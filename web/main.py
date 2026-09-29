@@ -3337,7 +3337,8 @@ async def initialize_engine():
         try:
             # 1. Metadata
             print("[init] 1/6 MetadataManager...", flush=True)
-            state.meta_mgr = MetadataManager()
+            # The web's library fetches (manifests, MARC) check every redirect hop.
+            state.meta_mgr = MetadataManager(checked_library_fetches=True)
             print("[init] 2/6 ListsManager...", flush=True)
             state.lists_mgr = ListsManager(state.meta_mgr)
 

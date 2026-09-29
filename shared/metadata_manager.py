@@ -242,12 +242,39 @@ NLI_IIIF_FUTURE_TIMEOUT = 15      # await fetch_iiif_manifest() future result
 EXTERNAL_IIIF_HTTP_TIMEOUT = 5    # external IIIF manifest GET (Figgy/CUDL etc.)
 
 
+class _RefusedHopResponse:
+    """What ``MetadataManager._library_get`` returns for a redirect it did not follow.
+
+    A non-success response with no body: every caller treats it as it treats a
+    404 -- no circuit-breaker failure, only the per-sys_id negative cache a 404
+    would set.
+    """
+    status_code = 0
+    ok = False
+    content = b''
+    text = ''
+    headers: dict = {}
+
+    def json(self):
+        raise ValueError('no body: the redirect was not followed')
+
+    def close(self):
+        pass
+
+
 class MetadataManager:
     def _make_session(self):
         return requests.Session()
 
     """Handle metadata parsing, remote retrieval, and persistent caching."""
-    def __init__(self):
+    # The web app (web/main.py) and its research worker set this: every library
+    # fetch below then follows redirects one checked hop at a time, only to the
+    # library hosts (shared/puzzle_image_service.py::get_with_checked_redirects).
+    # The desktop and the scripts leave it False and fetch as before.
+    checked_library_fetches = False
+
+    def __init__(self, *, checked_library_fetches: bool = False):
+        self.checked_library_fetches = bool(checked_library_fetches)
         self.meta_map = {}
         # Bounded LRU (was an unbounded dict — see _BoundedLRUCache above).
         self.nli_cache = _BoundedLRUCache()
@@ -626,6 +653,22 @@ class MetadataManager:
 
         return result
 
+    def _library_get(self, session, url, **kwargs):
+        """``session.get(url, **kwargs)``, or its checked-hop form on the web.
+
+        With ``checked_library_fetches`` the first URL and each redirect target
+        must be on a library host; a redirect that is not followed comes back as
+        a ``_RefusedHopResponse`` (a non-success response, handled as a 404).
+        """
+        if not self.checked_library_fetches:
+            return session.get(url, **kwargs)
+        from shared.puzzle_image_service import RedirectNotFollowed, get_with_checked_redirects
+        try:
+            return get_with_checked_redirects(url, session=session, **kwargs)
+        except RedirectNotFollowed as e:
+            LOGGER.warning("Library fetch redirect not followed for %s: %s", str(url)[:80], e)
+            return _RefusedHopResponse()
+
     def fetch_nli_data(self, system_id):
         # 1. Check existing cache
         if system_id in self.nli_cache:
@@ -762,7 +805,8 @@ class MetadataManager:
         result = {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
         try:
             session = self._make_session()
-            resp = session.get(
+            resp = self._library_get(
+                session,
                 url,
                 headers=headers,
                 timeout=(NLI_CONNECT_TIMEOUT, NLI_IIIF_READ_TIMEOUT),
@@ -877,7 +921,8 @@ class MetadataManager:
 
         try:
             session = self._make_session()
-            resp = session.get(
+            resp = self._library_get(
+                session,
                 url,
                 headers=headers,
                 timeout=(NLI_CONNECT_TIMEOUT, NLI_MARC_READ_TIMEOUT),
@@ -1350,7 +1395,7 @@ class MetadataManager:
             # 260421 follow-up (L81 lag): 10s was overkill — Figgy/CUDL
             # normally respond in <2s. Shorten so a slow external host
             # does not gate the whole browse navigation.
-            resp = session.get(manifest_url, timeout=EXTERNAL_IIIF_HTTP_TIMEOUT)
+            resp = self._library_get(session, manifest_url, timeout=EXTERNAL_IIIF_HTTP_TIMEOUT)
             if resp.status_code == 200:
                 data = resp.json()
 
@@ -1438,7 +1483,8 @@ class MetadataManager:
             try:
                 time.sleep(0.3)
                 session = self._make_session()
-                resp = session.get(
+                resp = self._library_get(
+                    session,
                     url,
                     headers=headers,
                     timeout=(NLI_CONNECT_TIMEOUT, NLI_MARC_READ_TIMEOUT),
@@ -1588,7 +1634,8 @@ class MetadataManager:
         headers = Config.HTTP_HEADERS
         try:
             session = self._make_session()
-            resp = session.get(
+            resp = self._library_get(
+                session,
                 url,
                 headers=headers,
                 timeout=(NLI_CONNECT_TIMEOUT, NLI_MARC_READ_TIMEOUT),

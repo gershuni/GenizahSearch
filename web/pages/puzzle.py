@@ -1930,6 +1930,7 @@ def _resolve_folios(sys_id: str) -> list:
     """
     import re as _re
     import requests as _requests
+    from shared.puzzle_image_service import RedirectNotFollowed, get_with_checked_redirects
 
     # Check enrich_metadata to detect external provider. Manchester/Oxford/JTS have
     # NLI FL IDs that are catalog stubs (return 503) — prefer images_ext for those.
@@ -2004,7 +2005,9 @@ def _resolve_folios(sys_id: str) -> list:
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
             # Phase 98 D-21: env-driven (connect, read) tuple — 5s default for JSON manifest.
             # NLI_IIIF_READ_TIMEOUT (not NLI_IMAGE_READ_TIMEOUT) because the response is JSON.
-            resp = _requests.get(
+            # Each redirect hop is checked against the library hosts: the FL ids
+            # found here name the images the puzzle loads and caches.
+            resp = get_with_checked_redirects(
                 url,
                 headers=headers,
                 timeout=(NLI_CONNECT_TIMEOUT, NLI_IIIF_READ_TIMEOUT),
@@ -2036,6 +2039,9 @@ def _resolve_folios(sys_id: str) -> list:
                 _nli_record_failure(failure_type='5xx', path='puzzle_resolve_folios')
                 logger.warning(f"NLI manifest {resp.status_code} for {sys_id}")
             # 404 / other -> fall through to images_ext fallback (D-07: no breaker increment)
+        except RedirectNotFollowed as e:
+            # A redirect off the library hosts: handled as a 404 (no breaker increment).
+            logger.warning(f"NLI manifest redirect not followed for {sys_id}: {e}")
         except _requests.exceptions.Timeout as e:
             logger.error(f"NLI manifest timeout for {sys_id}: {e}")
             _nli_record_failure(failure_type='timeout', path='puzzle_resolve_folios')

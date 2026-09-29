@@ -127,7 +127,9 @@ def run_query(root, payload, report, *, native_matching=False):
         from shared.search_engine import SearchEngine, _consume_last_responsa_downgrade, _consume_last_responsa_downgrade_meta
         from shared.search_regex import isolated_matching
 
-        meta = MetadataManager()
+        # Started only by the web app (web/research_jobs.py): its library fetches
+        # check every redirect hop, as the web's own MetadataManager does.
+        meta = MetadataManager(checked_library_fetches=True)
         # The web initializer loads these asynchronously. A short-lived worker
         # must finish loading before it searches or serializes display metadata.
         meta._load_heavy_caches_bg()
