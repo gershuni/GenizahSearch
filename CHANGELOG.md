@@ -6,6 +6,18 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
+### Web: Fragment Puzzle follow-ups (web deploy)
+
+- **Publishing works again.** The website sent the join's images to storage without the signed-in
+  user's token, so storage refused the upload (a row-level policy error) and every publish from /puzzle failed; unpublishing likewise left the old images in storage. The upload now carries
+  the user's token.
+- **Signing in keeps your work.** Drafts saved in this browser while signed out move into the account you
+  sign in to, and the canvas you had open comes back as that same draft. The canvas could also come back
+  empty after a page load (most often right after signing in): the page read it before the browser had
+  connected. It now waits for the connection.
+- **"Open in Puzzle" on Computed Identifications no longer saves a copy on every click.** It opens the
+  published join as an unsaved canvas, as a shared link does; a copy is saved only when you press Save.
+
 ### Web: Fragment Puzzle saved joins are kept per visitor (web deploy)
 
 - **Saved joins are private until published.** The "Saved joins" drawer on /puzzle lists only your own

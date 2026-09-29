@@ -2483,7 +2483,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 signed_in = False
             ui.label(
                 tr('Only you can see your saved joins until you publish them.') if signed_in
-                else tr('Saved in this browser only. Only you can see them.')
+                else tr('Saved in this browser only. Only you can see them. Sign in to keep them in your account.')
             ).classes('text-caption').style('color: var(--text-tertiary);')
             if not docs:
                 ui.label(tr('No saved joins')).style('color: var(--text-secondary); font-style: italic;')
@@ -3804,12 +3804,42 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             })(0);
         ''')
 
-        # Restore saved fragments (client should be connected via timer delay).
-        # The tab's canvas is restored only for the visitor who left it, with
-        # one carry-over: an unsaved canvas this browser made while signed out
-        # follows the visitor into the account they sign in to. Its open draft
-        # id is dropped (that draft belongs to the browser key, not the
-        # account). Every other owner change (another account, signing out,
+        # The saved canvas is in tab storage, which can be read only once the
+        # browser is connected. This task starts a fixed 0.5 s after the page
+        # is built; on a slower page (right after signing in, for example) the
+        # browser was not connected yet, the read failed quietly, and the
+        # canvas came back empty. Wait for the connection instead.
+        try:
+            await _puzzle_client.connected(timeout=30.0)
+        except Exception as e:
+            logger.warning("puzzle: the browser did not connect; canvas not restored: %s", e)
+            return
+
+        # Signed in: the drafts this browser saved while signed out move into
+        # the account (owner ruling 2026-09-29), so a draft left open in this
+        # tab is still the visitor's own after signing in.
+        try:
+            to_move = _saved_joins.browser_drafts_to_move()
+            if to_move and to_move[1] == page_owner:
+                ids = await run.io_bound(_saved_joins.browser_draft_ids, to_move[0])
+                # Move only if this browser is still signed in to the same
+                # account after the list was read, and only the drafts listed.
+                moved = 0
+                if ids and _saved_joins.browser_drafts_to_move() == to_move:
+                    moved = await run.io_bound(_saved_joins.move_browser_drafts, *to_move, ids)
+                if moved:
+                    logger.info("puzzle: moved %d signed-out draft(s) into the account", moved)
+                    ui.notify(tr('Drafts saved in this browser were added to your account ({}).').format(moved),
+                              type='info')
+        except Exception as e:
+            logger.warning("puzzle: moving this browser's drafts into the account failed: %s", e)
+
+        # Restore saved fragments. The tab's canvas is restored only for the
+        # visitor who left it, with one carry-over: a canvas this browser made
+        # while signed out follows the visitor into the account they sign in
+        # to, with its open draft (moved into the account just above; if the
+        # move failed, the draft does not load below and the canvas opens
+        # unsaved). Every other owner change (another account, signing out,
         # an unknown owner) drops the whole tab state first, so an account's
         # canvas never reaches anyone else.
         try:
@@ -3821,7 +3851,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                   and page_owner.startswith(_saved_joins.USER_PREFIX)
                   and browser_owner is not None
                   and recorded_owner == browser_owner):
-                tab_store['puzzle_doc_id'] = None  # signed-out canvas kept, its draft is not
+                pass  # signed-out canvas kept, with its draft (now the account's)
             else:
                 tab_store['puzzle_fragments'] = {}
                 tab_store['puzzle_state'] = None
@@ -3970,7 +4000,25 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         except Exception as e:
             logger.exception(f"Puzzle _after_delay error in {coro_func.__name__}")
 
-    asyncio.ensure_future(_after_delay(0.5, init_canvas))
+    # Set once init_canvas has finished or given up. The ?add= / ?doc= start-up
+    # steps wait for it instead of relying on their fixed delays, which a slow
+    # browser connection can outrun: after signing in, ?doc= then looked the
+    # draft up before it had moved into the account.
+    canvas_ready = asyncio.Event()
+
+    async def _init_canvas_then_signal():
+        try:
+            await init_canvas()
+        finally:
+            canvas_ready.set()
+
+    async def _wait_for_canvas():
+        try:
+            await asyncio.wait_for(canvas_ready.wait(), timeout=45.0)
+        except asyncio.TimeoutError:
+            logger.warning("puzzle: start-up step ran without the canvas being ready")
+
+    asyncio.ensure_future(_after_delay(0.5, _init_canvas_then_signal))
 
     # ── Handle initial_add query parameter ──
     if initial_add:
@@ -3987,6 +4035,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         async def auto_add():
             """Auto-add a fragment from the initial_add query parameter after canvas init."""
             import asyncio
+            await _wait_for_canvas()
             await asyncio.sleep(1.0)
 
             fl_id = add_fl_id
@@ -4129,6 +4178,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             B2 / V3: this is an inner async def; create_puzzle_page is SYNC —
             there is no await in the sync body.
             """
+            await _wait_for_canvas()
             for sys_id in bulk_fragments:
                 if not sys_id:
                     continue
@@ -4154,6 +4204,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         async def auto_load_doc():
             """Auto-load a saved document from the initial_doc query parameter."""
             import asyncio
+            await _wait_for_canvas()
             await asyncio.sleep(1.0)
             await load_document(initial_doc)
 

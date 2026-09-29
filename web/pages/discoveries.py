@@ -263,11 +263,11 @@ def _show_puzzle_join_detail_dialog(join_id: str, on_refresh=None):
                         ).style('color: var(--primary-600);')
 
                     if WEB_PUZZLE_ENABLED:
-                        async def do_fork(jid=join_id):
+                        def do_open_in_puzzle(jid=join_id):
                             dlg.close()
-                            await _fork_puzzle_join_and_navigate(jid)
+                            _open_published_join_in_puzzle(jid)
 
-                        ui.button(tr('Open in Puzzle'), icon='extension', on_click=do_fork).props('outlined dense color=cyan')
+                        ui.button(tr('Open in Puzzle'), icon='extension', on_click=do_open_in_puzzle).props('outlined dense color=cyan')
 
         async def _deferred_load_detail():
             await asyncio.sleep(0.1)
@@ -279,29 +279,14 @@ def _show_puzzle_join_detail_dialog(join_id: str, on_refresh=None):
     dlg.open()
 
 
-async def _fork_puzzle_join_and_navigate(join_id: str):
-    """Fork a published join and navigate to the puzzle page with it."""
-    try:
-        from shared.puzzle_publish_service import fork_published_join
-        from web.saved_joins import NoVisitorKey, for_current_visitor
-        from web.supabase_client import get_client
+def _open_published_join_in_puzzle(join_id: str):
+    """Open a published join on the puzzle page, as an unsaved canvas.
 
-        # The fork is saved under the visitor who forks it. Resolve the owner
-        # here, in the page context, before the worker thread starts.
-        try:
-            joins = for_current_visitor()
-        except NoVisitorKey:
-            ui.notify(tr('Could not fork join'), type='warning')
-            return
-        client = get_client()
-        new_doc_id = await run.io_bound(fork_published_join, client, join_id, joins)
-        if new_doc_id:
-            ui.navigate.to(f'/puzzle?doc={new_doc_id}')
-        else:
-            ui.notify(tr('Could not fork join'), type='warning')
-    except Exception as e:
-        logger.error(f"Fork puzzle join failed: {e}")
-        ui.notify(tr('Fork failed: {}').format(str(e)), type='negative')
+    Nothing is saved here: /puzzle opens the published version, and a copy is
+    saved only when the visitor presses Save there (owner ruling 2026-09-29;
+    saving a "Fork of:" copy on every click filled the drafts with copies).
+    """
+    ui.navigate.to(f'/puzzle?doc={join_id}')
 
 
 def create_discoveries_page():
@@ -1099,11 +1084,11 @@ def create_feed_item(item: dict, on_refresh=None):
                                 ui.button(tr('View Details'), icon='visibility', on_click=open_puzzle_join_detail).props('outlined dense')
 
                                 if WEB_PUZZLE_ENABLED:
-                                    async def fork_and_open(jid=pj_raw_id):
-                                        """Fork the join and open in puzzle page."""
-                                        await _fork_puzzle_join_and_navigate(jid)
+                                    def open_in_puzzle(jid=pj_raw_id):
+                                        """Open the published join on the puzzle page (unsaved)."""
+                                        _open_published_join_in_puzzle(jid)
 
-                                    ui.button(tr('Open in Puzzle'), icon='extension', on_click=fork_and_open).props('outlined dense color=cyan')
+                                    ui.button(tr('Open in Puzzle'), icon='extension', on_click=open_in_puzzle).props('outlined dense color=cyan')
 
                                 # Admin hide button for puzzle joins
                                 if is_admin:
