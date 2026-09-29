@@ -18,9 +18,10 @@ Images a web browser uploads (``store_upload``):
     ``_uploads.jsonl`` in the cache directory and flushed to disk; only then
     is the file given its name in the shared cache above. If the line cannot
     be written the image is not shared (it is kept for the uploading browser
-    only, when there is one). A line whose SHA-256 differs from the file of
-    that name records an upload that arrived after another copy was cached;
-    the earlier file was kept;
+    only, when there is one). If the line was written but the file then did
+    not get its name (another copy got it first, or the link step failed), a
+    second line with the same file, account and SHA-256 and
+    ``"published": false`` follows it: that upload was not shared;
   - from a signed-out browser: into ``_browser/<hash of the browser key>/``,
     and only that browser is given them back (``browser_key=`` lookups).
 A lookup always tries the shared file first, then the requester's own.
@@ -410,21 +411,29 @@ class PuzzleImageService:
         user_id = str(user_id).strip() if user_id else ''
         if user_id:
             path = self.get_cache_path(fl_id, size, threshold, processed, is_cul)
+            recorded = []
             try:
                 if path.is_file():
                     return STORED_SHARED
-                created = _write_new_file(
-                    path, data,
-                    before_publish=lambda: self._record_shared_upload(path.name, user_id, data),
-                )
+
+                def _record():
+                    self._record_shared_upload(path.name, user_id, data)
+                    recorded.append(True)
+
+                created = _write_new_file(path, data, before_publish=_record)
                 if created:
                     logger.info("Stored uploaded image in shared cache: %s (%d bytes)",
                                 path.name, len(data))
+                elif recorded:
+                    # Another copy got the name between our record line and our link.
+                    self._record_upload_not_published(path.name, user_id, data)
                 return STORED_SHARED
             except UploadNotRecorded as e:
                 logger.warning("Uploaded image for %s not shared (record not written): %s",
                                fl_id, e)
             except OSError as e:
+                if recorded:
+                    self._record_upload_not_published(path.name, user_id, data)
                 logger.warning("Uploaded image for %s not shared: %s", fl_id, e)
         try:
             path = self.get_browser_cache_path(browser_key, fl_id, size, threshold, processed, is_cul)
@@ -441,12 +450,32 @@ class PuzzleImageService:
 
         Raises ``UploadNotRecorded`` if the whole line cannot be written.
         """
-        line = json.dumps({
+        self._append_upload_record(file_name, user_id, data)
+
+    def _record_upload_not_published(self, file_name: str, user_id: str, data: bytes) -> None:
+        """Append the line that withdraws an upload's record: its file was not published.
+
+        Written when the record line is on disk but the file then did not get
+        its name (another copy got it first, or the link step failed). Best
+        effort: a failure is logged, since nothing was shared either way.
+        """
+        try:
+            self._append_upload_record(file_name, user_id, data, published=False)
+        except UploadNotRecorded as e:
+            logger.warning("Could not record that %s was not published: %s", file_name, e)
+
+    def _append_upload_record(self, file_name: str, user_id: str, data: bytes,
+                              published: Optional[bool] = None) -> None:
+        """Write one JSON line to the upload record with one append and fsync it."""
+        fields = {
             'file': file_name,
             'user_id': user_id,
             'uploaded_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
             'sha256': hashlib.sha256(data).hexdigest(),
-        }, ensure_ascii=True, sort_keys=True)
+        }
+        if published is not None:
+            fields['published'] = published
+        line = json.dumps(fields, ensure_ascii=True, sort_keys=True)
         encoded = (line + '\n').encode('ascii')
         manifest = self._cache_dir / UPLOAD_MANIFEST_NAME
         flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, 'O_BINARY', 0)

@@ -11,7 +11,7 @@ from web.export_service import get_export_service, encode_filename_for_header
 import requests
 import requests.adapters
 
-from shared.nli_fetch import nli_image_get
+from shared.nli_fetch import RedirectNotAllowed, nli_image_get
 import re
 import os
 import threading
@@ -1153,6 +1153,8 @@ def init_api_routes(app_override=None):
                     _nli_record_failure(failure_type='429', path='_fetch_nli_image_bytes_rosetta_thumb')
                 elif 500 <= r2.status_code < 600:
                     _nli_record_failure(failure_type='5xx', path='_fetch_nli_image_bytes_rosetta_thumb')
+            except RedirectNotAllowed:
+                pass  # a redirect off the library image hosts; not an NLI outage
             except requests.exceptions.Timeout:
                 _nli_record_failure(failure_type='timeout', path='_fetch_nli_image_bytes_rosetta_thumb')
             except requests.exceptions.ConnectionError:

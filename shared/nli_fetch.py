@@ -83,6 +83,14 @@ def nli_verify_for(url: str) -> bool:
 _MAX_REDIRECTS = 5
 
 
+class RedirectNotAllowed(requests.exceptions.RequestException):
+    """``nli_image_get`` did not follow a redirect its ``allowed_url`` refused.
+
+    A refused hop says nothing about the NLI host's health, so callers that
+    feed the circuit breaker catch this before ``RequestException``.
+    """
+
+
 def _get_once(url, *, verify, headers, timeout, stream, **kwargs):
     """Single ``requests.get`` (no auto-redirect) honouring ``verify``.
 
@@ -121,7 +129,8 @@ def nli_image_get(url, *, headers=None, timeout=None, stream=False,
     still work). Pass ``allow_redirects=False`` to disable following entirely.
 
     ``allowed_url``, if given, is called with each redirect target before it
-    is requested; a target it rejects raises ``requests.RequestException``.
+    is requested; a target it rejects raises ``RedirectNotAllowed`` (a
+    ``requests.RequestException``).
     Without it (the default, and every desktop caller) redirects are followed
     as before.
 
@@ -154,7 +163,7 @@ def nli_image_get(url, *, headers=None, timeout=None, stream=False,
             pass
         current_url = nxt.url
         if allowed_url is not None and not allowed_url(current_url):
-            raise requests.exceptions.RequestException(
+            raise RedirectNotAllowed(
                 f'Redirect to a host that is not allowed: {host_of(current_url)}',
                 response=resp,
             )
@@ -163,6 +172,7 @@ def nli_image_get(url, *, headers=None, timeout=None, stream=False,
 
 __all__ = [
     'NLI_IMAGE_HOSTS',
+    'RedirectNotAllowed',
     'host_of',
     'is_nli_host',
     'nli_verify_for',
