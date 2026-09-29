@@ -4012,11 +4012,19 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         finally:
             canvas_ready.set()
 
-    async def _wait_for_canvas():
-        try:
-            await asyncio.wait_for(canvas_ready.wait(), timeout=45.0)
-        except asyncio.TimeoutError:
-            logger.warning("puzzle: start-up step ran without the canvas being ready")
+    async def _wait_for_canvas() -> bool:
+        """True once init_canvas has finished; False if the page went away
+        first. No time cap: a step that ran while the restore was still going
+        (a slow lookup, say) could mix the restored canvas into the one it
+        opens."""
+        while not canvas_ready.is_set():
+            if getattr(page_client, '_deleted', False):
+                return False
+            try:
+                await asyncio.wait_for(canvas_ready.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                pass
+        return True
 
     asyncio.ensure_future(_after_delay(0.5, _init_canvas_then_signal))
 
@@ -4035,7 +4043,8 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         async def auto_add():
             """Auto-add a fragment from the initial_add query parameter after canvas init."""
             import asyncio
-            await _wait_for_canvas()
+            if not await _wait_for_canvas():
+                return
             await asyncio.sleep(1.0)
 
             fl_id = add_fl_id
@@ -4178,7 +4187,8 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             B2 / V3: this is an inner async def; create_puzzle_page is SYNC —
             there is no await in the sync body.
             """
-            await _wait_for_canvas()
+            if not await _wait_for_canvas():
+                return
             for sys_id in bulk_fragments:
                 if not sys_id:
                     continue
@@ -4204,7 +4214,8 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         async def auto_load_doc():
             """Auto-load a saved document from the initial_doc query parameter."""
             import asyncio
-            await _wait_for_canvas()
+            if not await _wait_for_canvas():
+                return
             await asyncio.sleep(1.0)
             await load_document(initial_doc)
 

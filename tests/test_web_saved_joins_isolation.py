@@ -895,6 +895,51 @@ def test_link_to_own_draft_opens_it_after_sign_in_with_a_slow_connection(shared_
         _run(driver)
 
 
+def test_link_opens_after_a_slow_restore_without_mixing_the_canvases(shared_svc):
+    """/puzzle?doc=<B> while the tab still holds draft A and A's publish-state
+    lookup is slow: the link waits for the restore to finish, so A's fragments
+    are never added onto B's canvas afterwards."""
+    import time
+
+    def _slow_detail(client, join_id):
+        if join_id == 'doc-prev':
+            time.sleep(4.0)              # the restore's publish-state lookup for A
+        return None
+
+    async def driver(a, _b):
+        calls = _add_fragment_calls(a)
+        await a.open('/puzzle')
+        await asyncio.sleep(1.0)
+        owner = _current_owner(a)
+        prev = PuzzleDocument(id='doc-prev', title='Previous draft', notes='',
+                              fragments=[PuzzleFragment(**_fragment_dict())])
+        target = PuzzleDocument(id='doc-target', title='Target draft', notes='', fragments=[
+            PuzzleFragment(sys_id='990002', folio_label='1r', fl_id='FL-990002', shelfmark='T-S 2.2')])
+        assert _seed(shared_svc, prev, owner) == 'doc-prev'
+        assert _seed(shared_svc, target, owner) == 'doc-target'
+        from nicegui import app
+
+        def _leave_prev():
+            app.storage.tab['puzzle_fragments'] = {'990001,1r': {
+                'sys_id': '990001', 'shelfmark': 'T-S 1.1', 'folio_label': '1r',
+                'fl_id': 'FL-990001', 'threshold': 30, 'processed': True, 'size': 800}}
+            app.storage.tab['puzzle_doc_id'] = 'doc-prev'
+        _in_page(a, _leave_prev)
+
+        calls.clear()
+        await a.open('/puzzle?doc=doc-target')
+        await asyncio.sleep(9.0)
+
+        prev_at = [i for i, c in enumerate(calls) if 'FL-990001' in c]
+        target_at = [i for i, c in enumerate(calls) if 'FL-990002' in c]
+        assert target_at, calls
+        assert not prev_at or max(prev_at) < min(target_at), calls   # A never lands after B
+        assert _tab(a).get('puzzle_doc_id') == 'doc-target'
+
+    with patch('shared.puzzle_publish_service.get_published_join_detail', side_effect=_slow_detail),             patch('web.supabase_client.get_client', return_value=MagicMock()),             patch('shared.puzzle_export.generate_thumbnail', return_value=''),             patch('shared.puzzle_image_service.get_puzzle_image_service', return_value=MagicMock()):
+        _run(driver)
+
+
 # ── The /puzzle page: background auto-save ─────────────────────────
 
 
