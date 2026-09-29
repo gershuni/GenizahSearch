@@ -369,10 +369,11 @@ def test_widen_synthesis_stops_when_cancelled():
 
 
 def test_keeping_a_worker_adds_no_quit_step():
-    """A kept worker is neither waited for nor terminated at quit: a running QThread that
-    is still referenced at exit is not destroyed, so a wait only delays the exit (and the
-    single-instance relaunch) and terminate() can hang it. The exit behaviour itself is
-    pinned by tests/test_kept_qthreads_exit_cleanly.py."""
+    """A kept worker is neither waited for nor terminated by the keeper: a replace on the
+    UI thread must not wait for the worker it gives up, and terminate() can kill a thread
+    inside a lock. The exit has its own single bounded step,
+    desktop.qthread_exit.settle_running_threads, pinned by
+    tests/test_kept_qthreads_exit_cleanly.py."""
     import ast
     import inspect
     import textwrap

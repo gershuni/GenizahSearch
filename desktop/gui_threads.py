@@ -25,11 +25,13 @@ _ORPHANED_WORKERS: list = []
 def _keep_until_finished(worker) -> None:
     """Hold ``worker`` until its QThread has finished, then let it go.
 
-    There is deliberately no quit step (no wait, no terminate() at aboutToQuit): on the
-    pinned PyQt6/sip a running QThread that is still referenced when the process exits
-    is not destroyed, and the process exits cleanly. Waiting would only delay the exit
-    and the single-instance relaunch; terminate() can kill a thread inside a lock and
-    hang the exit. tests/test_kept_qthreads_exit_cleanly.py pins the exit behaviour.
+    There is deliberately no quit step here (no wait, no terminate()): a replace or a
+    teardown on the UI thread must not wait for the worker it gives up, and terminate()
+    can kill a thread inside a lock. The exit has one step of its own for every running
+    QThread, desktop.qthread_exit.settle_running_threads (after app.exec()): a thread
+    held by a module-level list like this one outlives PyQt's exit handler and is left
+    running, and the process exits cleanly. tests/test_kept_qthreads_exit_cleanly.py
+    pins both.
 
     The release closure holds only a weak reference: a closure or default argument
     holding the worker itself forms worker -> slot -> closure -> worker, which only the

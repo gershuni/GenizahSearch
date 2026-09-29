@@ -2468,6 +2468,11 @@ moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `deskt
 - **Function** `request_restart` (Line 122) — Relaunch the app once its event loop has ended (see relaunch_if_requested).
 - **Function** `relaunch_if_requested` (Line 128) — Start the new copy if request_restart() was called. Returns True if one was started.
 
+## desktop/qthread_exit.py
+
+- **Function** `running_qthreads` (Line 48) — Every QThread created from Python whose thread is still running, except this one.
+- **Function** `settle_running_threads` (Line 69) — Stop what stops within ``wait_ms``; keep the rest from being destroyed at exit.
+
 ## Phase 145 — Passage-Matching Parallels Search (web beta)
 
 `shared/passage_parallels.py` and `web/passage_assets.py`, added for the

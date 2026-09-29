@@ -6,6 +6,15 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
+### Desktop: no crash on exit while background loads are still running (next installer)
+
+- **Closing the app no longer crashes now and then.** When a background task was still running at exit --
+  most often a thumbnail load of a closed Joins Lab -- Windows could report that the program stopped
+  working ("QThread: Destroyed while thread is still running"). Everything had been saved by then; the
+  crash came afterwards. The app now gives such tasks up to 1.5 seconds to finish after its windows have
+  closed and leaves any still running untouched, so the exit is clean. `desktop/qthread_exit.py`;
+  `tests/test_kept_qthreads_exit_cleanly.py`, which failed about one run in twenty, is now deterministic.
+
 ### Web: Fragment Puzzle saved joins are kept per visitor (web deploy)
 
 - **Saved joins are private until published.** The "Saved joins" drawer on /puzzle lists only your own
