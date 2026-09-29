@@ -75,6 +75,8 @@ DESKTOP_MODULES = [
     "desktop/lists_sync_runner.py",
     # The website-removal prompt of the list sync.
     "desktop/lists_web_removals_dialog.py",
+    # 2026-09-29: no running QThread is destroyed at exit.
+    "desktop/qthread_exit.py",
 ]
 
 # Compound statement types whose bodies run at import time
