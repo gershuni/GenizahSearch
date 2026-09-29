@@ -3130,6 +3130,7 @@ TRANSLATIONS = {
     "Saved in this browser only. Only you can see them.": "נשמרים בדפדפן זה בלבד. רק אתה רואה אותם.",
     "Could not save this join": "לא ניתן לשמור את הצירוף",
     "Opened the published version: {}. Save to keep your own copy.": "נפתחה הגרסה שפורסמה: {}. שמור כדי לשמור עותק משלך.",
+    "You signed in or out since this page opened. Reload the page to continue.": "התחברת או התנתקת מאז שהדף נפתח. נא לטעון את הדף מחדש כדי להמשיך.",
     "Export failed": "הייצוא נכשל",
     "Add fragment": "הוסף קטע",
     "Delete selected fragment": "מחק קטע נבחר",

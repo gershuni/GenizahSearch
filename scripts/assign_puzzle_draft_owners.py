@@ -164,11 +164,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f'error: {err}', file=sys.stderr)
         return 2
 
-    if args.apply:
-        conn = sqlite3.connect(args.db)
-    else:
-        from pathlib import Path
-        conn = sqlite3.connect(Path(os.path.abspath(args.db)).as_uri() + '?mode=ro', uri=True)
+    # URI mode rw/ro: SQLite opens an existing file only. A plain connect would
+    # create an empty database if the file were moved after the check above.
+    from pathlib import Path
+    uri = Path(os.path.abspath(args.db)).as_uri() + ('?mode=rw' if args.apply else '?mode=ro')
+    try:
+        conn = sqlite3.connect(uri, uri=True)
+    except sqlite3.Error:
+        print('error: the database file could not be opened', file=sys.stderr)
+        return 2
     try:
         try:
             conn.execute('SELECT 1 FROM join_documents LIMIT 0')

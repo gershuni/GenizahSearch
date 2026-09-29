@@ -2265,13 +2265,52 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
     from shared.puzzle_export import auto_suggest_title
     from shared.puzzle_model import PuzzleDocument, PuzzleFragment
+    from web import saved_joins as _saved_joins
     from web.saved_joins import NoVisitorKey, for_current_visitor
+
+    # The visitor this page was opened for. The canvas kept in the tab
+    # (fragments, positions, open document) belongs to this owner only: it is
+    # discarded when the tab is reopened by someone else (sign-in, sign-out,
+    # another account), and nothing is saved from this page once the visitor
+    # has changed in another tab.
+    try:
+        page_owner = _saved_joins.owner_key()
+    except Exception as e:
+        logger.debug("puzzle: owner key unavailable at page build: %s", e)
+        page_owner = None
+    # This browser's signed-out owner key ('b:<session uuid>'). The session
+    # uuid survives sign-in, so after signing in this still names the
+    # signed-out owner of this browser -- used to carry an unsaved signed-out
+    # canvas over into the account (never the other way round).
+    try:
+        from web.safe_storage import get_persisted_session_uuid
+        _browser_uuid = get_persisted_session_uuid()
+        browser_owner = (_saved_joins.BROWSER_PREFIX + _browser_uuid) if _browser_uuid else None
+    except Exception as e:
+        logger.debug("puzzle: browser key unavailable at page build: %s", e)
+        browser_owner = None
+
+    def _visitor_changed(joins) -> bool:
+        """True when ``joins`` is not the visitor this page was opened for."""
+        return page_owner is None or joins is None or joins.owner != page_owner
 
     def _visitor_joins():
         """This visitor's saved joins, or None (with a notice) if the visitor
-        cannot be identified. Must run in the page context, before io_bound."""
+        cannot be identified or is no longer the visitor this page was opened
+        for. Must run in the page context, before io_bound."""
         try:
-            return for_current_visitor()
+            joins = for_current_visitor()
+            if _visitor_changed(joins):
+                if page_owner is None:
+                    message = tr('Saved joins are unavailable right now. Please reload the page.')
+                else:
+                    message = tr('You signed in or out since this page opened. Reload the page to continue.')
+                try:
+                    ui.notify(message, type='warning')
+                except Exception:
+                    pass  # no client context (e.g. page already closed)
+                return None
+            return joins
         except NoVisitorKey:
             logger.warning("puzzle: visitor could not be identified; saved joins unavailable")
             try:
@@ -2381,6 +2420,13 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         async def do_auto_save():
             await asyncio.sleep(1.5)
             if doc_state['current_doc_id'] and not doc_state.get('loading'):
+                # NOTE: this task is started with create_task and has no NiceGUI
+                # slot of its own, so build_fragments_list raises RuntimeError
+                # and the cycle is skipped: in practice this auto-save does not
+                # write. It is deliberately left that way here -- making it
+                # write needs the restore/placement fixes first (a stale or
+                # default-positioned canvas would otherwise overwrite the
+                # owner's draft). Explicit Save is the path that writes.
                 try:
                     fragments = await build_fragments_list()
                 except RuntimeError:
@@ -2389,6 +2435,8 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     joins = for_current_visitor()
                 except NoVisitorKey:
                     return  # visitor unknown this cycle; nothing is written
+                if _visitor_changed(joins):
+                    return  # signed in or out in another tab: this canvas is not theirs
                 # Only the visitor's own document is loaded (and so saved).
                 doc = await run.io_bound(joins.load_document, doc_state['current_doc_id'])
                 if doc:
@@ -3749,7 +3797,31 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             })(0);
         ''')
 
-        # Restore saved fragments (client should be connected via timer delay)
+        # Restore saved fragments (client should be connected via timer delay).
+        # The tab's canvas is restored only for the visitor who left it, with
+        # one carry-over: an unsaved canvas this browser made while signed out
+        # follows the visitor into the account they sign in to. Its open draft
+        # id is dropped (that draft belongs to the browser key, not the
+        # account). Every other owner change (another account, signing out,
+        # an unknown owner) drops the whole tab state first, so an account's
+        # canvas never reaches anyone else.
+        try:
+            tab_store = app.storage.tab
+            recorded_owner = tab_store.get('puzzle_owner')
+            if page_owner is not None and recorded_owner == page_owner:
+                pass  # same visitor: restore as left
+            elif (page_owner is not None
+                  and page_owner.startswith(_saved_joins.USER_PREFIX)
+                  and browser_owner is not None
+                  and recorded_owner == browser_owner):
+                tab_store['puzzle_doc_id'] = None  # signed-out canvas kept, its draft is not
+            else:
+                tab_store['puzzle_fragments'] = {}
+                tab_store['puzzle_state'] = None
+                tab_store['puzzle_doc_id'] = None
+            tab_store['puzzle_owner'] = page_owner
+        except RuntimeError:
+            pass
         try:
             saved_meta = app.storage.tab.get('puzzle_fragments', {})
             saved_state = app.storage.tab.get('puzzle_state')
@@ -3763,6 +3835,8 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         if saved_doc_id:
             try:
                 joins = for_current_visitor()
+                if _visitor_changed(joins):
+                    raise NoVisitorKey('the visitor changed since the page opened')
                 doc = await run.io_bound(joins.load_document, saved_doc_id)
             except Exception:
                 doc = None  # visitor unknown or lookup failed: start unsaved

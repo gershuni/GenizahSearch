@@ -106,7 +106,10 @@ async def _open_with_one_fragment(user):
     user.javascript_rules[re.compile(r'.*puzzleCanvas\.get(Crop)?State\(\)')] = lambda _m: '{}'
     await user.open('/puzzle')
     with user._client:
-        # Restored by the page's init_canvas (scheduled 0.5 s after load).
+        # Restored by the page's init_canvas (scheduled 0.5 s after load),
+        # which restores a tab's canvas only for the visitor it was left by.
+        from web.saved_joins import owner_key
+        app.storage.tab['puzzle_owner'] = owner_key()
         app.storage.tab['puzzle_fragments'] = {KEY: {
             'sys_id': '990000000000001', 'shelfmark': 'ENA 1.1', 'folio_label': '1r',
             'fl_id': FL, 'threshold': 30, 'processed': True, 'size': 800,
@@ -258,12 +261,13 @@ def test_publishing_a_join_draws_it_with_this_browsers_images(
     monkeypatch.setattr(supabase_client, 'get_user_client', lambda: object())
 
     async def driver(user):
-        session_id = await _open_with_one_fragment(user)
-        own = _put_own_image(image_service, session_id, (90, 30, 160, 255))
-        # Signed in before saving: a saved join belongs to the account that
-        # saved it, and only its owner can publish it.
+        # Signed in before the page opens (signing in reloads the page): a
+        # saved join belongs to the account that saved it, and only its owner
+        # can publish it.
         monkeypatch.setattr(GlobalAuthState, 'is_logged_in', classmethod(lambda cls: True))
         monkeypatch.setattr(GlobalAuthState, 'get_user_id', classmethod(lambda cls: 'account-x'))
+        session_id = await _open_with_one_fragment(user)
+        own = _put_own_image(image_service, session_id, (90, 30, 160, 255))
         await _save_join(user)
         await _wait_until(lambda: thumbnail_services)
         await asyncio.sleep(0.3)

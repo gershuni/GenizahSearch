@@ -118,3 +118,18 @@ def test_missing_database_is_never_created(tmp_path):
     mapping.write_text('{}', encoding='utf-8')
     assert _load().main([str(db), '--mapping', str(mapping), '--apply']) == 2
     assert not db.exists()
+
+
+def test_apply_never_creates_a_database_moved_after_the_check(tmp_path, monkeypatch):
+    """The file exists when it is checked but is gone (moved, renamed) by the
+    time it is opened: nothing is created in its place."""
+    mod = _load()
+    db = tmp_path / 'moved.db'
+    mapping = tmp_path / 'owners.json'
+    mapping.write_text(json.dumps({'doc-1': 'u:user-1'}), encoding='utf-8')
+    real_isfile = mod.os.path.isfile
+    monkeypatch.setattr(mod.os.path, 'isfile',
+                        lambda p: True if pathlib.Path(p) == db else real_isfile(p))
+
+    assert mod.main([str(db), '--mapping', str(mapping), '--apply']) == 2
+    assert not db.exists()

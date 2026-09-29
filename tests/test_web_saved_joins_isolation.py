@@ -461,3 +461,446 @@ def test_page_shows_and_saves_only_the_visitors_own_joins(shared_svc, published)
             patch('shared.puzzle_export.generate_thumbnail', return_value=''), \
             patch('shared.puzzle_image_service.get_puzzle_image_service', return_value=MagicMock()):
         _run(driver)
+
+
+
+# ── Two first opens of an older file at once ────────────────────────
+
+
+_V2_SCHEMA = """
+    CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+    INSERT INTO meta VALUES ('schema_version', '2');
+    CREATE TABLE join_documents (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
+        join_type TEXT NOT NULL DEFAULT 'uncertain', fragments_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        thumbnail_b64 TEXT DEFAULT '');
+    CREATE TABLE join_document_fragments (
+        doc_id TEXT NOT NULL, fl_id TEXT NOT NULL, sys_id TEXT NOT NULL,
+        FOREIGN KEY (doc_id) REFERENCES join_documents(id) ON DELETE CASCADE);
+    INSERT INTO join_documents (id, title, notes, fragments_json, created_at, updated_at)
+        VALUES ('old-1', 'older join', 'n', '[]', '2026-03-17', '2026-03-17');
+"""
+
+
+def test_two_first_opens_of_an_older_file_both_work(tmp_path, monkeypatch):
+    """Two service objects open a v2 WAL joins.db for the first time at once.
+    The second one starts (in another thread) just as the first is about to
+    add the owner column. Both must end up usable, with the rows intact."""
+    import threading
+
+    import shared.puzzle_service as ps
+
+    path = tmp_path / 'joins.db'
+    conn = sqlite3.connect(str(path))
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.executescript(_V2_SCHEMA)
+    conn.commit()
+    conn.close()
+
+    real_connect = sqlite3.connect
+    other = {}
+
+    def _open_other():
+        other['svc'] = ps.PuzzleService(db_path=str(path), thread_safe=True)
+
+    class _FirstOpener(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if 'ADD COLUMN owner_key' in sql and 'thread' not in other:
+                t = threading.Thread(target=_open_other, daemon=True)
+                other['thread'] = t
+                t.start()
+                t.join(timeout=1.0)  # the other opener runs as far as it can
+            return super().execute(sql, *args)
+
+    opened = []
+
+    def _connect(*args, **kwargs):
+        if not opened:
+            kwargs['factory'] = _FirstOpener
+        opened.append(1)
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(ps.sqlite3, 'connect', _connect)
+    first = ps.PuzzleService(db_path=str(path), thread_safe=True)
+    assert 'thread' in other, 'the owner column was not added by the first opener'
+    other['thread'].join(timeout=30)
+    monkeypatch.undo()
+    second = other.get('svc')
+    try:
+        for svc in (first, second):
+            assert svc is not None and svc.is_available()
+            assert [d['id'] for d in svc.list_documents()] == ['old-1']
+        mine = _doc('mine')
+        assert first.save_document(mine, owner_key='b:browser-a') == mine.id
+        assert second.load_document(mine.id, owner_key='b:browser-a').title == 'mine'
+        theirs = _doc('theirs', sys_id='990002')
+        assert second.save_document(theirs, owner_key='b:browser-b') == theirs.id
+        assert first.load_document(theirs.id, owner_key='b:browser-a') is None
+    finally:
+        for svc in (first, second):
+            if svc is not None and svc._conn is not None:
+                svc._conn.close()
+
+
+def _v2_file(tmp_path, with_owner_column=False):
+    path = tmp_path / 'joins.db'
+    conn = sqlite3.connect(str(path))
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.executescript(_V2_SCHEMA)
+    if with_owner_column:
+        conn.execute('ALTER TABLE join_documents ADD COLUMN owner_key TEXT')
+    conn.commit()
+    conn.close()
+    return path
+
+
+def test_owner_column_is_checked_and_added_in_one_immediate_transaction(tmp_path, monkeypatch):
+    """The check that the column is missing and the ALTER that adds it run
+    inside one BEGIN IMMEDIATE transaction, so a second opener waits and then
+    finds the column instead of adding it twice."""
+    import shared.puzzle_service as ps
+    path = _v2_file(tmp_path)
+    seen = []
+
+    class _Recording(sqlite3.Connection):
+        def execute(self, sql, *args):
+            seen.append(' '.join(str(sql).split()))
+            return super().execute(sql, *args)
+
+    real_connect = sqlite3.connect
+    monkeypatch.setattr(ps.sqlite3, 'connect',
+                        lambda *a, **k: real_connect(*a, **dict(k, factory=_Recording)))
+    svc = ps.PuzzleService(db_path=str(path), thread_safe=True)
+    monkeypatch.undo()
+    try:
+        assert svc.is_available()
+        alter = next(i for i, sql in enumerate(seen) if 'ADD COLUMN owner_key' in sql)
+        begins = [i for i, sql in enumerate(seen[:alter]) if sql.upper().startswith('BEGIN IMMEDIATE')]
+        assert begins, 'the owner column was added outside an IMMEDIATE transaction'
+        assert any('table_info' in sql for sql in seen[begins[-1] + 1:alter]), \
+            'the column was not checked again inside the transaction'
+    finally:
+        svc._conn.close()
+
+
+def test_a_duplicate_column_error_counts_as_already_added(tmp_path, monkeypatch):
+    """A writer outside this code path has already added the column, but this
+    opener's checks did not see it: the ALTER then fails with 'duplicate
+    column', which must be read as 'already added', not as a broken file."""
+    import shared.puzzle_service as ps
+    path = _v2_file(tmp_path, with_owner_column=True)
+    state = {'altered': False}
+
+    class _StaleSchema(sqlite3.Connection):
+        def execute(self, sql, *args):
+            text = str(sql)
+            if 'ADD COLUMN owner_key' in text:
+                state['altered'] = True
+            elif 'table_info' in text and not state['altered']:
+                return super().execute(
+                    "SELECT * FROM pragma_table_info('join_documents') WHERE name != 'owner_key'")
+            return super().execute(sql, *args)
+
+    real_connect = sqlite3.connect
+    monkeypatch.setattr(ps.sqlite3, 'connect',
+                        lambda *a, **k: real_connect(*a, **dict(k, factory=_StaleSchema)))
+    svc = ps.PuzzleService(db_path=str(path), thread_safe=True)
+    monkeypatch.undo()
+    try:
+        assert state['altered'], 'the test did not reach the ALTER'
+        assert svc.is_available()
+        assert [d['id'] for d in svc.list_documents()] == ['old-1']
+    finally:
+        if svc._conn is not None:
+            svc._conn.close()
+
+
+# ── The /puzzle page: the tab's canvas belongs to one visitor ───────
+
+
+def _in_page(user, fn):
+    """Run ``fn`` in ``user``'s page context (storage, tab, request)."""
+    from nicegui.storage import request_contextvar
+    token = request_contextvar.set(user._client.request)
+    try:
+        with user._client:
+            return fn()
+    finally:
+        request_contextvar.reset(token)
+
+
+def _sign_in_as(user, account):
+    """Sign this browser in as ``account`` (or out, for None), the way the
+    login flow leaves it in user storage."""
+    from nicegui import app
+
+    def _set():
+        if account is None:
+            app.storage.user.pop('auth_user', None)
+            app.storage.user.pop('auth_profile', None)
+        else:
+            app.storage.user['auth_user'] = {'id': account, 'email': account + '@example.org'}
+            app.storage.user['auth_profile'] = {'role': 'user'}
+    _in_page(user, _set)
+
+
+def _current_owner(user):
+    from web.saved_joins import owner_key
+    return _in_page(user, owner_key)
+
+
+def _tab(user):
+    from nicegui import app
+    return _in_page(user, lambda: dict(app.storage.tab))
+
+
+class _AddFragmentRecorder:
+    """A javascript rule that only records ``addFragment`` calls. Those calls
+    are not awaited (they carry no request id), so it never answers them."""
+    pattern = 'addFragment recorder'
+
+    def __init__(self):
+        self.calls = []
+
+    def match(self, code):
+        if 'window.puzzleCanvas.addFragment(' in code:
+            self.calls.append(code)
+        return None
+
+
+def _add_fragment_calls(user):
+    recorder = _AddFragmentRecorder()
+    user.javascript_rules[recorder] = lambda m: None
+    return recorder.calls
+
+
+@pytest.mark.parametrize('first, then', [
+    ('acct-a', 'acct-b'),   # another account in the same tab
+    ('acct-a', None),       # signed out
+], ids=['account-switch', 'sign-out'])
+def test_tab_canvas_is_restored_only_for_the_visitor_who_left_it(shared_svc, first, then):
+    async def driver(a, _b):
+        calls = _add_fragment_calls(a)
+        await a.open('/puzzle')
+        _sign_in_as(a, first)
+        await a.open('/puzzle')
+        await asyncio.sleep(1.0)            # the page starts its canvas after 0.5 s
+        owner_first = _current_owner(a)
+        assert owner_first and owner_first.startswith('u:' if first else 'b:')
+
+        # The first visitor has a draft open and a canvas in this tab.
+        doc = PuzzleDocument(id='doc-first', title='First visitor draft', notes='first notes',
+                             fragments=[PuzzleFragment(**_fragment_dict())])
+        assert _seed(shared_svc, doc, owner_first) == 'doc-first'
+        from nicegui import app
+
+        def _leave_canvas():
+            app.storage.tab['puzzle_fragments'] = {'990001,1r': {
+                'sys_id': '990001', 'shelfmark': 'T-S 1.1', 'folio_label': '1r',
+                'fl_id': 'FL-990001', 'threshold': 30, 'processed': True, 'size': 800}}
+            app.storage.tab['puzzle_state'] = json.dumps({'990001,1r': {'x': 321, 'y': 654}})
+            app.storage.tab['puzzle_doc_id'] = 'doc-first'
+        _in_page(a, _leave_canvas)
+
+        # The same visitor reopening the tab gets it back (the control).
+        calls.clear()
+        await a.open('/puzzle')
+        await asyncio.sleep(1.5)
+        assert any('FL-990001' in c for c in calls)
+        assert 'First visitor draft' in _texts(a)
+
+        # Someone else in the same tab gets an empty canvas ...
+        _sign_in_as(a, then)
+        owner_then = _current_owner(a)
+        assert owner_then and owner_then != owner_first
+        calls.clear()
+        await a.open('/puzzle')
+        await asyncio.sleep(1.5)
+        assert not any('FL-990001' in c for c in calls)
+        assert 'First visitor draft' not in _texts(a)
+        tab = _tab(a)
+        assert not tab.get('puzzle_fragments') and not tab.get('puzzle_state')
+        assert not tab.get('puzzle_doc_id')
+
+        # ... and cannot save the first visitor's arrangement as their own.
+        await _save_canvas(a)
+        assert shared_svc.list_documents(owner_key=owner_then) == []
+        assert {d['id'] for d in shared_svc.list_documents()} == {'doc-first'}
+        assert shared_svc.load_document('doc-first').title == 'First visitor draft'
+
+    with patch('shared.puzzle_publish_service.get_published_join_detail', return_value=None), \
+            patch('web.supabase_client.get_client', return_value=MagicMock()), \
+            patch('shared.puzzle_export.generate_thumbnail', return_value=''), \
+            patch('shared.puzzle_image_service.get_puzzle_image_service', return_value=MagicMock()):
+        _run(driver)
+
+
+def test_signed_out_canvas_follows_the_visitor_into_their_account(shared_svc):
+    """An unsaved canvas made in this browser while signed out is kept when the
+    visitor signs in (signing in reloads the page). The draft the browser had
+    open is not carried over: it stays with the browser, and saving creates a
+    new join for the account."""
+    async def driver(a, _b):
+        calls = _add_fragment_calls(a)
+        await a.open('/puzzle')
+        await asyncio.sleep(1.0)
+        owner_browser = _current_owner(a)
+        assert owner_browser and owner_browser.startswith('b:')
+        doc = PuzzleDocument(id='doc-first', title='Browser draft', notes='browser notes',
+                             fragments=[PuzzleFragment(**_fragment_dict())])
+        assert _seed(shared_svc, doc, owner_browser) == 'doc-first'
+        from nicegui import app
+
+        def _leave_canvas():
+            app.storage.tab['puzzle_fragments'] = {'990001,1r': {
+                'sys_id': '990001', 'shelfmark': 'T-S 1.1', 'folio_label': '1r',
+                'fl_id': 'FL-990001', 'threshold': 30, 'processed': True, 'size': 800}}
+            app.storage.tab['puzzle_state'] = json.dumps({'990001,1r': {'x': 321, 'y': 654}})
+            app.storage.tab['puzzle_doc_id'] = 'doc-first'
+        _in_page(a, _leave_canvas)
+
+        _sign_in_as(a, 'acct-a')
+        assert _current_owner(a) == 'u:acct-a'
+        calls.clear()
+        await a.open('/puzzle')
+        await asyncio.sleep(1.5)
+        assert any('FL-990001' in c for c in calls)     # the canvas came along ...
+        assert not _tab(a).get('puzzle_doc_id')          # ... the browser's draft did not
+        assert 'Browser draft' not in _texts(a)
+
+        assert await _save_canvas(a)
+        mine = shared_svc.list_documents(owner_key='u:acct-a')
+        assert len(mine) == 1 and mine[0]['id'] != 'doc-first'
+        assert shared_svc.load_document('doc-first').title == 'Browser draft'
+
+    with patch('shared.puzzle_publish_service.get_published_join_detail', return_value=None), \
+            patch('web.supabase_client.get_client', return_value=MagicMock()), \
+            patch('shared.puzzle_export.generate_thumbnail', return_value=''), \
+            patch('shared.puzzle_image_service.get_puzzle_image_service', return_value=MagicMock()):
+        _run(driver)
+
+
+# ── The /puzzle page: background auto-save ─────────────────────────
+
+
+def _fire(user, event, detail):
+    """Deliver a canvas CustomEvent to the page, as the browser would."""
+    from nicegui import helpers
+    wraps = [el for el in user._client.elements.values() if 'puzzle-canvas-wrap' in el.classes]
+    assert wraps, 'canvas element not found'
+    wanted = helpers.event_type_to_camel_case(event)
+    listeners = [lid for lid, lst in wraps[0]._event_listeners.items() if lst.type == wanted]
+    assert listeners, f'no {event} listener'
+    for lid in listeners:
+        wraps[0]._handle_event({'listener_id': lid, 'args': {'detail': detail}})
+
+
+def _canvas_rules(user, state):
+    """Answer the canvas calls: getState from ``state`` (a dict the test can
+    change), everything else with no value."""
+    for rule in [r for r in user.javascript_rules if 'getState' in r.pattern]:
+        del user.javascript_rules[rule]
+    user.javascript_rules[re.compile(r'\s*window\.puzzleCanvas\.getState\(\)\s*$')] = \
+        lambda m: json.dumps(state)
+    user.javascript_rules[re.compile(
+        r'\s*window\.puzzleCanvas(\.getCropState\(\)|\.clearAll\(\)| && window\.puzzleCanvas\.fitAll\(\))\s*$')] = \
+        lambda m: None
+
+
+def _saved_x(path):
+    frags = json.loads(_row(path)[2])
+    return [f['x'] for f in frags]
+
+
+@pytest.mark.parametrize('published', [False, True], ids=['unpublished', 'published'])
+def test_another_visitors_canvas_events_never_change_the_owners_draft(shared_svc, published):
+    """Canvas events on another browser's page never change the owner's row.
+
+    A guard rather than a regression test: web auto-save does not write at
+    this point (its task has no page slot; see the tracker), so this also
+    passes on older code. It pins the rule for when auto-save is enabled."""
+    detail = {
+        'id': 'doc-browser-a', 'title': 'A published', 'notes': '',
+        'fragments_json': {'fragments': [_fragment_dict()], 'join_type': 'physical'},
+        'is_published': True,
+    }
+
+    def _published(client, join_id):
+        return dict(detail) if (published and join_id == 'doc-browser-a') else None
+
+    async def driver(a, b):
+        state_a = {'990001,1r': {'x': 321, 'y': 654}}
+        _canvas_rules(a, state_a)
+        await a.open('/puzzle')
+        key_a = _visitor_key(a)
+        doc = PuzzleDocument(id='doc-browser-a', title='A private', notes='notes of browser a',
+                             fragments=[PuzzleFragment(**_fragment_dict())])
+        assert _seed(shared_svc, doc, key_a) == 'doc-browser-a'
+        assert _saved_x(shared_svc._db_path) == [0.0]
+
+        # A opens its own draft; the fragment image finishes loading.
+        await a.open('/puzzle?doc=doc-browser-a')
+        await asyncio.sleep(3.2)
+        _fire(a, 'puzzle-add-result', {'key': '990001,1r', 'success': True})
+        await asyncio.sleep(3.0)            # past the 1.5 s auto-save delay
+
+        # A moves the fragment on its own canvas.
+        state_a['990001,1r'] = {'x': 555, 'y': 666}
+        _fire(a, 'puzzle-object-modified', {'key': '990001,1r'})
+        await asyncio.sleep(3.0)
+        after_a = _row(shared_svc._db_path)
+        assert after_a[0] == 'A private'
+
+        # B follows the link to A's draft and moves things on its canvas.
+        state_b = {'990001,1r': {'x': 999, 'y': 999}}
+        _canvas_rules(b, state_b)
+        await b.open('/puzzle?doc=doc-browser-a')
+        await asyncio.sleep(3.2)
+        assert _visitor_key(b) != key_a
+        _fire(b, 'puzzle-add-result', {'key': '990001,1r', 'success': True})
+        await asyncio.sleep(0.3)
+        _fire(b, 'puzzle-object-modified', {'key': '990001,1r'})
+        await asyncio.sleep(3.0)
+
+        # A's row is exactly as it was before B's events.
+        assert _row(shared_svc._db_path) == after_a
+        assert {d['id'] for d in shared_svc.list_documents()} == {'doc-browser-a'}
+
+    with patch('shared.puzzle_publish_service.get_published_join_detail', side_effect=_published), \
+            patch('web.supabase_client.get_client', return_value=MagicMock()), \
+            patch('shared.puzzle_export.generate_thumbnail', return_value=''), \
+            patch('shared.puzzle_image_service.get_puzzle_image_service', return_value=MagicMock()):
+        _run(driver)
+
+
+def test_open_page_saves_nothing_after_the_visitor_changes_elsewhere(shared_svc):
+    """The page stays open while this browser signs in from another tab: its
+    canvas still belongs to the visitor it was opened for, so Save writes
+    nothing for the new account."""
+    async def driver(a, _b):
+        calls = _add_fragment_calls(a)
+        await a.open('/puzzle')
+        await asyncio.sleep(1.0)
+        from nicegui import app
+
+        def _leave_canvas():
+            app.storage.tab['puzzle_fragments'] = {'990001,1r': {
+                'sys_id': '990001', 'shelfmark': 'T-S 1.1', 'folio_label': '1r',
+                'fl_id': 'FL-990001', 'threshold': 30, 'processed': True, 'size': 800}}
+        _in_page(a, _leave_canvas)
+        await a.open('/puzzle')
+        await asyncio.sleep(1.5)
+        assert any('FL-990001' in c for c in calls)   # the canvas is on the page
+
+        _sign_in_as(a, 'acct-b')                      # as another tab would
+        await _save_canvas(a)
+        assert shared_svc.list_documents(owner_key='u:acct-b') == []
+        assert shared_svc.list_documents() == []
+
+    with patch('shared.puzzle_publish_service.get_published_join_detail', return_value=None), \
+            patch('web.supabase_client.get_client', return_value=MagicMock()), \
+            patch('shared.puzzle_export.generate_thumbnail', return_value=''), \
+            patch('shared.puzzle_image_service.get_puzzle_image_service', return_value=MagicMock()):
+        _run(driver)

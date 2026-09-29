@@ -179,28 +179,55 @@ class PuzzleService:
         """)
 
         # Schema migration to v2: add thumbnail_b64 column
-        try:
-            self._conn.execute("SELECT thumbnail_b64 FROM join_documents LIMIT 0")
-        except sqlite3.OperationalError:
-            self._conn.execute("ALTER TABLE join_documents ADD COLUMN thumbnail_b64 TEXT DEFAULT ''")
-            self._conn.commit()
+        if self._add_column_if_missing('thumbnail_b64', "TEXT DEFAULT ''"):
             logger.info("PuzzleService: migrated schema to v2 (added thumbnail_b64)")
 
         # Schema migration to v3: add owner_key column. Existing rows keep
         # owner_key = NULL, which the web app never matches (so they stay in
         # the file but are not shown to any web visitor) and which the desktop
         # app ignores (it never filters by owner).
-        try:
-            self._conn.execute("SELECT owner_key FROM join_documents LIMIT 0")
-        except sqlite3.OperationalError:
-            self._conn.execute("ALTER TABLE join_documents ADD COLUMN owner_key TEXT")
-            self._conn.commit()
+        if self._add_column_if_missing('owner_key', 'TEXT'):
             logger.info("PuzzleService: migrated schema to v3 (added owner_key)")
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_join_documents_owner "
             "ON join_documents(owner_key, updated_at DESC)"
         )
         self._conn.commit()
+
+    def _has_column(self, column: str) -> bool:
+        return any(r[1] == column for r in self._conn.execute("PRAGMA table_info(join_documents)"))
+
+    def _add_column_if_missing(self, column: str, decl: str) -> bool:
+        """Add ``column`` to join_documents unless it is already there.
+
+        Several processes (or several service objects) can open the same file
+        for the first time at once. The check and the ALTER run in one
+        IMMEDIATE transaction, so only one opener adds the column; the others
+        wait (busy_timeout) and then find it. A "duplicate column" error from
+        a writer that does not take this path is also read as "already added".
+
+        Returns True when this call added the column.
+        """
+        if self._has_column(column):
+            return False
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            if self._has_column(column):
+                return False
+            raise
+        try:
+            if self._has_column(column):
+                self._conn.rollback()
+                return False
+            self._conn.execute(f"ALTER TABLE join_documents ADD COLUMN {column} {decl}")
+            self._conn.commit()
+            return True
+        except sqlite3.OperationalError as e:
+            self._conn.rollback()
+            if 'duplicate column' in str(e).lower() and self._has_column(column):
+                return False
+            raise
 
     def is_available(self) -> bool:
         """Check if the service has a valid database connection."""
