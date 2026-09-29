@@ -18,7 +18,6 @@ from urllib.parse import unquote
 import asyncio
 import re
 import html
-import os
 import time
 import requests
 from datetime import datetime
@@ -33,10 +32,8 @@ from web.components.filter_panel import (
 logger = logging.getLogger(__name__)
 
 # Import Sefaria sources and text cleaning from the shared sefaria_utils module (no PyQt6 dependency)
-from shared.sefaria_utils import SEFARIA_SOURCES, clean_hebrew_text, get_cache_dir, get_sefaria_library
-
-# Import shared sanitization utility
-from shared_export_utils import sanitize_cache_filename as _sanitize_cache_filename
+from shared.sefaria_utils import (SEFARIA_SOURCES, clean_hebrew_text, get_sefaria_library,
+                                  read_sefaria_cache, write_sefaria_cache)
 
 # DMF-09/DMF-10/DMF-13: library filter imports
 from shared.browse_map_utils import (
@@ -154,19 +151,11 @@ def flatten_sefaria_text(text_data):
 
 def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
     """Fetch a single text from Sefaria API (cleaned, no nikud/taamim)."""
-    cache_dir = get_cache_dir()
-    # Use sanitized filename to prevent path traversal attacks
-    safe_filename = _sanitize_cache_filename(ref)
-    cache_file = os.path.join(cache_dir, f"{safe_filename}_v2.txt")
-
-    if use_cache and os.path.exists(cache_file):
-        try:
-            with open(cache_file, 'r', encoding='utf-8') as f:
-                text = f.read()
-                if text:
-                    return text
-        except Exception:
-            pass  # Cache cleanup failed; stale cache is acceptable
+    # One cache entry per exact reference (shared.sefaria_utils).
+    if use_cache:
+        text = read_sefaria_cache(ref)
+        if text:
+            return text
 
     try:
         encoded_ref = ref.replace(' ', '%20')
@@ -216,11 +205,7 @@ def fetch_sefaria_text(ref: str, use_cache: bool = True) -> str:
             # Clean the text (remove any remaining nikud, taamim, non-Hebrew)
             cleaned = clean_hebrew_text(raw_text)
             if cleaned:
-                try:
-                    with open(cache_file, 'w', encoding='utf-8') as f:
-                        f.write(cleaned)
-                except Exception:
-                    pass  # Cache cleanup failed; stale cache is acceptable
+                write_sefaria_cache(ref, cleaned)
                 return cleaned
     except requests.Timeout:
         logger.error(f"Timeout fetching {ref}")

@@ -10,9 +10,13 @@ import os
 import json
 import time
 import re
+import hashlib
 import html as html_module
 
 import requests
+
+from shared.atomic_io import write_bytes_atomic
+from shared.export_utils import make_safe_filename
 
 
 def get_cache_dir():
@@ -20,6 +24,68 @@ def get_cache_dir():
     cache_dir = os.path.join(os.path.expanduser("~"), ".genizah_search", "sefaria_cache")
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
+
+
+# One cached text per exact reference.
+#
+# The file name is a readable ASCII stem of the reference plus a hash of the
+# whole (stripped) reference, so two references never share a file even when
+# their stems are the same: every Hebrew-only reference has an empty ASCII stem,
+# and long English titles share their first characters. Files written under the
+# older naming (``<stem>_v2.txt`` on the web, ``<stem>_clean.txt`` on the
+# desktop) are simply never read again.
+#
+# The first line of a cache file is the reference as JSON; the text follows. A
+# file whose first line names another reference is treated as a miss.
+SEFARIA_CACHE_KIND = "v3"
+
+
+def _cache_key(ref):
+    return (ref or "").strip()
+
+
+def sefaria_cache_path(ref, cache_dir=None, kind=SEFARIA_CACHE_KIND):
+    """Return the cache file path for exactly ``ref`` (inside the cache folder).
+
+    ``kind`` separates caches whose texts are built differently (the web page
+    and the desktop dialog fetch slightly different versions).
+    """
+    key = _cache_key(ref)
+    stem = make_safe_filename(key, default="ref", max_length=40, preserve_hebrew=False)
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    folder = cache_dir if cache_dir is not None else get_cache_dir()
+    return os.path.join(folder, f"{stem}_{digest}_{kind}.txt")
+
+
+def read_sefaria_cache(ref, cache_dir=None, kind=SEFARIA_CACHE_KIND):
+    """Return the cached text for ``ref``, or ``""`` when there is none."""
+    path = sefaria_cache_path(ref, cache_dir=cache_dir, kind=kind)
+    try:
+        with open(path, "r", encoding="utf-8", newline="") as fh:
+            header, sep, text = fh.read().partition("\n")
+    except OSError:
+        return ""
+    if not sep:
+        return ""
+    try:
+        stored_ref = json.loads(header)
+    except ValueError:
+        return ""
+    if stored_ref != _cache_key(ref):
+        return ""
+    return text
+
+
+def write_sefaria_cache(ref, text, cache_dir=None, kind=SEFARIA_CACHE_KIND):
+    """Store ``text`` for ``ref``. Failures are ignored (the cache is optional)."""
+    if not text:
+        return
+    path = sefaria_cache_path(ref, cache_dir=cache_dir, kind=kind)
+    data = (json.dumps(_cache_key(ref)) + "\n" + text).encode("utf-8")
+    try:
+        write_bytes_atomic(path, data)
+    except OSError:
+        pass
 
 
 def clean_hebrew_text(text):
