@@ -63,7 +63,8 @@ def read_sefaria_cache(ref, cache_dir=None, kind=SEFARIA_CACHE_KIND):
     try:
         with open(path, "r", encoding="utf-8", newline="") as fh:
             header, sep, text = fh.read().partition("\n")
-    except OSError:
+    except (OSError, ValueError):
+        # Missing, unreadable, or not valid UTF-8 (e.g. cut short): a miss.
         return ""
     if not sep:
         return ""

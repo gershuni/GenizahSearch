@@ -126,7 +126,7 @@ def test_cache_path_distinct_per_reference_and_stays_in_folder(tmp_path):
     from shared.sefaria_utils import sefaria_cache_path
 
     folder = str(tmp_path)
-    refs = [GENESIS_REF, EXODUS_REF, LONG_REF_A, LONG_REF_B, "../../etc/passwd", "", "a/b\\c"]
+    refs = [GENESIS_REF, EXODUS_REF, LONG_REF_A, LONG_REF_B, "../other/folder/ref", "", "a/b\\c"]
     paths = [sefaria_cache_path(r, cache_dir=folder) for r in refs]
     assert len(set(paths)) == len(paths)
     for p in paths:
@@ -149,6 +149,33 @@ def test_cache_entry_for_another_reference_is_a_miss(tmp_path):
     with open(other, "w", encoding="utf-8") as fh:
         fh.write(json.dumps(GENESIS_REF) + "\n" + TEXTS[GENESIS_REF])
     assert read_sefaria_cache(EXODUS_REF, cache_dir=folder) == ""
+
+
+# A cache file that was cut short in the middle of a Hebrew letter.
+_UNDECODABLE = b'"x"\n\xd7\x90\xd7'
+
+
+def test_undecodable_cache_file_is_a_miss(tmp_path):
+    from shared.sefaria_utils import read_sefaria_cache, sefaria_cache_path
+
+    folder = str(tmp_path)
+    with open(sefaria_cache_path(GENESIS_REF, cache_dir=folder), "wb") as fh:
+        fh.write(_UNDECODABLE)
+    assert read_sefaria_cache(GENESIS_REF, cache_dir=folder) == ""
+
+
+def test_web_fetch_refetches_when_cache_file_is_undecodable(isolated_cache):
+    from shared.sefaria_utils import sefaria_cache_path
+    from web.pages.parallels import fetch_sefaria_text
+
+    home, calls = isolated_cache
+    folder = _cache_dir(home)
+    os.makedirs(folder, exist_ok=True)
+    with open(sefaria_cache_path(GENESIS_REF, cache_dir=folder), "wb") as fh:
+        fh.write(_UNDECODABLE)
+
+    assert fetch_sefaria_text(GENESIS_REF) == TEXTS[GENESIS_REF]
+    assert calls == [GENESIS_REF]
 
 
 # ---------------------------------------------------------------------------
@@ -186,3 +213,26 @@ def test_desktop_fetch_thread_returns_each_reference_own_text(isolated_cache, fi
     t3.run()
     assert again == {first: TEXTS[first]}
     assert calls == [first, second]
+
+
+def test_desktop_fetch_thread_refetches_when_cache_file_is_undecodable(isolated_cache):
+    pytest.importorskip("PyQt6")
+    from PyQt6.QtWidgets import QApplication
+
+    _app = QApplication.instance() or QApplication([])  # noqa: F841
+    from desktop.filter_text_dialog import _CACHE_KIND, SefariaFetchThread
+    from shared.sefaria_utils import sefaria_cache_path
+
+    home, calls = isolated_cache
+    folder = _cache_dir(home)
+    os.makedirs(folder, exist_ok=True)
+    path = sefaria_cache_path(GENESIS_REF, cache_dir=folder, kind=_CACHE_KIND)
+    with open(path, "wb") as fh:
+        fh.write(_UNDECODABLE)
+
+    results = {}
+    t = SefariaFetchThread([GENESIS_REF])
+    t.finished.connect(results.update)
+    t.run()
+    assert results == {GENESIS_REF: TEXTS[GENESIS_REF]}
+    assert calls == [GENESIS_REF]
