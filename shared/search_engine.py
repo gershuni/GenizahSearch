@@ -276,6 +276,28 @@ def _build_wildcard_regex(component: dict) -> str:
     return ''
 
 
+def _first_position_valid_match(regex, text, first_match, text_position, line_constraints,
+                                strip_brackets):
+    """Return the first occurrence of *regex* in *text* that meets *text_position*, or None.
+
+    A page can hold the term several times: the first occurrence may sit
+    mid-line while a later one ends the line. Checking only the first dropped
+    such pages (found 2026-09-30). 'start' can only be met by the earliest
+    occurrence, and L<n>: line constraints do not depend on the occurrence, so
+    both check one match. Uses repeated ``search(pos=...)``: the budgeted
+    Pattern wrapper has no ``finditer``.
+    """
+    match = first_match
+    while match is not None:
+        if Indexer._validate_position_match(text, match, text_position, line_constraints,
+                                            strip_brackets=strip_brackets):
+            return match
+        if line_constraints or text_position == 'start':
+            return None
+        match = regex.search(text, pos=match.start() + 1)
+    return None
+
+
 def _add_bracket_variants(term: str) -> list:
     """Return bracket-adorned variants of *term* for Tantivy OR expansion.
 
@@ -289,13 +311,19 @@ def _add_bracket_variants(term: str) -> list:
     — never broadened to the bare/other-bracket forms. A bare ``סגן`` still
     expands to ``[סגן`` etc. so it reaches bracketed tokens on pages that
     contain it.
+
+    ``]term[`` is a word standing between two lacunae (the text before it ends
+    in a gap, the text after it opens one). It was missing until 2026-09-30:
+    for שלום, 10 V0.8 pages carry the token ``]שלום[`` and none was reachable
+    from a bare query. Brackets INSIDE a word (``ש[לום``) are still not
+    expanded here -- see docs/plans/SEARCH_UNCAPPED_STREAMING_PLAN.md, stage 0b.
     """
     variants = [term]
     if not term:
         return variants
     if '[' in term or ']' in term:
         return variants  # exact bracket query — do not expand
-    for v in (f'[{term}', f'{term}]', f'[{term}]', f']{term}', f'{term}['):
+    for v in (f'[{term}', f'{term}]', f'[{term}]', f']{term}', f'{term}[', f']{term}['):
         if v not in variants:
             variants.append(v)
     return variants
@@ -1619,6 +1647,45 @@ class SearchEngine:
 
         return " AND ".join(parts)
 
+    # Extra phrase slop for stray tokens between two words: the hebword tokenizer
+    # keeps a lone lacuna bracket, quote or mark ("ברוך [\nאתה") as its own token,
+    # while the verification regex strips or skips it. Measured 2026-09-30 on the
+    # real index: +2 missed 0 whole-word matches over six phrases; +3 is margin.
+    _PHRASE_EXTRA_SLOP = 3
+    _PHRASE_TERM_RE = re.compile(r"^[\w֐-׿̀-ͯ'\"\[\]]+$")
+
+    def build_phrase_candidate_query(self, terms, max_gap, content_search_field=None):
+        """Tantivy candidates for a multi-word Literal query: every ADJACENT pair of
+        terms must occur as a near phrase (slop = gap + _PHRASE_EXTRA_SLOP).
+
+        The AND-of-terms query returns every document holding the words anywhere
+        -- whole manuscripts included -- and the regex then discards most of them
+        (אהרן כהן: 8,897 candidates, 252 verified). Pairs instead of one phrase
+        keep the bracket-form expansion linear in the query length. Owner
+        decision 2026-09-30: Literal matches exact words, in phrases too, so a
+        pair found only inside a longer word (לאהרן כהן) is not a match.
+
+        Returns None when the fast path does not apply (a term that is not one
+        plain token); the caller then uses build_tantivy_query.
+        """
+        if len(terms) < 2:
+            return None
+        cleaned = [t.replace('"', '') for t in terms]
+        if not all(t and self._PHRASE_TERM_RE.match(t) for t in cleaned):
+            return None
+        slop = max_gap + self._PHRASE_EXTRA_SLOP
+        pairs = []
+        for a, b in zip(cleaned, cleaned[1:]):
+            clauses = [f'content:"{x} {y}"~{slop}'
+                       for x in _add_bracket_variants(a) for y in _add_bracket_variants(b)]
+            if content_search_field:
+                fa = strip_search_diacritics(a).replace('"', '')
+                fb = strip_search_diacritics(b).replace('"', '')
+                if fa and fb:
+                    clauses.append(f'{content_search_field}:"{fa} {fb}"~{slop}')
+            pairs.append(f'({" OR ".join(clauses)})')
+        return " AND ".join(pairs)
+
     def build_regex_pattern(self, terms, mode, max_gap, responsa_components=None, responsa_options=None, per_pair_gaps=None):
         # --- Responsa branch ---
         if responsa_components is not None:
@@ -1836,6 +1903,27 @@ class SearchEngine:
                 uid_val = '?'  # UID extraction failed; use placeholder for warning message
             LOGGER.warning("Failed to parse boundaries for doc %s: %s", uid_val, e)
             return []
+
+    def _first_match_in_pages(self, regex, text, first_match, boundaries, page_uids, accept=None):
+        """First match (from *first_match* on) whose page is in *page_uids*, or None.
+
+        Search-within over an aggregate (scope system/part) hit: the doc's own
+        uid is ``sys:``/``part:``, so the restriction is tested on the page the
+        match falls in (the primary page, as ``_map_span_to_pages`` picks it).
+        An Oxford part can span manuscripts, so a later match may be the one
+        inside the restriction. *accept* (e.g. a position check) must also hold.
+        Before 2026-09-30 every aggregate hit was discarded under search-within.
+        """
+        if not boundaries or not any(b.get('uid') in page_uids for b in boundaries):
+            return None  # no page of this aggregate is in the restriction
+        match = first_match
+        while match is not None:
+            if accept is None or accept(match):
+                primary = self._map_span_to_pages(match.span(), boundaries).get('primary') or {}
+                if primary.get('uid') in page_uids:
+                    return match
+            match = regex.search(text, pos=match.start() + 1)
+        return None
 
     def _map_span_to_pages(self, span, boundaries):
         """Return page overlaps and primary page for a match span."""
@@ -2212,7 +2300,7 @@ class SearchEngine:
 
         if restrict_sys_ids is not None and len(restrict_sys_ids) <= 500:
             sid_clauses = ' OR '.join(f'full_header:"{sid}"' for sid in restrict_sys_ids)
-            t_query_str = f'({t_query_str}) AND ({sid_clauses})'
+            t_query_str = f'({t_query_str}) AND ({sid_clauses} OR scope:part)'  # parts: see execute_search
 
         try:
             query = self.index.parse_query(t_query_str, ['content'])
@@ -2245,8 +2333,10 @@ class SearchEngine:
                     progress_callback(i, total_hits)
                 try:
                     doc = self.searcher.doc(doc_addr)
+                    scope = (self._get_field(doc, 'scope', ['page']) or ['page'])[0]
 
-                    if restrict_uids is not None:
+                    # Aggregates (sys:/part: uids) are tested by page below.
+                    if restrict_uids is not None and scope == 'page':
                         if doc['unique_id'][0] not in restrict_uids:
                             continue
 
@@ -2262,10 +2352,14 @@ class SearchEngine:
                         continue
 
                     # Re-search on original content for highlighting
+                    span_text = match_content
                     if match_content is not content:
                         orig_match = regex.search(content)
                         if orig_match:
                             match_obj = orig_match
+                            span_text = content
+                    else:
+                        span_text = content
 
                     # Text position filter — strip brackets from
                     # prefix/suffix only for bracket-free queries
@@ -2276,18 +2370,32 @@ class SearchEngine:
                         if cleaned:
                             regex_filtered += 1
                             continue
-                    elif text_position == 'end' and match_obj.end() < len(content):
-                        suffix = content[match_obj.end():]
-                        cleaned = suffix.strip() if _brackets_in_query else _strip_brackets(suffix).strip()
-                        if cleaned:
+                    elif text_position == 'end':
+                        # The LAST occurrence may be the one that ends the text.
+                        match_obj = _first_position_valid_match(
+                            regex, span_text, match_obj, 'end', None,
+                            strip_brackets=not _brackets_in_query)
+                        if match_obj is None:
                             regex_filtered += 1
                             continue
 
                     # Use standard highlight helpers with the match span
-                    span = match_obj.span()
-                    scope_list = self._get_field(doc, 'scope', ['page']) or ['page']
-                    scope = scope_list[0]
                     boundaries = self._parse_boundaries(doc) if scope != 'page' else []
+                    if restrict_uids is not None and scope != 'page':
+                        def position_ok(m, _t=span_text, _b=_brackets_in_query):
+                            if text_position == 'start':
+                                pre = _t[:m.start()]
+                                return not (pre.strip() if _b else _strip_brackets(pre).strip())
+                            if text_position == 'end':
+                                post = _t[m.end():]
+                                return not (post.strip() if _b else _strip_brackets(post).strip())
+                            return True
+                        match_obj = self._first_match_in_pages(
+                            regex, span_text, match_obj, boundaries, restrict_uids, position_ok)
+                        if match_obj is None:
+                            regex_filtered += 1
+                            continue
+                    span = match_obj.span()
 
                     hl_c = self.highlight(content, regex, False)
                     hl_f = self.highlight(content, regex, True)
@@ -2738,7 +2846,11 @@ class SearchEngine:
                 _cs_field = ('content_search'
                              if (not text_position and getattr(self, '_has_content_search', False))
                              else None)
-                t_query_str = self.build_tantivy_query(terms, mode, content_search_field=_cs_field)
+                t_query_str = None
+                if mode == 'literal' and not text_position:
+                    t_query_str = self.build_phrase_candidate_query(terms, gap, content_search_field=_cs_field)
+                if t_query_str is None:
+                    t_query_str = self.build_tantivy_query(terms, mode, content_search_field=_cs_field)
                 regex = self.build_regex_pattern(terms, mode, gap)
         if not regex: return []
 
@@ -2751,9 +2863,11 @@ class SearchEngine:
 
         # Augment Tantivy query with sys_id filter so the index only returns
         # hits from the restricted manuscripts (avoids iterating 50K hits).
+        # Oxford parts carry only their FIRST page's header and can span
+        # manuscripts, so they always pass here and are tested per page below.
         if restrict_sys_ids is not None and len(restrict_sys_ids) <= 500:
             sid_clauses = ' OR '.join(f'full_header:"{sid}"' for sid in restrict_sys_ids)
-            t_query_str = f'({t_query_str}) AND ({sid_clauses})'
+            t_query_str = f'({t_query_str}) AND ({sid_clauses} OR scope:part)'
 
         # Choose search field based on text_position filter
         position_field_map = {
@@ -2815,14 +2929,17 @@ class SearchEngine:
                     doc = self.searcher.doc(doc_addr)
                     document_load_seconds += time.perf_counter() - load_started
 
-                    # Pre-search filter: skip manuscripts outside the restrict set
-                    if restrict_uids is not None:
+                    scope_list = self._get_field(doc, 'scope', ['page']) or ['page']
+                    scope = scope_list[0]
+
+                    # Pre-search filter: skip pages outside the restrict set. An
+                    # aggregate (system/part) has a sys:/part: uid, never a page uid,
+                    # so it is tested below by the page its match falls in.
+                    if restrict_uids is not None and scope == 'page':
                         if doc['unique_id'][0] not in restrict_uids:
                             continue
 
                     content = self._get_field(doc, 'content', [""])[0]
-                    scope_list = self._get_field(doc, 'scope', ['page']) or ['page']
-                    scope = scope_list[0]
 
                     # Bracket handling: strip brackets from content for
                     # bracket-free queries so e.g. הנתשנ matches ]הנתשנ
@@ -2840,15 +2957,26 @@ class SearchEngine:
 
                     # Position post-filter: Tantivy uses broad fields (10-word head/tail),
                     # validate exact position (first word, last word, line boundary)
-                    if text_position and not Indexer._validate_position_match(match_content, match_obj, text_position, _line_constraints or None, strip_brackets=not _query_has_brackets(query_str)):
-                        regex_filtered_count += 1
-                        continue
+                    # against the first occurrence that satisfies it, not just the first.
+                    if text_position:
+                        match_obj = _first_position_valid_match(
+                            regex, match_content, match_obj, text_position, _line_constraints or None,
+                            strip_brackets=not _query_has_brackets(query_str))
+                        if match_obj is None:
+                            regex_filtered_count += 1
+                            continue
 
                     # For highlighting, re-search on original content to
                     # preserve scholarly bracket notation in snippets.
                     orig_match_missing = False
                     if match_content is not content:
                         orig_match = regex.search(content)
+                        if orig_match and text_position:
+                            # Highlight the occurrence that met the position, when the
+                            # original text has one; else keep the old first match.
+                            orig_match = _first_position_valid_match(
+                                regex, content, orig_match, text_position, _line_constraints or None,
+                                strip_brackets=True) or orig_match
                         if orig_match:
                             match_obj = orig_match
                         else:
@@ -2857,6 +2985,19 @@ class SearchEngine:
                             orig_match_missing = True
 
                     boundaries = self._parse_boundaries(doc) if scope != 'page' else []
+                    if restrict_uids is not None and scope != 'page':
+                        span_text = match_content if orig_match_missing else content
+                        position_ok = None
+                        if text_position:
+                            def position_ok(m, _t=span_text):
+                                return Indexer._validate_position_match(
+                                    _t, m, text_position, _line_constraints or None,
+                                    strip_brackets=not _query_has_brackets(query_str))
+                        match_obj = self._first_match_in_pages(
+                            regex, span_text, match_obj, boundaries, restrict_uids, position_ok)
+                        if match_obj is None:
+                            regex_filtered_count += 1
+                            continue
                     span = match_obj.span()
                     if boundaries:
                         span_map = self._map_span_to_pages(span, boundaries)

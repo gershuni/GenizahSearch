@@ -329,6 +329,10 @@ except Exception:
 
 
 BATCH_SIZE = 500
+# Rows built before the first paint of a finished search; the rest of the first
+# page follows on the next event-loop turn. Building 500 rows took 1.2-2.7 s
+# (owner's machine, 2026-09-30), so 500 rows up front delayed the first result.
+FIRST_PAINT_ROWS = 50
 
 class LabPanel(QFrame):
     def __init__(self, parent, mode):
@@ -21610,6 +21614,9 @@ class GenizahGUI(QMainWindow):
             pass  # Silently fail -- notification is non-critical
 
     def on_search_finished(self, results):
+        # Post-search timing (search-speed handoff): where the time goes between
+        # execute_search returning and the table showing results.
+        _pt = [('start', time.perf_counter())]
         # Show processing phase — keep progress bar visible with elapsed timer running
         self.search_progress.setRange(0, 0)  # Indeterminate
         # Monotonic and pause-discounted: see effective_elapsed().
@@ -21669,9 +21676,11 @@ class GenizahGUI(QMainWindow):
             return
 
         self.last_results = results
+        _pt.append(('pre', time.perf_counter()))
         # v7.16 BUG-6: prime the LOCAL filepath cache in one batched query before
         # rendering/filtering iterate per-row (prevents the ~10s UI-thread freeze).
         self._prime_local_filepath_cache(results)
+        _pt.append(('prime_local', time.perf_counter()))
 
         # Phase 55: Refinement chain update (uses RAW results before post-filters)
         if self._refine_mode:
@@ -21748,8 +21757,10 @@ class GenizahGUI(QMainWindow):
             for r in (self.last_results or [])
         )
         self.results_table.setColumnHidden(self.COL_SRC, not (has_multiple_sources or has_local))
+        _pt.append(('setup', time.perf_counter()))
         # Phase 95 REQ-6 — update LOCAL filter button visibility after search results land.
         self._update_local_filter_visibility_search()
+        _pt.append(('local_filter_vis', time.perf_counter()))
 
         # Initialize domain data (will be populated asynchronously by DomainEnrichmentWorker)
         self._result_domain_map = {}
@@ -21758,23 +21769,29 @@ class GenizahGUI(QMainWindow):
         self._has_result_domains = False
         self.btn_domain_filter.setEnabled(False)
 
-        # Use smaller initial batch during session restore for faster first paint
-        restore_batch = 50 if getattr(self, '_restoring_session', False) else None
-        self.load_next_batch(batch_size=restore_batch)
+        # Use smaller initial batch during session restore for faster first paint.
+        # A normal search also paints FIRST_PAINT_ROWS first; the rest of the
+        # first page is built on the next event-loop turn (_fill_first_results_page).
+        restoring = getattr(self, '_restoring_session', False)
+        self.load_next_batch(batch_size=50 if restoring else min(FIRST_PAINT_ROWS, BATCH_SIZE))
+        _pt.append(('first_batch', time.perf_counter()))
 
         # Auto-fit columns to content (like double-clicking the column border)
         for col in (self.COL_SYS_ID, self.COL_LIBRARY, self.COL_SHELF, self.COL_IMG):
             self.results_table.resizeColumnToContents(col)
+        _pt.append(('resize_cols', time.perf_counter()))
 
         # Launch enrichment workers (async -- results appear first, enrichment fills in later)
         # During session restore, defer workers to keep UI responsive
         self._launch_enrichment_workers(results, defer=getattr(self, '_restoring_session', False))
+        _pt.append(('enrich_launch', time.perf_counter()))
 
         # Save session after search completes (crash-safe persistence)
         self._schedule_session_save()
         # Add to search history (skip during session restore and refinement -- D-15)
         if not getattr(self, '_restoring_session', False) and not self.refinement_chain:
             self._add_regular_search_to_history()
+        _pt.append(('session_history', time.perf_counter()))
 
         # Toast notification when app is not focused
         self._notify_search_complete(len(results), self.last_search_query)
@@ -21786,7 +21803,24 @@ class GenizahGUI(QMainWindow):
         # Phase 55: Reapply "all terms" filter if checkbox is checked
         if self._all_terms_filter and self.refinement_chain:
             self._apply_all_terms_filter_and_rerender()
+        _pt.append(('finish', time.perf_counter()))
         search_elapsed = self._pause_search.elapsed(time.monotonic())
+        logger.info(
+            "search_ui_perf rows=%d %s total_ms=%d since_submit_ms=%d fl_index_ready=%s",
+            len(results),
+            " ".join(f"{name}_ms={int((t - _pt[i][1]) * 1000)}"
+                     for i, (name, t) in enumerate(_pt[1:])),
+            int((_pt[-1][1] - _pt[0][1]) * 1000),
+            int(search_elapsed * 1000),
+            getattr(self.searcher, '_fl_id_index', None) is not None,
+        )
+        # The all-terms re-render above already built its own page from a
+        # filtered list (and put the full list back): a fill would append
+        # rows that filter hides.
+        if not restoring and not (self._all_terms_filter and self.refinement_chain):
+            # The page size is fixed now, not when the timer fires.
+            target = min(BATCH_SIZE, len(results))
+            QTimer.singleShot(0, lambda r=results, n=target: self._fill_first_results_page(r, n))
         elapsed_str = f"{int(search_elapsed // 60)}:{int(search_elapsed % 60):02d}"
         partial_tag = f" ({tr('Partial results')})" if was_cancelled else ""
         if not getattr(self, '_restoring_session', False):
@@ -21797,6 +21831,27 @@ class GenizahGUI(QMainWindow):
         # _app_shutting_down guard is first-line inside _emit_search_telemetry (REVIEWS HIGH-2).
         # emitted guard prevents double-emit if stop_search already fired (D-09).
         self._emit_search_telemetry('cancelled' if was_cancelled else 'completed', len(results))
+
+    def _fill_first_results_page(self, results, target):
+        """Build the rest of the first page (*target* rows, fixed when the search
+        landed) after the first FIRST_PAINT_ROWS have painted. Does nothing if
+        another search has started or replaced the list since, or if the page is
+        already full."""
+        if getattr(self, '_app_shutting_down', False):
+            return
+        if getattr(self, 'last_results', None) is not results or getattr(self, 'is_searching', False):
+            return
+        if getattr(self, '_all_terms_filter', False) and getattr(self, 'refinement_chain', None):
+            return  # the table shows a filtered page built from another list
+        # The first rows are on screen by now: this is the wait the user sees.
+        logger.info("search_first_paint since_submit_ms=%d rows_shown=%d",
+                    int(self._pause_search.elapsed(time.monotonic()) * 1000), self.results_loaded)
+        missing = target - self.results_loaded
+        if missing <= 0:
+            return
+        self.load_next_batch(batch_size=missing)
+        for col in (self.COL_SYS_ID, self.COL_LIBRARY, self.COL_SHELF, self.COL_IMG):
+            self.results_table.resizeColumnToContents(col)
 
     # ---- Phase 55: Refinement chain methods ----
 
