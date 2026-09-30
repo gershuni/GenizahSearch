@@ -6,6 +6,7 @@ genizah_core.py retains a permanent same-object re-export shim so all
 existing ``from genizah_core import SearchEngine`` callers continue working.
 """
 
+import bisect
 import logging
 import os
 import re
@@ -1921,6 +1922,119 @@ class SearchEngine:
             LOGGER.warning("Failed to parse boundaries for doc %s: %s", uid_val, e)
             return []
 
+    def _aggregate_result_row(self, doc, content, span, boundaries, pattern_str, scope, score):
+        """The result row for a match in a whole-manuscript / part doc: shown as
+        the page the match starts on, with per-page highlight spans."""
+        span_map = self._map_span_to_pages(span, boundaries)
+        primary = span_map.get('primary') or {}
+        display_header = primary.get('full_header', doc['full_header'][0])
+        source_label = primary.get('source', doc['source'][0])
+        hl_c, hl_f = self._highlight_pair(content, span)
+        meta = self.meta_mgr.get_display_data(display_header, source_label)
+        page_highlights = []
+        for ov in span_map.get('overlaps', []):
+            if 'span' in ov and ov.get('uid'):
+                page_highlights.append({
+                    'uid': ov.get('uid'),
+                    'p_num': ov.get('p_num'),
+                    'span': ov.get('span'),
+                    'full_header': ov.get('full_header', ''),
+                    'source': ov.get('source', '')
+                })
+        return {
+            'display': meta,
+            'snippet': hl_c or "",
+            'full_text': content,
+            'uid': primary.get('uid') or doc['unique_id'][0],
+            'raw_header': display_header,
+            'raw_file_hl': hl_f or "",
+            'highlight_pattern': pattern_str,
+            'page_highlights': page_highlights,
+            'cross_page': span_map.get('cross_page', False),
+            'scope': scope,
+            # Phase 77 D-01: surface Tantivy relevance score so
+            # serialize_search_payload emits non-zero scores.
+            'score': float(score),
+        }
+
+    def _cross_page_spans(self, regex, content, boundaries, first_term, last_term, window, gap, strip):
+        """Spans (in *content* coordinates) of every match that runs across a page
+        break of a whole-manuscript / part doc.
+
+        For a multi-word Literal query the page docs already give every match
+        inside one page, so an aggregate adds only the matches that cross a
+        break. Scanning the whole manuscript for them was most of the search
+        time (לי מי לי: 2,146 manuscripts, ~14 s of regex). The regex now runs
+        only in a window of +-*window* chars around a break, and only when the
+        first term occurs before the break and the last term after it: a match
+        across the break holds its newline and no term can, so this is a
+        necessary condition. Both sides are folded with strip_search_diacritics,
+        as the query was, and the pattern tolerates exactly those marks inside a
+        word. *strip* removes brackets first, as the whole-text path does.
+        """
+        if len(boundaries) < 2:
+            return []
+        first, last = first_term.lower(), last_term.lower()
+        pieces = []        # (window text, break offset in it, content index of its start, original window)
+        for b in boundaries[1:]:
+            cut = b.get('start', 0)
+            lo, hi = max(0, cut - window), min(len(content), cut + window)
+            left, right = content[lo:cut], content[cut:hi]
+            s_left, s_right = (_strip_brackets(left), _strip_brackets(right)) if strip else (left, right)
+            if (first not in strip_search_diacritics(s_left).lower()
+                    or last not in strip_search_diacritics(s_right).lower()):
+                continue
+            pieces.append((s_left + s_right, len(s_left), lo, left + right))
+        if not pieces:
+            return []
+
+        def to_content(piece, start, end):
+            _text, _cs, lo, orig = piece
+            if not strip:
+                return lo + start, lo + end
+            # Map bracket-free offsets back onto the original window exactly.
+            idx, kept, s_o, e_o = 0, 0, None, None
+            while idx < len(orig) and e_o is None:
+                if orig[idx] not in '[]':
+                    if kept == start and s_o is None:
+                        s_o = idx
+                    kept += 1
+                    if kept == end:
+                        e_o = idx + 1
+                idx += 1
+            return lo + (s_o if s_o is not None else 0), lo + (e_o if e_o is not None else len(orig))
+
+        spans = []
+        if gap == 0 and len(pieces) > 1:
+            # One pass over all windows joined by '_': a gap-0 match cannot hold
+            # '_' (it is neither a separator nor a letter of a term).
+            offsets, pos = [], 0
+            for text, _cs, _lo, _o in pieces:
+                offsets.append(pos)
+                pos += len(text) + 1
+            joined = '_'.join(p[0] for p in pieces)
+            m = regex.search(joined)
+            while m is not None:
+                j = bisect.bisect_right(offsets, m.start()) - 1
+                cs = offsets[j] + pieces[j][1]
+                if m.start() < cs < m.end():
+                    spans.append(to_content(pieces[j], m.start() - offsets[j], m.end() - offsets[j]))
+                    if j + 1 >= len(pieces):
+                        break
+                    m = regex.search(joined, offsets[j + 1])
+                else:
+                    m = regex.search(joined, m.start() + 1)
+        else:
+            for piece in pieces:
+                text, cs = piece[0], piece[1]
+                m = regex.search(text)
+                while m is not None and m.start() < cs and m.end() <= cs:
+                    m = regex.search(text, m.start() + 1)
+                if m is not None and m.start() < cs < m.end():
+                    spans.append(to_content(piece, m.start(), m.end()))
+        # Short pages: one match can straddle two breaks and show up twice.
+        return sorted(set(spans))
+
     def _first_match_in_pages(self, regex, text, first_match, boundaries, page_uids, accept=None):
         """First match (from *first_match* on) whose page is in *page_uids*, or None.
 
@@ -2633,6 +2747,8 @@ class SearchEngine:
         if not self.searcher: return []
         _line_constraints = {}  # Per-line position constraints (L3:word syntax)
         _has_wildcard_component = False  # Set True when any Responsa component has a wildcard
+        _cross_page_terms = None  # (first, last) term when aggregates add only cross-page matches
+        _cross_page_window = 0
 
         # Strip combining diacritical marks and geresh/gershayim from query
         # Skip for Regex mode -- user controls the pattern directly
@@ -2866,6 +2982,10 @@ class SearchEngine:
                 t_query_str = None
                 if mode == 'literal' and not text_position:
                     t_query_str = self.build_phrase_candidate_query(terms, gap, content_search_field=_cs_field)
+                    if t_query_str is not None:
+                        # Aggregates then only contribute matches across a page break.
+                        _cross_page_terms = (terms[0], terms[-1])
+                        _cross_page_window = 3 * len(query_str) + 30 * gap + 64
                 if t_query_str is None:
                     t_query_str = self.build_tantivy_query(terms, mode, content_search_field=_cs_field)
                 # A single Literal word cannot span a page break, so a
@@ -2966,6 +3086,30 @@ class SearchEngine:
 
                     content = self._get_field(doc, 'content', [""])[0]
 
+                    # Multi-word Literal: a whole-manuscript / part doc adds only the
+                    # matches that cross a page break (page docs give the rest).
+                    if _cross_page_terms is not None and scope != 'page':
+                        boundaries = self._parse_boundaries(doc)
+                        match_started = time.perf_counter()
+                        try:
+                            spans = self._cross_page_spans(
+                                regex, content, boundaries, _cross_page_terms[0], _cross_page_terms[1],
+                                _cross_page_window, gap, strip=not _query_has_brackets(query_str))
+                        finally:
+                            candidate_match_seconds += time.perf_counter() - match_started
+                        kept = 0
+                        for span in spans:
+                            if restrict_uids is not None:
+                                primary = self._map_span_to_pages(span, boundaries).get('primary') or {}
+                                if primary.get('uid') not in restrict_uids:
+                                    continue
+                            results.append(self._aggregate_result_row(
+                                doc, content, span, boundaries, pattern_str, scope, score))
+                            kept += 1
+                        if not kept:
+                            regex_filtered_count += 1
+                        continue
+
                     # Bracket handling: strip brackets from content for
                     # bracket-free queries so e.g. הנתשנ matches ]הנתשנ
                     match_content = content if _query_has_brackets(query_str) else _strip_brackets(content)
@@ -3025,37 +3169,8 @@ class SearchEngine:
                             continue
                     span = match_obj.span()
                     if boundaries:
-                        span_map = self._map_span_to_pages(span, boundaries)
-                        primary = span_map.get('primary') or {}
-                        display_header = primary.get('full_header', doc['full_header'][0])
-                        source_label = primary.get('source', doc['source'][0])
-                        hl_c, hl_f = self._highlight_pair(content, span)
-                        meta = self.meta_mgr.get_display_data(display_header, source_label)
-                        page_highlights = []
-                        for ov in span_map.get('overlaps', []):
-                            if 'span' in ov and ov.get('uid'):
-                                page_highlights.append({
-                                    'uid': ov.get('uid'),
-                                    'p_num': ov.get('p_num'),
-                                    'span': ov.get('span'),
-                                    'full_header': ov.get('full_header', ''),
-                                    'source': ov.get('source', '')
-                                })
-                        results.append({
-                            'display': meta,
-                            'snippet': hl_c or "",
-                            'full_text': content,
-                            'uid': primary.get('uid') or doc['unique_id'][0],
-                            'raw_header': display_header,
-                            'raw_file_hl': hl_f or "",
-                            'highlight_pattern': pattern_str,
-                            'page_highlights': page_highlights,
-                            'cross_page': span_map.get('cross_page', False),
-                            'scope': scope,
-                            # Phase 77 D-01: surface Tantivy relevance score so
-                            # serialize_search_payload emits non-zero scores.
-                            'score': float(score),
-                        })
+                        results.append(self._aggregate_result_row(
+                            doc, content, span, boundaries, pattern_str, scope, score))
                     else:
                         # match_obj already IS regex.search(content) here, except
                         # when brackets were stripped and the original text had no

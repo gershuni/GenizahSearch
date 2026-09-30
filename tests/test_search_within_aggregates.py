@@ -130,7 +130,10 @@ PART_PHRASE = f"{B1} {B2}"
 
 def test_unrestricted_baseline(run):
     assert run(SYS_PHRASE) == ["p1"]            # mapped to the page the match starts on
-    assert run(PART_PHRASE) == ["q1"]           # first occurrence, in 990007
+    # q1 from its own page doc; q2 is the part's match across the q2|q3 break. Before
+    # 2026-09-30 an aggregate gave only its FIRST match (q1 again), so the cross-page
+    # q2 was found only under search-within.
+    assert run(PART_PHRASE) == ["q1", "q2"]
 
 
 @pytest.mark.parametrize("extra", [set(), MANY], ids=["under500", "over500"])

@@ -133,6 +133,18 @@ Also done 2026-09-30, outside the original stage list:
   (175K rows), אלהים 15.9 -> 5.7. `tests/test_single_word_page_only.py`, 5 mutations killed. The
   snapshot fixture now also indexes the system doc's pages as page docs (as the real index does);
   on it HEAD and the working engine agree on every row and order, only `score` differs.
+- **Aggregates add only cross-page matches** for multi-word Literal (`_cross_page_spans`): the
+  regex runs only in a window (3 x query length + 30 x gap + 64 chars) around a page break whose
+  left side holds the first term and right side the last (folded; a match across the break holds
+  its newline and no term can, so this is necessary). Gap 0 joins the windows with '_' for one
+  regex pass. Bracket-free offsets map back exactly to the original text. Every crossing is
+  returned, not only a manuscript's first match. Real-index gate, HEAD vs working, uncapped, 10
+  phrases: all 23 old cross-page rows kept, 97 now; no whole-word drop; every new row a real
+  crossing. Time: לי מי לי 9.8 -> 7.0 s, אם אין אני לי 4.1 -> 2.7, אמר רבי 6.4 -> 4.4; בני ישראל
+  (38K rows) and על כן unchanged -- what is left is LOADING the manuscript docs (and many rows),
+  which only a re-index (small per-break docs) would remove. `tests/test_cross_page_spans.py`,
+  7 mutations killed. Profiling showed the first pre-check (both terms anywhere in the window)
+  passed almost always for short words; the before/after split fixed that.
 - Owner measurements after both (partly under test-suite load): בלי ירח 1.3 s and שמעון הצדיק
   1.1 s from submit to rows; שלום 3.4 s; בלי 17 s (loaded); variants שמעון הצדיק 75 s, of which
   66.5 s regex over whole-manuscript docs; fuzzy minutes (a 564K-character pattern).
