@@ -118,13 +118,46 @@ def test_other_modes_keep_the_manuscript_docs(engines):
     assert "A" in _uids(engines["complete"], W, mode="variants")
 
 
-def test_page_only_path_not_consulted_for_positions_phrases_or_other_modes(engines):
-    eng = engines["complete"]
-    with patch.object(eng, "_every_doc_has_scope", side_effect=AssertionError("fast path consulted")):
-        eng.execute_search(W, "literal", 0, text_position="start", corpus_scope="genizah")
-        eng.execute_search(f"{W} עליכם", "literal", 0, corpus_scope="genizah")
-        eng.execute_search(W, "variants", 0, corpus_scope="genizah")
-        eng.execute_search(W, "fuzzy", 0, corpus_scope="genizah")
+class _RecordingIndex:
+    """Forwards to the real tantivy Index (whose methods cannot be patched) and
+    records every query string it parses."""
+
+    def __init__(self, real):
+        self._real, self.parsed = real, []
+
+    def parse_query(self, qs, fields):
+        self.parsed.append(qs)
+        return self._real.parse_query(qs, fields)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+def _queries(eng, query, mode="literal", **kw):
+    real = eng.index
+    eng.index = rec = _RecordingIndex(real)
+    try:
+        eng.execute_search(query, mode, 0, corpus_scope="genizah", **kw)
+    finally:
+        eng.index = real
+    return rec.parsed
+
+
+AGG = "(scope:system OR scope:part)"
+
+
+def test_single_word_literal_never_queries_the_aggregates(engines):
+    assert not any(AGG in q for q in _queries(engines["complete"], W))
+
+
+@pytest.mark.parametrize("query, kw", [
+    (W, {"text_position": "start"}),
+    (f"{W} עליכם", {}),
+    (W, {"mode": "variants"}),
+    (W, {"mode": "fuzzy"}),
+], ids=["position", "phrase", "variants", "fuzzy"])
+def test_other_searches_still_query_the_aggregates(engines, query, kw):
+    assert any(AGG in q for q in _queries(engines["complete"], query, **kw))
 
 
 class _NoSearch:

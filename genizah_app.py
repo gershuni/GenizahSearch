@@ -20822,6 +20822,9 @@ class GenizahGUI(QMainWindow):
         # once New discards this run (_deliver_unless_discarded).
         _live = partial(self._discardable, '_search_new_generation')
         self.search_thread.results_signal.connect(_live(self.on_search_finished))
+        if hasattr(self.search_thread, 'preview_signal'):
+            self.search_thread.preview_signal.connect(
+                _live(lambda rows, t=self.search_thread: self._on_search_preview(t, rows)))
         self.search_thread.progress_signal.connect(self._on_search_progress)
         if hasattr(self.search_thread, 'pause_ack_signal'):
             self.search_thread.pause_ack_signal.connect(
@@ -21831,6 +21834,43 @@ class GenizahGUI(QMainWindow):
         # _app_shutting_down guard is first-line inside _emit_search_telemetry (REVIEWS HIGH-2).
         # emitted guard prevents double-emit if stop_search already fired (D-09).
         self._emit_search_telemetry('cancelled' if was_cancelled else 'completed', len(results))
+
+    def _on_search_preview(self, thread, rows):
+        """Show the first rows of a search that is still running
+        (SearchThread.preview_signal). on_search_finished rebuilds the table from
+        the complete list; sort, filters, export and search-within wait for it
+        (owner decision 2026-09-30). The engine offers a preview only where the
+        final list keeps these rows first and in this order."""
+        if thread is not getattr(self, 'search_thread', None) or not getattr(self, 'is_searching', False):
+            return
+        if not rows or getattr(self, '_restoring_session', False):
+            return
+        if getattr(self, '_all_terms_filter', False) and getattr(self, 'refinement_chain', None):
+            return  # that view is built from a filtered list when the run ends
+        # A later preview of the same run extends the earlier one: append only the
+        # new rows. Anything else (first preview, or a list that does not extend
+        # what is shown) rebuilds the table.
+        shown = self.results_loaded if getattr(self, '_preview_thread', None) is thread else 0
+        extends = bool(shown) and len(rows) >= shown and [r.get('uid') for r in rows[:shown]] == [
+            r.get('uid') for r in (self.last_results or [])[:shown]]
+        if extends and len(rows) == shown:
+            return
+        status = self.status_label.text()
+        if not extends:
+            self.results_loaded = 0
+            self.results_table.setRowCount(0)
+            self.result_row_by_sys_id = {}
+            self.shelfmark_items_by_sid = {}
+            self.title_items_by_sid = {}
+            self._res_map_by_sid = {}
+        self._preview_thread = thread
+        self.last_results = list(rows)
+        self._res_map_by_sid.update({r['display']['id']: r for r in rows})
+        self.load_next_batch(batch_size=len(rows) - self.results_loaded)
+        self.results_table.setSortingEnabled(False)  # load_next_batch turned it on
+        self.status_label.setText(status)            # still searching, not a result count
+        logger.info("search_preview since_submit_ms=%d rows_shown=%d",
+                    int(self._pause_search.elapsed(time.monotonic()) * 1000), self.results_loaded)
 
     def _fill_first_results_page(self, results, target):
         """Build the rest of the first page (*target* rows, fixed when the search

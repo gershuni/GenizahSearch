@@ -9,6 +9,19 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_fl_id_index_build(monkeypatch):
+    """These tests build a real SearchEngine (not worker_mode: they test the
+    LOCAL open fallback, which worker_mode changes). Its constructor would
+    start the FL-ID build on the REAL browse map in a daemon thread that
+    outlives the test and writes SearchEngine._shared_browse_map mid-way
+    through a later test (test_browse_map_atomic_write read the real map,
+    2026-09-30)."""
+    from shared.search_engine import SearchEngine
+    monkeypatch.setattr(SearchEngine, "start_fl_id_index_build", lambda self: None)
 
 
 # ---------------------------------------------------------------------------

@@ -1797,3 +1797,58 @@ def test_the_fill_leaves_an_all_terms_page_alone(window, monkeypatch):
     _drain_events()
     assert w.results_table.rowCount() == shown == 60
     assert all(w.results_table.item(r, w.COL_SYS_ID).text() == A for r in range(60))
+
+
+# --- Search preview (2026-09-30): the first rows while the search still runs.
+
+def test_a_preview_shows_rows_while_searching_and_the_result_replaces_it(window):
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    w.status_label.setText("Searching...")
+    w._on_search_preview(w.search_thread, _rows(A, 5))
+    assert w.results_table.rowCount() == 5
+    assert w.status_label.text() == "Searching...", "the preview must not claim a result count"
+    assert not w.results_table.isSortingEnabled(), "no sorting while the run is going"
+    _search(w, _rows(A, 5) + _rows(B, 7))       # the run ends
+    _drain_events()
+    assert w.results_table.rowCount() == 12
+
+
+@pytest.mark.parametrize("case", ["other thread", "not searching", "all-terms view"])
+def test_a_preview_is_ignored_when_it_no_longer_applies(window, case):
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    thread = w.search_thread
+    if case == "other thread":
+        thread = object()                       # a run that has since been replaced
+    elif case == "not searching":
+        w.is_searching = False
+    else:
+        w.refinement_chain = [object()]
+        w._all_terms_filter = True
+    w._on_search_preview(thread, _rows(A, 5))
+    assert w.results_table.rowCount() == 0
+
+
+def test_a_longer_preview_of_the_same_run_appends_rows(window):
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    first = _rows(A, 3)
+    w._on_search_preview(w.search_thread, first)
+    top = w.results_table.item(0, w.COL_SYS_ID)
+    w._on_search_preview(w.search_thread, first + _rows(B, 4))
+    assert w.results_table.rowCount() == 7
+    assert w.results_table.item(0, w.COL_SYS_ID) is top, "the rows already shown were rebuilt"
+
+
+def test_a_preview_that_does_not_extend_the_table_rebuilds_it(window):
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    w._on_search_preview(w.search_thread, _rows(A, 3))
+    w._on_search_preview(w.search_thread, _rows(B, 5))
+    assert w.results_table.rowCount() == 5
+    assert all(w.results_table.item(r, w.COL_SYS_ID).text() == B for r in range(5))

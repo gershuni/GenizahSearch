@@ -141,6 +141,13 @@ def _consume_last_responsa_downgrade_meta() -> Optional[dict]:
 # 5 hits: 10,000 signals for a 50,000-candidate search.
 _PROGRESS_TICK_EVERY = 200
 
+# execute_search(preview_callback=...) hands over result rows while the search is
+# still running, so the desktop can show them at once: the rows so far at most
+# every _PREVIEW_AFTER_S seconds, up to the first _PREVIEW_ROWS (a rare phrase or a
+# variants/fuzzy search may find only a few rows over a long run).
+_PREVIEW_ROWS = 50
+_PREVIEW_AFTER_S = 0.5
+
 
 def _count_unique_chunks(chunk_hits):
     """Count distinct source-chunk contents from a chunk_hits list.
@@ -2679,7 +2686,20 @@ class SearchEngine:
         return results
 
     @bounded_search
-    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None):
+    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None, preview_callback=None):
+        """Search the Genizah (and/or LOCAL) index; return the verified result rows.
+
+        *preview_callback(rows)*, when given, is called from this thread while the
+        search is still running: with the rows found so far, at most every
+        _PREVIEW_AFTER_S while new rows keep coming, and a last time with the
+        first _PREVIEW_ROWS rows when they are found. Each call extends the one
+        before and is the start of the final list, since rows keep their
+        first-seen order. Only offered where no later step can drop or
+        move those rows: Genizah scope (no LOCAL rank fusion), no exclude_words,
+        not Responsa. The rows are the first-seen V0.8 row per uid in hit order,
+        which is the order _deduplicate keeps (V0.7 rows only go at the end),
+        and outside Responsa it keeps these same first rows as well (first_wins).
+        """
         search_started = time.perf_counter()
         # R2-#1: discard any stale per-thread downgrade signal from a prior
         # invocation (e.g., a prior request that crashed before consuming).
@@ -2749,6 +2769,7 @@ class SearchEngine:
         _has_wildcard_component = False  # Set True when any Responsa component has a wildcard
         _cross_page_terms = None  # (first, last) term when aggregates add only cross-page matches
         _cross_page_window = 0
+        _page_only = False        # the query already excludes aggregate docs
 
         # Strip combining diacritical marks and geresh/gershayim from query
         # Skip for Regex mode -- user controls the pattern directly
@@ -2996,6 +3017,7 @@ class SearchEngine:
                 if (mode == 'literal' and not text_position and len(terms) == 1
                         and self._every_doc_has_scope()):
                     t_query_str = f'({t_query_str}) AND scope:page'
+                    _page_only = True
                 regex = self.build_regex_pattern(terms, mode, gap)
         if not regex: return []
 
@@ -3032,8 +3054,24 @@ class SearchEngine:
 
         tantivy_started = time.perf_counter()
         try:
-            query = self.index.parse_query(t_query_str, [search_field])
-            res_obj = self.searcher.search(query, Config.SEARCH_LIMIT)
+            # Page docs first, then whole-manuscript / part docs, within the same
+            # total limit. In score order the long aggregate docs often came first
+            # and took seconds before the first row (they rarely add one); now the
+            # rows only an aggregate gives come after the page rows. Responsa keeps
+            # the single mixed query.
+            agg_q = None
+            if (not _page_only and not (responsa_options and responsa_options.get('responsa_mode'))
+                    and self._every_doc_has_scope()):
+                page_q = self.index.parse_query(f'({t_query_str}) AND scope:page', [search_field])
+                hits = list(self.searcher.search(page_q, Config.SEARCH_LIMIT).hits)
+                # Parsed now (a bad query fails here, as before) but run only after
+                # the page hits: the first rows need not wait for it.
+                agg_q = self.index.parse_query(
+                    f'({t_query_str}) AND (scope:system OR scope:part)', [search_field])
+            else:
+                query = self.index.parse_query(t_query_str, [search_field])
+                res_obj = self.searcher.search(query, Config.SEARCH_LIMIT)
+                hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
         except MemoryError:
             raise
         except Exception as e:
@@ -3045,9 +3083,28 @@ class SearchEngine:
             return []
 
         tantivy_elapsed_ms = (time.perf_counter() - tantivy_started) * 1000.0
-        hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
         total_hits = len(hits)
         LOGGER.debug(f"Tantivy returned {total_hits} hits")
+
+        def _page_hits_then_aggregates():
+            """The page hits, then -- fetched only now, within the same total
+            limit -- the whole-manuscript / part hits."""
+            nonlocal total_hits, tantivy_elapsed_ms
+            yield from hits
+            room = Config.SEARCH_LIMIT - len(hits)
+            if agg_q is None or room <= 0:
+                return
+            started = time.perf_counter()
+            try:
+                more = self.searcher.search(agg_q, room).hits
+            except MemoryError:
+                raise
+            except Exception as e:
+                LOGGER.warning("Aggregate-doc query failed; page results kept: %s", e)
+                return
+            tantivy_elapsed_ms += (time.perf_counter() - started) * 1000.0
+            total_hits += len(more)
+            yield from more
         results = []
         regex_filtered_count = 0
         was_interrupted = False
@@ -3062,13 +3119,39 @@ class SearchEngine:
                 for page in browse_map.get(sid, []):
                     restrict_uids.add(page['uid'])
 
+        # Early rows for the desktop (see the docstring): only where nothing after
+        # this loop can drop or move them.
+        _preview = (preview_callback
+                    if (preview_callback is not None and corpus_scope == 'genizah' and not exclude_words
+                        and not (responsa_options and responsa_options.get('responsa_mode')))
+                    else None)
+        _preview_rows = {}   # uid -> first V0.8 row, in hit order
+        _preview_scanned = 0
+        _preview_sent = 0                # rows in the last preview handed over
+        _preview_last = search_started   # when it was handed over (or the search began)
+
         materialize_started = time.perf_counter()
         document_load_seconds = 0.0
         candidate_match_seconds = 0.0
         try:
-            for i, (score, doc_addr) in enumerate(hits):
+            for i, (score, doc_addr) in enumerate(_page_hits_then_aggregates()):
                 if progress_callback and i % _PROGRESS_TICK_EVERY == 0:
                     progress_callback(i, total_hits)
+                if _preview is not None:
+                    if len(results) > _preview_scanned:
+                        for r in results[_preview_scanned:]:
+                            if r['display'].get('source') == "V0.8":
+                                _preview_rows.setdefault(r['uid'], r)
+                        _preview_scanned = len(results)
+                    if len(_preview_rows) >= _PREVIEW_ROWS:
+                        _preview(list(_preview_rows.values())[:_PREVIEW_ROWS])
+                        _preview = None
+                    elif len(_preview_rows) > _preview_sent:
+                        now = time.perf_counter()
+                        if now - _preview_last >= _PREVIEW_AFTER_S:
+                            # The rows so far; more follow as they are found.
+                            _preview(list(_preview_rows.values()))
+                            _preview_sent, _preview_last = len(_preview_rows), now
                 try:
                     load_started = time.perf_counter()
                     doc = self.searcher.doc(doc_addr)
@@ -3203,7 +3286,8 @@ class SearchEngine:
 
         materialize_elapsed_ms = (time.perf_counter() - materialize_started) * 1000.0
         LOGGER.debug(f"Regex filtered out: {regex_filtered_count}, Results before dedup: {len(results)}, interrupted: {was_interrupted}")
-        deduped = self._deduplicate(results)
+        deduped = self._deduplicate(
+            results, first_wins=not (responsa_options and responsa_options.get('responsa_mode')))
 
         # Phase 95 D-08 (Codex P0): LOCAL hits merge AFTER _deduplicate.
         # The dedup body at _deduplicate() whitelists V0.8/V0.7 only and would
@@ -3314,13 +3398,22 @@ class SearchEngine:
 
         return deduped
 
-    def _deduplicate(self, results):
+    def _deduplicate(self, results, first_wins=False):
         # V0.8 wins outright on a uid collision. V0.7 rows must ALSO dedupe against
         # each other: the same uid arrives twice for one page -- once from the
         # aggregated scope='system' continuous doc and once from its scope='page'
         # doc -- and the old `uid not in v8` test let both through, rendering the
         # identical folio as two separate results.
-        v8 = {r['uid']: r for r in results if r['display']['source'] == "V0.8"}
+        # A V0.8 uid keeps its FIRST position either way; *first_wins* also keeps
+        # its first row (page docs are read before aggregates, so the page row),
+        # instead of the last one. Responsa keeps the last-row rule.
+        if first_wins:
+            v8 = {}
+            for r in results:
+                if r['display']['source'] == "V0.8":
+                    v8.setdefault(r['uid'], r)
+        else:
+            v8 = {r['uid']: r for r in results if r['display']['source'] == "V0.8"}
         final = list(v8.values())
         seen_v7 = set()
         for r in results:

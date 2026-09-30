@@ -145,6 +145,24 @@ Also done 2026-09-30, outside the original stage list:
   which only a re-index (small per-break docs) would remove. `tests/test_cross_page_spans.py`,
   7 mutations killed. Profiling showed the first pre-check (both terms anywhere in the window)
   passed almost always for short words; the before/after split fixed that.
+- **Stage 3, streaming (a first version)**: `execute_search(preview_callback=)` hands over the
+  rows found so far at most every `_PREVIEW_AFTER_S` (0.5 s) while new rows arrive, and a last time
+  with the first `_PREVIEW_ROWS` (50); each call extends the previous one and is the start of the
+  final list. Offered only for Genizah scope, no exclude_words, not Responsa (LOCAL rank fusion,
+  exclusion and Responsa checks could still drop or move rows). To make the prefix hold:
+  `_deduplicate(first_wins=True)` outside Responsa (a uid keeps its first row as well as its first
+  position), and page docs are processed before aggregates (a second, lazily run query for
+  system/part docs within the same total limit), so the page row is that first row. Desktop:
+  `SearchThread.preview_signal` -> `_on_search_preview` (current run only, not the all-terms view;
+  appends rows that extend the table; sorting stays off; the status line keeps saying it searches);
+  `on_search_finished` rebuilds from the full list. Real index, engine: שלום 50 rows at 48 ms (full
+  3.4 s), בני ישראל 165 ms, שלום על ישראל 350 ms, לי מי לי 12 rows at 0.5 s (full 14.8 s),
+  variants שמעון הצדיק 50 rows at 219 ms (full 27.8 s). Owner: "streaming is very good".
+  Declared changes: rows that only an aggregate gives (cross-page, and for variants/fuzzy some
+  substring matches) now follow the page rows instead of their score position; a page with both
+  rows is shown as its page row. While the 50K cap stays, a very common phrase can fill it with
+  page hits and skip its (rare) cross-page matches. Tests: `tests/test_search_preview.py` and the
+  preview tests in `tests/test_exclusion_surfaces.py`; 13 mutations killed.
 - Owner measurements after both (partly under test-suite load): בלי ירח 1.3 s and שמעון הצדיק
   1.1 s from submit to rows; שלום 3.4 s; בלי 17 s (loaded); variants שמעון הצדיק 75 s, of which
   66.5 s regex over whole-manuscript docs; fuzzy minutes (a 564K-character pattern).
