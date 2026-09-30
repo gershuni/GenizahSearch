@@ -1232,12 +1232,29 @@ class SearchEngine:
                     for _msg in content_search_staleness_messages(False, None):
                         LOGGER.warning("Stale index [%s]: %s", db_path, _msg)
                 self.searcher = self.index.searcher()
+                self._page_scope_complete = None  # re-checked for the new index
                 return True
             except MemoryError:
                 raise
             except Exception as e:
                 LOGGER.error("Failed to reload Tantivy index from %s: %s", db_path, e)
         return False
+
+    def _every_doc_has_scope(self):
+        """True when every document of the open index carries scope page/system/part,
+        so ``AND scope:page`` cannot silently drop a document that has no scope.
+        Checked once per index load (three counts, ~25 ms on the real index)."""
+        if getattr(self, '_page_scope_complete', None) is None:
+            try:
+                total = sum(self.searcher.search(self.index.parse_query(f'scope:{s}', ['content']),
+                                                 1, count=True).count
+                            for s in ('page', 'system', 'part'))
+                self._page_scope_complete = total > 0 and total == self.searcher.num_docs
+            except MemoryError:
+                raise
+            except Exception:
+                self._page_scope_complete = False
+        return self._page_scope_complete
 
     def index_staleness_report(self) -> dict:
         """SEED-019 #28: queryable verdict on the SEED-006 ``content_search`` compat
@@ -2851,6 +2868,14 @@ class SearchEngine:
                     t_query_str = self.build_phrase_candidate_query(terms, gap, content_search_field=_cs_field)
                 if t_query_str is None:
                     t_query_str = self.build_tantivy_query(terms, mode, content_search_field=_cs_field)
+                # A single Literal word cannot span a page break, so a
+                # whole-manuscript or part doc only repeats a page hit -- or adds
+                # a match inside a longer word, which is not a Literal match (owner
+                # decision 2026-09-30). Those docs averaged 62K chars and were most
+                # of the load time (שלום: 15,490 of them, 9.7 s).
+                if (mode == 'literal' and not text_position and len(terms) == 1
+                        and self._every_doc_has_scope()):
+                    t_query_str = f'({t_query_str}) AND scope:page'
                 regex = self.build_regex_pattern(terms, mode, gap)
         if not regex: return []
 

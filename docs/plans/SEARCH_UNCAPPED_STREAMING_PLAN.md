@@ -122,6 +122,17 @@ Also done 2026-09-30, outside the original stage list:
   page on the next event-loop turn (`_fill_first_results_page`, skipped when the all-terms view
   re-rendered its own page). Owner's machine: building the first rows 1.2-2.7 s -> 90-136 ms.
   New log lines: `search_ui_perf ... since_submit_ms`, `search_first_paint since_submit_ms`.
+- **Stage 1b for single-word Literal** (owner go-ahead 2026-09-30): `AND scope:page` when mode is
+  Literal, one term, no text position, and every doc of the open index carries a scope
+  (`_every_doc_has_scope`, three counts per index load). Real-index gate, engine itself,
+  uncapped, OFF vs ON, 8 words: nothing new; no dropped uid has the whole word on its own page
+  except one declared case, a bracket inside the word (`ב[לי`, V0.7; tracker row); 5 apparent
+  misses were the gate's own error (it treated the combining dot of `אלג̇מאד` as a boundary; the
+  hebword token keeps it, so מאד there is inside a longer word). שלום 10.1 s -> 1.7 s, בלי 8.8 ->
+  1.0, ירח 6.6 -> 0.3, הצדיק 5.0 -> 0.2, כהן 9.2 -> 1.3, מאד 9.9 -> 2.1, ישראל 25.1 -> 10.7
+  (175K rows), אלהים 15.9 -> 5.7. `tests/test_single_word_page_only.py`, 5 mutations killed. The
+  snapshot fixture now also indexes the system doc's pages as page docs (as the real index does);
+  on it HEAD and the working engine agree on every row and order, only `score` differs.
 - Owner measurements after both (partly under test-suite load): בלי ירח 1.3 s and שמעון הצדיק
   1.1 s from submit to rows; שלום 3.4 s; בלי 17 s (loaded); variants שמעון הצדיק 75 s, of which
   66.5 s regex over whole-manuscript docs; fuzzy minutes (a 564K-character pattern).
