@@ -135,6 +135,12 @@ def _consume_last_responsa_downgrade_meta() -> Optional[dict]:
 
 
 
+# execute_search calls progress_callback (the desktop worker's pause/cancel
+# checkpoint + a cross-thread Qt signal) once per this many hits. It was every
+# 5 hits: 10,000 signals for a 50,000-candidate search.
+_PROGRESS_TICK_EVERY = 200
+
+
 def _count_unique_chunks(chunk_hits):
     """Count distinct source-chunk contents from a chunk_hits list.
 
@@ -1782,6 +1788,17 @@ class SearchEngine:
         # For File/Export: Keep newlines
         return hl_snippet
 
+    def _highlight_pair(self, text, span):
+        """(table snippet, file snippet) for one span, built once.
+
+        Same output as ``_highlight_by_span(text, span, False)`` and
+        ``(..., True)``: the two differ only in the newline replacement.
+        """
+        hl_f = self._highlight_by_span(text, span, True)
+        if hl_f is None:
+            return None, None
+        return hl_f.replace('\n', ' \u2016 '), hl_f
+
     def _highlight_by_span(self, text, span, for_file=False):
         """Return a highlighted snippet around a specific span."""
         if not span:
@@ -2791,7 +2808,7 @@ class SearchEngine:
         candidate_match_seconds = 0.0
         try:
             for i, (score, doc_addr) in enumerate(hits):
-                if progress_callback and i % 5 == 0:
+                if progress_callback and i % _PROGRESS_TICK_EVERY == 0:
                     progress_callback(i, total_hits)
                 try:
                     load_started = time.perf_counter()
@@ -2829,12 +2846,15 @@ class SearchEngine:
 
                     # For highlighting, re-search on original content to
                     # preserve scholarly bracket notation in snippets.
+                    orig_match_missing = False
                     if match_content is not content:
                         orig_match = regex.search(content)
                         if orig_match:
                             match_obj = orig_match
-                        # else: keep match_obj from stripped content; highlight
-                        # may be slightly offset but still useful
+                        else:
+                            # keep match_obj from stripped content; highlight
+                            # may be slightly offset but still useful
+                            orig_match_missing = True
 
                     boundaries = self._parse_boundaries(doc) if scope != 'page' else []
                     span = match_obj.span()
@@ -2843,8 +2863,7 @@ class SearchEngine:
                         primary = span_map.get('primary') or {}
                         display_header = primary.get('full_header', doc['full_header'][0])
                         source_label = primary.get('source', doc['source'][0])
-                        hl_c = self._highlight_by_span(content, span, False)
-                        hl_f = self._highlight_by_span(content, span, True)
+                        hl_c, hl_f = self._highlight_pair(content, span)
                         meta = self.meta_mgr.get_display_data(display_header, source_label)
                         page_highlights = []
                         for ov in span_map.get('overlaps', []):
@@ -2872,8 +2891,15 @@ class SearchEngine:
                             'score': float(score),
                         })
                     else:
-                        hl_c = self.highlight(content, regex, False)
-                        hl_f = self.highlight(content, regex, True)
+                        # match_obj already IS regex.search(content) here, except
+                        # when brackets were stripped and the original text had no
+                        # match -- the old highlight() re-search dropped that hit,
+                        # so it is still dropped. Reusing the span saves two full
+                        # regex passes per hit.
+                        if orig_match_missing:
+                            hl_c = hl_f = None
+                        else:
+                            hl_c, hl_f = self._highlight_pair(content, span)
                         if hl_c:
                             meta = self.meta_mgr.get_display_data(doc['full_header'][0], doc['source'][0])
                             results.append({
