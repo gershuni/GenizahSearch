@@ -8,6 +8,10 @@ The web app's saved joins ("drafts") live in the shared ``joins.db`` sidecar
 * signed out -> owner ``'b:<session uuid>'`` (``web/safe_storage.py``; kept for
   this browser only).
 
+When a visitor signs in, the drafts their browser saved while signed out
+move into the account (``browser_drafts_to_move``, ``browser_draft_ids`` and
+``move_browser_drafts``, called by the /puzzle page).
+
 Published joins are a separate thing (Supabase ``published_joins``) and stay
 public; publishing still needs sign-in.
 
@@ -25,7 +29,7 @@ cannot tell who the visitor is)::
 from __future__ import annotations
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from shared.puzzle_model import PuzzleDocument
 
@@ -106,6 +110,43 @@ class SavedJoins:
 
     def list_documents_for_fragment(self, fl_id: str = None, sys_id: str = None) -> List[str]:
         return self._service().list_documents_for_fragment(fl_id=fl_id, sys_id=sys_id, owner_key=self._owner)
+
+
+def browser_drafts_to_move() -> Optional[Tuple[str, str]]:
+    """``(browser key, account key)`` when the current visitor is signed in:
+    the drafts this browser saved while signed out ('b:' + its session uuid,
+    which survives sign-in) go to that account (owner ruling 2026-09-29).
+    None when signed out or when either key cannot be told. Call from the
+    page context, then pass the pair to ``move_browser_drafts`` in a worker.
+    """
+    account = owner_key()
+    if not account or not account.startswith(USER_PREFIX):
+        return None
+    from web.safe_storage import get_persisted_session_uuid
+    session_uuid = get_persisted_session_uuid()
+    if not session_uuid:
+        return None
+    return BROWSER_PREFIX + session_uuid, account
+
+
+def browser_draft_ids(browser_key: str) -> List[str]:
+    """The ids of the drafts ``browser_key`` owns now (worker-safe)."""
+    if not (isinstance(browser_key, str) and browser_key.startswith(BROWSER_PREFIX)):
+        return []
+    return [d['id'] for d in SavedJoins(browser_key).list_documents()]
+
+
+def move_browser_drafts(browser_key: str, account_key: str, doc_ids: List[str]) -> int:
+    """Move the listed drafts of ``browser_key`` into ``account_key``; returns the count.
+
+    ``doc_ids`` is the snapshot from ``browser_draft_ids``, taken while the
+    account was signed in: a draft the browser saves later (after signing out,
+    say) is not swept into this account by a move that runs late.
+    """
+    if not (isinstance(browser_key, str) and browser_key.startswith(BROWSER_PREFIX)
+            and isinstance(account_key, str) and account_key.startswith(USER_PREFIX)):
+        return 0
+    return SavedJoins._service().move_owner(browser_key, account_key, list(doc_ids or []))
 
 
 def for_current_visitor() -> SavedJoins:

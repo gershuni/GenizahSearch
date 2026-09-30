@@ -181,31 +181,63 @@ def test_owner_key_is_the_account_when_signed_in_else_the_browser(monkeypatch):
         sj.for_current_visitor()
 
 
-def test_fork_is_saved_under_the_forking_visitor(shared_svc, monkeypatch):
-    """The community-joins fork saves through the visitor's wrapper."""
+def test_open_in_puzzle_saves_nothing_and_opens_the_published_join(shared_svc, monkeypatch):
+    """'Open in Puzzle' on the community joins saves no copy: it opens the
+    published join itself, and /puzzle shows it as an unsaved canvas (a copy is
+    saved only on Save; see test_page_shows_and_saves_only_the_visitors_own_joins)."""
     import web.pages.discoveries as disc
-    import web.saved_joins as sj
 
-    detail = {'id': 'pub-1', 'title': 'Published join', 'notes': '',
-              'fragments_json': json.loads(_doc('p').to_json()), 'is_published': True}
-    monkeypatch.setattr('shared.puzzle_publish_service.get_published_join_detail',
-                        lambda client, join_id: dict(detail))
-    monkeypatch.setattr('web.supabase_client.get_client', lambda: MagicMock())
-    monkeypatch.setattr(sj, 'owner_key', lambda: 'b:browser-fork')
     navigated = []
     monkeypatch.setattr(disc.ui.navigate, 'to', lambda url: navigated.append(url))
-    monkeypatch.setattr(disc.ui, 'notify', lambda *a, **k: None)
 
-    async def _io_bound(fn, *args, **kwargs):
-        return fn(*args, **kwargs)
-    monkeypatch.setattr(disc.run, 'io_bound', _io_bound)
+    disc._open_published_join_in_puzzle('pub-1')
 
-    asyncio.run(disc._fork_puzzle_join_and_navigate('pub-1'))
+    assert navigated == ['/puzzle?doc=pub-1']
+    assert shared_svc.list_documents() == []
 
-    mine = shared_svc.list_documents(owner_key='b:browser-fork')
-    assert len(mine) == 1 and mine[0]['title'] == 'Fork of: Published join'
-    assert navigated == [f"/puzzle?doc={mine[0]['id']}"]
-    assert shared_svc.list_documents(owner_key='b:someone-else') == []
+
+def test_move_owner_moves_only_the_listed_rows_of_that_owner(svc):
+    """A browser's drafts move into an account; nobody else's rows change, and
+    a draft saved after the snapshot is not swept along by a late move."""
+    svc.save_document(_doc('browser draft', doc_id='d-b'), owner_key='b:browser-1')
+    svc.save_document(_doc('other browser', doc_id='d-o'), owner_key='b:browser-2')
+    svc.save_document(_doc('account draft', doc_id='d-u'), owner_key='u:acct-a')
+    svc.save_document(_doc('desktop row', doc_id='d-n'))
+    snapshot = [d['id'] for d in svc.list_documents(owner_key='b:browser-1')]
+    assert snapshot == ['d-b']
+    # The browser saves another draft (signed out again) before the move runs.
+    svc.save_document(_doc('saved later', doc_id='d-later'), owner_key='b:browser-1')
+
+    assert svc.move_owner('b:browser-1', 'u:acct-a', snapshot + ['d-o', 'd-n']) == 1
+    assert {d['id'] for d in svc.list_documents(owner_key='u:acct-a')} == {'d-b', 'd-u'}
+    assert {d['id'] for d in svc.list_documents(owner_key='b:browser-1')} == {'d-later'}
+    assert {d['id'] for d in svc.list_documents(owner_key='b:browser-2')} == {'d-o'}
+    assert svc.load_document('d-n') is not None
+    assert svc.move_owner('b:browser-1', 'u:acct-a', snapshot) == 0   # already moved
+    assert svc.move_owner('b:browser-1', 'u:acct-a', []) == 0
+    assert svc.move_owner('', 'u:acct-a', ['d-later']) == 0
+    assert svc.move_owner('b:browser-1', '', ['d-later']) == 0
+
+
+def test_browser_drafts_move_only_into_a_signed_in_account(monkeypatch):
+    import web.safe_storage as st
+    import web.saved_joins as sj
+    from web.auth_state import GlobalAuthState
+
+    monkeypatch.setattr(st, 'ensure_session_uuid', lambda: None)
+    monkeypatch.setattr(st, 'get_persisted_session_uuid', lambda: 'a' * 32)
+    monkeypatch.setattr(GlobalAuthState, 'get_user_id', classmethod(lambda cls: 'user-123'))
+    assert sj.browser_drafts_to_move() == ('b:' + 'a' * 32, 'u:user-123')
+
+    monkeypatch.setattr(GlobalAuthState, 'get_user_id', classmethod(lambda cls: None))
+    assert sj.browser_drafts_to_move() is None                     # signed out: nothing moves
+
+    monkeypatch.setattr(GlobalAuthState, 'get_user_id', classmethod(lambda cls: 'user-123'))
+    monkeypatch.setattr(st, 'get_persisted_session_uuid', lambda: None)
+    assert sj.browser_drafts_to_move() is None                     # no browser key: nothing moves
+    assert sj.move_browser_drafts('u:user-9', 'u:user-123', ['d']) == 0   # only a browser's drafts move
+    assert sj.move_browser_drafts('b:' + 'a' * 32, 'b:' + 'c' * 32, ['d']) == 0
+    assert sj.browser_draft_ids('u:user-9') == []
 
 
 def _calls_get_puzzle_service(path: pathlib.Path) -> bool:
@@ -750,20 +782,20 @@ def test_tab_canvas_is_restored_only_for_the_visitor_who_left_it(shared_svc, fir
         _run(driver)
 
 
-def test_signed_out_canvas_follows_the_visitor_into_their_account(shared_svc):
-    """An unsaved canvas made in this browser while signed out is kept when the
-    visitor signs in (signing in reloads the page). The draft the browser had
-    open is not carried over: it stays with the browser, and saving creates a
-    new join for the account."""
+def _signed_out_canvas_then_sign_in(shared_svc, *, connect_late):
+    """Signed out: two drafts saved, the first left open on the canvas. Then
+    sign in (the login dialog reloads the page), optionally with the browser
+    connecting only after the page's canvas-restore step has started."""
     async def driver(a, _b):
         calls = _add_fragment_calls(a)
         await a.open('/puzzle')
         await asyncio.sleep(1.0)
         owner_browser = _current_owner(a)
         assert owner_browser and owner_browser.startswith('b:')
-        doc = PuzzleDocument(id='doc-first', title='Browser draft', notes='browser notes',
-                             fragments=[PuzzleFragment(**_fragment_dict())])
-        assert _seed(shared_svc, doc, owner_browser) == 'doc-first'
+        for doc_id, title in (('doc-first', 'Browser draft'), ('doc-second', 'Second browser draft')):
+            doc = PuzzleDocument(id=doc_id, title=title, notes='browser notes',
+                                 fragments=[PuzzleFragment(**_fragment_dict())])
+            assert _seed(shared_svc, doc, owner_browser) == doc_id
         from nicegui import app
 
         def _leave_canvas():
@@ -777,21 +809,134 @@ def test_signed_out_canvas_follows_the_visitor_into_their_account(shared_svc):
         _sign_in_as(a, 'acct-a')
         assert _current_owner(a) == 'u:acct-a'
         calls.clear()
-        await a.open('/puzzle')
+        if connect_late:
+            import nicegui.testing.user as nicegui_user
+            real_handshake = nicegui_user._on_handshake
+
+            async def _late_handshake(*args, **kwargs):
+                await asyncio.sleep(1.5)     # the restore step starts 0.5 s after the page build
+                return await real_handshake(*args, **kwargs)
+            nicegui_user._on_handshake = _late_handshake
+            try:
+                await a.open('/puzzle')
+            finally:
+                nicegui_user._on_handshake = real_handshake
+        else:
+            await a.open('/puzzle')
         await asyncio.sleep(1.5)
-        assert any('FL-990001' in c for c in calls)     # the canvas came along ...
-        assert not _tab(a).get('puzzle_doc_id')          # ... the browser's draft did not
-        assert 'Browser draft' not in _texts(a)
 
-        assert await _save_canvas(a)
-        mine = shared_svc.list_documents(owner_key='u:acct-a')
-        assert len(mine) == 1 and mine[0]['id'] != 'doc-first'
-        assert shared_svc.load_document('doc-first').title == 'Browser draft'
+        # The canvas came along, with its draft: both drafts are the account's now.
+        assert any('FL-990001' in c for c in calls)
+        assert _tab(a).get('puzzle_doc_id') == 'doc-first'
+        assert 'Browser draft' in _texts(a)
+        assert {d['id'] for d in shared_svc.list_documents(owner_key='u:acct-a')} == {'doc-first', 'doc-second'}
+        assert shared_svc.list_documents(owner_key=owner_browser) == []
+        await _open_drawer(a)
+        assert 'Second browser draft' in _texts(a)
 
-    with patch('shared.puzzle_publish_service.get_published_join_detail', return_value=None), \
-            patch('web.supabase_client.get_client', return_value=MagicMock()), \
-            patch('shared.puzzle_export.generate_thumbnail', return_value=''), \
-            patch('shared.puzzle_image_service.get_puzzle_image_service', return_value=MagicMock()):
+        # Signing out again: the drafts stay with the account.
+        _sign_in_as(a, None)
+        await a.open('/puzzle')
+        await asyncio.sleep(1.0)
+        await _open_drawer(a)
+        assert 'Browser draft' not in _texts(a) and 'Second browser draft' not in _texts(a)
+        assert shared_svc.list_documents(owner_key=owner_browser) == []
+
+    with patch('shared.puzzle_publish_service.get_published_join_detail', return_value=None),             patch('web.supabase_client.get_client', return_value=MagicMock()),             patch('shared.puzzle_export.generate_thumbnail', return_value=''),             patch('shared.puzzle_image_service.get_puzzle_image_service', return_value=MagicMock()):
+        _run(driver)
+
+
+def test_signed_out_canvas_and_drafts_follow_the_visitor_into_their_account(shared_svc):
+    """Signing in moves this browser's signed-out drafts into the account
+    (owner ruling 2026-09-29), and the canvas left open comes along as that
+    same draft."""
+    _signed_out_canvas_then_sign_in(shared_svc, connect_late=False)
+
+
+def test_canvas_survives_sign_in_when_the_browser_connects_late(shared_svc):
+    """The canvas-restore step starts a fixed 0.5 s after the page is built.
+    After signing in the page is slower, and the browser may connect later
+    than that; the canvas must still be restored (it came back empty)."""
+    _signed_out_canvas_then_sign_in(shared_svc, connect_late=True)
+
+
+def test_link_to_own_draft_opens_it_after_sign_in_with_a_slow_connection(shared_svc):
+    """/puzzle?doc=<draft> right after signing in, with the browser connecting
+    late: the link is followed only after the browser's drafts have moved into
+    the account, so it opens the visitor's own draft (it used to look the draft
+    up first, fail, and leave the canvas on another draft)."""
+    async def driver(a, _b):
+        await a.open('/puzzle')
+        await asyncio.sleep(1.0)
+        owner_browser = _current_owner(a)
+        doc = PuzzleDocument(id='doc-linked', title='Linked browser draft', notes='',
+                             fragments=[PuzzleFragment(**_fragment_dict())])
+        assert _seed(shared_svc, doc, owner_browser) == 'doc-linked'
+        _sign_in_as(a, 'acct-a')
+
+        import nicegui.testing.user as nicegui_user
+        real_handshake = nicegui_user._on_handshake
+
+        async def _late_handshake(*args, **kwargs):
+            await asyncio.sleep(3.5)     # later than the ?doc= step's own delay
+            return await real_handshake(*args, **kwargs)
+        nicegui_user._on_handshake = _late_handshake
+        try:
+            await a.open('/puzzle?doc=doc-linked')
+        finally:
+            nicegui_user._on_handshake = real_handshake
+        await asyncio.sleep(2.5)
+
+        assert [d['id'] for d in shared_svc.list_documents(owner_key='u:acct-a')] == ['doc-linked']
+        assert 'Linked browser draft' in _texts(a)
+        assert _tab(a).get('puzzle_doc_id') == 'doc-linked'
+
+    with patch('shared.puzzle_publish_service.get_published_join_detail', return_value=None),             patch('web.supabase_client.get_client', return_value=MagicMock()),             patch('shared.puzzle_export.generate_thumbnail', return_value=''),             patch('shared.puzzle_image_service.get_puzzle_image_service', return_value=MagicMock()):
+        _run(driver)
+
+
+def test_link_opens_after_a_slow_restore_without_mixing_the_canvases(shared_svc):
+    """/puzzle?doc=<B> while the tab still holds draft A and A's publish-state
+    lookup is slow: the link waits for the restore to finish, so A's fragments
+    are never added onto B's canvas afterwards."""
+    import time
+
+    def _slow_detail(client, join_id):
+        if join_id == 'doc-prev':
+            time.sleep(4.0)              # the restore's publish-state lookup for A
+        return None
+
+    async def driver(a, _b):
+        calls = _add_fragment_calls(a)
+        await a.open('/puzzle')
+        await asyncio.sleep(1.0)
+        owner = _current_owner(a)
+        prev = PuzzleDocument(id='doc-prev', title='Previous draft', notes='',
+                              fragments=[PuzzleFragment(**_fragment_dict())])
+        target = PuzzleDocument(id='doc-target', title='Target draft', notes='', fragments=[
+            PuzzleFragment(sys_id='990002', folio_label='1r', fl_id='FL-990002', shelfmark='T-S 2.2')])
+        assert _seed(shared_svc, prev, owner) == 'doc-prev'
+        assert _seed(shared_svc, target, owner) == 'doc-target'
+        from nicegui import app
+
+        def _leave_prev():
+            app.storage.tab['puzzle_fragments'] = {'990001,1r': {
+                'sys_id': '990001', 'shelfmark': 'T-S 1.1', 'folio_label': '1r',
+                'fl_id': 'FL-990001', 'threshold': 30, 'processed': True, 'size': 800}}
+            app.storage.tab['puzzle_doc_id'] = 'doc-prev'
+        _in_page(a, _leave_prev)
+
+        calls.clear()
+        await a.open('/puzzle?doc=doc-target')
+        await asyncio.sleep(9.0)
+
+        prev_at = [i for i, c in enumerate(calls) if 'FL-990001' in c]
+        target_at = [i for i, c in enumerate(calls) if 'FL-990002' in c]
+        assert target_at, calls
+        assert not prev_at or max(prev_at) < min(target_at), calls   # A never lands after B
+        assert _tab(a).get('puzzle_doc_id') == 'doc-target'
+
+    with patch('shared.puzzle_publish_service.get_published_join_detail', side_effect=_slow_detail),             patch('web.supabase_client.get_client', return_value=MagicMock()),             patch('shared.puzzle_export.generate_thumbnail', return_value=''),             patch('shared.puzzle_image_service.get_puzzle_image_service', return_value=MagicMock()):
         _run(driver)
 
 

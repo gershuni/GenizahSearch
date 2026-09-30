@@ -9,6 +9,14 @@
 
 > Previous (2026-08-10, fourth session close) — **the citations question was put to Codex twice and the answer reframed the work.** WP4 is **DEFERRED by measurement**: the multi-alignment rate is 24.0% (not 7.0% — `n_spans` counts page hulls), and the "spurious piece" is usually either the work's own doublet (`תנ"ך, שמות` command//execution) or a compilation quoting its source — 34 works at ≥2x their length peers hold 53% of all conflicts. "Later work is probably the citation" was built twice and fires in the RIGHT direction, but the bake starved it 26,608→1,484 (both sides must already be `shipped`, and the verdict is unrecordable in the single `routing_reason` column). The deeper defect is **decision-to-surface integrity** (Codex's phrase): the findings chip is a constant ("Direct match" on 28,462 of 28,464 public main-pool rows), the expansion pane never reads the router, the one honesty warning dies on the v3 swap (108,235 rows → 0), and the public projection ships the quoter (`ילקוט שמעוני` 625 ids) while deleting the quoted work (`תנחומא` 0) and promoting 280 tie-broken rows. The owner's divergence statistic marks the off works and his own blind grades validate it (0 of 57 `ילקוט` rows correct; `ראב"ש` at #2/#3/#6/#14) — a curated quoter/quoted-inside flag seeded from that ranking is the proposed fix (curation sheet delivered). Session-4 record is inline below; no separate handout this session.
 
+### Fragment Puzzle follow-ups after the deploy (2026-09-29, fixed)
+
+Branch `fix/web-puzzle-followups`. From "1. Outstanding Bugs" (P3):
+
+| Issue | File | Status | Notes |
+|-------|------|--------|-------|
+| **Web puzzle: a draft saved while signed out stays with the browser after sign-in** | `web/saved_joins.py`, `web/pages/puzzle.py` | ✅ Fixed (2026-09-29) | Drafts are keyed per browser when signed out and per account when signed in; there is no claim-on-sign-in step. Save after signing in makes a new account copy; Publish on the browser draft asks to save first. **Fixed (2026-09-29, `fix/web-puzzle-followups`):** owner ruling: a browser's signed-out drafts move into the account that signs in there. The /puzzle page takes the ids while signed in, re-checks the visitor, and moves only those (`PuzzleService.move_owner`, `web/saved_joins.py`), so the draft left open comes back as the same draft. Tests in `tests/test_web_saved_joins_isolation.py`. |
+
 ### Web library fetches on the checked-hop helper (2026-09-29, fixed)
 
 Branch `fix/web-hardening-2`. From "1. Outstanding Bugs" (P2):
