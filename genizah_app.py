@@ -63,6 +63,7 @@ from desktop.column_chooser import ColumnChooser, ColumnFitter
 from desktop.single_instance import (
     acquire_instance_lock, relaunch_if_requested, relaunch_looks_possible, request_restart, restarted_from,
 )
+from desktop.qthread_exit import settle_running_threads
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
 from desktop.widgets.line_number_text_edit import (
@@ -32484,8 +32485,9 @@ class GenizahGUI(QMainWindow):
             pass
         # Silence the update checks and a running data download: no update dialog
         # or data prompt may open over a closing app, and none of these threads may
-        # be dropped while running. Nothing is waited for -- a kept QThread does not
-        # hold up the exit (see desktop.gui_threads._keep_until_finished). Each
+        # be dropped while running. Nothing is waited for here: after app.exec(),
+        # settle_running_threads gives every running thread one bounded wait and
+        # keeps the rest from being destroyed (desktop/qthread_exit.py). Each
         # thread in its own guard, so one failure cannot skip the others.
         for name in ('update_thread', 'sidecar_update_thread', '_current_sidecar_download'):
             try:
@@ -33111,6 +33113,11 @@ if __name__ == "__main__":
     window = GenizahGUI()
     window.showMaximized()
     _exit_code = app.exec()
+    # No running QThread may be destroyed on the way out: PyQt's exit handler destroys
+    # the windows, and with them any thread a hidden window (a closed Joins Lab) still
+    # holds, which aborts the process. Bounded, and every window has closed by now
+    # (desktop/qthread_exit.py). Before the relaunch, which must stay the last step.
+    settle_running_threads()
     # If a language change asked for a restart, the new copy starts only now,
     # after closeEvent has saved the session. It waits for this process (named
     # on its command line) to exit and release _instance_lock. If it cannot be

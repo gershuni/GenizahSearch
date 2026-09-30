@@ -5784,8 +5784,10 @@ if _QT_AVAILABLE:
 
             The window is only hidden (D-02: open_join_workbench shows it again), so the
             grid's thumbnails are NOT cancelled here: they keep loading and are there
-            when the Lab is reopened. Their threads stay referenced by the window, which
-            is exit-safe."""
+            when the Lab is reopened. Their threads stay referenced by the window. That
+            alone is not exit-safe (PyQt's exit handler destroys the hidden window and a
+            thread only it holds); desktop.qthread_exit.settle_running_threads, after
+            app.exec(), keeps any still running from being destroyed with it."""
             self._gen += 1  # must-fix #7: invalidate any in-flight workers
             self._cancel_workers()
             pane = getattr(self, "_candidate_pane", None)
