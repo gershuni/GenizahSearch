@@ -463,6 +463,42 @@ class PuzzleService:
                 logger.error("PuzzleService.delete_document failed: %s", e)
                 return False
 
+    def move_owner(self, from_owner: str, to_owner: str, doc_ids: List[str]) -> int:
+        """
+        Give the listed documents of one owner to another (web: a browser's
+        signed-out drafts move into the account that signs in there).
+
+        Args:
+            from_owner: The current owner key; must be non-empty.
+            to_owner: The new owner key; must be non-empty and different.
+            doc_ids: The documents to move (a snapshot the caller took); only
+                those of them still owned by ``from_owner`` move, so a
+                document saved after the snapshot is never swept along.
+
+        Returns:
+            The number of documents moved (0 on any failure).
+        """
+        if (not self.is_available() or not from_owner or not to_owner
+                or from_owner == to_owner or not doc_ids):
+            return 0
+
+        with self._write_lock:
+            try:
+                marks = ','.join('?' for _ in doc_ids)
+                cursor = self._conn.execute(
+                    f"UPDATE join_documents SET owner_key = ? WHERE owner_key = ? AND id IN ({marks})",
+                    (to_owner, from_owner, *doc_ids)
+                )
+                self._conn.commit()
+                return cursor.rowcount
+            except Exception as e:
+                try:
+                    self._conn.rollback()
+                except Exception:
+                    pass
+                logger.error("PuzzleService.move_owner failed: %s", e)
+                return 0
+
     def list_documents_for_fragment(self, fl_id: str = None, sys_id: str = None,
                                     *, owner_key: Optional[str] = None) -> List[str]:
         """
