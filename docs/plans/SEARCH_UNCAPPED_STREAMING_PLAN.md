@@ -163,6 +163,21 @@ Also done 2026-09-30, outside the original stage list:
   rows is shown as its page row. While the 50K cap stays, a very common phrase can fill it with
   page hits and skip its (rare) cross-page matches. Tests: `tests/test_search_preview.py` and the
   preview tests in `tests/test_exclusion_surfaces.py`; 13 mutations killed.
+- **Codex review 2026-10-01 (draft PR #375): two phrase losses, both confirmed on the corpus.**
+  (1) *Cross-page window in characters*: a long non-word run at a page edge pushed a crossing out
+  (V0.8: 333 page ends / 329 page starts with a run over 60 chars). **Fixed:** the window is now
+  (terms - 1) x (gap + 1) word-holding whitespace chunks per side (`_left_window_start`,
+  `_right_window_end`, one anchored regex per probe; the left side matches the reversed slice).
+  A crossing holds at most that many words on one side and the verifier has no lookaround, so the
+  window finds exactly what the whole text finds (randomised test against the whole text). Real
+  index, HEAD vs working, uncapped, 10 phrases: identical rows (65 cross-page rows both), time equal
+  within noise except לי מי לי 5.8 -> 7.2 s (382K breaks). 10 mutations killed.
+  (2) *Pair-phrase slop*: 4+ standalone bracket tokens between two words exceed slop gap + 3
+  (V0.8: 31,591 places on 23,778 pages, mostly whole lacuna lines). Six common phrases lose 0
+  whole-word matches to it, on pages or across breaks; a lossless fallback (old AND-of-terms query
+  AND a standalone bracket token) costs +0.1-1.3 s per phrase on pages and +7-23 s across breaks
+  (846,476 page docs, 43%, hold a standalone bracket). **Owner (2026-10-01): make it an option**
+  -- to be designed together with the whole-word / substring option, before building.
 - Owner measurements after both (partly under test-suite load): בלי ירח 1.3 s and שמעון הצדיק
   1.1 s from submit to rows; שלום 3.4 s; בלי 17 s (loaded); variants שמעון הצדיק 75 s, of which
   66.5 s regex over whole-manuscript docs; fuzzy minutes (a 564K-character pattern).

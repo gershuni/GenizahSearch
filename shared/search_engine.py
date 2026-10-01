@@ -337,6 +337,64 @@ def _add_bracket_variants(term: str) -> list:
     return variants
 
 
+# Cross-page windows. A "chunk" is a whitespace-delimited run; it can hold a
+# regex word (Config.WORD_TOKEN_PATTERN) only if it has one of these chars.
+# A word chunk is [non-word chars][word char][anything]; the split is unique,
+# so the possessive patterns below never backtrack inside a chunk.
+_WCH = r"\w\u0590-\u05FF'"
+_WORD_CHUNK = rf"[^\s{_WCH}]*+[{_WCH}]\S*+"
+_NONWORD_CHUNK = rf"[^\s{_WCH}]++"
+_WINDOW_RES = {}
+
+
+def _words_head_re(words):
+    """Matches from the start of a text through its *words*-th word chunk.
+    Chunks and word chars do not depend on direction, so the same pattern on a
+    REVERSED text finds the *words*-th last chunk -- anchored, one call."""
+    rx = _WINDOW_RES.get(words)
+    if rx is None:
+        rx = _WINDOW_RES[words] = re.compile(
+            rf"\s*+(?:{_NONWORD_CHUNK}\s++)*+{_WORD_CHUNK}"
+            rf"(?:\s++(?:{_NONWORD_CHUNK}\s++)*+{_WORD_CHUNK}){{{words - 1}}}")
+    return rx
+
+
+def _left_window_start(content, cut, words):
+    """Start of the *words*-th last chunk holding a word char before *cut*
+    (0 if there are fewer). Measured in words, not characters, so a long run
+    of dots, brackets or spaces at a page end cannot push a match out. This
+    runs for every page break of every candidate manuscript, hence one
+    anchored regex call per probe."""
+    head = _words_head_re(max(1, words))
+    size = 256
+    while True:
+        lo = max(0, cut - size)
+        rev = content[lo:cut][::-1]
+        m = head.match(rev)
+        # The reversed text ends at lo: a chunk cut through by lo only looks complete.
+        if m is not None and (m.end() < len(rev) or lo == 0 or content[lo - 1].isspace()):
+            return cut - m.end()
+        if lo == 0:
+            return 0
+        size *= 4
+
+
+def _right_window_end(content, cut, words):
+    """End of the *words*-th chunk holding a word char from *cut* on
+    (len(content) if there are fewer)."""
+    head = _words_head_re(max(1, words))
+    size = 256
+    while True:
+        hi = min(len(content), cut + size)
+        m = head.match(content, cut, hi)
+        # endpos acts as the end of the text: a chunk cut through by hi only looks complete.
+        if m is not None and (m.end() < hi or hi == len(content) or content[hi].isspace()):
+            return m.end()
+        if hi == len(content):
+            return len(content)
+        size *= 4
+
+
 def _query_has_brackets(query_str: str) -> bool:
     """Return True if *query_str* contains literal square brackets.
 
@@ -1964,7 +2022,7 @@ class SearchEngine:
             'score': float(score),
         }
 
-    def _cross_page_spans(self, regex, content, boundaries, first_term, last_term, window, gap, strip):
+    def _cross_page_spans(self, regex, content, boundaries, first_term, last_term, side_words, gap, strip):
         """Spans (in *content* coordinates) of every match that runs across a page
         break of a whole-manuscript / part doc.
 
@@ -1972,24 +2030,44 @@ class SearchEngine:
         inside one page, so an aggregate adds only the matches that cross a
         break. Scanning the whole manuscript for them was most of the search
         time (לי מי לי: 2,146 manuscripts, ~14 s of regex). The regex now runs
-        only in a window of +-*window* chars around a break, and only when the
-        first term occurs before the break and the last term after it: a match
-        across the break holds its newline and no term can, so this is a
-        necessary condition. Both sides are folded with strip_search_diacritics,
-        as the query was, and the pattern tolerates exactly those marks inside a
-        word. *strip* removes brackets first, as the whole-text path does.
+        only in a window around a break, and only when the first term occurs
+        before the break and the last term after it: a match across the break
+        holds its newline and no term can, so this is a necessary condition.
+        Both sides are folded with strip_search_diacritics, as the query was,
+        and the pattern tolerates exactly those marks inside a word. *strip*
+        removes brackets first, as the whole-text path does.
+
+        The window is *side_words* word-holding chunks on each side: a match
+        across the break holds at most that many words on one side (n - 1 terms
+        and gap words between them), and the regex has no lookaround, so the
+        window finds exactly the match the whole text would. It was a fixed
+        number of characters until 2026-10-01, which lost a crossing after a
+        long run of dots or lacuna brackets (Codex review; 333 V0.8 pages end
+        with a non-word run over 60 characters).
         """
         if len(boundaries) < 2:
             return []
         first, last = first_term.lower(), last_term.lower()
+        head = _words_head_re(max(1, side_words))
         pieces = []        # (window text, break offset in it, content index of its start, original window)
         for b in boundaries[1:]:
             cut = b.get('start', 0)
-            lo, hi = max(0, cut - window), min(len(content), cut + window)
-            left, right = content[lo:cut], content[cut:hi]
-            s_left, s_right = (_strip_brackets(left), _strip_brackets(right)) if strip else (left, right)
-            if (first not in strip_search_diacritics(s_left).lower()
-                    or last not in strip_search_diacritics(s_right).lower()):
+            # Inline 64-char probe of _left_window_start (this loop runs for every
+            # break: לי מי לי has 382K); the helper takes over when it is too short.
+            lo = cut - 64 if cut > 64 else 0
+            m = head.match(content[lo:cut][::-1])
+            if m is not None and (m.end() < cut - lo or lo == 0 or content[lo - 1].isspace()):
+                lo = cut - m.end()
+            else:
+                lo = _left_window_start(content, cut, side_words)
+            left = content[lo:cut]
+            s_left = _strip_brackets(left) if strip else left
+            if first not in strip_search_diacritics(s_left).lower():
+                continue
+            hi = _right_window_end(content, cut, side_words)
+            right = content[cut:hi]
+            s_right = _strip_brackets(right) if strip else right
+            if last not in strip_search_diacritics(s_right).lower():
                 continue
             pieces.append((s_left + s_right, len(s_left), lo, left + right))
         if not pieces:
@@ -2768,7 +2846,7 @@ class SearchEngine:
         _line_constraints = {}  # Per-line position constraints (L3:word syntax)
         _has_wildcard_component = False  # Set True when any Responsa component has a wildcard
         _cross_page_terms = None  # (first, last) term when aggregates add only cross-page matches
-        _cross_page_window = 0
+        _cross_page_side_words = 0
         _page_only = False        # the query already excludes aggregate docs
 
         # Strip combining diacritical marks and geresh/gershayim from query
@@ -3006,7 +3084,8 @@ class SearchEngine:
                     if t_query_str is not None:
                         # Aggregates then only contribute matches across a page break.
                         _cross_page_terms = (terms[0], terms[-1])
-                        _cross_page_window = 3 * len(query_str) + 30 * gap + 64
+                        # Words a crossing match can hold on one side of the break.
+                        _cross_page_side_words = (len(terms) - 1) * (gap + 1)
                 if t_query_str is None:
                     t_query_str = self.build_tantivy_query(terms, mode, content_search_field=_cs_field)
                 # A single Literal word cannot span a page break, so a
@@ -3177,7 +3256,7 @@ class SearchEngine:
                         try:
                             spans = self._cross_page_spans(
                                 regex, content, boundaries, _cross_page_terms[0], _cross_page_terms[1],
-                                _cross_page_window, gap, strip=not _query_has_brackets(query_str))
+                                _cross_page_side_words, gap, strip=not _query_has_brackets(query_str))
                         finally:
                             candidate_match_seconds += time.perf_counter() - match_started
                         kept = 0

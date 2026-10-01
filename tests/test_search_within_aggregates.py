@@ -32,6 +32,8 @@ T1, T2 = "תעודדו", "תענגו"  # תעודדו תענגו
 # Phrase 2 lives in an Oxford part spanning 990007 (first page) and 990008.
 B1, B2 = "ברוך", "הבא"                            # ברוך הבא
 X, Y, Z = "עמוד", "ראשון", "סוף"  # עמוד ראשון סוף
+# Phrase 3 crosses the break in 990010 with a gap word (Y) before the break.
+G1, G2 = "גמרא", "תוספות"  # גמרא תוספות
 
 
 def _page(uid, sid, text):
@@ -42,8 +44,9 @@ SYS_PAGES = [_page("p1", "990009", f"{X} {Y} {T1}"), _page("p2", "990009", f"{T2
 PART_PAGES = [_page("q1", "990007", f"{B1} {B2} {X}"),       # first match: outside 990008
               _page("q2", "990008", f"{X} {Y} {B1}"),        # second match starts here...
               _page("q3", "990008", f"{B2} {Z}")]            # ...and ends here
+GAP_PAGES = [_page("g1", "990010", f"{X} {G1} {Y}"), _page("g2", "990010", f"{G2} {Z}")]
 BROWSE_MAP = {"990009": [{"uid": "p1"}, {"uid": "p2"}], "990007": [{"uid": "q1"}],
-              "990008": [{"uid": "q2"}, {"uid": "q3"}]}
+              "990008": [{"uid": "q2"}, {"uid": "q3"}], "990010": [{"uid": "g1"}, {"uid": "g2"}]}
 MANY = {f"99{n:07d}" for n in range(1000, 1501)}  # 501 unrelated ids: forces the >500 path
 
 
@@ -97,10 +100,12 @@ def run(tmp_path_factory):
             source="V0.8", full_header=header, shelfmark=header, scope=scope, boundaries=bounds,
             **Indexer._extract_position_fields(text)))
 
-    for p in SYS_PAGES + PART_PAGES:
+    for p in SYS_PAGES + PART_PAGES + GAP_PAGES:
         add(p["uid"], p["text"], p["header"], "page")
     add("sys:990009", *_aggregate(SYS_PAGES)[:1], SYS_PAGES[0]["header"], "system",
         _aggregate(SYS_PAGES)[1])
+    add("sys:990010", _aggregate(GAP_PAGES)[0], GAP_PAGES[0]["header"], "system",
+        _aggregate(GAP_PAGES)[1])
     add("part:MS. Heb. x. 1/1", _aggregate(PART_PAGES)[0], PART_PAGES[0]["header"], "part",
         _aggregate(PART_PAGES)[1])
     w.commit()
@@ -112,9 +117,9 @@ def run(tmp_path_factory):
     engine = se.SearchEngine(_Meta(), VariantManager(), worker_mode=True, open_local=False)
     engine._load_browse_map = lambda: BROWSE_MAP
 
-    def _run(query, restrict=None, responsa=False):
+    def _run(query, restrict=None, responsa=False, gap=0):
         rows = engine.execute_search(
-            query, "literal", 0, restrict_sys_ids=restrict, corpus_scope="genizah",
+            query, "literal", gap, restrict_sys_ids=restrict, corpus_scope="genizah",
             responsa_options={"responsa_mode": True} if responsa else None)
         return [r["uid"] for r in rows]
 
@@ -159,3 +164,10 @@ def test_line_break_path_keeps_cross_page_system_hit(run, extra):
     assert run(query, responsa=True) == ["p1"]
     assert run(query, restrict={"990009"} | extra, responsa=True) == ["p1"]
     assert run(query, restrict={"990008"} | extra, responsa=True) == []
+
+
+def test_a_crossing_with_a_gap_word_before_the_break_is_found(run):
+    # The window holds (terms - 1) * (gap + 1) words on each side: here G1 and the
+    # gap word Y. A window of (terms - 1) words held only Y, so the crossing was lost.
+    assert run(f"{G1} {G2}", gap=1) == ["g1"]
+    assert run(f"{G1} {G2}", gap=0) == []      # Y stands between them

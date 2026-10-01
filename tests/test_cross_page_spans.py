@@ -6,8 +6,12 @@ breaks that pass a necessary pre-check (first term before the break, last term
 after it). Real-index gate (2026-09-30, HEAD vs working engine, uncapped, 10
 phrases): every cross-page row of the old path kept, 23 -> 97 cross-page rows
 (the old path gave only each manuscript's FIRST match).
+
+The window is counted in words, not characters (2026-10-01): a fixed character
+window lost a crossing after a long run of dots or lacuna brackets at a page edge.
 """
 import json
+import random
 
 import pytest
 
@@ -39,12 +43,17 @@ def _doc(pages):
     return "".join(text), bounds
 
 
-def _spans(eng, pages, query=f"{T1} {T2}", gap=0, strip=True, window=None):
+def _side_words(terms, gap):
+    # As execute_search computes it.
+    return (len(terms) - 1) * (gap + 1)
+
+
+def _spans(eng, pages, query=f"{T1} {T2}", gap=0, strip=True, side_words=None):
     content, bounds = _doc(pages)
     terms = query.split()
     rx = eng.build_regex_pattern(terms, "literal", gap)
-    window = window or 3 * len(query) + 30 * gap + 64
-    got = eng._cross_page_spans(rx, content, bounds, terms[0], terms[-1], window, gap, strip)
+    side_words = side_words or _side_words(terms, gap)
+    got = eng._cross_page_spans(rx, content, bounds, terms[0], terms[-1], side_words, gap, strip)
     return content, [content[s:e] for s, e in got]
 
 
@@ -98,3 +107,101 @@ def test_the_pre_check_needs_the_first_term_before_and_the_last_after(eng):
 def test_no_breaks_no_spans(eng):
     rx = eng.build_regex_pattern([T1, T2], "literal", 0)
     assert eng._cross_page_spans(rx, f"{T1} {T2}", [{"start": 0, "end": 13}], T1, T2, 100, 0, True) == []
+
+
+@pytest.mark.parametrize("gap", [0, 1])
+def test_a_long_non_word_run_at_a_page_end_does_not_hide_a_crossing(eng, gap):
+    # Codex review 2026-10-01: 100 dots after the first word put it outside the
+    # old 79-character window. 333 V0.8 pages end with a non-word run over 60.
+    pages = [f"{X} {T1}" + "." * 100, f"{T2} {X}", f"{X}"]
+    _content, texts = _spans(eng, pages, gap=gap)
+    assert texts == [T1 + "." * 100 + "\n" + T2]
+
+
+@pytest.mark.parametrize("dots", [57, 58, 59, 60, 61, 62])
+def test_a_probe_edge_inside_the_first_word_does_not_hide_a_crossing(eng, dots):
+    # The first 64-character probe before the break ends inside T1: that partial
+    # chunk must not be taken as the window start.
+    pages = [f"{X} {T1}" + "." * dots, f"{T2} {X}", f"{X}"]
+    _content, texts = _spans(eng, pages)
+    assert texts == [T1 + "." * dots + "\n" + T2]
+
+
+def test_lacuna_lines_at_a_page_start_do_not_hide_a_crossing(eng):
+    lacuna = "[\n" * 40
+    pages = [f"{X} {T1}", lacuna + f"{T2} {X}", f"{X}"]
+    _content, texts = _spans(eng, pages, strip=True)
+    assert texts == [T1 + "\n" + lacuna + T2]
+
+
+def test_gap_words_of_any_length_stay_inside_the_window(eng):
+    long_word = "ש" * 300
+    pages = [f"{X} {T1} {long_word}", f"{T2} {X}", f"{X}"]
+    _content, texts = _spans(eng, pages, gap=1)
+    assert texts == [f"{T1} {long_word}\n{T2}"]
+
+
+def test_window_edges_never_fall_inside_a_long_chunk():
+    # A chunk longer than the first 256-character probe: the edge is the chunk's
+    # real start / end, not the probe's.
+    long_chunk = "ב" * 300
+    left = f"{X} {long_chunk}\n"
+    assert se._left_window_start(left, len(left), 1) == len(X) + 1
+    right = f"{long_chunk} {X}"
+    assert se._right_window_end(right, 0, 1) == len(long_chunk)
+
+
+def _ref_chunks(text):
+    """Plain reference: (start, end) of every whitespace chunk holding a word char."""
+    import re
+    return [(m.start(), m.end()) for m in re.finditer(r"\S+", text)
+            if re.search(r"[\w֐-׿']", m.group())]
+
+
+def test_window_edges_match_a_plain_reference():
+    rnd = random.Random(7)
+    pieces = [X, T1, "ש" * 300, "[", "]", "....", "." * 400, "־", "'", "[א", "1"]
+    inside = 0
+    for _ in range(8000):
+        text = "".join(rnd.choice(pieces) + rnd.choice([" ", "\n", "  ", ""]) for _w in range(rnd.randint(0, 12)))
+        cut = rnd.randint(0, len(text))
+        words = rnd.randint(1, 4)
+        left = [c for c in _ref_chunks(text[:cut])]
+        want_lo = left[-words][0] if len(left) >= words else 0
+        right = _ref_chunks(text[cut:])
+        want_hi = cut + right[words - 1][1] if len(right) >= words else len(text)
+        # The reference chunks text[:cut] / text[cut:] on their own, so a chunk
+        # running across the cut counts on both sides; the engine only cuts at a
+        # page break, where text[cut - 1] is a newline.
+        if 0 < cut < len(text) and not text[cut - 1].isspace() and not text[cut].isspace():
+            continue
+        assert se._left_window_start(text, cut, words) == want_lo, (text, cut, words)
+        assert se._right_window_end(text, cut, words) == want_hi, (text, cut, words)
+        inside += 0 < want_lo < cut or cut < want_hi < len(text)
+    assert inside > 400  # edges strictly inside the text, not only at its ends
+
+
+def test_the_word_window_finds_exactly_what_the_whole_text_finds(eng):
+    """Randomised: the window result equals the same function over the whole text."""
+    rnd = random.Random(20261001)
+    vocab = [T1, T2, X, "[", "]", "[ ]", "....", "." * 90, "[" * 3, T1 + T2, "ו" + T1, "־", "'"]
+    seps = [" ", "\n", "  ", " \n "]
+    checked = 0
+    for _ in range(400):
+        pages = []
+        for _p in range(rnd.randint(2, 6)):
+            words = [rnd.choice(vocab) for _w in range(rnd.randint(1, 7))]
+            pages.append("".join(w + rnd.choice(seps) for w in words).strip() or X)
+        terms = rnd.choice([[T1, T2], [T1, X, T2], [X, T2], [T1, X]])
+        gap = rnd.choice([0, 0, 1, 2])
+        strip = rnd.random() < 0.8
+        content, bounds = _doc(pages)
+        rx = eng.build_regex_pattern(terms, "literal", gap)
+        whole = eng._cross_page_spans(rx, content, bounds, terms[0], terms[-1], len(content) + 1, gap, strip)
+        windowed = eng._cross_page_spans(rx, content, bounds, terms[0], terms[-1],
+                                         _side_words(terms, gap), gap, strip)
+        assert windowed == whole, (pages, terms, gap, strip)
+        checked += bool(whole)
+    assert checked > 40  # the sample really contains crossings
+
+
