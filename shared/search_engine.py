@@ -7,6 +7,7 @@ existing ``from genizah_core import SearchEngine`` callers continue working.
 """
 
 import bisect
+import functools
 import logging
 import os
 import re
@@ -26,10 +27,11 @@ try:
     import tantivy
 except ImportError:
     raise ImportError("Tantivy library missing. Please install it.")
+from rapidfuzz.distance import OSA
 
 from shared.config import Config
 from shared.search_regex import (
-    compile as compile_search_regex, SearchBudgetExceeded, bounded_search,
+    compile as compile_search_regex, SearchBudgetExceeded, bounded_search, _check_deadline,
 )
 from shared.text_normalize import strip_nikud, strip_search_diacritics
 from shared.browse_map_utils import natural_sort_key, dedupe_browse_map, _extract_ie_from_header
@@ -307,7 +309,7 @@ def _first_position_valid_match(regex, text, first_match, text_position, line_co
     return None
 
 
-# Whole words (owner, D1 for Exact and 2026-10-01 for Variants): a match inside a
+# Whole words (owner, D1 for Exact, 2026-10-01 for Variants and Fuzzy): a match inside a
 # longer Hebrew word is not a match -- "Responsa mode is for that kind of search".
 # Marks (nikud, cantillation, the Judeo-Arabic dot), quotes/geresh and lacuna brackets
 # belong to the word they sit in (ו[שלום is one word), so they are looked past. Any
@@ -315,7 +317,7 @@ def _first_position_valid_match(regex, text, first_match, text_position, line_co
 # Python's \w disagree on chars like '²', and a page the index returned for a whole
 # token must not be lost to that.
 _IN_WORD_QUOTES = frozenset('\'"\u05F3\u05F4\u2018\u2019[]')
-_WHOLE_WORD_MODES = frozenset({'literal', 'variants', 'variants_extended', 'variants_maximum'})
+_WHOLE_WORD_MODES = frozenset({'literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy'})
 _HEB_LETTER_RUN_RE = re.compile(r'[\u05D0-\u05EA]+')
 
 
@@ -323,17 +325,25 @@ def _looked_past(ch):
     return ch in _IN_WORD_QUOTES or unicodedata.category(ch)[0] == 'M'
 
 
-def _whole_word_span(text, start, end):
-    """True unless the span text[start:end] continues a Hebrew word on either side."""
+def _starts_word(text, start):
+    """True unless text[start] continues a Hebrew word that began before it."""
     i = start - 1
     while i >= 0 and _looked_past(text[i]):
         i -= 1
-    if i >= 0 and '\u05D0' <= text[i] <= '\u05EA':
-        return False
+    return not (i >= 0 and '\u05D0' <= text[i] <= '\u05EA')
+
+
+def _ends_word(text, end):
+    """True unless the Hebrew word ending at *end* goes on after it."""
     j = end
     while j < len(text) and _looked_past(text[j]):
         j += 1
     return not (j < len(text) and '\u05D0' <= text[j] <= '\u05EA')
+
+
+def _whole_word_span(text, start, end):
+    """True unless the span text[start:end] continues a Hebrew word on either side."""
+    return _starts_word(text, start) and _ends_word(text, end)
 
 
 def _first_accepted_match(regex, text, first_match, accept):
@@ -537,6 +547,307 @@ def make_mark_tolerant_pattern(escaped_term: str) -> str:
     # Split escaped string into tokens: \\X (escape sequences) or single chars
     tokens = re.findall(r'\\.|.', escaped_term)
     return MARK_TOLERANT_INSERTER.join(tokens)
+
+
+def _gap_separator(max_gap):
+    """The regex between two query words: non-word chars, with up to *max_gap* words between."""
+    if max_gap == 0:
+        # Flexible separator (any non-word char)
+        return r'[^\w\u0590-\u05FF\']+'
+    # Gap logic
+    return rf'(?:[^\w\u0590-\u05FF\']+{Config.WORD_TOKEN_PATTERN}){{0,{max_gap}}}[^\w\u0590-\u05FF\']+'
+
+
+# _add_bracket_variants of a bare word, as (before, after) around it.
+_BRACKET_AFFIXES = tuple(tuple(v.split('|')) for v in _add_bracket_variants('|'))
+
+
+# Fuzzy = near spellings (owner 2026-10-01; prefixes 2026-10-02): every whole word
+# within a few edits of the query word -- a letter added, dropped or replaced, or two
+# neighbours swapped (OSA distance, which is how Tantivy's own fuzzy query counts).
+# One edit for a word of 3-4 letters, two from 5 letters, none below 3. A prefix
+# letter is an edit like any other, so ושלום is a near spelling of שלום ("It's
+# fuzzy"); ושלומות, three edits away, is not.
+_HEB_LETTERS = 'אבגדהוזחטיכלמנסעפצקרשתךםןףץ'
+# Between the letters of a near spelling: the marks and quotes every search
+# tolerates, and lacuna brackets -- ו[שלום is the word ושלום.
+_FUZZY_INSERTER = MARK_TOLERANT_INSERTER[:-2] + r'\[\]]*'
+
+
+def _fuzzy_distance(term):
+    """The edits a near spelling of *term* may have."""
+    if len(term) < 3:
+        return 0
+    return 1 if len(term) < 5 else 2
+
+
+@functools.lru_cache(maxsize=256)
+def _near_spellings(term):
+    """Every string of Hebrew letters within ``_fuzzy_distance(term)`` edits of
+    *term*, *term* included -- or None when *term* is not plain Hebrew letters (a
+    bracket search, digits, Latin), which is then matched as typed. הצדיק has
+    39,687 (0.03 s), of which the index holds 4,262."""
+    if not _HEB_LETTER_RUN_RE.fullmatch(term):
+        return None
+    d = _fuzzy_distance(term)
+    found = {term}
+    for _ in range(d):
+        grown = set(found)
+        for w in found:
+            for i in range(len(w) + 1):
+                if i < len(w):
+                    grown.add(w[:i] + w[i + 1:])
+                    if i + 1 < len(w):
+                        grown.add(w[:i] + w[i + 1] + w[i] + w[i + 2:])
+                for ch in _HEB_LETTERS:
+                    grown.add(w[:i] + ch + w[i:])
+                    if i < len(w):
+                        grown.add(w[:i] + ch + w[i + 1:])
+        found = grown
+    # Two edits can reach a string three apart under OSA (swap two letters, then
+    # insert between them); Tantivy's fuzzy query does not count it.
+    return frozenset(w for w in found if w and OSA.distance(term, w, score_cutoff=d) <= d)
+
+
+@functools.lru_cache(maxsize=256)
+def _near_spelling_tiers(term):
+    """*term*'s near spellings by distance: (0 edits, 1 edit[, 2 edits]) -- so
+    retrieval can rank the word itself above one edit, and one edit above two.
+    A word Fuzzy matches as typed is its own only tier."""
+    spellings = _near_spellings(term)
+    if spellings is None:
+        return (frozenset({term}),)
+    tiers = [set() for _ in range(_fuzzy_distance(term) + 1)]
+    for w in spellings:
+        tiers[OSA.distance(term, w)].add(w)
+    return tuple(frozenset(t) for t in tiers)
+
+
+@functools.lru_cache(maxsize=4096)
+def _fuzzy_pattern(forms_per_term, as_typed, max_gap):
+    """Regex text for these forms: per query word an alternation of its forms,
+    longest first, the words joined as Exact joins them. *as_typed[i]*: word i is
+    matched as typed (marks and quotes tolerated, as in Exact), not as a near
+    spelling. Only handed to result rows to highlight with; never compiled here."""
+    parts = []
+    for forms, typed in zip(forms_per_term, as_typed):
+        alts = [_fuzzy_form_pattern(f, typed) for f in sorted(forms, key=lambda f: (-len(f), f))]
+        parts.append(f"({'|'.join(alts)})")
+    return _gap_separator(max_gap).join(parts)
+
+
+@functools.lru_cache(maxsize=65536)
+def _fuzzy_form_pattern(form, typed):
+    """One form of _fuzzy_pattern: escaped, with the inserter between its characters."""
+    inserter = MARK_TOLERANT_INSERTER if typed else _FUZZY_INSERTER
+    return inserter.join(re.findall(r'\\.|.', re.escape(form)))
+
+
+_HEB_LETTER = _HEB_LETTER_RUN_RE.pattern[:-1]
+# A Hebrew word as Fuzzy reads it: letters, with the marks, quotes and lacuna
+# brackets a word holds between them; its letters are what is compared.
+_FUZZY_WORD_RE = re.compile(f'{_HEB_LETTER}(?:{_FUZZY_INSERTER}{_HEB_LETTER})*')
+_FUZZY_FOLD_RE = re.compile(_FUZZY_INSERTER[:-1])
+# The same characters as a set, for a quick look at the one after a letter run.
+_FUZZY_HELD_CHARS = frozenset(ch for ch in map(chr, range(0x2100)) if _FUZZY_FOLD_RE.match(ch))
+# Between the words of a phrase: Exact's separator, and Exact's gap words.
+_PHRASE_SEP_RE = re.compile(_gap_separator(0))
+_GAP_WORD_RE = re.compile(Config.WORD_TOKEN_PATTERN)
+
+
+class _Span:
+    """A phrase match, with what callers read from a match object."""
+    __slots__ = ('_start', '_end')
+
+    def __init__(self, start, end):
+        self._start, self._end = start, end
+
+    def start(self):
+        return self._start
+
+    def end(self):
+        return self._end
+
+    def span(self):
+        return (self._start, self._end)
+
+
+class _FuzzyMatcher:
+    """Fuzzy's verifier, where the other modes have one compiled regex. The near
+    spellings run to tens of thousands of strings, far too many for one pattern
+    (Fuzzy used the 8,000-form Variants alternation instead, and הצדיק ran out its
+    regex budget on a whole manuscript), and a regex per page cost 10 ms to compile
+    (אהרן הכהן: 7,000 of them, 70 of its 92 s). So it walks the words of a text
+    and looks each up in the set of near spellings: a whole word whose letters are
+    one, and for a phrase the next word after Exact's separator and up to *gap*
+    words between.
+
+    It has what the callers use -- ``search(text, pos)``, ``pattern`` (the words as
+    typed) -- so their bracket, position, page-break and highlight handling apply
+    as they are; and ``pattern_for(text)``, the regex a result row for *text*
+    highlights with: the near spellings that are words in it.
+    """
+
+    def __init__(self, terms, max_gap):
+        self._terms = tuple(terms)
+        self._spellings = tuple(_near_spellings(t) for t in self._terms)
+        typed = tuple(s is None for s in self._spellings)
+        # A word that is not plain Hebrew letters is matched as typed, as Exact does.
+        self._typed_rx = tuple(
+            compile_search_regex(make_mark_tolerant_pattern(re.escape(t)), re.IGNORECASE) if is_typed else None
+            for t, is_typed in zip(self._terms, typed))
+        self._typed = typed
+        self._gap = max_gap
+        self.pattern = _fuzzy_pattern(tuple((t,) for t in self._terms), typed, max_gap)
+        self._last_forms = (None, None)
+
+    def _word_end(self, k, text, pos, endpos):
+        """Where query word *k* ends when it starts at *pos*, else None."""
+        rx = self._typed_rx[k]
+        if rx is not None:
+            m = rx.match(text, pos, endpos)
+            return m.end() if m is not None else None
+        m = _FUZZY_WORD_RE.match(text, pos, endpos)
+        if m is None:
+            return None
+        w = m.group()
+        return m.end() if (w if w.isalpha() else _FUZZY_FOLD_RE.sub('', w)) in self._spellings[k] else None
+
+    def _rest_end(self, text, end, k, endpos):
+        """Where query words k.. end when word k-1 ends at *end*, else None. As the
+        regex's greedy gap does, more gap words are tried first; a choice whose
+        last word is not whole is passed over for the next."""
+        starts = []
+        p = end
+        for _ in range(self._gap + 1):
+            sep = _PHRASE_SEP_RE.match(text, p, endpos)
+            if sep is None:
+                break
+            starts.append(sep.end())
+            word = _GAP_WORD_RE.match(text, sep.end(), endpos)
+            if word is None:
+                break
+            p = word.end()
+        for q in reversed(starts):
+            e = self._word_end(k, text, q, endpos)
+            if e is None:
+                continue
+            if k + 1 == len(self._terms):
+                if _ends_word(text, e):
+                    return e
+                continue
+            e = self._rest_end(text, e, k + 1, endpos)
+            if e is not None:
+                return e
+        return None
+
+    def _first_words(self, text, pos, endpos):
+        """Every place query word 0 occurs from *pos* on, in text order. Walks the
+        letter runs and stops where the caller does (most pages hold the word
+        early); a run that a mark, quote or bracket joins to more letters is read
+        as the whole word and folded. A word that continues one before it is
+        dropped by the caller's whole-word test."""
+        rx = self._typed_rx[0]
+        if rx is not None:
+            m = rx.search(text, pos, endpos)
+            while m is not None:
+                yield m
+                m = rx.search(text, m.start() + 1, endpos)
+            return
+        spellings = self._spellings[0]
+        after = pos                     # runs inside a word already read are skipped
+        for run in _HEB_LETTER_RUN_RE.finditer(text, pos, endpos):
+            if run.start() < after:
+                continue
+            e = run.end()
+            if e < endpos and text[e] in _FUZZY_HELD_CHARS:
+                word = _FUZZY_WORD_RE.match(text, run.start(), endpos)
+                if word.end() > e:
+                    after = word.end()
+                    if _FUZZY_FOLD_RE.sub('', word.group()) in spellings:
+                        yield word
+                    continue
+            if run.group() in spellings:
+                yield run
+
+    def search(self, text, pos=0, endpos=None):
+        _check_deadline()          # the API's time budget (compiled patterns check it per call)
+        endpos = len(text) if endpos is None else endpos
+        for m in self._first_words(text, pos, endpos):
+            if not _starts_word(text, m.start()):
+                continue
+            if len(self._terms) == 1:
+                if _ends_word(text, m.end()):
+                    return m
+                continue
+            e = self._rest_end(text, m.end(), 1, endpos)
+            if e is not None:
+                return _Span(m.start(), e)
+        return None
+
+    def closest(self, text, first, accept):
+        """For one query word: of the matches from *first* on that *accept* takes,
+        the one nearest the word as typed -- the word itself before one edit, one
+        edit before two; the earliest among equals. A page holding the word itself
+        then shows it, not an earlier two-edit word (הצדיק showed בדיק)."""
+        if len(self._terms) != 1 or self._typed_rx[0] is not None:
+            return first
+        term = self._terms[0]
+
+        def distance(m):
+            return OSA.distance(term, _FUZZY_FOLD_RE.sub('', text[m.start():m.end()]))
+
+        forms = self._forms(text)
+        # The nearest any word of this text can be: the walk stops when it is met.
+        nearest = min((OSA.distance(term, f) for f in forms[0]), default=0) if forms else 0
+        best, best_distance = first, distance(first)
+        m = first
+        while best_distance > nearest:
+            m = self.search(text, m.start() + 1)
+            if m is None:
+                break
+            if accept(m):
+                d = distance(m)
+                if d < best_distance:
+                    best, best_distance = m, d
+        return best
+
+    def _forms(self, text):
+        """Per query word, its near spellings that are words of *text* (the word
+        itself for one matched as typed), or None when one has none: the text's
+        letter runs with marks, quotes and brackets folded away. The last text is
+        kept: a row asks for it twice (closest, pattern_for)."""
+        if self._last_forms[0] is text:
+            return self._last_forms[1]
+        words = _HEB_LETTER_RUN_RE.findall(strip_search_diacritics(_strip_brackets(text)))
+        forms = []
+        for term, spellings in zip(self._terms, self._spellings):
+            hits = (term,) if spellings is None else tuple(sorted(spellings.intersection(words)))
+            if not hits:
+                forms = None
+                break
+            forms.append(hits)
+        forms = None if forms is None else tuple(forms)
+        self._last_forms = (text, forms)
+        return forms
+
+    def pattern_for(self, text):
+        forms = self._forms(text)
+        return self.pattern if forms is None else _fuzzy_pattern(forms, self._typed, self._gap)
+
+
+_POSITION_FIELDS = {
+    'start': 'content_head',
+    'end': 'content_tail',
+    'line_start': 'line_starts',
+    'line_end': 'line_ends',
+}
+
+
+def _fuzzy_matcher(terms, max_gap):
+    """A _FuzzyMatcher for *terms*, or None when there are none (as build_regex_pattern)."""
+    terms = [t for t in terms if t]
+    return _FuzzyMatcher(terms, max_gap) if terms else None
 
 
 
@@ -1179,7 +1490,9 @@ class SearchEngine:
             hl_f = self.highlight(content, regex, for_file=True)
             snippet = hl_c
             raw_file_hl = hl_f or ""
-            effective_pattern = pattern_str or regex.pattern
+            # Fuzzy's regex differs per text (_FuzzyMatcher): this row's own.
+            effective_pattern = (regex.pattern_for(content) if isinstance(regex, _FuzzyMatcher)
+                                 else pattern_str or regex.pattern)
         else:
             # Back-compat path (no regex passed by caller — old behaviour).
             # Always returns a dict; no filter-out.
@@ -1816,14 +2129,72 @@ class SearchEngine:
                                             (tantivy.Occur.Must, self.index.parse_query(f'({extra})', ['content']))])
 
     def _verifier_forms(self, term, mode):
-        """The forms build_regex_pattern accepts for *term* (Variants modes)."""
+        """The forms build_regex_pattern accepts for *term* (Variants modes); for
+        Fuzzy, its near spellings (VariantManager has no Fuzzy tier)."""
+        if mode == 'fuzzy':
+            return sorted(_near_spellings(term) or (term,))
         forms = set(self.var_mgr.get_variants(term, mode, limit=Config.REGEX_VARIANTS_LIMIT))
         forms.add(term)
         return sorted(f for f in forms if f)
 
     def _folded_forms(self, term, mode):
         """*term*'s forms folded as the index's content_search field is."""
+        if mode == 'fuzzy' and _near_spellings(term) is not None:
+            return _near_spellings(term)    # Hebrew letters only: nothing to fold
         return frozenset(f for f in (strip_search_diacritics(v).lower() for v in self._verifier_forms(term, mode)) if f)
+
+    # Constant scores of a near spelling by its distance: the word itself, one
+    # edit, two. Each beats the next even matched in one field against two
+    # (content and content_search), alone or added up: 9 > 3 + 3 > 1 + 1.
+    _FUZZY_TIER_SCORES = (9.0, 3.0, 1.0)
+
+    def _fuzzy_term_query(self, term, exact_field, fields):
+        """Retrieval for one Fuzzy word: Exact's clause on *exact_field* (its BM25
+        ranks the pages with the word itself) OR its near spellings, bracket forms
+        included, as whole tokens of *fields*, scored by distance
+        (_FUZZY_TIER_SCORES). Under a result limit the word comes first, then one
+        edit, then two; with one score for all, הצדיק's 50,000 rows were mostly
+        הדין and צדק. One flat Should list: every level of nesting copies the term
+        sets (ירושלים: 529K tokens)."""
+        should = tantivy.Occur.Should
+        clauses = [(should, self.index.parse_query(self.build_tantivy_query([term], 'fuzzy'), [exact_field]))]
+        typed = _near_spellings(term) is None
+        for distance, forms in enumerate(_near_spelling_tiers(term)):
+            if not forms:
+                continue
+            # Near spellings are bare letters: _add_bracket_variants' forms are its
+            # affixes around each, built in one comprehension.
+            tokens = (_add_bracket_variants(term) if typed else
+                      [a + f + z for f in forms for a, z in _BRACKET_AFFIXES])
+            for field in fields:
+                clauses.append((should, tantivy.Query.const_score_query(
+                    tantivy.Query.term_set_query(self.index.schema, field, tokens),
+                    self._FUZZY_TIER_SCORES[distance])))
+        return tantivy.Query.boolean_query(clauses)
+
+    def _fuzzy_position_query(self, terms, text_position):
+        """Fuzzy candidates for a position search: _fuzzy_term_query on the position
+        field (whitespace tokens). None when the field is missing from the index;
+        the parsed query then fails as it does for every mode on an old index."""
+        field = _POSITION_FIELDS.get(text_position)
+        if field is None:
+            return None
+        per_term = []
+        try:
+            for term in terms:
+                clean = term.replace('"', '')
+                if clean:
+                    per_term.append((tantivy.Occur.Must, self._fuzzy_term_query(clean, field, [field])))
+        except ValueError:
+            return None
+        return tantivy.Query.boolean_query(per_term) if per_term else None
+
+    def _cross_page_term(self, term, mode):
+        """What _cross_page_spans looks for before and after a break: the folded
+        forms (Variants, Fuzzy), or the word itself when Fuzzy matches it as typed."""
+        if mode == 'fuzzy' and _near_spellings(term) is None:
+            return term
+        return self._folded_forms(term, mode)
 
     def build_variant_query(self, terms, mode, content_search_field=None):
         """Tantivy candidates for whole-word Variants: per term, today's clause
@@ -1845,6 +2216,13 @@ class SearchEngine:
         for term in terms:
             clean = term.replace('"', '')
             if not clean:
+                continue
+            if mode == 'fuzzy':
+                # A near spelling is bare letters (with an edge bracket at most), which
+                # content_search -- content with marks and quotes folded out -- holds
+                # as the same token: one field finds every page the two would.
+                per_term.append((tantivy.Occur.Must, self._fuzzy_term_query(
+                    clean, 'content', [content_search_field or 'content'])))
                 continue
             clauses = [(should, self.index.parse_query(
                 self.build_tantivy_query([clean], mode, content_search_field=content_search_field), ['content']))]
@@ -1986,12 +2364,7 @@ class SearchEngine:
             # Allow prefix matches when search term appears inside a word
             parts.append(f"({'|'.join(escaped)})")
 
-        if max_gap == 0:
-            # Flexible separator (any non-word char)
-            sep = r'[^\w\u0590-\u05FF\']+'
-        else:
-            # Gap logic
-            sep = rf'(?:[^\w\u0590-\u05FF\']+{Config.WORD_TOKEN_PATTERN}){{0,{max_gap}}}[^\w\u0590-\u05FF\']+'
+        sep = _gap_separator(max_gap)
 
         try:
             return compile_search_regex(sep.join(parts), re.IGNORECASE)
@@ -2939,7 +3312,8 @@ class SearchEngine:
                     _local_terms = [query_str]
                 else:
                     _local_terms = query_str.split()
-                _local_regex = self.build_regex_pattern(_local_terms, mode, gap)
+                _local_regex = (_fuzzy_matcher(_local_terms, gap) if mode == 'fuzzy'
+                                else self.build_regex_pattern(_local_terms, mode, gap))
                 return self._query_local_index(
                     query_str, mode, gap, regex=_local_regex or None,
                     progress_callback=progress_callback,
@@ -3172,15 +3546,17 @@ class SearchEngine:
                             tantivy_parts.append(f'"{t}"')
                             regex_terms.append(t)
                     t_query_str = " AND ".join(tantivy_parts)
-                    regex = self.build_regex_pattern(regex_terms, mode, gap)
+                    regex = (_fuzzy_matcher(regex_terms, gap) if mode == 'fuzzy'
+                             else self.build_regex_pattern(regex_terms, mode, gap))
                     if not regex: return []
                     # Skip the normal build path below
                     terms = None
 
             if terms is not None:
                 # Pre-compute variants at max limit so Tantivy (limit=200) can
-                # slice from cache instead of recomputing when regex (limit=8000) runs
-                if mode != 'Regex':
+                # slice from cache instead of recomputing when regex (limit=8000) runs.
+                # Fuzzy uses no VariantManager forms here (near spellings instead).
+                if mode not in ('Regex', 'fuzzy'):
                     self._get_or_compute_variants(terms, mode)
 
                 # SEED-006 Stage 2: only fold-fallback for a plain content search.
@@ -3209,9 +3585,13 @@ class SearchEngine:
                 if mode in _WHOLE_WORD_MODES and mode != 'literal' and not text_position:
                     t_query_obj = self.build_variant_query(terms, mode, content_search_field=_cs_field)
                     if t_query_obj is not None and len(terms) > 1:
-                        _cross_page_terms = (self._folded_forms(terms[0], mode),
-                                             self._folded_forms(terms[-1], mode))
+                        _cross_page_terms = (self._cross_page_term(terms[0], mode),
+                                             self._cross_page_term(terms[-1], mode))
                         _cross_page_side_words = (len(terms) - 1) * (gap + 1)
+                elif mode == 'fuzzy' and text_position:
+                    # The position fields hold whitespace tokens: the near spellings
+                    # (and their bracket forms) as whole tokens there.
+                    t_query_obj = self._fuzzy_position_query(terms, text_position)
                 # A single word cannot span a page break, so a whole-manuscript or
                 # part doc only repeats a page hit -- or adds a match inside a
                 # longer word, which is not a match (owner decision 2026-09-30).
@@ -3223,7 +3603,8 @@ class SearchEngine:
                     if t_query_obj is not None:
                         t_query_obj = self._and_query(t_query_obj, 'scope:page')
                     _page_only = True
-                regex = self.build_regex_pattern(terms, mode, gap)
+                regex = (_fuzzy_matcher(terms, gap) if mode == 'fuzzy'
+                         else self.build_regex_pattern(terms, mode, gap))
         if not regex: return []
 
         LOGGER.debug(f"Mode: {mode}, Query: {query_str[:200]}")
@@ -3232,6 +3613,9 @@ class SearchEngine:
 
         # Save pattern string for passing to results
         pattern_str = regex.pattern
+        # Fuzzy's regex differs per text (_FuzzyMatcher): each row gets its own.
+        def _row_pattern(text):
+            return regex.pattern_for(text) if isinstance(regex, _FuzzyMatcher) else pattern_str
 
         # Augment Tantivy query with sys_id filter so the index only returns
         # hits from the restricted manuscripts (avoids iterating 50K hits).
@@ -3244,13 +3628,7 @@ class SearchEngine:
                 t_query_obj = self._and_query(t_query_obj, f'{sid_clauses} OR scope:part')
 
         # Choose search field based on text_position filter
-        position_field_map = {
-            'start': 'content_head',
-            'end': 'content_tail',
-            'line_start': 'line_starts',
-            'line_end': 'line_ends',
-        }
-        search_field = position_field_map.get(text_position, 'content')
+        search_field = _POSITION_FIELDS.get(text_position, 'content')
 
         # Wildcard components with positional fields: fall back to content field.
         # Positional fields only contain exact tokens (first/last words or head/tail),
@@ -3418,7 +3796,7 @@ class SearchEngine:
                                 if primary.get('uid') not in restrict_uids:
                                     continue
                             results.append(self._aggregate_result_row(
-                                doc, content, span, boundaries, pattern_str, scope, score))
+                                doc, content, span, boundaries, _row_pattern(content), scope, score))
                             kept += 1
                         if not kept:
                             regex_filtered_count += 1
@@ -3476,6 +3854,12 @@ class SearchEngine:
                             # may be slightly offset but still useful
                             orig_match_missing = True
 
+                    # Fuzzy: a page row shows the nearest spelling on the page.
+                    if isinstance(regex, _FuzzyMatcher) and scope == 'page' and not orig_match_missing:
+                        match_obj = regex.closest(
+                            content, match_obj,
+                            lambda m, _t=content: _accept(_t, m, not _query_has_brackets(query_str)))
+
                     boundaries = self._parse_boundaries(doc) if scope != 'page' else []
                     if restrict_uids is not None and scope != 'page':
                         span_text = match_content if orig_match_missing else content
@@ -3491,7 +3875,7 @@ class SearchEngine:
                     span = match_obj.span()
                     if boundaries:
                         results.append(self._aggregate_result_row(
-                            doc, content, span, boundaries, pattern_str, scope, score))
+                            doc, content, span, boundaries, _row_pattern(content), scope, score))
                     else:
                         # match_obj already IS regex.search(content) here, except
                         # when brackets were stripped and the original text had no
@@ -3507,7 +3891,7 @@ class SearchEngine:
                             results.append({
                                 'display': meta, 'snippet': hl_c, 'full_text': content,
                                 'uid': doc['unique_id'][0], 'raw_header': doc['full_header'][0],
-                                'raw_file_hl': hl_f, 'highlight_pattern': pattern_str,
+                                'raw_file_hl': hl_f, 'highlight_pattern': _row_pattern(content),
                                 'scope': scope,
                                 # Phase 77 D-01: Tantivy relevance score for JSON.
                                 'score': float(score),

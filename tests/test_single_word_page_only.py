@@ -1,4 +1,4 @@
-"""A single Exact or Variants word is searched in page docs only, not in whole-manuscript / part docs.
+"""A single Exact, Variants or Fuzzy word is searched in page docs only, not in whole-manuscript / part docs.
 
 A single word cannot span a page break, so an aggregate doc only repeated a page hit
 or, through its first-match-in-the-manuscript row, added a match INSIDE a longer word
@@ -9,7 +9,9 @@ real-index gate is described in docs/plans/SEARCH_UNCAPPED_STREAMING_PLAN.md.
 
 The fast path must stay off for multi-word queries (cross-page matches), for text
 positions, for other modes, and for an index whose docs do not all carry a scope.
-Variants got the same path on 2026-10-01 (owner: Variants match whole words too).
+Variants got the same path on 2026-10-01 (owner: Variants match whole words too), and Fuzzy
+on 2026-10-02 (near spellings, whole words: לשלום is one edit from שלום, so it is a match,
+found on its own page).
 """
 import gc
 import json
@@ -123,8 +125,10 @@ def test_single_word_variants_is_found_on_its_page_only(engines):
     assert _uids(engines["complete"], W, mode="variants") == {"B"}
 
 
-def test_fuzzy_keeps_the_manuscript_docs(engines):
-    assert "A" in _uids(engines["complete"], W, mode="fuzzy")
+def test_single_word_fuzzy_is_found_on_its_page_only(engines):
+    rows = engines["complete"].execute_search(W, "fuzzy", 0, corpus_scope="genizah")
+    # לשלום is a near spelling of שלום (one added letter) -- a whole word on page A.
+    assert {r["uid"]: r["scope"] for r in rows} == {"A": "page", "B": "page"}
 
 
 class _RecordingIndex:
@@ -155,7 +159,7 @@ def _queries(eng, query, mode="literal", **kw):
 AGG = "(scope:system OR scope:part)"
 
 
-@pytest.mark.parametrize("mode", ["literal", "variants"])
+@pytest.mark.parametrize("mode", ["literal", "variants", "fuzzy"])
 def test_single_word_never_queries_the_aggregates(engines, mode):
     assert not any(AGG in q for q in _queries(engines["complete"], W, mode=mode))
 
@@ -164,8 +168,9 @@ def test_single_word_never_queries_the_aggregates(engines, mode):
     (W, {"text_position": "start"}),
     (f"{W} עליכם", {}),
     (f"{W} עליכם", {"mode": "variants"}),
-    (W, {"mode": "fuzzy"}),
-], ids=["position", "phrase", "variants-phrase", "fuzzy"])
+    (f"{W} עליכם", {"mode": "fuzzy"}),
+    (W, {"mode": "fuzzy", "text_position": "start"}),
+], ids=["position", "phrase", "variants-phrase", "fuzzy-phrase", "fuzzy-position"])
 def test_other_searches_still_query_the_aggregates(engines, query, kw):
     assert any(AGG in q for q in _queries(engines["complete"], query, **kw))
 

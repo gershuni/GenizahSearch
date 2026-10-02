@@ -222,7 +222,7 @@ class SearchRequest(BaseModel):
     )
     search_mode: Literal['exact', 'variants', 'responsa', 'title', 'shelfmark', 'fuzzy'] = Field(
         ...,
-        description="Search mode: 'exact' (literal), 'variants' (morphological), 'responsa' (Responsa Project style), 'title' (FJMS title metadata), 'shelfmark' (call number lookup), 'fuzzy' (approximate / maximum variant expansion — slowest mode).",
+        description="Search mode: 'exact' (literal), 'variants' (morphological), 'responsa' (Responsa Project style), 'title' (FJMS title metadata), 'shelfmark' (call number lookup), 'fuzzy' (near spellings: whole words one letter away, two from 5 letters, prefixed forms included — slowest mode).",
     )
     responsa_options: Optional[ResponsaOptions] = Field(
         default=None,

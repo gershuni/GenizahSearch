@@ -220,6 +220,28 @@ Also done 2026-09-30, outside the original stage list:
   a run that showed a preview and then ended with no rows turns table sorting back on. Two
   earlier P1 comments were already handled: the character window (word window, 9e8d8172) and
   4+ lacuna brackets in a phrase (owner: ignore; a larger gap reaches them).
+- **Stage W step 2, Fuzzy = near spellings (2026-10-02).** A near spelling is a whole word within
+  OSA distance 1 (3-4 letters) / 2 (5+), none below 3 -- a letter added, dropped or changed, or two
+  neighbours swapped, as Tantivy's fuzzy query counts -- and a prefixed form counts (owner).
+  `_near_spellings` builds them all (הצדיק 39,687, ירושלים 75,591; the index holds 4,262 / 2,247).
+  Retrieval: their bare and edge-bracket forms as term sets on `content_search` only (it holds the
+  same bare tokens as `content`: identical page counts, half the time), constant scores 9/3/1 by
+  distance, so under a limit the word comes first, then one edit, then two (with one score,
+  הצדיק's 50,000 rows were mostly הדין and צדק). Verification: `_FuzzyMatcher`, a word walk -- one
+  regex of all spellings is far too big, and a regex per page cost 10 ms to compile (אהרן הכהן 70 of
+  92 s); it walks letter runs, reads a word holding a mark, quote or bracket whole, and for phrases
+  takes Exact's separator and gap words. Rows highlight with their own page's spellings
+  (`pattern_for`) and show the page's nearest one. Same paths as Variants; position searches use
+  term sets on the position field; My Library verifies with it (its retrieval is still the typed
+  word); Composition keeps its old Fuzzy. Real index, 50,000 cap: על 6.4 s, שלום 9.4 s, הצדיק 15 s,
+  ירושלים 16 s, אהרן הכהן 24 s, שלום עליכם 35 s; first rows 0.2-4.7 s. Gate (scratchpad
+  `fuzzy/gate_fuzzy.py`: uncapped; an oracle written apart from the engine, over every page
+  Tantivy's own fuzzy query or the engine retrieves; fails on a broken engine): 0 wrong rows, 0 real
+  misses over אהרן 73,936 pages, הצדיק 159,401, ירושלים 60,057, על 383,715, שלום 148,622, אהרן הכהן
+  2,885 rows, שמעון הצדיק 1,661, שלום עליכם 2,868 (27 across a break). Misses only where the
+  index token holds a digit, nikud or bracket inside the word (16ירושלים, אַהרן, ה[דים: 0-23 per
+  word), as for Exact. Under the cap a very common word (שלום: 79K pages hold it) shows only the word
+  itself -- the cap, stage 2. `tests/test_whole_word_fuzzy.py`; 26 mutations killed.
 - Owner measurements after both (partly under test-suite load): בלי ירח 1.3 s and שמעון הצדיק
   1.1 s from submit to rows; שלום 3.4 s; בלי 17 s (loaded); variants שמעון הצדיק 75 s, of which
   66.5 s regex over whole-manuscript docs; fuzzy minutes (a 564K-character pattern).
@@ -339,7 +361,7 @@ survive an index rebuild. **Choose (b)**:
   limits: 1 worker, 4,096 MiB, 512 MiB compressed transfer) — replaced by the handle.
 - The exact server peak is a deployment measurement: parent + workers + index residency + export.
 
-### Stage W. The "Words" option (D4-D7) — design, not started (2026-10-01)
+### Stage W. The "Words" option (D4-D7) — the control dropped (owner); whole-word Variants (step 1) and Fuzzy (step 2) built
 
 **Found while designing (pre-existing, both apps):**
 - *Fuzzy retrieves only the exact word.* `build_tantivy_query` sends `"term"~1|2`, which the
@@ -390,6 +412,13 @@ Preview/streaming unchanged (page-first). Prefixes (D7) later as a third value.
 - W-Q1 **answered by the owner 2026-10-01: near spellings** -- edit distance 1 (short words) / 2
   (5+ letters), as the desktop tooltip ("Fuzzy search: Levenshtein distance") always promised;
   retrieval by `fuzzy_term_query`, verification by edit distance, not the variant list.
+  **Built 2026-10-02 (step 2, above)** with two changes: a swap of two neighbouring letters is
+  one edit (OSA, as Tantivy's fuzzy query counts: שולם for שלום), and retrieval is term sets of
+  the near spellings themselves -- `fuzzy_term_query` measured 3-4x slower (הצדיק 6.1 s vs 1.2 s).
+  **Owner 2026-10-02: a whole word within that distance counts even when the edit is an added
+  prefix letter** ("It's not bad that we include ושלום in fuzzy. It's fuzzy."). So in Fuzzy the
+  whole-word rule applies to the matched WORD (a whole token within the distance), not to the
+  query string: ושלום matches שלום, but שלום found inside ושלומות (3+ edits) does not.
 - W-Q2: is `regex_phrase_query` with large alternations fast enough, and is term-set + phrase
   retrieval provably a superset of the token verifier (bracket forms, marks, finals, geresh)?
 - W-Q3: which callers must pass `word_match` explicitly to keep their results (web /search
