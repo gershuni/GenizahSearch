@@ -35,6 +35,24 @@ hit", "Position search checks only the first occurrence on a page".
 - **D3 — controls that need the complete list (sort, filters, export, search-within) wait until
   the run finishes.**
 
+**Superseded the same day (owner, 2026-10-01): no "Words" control.** "I don't need to find שלום
+inside ושלום -- Responsa mode is for this kind of search." Exact, Variants and Fuzzy all match
+WHOLE words; prefixes stay with Responsa mode (D7 dropped). Lacunae: no option -- a phrase is
+found when words between + standalone brackets <= gap + 3; "the user can just increase the gap"
+(verified: 6 words + 8 brackets is missed at gap 6 and 10, found at gap 11). Fuzzy = near
+spellings (W-Q1) stands. Stage W below is kept for its findings; its "Also inside words" half is
+dropped, which also removes the slow per-term substring retrieval.
+
+Owner decisions (2026-10-01, earlier), the "Words" option:
+- **D4 — a "Words" choice for Exact, Variants and Fuzzy:** *Whole words* / *Also inside words*.
+- **D5 — the default is Whole words in all three** (Variants and Fuzzy too; today they match inside
+  words). Measured, whole-manuscript docs skipped: variants שמעון הצדיק 19.8 s -> 0.1 s, אהרן הכהן
+  150 s -> 3.7 s; fuzzy שלום 124 s -> 115 s (its time is the 564K-character pattern itself).
+- **D6 — lacunae belong to "Also inside words":** that setting also matches a phrase across any
+  number of lacuna brackets; Whole words stays strict (pair-phrase slop gap + 3).
+- **D7 — prefixes (ו ה ב כ ל מ ש) later, as a third value.** Placement: desktop search row after
+  Gap, for those three modes only; web: Advanced options. Kept across restarts.
+
 ## Measurements (real index, read-only scripts, warm, 2026-09-30)
 
 | Fact | Number |
@@ -178,6 +196,24 @@ Also done 2026-09-30, outside the original stage list:
   AND a standalone bracket token) costs +0.1-1.3 s per phrase on pages and +7-23 s across breaks
   (846,476 page docs, 43%, hold a standalone bracket). **Owner (2026-10-01): make it an option**
   -- to be designed together with the whole-word / substring option, before building.
+- **Stage W step 1, whole-word Variants (2026-10-01).** Variants retrieve every form the verifier
+  accepts (not the first 200) as whole tokens, with each form's edge-bracket forms, raw on
+  `content` and folded on `content_search` (term sets, `build_variant_query`, ORed with today's
+  clause so its boosts still rank); one word reads page docs only; phrases use aggregates only
+  for crossings, with a form-set pre-check. The whole-word rule (`_whole_word_span`: a match
+  continuing a Hebrew word -- marks, quotes and lacuna brackets looked past -- is not a match)
+  now applies to Exact and Variants in every path: page check, highlight in the original text,
+  restricted aggregates, crossings. Real index, HEAD vs working, uncapped: no row with a
+  whole-word match on its page lost; every added row a whole-word match. Variants שמעון הצדיק
+  11.1 -> 3.5 s, אהרן הכהן 89 -> 8.2 s, ברוך אתה 44 -> 11.6 s, שלום 15.5 -> 8.3 s, הצדיק 33 ->
+  1.9 s; rows drop only where the match was inside a longer word (שלום 3,551; one crossing
+  `לאהרן\nהכהן`), and come back where a form was never retrieved (שלום +245: forms with a bracket,
+  7 such pages were the gate's first FAIL). Exact: same rows and speed for single words; phrases
+  lose only inside-word matches (ברוך אתה 35, לי מי לי 8, אהרן כהן 1 -- the pinned known gap,
+  now closed). Fixture snapshot: same rows and order, Variants `score` differs.
+  `tests/test_whole_word_variants.py`; 16 mutations killed. Still open: Fuzzy (step 2); the
+  web's Exact is sent as mode `'exact'`, which the engine does not treat as `'literal'`, so none
+  of the Exact paths reach the website yet (decide with the web stage, after the API check).
 - Owner measurements after both (partly under test-suite load): בלי ירח 1.3 s and שמעון הצדיק
   1.1 s from submit to rows; שלום 3.4 s; בלי 17 s (loaded); variants שמעון הצדיק 75 s, of which
   66.5 s regex over whole-manuscript docs; fuzzy minutes (a 564K-character pattern).
@@ -296,6 +332,62 @@ survive an index rebuild. **Choose (b)**:
 - worker transfer: today the whole result is loaded into the parent (`web/research_jobs.py:246`,
   limits: 1 worker, 4,096 MiB, 512 MiB compressed transfer) — replaced by the handle.
 - The exact server peak is a deployment measurement: parent + workers + index residency + export.
+
+### Stage W. The "Words" option (D4-D7) — design, not started (2026-10-01)
+
+**Found while designing (pre-existing, both apps):**
+- *Fuzzy retrieves only the exact word.* `build_tantivy_query` sends `"term"~1|2`, which the
+  parser reads as a one-word PHRASE slop, not a fuzzy term: שלום 79,656 docs either way, while
+  `Query.fuzzy_term_query(distance=1)` gives 318,297 (ירושלים 19,401 vs 145,646). Fuzzy rows are
+  pages holding the exact word, plus a variant that the 8,000-form regex happens to find inside a
+  retrieved whole manuscript.
+- *Variants retrieve with at most 200 forms per term* (`get_variants(limit=200)`, `:1684`), while
+  the regex verifies up to `REGEX_VARIANTS_LIMIT` = 8,000; a page holding only form 201+ is found
+  only incidentally, through a whole-manuscript doc that holds a top-200 form elsewhere.
+- *Today's "inside words" is incidental too:* retrieval is whole-token, so a match inside a longer
+  word is found only when its manuscript also holds the whole word (the substring regex over the
+  whole manuscript then reports the first occurrence).
+
+**Semantics.** Whole words: every query term matches a whole hebword token of the text (brackets
+and the mark set of `strip_search_diacritics` tolerated, as today's bracket forms and
+`content_search` do). Also inside words: a term matches any substring of a token, and a phrase's
+words may be separated by any run of separators, lacuna brackets included (D6). Both apply to the
+term *forms* of the mode: Exact = the term; Variants = its variant forms; Fuzzy = see W-Q1.
+
+**Retrieval, per setting** (tantivy-py 0.25 has `term_set_query`, `regex_query`,
+`regex_phrase_query(words, slop)`, `fuzzy_term_query`):
+- Whole words, one term: the term's forms as whole tokens (a term set over `content` /
+  `content_search`, with the bracket forms) AND `scope:page`. Forms are the SAME list the verifier
+  uses (no 200-form cut).
+- Whole words, several terms: page docs by adjacent-pair `regex_phrase_query` (each position = an
+  alternation of that term's forms, bracket-tolerant; slop gap + 3); whole-manuscript docs only for
+  crossings, by the word window. If one pair's alternation is too large for the term dictionary
+  (measure), fall back to AND of per-term sets for that pair.
+- Also inside words: per term `regex_query('.*form.*')` on the folded field (bracket-tolerant
+  between letters), AND across terms (no phrase, so no slop: lacuna runs are crossed), page docs;
+  whole-manuscript docs for crossings only, by the word window. An unanchored term-dictionary
+  pass costs 3.4-5 s per term (PR 3 #9 measurement) -- the price of this setting.
+- Verification: whole words -> a token check (each text token, bracket-stripped and folded,
+  looked up in the term's form set; phrases: consecutive word tokens with <= gap words between),
+  replacing the 564K-character fuzzy/variants alternation; inside words -> today's substring
+  regex. Highlight = the verified span.
+
+**Plumbing.** `execute_search(..., word_match=None)`: 'whole' | 'inside'; None = today's behaviour
+for that mode, so the public API, Joins Lab, research workers and replayed old refinement steps
+are unchanged until they pass it. Desktop: a combo after Gap (Exact/Variants/Fuzzy only),
+`SearchThread(word_match=)`, saved in `session.json` on the always-restored path (like corpus
+scope), recorded in history params and refinement steps, reset by New. Web: Advanced options,
+`_safe_set('search_word_match')`, passed at the `execute_search` call; refinement steps carry it.
+Preview/streaming unchanged (page-first). Prefixes (D7) later as a third value.
+
+**Open questions (Codex round, then owner):**
+- W-Q1 **answered by the owner 2026-10-01: near spellings** -- edit distance 1 (short words) / 2
+  (5+ letters), as the desktop tooltip ("Fuzzy search: Levenshtein distance") always promised;
+  retrieval by `fuzzy_term_query`, verification by edit distance, not the variant list.
+- W-Q2: is `regex_phrase_query` with large alternations fast enough, and is term-set + phrase
+  retrieval provably a superset of the token verifier (bracket forms, marks, finals, geresh)?
+- W-Q3: which callers must pass `word_match` explicitly to keep their results (web /search
+  defaults to 'whole' per D5; the API keeps None)?
 
 ### Out of scope (separate caps)
 

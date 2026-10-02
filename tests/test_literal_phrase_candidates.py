@@ -122,9 +122,11 @@ def test_pair_only_inside_a_longer_word_is_not_a_match(engine):
     assert "inside_far" not in _uids(engine, f"{AH} {KO}")
 
 
-def test_inside_word_near_bare_words_is_a_known_gap(engine):
-    # Flip when the Literal verifier becomes whole-word (plan stage 0a).
-    assert "inside_near" in _uids(engine, f"{AH} {KO}")
+def test_inside_word_near_bare_words_is_not_a_match(engine):
+    # The pair phrase still returns the page (Tantivy's slop also allows reversed
+    # order), but the only phrase on it is inside a longer word: the whole-word
+    # check rejects it (2026-10-01; was a known gap pinned here).
+    assert "inside_near" not in _uids(engine, f"{AH} {KO}")
 
 
 def test_gap_is_respected(engine):

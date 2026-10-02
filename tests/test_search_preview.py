@@ -68,7 +68,7 @@ def _build(root, n_v8):
     add("v7only", f"{W}", "V0.7")                      # a V0.7-only page: goes to the end
     # A whole-manuscript doc that outscores every page (the word 30 times) and maps
     # to a page with no page doc of its own: its row exists only through the
-    # aggregate. Literal single-word search skips aggregates; variants keeps them.
+    # aggregate. Single-word Exact and Variants skip aggregates; a position search keeps them.
     text = " ".join([W] * 30)
     w.add_document(tantivy.Document(
         unique_id="sys:990009", content=text, content_search=text, source="V0.8",
@@ -169,7 +169,7 @@ def test_first_wins_keeps_the_first_row_and_position_per_uid():
 def test_page_docs_are_processed_before_whole_manuscript_docs(engines):
     # The aggregate outscores every page, so the old single mixed query handled
     # it first; its row now follows every page row.
-    final = engines["many"].execute_search(W, "variants", 0, corpus_scope="genizah")
+    final = engines["many"].execute_search(W, "variants", 0, corpus_scope="genizah", text_position="start")
     v8 = [r["uid"] for r in final if r["display"]["source"] == "V0.8"]
     assert "sysonly" in v8 and v8[-1] == "sysonly"
 

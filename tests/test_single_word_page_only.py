@@ -1,4 +1,4 @@
-"""A single Literal word is searched in page docs only, not in whole-manuscript / part docs.
+"""A single Exact or Variants word is searched in page docs only, not in whole-manuscript / part docs.
 
 A single word cannot span a page break, so an aggregate doc only repeated a page hit
 or, through its first-match-in-the-manuscript row, added a match INSIDE a longer word
@@ -9,6 +9,7 @@ real-index gate is described in docs/plans/SEARCH_UNCAPPED_STREAMING_PLAN.md.
 
 The fast path must stay off for multi-word queries (cross-page matches), for text
 positions, for other modes, and for an index whose docs do not all carry a scope.
+Variants got the same path on 2026-10-01 (owner: Variants match whole words too).
 """
 import gc
 import json
@@ -111,11 +112,19 @@ def test_single_word_is_found_on_its_page_only(engines):
 def test_the_manuscript_doc_is_still_used_when_a_doc_has_no_scope(engines):
     eng = engines["scopeless"]
     assert eng._every_doc_has_scope() is False
-    assert "A" in _uids(eng, W)                     # today's behaviour, unchanged
+    assert not any("scope:page" in q for q in _queries(eng, W))   # no page-only clause
+    # The manuscript doc is read, but its first match (לשלום) is inside a longer
+    # word: the whole-word check moves on to page B's שלום.
+    got = _uids(eng, W)
+    assert "A" not in got and "B" in got
 
 
-def test_other_modes_keep_the_manuscript_docs(engines):
-    assert "A" in _uids(engines["complete"], W, mode="variants")
+def test_single_word_variants_is_found_on_its_page_only(engines):
+    assert _uids(engines["complete"], W, mode="variants") == {"B"}
+
+
+def test_fuzzy_keeps_the_manuscript_docs(engines):
+    assert "A" in _uids(engines["complete"], W, mode="fuzzy")
 
 
 class _RecordingIndex:
@@ -146,16 +155,17 @@ def _queries(eng, query, mode="literal", **kw):
 AGG = "(scope:system OR scope:part)"
 
 
-def test_single_word_literal_never_queries_the_aggregates(engines):
-    assert not any(AGG in q for q in _queries(engines["complete"], W))
+@pytest.mark.parametrize("mode", ["literal", "variants"])
+def test_single_word_never_queries_the_aggregates(engines, mode):
+    assert not any(AGG in q for q in _queries(engines["complete"], W, mode=mode))
 
 
 @pytest.mark.parametrize("query, kw", [
     (W, {"text_position": "start"}),
     (f"{W} עליכם", {}),
-    (W, {"mode": "variants"}),
+    (f"{W} עליכם", {"mode": "variants"}),
     (W, {"mode": "fuzzy"}),
-], ids=["position", "phrase", "variants", "fuzzy"])
+], ids=["position", "phrase", "variants-phrase", "fuzzy"])
 def test_other_searches_still_query_the_aggregates(engines, query, kw):
     assert any(AGG in q for q in _queries(engines["complete"], query, **kw))
 

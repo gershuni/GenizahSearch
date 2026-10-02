@@ -12,6 +12,7 @@ import os
 import re
 import threading
 import time
+import unicodedata
 import weakref
 import html
 import json
@@ -302,6 +303,46 @@ def _first_position_valid_match(regex, text, first_match, text_position, line_co
             return match
         if line_constraints or text_position == 'start':
             return None
+        match = regex.search(text, pos=match.start() + 1)
+    return None
+
+
+# Whole words (owner, D1 for Exact and 2026-10-01 for Variants): a match inside a
+# longer Hebrew word is not a match -- "Responsa mode is for that kind of search".
+# Marks (nikud, cantillation, the Judeo-Arabic dot), quotes/geresh and lacuna brackets
+# belong to the word they sit in (ו[שלום is one word), so they are looked past. Any
+# other neighbour is a boundary. That is lenient on purpose: the hebword tokenizer and
+# Python's \w disagree on chars like '²', and a page the index returned for a whole
+# token must not be lost to that.
+_IN_WORD_QUOTES = frozenset('\'"\u05F3\u05F4\u2018\u2019[]')
+_WHOLE_WORD_MODES = frozenset({'literal', 'variants', 'variants_extended', 'variants_maximum'})
+_HEB_LETTER_RUN_RE = re.compile(r'[\u05D0-\u05EA]+')
+
+
+def _looked_past(ch):
+    return ch in _IN_WORD_QUOTES or unicodedata.category(ch)[0] == 'M'
+
+
+def _whole_word_span(text, start, end):
+    """True unless the span text[start:end] continues a Hebrew word on either side."""
+    i = start - 1
+    while i >= 0 and _looked_past(text[i]):
+        i -= 1
+    if i >= 0 and '\u05D0' <= text[i] <= '\u05EA':
+        return False
+    j = end
+    while j < len(text) and _looked_past(text[j]):
+        j += 1
+    return not (j < len(text) and '\u05D0' <= text[j] <= '\u05EA')
+
+
+def _first_accepted_match(regex, text, first_match, accept):
+    """The first occurrence of *regex* in *text*, from *first_match* on, that *accept*
+    takes, or None. Repeated ``search(pos=...)``: the budgeted Pattern has no finditer."""
+    match = first_match
+    while match is not None:
+        if accept(match):
+            return match
         match = regex.search(text, pos=match.start() + 1)
     return None
 
@@ -1769,6 +1810,52 @@ class SearchEngine:
             pairs.append(f'({" OR ".join(clauses)})')
         return " AND ".join(pairs)
 
+    def _and_query(self, query, extra):
+        """*query* (a Query object) AND the query string *extra*."""
+        return tantivy.Query.boolean_query([(tantivy.Occur.Must, query),
+                                            (tantivy.Occur.Must, self.index.parse_query(f'({extra})', ['content']))])
+
+    def _verifier_forms(self, term, mode):
+        """The forms build_regex_pattern accepts for *term* (Variants modes)."""
+        forms = set(self.var_mgr.get_variants(term, mode, limit=Config.REGEX_VARIANTS_LIMIT))
+        forms.add(term)
+        return sorted(f for f in forms if f)
+
+    def _folded_forms(self, term, mode):
+        """*term*'s forms folded as the index's content_search field is."""
+        return frozenset(f for f in (strip_search_diacritics(v).lower() for v in self._verifier_forms(term, mode)) if f)
+
+    def build_variant_query(self, terms, mode, content_search_field=None):
+        """Tantivy candidates for whole-word Variants: per term, today's clause
+        (the term boosted, its first 200 variants, its bracket forms) OR every form
+        the verifier accepts, as whole tokens -- raw on ``content`` and folded on
+        *content_search_field*. Term sets: 8,000 forms cost 0.45 s where the
+        parsed OR of them cost 4 s (Codex, real index, 2026-10-01). Before this,
+        a page holding only form 201+ was never retrieved.
+        """
+        schema = self.index.schema
+        should = tantivy.Occur.Should
+
+        def with_brackets(forms):
+            # A token keeps an edge bracket (שלים[, ]אחה); the real-index gate found
+            # 7 V0.8 pages whose only match was such a form. Both fields keep brackets.
+            return sorted({b for f in forms for b in _add_bracket_variants(f)})
+
+        per_term = []
+        for term in terms:
+            clean = term.replace('"', '')
+            if not clean:
+                continue
+            clauses = [(should, self.index.parse_query(
+                self.build_tantivy_query([clean], mode, content_search_field=content_search_field), ['content']))]
+            clauses.append((should, tantivy.Query.term_set_query(
+                schema, 'content', with_brackets(self._verifier_forms(clean, mode)))))
+            if content_search_field:
+                clauses.append((should, tantivy.Query.term_set_query(
+                    schema, content_search_field, with_brackets(self._folded_forms(clean, mode)))))
+            per_term.append((tantivy.Occur.Must, tantivy.Query.boolean_query(clauses)))
+        return tantivy.Query.boolean_query(per_term) if per_term else None
+
     def build_regex_pattern(self, terms, mode, max_gap, responsa_components=None, responsa_options=None, per_pair_gaps=None):
         # --- Responsa branch ---
         if responsa_components is not None:
@@ -2022,9 +2109,15 @@ class SearchEngine:
             'score': float(score),
         }
 
-    def _cross_page_spans(self, regex, content, boundaries, first_term, last_term, side_words, gap, strip):
+    def _cross_page_spans(self, regex, content, boundaries, first_term, last_term, side_words, gap, strip,
+                          whole_words=False):
         """Spans (in *content* coordinates) of every match that runs across a page
         break of a whole-manuscript / part doc.
+
+        *first_term* / *last_term* are the query's words, or -- for Variants -- the
+        sets of their forms, folded (``_folded_forms``); a set is checked against the
+        window's runs of Hebrew letters, which a whole-word occurrence always is.
+        *whole_words*: a match must also pass ``_whole_word_span``.
 
         For a multi-word Literal query the page docs already give every match
         inside one page, so an aggregate adds only the matches that cross a
@@ -2047,7 +2140,14 @@ class SearchEngine:
         """
         if len(boundaries) < 2:
             return []
-        first, last = first_term.lower(), last_term.lower()
+
+        def _occurs(term, folded):
+            if isinstance(term, frozenset):
+                return any(r in term for r in _HEB_LETTER_RUN_RE.findall(folded))
+            return term in folded.lower()
+
+        first = first_term if isinstance(first_term, frozenset) else first_term.lower()
+        last = last_term if isinstance(last_term, frozenset) else last_term.lower()
         head = _words_head_re(max(1, side_words))
         pieces = []        # (window text, break offset in it, content index of its start, original window)
         for b in boundaries[1:]:
@@ -2062,12 +2162,12 @@ class SearchEngine:
                 lo = _left_window_start(content, cut, side_words)
             left = content[lo:cut]
             s_left = _strip_brackets(left) if strip else left
-            if first not in strip_search_diacritics(s_left).lower():
+            if not _occurs(first, strip_search_diacritics(s_left)):
                 continue
             hi = _right_window_end(content, cut, side_words)
             right = content[cut:hi]
             s_right = _strip_brackets(right) if strip else right
-            if last not in strip_search_diacritics(s_right).lower():
+            if not _occurs(last, strip_search_diacritics(s_right)):
                 continue
             pieces.append((s_left + s_right, len(s_left), lo, left + right))
         if not pieces:
@@ -2102,7 +2202,9 @@ class SearchEngine:
             while m is not None:
                 j = bisect.bisect_right(offsets, m.start()) - 1
                 cs = offsets[j] + pieces[j][1]
-                if m.start() < cs < m.end():
+                # A window starts and ends at a whitespace edge and '_' is no
+                # Hebrew letter, so the whole-word test sees the true neighbours.
+                if m.start() < cs < m.end() and (not whole_words or _whole_word_span(joined, m.start(), m.end())):
                     spans.append(to_content(pieces[j], m.start() - offsets[j], m.end() - offsets[j]))
                     if j + 1 >= len(pieces):
                         break
@@ -2113,7 +2215,10 @@ class SearchEngine:
             for piece in pieces:
                 text, cs = piece[0], piece[1]
                 m = regex.search(text)
-                while m is not None and m.start() < cs and m.end() <= cs:
+                # The first match that crosses the break (and is a whole-word match,
+                # when asked); one that starts after the break cannot cross it.
+                while m is not None and m.start() < cs and not (
+                        cs < m.end() and (not whole_words or _whole_word_span(text, m.start(), m.end()))):
                     m = regex.search(text, m.start() + 1)
                 if m is not None and m.start() < cs < m.end():
                     spans.append(to_content(piece, m.start(), m.end()))
@@ -2846,6 +2951,7 @@ class SearchEngine:
         _line_constraints = {}  # Per-line position constraints (L3:word syntax)
         _has_wildcard_component = False  # Set True when any Responsa component has a wildcard
         _cross_page_terms = None  # (first, last) term when aggregates add only cross-page matches
+        t_query_obj = None        # a Query object (Variants' term sets) used instead of t_query_str
         _cross_page_side_words = 0
         _page_only = False        # the query already excludes aggregate docs
 
@@ -3088,14 +3194,28 @@ class SearchEngine:
                         _cross_page_side_words = (len(terms) - 1) * (gap + 1)
                 if t_query_str is None:
                     t_query_str = self.build_tantivy_query(terms, mode, content_search_field=_cs_field)
-                # A single Literal word cannot span a page break, so a
-                # whole-manuscript or part doc only repeats a page hit -- or adds
-                # a match inside a longer word, which is not a Literal match (owner
-                # decision 2026-09-30). Those docs averaged 62K chars and were most
-                # of the load time (שלום: 15,490 of them, 9.7 s).
-                if (mode == 'literal' and not text_position and len(terms) == 1
+                # Variants match whole words too (owner 2026-10-01), so they get
+                # Literal's paths: every verifier form retrieved as a whole token,
+                # page docs for one word, aggregates only for page-break crossings.
+                # Measured: שמעון הצדיק 19.8 s, אהרן הכהן 150 s were regex over
+                # whole manuscripts. Position searches keep the old query (their
+                # fields hold head/tail tokens only).
+                if mode in _WHOLE_WORD_MODES and mode != 'literal' and not text_position:
+                    t_query_obj = self.build_variant_query(terms, mode, content_search_field=_cs_field)
+                    if t_query_obj is not None and len(terms) > 1:
+                        _cross_page_terms = (self._folded_forms(terms[0], mode),
+                                             self._folded_forms(terms[-1], mode))
+                        _cross_page_side_words = (len(terms) - 1) * (gap + 1)
+                # A single word cannot span a page break, so a whole-manuscript or
+                # part doc only repeats a page hit -- or adds a match inside a
+                # longer word, which is not a match (owner decision 2026-09-30).
+                # Those docs averaged 62K chars and were most of the load time
+                # (שלום: 15,490 of them, 9.7 s).
+                if (mode in _WHOLE_WORD_MODES and not text_position and len(terms) == 1
                         and self._every_doc_has_scope()):
                     t_query_str = f'({t_query_str}) AND scope:page'
+                    if t_query_obj is not None:
+                        t_query_obj = self._and_query(t_query_obj, 'scope:page')
                     _page_only = True
                 regex = self.build_regex_pattern(terms, mode, gap)
         if not regex: return []
@@ -3114,6 +3234,8 @@ class SearchEngine:
         if restrict_sys_ids is not None and len(restrict_sys_ids) <= 500:
             sid_clauses = ' OR '.join(f'full_header:"{sid}"' for sid in restrict_sys_ids)
             t_query_str = f'({t_query_str}) AND ({sid_clauses} OR scope:part)'
+            if t_query_obj is not None:
+                t_query_obj = self._and_query(t_query_obj, f'{sid_clauses} OR scope:part')
 
         # Choose search field based on text_position filter
         position_field_map = {
@@ -3141,12 +3263,21 @@ class SearchEngine:
             agg_q = None
             if (not _page_only and not (responsa_options and responsa_options.get('responsa_mode'))
                     and self._every_doc_has_scope()):
-                page_q = self.index.parse_query(f'({t_query_str}) AND scope:page', [search_field])
+                if t_query_obj is not None:
+                    page_q = self._and_query(t_query_obj, 'scope:page')
+                else:
+                    page_q = self.index.parse_query(f'({t_query_str}) AND scope:page', [search_field])
                 hits = list(self.searcher.search(page_q, Config.SEARCH_LIMIT).hits)
                 # Parsed now (a bad query fails here, as before) but run only after
                 # the page hits: the first rows need not wait for it.
-                agg_q = self.index.parse_query(
-                    f'({t_query_str}) AND (scope:system OR scope:part)', [search_field])
+                if t_query_obj is not None:
+                    agg_q = self._and_query(t_query_obj, 'scope:system OR scope:part')
+                else:
+                    agg_q = self.index.parse_query(
+                        f'({t_query_str}) AND (scope:system OR scope:part)', [search_field])
+            elif t_query_obj is not None:
+                res_obj = self.searcher.search(t_query_obj, Config.SEARCH_LIMIT)
+                hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
             else:
                 query = self.index.parse_query(t_query_str, [search_field])
                 res_obj = self.searcher.search(query, Config.SEARCH_LIMIT)
@@ -3197,6 +3328,18 @@ class SearchEngine:
             for sid in restrict_sys_ids:
                 for page in browse_map.get(sid, []):
                     restrict_uids.add(page['uid'])
+
+        # Exact and Variants match whole words (owner decisions D1, 2026-10-01).
+        _whole_words = (mode in _WHOLE_WORD_MODES
+                        and not (responsa_options and responsa_options.get('responsa_mode')))
+
+        def _accept(text, m, strip_br):
+            """A match the row may use: a whole-word one (Exact, Variants) that
+            meets the text position, when one is set."""
+            if _whole_words and not _whole_word_span(text, m.start(), m.end()):
+                return False
+            return (not text_position or Indexer._validate_position_match(
+                text, m, text_position, _line_constraints or None, strip_brackets=strip_br))
 
         # Early rows for the desktop (see the docstring): only where nothing after
         # this loop can drop or move them.
@@ -3256,7 +3399,8 @@ class SearchEngine:
                         try:
                             spans = self._cross_page_spans(
                                 regex, content, boundaries, _cross_page_terms[0], _cross_page_terms[1],
-                                _cross_page_side_words, gap, strip=not _query_has_brackets(query_str))
+                                _cross_page_side_words, gap, strip=not _query_has_brackets(query_str),
+                                whole_words=_whole_words)
                         finally:
                             candidate_match_seconds += time.perf_counter() - match_started
                         kept = 0
@@ -3289,20 +3433,29 @@ class SearchEngine:
                     # Position post-filter: Tantivy uses broad fields (10-word head/tail),
                     # validate exact position (first word, last word, line boundary)
                     # against the first occurrence that satisfies it, not just the first.
-                    if text_position:
+                    # Whole words: the first occurrence that is not inside a longer word.
+                    if _whole_words:
+                        match_obj = _first_accepted_match(
+                            regex, match_content, match_obj,
+                            lambda m, _t=match_content: _accept(_t, m, not _query_has_brackets(query_str)))
+                    elif text_position:
                         match_obj = _first_position_valid_match(
                             regex, match_content, match_obj, text_position, _line_constraints or None,
                             strip_brackets=not _query_has_brackets(query_str))
-                        if match_obj is None:
-                            regex_filtered_count += 1
-                            continue
+                    if match_obj is None:
+                        regex_filtered_count += 1
+                        continue
 
                     # For highlighting, re-search on original content to
                     # preserve scholarly bracket notation in snippets.
                     orig_match_missing = False
                     if match_content is not content:
                         orig_match = regex.search(content)
-                        if orig_match and text_position:
+                        if orig_match and _whole_words:
+                            orig_match = _first_accepted_match(
+                                regex, content, orig_match,
+                                lambda m, _t=content: _accept(_t, m, True)) or orig_match
+                        elif orig_match and text_position:
                             # Highlight the occurrence that met the position, when the
                             # original text has one; else keep the old first match.
                             orig_match = _first_position_valid_match(
@@ -3319,11 +3472,9 @@ class SearchEngine:
                     if restrict_uids is not None and scope != 'page':
                         span_text = match_content if orig_match_missing else content
                         position_ok = None
-                        if text_position:
+                        if text_position or _whole_words:
                             def position_ok(m, _t=span_text):
-                                return Indexer._validate_position_match(
-                                    _t, m, text_position, _line_constraints or None,
-                                    strip_brackets=not _query_has_brackets(query_str))
+                                return _accept(_t, m, not _query_has_brackets(query_str))
                         match_obj = self._first_match_in_pages(
                             regex, span_text, match_obj, boundaries, restrict_uids, position_ok)
                         if match_obj is None:
