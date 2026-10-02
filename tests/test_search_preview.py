@@ -174,6 +174,16 @@ def test_page_docs_are_processed_before_whole_manuscript_docs(engines):
     assert "sysonly" in v8 and v8[-1] == "sysonly"
 
 
+def test_whole_manuscript_docs_are_read_when_page_hits_fill_the_limit(engines):
+    # Codex review of PR #375: the aggregate query got only the room the page hits
+    # left, so a search whose page hits reached the limit lost every row that only
+    # an aggregate gives (a phrase's page-break matches).
+    with patch.object(Config, "SEARCH_LIMIT", 10):
+        final = engines["many"].execute_search(W, "variants", 0, corpus_scope="genizah",
+                                               text_position="start")
+    assert "sysonly" in [r["uid"] for r in final]
+
+
 def test_search_thread_passes_the_callback_and_emits_the_preview():
     from desktop.gui_threads import SearchThread
 

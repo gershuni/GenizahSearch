@@ -21645,6 +21645,8 @@ class GenizahGUI(QMainWindow):
             self.last_results = []
             for b in self.export_buttons: b.setEnabled(False)
             self.results_table.setRowCount(0)
+            # A preview of this run turned sorting off; no batch load turns it on here.
+            self.results_table.setSortingEnabled(True)
             self._update_load_more_button()
             self.result_row_by_sys_id = {}
             self.shelfmark_items_by_sid = {}

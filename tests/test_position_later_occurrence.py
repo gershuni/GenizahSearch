@@ -127,6 +127,10 @@ def test_line_break_end_accepts_a_later_occurrence(results_by_position):
     rows = results_by_position["line_break_end"]
     assert "lb_end_later" in rows
     assert "lb_end_never" not in rows
+    # The highlight marks the occurrence that ends the text, not the first one
+    # (Codex review of PR #375: the row was built from a fresh first-match search).
+    snippet = rows["lb_end_later"].rstrip()
+    assert snippet.endswith("*") and not snippet.startswith("*"), snippet
 
 
 def test_no_position_valid_occurrence_still_rejected(results_by_position):

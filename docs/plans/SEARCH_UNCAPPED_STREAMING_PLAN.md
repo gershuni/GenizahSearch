@@ -178,8 +178,9 @@ Also done 2026-09-30, outside the original stage list:
   variants שמעון הצדיק 50 rows at 219 ms (full 27.8 s). Owner: "streaming is very good".
   Declared changes: rows that only an aggregate gives (cross-page, and for variants/fuzzy some
   substring matches) now follow the page rows instead of their score position; a page with both
-  rows is shown as its page row. While the 50K cap stays, a very common phrase can fill it with
-  page hits and skip its (rare) cross-page matches. Tests: `tests/test_search_preview.py` and the
+  rows is shown as its page row. While the 50K cap stays, a very common phrase could fill it with
+  page hits and skip its (rare) cross-page matches -- fixed 2026-10-02 (Codex PR review):
+  the aggregate query has a limit of its own. Tests: `tests/test_search_preview.py` and the
   preview tests in `tests/test_exclusion_surfaces.py`; 13 mutations killed.
 - **Codex review 2026-10-01 (draft PR #375): two phrase losses, both confirmed on the corpus.**
   (1) *Cross-page window in characters*: a long non-word run at a page edge pushed a crossing out
@@ -214,6 +215,11 @@ Also done 2026-09-30, outside the original stage list:
   `tests/test_whole_word_variants.py`; 16 mutations killed. Still open: Fuzzy (step 2); the
   web's Exact is sent as mode `'exact'`, which the engine does not treat as `'literal'`, so none
   of the Exact paths reach the website yet (decide with the web stage, after the API check).
+- **Codex PR review of #375 (2026-10-02), three fixes:** aggregates get their own limit (above);
+  the line-break path highlights the occurrence that met the position, not a fresh first match;
+  a run that showed a preview and then ended with no rows turns table sorting back on. Two
+  earlier P1 comments were already handled: the character window (word window, 9e8d8172) and
+  4+ lacuna brackets in a phrase (owner: ignore; a larger gap reaches them).
 - Owner measurements after both (partly under test-suite load): בלי ירח 1.3 s and שמעון הצדיק
   1.1 s from submit to rows; שלום 3.4 s; בלי 17 s (loaded); variants שמעון הצדיק 75 s, of which
   66.5 s regex over whole-manuscript docs; fuzzy minutes (a 564K-character pattern).

@@ -1815,6 +1815,21 @@ def test_a_preview_shows_rows_while_searching_and_the_result_replaces_it(window)
     assert w.results_table.rowCount() == 12
 
 
+@pytest.mark.parametrize("final", ["the same rows", "no rows"])
+def test_sorting_comes_back_when_the_run_ends(window, final):
+    # Codex review (PR #375): the preview turns sorting off; the end of the run
+    # must turn it on again -- also when the preview already held every row, and
+    # when the run ends with nothing (an error, or Stop before any result).
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    w._on_search_preview(w.search_thread, _rows(A, 5))
+    assert not w.results_table.isSortingEnabled()
+    _search(w, _rows(A, 5) if final == "the same rows" else [])
+    _drain_events()
+    assert w.results_table.isSortingEnabled()
+
+
 @pytest.mark.parametrize("case", ["other thread", "not searching", "all-terms view"])
 def test_a_preview_is_ignored_when_it_no_longer_applies(window, case):
     w = window

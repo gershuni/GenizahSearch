@@ -2718,8 +2718,14 @@ class SearchEngine:
                             continue
                     span = match_obj.span()
 
-                    hl_c = self.highlight(content, regex, False)
-                    hl_f = self.highlight(content, regex, True)
+                    # Highlight the occurrence kept above (it may be a later one that
+                    # meets the position), not a fresh first match. With no match in
+                    # the original text, highlight() finds none either, as before.
+                    if span_text is content:
+                        hl_c, hl_f = self._highlight_pair(content, span)
+                    else:
+                        hl_c = self.highlight(content, regex, False)
+                        hl_f = self.highlight(content, regex, True)
 
                     if boundaries:
                         span_map = self._map_span_to_pages(span, boundaries)
@@ -3297,12 +3303,14 @@ class SearchEngine:
         LOGGER.debug(f"Tantivy returned {total_hits} hits")
 
         def _page_hits_then_aggregates():
-            """The page hits, then -- fetched only now, within the same total
-            limit -- the whole-manuscript / part hits."""
+            """The page hits, then -- fetched only now -- the whole-manuscript /
+            part hits, with a limit of their own: they are the only source of a
+            phrase's page-break matches, so page hits that fill the limit must not
+            leave them no room (Codex review of PR #375)."""
             nonlocal total_hits, tantivy_elapsed_ms
             yield from hits
-            room = Config.SEARCH_LIMIT - len(hits)
-            if agg_q is None or room <= 0:
+            room = Config.SEARCH_LIMIT
+            if agg_q is None:
                 return
             started = time.perf_counter()
             try:
