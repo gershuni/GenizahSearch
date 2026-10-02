@@ -259,6 +259,11 @@ class SearchThread(PausableSearchMixin, QThread):
     # Phase marker (e.g. 'local_search'); distinct from progress_signal so a phase
     # change can never be mistaken for numeric progress.
     phase_signal = pyqtSignal(str)
+    # The first rows of the result while the search still runs, repeatedly as
+    # more are found, each the start of the final list (see
+    # SearchEngine.execute_search preview_callback). results_signal still
+    # carries the complete list.
+    preview_signal = pyqtSignal(list)
     def __init__(self, searcher, query, mode, gap, exclude_words=None, responsa_options=None, restrict_sys_ids=None, text_position=None, corpus_scope="all", run_id=0):
         super().__init__()
         self.searcher = searcher; self.query = query; self.mode = mode; self.gap = gap
@@ -292,6 +297,7 @@ class SearchThread(PausableSearchMixin, QThread):
                 text_position=self.text_position,
                 corpus_scope=self.corpus_scope,
                 phase_callback=phase_cb,
+                preview_callback=self.preview_signal.emit,
             )
 
             self.results_signal.emit(results)

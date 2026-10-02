@@ -46,8 +46,13 @@ def _make_search_engine():
     var_mgr = MagicMock()
     var_mgr.get_variants = MagicMock(side_effect=lambda term, mode, limit=200: [term])
 
+    # worker_mode / open_local: the default constructor starts the FL-ID index
+    # build on the REAL browse map in a background thread. It filled the
+    # class-level SearchEngine._shared_browse_map with real data for every
+    # later test in the process, and its CPU load exhausted the regex time
+    # budget of test_search_regex.py (both found 2026-09-30).
     with patch.object(SearchEngine, 'reload_index', return_value=False):
-        engine = SearchEngine(meta_mgr, var_mgr)
+        engine = SearchEngine(meta_mgr, var_mgr, worker_mode=True, open_local=False)
 
     return engine
 

@@ -1746,3 +1746,124 @@ def test_the_load_more_label_has_a_hebrew_translation():
     from shared.genizah_translations import TRANSLATIONS
     assert TRANSLATIONS.get("Load more results ({} not loaded)"), (
         "user-visible string without a Hebrew entry")
+
+
+# --- First paint (2026-09-30): the first FIRST_PAINT_ROWS rows are built before the
+# handler returns; the rest of the first page follows on the next event-loop turn.
+
+def _drain_events():
+    for _ in range(5):
+        QApplication.processEvents()
+
+
+def test_a_search_paints_the_first_rows_then_fills_the_first_page(window):
+    w = window
+    _search(w, _rows(A, 120))
+    assert w.results_table.rowCount() == app.FIRST_PAINT_ROWS, (
+        "the whole first page was built before the first paint")
+    _drain_events()
+    assert w.results_table.rowCount() == 120 and w.results_loaded == 120
+
+
+def test_the_fill_stops_when_another_search_has_replaced_the_results(window):
+    w = window
+    _search(w, _rows(A, 120))
+    _search(w, _rows(B, 30))              # a second search lands before the fill runs
+    _drain_events()
+    assert w.results_table.rowCount() == 30
+    assert all(w.results_table.item(r, w.COL_SYS_ID).text() == B for r in range(30))
+
+
+def test_the_fill_waits_while_a_new_search_runs(window):
+    w = window
+    _search(w, _rows(A, 120))
+    w.is_searching = True                 # the user started another search
+    _drain_events()
+    assert w.results_table.rowCount() == app.FIRST_PAINT_ROWS
+
+
+def test_the_fill_leaves_an_all_terms_page_alone(window, monkeypatch):
+    """With "only results with all terms" on, the search re-renders its own page
+    from a filtered list and puts the full list back; a fill would then append
+    rows that filter hides."""
+    w = window
+    keep = {f"{A}_{p}" for p in range(1, 61)}
+    monkeypatch.setattr(app, "compute_all_terms_filter", lambda chain: keep)
+    monkeypatch.setattr(app, "enrich_snippet_with_chain_terms", lambda s, c, q: s)
+    w.refinement_chain = [object(), object()]
+    w._all_terms_filter = True
+    _search(w, _rows(A, 60) + _rows(B, 60))
+    shown = w.results_table.rowCount()
+    _drain_events()
+    assert w.results_table.rowCount() == shown == 60
+    assert all(w.results_table.item(r, w.COL_SYS_ID).text() == A for r in range(60))
+
+
+# --- Search preview (2026-09-30): the first rows while the search still runs.
+
+def test_a_preview_shows_rows_while_searching_and_the_result_replaces_it(window):
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    w.status_label.setText("Searching...")
+    w._on_search_preview(w.search_thread, _rows(A, 5))
+    assert w.results_table.rowCount() == 5
+    assert w.status_label.text() == "Searching...", "the preview must not claim a result count"
+    assert not w.results_table.isSortingEnabled(), "no sorting while the run is going"
+    _search(w, _rows(A, 5) + _rows(B, 7))       # the run ends
+    _drain_events()
+    assert w.results_table.rowCount() == 12
+
+
+@pytest.mark.parametrize("final", ["the same rows", "no rows"])
+def test_sorting_comes_back_when_the_run_ends(window, final):
+    # Codex review (PR #375): the preview turns sorting off; the end of the run
+    # must turn it on again -- also when the preview already held every row, and
+    # when the run ends with nothing (an error, or Stop before any result).
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    w._on_search_preview(w.search_thread, _rows(A, 5))
+    assert not w.results_table.isSortingEnabled()
+    _search(w, _rows(A, 5) if final == "the same rows" else [])
+    _drain_events()
+    assert w.results_table.isSortingEnabled()
+
+
+@pytest.mark.parametrize("case", ["other thread", "not searching", "all-terms view"])
+def test_a_preview_is_ignored_when_it_no_longer_applies(window, case):
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    thread = w.search_thread
+    if case == "other thread":
+        thread = object()                       # a run that has since been replaced
+    elif case == "not searching":
+        w.is_searching = False
+    else:
+        w.refinement_chain = [object()]
+        w._all_terms_filter = True
+    w._on_search_preview(thread, _rows(A, 5))
+    assert w.results_table.rowCount() == 0
+
+
+def test_a_longer_preview_of_the_same_run_appends_rows(window):
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    first = _rows(A, 3)
+    w._on_search_preview(w.search_thread, first)
+    top = w.results_table.item(0, w.COL_SYS_ID)
+    w._on_search_preview(w.search_thread, first + _rows(B, 4))
+    assert w.results_table.rowCount() == 7
+    assert w.results_table.item(0, w.COL_SYS_ID) is top, "the rows already shown were rebuilt"
+
+
+def test_a_preview_that_does_not_extend_the_table_rebuilds_it(window):
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    w._on_search_preview(w.search_thread, _rows(A, 3))
+    w._on_search_preview(w.search_thread, _rows(B, 5))
+    assert w.results_table.rowCount() == 5
+    assert all(w.results_table.item(r, w.COL_SYS_ID).text() == B for r in range(5))

@@ -25,6 +25,13 @@ class TestAddBracketVariants:
         assert "]word" in variants
         assert "word[" in variants
 
+    def test_word_between_two_lacunae(self):
+        # ]word[ -- a word standing between two gaps. The hebword tokenizer
+        # keeps it as one token, so without this form a bare query never
+        # reached it (10 V0.8 pages for שלום, measured 2026-09-30).
+        assert "]word[" in _add_bracket_variants("word")
+        assert "]שלום[" in _add_bracket_variants("שלום")
+
     def test_includes_original(self):
         variants = _add_bracket_variants("word")
         assert "word" in variants

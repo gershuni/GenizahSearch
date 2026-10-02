@@ -329,6 +329,10 @@ except Exception:
 
 
 BATCH_SIZE = 500
+# Rows built before the first paint of a finished search; the rest of the first
+# page follows on the next event-loop turn. Building 500 rows took 1.2-2.7 s
+# (owner's machine, 2026-09-30), so 500 rows up front delayed the first result.
+FIRST_PAINT_ROWS = 50
 
 class LabPanel(QFrame):
     def __init__(self, parent, mode):
@@ -5732,7 +5736,7 @@ class GenizahGUI(QMainWindow):
         self.mode_combo.setItemData(0, tr("Exact match"))
         self.mode_combo.setItemData(1, tr("Variant search with configurable intensity"))
         self.mode_combo.setItemData(2, tr("Responsa-Project style grammatical expansion for Hebrew search"))
-        self.mode_combo.setItemData(3, tr("Fuzzy search: Levenshtein distance"))
+        self.mode_combo.setItemData(3, tr("Fuzzy search: near spellings, 1 letter different (2 in words of 5+ letters)"))
         self.mode_combo.setItemData(4, tr("Regex: Advanced pattern matching"))
         self.mode_combo.setItemData(5, tr("Search in Title metadata"))
         self.mode_combo.setItemData(6, tr("Search in Shelfmark metadata"))
@@ -16735,7 +16739,7 @@ class GenizahGUI(QMainWindow):
 
     def get_search_help_text(self):
         if CURRENT_LANG == 'he': return tr("SEARCH_HELP_HTML")
-        return """<h3>Search Modes</h3><ul><li><b>Exact:</b> Only finds exact matches.</li><li><b>Variants (?):</b> Basic OCR errors.</li><li><b>Extended (??):</b> More variants.</li><li><b>Maximum (???):</b> Aggressive swapping (Use caution).</li><li><b>Fuzzy (~):</b> Levenshtein distance (1-2 typos).</li><li><b>Regex:</b> Advanced patterns.</li><li><b>Title:</b> Search in composition titles (metadata).</li><li><b>Shelfmark:</b> Search for shelfmarks (metadata).</li><li><b>Responsa (R):</b> Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Use the Query Builder for visual construction.</li></ul><hr><b>Gap:</b> Max distance between words (irrelevant for Title/Shelfmark).<hr><h3>Line &amp; Text Position Search</h3><p>Use the <b>position dropdown</b> next to the search bar to constrain where matches appear: Start of text, End of text, Line starts, or Line ends. This is useful for <b>detecting joins</b> between fragments &mdash; if you know how a manuscript ends, search for those words at &ldquo;End of text&rdquo; to find potential continuations.</p><p>In <b>Responsa mode</b>, position constraints can be applied per word using <code>|_</code> (start of line) and <code>_|</code> (end of line). Combined with line-break syntax (<code>|</code>), you can build multi-line positional queries &mdash; for example, find specific words at the end of one line and other words at the beginning of a line 4 lines later. The <b>Tabular Query Builder</b> provides a visual interface for constructing these queries.</p><p><i>Note: Requires a rebuilt index. Rebuild from Settings to use this feature.</i></p><hr><h3>Advanced Filters</h3><p>Use the <b>Advanced Filters</b> panel to narrow search results by manuscript properties: domain, author, work, date range, and material type. Active filters appear as removable chips above the results.</p>"""
+        return """<h3>Search Modes</h3><ul><li><b>Exact:</b> Only finds exact matches.</li><li><b>Variants (?):</b> Basic OCR errors.</li><li><b>Extended (??):</b> More variants.</li><li><b>Maximum (???):</b> Aggressive swapping (Use caution).</li><li><b>Fuzzy (~):</b> Near spellings: whole words one letter away (two in words of 5+ letters) &mdash; a letter added, dropped or changed, or two neighbours swapped. Prefixed forms are included (ושלום for שלום).</li><li><b>Regex:</b> Advanced patterns.</li><li><b>Title:</b> Search in composition titles (metadata).</li><li><b>Shelfmark:</b> Search for shelfmarks (metadata).</li><li><b>Responsa (R):</b> Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Use the Query Builder for visual construction.</li></ul><hr><b>Gap:</b> Max distance between words (irrelevant for Title/Shelfmark).<hr><h3>Line &amp; Text Position Search</h3><p>Use the <b>position dropdown</b> next to the search bar to constrain where matches appear: Start of text, End of text, Line starts, or Line ends. This is useful for <b>detecting joins</b> between fragments &mdash; if you know how a manuscript ends, search for those words at &ldquo;End of text&rdquo; to find potential continuations.</p><p>In <b>Responsa mode</b>, position constraints can be applied per word using <code>|_</code> (start of line) and <code>_|</code> (end of line). Combined with line-break syntax (<code>|</code>), you can build multi-line positional queries &mdash; for example, find specific words at the end of one line and other words at the beginning of a line 4 lines later. The <b>Tabular Query Builder</b> provides a visual interface for constructing these queries.</p><p><i>Note: Requires a rebuilt index. Rebuild from Settings to use this feature.</i></p><hr><h3>Advanced Filters</h3><p>Use the <b>Advanced Filters</b> panel to narrow search results by manuscript properties: domain, author, work, date range, and material type. Active filters appear as removable chips above the results.</p>"""
 
     def get_comp_help_text(self):
         if CURRENT_LANG == 'he': return tr("COMP_HELP_HTML")
@@ -20818,6 +20822,9 @@ class GenizahGUI(QMainWindow):
         # once New discards this run (_deliver_unless_discarded).
         _live = partial(self._discardable, '_search_new_generation')
         self.search_thread.results_signal.connect(_live(self.on_search_finished))
+        if hasattr(self.search_thread, 'preview_signal'):
+            self.search_thread.preview_signal.connect(
+                _live(lambda rows, t=self.search_thread: self._on_search_preview(t, rows)))
         self.search_thread.progress_signal.connect(self._on_search_progress)
         if hasattr(self.search_thread, 'pause_ack_signal'):
             self.search_thread.pause_ack_signal.connect(
@@ -21610,6 +21617,9 @@ class GenizahGUI(QMainWindow):
             pass  # Silently fail -- notification is non-critical
 
     def on_search_finished(self, results):
+        # Post-search timing (search-speed handoff): where the time goes between
+        # execute_search returning and the table showing results.
+        _pt = [('start', time.perf_counter())]
         # Show processing phase — keep progress bar visible with elapsed timer running
         self.search_progress.setRange(0, 0)  # Indeterminate
         # Monotonic and pause-discounted: see effective_elapsed().
@@ -21635,6 +21645,8 @@ class GenizahGUI(QMainWindow):
             self.last_results = []
             for b in self.export_buttons: b.setEnabled(False)
             self.results_table.setRowCount(0)
+            # A preview of this run turned sorting off; no batch load turns it on here.
+            self.results_table.setSortingEnabled(True)
             self._update_load_more_button()
             self.result_row_by_sys_id = {}
             self.shelfmark_items_by_sid = {}
@@ -21669,9 +21681,11 @@ class GenizahGUI(QMainWindow):
             return
 
         self.last_results = results
+        _pt.append(('pre', time.perf_counter()))
         # v7.16 BUG-6: prime the LOCAL filepath cache in one batched query before
         # rendering/filtering iterate per-row (prevents the ~10s UI-thread freeze).
         self._prime_local_filepath_cache(results)
+        _pt.append(('prime_local', time.perf_counter()))
 
         # Phase 55: Refinement chain update (uses RAW results before post-filters)
         if self._refine_mode:
@@ -21748,8 +21762,10 @@ class GenizahGUI(QMainWindow):
             for r in (self.last_results or [])
         )
         self.results_table.setColumnHidden(self.COL_SRC, not (has_multiple_sources or has_local))
+        _pt.append(('setup', time.perf_counter()))
         # Phase 95 REQ-6 — update LOCAL filter button visibility after search results land.
         self._update_local_filter_visibility_search()
+        _pt.append(('local_filter_vis', time.perf_counter()))
 
         # Initialize domain data (will be populated asynchronously by DomainEnrichmentWorker)
         self._result_domain_map = {}
@@ -21758,23 +21774,29 @@ class GenizahGUI(QMainWindow):
         self._has_result_domains = False
         self.btn_domain_filter.setEnabled(False)
 
-        # Use smaller initial batch during session restore for faster first paint
-        restore_batch = 50 if getattr(self, '_restoring_session', False) else None
-        self.load_next_batch(batch_size=restore_batch)
+        # Use smaller initial batch during session restore for faster first paint.
+        # A normal search also paints FIRST_PAINT_ROWS first; the rest of the
+        # first page is built on the next event-loop turn (_fill_first_results_page).
+        restoring = getattr(self, '_restoring_session', False)
+        self.load_next_batch(batch_size=50 if restoring else min(FIRST_PAINT_ROWS, BATCH_SIZE))
+        _pt.append(('first_batch', time.perf_counter()))
 
         # Auto-fit columns to content (like double-clicking the column border)
         for col in (self.COL_SYS_ID, self.COL_LIBRARY, self.COL_SHELF, self.COL_IMG):
             self.results_table.resizeColumnToContents(col)
+        _pt.append(('resize_cols', time.perf_counter()))
 
         # Launch enrichment workers (async -- results appear first, enrichment fills in later)
         # During session restore, defer workers to keep UI responsive
         self._launch_enrichment_workers(results, defer=getattr(self, '_restoring_session', False))
+        _pt.append(('enrich_launch', time.perf_counter()))
 
         # Save session after search completes (crash-safe persistence)
         self._schedule_session_save()
         # Add to search history (skip during session restore and refinement -- D-15)
         if not getattr(self, '_restoring_session', False) and not self.refinement_chain:
             self._add_regular_search_to_history()
+        _pt.append(('session_history', time.perf_counter()))
 
         # Toast notification when app is not focused
         self._notify_search_complete(len(results), self.last_search_query)
@@ -21786,7 +21808,24 @@ class GenizahGUI(QMainWindow):
         # Phase 55: Reapply "all terms" filter if checkbox is checked
         if self._all_terms_filter and self.refinement_chain:
             self._apply_all_terms_filter_and_rerender()
+        _pt.append(('finish', time.perf_counter()))
         search_elapsed = self._pause_search.elapsed(time.monotonic())
+        logger.info(
+            "search_ui_perf rows=%d %s total_ms=%d since_submit_ms=%d fl_index_ready=%s",
+            len(results),
+            " ".join(f"{name}_ms={int((t - _pt[i][1]) * 1000)}"
+                     for i, (name, t) in enumerate(_pt[1:])),
+            int((_pt[-1][1] - _pt[0][1]) * 1000),
+            int(search_elapsed * 1000),
+            getattr(self.searcher, '_fl_id_index', None) is not None,
+        )
+        # The all-terms re-render above already built its own page from a
+        # filtered list (and put the full list back): a fill would append
+        # rows that filter hides.
+        if not restoring and not (self._all_terms_filter and self.refinement_chain):
+            # The page size is fixed now, not when the timer fires.
+            target = min(BATCH_SIZE, len(results))
+            QTimer.singleShot(0, lambda r=results, n=target: self._fill_first_results_page(r, n))
         elapsed_str = f"{int(search_elapsed // 60)}:{int(search_elapsed % 60):02d}"
         partial_tag = f" ({tr('Partial results')})" if was_cancelled else ""
         if not getattr(self, '_restoring_session', False):
@@ -21797,6 +21836,64 @@ class GenizahGUI(QMainWindow):
         # _app_shutting_down guard is first-line inside _emit_search_telemetry (REVIEWS HIGH-2).
         # emitted guard prevents double-emit if stop_search already fired (D-09).
         self._emit_search_telemetry('cancelled' if was_cancelled else 'completed', len(results))
+
+    def _on_search_preview(self, thread, rows):
+        """Show the first rows of a search that is still running
+        (SearchThread.preview_signal). on_search_finished rebuilds the table from
+        the complete list; sort, filters, export and search-within wait for it
+        (owner decision 2026-09-30). The engine offers a preview only where the
+        final list keeps these rows first and in this order."""
+        if thread is not getattr(self, 'search_thread', None) or not getattr(self, 'is_searching', False):
+            return
+        if not rows or getattr(self, '_restoring_session', False):
+            return
+        if getattr(self, '_all_terms_filter', False) and getattr(self, 'refinement_chain', None):
+            return  # that view is built from a filtered list when the run ends
+        # A later preview of the same run extends the earlier one: append only the
+        # new rows. Anything else (first preview, or a list that does not extend
+        # what is shown) rebuilds the table.
+        shown = self.results_loaded if getattr(self, '_preview_thread', None) is thread else 0
+        extends = bool(shown) and len(rows) >= shown and [r.get('uid') for r in rows[:shown]] == [
+            r.get('uid') for r in (self.last_results or [])[:shown]]
+        if extends and len(rows) == shown:
+            return
+        status = self.status_label.text()
+        if not extends:
+            self.results_loaded = 0
+            self.results_table.setRowCount(0)
+            self.result_row_by_sys_id = {}
+            self.shelfmark_items_by_sid = {}
+            self.title_items_by_sid = {}
+            self._res_map_by_sid = {}
+        self._preview_thread = thread
+        self.last_results = list(rows)
+        self._res_map_by_sid.update({r['display']['id']: r for r in rows})
+        self.load_next_batch(batch_size=len(rows) - self.results_loaded)
+        self.results_table.setSortingEnabled(False)  # load_next_batch turned it on
+        self.status_label.setText(status)            # still searching, not a result count
+        logger.info("search_preview since_submit_ms=%d rows_shown=%d",
+                    int(self._pause_search.elapsed(time.monotonic()) * 1000), self.results_loaded)
+
+    def _fill_first_results_page(self, results, target):
+        """Build the rest of the first page (*target* rows, fixed when the search
+        landed) after the first FIRST_PAINT_ROWS have painted. Does nothing if
+        another search has started or replaced the list since, or if the page is
+        already full."""
+        if getattr(self, '_app_shutting_down', False):
+            return
+        if getattr(self, 'last_results', None) is not results or getattr(self, 'is_searching', False):
+            return
+        if getattr(self, '_all_terms_filter', False) and getattr(self, 'refinement_chain', None):
+            return  # the table shows a filtered page built from another list
+        # The first rows are on screen by now: this is the wait the user sees.
+        logger.info("search_first_paint since_submit_ms=%d rows_shown=%d",
+                    int(self._pause_search.elapsed(time.monotonic()) * 1000), self.results_loaded)
+        missing = target - self.results_loaded
+        if missing <= 0:
+            return
+        self.load_next_batch(batch_size=missing)
+        for col in (self.COL_SYS_ID, self.COL_LIBRARY, self.COL_SHELF, self.COL_IMG):
+            self.results_table.resizeColumnToContents(col)
 
     # ---- Phase 55: Refinement chain methods ----
 
