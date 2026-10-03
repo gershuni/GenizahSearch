@@ -30,7 +30,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QObject, QPoint, QRect
+from PyQt6.QtCore import QObject, QPoint, QRect, Qt
 from PyQt6.QtWidgets import (QApplication, QComboBox, QLabel, QLineEdit,
                              QMainWindow, QProgressBar, QPushButton,
                              QTableWidget, QVBoxLayout, QWidget)
@@ -1827,6 +1827,36 @@ def test_sorting_comes_back_when_the_run_ends(window, final):
     assert not w.results_table.isSortingEnabled()
     _search(w, _rows(A, 5) if final == "the same rows" else [])
     _drain_events()
+    assert w.results_table.isSortingEnabled()
+
+
+def test_a_preview_keeps_engine_order_under_a_column_sort(window):
+    # Codex review (PR #375): with a column sort chosen, load_next_batch turned
+    # sorting back on at its end, which re-sorted the preview at once; turning it
+    # off again afterwards did not undo that.
+    w = window
+    w.results_table.setSortingEnabled(True)
+    w.results_table.sortByColumn(w.COL_SYS_ID, Qt.SortOrder.DescendingOrder)   # a header click
+    w.search_thread = object()
+    w.is_searching = True
+    engine_order = _rows(A, 2) + _rows(B, 3)          # descending by id would put B first
+    w._on_search_preview(w.search_thread, engine_order)
+    assert not w.results_table.isSortingEnabled()
+    assert [w.results_table.item(r, w.COL_SYS_ID).text() for r in range(5)] == [A, A, B, B, B]
+    w._on_search_preview(w.search_thread, engine_order + _rows(A, 2, start=3))   # it extends
+    assert [w.results_table.item(r, w.COL_SYS_ID).text() for r in range(7)] == [A, A, B, B, B, A, A]
+
+
+def test_an_error_after_a_preview_leaves_no_rows(window, monkeypatch):
+    # Codex review (PR #375): the preview's rows stayed as if they were the
+    # failed run's results, with sorting off; a failed run delivers nothing.
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    w._on_search_preview(w.search_thread, _rows(A, 5))
+    monkeypatch.setattr(app.QMessageBox, "critical", staticmethod(lambda *a, **k: None))
+    w.on_error("the regex ran out of time")
+    assert w.results_table.rowCount() == 0 and w.last_results == []
     assert w.results_table.isSortingEnabled()
 
 

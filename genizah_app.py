@@ -21129,7 +21129,23 @@ class GenizahGUI(QMainWindow):
             self.search_progress.setFormat(f"{elapsed_str}  %p%")
             self.status_label.setText(f"{tr('Searching')}... {elapsed_str}")
 
-    def on_error(self, err): self.reset_ui(); QMessageBox.critical(self, tr("Error"), str(err))
+    def on_error(self, err):
+        self.reset_ui()
+        # A preview may have shown this run's first rows; a failed run delivers
+        # no results (Codex review of PR #375), so they go, as on any search
+        # that ends empty -- the launch already cleared the previous results.
+        self.last_results = []
+        self.results_loaded = 0
+        self._preview_thread = None
+        self.shelfmark_items_by_sid = {}
+        self.title_items_by_sid = {}
+        self.results_table.setRowCount(0)
+        self.results_table.setSortingEnabled(True)   # the preview turned it off
+        self.result_row_by_sys_id = {}
+        self._res_map_by_sid = {}
+        for b in self.export_buttons: b.setEnabled(False)
+        self._update_load_more_button()
+        QMessageBox.critical(self, tr("Error"), str(err))
 
     def _reset_search(self):
         """Clear all search state and start fresh."""
@@ -21375,7 +21391,10 @@ class GenizahGUI(QMainWindow):
         if self._load_more_remaining():
             self.load_next_batch()
 
-    def load_next_batch(self, batch_size=None):
+    def load_next_batch(self, batch_size=None, keep_sorting_off=False):
+        """Add the next rows of last_results to the table. *keep_sorting_off*: a
+        preview's rows must stay in engine order; turning sorting back on at the
+        end re-sorts at once by the user's column (Codex review of PR #375)."""
         if self.results_loaded >= len(self.last_results):
             return
 
@@ -21567,7 +21586,8 @@ class GenizahGUI(QMainWindow):
             self._update_search_row_list_indicator(row_idx, res)
 
         self.results_loaded = end_idx
-        self.results_table.setSortingEnabled(True)
+        if not keep_sorting_off:
+            self.results_table.setSortingEnabled(True)
         self._apply_results_table_filters()
 
         # Update Status: the rows actually visible, with the excluded note
@@ -21868,8 +21888,7 @@ class GenizahGUI(QMainWindow):
         self._preview_thread = thread
         self.last_results = list(rows)
         self._res_map_by_sid.update({r['display']['id']: r for r in rows})
-        self.load_next_batch(batch_size=len(rows) - self.results_loaded)
-        self.results_table.setSortingEnabled(False)  # load_next_batch turned it on
+        self.load_next_batch(batch_size=len(rows) - self.results_loaded, keep_sorting_off=True)
         self.status_label.setText(status)            # still searching, not a result count
         logger.info("search_preview since_submit_ms=%d rows_shown=%d",
                     int(self._pause_search.elapsed(time.monotonic()) * 1000), self.results_loaded)

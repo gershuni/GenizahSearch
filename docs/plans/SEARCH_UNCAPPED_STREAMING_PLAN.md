@@ -232,8 +232,9 @@ Also done 2026-09-30, outside the original stage list:
   92 s); it walks letter runs, reads a word holding a mark, quote or bracket whole, and for phrases
   takes Exact's separator and gap words. Rows highlight with their own page's spellings
   (`pattern_for`) and show the page's nearest one. Same paths as Variants; position searches use
-  term sets on the position field; My Library verifies with it (its retrieval is still the typed
-  word); Composition keeps its old Fuzzy. Real index, 50,000 cap: על 6.4 s, שלום 9.4 s, הצדיק 15 s,
+  term sets on the position field; My Library verifies with it and, after the Codex review of
+  61d09a7a, retrieves every form too (Variants and Fuzzy; it had searched the typed word only);
+  Composition keeps its old Fuzzy. Real index, 50,000 cap: על 6.4 s, שלום 9.4 s, הצדיק 15 s,
   ירושלים 16 s, אהרן הכהן 24 s, שלום עליכם 35 s; first rows 0.2-4.7 s. Gate (scratchpad
   `fuzzy/gate_fuzzy.py`: uncapped; an oracle written apart from the engine, over every page
   Tantivy's own fuzzy query or the engine retrieves; fails on a broken engine): 0 wrong rows, 0 real
@@ -242,6 +243,11 @@ Also done 2026-09-30, outside the original stage list:
   index token holds a digit, nikud or bracket inside the word (16ירושלים, אַהרן, ה[דים: 0-23 per
   word), as for Exact. Under the cap a very common word (שלום: 79K pages hold it) shows only the word
   itself -- the cap, stage 2. `tests/test_whole_word_fuzzy.py`; 26 mutations killed.
+- **Codex review of 61d09a7a and the two earlier preview comments (2026-10-03), four fixes:** My
+  Library retrieves every Variants / Fuzzy form (above); a Variants phrase whose edge word holds a
+  Latin letter or a digit is found across a page break (the pre-check looked for Hebrew letter runs
+  only; from e8decfca); a preview keeps engine order under a column sort; an error after a preview
+  clears its rows. Each with a test that fails without it; 9 mutants killed.
 - Owner measurements after both (partly under test-suite load): בלי ירח 1.3 s and שמעון הצדיק
   1.1 s from submit to rows; שלום 3.4 s; בלי 17 s (loaded); variants שמעון הצדיק 75 s, of which
   66.5 s regex over whole-manuscript docs; fuzzy minutes (a 564K-character pattern).

@@ -1294,7 +1294,7 @@ class SearchEngine:
     @bounded_search
     def _query_local_index(self, query_str: str, mode: str, gap: int,
                            limit=None, regex=None, tantivy_query_str=None,
-                           progress_callback=None, phase_callback=None):
+                           progress_callback=None, phase_callback=None, tantivy_query=None):
         """Query the LOCAL side-index. Returns [] if local_searcher is None (D-37).
 
         MEDIUM-1 note: this uses a simplified parse_query (not the full Responsa
@@ -1349,8 +1349,10 @@ class SearchEngine:
             # parse_query below strips operator metacharacters and returns nothing,
             # which is why LOCAL Responsa came back empty. Defensive fall-back to the
             # simplified path if the pre-built query somehow fails to parse.
-            tantivy_q = None
-            if tantivy_query_str:
+            # Variants / Fuzzy: every form as a whole token (_local_forms_query); the
+            # typed word alone missed a page holding only another form.
+            tantivy_q = tantivy_query
+            if tantivy_q is None and tantivy_query_str:
                 try:
                     tantivy_q = self.local_index.parse_query(tantivy_query_str, _fields)
                 except (ValueError, Exception):
@@ -2148,16 +2150,17 @@ class SearchEngine:
     # (content and content_search), alone or added up: 9 > 3 + 3 > 1 + 1.
     _FUZZY_TIER_SCORES = (9.0, 3.0, 1.0)
 
-    def _fuzzy_term_query(self, term, exact_field, fields):
+    def _fuzzy_term_query(self, term, exact_field, fields, index=None):
         """Retrieval for one Fuzzy word: Exact's clause on *exact_field* (its BM25
         ranks the pages with the word itself) OR its near spellings, bracket forms
         included, as whole tokens of *fields*, scored by distance
         (_FUZZY_TIER_SCORES). Under a result limit the word comes first, then one
         edit, then two; with one score for all, הצדיק's 50,000 rows were mostly
         הדין and צדק. One flat Should list: every level of nesting copies the term
-        sets (ירושלים: 529K tokens)."""
+        sets (ירושלים: 529K tokens). *index*: the LOCAL index, else the main one."""
+        index = index or self.index
         should = tantivy.Occur.Should
-        clauses = [(should, self.index.parse_query(self.build_tantivy_query([term], 'fuzzy'), [exact_field]))]
+        clauses = [(should, index.parse_query(self.build_tantivy_query([term], 'fuzzy'), [exact_field]))]
         typed = _near_spellings(term) is None
         for distance, forms in enumerate(_near_spelling_tiers(term)):
             if not forms:
@@ -2168,7 +2171,7 @@ class SearchEngine:
                       [a + f + z for f in forms for a, z in _BRACKET_AFFIXES])
             for field in fields:
                 clauses.append((should, tantivy.Query.const_score_query(
-                    tantivy.Query.term_set_query(self.index.schema, field, tokens),
+                    tantivy.Query.term_set_query(index.schema, field, tokens),
                     self._FUZZY_TIER_SCORES[distance])))
         return tantivy.Query.boolean_query(clauses)
 
@@ -2189,22 +2192,46 @@ class SearchEngine:
             return None
         return tantivy.Query.boolean_query(per_term) if per_term else None
 
+    def _local_forms_query(self, query_str, mode):
+        """My Library candidates for Variants and Fuzzy: build_variant_query on the
+        LOCAL index -- every form as a whole token, not the typed word alone (Codex
+        review of PR #375: a local document holding only a near spelling or a
+        variant was never found). None for other modes, which keep the typed query,
+        and if the query cannot be built (then the typed query still runs)."""
+        if mode not in _WHOLE_WORD_MODES or mode == 'literal' or getattr(self, 'local_index', None) is None:
+            return None
+        cs = 'content_search' if getattr(self, '_local_has_content_search', False) else None
+        try:
+            return self.build_variant_query(query_str.split(), mode, content_search_field=cs, index=self.local_index)
+        except MemoryError:
+            raise
+        except Exception as e:
+            LOGGER.warning("LOCAL forms query failed; the typed query runs instead: %r", e)
+            return None
+
     def _cross_page_term(self, term, mode):
         """What _cross_page_spans looks for before and after a break: the folded
-        forms (Variants, Fuzzy), or the word itself when Fuzzy matches it as typed."""
+        forms (Variants, Fuzzy), or the word itself when Fuzzy matches it as typed.
+        A form with a Latin letter or a digit is never a run of Hebrew letters, so
+        such forms come apart as (Hebrew forms, others), the others looked for as
+        text (Codex review of PR #375: a crossing of `abc def` was never found)."""
         if mode == 'fuzzy' and _near_spellings(term) is None:
             return term
-        return self._folded_forms(term, mode)
+        forms = self._folded_forms(term, mode)
+        others = frozenset(f.lower() for f in forms if not _HEB_LETTER_RUN_RE.fullmatch(f))
+        return (forms, others) if others else forms
 
-    def build_variant_query(self, terms, mode, content_search_field=None):
+    def build_variant_query(self, terms, mode, content_search_field=None, index=None):
         """Tantivy candidates for whole-word Variants: per term, today's clause
         (the term boosted, its first 200 variants, its bracket forms) OR every form
         the verifier accepts, as whole tokens -- raw on ``content`` and folded on
         *content_search_field*. Term sets: 8,000 forms cost 0.45 s where the
         parsed OR of them cost 4 s (Codex, real index, 2026-10-01). Before this,
-        a page holding only form 201+ was never retrieved.
+        a page holding only form 201+ was never retrieved. *index*: the LOCAL
+        index (My Library), else the main one; the two schemas share these fields.
         """
-        schema = self.index.schema
+        index = index or self.index
+        schema = index.schema
         should = tantivy.Occur.Should
 
         def with_brackets(forms):
@@ -2222,9 +2249,9 @@ class SearchEngine:
                 # content_search -- content with marks and quotes folded out -- holds
                 # as the same token: one field finds every page the two would.
                 per_term.append((tantivy.Occur.Must, self._fuzzy_term_query(
-                    clean, 'content', [content_search_field or 'content'])))
+                    clean, 'content', [content_search_field or 'content'], index=index)))
                 continue
-            clauses = [(should, self.index.parse_query(
+            clauses = [(should, index.parse_query(
                 self.build_tantivy_query([clean], mode, content_search_field=content_search_field), ['content']))]
             clauses.append((should, tantivy.Query.term_set_query(
                 schema, 'content', with_brackets(self._verifier_forms(clean, mode)))))
@@ -2489,7 +2516,9 @@ class SearchEngine:
 
         *first_term* / *last_term* are the query's words, or -- for Variants -- the
         sets of their forms, folded (``_folded_forms``); a set is checked against the
-        window's runs of Hebrew letters, which a whole-word occurrence always is.
+        window's runs of Hebrew letters, which a whole-word occurrence always is;
+        a (forms, others) pair (``_cross_page_term``) also looks for *others* --
+        forms with a Latin letter or a digit -- as text in the window.
         *whole_words*: a match must also pass ``_whole_word_span``.
 
         For a multi-word Literal query the page docs already give every match
@@ -2515,12 +2544,16 @@ class SearchEngine:
             return []
 
         def _occurs(term, folded):
+            if isinstance(term, tuple):              # (Hebrew forms, others: as text)
+                forms, others = term
+                return (any(r in forms for r in _HEB_LETTER_RUN_RE.findall(folded))
+                        or any(f in folded.lower() for f in others))
             if isinstance(term, frozenset):
                 return any(r in term for r in _HEB_LETTER_RUN_RE.findall(folded))
             return term in folded.lower()
 
-        first = first_term if isinstance(first_term, frozenset) else first_term.lower()
-        last = last_term if isinstance(last_term, frozenset) else last_term.lower()
+        first = first_term if isinstance(first_term, (frozenset, tuple)) else first_term.lower()
+        last = last_term if isinstance(last_term, (frozenset, tuple)) else last_term.lower()
         head = _words_head_re(max(1, side_words))
         pieces = []        # (window text, break offset in it, content index of its start, original window)
         for b in boundaries[1:]:
@@ -3318,6 +3351,7 @@ class SearchEngine:
                     query_str, mode, gap, regex=_local_regex or None,
                     progress_callback=progress_callback,
                     phase_callback=phase_callback,
+                    tantivy_query=None if text_position else self._local_forms_query(query_str, mode),
                 )
             except SearchBudgetExceeded:
                 raise
@@ -3939,6 +3973,7 @@ class SearchEngine:
                         query_str, mode, gap, regex=regex,
                         progress_callback=progress_callback,
                         phase_callback=phase_callback,
+                        tantivy_query=None if text_position else self._local_forms_query(query_str, mode),
                     )
             except InterruptedError:
                 # Defensive only: _query_local_index now returns its partial hits

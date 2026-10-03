@@ -374,3 +374,70 @@ def test_a_my_library_row_highlights_with_its_own_pattern(engine):
 def test_composition_keeps_its_own_fuzzy_regex(engine):
     # Composition calls build_regex_pattern directly; its Fuzzy branch is unchanged.
     assert not isinstance(engine.build_regex_pattern([W], "fuzzy", 0), se._FuzzyMatcher)
+
+
+# --- My Library (Codex review of PR #375) ----------------------------------------
+# Its candidates came from the typed query alone, so a local document holding only a
+# near spelling (Fuzzy) or another variant form (Variants) was never found.
+
+@pytest.fixture(scope="module")
+def local_engine(engine, tmp_path_factory):
+    from shared.local_indexer import build_local_schema
+    root = tmp_path_factory.mktemp("fuzzy_local")
+    idx = tantivy.Index(build_local_schema(), path=str(root))
+    register_search_tokenizers(idx)
+    variant = next(f for f in engine._verifier_forms(W, "variants")
+                   if f != W and se._HEB_LETTER_RUN_RE.fullmatch(f))
+    docs = {"loc_near": f"אבג {NEAR} דהו", "loc_variant": f"אבג {variant} דהו", "loc_none": "אבג דהו זחט"}
+    w = idx.writer(heap_size=50_000_000, num_threads=1)
+    for uid, text in docs.items():
+        w.add_document(tantivy.Document(
+            unique_id=uid, content=text, content_search=strip_search_diacritics(text), source="LOCAL",
+            full_header=f"{uid}_LOCAL_P1_F1", shelfmark=uid, scope="page", boundaries="",
+            **Indexer._extract_position_fields(text)))
+    w.commit()
+    w.wait_merging_threads()
+    idx.reload()
+    saved = (getattr(engine, "local_index", None), getattr(engine, "local_searcher", None),
+             getattr(engine, "_local_has_content_search", False))
+    engine.local_index, engine.local_searcher, engine._local_has_content_search = idx, idx.searcher(), True
+    yield engine
+    engine.local_index, engine.local_searcher, engine._local_has_content_search = saved
+
+
+@pytest.mark.parametrize("scope", ["local", "all"])
+def test_my_library_finds_a_document_holding_only_a_near_spelling(local_engine, scope):
+    uids = {r["uid"] for r in local_engine.execute_search(W, "fuzzy", 0, corpus_scope=scope)}
+    assert "loc_near" in uids and "loc_none" not in uids
+
+
+def test_my_library_finds_a_document_holding_only_a_variant_form(local_engine):
+    uids = {r["uid"] for r in local_engine.execute_search(W, "variants", 0, corpus_scope="local")}
+    assert "loc_variant" in uids
+
+
+def test_my_library_exact_keeps_the_typed_query(local_engine):
+    assert local_engine._local_forms_query(W, "literal") is None
+    uids = {r["uid"] for r in local_engine.execute_search(W, "literal", 0, corpus_scope="local")}
+    assert not uids & {"loc_near", "loc_variant"}
+
+
+def test_the_forms_query_is_built_for_the_index_it_runs_on(engine, tmp_path):
+    # The LOCAL index has today the main index's field order, which would hide a
+    # query built on the main index's schema; a different order does not.
+    b = tantivy.SchemaBuilder()
+    b.add_text_field("content_search", stored=False, tokenizer_name="hebword")
+    b.add_text_field("content", stored=True, tokenizer_name="hebword")
+    b.add_text_field("unique_id", stored=True)
+    other = tantivy.Index(b.build(), path=str(tmp_path))
+    register_search_tokenizers(other)
+    w = other.writer(heap_size=50_000_000, num_threads=1)
+    text = f"אבג {NEAR} דהו"
+    w.add_document(tantivy.Document(unique_id="x", content=text, content_search=strip_search_diacritics(text)))
+    w.commit()
+    w.wait_merging_threads()
+    other.reload()
+    for mode in ("fuzzy", "variants"):
+        forms = [W] if mode == "fuzzy" else [NEAR]       # a variant query for the form itself
+        q = engine.build_variant_query(forms, mode, content_search_field="content_search", index=other)
+        assert other.searcher().search(q, 10).hits, mode

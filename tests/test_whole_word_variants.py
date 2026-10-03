@@ -50,6 +50,8 @@ PAGES = {
 CROSS = [("c1", f"אבג {FAR}"), ("c2", f"{ON} דהו")]          # FAR | ON across a break
 CROSS_IN = [("d1", f"{W} אבג ו{FAR}"), ("d2", f"{ON} דהו")]  # retrieved (שלום, על), crossing only inside a word
 CROSS_LIT = [("e1", f"{W} אבג ו{W}"), ("e2", f"{ON} דהו")]  # the same for Exact: ושלום | על
+CROSS_LAT = [("l1", "אבג abc"), ("l2", "def דהו")]                 # Latin words across a break
+CROSS_DIG = [("g1", "אבג טוב2"), ("g2", "יום דהו")]               # a word with a digit
 # An Oxford-style part spanning manuscripts A and B: the whole word on A's page, only
 # an inside-word occurrence on B's.
 PART = [("q1", "A", f"רב {W}"), ("q2", "B", f"רב ו{W}")]
@@ -105,9 +107,10 @@ def engine(tmp_path_factory):
             source="V0.8", full_header=header or uid, shelfmark=uid, scope=scope, boundaries=bounds,
             **Indexer._extract_position_fields(text)))
 
-    for uid, text in list(PAGES.items()) + CROSS + CROSS_IN + CROSS_LIT:
+    for uid, text in list(PAGES.items()) + CROSS + CROSS_IN + CROSS_LIT + CROSS_LAT + CROSS_DIG:
         add(uid, text, "page")
-    for sid, pages in (("sys:c", CROSS), ("sys:d", CROSS_IN), ("sys:e", CROSS_LIT)):
+    for sid, pages in (("sys:c", CROSS), ("sys:d", CROSS_IN), ("sys:e", CROSS_LIT),
+                       ("sys:l", CROSS_LAT), ("sys:g", CROSS_DIG)):
         add(sid, *_aggregate(pages)[:1], "system", _aggregate(pages)[1])
     for uid, sid, text in PART:
         add(uid, text, "page", header=f"IE_{uid} {sid}")
@@ -166,6 +169,14 @@ def test_a_variant_phrase_across_a_page_break_is_found(engine):
     # The crossing pre-check knew only the typed words; FAR is a form of W.
     rows = _rows(engine, f"{W} {ON}")
     assert "c1" in rows and rows["c1"].get("cross_page")
+
+
+@pytest.mark.parametrize("query, uid", [("abc def", "l1"), ("טוב2 יום", "g1")])
+def test_a_variant_phrase_with_a_latin_or_digit_word_across_a_page_break_is_found(engine, query, uid):
+    # Codex review (PR #375): the crossing pre-check looked for the forms among the
+    # window's runs of Hebrew letters only, which `abc` or `טוב2` never is.
+    rows = _rows(engine, query)
+    assert uid in rows and rows[uid].get("cross_page")
 
 
 def test_a_crossing_inside_a_longer_word_is_not_returned(engine):
