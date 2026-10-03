@@ -346,6 +346,13 @@ def _whole_word_span(text, start, end):
     return _starts_word(text, start) and _ends_word(text, end)
 
 
+def _page_in_restriction(page, page_uids, sys_ids):
+    """A page of an aggregate (its boundaries entry, or a _map_span_to_pages
+    overlap) inside a search-within restriction: its uid among the restricted
+    manuscripts' pages, or its own manuscript among *sys_ids*."""
+    return page.get('uid') in page_uids or (sys_ids is not None and page.get('sys_id') in sys_ids)
+
+
 def _first_accepted_match(regex, text, first_match, accept):
     """The first occurrence of *regex* in *text*, from *first_match* on, that *accept*
     takes, or None. Repeated ``search(pos=...)``: the budgeted Pattern has no finditer."""
@@ -2125,6 +2132,26 @@ class SearchEngine:
             pairs.append(f'({" OR ".join(clauses)})')
         return " AND ".join(pairs)
 
+    def _restriction_query(self, restrict_sys_ids):
+        """The docs a search within these manuscripts may use: a page or whole-
+        manuscript doc of one of them (its full_header holds the sys_id as a term,
+        whatever the header's shape), or any Oxford part -- its header names only the
+        part's first manuscript, so its pages are tested one by one after the match
+        (_page_in_restriction). A term set: in the query at any size. The OR of
+        full_header phrases it replaces cost 18.7 s at 50,000 ids, so above 500 the
+        search ran unrestricted and filtered its first 50,000 hits afterwards
+        (ישראל, then משה within it: about three quarters of the manuscripts lost)."""
+        should = tantivy.Occur.Should
+        sids = {str(s) for s in restrict_sys_ids}
+        terms = sorted(s.lower() for s in sids if s.isalnum())   # as the default tokenizer indexes them
+        clauses = [(should, tantivy.Query.term_set_query(self.index.schema, 'full_header', terms)),
+                   (should, self.index.parse_query('scope:part', ['content']))]
+        odd = [s for s in sids if not s.isalnum() and '"' not in s]
+        if odd:     # a header token sequence, as the phrase clauses matched it
+            clauses.append((should, self.index.parse_query(
+                ' OR '.join(f'full_header:"{s}"' for s in odd), ['content'])))
+        return tantivy.Query.boolean_query(clauses)
+
     def _and_query(self, query, extra):
         """*query* (a Query object) AND the query string *extra*."""
         return tantivy.Query.boolean_query([(tantivy.Occur.Must, query),
@@ -2631,23 +2658,26 @@ class SearchEngine:
         # Short pages: one match can straddle two breaks and show up twice.
         return sorted(set(spans))
 
-    def _first_match_in_pages(self, regex, text, first_match, boundaries, page_uids, accept=None):
-        """First match (from *first_match* on) whose page is in *page_uids*, or None.
+    def _first_match_in_pages(self, regex, text, first_match, boundaries, page_uids, accept=None,
+                              sys_ids=None):
+        """First match (from *first_match* on) on a page inside the restriction, or None.
 
         Search-within over an aggregate (scope system/part) hit: the doc's own
-        uid is ``sys:``/``part:``, so the restriction is tested on the page the
-        match falls in (the primary page, as ``_map_span_to_pages`` picks it).
-        An Oxford part can span manuscripts, so a later match may be the one
-        inside the restriction. *accept* (e.g. a position check) must also hold.
+        uid is ``sys:``/``part:``, so the restriction is tested on the pages the
+        match falls in (_page_in_restriction: its uid, or its manuscript in
+        *sys_ids*). An Oxford part can span manuscripts, so a later match may be the
+        one inside the restriction -- and a match across the part's own page break
+        counts when either page is inside (it tested only the first until
+        2026-10-04). *accept* (e.g. a position check) must also hold.
         Before 2026-09-30 every aggregate hit was discarded under search-within.
         """
-        if not boundaries or not any(b.get('uid') in page_uids for b in boundaries):
+        if not boundaries or not any(_page_in_restriction(b, page_uids, sys_ids) for b in boundaries):
             return None  # no page of this aggregate is in the restriction
         match = first_match
         while match is not None:
             if accept is None or accept(match):
-                primary = self._map_span_to_pages(match.span(), boundaries).get('primary') or {}
-                if primary.get('uid') in page_uids:
+                overlaps = self._map_span_to_pages(match.span(), boundaries).get('overlaps') or []
+                if any(_page_in_restriction(o, page_uids, sys_ids) for o in overlaps):
                     return match
             match = regex.search(text, pos=match.start() + 1)
         return None
@@ -3025,12 +3055,11 @@ class SearchEngine:
         LOGGER.debug(f"Line-break search, Tantivy: {t_query_str[:500]}")
         LOGGER.debug(f"Line-break regex: {pattern_str[:500]}")
 
-        if restrict_sys_ids is not None and len(restrict_sys_ids) <= 500:
-            sid_clauses = ' OR '.join(f'full_header:"{sid}"' for sid in restrict_sys_ids)
-            t_query_str = f'({t_query_str}) AND ({sid_clauses} OR scope:part)'  # parts: see execute_search
-
         try:
             query = self.index.parse_query(t_query_str, ['content'])
+            if restrict_sys_ids is not None:   # in the query at any size: see execute_search
+                query = tantivy.Query.boolean_query([(tantivy.Occur.Must, query), (
+                    tantivy.Occur.Must, self._restriction_query(restrict_sys_ids))])
             res_obj = self.searcher.search(query, Config.SEARCH_LIMIT)
         except MemoryError:
             raise
@@ -3043,6 +3072,7 @@ class SearchEngine:
         LOGGER.debug(f"Line-break Tantivy returned {total_hits} hits")
 
         restrict_uids = None
+        restrict_sids = None if restrict_sys_ids is None else {str(s) for s in restrict_sys_ids}
         if restrict_sys_ids is not None:
             browse_map = self._load_browse_map()
             restrict_uids = set()
@@ -3118,7 +3148,8 @@ class SearchEngine:
                                 return not (post.strip() if _b else _strip_brackets(post).strip())
                             return True
                         match_obj = self._first_match_in_pages(
-                            regex, span_text, match_obj, boundaries, restrict_uids, position_ok)
+                            regex, span_text, match_obj, boundaries, restrict_uids, position_ok,
+                            sys_ids=restrict_sids)
                         if match_obj is None:
                             regex_filtered += 1
                             continue
@@ -3651,15 +3682,15 @@ class SearchEngine:
         def _row_pattern(text):
             return regex.pattern_for(text) if isinstance(regex, _FuzzyMatcher) else pattern_str
 
-        # Augment Tantivy query with sys_id filter so the index only returns
-        # hits from the restricted manuscripts (avoids iterating 50K hits).
-        # Oxford parts carry only their FIRST page's header and can span
-        # manuscripts, so they always pass here and are tested per page below.
-        if restrict_sys_ids is not None and len(restrict_sys_ids) <= 500:
-            sid_clauses = ' OR '.join(f'full_header:"{sid}"' for sid in restrict_sys_ids)
-            t_query_str = f'({t_query_str}) AND ({sid_clauses} OR scope:part)'
-            if t_query_obj is not None:
-                t_query_obj = self._and_query(t_query_obj, f'{sid_clauses} OR scope:part')
+        # Search within manuscripts: the restriction is part of every query, at any
+        # size (_restriction_query). Oxford parts always pass here and are tested
+        # per page below.
+        restriction_q = (self._restriction_query(restrict_sys_ids)
+                         if restrict_sys_ids is not None else None)
+
+        def _restricted(q):
+            return q if restriction_q is None else tantivy.Query.boolean_query(
+                [(tantivy.Occur.Must, q), (tantivy.Occur.Must, restriction_q)])
 
         # Choose search field based on text_position filter
         search_field = _POSITION_FIELDS.get(text_position, 'content')
@@ -3685,7 +3716,7 @@ class SearchEngine:
                     page_q = self._and_query(t_query_obj, 'scope:page')
                 else:
                     page_q = self.index.parse_query(f'({t_query_str}) AND scope:page', [search_field])
-                hits = list(self.searcher.search(page_q, Config.SEARCH_LIMIT).hits)
+                hits = list(self.searcher.search(_restricted(page_q), Config.SEARCH_LIMIT).hits)
                 # Parsed now (a bad query fails here, as before) but run only after
                 # the page hits: the first rows need not wait for it.
                 if t_query_obj is not None:
@@ -3693,12 +3724,13 @@ class SearchEngine:
                 else:
                     agg_q = self.index.parse_query(
                         f'({t_query_str}) AND (scope:system OR scope:part)', [search_field])
+                agg_q = _restricted(agg_q)
             elif t_query_obj is not None:
-                res_obj = self.searcher.search(t_query_obj, Config.SEARCH_LIMIT)
+                res_obj = self.searcher.search(_restricted(t_query_obj), Config.SEARCH_LIMIT)
                 hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
             else:
                 query = self.index.parse_query(t_query_str, [search_field])
-                res_obj = self.searcher.search(query, Config.SEARCH_LIMIT)
+                res_obj = self.searcher.search(_restricted(query), Config.SEARCH_LIMIT)
                 hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
         except MemoryError:
             raise
@@ -3742,6 +3774,7 @@ class SearchEngine:
         # Pre-compute allowed unique_ids for fast O(1) filtering
         # instead of running parse_header_smart regex on every hit
         restrict_uids = None
+        restrict_sids = None if restrict_sys_ids is None else {str(s) for s in restrict_sys_ids}
         if restrict_sys_ids is not None:
             browse_map = self._load_browse_map()
             restrict_uids = set()
@@ -3826,8 +3859,9 @@ class SearchEngine:
                         kept = 0
                         for span in spans:
                             if restrict_uids is not None:
-                                primary = self._map_span_to_pages(span, boundaries).get('primary') or {}
-                                if primary.get('uid') not in restrict_uids:
+                                overlaps = self._map_span_to_pages(span, boundaries).get('overlaps') or []
+                                if not any(_page_in_restriction(o, restrict_uids, restrict_sids)
+                                           for o in overlaps):
                                     continue
                             results.append(self._aggregate_result_row(
                                 doc, content, span, boundaries, _row_pattern(content), scope, score))
@@ -3902,7 +3936,8 @@ class SearchEngine:
                             def position_ok(m, _t=span_text):
                                 return _accept(_t, m, not _query_has_brackets(query_str))
                         match_obj = self._first_match_in_pages(
-                            regex, span_text, match_obj, boundaries, restrict_uids, position_ok)
+                            regex, span_text, match_obj, boundaries, restrict_uids, position_ok,
+                            sys_ids=restrict_sids)
                         if match_obj is None:
                             regex_filtered_count += 1
                             continue
