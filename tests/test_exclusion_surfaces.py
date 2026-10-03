@@ -1897,3 +1897,51 @@ def test_a_preview_that_does_not_extend_the_table_rebuilds_it(window):
     w._on_search_preview(w.search_thread, _rows(B, 5))
     assert w.results_table.rowCount() == 5
     assert all(w.results_table.item(r, w.COL_SYS_ID).text() == B for r in range(5))
+
+
+# --- Refinement steps record what the run searched (D8 Phase 1, 2026-10-04) --------
+# Both step builders read the widgets, which may have changed since the run, and kept
+# some fields at their defaults: the first step of a chain lost gap, NOT-words, position
+# and Responsa options, the committed step its NOT-words, both the corpus. A replay
+# (session restore, a removed step, a scope change) then ran another search.
+
+RUN = dict(query="שלום", gap=2, exclude_words=["רע"], text_position="start",
+           responsa_options=None, corpus_scope="genizah")
+
+
+def _refining(w):
+    w.MODE_RESPONSA = 2                     # set in __init__, which the fixture skips
+    w._zero_result_refine = False
+    w.refine_badge, w.refine_cancel_btn, w._zero_result_back_btn = QLabel(), QPushButton(), QPushButton()
+    return w
+
+
+def _fields(step):
+    return (step.query, step.gap, step.exclude_words, step.text_position, step.corpus_scope)
+
+
+def test_a_committed_refinement_step_records_what_the_run_searched(window):
+    w = _refining(window)
+    w.query_input.setText("?שלום")          # the box still shows the mode prefix
+    w._refine_mode = True
+    w._last_search_params = dict(RUN)
+    _search(w, _rows(A, 2))
+    assert _fields(w.refinement_chain[-1]) == ("שלום", 2, ["רע"], "start", "genizah")
+
+
+def test_the_first_step_of_a_chain_records_what_the_run_searched(window):
+    w = _refining(window)
+    w.query_input.setText("?שלום")
+    w._last_search_params = dict(RUN)
+    _search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    assert _fields(w.refinement_chain[0]) == ("שלום", 2, ["רע"], "start", "genizah")
+
+
+def test_results_from_no_run_here_keep_the_widgets_values(window):
+    w = _refining(window)
+    w.query_input.setText("שלום")
+    w._last_search_params = None            # e.g. restored from a session
+    _search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    assert _fields(w.refinement_chain[0]) == ("שלום", 0, [], None, "all")

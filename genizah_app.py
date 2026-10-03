@@ -20810,6 +20810,7 @@ class GenizahGUI(QMainWindow):
             if hasattr(self, 'corpus_scope_combo'):
                 _lab_corpus_scope = self.corpus_scope_combo.currentData() or "genizah"
             self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap, deep_scan=deep, scan_limit=limit, corpus_scope=_lab_corpus_scope, run_id=_run_id)
+            self._last_search_params = None
         else:
             text_position = self._text_position_from_index(self.text_position_combo.currentIndex())
             # Phase 95 smoke-fix (item 2): read corpus scope from pre-search dropdown.
@@ -20817,6 +20818,12 @@ class GenizahGUI(QMainWindow):
             if hasattr(self, 'corpus_scope_combo'):
                 _corpus_scope = self.corpus_scope_combo.currentData() or "genizah"
             self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position, corpus_scope=_corpus_scope, run_id=_run_id)
+            # What this run searched, for the refinement step built from it: a replay
+            # (session restore, a removed step, scope change) re-runs exactly this --
+            # the widgets may have changed since, and the query lost its mode prefix.
+            self._last_search_params = dict(
+                query=query, gap=gap, exclude_words=list(exclude_words), text_position=text_position,
+                responsa_options=responsa_options, corpus_scope=_corpus_scope)
 
         # Every signal that writes the table or the status line is dropped
         # once New discards this run (_deliver_unless_discarded).
@@ -21190,6 +21197,7 @@ class GenizahGUI(QMainWindow):
         self.results_table.setRowCount(0)
         self.result_row_by_sys_id = {}
         self.last_results = []
+        self._last_search_params = None   # these results came from no search run here
         self.last_search_query = ""
         self.results_loaded = 0
         self.hovered_row = -1
@@ -21730,6 +21738,7 @@ class GenizahGUI(QMainWindow):
                 responsa_options=getattr(self, '_last_responsa_options', None),
                 result_count=len(results),  # total results (matches display count)
             )
+            self._apply_run_params(step)
             step._result_uids = {
                 r.get('uid') or r.get('display', {}).get('id')
                 for r in results
@@ -21987,6 +21996,23 @@ class GenizahGUI(QMainWindow):
             return self._search_status_summary()
         return ''
 
+    def _apply_run_params(self, step):
+        """Fill *step* with what the search that produced the shown results ran with
+        (_last_search_params): its query without a mode prefix, gap, NOT-words,
+        position, Responsa options and corpus. Both step builders took some of these
+        from the widgets and left the rest at defaults -- the first step of a chain
+        lost all four, the committed step its NOT-words -- so a replay ran another
+        search. A Lab run, or results restored from a session, keep the widgets' values."""
+        params = getattr(self, '_last_search_params', None)
+        if not params:
+            return
+        step.query = params['query'] or step.query
+        step.gap = params['gap']
+        step.exclude_words = list(params['exclude_words'])
+        step.text_position = params['text_position']
+        step.responsa_options = params['responsa_options']
+        step.corpus_scope = params['corpus_scope']
+
     def _enter_refine_mode(self):
         """D-02, D-03: Activate refine mode on desktop search bar."""
         if getattr(self, 'is_searching', False):
@@ -22010,6 +22036,7 @@ class GenizahGUI(QMainWindow):
                 mode=mode_val or 'exact',
                 result_count=len(getattr(self, 'last_results', [])),
             )
+            self._apply_run_params(step0)
             step0._result_uids = {
                 r.get('uid') or r.get('display', {}).get('id')
                 for r in getattr(self, 'last_results', [])
@@ -23075,6 +23102,7 @@ class GenizahGUI(QMainWindow):
             self._emit_pgp_tag_search_telemetry('completed', 0, token=token)
             self.status_label.setText(tr("No results for tag: {}").format(tag))
             self.last_results = []
+            self._last_search_params = None   # a tag search: no refinement params
             self.results_loaded = 0
             self.results_table.setRowCount(0)
             self._update_load_more_button()
@@ -23170,6 +23198,7 @@ class GenizahGUI(QMainWindow):
         self.chk_search_header.blockSignals(False)
 
         self.last_results = formatted
+        self._last_search_params = None   # a tag search: no refinement params
         # v7.16 BUG-6: batch-prime LOCAL filepath cache (see on_search_finished).
         self._prime_local_filepath_cache(formatted)
         self.results_loaded = 0
@@ -31340,6 +31369,7 @@ class GenizahGUI(QMainWindow):
         if results:
             # Legacy entry with a stored snapshot — restore instantly.
             self.last_results = results
+            self._last_search_params = None   # a stored snapshot: no params of a run here
             self.on_search_finished(results)
             self._schedule_session_save()
             return
@@ -31999,6 +32029,7 @@ class GenizahGUI(QMainWindow):
             # Restore regular search results
             if reg.get('results'):
                 self.last_results = reg['results']
+                self._last_search_params = None   # these results came from no search run here
                 self.on_search_finished(self.last_results)
                 self.search_progress.setValue(n_reg)
                 QApplication.processEvents()  # Let UI paint before composition restore

@@ -248,6 +248,56 @@ Also done 2026-09-30, outside the original stage list:
   Latin letter or a digit is found across a page break (the pre-check looked for Hebrew letter runs
   only; from e8decfca); a preview keeps engine order under a column sort; an error after a preview
   clears its rows. Each with a test that fails without it; 9 mutants killed.
+- **Step 3, day 1 (2026-10-04): where an uncapped search spends its time.** Owner chose "measure,
+  then the compact list" over a letter-index prototype: a design round (3 backends, 2 judges)
+  ranked a word-aware letter index last on correctness (a second word-boundary definition baked
+  into a 4-5 GB artifact) and proposed keeping Tantivy + today's verifiers. Real index, real
+  MetadataManager, uncapped, one process per search, warm (scratchpad `spike/profile_uncapped.py`):
+
+  | Search | Rows | Total | Find | Load docs | Check | Build rows | Other | Row memory |
+  |---|---|---|---|---|---|---|---|---|
+  | Exact שלום | 31,400 | 5.2 s | 0.05 | 1.9 | 0.9 | 0.9 | 1.4 | 0.26 GB |
+  | Exact ישראל | 175,530 | 32 s | 0.2 | 14.3 | 5.6 | 4.5 | 7.5 | 1.6 GB |
+  | Exact על | 383,713 | 66 s | 0.6 | 20.2 | 19.7 | 10.3 | 14.8 | 3.3 GB |
+  | Exact בני ישראל | 37,573 | 22 s | 0.4 | 12.3 | 2.4 | 0.7 | 6.4 | 1.5 GB |
+  | Variants אהרן הכהן | 1,943 | 17 s | 1.5 | 6.0 | 4.8 | 0.1 | 4.9 | 1.2 GB |
+  | Fuzzy ירושלים | 60,057 | 44 s | 2.2 | 5.4 | 10.3 | 18.0 | 8.3 | 0.6 GB |
+  | Fuzzy שלום עליכם | 2,868 | 64 s | 3.0 | 16.4 | 33.3 | 1.1 | 10.5 | 0.7 GB |
+
+  Build rows = display metadata + snippet + Fuzzy's row pattern and nearest spelling: the part a
+  compact list defers to the rows shown, with nearly all the memory. Phrases spend theirs loading
+  whole-manuscript docs (~62K chars, 140-1,650 us each) for page breaks -- a seam doc per break
+  (the text around it) would let the page path find crossings; a separate step. Doc loads are
+  26-43 us per page; half of these candidates are V0.7 duplicates (owner's machine only). על's
+  check is whole-word retries through the budgeted regex (15 s) -- cheap to fix. A separate
+  ~3 GB text store is not justified by these numbers.
+- **Step 3, owner decision D8 (2026-10-04): complete only when needed.** A design round proposed a
+  complete compact list for every search (ResultSet, 13 commits). With the cap gone a very common
+  word takes ~15-30 s to finish on a user's machine (first rows in 1-3 s); the owner chose instead:
+  keep today's cut-off for the display, say so in the count ("25,000+"), and compute the complete
+  set of a step (manuscript and page ids, no rows) only when a combination needs it -- search-within,
+  the all-terms filter, replay. Phase 1 first (combinations and honest counts), then review. The
+  ResultSet design is kept in the scratchpad (`compact/FINAL_COMPACT_PLAN.md`) for Phase 2 decisions.
+- **D8 Phase 1 plan (2026-10-04)**, from a design round with two skeptics (19 findings, all
+  confirmed): (1) search-within restricts in the query at any size; (2) refinement steps record the
+  run they came from; (3) a cut-off signal from the engine; (4) "+" counts; (5) an ids-only
+  complete mode; (6) replay with progress and Stop that never wipes the chain; (7) search-within,
+  all-terms and replay complete a cut-off step first; (8) the real-index gate, registered. Owner:
+  the restriction fix ships to both apps (it only adds true matches).
+- **D8 commit 1, restriction in the query.** Above 500 manuscripts search-within ran the child
+  search over the whole corpus, kept its first 50,000 hits and filtered them afterwards. Now a term
+  set on `full_header` (the sys_id is one token of it, V0.8 ids and V0.7 paths alike), always in
+  the query; Oxford parts always pass and are tested per page, and a match across a part's own page
+  break counts when either page is inside (both the crossing path and `_first_match_in_pages` tested
+  the first page only). Real index (scratchpad `d8/gate_restriction.py`): within the 44,055
+  manuscripts with ישראל, משה Exact finds 72,067 pages = the brute force (today: 22,673, 69% lost);
+  Variants 123,186 = the brute force plus 3 page ids catalogued under two manuscripts, each a verified
+  match in a copy under a parent manuscript (today: 23,204, 81% lost). Composition's identical
+  <=500 path and the LOCAL index (never restricted) are tracker items.
+- **D8 commit 2, steps record their run.** The search records what it ran with; both step builders
+  take it (the first step of a chain had lost gap, NOT-words, position and Responsa options; the
+  committed step its NOT-words; both the corpus and the query's mode prefix). `RefinementStep`
+  gains `corpus_scope` ('all' for saved steps: replay never passed one, so that is what they ran).
 - Owner measurements after both (partly under test-suite load): בלי ירח 1.3 s and שמעון הצדיק
   1.1 s from submit to rows; שלום 3.4 s; בלי 17 s (loaded); variants שמעון הצדיק 75 s, of which
   66.5 s regex over whole-manuscript docs; fuzzy minutes (a 564K-character pattern).

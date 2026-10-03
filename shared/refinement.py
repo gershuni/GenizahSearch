@@ -35,6 +35,9 @@ class RefinementStep:
     text_position: Optional[str] = None
     responsa_options: Optional[dict] = None
     result_count: int = 0  # total page-level results (matches display count)
+    # The corpus the step searched. 'all' (execute_search's default) for steps saved
+    # before 2026-10-04: replay never passed one, so that is what they replayed as.
+    corpus_scope: str = 'all'
 
     # Runtime-only fields (not serialized, rebuilt on replay)
     _result_uids: set = field(default_factory=set, repr=False, compare=False)
@@ -132,6 +135,7 @@ def replay_chain(
             responsa_options=step.responsa_options,
             restrict_sys_ids=effective,
             text_position=step.text_position,
+            corpus_scope=step.corpus_scope,
         )
 
         result_sys_ids = {

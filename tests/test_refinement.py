@@ -378,3 +378,34 @@ class TestComputeAllTermsFilter:
         s3._result_uids = {'b', 'c', 'e'}
         result = compute_all_terms_filter([s1, s2, s3])
         assert result == {'b', 'c'}  # intersection of s1 and s3 only
+
+
+# ---------------------------------------------------------------------------
+# Replay runs each step's own search (D8 Phase 1, 2026-10-04)
+# ---------------------------------------------------------------------------
+
+class TestReplayFidelity:
+    def test_replay_passes_each_steps_corpus(self):
+        chain = [RefinementStep('a', 'literal', corpus_scope='genizah'),
+                 RefinementStep('b', 'literal', corpus_scope='local')]
+        searcher = MockSearcher([_make_results('1'), _make_results('1')])
+        replay_chain(chain, searcher, None)
+        assert [c[3]['corpus_scope'] for c in searcher.calls] == ['genizah', 'local']
+
+    def test_a_step_saved_before_the_field_replays_as_it_always_did(self):
+        # replay never passed a corpus, so those steps ran execute_search's default, 'all'
+        step = RefinementStep.from_dict({'query': 'a', 'mode': 'literal', 'gap': 0})
+        assert step.corpus_scope == 'all'
+        assert RefinementStep.from_dict(step.to_dict()).corpus_scope == 'all'
+        explicit = RefinementStep.from_dict({'query': 'a', 'mode': 'literal', 'corpus_scope': 'genizah'})
+        assert explicit.corpus_scope == 'genizah'
+
+    def test_replay_passes_not_words_gap_position_and_responsa(self):
+        opts = {'responsa_mode': True, 'variants': False}
+        chain = [RefinementStep('a', 'responsa', gap=2, exclude_words=['x'], text_position='end',
+                                responsa_options=opts)]
+        searcher = MockSearcher([_make_results('1')])
+        replay_chain(chain, searcher, None)
+        query, mode, gap, kw = searcher.calls[0]
+        assert (query, gap, kw['exclude_words'], kw['text_position'], kw['responsa_options']) == (
+            'a', 2, ['x'], 'end', opts)
