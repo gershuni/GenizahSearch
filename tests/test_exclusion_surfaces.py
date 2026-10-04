@@ -2208,3 +2208,36 @@ def test_a_failed_completion_keeps_the_chain(completing, monkeypatch):
     assert w._refine_mode and w.refinement_restrict_sys_ids == {A}
     assert len(w.refinement_chain) == 1 and w.refinement_chain[0].result_count_capped
     assert " 1+ " in w.refine_badge.text()
+
+
+# --- A preview is not judged by the previous run's enrichment (Codex review, round 5) ---
+# Domains and measurements arrive after a run ends; until then the previous run's maps
+# stood, so a preview row absent from them was hidden as "Uncategorized" or as "no
+# measurements, fetch complete", and the running search showed a blank table.
+
+def _previous_run_left(w, domains=False, measurements=False):
+    if domains:
+        w._result_domain_map, w._has_result_domains = {A: ["Liturgy"]}, True
+        w._domain_exclusions = {"Uncategorized"}
+    if measurements:
+        w._result_measurement_map, w._measurement_fetch_complete = {A: {"width": 20.0}}, True
+        w._post_measurement_filters = {"width_min": 10.0}
+
+
+@pytest.mark.parametrize("what", ["domains", "measurements"])
+def test_a_preview_shows_its_rows_after_a_search_that_left_filter_data(window, monkeypatch, what):
+    w = window
+    _previous_run_left(w, **{what: True})
+    thread = _start_a_search_that_never_lands(w, monkeypatch)
+    w._on_search_preview(thread, _rows(B, 4))
+    assert w.results_table.rowCount() == 4
+    assert not any(w.results_table.isRowHidden(r) for r in range(4)), "the preview's rows were hidden"
+
+
+def test_the_standing_filters_survive_the_launch(window, monkeypatch):
+    # Only this run's data is reset: what the user chose to hide stays chosen.
+    w = window
+    _previous_run_left(w, domains=True, measurements=True)
+    _start_a_search_that_never_lands(w, monkeypatch)
+    assert w._domain_exclusions == {"Uncategorized"} and w._post_measurement_filters == {"width_min": 10.0}
+    assert (w._result_domain_map, w._has_result_domains, w._measurement_fetch_complete) == ({}, False, False)

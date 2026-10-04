@@ -160,3 +160,77 @@ def test_the_desktop_thread_hands_the_signal_over_before_the_results(engine):
     with patch.object(Config, "SEARCH_LIMIT", 2):
         t.run()                                 # same thread: signals are delivered directly
     assert [k for k, _v in got] == ["cutoff", "results"] and got[0][1]["capped"]
+
+
+# --- Codex review of PR #375 (round 5) ------------------------------------------------
+
+@pytest.fixture
+def my_library(engine, tmp_path):
+    local = _build(str(tmp_path / "local"), [(f"l{n}", f"אבג {W} {C}", "page", "") for n in range(5)])
+    saved = (getattr(engine, "local_index", None), getattr(engine, "local_searcher", None))
+    engine.local_index, engine.local_searcher = local, local.searcher()
+    yield engine
+    engine.local_index, engine.local_searcher = saved
+
+
+def _local_rows(rows):
+    return [r for r in rows if r.get("display", {}).get("source") == "LOCAL"]
+
+
+@pytest.mark.parametrize("scope, responsa", [("local", False), ("local", True), ("all", True), ("all", False)])
+def test_ids_only_reads_every_my_library_candidate(my_library, scope, responsa):
+    # complete_chain completing a My Library step: the LOCAL-only paths (and the 'all'
+    # merge's Responsa path) kept the display limit, so the "complete" set was the cut one.
+    opts = {"responsa_mode": True} if responsa else None
+    se.consume_last_search_cutoff()
+    with patch.object(Config, "SEARCH_LIMIT", 2):
+        rows = my_library.execute_search(W, "literal", 0, corpus_scope=scope, ids_only=True,
+                                         responsa_options=opts)
+        cutoff = se.consume_last_search_cutoff()
+    assert len(_local_rows(rows)) == 5
+    assert not cutoff["capped"]
+
+
+class _TitleMeta:
+    ids = [f"99{n:06d}" for n in range(50)]
+
+    def search_by_meta(self, query_str, target_field):
+        return list(self.ids)
+
+    def get_meta_for_id(self, sid):
+        return {"shelfmark": f"SM {sid}", "title": "T", "library_code": "CUL"}
+
+    def get_library_for_id(self, sid):
+        return "CUL"
+
+
+@pytest.mark.parametrize("mode", ["Title", "Shelfmark"])
+def test_a_stopped_title_or_shelfmark_search_is_reported(mode):
+    eng = se.SearchEngine.__new__(se.SearchEngine)       # metadata rows need no index
+    eng.meta_mgr, eng.searcher = _TitleMeta(), None
+
+    def stop(i, total):
+        if i >= 10:
+            raise InterruptedError
+    se.consume_last_search_cutoff()
+    rows = eng.execute_search("*", mode, 0, progress_callback=stop, restrict_sys_ids=set(_TitleMeta.ids))
+    assert 0 < len(rows) < 50, "partial rows come back"
+    assert se.consume_last_search_cutoff()["interrupted"]
+    eng.execute_search("*", mode, 0, restrict_sys_ids=set(_TitleMeta.ids))
+    assert not se.consume_last_search_cutoff()["interrupted"], "a finished scan is not"
+
+
+def test_ids_only_is_not_cut_off_when_every_doc_matches(tmp_path):
+    # Its limit was the doc count: a query every doc matched filled it and read as cut off.
+    root = tmp_path / "all_match"
+    root.mkdir()
+    _build(str(root / "tantivy_db"), [(f"m{n}", f"אבג {W}", "page", "") for n in range(3)])
+    with patch.object(Config, "INDEX_DIR", str(root)):
+        eng = se.SearchEngine(_Meta(), VariantManager(), worker_mode=True, open_local=False)
+    se.consume_last_search_cutoff()
+    with patch.object(Config, "SEARCH_LIMIT", 1):
+        rows = eng.execute_search(W, "literal", 0, corpus_scope="genizah", ids_only=True)
+        cutoff = se.consume_last_search_cutoff()
+    assert len(rows) == 3 and not cutoff["capped"]
+    eng = None
+    gc.collect()

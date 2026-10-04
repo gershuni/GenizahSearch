@@ -20827,6 +20827,17 @@ class GenizahGUI(QMainWindow):
                 query=query, gap=gap, exclude_words=list(exclude_words), text_position=text_position,
                 responsa_options=responsa_options, corpus_scope=_corpus_scope)
         self._search_cutoff = None    # this run's arrives (cutoff_signal) before its results
+        # The previous run's enrichment (domains, measurements) arrives again only after
+        # this run ends (_launch_enrichment_workers). Until then a preview row must not be
+        # judged by it: a manuscript absent from the old domain map was hidden as
+        # "Uncategorized", and one absent from the old measurement map as "no data,
+        # fetch complete" (Codex review of PR #375). Unknown shows the row.
+        self._result_domain_map = {}
+        self._result_domain_counts = {}
+        self._has_result_domains = False
+        self.btn_domain_filter.setEnabled(False)
+        self._result_measurement_map = {}
+        self._measurement_fetch_complete = False
 
         # Every signal that writes the table or the status line is dropped
         # once New discards this run (_deliver_unless_discarded).

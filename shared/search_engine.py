@@ -1555,16 +1555,21 @@ class SearchEngine:
         if regex is not None:
             if accept is not None:
                 first = regex.search(content)
-                if first is None or _first_accepted_match(
-                        regex, content, first, lambda m: accept(content, m)) is None:
+                accepted = first and _first_accepted_match(
+                    regex, content, first, lambda m: accept(content, m))
+                if not accepted:
                     return None
-            hl_c = self.highlight(content, regex, for_file=False)
+                # Mark the occurrence accepted, not the first one -- which may sit
+                # inside a longer word or away from the position (Codex review).
+                hl_c, hl_f = self._highlight_pair(content, (accepted.start(), accepted.end()))
+            else:
+                hl_c = self.highlight(content, regex, for_file=False)
+                hl_f = self.highlight(content, regex, for_file=True) if hl_c else None
             if not hl_c:
                 # D-04.1: Tantivy matched but regex didn't.
                 # SILENTLY DROP this candidate by returning None.
                 # _query_local_index will skip it.
                 return None
-            hl_f = self.highlight(content, regex, for_file=True)
             snippet = hl_c
             raw_file_hl = hl_f or ""
             # Fuzzy's regex differs per text (_FuzzyMatcher): this row's own.
@@ -3376,7 +3381,10 @@ class SearchEngine:
                     })
 
         except InterruptedError:
-            pass  # cancelled mid-scan — fall through to the sort and return partials
+            # Cancelled mid-scan: fall through to the sort and return partials -- and
+            # say so, or a refinement step built on them counts as complete (Codex
+            # review of PR #375).
+            _note_search_cutoff(interrupted=True)
 
         results.sort(key=lambda r: natural_sort_key(r.get('display', {}).get('shelfmark', '')))
         return results
@@ -3438,7 +3446,11 @@ class SearchEngine:
                 # returns nothing. Build the same candidate query + components-aware
                 # regex the main index uses, then run it against LOCAL. Line-break (|)
                 # is main-index only -> helper returns None -> simplified fallback.
-                if responsa_options and responsa_options.get('responsa_mode'):
+                _responsa = bool(responsa_options and responsa_options.get('responsa_mode'))
+                # ids_only (complete_chain completing a My Library step): every candidate.
+                _local_limit = (max(Config.SEARCH_LIMIT, self.local_searcher.num_docs + 1)
+                                if ids_only else None)
+                if _responsa:
                     _resp_q, _resp_regex = self._build_local_responsa_query_and_regex(
                         query_str, mode, gap, responsa_options
                     )
@@ -3448,6 +3460,8 @@ class SearchEngine:
                             regex=_resp_regex, tantivy_query_str=_resp_q,
                             progress_callback=progress_callback,
                             phase_callback=phase_callback,
+                            limit=_local_limit,
+                            accept=_local_match_accept(False, text_position, query_str),
                         )
                 # Phase 96 D-F5: build regex here so LOCAL-only path also gets
                 # D-04.1 filter-out + highlight_pattern, same as the RRF merge path.
@@ -3462,6 +3476,7 @@ class SearchEngine:
                     progress_callback=progress_callback,
                     phase_callback=phase_callback,
                     tantivy_query=self._local_forms_query(query_str, mode),
+                    limit=_local_limit,
                     accept=_local_match_accept(mode in _WHOLE_WORD_MODES, text_position, query_str),
                 )
             except SearchBudgetExceeded:
@@ -3804,8 +3819,9 @@ class SearchEngine:
         if search_field != 'content' and _has_wildcard_component:
             search_field = 'content'
 
-        # Candidates read per query: the display's cut-off, or every doc (ids_only).
-        _limit = max(Config.SEARCH_LIMIT, self.searcher.num_docs) if ids_only else Config.SEARCH_LIMIT
+        # Candidates read per query: the display's cut-off, or every doc (ids_only) --
+        # one more than there are, so a query every doc matches is not reported cut off.
+        _limit = max(Config.SEARCH_LIMIT, self.searcher.num_docs + 1) if ids_only else Config.SEARCH_LIMIT
 
         tantivy_started = time.perf_counter()
         try:
@@ -4121,6 +4137,8 @@ class SearchEngine:
                         tantivy_query_str=_local_responsa_query,
                         progress_callback=progress_callback,
                         phase_callback=phase_callback,
+                        limit=(max(Config.SEARCH_LIMIT, self.local_searcher.num_docs + 1) if ids_only else None),
+                        accept=_local_match_accept(_whole_words, text_position, query_str),
                     )
                 else:
                     local_hits = self._query_local_index(
@@ -4128,7 +4146,7 @@ class SearchEngine:
                         progress_callback=progress_callback,
                         phase_callback=phase_callback,
                         tantivy_query=self._local_forms_query(query_str, mode),
-                        limit=(max(Config.SEARCH_LIMIT, self.local_searcher.num_docs) if ids_only else None),
+                        limit=(max(Config.SEARCH_LIMIT, self.local_searcher.num_docs + 1) if ids_only else None),
                         accept=_local_match_accept(_whole_words, text_position, query_str),
                     )
             except InterruptedError:

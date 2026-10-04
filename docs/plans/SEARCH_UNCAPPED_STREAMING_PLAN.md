@@ -331,6 +331,15 @@ Also done 2026-09-30, outside the original stage list:
   searches it exits 1 (9,956 of 44,055 manuscripts, 44,880 pages missing). 156 s on the owner's
   machine. Nightly via `scripts/schedule_nightly_search_gate.ps1` (04:30, after the review-artifact
   check); registering the task is the owner's step. No opt-in env var: a script, not a skipping test.
+- **Codex rounds 4-5 (2026-10-04), each finding reproduced by a verifier before fixing.** A Latin
+  letter or digit continues a word (as Exact's tokens; Variants/Fuzzy had matched `abc` in `xabc`).
+  My Library rows take the main index's rule -- whole words, the text position -- and mark the
+  occurrence they were accepted for; its LOCAL-only and Responsa queries read every candidate under
+  ids_only (completion had re-run them capped); an ids_only limit is one more than the doc count (a
+  query every doc matched read as cut off). A stopped Title/Shelfmark search reports the stop. A
+  run's domain and measurement data reset at launch, so a preview is not hidden by the last run's.
+  Sweeps for siblings found two more, tracked: Lab Mode in chains (P2) and bracket-only matches on
+  whole-manuscript rows (P3, predates the PR).
 - Owner measurements after both (partly under test-suite load): בלי ירח 1.3 s and שמעון הצדיק
   1.1 s from submit to rows; שלום 3.4 s; בלי 17 s (loaded); variants שמעון הצדיק 75 s, of which
   66.5 s regex over whole-manuscript docs; fuzzy minutes (a 564K-character pattern).

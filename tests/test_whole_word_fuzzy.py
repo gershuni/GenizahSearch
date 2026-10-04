@@ -457,7 +457,8 @@ def local_cases(engine, tmp_path):
     register_search_tokenizers(idx)
     docs = {"near_start": f"{NEAR} אבג דהו", "near_middle": f"אבג {NEAR} דהו",
             "exact_middle": f"אבג {W} דהו",
-            "inside_pair": f"אבג ב{W} {ON} {W} זחט {ON}", "whole_pair": f"אבג {W} {ON} דהו"}
+            "inside_pair": f"אבג ב{W} {ON} {W} זחט {ON}", "whole_pair": f"אבג {W} {ON} דהו",
+            "inside_then_whole": f"אבג ב{W} {ON} זחט {W} {ON} דהו"}
     w = idx.writer(heap_size=50_000_000, num_threads=1)
     for uid, text in docs.items():
         w.add_document(tantivy.Document(
@@ -491,3 +492,24 @@ def test_my_library_phrases_match_whole_words(local_cases, scope, mode):
     # (Fuzzy takes ב{W}: a prefixed form is a near spelling, owner 2026-10-02.)
     got = _local_uids(local_cases, f"{W} {ON}", mode, scope) & {"inside_pair", "whole_pair"}
     assert got == {"whole_pair"}
+
+
+@pytest.mark.parametrize("mode", ["literal", "variants"])
+def test_my_library_marks_the_occurrence_it_accepted(local_cases, mode):
+    # Codex review of PR #375: the row was kept for the whole-word pair, but its snippet
+    # re-searched and marked the first pair, inside ב{W}.
+    (row,) = [r for r in local_cases.execute_search(f"{W} {ON}", mode, 0, corpus_scope="local")
+              if r["uid"] == "inside_then_whole"]
+    for text in (row["snippet"], row["raw_file_hl"]):
+        assert f"זחט *{W}" in text and f"ב*{W}" not in text, text
+
+
+@pytest.mark.parametrize("scope", ["local", "all"])
+def test_my_library_responsa_honours_the_position(local_cases, scope):
+    # The Responsa paths took no acceptance at all: a start-position search returned
+    # every page holding the word anywhere. (No whole-word rule: Responsa matches inside.)
+    opts = {"responsa_mode": True}
+    anywhere = _local_uids(local_cases, W, "literal", scope, responsa_options=opts)
+    at_start = _local_uids(local_cases, W, "literal", scope, responsa_options=opts, text_position="start")
+    assert {"exact_middle", "inside_pair"} <= anywhere
+    assert at_start == set(), "no page has the word first"
