@@ -1986,11 +1986,15 @@ def test_a_replaced_fetch_neither_reports_nor_drops_the_one_after_it(window, mon
     w = window
     monkeypatch.setattr(app, "ShelfmarkLoaderThread", _FakeLoader)
     monkeypatch.setattr(_FakeLoader, "made", [])
-    w.start_metadata_loading([A, B])
+    D = "990000000000400004"
+    w.start_metadata_loading([A, B, D])
     w.meta_mgr.nli_cache = {A: {"shelfmark": "T-S 1", "title": "t"}}    # A came in before the cancel
+    # A and B still have search-results rows; D's view was replaced since (Codex
+    # review of PR #376: a rerun Composition clears its tree, not the loader).
+    w.shelfmark_items_by_sid = {A: app.QTableWidgetItem(), B: app.QTableWidgetItem()}
     w.start_metadata_loading([C])
     first, second = _FakeLoader.made
-    assert second.sids == [B, C], "a fetched id was asked again, or one not reached was dropped"
+    assert second.sids == [B, C], "a fetched or no longer shown id was asked again, or one not reached dropped"
     # Its finished(True) is still queued; delivered, it set meta_loader to None
     # under the running second loader and reported a cancel.
     assert not first.finished_signal.slots and not first.progress_signal.slots

@@ -23849,14 +23849,17 @@ class GenizahGUI(QMainWindow):
             self.meta_loader.request_cancel()
             self.meta_loader.wait()
             # The ids the cancelled loader did not reach join this request, ahead
-            # of the new ones: their rows still show "Loading...". A landed search
-            # starts the fetch of its first rows and the rest of the first page
-            # replaces it a moment later (Codex review of PR #376); fast scrolling
-            # did the same. A new search cancels the loader before its rows are
-            # built, so ids of replaced results never carry over.
+            # of the new ones, while their search-results rows still show
+            # "Loading...". A landed search starts the fetch of its first rows and
+            # the rest of the first page replaces it a moment later (Codex review
+            # of PR #376); fast scrolling did the same. Only ids with such a row:
+            # those are the rows a fetch updates (on_meta_progress). Ids of a
+            # Composition view rebuilt since, or of results a new search replaced
+            # (it clears the rows), are not carried.
             asked = set(ids)
+            shown = getattr(self, 'shelfmark_items_by_sid', None) or {}
             carried = [sid for sid in getattr(self.meta_loader, 'sids', None) or []
-                       if sid not in self.meta_mgr.nli_cache and sid not in asked]
+                       if sid in shown and sid not in self.meta_mgr.nli_cache and sid not in asked]
             ids = carried + list(ids)
             # Its finished(True) is still queued: delivered after the new loader
             # starts, on_meta_finished dropped the NEW loader's reference (a running
