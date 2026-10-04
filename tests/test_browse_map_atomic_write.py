@@ -20,6 +20,13 @@ from shared.search_engine import SearchEngine
 
 
 def _fresh_engine(monkeypatch, browse_map_path, on_disk):
+    # An engine built by an earlier test in the process may still be loading the
+    # real browse map on its FL-ID thread (tests/test_local_reload_after_refresh.py
+    # does). Its load holds the class lock and ends by filling the class cache: a
+    # test that cleared the cache first would wait on that lock and get the real
+    # map. Wait for it here, then clear.
+    with SearchEngine._browse_map_lock:
+        pass
     monkeypatch.setattr(Config, 'BROWSE_MAP', str(browse_map_path))
     monkeypatch.setattr(SearchEngine, '_shared_browse_map', None)
     with open(browse_map_path, 'wb') as f:
