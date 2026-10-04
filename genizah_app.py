@@ -20750,6 +20750,9 @@ class GenizahGUI(QMainWindow):
         self._pause_search.reset_for_run(_run_id, time.monotonic())
 
         self.is_searching = True; self.btn_search.setText(tr("Stop")); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
+        # The last run's "Search completed in ..." stays until cleared (timeout 0): it
+        # described results this run has just replaced (owner, 2026-10-04).
+        self.statusBar().clearMessage()
         self.search_within_btn.setVisible(False)  # Hide during search
         self.search_start_time = time.time()
         self._search_was_cancelled = False
@@ -21203,6 +21206,7 @@ class GenizahGUI(QMainWindow):
 
         # 2. Reset search UI state
         self.reset_ui()
+        self.statusBar().clearMessage()          # "Search completed in ..." of what New cleared
 
         # 3. Clear query input
         self.query_input.setText("")
@@ -23222,6 +23226,7 @@ class GenizahGUI(QMainWindow):
             'token': self._pgp_tag_active_token,
         }
         self.status_label.setText(tr("Searching tag: {}...").format(tag))
+        self.statusBar().clearMessage()          # the last search's "Search completed in ..."
         self._pgp_tag_search_worker = PGPTagSearchWorker(tag)
         # CR-114-01: bind THIS run's token into the slot so a stale slot from a superseded
         # worker carries its OLD token and is skipped by the emit helper's token guard.

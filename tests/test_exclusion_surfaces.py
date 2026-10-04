@@ -2241,3 +2241,37 @@ def test_the_standing_filters_survive_the_launch(window, monkeypatch):
     _start_a_search_that_never_lands(w, monkeypatch)
     assert w._domain_exclusions == {"Uncategorized"} and w._post_measurement_filters == {"width_min": 10.0}
     assert (w._result_domain_map, w._has_result_domains, w._measurement_fetch_complete) == ({}, False, False)
+
+
+# --- "Search completed in ..." leaves with its results (owner, 2026-10-04) ------------
+# The status bar message has no timeout: it stood under the next search until that one
+# finished, describing results already gone.
+
+def _completed_message(w):
+    _search(w, _rows(A, 2))
+    assert w.statusBar().currentMessage().startswith(app.tr("Search completed in"))
+
+
+def test_a_new_search_clears_the_last_completed_message(window, monkeypatch):
+    w = window
+    _completed_message(w)
+    _start_a_search_that_never_lands(w, monkeypatch)
+    assert w.statusBar().currentMessage() == ""
+
+
+def test_new_clears_the_completed_message(window):
+    w = window
+    _completed_message(w)
+    w._reset_search()
+    assert w.statusBar().currentMessage() == ""
+
+
+def test_a_tag_search_clears_the_completed_message(load_more, monkeypatch):
+    monkeypatch.setattr(app, "PGPTagSearchWorker", _QueuedTagWorker)
+    w = load_more
+    _completed_message(w)
+    w.tag_search_combo = QComboBox()
+    w.tag_search_combo.addItem("letters", "letters")
+    w._pgp_tag_search_worker = None
+    w._execute_tag_search()
+    assert w.statusBar().currentMessage() == ""
