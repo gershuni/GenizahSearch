@@ -323,6 +323,14 @@ Also done 2026-09-30, outside the original stage list:
   ישראל alone warm (a full-row uncapped search: 19 s -- doc loads dominate, not row building);
   Stop 3 s in returns in 0.08 s with the chain unchanged. Restore replay, chip removal and the
   zero-result undo still replay capped searches (the steps come back "+"); they gain no Stop.
+- **D8 commit 8, the gate registered.** `scripts/verify_search_combinations.py` runs both checks on
+  the real index -- restriction (Exact and Variants = brute force) and completion (both steps =
+  uncapped oracles; Stop leaves the chain) -- with every expected value computed in the same run.
+  Missing index, browse map or libraries.csv: exit 2, never a skip; a parent word that no longer
+  reaches the limit: exit 1 ("vacuous"). Shown able to fail: with completion running capped
+  searches it exits 1 (9,956 of 44,055 manuscripts, 44,880 pages missing). 156 s on the owner's
+  machine. Nightly via `scripts/schedule_nightly_search_gate.ps1` (04:30, after the review-artifact
+  check); registering the task is the owner's step. No opt-in env var: a script, not a skipping test.
 - Owner measurements after both (partly under test-suite load): בלי ירח 1.3 s and שמעון הצדיק
   1.1 s from submit to rows; שלום 3.4 s; בלי 17 s (loaded); variants שמעון הצדיק 75 s, of which
   66.5 s regex over whole-manuscript docs; fuzzy minutes (a 564K-character pattern).
