@@ -524,6 +524,32 @@ def _strip_brackets(text: str) -> str:
     return text.replace('[', '').replace(']', '')
 
 
+def _unstripped_span(text, start, end):
+    """Where the span [start, end) of _strip_brackets(text) stands in *text*: the
+    same characters, with any brackets among them (של[ו]ם for שלום); a bracket that
+    closes or opens a pair right at its edge is kept with it (ב[ג], not ב[ג), never
+    a letter outside the span."""
+    kept, s0, e0 = 0, None, None
+    for i, ch in enumerate(text):
+        if ch in '[]':
+            continue
+        if kept == start:
+            s0 = i
+        kept += 1
+        if kept == end:
+            e0 = i + 1
+            break
+    s0 = len(text) if s0 is None else s0
+    e0 = len(text) if e0 is None else e0
+    # A pair closed or opened right at the edge stays whole: ב[ג] rather than ב[ג.
+    seg = text[s0:e0]
+    if seg.count('[') > seg.count(']') and text[e0:e0 + 1] == ']':
+        e0 += 1
+    if seg.count(']') > seg.count('[') and s0 and text[s0 - 1] == '[':
+        s0 -= 1
+    return s0, e0
+
+
 def _index_has_field(index, field_name: str) -> bool:
     """SEED-006 compat gate: True if *index*'s schema defines *field_name*.
 
@@ -4042,23 +4068,29 @@ class SearchEngine:
                     # preserve scholarly bracket notation in snippets.
                     orig_match_missing = False
                     if match_content is not content:
-                        orig_match = regex.search(content)
+                        first_orig = orig_match = regex.search(content)
                         if orig_match and _whole_words:
                             orig_match = _first_accepted_match(
                                 regex, content, orig_match,
-                                lambda m, _t=content: _accept(_t, m, True)) or orig_match
+                                lambda m, _t=content: _accept(_t, m, True))
                         elif orig_match and text_position:
-                            # Highlight the occurrence that met the position, when the
-                            # original text has one; else keep the old first match.
+                            # The occurrence that met the position, when the original
+                            # text has one.
                             orig_match = _first_position_valid_match(
                                 regex, content, orig_match, text_position, _line_constraints or None,
-                                strip_brackets=True) or orig_match
+                                strip_brackets=True)
                         if orig_match:
                             match_obj = orig_match
                         else:
-                            # keep match_obj from stripped content; highlight
-                            # may be slightly offset but still useful
-                            orig_match_missing = True
+                            # The accepted occurrence holds a bracket (של[ו]ם עולם): mark
+                            # it where it stands in the original text, brackets included --
+                            # not an earlier occurrence the rule rejected (Codex review of
+                            # PR #375), nor the stripped text's offsets (a whole-manuscript
+                            # row mapped those onto the wrong characters and page).
+                            match_obj = _Span(*_unstripped_span(content, match_obj.start(), match_obj.end()))
+                            # A page row whose original text holds no match at all is
+                            # still dropped below, as before (membership unchanged).
+                            orig_match_missing = first_orig is None
 
                     # Fuzzy: a page row shows the nearest spelling on the page.
                     if (isinstance(regex, _FuzzyMatcher) and scope == 'page' and not orig_match_missing
@@ -4069,13 +4101,14 @@ class SearchEngine:
 
                     boundaries = self._parse_boundaries(doc) if scope != 'page' else []
                     if restrict_uids is not None and scope != 'page':
-                        span_text = match_content if orig_match_missing else content
+                        # match_obj is in the original text's offsets (mapped back when the
+                        # match needed its brackets out), so its pages are read there.
                         position_ok = None
                         if text_position or _whole_words:
-                            def position_ok(m, _t=span_text):
+                            def position_ok(m, _t=content):
                                 return _accept(_t, m, not _query_has_brackets(query_str))
                         match_obj = self._first_match_in_pages(
-                            regex, span_text, match_obj, boundaries, restrict_uids, position_ok,
+                            regex, content, match_obj, boundaries, restrict_uids, position_ok,
                             sys_ids=restrict_sids)
                         if match_obj is None:
                             regex_filtered_count += 1

@@ -20753,6 +20753,7 @@ class GenizahGUI(QMainWindow):
         # The last run's "Search completed in ..." stays until cleared (timeout 0): it
         # described results this run has just replaced (owner, 2026-10-04).
         self.statusBar().clearMessage()
+        self._after_restore_replay = None    # an action held for the replay was for the old results
         self.search_within_btn.setVisible(False)  # Hide during search
         self.search_start_time = time.time()
         self._search_was_cancelled = False
@@ -21207,6 +21208,7 @@ class GenizahGUI(QMainWindow):
         # 2. Reset search UI state
         self.reset_ui()
         self.statusBar().clearMessage()          # "Search completed in ..." of what New cleared
+        self._after_restore_replay = None        # nor an action held for the restore replay
 
         # 3. Clear query input
         self.query_input.setText("")
@@ -21865,8 +21867,7 @@ class GenizahGUI(QMainWindow):
         # Phase 55: Reapply "all terms" filter if checkbox is checked -- once the
         # steps before this one are complete (D8: a cut-off one would hide true rows).
         if self._all_terms_filter and self.refinement_chain:
-            self._complete_chain_then(len(self.refinement_chain) - 1,
-                                      lambda _result: self._apply_all_terms_filter_and_rerender())
+            self._complete_chain_then(len(self.refinement_chain) - 1, self._all_terms_after_completion)
         _pt.append(('finish', time.perf_counter()))
         search_elapsed = self._pause_search.elapsed(time.monotonic())
         logger.info(
@@ -22006,6 +22007,21 @@ class GenizahGUI(QMainWindow):
             self._update_refinement_strip()
         if hasattr(self, '_update_search_within_btn'):
             self._update_search_within_btn()
+        self._run_after_restore_replay()
+
+    def _run_after_restore_replay(self):
+        """Run the search-within or all-terms action asked for while the restored
+        chain was replaying (_complete_chain_then held it). Not when a search has
+        started since: completing would stop it, and its results replace the ones
+        the action was for (start_search and New drop the action anyway)."""
+        pending = getattr(self, '_after_restore_replay', None)
+        self._after_restore_replay = None
+        if pending is None or getattr(self, 'is_searching', False):
+            return
+        replay = getattr(self, '_replay_restore_thread', None)
+        if replay is not None:
+            replay.wait(2000)    # it has delivered its result; let run() return
+        self._complete_chain_then(*pending)
 
     def _on_replay_for_restore_error(self, msg):
         """Replay failed -- clear the chain rather than leave stale state."""
@@ -22016,6 +22032,7 @@ class GenizahGUI(QMainWindow):
             self.status_label.setText(self._search_status_or_blank())
         if hasattr(self, '_update_refinement_strip'):
             self._update_refinement_strip()
+        self._run_after_restore_replay()     # a held action runs on what is left
 
     def _search_status_or_blank(self):
         """What the replay leaves in the status label once it is done: the
@@ -22213,10 +22230,20 @@ class GenizahGUI(QMainWindow):
             return      # the run in flight renders with the filter as it is when it ends
         if checked and self.refinement_chain:
             # D8: the steps before the shown one are completed first.
-            self._complete_chain_then(len(self.refinement_chain) - 1,
-                                      lambda _result: self._apply_all_terms_filter_and_rerender())
+            self._complete_chain_then(len(self.refinement_chain) - 1, self._all_terms_after_completion)
         else:
             self._apply_all_terms_filter_and_rerender()
+
+    def _all_terms_after_completion(self, result):
+        """Render with the all-terms filter once the steps before the shown one are
+        complete. Stopped (or failed), their sets are still cut off and would hide
+        rows that do hold every term (Codex review of PR #375): the filter is turned
+        off instead -- its checkbox unticks -- and the rows show unfiltered."""
+        if result and result.get('interrupted'):
+            self._all_terms_filter = False
+            if hasattr(self, '_update_refinement_strip'):
+                self._update_refinement_strip()
+        self._apply_all_terms_filter_and_rerender()
 
     def _forget_chain_sets(self):
         """The filter scope changed under the chain: each step's manuscripts were found
@@ -22240,7 +22267,10 @@ class GenizahGUI(QMainWindow):
             return
         replay = getattr(self, '_replay_restore_thread', None)
         if replay is not None and replay.isRunning():
-            # The restored chain is being replayed into these same steps.
+            # The restored chain is being replayed into these same steps: the action
+            # runs when the replay ends (_run_after_restore_replay). It was dropped
+            # (Codex review of PR #375). The latest request wins.
+            self._after_restore_replay = (upto, on_done)
             self.status_label.setText(tr('Restoring refinement chain...'))
             return
         if not self._drain_previous_worker('search_thread', self._pause_search):

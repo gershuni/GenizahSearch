@@ -2275,3 +2275,86 @@ def test_a_tag_search_clears_the_completed_message(load_more, monkeypatch):
     w._pgp_tag_search_worker = None
     w._execute_tag_search()
     assert w.statusBar().currentMessage() == ""
+
+
+# --- Codex review round 6: a stopped completion, and actions during the restore replay ---
+
+def test_a_stopped_completion_turns_the_all_terms_filter_off(completing):
+    # The earlier step is still cut off: filtering with it would hide B's pages, which
+    # do hold every term. The filter goes off, visibly, and every row shows.
+    w = completing
+    _two_step_chain(w)
+    _search(w, _rows(A, 2) + _rows(B, 2))
+    w._toggle_all_terms_filter(True)
+    (t,) = _CompletionThread.made
+    w.stop_search()
+    t.finished_signal.deliver({"restrict": None, "interrupted": True})
+    assert w._all_terms_filter is False
+    assert w.results_table.rowCount() == 4
+
+
+def test_a_search_landing_with_the_filter_on_and_a_stopped_completion_shows_every_row(completing):
+    w = completing
+    _two_step_chain(w)
+    w._all_terms_filter = True
+    _search(w, _rows(A, 2) + _rows(B, 2))
+    (t,) = _CompletionThread.made
+    w.stop_search()
+    t.finished_signal.deliver({"restrict": None, "interrupted": True})
+    assert w._all_terms_filter is False and w.results_table.rowCount() == 4
+
+
+def _replaying(w):
+    w._replay_restore_thread = SimpleNamespace(running=True, wait=lambda *a: True)
+    w._replay_restore_thread.isRunning = lambda: w._replay_restore_thread.running
+
+
+def test_search_within_asked_for_during_the_restore_replay_runs_after_it(completing):
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    _replaying(w)
+    w._enter_refine_mode()
+    assert _CompletionThread.made == [] and not w._refine_mode
+    w._replay_restore_thread.running = False
+    w._on_replay_for_restore_finished(None)            # the replay's result arrives
+    (t,) = _CompletionThread.made
+    t.complete([[A, B]])
+    assert w._refine_mode and w.refinement_restrict_sys_ids == {A, B}
+
+
+def test_an_action_held_for_the_replay_runs_after_a_failed_replay_too(completing):
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    _replaying(w)
+    w._enter_refine_mode()
+    w._replay_restore_thread.running = False
+    w._on_replay_for_restore_error("disk gone")        # the chain is cleared
+    assert w._refine_mode and w.refinement_restrict_sys_ids == {A}
+
+
+@pytest.mark.parametrize("then", ["a new search", "New"])
+def test_a_new_search_or_new_drops_the_held_action(completing, monkeypatch, then):
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    _replaying(w)
+    w._enter_refine_mode()
+    if then == "New":
+        w._reset_search()
+    else:
+        _start_a_search_that_never_lands(w, monkeypatch)
+        w.is_searching = False                          # it ended; the replay ends after
+    w._replay_restore_thread.running = False
+    w._on_replay_for_restore_finished(None)
+    assert _CompletionThread.made == [] and not w._refine_mode
+
+
+def test_a_held_action_waits_out_a_search_that_is_running(completing):
+    # Completing would stop it (the completion takes the search worker's slot).
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    _replaying(w)
+    w._enter_refine_mode()
+    w.is_searching = True                               # e.g. a run not started by start_search
+    w._replay_restore_thread.running = False
+    w._on_replay_for_restore_finished(None)
+    assert _CompletionThread.made == []
