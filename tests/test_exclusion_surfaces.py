@@ -1790,7 +1790,10 @@ def test_the_fill_leaves_an_all_terms_page_alone(window, monkeypatch):
     keep = {f"{A}_{p}" for p in range(1, 61)}
     monkeypatch.setattr(app, "compute_all_terms_filter", lambda chain: keep)
     monkeypatch.setattr(app, "enrich_snippet_with_chain_terms", lambda s, c, q: s)
-    w.refinement_chain = [object(), object()]
+    from shared.refinement import RefinementStep
+    w.refinement_chain = [RefinementStep("x", "literal"), RefinementStep("y", "literal")]
+    for step in w.refinement_chain:
+        step._result_sys_ids = {A}                  # complete: nothing to complete first
     w._all_terms_filter = True
     _search(w, _rows(A, 60) + _rows(B, 60))
     shown = w.results_table.rowCount()
@@ -1994,3 +1997,214 @@ def test_history_records_a_cut_off_count(window, monkeypatch):
     _search(w, _rows(A, 2))
     GenizahGUI._add_regular_search_to_history(w)
     assert entries and entries[-1]["result_count_capped"] is True
+
+
+# --- Completing a cut-off chain first (D8 commit 6/7, 2026-10-04) --------------------
+# Search-within restricts the next search to a step's manuscripts, and the all-terms
+# filter intersects every step's pages. A step whose list was cut off at the
+# 50,000-candidate limit would make both miss true matches, so it is completed first
+# (ChainCompletionThread), in a run like a search: Stop leaves the chain as it was.
+
+class _CompletionThread(_RunningSearchThread):
+    made = []
+
+    def __init__(self, chain, searcher, filter_restrict, upto=None, run_id=0):
+        super().__init__()
+        self.chain, self.filter_restrict, self.upto = chain, filter_restrict, upto
+        self.finished_signal = _QueuedSignal()
+        self.pause_ack_signal = _QueuedSignal()
+        _CompletionThread.made.append(self)
+
+    def complete(self, step_sys_ids, step_uids=None):
+        """The worker finishing: the steps it completed, then its result."""
+        for step, sids in zip(self.chain, step_sys_ids):
+            step._result_sys_ids, step.result_count_capped = set(sids), False
+            if step_uids:
+                step._result_uids = set(step_uids.pop(0))
+        self.running = False
+        self.finished_signal.deliver({"restrict": set(step_sys_ids[-1]), "interrupted": False})
+
+
+@pytest.fixture
+def completing(window, monkeypatch):
+    _CompletionThread.made = []
+    monkeypatch.setattr(app, "ChainCompletionThread", _CompletionThread)
+    w = _refining(window)
+    w.search_within_btn = QPushButton()
+    w._run_seq = 0
+    w._pause_search = SimpleNamespace(state="idle", elapsed=lambda t: 1.0, local_phase_active=False,
+                                      reset_for_run=lambda *a: None)
+    w.query_input.setText("שלום")
+    return w
+
+
+def _cut_off_search(w, rows):
+    w._on_search_cutoff({"capped": True, "interrupted": False})
+    _search(w, rows)
+
+
+def test_search_within_a_cut_off_list_completes_it_first(completing):
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    (t,) = _CompletionThread.made
+    assert t.upto is None and t.chain is w.refinement_chain and w.is_searching
+    assert not w._refine_mode, "the next search waits for the complete set"
+    t.complete([[A, B, C]])
+    assert w._refine_mode and not w.is_searching
+    assert w.refinement_restrict_sys_ids == {A, B, C}
+    assert " 3 " in w.refine_badge.text() and "+" not in w.refine_badge.text()
+
+
+def test_stopping_the_completion_searches_within_the_shown_list(completing):
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    (t,) = _CompletionThread.made
+    w.stop_search()
+    t.finished_signal.deliver({"restrict": None, "interrupted": True})
+    assert w._refine_mode and w.refinement_restrict_sys_ids == {A}
+    assert " 1+ " in w.refine_badge.text(), "the set is still cut off"
+    assert len(w.refinement_chain) == 1 and w.refinement_chain[0].result_count_capped
+    assert not w._search_was_cancelled, "Stop ended the completion, not the shown search"
+
+
+def test_a_list_that_was_not_cut_off_needs_no_completion(completing):
+    w = completing
+    w._on_search_cutoff({"capped": False, "interrupted": False})
+    _search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    assert _CompletionThread.made == [] and w._refine_mode
+    assert w.refinement_restrict_sys_ids == {A}
+
+
+def test_new_drops_a_completion_in_flight(completing):
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    (t,) = _CompletionThread.made
+    w._search_new_generation = getattr(w, "_search_new_generation", 0) + 1   # what New does
+    t.complete([[A, B]])
+    assert not w._refine_mode and w.refine_badge.text() == ""
+
+
+def _two_step_chain(w):
+    from shared.refinement import RefinementStep
+    first = RefinementStep("ישראל", "literal", result_count=1, result_count_capped=True)
+    first._result_sys_ids, first._result_uids = {A}, {f"{A}_1", f"{A}_2"}
+    w.refinement_chain = [first]
+    w._refine_mode = True
+    w._on_search_cutoff({"capped": False, "interrupted": False})
+    return first
+
+
+def test_the_all_terms_filter_completes_the_steps_before_the_shown_one(completing):
+    w = completing
+    first = _two_step_chain(w)
+    _search(w, _rows(A, 2) + _rows(B, 2))            # the committed second step
+    w._toggle_all_terms_filter(True)
+    (t,) = _CompletionThread.made
+    assert t.upto == 1, "the shown step needs no completing"
+    t.complete([[A, B]], [[f"{A}_1", f"{A}_2", f"{B}_1", f"{B}_2"]])
+    assert first._result_uids >= {f"{B}_1"}
+    assert w.results_table.rowCount() == 4, "B's pages match both steps once the first is complete"
+
+
+def test_a_search_landing_with_the_all_terms_filter_on_completes_first(completing):
+    w = completing
+    _two_step_chain(w)
+    w._all_terms_filter = True
+    _search(w, _rows(A, 2) + _rows(B, 2))
+    (t,) = _CompletionThread.made
+    assert t.upto == 1 and len(w.refinement_chain) == 2
+    t.complete([[A, B]], [[f"{A}_1", f"{A}_2", f"{B}_1", f"{B}_2"]])
+    assert w.results_table.rowCount() == 4
+
+
+def test_a_committed_step_that_was_not_cut_off_needs_no_completion(completing):
+    w = completing
+    _two_step_chain(w).result_count_capped = False
+    _search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    assert _CompletionThread.made == [], "the step recorded its manuscripts when it landed"
+    assert w.refinement_restrict_sys_ids == {A}
+
+
+def test_the_all_terms_checkbox_waits_for_a_run_in_flight(completing):
+    w = completing
+    _two_step_chain(w)
+    _search(w, _rows(A, 2) + _rows(B, 2))
+    w.is_searching = True                   # a search or a completion is running
+    w._toggle_all_terms_filter(True)
+    assert _CompletionThread.made == [] and w._all_terms_filter
+    assert w.results_table.rowCount() == 4, "the run re-renders when it ends"
+
+
+def test_no_completion_while_a_restored_chain_is_replayed(completing):
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    w._replay_restore_thread = SimpleNamespace(isRunning=lambda: True)
+    w._enter_refine_mode()
+    assert _CompletionThread.made == [] and not w._refine_mode and not w.is_searching
+
+
+def test_a_scope_change_runs_every_step_again_before_search_within(completing):
+    # The steps' manuscripts were found in the old scope; reusing them would restrict
+    # the next search to the old scope's manuscripts.
+    w = completing
+    first = _two_step_chain(w)
+    first.result_count_capped = False
+    _search(w, _rows(A, 2))
+    w._refinement_scope_sig = "old"
+    w._on_filter_recompute_finished({A, B})
+    assert w._refinement_stale and all(s._result_sys_ids is None for s in w.refinement_chain)
+    w._enter_refine_mode()
+    (t,) = _CompletionThread.made
+    t.complete([[A, B], [A, B]])
+    assert w.refinement_restrict_sys_ids == {A, B}
+
+
+def test_a_scope_changed_in_the_filter_dialog_forgets_the_steps_sets_too(completing, monkeypatch):
+    class _Dialog:
+        def __init__(self, *a, **k):
+            pass
+
+        def exec(self):
+            return app.QDialog.DialogCode.Accepted
+
+        def get_filters(self):
+            return {"libraries": ["CUL"]}
+
+        def get_restrict_sys_ids(self):
+            return {A}
+    monkeypatch.setattr(app, "PreSearchFilterDialog", _Dialog)
+    w = completing
+    _two_step_chain(w).result_count_capped = False
+    w._refinement_scope_sig = "old"
+    w._open_pre_search_filter_dialog()
+    assert w._refinement_stale and w.refinement_chain[0]._result_sys_ids is None
+
+
+def test_a_completion_for_a_chain_changed_meanwhile_is_dropped(completing):
+    # A chip removed (truncate_chain) or the chain cleared while the run was going.
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    (t,) = _CompletionThread.made
+    w.refinement_chain = list(w.refinement_chain)
+    t.complete([[A, B, C]])
+    assert not w._refine_mode and not w.is_searching
+    assert w.refinement_restrict_sys_ids != {A, B, C}
+
+
+def test_a_failed_completion_keeps_the_chain(completing, monkeypatch):
+    monkeypatch.setattr(app.QMessageBox, "warning", staticmethod(lambda *a, **k: None))
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    (t,) = _CompletionThread.made
+    t.running = False
+    t.error_signal.deliver("disk gone")
+    assert w._refine_mode and w.refinement_restrict_sys_ids == {A}
+    assert len(w.refinement_chain) == 1 and w.refinement_chain[0].result_count_capped
+    assert " 1+ " in w.refine_badge.text()

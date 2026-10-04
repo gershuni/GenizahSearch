@@ -307,6 +307,22 @@ Also done 2026-09-30, outside the original stage list:
   normal search case by case (tests: whole words, Variants, Fuzzy, crossings, positions, NOT-words
   with V0.8/V0.7 copies that disagree, a page whose original text breaks the match), no display
   metadata, snippets or previews.
+- **D8 commits 6+7, cut-off steps completed first.** `complete_chain` (shared/refinement.py) runs
+  each cut-off step again with `ids_only` under the complete restriction of the steps before it;
+  a step that was not cut off keeps its sets (each step now records its manuscripts,
+  `_result_sys_ids`, runtime only). The desktop runs it as a search (`ChainCompletionThread`:
+  progress, Pause, Stop, New) before search-within seeds its restriction and before the all-terms
+  filter -- the checkbox and the re-apply when a search lands -- which skips the shown step (it
+  only filters the shown rows). Stop or a failure keeps the chain: completed steps keep their full
+  sets, the rest stay "+", and search-within falls back to the shown list's manuscripts (badge
+  "N+"). A filter-scope change forgets every step's set, so the next combination runs all steps
+  in the new scope. A Responsa line-break step is not run again (no ids-only path): it stays "+",
+  as does every step after it (tracker P2). Real index (scratchpad `d8/gate_completion.py`): Exact
+  ישראל cut off at 9,956 manuscripts completes to 44,055 (= an uncapped search); משה within it,
+  27,187 pages -> 72,067 (= brute force, 0 missing, 0 extra); 24 s for both steps, 17 s for
+  ישראל alone warm (a full-row uncapped search: 19 s -- doc loads dominate, not row building);
+  Stop 3 s in returns in 0.08 s with the chain unchanged. Restore replay, chip removal and the
+  zero-result undo still replay capped searches (the steps come back "+"); they gain no Stop.
 - Owner measurements after both (partly under test-suite load): בלי ירח 1.3 s and שמעון הצדיק
   1.1 s from submit to rows; שלום 3.4 s; בלי 17 s (loaded); variants שמעון הצדיק 75 s, of which
   66.5 s regex over whole-manuscript docs; fuzzy minutes (a 564K-character pattern).

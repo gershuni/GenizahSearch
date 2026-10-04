@@ -432,3 +432,135 @@ class TestReplayCutoff:
         step = RefinementStep('a', 'literal', result_count_capped=True)
         assert RefinementStep.from_dict(step.to_dict()).result_count_capped is True
         assert RefinementStep.from_dict({'query': 'a', 'mode': 'literal'}).result_count_capped is False
+
+
+class TestCompleteChain:
+    """D8 (2026-10-04): a cut-off step is completed before search-within or the
+    all-terms filter rely on it -- run again with ids_only, under the complete
+    restriction of the steps before it."""
+
+    @staticmethod
+    def _quiet(monkeypatch, signals=None):
+        import shared.refinement as rf
+        it = iter(signals) if signals is not None else None
+        monkeypatch.setattr(rf, '_last_search_cutoff',
+                            (lambda: next(it)) if it else (lambda: {'capped': False, 'interrupted': False}))
+
+    @staticmethod
+    def _step(query, sys_ids, capped):
+        step = RefinementStep(query, 'literal', result_count=len(sys_ids), result_count_capped=capped,
+                              corpus_scope='genizah')
+        step._result_sys_ids = set(sys_ids)
+        step._result_uids = {f'uid_{s}' for s in sys_ids}
+        return step
+
+    def test_a_cut_off_chain_is_completed_step_by_step(self, monkeypatch):
+        from shared.refinement import complete_chain
+        self._quiet(monkeypatch)
+        chain = [self._step('a', ['1'], True), self._step('b', ['1'], True)]
+        searcher = MockSearcher([_make_results('1', '2', '3'), _make_results('1', '3')])
+        result = complete_chain(chain, searcher, {'1', '2', '3', '9'})
+        assert result == {'restrict': {'1', '3'}, 'interrupted': False}
+        (_q0, _m0, _g0, kw0), (_q1, _m1, _g1, kw1) = searcher.calls
+        assert kw0['ids_only'] is True and kw0['corpus_scope'] == 'genizah'
+        assert kw0['restrict_sys_ids'] == {'1', '2', '3', '9'}
+        assert kw1['restrict_sys_ids'] == {'1', '2', '3'}, "the next step reads the completed set"
+        assert [(s._result_sys_ids, s.result_count, s.result_count_capped) for s in chain] == [
+            ({'1', '2', '3'}, 3, False), ({'1', '3'}, 2, False)]
+        assert chain[0]._result_uids == {'uid_1', 'uid_2', 'uid_3'}
+
+    def test_a_step_that_was_not_cut_off_is_not_run_again(self, monkeypatch):
+        from shared.refinement import complete_chain
+        self._quiet(monkeypatch)
+        chain = [self._step('a', ['1', '2'], False), self._step('b', ['1'], True)]
+        searcher = MockSearcher([_make_results('1', '2')])
+        complete_chain(chain, searcher, None)
+        assert [c[0] for c in searcher.calls] == ['b']
+        assert searcher.calls[0][3]['restrict_sys_ids'] == {'1', '2'}
+
+    def test_a_step_whose_manuscripts_are_unknown_is_run(self, monkeypatch):
+        from shared.refinement import chain_needs_completion, complete_chain
+        self._quiet(monkeypatch)
+        step = RefinementStep('a', 'literal')       # restored, not replayed yet
+        assert chain_needs_completion([step])
+        complete_chain([step], MockSearcher([_make_results('5')]), None)
+        assert step._result_sys_ids == {'5'} and not chain_needs_completion([step])
+
+    def test_upto_leaves_the_shown_step_alone(self, monkeypatch):
+        from shared.refinement import chain_needs_completion, complete_chain
+        self._quiet(monkeypatch)
+        chain = [self._step('a', ['1'], True), self._step('b', ['1'], True)]
+        assert chain_needs_completion(chain, 1) and not chain_needs_completion(chain[1:], 0)
+        searcher = MockSearcher([_make_results('1', '2')])
+        result = complete_chain(chain, searcher, None, upto=1)
+        assert [c[0] for c in searcher.calls] == ['a'] and result['restrict'] == {'1', '2'}
+        assert chain[1].result_count_capped and chain[1]._result_sys_ids == {'1'}
+
+    def test_a_step_still_cut_off_marks_every_step_after_it(self, monkeypatch):
+        # The line-break search has no ids-only path: it can still report a cut-off.
+        from shared.refinement import complete_chain
+        self._quiet(monkeypatch, [{'capped': True}, {'capped': False}])
+        chain = [self._step('a', ['1'], True), self._step('b', ['1'], True)]
+        complete_chain(chain, MockSearcher([_make_results('1', '2'), _make_results('1')]), None)
+        assert [s.result_count_capped for s in chain] == [True, True]
+
+    def test_stop_keeps_what_was_completed_and_leaves_the_rest(self, monkeypatch):
+        from shared.refinement import complete_chain
+        self._quiet(monkeypatch, [{'capped': False}, {'interrupted': True}])
+        chain = [self._step('a', ['1'], True), self._step('b', ['1'], True)]
+        result = complete_chain(chain, MockSearcher([_make_results('1', '2'), _make_results('2')]), None)
+        assert result == {'restrict': None, 'interrupted': True}
+        assert (chain[0]._result_sys_ids, chain[0].result_count_capped) == ({'1', '2'}, False)
+        assert (chain[1]._result_sys_ids, chain[1].result_count, chain[1].result_count_capped) == (
+            {'1'}, 1, True), "the step in flight keeps what it had"
+
+    def test_an_empty_completed_step_restricts_the_next_to_nothing(self, monkeypatch):
+        from shared.refinement import complete_chain
+        self._quiet(monkeypatch)
+        chain = [self._step('a', ['1'], True), self._step('b', ['1'], True)]
+        searcher = MockSearcher([[], []])
+        complete_chain(chain, searcher, None)
+        assert searcher.calls[1][3]['restrict_sys_ids'] == set()
+
+    def test_the_manuscripts_are_runtime_only(self, monkeypatch):
+        self._quiet(monkeypatch)
+        step = self._step('a', ['1'], False)
+        assert '_result_sys_ids' not in step.to_dict()
+        assert RefinementStep.from_dict(step.to_dict())._result_sys_ids is None
+
+    def test_replay_records_each_steps_manuscripts(self, monkeypatch):
+        self._quiet(monkeypatch)
+        chain = [RefinementStep('a', 'literal'), RefinementStep('b', 'literal')]
+        replay_chain(chain, MockSearcher([_make_results('1', '2'), _make_results('2')]), None)
+        assert [s._result_sys_ids for s in chain] == [{'1', '2'}, {'2'}]
+
+    def test_a_line_break_step_is_not_run_again(self, monkeypatch):
+        # Its search has no ids-only path: a second run reads the same cut-off list.
+        from shared.refinement import complete_chain
+        self._quiet(monkeypatch)
+        lb = self._step('a | b', ['1'], True)
+        lb.responsa_options = {'responsa_mode': True}
+        chain = [lb, self._step('c', ['1'], True)]
+        searcher = MockSearcher([_make_results('1', '2')])
+        result = complete_chain(chain, searcher, None)
+        assert [c[0] for c in searcher.calls] == ['c'] and searcher.calls[0][3]['restrict_sys_ids'] == {'1'}
+        assert [s.result_count_capped for s in chain] == [True, True]
+        assert result == {'restrict': {'1', '2'}, 'interrupted': False}
+
+    def test_a_responsa_step_without_line_breaks_is_completed(self, monkeypatch):
+        from shared.refinement import complete_chain
+        self._quiet(monkeypatch)
+        step = self._step('a b', ['1'], True)
+        step.responsa_options = {'responsa_mode': True}
+        searcher = MockSearcher([_make_results('1', '2')])
+        complete_chain([step], searcher, None)
+        assert searcher.calls and not step.result_count_capped
+
+    def test_a_bar_outside_responsa_is_no_line_break(self, monkeypatch):
+        # Only the Responsa search reads '|' as a line break; elsewhere the step completes.
+        from shared.refinement import complete_chain
+        self._quiet(monkeypatch)
+        step = self._step('a | b', ['1'], True)
+        searcher = MockSearcher([_make_results('1', '2')])
+        complete_chain([step], searcher, None)
+        assert searcher.calls and not step.result_count_capped

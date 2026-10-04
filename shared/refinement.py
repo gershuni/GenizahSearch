@@ -45,18 +45,21 @@ class RefinementStep:
 
     # Runtime-only fields (not serialized, rebuilt on replay)
     _result_uids: set = field(default_factory=set, repr=False, compare=False)
+    # The step's manuscripts: the restriction of the step after it (None until known).
+    _result_sys_ids: Optional[set] = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict:
         """Serialize to a plain dict (JSON-safe for session persistence).
         Excludes runtime-only _result_uids."""
         d = dataclasses.asdict(self)
         d.pop('_result_uids', None)
+        d.pop('_result_sys_ids', None)
         return d
 
     @classmethod
     def from_dict(cls, d: dict) -> RefinementStep:
         """Construct from dict, ignoring unknown keys and runtime fields."""
-        _skip = {'_result_uids'}
+        _skip = {'_result_uids', '_result_sys_ids'}
         known = {k: v for k, v in d.items() if k in cls.__dataclass_fields__ and k not in _skip}
         return cls(**known)
 
@@ -167,12 +170,83 @@ def replay_chain(
         }
 
         step.result_count = len(results)  # page-level count (matches display)
+        step._result_sys_ids = result_sys_ids
         cutoff = _last_search_cutoff()
         incomplete = incomplete or bool(cutoff.get('capped') or cutoff.get('interrupted'))
         step.result_count_capped = incomplete
         accumulated_restrict = result_sys_ids if result_sys_ids else set()
 
     return accumulated_restrict
+
+
+def _cannot_complete(step: RefinementStep) -> bool:
+    """A Responsa line-break ('|') step: that search has no ids-only path, so running it
+    again reads the same cut-off list. It stays marked "+" (tracked for Phase 2)."""
+    if not (step.responsa_options or {}).get('responsa_mode'):
+        return False
+    from shared.responsa import _has_line_break_syntax
+    return bool(_has_line_break_syntax(step.query))
+
+
+def chain_needs_completion(chain: list[RefinementStep], upto: int | None = None) -> bool:
+    """Whether a step of *chain* (of its first *upto* steps) left matches out, or its
+    manuscripts are unknown, so search-within or the all-terms filter must complete it
+    first (D8)."""
+    return any(s.result_count_capped or s._result_sys_ids is None for s in chain[:upto])
+
+
+def complete_chain(
+    chain: list[RefinementStep],
+    searcher,
+    filter_restrict: set | None,
+    progress_callback=None,
+    upto: int | None = None,
+) -> dict:
+    """Complete every step of *chain* that left matches out (D8, 2026-10-04).
+
+    Such a step is run again with ``ids_only=True`` -- every candidate, only page ids
+    and manuscripts kept -- under the complete restriction of the steps before it, and
+    its ``_result_uids`` / ``_result_sys_ids`` / ``result_count`` become complete. A
+    step that was not cut off keeps its sets. A step that still reports a cut-off (the
+    line-break search has no ids-only path: such a step is not run again) stays marked,
+    and so does every step after it. Stop (the run comes back interrupted) ends the completion: the steps completed
+    so far keep their complete sets, the rest stay as they were.
+
+    *upto* limits the work to the first *upto* steps: the all-terms filter only
+    filters the shown rows, so the step that produced them needs no completing.
+
+    Returns {'restrict': the last completed step's manuscripts (None for no step),
+    'interrupted': bool}.
+    """
+    accumulated = None
+    incomplete = False
+    for step in chain[:upto]:
+        if step.result_count_capped and step._result_sys_ids is not None and _cannot_complete(step):
+            incomplete = True
+        elif step.result_count_capped or step._result_sys_ids is None:
+            effective = compute_effective_restrict(filter_restrict, accumulated)
+            rows = searcher.execute_search(
+                step.query, step.mode, step.gap,
+                exclude_words=step.exclude_words or None,
+                responsa_options=step.responsa_options,
+                restrict_sys_ids=effective,
+                text_position=step.text_position,
+                corpus_scope=step.corpus_scope,
+                progress_callback=progress_callback,
+                ids_only=True,
+            )
+            cutoff = _last_search_cutoff()
+            if cutoff.get('interrupted'):
+                return {'restrict': None, 'interrupted': True}
+            step._result_sys_ids = {r.get('display', {}).get('id') for r in rows
+                                    if r.get('display', {}).get('id')}
+            step._result_uids = {r.get('uid') or r.get('display', {}).get('id') for r in rows
+                                 if r.get('uid') or r.get('display', {}).get('id')}
+            step.result_count = len(rows)
+            incomplete = incomplete or bool(cutoff.get('capped'))
+            step.result_count_capped = incomplete
+        accumulated = step._result_sys_ids if step._result_sys_ids else set()
+    return {'restrict': accumulated, 'interrupted': False}
 
 
 def enrich_snippet_with_chain_terms(snippet: str, chain: list[RefinementStep], current_query: str) -> str:

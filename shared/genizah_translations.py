@@ -3299,6 +3299,7 @@ TRANSLATIONS = {
     "manuscripts": "כתבי יד",
     "Re-evaluating refinement...": "מעריך מחדש צמצום...",
     "Restoring refinement chain...": "משחזר שרשרת צמצום...",
+    "Completing the cut-off results": "משלים את התוצאות שנקטעו",
     "Back to previous step": "חזרה לשלב הקודם",
     "Scope changed \u2014 results will update on next search": "הטווח השתנה \u2014 התוצאות יתעדכנו בחיפוש הבא",
     "0 results within current scope": "0 תוצאות בטווח הנוכחי",

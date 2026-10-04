@@ -49,7 +49,7 @@ if _CORE_IMPORT_ERROR:
         raise _CORE_IMPORT_ERROR
 from shared.search_engine import PHASE_LOCAL_SEARCH
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
-from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, _keep_until_finished
+from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished
 from desktop.widgets import (
     text_has_pattern_markers,
     ActionsHoverWidget, _format_add_to_list_label,
@@ -101,7 +101,7 @@ from desktop.list_filter_dialog import ListFilterDialog
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared_export_utils import coerce_img_page_cell
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
-from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter
+from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter, chain_needs_completion
 from shared.document_service import select_pgp_page_entry
 from shared.exclusion_service import (
     ExclusionSource, compute_excluded_ids,
@@ -20025,6 +20025,7 @@ class GenizahGUI(QMainWindow):
                 new_sig = scope_signature(self.pre_search_restrict_sys_ids)
                 if new_sig != self._refinement_scope_sig:
                     self._refinement_stale = True
+                    self._forget_chain_sets()
                     if hasattr(self, '_update_refinement_strip'):
                         self._update_refinement_strip()
             self._update_filter_chip_bar()
@@ -20209,6 +20210,7 @@ class GenizahGUI(QMainWindow):
             new_sig = scope_signature(self.pre_search_restrict_sys_ids)
             if new_sig != self._refinement_scope_sig:
                 self._refinement_stale = True
+                self._forget_chain_sets()
                 if hasattr(self, '_update_refinement_strip'):
                     self._update_refinement_strip()
         self._update_filter_chip_bar()
@@ -21113,6 +21115,7 @@ class GenizahGUI(QMainWindow):
         # afresh right after this call (Codex, PR #343).
         self._set_local_scope_strip_visible(False)
         self.is_searching = False; self.btn_search.setText(tr("Search")); self.btn_search.setStyleSheet("background-color: #27ae60; color: white;")
+        self._completing_chain = False
         # reset_ui is the single funnel every search exit path reaches, so hiding
         # here guarantees no orphaned visible Pause button on any of them.
         self._apply_pause_state(self._pause_search, 'hidden')
@@ -21137,7 +21140,9 @@ class GenizahGUI(QMainWindow):
             self.status_label.setText(f"{tr('Processing')}... {elapsed_str}")
         else:
             self.search_progress.setFormat(f"{elapsed_str}  %p%")
-            self.status_label.setText(f"{tr('Searching')}... {elapsed_str}")
+            doing = (tr('Completing the cut-off results') if getattr(self, '_completing_chain', False)
+                     else tr('Searching'))
+            self.status_label.setText(f"{doing}... {elapsed_str}")
 
     def on_error(self, err):
         self.reset_ui()
@@ -21751,6 +21756,7 @@ class GenizahGUI(QMainWindow):
                 for r in results
                 if r.get('uid') or r.get('display', {}).get('id')
             }
+            step._result_sys_ids = raw_result_sys_ids
             self.refinement_chain.append(step)
             self.refinement_restrict_sys_ids = raw_result_sys_ids
             self._refinement_scope_sig = scope_signature(self.pre_search_restrict_sys_ids)
@@ -21841,9 +21847,11 @@ class GenizahGUI(QMainWindow):
         self.reset_ui()
         # Phase 55: Update search-within button AFTER reset_ui clears is_searching
         self._update_search_within_btn()
-        # Phase 55: Reapply "all terms" filter if checkbox is checked
+        # Phase 55: Reapply "all terms" filter if checkbox is checked -- once the
+        # steps before this one are complete (D8: a cut-off one would hide true rows).
         if self._all_terms_filter and self.refinement_chain:
-            self._apply_all_terms_filter_and_rerender()
+            self._complete_chain_then(len(self.refinement_chain) - 1,
+                                      lambda _result: self._apply_all_terms_filter_and_rerender())
         _pt.append(('finish', time.perf_counter()))
         search_elapsed = self._pause_search.elapsed(time.monotonic())
         logger.info(
@@ -22028,8 +22036,6 @@ class GenizahGUI(QMainWindow):
         raw_ids = {r.get('display', {}).get('id') for r in getattr(self, 'last_results', []) if r.get('display', {}).get('id')}
         if not raw_ids:
             return
-        self.refinement_restrict_sys_ids = raw_ids
-        self._refinement_scope_sig = scope_signature(self.pre_search_restrict_sys_ids)
         # Add the CURRENT search as step 0 if chain is empty (so breadcrumb shows the original query)
         if not self.refinement_chain and self.query_input.text().strip():
             mode_idx = self.mode_combo.currentIndex()
@@ -22050,13 +22056,33 @@ class GenizahGUI(QMainWindow):
                 for r in getattr(self, 'last_results', [])
                 if r.get('uid') or r.get('display', {}).get('id')
             }
+            step0._result_sys_ids = set(raw_ids)
             self.refinement_chain.append(step0)
             self._update_refinement_strip()
-        ms_count = len(raw_ids)  # unique manuscript count
+        # D8: the next search is restricted to these manuscripts; a step that was cut
+        # off is completed first, or the search would miss what it left out.
+        self._complete_chain_then(None, lambda result: self._finish_enter_refine_mode(result, raw_ids))
+
+    def _finish_enter_refine_mode(self, result, raw_ids):
+        """The rest of _enter_refine_mode, once the chain is complete (or not: *result*
+        is None when nothing needed completing). Stopped, it searches within the shown
+        results' manuscripts, as before D8 -- and the badge says the set is cut off."""
+        restrict = raw_ids
+        if result and not result['interrupted'] and result['restrict'] is not None:
+            restrict = result['restrict']
+        chain = self.refinement_chain
+        capped = chain[-1].result_count_capped if chain else self._run_left_matches_out()
+        self.refinement_restrict_sys_ids = restrict
+        self._refinement_scope_sig = scope_signature(self.pre_search_restrict_sys_ids)
+        if result is not None:
+            self._update_refinement_strip()     # completed steps show their full counts
+            self._schedule_session_save()
+        ms_count = len(restrict)  # unique manuscript count
         self._refine_mode = True
         self._zero_result_refine = False
         self._zero_result_back_btn.setVisible(False)
-        self.refine_badge.setText(f"{tr('Searching within')} {ms_count:,} {tr('manuscripts')}")
+        self.refine_badge.setText(
+            f"{tr('Searching within')} {self._count_text(ms_count, capped, sep=True)} {tr('manuscripts')}")
         self.refine_badge.setVisible(True)
         self.refine_cancel_btn.setVisible(True)
         self.query_input.setFocus()
@@ -22166,8 +22192,88 @@ class GenizahGUI(QMainWindow):
     def _toggle_all_terms_filter(self, checked):
         """Toggle 'Only results with all terms' post-filter and re-render results."""
         self._all_terms_filter = checked
-        if hasattr(self, 'last_results') and self.last_results:
+        if not (hasattr(self, 'last_results') and self.last_results):
+            return
+        if getattr(self, 'is_searching', False):
+            return      # the run in flight renders with the filter as it is when it ends
+        if checked and self.refinement_chain:
+            # D8: the steps before the shown one are completed first.
+            self._complete_chain_then(len(self.refinement_chain) - 1,
+                                      lambda _result: self._apply_all_terms_filter_and_rerender())
+        else:
             self._apply_all_terms_filter_and_rerender()
+
+    def _forget_chain_sets(self):
+        """The filter scope changed under the chain: each step's manuscripts were found
+        in the old scope, so search-within and the all-terms filter run every step
+        again first (D8; _complete_chain_then) instead of reusing them."""
+        for step in self.refinement_chain:
+            step._result_sys_ids = None
+
+    def _complete_chain_then(self, upto, on_done):
+        """Complete the refinement chain's cut-off steps, then on_done(result) (D8).
+
+        Nothing to complete (shared.refinement.chain_needs_completion): on_done(None)
+        at once. Otherwise a run like a search -- progress, Pause, Stop and New --
+        reads every match of each cut-off step (ChainCompletionThread), and
+        on_done gets complete_chain's {'restrict', 'interrupted'}. Stop, or a
+        failure, leaves the chain as it was (the steps already completed keep their
+        sets) and on_done gets {'restrict': None, 'interrupted': True}; New drops
+        on_done. *upto* limits the work to the first *upto* steps."""
+        if not chain_needs_completion(self.refinement_chain, upto):
+            on_done(None)
+            return
+        replay = getattr(self, '_replay_restore_thread', None)
+        if replay is not None and replay.isRunning():
+            # The restored chain is being replayed into these same steps.
+            self.status_label.setText(tr('Restoring refinement chain...'))
+            return
+        if not self._drain_previous_worker('search_thread', self._pause_search):
+            return
+        self._run_seq += 1
+        run_id = self._run_seq
+        self._pause_search.reset_for_run(run_id, time.monotonic())
+        thread = ChainCompletionThread(self.refinement_chain, self.searcher,
+                                       getattr(self, 'pre_search_restrict_sys_ids', None),
+                                       upto=upto, run_id=run_id)
+        self.search_thread = thread
+        # The shown results were not stopped: Stop here must not mark them partial.
+        was_cancelled = getattr(self, '_search_was_cancelled', False)
+        self._search_was_cancelled = False
+        self.is_searching = True; self.btn_search.setText(tr("Stop")); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
+        self._completing_chain = True
+        self.search_within_btn.setVisible(False)
+        self.search_progress.setRange(0, 100); self.search_progress.setValue(0); self.search_progress.setFormat("%p%"); self.search_progress.setVisible(True)
+        self.status_label.setText(f"{tr('Completing the cut-off results')}...")
+        if not hasattr(self, '_search_elapsed_timer'):
+            self._search_elapsed_timer = QTimer(self)
+            self._search_elapsed_timer.timeout.connect(self._update_search_elapsed)
+        self._search_elapsed_timer.start(1000)
+        self._apply_pause_state(self._pause_search, 'pause')
+
+        def finished(result):
+            self.reset_ui()
+            self._search_was_cancelled = was_cancelled
+            self.status_label.setText(self._search_status_or_blank())
+            self._update_refinement_strip()
+            self._update_search_within_btn()
+            self._schedule_session_save()
+            if self.refinement_chain is thread.chain:
+                on_done(result)
+            # else: a chip was removed or the chain cleared meanwhile -- the result
+            # belongs to a chain that is no longer shown.
+
+        def failed(err):
+            logger.warning("Completing the refinement chain failed: %s", err)
+            QMessageBox.warning(self, tr("Error"), str(err))
+            finished({'restrict': None, 'interrupted': True})
+
+        _live = partial(self._discardable, '_search_new_generation')
+        thread.finished_signal.connect(_live(finished))
+        thread.error_signal.connect(_live(failed))
+        thread.progress_signal.connect(self._on_search_progress)
+        thread.pause_ack_signal.connect(lambda rid, ep: self._on_pause_ack(self._pause_search, rid, ep))
+        thread.start()
 
     def _apply_all_terms_filter_and_rerender(self):
         """Re-render results table applying the all-terms filter."""

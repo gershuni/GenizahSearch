@@ -174,3 +174,50 @@ def test_ids_only_offers_no_preview(engine):
         engine.execute_search(W, "literal", 0, corpus_scope="genizah", ids_only=True,
                               preview_callback=calls.append)
     assert calls == []
+
+
+# --- Completing a cut-off chain with the real engine (D8 commit 6/7) -------------------
+
+def _chain():
+    from shared.refinement import RefinementStep
+    steps = [RefinementStep(W, "literal", corpus_scope="genizah", result_count_capped=True),
+             RefinementStep(ON, "literal", corpus_scope="genizah", result_count_capped=True)]
+    steps[0]._result_sys_ids, steps[1]._result_sys_ids = {"991"}, {"991"}
+    return steps
+
+
+def test_complete_chain_reads_every_match_from_the_engine(engine):
+    from shared.refinement import complete_chain
+    with patch.object(Config, "SEARCH_LIMIT", 1000):
+        first = {r["display"]["id"] for r in engine.execute_search(W, "literal", 0, corpus_scope="genizah")}
+        within = {r["display"]["id"] for r in engine.execute_search(
+            ON, "literal", 0, corpus_scope="genizah", restrict_sys_ids=first)}
+    chain = _chain()
+    with patch.object(Config, "SEARCH_LIMIT", 2):          # the display's cut-off is tiny
+        result = complete_chain(chain, engine, None)
+    assert len(first) > 2 and chain[0]._result_sys_ids == first
+    assert result == {"restrict": within, "interrupted": False}
+    assert [s.result_count_capped for s in chain] == [False, False]
+
+
+def test_the_completion_thread_hands_back_the_completed_set(engine):
+    from desktop.gui_threads import ChainCompletionThread
+    chain, got = _chain(), []
+    t = ChainCompletionThread(chain, engine, None, upto=1)
+    t.finished_signal.connect(got.append)
+    with patch.object(Config, "SEARCH_LIMIT", 2):
+        t.run()                                 # same thread: delivered directly
+    assert got == [{"restrict": chain[0]._result_sys_ids, "interrupted": False}]
+    assert chain[1]._result_sys_ids == {"991"}, "upto=1 leaves the shown step alone"
+
+
+def test_a_stopped_completion_leaves_the_chain_as_it_was(engine):
+    from desktop.gui_threads import ChainCompletionThread
+    chain, got = _chain(), []
+    t = ChainCompletionThread(chain, engine, None)
+    t.finished_signal.connect(got.append)
+    t.request_cancel()
+    with patch.object(se, "_PROGRESS_TICK_EVERY", 1):
+        t.run()
+    assert got == [{"restrict": None, "interrupted": True}]
+    assert [(s._result_sys_ids, s.result_count_capped) for s in chain] == [({"991"}, True)] * 2

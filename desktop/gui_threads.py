@@ -334,6 +334,46 @@ class SearchThread(PausableSearchMixin, QThread):
             self.pause_gate.finish()
             _allow_sleep()
 
+class ChainCompletionThread(PausableSearchMixin, QThread):
+    """Complete a refinement chain's cut-off steps (shared.refinement.complete_chain) as
+    a stoppable run: each step's search reads every candidate (ids only). Steps are
+    updated in place and read on the UI thread after finished_signal, as
+    RefinementReplayThread's are. Stop (request_cancel) ends the step in flight; the
+    result then says interrupted and the chain keeps what it had."""
+
+    progress_signal = pyqtSignal(int, int)
+    finished_signal = pyqtSignal(dict)
+    error_signal = pyqtSignal(str)
+    pause_ack_signal = pyqtSignal(int, int)
+
+    def __init__(self, chain, searcher, filter_restrict, upto=None, run_id=0):
+        super().__init__()
+        self.chain = chain
+        self.searcher = searcher
+        self.filter_restrict = filter_restrict
+        self.upto = upto
+        self._init_pause_support(run_id)
+
+    def run(self):
+        _prevent_sleep()
+        try:
+            from shared.refinement import complete_chain
+
+            def cb(curr, total):
+                self._checkpoint()
+                self.progress_signal.emit(curr, total)
+            self.finished_signal.emit(complete_chain(self.chain, self.searcher, self.filter_restrict,
+                                                     progress_callback=cb, upto=self.upto))
+        except InterruptedError:
+            self.finished_signal.emit({'restrict': None, 'interrupted': True})
+        except Exception as e:  # noqa: BLE001
+            logger.warning("ChainCompletionThread failed: %s", e)
+            self.error_signal.emit(str(e))
+        finally:
+            self.pause_gate.finish()
+            _allow_sleep()
+
+
 class LabSearchThread(PausableSearchMixin, QThread):
     """Execute a Lab Mode search query."""
 
