@@ -1902,6 +1902,26 @@ def test_a_preview_that_does_not_extend_the_table_rebuilds_it(window):
     assert all(w.results_table.item(r, w.COL_SYS_ID).text() == B for r in range(5))
 
 
+def test_a_preview_starts_no_shelfmark_fetch_and_the_result_does(window, monkeypatch):
+    # Codex review (PR #375): a preview's rows started a shelfmark fetch, and the
+    # next preview's start_metadata_loading cancelled it and waited on the GUI
+    # thread for the NLI request in flight. The rows are rebuilt when the run
+    # lands, and that rebuild fetches what they lack.
+    w = window
+    monkeypatch.setattr(w.meta_mgr, "get_meta_for_id", lambda sid: ("Unknown", ""))
+    fetched = []
+    monkeypatch.setattr(w, "start_metadata_loading", lambda ids: fetched.append(list(ids)))
+    w.search_thread = object()
+    w.is_searching = True
+    w._on_search_preview(w.search_thread, _rows(A, 3))
+    w._on_search_preview(w.search_thread, _rows(A, 3) + _rows(B, 2))
+    assert w.results_table.rowCount() == 5
+    assert fetched == [], "a preview started a shelfmark fetch"
+    _search(w, _rows(A, 3) + _rows(B, 2))
+    _drain_events()
+    assert {A, B} <= {sid for ids in fetched for sid in ids}, "the landed rows were not fetched"
+
+
 # --- Refinement steps record what the run searched (D8 Phase 1, 2026-10-04) --------
 # Both step builders read the widgets, which may have changed since the run, and kept
 # some fields at their defaults: the first step of a chain lost gap, NOT-words, position

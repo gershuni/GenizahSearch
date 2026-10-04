@@ -21425,10 +21425,15 @@ class GenizahGUI(QMainWindow):
         if self._load_more_remaining():
             self.load_next_batch()
 
-    def load_next_batch(self, batch_size=None, keep_sorting_off=False):
+    def load_next_batch(self, batch_size=None, keep_sorting_off=False, skip_metadata=False):
         """Add the next rows of last_results to the table. *keep_sorting_off*: a
         preview's rows must stay in engine order; turning sorting back on at the
-        end re-sorts at once by the user's column (Codex review of PR #375)."""
+        end re-sorts at once by the user's column (Codex review of PR #375).
+        *skip_metadata*: start no shelfmark fetch for these rows. A preview's rows
+        are rebuilt when the search lands, and that rebuild fetches them; a fetch
+        started here made the next preview wait on the GUI thread for the one
+        still running (start_metadata_loading cancels and waits -- Codex review
+        of PR #375)."""
         if self.results_loaded >= len(self.last_results):
             return
 
@@ -21630,7 +21635,7 @@ class GenizahGUI(QMainWindow):
         self.status_label.setText(self._search_status_summary())
 
         # Trigger Metadata
-        if ids_to_fetch:
+        if ids_to_fetch and not skip_metadata:
             self.start_metadata_loading(ids_to_fetch)
 
     def _notify_search_complete(self, result_count, search_term, search_type='search'):
@@ -21928,7 +21933,8 @@ class GenizahGUI(QMainWindow):
         self._preview_thread = thread
         self.last_results = list(rows)
         self._res_map_by_sid.update({r['display']['id']: r for r in rows})
-        self.load_next_batch(batch_size=len(rows) - self.results_loaded, keep_sorting_off=True)
+        self.load_next_batch(batch_size=len(rows) - self.results_loaded, keep_sorting_off=True,
+                             skip_metadata=True)
         self.status_label.setText(status)            # still searching, not a result count
         logger.info("search_preview since_submit_ms=%d rows_shown=%d",
                     int(self._pause_search.elapsed(time.monotonic()) * 1000), self.results_loaded)
