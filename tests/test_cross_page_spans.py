@@ -10,7 +10,6 @@ phrases): every cross-page row of the old path kept, 23 -> 97 cross-page rows
 The window is counted in words, not characters (2026-10-01): a fixed character
 window lost a crossing after a long run of dots or lacuna brackets at a page edge.
 """
-import json
 import random
 
 import pytest
