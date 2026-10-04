@@ -245,6 +245,16 @@ class PausableSearchMixin:
             raise InterruptedError("Search cancelled by user")
 
 
+def _last_search_cutoff():
+    """The cut-off signal of the search just run on this thread (D8); none from a
+    searcher that is not the real engine (a test double)."""
+    try:
+        from shared.search_engine import consume_last_search_cutoff
+    except ImportError:
+        return {'capped': False, 'interrupted': False}
+    return consume_last_search_cutoff()
+
+
 class SearchThread(PausableSearchMixin, QThread):
     """Execute a search query asynchronously."""
 
@@ -264,6 +274,9 @@ class SearchThread(PausableSearchMixin, QThread):
     # SearchEngine.execute_search preview_callback). results_signal still
     # carries the complete list.
     preview_signal = pyqtSignal(list)
+    # Whether the result leaves matches out ({'capped', 'interrupted'}), emitted just
+    # before results_signal (D8: the count shows "N+").
+    cutoff_signal = pyqtSignal(dict)
     def __init__(self, searcher, query, mode, gap, exclude_words=None, responsa_options=None, restrict_sys_ids=None, text_position=None, corpus_scope="all", run_id=0):
         super().__init__()
         self.searcher = searcher; self.query = query; self.mode = mode; self.gap = gap
@@ -300,6 +313,7 @@ class SearchThread(PausableSearchMixin, QThread):
                 preview_callback=self.preview_signal.emit,
             )
 
+            self.cutoff_signal.emit(_last_search_cutoff())
             self.results_signal.emit(results)
             # Phase 115: emit perf signal — ONLY on success path (D-08 / Pitfall 3)
             # Phase 115 D-08 says perf is emitted for COMPLETED runs only, but the
@@ -311,6 +325,7 @@ class SearchThread(PausableSearchMixin, QThread):
                     (time.perf_counter() - t0 - self.pause_gate.total_paused_s) * 1000.0, len(results))
         except InterruptedError:
             # Cancelled — do NOT emit perf_signal (Pitfall 3 / D-08 "completed runs only")
+            self.cutoff_signal.emit({'capped': False, 'interrupted': True})
             self.results_signal.emit([])
         except Exception as e: self.error_signal.emit(str(e))
         finally:

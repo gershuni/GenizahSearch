@@ -112,6 +112,28 @@ def _consume_last_responsa_downgrade() -> Optional[str]:
     return msg
 
 
+# D8 (2026-10-04): did the search just run on this thread leave matches out? 'capped':
+# a query returned Config.SEARCH_LIMIT hits, so more candidates existed than were read;
+# 'interrupted': Stop ended it early (it returns what it found). The desktop shows such a
+# count as "N+" and completes the step before search-within or all-terms rely on it.
+# Read and cleared like the Responsa signal; drained when each search starts.
+_LAST_SEARCH_CUTOFF = threading.local()
+
+
+def _note_search_cutoff(capped=False, interrupted=False) -> None:
+    """Add to the current search's cut-off signal (any part of it can say so)."""
+    cur = getattr(_LAST_SEARCH_CUTOFF, 'value', None) or {'capped': False, 'interrupted': False}
+    _LAST_SEARCH_CUTOFF.value = {'capped': cur['capped'] or bool(capped),
+                                 'interrupted': cur['interrupted'] or bool(interrupted)}
+
+
+def consume_last_search_cutoff() -> dict:
+    """Read and clear the cut-off signal of the last search on this thread."""
+    value = getattr(_LAST_SEARCH_CUTOFF, 'value', None)
+    _LAST_SEARCH_CUTOFF.value = None
+    return value or {'capped': False, 'interrupted': False}
+
+
 def _set_last_responsa_downgrade_meta(meta: dict) -> None:
     """Phase 81A — record a structured per-flag cascade outcome.
 
@@ -1385,6 +1407,7 @@ class SearchEngine:
             search_limit = limit or Config.SEARCH_LIMIT
             res_obj = self.local_searcher.search(tantivy_q, search_limit)
             hits = res_obj.hits if hasattr(res_obj, "hits") else res_obj
+            _note_search_cutoff(capped=len(hits) >= search_limit)
             pattern_str = regex.pattern if regex is not None else ""
             # The LOCAL pass is a distinct phase, not more of the Genizah one: its
             # hit counts are unrelated, so reporting them on the same numeric
@@ -1429,9 +1452,11 @@ class SearchEngine:
                         continue
                     results.append(hit)
             except InterruptedError:
+                _note_search_cutoff(interrupted=True)
                 return results  # cancelled mid-scan — keep the hits we built
             return results
         except InterruptedError:
+            _note_search_cutoff(interrupted=True)
             # Still not an index failure, so still ahead of the broad handler —
             # but hand back what was gathered instead of re-raising. Telemetry
             # correctness does NOT depend on the exception escaping: perf_signal
@@ -3069,6 +3094,7 @@ class SearchEngine:
 
         hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
         total_hits = len(hits)
+        _note_search_cutoff(capped=total_hits >= Config.SEARCH_LIMIT)
         LOGGER.debug(f"Line-break Tantivy returned {total_hits} hits")
 
         restrict_uids = None
@@ -3210,6 +3236,7 @@ class SearchEngine:
                     LOGGER.warning("Line-break search: failed to process hit %s: %s", i, e)
         except InterruptedError:
             was_interrupted = True
+            _note_search_cutoff(interrupted=True)
 
         LOGGER.debug(f"Line-break search: {len(results)} results, filtered: {regex_filtered}, interrupted: {was_interrupted}")
         deduped = self._deduplicate(results)
@@ -3312,7 +3339,7 @@ class SearchEngine:
         return results
 
     @bounded_search
-    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None, preview_callback=None):
+    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None, preview_callback=None, ids_only=False):
         """Search the Genizah (and/or LOCAL) index; return the verified result rows.
 
         *preview_callback(rows)*, when given, is called from this thread while the
@@ -3325,6 +3352,14 @@ class SearchEngine:
         not Responsa. The rows are the first-seen V0.8 row per uid in hit order,
         which is the order _deduplicate keeps (V0.7 rows only go at the end),
         and outside Responsa it keeps these same first rows as well (first_wins).
+
+        *ids_only* (D8, 2026-10-04): the COMPLETE set of matches, as light rows
+        ({'uid', 'display': {'id', 'source'}, 'scope'}) -- every candidate read, no
+        limit, and no snippets, metadata, highlight patterns or previews. What counts as
+        a match is a normal search's, page by page (the same verifiers, the same drop of
+        a page whose match the original text does not hold, NOT-words decided by the
+        same winning copy of a page). The desktop runs it to complete a cut-off step
+        before search-within or the all-terms filter rely on it.
         """
         search_started = time.perf_counter()
         # R2-#1: discard any stale per-thread downgrade signal from a prior
@@ -3336,6 +3371,7 @@ class SearchEngine:
         # symmetrically so a direct-core caller cannot leave a stale meta
         # dict that a later web request would read as "the cascade fired."
         _consume_last_responsa_downgrade_meta()
+        consume_last_search_cutoff()
         # --- Metadata Search Modes (csv_bank-backed, no Tantivy needed) ---
         if mode in ['Title', 'Shelfmark']:
             return self._execute_metadata_search(query_str, mode, progress_callback, restrict_sys_ids)
@@ -3682,6 +3718,28 @@ class SearchEngine:
         def _row_pattern(text):
             return regex.pattern_for(text) if isinstance(regex, _FuzzyMatcher) else pattern_str
 
+        _parse_header = getattr(type(self.meta_mgr), 'parse_header_smart', None) if ids_only else None
+        _excluded_words = [w.lower() for w in exclude_words or []]
+
+        def _id_row_of_span(doc, content, span, boundaries, scope):
+            """ids_only's row for a match: the identity a full row would carry -- the
+            page the match falls in (an aggregate's primary page), its manuscript as
+            get_display_data gives it -- and whether a NOT-word is in the text the full
+            row's exclusion check reads (its full_text: this doc's content)."""
+            header, source, uid = doc['full_header'][0], doc['source'][0], doc['unique_id'][0]
+            if boundaries:
+                primary = self._map_span_to_pages(span, boundaries).get('primary') or {}
+                header = primary.get('full_header', header)
+                source = primary.get('source', source)
+                uid = primary.get('uid') or uid
+            sys_id = (_parse_header(self.meta_mgr, header)[0] if _parse_header is not None
+                      else self.meta_mgr.get_display_data(header, source).get('id'))
+            row = {'uid': uid, 'display': {'id': sys_id, 'source': source}, 'scope': scope}
+            if _excluded_words:
+                lowered = content.lower()
+                row['_excluded'] = any(w in lowered for w in _excluded_words)
+            return row
+
         # Search within manuscripts: the restriction is part of every query, at any
         # size (_restriction_query). Oxford parts always pass here and are tested
         # per page below.
@@ -3702,6 +3760,9 @@ class SearchEngine:
         if search_field != 'content' and _has_wildcard_component:
             search_field = 'content'
 
+        # Candidates read per query: the display's cut-off, or every doc (ids_only).
+        _limit = max(Config.SEARCH_LIMIT, self.searcher.num_docs) if ids_only else Config.SEARCH_LIMIT
+
         tantivy_started = time.perf_counter()
         try:
             # Page docs first, then whole-manuscript / part docs, within the same
@@ -3716,7 +3777,8 @@ class SearchEngine:
                     page_q = self._and_query(t_query_obj, 'scope:page')
                 else:
                     page_q = self.index.parse_query(f'({t_query_str}) AND scope:page', [search_field])
-                hits = list(self.searcher.search(_restricted(page_q), Config.SEARCH_LIMIT).hits)
+                hits = list(self.searcher.search(_restricted(page_q), _limit).hits)
+                _note_search_cutoff(capped=len(hits) >= _limit)
                 # Parsed now (a bad query fails here, as before) but run only after
                 # the page hits: the first rows need not wait for it.
                 if t_query_obj is not None:
@@ -3726,12 +3788,14 @@ class SearchEngine:
                         f'({t_query_str}) AND (scope:system OR scope:part)', [search_field])
                 agg_q = _restricted(agg_q)
             elif t_query_obj is not None:
-                res_obj = self.searcher.search(_restricted(t_query_obj), Config.SEARCH_LIMIT)
+                res_obj = self.searcher.search(_restricted(t_query_obj), _limit)
                 hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
+                _note_search_cutoff(capped=len(hits) >= _limit)
             else:
                 query = self.index.parse_query(t_query_str, [search_field])
-                res_obj = self.searcher.search(_restricted(query), Config.SEARCH_LIMIT)
+                res_obj = self.searcher.search(_restricted(query), _limit)
                 hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
+                _note_search_cutoff(capped=len(hits) >= _limit)
         except MemoryError:
             raise
         except Exception as e:
@@ -3753,12 +3817,13 @@ class SearchEngine:
             leave them no room (Codex review of PR #375)."""
             nonlocal total_hits, tantivy_elapsed_ms
             yield from hits
-            room = Config.SEARCH_LIMIT
+            room = _limit
             if agg_q is None:
                 return
             started = time.perf_counter()
             try:
                 more = self.searcher.search(agg_q, room).hits
+                _note_search_cutoff(capped=len(more) >= room)
             except MemoryError:
                 raise
             except Exception as e:
@@ -3797,7 +3862,8 @@ class SearchEngine:
         # Early rows for the desktop (see the docstring): only where nothing after
         # this loop can drop or move them.
         _preview = (preview_callback
-                    if (preview_callback is not None and corpus_scope == 'genizah' and not exclude_words
+                    if (preview_callback is not None and not ids_only
+                        and corpus_scope == 'genizah' and not exclude_words
                         and not (responsa_options and responsa_options.get('responsa_mode')))
                     else None)
         _preview_rows = {}   # uid -> first V0.8 row, in hit order
@@ -3863,8 +3929,10 @@ class SearchEngine:
                                 if not any(_page_in_restriction(o, restrict_uids, restrict_sids)
                                            for o in overlaps):
                                     continue
-                            results.append(self._aggregate_result_row(
-                                doc, content, span, boundaries, _row_pattern(content), scope, score))
+                            results.append(
+                                _id_row_of_span(doc, content, span, boundaries, scope) if ids_only else
+                                self._aggregate_result_row(
+                                    doc, content, span, boundaries, _row_pattern(content), scope, score))
                             kept += 1
                         if not kept:
                             regex_filtered_count += 1
@@ -3923,7 +3991,8 @@ class SearchEngine:
                             orig_match_missing = True
 
                     # Fuzzy: a page row shows the nearest spelling on the page.
-                    if isinstance(regex, _FuzzyMatcher) and scope == 'page' and not orig_match_missing:
+                    if (isinstance(regex, _FuzzyMatcher) and scope == 'page' and not orig_match_missing
+                            and not ids_only):
                         match_obj = regex.closest(
                             content, match_obj,
                             lambda m, _t=content: _accept(_t, m, not _query_has_brackets(query_str)))
@@ -3942,7 +4011,12 @@ class SearchEngine:
                             regex_filtered_count += 1
                             continue
                     span = match_obj.span()
-                    if boundaries:
+                    if ids_only:
+                        # A page whose match the original text does not hold is dropped
+                        # below with its snippet; drop it here the same way.
+                        if boundaries or not orig_match_missing:
+                            results.append(_id_row_of_span(doc, content, span, boundaries, scope))
+                    elif boundaries:
                         results.append(self._aggregate_result_row(
                             doc, content, span, boundaries, _row_pattern(content), scope, score))
                     else:
@@ -3973,6 +4047,7 @@ class SearchEngine:
                     LOGGER.warning("Failed to materialize search hit at position %s: %s", i, e)
         except InterruptedError:
             was_interrupted = True
+            _note_search_cutoff(interrupted=True)
             LOGGER.debug(f"Search interrupted at hit {i}/{total_hits}, found {len(results)} results so far")
 
         materialize_elapsed_ms = (time.perf_counter() - materialize_started) * 1000.0
@@ -4009,6 +4084,7 @@ class SearchEngine:
                         progress_callback=progress_callback,
                         phase_callback=phase_callback,
                         tantivy_query=None if text_position else self._local_forms_query(query_str, mode),
+                        limit=(max(Config.SEARCH_LIMIT, self.local_searcher.num_docs) if ids_only else None),
                     )
             except InterruptedError:
                 # Defensive only: _query_local_index now returns its partial hits
@@ -4038,6 +4114,10 @@ class SearchEngine:
             for r in deduped:
                 # Combine text fields for checking
                 # We check snippet and full_text to be safe
+                if '_excluded' in r:             # an ids_only row: decided from its text
+                    if not r.pop('_excluded'):
+                        filtered.append(r)
+                    continue
                 text_content = (r.get('snippet', '') + ' ' + r.get('full_text', '')).lower()
 
                 # Check if ANY excluded word is present

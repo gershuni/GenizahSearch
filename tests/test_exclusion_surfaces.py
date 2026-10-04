@@ -1945,3 +1945,52 @@ def test_results_from_no_run_here_keep_the_widgets_values(window):
     _search(w, _rows(A, 2))
     w._enter_refine_mode()
     assert _fields(w.refinement_chain[0]) == ("שלום", 0, [], None, "all")
+
+
+# --- "N+" counts (D8, 2026-10-04): the display keeps the 50,000-candidate cut-off
+# but says when a list was cut. The engine's signal reaches on_search_cutoff first.
+
+def test_a_cut_off_list_shows_its_count_with_a_plus(window):
+    w = window
+    w._on_search_cutoff({"capped": True, "interrupted": False})
+    _search(w, _rows(A, 3))
+    assert w.status_label.text() == _showing(3, "3+")
+    w._on_search_cutoff({"capped": False, "interrupted": False})
+    _search(w, _rows(A, 3))
+    assert "3+" not in w.status_label.text()
+
+
+def test_search_within_counts_the_manuscripts_with_a_plus(window):
+    w = window
+    w.search_within_btn = QPushButton()
+    w._on_search_cutoff({"capped": True, "interrupted": False})
+    _search(w, _rows(A, 2) + _rows(B, 2))
+    GenizahGUI._update_search_within_btn(w)
+    assert " 2+ " in w.search_within_btn.text()
+
+
+def test_a_step_built_on_a_cut_off_step_is_marked_too(window):
+    from shared.refinement import RefinementStep
+    w = _refining(window)
+    w.query_input.setText("שלום")
+    first = RefinementStep("ישראל", "literal", result_count=25000, result_count_capped=True)
+    w.refinement_chain = [first]
+    w._refine_mode = True
+    w._on_search_cutoff({"capped": False, "interrupted": False})   # the narrower run was not cut
+    _search(w, _rows(A, 2))
+    assert w.refinement_chain[-1].result_count_capped, "restricted to an incomplete set"
+
+
+def test_history_records_a_cut_off_count(window, monkeypatch):
+    import shared.session_persistence as sp
+    entries = []
+    monkeypatch.setattr(sp, "add_history_entry", lambda kind, entry, *a, **k: entries.append(entry))
+    monkeypatch.setattr(app, "load_app_config", lambda: {})
+    w = window
+    w.query_input.setText("שלום")
+    w.gap_input, w.text_position_combo = QLineEdit(), QComboBox()
+    w._refresh_search_history = lambda: None          # the history menu, not built here
+    w._on_search_cutoff({"capped": True, "interrupted": False})
+    _search(w, _rows(A, 2))
+    GenizahGUI._add_regular_search_to_history(w)
+    assert entries and entries[-1]["result_count_capped"] is True

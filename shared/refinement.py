@@ -38,6 +38,10 @@ class RefinementStep:
     # The corpus the step searched. 'all' (execute_search's default) for steps saved
     # before 2026-10-04: replay never passed one, so that is what they replayed as.
     corpus_scope: str = 'all'
+    # The step's results may leave matches out (D8): its search reached the 50,000-
+    # candidate limit or was stopped, or a step before it did (it was restricted to an
+    # incomplete set). Its count shows as "N+".
+    result_count_capped: bool = False
 
     # Runtime-only fields (not serialized, rebuilt on replay)
     _result_uids: set = field(default_factory=set, repr=False, compare=False)
@@ -100,6 +104,16 @@ def truncate_chain(chain: list[RefinementStep], index: int) -> list[RefinementSt
     return chain[:index]
 
 
+def _last_search_cutoff() -> dict:
+    """The cut-off signal of the search just run on this thread (none from a searcher
+    that is not the real engine)."""
+    try:
+        from shared.search_engine import consume_last_search_cutoff
+    except ImportError:
+        return {}
+    return consume_last_search_cutoff()
+
+
 def replay_chain(
     chain: list[RefinementStep],
     searcher,
@@ -123,6 +137,7 @@ def replay_chain(
         return None
 
     accumulated_restrict = None  # None = no refinement restriction yet
+    incomplete = False  # a step so far left matches out: every later one may too
 
     for step in chain:
         effective = compute_effective_restrict(filter_restrict, accumulated_restrict)
@@ -152,6 +167,9 @@ def replay_chain(
         }
 
         step.result_count = len(results)  # page-level count (matches display)
+        cutoff = _last_search_cutoff()
+        incomplete = incomplete or bool(cutoff.get('capped') or cutoff.get('interrupted'))
+        step.result_count_capped = incomplete
         accumulated_restrict = result_sys_ids if result_sys_ids else set()
 
     return accumulated_restrict

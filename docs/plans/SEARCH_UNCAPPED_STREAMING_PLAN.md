@@ -298,6 +298,15 @@ Also done 2026-09-30, outside the original stage list:
   take it (the first step of a chain had lost gap, NOT-words, position and Responsa options; the
   committed step its NOT-words; both the corpus and the query's mode prefix). `RefinementStep`
   gains `corpus_scope` ('all' for saved steps: replay never passed one, so that is what they ran).
+- **D8 commits 3+5, "+" counts and the ids-only mode.** The engine says per search (thread-local,
+  `consume_last_search_cutoff`) whether a query reached its limit -- page docs, aggregates,
+  line-break, My Library -- or Stop ended it; the desktop shows "N+" in the status line, the
+  search-within button, the chain's chip and history, keeps it in the session (a full 5,000-row
+  snapshot counts as cut), and marks every step after a cut one. `execute_search(ids_only=True)`
+  reads every candidate and keeps only page id, manuscript and source: the same membership as a
+  normal search case by case (tests: whole words, Variants, Fuzzy, crossings, positions, NOT-words
+  with V0.8/V0.7 copies that disagree, a page whose original text breaks the match), no display
+  metadata, snippets or previews.
 - Owner measurements after both (partly under test-suite load): בלי ירח 1.3 s and שמעון הצדיק
   1.1 s from submit to rows; שלום 3.4 s; בלי 17 s (loaded); variants שמעון הצדיק 75 s, of which
   66.5 s regex over whole-manuscript docs; fuzzy minutes (a 564K-character pattern).

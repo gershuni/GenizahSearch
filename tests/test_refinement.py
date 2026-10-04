@@ -409,3 +409,26 @@ class TestReplayFidelity:
         query, mode, gap, kw = searcher.calls[0]
         assert (query, gap, kw['exclude_words'], kw['text_position'], kw['responsa_options']) == (
             'a', 2, ['x'], 'end', opts)
+
+
+class TestReplayCutoff:
+    def test_a_step_after_a_cut_off_step_is_cut_off_too(self, monkeypatch):
+        # D8: a step restricted to an incomplete set may miss matches itself.
+        import shared.refinement as rf
+        signals = iter([{'capped': True}, {'capped': False}, {}])
+        monkeypatch.setattr(rf, '_last_search_cutoff', lambda: next(signals))
+        chain = [RefinementStep('a', 'literal'), RefinementStep('b', 'literal'), RefinementStep('c', 'literal')]
+        replay_chain(chain, MockSearcher([_make_results('1')] * 3), None)
+        assert [s.result_count_capped for s in chain] == [True, True, True]
+
+    def test_an_uncut_chain_stays_exact(self, monkeypatch):
+        import shared.refinement as rf
+        monkeypatch.setattr(rf, '_last_search_cutoff', lambda: {'capped': False, 'interrupted': False})
+        chain = [RefinementStep('a', 'literal'), RefinementStep('b', 'literal')]
+        replay_chain(chain, MockSearcher([_make_results('1')] * 2), None)
+        assert [s.result_count_capped for s in chain] == [False, False]
+
+    def test_the_flag_is_saved_with_the_step(self):
+        step = RefinementStep('a', 'literal', result_count_capped=True)
+        assert RefinementStep.from_dict(step.to_dict()).result_count_capped is True
+        assert RefinementStep.from_dict({'query': 'a', 'mode': 'literal'}).result_count_capped is False

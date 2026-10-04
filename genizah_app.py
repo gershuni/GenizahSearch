@@ -20824,10 +20824,13 @@ class GenizahGUI(QMainWindow):
             self._last_search_params = dict(
                 query=query, gap=gap, exclude_words=list(exclude_words), text_position=text_position,
                 responsa_options=responsa_options, corpus_scope=_corpus_scope)
+        self._search_cutoff = None    # this run's arrives (cutoff_signal) before its results
 
         # Every signal that writes the table or the status line is dropped
         # once New discards this run (_deliver_unless_discarded).
         _live = partial(self._discardable, '_search_new_generation')
+        if hasattr(self.search_thread, 'cutoff_signal'):
+            self.search_thread.cutoff_signal.connect(_live(self._on_search_cutoff))
         self.search_thread.results_signal.connect(_live(self.on_search_finished))
         if hasattr(self.search_thread, 'preview_signal'):
             self.search_thread.preview_signal.connect(
@@ -21198,6 +21201,7 @@ class GenizahGUI(QMainWindow):
         self.result_row_by_sys_id = {}
         self.last_results = []
         self._last_search_params = None   # these results came from no search run here
+        self._search_cutoff = None
         self.last_search_query = ""
         self.results_loaded = 0
         self.hovered_row = -1
@@ -21739,6 +21743,9 @@ class GenizahGUI(QMainWindow):
                 result_count=len(results),  # total results (matches display count)
             )
             self._apply_run_params(step)
+            # Restricted to the previous step's results: if those left matches out, so may this.
+            step.result_count_capped = self._run_left_matches_out() or bool(
+                self.refinement_chain and self.refinement_chain[-1].result_count_capped)
             step._result_uids = {
                 r.get('uid') or r.get('display', {}).get('id')
                 for r in results
@@ -22037,6 +22044,7 @@ class GenizahGUI(QMainWindow):
                 result_count=len(getattr(self, 'last_results', [])),
             )
             self._apply_run_params(step0)
+            step0.result_count_capped = self._run_left_matches_out()
             step0._result_uids = {
                 r.get('uid') or r.get('display', {}).get('id')
                 for r in getattr(self, 'last_results', [])
@@ -22116,7 +22124,7 @@ class GenizahGUI(QMainWindow):
             strip_layout.addWidget(chip_frame)
 
         # Result count for final step only (D-06)
-        count_label = QLabel(f'{chain[-1].result_count:,}')
+        count_label = QLabel(self._count_text(chain[-1].result_count, chain[-1].result_count_capped, sep=True))
         count_label.setStyleSheet('font-size: 12px; font-weight: bold; color: palette(highlight); margin-left: 4px;')
         strip_layout.addWidget(count_label)
 
@@ -22219,7 +22227,9 @@ class GenizahGUI(QMainWindow):
             ms_count = 0
         self.search_within_btn.setVisible(ms_count > 0 and not is_searching)
         if ms_count > 0:
-            self.search_within_btn.setText(f"🔍 {tr('Search within')} {ms_count:,} {tr('manuscripts')}")
+            self.search_within_btn.setText(
+                f"🔍 {tr('Search within')} {self._count_text(ms_count, self._shown_results_capped(), sep=True)} "
+                f"{tr('manuscripts')}")
 
     def _undo_zero_result_refine(self):
         """D-14a: Recover from zero-result refinement -- replay chain to restore previous results."""
@@ -22610,6 +22620,24 @@ class GenizahGUI(QMainWindow):
         n = getattr(self, '_search_rows_excluded', 0)
         return f" ({n} {tr('excluded')})" if n else ""
 
+    def _on_search_cutoff(self, cutoff):
+        self._search_cutoff = dict(cutoff)
+
+    def _shown_results_capped(self):
+        """Whether the shown results leave matches out because the search reached its
+        50,000-candidate limit (D8; Stop has its own "Partial results" note)."""
+        return bool((getattr(self, '_search_cutoff', None) or {}).get('capped'))
+
+    def _run_left_matches_out(self):
+        """The shown results were cut off or stopped: a step built on them is incomplete."""
+        cutoff = getattr(self, '_search_cutoff', None) or {}
+        return bool(cutoff.get('capped') or cutoff.get('interrupted'))
+
+    def _count_text(self, n, capped, sep=False):
+        """A result count as shown: "25,000+" when the list was cut off (D8)."""
+        text = f"{n:,}" if sep else str(n)
+        return text + "+" if capped else text
+
     def _search_status_summary(self, domains=0):
         """The Search results status line, from the table as it is now.
 
@@ -22619,7 +22647,8 @@ class GenizahGUI(QMainWindow):
         """
         table = self.results_table
         visible = sum(1 for r in range(table.rowCount()) if not table.isRowHidden(r))
-        total = len(self.last_results) if self.last_results else 0
+        total = self._count_text(len(self.last_results) if self.last_results else 0,
+                                 self._shown_results_capped())
         expanded = getattr(self, '_responsa_expanded_count', 0)
         if domains:
             text = tr("Showing {} of {} results (filtering {} domains)").format(
@@ -23103,6 +23132,7 @@ class GenizahGUI(QMainWindow):
             self.status_label.setText(tr("No results for tag: {}").format(tag))
             self.last_results = []
             self._last_search_params = None   # a tag search: no refinement params
+            self._search_cutoff = None
             self.results_loaded = 0
             self.results_table.setRowCount(0)
             self._update_load_more_button()
@@ -23199,6 +23229,7 @@ class GenizahGUI(QMainWindow):
 
         self.last_results = formatted
         self._last_search_params = None   # a tag search: no refinement params
+        self._search_cutoff = None
         # v7.16 BUG-6: batch-prime LOCAL filepath cache (see on_search_finished).
         self._prime_local_filepath_cache(formatted)
         self.results_loaded = 0
@@ -31233,7 +31264,8 @@ class GenizahGUI(QMainWindow):
         h.setContentsMargins(4, 2, 4, 2)
         h.setSpacing(4)
 
-        results_word = tr("{count} results").format(count=count)
+        results_word = tr("{count} results").format(
+            count=self._count_text(count, entry.get('result_count_capped', False)))
         query = self._history_query_with_witnesses(entry, query)
         if search_type == 'regular':
             label_text = f"{mode_char}  {query}  ({results_word})"
@@ -31370,6 +31402,7 @@ class GenizahGUI(QMainWindow):
             # Legacy entry with a stored snapshot — restore instantly.
             self.last_results = results
             self._last_search_params = None   # a stored snapshot: no params of a run here
+            self._search_cutoff = dict(state.get('search_cutoff') or {'capped': False, 'interrupted': False})
             self.on_search_finished(results)
             self._schedule_session_save()
             return
@@ -31489,6 +31522,7 @@ class GenizahGUI(QMainWindow):
         add_history_entry('regular', {
             'query': query,
             'result_count': len(results),
+            'result_count_capped': self._shown_results_capped(),
             'timestamp': datetime.now().isoformat(),
             'search_params': {
                 'mode_index': self.mode_combo.currentIndex(),
@@ -31750,6 +31784,12 @@ class GenizahGUI(QMainWindow):
                     'text_position': self.text_position_combo.currentIndex() if hasattr(self, 'text_position_combo') else 0,
                     'variant_preset': getattr(self, '_current_variant_preset', 70),
                     'results': getattr(self, 'last_results', [])[:5000],
+                    # D8: the restored count shows "+" if the search was cut off or the
+                    # snapshot above drops rows.
+                    'search_cutoff': {
+                        'capped': bool((getattr(self, '_search_cutoff', None) or {}).get('capped'))
+                                  or len(getattr(self, 'last_results', [])) > 5000,
+                        'interrupted': bool((getattr(self, '_search_cutoff', None) or {}).get('interrupted'))},
                     'domain_exclusions': sorted(getattr(self, '_domain_exclusions', set())),
                     'printed_filter': getattr(self, '_printed_filter_state', 'all'),
                     'local_filter': getattr(self, '_local_filter_state_search', 'all'),
@@ -32030,6 +32070,10 @@ class GenizahGUI(QMainWindow):
             if reg.get('results'):
                 self.last_results = reg['results']
                 self._last_search_params = None   # these results came from no search run here
+                # A session saved before 2026-10-04 has no cut-off record: a full 5,000-row
+                # snapshot was most likely cut.
+                self._search_cutoff = dict(reg.get('search_cutoff') or
+                                           {'capped': len(reg['results']) >= 5000, 'interrupted': False})
                 self.on_search_finished(self.last_results)
                 self.search_progress.setValue(n_reg)
                 QApplication.processEvents()  # Let UI paint before composition restore
