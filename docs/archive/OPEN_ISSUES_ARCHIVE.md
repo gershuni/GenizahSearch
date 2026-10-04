@@ -1043,6 +1043,14 @@ Moved verbatim by `scripts/archive_closed_issues.py`. Nothing was edited or dele
 
 Moved verbatim from the top of the tracker on 2026-09-18 (the 2026-09-06 split did the same for the headers before them).
 
+> Previous: 2026-09-29 -- **Desktop exit no longer aborts with a running QThread in a hidden window** (`fix/desktop-exit-running-qthreads`): `tests/test_kept_qthreads_exit_cleanly.py` flaked on CI; reproduced locally (5/100), traced to the hidden-window reference path, fixed with a bounded exit step (`desktop/qthread_exit.py`) and a deterministic test. The P2 row was added and archived the same day.
+>
+> (The header above was moved verbatim from the top of the tracker on 2026-10-04.)
+>
+> Previous: 2026-09-29 (evening) -- **Fragment Puzzle follow-ups after the deploy** (`fix/web-puzzle-followups`): web publish works again (storage uploads carry the user's token); signing in moves this browser's drafts into the account and the canvas no longer comes back empty; 'Open in Puzzle' opens the published join unsaved. P3 -1 (the sign-in draft row, archived) +1 (Manchester images without background removal).
+>
+> (The header above was moved verbatim from the top of the tracker on 2026-10-04.)
+>
 > Previous: 2026-09-29 -- **Web Fragment Puzzle: saved joins kept per visitor** (`fix/web-hardening-2`): drafts private until published (per account / per browser), shared fragment images only from signed-in uploads with the uploader recorded, cached images never replaced, per-reference Sefaria cache (web + desktop), PNG export straight to the browser; four unused puzzle routes removed. P2 +1, P3 +4 (follow-ups below).
 >
 > (The header above was moved verbatim from the top of the tracker on 2026-10-04.)

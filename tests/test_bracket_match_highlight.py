@@ -98,3 +98,145 @@ def test_unstripped_span(text, start, end, want):
     assert se._unstripped_span(text, start, end) == want
     # The same letters, never one outside the match.
     assert se._strip_brackets(text[want[0]:want[1]]) == se._strip_brackets(text)[start:end]
+
+
+# --- Search-within over an Oxford part scans the stripped text (Codex review, round 7) ---
+# The part's first match is a clean one on a page of a manuscript outside the restriction;
+# the one inside matches only with its bracket out. The scan for an in-scope match went on
+# in the original text, where it never finds ש[לו]ם, so the row was lost. Regex mode
+# reaches this path (the whole-word modes take multi-word matches on a part from the
+# crossing search, and single words from the pages).
+
+ON2 = "על"
+
+
+def _aggregate(pages):
+    import json
+    text, bounds, cursor = [], [], 0
+    for i, (uid, sid, t) in enumerate(pages):
+        start = cursor
+        text.append(t)
+        cursor += len(t)
+        if i != len(pages) - 1:
+            text.append("\n")
+            cursor += 1
+        bounds.append({"uid": uid, "p_num": i + 1, "full_header": f"IE_{uid} {sid}",
+                       "source": "V0.8", "sys_id": sid, "start": start, "end": cursor})
+    return "".join(text), json.dumps(bounds, ensure_ascii=False)
+
+
+PART_INSIDE = [("a1", "A", f"אבג {W} {ON2} דהו"), ("b1", "B", f"דבר ש[לו]ם {ON2} דהו")]
+PART_CROSSING = [("c1", "C", f"אבג {W} {ON2} דהו"), ("d1", "D", f"זחט ש[לו]ם"), ("d2", "D", f"{ON2} טוב")]
+# No page docs of its own: its rows come from the part alone. The in-scope bracketed
+# occurrence comes first, a clean one after it, and a bracket earlier shifts offsets.
+PART_SOLO = [("g1", "G", "[אבג] דהו"), ("h1", "H", f"דבר ש[לו]ם {ON2} זחט {W} {ON2}")]
+
+
+@pytest.fixture(scope="module")
+def part_engine(tmp_path_factory):
+    root = tmp_path_factory.mktemp("bracket_part")
+    db = os.path.join(str(root), "tantivy_db")
+    os.makedirs(db)
+    idx = tantivy.Index(_schema(), path=db)
+    register_search_tokenizers(idx)
+    w = idx.writer(heap_size=50_000_000, num_threads=1)
+
+    def add(uid, sid, text, scope, bounds=""):
+        w.add_document(tantivy.Document(
+            unique_id=uid, content=text, content_search=strip_search_diacritics(text), source="V0.8",
+            full_header=f"IE_{uid} {sid}", shelfmark=uid, scope=scope, boundaries=bounds,
+            **Indexer._extract_position_fields(text)))
+    for name, pages in (("inside", PART_INSIDE), ("crossing", PART_CROSSING)):
+        for uid, sid, text in pages:
+            add(uid, sid, text, "page")
+        add(f"part:{name}", pages[0][1], *_aggregate(pages)[:1], "part", _aggregate(pages)[1])
+    add("part:solo", "G", *_aggregate(PART_SOLO)[:1], "part", _aggregate(PART_SOLO)[1])
+    w.commit()
+    w.wait_merging_threads()
+    w = idx = None
+    with patch.object(Config, "INDEX_DIR", str(root)):
+        eng = se.SearchEngine(_Meta(), VariantManager(), worker_mode=True, open_local=False)
+    browse = {}
+    for uid, sid, _t in PART_INSIDE + PART_CROSSING + PART_SOLO:
+        browse.setdefault(sid, []).append({"uid": uid})
+    eng._load_browse_map = lambda: browse
+    yield eng
+    eng = None
+    gc.collect()
+
+
+@pytest.mark.parametrize("restrict, page", [("B", "b1"), ("D", "d1")])
+def test_search_within_finds_a_bracketed_match_on_a_part_after_an_outside_one(part_engine, restrict, page):
+    rows = part_engine.execute_search(rf"{W}\s+{ON2}", "Regex", 0, corpus_scope="genizah",
+                                      restrict_sys_ids={restrict})
+    assert page in {r["uid"] for r in rows}, "the in-scope occurrence needs its bracket out"
+    (row,) = [r for r in rows if r["uid"] == page]
+    # The whole occurrence, brackets and the page break included.
+    assert f"*ש[לו]ם{chr(10) if page == 'd1' else ' '}{ON2}*" in row["raw_file_hl"], row["raw_file_hl"]
+
+
+def test_search_within_takes_the_first_in_scope_occurrence_from_the_stripped_text(part_engine):
+    rows = part_engine.execute_search(rf"{W}\s+{ON2}", "Regex", 0, corpus_scope="genizah",
+                                      restrict_sys_ids={"H"})
+    (row,) = [r for r in rows if r["uid"] == "h1"]
+    assert f"דבר *ש[לו]ם {ON2}* זחט" in row["raw_file_hl"], row["raw_file_hl"]
+
+
+def test_ids_only_finds_it_too(part_engine):
+    rows = part_engine.execute_search(rf"{W}\s+{ON2}", "Regex", 0, corpus_scope="genizah",
+                                      restrict_sys_ids={"B"}, ids_only=True)
+    assert "b1" in {r["uid"] for r in rows}
+
+
+# --- Composition marks a bracketed match whole (Codex review sweep, round 7) -------------
+
+def test_composition_marks_a_match_found_only_with_its_bracket_out(tmp_path):
+    root = tmp_path / "comp"
+    db = root / "tantivy_db"
+    db.mkdir(parents=True)
+    idx = tantivy.Index(_schema(), path=str(db))
+    register_search_tokenizers(idx)
+    w = idx.writer(heap_size=50_000_000, num_threads=1)
+    text = f"פתח ש[לום דהו טוב {W}"      # a clean שלום later lets the candidate through
+    w.add_document(tantivy.Document(
+        unique_id="p", content=text, content_search=strip_search_diacritics(text), source="V0.8",
+        full_header="IE_p 990", shelfmark="p", scope="page", boundaries="",
+        **Indexer._extract_position_fields(text)))
+    w.commit()
+    w.wait_merging_threads()
+    w = idx = None
+    with patch.object(Config, "INDEX_DIR", str(root)):
+        eng = se.SearchEngine(_Meta(), VariantManager(), worker_mode=True, open_local=False)
+    res = eng.search_composition_logic(f"פתח {W}", 2, 10 ** 9, "literal", corpus_scope="genizah")
+    (item,) = res["main"] + res["filtered"]
+    assert item["text"].startswith("*פתח ש[לום*"), item["text"]
+    eng = None
+    gc.collect()
+
+
+def test_my_library_composition_marks_it_whole_too(tmp_path):
+    from shared.local_indexer import build_local_schema
+    root = tmp_path / "comp_main"
+    (root / "tantivy_db").mkdir(parents=True)
+    main = tantivy.Index(_schema(), path=str(root / "tantivy_db"))
+    register_search_tokenizers(main)
+    main.writer(heap_size=50_000_000, num_threads=1).commit()
+    local = tantivy.Index(build_local_schema(), path=str(tmp_path))
+    register_search_tokenizers(local)
+    w = local.writer(heap_size=50_000_000, num_threads=1)
+    text = f"פתח ש[לום דהו טוב {W}"
+    w.add_document(tantivy.Document(
+        unique_id="loc", content=text, content_search=strip_search_diacritics(text), source="LOCAL",
+        full_header="loc_LOCAL_P1_F1", shelfmark="loc", scope="page", boundaries="",
+        **Indexer._extract_position_fields(text)))
+    w.commit()
+    w.wait_merging_threads()
+    local.reload()
+    with patch.object(Config, "INDEX_DIR", str(root)):
+        eng = se.SearchEngine(_Meta(), VariantManager(), worker_mode=True, open_local=False)
+    eng.local_index, eng.local_searcher, eng._local_has_content_search = local, local.searcher(), True
+    res = eng.search_composition_logic(f"פתח {W}", 2, 10 ** 9, "literal", corpus_scope="local")
+    (item,) = res["main"] + res["filtered"]
+    assert item["text"].startswith("*פתח ש[לום*"), item["text"]
+    eng = None
+    gc.collect()

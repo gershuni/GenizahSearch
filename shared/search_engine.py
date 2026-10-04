@@ -2768,7 +2768,7 @@ class SearchEngine:
         return sorted(set(spans))
 
     def _first_match_in_pages(self, regex, text, first_match, boundaries, page_uids, accept=None,
-                              sys_ids=None):
+                              sys_ids=None, to_original=None):
         """First match (from *first_match* on) on a page inside the restriction, or None.
 
         Search-within over an aggregate (scope system/part) hit: the doc's own
@@ -2779,15 +2779,23 @@ class SearchEngine:
         counts when either page is inside (it tested only the first until
         2026-10-04). *accept* (e.g. a position check) must also hold.
         Before 2026-09-30 every aggregate hit was discarded under search-within.
+
+        *to_original*: *text* is the bracket-stripped text the match was found in;
+        each match is mapped onto the original (whose offsets the boundaries and
+        *accept* use) and returned mapped. The scan goes on in *text*: in the
+        original, an occurrence that needs its brackets out (של[ו]ם) is never found
+        again, so a row whose first match fell outside the restriction was lost
+        (Codex review of PR #375).
         """
         if not boundaries or not any(_page_in_restriction(b, page_uids, sys_ids) for b in boundaries):
             return None  # no page of this aggregate is in the restriction
         match = first_match
         while match is not None:
-            if accept is None or accept(match):
-                overlaps = self._map_span_to_pages(match.span(), boundaries).get('overlaps') or []
+            found = match if to_original is None else to_original(match)
+            if accept is None or accept(found):
+                overlaps = self._map_span_to_pages(found.span(), boundaries).get('overlaps') or []
                 if any(_page_in_restriction(o, page_uids, sys_ids) for o in overlaps):
-                    return match
+                    return found
             match = regex.search(text, pos=match.start() + 1)
         return None
 
@@ -4067,6 +4075,7 @@ class SearchEngine:
                     # For highlighting, re-search on original content to
                     # preserve scholarly bracket notation in snippets.
                     orig_match_missing = False
+                    stripped_match = match_obj           # in match_content's offsets
                     if match_content is not content:
                         first_orig = orig_match = regex.search(content)
                         if orig_match and _whole_words:
@@ -4101,15 +4110,22 @@ class SearchEngine:
 
                     boundaries = self._parse_boundaries(doc) if scope != 'page' else []
                     if restrict_uids is not None and scope != 'page':
-                        # match_obj is in the original text's offsets (mapped back when the
-                        # match needed its brackets out), so its pages are read there.
+                        # Pages and acceptance are read in the original text's offsets.
                         position_ok = None
                         if text_position or _whole_words:
                             def position_ok(m, _t=content):
                                 return _accept(_t, m, not _query_has_brackets(query_str))
-                        match_obj = self._first_match_in_pages(
-                            regex, content, match_obj, boundaries, restrict_uids, position_ok,
-                            sys_ids=restrict_sids)
+                        if match_content is content:
+                            match_obj = self._first_match_in_pages(
+                                regex, content, match_obj, boundaries, restrict_uids, position_ok,
+                                sys_ids=restrict_sids)
+                        else:
+                            # Scan the stripped text, where a bracketed occurrence on a
+                            # page inside the restriction can still be found.
+                            match_obj = self._first_match_in_pages(
+                                regex, match_content, stripped_match, boundaries, restrict_uids,
+                                position_ok, sys_ids=restrict_sids,
+                                to_original=lambda m, _t=content: _Span(*_unstripped_span(_t, m.start(), m.end())))
                         if match_obj is None:
                             regex_filtered_count += 1
                             continue
@@ -4519,9 +4535,14 @@ class SearchEngine:
                             rec['head'] = doc['full_header'][0]
                             rec['src'] = doc['source'][0]
                             rec['content'] = content
-                            # Use original content span if possible, fall back to stripped
+                            # Original content span if possible; else the stripped match,
+                            # mapped onto the original (its offsets cut a bracketed word
+                            # short: *אבג ש[לו*ם -- Codex review of PR #375).
                             _orig_m = regex.search(content)
-                            _ms_match = _orig_m or regex.search(match_content)
+                            if _orig_m is None:
+                                _sm = regex.search(match_content)
+                                _orig_m = _Span(*_unstripped_span(content, _sm.start(), _sm.end()))
+                            _ms_match = _orig_m
                             rec['matches'].append(_ms_match.span())
                             # Save indices of found words in *source* text
                             rec['src_indices'].update(range(token_idx, token_idx + chunk_size))
@@ -4704,7 +4725,11 @@ class SearchEngine:
                                         _rec_scl['shelfmark'] = ''
                                     _rec_scl['content'] = _content_scl
                                     _orig_m_scl = _regex_scl.search(_content_scl)
-                                    _ms_match_scl = _orig_m_scl or _regex_scl.search(_match_content_scl)
+                                    if _orig_m_scl is None:          # as the Genizah loop above
+                                        _sm_scl = _regex_scl.search(_match_content_scl)
+                                        _orig_m_scl = _Span(*_unstripped_span(
+                                            _content_scl, _sm_scl.start(), _sm_scl.end()))
+                                    _ms_match_scl = _orig_m_scl
                                     _rec_scl['matches'].append(_ms_match_scl.span())
                                     _rec_scl['src_indices'].update(
                                         range(_token_idx_scl, _token_idx_scl + chunk_size)
