@@ -1922,6 +1922,87 @@ def test_a_preview_starts_no_shelfmark_fetch_and_the_result_does(window, monkeyp
     assert {A, B} <= {sid for ids in fetched for sid in ids}, "the landed rows were not fetched"
 
 
+class _FakeLoader:
+    """ShelfmarkLoaderThread without a thread: records what each fetch was asked for."""
+    made = []
+
+    class _Sig:
+        def __init__(self):
+            self.slots = []
+
+        def connect(self, slot):
+            self.slots.append(slot)
+
+        def disconnect(self):
+            self.slots.clear()
+
+        def emit(self, *args):
+            for slot in list(self.slots):
+                slot(*args)
+
+    def __init__(self, meta_mgr, sids):
+        self.sids, self.running = list(sids), False
+        self.progress_signal, self.finished_signal = self._Sig(), self._Sig()
+        self.error_signal, self.finished = self._Sig(), self._Sig()
+        _FakeLoader.made.append(self)
+
+    def start(self):
+        self.running = True
+
+    def isRunning(self):
+        return self.running
+
+    def request_cancel(self):
+        pass
+
+    def wait(self):
+        self.running = False
+
+
+_SIDS = [f"99{n:016d}" for n in range(1, 61)]      # more than FIRST_PAINT_ROWS
+
+
+def test_the_first_rows_keep_their_shelfmark_fetch_when_the_rest_of_the_page_loads(window, monkeypatch):
+    # Codex review (PR #376): the landed search starts the fetch of its first
+    # FIRST_PAINT_ROWS rows, and the rest of the first page replaced it with a
+    # fetch of its own ids: rows the first fetch had not reached stayed
+    # "Loading..." for good. They now join the next fetch, ahead of its own.
+    w = window
+    monkeypatch.setattr(w.meta_mgr, "get_meta_for_id", lambda sid: ("Unknown", ""))
+    # MetadataManager's fallback for an id it does not know (not on the stub).
+    monkeypatch.setattr(w.meta_mgr, "get_shelfmark_from_header", lambda header: None, raising=False)
+    monkeypatch.setattr(app, "ShelfmarkLoaderThread", _FakeLoader)
+    monkeypatch.setattr(_FakeLoader, "made", [])
+    _search(w, [_res(s, 1) for s in _SIDS])
+    _drain_events()
+    first, last = _FakeLoader.made
+    assert first.sids == _SIDS[:app.FIRST_PAINT_ROWS]
+    assert last.sids == _SIDS, "the first rows' fetch was dropped"
+    assert w.meta_loader is last
+
+
+def test_a_replaced_fetch_neither_reports_nor_drops_the_one_after_it(window, monkeypatch):
+    from desktop.gui_threads import _ORPHANED_WORKERS
+    w = window
+    monkeypatch.setattr(app, "ShelfmarkLoaderThread", _FakeLoader)
+    monkeypatch.setattr(_FakeLoader, "made", [])
+    w.start_metadata_loading([A, B])
+    w.meta_mgr.nli_cache = {A: {"shelfmark": "T-S 1", "title": "t"}}    # A came in before the cancel
+    w.start_metadata_loading([C])
+    first, second = _FakeLoader.made
+    assert second.sids == [B, C], "a fetched id was asked again, or one not reached was dropped"
+    # Its finished(True) is still queued; delivered, it set meta_loader to None
+    # under the running second loader and reported a cancel.
+    assert not first.finished_signal.slots and not first.progress_signal.slots
+    assert w.meta_loader is second
+    second.finished_signal.emit(False)
+    # finished(bool) comes from inside run(): the thread is kept until it ends.
+    assert w.meta_loader is None and any(t is second for t in _ORPHANED_WORKERS)
+    second.running = False
+    second.finished.emit()
+    assert not any(t is second for t in _ORPHANED_WORKERS)
+
+
 # --- Refinement steps record what the run searched (D8 Phase 1, 2026-10-04) --------
 # Both step builders read the widgets, which may have changed since the run, and kept
 # some fields at their defaults: the first step of a chain lost gap, NOT-words, position
