@@ -22,7 +22,10 @@ from genizah_core import RRF_K
 
 def _make_engine():
     from genizah_core import SearchEngine
-    with patch("genizah_core.SearchEngine.reload_index", return_value=False):
+    # No FL-ID background build: it would load the developer's REAL browse map and
+    # call this MagicMock once per page, for seconds after the test (see
+    # tests/test_local_reload_after_refresh.py, _NO_FL_ID_BUILD).
+    with patch("genizah_core.SearchEngine.reload_index", return_value=False),             patch.object(SearchEngine, "start_fl_id_index_build"):
         with patch.object(SearchEngine, "_open_local_searcher"):
             meta = MagicMock()
             meta.parse_full_id_components.return_value = {}

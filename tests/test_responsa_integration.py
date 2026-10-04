@@ -49,7 +49,7 @@ def _make_search_engine():
 
     # Patch reload_index to avoid needing an actual Tantivy index
     with patch.object(SearchEngine, 'reload_index', return_value=False):
-        engine = SearchEngine(meta_mgr, var_mgr)
+        engine = SearchEngine(meta_mgr, var_mgr, worker_mode=True, open_local=False)  # no real FL-ID build / LOCAL index (see test_responsa_edge_cases)
 
     return engine
 

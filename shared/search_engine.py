@@ -6,11 +6,14 @@ genizah_core.py retains a permanent same-object re-export shim so all
 existing ``from genizah_core import SearchEngine`` callers continue working.
 """
 
+import bisect
+import functools
 import logging
 import os
 import re
 import threading
 import time
+import unicodedata
 import weakref
 import html
 import json
@@ -24,10 +27,11 @@ try:
     import tantivy
 except ImportError:
     raise ImportError("Tantivy library missing. Please install it.")
+from rapidfuzz.distance import OSA
 
 from shared.config import Config
 from shared.search_regex import (
-    compile as compile_search_regex, SearchBudgetExceeded, bounded_search,
+    compile as compile_search_regex, SearchBudgetExceeded, bounded_search, _check_deadline,
 )
 from shared.text_normalize import strip_nikud, strip_search_diacritics
 from shared.browse_map_utils import natural_sort_key, dedupe_browse_map, _extract_ie_from_header
@@ -108,6 +112,28 @@ def _consume_last_responsa_downgrade() -> Optional[str]:
     return msg
 
 
+# D8 (2026-10-04): did the search just run on this thread leave matches out? 'capped':
+# a query returned Config.SEARCH_LIMIT hits, so more candidates existed than were read;
+# 'interrupted': Stop ended it early (it returns what it found). The desktop shows such a
+# count as "N+" and completes the step before search-within or all-terms rely on it.
+# Read and cleared like the Responsa signal; drained when each search starts.
+_LAST_SEARCH_CUTOFF = threading.local()
+
+
+def _note_search_cutoff(capped=False, interrupted=False) -> None:
+    """Add to the current search's cut-off signal (any part of it can say so)."""
+    cur = getattr(_LAST_SEARCH_CUTOFF, 'value', None) or {'capped': False, 'interrupted': False}
+    _LAST_SEARCH_CUTOFF.value = {'capped': cur['capped'] or bool(capped),
+                                 'interrupted': cur['interrupted'] or bool(interrupted)}
+
+
+def consume_last_search_cutoff() -> dict:
+    """Read and clear the cut-off signal of the last search on this thread."""
+    value = getattr(_LAST_SEARCH_CUTOFF, 'value', None)
+    _LAST_SEARCH_CUTOFF.value = None
+    return value or {'capped': False, 'interrupted': False}
+
+
 def _set_last_responsa_downgrade_meta(meta: dict) -> None:
     """Phase 81A — record a structured per-flag cascade outcome.
 
@@ -133,6 +159,19 @@ def _consume_last_responsa_downgrade_meta() -> Optional[dict]:
             pass
     return meta
 
+
+
+# execute_search calls progress_callback (the desktop worker's pause/cancel
+# checkpoint + a cross-thread Qt signal) once per this many hits. It was every
+# 5 hits: 10,000 signals for a 50,000-candidate search.
+_PROGRESS_TICK_EVERY = 200
+
+# execute_search(preview_callback=...) hands over result rows while the search is
+# still running, so the desktop can show them at once: the rows so far at most
+# every _PREVIEW_AFTER_S seconds, up to the first _PREVIEW_ROWS (a rare phrase or a
+# variants/fuzzy search may find only a few rows over a long run).
+_PREVIEW_ROWS = 50
+_PREVIEW_AFTER_S = 0.5
 
 
 def _count_unique_chunks(chunk_hits):
@@ -270,6 +309,117 @@ def _build_wildcard_regex(component: dict) -> str:
     return ''
 
 
+def _first_position_valid_match(regex, text, first_match, text_position, line_constraints,
+                                strip_brackets):
+    """Return the first occurrence of *regex* in *text* that meets *text_position*, or None.
+
+    A page can hold the term several times: the first occurrence may sit
+    mid-line while a later one ends the line. Checking only the first dropped
+    such pages (found 2026-09-30). 'start' can only be met by the earliest
+    occurrence, and L<n>: line constraints do not depend on the occurrence, so
+    both check one match. Uses repeated ``search(pos=...)``: the budgeted
+    Pattern wrapper has no ``finditer``.
+    """
+    match = first_match
+    while match is not None:
+        if Indexer._validate_position_match(text, match, text_position, line_constraints,
+                                            strip_brackets=strip_brackets):
+            return match
+        if line_constraints or text_position == 'start':
+            return None
+        match = regex.search(text, pos=match.start() + 1)
+    return None
+
+
+# Whole words (owner, D1 for Exact, 2026-10-01 for Variants and Fuzzy): a match inside a
+# longer Hebrew word is not a match -- "Responsa mode is for that kind of search".
+# Marks (nikud, cantillation, the Judeo-Arabic dot), quotes/geresh and lacuna brackets
+# belong to the word they sit in (ו[שלום is one word), so they are looked past. Any
+# other neighbour is a boundary. That is lenient on purpose: the hebword tokenizer and
+# Python's \w disagree on chars like '²', and a page the index returned for a whole
+# token must not be lost to that.
+_IN_WORD_QUOTES = frozenset('\'"\u05F3\u05F4\u2018\u2019[]')
+_WHOLE_WORD_MODES = frozenset({'literal', 'variants', 'variants_extended', 'variants_maximum', 'fuzzy'})
+_HEB_LETTER_RUN_RE = re.compile(r'[\u05D0-\u05EA]+')
+
+
+def _looked_past(ch):
+    return ch in _IN_WORD_QUOTES or unicodedata.category(ch)[0] == 'M'
+
+
+def _continues_word(ch):
+    """A character a word goes on through: a letter or a decimal digit of any script,
+    or '_' -- the hebword tokenizer's word class, so Exact's tokens agree. Hebrew letters
+    alone missed `abc` inside `xabc` and `שלום` before a digit (Codex review of PR #375)."""
+    cat = unicodedata.category(ch)
+    return cat[0] == 'L' or cat in ('Nd', 'Pc')
+
+
+# Between the windows of the joined crossing pass: no separator can span it (the gap
+# regex's separator excludes word characters, and it is one), and it neither goes on a
+# word (category No, not a letter or a decimal digit) nor is looked past -- so the
+# whole-word test sees a window's edge as an edge. '_' did until '_' began to count
+# as a word character (it is one in the tokenizer).
+_WINDOW_JOINER = chr(0xB2)
+
+
+def _starts_word(text, start):
+    """True unless text[start] continues a word that began before it."""
+    i = start - 1
+    while i >= 0 and _looked_past(text[i]):
+        i -= 1
+    return not (i >= 0 and _continues_word(text[i]))
+
+
+def _ends_word(text, end):
+    """True unless the word ending at *end* goes on after it."""
+    j = end
+    while j < len(text) and _looked_past(text[j]):
+        j += 1
+    return not (j < len(text) and _continues_word(text[j]))
+
+
+def _whole_word_span(text, start, end):
+    """True unless the span text[start:end] continues a word on either side."""
+    return _starts_word(text, start) and _ends_word(text, end)
+
+
+def _local_match_accept(whole_words, text_position, query_str):
+    """What a My Library row may use as its match, as the main index's _accept: a
+    whole word (Exact, Variants, Fuzzy) at the text position, when one is set. None
+    when neither applies. The LOCAL rows took the first regex match anywhere, so
+    `בשלום עולם` was a hit for `שלום עולם` and a start-position search ignored the
+    position (Codex review of PR #375)."""
+    if not whole_words and not text_position:
+        return None
+    strip_br = not _query_has_brackets(query_str)
+
+    def accept(text, m):
+        if whole_words and not _whole_word_span(text, m.start(), m.end()):
+            return False
+        return not text_position or Indexer._validate_position_match(
+            text, m, text_position, None, strip_brackets=strip_br)
+    return accept
+
+
+def _page_in_restriction(page, page_uids, sys_ids):
+    """A page of an aggregate (its boundaries entry, or a _map_span_to_pages
+    overlap) inside a search-within restriction: its uid among the restricted
+    manuscripts' pages, or its own manuscript among *sys_ids*."""
+    return page.get('uid') in page_uids or (sys_ids is not None and page.get('sys_id') in sys_ids)
+
+
+def _first_accepted_match(regex, text, first_match, accept):
+    """The first occurrence of *regex* in *text*, from *first_match* on, that *accept*
+    takes, or None. Repeated ``search(pos=...)``: the budgeted Pattern has no finditer."""
+    match = first_match
+    while match is not None:
+        if accept(match):
+            return match
+        match = regex.search(text, pos=match.start() + 1)
+    return None
+
+
 def _add_bracket_variants(term: str) -> list:
     """Return bracket-adorned variants of *term* for Tantivy OR expansion.
 
@@ -283,16 +433,80 @@ def _add_bracket_variants(term: str) -> list:
     — never broadened to the bare/other-bracket forms. A bare ``סגן`` still
     expands to ``[סגן`` etc. so it reaches bracketed tokens on pages that
     contain it.
+
+    ``]term[`` is a word standing between two lacunae (the text before it ends
+    in a gap, the text after it opens one). It was missing until 2026-09-30:
+    for שלום, 10 V0.8 pages carry the token ``]שלום[`` and none was reachable
+    from a bare query. Brackets INSIDE a word (``ש[לום``) are still not
+    expanded here -- see docs/plans/SEARCH_UNCAPPED_STREAMING_PLAN.md, stage 0b.
     """
     variants = [term]
     if not term:
         return variants
     if '[' in term or ']' in term:
         return variants  # exact bracket query — do not expand
-    for v in (f'[{term}', f'{term}]', f'[{term}]', f']{term}', f'{term}['):
+    for v in (f'[{term}', f'{term}]', f'[{term}]', f']{term}', f'{term}[', f']{term}['):
         if v not in variants:
             variants.append(v)
     return variants
+
+
+# Cross-page windows. A "chunk" is a whitespace-delimited run; it can hold a
+# regex word (Config.WORD_TOKEN_PATTERN) only if it has one of these chars.
+# A word chunk is [non-word chars][word char][anything]; the split is unique,
+# so the possessive patterns below never backtrack inside a chunk.
+_WCH = r"\w\u0590-\u05FF'"
+_WORD_CHUNK = rf"[^\s{_WCH}]*+[{_WCH}]\S*+"
+_NONWORD_CHUNK = rf"[^\s{_WCH}]++"
+_WINDOW_RES = {}
+
+
+def _words_head_re(words):
+    """Matches from the start of a text through its *words*-th word chunk.
+    Chunks and word chars do not depend on direction, so the same pattern on a
+    REVERSED text finds the *words*-th last chunk -- anchored, one call."""
+    rx = _WINDOW_RES.get(words)
+    if rx is None:
+        rx = _WINDOW_RES[words] = re.compile(
+            rf"\s*+(?:{_NONWORD_CHUNK}\s++)*+{_WORD_CHUNK}"
+            rf"(?:\s++(?:{_NONWORD_CHUNK}\s++)*+{_WORD_CHUNK}){{{words - 1}}}")
+    return rx
+
+
+def _left_window_start(content, cut, words):
+    """Start of the *words*-th last chunk holding a word char before *cut*
+    (0 if there are fewer). Measured in words, not characters, so a long run
+    of dots, brackets or spaces at a page end cannot push a match out. This
+    runs for every page break of every candidate manuscript, hence one
+    anchored regex call per probe."""
+    head = _words_head_re(max(1, words))
+    size = 256
+    while True:
+        lo = max(0, cut - size)
+        rev = content[lo:cut][::-1]
+        m = head.match(rev)
+        # The reversed text ends at lo: a chunk cut through by lo only looks complete.
+        if m is not None and (m.end() < len(rev) or lo == 0 or content[lo - 1].isspace()):
+            return cut - m.end()
+        if lo == 0:
+            return 0
+        size *= 4
+
+
+def _right_window_end(content, cut, words):
+    """End of the *words*-th chunk holding a word char from *cut* on
+    (len(content) if there are fewer)."""
+    head = _words_head_re(max(1, words))
+    size = 256
+    while True:
+        hi = min(len(content), cut + size)
+        m = head.match(content, cut, hi)
+        # endpos acts as the end of the text: a chunk cut through by hi only looks complete.
+        if m is not None and (m.end() < hi or hi == len(content) or content[hi].isspace()):
+            return m.end()
+        if hi == len(content):
+            return len(content)
+        size *= 4
 
 
 def _query_has_brackets(query_str: str) -> bool:
@@ -308,6 +522,32 @@ def _query_has_brackets(query_str: str) -> bool:
 def _strip_brackets(text: str) -> str:
     """Remove all square brackets from *text*."""
     return text.replace('[', '').replace(']', '')
+
+
+def _unstripped_span(text, start, end):
+    """Where the span [start, end) of _strip_brackets(text) stands in *text*: the
+    same characters, with any brackets among them (של[ו]ם for שלום); a bracket that
+    closes or opens a pair right at its edge is kept with it (ב[ג], not ב[ג), never
+    a letter outside the span."""
+    kept, s0, e0 = 0, None, None
+    for i, ch in enumerate(text):
+        if ch in '[]':
+            continue
+        if kept == start:
+            s0 = i
+        kept += 1
+        if kept == end:
+            e0 = i + 1
+            break
+    s0 = len(text) if s0 is None else s0
+    e0 = len(text) if e0 is None else e0
+    # A pair closed or opened right at the edge stays whole: ב[ג] rather than ב[ג.
+    seg = text[s0:e0]
+    if seg.count('[') > seg.count(']') and text[e0:e0 + 1] == ']':
+        e0 += 1
+    if seg.count(']') > seg.count('[') and s0 and text[s0 - 1] == '[':
+        s0 -= 1
+    return s0, e0
 
 
 def _index_has_field(index, field_name: str) -> bool:
@@ -396,6 +636,307 @@ def make_mark_tolerant_pattern(escaped_term: str) -> str:
     # Split escaped string into tokens: \\X (escape sequences) or single chars
     tokens = re.findall(r'\\.|.', escaped_term)
     return MARK_TOLERANT_INSERTER.join(tokens)
+
+
+def _gap_separator(max_gap):
+    """The regex between two query words: non-word chars, with up to *max_gap* words between."""
+    if max_gap == 0:
+        # Flexible separator (any non-word char)
+        return r'[^\w\u0590-\u05FF\']+'
+    # Gap logic
+    return rf'(?:[^\w\u0590-\u05FF\']+{Config.WORD_TOKEN_PATTERN}){{0,{max_gap}}}[^\w\u0590-\u05FF\']+'
+
+
+# _add_bracket_variants of a bare word, as (before, after) around it.
+_BRACKET_AFFIXES = tuple(tuple(v.split('|')) for v in _add_bracket_variants('|'))
+
+
+# Fuzzy = near spellings (owner 2026-10-01; prefixes 2026-10-02): every whole word
+# within a few edits of the query word -- a letter added, dropped or replaced, or two
+# neighbours swapped (OSA distance, which is how Tantivy's own fuzzy query counts).
+# One edit for a word of 3-4 letters, two from 5 letters, none below 3. A prefix
+# letter is an edit like any other, so ושלום is a near spelling of שלום ("It's
+# fuzzy"); ושלומות, three edits away, is not.
+_HEB_LETTERS = 'אבגדהוזחטיכלמנסעפצקרשתךםןףץ'
+# Between the letters of a near spelling: the marks and quotes every search
+# tolerates, and lacuna brackets -- ו[שלום is the word ושלום.
+_FUZZY_INSERTER = MARK_TOLERANT_INSERTER[:-2] + r'\[\]]*'
+
+
+def _fuzzy_distance(term):
+    """The edits a near spelling of *term* may have."""
+    if len(term) < 3:
+        return 0
+    return 1 if len(term) < 5 else 2
+
+
+@functools.lru_cache(maxsize=256)
+def _near_spellings(term):
+    """Every string of Hebrew letters within ``_fuzzy_distance(term)`` edits of
+    *term*, *term* included -- or None when *term* is not plain Hebrew letters (a
+    bracket search, digits, Latin), which is then matched as typed. הצדיק has
+    39,687 (0.03 s), of which the index holds 4,262."""
+    if not _HEB_LETTER_RUN_RE.fullmatch(term):
+        return None
+    d = _fuzzy_distance(term)
+    found = {term}
+    for _ in range(d):
+        grown = set(found)
+        for w in found:
+            for i in range(len(w) + 1):
+                if i < len(w):
+                    grown.add(w[:i] + w[i + 1:])
+                    if i + 1 < len(w):
+                        grown.add(w[:i] + w[i + 1] + w[i] + w[i + 2:])
+                for ch in _HEB_LETTERS:
+                    grown.add(w[:i] + ch + w[i:])
+                    if i < len(w):
+                        grown.add(w[:i] + ch + w[i + 1:])
+        found = grown
+    # Two edits can reach a string three apart under OSA (swap two letters, then
+    # insert between them); Tantivy's fuzzy query does not count it.
+    return frozenset(w for w in found if w and OSA.distance(term, w, score_cutoff=d) <= d)
+
+
+@functools.lru_cache(maxsize=256)
+def _near_spelling_tiers(term):
+    """*term*'s near spellings by distance: (0 edits, 1 edit[, 2 edits]) -- so
+    retrieval can rank the word itself above one edit, and one edit above two.
+    A word Fuzzy matches as typed is its own only tier."""
+    spellings = _near_spellings(term)
+    if spellings is None:
+        return (frozenset({term}),)
+    tiers = [set() for _ in range(_fuzzy_distance(term) + 1)]
+    for w in spellings:
+        tiers[OSA.distance(term, w)].add(w)
+    return tuple(frozenset(t) for t in tiers)
+
+
+@functools.lru_cache(maxsize=4096)
+def _fuzzy_pattern(forms_per_term, as_typed, max_gap):
+    """Regex text for these forms: per query word an alternation of its forms,
+    longest first, the words joined as Exact joins them. *as_typed[i]*: word i is
+    matched as typed (marks and quotes tolerated, as in Exact), not as a near
+    spelling. Only handed to result rows to highlight with; never compiled here."""
+    parts = []
+    for forms, typed in zip(forms_per_term, as_typed):
+        alts = [_fuzzy_form_pattern(f, typed) for f in sorted(forms, key=lambda f: (-len(f), f))]
+        parts.append(f"({'|'.join(alts)})")
+    return _gap_separator(max_gap).join(parts)
+
+
+@functools.lru_cache(maxsize=65536)
+def _fuzzy_form_pattern(form, typed):
+    """One form of _fuzzy_pattern: escaped, with the inserter between its characters."""
+    inserter = MARK_TOLERANT_INSERTER if typed else _FUZZY_INSERTER
+    return inserter.join(re.findall(r'\\.|.', re.escape(form)))
+
+
+_HEB_LETTER = _HEB_LETTER_RUN_RE.pattern[:-1]
+# A Hebrew word as Fuzzy reads it: letters, with the marks, quotes and lacuna
+# brackets a word holds between them; its letters are what is compared.
+_FUZZY_WORD_RE = re.compile(f'{_HEB_LETTER}(?:{_FUZZY_INSERTER}{_HEB_LETTER})*')
+_FUZZY_FOLD_RE = re.compile(_FUZZY_INSERTER[:-1])
+# The same characters as a set, for a quick look at the one after a letter run.
+_FUZZY_HELD_CHARS = frozenset(ch for ch in map(chr, range(0x2100)) if _FUZZY_FOLD_RE.match(ch))
+# Between the words of a phrase: Exact's separator, and Exact's gap words.
+_PHRASE_SEP_RE = re.compile(_gap_separator(0))
+_GAP_WORD_RE = re.compile(Config.WORD_TOKEN_PATTERN)
+
+
+class _Span:
+    """A phrase match, with what callers read from a match object."""
+    __slots__ = ('_start', '_end')
+
+    def __init__(self, start, end):
+        self._start, self._end = start, end
+
+    def start(self):
+        return self._start
+
+    def end(self):
+        return self._end
+
+    def span(self):
+        return (self._start, self._end)
+
+
+class _FuzzyMatcher:
+    """Fuzzy's verifier, where the other modes have one compiled regex. The near
+    spellings run to tens of thousands of strings, far too many for one pattern
+    (Fuzzy used the 8,000-form Variants alternation instead, and הצדיק ran out its
+    regex budget on a whole manuscript), and a regex per page cost 10 ms to compile
+    (אהרן הכהן: 7,000 of them, 70 of its 92 s). So it walks the words of a text
+    and looks each up in the set of near spellings: a whole word whose letters are
+    one, and for a phrase the next word after Exact's separator and up to *gap*
+    words between.
+
+    It has what the callers use -- ``search(text, pos)``, ``pattern`` (the words as
+    typed) -- so their bracket, position, page-break and highlight handling apply
+    as they are; and ``pattern_for(text)``, the regex a result row for *text*
+    highlights with: the near spellings that are words in it.
+    """
+
+    def __init__(self, terms, max_gap):
+        self._terms = tuple(terms)
+        self._spellings = tuple(_near_spellings(t) for t in self._terms)
+        typed = tuple(s is None for s in self._spellings)
+        # A word that is not plain Hebrew letters is matched as typed, as Exact does.
+        self._typed_rx = tuple(
+            compile_search_regex(make_mark_tolerant_pattern(re.escape(t)), re.IGNORECASE) if is_typed else None
+            for t, is_typed in zip(self._terms, typed))
+        self._typed = typed
+        self._gap = max_gap
+        self.pattern = _fuzzy_pattern(tuple((t,) for t in self._terms), typed, max_gap)
+        self._last_forms = (None, None)
+
+    def _word_end(self, k, text, pos, endpos):
+        """Where query word *k* ends when it starts at *pos*, else None."""
+        rx = self._typed_rx[k]
+        if rx is not None:
+            m = rx.match(text, pos, endpos)
+            return m.end() if m is not None else None
+        m = _FUZZY_WORD_RE.match(text, pos, endpos)
+        if m is None:
+            return None
+        w = m.group()
+        return m.end() if (w if w.isalpha() else _FUZZY_FOLD_RE.sub('', w)) in self._spellings[k] else None
+
+    def _rest_end(self, text, end, k, endpos):
+        """Where query words k.. end when word k-1 ends at *end*, else None. As the
+        regex's greedy gap does, more gap words are tried first; a choice whose
+        last word is not whole is passed over for the next."""
+        starts = []
+        p = end
+        for _ in range(self._gap + 1):
+            sep = _PHRASE_SEP_RE.match(text, p, endpos)
+            if sep is None:
+                break
+            starts.append(sep.end())
+            word = _GAP_WORD_RE.match(text, sep.end(), endpos)
+            if word is None:
+                break
+            p = word.end()
+        for q in reversed(starts):
+            e = self._word_end(k, text, q, endpos)
+            if e is None:
+                continue
+            if k + 1 == len(self._terms):
+                if _ends_word(text, e):
+                    return e
+                continue
+            e = self._rest_end(text, e, k + 1, endpos)
+            if e is not None:
+                return e
+        return None
+
+    def _first_words(self, text, pos, endpos):
+        """Every place query word 0 occurs from *pos* on, in text order. Walks the
+        letter runs and stops where the caller does (most pages hold the word
+        early); a run that a mark, quote or bracket joins to more letters is read
+        as the whole word and folded. A word that continues one before it is
+        dropped by the caller's whole-word test."""
+        rx = self._typed_rx[0]
+        if rx is not None:
+            m = rx.search(text, pos, endpos)
+            while m is not None:
+                yield m
+                m = rx.search(text, m.start() + 1, endpos)
+            return
+        spellings = self._spellings[0]
+        after = pos                     # runs inside a word already read are skipped
+        for run in _HEB_LETTER_RUN_RE.finditer(text, pos, endpos):
+            if run.start() < after:
+                continue
+            e = run.end()
+            if e < endpos and text[e] in _FUZZY_HELD_CHARS:
+                word = _FUZZY_WORD_RE.match(text, run.start(), endpos)
+                if word.end() > e:
+                    after = word.end()
+                    if _FUZZY_FOLD_RE.sub('', word.group()) in spellings:
+                        yield word
+                    continue
+            if run.group() in spellings:
+                yield run
+
+    def search(self, text, pos=0, endpos=None):
+        _check_deadline()          # the API's time budget (compiled patterns check it per call)
+        endpos = len(text) if endpos is None else endpos
+        for m in self._first_words(text, pos, endpos):
+            if not _starts_word(text, m.start()):
+                continue
+            if len(self._terms) == 1:
+                if _ends_word(text, m.end()):
+                    return m
+                continue
+            e = self._rest_end(text, m.end(), 1, endpos)
+            if e is not None:
+                return _Span(m.start(), e)
+        return None
+
+    def closest(self, text, first, accept):
+        """For one query word: of the matches from *first* on that *accept* takes,
+        the one nearest the word as typed -- the word itself before one edit, one
+        edit before two; the earliest among equals. A page holding the word itself
+        then shows it, not an earlier two-edit word (הצדיק showed בדיק)."""
+        if len(self._terms) != 1 or self._typed_rx[0] is not None:
+            return first
+        term = self._terms[0]
+
+        def distance(m):
+            return OSA.distance(term, _FUZZY_FOLD_RE.sub('', text[m.start():m.end()]))
+
+        forms = self._forms(text)
+        # The nearest any word of this text can be: the walk stops when it is met.
+        nearest = min((OSA.distance(term, f) for f in forms[0]), default=0) if forms else 0
+        best, best_distance = first, distance(first)
+        m = first
+        while best_distance > nearest:
+            m = self.search(text, m.start() + 1)
+            if m is None:
+                break
+            if accept(m):
+                d = distance(m)
+                if d < best_distance:
+                    best, best_distance = m, d
+        return best
+
+    def _forms(self, text):
+        """Per query word, its near spellings that are words of *text* (the word
+        itself for one matched as typed), or None when one has none: the text's
+        letter runs with marks, quotes and brackets folded away. The last text is
+        kept: a row asks for it twice (closest, pattern_for)."""
+        if self._last_forms[0] is text:
+            return self._last_forms[1]
+        words = _HEB_LETTER_RUN_RE.findall(strip_search_diacritics(_strip_brackets(text)))
+        forms = []
+        for term, spellings in zip(self._terms, self._spellings):
+            hits = (term,) if spellings is None else tuple(sorted(spellings.intersection(words)))
+            if not hits:
+                forms = None
+                break
+            forms.append(hits)
+        forms = None if forms is None else tuple(forms)
+        self._last_forms = (text, forms)
+        return forms
+
+    def pattern_for(self, text):
+        forms = self._forms(text)
+        return self.pattern if forms is None else _fuzzy_pattern(forms, self._typed, self._gap)
+
+
+_POSITION_FIELDS = {
+    'start': 'content_head',
+    'end': 'content_tail',
+    'line_start': 'line_starts',
+    'line_end': 'line_ends',
+}
+
+
+def _fuzzy_matcher(terms, max_gap):
+    """A _FuzzyMatcher for *terms*, or None when there are none (as build_regex_pattern)."""
+    terms = [t for t in terms if t]
+    return _FuzzyMatcher(terms, max_gap) if terms else None
 
 
 
@@ -842,7 +1383,8 @@ class SearchEngine:
     @bounded_search
     def _query_local_index(self, query_str: str, mode: str, gap: int,
                            limit=None, regex=None, tantivy_query_str=None,
-                           progress_callback=None, phase_callback=None):
+                           progress_callback=None, phase_callback=None, tantivy_query=None,
+                           accept=None):
         """Query the LOCAL side-index. Returns [] if local_searcher is None (D-37).
 
         MEDIUM-1 note: this uses a simplified parse_query (not the full Responsa
@@ -897,8 +1439,10 @@ class SearchEngine:
             # parse_query below strips operator metacharacters and returns nothing,
             # which is why LOCAL Responsa came back empty. Defensive fall-back to the
             # simplified path if the pre-built query somehow fails to parse.
-            tantivy_q = None
-            if tantivy_query_str:
+            # Variants / Fuzzy: every form as a whole token (_local_forms_query); the
+            # typed word alone missed a page holding only another form.
+            tantivy_q = tantivy_query
+            if tantivy_q is None and tantivy_query_str:
                 try:
                     tantivy_q = self.local_index.parse_query(tantivy_query_str, _fields)
                 except (ValueError, Exception):
@@ -924,6 +1468,7 @@ class SearchEngine:
             search_limit = limit or Config.SEARCH_LIMIT
             res_obj = self.local_searcher.search(tantivy_q, search_limit)
             hits = res_obj.hits if hasattr(res_obj, "hits") else res_obj
+            _note_search_cutoff(capped=len(hits) >= search_limit)
             pattern_str = regex.pattern if regex is not None else ""
             # The LOCAL pass is a distinct phase, not more of the Genizah one: its
             # hit counts are unrelated, so reporting them on the same numeric
@@ -960,7 +1505,7 @@ class SearchEngine:
                             pass  # progress is advisory; cancellation is not
                     doc = self.local_searcher.doc(doc_address)
                     hit = self._build_local_result_dict(
-                        doc, score, regex=regex, pattern_str=pattern_str
+                        doc, score, regex=regex, pattern_str=pattern_str, accept=accept
                     )
                     # D-04.1 filter-out: skip candidates whose regex didn't match.
                     # _build_local_result_dict returns None for those.
@@ -968,9 +1513,11 @@ class SearchEngine:
                         continue
                     results.append(hit)
             except InterruptedError:
+                _note_search_cutoff(interrupted=True)
                 return results  # cancelled mid-scan — keep the hits we built
             return results
         except InterruptedError:
+            _note_search_cutoff(interrupted=True)
             # Still not an index failure, so still ahead of the broad handler —
             # but hand back what was gathered instead of re-raising. Telemetry
             # correctness does NOT depend on the exception escaping: perf_signal
@@ -985,7 +1532,7 @@ class SearchEngine:
             LOGGER.warning("LOCAL index query failed: %r", e)
             return []
 
-    def _build_local_result_dict(self, doc, score, regex=None, pattern_str=None):
+    def _build_local_result_dict(self, doc, score, regex=None, pattern_str=None, accept=None):
         """Construct a result row from a LOCAL Tantivy doc per D-34 shape.
 
         Phase 96 D-F5: when `regex` is provided, populate snippet + raw_file_hl
@@ -1002,6 +1549,9 @@ class SearchEngine:
 
         Back-compat: when `regex` is None (legacy callers), the function ALWAYS
         returns a dict (old shape — snippet = content[:200]).
+
+        *accept* (_local_match_accept): with a regex, the row needs a match it takes
+        -- a whole word at the text position -- not just any match.
 
         Returns:
             - dict (the hit) when regex matches OR regex is None
@@ -1029,16 +1579,28 @@ class SearchEngine:
         # Phase 96 D-F5: compute snippet via self.highlight when regex provided.
         # D-04.1: filter-out signal when regex doesn't match (return None).
         if regex is not None:
-            hl_c = self.highlight(content, regex, for_file=False)
+            if accept is not None:
+                first = regex.search(content)
+                accepted = first and _first_accepted_match(
+                    regex, content, first, lambda m: accept(content, m))
+                if not accepted:
+                    return None
+                # Mark the occurrence accepted, not the first one -- which may sit
+                # inside a longer word or away from the position (Codex review).
+                hl_c, hl_f = self._highlight_pair(content, (accepted.start(), accepted.end()))
+            else:
+                hl_c = self.highlight(content, regex, for_file=False)
+                hl_f = self.highlight(content, regex, for_file=True) if hl_c else None
             if not hl_c:
                 # D-04.1: Tantivy matched but regex didn't.
                 # SILENTLY DROP this candidate by returning None.
                 # _query_local_index will skip it.
                 return None
-            hl_f = self.highlight(content, regex, for_file=True)
             snippet = hl_c
             raw_file_hl = hl_f or ""
-            effective_pattern = pattern_str or regex.pattern
+            # Fuzzy's regex differs per text (_FuzzyMatcher): this row's own.
+            effective_pattern = (regex.pattern_for(content) if isinstance(regex, _FuzzyMatcher)
+                                 else pattern_str or regex.pattern)
         else:
             # Back-compat path (no regex passed by caller — old behaviour).
             # Always returns a dict; no filter-out.
@@ -1198,12 +1760,29 @@ class SearchEngine:
                     for _msg in content_search_staleness_messages(False, None):
                         LOGGER.warning("Stale index [%s]: %s", db_path, _msg)
                 self.searcher = self.index.searcher()
+                self._page_scope_complete = None  # re-checked for the new index
                 return True
             except MemoryError:
                 raise
             except Exception as e:
                 LOGGER.error("Failed to reload Tantivy index from %s: %s", db_path, e)
         return False
+
+    def _every_doc_has_scope(self):
+        """True when every document of the open index carries scope page/system/part,
+        so ``AND scope:page`` cannot silently drop a document that has no scope.
+        Checked once per index load (three counts, ~25 ms on the real index)."""
+        if getattr(self, '_page_scope_complete', None) is None:
+            try:
+                total = sum(self.searcher.search(self.index.parse_query(f'scope:{s}', ['content']),
+                                                 1, count=True).count
+                            for s in ('page', 'system', 'part'))
+                self._page_scope_complete = total > 0 and total == self.searcher.num_docs
+            except MemoryError:
+                raise
+            except Exception:
+                self._page_scope_complete = False
+        return self._page_scope_complete
 
     def index_staleness_report(self) -> dict:
         """SEED-019 #28: queryable verdict on the SEED-006 ``content_search`` compat
@@ -1613,6 +2192,211 @@ class SearchEngine:
 
         return " AND ".join(parts)
 
+    # Extra phrase slop for stray tokens between two words: the hebword tokenizer
+    # keeps a lone lacuna bracket, quote or mark ("ברוך [\nאתה") as its own token,
+    # while the verification regex strips or skips it. Measured 2026-09-30 on the
+    # real index: +2 missed 0 whole-word matches over six phrases; +3 is margin.
+    _PHRASE_EXTRA_SLOP = 3
+    _PHRASE_TERM_RE = re.compile(r"^[\w֐-׿̀-ͯ'\"\[\]]+$")
+
+    def build_phrase_candidate_query(self, terms, max_gap, content_search_field=None):
+        """Tantivy candidates for a multi-word Literal query: every ADJACENT pair of
+        terms must occur as a near phrase (slop = gap + _PHRASE_EXTRA_SLOP).
+
+        The AND-of-terms query returns every document holding the words anywhere
+        -- whole manuscripts included -- and the regex then discards most of them
+        (אהרן כהן: 8,897 candidates, 252 verified). Pairs instead of one phrase
+        keep the bracket-form expansion linear in the query length. Owner
+        decision 2026-09-30: Literal matches exact words, in phrases too, so a
+        pair found only inside a longer word (לאהרן כהן) is not a match.
+
+        Returns None when the fast path does not apply (a term that is not one
+        plain token); the caller then uses build_tantivy_query.
+        """
+        if len(terms) < 2:
+            return None
+        cleaned = [t.replace('"', '') for t in terms]
+        if not all(t and self._PHRASE_TERM_RE.match(t) for t in cleaned):
+            return None
+        slop = max_gap + self._PHRASE_EXTRA_SLOP
+        pairs = []
+        for a, b in zip(cleaned, cleaned[1:]):
+            clauses = [f'content:"{x} {y}"~{slop}'
+                       for x in _add_bracket_variants(a) for y in _add_bracket_variants(b)]
+            if content_search_field:
+                fa = strip_search_diacritics(a).replace('"', '')
+                fb = strip_search_diacritics(b).replace('"', '')
+                if fa and fb:
+                    clauses.append(f'{content_search_field}:"{fa} {fb}"~{slop}')
+            pairs.append(f'({" OR ".join(clauses)})')
+        return " AND ".join(pairs)
+
+    def _restriction_query(self, restrict_sys_ids, pages_only=False):
+        """The docs a search within these manuscripts may use: a page or whole-
+        manuscript doc of one of them (its full_header holds the sys_id as a term,
+        whatever the header's shape), or any Oxford part -- its header names only the
+        part's first manuscript, so its pages are tested one by one after the match
+        (_page_in_restriction). A term set: in the query at any size. The OR of
+        full_header phrases it replaces cost 18.7 s at 50,000 ids, so above 500 the
+        search ran unrestricted and filtered its first 50,000 hits afterwards
+        (ישראל, then משה within it: about three quarters of the manuscripts lost).
+        *pages_only*: only these manuscripts' page docs (Composition, which keeps page
+        docs only: a whole-manuscript doc or an Oxford part naming one of them would
+        take one of a chunk's 50 slots and be dropped afterwards)."""
+        should = tantivy.Occur.Should
+        sids = {str(s) for s in restrict_sys_ids}
+        terms = sorted(s.lower() for s in sids if s.isalnum())   # as the default tokenizer indexes them
+        clauses = [(should, tantivy.Query.term_set_query(self.index.schema, 'full_header', terms))]
+        if not pages_only:
+            clauses.append((should, self.index.parse_query('scope:part', ['content'])))
+        odd = [s for s in sids if not s.isalnum() and '"' not in s]
+        if odd:     # a header token sequence, as the phrase clauses matched it
+            clauses.append((should, self.index.parse_query(
+                ' OR '.join(f'full_header:"{s}"' for s in odd), ['content'])))
+        query = tantivy.Query.boolean_query(clauses)
+        if pages_only:
+            query = tantivy.Query.boolean_query(
+                [(tantivy.Occur.Must, query)]
+                + [(tantivy.Occur.MustNot, self.index.parse_query(f'scope:{scope}', ['content']))
+                   for scope in ('part', 'system')])
+        return query
+
+    def _and_query(self, query, extra):
+        """*query* (a Query object) AND the query string *extra*."""
+        return tantivy.Query.boolean_query([(tantivy.Occur.Must, query),
+                                            (tantivy.Occur.Must, self.index.parse_query(f'({extra})', ['content']))])
+
+    def _verifier_forms(self, term, mode):
+        """The forms build_regex_pattern accepts for *term* (Variants modes); for
+        Fuzzy, its near spellings (VariantManager has no Fuzzy tier)."""
+        if mode == 'fuzzy':
+            return sorted(_near_spellings(term) or (term,))
+        forms = set(self.var_mgr.get_variants(term, mode, limit=Config.REGEX_VARIANTS_LIMIT))
+        forms.add(term)
+        return sorted(f for f in forms if f)
+
+    def _folded_forms(self, term, mode):
+        """*term*'s forms folded as the index's content_search field is."""
+        if mode == 'fuzzy' and _near_spellings(term) is not None:
+            return _near_spellings(term)    # Hebrew letters only: nothing to fold
+        return frozenset(f for f in (strip_search_diacritics(v).lower() for v in self._verifier_forms(term, mode)) if f)
+
+    # Constant scores of a near spelling by its distance: the word itself, one
+    # edit, two. Each beats the next even matched in one field against two
+    # (content and content_search), alone or added up: 9 > 3 + 3 > 1 + 1.
+    _FUZZY_TIER_SCORES = (9.0, 3.0, 1.0)
+
+    def _fuzzy_term_query(self, term, exact_field, fields, index=None):
+        """Retrieval for one Fuzzy word: Exact's clause on *exact_field* (its BM25
+        ranks the pages with the word itself) OR its near spellings, bracket forms
+        included, as whole tokens of *fields*, scored by distance
+        (_FUZZY_TIER_SCORES). Under a result limit the word comes first, then one
+        edit, then two; with one score for all, הצדיק's 50,000 rows were mostly
+        הדין and צדק. One flat Should list: every level of nesting copies the term
+        sets (ירושלים: 529K tokens). *index*: the LOCAL index, else the main one."""
+        index = index or self.index
+        should = tantivy.Occur.Should
+        clauses = [(should, index.parse_query(self.build_tantivy_query([term], 'fuzzy'), [exact_field]))]
+        typed = _near_spellings(term) is None
+        for distance, forms in enumerate(_near_spelling_tiers(term)):
+            if not forms:
+                continue
+            # Near spellings are bare letters: _add_bracket_variants' forms are its
+            # affixes around each, built in one comprehension.
+            tokens = (_add_bracket_variants(term) if typed else
+                      [a + f + z for f in forms for a, z in _BRACKET_AFFIXES])
+            for field in fields:
+                clauses.append((should, tantivy.Query.const_score_query(
+                    tantivy.Query.term_set_query(index.schema, field, tokens),
+                    self._FUZZY_TIER_SCORES[distance])))
+        return tantivy.Query.boolean_query(clauses)
+
+    def _fuzzy_position_query(self, terms, text_position):
+        """Fuzzy candidates for a position search: _fuzzy_term_query on the position
+        field (whitespace tokens). None when the field is missing from the index;
+        the parsed query then fails as it does for every mode on an old index."""
+        field = _POSITION_FIELDS.get(text_position)
+        if field is None:
+            return None
+        per_term = []
+        try:
+            for term in terms:
+                clean = term.replace('"', '')
+                if clean:
+                    per_term.append((tantivy.Occur.Must, self._fuzzy_term_query(clean, field, [field])))
+        except ValueError:
+            return None
+        return tantivy.Query.boolean_query(per_term) if per_term else None
+
+    def _local_forms_query(self, query_str, mode):
+        """My Library candidates for Variants and Fuzzy: build_variant_query on the
+        LOCAL index -- every form as a whole token, not the typed word alone (Codex
+        review of PR #375: a local document holding only a near spelling or a
+        variant was never found). None for other modes, which keep the typed query,
+        and if the query cannot be built (then the typed query still runs)."""
+        if mode not in _WHOLE_WORD_MODES or mode == 'literal' or getattr(self, 'local_index', None) is None:
+            return None
+        cs = 'content_search' if getattr(self, '_local_has_content_search', False) else None
+        try:
+            return self.build_variant_query(query_str.split(), mode, content_search_field=cs, index=self.local_index)
+        except MemoryError:
+            raise
+        except Exception as e:
+            LOGGER.warning("LOCAL forms query failed; the typed query runs instead: %r", e)
+            return None
+
+    def _cross_page_term(self, term, mode):
+        """What _cross_page_spans looks for before and after a break: the folded
+        forms (Variants, Fuzzy), or the word itself when Fuzzy matches it as typed.
+        A form with a Latin letter or a digit is never a run of Hebrew letters, so
+        such forms come apart as (Hebrew forms, others), the others looked for as
+        text (Codex review of PR #375: a crossing of `abc def` was never found)."""
+        if mode == 'fuzzy' and _near_spellings(term) is None:
+            return term
+        forms = self._folded_forms(term, mode)
+        others = frozenset(f.lower() for f in forms if not _HEB_LETTER_RUN_RE.fullmatch(f))
+        return (forms, others) if others else forms
+
+    def build_variant_query(self, terms, mode, content_search_field=None, index=None):
+        """Tantivy candidates for whole-word Variants: per term, today's clause
+        (the term boosted, its first 200 variants, its bracket forms) OR every form
+        the verifier accepts, as whole tokens -- raw on ``content`` and folded on
+        *content_search_field*. Term sets: 8,000 forms cost 0.45 s where the
+        parsed OR of them cost 4 s (Codex, real index, 2026-10-01). Before this,
+        a page holding only form 201+ was never retrieved. *index*: the LOCAL
+        index (My Library), else the main one; the two schemas share these fields.
+        """
+        index = index or self.index
+        schema = index.schema
+        should = tantivy.Occur.Should
+
+        def with_brackets(forms):
+            # A token keeps an edge bracket (שלים[, ]אחה); the real-index gate found
+            # 7 V0.8 pages whose only match was such a form. Both fields keep brackets.
+            return sorted({b for f in forms for b in _add_bracket_variants(f)})
+
+        per_term = []
+        for term in terms:
+            clean = term.replace('"', '')
+            if not clean:
+                continue
+            if mode == 'fuzzy':
+                # A near spelling is bare letters (with an edge bracket at most), which
+                # content_search -- content with marks and quotes folded out -- holds
+                # as the same token: one field finds every page the two would.
+                per_term.append((tantivy.Occur.Must, self._fuzzy_term_query(
+                    clean, 'content', [content_search_field or 'content'], index=index)))
+                continue
+            clauses = [(should, index.parse_query(
+                self.build_tantivy_query([clean], mode, content_search_field=content_search_field), ['content']))]
+            clauses.append((should, tantivy.Query.term_set_query(
+                schema, 'content', with_brackets(self._verifier_forms(clean, mode)))))
+            if content_search_field:
+                clauses.append((should, tantivy.Query.term_set_query(
+                    schema, content_search_field, with_brackets(self._folded_forms(clean, mode)))))
+            per_term.append((tantivy.Occur.Must, tantivy.Query.boolean_query(clauses)))
+        return tantivy.Query.boolean_query(per_term) if per_term else None
+
     def build_regex_pattern(self, terms, mode, max_gap, responsa_components=None, responsa_options=None, per_pair_gaps=None):
         # --- Responsa branch ---
         if responsa_components is not None:
@@ -1743,12 +2527,7 @@ class SearchEngine:
             # Allow prefix matches when search term appears inside a word
             parts.append(f"({'|'.join(escaped)})")
 
-        if max_gap == 0:
-            # Flexible separator (any non-word char)
-            sep = r'[^\w\u0590-\u05FF\']+'
-        else:
-            # Gap logic
-            sep = rf'(?:[^\w\u0590-\u05FF\']+{Config.WORD_TOKEN_PATTERN}){{0,{max_gap}}}[^\w\u0590-\u05FF\']+'
+        sep = _gap_separator(max_gap)
 
         try:
             return compile_search_regex(sep.join(parts), re.IGNORECASE)
@@ -1781,6 +2560,17 @@ class SearchEngine:
 
         # For File/Export: Keep newlines
         return hl_snippet
+
+    def _highlight_pair(self, text, span):
+        """(table snippet, file snippet) for one span, built once.
+
+        Same output as ``_highlight_by_span(text, span, False)`` and
+        ``(..., True)``: the two differ only in the newline replacement.
+        """
+        hl_f = self._highlight_by_span(text, span, True)
+        if hl_f is None:
+            return None, None
+        return hl_f.replace('\n', ' \u2016 '), hl_f
 
     def _highlight_by_span(self, text, span, for_file=False):
         """Return a highlighted snippet around a specific span."""
@@ -1819,6 +2609,195 @@ class SearchEngine:
                 uid_val = '?'  # UID extraction failed; use placeholder for warning message
             LOGGER.warning("Failed to parse boundaries for doc %s: %s", uid_val, e)
             return []
+
+    def _aggregate_result_row(self, doc, content, span, boundaries, pattern_str, scope, score):
+        """The result row for a match in a whole-manuscript / part doc: shown as
+        the page the match starts on, with per-page highlight spans."""
+        span_map = self._map_span_to_pages(span, boundaries)
+        primary = span_map.get('primary') or {}
+        display_header = primary.get('full_header', doc['full_header'][0])
+        source_label = primary.get('source', doc['source'][0])
+        hl_c, hl_f = self._highlight_pair(content, span)
+        meta = self.meta_mgr.get_display_data(display_header, source_label)
+        page_highlights = []
+        for ov in span_map.get('overlaps', []):
+            if 'span' in ov and ov.get('uid'):
+                page_highlights.append({
+                    'uid': ov.get('uid'),
+                    'p_num': ov.get('p_num'),
+                    'span': ov.get('span'),
+                    'full_header': ov.get('full_header', ''),
+                    'source': ov.get('source', '')
+                })
+        return {
+            'display': meta,
+            'snippet': hl_c or "",
+            'full_text': content,
+            'uid': primary.get('uid') or doc['unique_id'][0],
+            'raw_header': display_header,
+            'raw_file_hl': hl_f or "",
+            'highlight_pattern': pattern_str,
+            'page_highlights': page_highlights,
+            'cross_page': span_map.get('cross_page', False),
+            'scope': scope,
+            # Phase 77 D-01: surface Tantivy relevance score so
+            # serialize_search_payload emits non-zero scores.
+            'score': float(score),
+        }
+
+    def _cross_page_spans(self, regex, content, boundaries, first_term, last_term, side_words, gap, strip,
+                          whole_words=False):
+        """Spans (in *content* coordinates) of every match that runs across a page
+        break of a whole-manuscript / part doc.
+
+        *first_term* / *last_term* are the query's words, or -- for Variants -- the
+        sets of their forms, folded (``_folded_forms``); a set is checked against the
+        window's runs of Hebrew letters, which a whole-word occurrence always is;
+        a (forms, others) pair (``_cross_page_term``) also looks for *others* --
+        forms with a Latin letter or a digit -- as text in the window.
+        *whole_words*: a match must also pass ``_whole_word_span``.
+
+        For a multi-word Literal query the page docs already give every match
+        inside one page, so an aggregate adds only the matches that cross a
+        break. Scanning the whole manuscript for them was most of the search
+        time (לי מי לי: 2,146 manuscripts, ~14 s of regex). The regex now runs
+        only in a window around a break, and only when the first term occurs
+        before the break and the last term after it: a match across the break
+        holds its newline and no term can, so this is a necessary condition.
+        Both sides are folded with strip_search_diacritics, as the query was,
+        and the pattern tolerates exactly those marks inside a word. *strip*
+        removes brackets first, as the whole-text path does.
+
+        The window is *side_words* word-holding chunks on each side: a match
+        across the break holds at most that many words on one side (n - 1 terms
+        and gap words between them), and the regex has no lookaround, so the
+        window finds exactly the match the whole text would. It was a fixed
+        number of characters until 2026-10-01, which lost a crossing after a
+        long run of dots or lacuna brackets (Codex review; 333 V0.8 pages end
+        with a non-word run over 60 characters).
+        """
+        if len(boundaries) < 2:
+            return []
+
+        def _occurs(term, folded):
+            if isinstance(term, tuple):              # (Hebrew forms, others: as text)
+                forms, others = term
+                return (any(r in forms for r in _HEB_LETTER_RUN_RE.findall(folded))
+                        or any(f in folded.lower() for f in others))
+            if isinstance(term, frozenset):
+                return any(r in term for r in _HEB_LETTER_RUN_RE.findall(folded))
+            return term in folded.lower()
+
+        first = first_term if isinstance(first_term, (frozenset, tuple)) else first_term.lower()
+        last = last_term if isinstance(last_term, (frozenset, tuple)) else last_term.lower()
+        head = _words_head_re(max(1, side_words))
+        pieces = []        # (window text, break offset in it, content index of its start, original window)
+        for b in boundaries[1:]:
+            cut = b.get('start', 0)
+            # Inline 64-char probe of _left_window_start (this loop runs for every
+            # break: לי מי לי has 382K); the helper takes over when it is too short.
+            lo = cut - 64 if cut > 64 else 0
+            m = head.match(content[lo:cut][::-1])
+            if m is not None and (m.end() < cut - lo or lo == 0 or content[lo - 1].isspace()):
+                lo = cut - m.end()
+            else:
+                lo = _left_window_start(content, cut, side_words)
+            left = content[lo:cut]
+            s_left = _strip_brackets(left) if strip else left
+            if not _occurs(first, strip_search_diacritics(s_left)):
+                continue
+            hi = _right_window_end(content, cut, side_words)
+            right = content[cut:hi]
+            s_right = _strip_brackets(right) if strip else right
+            if not _occurs(last, strip_search_diacritics(s_right)):
+                continue
+            pieces.append((s_left + s_right, len(s_left), lo, left + right))
+        if not pieces:
+            return []
+
+        def to_content(piece, start, end):
+            _text, _cs, lo, orig = piece
+            if not strip:
+                return lo + start, lo + end
+            # Map bracket-free offsets back onto the original window exactly.
+            idx, kept, s_o, e_o = 0, 0, None, None
+            while idx < len(orig) and e_o is None:
+                if orig[idx] not in '[]':
+                    if kept == start and s_o is None:
+                        s_o = idx
+                    kept += 1
+                    if kept == end:
+                        e_o = idx + 1
+                idx += 1
+            return lo + (s_o if s_o is not None else 0), lo + (e_o if e_o is not None else len(orig))
+
+        spans = []
+        if gap == 0 and len(pieces) > 1:
+            # One pass over all windows joined by _WINDOW_JOINER: a gap-0 match
+            # cannot hold it (it is neither a separator nor a letter of a term).
+            offsets, pos = [], 0
+            for text, _cs, _lo, _o in pieces:
+                offsets.append(pos)
+                pos += len(text) + 1
+            joined = _WINDOW_JOINER.join(p[0] for p in pieces)
+            m = regex.search(joined)
+            while m is not None:
+                j = bisect.bisect_right(offsets, m.start()) - 1
+                cs = offsets[j] + pieces[j][1]
+                # A window starts and ends at a whitespace edge and the joiner
+                # ends a word, so the whole-word test sees the true neighbours.
+                if m.start() < cs < m.end() and (not whole_words or _whole_word_span(joined, m.start(), m.end())):
+                    spans.append(to_content(pieces[j], m.start() - offsets[j], m.end() - offsets[j]))
+                    if j + 1 >= len(pieces):
+                        break
+                    m = regex.search(joined, offsets[j + 1])
+                else:
+                    m = regex.search(joined, m.start() + 1)
+        else:
+            for piece in pieces:
+                text, cs = piece[0], piece[1]
+                m = regex.search(text)
+                # The first match that crosses the break (and is a whole-word match,
+                # when asked); one that starts after the break cannot cross it.
+                while m is not None and m.start() < cs and not (
+                        cs < m.end() and (not whole_words or _whole_word_span(text, m.start(), m.end()))):
+                    m = regex.search(text, m.start() + 1)
+                if m is not None and m.start() < cs < m.end():
+                    spans.append(to_content(piece, m.start(), m.end()))
+        # Short pages: one match can straddle two breaks and show up twice.
+        return sorted(set(spans))
+
+    def _first_match_in_pages(self, regex, text, first_match, boundaries, page_uids, accept=None,
+                              sys_ids=None, to_original=None):
+        """First match (from *first_match* on) on a page inside the restriction, or None.
+
+        Search-within over an aggregate (scope system/part) hit: the doc's own
+        uid is ``sys:``/``part:``, so the restriction is tested on the pages the
+        match falls in (_page_in_restriction: its uid, or its manuscript in
+        *sys_ids*). An Oxford part can span manuscripts, so a later match may be the
+        one inside the restriction -- and a match across the part's own page break
+        counts when either page is inside (it tested only the first until
+        2026-10-04). *accept* (e.g. a position check) must also hold.
+        Before 2026-09-30 every aggregate hit was discarded under search-within.
+
+        *to_original*: *text* is the bracket-stripped text the match was found in;
+        each match is mapped onto the original (whose offsets the boundaries and
+        *accept* use) and returned mapped. The scan goes on in *text*: in the
+        original, an occurrence that needs its brackets out (של[ו]ם) is never found
+        again, so a row whose first match fell outside the restriction was lost
+        (Codex review of PR #375).
+        """
+        if not boundaries or not any(_page_in_restriction(b, page_uids, sys_ids) for b in boundaries):
+            return None  # no page of this aggregate is in the restriction
+        match = first_match
+        while match is not None:
+            found = match if to_original is None else to_original(match)
+            if accept is None or accept(found):
+                overlaps = self._map_span_to_pages(found.span(), boundaries).get('overlaps') or []
+                if any(_page_in_restriction(o, page_uids, sys_ids) for o in overlaps):
+                    return found
+            match = regex.search(text, pos=match.start() + 1)
+        return None
 
     def _map_span_to_pages(self, span, boundaries):
         """Return page overlaps and primary page for a match span."""
@@ -2193,12 +3172,11 @@ class SearchEngine:
         LOGGER.debug(f"Line-break search, Tantivy: {t_query_str[:500]}")
         LOGGER.debug(f"Line-break regex: {pattern_str[:500]}")
 
-        if restrict_sys_ids is not None and len(restrict_sys_ids) <= 500:
-            sid_clauses = ' OR '.join(f'full_header:"{sid}"' for sid in restrict_sys_ids)
-            t_query_str = f'({t_query_str}) AND ({sid_clauses})'
-
         try:
             query = self.index.parse_query(t_query_str, ['content'])
+            if restrict_sys_ids is not None:   # in the query at any size: see execute_search
+                query = tantivy.Query.boolean_query([(tantivy.Occur.Must, query), (
+                    tantivy.Occur.Must, self._restriction_query(restrict_sys_ids))])
             res_obj = self.searcher.search(query, Config.SEARCH_LIMIT)
         except MemoryError:
             raise
@@ -2208,9 +3186,11 @@ class SearchEngine:
 
         hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
         total_hits = len(hits)
+        _note_search_cutoff(capped=total_hits >= Config.SEARCH_LIMIT)
         LOGGER.debug(f"Line-break Tantivy returned {total_hits} hits")
 
         restrict_uids = None
+        restrict_sids = None if restrict_sys_ids is None else {str(s) for s in restrict_sys_ids}
         if restrict_sys_ids is not None:
             browse_map = self._load_browse_map()
             restrict_uids = set()
@@ -2228,8 +3208,10 @@ class SearchEngine:
                     progress_callback(i, total_hits)
                 try:
                     doc = self.searcher.doc(doc_addr)
+                    scope = (self._get_field(doc, 'scope', ['page']) or ['page'])[0]
 
-                    if restrict_uids is not None:
+                    # Aggregates (sys:/part: uids) are tested by page below.
+                    if restrict_uids is not None and scope == 'page':
                         if doc['unique_id'][0] not in restrict_uids:
                             continue
 
@@ -2245,10 +3227,14 @@ class SearchEngine:
                         continue
 
                     # Re-search on original content for highlighting
+                    span_text = match_content
                     if match_content is not content:
                         orig_match = regex.search(content)
                         if orig_match:
                             match_obj = orig_match
+                            span_text = content
+                    else:
+                        span_text = content
 
                     # Text position filter — strip brackets from
                     # prefix/suffix only for bracket-free queries
@@ -2259,21 +3245,42 @@ class SearchEngine:
                         if cleaned:
                             regex_filtered += 1
                             continue
-                    elif text_position == 'end' and match_obj.end() < len(content):
-                        suffix = content[match_obj.end():]
-                        cleaned = suffix.strip() if _brackets_in_query else _strip_brackets(suffix).strip()
-                        if cleaned:
+                    elif text_position == 'end':
+                        # The LAST occurrence may be the one that ends the text.
+                        match_obj = _first_position_valid_match(
+                            regex, span_text, match_obj, 'end', None,
+                            strip_brackets=not _brackets_in_query)
+                        if match_obj is None:
                             regex_filtered += 1
                             continue
 
                     # Use standard highlight helpers with the match span
-                    span = match_obj.span()
-                    scope_list = self._get_field(doc, 'scope', ['page']) or ['page']
-                    scope = scope_list[0]
                     boundaries = self._parse_boundaries(doc) if scope != 'page' else []
+                    if restrict_uids is not None and scope != 'page':
+                        def position_ok(m, _t=span_text, _b=_brackets_in_query):
+                            if text_position == 'start':
+                                pre = _t[:m.start()]
+                                return not (pre.strip() if _b else _strip_brackets(pre).strip())
+                            if text_position == 'end':
+                                post = _t[m.end():]
+                                return not (post.strip() if _b else _strip_brackets(post).strip())
+                            return True
+                        match_obj = self._first_match_in_pages(
+                            regex, span_text, match_obj, boundaries, restrict_uids, position_ok,
+                            sys_ids=restrict_sids)
+                        if match_obj is None:
+                            regex_filtered += 1
+                            continue
+                    span = match_obj.span()
 
-                    hl_c = self.highlight(content, regex, False)
-                    hl_f = self.highlight(content, regex, True)
+                    # Highlight the occurrence kept above (it may be a later one that
+                    # meets the position), not a fresh first match. With no match in
+                    # the original text, highlight() finds none either, as before.
+                    if span_text is content:
+                        hl_c, hl_f = self._highlight_pair(content, span)
+                    else:
+                        hl_c = self.highlight(content, regex, False)
+                        hl_f = self.highlight(content, regex, True)
 
                     if boundaries:
                         span_map = self._map_span_to_pages(span, boundaries)
@@ -2321,6 +3328,7 @@ class SearchEngine:
                     LOGGER.warning("Line-break search: failed to process hit %s: %s", i, e)
         except InterruptedError:
             was_interrupted = True
+            _note_search_cutoff(interrupted=True)
 
         LOGGER.debug(f"Line-break search: {len(results)} results, filtered: {regex_filtered}, interrupted: {was_interrupted}")
         deduped = self._deduplicate(results)
@@ -2417,13 +3425,37 @@ class SearchEngine:
                     })
 
         except InterruptedError:
-            pass  # cancelled mid-scan — fall through to the sort and return partials
+            # Cancelled mid-scan: fall through to the sort and return partials -- and
+            # say so, or a refinement step built on them counts as complete (Codex
+            # review of PR #375).
+            _note_search_cutoff(interrupted=True)
 
         results.sort(key=lambda r: natural_sort_key(r.get('display', {}).get('shelfmark', '')))
         return results
 
     @bounded_search
-    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None):
+    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None, preview_callback=None, ids_only=False):
+        """Search the Genizah (and/or LOCAL) index; return the verified result rows.
+
+        *preview_callback(rows)*, when given, is called from this thread while the
+        search is still running: with the rows found so far, at most every
+        _PREVIEW_AFTER_S while new rows keep coming, and a last time with the
+        first _PREVIEW_ROWS rows when they are found. Each call extends the one
+        before and is the start of the final list, since rows keep their
+        first-seen order. Only offered where no later step can drop or
+        move those rows: Genizah scope (no LOCAL rank fusion), no exclude_words,
+        not Responsa. The rows are the first-seen V0.8 row per uid in hit order,
+        which is the order _deduplicate keeps (V0.7 rows only go at the end),
+        and outside Responsa it keeps these same first rows as well (first_wins).
+
+        *ids_only* (D8, 2026-10-04): the COMPLETE set of matches, as light rows
+        ({'uid', 'display': {'id', 'source'}, 'scope'}) -- every candidate read, no
+        limit, and no snippets, metadata, highlight patterns or previews. What counts as
+        a match is a normal search's, page by page (the same verifiers, the same drop of
+        a page whose match the original text does not hold, NOT-words decided by the
+        same winning copy of a page). The desktop runs it to complete a cut-off step
+        before search-within or the all-terms filter rely on it.
+        """
         search_started = time.perf_counter()
         # R2-#1: discard any stale per-thread downgrade signal from a prior
         # invocation (e.g., a prior request that crashed before consuming).
@@ -2434,6 +3466,7 @@ class SearchEngine:
         # symmetrically so a direct-core caller cannot leave a stale meta
         # dict that a later web request would read as "the cascade fired."
         _consume_last_responsa_downgrade_meta()
+        consume_last_search_cutoff()
         # --- Metadata Search Modes (csv_bank-backed, no Tantivy needed) ---
         if mode in ['Title', 'Shelfmark']:
             return self._execute_metadata_search(query_str, mode, progress_callback, restrict_sys_ids)
@@ -2457,7 +3490,11 @@ class SearchEngine:
                 # returns nothing. Build the same candidate query + components-aware
                 # regex the main index uses, then run it against LOCAL. Line-break (|)
                 # is main-index only -> helper returns None -> simplified fallback.
-                if responsa_options and responsa_options.get('responsa_mode'):
+                _responsa = bool(responsa_options and responsa_options.get('responsa_mode'))
+                # ids_only (complete_chain completing a My Library step): every candidate.
+                _local_limit = (max(Config.SEARCH_LIMIT, self.local_searcher.num_docs + 1)
+                                if ids_only else None)
+                if _responsa:
                     _resp_q, _resp_regex = self._build_local_responsa_query_and_regex(
                         query_str, mode, gap, responsa_options
                     )
@@ -2467,6 +3504,8 @@ class SearchEngine:
                             regex=_resp_regex, tantivy_query_str=_resp_q,
                             progress_callback=progress_callback,
                             phase_callback=phase_callback,
+                            limit=_local_limit,
+                            accept=_local_match_accept(False, text_position, query_str),
                         )
                 # Phase 96 D-F5: build regex here so LOCAL-only path also gets
                 # D-04.1 filter-out + highlight_pattern, same as the RRF merge path.
@@ -2474,11 +3513,15 @@ class SearchEngine:
                     _local_terms = [query_str]
                 else:
                     _local_terms = query_str.split()
-                _local_regex = self.build_regex_pattern(_local_terms, mode, gap)
+                _local_regex = (_fuzzy_matcher(_local_terms, gap) if mode == 'fuzzy'
+                                else self.build_regex_pattern(_local_terms, mode, gap))
                 return self._query_local_index(
                     query_str, mode, gap, regex=_local_regex or None,
                     progress_callback=progress_callback,
                     phase_callback=phase_callback,
+                    tantivy_query=self._local_forms_query(query_str, mode),
+                    limit=_local_limit,
+                    accept=_local_match_accept(mode in _WHOLE_WORD_MODES, text_position, query_str),
                 )
             except SearchBudgetExceeded:
                 raise
@@ -2491,6 +3534,10 @@ class SearchEngine:
         if not self.searcher: return []
         _line_constraints = {}  # Per-line position constraints (L3:word syntax)
         _has_wildcard_component = False  # Set True when any Responsa component has a wildcard
+        _cross_page_terms = None  # (first, last) term when aggregates add only cross-page matches
+        t_query_obj = None        # a Query object (Variants' term sets) used instead of t_query_str
+        _cross_page_side_words = 0
+        _page_only = False        # the query already excludes aggregate docs
 
         # Strip combining diacritical marks and geresh/gershayim from query
         # Skip for Regex mode -- user controls the pattern directly
@@ -2703,15 +3750,17 @@ class SearchEngine:
                             tantivy_parts.append(f'"{t}"')
                             regex_terms.append(t)
                     t_query_str = " AND ".join(tantivy_parts)
-                    regex = self.build_regex_pattern(regex_terms, mode, gap)
+                    regex = (_fuzzy_matcher(regex_terms, gap) if mode == 'fuzzy'
+                             else self.build_regex_pattern(regex_terms, mode, gap))
                     if not regex: return []
                     # Skip the normal build path below
                     terms = None
 
             if terms is not None:
                 # Pre-compute variants at max limit so Tantivy (limit=200) can
-                # slice from cache instead of recomputing when regex (limit=8000) runs
-                if mode != 'Regex':
+                # slice from cache instead of recomputing when regex (limit=8000) runs.
+                # Fuzzy uses no VariantManager forms here (near spellings instead).
+                if mode not in ('Regex', 'fuzzy'):
                     self._get_or_compute_variants(terms, mode)
 
                 # SEED-006 Stage 2: only fold-fallback for a plain content search.
@@ -2721,8 +3770,45 @@ class SearchEngine:
                 _cs_field = ('content_search'
                              if (not text_position and getattr(self, '_has_content_search', False))
                              else None)
-                t_query_str = self.build_tantivy_query(terms, mode, content_search_field=_cs_field)
-                regex = self.build_regex_pattern(terms, mode, gap)
+                t_query_str = None
+                if mode == 'literal' and not text_position:
+                    t_query_str = self.build_phrase_candidate_query(terms, gap, content_search_field=_cs_field)
+                    if t_query_str is not None:
+                        # Aggregates then only contribute matches across a page break.
+                        _cross_page_terms = (terms[0], terms[-1])
+                        # Words a crossing match can hold on one side of the break.
+                        _cross_page_side_words = (len(terms) - 1) * (gap + 1)
+                if t_query_str is None:
+                    t_query_str = self.build_tantivy_query(terms, mode, content_search_field=_cs_field)
+                # Variants match whole words too (owner 2026-10-01), so they get
+                # Literal's paths: every verifier form retrieved as a whole token,
+                # page docs for one word, aggregates only for page-break crossings.
+                # Measured: שמעון הצדיק 19.8 s, אהרן הכהן 150 s were regex over
+                # whole manuscripts. Position searches keep the old query (their
+                # fields hold head/tail tokens only).
+                if mode in _WHOLE_WORD_MODES and mode != 'literal' and not text_position:
+                    t_query_obj = self.build_variant_query(terms, mode, content_search_field=_cs_field)
+                    if t_query_obj is not None and len(terms) > 1:
+                        _cross_page_terms = (self._cross_page_term(terms[0], mode),
+                                             self._cross_page_term(terms[-1], mode))
+                        _cross_page_side_words = (len(terms) - 1) * (gap + 1)
+                elif mode == 'fuzzy' and text_position:
+                    # The position fields hold whitespace tokens: the near spellings
+                    # (and their bracket forms) as whole tokens there.
+                    t_query_obj = self._fuzzy_position_query(terms, text_position)
+                # A single word cannot span a page break, so a whole-manuscript or
+                # part doc only repeats a page hit -- or adds a match inside a
+                # longer word, which is not a match (owner decision 2026-09-30).
+                # Those docs averaged 62K chars and were most of the load time
+                # (שלום: 15,490 of them, 9.7 s).
+                if (mode in _WHOLE_WORD_MODES and not text_position and len(terms) == 1
+                        and self._every_doc_has_scope()):
+                    t_query_str = f'({t_query_str}) AND scope:page'
+                    if t_query_obj is not None:
+                        t_query_obj = self._and_query(t_query_obj, 'scope:page')
+                    _page_only = True
+                regex = (_fuzzy_matcher(terms, gap) if mode == 'fuzzy'
+                         else self.build_regex_pattern(terms, mode, gap))
         if not regex: return []
 
         LOGGER.debug(f"Mode: {mode}, Query: {query_str[:200]}")
@@ -2731,21 +3817,44 @@ class SearchEngine:
 
         # Save pattern string for passing to results
         pattern_str = regex.pattern
+        # Fuzzy's regex differs per text (_FuzzyMatcher): each row gets its own.
+        def _row_pattern(text):
+            return regex.pattern_for(text) if isinstance(regex, _FuzzyMatcher) else pattern_str
 
-        # Augment Tantivy query with sys_id filter so the index only returns
-        # hits from the restricted manuscripts (avoids iterating 50K hits).
-        if restrict_sys_ids is not None and len(restrict_sys_ids) <= 500:
-            sid_clauses = ' OR '.join(f'full_header:"{sid}"' for sid in restrict_sys_ids)
-            t_query_str = f'({t_query_str}) AND ({sid_clauses})'
+        _parse_header = getattr(type(self.meta_mgr), 'parse_header_smart', None) if ids_only else None
+        _excluded_words = [w.lower() for w in exclude_words or []]
+
+        def _id_row_of_span(doc, content, span, boundaries, scope):
+            """ids_only's row for a match: the identity a full row would carry -- the
+            page the match falls in (an aggregate's primary page), its manuscript as
+            get_display_data gives it -- and whether a NOT-word is in the text the full
+            row's exclusion check reads (its full_text: this doc's content)."""
+            header, source, uid = doc['full_header'][0], doc['source'][0], doc['unique_id'][0]
+            if boundaries:
+                primary = self._map_span_to_pages(span, boundaries).get('primary') or {}
+                header = primary.get('full_header', header)
+                source = primary.get('source', source)
+                uid = primary.get('uid') or uid
+            sys_id = (_parse_header(self.meta_mgr, header)[0] if _parse_header is not None
+                      else self.meta_mgr.get_display_data(header, source).get('id'))
+            row = {'uid': uid, 'display': {'id': sys_id, 'source': source}, 'scope': scope}
+            if _excluded_words:
+                lowered = content.lower()
+                row['_excluded'] = any(w in lowered for w in _excluded_words)
+            return row
+
+        # Search within manuscripts: the restriction is part of every query, at any
+        # size (_restriction_query). Oxford parts always pass here and are tested
+        # per page below.
+        restriction_q = (self._restriction_query(restrict_sys_ids)
+                         if restrict_sys_ids is not None else None)
+
+        def _restricted(q):
+            return q if restriction_q is None else tantivy.Query.boolean_query(
+                [(tantivy.Occur.Must, q), (tantivy.Occur.Must, restriction_q)])
 
         # Choose search field based on text_position filter
-        position_field_map = {
-            'start': 'content_head',
-            'end': 'content_tail',
-            'line_start': 'line_starts',
-            'line_end': 'line_ends',
-        }
-        search_field = position_field_map.get(text_position, 'content')
+        search_field = _POSITION_FIELDS.get(text_position, 'content')
 
         # Wildcard components with positional fields: fall back to content field.
         # Positional fields only contain exact tokens (first/last words or head/tail),
@@ -2754,10 +3863,43 @@ class SearchEngine:
         if search_field != 'content' and _has_wildcard_component:
             search_field = 'content'
 
+        # Candidates read per query: the display's cut-off, or every doc (ids_only) --
+        # one more than there are, so a query every doc matches is not reported cut off.
+        _limit = max(Config.SEARCH_LIMIT, self.searcher.num_docs + 1) if ids_only else Config.SEARCH_LIMIT
+
         tantivy_started = time.perf_counter()
         try:
-            query = self.index.parse_query(t_query_str, [search_field])
-            res_obj = self.searcher.search(query, Config.SEARCH_LIMIT)
+            # Page docs first, then whole-manuscript / part docs, within the same
+            # total limit. In score order the long aggregate docs often came first
+            # and took seconds before the first row (they rarely add one); now the
+            # rows only an aggregate gives come after the page rows. Responsa keeps
+            # the single mixed query.
+            agg_q = None
+            if (not _page_only and not (responsa_options and responsa_options.get('responsa_mode'))
+                    and self._every_doc_has_scope()):
+                if t_query_obj is not None:
+                    page_q = self._and_query(t_query_obj, 'scope:page')
+                else:
+                    page_q = self.index.parse_query(f'({t_query_str}) AND scope:page', [search_field])
+                hits = list(self.searcher.search(_restricted(page_q), _limit).hits)
+                _note_search_cutoff(capped=len(hits) >= _limit)
+                # Parsed now (a bad query fails here, as before) but run only after
+                # the page hits: the first rows need not wait for it.
+                if t_query_obj is not None:
+                    agg_q = self._and_query(t_query_obj, 'scope:system OR scope:part')
+                else:
+                    agg_q = self.index.parse_query(
+                        f'({t_query_str}) AND (scope:system OR scope:part)', [search_field])
+                agg_q = _restricted(agg_q)
+            elif t_query_obj is not None:
+                res_obj = self.searcher.search(_restricted(t_query_obj), _limit)
+                hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
+                _note_search_cutoff(capped=len(hits) >= _limit)
+            else:
+                query = self.index.parse_query(t_query_str, [search_field])
+                res_obj = self.searcher.search(_restricted(query), _limit)
+                hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
+                _note_search_cutoff(capped=len(hits) >= _limit)
         except MemoryError:
             raise
         except Exception as e:
@@ -2769,9 +3911,31 @@ class SearchEngine:
             return []
 
         tantivy_elapsed_ms = (time.perf_counter() - tantivy_started) * 1000.0
-        hits = res_obj.hits if hasattr(res_obj, 'hits') else res_obj
         total_hits = len(hits)
         LOGGER.debug(f"Tantivy returned {total_hits} hits")
+
+        def _page_hits_then_aggregates():
+            """The page hits, then -- fetched only now -- the whole-manuscript /
+            part hits, with a limit of their own: they are the only source of a
+            phrase's page-break matches, so page hits that fill the limit must not
+            leave them no room (Codex review of PR #375)."""
+            nonlocal total_hits, tantivy_elapsed_ms
+            yield from hits
+            room = _limit
+            if agg_q is None:
+                return
+            started = time.perf_counter()
+            try:
+                more = self.searcher.search(agg_q, room).hits
+                _note_search_cutoff(capped=len(more) >= room)
+            except MemoryError:
+                raise
+            except Exception as e:
+                LOGGER.warning("Aggregate-doc query failed; page results kept: %s", e)
+                return
+            tantivy_elapsed_ms += (time.perf_counter() - started) * 1000.0
+            total_hits += len(more)
+            yield from more
         results = []
         regex_filtered_count = 0
         was_interrupted = False
@@ -2779,6 +3943,7 @@ class SearchEngine:
         # Pre-compute allowed unique_ids for fast O(1) filtering
         # instead of running parse_header_smart regex on every hit
         restrict_uids = None
+        restrict_sids = None if restrict_sys_ids is None else {str(s) for s in restrict_sys_ids}
         if restrict_sys_ids is not None:
             browse_map = self._load_browse_map()
             restrict_uids = set()
@@ -2786,26 +3951,96 @@ class SearchEngine:
                 for page in browse_map.get(sid, []):
                     restrict_uids.add(page['uid'])
 
+        # Exact and Variants match whole words (owner decisions D1, 2026-10-01).
+        _whole_words = (mode in _WHOLE_WORD_MODES
+                        and not (responsa_options and responsa_options.get('responsa_mode')))
+
+        def _accept(text, m, strip_br):
+            """A match the row may use: a whole-word one (Exact, Variants) that
+            meets the text position, when one is set."""
+            if _whole_words and not _whole_word_span(text, m.start(), m.end()):
+                return False
+            return (not text_position or Indexer._validate_position_match(
+                text, m, text_position, _line_constraints or None, strip_brackets=strip_br))
+
+        # Early rows for the desktop (see the docstring): only where nothing after
+        # this loop can drop or move them.
+        _preview = (preview_callback
+                    if (preview_callback is not None and not ids_only
+                        and corpus_scope == 'genizah' and not exclude_words
+                        and not (responsa_options and responsa_options.get('responsa_mode')))
+                    else None)
+        _preview_rows = {}   # uid -> first V0.8 row, in hit order
+        _preview_scanned = 0
+        _preview_sent = 0                # rows in the last preview handed over
+        _preview_last = search_started   # when it was handed over (or the search began)
+
         materialize_started = time.perf_counter()
         document_load_seconds = 0.0
         candidate_match_seconds = 0.0
         try:
-            for i, (score, doc_addr) in enumerate(hits):
-                if progress_callback and i % 5 == 0:
+            for i, (score, doc_addr) in enumerate(_page_hits_then_aggregates()):
+                if progress_callback and i % _PROGRESS_TICK_EVERY == 0:
                     progress_callback(i, total_hits)
+                if _preview is not None:
+                    if len(results) > _preview_scanned:
+                        for r in results[_preview_scanned:]:
+                            if r['display'].get('source') == "V0.8":
+                                _preview_rows.setdefault(r['uid'], r)
+                        _preview_scanned = len(results)
+                    if len(_preview_rows) >= _PREVIEW_ROWS:
+                        _preview(list(_preview_rows.values())[:_PREVIEW_ROWS])
+                        _preview = None
+                    elif len(_preview_rows) > _preview_sent:
+                        now = time.perf_counter()
+                        if now - _preview_last >= _PREVIEW_AFTER_S:
+                            # The rows so far; more follow as they are found.
+                            _preview(list(_preview_rows.values()))
+                            _preview_sent, _preview_last = len(_preview_rows), now
                 try:
                     load_started = time.perf_counter()
                     doc = self.searcher.doc(doc_addr)
                     document_load_seconds += time.perf_counter() - load_started
 
-                    # Pre-search filter: skip manuscripts outside the restrict set
-                    if restrict_uids is not None:
+                    scope_list = self._get_field(doc, 'scope', ['page']) or ['page']
+                    scope = scope_list[0]
+
+                    # Pre-search filter: skip pages outside the restrict set. An
+                    # aggregate (system/part) has a sys:/part: uid, never a page uid,
+                    # so it is tested below by the page its match falls in.
+                    if restrict_uids is not None and scope == 'page':
                         if doc['unique_id'][0] not in restrict_uids:
                             continue
 
                     content = self._get_field(doc, 'content', [""])[0]
-                    scope_list = self._get_field(doc, 'scope', ['page']) or ['page']
-                    scope = scope_list[0]
+
+                    # Multi-word Literal: a whole-manuscript / part doc adds only the
+                    # matches that cross a page break (page docs give the rest).
+                    if _cross_page_terms is not None and scope != 'page':
+                        boundaries = self._parse_boundaries(doc)
+                        match_started = time.perf_counter()
+                        try:
+                            spans = self._cross_page_spans(
+                                regex, content, boundaries, _cross_page_terms[0], _cross_page_terms[1],
+                                _cross_page_side_words, gap, strip=not _query_has_brackets(query_str),
+                                whole_words=_whole_words)
+                        finally:
+                            candidate_match_seconds += time.perf_counter() - match_started
+                        kept = 0
+                        for span in spans:
+                            if restrict_uids is not None:
+                                overlaps = self._map_span_to_pages(span, boundaries).get('overlaps') or []
+                                if not any(_page_in_restriction(o, restrict_uids, restrict_sids)
+                                           for o in overlaps):
+                                    continue
+                            results.append(
+                                _id_row_of_span(doc, content, span, boundaries, scope) if ids_only else
+                                self._aggregate_result_row(
+                                    doc, content, span, boundaries, _row_pattern(content), scope, score))
+                            kept += 1
+                        if not kept:
+                            regex_filtered_count += 1
+                        continue
 
                     # Bracket handling: strip brackets from content for
                     # bracket-free queries so e.g. הנתשנ matches ]הנתשנ
@@ -2823,63 +4058,102 @@ class SearchEngine:
 
                     # Position post-filter: Tantivy uses broad fields (10-word head/tail),
                     # validate exact position (first word, last word, line boundary)
-                    if text_position and not Indexer._validate_position_match(match_content, match_obj, text_position, _line_constraints or None, strip_brackets=not _query_has_brackets(query_str)):
+                    # against the first occurrence that satisfies it, not just the first.
+                    # Whole words: the first occurrence that is not inside a longer word.
+                    if _whole_words:
+                        match_obj = _first_accepted_match(
+                            regex, match_content, match_obj,
+                            lambda m, _t=match_content: _accept(_t, m, not _query_has_brackets(query_str)))
+                    elif text_position:
+                        match_obj = _first_position_valid_match(
+                            regex, match_content, match_obj, text_position, _line_constraints or None,
+                            strip_brackets=not _query_has_brackets(query_str))
+                    if match_obj is None:
                         regex_filtered_count += 1
                         continue
 
                     # For highlighting, re-search on original content to
                     # preserve scholarly bracket notation in snippets.
+                    orig_match_missing = False
+                    stripped_match = match_obj           # in match_content's offsets
                     if match_content is not content:
-                        orig_match = regex.search(content)
+                        first_orig = orig_match = regex.search(content)
+                        if orig_match and _whole_words:
+                            orig_match = _first_accepted_match(
+                                regex, content, orig_match,
+                                lambda m, _t=content: _accept(_t, m, True))
+                        elif orig_match and text_position:
+                            # The occurrence that met the position, when the original
+                            # text has one.
+                            orig_match = _first_position_valid_match(
+                                regex, content, orig_match, text_position, _line_constraints or None,
+                                strip_brackets=True)
                         if orig_match:
                             match_obj = orig_match
-                        # else: keep match_obj from stripped content; highlight
-                        # may be slightly offset but still useful
+                        else:
+                            # The accepted occurrence holds a bracket (של[ו]ם עולם): mark
+                            # it where it stands in the original text, brackets included --
+                            # not an earlier occurrence the rule rejected (Codex review of
+                            # PR #375), nor the stripped text's offsets (a whole-manuscript
+                            # row mapped those onto the wrong characters and page).
+                            match_obj = _Span(*_unstripped_span(content, match_obj.start(), match_obj.end()))
+                            # A page row whose original text holds no match at all is
+                            # still dropped below, as before (membership unchanged).
+                            orig_match_missing = first_orig is None
+
+                    # Fuzzy: a page row shows the nearest spelling on the page.
+                    if (isinstance(regex, _FuzzyMatcher) and scope == 'page' and not orig_match_missing
+                            and not ids_only):
+                        match_obj = regex.closest(
+                            content, match_obj,
+                            lambda m, _t=content: _accept(_t, m, not _query_has_brackets(query_str)))
 
                     boundaries = self._parse_boundaries(doc) if scope != 'page' else []
+                    if restrict_uids is not None and scope != 'page':
+                        # Pages and acceptance are read in the original text's offsets.
+                        position_ok = None
+                        if text_position or _whole_words:
+                            def position_ok(m, _t=content):
+                                return _accept(_t, m, not _query_has_brackets(query_str))
+                        if match_content is content:
+                            match_obj = self._first_match_in_pages(
+                                regex, content, match_obj, boundaries, restrict_uids, position_ok,
+                                sys_ids=restrict_sids)
+                        else:
+                            # Scan the stripped text, where a bracketed occurrence on a
+                            # page inside the restriction can still be found.
+                            match_obj = self._first_match_in_pages(
+                                regex, match_content, stripped_match, boundaries, restrict_uids,
+                                position_ok, sys_ids=restrict_sids,
+                                to_original=lambda m, _t=content: _Span(*_unstripped_span(_t, m.start(), m.end())))
+                        if match_obj is None:
+                            regex_filtered_count += 1
+                            continue
                     span = match_obj.span()
-                    if boundaries:
-                        span_map = self._map_span_to_pages(span, boundaries)
-                        primary = span_map.get('primary') or {}
-                        display_header = primary.get('full_header', doc['full_header'][0])
-                        source_label = primary.get('source', doc['source'][0])
-                        hl_c = self._highlight_by_span(content, span, False)
-                        hl_f = self._highlight_by_span(content, span, True)
-                        meta = self.meta_mgr.get_display_data(display_header, source_label)
-                        page_highlights = []
-                        for ov in span_map.get('overlaps', []):
-                            if 'span' in ov and ov.get('uid'):
-                                page_highlights.append({
-                                    'uid': ov.get('uid'),
-                                    'p_num': ov.get('p_num'),
-                                    'span': ov.get('span'),
-                                    'full_header': ov.get('full_header', ''),
-                                    'source': ov.get('source', '')
-                                })
-                        results.append({
-                            'display': meta,
-                            'snippet': hl_c or "",
-                            'full_text': content,
-                            'uid': primary.get('uid') or doc['unique_id'][0],
-                            'raw_header': display_header,
-                            'raw_file_hl': hl_f or "",
-                            'highlight_pattern': pattern_str,
-                            'page_highlights': page_highlights,
-                            'cross_page': span_map.get('cross_page', False),
-                            'scope': scope,
-                            # Phase 77 D-01: surface Tantivy relevance score so
-                            # serialize_search_payload emits non-zero scores.
-                            'score': float(score),
-                        })
+                    if ids_only:
+                        # A page whose match the original text does not hold is dropped
+                        # below with its snippet; drop it here the same way.
+                        if boundaries or not orig_match_missing:
+                            results.append(_id_row_of_span(doc, content, span, boundaries, scope))
+                    elif boundaries:
+                        results.append(self._aggregate_result_row(
+                            doc, content, span, boundaries, _row_pattern(content), scope, score))
                     else:
-                        hl_c = self.highlight(content, regex, False)
-                        hl_f = self.highlight(content, regex, True)
+                        # match_obj already IS regex.search(content) here, except
+                        # when brackets were stripped and the original text had no
+                        # match -- the old highlight() re-search dropped that hit,
+                        # so it is still dropped. Reusing the span saves two full
+                        # regex passes per hit.
+                        if orig_match_missing:
+                            hl_c = hl_f = None
+                        else:
+                            hl_c, hl_f = self._highlight_pair(content, span)
                         if hl_c:
                             meta = self.meta_mgr.get_display_data(doc['full_header'][0], doc['source'][0])
                             results.append({
                                 'display': meta, 'snippet': hl_c, 'full_text': content,
                                 'uid': doc['unique_id'][0], 'raw_header': doc['full_header'][0],
-                                'raw_file_hl': hl_f, 'highlight_pattern': pattern_str,
+                                'raw_file_hl': hl_f, 'highlight_pattern': _row_pattern(content),
                                 'scope': scope,
                                 # Phase 77 D-01: Tantivy relevance score for JSON.
                                 'score': float(score),
@@ -2892,11 +4166,13 @@ class SearchEngine:
                     LOGGER.warning("Failed to materialize search hit at position %s: %s", i, e)
         except InterruptedError:
             was_interrupted = True
+            _note_search_cutoff(interrupted=True)
             LOGGER.debug(f"Search interrupted at hit {i}/{total_hits}, found {len(results)} results so far")
 
         materialize_elapsed_ms = (time.perf_counter() - materialize_started) * 1000.0
         LOGGER.debug(f"Regex filtered out: {regex_filtered_count}, Results before dedup: {len(results)}, interrupted: {was_interrupted}")
-        deduped = self._deduplicate(results)
+        deduped = self._deduplicate(
+            results, first_wins=not (responsa_options and responsa_options.get('responsa_mode')))
 
         # Phase 95 D-08 (Codex P0): LOCAL hits merge AFTER _deduplicate.
         # The dedup body at _deduplicate() whitelists V0.8/V0.7 only and would
@@ -2920,12 +4196,17 @@ class SearchEngine:
                         tantivy_query_str=_local_responsa_query,
                         progress_callback=progress_callback,
                         phase_callback=phase_callback,
+                        limit=(max(Config.SEARCH_LIMIT, self.local_searcher.num_docs + 1) if ids_only else None),
+                        accept=_local_match_accept(_whole_words, text_position, query_str),
                     )
                 else:
                     local_hits = self._query_local_index(
                         query_str, mode, gap, regex=regex,
                         progress_callback=progress_callback,
                         phase_callback=phase_callback,
+                        tantivy_query=self._local_forms_query(query_str, mode),
+                        limit=(max(Config.SEARCH_LIMIT, self.local_searcher.num_docs + 1) if ids_only else None),
+                        accept=_local_match_accept(_whole_words, text_position, query_str),
                     )
             except InterruptedError:
                 # Defensive only: _query_local_index now returns its partial hits
@@ -2955,6 +4236,10 @@ class SearchEngine:
             for r in deduped:
                 # Combine text fields for checking
                 # We check snippet and full_text to be safe
+                if '_excluded' in r:             # an ids_only row: decided from its text
+                    if not r.pop('_excluded'):
+                        filtered.append(r)
+                    continue
                 text_content = (r.get('snippet', '') + ' ' + r.get('full_text', '')).lower()
 
                 # Check if ANY excluded word is present
@@ -3007,13 +4292,22 @@ class SearchEngine:
 
         return deduped
 
-    def _deduplicate(self, results):
+    def _deduplicate(self, results, first_wins=False):
         # V0.8 wins outright on a uid collision. V0.7 rows must ALSO dedupe against
         # each other: the same uid arrives twice for one page -- once from the
         # aggregated scope='system' continuous doc and once from its scope='page'
         # doc -- and the old `uid not in v8` test let both through, rendering the
         # identical folio as two separate results.
-        v8 = {r['uid']: r for r in results if r['display']['source'] == "V0.8"}
+        # A V0.8 uid keeps its FIRST position either way; *first_wins* also keeps
+        # its first row (page docs are read before aggregates, so the page row),
+        # instead of the last one. Responsa keeps the last-row rule.
+        if first_wins:
+            v8 = {}
+            for r in results:
+                if r['display']['source'] == "V0.8":
+                    v8.setdefault(r['uid'], r)
+        else:
+            v8 = {r['uid']: r for r in results if r['display']['source'] == "V0.8"}
         final = list(v8.values())
         seen_v7 = set()
         for r in results:
@@ -3103,18 +4397,18 @@ class SearchEngine:
 
         # Pre-compute allowed unique_ids for fast O(1) filtering
         restrict_uids = None
-        _sid_filter_clause = None
+        _sid_restriction = None
         if restrict_sys_ids is not None:
             browse_map = self._load_browse_map()
             restrict_uids = set()
             for sid in restrict_sys_ids:
                 for page in browse_map.get(sid, []):
                     restrict_uids.add(page['uid'])
-            # Pre-build Tantivy filter clause for small restrict sets
-            if len(restrict_sys_ids) <= 500:
-                _sid_filter_clause = '(' + ' OR '.join(
-                    f'full_header:"{sid}"' for sid in restrict_sys_ids
-                ) + ')'
+            # In the query at any size. Above 500 manuscripts this was left out (the
+            # OR of phrases was too slow): each chunk's 50 hits came from the whole
+            # corpus and were filtered afterwards, so a narrow filter found almost
+            # nothing in its own manuscripts (2026-10-04; main search had the same).
+            _sid_restriction = self._restriction_query(restrict_sys_ids, pages_only=True)
 
         # SEED-011 (125a): Build per-chunk plans ONCE before the index loops.
         # Each _ChunkPlan carries both flavor query strings (Genizah raw +
@@ -3191,10 +4485,6 @@ class SearchEngine:
                 regex = plan.compiled_regex_genizah
                 if not regex: continue
 
-                # Augment chunk query with sys_id filter
-                if _sid_filter_clause:
-                    t_query = f'({t_query}) AND {_sid_filter_clause}'
-
                 # Check: Is phrase in "Filter Text"?
                 is_text_filtered = False
                 if filter_text:
@@ -3204,6 +4494,9 @@ class SearchEngine:
                 try:
                     # Search index
                     query = self.index.parse_query(t_query, ["content"])
+                    if _sid_restriction is not None:
+                        query = tantivy.Query.boolean_query([(tantivy.Occur.Must, query),
+                                                             (tantivy.Occur.Must, _sid_restriction)])
                     hits = self.searcher.search(query, 50).hits
 
                     is_freq_filtered = len(hits) > max_freq
@@ -3242,9 +4535,14 @@ class SearchEngine:
                             rec['head'] = doc['full_header'][0]
                             rec['src'] = doc['source'][0]
                             rec['content'] = content
-                            # Use original content span if possible, fall back to stripped
+                            # Original content span if possible; else the stripped match,
+                            # mapped onto the original (its offsets cut a bracketed word
+                            # short: *אבג ש[לו*ם -- Codex review of PR #375).
                             _orig_m = regex.search(content)
-                            _ms_match = _orig_m or regex.search(match_content)
+                            if _orig_m is None:
+                                _sm = regex.search(match_content)
+                                _orig_m = _Span(*_unstripped_span(content, _sm.start(), _sm.end()))
+                            _ms_match = _orig_m
                             rec['matches'].append(_ms_match.span())
                             # Save indices of found words in *source* text
                             rec['src_indices'].update(range(token_idx, token_idx + chunk_size))
@@ -3427,7 +4725,11 @@ class SearchEngine:
                                         _rec_scl['shelfmark'] = ''
                                     _rec_scl['content'] = _content_scl
                                     _orig_m_scl = _regex_scl.search(_content_scl)
-                                    _ms_match_scl = _orig_m_scl or _regex_scl.search(_match_content_scl)
+                                    if _orig_m_scl is None:          # as the Genizah loop above
+                                        _sm_scl = _regex_scl.search(_match_content_scl)
+                                        _orig_m_scl = _Span(*_unstripped_span(
+                                            _content_scl, _sm_scl.start(), _sm_scl.end()))
+                                    _ms_match_scl = _orig_m_scl
                                     _rec_scl['matches'].append(_ms_match_scl.span())
                                     _rec_scl['src_indices'].update(
                                         range(_token_idx_scl, _token_idx_scl + chunk_size)

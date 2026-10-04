@@ -1,6 +1,6 @@
 # GenizahSearch Search-Helper API
 
-> Contract `schema_version: 1` · Verified against site release 9.2.0 · Last updated: 2026-09-15
+> Contract `schema_version: 1` · Verified against site release 9.2.0 · Last updated: 2026-10-03
 
 The **site release** above is the GenizahSearch version this document was last checked
 against — it is NOT a separate API version, and it does not gate what is true. The
@@ -281,7 +281,7 @@ when the offending key is the legacy `mode` field (renamed to `search_mode` in P
 | Name | Type | Constraint | Default | Notes |
 | ---- | ---- | ---------- | ------- | ----- |
 | `query` | string | 1..1000 chars (post-strip; empty → `query_required`; over cap → `query_too_long`) | required | `QUERY_LENGTH_CAP=1000` |
-| `search_mode` | enum | `exact \| variants \| responsa \| title \| shelfmark \| fuzzy` | required | `regex` was intentionally dropped per Phase 81A D-09. `fuzzy` (added 2026-06) is the approximate / maximum-variant tier — bounded by `SEARCH_API_FUZZY_TIMEOUT` (default 110s as of 2026-09-08, down from 300s — see "Edge-Timeout Ceiling" below), not the interactive 30s baseline |
+| `search_mode` | enum | `exact \| variants \| responsa \| title \| shelfmark \| fuzzy` | required | `regex` was intentionally dropped per Phase 81A D-09. `fuzzy` (added 2026-06) finds near spellings — whole words one letter away, two from 5 letters, prefixed forms included (since 2026-10; before, the exact word only) — bounded by `SEARCH_API_FUZZY_TIMEOUT` (default 110s as of 2026-09-08, down from 300s — see "Edge-Timeout Ceiling" below), not the interactive 30s baseline |
 | `responsa_options` | object \| null | valid only when `search_mode="responsa"` | `null` | see sub-table below |
 | `gap` | integer | must be `0` when `search_mode in {title, shelfmark}` | `0` | proximity slop for keyword search |
 | `limit` | integer | `1..100` for non-fuzzy modes (`MAX_LIMIT=100`); `1..SEARCH_API_FUZZY_MAX_LIMIT` (default 500, max 2000) for `fuzzy` | `50` (fuzzy with no explicit limit widens to a recall-oriented default of 250) | P9X: fuzzy recall-over-precision — non-fuzzy boundary unchanged |
@@ -1168,7 +1168,7 @@ Every server-side var that affects the four endpoints, plus the two skill-side v
 | `SEARCH_API_BROWSE_CORE_TIMEOUT` | `2.0` | server | Core BrowsePage fetch timeout for `/api/browse`, in seconds. Phase 79 R-01 added this to prevent executor pinning on a hung Tantivy reader; hitting it produces a 504 `core_timeout` envelope. |
 | `SEARCH_API_CORE_TIMEOUT` | `30.0` | server | Interactive baseline timeout for `/api/search` (exact/title/shelfmark/responsa modes), in seconds. Re-read per request. |
 | `SEARCH_API_VARIANTS_TIMEOUT` | `60.0` | server | Heavy-tier timeout for `/api/search` with `search_mode=variants`, in seconds. Re-read per request. |
-| `SEARCH_API_FUZZY_TIMEOUT` | `110.0` (was `300.0` before 2026-09-08) | server | Heavy-tier timeout for `/api/search` with `search_mode=fuzzy`, in seconds. Fuzzy (variants_maximum) is inherently slow. Lowered from 300s so the server-side ceiling sits below the public deployment's edge-proxy origin-response budget — see "Edge-Timeout Ceiling" below. A deployment that sits behind no such proxy can raise it back via this env var. Re-read per request. |
+| `SEARCH_API_FUZZY_TIMEOUT` | `110.0` (was `300.0` before 2026-09-08) | server | Heavy-tier timeout for `/api/search` with `search_mode=fuzzy`, in seconds. Fuzzy (near spellings, tens of thousands per word) is inherently slow. Lowered from 300s so the server-side ceiling sits below the public deployment's edge-proxy origin-response budget — see "Edge-Timeout Ceiling" below. A deployment that sits behind no such proxy can raise it back via this env var. Re-read per request. |
 | `SEARCH_API_PARALLELS_TIMEOUT` | `110.0` (was `300.0` before 2026-09-08) | server | Timeout for `/api/parallels` composition search with `method='chunk'` (default), in seconds. Lowered from 300s for the same edge-proxy reason as `SEARCH_API_FUZZY_TIMEOUT` — see "Edge-Timeout Ceiling" below. Re-read per request. |
 | `SEARCH_API_PASSAGE_TIMEOUT` | `30.0` | server | Phase 145. Timeout for `/api/parallels` with `method='passage'`, in seconds — its own ceiling, unrelated to `SEARCH_API_PARALLELS_TIMEOUT`. Re-read per request. |
 | `SEARCH_API_HEAVY_CONCURRENCY` | `2` | server | Maximum simultaneous in-flight heavy requests (variants/fuzzy/`method='chunk'` parallels). Beyond this, new requests fail fast with 503 `heavy_search_busy` + `Retry-After: 5`. Re-read per request (semaphore rebuilt when config changes and all slots are free). |
@@ -1220,7 +1220,7 @@ flipped at runtime without a restart.
 Certain search classes are inherently slow:
 
 - **variants** — morphological expansion (30+ variant pairs)
-- **fuzzy** — full Tantivy edit-distance + variants_maximum tier
+- **fuzzy** — near spellings: every whole word within one edit of the query word (two from 5 letters; an edit is a letter added, dropped or changed, or two neighbours swapped), prefixed forms included
 - **/api/parallels** — multi-minute sliding-window composition matching
 
 These run in a thread-pool worker (one slow query blocks ONE worker thread, not the event loop), so the risk is threadpool starvation rather than event-loop blocking. They are governed by a separate tier:

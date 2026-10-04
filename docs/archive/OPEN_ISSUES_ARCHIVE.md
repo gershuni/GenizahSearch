@@ -1043,6 +1043,26 @@ Moved verbatim by `scripts/archive_closed_issues.py`. Nothing was edited or dele
 
 Moved verbatim from the top of the tracker on 2026-09-18 (the 2026-09-06 split did the same for the headers before them).
 
+> Previous: 2026-09-29 -- **Desktop exit no longer aborts with a running QThread in a hidden window** (`fix/desktop-exit-running-qthreads`): `tests/test_kept_qthreads_exit_cleanly.py` flaked on CI; reproduced locally (5/100), traced to the hidden-window reference path, fixed with a bounded exit step (`desktop/qthread_exit.py`) and a deterministic test. The P2 row was added and archived the same day.
+>
+> (The header above was moved verbatim from the top of the tracker on 2026-10-04.)
+>
+> Previous: 2026-09-29 (evening) -- **Fragment Puzzle follow-ups after the deploy** (`fix/web-puzzle-followups`): web publish works again (storage uploads carry the user's token); signing in moves this browser's drafts into the account and the canvas no longer comes back empty; 'Open in Puzzle' opens the published join unsaved. P3 -1 (the sign-in draft row, archived) +1 (Manchester images without background removal).
+>
+> (The header above was moved verbatim from the top of the tracker on 2026-10-04.)
+>
+> Previous: 2026-09-29 -- **Web Fragment Puzzle: saved joins kept per visitor** (`fix/web-hardening-2`): drafts private until published (per account / per browser), shared fragment images only from signed-in uploads with the uploader recorded, cached images never replaced, per-reference Sefaria cache (web + desktop), PNG export straight to the browser; four unused puzzle routes removed. P2 +1, P3 +4 (follow-ups below).
+>
+> (The header above was moved verbatim from the top of the tracker on 2026-10-04.)
+>
+> Previous: 2026-09-28 -- **v9.4.0 desktop release (Data integrity)**: PRs #367 (2a), #369 (Data API grants), #370 (2b-1), #368 (2c) and #371 (2b-2) merged into master-main (`fd4be4c1`); the owner applied `migrations/add_list_item_page_column.sql` (verify queries checked) and ran the desktop smoke test. Local suite 13,318 passed; gui lane 57/58 (`test_eliding_label.py`, pre-existing). The web /lists fixes deploy with the installer.
+>
+> (The header above was moved verbatim from the top of the tracker on 2026-10-04.)
+>
+> Previous: 2026-09-27 -- **Desktop list sync PR 2b-2** (`fix/desktop-2b2-sync-runner`, on PR 2b-1; the same installer as 2a and 2b-1): list syncs run one at a time off the UI thread, with Cancel; an upload after each list edit; Sync lists now on the Lists tab; log-out and close do not wait; a restored log-in syncs; desktop removals and moves reach the account; website removals are offered in a prompt. The interim "until PR 2b-2" row archived; P3 +23, Untested Areas +1 (the progress dialog and a pulled-cable log-out, to run by hand before release). Next: PR 2c (Puzzle and threads).
+>
+> (The header above was moved verbatim from the top of the tracker on 2026-10-04.)
+>
 > Previous: 2026-09-27 -- **Desktop Fragment Puzzle + Joins Lab PR opened** (sweep items #8, #10, #22; stacked on the data-integrity PR #367): the puzzle asks before dropping work, keeps fragments whose images failed, confirms multi-deletes with Ctrl+Z undo; the Joins Lab keeps replaced workers and drops late folio results; quit asks the puzzle question before stopping anything. 3 rows added (P2 +1, P3 +2).
 >
 > (The header above was moved verbatim from the top of the tracker on 2026-09-30.)

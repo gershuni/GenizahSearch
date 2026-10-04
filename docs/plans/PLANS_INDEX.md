@@ -1,6 +1,6 @@
 # GenizahSearch - Plans Index
 
-**Last Updated:** 2026-09-21
+**Last Updated:** 2026-09-30
 
 ---
 
@@ -8,6 +8,7 @@
 
 | Plan | Status | Description |
 |------|--------|-------------|
+| [SEARCH_PERF_HANDOFF.md](SEARCH_PERF_HANDOFF.md) | In progress (step 1 on `ccr-b3b8c7ac-jyxlw3`) | Desktop search ~28 s -> index is 0.24 s of it; per-hit Python loop, duplicates, silent 50,000 cap; next steps + equivalence tool |
 | [MOBILE_RESPONSIVE_PLAN.md](MOBILE_RESPONSIVE_PLAN.md) | Planned | Mobile/tablet responsive design |
 | [JOIN_FINDER_IMPLEMENTATION_PLAN.md](JOIN_FINDER_IMPLEMENTATION_PLAN.md) | Planned | Direction-aware join finder, caching, and manuscript-view UI |
 | [USER_TEXT_SEARCH_PLAN.md](USER_TEXT_SEARCH_PLAN.md) | Planned | User-added text search for parallels |

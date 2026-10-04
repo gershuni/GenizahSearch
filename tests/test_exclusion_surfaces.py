@@ -30,7 +30,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QObject, QPoint, QRect
+from PyQt6.QtCore import QObject, QPoint, QRect, Qt
 from PyQt6.QtWidgets import (QApplication, QComboBox, QLabel, QLineEdit,
                              QMainWindow, QProgressBar, QPushButton,
                              QTableWidget, QVBoxLayout, QWidget)
@@ -1746,3 +1746,615 @@ def test_the_load_more_label_has_a_hebrew_translation():
     from shared.genizah_translations import TRANSLATIONS
     assert TRANSLATIONS.get("Load more results ({} not loaded)"), (
         "user-visible string without a Hebrew entry")
+
+
+# --- First paint (2026-09-30): the first FIRST_PAINT_ROWS rows are built before the
+# handler returns; the rest of the first page follows on the next event-loop turn.
+
+def _drain_events():
+    for _ in range(5):
+        QApplication.processEvents()
+
+
+def test_a_search_paints_the_first_rows_then_fills_the_first_page(window):
+    w = window
+    _search(w, _rows(A, 120))
+    assert w.results_table.rowCount() == app.FIRST_PAINT_ROWS, (
+        "the whole first page was built before the first paint")
+    _drain_events()
+    assert w.results_table.rowCount() == 120 and w.results_loaded == 120
+
+
+def test_the_fill_stops_when_another_search_has_replaced_the_results(window):
+    w = window
+    _search(w, _rows(A, 120))
+    _search(w, _rows(B, 30))              # a second search lands before the fill runs
+    _drain_events()
+    assert w.results_table.rowCount() == 30
+    assert all(w.results_table.item(r, w.COL_SYS_ID).text() == B for r in range(30))
+
+
+def test_the_fill_waits_while_a_new_search_runs(window):
+    w = window
+    _search(w, _rows(A, 120))
+    w.is_searching = True                 # the user started another search
+    _drain_events()
+    assert w.results_table.rowCount() == app.FIRST_PAINT_ROWS
+
+
+def test_the_fill_leaves_an_all_terms_page_alone(window, monkeypatch):
+    """With "only results with all terms" on, the search re-renders its own page
+    from a filtered list and puts the full list back; a fill would then append
+    rows that filter hides."""
+    w = window
+    keep = {f"{A}_{p}" for p in range(1, 61)}
+    monkeypatch.setattr(app, "compute_all_terms_filter", lambda chain: keep)
+    monkeypatch.setattr(app, "enrich_snippet_with_chain_terms", lambda s, c, q: s)
+    from shared.refinement import RefinementStep
+    w.refinement_chain = [RefinementStep("x", "literal"), RefinementStep("y", "literal")]
+    for step in w.refinement_chain:
+        step._result_sys_ids = {A}                  # complete: nothing to complete first
+    w._all_terms_filter = True
+    _search(w, _rows(A, 60) + _rows(B, 60))
+    shown = w.results_table.rowCount()
+    _drain_events()
+    assert w.results_table.rowCount() == shown == 60
+    assert all(w.results_table.item(r, w.COL_SYS_ID).text() == A for r in range(60))
+
+
+# --- Search preview (2026-09-30): the first rows while the search still runs.
+
+def test_a_preview_shows_rows_while_searching_and_the_result_replaces_it(window):
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    w.status_label.setText("Searching...")
+    w._on_search_preview(w.search_thread, _rows(A, 5))
+    assert w.results_table.rowCount() == 5
+    assert w.status_label.text() == "Searching...", "the preview must not claim a result count"
+    assert not w.results_table.isSortingEnabled(), "no sorting while the run is going"
+    _search(w, _rows(A, 5) + _rows(B, 7))       # the run ends
+    _drain_events()
+    assert w.results_table.rowCount() == 12
+
+
+@pytest.mark.parametrize("final", ["the same rows", "no rows"])
+def test_sorting_comes_back_when_the_run_ends(window, final):
+    # Codex review (PR #375): the preview turns sorting off; the end of the run
+    # must turn it on again -- also when the preview already held every row, and
+    # when the run ends with nothing (an error, or Stop before any result).
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    w._on_search_preview(w.search_thread, _rows(A, 5))
+    assert not w.results_table.isSortingEnabled()
+    _search(w, _rows(A, 5) if final == "the same rows" else [])
+    _drain_events()
+    assert w.results_table.isSortingEnabled()
+
+
+def test_a_preview_keeps_engine_order_under_a_column_sort(window):
+    # Codex review (PR #375): with a column sort chosen, load_next_batch turned
+    # sorting back on at its end, which re-sorted the preview at once; turning it
+    # off again afterwards did not undo that.
+    w = window
+    w.results_table.setSortingEnabled(True)
+    w.results_table.sortByColumn(w.COL_SYS_ID, Qt.SortOrder.DescendingOrder)   # a header click
+    w.search_thread = object()
+    w.is_searching = True
+    engine_order = _rows(A, 2) + _rows(B, 3)          # descending by id would put B first
+    w._on_search_preview(w.search_thread, engine_order)
+    assert not w.results_table.isSortingEnabled()
+    assert [w.results_table.item(r, w.COL_SYS_ID).text() for r in range(5)] == [A, A, B, B, B]
+    w._on_search_preview(w.search_thread, engine_order + _rows(A, 2, start=3))   # it extends
+    assert [w.results_table.item(r, w.COL_SYS_ID).text() for r in range(7)] == [A, A, B, B, B, A, A]
+
+
+def test_an_error_after_a_preview_leaves_no_rows(window, monkeypatch):
+    # Codex review (PR #375): the preview's rows stayed as if they were the
+    # failed run's results, with sorting off; a failed run delivers nothing.
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    w._on_search_preview(w.search_thread, _rows(A, 5))
+    monkeypatch.setattr(app.QMessageBox, "critical", staticmethod(lambda *a, **k: None))
+    w.on_error("the regex ran out of time")
+    assert w.results_table.rowCount() == 0 and w.last_results == []
+    assert w.results_table.isSortingEnabled()
+
+
+@pytest.mark.parametrize("case", ["other thread", "not searching", "all-terms view"])
+def test_a_preview_is_ignored_when_it_no_longer_applies(window, case):
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    thread = w.search_thread
+    if case == "other thread":
+        thread = object()                       # a run that has since been replaced
+    elif case == "not searching":
+        w.is_searching = False
+    else:
+        w.refinement_chain = [object()]
+        w._all_terms_filter = True
+    w._on_search_preview(thread, _rows(A, 5))
+    assert w.results_table.rowCount() == 0
+
+
+def test_a_longer_preview_of_the_same_run_appends_rows(window):
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    first = _rows(A, 3)
+    w._on_search_preview(w.search_thread, first)
+    top = w.results_table.item(0, w.COL_SYS_ID)
+    w._on_search_preview(w.search_thread, first + _rows(B, 4))
+    assert w.results_table.rowCount() == 7
+    assert w.results_table.item(0, w.COL_SYS_ID) is top, "the rows already shown were rebuilt"
+
+
+def test_a_preview_that_does_not_extend_the_table_rebuilds_it(window):
+    w = window
+    w.search_thread = object()
+    w.is_searching = True
+    w._on_search_preview(w.search_thread, _rows(A, 3))
+    w._on_search_preview(w.search_thread, _rows(B, 5))
+    assert w.results_table.rowCount() == 5
+    assert all(w.results_table.item(r, w.COL_SYS_ID).text() == B for r in range(5))
+
+
+# --- Refinement steps record what the run searched (D8 Phase 1, 2026-10-04) --------
+# Both step builders read the widgets, which may have changed since the run, and kept
+# some fields at their defaults: the first step of a chain lost gap, NOT-words, position
+# and Responsa options, the committed step its NOT-words, both the corpus. A replay
+# (session restore, a removed step, a scope change) then ran another search.
+
+RUN = dict(query="שלום", gap=2, exclude_words=["רע"], text_position="start",
+           responsa_options=None, corpus_scope="genizah")
+
+
+def _refining(w):
+    w.MODE_RESPONSA = 2                     # set in __init__, which the fixture skips
+    w._zero_result_refine = False
+    w.refine_badge, w.refine_cancel_btn, w._zero_result_back_btn = QLabel(), QPushButton(), QPushButton()
+    return w
+
+
+def _fields(step):
+    return (step.query, step.gap, step.exclude_words, step.text_position, step.corpus_scope)
+
+
+def test_a_committed_refinement_step_records_what_the_run_searched(window):
+    w = _refining(window)
+    w.query_input.setText("?שלום")          # the box still shows the mode prefix
+    w._refine_mode = True
+    w._last_search_params = dict(RUN)
+    _search(w, _rows(A, 2))
+    assert _fields(w.refinement_chain[-1]) == ("שלום", 2, ["רע"], "start", "genizah")
+
+
+def test_the_first_step_of_a_chain_records_what_the_run_searched(window):
+    w = _refining(window)
+    w.query_input.setText("?שלום")
+    w._last_search_params = dict(RUN)
+    _search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    assert _fields(w.refinement_chain[0]) == ("שלום", 2, ["רע"], "start", "genizah")
+
+
+def test_results_from_no_run_here_keep_the_widgets_values(window):
+    w = _refining(window)
+    w.query_input.setText("שלום")
+    w._last_search_params = None            # e.g. restored from a session
+    _search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    assert _fields(w.refinement_chain[0]) == ("שלום", 0, [], None, "all")
+
+
+# --- "N+" counts (D8, 2026-10-04): the display keeps the 50,000-candidate cut-off
+# but says when a list was cut. The engine's signal reaches on_search_cutoff first.
+
+def test_a_cut_off_list_shows_its_count_with_a_plus(window):
+    w = window
+    w._on_search_cutoff({"capped": True, "interrupted": False})
+    _search(w, _rows(A, 3))
+    assert w.status_label.text() == _showing(3, "3+")
+    w._on_search_cutoff({"capped": False, "interrupted": False})
+    _search(w, _rows(A, 3))
+    assert "3+" not in w.status_label.text()
+
+
+def test_search_within_counts_the_manuscripts_with_a_plus(window):
+    w = window
+    w.search_within_btn = QPushButton()
+    w._on_search_cutoff({"capped": True, "interrupted": False})
+    _search(w, _rows(A, 2) + _rows(B, 2))
+    GenizahGUI._update_search_within_btn(w)
+    assert " 2+ " in w.search_within_btn.text()
+
+
+def test_a_step_built_on_a_cut_off_step_is_marked_too(window):
+    from shared.refinement import RefinementStep
+    w = _refining(window)
+    w.query_input.setText("שלום")
+    first = RefinementStep("ישראל", "literal", result_count=25000, result_count_capped=True)
+    w.refinement_chain = [first]
+    w._refine_mode = True
+    w._on_search_cutoff({"capped": False, "interrupted": False})   # the narrower run was not cut
+    _search(w, _rows(A, 2))
+    assert w.refinement_chain[-1].result_count_capped, "restricted to an incomplete set"
+
+
+def test_history_records_a_cut_off_count(window, monkeypatch):
+    import shared.session_persistence as sp
+    entries = []
+    monkeypatch.setattr(sp, "add_history_entry", lambda kind, entry, *a, **k: entries.append(entry))
+    monkeypatch.setattr(app, "load_app_config", lambda: {})
+    w = window
+    w.query_input.setText("שלום")
+    w.gap_input, w.text_position_combo = QLineEdit(), QComboBox()
+    w._refresh_search_history = lambda: None          # the history menu, not built here
+    w._on_search_cutoff({"capped": True, "interrupted": False})
+    _search(w, _rows(A, 2))
+    GenizahGUI._add_regular_search_to_history(w)
+    assert entries and entries[-1]["result_count_capped"] is True
+
+
+# --- Completing a cut-off chain first (D8 commit 6/7, 2026-10-04) --------------------
+# Search-within restricts the next search to a step's manuscripts, and the all-terms
+# filter intersects every step's pages. A step whose list was cut off at the
+# 50,000-candidate limit would make both miss true matches, so it is completed first
+# (ChainCompletionThread), in a run like a search: Stop leaves the chain as it was.
+
+class _CompletionThread(_RunningSearchThread):
+    made = []
+
+    def __init__(self, chain, searcher, filter_restrict, upto=None, run_id=0):
+        super().__init__()
+        self.chain, self.filter_restrict, self.upto = chain, filter_restrict, upto
+        self.finished_signal = _QueuedSignal()
+        self.pause_ack_signal = _QueuedSignal()
+        _CompletionThread.made.append(self)
+
+    def complete(self, step_sys_ids, step_uids=None):
+        """The worker finishing: the steps it completed, then its result."""
+        for step, sids in zip(self.chain, step_sys_ids):
+            step._result_sys_ids, step.result_count_capped = set(sids), False
+            if step_uids:
+                step._result_uids = set(step_uids.pop(0))
+        self.running = False
+        self.finished_signal.deliver({"restrict": set(step_sys_ids[-1]), "interrupted": False})
+
+
+@pytest.fixture
+def completing(window, monkeypatch):
+    _CompletionThread.made = []
+    monkeypatch.setattr(app, "ChainCompletionThread", _CompletionThread)
+    w = _refining(window)
+    w.search_within_btn = QPushButton()
+    w._run_seq = 0
+    w._pause_search = SimpleNamespace(state="idle", elapsed=lambda t: 1.0, local_phase_active=False,
+                                      reset_for_run=lambda *a: None)
+    w.query_input.setText("שלום")
+    return w
+
+
+def _cut_off_search(w, rows):
+    w._on_search_cutoff({"capped": True, "interrupted": False})
+    _search(w, rows)
+
+
+def test_search_within_a_cut_off_list_completes_it_first(completing):
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    (t,) = _CompletionThread.made
+    assert t.upto is None and t.chain is w.refinement_chain and w.is_searching
+    assert not w._refine_mode, "the next search waits for the complete set"
+    t.complete([[A, B, C]])
+    assert w._refine_mode and not w.is_searching
+    assert w.refinement_restrict_sys_ids == {A, B, C}
+    assert " 3 " in w.refine_badge.text() and "+" not in w.refine_badge.text()
+
+
+def test_stopping_the_completion_searches_within_the_shown_list(completing):
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    (t,) = _CompletionThread.made
+    w.stop_search()
+    t.finished_signal.deliver({"restrict": None, "interrupted": True})
+    assert w._refine_mode and w.refinement_restrict_sys_ids == {A}
+    assert " 1+ " in w.refine_badge.text(), "the set is still cut off"
+    assert len(w.refinement_chain) == 1 and w.refinement_chain[0].result_count_capped
+    assert not w._search_was_cancelled, "Stop ended the completion, not the shown search"
+
+
+def test_a_list_that_was_not_cut_off_needs_no_completion(completing):
+    w = completing
+    w._on_search_cutoff({"capped": False, "interrupted": False})
+    _search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    assert _CompletionThread.made == [] and w._refine_mode
+    assert w.refinement_restrict_sys_ids == {A}
+
+
+def test_new_drops_a_completion_in_flight(completing):
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    (t,) = _CompletionThread.made
+    w._search_new_generation = getattr(w, "_search_new_generation", 0) + 1   # what New does
+    t.complete([[A, B]])
+    assert not w._refine_mode and w.refine_badge.text() == ""
+
+
+def _two_step_chain(w):
+    from shared.refinement import RefinementStep
+    first = RefinementStep("ישראל", "literal", result_count=1, result_count_capped=True)
+    first._result_sys_ids, first._result_uids = {A}, {f"{A}_1", f"{A}_2"}
+    w.refinement_chain = [first]
+    w._refine_mode = True
+    w._on_search_cutoff({"capped": False, "interrupted": False})
+    return first
+
+
+def test_the_all_terms_filter_completes_the_steps_before_the_shown_one(completing):
+    w = completing
+    first = _two_step_chain(w)
+    _search(w, _rows(A, 2) + _rows(B, 2))            # the committed second step
+    w._toggle_all_terms_filter(True)
+    (t,) = _CompletionThread.made
+    assert t.upto == 1, "the shown step needs no completing"
+    t.complete([[A, B]], [[f"{A}_1", f"{A}_2", f"{B}_1", f"{B}_2"]])
+    assert first._result_uids >= {f"{B}_1"}
+    assert w.results_table.rowCount() == 4, "B's pages match both steps once the first is complete"
+
+
+def test_a_search_landing_with_the_all_terms_filter_on_completes_first(completing):
+    w = completing
+    _two_step_chain(w)
+    w._all_terms_filter = True
+    _search(w, _rows(A, 2) + _rows(B, 2))
+    (t,) = _CompletionThread.made
+    assert t.upto == 1 and len(w.refinement_chain) == 2
+    t.complete([[A, B]], [[f"{A}_1", f"{A}_2", f"{B}_1", f"{B}_2"]])
+    assert w.results_table.rowCount() == 4
+
+
+def test_a_committed_step_that_was_not_cut_off_needs_no_completion(completing):
+    w = completing
+    _two_step_chain(w).result_count_capped = False
+    _search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    assert _CompletionThread.made == [], "the step recorded its manuscripts when it landed"
+    assert w.refinement_restrict_sys_ids == {A}
+
+
+def test_the_all_terms_checkbox_waits_for_a_run_in_flight(completing):
+    w = completing
+    _two_step_chain(w)
+    _search(w, _rows(A, 2) + _rows(B, 2))
+    w.is_searching = True                   # a search or a completion is running
+    w._toggle_all_terms_filter(True)
+    assert _CompletionThread.made == [] and w._all_terms_filter
+    assert w.results_table.rowCount() == 4, "the run re-renders when it ends"
+
+
+def test_no_completion_while_a_restored_chain_is_replayed(completing):
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    w._replay_restore_thread = SimpleNamespace(isRunning=lambda: True)
+    w._enter_refine_mode()
+    assert _CompletionThread.made == [] and not w._refine_mode and not w.is_searching
+
+
+def test_a_scope_change_runs_every_step_again_before_search_within(completing):
+    # The steps' manuscripts were found in the old scope; reusing them would restrict
+    # the next search to the old scope's manuscripts.
+    w = completing
+    first = _two_step_chain(w)
+    first.result_count_capped = False
+    _search(w, _rows(A, 2))
+    w._refinement_scope_sig = "old"
+    w._on_filter_recompute_finished({A, B})
+    assert w._refinement_stale and all(s._result_sys_ids is None for s in w.refinement_chain)
+    w._enter_refine_mode()
+    (t,) = _CompletionThread.made
+    t.complete([[A, B], [A, B]])
+    assert w.refinement_restrict_sys_ids == {A, B}
+
+
+def test_a_scope_changed_in_the_filter_dialog_forgets_the_steps_sets_too(completing, monkeypatch):
+    class _Dialog:
+        def __init__(self, *a, **k):
+            pass
+
+        def exec(self):
+            return app.QDialog.DialogCode.Accepted
+
+        def get_filters(self):
+            return {"libraries": ["CUL"]}
+
+        def get_restrict_sys_ids(self):
+            return {A}
+    monkeypatch.setattr(app, "PreSearchFilterDialog", _Dialog)
+    w = completing
+    _two_step_chain(w).result_count_capped = False
+    w._refinement_scope_sig = "old"
+    w._open_pre_search_filter_dialog()
+    assert w._refinement_stale and w.refinement_chain[0]._result_sys_ids is None
+
+
+def test_a_completion_for_a_chain_changed_meanwhile_is_dropped(completing):
+    # A chip removed (truncate_chain) or the chain cleared while the run was going.
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    (t,) = _CompletionThread.made
+    w.refinement_chain = list(w.refinement_chain)
+    t.complete([[A, B, C]])
+    assert not w._refine_mode and not w.is_searching
+    assert w.refinement_restrict_sys_ids != {A, B, C}
+
+
+def test_a_failed_completion_keeps_the_chain(completing, monkeypatch):
+    monkeypatch.setattr(app.QMessageBox, "warning", staticmethod(lambda *a, **k: None))
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    w._enter_refine_mode()
+    (t,) = _CompletionThread.made
+    t.running = False
+    t.error_signal.deliver("disk gone")
+    assert w._refine_mode and w.refinement_restrict_sys_ids == {A}
+    assert len(w.refinement_chain) == 1 and w.refinement_chain[0].result_count_capped
+    assert " 1+ " in w.refine_badge.text()
+
+
+# --- A preview is not judged by the previous run's enrichment (Codex review, round 5) ---
+# Domains and measurements arrive after a run ends; until then the previous run's maps
+# stood, so a preview row absent from them was hidden as "Uncategorized" or as "no
+# measurements, fetch complete", and the running search showed a blank table.
+
+def _previous_run_left(w, domains=False, measurements=False):
+    if domains:
+        w._result_domain_map, w._has_result_domains = {A: ["Liturgy"]}, True
+        w._domain_exclusions = {"Uncategorized"}
+    if measurements:
+        w._result_measurement_map, w._measurement_fetch_complete = {A: {"width": 20.0}}, True
+        w._post_measurement_filters = {"width_min": 10.0}
+
+
+@pytest.mark.parametrize("what", ["domains", "measurements"])
+def test_a_preview_shows_its_rows_after_a_search_that_left_filter_data(window, monkeypatch, what):
+    w = window
+    _previous_run_left(w, **{what: True})
+    thread = _start_a_search_that_never_lands(w, monkeypatch)
+    w._on_search_preview(thread, _rows(B, 4))
+    assert w.results_table.rowCount() == 4
+    assert not any(w.results_table.isRowHidden(r) for r in range(4)), "the preview's rows were hidden"
+
+
+def test_the_standing_filters_survive_the_launch(window, monkeypatch):
+    # Only this run's data is reset: what the user chose to hide stays chosen.
+    w = window
+    _previous_run_left(w, domains=True, measurements=True)
+    _start_a_search_that_never_lands(w, monkeypatch)
+    assert w._domain_exclusions == {"Uncategorized"} and w._post_measurement_filters == {"width_min": 10.0}
+    assert (w._result_domain_map, w._has_result_domains, w._measurement_fetch_complete) == ({}, False, False)
+
+
+# --- "Search completed in ..." leaves with its results (owner, 2026-10-04) ------------
+# The status bar message has no timeout: it stood under the next search until that one
+# finished, describing results already gone.
+
+def _completed_message(w):
+    _search(w, _rows(A, 2))
+    assert w.statusBar().currentMessage().startswith(app.tr("Search completed in"))
+
+
+def test_a_new_search_clears_the_last_completed_message(window, monkeypatch):
+    w = window
+    _completed_message(w)
+    _start_a_search_that_never_lands(w, monkeypatch)
+    assert w.statusBar().currentMessage() == ""
+
+
+def test_new_clears_the_completed_message(window):
+    w = window
+    _completed_message(w)
+    w._reset_search()
+    assert w.statusBar().currentMessage() == ""
+
+
+def test_a_tag_search_clears_the_completed_message(load_more, monkeypatch):
+    monkeypatch.setattr(app, "PGPTagSearchWorker", _QueuedTagWorker)
+    w = load_more
+    _completed_message(w)
+    w.tag_search_combo = QComboBox()
+    w.tag_search_combo.addItem("letters", "letters")
+    w._pgp_tag_search_worker = None
+    w._execute_tag_search()
+    assert w.statusBar().currentMessage() == ""
+
+
+# --- Codex review round 6: a stopped completion, and actions during the restore replay ---
+
+def test_a_stopped_completion_turns_the_all_terms_filter_off(completing):
+    # The earlier step is still cut off: filtering with it would hide B's pages, which
+    # do hold every term. The filter goes off, visibly, and every row shows.
+    w = completing
+    _two_step_chain(w)
+    _search(w, _rows(A, 2) + _rows(B, 2))
+    w._toggle_all_terms_filter(True)
+    (t,) = _CompletionThread.made
+    w.stop_search()
+    t.finished_signal.deliver({"restrict": None, "interrupted": True})
+    assert w._all_terms_filter is False
+    assert w.results_table.rowCount() == 4
+
+
+def test_a_search_landing_with_the_filter_on_and_a_stopped_completion_shows_every_row(completing):
+    w = completing
+    _two_step_chain(w)
+    w._all_terms_filter = True
+    _search(w, _rows(A, 2) + _rows(B, 2))
+    (t,) = _CompletionThread.made
+    w.stop_search()
+    t.finished_signal.deliver({"restrict": None, "interrupted": True})
+    assert w._all_terms_filter is False and w.results_table.rowCount() == 4
+
+
+def _replaying(w):
+    w._replay_restore_thread = SimpleNamespace(running=True, wait=lambda *a: True)
+    w._replay_restore_thread.isRunning = lambda: w._replay_restore_thread.running
+
+
+def test_search_within_asked_for_during_the_restore_replay_runs_after_it(completing):
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    _replaying(w)
+    w._enter_refine_mode()
+    assert _CompletionThread.made == [] and not w._refine_mode
+    w._replay_restore_thread.running = False
+    w._on_replay_for_restore_finished(None)            # the replay's result arrives
+    (t,) = _CompletionThread.made
+    t.complete([[A, B]])
+    assert w._refine_mode and w.refinement_restrict_sys_ids == {A, B}
+
+
+def test_an_action_held_for_the_replay_runs_after_a_failed_replay_too(completing):
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    _replaying(w)
+    w._enter_refine_mode()
+    w._replay_restore_thread.running = False
+    w._on_replay_for_restore_error("disk gone")        # the chain is cleared
+    assert w._refine_mode and w.refinement_restrict_sys_ids == {A}
+
+
+@pytest.mark.parametrize("then", ["a new search", "New"])
+def test_a_new_search_or_new_drops_the_held_action(completing, monkeypatch, then):
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    _replaying(w)
+    w._enter_refine_mode()
+    if then == "New":
+        w._reset_search()
+    else:
+        _start_a_search_that_never_lands(w, monkeypatch)
+        w.is_searching = False                          # it ended; the replay ends after
+    w._replay_restore_thread.running = False
+    w._on_replay_for_restore_finished(None)
+    assert _CompletionThread.made == [] and not w._refine_mode
+
+
+def test_a_held_action_waits_out_a_search_that_is_running(completing):
+    # Completing would stop it (the completion takes the search worker's slot).
+    w = completing
+    _cut_off_search(w, _rows(A, 2))
+    _replaying(w)
+    w._enter_refine_mode()
+    w.is_searching = True                               # e.g. a run not started by start_search
+    w._replay_restore_thread.running = False
+    w._on_replay_for_restore_finished(None)
+    assert _CompletionThread.made == []

@@ -49,7 +49,7 @@ if _CORE_IMPORT_ERROR:
         raise _CORE_IMPORT_ERROR
 from shared.search_engine import PHASE_LOCAL_SEARCH
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
-from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, _keep_until_finished
+from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished
 from desktop.widgets import (
     text_has_pattern_markers,
     ActionsHoverWidget, _format_add_to_list_label,
@@ -101,7 +101,7 @@ from desktop.list_filter_dialog import ListFilterDialog
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared_export_utils import coerce_img_page_cell
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
-from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter
+from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter, chain_needs_completion
 from shared.document_service import select_pgp_page_entry
 from shared.exclusion_service import (
     ExclusionSource, compute_excluded_ids,
@@ -329,6 +329,10 @@ except Exception:
 
 
 BATCH_SIZE = 500
+# Rows built before the first paint of a finished search; the rest of the first
+# page follows on the next event-loop turn. Building 500 rows took 1.2-2.7 s
+# (owner's machine, 2026-09-30), so 500 rows up front delayed the first result.
+FIRST_PAINT_ROWS = 50
 
 class LabPanel(QFrame):
     def __init__(self, parent, mode):
@@ -5732,7 +5736,7 @@ class GenizahGUI(QMainWindow):
         self.mode_combo.setItemData(0, tr("Exact match"))
         self.mode_combo.setItemData(1, tr("Variant search with configurable intensity"))
         self.mode_combo.setItemData(2, tr("Responsa-Project style grammatical expansion for Hebrew search"))
-        self.mode_combo.setItemData(3, tr("Fuzzy search: Levenshtein distance"))
+        self.mode_combo.setItemData(3, tr("Fuzzy search: near spellings, 1 letter different (2 in words of 5+ letters)"))
         self.mode_combo.setItemData(4, tr("Regex: Advanced pattern matching"))
         self.mode_combo.setItemData(5, tr("Search in Title metadata"))
         self.mode_combo.setItemData(6, tr("Search in Shelfmark metadata"))
@@ -16735,7 +16739,7 @@ class GenizahGUI(QMainWindow):
 
     def get_search_help_text(self):
         if CURRENT_LANG == 'he': return tr("SEARCH_HELP_HTML")
-        return """<h3>Search Modes</h3><ul><li><b>Exact:</b> Only finds exact matches.</li><li><b>Variants (?):</b> Basic OCR errors.</li><li><b>Extended (??):</b> More variants.</li><li><b>Maximum (???):</b> Aggressive swapping (Use caution).</li><li><b>Fuzzy (~):</b> Levenshtein distance (1-2 typos).</li><li><b>Regex:</b> Advanced patterns.</li><li><b>Title:</b> Search in composition titles (metadata).</li><li><b>Shelfmark:</b> Search for shelfmarks (metadata).</li><li><b>Responsa (R):</b> Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Use the Query Builder for visual construction.</li></ul><hr><b>Gap:</b> Max distance between words (irrelevant for Title/Shelfmark).<hr><h3>Line &amp; Text Position Search</h3><p>Use the <b>position dropdown</b> next to the search bar to constrain where matches appear: Start of text, End of text, Line starts, or Line ends. This is useful for <b>detecting joins</b> between fragments &mdash; if you know how a manuscript ends, search for those words at &ldquo;End of text&rdquo; to find potential continuations.</p><p>In <b>Responsa mode</b>, position constraints can be applied per word using <code>|_</code> (start of line) and <code>_|</code> (end of line). Combined with line-break syntax (<code>|</code>), you can build multi-line positional queries &mdash; for example, find specific words at the end of one line and other words at the beginning of a line 4 lines later. The <b>Tabular Query Builder</b> provides a visual interface for constructing these queries.</p><p><i>Note: Requires a rebuilt index. Rebuild from Settings to use this feature.</i></p><hr><h3>Advanced Filters</h3><p>Use the <b>Advanced Filters</b> panel to narrow search results by manuscript properties: domain, author, work, date range, and material type. Active filters appear as removable chips above the results.</p>"""
+        return """<h3>Search Modes</h3><ul><li><b>Exact:</b> Only finds exact matches.</li><li><b>Variants (?):</b> Basic OCR errors.</li><li><b>Extended (??):</b> More variants.</li><li><b>Maximum (???):</b> Aggressive swapping (Use caution).</li><li><b>Fuzzy (~):</b> Near spellings: whole words one letter away (two in words of 5+ letters) &mdash; a letter added, dropped or changed, or two neighbours swapped. Prefixed forms are included (ושלום for שלום).</li><li><b>Regex:</b> Advanced patterns.</li><li><b>Title:</b> Search in composition titles (metadata).</li><li><b>Shelfmark:</b> Search for shelfmarks (metadata).</li><li><b>Responsa (R):</b> Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Use the Query Builder for visual construction.</li></ul><hr><b>Gap:</b> Max distance between words (irrelevant for Title/Shelfmark).<hr><h3>Line &amp; Text Position Search</h3><p>Use the <b>position dropdown</b> next to the search bar to constrain where matches appear: Start of text, End of text, Line starts, or Line ends. This is useful for <b>detecting joins</b> between fragments &mdash; if you know how a manuscript ends, search for those words at &ldquo;End of text&rdquo; to find potential continuations.</p><p>In <b>Responsa mode</b>, position constraints can be applied per word using <code>|_</code> (start of line) and <code>_|</code> (end of line). Combined with line-break syntax (<code>|</code>), you can build multi-line positional queries &mdash; for example, find specific words at the end of one line and other words at the beginning of a line 4 lines later. The <b>Tabular Query Builder</b> provides a visual interface for constructing these queries.</p><p><i>Note: Requires a rebuilt index. Rebuild from Settings to use this feature.</i></p><hr><h3>Advanced Filters</h3><p>Use the <b>Advanced Filters</b> panel to narrow search results by manuscript properties: domain, author, work, date range, and material type. Active filters appear as removable chips above the results.</p>"""
 
     def get_comp_help_text(self):
         if CURRENT_LANG == 'he': return tr("COMP_HELP_HTML")
@@ -20021,6 +20025,7 @@ class GenizahGUI(QMainWindow):
                 new_sig = scope_signature(self.pre_search_restrict_sys_ids)
                 if new_sig != self._refinement_scope_sig:
                     self._refinement_stale = True
+                    self._forget_chain_sets()
                     if hasattr(self, '_update_refinement_strip'):
                         self._update_refinement_strip()
             self._update_filter_chip_bar()
@@ -20205,6 +20210,7 @@ class GenizahGUI(QMainWindow):
             new_sig = scope_signature(self.pre_search_restrict_sys_ids)
             if new_sig != self._refinement_scope_sig:
                 self._refinement_stale = True
+                self._forget_chain_sets()
                 if hasattr(self, '_update_refinement_strip'):
                     self._update_refinement_strip()
         self._update_filter_chip_bar()
@@ -20744,6 +20750,10 @@ class GenizahGUI(QMainWindow):
         self._pause_search.reset_for_run(_run_id, time.monotonic())
 
         self.is_searching = True; self.btn_search.setText(tr("Stop")); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
+        # The last run's "Search completed in ..." stays until cleared (timeout 0): it
+        # described results this run has just replaced (owner, 2026-10-04).
+        self.statusBar().clearMessage()
+        self._after_restore_replay = None    # an action held for the replay was for the old results
         self.search_within_btn.setVisible(False)  # Hide during search
         self.search_start_time = time.time()
         self._search_was_cancelled = False
@@ -20806,6 +20816,7 @@ class GenizahGUI(QMainWindow):
             if hasattr(self, 'corpus_scope_combo'):
                 _lab_corpus_scope = self.corpus_scope_combo.currentData() or "genizah"
             self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap, deep_scan=deep, scan_limit=limit, corpus_scope=_lab_corpus_scope, run_id=_run_id)
+            self._last_search_params = None
         else:
             text_position = self._text_position_from_index(self.text_position_combo.currentIndex())
             # Phase 95 smoke-fix (item 2): read corpus scope from pre-search dropdown.
@@ -20813,11 +20824,34 @@ class GenizahGUI(QMainWindow):
             if hasattr(self, 'corpus_scope_combo'):
                 _corpus_scope = self.corpus_scope_combo.currentData() or "genizah"
             self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position, corpus_scope=_corpus_scope, run_id=_run_id)
+            # What this run searched, for the refinement step built from it: a replay
+            # (session restore, a removed step, scope change) re-runs exactly this --
+            # the widgets may have changed since, and the query lost its mode prefix.
+            self._last_search_params = dict(
+                query=query, gap=gap, exclude_words=list(exclude_words), text_position=text_position,
+                responsa_options=responsa_options, corpus_scope=_corpus_scope)
+        self._search_cutoff = None    # this run's arrives (cutoff_signal) before its results
+        # The previous run's enrichment (domains, measurements) arrives again only after
+        # this run ends (_launch_enrichment_workers). Until then a preview row must not be
+        # judged by it: a manuscript absent from the old domain map was hidden as
+        # "Uncategorized", and one absent from the old measurement map as "no data,
+        # fetch complete" (Codex review of PR #375). Unknown shows the row.
+        self._result_domain_map = {}
+        self._result_domain_counts = {}
+        self._has_result_domains = False
+        self.btn_domain_filter.setEnabled(False)
+        self._result_measurement_map = {}
+        self._measurement_fetch_complete = False
 
         # Every signal that writes the table or the status line is dropped
         # once New discards this run (_deliver_unless_discarded).
         _live = partial(self._discardable, '_search_new_generation')
+        if hasattr(self.search_thread, 'cutoff_signal'):
+            self.search_thread.cutoff_signal.connect(_live(self._on_search_cutoff))
         self.search_thread.results_signal.connect(_live(self.on_search_finished))
+        if hasattr(self.search_thread, 'preview_signal'):
+            self.search_thread.preview_signal.connect(
+                _live(lambda rows, t=self.search_thread: self._on_search_preview(t, rows)))
         self.search_thread.progress_signal.connect(self._on_search_progress)
         if hasattr(self.search_thread, 'pause_ack_signal'):
             self.search_thread.pause_ack_signal.connect(
@@ -21096,6 +21130,7 @@ class GenizahGUI(QMainWindow):
         # afresh right after this call (Codex, PR #343).
         self._set_local_scope_strip_visible(False)
         self.is_searching = False; self.btn_search.setText(tr("Search")); self.btn_search.setStyleSheet("background-color: #27ae60; color: white;")
+        self._completing_chain = False
         # reset_ui is the single funnel every search exit path reaches, so hiding
         # here guarantees no orphaned visible Pause button on any of them.
         self._apply_pause_state(self._pause_search, 'hidden')
@@ -21120,9 +21155,27 @@ class GenizahGUI(QMainWindow):
             self.status_label.setText(f"{tr('Processing')}... {elapsed_str}")
         else:
             self.search_progress.setFormat(f"{elapsed_str}  %p%")
-            self.status_label.setText(f"{tr('Searching')}... {elapsed_str}")
+            doing = (tr('Completing the cut-off results') if getattr(self, '_completing_chain', False)
+                     else tr('Searching'))
+            self.status_label.setText(f"{doing}... {elapsed_str}")
 
-    def on_error(self, err): self.reset_ui(); QMessageBox.critical(self, tr("Error"), str(err))
+    def on_error(self, err):
+        self.reset_ui()
+        # A preview may have shown this run's first rows; a failed run delivers
+        # no results (Codex review of PR #375), so they go, as on any search
+        # that ends empty -- the launch already cleared the previous results.
+        self.last_results = []
+        self.results_loaded = 0
+        self._preview_thread = None
+        self.shelfmark_items_by_sid = {}
+        self.title_items_by_sid = {}
+        self.results_table.setRowCount(0)
+        self.results_table.setSortingEnabled(True)   # the preview turned it off
+        self.result_row_by_sys_id = {}
+        self._res_map_by_sid = {}
+        for b in self.export_buttons: b.setEnabled(False)
+        self._update_load_more_button()
+        QMessageBox.critical(self, tr("Error"), str(err))
 
     def _reset_search(self):
         """Clear all search state and start fresh."""
@@ -21154,6 +21207,8 @@ class GenizahGUI(QMainWindow):
 
         # 2. Reset search UI state
         self.reset_ui()
+        self.statusBar().clearMessage()          # "Search completed in ..." of what New cleared
+        self._after_restore_replay = None        # nor an action held for the restore replay
 
         # 3. Clear query input
         self.query_input.setText("")
@@ -21167,6 +21222,8 @@ class GenizahGUI(QMainWindow):
         self.results_table.setRowCount(0)
         self.result_row_by_sys_id = {}
         self.last_results = []
+        self._last_search_params = None   # these results came from no search run here
+        self._search_cutoff = None
         self.last_search_query = ""
         self.results_loaded = 0
         self.hovered_row = -1
@@ -21368,7 +21425,10 @@ class GenizahGUI(QMainWindow):
         if self._load_more_remaining():
             self.load_next_batch()
 
-    def load_next_batch(self, batch_size=None):
+    def load_next_batch(self, batch_size=None, keep_sorting_off=False):
+        """Add the next rows of last_results to the table. *keep_sorting_off*: a
+        preview's rows must stay in engine order; turning sorting back on at the
+        end re-sorts at once by the user's column (Codex review of PR #375)."""
         if self.results_loaded >= len(self.last_results):
             return
 
@@ -21560,7 +21620,8 @@ class GenizahGUI(QMainWindow):
             self._update_search_row_list_indicator(row_idx, res)
 
         self.results_loaded = end_idx
-        self.results_table.setSortingEnabled(True)
+        if not keep_sorting_off:
+            self.results_table.setSortingEnabled(True)
         self._apply_results_table_filters()
 
         # Update Status: the rows actually visible, with the excluded note
@@ -21610,6 +21671,9 @@ class GenizahGUI(QMainWindow):
             pass  # Silently fail -- notification is non-critical
 
     def on_search_finished(self, results):
+        # Post-search timing (search-speed handoff): where the time goes between
+        # execute_search returning and the table showing results.
+        _pt = [('start', time.perf_counter())]
         # Show processing phase — keep progress bar visible with elapsed timer running
         self.search_progress.setRange(0, 0)  # Indeterminate
         # Monotonic and pause-discounted: see effective_elapsed().
@@ -21635,6 +21699,8 @@ class GenizahGUI(QMainWindow):
             self.last_results = []
             for b in self.export_buttons: b.setEnabled(False)
             self.results_table.setRowCount(0)
+            # A preview of this run turned sorting off; no batch load turns it on here.
+            self.results_table.setSortingEnabled(True)
             self._update_load_more_button()
             self.result_row_by_sys_id = {}
             self.shelfmark_items_by_sid = {}
@@ -21669,9 +21735,11 @@ class GenizahGUI(QMainWindow):
             return
 
         self.last_results = results
+        _pt.append(('pre', time.perf_counter()))
         # v7.16 BUG-6: prime the LOCAL filepath cache in one batched query before
         # rendering/filtering iterate per-row (prevents the ~10s UI-thread freeze).
         self._prime_local_filepath_cache(results)
+        _pt.append(('prime_local', time.perf_counter()))
 
         # Phase 55: Refinement chain update (uses RAW results before post-filters)
         if self._refine_mode:
@@ -21696,11 +21764,16 @@ class GenizahGUI(QMainWindow):
                 responsa_options=getattr(self, '_last_responsa_options', None),
                 result_count=len(results),  # total results (matches display count)
             )
+            self._apply_run_params(step)
+            # Restricted to the previous step's results: if those left matches out, so may this.
+            step.result_count_capped = self._run_left_matches_out() or bool(
+                self.refinement_chain and self.refinement_chain[-1].result_count_capped)
             step._result_uids = {
                 r.get('uid') or r.get('display', {}).get('id')
                 for r in results
                 if r.get('uid') or r.get('display', {}).get('id')
             }
+            step._result_sys_ids = raw_result_sys_ids
             self.refinement_chain.append(step)
             self.refinement_restrict_sys_ids = raw_result_sys_ids
             self._refinement_scope_sig = scope_signature(self.pre_search_restrict_sys_ids)
@@ -21748,8 +21821,10 @@ class GenizahGUI(QMainWindow):
             for r in (self.last_results or [])
         )
         self.results_table.setColumnHidden(self.COL_SRC, not (has_multiple_sources or has_local))
+        _pt.append(('setup', time.perf_counter()))
         # Phase 95 REQ-6 — update LOCAL filter button visibility after search results land.
         self._update_local_filter_visibility_search()
+        _pt.append(('local_filter_vis', time.perf_counter()))
 
         # Initialize domain data (will be populated asynchronously by DomainEnrichmentWorker)
         self._result_domain_map = {}
@@ -21758,23 +21833,29 @@ class GenizahGUI(QMainWindow):
         self._has_result_domains = False
         self.btn_domain_filter.setEnabled(False)
 
-        # Use smaller initial batch during session restore for faster first paint
-        restore_batch = 50 if getattr(self, '_restoring_session', False) else None
-        self.load_next_batch(batch_size=restore_batch)
+        # Use smaller initial batch during session restore for faster first paint.
+        # A normal search also paints FIRST_PAINT_ROWS first; the rest of the
+        # first page is built on the next event-loop turn (_fill_first_results_page).
+        restoring = getattr(self, '_restoring_session', False)
+        self.load_next_batch(batch_size=50 if restoring else min(FIRST_PAINT_ROWS, BATCH_SIZE))
+        _pt.append(('first_batch', time.perf_counter()))
 
         # Auto-fit columns to content (like double-clicking the column border)
         for col in (self.COL_SYS_ID, self.COL_LIBRARY, self.COL_SHELF, self.COL_IMG):
             self.results_table.resizeColumnToContents(col)
+        _pt.append(('resize_cols', time.perf_counter()))
 
         # Launch enrichment workers (async -- results appear first, enrichment fills in later)
         # During session restore, defer workers to keep UI responsive
         self._launch_enrichment_workers(results, defer=getattr(self, '_restoring_session', False))
+        _pt.append(('enrich_launch', time.perf_counter()))
 
         # Save session after search completes (crash-safe persistence)
         self._schedule_session_save()
         # Add to search history (skip during session restore and refinement -- D-15)
         if not getattr(self, '_restoring_session', False) and not self.refinement_chain:
             self._add_regular_search_to_history()
+        _pt.append(('session_history', time.perf_counter()))
 
         # Toast notification when app is not focused
         self._notify_search_complete(len(results), self.last_search_query)
@@ -21783,10 +21864,28 @@ class GenizahGUI(QMainWindow):
         self.reset_ui()
         # Phase 55: Update search-within button AFTER reset_ui clears is_searching
         self._update_search_within_btn()
-        # Phase 55: Reapply "all terms" filter if checkbox is checked
+        # Phase 55: Reapply "all terms" filter if checkbox is checked -- once the
+        # steps before this one are complete (D8: a cut-off one would hide true rows).
         if self._all_terms_filter and self.refinement_chain:
-            self._apply_all_terms_filter_and_rerender()
+            self._complete_chain_then(len(self.refinement_chain) - 1, self._all_terms_after_completion)
+        _pt.append(('finish', time.perf_counter()))
         search_elapsed = self._pause_search.elapsed(time.monotonic())
+        logger.info(
+            "search_ui_perf rows=%d %s total_ms=%d since_submit_ms=%d fl_index_ready=%s",
+            len(results),
+            " ".join(f"{name}_ms={int((t - _pt[i][1]) * 1000)}"
+                     for i, (name, t) in enumerate(_pt[1:])),
+            int((_pt[-1][1] - _pt[0][1]) * 1000),
+            int(search_elapsed * 1000),
+            getattr(self.searcher, '_fl_id_index', None) is not None,
+        )
+        # The all-terms re-render above already built its own page from a
+        # filtered list (and put the full list back): a fill would append
+        # rows that filter hides.
+        if not restoring and not (self._all_terms_filter and self.refinement_chain):
+            # The page size is fixed now, not when the timer fires.
+            target = min(BATCH_SIZE, len(results))
+            QTimer.singleShot(0, lambda r=results, n=target: self._fill_first_results_page(r, n))
         elapsed_str = f"{int(search_elapsed // 60)}:{int(search_elapsed % 60):02d}"
         partial_tag = f" ({tr('Partial results')})" if was_cancelled else ""
         if not getattr(self, '_restoring_session', False):
@@ -21797,6 +21896,63 @@ class GenizahGUI(QMainWindow):
         # _app_shutting_down guard is first-line inside _emit_search_telemetry (REVIEWS HIGH-2).
         # emitted guard prevents double-emit if stop_search already fired (D-09).
         self._emit_search_telemetry('cancelled' if was_cancelled else 'completed', len(results))
+
+    def _on_search_preview(self, thread, rows):
+        """Show the first rows of a search that is still running
+        (SearchThread.preview_signal). on_search_finished rebuilds the table from
+        the complete list; sort, filters, export and search-within wait for it
+        (owner decision 2026-09-30). The engine offers a preview only where the
+        final list keeps these rows first and in this order."""
+        if thread is not getattr(self, 'search_thread', None) or not getattr(self, 'is_searching', False):
+            return
+        if not rows or getattr(self, '_restoring_session', False):
+            return
+        if getattr(self, '_all_terms_filter', False) and getattr(self, 'refinement_chain', None):
+            return  # that view is built from a filtered list when the run ends
+        # A later preview of the same run extends the earlier one: append only the
+        # new rows. Anything else (first preview, or a list that does not extend
+        # what is shown) rebuilds the table.
+        shown = self.results_loaded if getattr(self, '_preview_thread', None) is thread else 0
+        extends = bool(shown) and len(rows) >= shown and [r.get('uid') for r in rows[:shown]] == [
+            r.get('uid') for r in (self.last_results or [])[:shown]]
+        if extends and len(rows) == shown:
+            return
+        status = self.status_label.text()
+        if not extends:
+            self.results_loaded = 0
+            self.results_table.setRowCount(0)
+            self.result_row_by_sys_id = {}
+            self.shelfmark_items_by_sid = {}
+            self.title_items_by_sid = {}
+            self._res_map_by_sid = {}
+        self._preview_thread = thread
+        self.last_results = list(rows)
+        self._res_map_by_sid.update({r['display']['id']: r for r in rows})
+        self.load_next_batch(batch_size=len(rows) - self.results_loaded, keep_sorting_off=True)
+        self.status_label.setText(status)            # still searching, not a result count
+        logger.info("search_preview since_submit_ms=%d rows_shown=%d",
+                    int(self._pause_search.elapsed(time.monotonic()) * 1000), self.results_loaded)
+
+    def _fill_first_results_page(self, results, target):
+        """Build the rest of the first page (*target* rows, fixed when the search
+        landed) after the first FIRST_PAINT_ROWS have painted. Does nothing if
+        another search has started or replaced the list since, or if the page is
+        already full."""
+        if getattr(self, '_app_shutting_down', False):
+            return
+        if getattr(self, 'last_results', None) is not results or getattr(self, 'is_searching', False):
+            return
+        if getattr(self, '_all_terms_filter', False) and getattr(self, 'refinement_chain', None):
+            return  # the table shows a filtered page built from another list
+        # The first rows are on screen by now: this is the wait the user sees.
+        logger.info("search_first_paint since_submit_ms=%d rows_shown=%d",
+                    int(self._pause_search.elapsed(time.monotonic()) * 1000), self.results_loaded)
+        missing = target - self.results_loaded
+        if missing <= 0:
+            return
+        self.load_next_batch(batch_size=missing)
+        for col in (self.COL_SYS_ID, self.COL_LIBRARY, self.COL_SHELF, self.COL_IMG):
+            self.results_table.resizeColumnToContents(col)
 
     # ---- Phase 55: Refinement chain methods ----
 
@@ -21851,6 +22007,21 @@ class GenizahGUI(QMainWindow):
             self._update_refinement_strip()
         if hasattr(self, '_update_search_within_btn'):
             self._update_search_within_btn()
+        self._run_after_restore_replay()
+
+    def _run_after_restore_replay(self):
+        """Run the search-within or all-terms action asked for while the restored
+        chain was replaying (_complete_chain_then held it). Not when a search has
+        started since: completing would stop it, and its results replace the ones
+        the action was for (start_search and New drop the action anyway)."""
+        pending = getattr(self, '_after_restore_replay', None)
+        self._after_restore_replay = None
+        if pending is None or getattr(self, 'is_searching', False):
+            return
+        replay = getattr(self, '_replay_restore_thread', None)
+        if replay is not None:
+            replay.wait(2000)    # it has delivered its result; let run() return
+        self._complete_chain_then(*pending)
 
     def _on_replay_for_restore_error(self, msg):
         """Replay failed -- clear the chain rather than leave stale state."""
@@ -21861,6 +22032,7 @@ class GenizahGUI(QMainWindow):
             self.status_label.setText(self._search_status_or_blank())
         if hasattr(self, '_update_refinement_strip'):
             self._update_refinement_strip()
+        self._run_after_restore_replay()     # a held action runs on what is left
 
     def _search_status_or_blank(self):
         """What the replay leaves in the status label once it is done: the
@@ -21871,6 +22043,23 @@ class GenizahGUI(QMainWindow):
             return self._search_status_summary()
         return ''
 
+    def _apply_run_params(self, step):
+        """Fill *step* with what the search that produced the shown results ran with
+        (_last_search_params): its query without a mode prefix, gap, NOT-words,
+        position, Responsa options and corpus. Both step builders took some of these
+        from the widgets and left the rest at defaults -- the first step of a chain
+        lost all four, the committed step its NOT-words -- so a replay ran another
+        search. A Lab run, or results restored from a session, keep the widgets' values."""
+        params = getattr(self, '_last_search_params', None)
+        if not params:
+            return
+        step.query = params['query'] or step.query
+        step.gap = params['gap']
+        step.exclude_words = list(params['exclude_words'])
+        step.text_position = params['text_position']
+        step.responsa_options = params['responsa_options']
+        step.corpus_scope = params['corpus_scope']
+
     def _enter_refine_mode(self):
         """D-02, D-03: Activate refine mode on desktop search bar."""
         if getattr(self, 'is_searching', False):
@@ -21879,8 +22068,6 @@ class GenizahGUI(QMainWindow):
         raw_ids = {r.get('display', {}).get('id') for r in getattr(self, 'last_results', []) if r.get('display', {}).get('id')}
         if not raw_ids:
             return
-        self.refinement_restrict_sys_ids = raw_ids
-        self._refinement_scope_sig = scope_signature(self.pre_search_restrict_sys_ids)
         # Add the CURRENT search as step 0 if chain is empty (so breadcrumb shows the original query)
         if not self.refinement_chain and self.query_input.text().strip():
             mode_idx = self.mode_combo.currentIndex()
@@ -21894,18 +22081,40 @@ class GenizahGUI(QMainWindow):
                 mode=mode_val or 'exact',
                 result_count=len(getattr(self, 'last_results', [])),
             )
+            self._apply_run_params(step0)
+            step0.result_count_capped = self._run_left_matches_out()
             step0._result_uids = {
                 r.get('uid') or r.get('display', {}).get('id')
                 for r in getattr(self, 'last_results', [])
                 if r.get('uid') or r.get('display', {}).get('id')
             }
+            step0._result_sys_ids = set(raw_ids)
             self.refinement_chain.append(step0)
             self._update_refinement_strip()
-        ms_count = len(raw_ids)  # unique manuscript count
+        # D8: the next search is restricted to these manuscripts; a step that was cut
+        # off is completed first, or the search would miss what it left out.
+        self._complete_chain_then(None, lambda result: self._finish_enter_refine_mode(result, raw_ids))
+
+    def _finish_enter_refine_mode(self, result, raw_ids):
+        """The rest of _enter_refine_mode, once the chain is complete (or not: *result*
+        is None when nothing needed completing). Stopped, it searches within the shown
+        results' manuscripts, as before D8 -- and the badge says the set is cut off."""
+        restrict = raw_ids
+        if result and not result['interrupted'] and result['restrict'] is not None:
+            restrict = result['restrict']
+        chain = self.refinement_chain
+        capped = chain[-1].result_count_capped if chain else self._run_left_matches_out()
+        self.refinement_restrict_sys_ids = restrict
+        self._refinement_scope_sig = scope_signature(self.pre_search_restrict_sys_ids)
+        if result is not None:
+            self._update_refinement_strip()     # completed steps show their full counts
+            self._schedule_session_save()
+        ms_count = len(restrict)  # unique manuscript count
         self._refine_mode = True
         self._zero_result_refine = False
         self._zero_result_back_btn.setVisible(False)
-        self.refine_badge.setText(f"{tr('Searching within')} {ms_count:,} {tr('manuscripts')}")
+        self.refine_badge.setText(
+            f"{tr('Searching within')} {self._count_text(ms_count, capped, sep=True)} {tr('manuscripts')}")
         self.refine_badge.setVisible(True)
         self.refine_cancel_btn.setVisible(True)
         self.query_input.setFocus()
@@ -21973,7 +22182,7 @@ class GenizahGUI(QMainWindow):
             strip_layout.addWidget(chip_frame)
 
         # Result count for final step only (D-06)
-        count_label = QLabel(f'{chain[-1].result_count:,}')
+        count_label = QLabel(self._count_text(chain[-1].result_count, chain[-1].result_count_capped, sep=True))
         count_label.setStyleSheet('font-size: 12px; font-weight: bold; color: palette(highlight); margin-left: 4px;')
         strip_layout.addWidget(count_label)
 
@@ -22015,8 +22224,101 @@ class GenizahGUI(QMainWindow):
     def _toggle_all_terms_filter(self, checked):
         """Toggle 'Only results with all terms' post-filter and re-render results."""
         self._all_terms_filter = checked
-        if hasattr(self, 'last_results') and self.last_results:
+        if not (hasattr(self, 'last_results') and self.last_results):
+            return
+        if getattr(self, 'is_searching', False):
+            return      # the run in flight renders with the filter as it is when it ends
+        if checked and self.refinement_chain:
+            # D8: the steps before the shown one are completed first.
+            self._complete_chain_then(len(self.refinement_chain) - 1, self._all_terms_after_completion)
+        else:
             self._apply_all_terms_filter_and_rerender()
+
+    def _all_terms_after_completion(self, result):
+        """Render with the all-terms filter once the steps before the shown one are
+        complete. Stopped (or failed), their sets are still cut off and would hide
+        rows that do hold every term (Codex review of PR #375): the filter is turned
+        off instead -- its checkbox unticks -- and the rows show unfiltered."""
+        if result and result.get('interrupted'):
+            self._all_terms_filter = False
+            if hasattr(self, '_update_refinement_strip'):
+                self._update_refinement_strip()
+        self._apply_all_terms_filter_and_rerender()
+
+    def _forget_chain_sets(self):
+        """The filter scope changed under the chain: each step's manuscripts were found
+        in the old scope, so search-within and the all-terms filter run every step
+        again first (D8; _complete_chain_then) instead of reusing them."""
+        for step in self.refinement_chain:
+            step._result_sys_ids = None
+
+    def _complete_chain_then(self, upto, on_done):
+        """Complete the refinement chain's cut-off steps, then on_done(result) (D8).
+
+        Nothing to complete (shared.refinement.chain_needs_completion): on_done(None)
+        at once. Otherwise a run like a search -- progress, Pause, Stop and New --
+        reads every match of each cut-off step (ChainCompletionThread), and
+        on_done gets complete_chain's {'restrict', 'interrupted'}. Stop, or a
+        failure, leaves the chain as it was (the steps already completed keep their
+        sets) and on_done gets {'restrict': None, 'interrupted': True}; New drops
+        on_done. *upto* limits the work to the first *upto* steps."""
+        if not chain_needs_completion(self.refinement_chain, upto):
+            on_done(None)
+            return
+        replay = getattr(self, '_replay_restore_thread', None)
+        if replay is not None and replay.isRunning():
+            # The restored chain is being replayed into these same steps: the action
+            # runs when the replay ends (_run_after_restore_replay). It was dropped
+            # (Codex review of PR #375). The latest request wins.
+            self._after_restore_replay = (upto, on_done)
+            self.status_label.setText(tr('Restoring refinement chain...'))
+            return
+        if not self._drain_previous_worker('search_thread', self._pause_search):
+            return
+        self._run_seq += 1
+        run_id = self._run_seq
+        self._pause_search.reset_for_run(run_id, time.monotonic())
+        thread = ChainCompletionThread(self.refinement_chain, self.searcher,
+                                       getattr(self, 'pre_search_restrict_sys_ids', None),
+                                       upto=upto, run_id=run_id)
+        self.search_thread = thread
+        # The shown results were not stopped: Stop here must not mark them partial.
+        was_cancelled = getattr(self, '_search_was_cancelled', False)
+        self._search_was_cancelled = False
+        self.is_searching = True; self.btn_search.setText(tr("Stop")); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
+        self._completing_chain = True
+        self.search_within_btn.setVisible(False)
+        self.search_progress.setRange(0, 100); self.search_progress.setValue(0); self.search_progress.setFormat("%p%"); self.search_progress.setVisible(True)
+        self.status_label.setText(f"{tr('Completing the cut-off results')}...")
+        if not hasattr(self, '_search_elapsed_timer'):
+            self._search_elapsed_timer = QTimer(self)
+            self._search_elapsed_timer.timeout.connect(self._update_search_elapsed)
+        self._search_elapsed_timer.start(1000)
+        self._apply_pause_state(self._pause_search, 'pause')
+
+        def finished(result):
+            self.reset_ui()
+            self._search_was_cancelled = was_cancelled
+            self.status_label.setText(self._search_status_or_blank())
+            self._update_refinement_strip()
+            self._update_search_within_btn()
+            self._schedule_session_save()
+            if self.refinement_chain is thread.chain:
+                on_done(result)
+            # else: a chip was removed or the chain cleared meanwhile -- the result
+            # belongs to a chain that is no longer shown.
+
+        def failed(err):
+            logger.warning("Completing the refinement chain failed: %s", err)
+            QMessageBox.warning(self, tr("Error"), str(err))
+            finished({'restrict': None, 'interrupted': True})
+
+        _live = partial(self._discardable, '_search_new_generation')
+        thread.finished_signal.connect(_live(finished))
+        thread.error_signal.connect(_live(failed))
+        thread.progress_signal.connect(self._on_search_progress)
+        thread.pause_ack_signal.connect(lambda rid, ep: self._on_pause_ack(self._pause_search, rid, ep))
+        thread.start()
 
     def _apply_all_terms_filter_and_rerender(self):
         """Re-render results table applying the all-terms filter."""
@@ -22076,7 +22378,9 @@ class GenizahGUI(QMainWindow):
             ms_count = 0
         self.search_within_btn.setVisible(ms_count > 0 and not is_searching)
         if ms_count > 0:
-            self.search_within_btn.setText(f"🔍 {tr('Search within')} {ms_count:,} {tr('manuscripts')}")
+            self.search_within_btn.setText(
+                f"🔍 {tr('Search within')} {self._count_text(ms_count, self._shown_results_capped(), sep=True)} "
+                f"{tr('manuscripts')}")
 
     def _undo_zero_result_refine(self):
         """D-14a: Recover from zero-result refinement -- replay chain to restore previous results."""
@@ -22467,6 +22771,24 @@ class GenizahGUI(QMainWindow):
         n = getattr(self, '_search_rows_excluded', 0)
         return f" ({n} {tr('excluded')})" if n else ""
 
+    def _on_search_cutoff(self, cutoff):
+        self._search_cutoff = dict(cutoff)
+
+    def _shown_results_capped(self):
+        """Whether the shown results leave matches out because the search reached its
+        50,000-candidate limit (D8; Stop has its own "Partial results" note)."""
+        return bool((getattr(self, '_search_cutoff', None) or {}).get('capped'))
+
+    def _run_left_matches_out(self):
+        """The shown results were cut off or stopped: a step built on them is incomplete."""
+        cutoff = getattr(self, '_search_cutoff', None) or {}
+        return bool(cutoff.get('capped') or cutoff.get('interrupted'))
+
+    def _count_text(self, n, capped, sep=False):
+        """A result count as shown: "25,000+" when the list was cut off (D8)."""
+        text = f"{n:,}" if sep else str(n)
+        return text + "+" if capped else text
+
     def _search_status_summary(self, domains=0):
         """The Search results status line, from the table as it is now.
 
@@ -22476,7 +22798,8 @@ class GenizahGUI(QMainWindow):
         """
         table = self.results_table
         visible = sum(1 for r in range(table.rowCount()) if not table.isRowHidden(r))
-        total = len(self.last_results) if self.last_results else 0
+        total = self._count_text(len(self.last_results) if self.last_results else 0,
+                                 self._shown_results_capped())
         expanded = getattr(self, '_responsa_expanded_count', 0)
         if domains:
             text = tr("Showing {} of {} results (filtering {} domains)").format(
@@ -22933,6 +23256,7 @@ class GenizahGUI(QMainWindow):
             'token': self._pgp_tag_active_token,
         }
         self.status_label.setText(tr("Searching tag: {}...").format(tag))
+        self.statusBar().clearMessage()          # the last search's "Search completed in ..."
         self._pgp_tag_search_worker = PGPTagSearchWorker(tag)
         # CR-114-01: bind THIS run's token into the slot so a stale slot from a superseded
         # worker carries its OLD token and is skipped by the emit helper's token guard.
@@ -22959,6 +23283,8 @@ class GenizahGUI(QMainWindow):
             self._emit_pgp_tag_search_telemetry('completed', 0, token=token)
             self.status_label.setText(tr("No results for tag: {}").format(tag))
             self.last_results = []
+            self._last_search_params = None   # a tag search: no refinement params
+            self._search_cutoff = None
             self.results_loaded = 0
             self.results_table.setRowCount(0)
             self._update_load_more_button()
@@ -23054,6 +23380,8 @@ class GenizahGUI(QMainWindow):
         self.chk_search_header.blockSignals(False)
 
         self.last_results = formatted
+        self._last_search_params = None   # a tag search: no refinement params
+        self._search_cutoff = None
         # v7.16 BUG-6: batch-prime LOCAL filepath cache (see on_search_finished).
         self._prime_local_filepath_cache(formatted)
         self.results_loaded = 0
@@ -31088,7 +31416,8 @@ class GenizahGUI(QMainWindow):
         h.setContentsMargins(4, 2, 4, 2)
         h.setSpacing(4)
 
-        results_word = tr("{count} results").format(count=count)
+        results_word = tr("{count} results").format(
+            count=self._count_text(count, entry.get('result_count_capped', False)))
         query = self._history_query_with_witnesses(entry, query)
         if search_type == 'regular':
             label_text = f"{mode_char}  {query}  ({results_word})"
@@ -31224,6 +31553,8 @@ class GenizahGUI(QMainWindow):
         if results:
             # Legacy entry with a stored snapshot — restore instantly.
             self.last_results = results
+            self._last_search_params = None   # a stored snapshot: no params of a run here
+            self._search_cutoff = dict(state.get('search_cutoff') or {'capped': False, 'interrupted': False})
             self.on_search_finished(results)
             self._schedule_session_save()
             return
@@ -31343,6 +31674,7 @@ class GenizahGUI(QMainWindow):
         add_history_entry('regular', {
             'query': query,
             'result_count': len(results),
+            'result_count_capped': self._shown_results_capped(),
             'timestamp': datetime.now().isoformat(),
             'search_params': {
                 'mode_index': self.mode_combo.currentIndex(),
@@ -31604,6 +31936,12 @@ class GenizahGUI(QMainWindow):
                     'text_position': self.text_position_combo.currentIndex() if hasattr(self, 'text_position_combo') else 0,
                     'variant_preset': getattr(self, '_current_variant_preset', 70),
                     'results': getattr(self, 'last_results', [])[:5000],
+                    # D8: the restored count shows "+" if the search was cut off or the
+                    # snapshot above drops rows.
+                    'search_cutoff': {
+                        'capped': bool((getattr(self, '_search_cutoff', None) or {}).get('capped'))
+                                  or len(getattr(self, 'last_results', [])) > 5000,
+                        'interrupted': bool((getattr(self, '_search_cutoff', None) or {}).get('interrupted'))},
                     'domain_exclusions': sorted(getattr(self, '_domain_exclusions', set())),
                     'printed_filter': getattr(self, '_printed_filter_state', 'all'),
                     'local_filter': getattr(self, '_local_filter_state_search', 'all'),
@@ -31883,6 +32221,11 @@ class GenizahGUI(QMainWindow):
             # Restore regular search results
             if reg.get('results'):
                 self.last_results = reg['results']
+                self._last_search_params = None   # these results came from no search run here
+                # A session saved before 2026-10-04 has no cut-off record: a full 5,000-row
+                # snapshot was most likely cut.
+                self._search_cutoff = dict(reg.get('search_cutoff') or
+                                           {'capped': len(reg['results']) >= 5000, 'interrupted': False})
                 self.on_search_finished(self.last_results)
                 self.search_progress.setValue(n_reg)
                 QApplication.processEvents()  # Let UI paint before composition restore

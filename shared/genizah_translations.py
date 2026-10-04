@@ -146,7 +146,7 @@ TRANSLATIONS = {
     "Current level": "דרגה נוכחית",
     "Max changes:": "שינויים:",
     "Fuzzy search": "חיפוש מקורב",
-    "Fuzzy search: Levenshtein distance": "חיפוש מקורב: מרחק לווינשטיין",
+    "Fuzzy search: near spellings, 1 letter different (2 in words of 5+ letters)": "חיפוש מקורב: כתיב קרוב, הבדל של אות אחת (שתיים במילים של 5 אותיות ומעלה)",
     "Regex: Use AI Assistant for complex patterns": "ביטוי רגולרי: השתמש בעוזר ה-AI לתבניות מורכבות",
     "Search in Title metadata": "חיפוש בכותרות (Metadata)",
     "Search in Shelfmark metadata": "חיפוש במספרי מדף (Metadata)",
@@ -673,7 +673,7 @@ TRANSLATIONS = {
     <li><b>וריאנטים (?):</b> שגיאות OCR בסיסיות.</li>
     <li><b>מורחב (??):</b> וריאנטים נוספים.</li>
     <li><b>מקסימלי (???):</b> חילופים אגרסיביים (השתמש בזהירות).</li>
-    <li><b>מקורב (~):</b> מרחק לווינשטיין (1-2 שגיאות).</li>
+    <li><b>מקורב (~):</b> כתיב קרוב: מילים שלמות השונות באות אחת (בשתיים במילים של 5 אותיות ומעלה) &mdash; אות שנוספה, נשמטה או הוחלפה, או שתי אותיות סמוכות שהתחלפו. צורות עם תחילית נכללות (ושלום עבור שלום).</li>
     <li><b>ביטוי רגולרי:</b> תבניות מורכבות (היעזר ב-AI).</li>
     <li><b>כותרת:</b> חיפוש בכותרות החיבורים.</li>
     <li><b>מספר מדף:</b> חיפוש במספרי מדף.</li>
@@ -3299,6 +3299,7 @@ TRANSLATIONS = {
     "manuscripts": "כתבי יד",
     "Re-evaluating refinement...": "מעריך מחדש צמצום...",
     "Restoring refinement chain...": "משחזר שרשרת צמצום...",
+    "Completing the cut-off results": "משלים את התוצאות שנקטעו",
     "Back to previous step": "חזרה לשלב הקודם",
     "Scope changed \u2014 results will update on next search": "הטווח השתנה \u2014 התוצאות יתעדכנו בחיפוש הבא",
     "0 results within current scope": "0 תוצאות בטווח הנוכחי",

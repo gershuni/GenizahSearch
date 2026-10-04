@@ -47,7 +47,7 @@ def _make_search_engine():
     var_mgr.get_variants = MagicMock(side_effect=lambda term, mode, limit=200: [term])
 
     with patch.object(SearchEngine, 'reload_index', return_value=False):
-        engine = SearchEngine(meta_mgr, var_mgr)
+        engine = SearchEngine(meta_mgr, var_mgr, worker_mode=True, open_local=False)  # no real FL-ID build / LOCAL index (see test_responsa_edge_cases)
 
     return engine
 
@@ -62,7 +62,7 @@ def _make_search_engine_with_hits(content_texts, uid_prefix='uid'):
     var_mgr.get_variants = MagicMock(side_effect=lambda term, mode, limit=200: [term])
 
     with patch.object(SearchEngine, 'reload_index', return_value=False):
-        engine = SearchEngine(meta_mgr, var_mgr)
+        engine = SearchEngine(meta_mgr, var_mgr, worker_mode=True, open_local=False)  # no real FL-ID build / LOCAL index (see test_responsa_edge_cases)
 
     engine.index = MagicMock()
     engine.searcher = MagicMock()
