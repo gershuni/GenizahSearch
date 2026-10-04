@@ -19,10 +19,18 @@ import tantivy
 # Helpers
 # ---------------------------------------------------------------------------
 
+# _NO_FL_ID_BUILD: every engine here is built without its FL-ID background build.
+# Built as the app builds it (worker_mode=False), it would load the REAL browse map
+# from the developer's index and call this MagicMock meta once per page, holding the
+# class browse-map lock and the GIL for seconds after the test ended -- which failed
+# tests/test_browse_map_atomic_write.py and the 1-second waits of
+# tests/test_search_load_control.py when they shared a runner chunk (2026-10-04).
+
+
 def _make_engine_no_local():
     """Construct a SearchEngine with no real index and local_searcher=None."""
     from genizah_core import SearchEngine
-    with patch("genizah_core.SearchEngine.reload_index", return_value=False):
+    with patch("genizah_core.SearchEngine.reload_index", return_value=False),             patch.object(SearchEngine, "start_fl_id_index_build"):   # see _NO_FL_ID_BUILD
         with patch.object(SearchEngine, "_open_local_searcher"):
             meta = MagicMock()
             meta.parse_full_id_components.return_value = {}
@@ -98,7 +106,7 @@ def test_reload_local_indexes_picks_up_new_docs_without_restart(tmp_path):
     # Open engine against the empty index
     with patch.object(genizah_core.Config, "LOCAL_INDEX_DIR", index_dir):
         with patch.object(genizah_core.Config, "LOCAL_LAB_INDEX_DIR", str(tmp_path / "LocalLabIndex")):
-            with patch("genizah_core.SearchEngine.reload_index", return_value=False):
+            with patch("genizah_core.SearchEngine.reload_index", return_value=False),                     patch("genizah_core.SearchEngine.start_fl_id_index_build"):
                 meta = MagicMock()
                 meta.parse_full_id_components.return_value = {}
                 engine = genizah_core.SearchEngine(meta, MagicMock())
@@ -221,7 +229,7 @@ def _make_engine_with_local(tmp_path, docs):
     _build_local_index(index_dir, docs)
     with patch.object(genizah_core.Config, "LOCAL_INDEX_DIR", index_dir):
         with patch.object(genizah_core.Config, "LOCAL_LAB_INDEX_DIR", str(tmp_path / "LocalLabIndex")):
-            with patch("genizah_core.SearchEngine.reload_index", return_value=False):
+            with patch("genizah_core.SearchEngine.reload_index", return_value=False),                     patch("genizah_core.SearchEngine.start_fl_id_index_build"):
                 meta = _MM()
                 meta.parse_full_id_components.return_value = {}
                 engine = genizah_core.SearchEngine(meta, _MM())

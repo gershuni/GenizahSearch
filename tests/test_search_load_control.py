@@ -35,10 +35,15 @@ def test_enrichment_batch_slot_releases_after_use():
     asyncio.run(exercise())
 
 
-def test_cancelled_ui_awaiter_signals_its_isolated_job():
+def test_cancelled_ui_awaiter_signals_its_isolated_job(monkeypatch):
     """Cancellation reaches the waiter even without engine progress events."""
     from threading import Event
+    from web import research_jobs
     from web.research_jobs import run_research_call, _cancel_context
+    # A web test that runs the app's shutdown hook (tests/test_web_saved_joins_isolation.py)
+    # leaves the module's executor shut down -- shutdown_research() keeps it, so nothing
+    # starts threads while the server exits. This test needs a live one of its own.
+    monkeypatch.setattr(research_jobs, '_wait_executor', None)
     started, finish = Event(), Event()
 
     def worker():
@@ -56,7 +61,11 @@ def test_cancelled_ui_awaiter_signals_its_isolated_job():
         except asyncio.CancelledError:
             pass
         assert await asyncio.to_thread(finish.wait, 1)
-    asyncio.run(exercise())
+    try:
+        asyncio.run(exercise())
+    finally:
+        if research_jobs._wait_executor is not None:
+            research_jobs._wait_executor.shutdown(wait=False)
 
 
 def test_search_ui_uses_bounded_background_enrichment_and_core_permit():
