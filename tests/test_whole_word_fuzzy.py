@@ -170,7 +170,9 @@ def test_with_a_gap_a_later_word_is_tried_when_the_further_one_is_not_a_near_spe
 
 def test_a_word_not_of_hebrew_letters_is_matched_as_typed_in_a_phrase():
     assert _found(f"{W} AB", f"{NEAR} ab") == f"{NEAR} ab"     # IGNORECASE, as Exact
-    assert _found(f"{W} AB", f"{NEAR} abc") is not None        # Latin neighbours are lenient (as Exact)
+    # A Latin letter continues a word, as in Exact's tokens (Codex review of PR #375:
+    # this was lenient, and `abc def` matched inside `xabc defz`).
+    assert _found(f"{W} AB", f"{NEAR} abc") is None
 
 
 def test_the_closest_spelling_on_a_page_is_preferred():
@@ -441,3 +443,51 @@ def test_the_forms_query_is_built_for_the_index_it_runs_on(engine, tmp_path):
         forms = [W] if mode == "fuzzy" else [NEAR]       # a variant query for the form itself
         q = engine.build_variant_query(forms, mode, content_search_field="content_search", index=other)
         assert other.searcher().search(q, 10).hits, mode
+
+
+# --- My Library rows take the main index's rule (Codex review of PR #375) ----------
+# A LOCAL row took the first regex match anywhere: a phrase inside longer words was a
+# hit in Exact and Variants, and a positioned search ignored the position -- and a
+# positioned Fuzzy search looked up only the typed spelling.
+
+@pytest.fixture
+def local_cases(engine, tmp_path):
+    from shared.local_indexer import build_local_schema
+    idx = tantivy.Index(build_local_schema(), path=str(tmp_path))
+    register_search_tokenizers(idx)
+    docs = {"near_start": f"{NEAR} אבג דהו", "near_middle": f"אבג {NEAR} דהו",
+            "exact_middle": f"אבג {W} דהו",
+            "inside_pair": f"אבג ב{W} {ON} {W} זחט {ON}", "whole_pair": f"אבג {W} {ON} דהו"}
+    w = idx.writer(heap_size=50_000_000, num_threads=1)
+    for uid, text in docs.items():
+        w.add_document(tantivy.Document(
+            unique_id=uid, content=text, content_search=strip_search_diacritics(text), source="LOCAL",
+            full_header=f"{uid}_LOCAL_P1_F1", shelfmark=uid, scope="page", boundaries="",
+            **Indexer._extract_position_fields(text)))
+    w.commit()
+    w.wait_merging_threads()
+    idx.reload()
+    saved = (getattr(engine, "local_index", None), getattr(engine, "local_searcher", None),
+             getattr(engine, "_local_has_content_search", False))
+    engine.local_index, engine.local_searcher, engine._local_has_content_search = idx, idx.searcher(), True
+    yield engine
+    engine.local_index, engine.local_searcher, engine._local_has_content_search = saved
+
+
+def _local_uids(eng, query, mode, scope, **kw):
+    return {r["uid"] for r in eng.execute_search(query, mode, 0, corpus_scope=scope, **kw)
+            if r.get("display", {}).get("source") == "LOCAL"}
+
+
+@pytest.mark.parametrize("scope", ["local", "all"])
+def test_my_library_fuzzy_at_a_position_finds_a_near_spelling_there(local_cases, scope):
+    got = _local_uids(local_cases, W, "fuzzy", scope, text_position="start")
+    assert got == {"near_start"}, "a near spelling at the start, and nothing elsewhere"
+
+
+@pytest.mark.parametrize("scope", ["local", "all"])
+@pytest.mark.parametrize("mode", ["literal", "variants"])
+def test_my_library_phrases_match_whole_words(local_cases, scope, mode):
+    # (Fuzzy takes ב{W}: a prefixed form is a near spelling, owner 2026-10-02.)
+    got = _local_uids(local_cases, f"{W} {ON}", mode, scope) & {"inside_pair", "whole_pair"}
+    assert got == {"whole_pair"}

@@ -163,11 +163,11 @@ def test_d_f5_integration_regex_arrives_at_build_local_result_dict():
     captured = {}
     orig = engine._build_local_result_dict
 
-    def _spy(doc, score, regex=None, pattern_str=None):
+    def _spy(doc, score, regex=None, pattern_str=None, accept=None):
         captured['regex'] = regex
         captured['pattern_str'] = pattern_str
         # Return a minimal dict so the merger doesn't crash
-        return orig(doc, score, regex=regex, pattern_str=pattern_str)
+        return orig(doc, score, regex=regex, pattern_str=pattern_str, accept=accept)
 
     # Stub a fake local_searcher with one hit
     fake_doc = _mock_doc(content="the genizah text matches here")

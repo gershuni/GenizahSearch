@@ -347,25 +347,59 @@ def _looked_past(ch):
     return ch in _IN_WORD_QUOTES or unicodedata.category(ch)[0] == 'M'
 
 
+def _continues_word(ch):
+    """A character a word goes on through: a letter or a decimal digit of any script,
+    or '_' -- the hebword tokenizer's word class, so Exact's tokens agree. Hebrew letters
+    alone missed `abc` inside `xabc` and `שלום` before a digit (Codex review of PR #375)."""
+    cat = unicodedata.category(ch)
+    return cat[0] == 'L' or cat in ('Nd', 'Pc')
+
+
+# Between the windows of the joined crossing pass: no separator can span it (the gap
+# regex's separator excludes word characters, and it is one), and it neither goes on a
+# word (category No, not a letter or a decimal digit) nor is looked past -- so the
+# whole-word test sees a window's edge as an edge. '_' did until '_' began to count
+# as a word character (it is one in the tokenizer).
+_WINDOW_JOINER = chr(0xB2)
+
+
 def _starts_word(text, start):
-    """True unless text[start] continues a Hebrew word that began before it."""
+    """True unless text[start] continues a word that began before it."""
     i = start - 1
     while i >= 0 and _looked_past(text[i]):
         i -= 1
-    return not (i >= 0 and '\u05D0' <= text[i] <= '\u05EA')
+    return not (i >= 0 and _continues_word(text[i]))
 
 
 def _ends_word(text, end):
-    """True unless the Hebrew word ending at *end* goes on after it."""
+    """True unless the word ending at *end* goes on after it."""
     j = end
     while j < len(text) and _looked_past(text[j]):
         j += 1
-    return not (j < len(text) and '\u05D0' <= text[j] <= '\u05EA')
+    return not (j < len(text) and _continues_word(text[j]))
 
 
 def _whole_word_span(text, start, end):
-    """True unless the span text[start:end] continues a Hebrew word on either side."""
+    """True unless the span text[start:end] continues a word on either side."""
     return _starts_word(text, start) and _ends_word(text, end)
+
+
+def _local_match_accept(whole_words, text_position, query_str):
+    """What a My Library row may use as its match, as the main index's _accept: a
+    whole word (Exact, Variants, Fuzzy) at the text position, when one is set. None
+    when neither applies. The LOCAL rows took the first regex match anywhere, so
+    `בשלום עולם` was a hit for `שלום עולם` and a start-position search ignored the
+    position (Codex review of PR #375)."""
+    if not whole_words and not text_position:
+        return None
+    strip_br = not _query_has_brackets(query_str)
+
+    def accept(text, m):
+        if whole_words and not _whole_word_span(text, m.start(), m.end()):
+            return False
+        return not text_position or Indexer._validate_position_match(
+            text, m, text_position, None, strip_brackets=strip_br)
+    return accept
 
 
 def _page_in_restriction(page, page_uids, sys_ids):
@@ -1323,7 +1357,8 @@ class SearchEngine:
     @bounded_search
     def _query_local_index(self, query_str: str, mode: str, gap: int,
                            limit=None, regex=None, tantivy_query_str=None,
-                           progress_callback=None, phase_callback=None, tantivy_query=None):
+                           progress_callback=None, phase_callback=None, tantivy_query=None,
+                           accept=None):
         """Query the LOCAL side-index. Returns [] if local_searcher is None (D-37).
 
         MEDIUM-1 note: this uses a simplified parse_query (not the full Responsa
@@ -1444,7 +1479,7 @@ class SearchEngine:
                             pass  # progress is advisory; cancellation is not
                     doc = self.local_searcher.doc(doc_address)
                     hit = self._build_local_result_dict(
-                        doc, score, regex=regex, pattern_str=pattern_str
+                        doc, score, regex=regex, pattern_str=pattern_str, accept=accept
                     )
                     # D-04.1 filter-out: skip candidates whose regex didn't match.
                     # _build_local_result_dict returns None for those.
@@ -1471,7 +1506,7 @@ class SearchEngine:
             LOGGER.warning("LOCAL index query failed: %r", e)
             return []
 
-    def _build_local_result_dict(self, doc, score, regex=None, pattern_str=None):
+    def _build_local_result_dict(self, doc, score, regex=None, pattern_str=None, accept=None):
         """Construct a result row from a LOCAL Tantivy doc per D-34 shape.
 
         Phase 96 D-F5: when `regex` is provided, populate snippet + raw_file_hl
@@ -1488,6 +1523,9 @@ class SearchEngine:
 
         Back-compat: when `regex` is None (legacy callers), the function ALWAYS
         returns a dict (old shape — snippet = content[:200]).
+
+        *accept* (_local_match_accept): with a regex, the row needs a match it takes
+        -- a whole word at the text position -- not just any match.
 
         Returns:
             - dict (the hit) when regex matches OR regex is None
@@ -1515,6 +1553,11 @@ class SearchEngine:
         # Phase 96 D-F5: compute snippet via self.highlight when regex provided.
         # D-04.1: filter-out signal when regex doesn't match (return None).
         if regex is not None:
+            if accept is not None:
+                first = regex.search(content)
+                if first is None or _first_accepted_match(
+                        regex, content, first, lambda m: accept(content, m)) is None:
+                    return None
             hl_c = self.highlight(content, regex, for_file=False)
             if not hl_c:
                 # D-04.1: Tantivy matched but regex didn't.
@@ -2649,19 +2692,19 @@ class SearchEngine:
 
         spans = []
         if gap == 0 and len(pieces) > 1:
-            # One pass over all windows joined by '_': a gap-0 match cannot hold
-            # '_' (it is neither a separator nor a letter of a term).
+            # One pass over all windows joined by _WINDOW_JOINER: a gap-0 match
+            # cannot hold it (it is neither a separator nor a letter of a term).
             offsets, pos = [], 0
             for text, _cs, _lo, _o in pieces:
                 offsets.append(pos)
                 pos += len(text) + 1
-            joined = '_'.join(p[0] for p in pieces)
+            joined = _WINDOW_JOINER.join(p[0] for p in pieces)
             m = regex.search(joined)
             while m is not None:
                 j = bisect.bisect_right(offsets, m.start()) - 1
                 cs = offsets[j] + pieces[j][1]
-                # A window starts and ends at a whitespace edge and '_' is no
-                # Hebrew letter, so the whole-word test sees the true neighbours.
+                # A window starts and ends at a whitespace edge and the joiner
+                # ends a word, so the whole-word test sees the true neighbours.
                 if m.start() < cs < m.end() and (not whole_words or _whole_word_span(joined, m.start(), m.end())):
                     spans.append(to_content(pieces[j], m.start() - offsets[j], m.end() - offsets[j]))
                     if j + 1 >= len(pieces):
@@ -3418,7 +3461,8 @@ class SearchEngine:
                     query_str, mode, gap, regex=_local_regex or None,
                     progress_callback=progress_callback,
                     phase_callback=phase_callback,
-                    tantivy_query=None if text_position else self._local_forms_query(query_str, mode),
+                    tantivy_query=self._local_forms_query(query_str, mode),
+                    accept=_local_match_accept(mode in _WHOLE_WORD_MODES, text_position, query_str),
                 )
             except SearchBudgetExceeded:
                 raise
@@ -4083,8 +4127,9 @@ class SearchEngine:
                         query_str, mode, gap, regex=regex,
                         progress_callback=progress_callback,
                         phase_callback=phase_callback,
-                        tantivy_query=None if text_position else self._local_forms_query(query_str, mode),
+                        tantivy_query=self._local_forms_query(query_str, mode),
                         limit=(max(Config.SEARCH_LIMIT, self.local_searcher.num_docs) if ids_only else None),
+                        accept=_local_match_accept(_whole_words, text_position, query_str),
                     )
             except InterruptedError:
                 # Defensive only: _query_local_index now returns its partial hits

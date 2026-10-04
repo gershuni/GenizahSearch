@@ -141,7 +141,7 @@ def _engine_with_local(n_hits):
     eng._my_library_tab_ref = None
     eng.local_index = types.SimpleNamespace(parse_query=lambda *a, **k: object())
     eng.local_searcher = _FakeLocalSearcher(n_hits)
-    eng._build_local_result_dict = lambda doc, score, regex=None, pattern_str=None: {'d': score}
+    eng._build_local_result_dict = lambda doc, score, regex=None, pattern_str=None, accept=None: {'d': score}
     return eng
 
 
