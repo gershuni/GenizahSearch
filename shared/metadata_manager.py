@@ -1714,7 +1714,14 @@ class MetadataManager:
         current_progress = len(system_ids) - len(to_fetch)
 
         for future in as_completed(futures):
-            if check_cancel and check_cancel(): break
+            if check_cancel and check_cancel():
+                # The requests still queued are dropped, not left to run unread on
+                # the shared executor: the request that replaced this one asks for
+                # the ids it did not reach again (Codex review of PR #376). The
+                # ones already running finish unread.
+                for pending in futures:
+                    pending.cancel()
+                break
             sid, meta = future.result()
             self.nli_cache[sid] = meta
             current_progress += 1

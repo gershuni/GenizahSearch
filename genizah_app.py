@@ -49,7 +49,7 @@ if _CORE_IMPORT_ERROR:
         raise _CORE_IMPORT_ERROR
 from shared.search_engine import PHASE_LOCAL_SEARCH
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
-from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished
+from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished, _retire_worker
 from desktop.widgets import (
     text_has_pattern_markers,
     ActionsHoverWidget, _format_add_to_list_label,
@@ -21425,10 +21425,15 @@ class GenizahGUI(QMainWindow):
         if self._load_more_remaining():
             self.load_next_batch()
 
-    def load_next_batch(self, batch_size=None, keep_sorting_off=False):
+    def load_next_batch(self, batch_size=None, keep_sorting_off=False, skip_metadata=False):
         """Add the next rows of last_results to the table. *keep_sorting_off*: a
         preview's rows must stay in engine order; turning sorting back on at the
-        end re-sorts at once by the user's column (Codex review of PR #375)."""
+        end re-sorts at once by the user's column (Codex review of PR #375).
+        *skip_metadata*: start no shelfmark fetch for these rows. A preview's rows
+        are rebuilt when the search lands, and that rebuild fetches them; a fetch
+        started here made the next preview wait on the GUI thread for the one
+        still running (start_metadata_loading cancels and waits -- Codex review
+        of PR #375)."""
         if self.results_loaded >= len(self.last_results):
             return
 
@@ -21630,7 +21635,7 @@ class GenizahGUI(QMainWindow):
         self.status_label.setText(self._search_status_summary())
 
         # Trigger Metadata
-        if ids_to_fetch:
+        if ids_to_fetch and not skip_metadata:
             self.start_metadata_loading(ids_to_fetch)
 
     def _notify_search_complete(self, result_count, search_term, search_type='search'):
@@ -21928,7 +21933,8 @@ class GenizahGUI(QMainWindow):
         self._preview_thread = thread
         self.last_results = list(rows)
         self._res_map_by_sid.update({r['display']['id']: r for r in rows})
-        self.load_next_batch(batch_size=len(rows) - self.results_loaded, keep_sorting_off=True)
+        self.load_next_batch(batch_size=len(rows) - self.results_loaded, keep_sorting_off=True,
+                             skip_metadata=True)
         self.status_label.setText(status)            # still searching, not a result count
         logger.info("search_preview since_submit_ms=%d rows_shown=%d",
                     int(self._pause_search.elapsed(time.monotonic()) * 1000), self.results_loaded)
@@ -23842,6 +23848,24 @@ class GenizahGUI(QMainWindow):
         if self.meta_loader and self.meta_loader.isRunning():
             self.meta_loader.request_cancel()
             self.meta_loader.wait()
+            # The ids the cancelled loader did not reach join this request, ahead
+            # of the new ones, while their search-results rows still show
+            # "Loading...". A landed search starts the fetch of its first rows and
+            # the rest of the first page replaces it a moment later (Codex review
+            # of PR #376); fast scrolling did the same. Only ids with such a row:
+            # those are the rows a fetch updates (on_meta_progress). Ids of a
+            # Composition view rebuilt since, or of results a new search replaced
+            # (it clears the rows), are not carried.
+            asked = set(ids)
+            shown = getattr(self, 'shelfmark_items_by_sid', None) or {}
+            carried = [sid for sid in getattr(self.meta_loader, 'sids', None) or []
+                       if sid in shown and sid not in self.meta_mgr.nli_cache and sid not in asked]
+            ids = carried + list(ids)
+            # Its finished(True) is still queued: delivered after the new loader
+            # starts, on_meta_finished dropped the NEW loader's reference (a running
+            # QThread with no owner) and reported a cancel. The rows it did fetch
+            # are refreshed from the cache below.
+            _retire_worker(self.meta_loader, 'progress_signal', 'finished_signal', 'error_signal')
 
         self.meta_cached_count = len([sid for sid in ids if sid and sid in self.meta_mgr.nli_cache])
         self.meta_to_fetch_count = len([sid for sid in ids if sid and sid not in self.meta_mgr.nli_cache])
@@ -23933,6 +23957,8 @@ class GenizahGUI(QMainWindow):
         else:
             self.status_label.setText(self._with_search_summary(
                 tr("Loaded {} items.").format(total_expected)))
+        # finished(bool) is emitted inside run(): the QThread is still running.
+        _keep_until_finished(self.meta_loader)
         self.meta_loader = None
 
     def _format_metadata_status(self):
