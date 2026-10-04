@@ -2205,7 +2205,7 @@ class SearchEngine:
             pairs.append(f'({" OR ".join(clauses)})')
         return " AND ".join(pairs)
 
-    def _restriction_query(self, restrict_sys_ids):
+    def _restriction_query(self, restrict_sys_ids, pages_only=False):
         """The docs a search within these manuscripts may use: a page or whole-
         manuscript doc of one of them (its full_header holds the sys_id as a term,
         whatever the header's shape), or any Oxford part -- its header names only the
@@ -2213,17 +2213,27 @@ class SearchEngine:
         (_page_in_restriction). A term set: in the query at any size. The OR of
         full_header phrases it replaces cost 18.7 s at 50,000 ids, so above 500 the
         search ran unrestricted and filtered its first 50,000 hits afterwards
-        (ישראל, then משה within it: about three quarters of the manuscripts lost)."""
+        (ישראל, then משה within it: about three quarters of the manuscripts lost).
+        *pages_only*: only these manuscripts' page docs (Composition, which keeps page
+        docs only: a whole-manuscript doc or an Oxford part naming one of them would
+        take one of a chunk's 50 slots and be dropped afterwards)."""
         should = tantivy.Occur.Should
         sids = {str(s) for s in restrict_sys_ids}
         terms = sorted(s.lower() for s in sids if s.isalnum())   # as the default tokenizer indexes them
-        clauses = [(should, tantivy.Query.term_set_query(self.index.schema, 'full_header', terms)),
-                   (should, self.index.parse_query('scope:part', ['content']))]
+        clauses = [(should, tantivy.Query.term_set_query(self.index.schema, 'full_header', terms))]
+        if not pages_only:
+            clauses.append((should, self.index.parse_query('scope:part', ['content'])))
         odd = [s for s in sids if not s.isalnum() and '"' not in s]
         if odd:     # a header token sequence, as the phrase clauses matched it
             clauses.append((should, self.index.parse_query(
                 ' OR '.join(f'full_header:"{s}"' for s in odd), ['content'])))
-        return tantivy.Query.boolean_query(clauses)
+        query = tantivy.Query.boolean_query(clauses)
+        if pages_only:
+            query = tantivy.Query.boolean_query(
+                [(tantivy.Occur.Must, query)]
+                + [(tantivy.Occur.MustNot, self.index.parse_query(f'scope:{scope}', ['content']))
+                   for scope in ('part', 'system')])
+        return query
 
     def _and_query(self, query, extra):
         """*query* (a Query object) AND the query string *extra*."""
@@ -4338,18 +4348,18 @@ class SearchEngine:
 
         # Pre-compute allowed unique_ids for fast O(1) filtering
         restrict_uids = None
-        _sid_filter_clause = None
+        _sid_restriction = None
         if restrict_sys_ids is not None:
             browse_map = self._load_browse_map()
             restrict_uids = set()
             for sid in restrict_sys_ids:
                 for page in browse_map.get(sid, []):
                     restrict_uids.add(page['uid'])
-            # Pre-build Tantivy filter clause for small restrict sets
-            if len(restrict_sys_ids) <= 500:
-                _sid_filter_clause = '(' + ' OR '.join(
-                    f'full_header:"{sid}"' for sid in restrict_sys_ids
-                ) + ')'
+            # In the query at any size. Above 500 manuscripts this was left out (the
+            # OR of phrases was too slow): each chunk's 50 hits came from the whole
+            # corpus and were filtered afterwards, so a narrow filter found almost
+            # nothing in its own manuscripts (2026-10-04; main search had the same).
+            _sid_restriction = self._restriction_query(restrict_sys_ids, pages_only=True)
 
         # SEED-011 (125a): Build per-chunk plans ONCE before the index loops.
         # Each _ChunkPlan carries both flavor query strings (Genizah raw +
@@ -4426,10 +4436,6 @@ class SearchEngine:
                 regex = plan.compiled_regex_genizah
                 if not regex: continue
 
-                # Augment chunk query with sys_id filter
-                if _sid_filter_clause:
-                    t_query = f'({t_query}) AND {_sid_filter_clause}'
-
                 # Check: Is phrase in "Filter Text"?
                 is_text_filtered = False
                 if filter_text:
@@ -4439,6 +4445,9 @@ class SearchEngine:
                 try:
                     # Search index
                     query = self.index.parse_query(t_query, ["content"])
+                    if _sid_restriction is not None:
+                        query = tantivy.Query.boolean_query([(tantivy.Occur.Must, query),
+                                                             (tantivy.Occur.Must, _sid_restriction)])
                     hits = self.searcher.search(query, 50).hits
 
                     is_freq_filtered = len(hits) > max_freq
