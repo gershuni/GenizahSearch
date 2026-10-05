@@ -20,7 +20,8 @@ follow-up gershuni/GenizahSearch#376 (`824a7e36`).
   - D8 Phase 2: sort all, export all, full session restore, Joins Lab. The owner decides when.
   - Stage 2 (exhaustive desktop over a result store) and Stage 5 (no cap on the web).
   - Whole-word Exact on the web and in the API. They send `exact`; the rule and fast paths key on
-    the desktop's `literal` (deferred in `e8decfca`).
+    the desktop's `literal` (deferred in `e8decfca`). The web search page: done 2026-10-05 (below);
+    the API and web Joins Lab still open.
   - The tracker rows: `L1:word` near spellings (P3), the loader's blocking cancel-and-wait (P3),
     My Library unrestricted by search-within (P2), line-break steps stay "+" (P2), Lab Mode in
     chains (P2, owner: not now), the `test_findings_page` hang (P3).
@@ -47,7 +48,18 @@ Owner: the web did not stream and was slower (אם אין אני לי: desktop 1
 - **Open:** one worker serves every visitor (FIFO, `GENIZAH_RESEARCH_WORKERS=1`): raising it is a
   server `.env` decision (CPUs, memory), see `docs/search-matching-timeouts.md`. A restricted
   search (filters, search within) still loads `browse_map.pkl` in each worker (not measured
-  here). The web's Exact still goes through the `exact` mode, not `literal` (above).
+  here).
+- **Web Exact = the desktop's Exact (same branch, second change).** The page sent mode `'exact'`,
+  which has none of `literal`'s paths (pair phrases, page docs for one word, aggregates only for
+  crossings) nor the whole-word rule: part of the 19 s vs 13 s. `web/pages/search_state.py::
+  engine_mode` maps it at the engine call, and search-within steps record `literal` (what ran) so
+  their replays match; the selector, history, URL and exports keep `exact`. Synthetic 164K-doc
+  index with whole-manuscript docs, engine: שלום 4.9 -> 2.6 s, אם אין אני לי 3.2 -> 2.4 s, משה אל
+  העם 5.7 -> 4.8 s; uncapped, `literal` keeps every `exact` row of both phrases and adds the
+  page-break crossings `exact` missed (9 and 183); for one word it drops only inside-word rows
+  (ושלום). Web end to end, same index: שלום 11.9 -> 8.1 s (the rest is moving 48K rows to the page),
+  אם אין אני לי 5.3 -> 4.3 s. **The API and web Joins Lab still send `exact`** (a public contract:
+  owner's call).
 
 Everything below is the plan as written and amended stage by stage; read it for the decisions and
 measurements behind the code.

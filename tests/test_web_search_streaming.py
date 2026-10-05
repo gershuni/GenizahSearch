@@ -378,6 +378,7 @@ def test_page_asks_for_early_rows_in_the_genizah_scope():
     assert len(calls) == 1
     keywords = {k.arg: ast.unparse(k.value) for k in calls[0].keywords}
     assert keywords['corpus_scope'] == "'genizah'"
+    assert keywords['mode'] == 'engine_mode(mode)'
     assert keywords['preview_callback'] == 'preview_cb if _preview_wanted else None'
     source = ast.unparse(function)
     assert 'preview_shows_final_rows(search_state)' in source
@@ -390,3 +391,30 @@ def test_page_asks_for_early_rows_in_the_genizah_scope():
 def test_preview_translation_exists():
     from shared.genizah_translations import TRANSLATIONS
     assert TRANSLATIONS['Still searching. The first results:']
+
+
+# --- Exact runs as the desktop's Exact ---------------------------------------------
+
+def test_page_exact_is_the_engines_literal():
+    """The engine's whole-word rule and Exact fast paths key on 'literal'; the
+    page's 'exact' had none of them (e8decfca deferred it)."""
+    from web.pages.search_state import engine_mode
+    from shared.search_engine import _WHOLE_WORD_MODES
+    assert engine_mode('exact') == 'literal' and 'literal' in _WHOLE_WORD_MODES
+    for mode in ('variants', 'variants_extended', 'variants_maximum', 'fuzzy', 'Regex',
+                 'Title', 'Shelfmark', 'responsa', 'literal'):
+        assert engine_mode(mode) == mode
+
+
+def test_search_within_steps_record_the_mode_they_ran_with():
+    """A step replays with its recorded mode: it must be the one the search ran."""
+    tree = ast.parse((ROOT / 'web' / 'pages' / 'search.py').read_text(encoding='utf-8'))
+    steps = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Name) and n.func.id == 'RefinementStep']
+    assert len(steps) == 2
+    for call in steps:
+        mode = next(ast.unparse(k.value) for k in call.keywords if k.arg == 'mode')
+        assert mode.startswith('engine_mode('), mode
+    # Undo puts a 'literal' step back in the selector as Exact.
+    source = ast.unparse(tree)
+    assert "mode_select.value = 'exact' if last_step.mode == 'literal'" in source

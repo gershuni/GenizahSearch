@@ -290,6 +290,19 @@ def compact_result_rows(results: list) -> list:
     return _compact_result_rows(results)
 
 
+def engine_mode(mode: str) -> str:
+    """The engine mode a web search runs for the page's *mode*.
+
+    The page's Exact is the engine's 'literal', as on the desktop: whole words
+    (owner, 2026-10-01) and the fast paths keyed on it -- pair phrases for a
+    phrase, page documents only for one word, whole manuscripts only for page-break
+    crossings. The engine's 'exact' has none of them (deferred in e8decfca). The
+    page keeps 'exact' for its own state (the mode selector, history, the URL,
+    exports); the engine and the search-within steps get this.
+    """
+    return 'literal' if mode == 'exact' else mode
+
+
 _MEASUREMENT_POST_FILTERS = (
     'width_min', 'width_max', 'height_min', 'height_max',
     'line_count_min', 'line_count_max', 'line_height_min', 'line_height_max',

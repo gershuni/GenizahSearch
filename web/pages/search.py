@@ -30,7 +30,7 @@ from web.pages.search_state import (
     domain_display_name,
     persist_search_snapshot, clear_search_snapshot, clear_search_filters,
     get_search_active_snapshot, restore_search_snapshot,
-    compact_result_rows, preview_shows_final_rows,
+    compact_result_rows, preview_shows_final_rows, engine_mode,
 )
 from web.pages.search_results import (
     toggle_expansion as _toggle_expansion,
@@ -2250,7 +2250,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if not search_state.refinement_chain and query_input.value:
             step0 = RefinementStep(
                 query=query_input.value.strip(),
-                mode=mode_select.value,
+                # What it ran with (Exact runs as the engine's 'literal'), so a
+                # replay runs the same search.
+                mode=engine_mode(mode_select.value),
                 gap=int(gap_input.value),
                 result_count=len(search_state.results),
             )
@@ -2381,7 +2383,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Restore the last chain step's query and re-execute it
             last_step = search_state.refinement_chain[-1]
             query_input.value = last_step.query
-            mode_select.value = last_step.mode if last_step.mode in ('exact', 'variants', 'variants_extended', 'variants_maximum', 'responsa', 'Regex', 'Title', 'Shelfmark') else 'exact'
+            mode_select.value = 'exact' if last_step.mode == 'literal' else last_step.mode if last_step.mode in ('exact', 'variants', 'variants_extended', 'variants_maximum', 'responsa', 'Regex', 'Title', 'Shelfmark') else 'exact'
             # Remove the last step so re-search in refine mode re-adds it
             search_state.refinement_chain = search_state.refinement_chain[:-1]
             if search_state.refinement_chain:
@@ -4932,7 +4934,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     tp = text_position_select.value
                     return state.searcher.execute_search(
                         clean_query,
-                        mode=mode,
+                        mode=engine_mode(mode),
                         gap=int(gap_input.value),
                         progress_callback=progress_cb,
                         exclude_words=not_words,
@@ -5158,7 +5160,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             else:
                 step = RefinementStep(
                     query=clean_query,
-                    mode=mode,
+                    mode=engine_mode(mode),  # what it ran with, for its replays
                     gap=int(gap_input.value),
                     exclude_words=not_words if not_words else [],
                     text_position=text_position_select.value if text_position_select.value != 'anywhere' else None,

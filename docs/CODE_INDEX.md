@@ -1761,6 +1761,7 @@ Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /
 - **Function** `clear_search_history` (Line 477) — Clear all search history.
 - **Function** `domain_display_name` (Line 486) — Get display name for a domain (Hebrew if UI is Hebrew, else English).
 - **Function** `preview_shows_final_rows` — True when no post-search filter could hide an early row, so the page may show the worker's preview
+- **Function** `engine_mode` — the engine mode a web search runs: the page's Exact is the engine's `literal` (whole words, Exact's fast paths)
 
 ## web/pages/search_results.py
 
