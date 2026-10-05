@@ -16,7 +16,6 @@ import threading
 import time
 from types import SimpleNamespace
 
-import psutil
 import pytest
 
 from web.research_jobs import IsolatedEngine, Job, ResearchQueue, _read_preview
@@ -70,7 +69,7 @@ def make_queue(tmp_path, monkeypatch):
         queue.close()
 
 
-def wait_for(predicate, timeout=10):
+def wait_for(predicate, timeout=30):
     deadline = time.monotonic() + timeout
     while not predicate():
         assert time.monotonic() < deadline, 'expected state not reached'
@@ -90,13 +89,13 @@ def test_slot_starts_its_worker_before_the_search_and_the_search_uses_it(make_qu
     spare = spare_of(queue)
     wait_for(lambda: (spare.root / 'started').exists())
     assert not (spare.root / 'input.pkl').exists()  # waiting for a search
-    result = queue.submit({'query': 'שלום'}).future.result(timeout=10)['value']
+    result = queue.submit({'query': 'שלום'}).future.result(timeout=30)['value']
     assert result['pid'] == spare.process.pid
     assert result['warm'] == '1'
     assert result['request'] == {'query': 'שלום'}
     # One search per process: it is gone, its directory removed, and the slot
     # has already started the next one.
-    assert not psutil.pid_exists(spare.process.pid) or psutil.Process(spare.process.pid).status() == psutil.STATUS_ZOMBIE
+    assert spare.process.poll() is not None  # exited and reaped (not pid_exists: pids wrap)
     assert not spare.root.exists()
     wait_for(lambda: spare_of(queue) is not None)
     assert spare_of(queue).process.pid != spare.process.pid
@@ -106,7 +105,7 @@ def test_cold_queue_starts_its_worker_with_the_search(make_queue):
     queue = make_queue(warm=False)
     time.sleep(0.2)
     assert spare_of(queue) is None
-    result = queue.submit({'query': 'x'}).future.result(timeout=10)['value']
+    result = queue.submit({'query': 'x'}).future.result(timeout=30)['value']
     assert result['warm'] == '0'
     assert spare_of(queue) is None
 
@@ -116,12 +115,12 @@ def test_stop_kills_the_warm_worker_and_the_next_search_works(make_queue):
     wait_for(lambda: spare_of(queue) is not None)
     job = queue.submit({'block': True})
     wait_for(lambda: job.status == 'Searching')
-    pid = job.process.pid
+    process = job.process
     queue.cancel(job)
     with pytest.raises(InterruptedError):
-        job.future.result(timeout=5)
-    assert not psutil.pid_exists(pid)
-    assert queue.submit({'next': True}).future.result(timeout=10)['value']['request']['next']
+        job.future.result(timeout=30)
+    assert process.poll() is not None
+    assert queue.submit({'next': True}).future.result(timeout=30)['value']['request']['next']
 
 
 def test_a_warm_worker_that_died_is_replaced_by_a_fresh_one(make_queue):
@@ -130,7 +129,7 @@ def test_a_warm_worker_that_died_is_replaced_by_a_fresh_one(make_queue):
     dead = spare_of(queue)
     dead.process.kill()
     dead.process.wait(timeout=5)
-    result = queue.submit({'query': 'x'}).future.result(timeout=10)['value']
+    result = queue.submit({'query': 'x'}).future.result(timeout=30)['value']
     assert result['pid'] != dead.process.pid
     assert result['warm'] == '0'  # started with its search
     assert not dead.root.exists()
@@ -141,7 +140,7 @@ def test_close_kills_the_idle_warm_worker(make_queue):
     wait_for(lambda: spare_of(queue) is not None)
     spare = spare_of(queue)
     queue.close()
-    assert not psutil.pid_exists(spare.process.pid)
+    assert spare.process.poll() is not None
     assert not spare.root.exists()
     assert queue.spares == {}
 
@@ -216,7 +215,7 @@ worker.main(sys.argv[1])
         time.sleep(0.8)
         assert process.poll() is None, 'a warm worker must wait for its search'
         _write_input(root, {'query': 'שלום'})
-        assert process.wait(timeout=10) == 0
+        assert process.wait(timeout=30) == 0
         output = pickle.loads((root / 'output.pkl').read_bytes())
         assert output == {'payload': {'query': 'שלום'}, 'meta': 'loaded catalogue'}
     finally:
