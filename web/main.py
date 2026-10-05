@@ -735,7 +735,7 @@ from version import APP_VERSION
 # Names the CONTENT wave, not a release: the seen flag is stored per browser
 # as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
-WHATS_NEW_VERSION = "9.2.1-ai-tools"
+WHATS_NEW_VERSION = "9.5.0-search"
 APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
 # Initialize API routes (Image Proxy, Export)
@@ -1672,6 +1672,11 @@ def create_layout():
         pass
 
     _new_surfaces = []
+    # v9.5.0 (2026-10-04), ungated: the search changes reach every reader. First,
+    # as the newest. Wording approved with the release texts.
+    _new_surfaces.append(
+        (tr("New: faster search, more comprehensive results in searches with many "
+            "results, and whole-word matching in Variants and Fuzzy"), '/search'))
     if passage_available():
         _new_surfaces.append(
             (tr("Letter-level parallels search — faster and more precise"),

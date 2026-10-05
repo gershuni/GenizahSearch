@@ -5372,6 +5372,22 @@ TRANSLATIONS.update({
         "העבודה שלך נשמרת: הרשימות, ההגדרות והשפה נשמרות בבטחה ומשוחזרות מגיבוי אם קובץ נפגע; „חדש\" שומר את העבודה במעבדת צירופים; כתבי יד שהוחרגו נשארים מוסתרים עד „חדש\"; ורק עותק אחד של התוכנה פועל בכל פעם.",
 })
 
+# v9.5.0 desktop What's New bar and dialog, and the web What's New entry
+# (2026-10-04). Hebrew: the owner's own for the desktop bar; the rest drafted for
+# the release and approved.
+TRANSLATIONS.update({
+    "New: much faster search, and more comprehensive results, also in searches with many results":
+        "חדש: חיפוש מהיר בהרבה, ותוצאות מקיפות יותר גם בחיפושים מרובי תוצאות",
+    "Faster search: the first results appear while the search is still running, and Exact and Variants searches take a fraction of the time (Exact שלום: from 10 seconds to under 2).":
+        "חיפוש מהיר יותר: התוצאות הראשונות מופיעות כבר בזמן החיפוש, וחיפושים מדויקים ובווריאנטים נמשכים זמן קצר בהרבה (שלום בחיפוש מדויק: מ־10 שניות לפחות מ־2).",
+    "Whole words: Exact, Variants and Fuzzy match whole words (שלום, not בשלום), and Fuzzy finds near spellings: one letter different, two in words of five letters or more.":
+        "מילים שלמות: מדויק, וריאנטים ומקורב מוצאים מילים שלמות (שלום, ולא בשלום), והחיפוש המקורב מוצא כתיב קרוב: הבדל של אות אחת, או שתיים במילים של חמש אותיות ומעלה.",
+    "More comprehensive results, also in searches with many results: \"Search within\", \"Only results with all terms\" and Composition Search with filters work on the whole set, at any size, and a long list shows \"N+\".":
+        "תוצאות מקיפות יותר, גם בחיפושים מרובי תוצאות: „חפש בתוך\", „רק תוצאות עם כל המונחים\" וחיפוש חיבורים עם מסננים פועלים על הקבוצה כולה, בכל גודל, ורשימה ארוכה מסומנת „N+\".",
+    "New: faster search, more comprehensive results in searches with many results, and whole-word matching in Variants and Fuzzy":
+        "חדש: חיפוש מהיר יותר, תוצאות מקיפות יותר בחיפושים מרובי תוצאות, והתאמה למילים שלמות בווריאנטים ובמקורב",
+})
+
 # Web What's New banner, v9.2.1 (2026-09-18): the GPT pilot went live.
 TRANSLATIONS.update({
     "New: ask the Genizah in ChatGPT - the GenizahSearch GPT, a research skill for other AI assistants, and the public API, from the AI tools page.":

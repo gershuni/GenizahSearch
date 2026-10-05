@@ -4,9 +4,58 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [9.5.0] - 2026-10-04 — Faster, complete search
 
-### Desktop: no crash on exit while background loads are still running (next installer)
+A desktop installer and a web deploy. Search is much faster, and its results are more
+comprehensive, also in searches with many results. The desktop shows the first results while
+a search runs, and Exact and Variants searches take a fraction of the time. Search within
+results and Parallels filters search the whole set directly, at any size. Exact, Variants and
+Fuzzy match whole words, and Fuzzy finds near spellings. The two web Fragment Puzzle sections
+below went live on 2026-09-29.
+
+### Search: faster, more comprehensive, whole words (desktop and web)
+
+- **The first results appear while the search runs (desktop).** For example, the first rows
+  of שלום show after 48 ms; Variants שמעון הצדיק after 0.2 s. The full list follows.
+  Sorting, filters, export and search within become available when it is complete.
+- **Much faster searches.** Measured on the desktop:
+
+  | Search | Before | Now |
+  |---|---|---|
+  | Exact הצדיק | 5.0 s | 0.2 s |
+  | Exact שלום | 10.1 s | 1.7 s |
+  | Exact אהרן כהן | 8.7 s | 0.7 s |
+  | Variants הצדיק | 33 s | 1.9 s |
+  | Variants שמעון הצדיק | 11.1 s | 3.5 s |
+  | Variants אהרן הכהן | 89 s | 8.2 s |
+
+  Every search, on the desktop and the website, now builds each row's snippet from the
+  match it has already found: about twice as fast per row.
+- **Whole words.** Exact (desktop), Variants and Fuzzy (desktop and web) match whole words:
+  שלום finds שלום, not בשלום or ולשלום, and ברוך אתה יי does not match ברוך אתה ייי. A
+  Latin letter or digit next to a word counts as part of it. Variants searches with every
+  spelling form of each word, for fuller results. On the website and in the API, Exact keeps its current
+  behaviour in this release.
+- **Fuzzy finds near spellings.** A Fuzzy match is a whole word one letter different, or
+  two letters in words of five or more: a letter added, dropped or changed, or two
+  neighbouring letters swapped. A prefix letter counts as one, so ושלום is found for שלום.
+  The help pages and the API description explain it. Desktop and web.
+- **More comprehensive results in large searches.** Search within results searches the
+  whole set directly, at any size, and so does Parallels / Composition Search with filters.
+  Desktop and web.
+- **Long result lists (desktop).** When a list is shortened for display, its count shows
+  "N+". Search within and "Only results with all terms" then work on the full list, with
+  progress, Pause and Stop.
+- **Text position** considers every occurrence on a page, so more pages are found. **Words with brackets**
+  (של[ו]ם) are found and highlighted whole, also across a page break. Desktop and web.
+- Desktop:
+  - A search-within chain that is replayed (session restore, removing a step, changing
+    the scope) runs each step with its own settings.
+  - "Search completed in ..." clears when a new search starts.
+  - My Library searches match whole words too.
+  - Shelfmarks are fetched for every row on the first page.
+
+### Desktop: no crash on exit while background loads are still running
 
 - **Closing the app no longer crashes now and then.** When a background task was still running at exit --
   most often a thumbnail load of a closed Joins Lab -- Windows could report that the program stopped

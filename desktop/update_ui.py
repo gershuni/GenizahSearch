@@ -158,7 +158,9 @@ class WhatsNewBar(QFrame):
         # and fixes", which is what the dialog is for.
         # v9.3.0: the owner's own sentence (2026-09-24).
         # v9.4.0: the owner's own sentence (2026-09-28); the dialog says the rest.
-        self.lbl_msg.setText(tr("New: improvements to personal list sync, and more"))
+        # v9.5.0: the owner's own Hebrew sentence (2026-10-04): speed first, and
+        # fuller results said plainly, with no before/after figures.
+        self.lbl_msg.setText(tr("New: much faster search, and more comprehensive results, also in searches with many results"))
         self.show()
 
     def on_learn_more(self):
@@ -291,14 +293,13 @@ class WhatsNewDialog(QDialog):
         layout.addWidget(title)
 
         is_heb = CURRENT_LANG == 'he'
-        # v9.4.0 (2026-09-28). Three bullets (owner: keep the first three of five):
-        # what list sync keeps, list sync in the background, and saved work. The
-        # Fragment Puzzle, log-out and "Post anonymously" items are in the CHANGELOG,
-        # README and GitHub release only.
+        # v9.5.0 (2026-10-04). Three bullets: speed, whole words, fuller results in large
+        # searches. Approved with the release texts; the timings and the rest are in the
+        # CHANGELOG, README and GitHub release.
         items = [
-            tr("List sync keeps everything: an entry in two lists, and two pages of one manuscript, each keep their own copy in your account, and a note that differs is never overwritten; both versions are kept."),
-            tr("List sync runs in the background: every change uploads by itself, \"Sync lists now\" is on the Lists tab, and entries you remove here are removed from your account too. Entries removed on the website are shown to you and never removed silently."),
-            tr("Your work stays saved: lists, settings and language are saved safely and restored from a backup if a file is damaged; New keeps your Joins Lab work; excluded manuscripts stay hidden until New; only one copy of the program runs at a time."),
+            tr("Faster search: the first results appear while the search is still running, and Exact and Variants searches take a fraction of the time (Exact שלום: from 10 seconds to under 2)."),
+            tr("Whole words: Exact, Variants and Fuzzy match whole words (שלום, not בשלום), and Fuzzy finds near spellings: one letter different, two in words of five letters or more."),
+            tr("More comprehensive results, also in searches with many results: \"Search within\", \"Only results with all terms\" and Composition Search with filters work on the whole set, at any size, and a long list shows \"N+\"."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

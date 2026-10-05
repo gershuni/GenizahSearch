@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 9.4.0
+# Dicta Genizah Search Pro 9.5.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,28 +8,23 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 9.4.0?
+## What's New in Version 9.5.0?
 
-**On the desktop** (installer 9.4.0):
+**Faster, complete search**, on the desktop (installer 9.5.0) and the website:
 
-- **List sync that keeps everything**: an entry in two lists, and two pages of one manuscript,
-  each keep their own copy in your account; a differing note is never overwritten (both versions
-  are kept)
-- **Sync in the background**: every list change uploads by itself, "Sync lists now" is on the
-  Lists tab, removals and moves reach your account, and entries removed on the website are
-  offered, never removed silently
-- **Saved work stays saved**: lists, settings and language are written safely with backup
-  recovery; New keeps the Joins Lab session; exclusions hold until New; one copy of the program
-  at a time
-- **Fragment Puzzle and Joins Lab**: the puzzle asks before dropping work and keeps fragments
-  whose images failed; Delete asks and Ctrl+Z undoes; no crash on quick Joins Lab page turns
-- **"Post anonymously" removed**: it was never saved; the website always showed the name
-
-**On the web**: /lists notes, tags and Remove work again and show each entry's page (deployed
-with this installer).
+- **Much faster**: on the desktop the first results appear while the search runs, and
+  Exact and Variants searches take a fraction of the time (Exact שלום: 10 s → 1.7 s;
+  Variants אהרן הכהן: 89 s → 8 s)
+- **More comprehensive results, also in searches with many results**: search within results
+  and Parallels filters search the whole set directly, at any size; on the desktop a long
+  list shows "N+" and is searched in full
+- **Whole words**: Variants and Fuzzy (and Exact on the desktop) match whole words, so
+  שלום finds שלום and not בשלום; Variants searches with every spelling form
+- **Fuzzy finds near spellings**: whole words one letter different (two in longer words)
+- **Desktop**: closing the program while background work is still running no longer crashes
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md). The README's previous What's New sections
-(8.1.0 to 9.3.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
+(8.1.0 to 9.4.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
 
 ---
 
@@ -103,7 +98,7 @@ Open the **GenizahSearch GPT** in ChatGPT from [genizahsearch.com/ai](https://ge
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V9.4.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
+1. **Download:** the installer (`GenizahSearchPro_V9.5.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
