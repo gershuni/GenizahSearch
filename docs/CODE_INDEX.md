@@ -1760,6 +1760,7 @@ Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /
 - **Function** `delete_search_history_entry` (Line 469) — Delete a specific history entry by index.
 - **Function** `clear_search_history` (Line 477) — Clear all search history.
 - **Function** `domain_display_name` (Line 486) — Get display name for a domain (Hebrew if UI is Hebrew, else English).
+- **Function** `preview_shows_final_rows` — True when no post-search filter could hide an early row, so the page may show the worker's preview
 
 ## web/pages/search_results.py
 
@@ -1769,6 +1770,7 @@ Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /
 - **Function** `show_add_to_list_dialog` (Line 61)
 - **Function** `toggle_expansion` (Line 86) — Toggle inline accordion expansion for a result card.
 - **Function** `render_results` (Line 115)
+- **Function** `render_preview_results` — the rows found so far, shown under "Still searching" while a search runs (no export/filter/pagination; the result re-renders)
 - **Function** `create_result_card` (Line 345)
 - **Function** `open_advanced_dialog` (Line 752) — Open an enhanced Advanced View dialog with in-place navigation and IIIF image viewer.
 

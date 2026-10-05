@@ -490,6 +490,29 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
 
 
 
+def render_preview_results(search_state, refs, rows):
+    """Show the rows found so far while the search is still running.
+
+    *rows* are the start of the final list, in its order (the engine's preview
+    contract; the page asks for them only when no filter could hide one), so
+    card numbers and selections keep their meaning when the completed search
+    renders the whole list. The export payload, filters and pagination are left
+    to that render.
+    """
+    refs.results_container.clear()
+    search_state.displayed_results = rows
+    search_state.expanded_index = None
+    search_state.expansion_refs = {}
+    with refs.results_container:
+        with ui.row().classes('w-full items-center gap-2 px-4 pt-3'):
+            ui.spinner(size='sm', color='primary')
+            ui.label(tr('Still searching. The first results:')).classes('text-sm').style(
+                'color: var(--text-muted);')
+        with ui.column().classes('w-full gap-2 p-4'):
+            for i, res in enumerate(rows[:refs.page_size]):
+                create_result_card(search_state, refs, i, res)
+
+
 def create_result_card(search_state, refs, index, result):
     display = result.get('display', {})
     shelfmark = display.get('shelfmark', 'Unknown')

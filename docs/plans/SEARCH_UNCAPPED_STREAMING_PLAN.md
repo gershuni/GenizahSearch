@@ -29,6 +29,26 @@ follow-up gershuni/GenizahSearch#376 (`824a7e36`).
 - **Public wording (owner, 2026-10-04):** speed first; fuller results said positively; no loss
   figures in release texts. The loss figures stay here and in the tracker archive.
 
+**Web, after v9.5.0 (2026-10-05, branch `claude/web-search-streaming-perf-s01r1t`, not deployed).**
+Owner: the web did not stream and was slower (אם אין אני לי: desktop 13 s, web 19 s).
+- **Why slower:** every web search ran in a fresh worker process that first loaded the catalogue
+  (`MetadataManager._load_heavy_caches_bg`, 5.5-6.4 s in a 4-CPU dev container: CSV 1.7 s, CUDL
+  alias index 3.2 s, Oxford parts 0.6 s), and the engine work itself is the desktop's. **Fixed:** each queue
+  slot starts its next worker ahead of the search (loads, then waits for `input.pkl`); still one
+  search per process. ~400 MB resident per idle slot; `GENIZAH_RESEARCH_PRESTART=0` turns it off.
+- **Why no streaming:** the worker had no channel back. **Fixed:** the page passes
+  `preview_callback` (and `corpus_scope='genizah'`, which the preview requires; the web has no My
+  Library); the worker writes `preview.pkl`, the parent reads it, the page paints up to one page
+  of rows under "Still searching". Not with NOT-words, Responsa, Lab Mode, or any post-search
+  filter that could hide a row. Stop keeps the rows shown (marked partial; before, Stop showed 0).
+- **Measured** (real web app + headless Chromium, synthetic 60,000-page index, so absolute numbers
+  are not production's): אם אין אני לי first rows 7.1 s -> 1.1 s, complete 8.4-8.8 s -> 2.6 s;
+  שלום first rows 1.1 s of 6.8 s. Tests: `tests/test_web_search_streaming.py`, 13 mutants killed.
+- **Open:** one worker serves every visitor (FIFO, `GENIZAH_RESEARCH_WORKERS=1`): raising it is a
+  server `.env` decision (CPUs, memory), see `docs/search-matching-timeouts.md`. A restricted
+  search (filters, search within) still loads `browse_map.pkl` in each worker (not measured
+  here). The web's Exact still goes through the `exact` mode, not `literal` (above).
+
 Everything below is the plan as written and amended stage by stage; read it for the decisions and
 measurements behind the code.
 

@@ -290,6 +290,30 @@ def compact_result_rows(results: list) -> list:
     return _compact_result_rows(results)
 
 
+_MEASUREMENT_POST_FILTERS = (
+    'width_min', 'width_max', 'height_min', 'height_max',
+    'line_count_min', 'line_count_max', 'line_height_min', 'line_height_max',
+    'text_density_min', 'text_density_max', 'measurement_material',
+)
+
+
+def preview_shows_final_rows(state: 'SearchUIState') -> bool:
+    """True when rows found while a search runs can be shown as they are.
+
+    The engine's early rows are the start of the final list, in its order. A
+    filter applied after the search (exclusions, library, printed, PGP, domain,
+    measurements, the all-terms view) could hide some of them, and most need
+    enrichment that only runs on the result -- so with any of them active the
+    page keeps its spinner and shows the result as before.
+    """
+    if (state.exclusion_sources or state.word_search_excluded_ids or state.domain_exclusions
+            or state.printed_filter != 'all' or state.pgp_filter != 'all' or state.library_filter
+            or (state._all_terms_filter and state.refinement_chain)):
+        return False
+    return not any(getattr(state, f'post_filter_{name}', None) not in (None, [], ())
+                   for name in _MEASUREMENT_POST_FILTERS)
+
+
 def get_search_active_snapshot() -> dict:
     """Return the current same-tab active search snapshot, if present."""
     tab = _get_tab_storage()

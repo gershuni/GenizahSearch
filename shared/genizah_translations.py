@@ -2236,6 +2236,8 @@ TRANSLATIONS = {
     # --- Search Mode ---
     "Searching...": "מחפש...",
     "Searching": "מחפש",
+    # Web search page, rows shown while the search still runs (2026-10-05).
+    "Still searching. The first results:": "החיפוש עדיין נמשך. התוצאות הראשונות:",
     "Max frequency": "תדירות מקסימלית",
     "Filter common phrases (lower = stricter)": "סנן ביטויים נפוצים (נמוך = מחמיר יותר)",
     # Replaced 2026-08-25: the old wording said "manuscripts", but the engine

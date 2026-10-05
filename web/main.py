@@ -3365,9 +3365,12 @@ async def initialize_engine():
 
             # Only heavy entry points leave this process. Browsing, metadata,
             # and result formatting retain their existing engine interfaces.
-            from web.research_jobs import IsolatedEngine
+            from web.research_jobs import IsolatedEngine, get_queue
             state.searcher = IsolatedEngine(state.searcher, 'search')
             state.lab_engine = IsolatedEngine(state.lab_engine, 'lab')
+            # Start the worker slots now: each starts its first worker, which
+            # loads the catalogue before the first search arrives.
+            get_queue()
 
             print("[init] Engine initialization complete (searcher ready).", flush=True)
 
