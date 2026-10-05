@@ -129,6 +129,9 @@ def _run_create_layout(monkeypatch, *, available: bool, lang: str = "en") -> lis
     from nicegui.client import Client
 
     _set_availability(monkeypatch, available)
+    # create_layout() sets the language from per-user storage, which is empty
+    # here; stand in for a reader who saved `lang`.
+    monkeypatch.setattr(wm, "_resolve_ui_language", lambda: lang)
     set_language(lang)
     labels: list = []
 
@@ -2082,8 +2085,9 @@ def test_the_facet_cascade_never_carries_a_selection_the_result_set_dropped(monk
 # LANGUAGE (fixed while wiring the job): the check used to navigate to
 # `?lang=en`. Nothing in the app reads that parameter — `web/main.py::
 # _resolve_ui_language` resolves the UI language from PER-USER STORAGE and
-# defaults to Hebrew — so a fresh browser context rendered Hebrew and the "EN"
-# pass looked for an English control that was never on the page. The check now
+# then the browser's language — so a fresh browser context rendered whatever
+# that resolved to (Hebrew, when this was written) and the "EN" pass looked for
+# an English control that was never on the page. The check now
 # reads the language off the rendered control and reaches English the only way a
 # reader can: by clicking the header's own language toggle.
 # ---------------------------------------------------------------------------
@@ -2095,9 +2099,10 @@ _BROWSER_BASE_URL_ENV = "GENIZAH_FINDINGS_BROWSER_BASE_URL"
 _BROWSER_VIEWPORTS = ((375, 812), (1440, 900))
 
 #: The header's own language toggle (`web/main.py::create_layout`). The app has
-#: no `?lang=` parameter — the UI language comes from per-user storage and
-#: defaults to Hebrew — so this control is the ONLY route a real reader has to
-#: English, and therefore the only honest way for this check to reach it.
+#: no `?lang=` parameter — the UI language comes from per-user storage, else
+#: the browser's language — so this control is the ONLY route a real reader has
+#: to the other language, and therefore the only honest way for this check to
+#: reach it.
 _LANG_TOGGLE_SELECTOR = ".lang-btn-header"
 
 #: NiceGUI paints its body over the websocket AFTER `load` fires, so every
