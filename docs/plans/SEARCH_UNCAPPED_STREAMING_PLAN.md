@@ -1,7 +1,39 @@
 # Desktop and web search: full coverage and first results under a second — plan (2026-09-30)
 
-**Status:** DRAFT, not started. Owner decisions D1-D3 answered 2026-09-30. Two Codex rounds
-(read-only, unsandboxed):
+**Status (2026-10-05): Phase 1 SHIPPED in v9.5.0 "Faster, complete search"**, released
+2026-10-05: desktop installer on GitHub (latest) and web deployed, tag `v9.5.0` on `e3c32666`.
+It went out as PR gershuni/GenizahSearch#375 (merged 2026-10-04, `9b4d0b2a`) and its
+follow-up gershuni/GenizahSearch#376 (`824a7e36`).
+
+- **What shipped:**
+  - Whole words in Exact (desktop), Variants and Fuzzy (Stage W).
+  - Fuzzy finds near spellings.
+  - Position checks every occurrence on a page.
+  - Phrase candidates for Literal, and page-first single-word Literal (Stage 1a/1b where proven).
+  - First rows streamed on the desktop (Stage 3).
+  - D8 Phase 1: restriction in the query at any size (desktop and web, including Parallels),
+    "N+" counts, cut-off steps completed before search-within and the all-terms filter, and steps
+    that replay their own run.
+  - #376: a preview starts no shelfmark fetch; a replaced fetch hands on the rows it did not reach,
+    only those still shown; a cancel drops its queued requests.
+- **What did NOT ship (open):**
+  - D8 Phase 2: sort all, export all, full session restore, Joins Lab. The owner decides when.
+  - Stage 2 (exhaustive desktop over a result store) and Stage 5 (no cap on the web).
+  - Whole-word Exact on the web and in the API. They send `exact`; the rule and fast paths key on
+    the desktop's `literal` (deferred in `e8decfca`).
+  - The tracker rows: `L1:word` near spellings (P3), the loader's blocking cancel-and-wait (P3),
+    My Library unrestricted by search-within (P2), line-break steps stay "+" (P2), Lab Mode in
+    chains (P2, owner: not now), the `test_findings_page` hang (P3).
+- **Gate:** `scripts/verify_search_combinations.py` (real index). Nightly registration via
+  `scripts/schedule_nightly_search_gate.ps1` is the owner's step.
+- **Public wording (owner, 2026-10-04):** speed first; fuller results said positively; no loss
+  figures in release texts. The loss figures stay here and in the tracker archive.
+
+Everything below is the plan as written and amended stage by stage; read it for the decisions and
+measurements behind the code.
+
+**Original status (2026-09-30):** DRAFT, not started. Owner decisions D1-D3 answered 2026-09-30.
+Two Codex rounds (read-only, unsandboxed):
 - Round 1, an independent assessment run alongside the first draft: *build exhaustive search
   around bounded batches and a lightweight result store, with immediate incremental rendering and
   explicit deduplication semantics, rather than raising the shared cap or blindly skipping system
