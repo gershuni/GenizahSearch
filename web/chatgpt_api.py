@@ -151,6 +151,12 @@ def _job_owner(request):
         return _error(exc.code, str(exc), exc.http_status)
 
 
+def _mark_chatgpt(request):
+    """Label the request so the shared handlers' telemetry counts it as GPT traffic."""
+    from web.api_hardening import API_CHANNEL_SCOPE_KEY
+    request.scope[API_CHANNEL_SCOPE_KEY] = 'chatgpt'
+
+
 def register_chatgpt_api(app):
     """Call after init_search_api on its /api sub-app; no extra corpus imports."""
     handlers = {route.path: route.endpoint for route in app.routes if hasattr(route, 'endpoint')}
@@ -158,6 +164,7 @@ def register_chatgpt_api(app):
     register_manuscript_details(app, _job_owner)
     from web.chatgpt_jobs import register_chatgpt_jobs
     async def prepare_job(kind, request):
+        _mark_chatgpt(request)
         return await _prepare_request(kind, request, background=True)
     register_chatgpt_jobs(app, handlers, prepare_job, _finish_response, _job_owner)
 
@@ -165,6 +172,7 @@ def register_chatgpt_api(app):
         handler = handlers['/' + kind]
 
         async def endpoint(request: Request):
+            _mark_chatgpt(request)
             if request.method == 'POST':
                 request = await _prepare_request(kind, request)
                 if isinstance(request, Response):
