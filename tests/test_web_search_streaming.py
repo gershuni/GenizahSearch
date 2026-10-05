@@ -56,6 +56,11 @@ def make_queue(tmp_path, monkeypatch):
     monkeypatch.setenv('GENIZAH_RESEARCH_WORKERS', '1')
     monkeypatch.setenv('GENIZAH_RESEARCH_QUEUE_SIZE', '2')
     monkeypatch.setenv('GENIZAH_WEB_RESERVE_MB', '128')
+    # These tests are about the warm protocol, not admission (one test sets
+    # memory to 0 itself). The host's reading can be low for reasons of its own:
+    # a container's cgroup counts page cache as used (1.3 GB "available" with
+    # 15 GB free), so four test lanes left a search waiting for memory.
+    monkeypatch.setattr('web.research_jobs.available_memory', lambda: 64 * 1024**3)
     script = tmp_path / 'worker.py'
     script.write_text(WORKER, encoding='utf-8')
     queues = []
