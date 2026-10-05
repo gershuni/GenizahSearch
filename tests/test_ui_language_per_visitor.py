@@ -16,8 +16,21 @@ from types import SimpleNamespace
 import pytest
 from nicegui.storage import request_contextvar
 
-import web.main as wm
 from web.translations import get_language, language_from_accept_language, set_language
+
+
+@pytest.fixture
+def wm():
+    """``web.main``, imported at test time rather than at collection.
+
+    ``web.main`` calls ``load_dotenv()`` at import. Imported ahead of the other
+    test modules, it sets ``GENIZAH_DISCOVERY_DATA_DIR`` from a local ``.env``
+    before ``web.discovery_assets`` reads it, and ``tests/test_findings_page.py``
+    then renders the locally staged artifact instead of its stubs.
+    """
+    import web.main
+
+    return web.main
 
 
 @pytest.mark.parametrize("header, expected", [
@@ -41,7 +54,7 @@ def test_language_from_accept_language(header, expected):
 
 
 @pytest.fixture
-def visitor(monkeypatch):
+def visitor(monkeypatch, wm):
     """One visitor: their per-user storage, and their browser's header."""
     data: dict = {}
     monkeypatch.setattr(wm, "safe_user_get", lambda key, default=None: data.get(key, default))
@@ -65,27 +78,27 @@ def visitor(monkeypatch):
 ])
 @pytest.mark.parametrize("previous_visitor", ["en", "he"])
 def test_no_saved_choice_follows_the_browser_not_the_previous_visitor(
-        visitor, header, expected, previous_visitor):
+        wm, visitor, header, expected, previous_visitor):
     visitor.browser(header)
     set_language(previous_visitor)  # what the last render left behind
     assert wm._resolve_ui_language() == expected
 
 
 @pytest.mark.parametrize("saved", ["en", "he"])
-def test_saved_choice_wins_over_the_browser(visitor, saved):
+def test_saved_choice_wins_over_the_browser(wm, visitor, saved):
     visitor.storage["ui_language"] = saved
     visitor.browser("en-US" if saved == "he" else "he-IL")
     assert wm._resolve_ui_language() == saved
 
 
-def test_unknown_saved_value_follows_the_browser(visitor):
+def test_unknown_saved_value_follows_the_browser(wm, visitor):
     visitor.storage["ui_language"] = "fr"
     visitor.browser("he-IL")
     set_language("en")
     assert wm._resolve_ui_language() == "he"
 
 
-def test_outside_a_request_the_default_is_english(visitor):
+def test_outside_a_request_the_default_is_english(wm, visitor):
     set_language("he")
     assert wm._resolve_ui_language() == "en"
 
@@ -94,12 +107,65 @@ def test_outside_a_request_the_default_is_english(visitor):
     ("he-IL", "en", "rtl"),
     ("en-US", "he", "ltr"),
 ])
-def test_first_paint_direction_follows_the_browser(visitor, header, previous_visitor, direction):
+def test_first_paint_direction_follows_the_browser(
+        wm, visitor, header, previous_visitor, direction):
     """The call site: the pre-render script paints this browser's direction,
     not the direction of whoever rendered last."""
     visitor.browser(header)
     set_language(previous_visitor)
     assert f'var dir = "{direction}";' in wm.apply_theme_immediately()
+
+
+@pytest.mark.parametrize("page_lang", ["en", "he"])
+def test_the_toggle_switches_from_the_language_its_page_was_rendered_in(monkeypatch, wm, page_lang):
+    """Codex review of #378: the header toggle chose the next language from
+    get_language() at CLICK time. With per-browser defaults two open pages can
+    differ, so after another visitor's render the toggle saved the language its
+    page already showed and reloaded to no change."""
+    import asyncio
+    import inspect
+
+    from nicegui import core, ui
+    from nicegui.client import Client
+    from nicegui.testing.general import prepare_simulation
+
+    prepare_simulation()
+    other = "he" if page_lang == "en" else "en"
+    saved: list = []
+    monkeypatch.setattr(wm, "_resolve_ui_language", lambda: page_lang)
+    monkeypatch.setattr(wm, "safe_user_set", lambda key, value: saved.append((key, value)) or True)
+    monkeypatch.setattr(ui.navigate, "reload", lambda: None)
+    previous = get_language()
+    outcome: dict = {}
+
+    async def _run():
+        core.loop = asyncio.get_running_loop()
+        with Client(ui.page("/_lang_toggle_probe")) as client:
+            with client:
+                wm.create_layout()
+            buttons = [e for e in client.elements.values()
+                       if "lang-btn-header" in getattr(e, "_classes", [])]
+            assert len(buttons) == 1, f"expected one language toggle, found {len(buttons)}"
+            outcome["label"] = buttons[0].text
+            set_language(other)  # another visitor's page renders meanwhile
+            handlers = [listener.handler
+                        for listener in buttons[0]._event_listeners.values()
+                        if listener.type == "click"]
+            assert handlers, "the language toggle has no click handler"
+            with client:
+                for handler in handlers:
+                    result = handler() if not inspect.signature(handler).parameters else handler(None)
+                    if inspect.isawaitable(result):
+                        await result
+
+    try:
+        asyncio.run(_run())
+    finally:
+        set_language(previous)
+
+    assert outcome["label"] == ("EN" if page_lang == "he" else "עב")
+    assert saved == [("ui_language", other)], (
+        f"a {page_lang!r} page's toggle saved {saved!r}; it must save {other!r}")
 
 
 @pytest.mark.parametrize("header, saved, rtl", [

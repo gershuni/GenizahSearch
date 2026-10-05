@@ -1793,14 +1793,14 @@ def create_layout():
                 create_auth_buttons()
 
             # Language Toggle
+            # Switch from the language THIS page was rendered in. get_language()
+            # at click time is whatever the last visitor's render left behind.
             def toggle_lang():
-                current = get_language()
-                new_lang = 'en' if current == 'he' else 'he'
+                new_lang = 'en' if resolved_lang == 'he' else 'he'
                 safe_user_set('ui_language', new_lang)
-                set_language(new_lang)
                 ui.navigate.reload()
 
-            lang_label = "EN" if get_language() == 'he' else "\u05E2\u05D1"
+            lang_label = "EN" if resolved_lang == 'he' else "\u05E2\u05D1"
             ui.button(lang_label, on_click=toggle_lang).props('flat round text-color=white').tooltip(tr('Switch language')).classes('lang-btn-header')
 
             # "What's New" — a header button with an unread dot, NOT a toast.
