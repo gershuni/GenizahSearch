@@ -330,6 +330,19 @@ def _build_envelope_response(*args) -> JSONResponse:
     )
 
 
+# Which surface a request came through, for the `channel` property. The GPT facade
+# marks the ASGI scope; both background-job runners set `research_job`. A scope key,
+# unlike a header, cannot be set by the caller, so the label cannot be spoofed.
+API_CHANNEL_SCOPE_KEY = 'genizah_api_channel'
+
+
+def api_channel(request) -> str:
+    """'api' | 'api_job' | 'chatgpt' | 'chatgpt_job'."""
+    scope = getattr(request, 'scope', None) or {}
+    channel = 'chatgpt' if scope.get(API_CHANNEL_SCOPE_KEY) == 'chatgpt' else 'api'
+    return channel + '_job' if scope.get('research_job') is not None else channel
+
+
 def wrap_endpoint(*, endpoint_name: str):
     """Decorator that owns the try/except/finally + envelope + PostHog
     capture pattern shared by all Phase 78+ search-helper endpoints.
@@ -365,6 +378,7 @@ def wrap_endpoint(*, endpoint_name: str):
         async def _wrapped(request: Request):
             t0 = time.monotonic()
             client_ip = _resolve_rate_limit_key(request)
+            channel = api_channel(request)
             captured_state: dict = {
                 'mode': None,
                 'result_count': None,
@@ -422,6 +436,7 @@ def wrap_endpoint(*, endpoint_name: str):
                         # Phase 85 SYNTH-06 / D-14 — populated by /api/browse
                         # handler; /api/parallels intentionally leaves None.
                         is_synthetic=captured_state.get('is_synthetic'),
+                        channel=channel,
                     )
                 except Exception:
                     logger.warning(
@@ -612,6 +627,10 @@ def capture_api_event(
     # None when the property is structurally inapplicable (/api/parallels
     # takes text not sys_id, or pre-resolution error paths).
     is_synthetic: Optional[bool] = None,
+    # api_channel(request): which surface the call came through (direct API, the
+    # GPT facade, or either one's background job). None only for a caller that
+    # predates the property.
+    channel: Optional[str] = None,
 ) -> None:
     """Enqueue a search_api_request PostHog event. Never blocks; never raises.
 
@@ -644,6 +663,7 @@ def capture_api_event(
         # not sys_id, so there is no canonical seed to tag — REVIEWS-MODE
         # Codex HIGH).
         props['is_synthetic'] = is_synthetic
+        props['channel'] = channel
         event = {
             'event': 'search_api_request',
             'distinct_id': hash_ip(client_ip),
@@ -668,6 +688,7 @@ __all__ = [
     'enforce_mode_gate',
     '_resolve_rate_limit_key', '_is_loopback_request',
     'hash_ip', 'capture_api_event', 'get_dropped_event_count',
+    'API_CHANNEL_SCOPE_KEY', 'api_channel',
     'latency_bucket', 'result_count_bucket',
     'wrap_endpoint', '_build_envelope_response',
     'POSTHOG_CAPTURE_URL', 'LOOPBACK_IPS', 'RATE_LIMIT_BUCKET_TTL',

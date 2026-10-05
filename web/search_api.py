@@ -49,6 +49,7 @@ from web.api_hardening import (
     RateLimiter,
     enforce_mode_gate,
     _resolve_rate_limit_key,
+    api_channel,
     capture_api_event,
     _build_envelope_response,
     wrap_endpoint,  # Phase 79 R-PR-03: now reused for browse_endpoint.
@@ -1462,6 +1463,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         t0 = time.monotonic()
         endpoint_name = 'search'
         client_ip = _resolve_rate_limit_key(request)
+        channel = api_channel(request)
         status_code = 200
         error_code: Optional[str] = None
         result_count: Optional[int] = None
@@ -1878,6 +1880,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     # Phase 85 SYNTH-06 / D-14 — derived from response items
                     # after serialization. None on error paths (no envelope).
                     is_synthetic=posthog_is_synthetic,
+                    channel=channel,
                 )
             except Exception:
                 logger.warning(
