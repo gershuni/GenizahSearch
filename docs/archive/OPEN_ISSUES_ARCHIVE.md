@@ -1325,12 +1325,6 @@ Moved by hand after every open entry was rechecked against `1d952620` and the fu
 |-------|------|--------|-----------|
 | Timeouts & retries | `auth_state.py:17-20` | ✅ Superseded (closed in the 2026-10-05 recheck) | Low priority - defaults are reasonable **Recheck 2026-10-05:** these constants (`DEFAULT_API_TIMEOUT`, `AUTH_API_TIMEOUT`, `MAX_RETRIES`, `RETRY_BACKOFF`) went with the old backend's httpx client in `feb5d46e` (2026-01-30). |
 
-### From `Deferred to v7.15+ (Phase 95 follow-up backlog)`
-
-| # | Item | Description | Priority |
-|---|------|-------------|----------|
-| D-F12 | ✅ Fixed (closed in the 2026-10-05 recheck; was ⏸ Deferred 2026-05-28, Phase 101 UAT) Regular Search ~constant ~8s wall-clock regardless of corpus size | Hillel UAT-observed during v7.15 close: regular Search (LOCAL-only) takes ~8s whether the LOCAL corpus is 1, 100, or 1000 files — strongly suggesting fixed overhead, not per-doc work. Also reported on a heavily-filtered Genizah search (filter narrows result set but wall-clock unchanged). Suspect surfaces (not yet measured): (a) cold Tantivy searcher open + warmup per request, (b) NLI / PGP / FJMS enrichment timeouts firing even on LOCAL-only or narrow-filter paths, (c) main Genizah corpus search always running alongside in the LOCAL→ALL RRF merge, (d) filter applied in Python after Tantivy returns full corpus (rather than pushed into the Tantivy query). Recommended next-milestone approach: instrument the regular-search hot path with 5-6 timing markers (Tantivy candidate fetch, regex post-filter, per-source enrichment, highlight build, return-to-UI), have user run 3 search shapes (LOCAL-only, Genizah unfiltered, Genizah filtered), then optimize the actual bottleneck — explicitly do NOT guess. Composition Search and Parallels are SEPARATE code paths and not in scope of this investigation. **Recheck 2026-10-05:** the size-independent cost was rewriting `search_history.json` on the UI thread after every search (`97edc02f`, 2026-06-01, with tests); a LOCAL-only search profiled at 0.01 s on 2026-05-31; v9.5.0 fixed the measured Exact/Variants costs and restricts filters inside the query. Nobody has re-timed the LOCAL-only and heavily filtered shapes end to end. | P2 |
-
 ### Original text of the entries rewritten in the tracker on 2026-10-05
 
 Each was partly fixed; the tracker now holds a shorter entry saying what remains (marked "narrowed 2026-10-05", or "reshaped" for the browse-map test). Verbatim, grouped by the section they live in.
