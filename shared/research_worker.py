@@ -31,6 +31,67 @@ def write_progress(root, event):
         pass
 
 
+# Early rows (execute_search's preview_callback) are a few dozen rows; a bigger
+# file is not written, so the parent never loads more than this before the result.
+PREVIEW_MAX_BYTES = 16 * 1024**2
+
+
+def write_preview(root, sequence, rows):
+    """Hand the parent the rows found so far, replacing the previous preview.
+
+    Each preview extends the one before (the engine's contract), so a preview
+    lost to a reader holding the file is covered by the next one or the result.
+    """
+    data = pickle.dumps({'sequence': sequence, 'rows': rows}, protocol=pickle.HIGHEST_PROTOCOL)
+    if len(data) > PREVIEW_MAX_BYTES:
+        return
+    temporary = root / 'preview.tmp'
+    for attempt in range(3):
+        try:
+            temporary.write_bytes(data)
+            temporary.replace(root / 'preview.pkl')
+            return
+        except OSError:
+            time.sleep(0.02 * (attempt + 1))
+
+
+def wait_for_input(root, poll=0.02):
+    """A warm worker waits here, everything loaded, until the parent hands it a
+    search. The parent writes input.pkl under another name and renames it, so
+    the file is complete once it exists."""
+    path = root / 'input.pkl'
+    while not path.exists():
+        time.sleep(poll)
+    return pickle.loads(path.read_bytes())
+
+
+def preload():
+    """What every search needs before it can start, loaded before it arrives.
+
+    The catalogue (libraries.csv and what is built from it) takes seconds to
+    load; the index itself opens in milliseconds and is opened per search, under
+    the index lease. A failure here is not fatal: run_query loads again and
+    reports the error the normal way.
+    """
+    try:
+        from shared.metadata_manager import MetadataManager
+        import shared.lab_engine  # noqa: F401 -- imported for run_query
+        import shared.search_engine  # noqa: F401
+        import shared.variants  # noqa: F401
+
+        # Started only by the web app (web/research_jobs.py): its library fetches
+        # check every redirect hop, as the web's own MetadataManager does.
+        meta = MetadataManager(checked_library_fetches=True)
+        meta._load_heavy_caches_bg()
+        return meta
+    except MemoryError:
+        raise
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 def restore_settings(snapshot):
     from shared.lab_settings import LabSettings
     settings = LabSettings()
@@ -92,7 +153,14 @@ def main(directory):
             proc.cpu_affinity([search_cpus[slot % len(search_cpus)]])
 
     root = Path(directory)
-    payload = pickle.loads((root / 'input.pkl').read_bytes())
+    meta = None
+    if os.environ.get('GENIZAH_RESEARCH_WARM') == '1':
+        # Started ahead of its search (web/research_jobs.py): load first, then
+        # wait. Still one search per process, so killing it frees everything.
+        meta = preload()
+        payload = wait_for_input(root)
+    else:
+        payload = pickle.loads((root / 'input.pkl').read_bytes())
     last = [0.0]
 
     def report(*values):
@@ -112,14 +180,14 @@ def main(directory):
     with index_leases([Config.LOCAL_INDEX_DIR, Config.LOCAL_LAB_INDEX_DIR]):
         write_progress(root, {'status': 'Starting search worker', 'progress': (0, 0)})
         try:
-            run_query(root, payload, report, native_matching=native_matching)
+            run_query(root, payload, report, native_matching=native_matching, meta=meta)
         finally:
             # Drop engine cycles/native handles before releasing the read lease.
             import gc
             gc.collect()
 
 
-def run_query(root, payload, report, *, native_matching=False):
+def run_query(root, payload, report, *, native_matching=False, meta=None):
     try:
         from shared.metadata_manager import MetadataManager
         from shared.variants import VariantManager
@@ -127,12 +195,13 @@ def run_query(root, payload, report, *, native_matching=False):
         from shared.search_engine import SearchEngine, _consume_last_responsa_downgrade, _consume_last_responsa_downgrade_meta
         from shared.search_regex import isolated_matching
 
-        # Started only by the web app (web/research_jobs.py): its library fetches
-        # check every redirect hop, as the web's own MetadataManager does.
-        meta = MetadataManager(checked_library_fetches=True)
-        # The web initializer loads these asynchronously. A short-lived worker
-        # must finish loading before it searches or serializes display metadata.
-        meta._load_heavy_caches_bg()
+        if meta is None:
+            # Started only by the web app (web/research_jobs.py): its library fetches
+            # check every redirect hop, as the web's own MetadataManager does.
+            meta = MetadataManager(checked_library_fetches=True)
+            # The web initializer loads these asynchronously. A short-lived worker
+            # must finish loading before it searches or serializes display metadata.
+            meta._load_heavy_caches_bg()
         lab = LabEngine(meta, None, settings=restore_settings(payload.get('settings')))
         variants = VariantManager(settings=lab.settings)
         lab.var_mgr = variants
@@ -165,6 +234,13 @@ def run_query(root, payload, report, *, native_matching=False):
         if arguments.get('restrict_sys_ids') is not None:
             arguments['restrict_sys_ids'] = set(arguments['restrict_sys_ids'])
         arguments['progress_callback'] = report
+        if payload.get('preview') and kind == 'search' and payload['method'] == 'execute_search':
+            sent = [0]
+
+            def preview(rows):
+                sent[0] += 1
+                write_preview(root, sent[0], rows)
+            arguments['preview_callback'] = preview
         write_progress(root, {'status': 'Preparing search', 'progress': (0, 0)})
         with isolated_matching(native=native_matching):
             value = getattr(engine, payload['method'])(**arguments)

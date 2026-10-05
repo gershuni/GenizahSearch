@@ -34,6 +34,7 @@ competition; it is not a guarantee against all host overload or storage contenti
 | `GENIZAH_RESEARCH_MEMORY_MB` | 4096 | Maximum worker allocation and resident-memory allowance |
 | `GENIZAH_WEB_RESERVE_MB` | 1024 | Free memory reserved for website/host activity |
 | `GENIZAH_RESEARCH_RESULT_MB` | 512 | Maximum compressed worker transfer (maximum 512) |
+| `GENIZAH_RESEARCH_PRESTART` | 1 | `0` = start each worker only when its search arrives (see below) |
 
 A worker waits when available memory is too low to start. Its allocation limit
 is reduced at launch if the configured allowance would consume the reserve.
@@ -52,8 +53,45 @@ design. Multiple server processes multiply capacity and do not share API job
 records; supporting that deployment requires an external queue/result store.
 Start with one worker and measure real broad queries, peak worker memory, queue
 wait, and concurrent browse response times before increasing concurrency.
-Each query starts a fresh worker and reloads engine metadata, adding startup
-latency in exchange for releasing its memory and native threads after completion.
+
+With one worker, every visitor's text search, Parallels search and API search
+waits in the same FIFO queue: a search starts only when the one before it ends.
+`GENIZAH_RESEARCH_WORKERS=2` (in the server's `.env`, then restart) runs two at
+once. Workers are pinned to one CPU each, never the first: two get separate CPUs
+only with at least three (`nproc`); on two CPUs they share one. Each running
+search may hold up to `GENIZAH_RESEARCH_MEMORY_MB` (the allowance is divided
+among the slots at launch), and each slot keeps a warm worker (below).
+
+### Warm workers (2026-10-05)
+
+Each query still runs in a fresh worker, released with its memory and native
+threads when it ends. But a worker spent ~6 s (measured in a 4-CPU dev container)
+loading the catalogue (`libraries.csv`, the CUDL alias index, the Oxford parts)
+before it could search, on every query -- the likely gap between 19 s on the
+website and 13 s on the desktop for the same search (owner, 2026-10-05). Now each slot starts its next worker as soon as the previous one ends
+(and at server start): it loads the catalogue and waits for its input, which the
+parent hands over by renaming `input.pkl` into its directory. The index itself is
+opened per search, under the index lease. Measured on a synthetic 60,000-page
+index, `אם אין אני לי`: first rows 7.1 s -> 1.1 s, complete 8.4-8.8 s -> 2.6 s.
+
+The cost: an idle worker holds the loaded catalogue, ~400 MB resident, one per
+slot. A slot does not start one when memory is below the admission threshold
+(the reserve plus 128 MB per slot); a search then starts its own worker, as
+before. A warm worker that died while waiting is replaced by a fresh one for the
+search. `GENIZAH_RESEARCH_PRESTART=0` restores the old behaviour. A search
+arriving while its warm worker is still loading waits only for the rest of the load.
+
+### Early rows
+
+A text search on the search page asks the worker for its first rows
+(`execute_search(preview_callback=)`, the desktop's streaming): the worker writes
+them to `preview.pkl` as they are found (at most 50 rows, each preview the start
+of the final list), the parent reads it on its 100 ms tick, and the page shows
+them under "Still searching" while the search runs. Offered where the engine
+offers them (no NOT-words, not Responsa, Genizah scope -- the website has no My
+Library) and only when no post-search filter (exclusions, library, printed, PGP,
+domain, measurements, the all-terms view) could hide a row. Stop keeps the rows
+already shown, marked partial. The API does not ask for them.
 
 ## Matching in supervised workers
 

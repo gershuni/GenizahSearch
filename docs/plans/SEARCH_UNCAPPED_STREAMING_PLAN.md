@@ -20,7 +20,8 @@ follow-up gershuni/GenizahSearch#376 (`824a7e36`).
   - D8 Phase 2: sort all, export all, full session restore, Joins Lab. The owner decides when.
   - Stage 2 (exhaustive desktop over a result store) and Stage 5 (no cap on the web).
   - Whole-word Exact on the web and in the API. They send `exact`; the rule and fast paths key on
-    the desktop's `literal` (deferred in `e8decfca`).
+    the desktop's `literal` (deferred in `e8decfca`). The web search page: done 2026-10-05 (below);
+    the API and web Joins Lab still open.
   - The tracker rows: `L1:word` near spellings (P3), the loader's blocking cancel-and-wait (P3),
     My Library unrestricted by search-within (P2), line-break steps stay "+" (P2), Lab Mode in
     chains (P2, owner: not now), the `test_findings_page` hang (P3).
@@ -28,6 +29,37 @@ follow-up gershuni/GenizahSearch#376 (`824a7e36`).
   `scripts/schedule_nightly_search_gate.ps1` is the owner's step.
 - **Public wording (owner, 2026-10-04):** speed first; fuller results said positively; no loss
   figures in release texts. The loss figures stay here and in the tracker archive.
+
+**Web, after v9.5.0 (2026-10-05, branch `claude/web-search-streaming-perf-s01r1t`, not deployed).**
+Owner: the web did not stream and was slower (אם אין אני לי: desktop 13 s, web 19 s).
+- **Why slower:** every web search ran in a fresh worker process that first loaded the catalogue
+  (`MetadataManager._load_heavy_caches_bg`, 5.5-6.4 s in a 4-CPU dev container: CSV 1.7 s, CUDL
+  alias index 3.2 s, Oxford parts 0.6 s), and the engine work itself is the desktop's. **Fixed:** each queue
+  slot starts its next worker ahead of the search (loads, then waits for `input.pkl`); still one
+  search per process. ~400 MB resident per idle slot; `GENIZAH_RESEARCH_PRESTART=0` turns it off.
+- **Why no streaming:** the worker had no channel back. **Fixed:** the page passes
+  `preview_callback` (and `corpus_scope='genizah'`, which the preview requires; the web has no My
+  Library); the worker writes `preview.pkl`, the parent reads it, the page paints up to one page
+  of rows under "Still searching". Not with NOT-words, Responsa, Lab Mode, or any post-search
+  filter that could hide a row. Stop keeps the rows shown (marked partial; before, Stop showed 0).
+- **Measured** (real web app + headless Chromium, synthetic 60,000-page index, so absolute numbers
+  are not production's): אם אין אני לי first rows 7.1 s -> 1.1 s, complete 8.4-8.8 s -> 2.6 s;
+  שלום first rows 1.1 s of 6.8 s. Tests: `tests/test_web_search_streaming.py`, 13 mutants killed.
+- **Open:** one worker serves every visitor (FIFO, `GENIZAH_RESEARCH_WORKERS=1`): raising it is a
+  server `.env` decision (CPUs, memory), see `docs/search-matching-timeouts.md`. A restricted
+  search (filters, search within) still loads `browse_map.pkl` in each worker (not measured
+  here).
+- **Web Exact = the desktop's Exact (same branch, second change).** The page sent mode `'exact'`,
+  which has none of `literal`'s paths (pair phrases, page docs for one word, aggregates only for
+  crossings) nor the whole-word rule: part of the 19 s vs 13 s. `web/pages/search_state.py::
+  engine_mode` maps it at the engine call, and search-within steps record `literal` (what ran) so
+  their replays match; the selector, history, URL and exports keep `exact`. Synthetic 164K-doc
+  index with whole-manuscript docs, engine: שלום 4.9 -> 2.6 s, אם אין אני לי 3.2 -> 2.4 s, משה אל
+  העם 5.7 -> 4.8 s; uncapped, `literal` keeps every `exact` row of both phrases and adds the
+  page-break crossings `exact` missed (9 and 183); for one word it drops only inside-word rows
+  (ושלום). Web end to end, same index: שלום 11.9 -> 8.1 s (the rest is moving 48K rows to the page),
+  אם אין אני לי 5.3 -> 4.3 s. **The API and web Joins Lab still send `exact`** (a public contract:
+  owner's call).
 
 Everything below is the plan as written and amended stage by stage; read it for the decisions and
 measurements behind the code.

@@ -1043,6 +1043,10 @@ Moved verbatim by `scripts/archive_closed_issues.py`. Nothing was edited or dele
 
 Moved verbatim from the top of the tracker on 2026-09-18 (the 2026-09-06 split did the same for the headers before them).
 
+> Previous: 2026-10-04 -- **Desktop search: combinations** (branch `ccr-b3b8c7ac-jyxlw3`, draft PR #375): search-within restricts in the query at any size (above 500 manuscripts it lost 69-81% of true pages), refinement steps replay the search they came from; owner decision D8 (complete a cut-off step only when a combination needs it), now built: search-within and the all-terms filter complete cut-off steps first (Stop keeps the chain); a nightly real-index check (`scripts/verify_search_combinations.py`); Codex rounds 4-5 fixed (My Library whole words, position and complete reads; stopped Title/Shelfmark searches marked; previews not judged by the last run's filters). P2 +4 (Composition and My Library restriction gaps; line-break steps; Lab Mode in chains), P3 +1 (bracket-only matches on whole-manuscript rows). Three older header notes moved to the archive. Plan: `docs/plans/SEARCH_UNCAPPED_STREAMING_PLAN.md`.
+>
+> (The header above was moved verbatim from the top of the tracker on 2026-10-05.)
+>
 > Previous: 2026-09-30 -- **Desktop search: why it is slow and what the 50,000 cap loses** (branch `ccr-b3b8c7ac-jyxlw3`): owner re-measured step 1 (search 27.7 s -> 3.9 s warm; the wait is now startup background work and UI); real-index measurements, owner decisions (Literal = exact word, no cap on the web either, controls wait for a finished run) and two Codex rounds in `docs/plans/SEARCH_UNCAPPED_STREAMING_PLAN.md`. P2 +3 (bracket form `]word[` never retrieved, search-within drops cross-page hits, position search checks only the first occurrence; the latter two since fixed on the branch), P3 +1 (a regex time budget leaks from the Responsa tests into `test_search_regex.py`). Multi-word Literal now retrieves by adjacent-pair phrases (owner: exact words in phrases too; real index: אהרן כהן 8.7 s -> 0.7 s).
 >
 > (The header above was moved verbatim from the top of the tracker on 2026-10-04.)

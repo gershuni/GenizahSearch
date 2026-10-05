@@ -13,7 +13,7 @@ A comprehensive search interface with:
 from nicegui import ui, run, app
 from web.state import state
 from web.pages.search_helpers import compute_selected_uids
-from web.translations import tr, is_rtl, get_language
+from web.translations import tr, is_rtl, get_language, using_language
 from web.components.typography import h2, h3, h4
 from web.clipboard import copy_text_to_clipboard
 from web.components.filter_panel import (
@@ -30,11 +30,12 @@ from web.pages.search_state import (
     domain_display_name,
     persist_search_snapshot, clear_search_snapshot, clear_search_filters,
     get_search_active_snapshot, restore_search_snapshot,
-    compact_result_rows,
+    compact_result_rows, preview_shows_final_rows, engine_mode,
 )
 from web.pages.search_results import (
     toggle_expansion as _toggle_expansion,
     render_results as _render_results,
+    render_preview_results as _render_preview_results,
     create_result_card as _create_result_card,
     open_advanced_dialog as _open_advanced_dialog,
     copy_result_text,
@@ -2249,7 +2250,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if not search_state.refinement_chain and query_input.value:
             step0 = RefinementStep(
                 query=query_input.value.strip(),
-                mode=mode_select.value,
+                # What it ran with (Exact runs as the engine's 'literal'), so a
+                # replay runs the same search.
+                mode=engine_mode(mode_select.value),
                 gap=int(gap_input.value),
                 result_count=len(search_state.results),
             )
@@ -2380,7 +2383,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Restore the last chain step's query and re-execute it
             last_step = search_state.refinement_chain[-1]
             query_input.value = last_step.query
-            mode_select.value = last_step.mode if last_step.mode in ('exact', 'variants', 'variants_extended', 'variants_maximum', 'responsa', 'Regex', 'Title', 'Shelfmark') else 'exact'
+            mode_select.value = 'exact' if last_step.mode == 'literal' else last_step.mode if last_step.mode in ('exact', 'variants', 'variants_extended', 'variants_maximum', 'responsa', 'Regex', 'Title', 'Shelfmark') else 'exact'
             # Remove the last step so re-search in refine mode re-adds it
             search_state.refinement_chain = search_state.refinement_chain[:-1]
             if search_state.refinement_chain:
@@ -4863,6 +4866,59 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             render_results([])
             return
 
+        # Early rows (2026-10-05): the worker hands over the first rows it finds
+        # (execute_search's preview_callback, the desktop's streaming) and the
+        # page shows them while the search runs. Only where the engine offers
+        # them (no NOT-words, not Responsa) and no post-search filter could hide
+        # one; the completed search then renders the whole list as before.
+        _preview_wanted = (not lab_mode.value and not not_words and responsa_options is None
+                           and preview_shows_final_rows(search_state))
+        _loop = asyncio.get_running_loop()
+        _preview_ready = asyncio.Event()
+        _preview_box = {'rows': None}
+
+        def preview_cb(rows):
+            # Runs on the thread waiting for the worker: hand over to the loop.
+            _preview_box['rows'] = rows
+            _loop.call_soon_threadsafe(_preview_ready.set)
+
+        async def _paint_previews(generation, lang):
+            painted = 0
+            while True:
+                await _preview_ready.wait()
+                _preview_ready.clear()
+                rows = _preview_box['rows']
+                if not rows or len(rows) <= painted:
+                    continue
+                rows = compact_result_rows(rows)
+                sids = [r.get('display', {}).get('id') for r in rows if r.get('display', {}).get('id')]
+
+                def _fetch_preview_titles():
+                    from shared.translation_service import TranslationService
+                    svc = TranslationService(thread_safe=True)
+                    tt = svc.get_title_translations_batch(sids) if svc.titles_available() else {}
+                    svc.close()
+                    return tt
+                try:
+                    titles = await run.io_bound(_fetch_preview_titles) if sids else {}
+                except Exception:
+                    titles = {}  # Titles are added again with the result.
+                if (search_state.search_generation != generation or not search_state.is_running
+                        or search_state.is_cancelled):
+                    return
+                search_state.title_translations = titles
+                try:
+                    with refs.page_client, using_language(lang):
+                        _render_preview_results(search_state, refs, rows)
+                except RuntimeError:
+                    return  # The page is gone.
+                except Exception:
+                    logger.exception('Search preview render failed')
+                    return
+                painted = len(rows)
+                logger.info('Search perf: preview_rows=%d since_submit_ms=%.0f', painted,
+                            (time.time() - search_state.search_start_time) * 1000)
+
         def run_core_search():
             try:
                 if lab_mode.value:
@@ -4878,13 +4934,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     tp = text_position_select.value
                     return state.searcher.execute_search(
                         clean_query,
-                        mode=mode,
+                        mode=engine_mode(mode),
                         gap=int(gap_input.value),
                         progress_callback=progress_cb,
                         exclude_words=not_words,
                         responsa_options=responsa_options,
                         restrict_sys_ids=effective_restrict,
                         text_position=tp if tp != 'anywhere' else None,
+                        # The website has no My Library: say so, which is also
+                        # what lets the engine hand over early rows.
+                        corpus_scope='genizah',
+                        preview_callback=preview_cb if _preview_wanted else None,
                     )
             except InterruptedError:
                 return []
@@ -4904,7 +4964,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # Admission, FIFO waiting and process termination are shared by text,
         # parallels and API searches. Waiting does not occupy NiceGUI's pool.
-        results = await run_research_call(run_core_search)
+        _painter = (asyncio.ensure_future(_paint_previews(search_state.search_generation, get_language()))
+                    if _preview_wanted else None)
+        try:
+            results = await run_research_call(run_core_search)
+        finally:
+            if _painter is not None:
+                _painter.cancel()
 
         # Handle validation errors from explosion guard (returned as sentinel dict
         # because run_core_search runs in io_bound thread and cannot call ui.notify)
@@ -4930,6 +4996,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # Skip expensive enrichment when search was cancelled (GAP-R7 round 3)
         if search_state.is_cancelled:
+            # Stop kills the worker, so it returns nothing; the early rows it had
+            # handed over are verified rows (the start of its list): keep them.
+            if not results and _preview_box['rows']:
+                results = list(_preview_box['rows'])
             search_state.is_running = False
             search_state.is_cancelled = False
             search_state.progress = 1.0
@@ -5090,7 +5160,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             else:
                 step = RefinementStep(
                     query=clean_query,
-                    mode=mode,
+                    mode=engine_mode(mode),  # what it ran with, for its replays
                     gap=int(gap_input.value),
                     exclude_words=not_words if not_words else [],
                     text_position=text_position_select.value if text_position_select.value != 'anywhere' else None,

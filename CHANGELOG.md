@@ -4,6 +4,20 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Web search: first results while it searches, and faster (web)
+
+- **The first results appear while the search runs**, as on the desktop: up to a page of rows
+  under "Still searching", then the full list. Stop keeps the rows already shown.
+- **Every search starts about 6 seconds sooner.** Each search runs in its own worker process;
+  the next worker now loads the catalogue before the search arrives instead of after.
+- **Exact searches are faster and match whole words, as on the desktop.** A phrase is found by
+  its words' pairs, a single word on pages only, and a phrase that runs across a page break is
+  found there too. A word inside a longer word (שלום in ושלום) is Responsa mode's job.
+- Operators: `GENIZAH_RESEARCH_PRESTART` (default on) and the worker-count trade-offs are in
+  `docs/search-matching-timeouts.md`.
+
 ## [9.5.0] - 2026-10-04 — Faster, complete search
 
 A desktop installer and a web deploy. Search is much faster, and its results are more
