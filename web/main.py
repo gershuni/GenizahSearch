@@ -700,7 +700,7 @@ logger = logging.getLogger(__name__)
 from web.state import state
 from web.api import init_api_routes
 from web.search_api import init_search_api
-from web.translations import tr, set_language, get_language
+from web.translations import tr, set_language, get_language, browser_language
 from web.citation_chip import render_citation_chip
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.atlas_assets import (
@@ -1511,14 +1511,24 @@ COMMON_STYLES = f'<link rel="stylesheet" href="/static/common.css?v={_common_css
 
 
 def _resolve_ui_language() -> str:
-    """Return the persisted UI language so layout and bootstrap agree on first render."""
+    """Return the persisted UI language so layout and bootstrap agree on first render.
+
+    A visitor with no saved choice gets their browser's language: Hebrew if
+    the browser's first choice is Hebrew, English otherwise. Never fall back
+    to ``get_language()``: that is one process-wide value, last set by
+    whichever visitor's page rendered before this one, so falling back to it
+    showed every new visitor the previous visitor's language.
+
+    The page HTML therefore depends on ``Accept-Language`` as well as the
+    session cookie. If page HTML is ever made cacheable (the Set-Cookie
+    BYPASS issue), the cache must vary on it.
+    """
     saved_lang = safe_user_get('ui_language')
 
     if saved_lang in ('he', 'en'):
         return saved_lang
 
-    current_lang = get_language()
-    return current_lang if current_lang in ('he', 'en') else 'he'
+    return browser_language()
 
 
 # ============================================================================

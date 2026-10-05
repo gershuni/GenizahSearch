@@ -26,6 +26,46 @@ def get_language() -> str:
     return _current_lang
 
 
+def language_from_accept_language(header: str | None) -> str:
+    """'he' when the browser's first-choice language is Hebrew, otherwise 'en'.
+
+    ``header`` is an HTTP ``Accept-Language`` value, e.g.
+    ``"he-IL,he;q=0.9,en;q=0.8"``. The first choice is the entry with the
+    highest q (the earliest on a tie); q=0 means "not acceptable" and is
+    skipped. ``iw`` is the legacy code for Hebrew. No header (most crawlers
+    send none) or an unparsable one gives 'en'.
+    """
+    best_tag, best_q = '', 0.0
+    for part in (header or '').split(','):
+        tag, _, params = part.strip().partition(';')
+        q = 1.0
+        for param in params.split(';'):
+            key, _, value = param.strip().partition('=')
+            if key.strip().lower() == 'q':
+                try:
+                    q = float(value)
+                except ValueError:
+                    q = 0.0
+        if tag and q > best_q:
+            best_tag, best_q = tag, q
+    primary = best_tag.split('-')[0].strip().lower()
+    return 'he' if primary in ('he', 'iw') else 'en'
+
+
+def browser_language() -> str:
+    """The default UI language for the current request's browser.
+
+    Reads NiceGUI's per-request context, which page builds, their event
+    handlers and FastAPI routes all carry. Outside a request: 'en'.
+    """
+    from nicegui.storage import request_contextvar
+
+    request = request_contextvar.get()
+    if request is None:
+        return 'en'
+    return language_from_accept_language(request.headers.get('accept-language'))
+
+
 @contextmanager
 def using_language(lang: str) -> Iterator[None]:
     """Render a synchronous block in ``lang``, then restore the previous language.

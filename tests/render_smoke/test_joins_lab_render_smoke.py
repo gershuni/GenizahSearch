@@ -2203,6 +2203,12 @@ def test_rtl_flex_row_reverse_pagination_and_compare(joins_lab_smoke_runner):
         # during the initial render.  Restore in finally for test isolation.
         _prev_lang = get_language()
         set_language('he')
+        # create_layout() sets the language from the visitor's saved choice,
+        # else their browser's; the simulated browser sends neither, so stand
+        # in for a Hebrew reader.
+        from unittest.mock import patch
+        _he_reader = patch('web.main._resolve_ui_language', return_value='he')
+        _he_reader.start()
         try:
             await user.open('/joins-lab')
             await _load_anchor_and_search(user)
@@ -2272,6 +2278,7 @@ def test_rtl_flex_row_reverse_pagination_and_compare(joins_lab_smoke_runner):
             )
         finally:
             # Restore language for test isolation (Pitfall 4).
+            _he_reader.stop()
             set_language(_prev_lang)
 
     # Pass 25 stub results so total_pages = 2 (> _PAGE_SIZE = 24), which causes
