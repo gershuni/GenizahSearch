@@ -113,6 +113,11 @@ class SearchUIState:
         # only part of it. The count shows "N+", and search-within completes it first.
         self.result_count_capped: bool = False
         self.running_label: str = None   # what the progress line says while running (default "Searching...")
+        # What the last search sent ran with (query without its mode prefix, engine
+        # mode, gap, NOT-words, position, Responsa options, scope, variant settings):
+        # the first step of a search-within chain is built from it, so a replay or a
+        # completion runs the same search (the desktop's D8 commit 2).
+        self.last_run: dict = None
         self.refinement_restrict_sys_ids: set = None   # sys_ids from last chain step (RAW results, not post-filtered)
         self._refine_mode: bool = False                # True when user clicked "Search within" and is entering query
         self._refinement_stale: bool = False           # True when filters changed during active chain (D-16)

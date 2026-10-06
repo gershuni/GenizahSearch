@@ -2265,6 +2265,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     # === Phase 55: Refinement UI helper functions ===
 
+    def _run_params_from_controls():
+        """The shown results' search as the controls describe it, for results restored
+        from a session (no run recorded on this page): the query without its mode
+        prefix, so a replay or a completion runs the search that was shown."""
+        raw = query_input.value.strip()
+        is_responsa = mode_select.value == 'responsa'
+        mode_override, parsed = state.searcher.parse_query_syntax(raw, responsa_mode=is_responsa)
+        return {'query': parsed if mode_override else raw,
+                'mode': engine_mode(mode_override or mode_select.value),
+                'gap': int(gap_input.value), 'corpus_scope': 'genizah',
+                'variant_settings': search_state.last_variant_settings}
+
     async def _enter_refine_mode():
         """D-02: Activate refine mode -- scroll to search bar, show badge."""
         if search_state.is_running:
@@ -2277,13 +2289,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state._refinement_scope_sig = scope_signature(search_state.restrict_sys_ids)
         # Add the CURRENT search as step 0 if chain is empty (so breadcrumb shows the original query)
         if not search_state.refinement_chain and query_input.value:
+            run_params = search_state.last_run or _run_params_from_controls()
             step0 = RefinementStep(
-                query=query_input.value.strip(),
-                # What it ran with (Exact runs as the engine's 'literal'), so a
-                # replay runs the same search.
-                mode=engine_mode(mode_select.value),
-                gap=int(gap_input.value),
-                variant_settings=search_state.last_variant_settings,
+                **run_params,
                 result_count=len(search_state.results),
                 result_count_capped=search_state.result_count_capped,
             )
@@ -2301,8 +2309,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # or failed, it searches within the shown results' manuscripts, said "+".
         completed = await _complete_chain(None)
         if completed and not completed['interrupted'] and completed['restrict'] is not None:
-            raw_ids = completed['restrict']
-            search_state.refinement_restrict_sys_ids = raw_ids
+            if raw_ids <= completed['restrict']:
+                raw_ids = completed['restrict']
+                search_state.refinement_restrict_sys_ids = raw_ids
+            else:
+                # The complete set must hold every shown manuscript: never search
+                # within fewer than are shown.
+                logger.warning('Completed refinement set misses %d shown manuscripts; '
+                               'searching within the shown ones',
+                               len(raw_ids - completed['restrict']))
+                search_state.refinement_chain[-1].result_count_capped = True
         capped = bool(search_state.refinement_chain and search_state.refinement_chain[-1].result_count_capped)
         ms_count = len(raw_ids)  # unique manuscript count
         search_state._refine_mode = True
@@ -2420,6 +2436,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         finally:
             search_state.running_label = None
             search_state.is_running = was_running
+            if not was_running:
+                results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}"
         persist_value('search_refinement_chain', [s.to_dict() for s in search_state.refinement_chain])
         _update_refinement_strip()
         return result
@@ -4900,6 +4918,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 'variant_mode': 'variants' if responsa_variants_cb.value else 'exact',
             }
 
+        _tp = text_position_select.value
+        search_state.last_run = {
+            'query': clean_query, 'mode': engine_mode(mode), 'gap': int(gap_input.value),
+            'exclude_words': list(not_words), 'text_position': _tp if _tp != 'anywhere' else None,
+            'responsa_options': responsa_options, 'corpus_scope': 'genizah',
+            'variant_settings': dict(variant_settings),
+        }
+
         # Phase 55: If not in refine mode, clear any stale refinement chain
         # A normal search should NOT be restricted by a previous refinement
         if not search_state._refine_mode and (search_state.refinement_chain or search_state.refinement_restrict_sys_ids):
@@ -5294,6 +5320,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     text_position=text_position_select.value if text_position_select.value != 'anywhere' else None,
                     responsa_options=responsa_options,
                     variant_settings=dict(variant_settings),
+                    corpus_scope='genizah',
                     result_count=len(results),  # total results (matches display count)
                     result_count_capped=search_state.result_count_capped,
                 )

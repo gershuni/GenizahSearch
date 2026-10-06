@@ -262,3 +262,29 @@ def test_a_snapshot_that_kept_part_of_the_list_restores_as_cut_off(monkeypatch):
     restored = ss.SearchUIState()
     ss.restore_search_snapshot(restored)
     assert len(restored.results) == 2 and restored.result_count_capped is True
+
+
+def test_completion_runs_the_search_that_ran_not_the_search_box(page):
+    """Found in the browser check: the first step of a chain was built from the
+    search box, which still held the "=" prefix, and with scope 'all', so the
+    completion searched "= <word>" and found nothing. It must re-run the search
+    that ran: the query without its prefix, its mode, the website's scope."""
+    queue = page({
+        (WORD, False): ([_row('M1')], {'capped': True, 'interrupted': False}),
+        (WORD, True): ([_row('M1'), _row('M2')], None),
+        (WORD2, False): ([_row('M2')], None),
+    })
+
+    async def driver(a, b):
+        await a.open('/search')
+        submit(a, f'= {WORD}')
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)))
+        _click_search_within(a)
+        await wait_for_payloads(queue, 2)
+        await _wait_for(lambda: any('Searching within 2 manuscripts' in t for t in _label_texts(a)))
+
+    run(driver)
+    completion = queue.payloads[1]['arguments']
+    assert (completion['query_str'], completion['mode'], completion['corpus_scope']) == (WORD, 'literal', 'genizah')
+    assert completion['ids_only'] is True
