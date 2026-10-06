@@ -1506,7 +1506,7 @@ def create_parallels_page(initial_text: str = None):
 
                             with ui.column().classes('gap-1'):
                                 h3(tr('Num Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                                max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=2).classes('w-16').props('outlined dense')
+                                max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=variant_preferences.max_changes('basic')).classes('w-16').props('outlined dense')
                         else:
                             # Slider mode
                             with ui.column().classes('gap-1 w-full'):
@@ -1516,11 +1516,20 @@ def create_parallels_page(initial_text: str = None):
                                     variant_slider_label = ui.label('30').classes('text-sm font-medium w-10').style('color: var(--primary-600);')
                             with ui.column().classes('gap-1'):
                                 h3(tr('Num Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                                max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=2).classes('w-16').props('outlined dense')
+                                max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=variant_preferences.max_changes('basic')).classes('w-16').props('outlined dense')
 
                     def set_level(level_value):
                         """Remember this visitor's variant level (sent with each search)."""
                         current_preset['value'] = level_value
+                        # Num Changes shows the level's own x1-x3 (no change event).
+                        max_changes_select.value = variant_preferences.max_changes(
+                            variant_preferences.level_of(level_value))
+
+                    def save_max_changes():
+                        variant_preferences.set_max_changes(
+                            variant_preferences.level_of(current_preset['value']),
+                            int(max_changes_select.value))
+                    max_changes_select.on('update:model-value', save_max_changes)
 
                     if variant_level_select:
                         def on_level_change():
@@ -1530,7 +1539,7 @@ def create_parallels_page(initial_text: str = None):
                     if variant_slider:
                         def on_slider_change():
                             val = int(variant_slider.value)
-                            current_preset['value'] = val
+                            set_level(val)
                             variant_slider_label.set_text(str(val))
                         variant_slider.on('update:model-value', on_slider_change)
 

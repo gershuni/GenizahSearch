@@ -1898,6 +1898,11 @@ class SearchEngine:
                 continue
             # Pre-compute at the larger limit; Tantivy phase will slice from cache
             self.var_mgr.get_variants(term, mode, limit=max_limit)
+            # More spellings within the settings than the budget holds: the
+            # pages only those reach are not searched, so the list says "+" (D8).
+            overflowed = getattr(self.var_mgr, 'variants_overflowed', None)
+            if overflowed is not None and overflowed(term, mode, limit=max_limit):
+                _note_search_cutoff(capped=True)
             if regex_mode != mode:
                 self.var_mgr.get_variants(term, regex_mode, limit=max_limit)
 

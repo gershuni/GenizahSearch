@@ -57,7 +57,7 @@ from web.api_hardening import (
 # Concern #3: APIError from neutral location.
 from shared.api_errors import APIError
 from shared.search_regex import SearchBudgetExceeded, search_budget
-from web.research_jobs import api_engine, wait_executor, ResearchJobError
+from web.research_jobs import api_engine, wait_executor, with_request_settings, ResearchJobError
 # Phase 79 imports.
 from shared.browse_service import (
     fetch_browse_bundle,
@@ -1658,6 +1658,9 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 core_timeout, timeout_env = _resolve_search_timeout(req.search_mode)
                 background_job = request.scope.get('research_job')
                 worker_searcher = api_engine(state.searcher, request, core_timeout)
+                if req.search_mode == 'fuzzy':
+                    # The website defaults give x1 (Basic); Fuzzy runs at x2.
+                    worker_searcher = with_request_settings(worker_searcher, variant_max_changes=2)
                 if background_job:
                     core_timeout = None
 
@@ -2500,7 +2503,9 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     fetch_parallels_results(
                         # SEED-016 #3: inject the SearchEngine + MetadataManager
                         # singletons (was read off web.state inside shared/).
-                        searcher=api_engine(state.searcher, request, parallels_ceiling),
+                        searcher=(with_request_settings(
+                            api_engine(state.searcher, request, parallels_ceiling), variant_max_changes=2)
+                            if req.mode == 'fuzzy' else api_engine(state.searcher, request, parallels_ceiling)),
                         meta_mgr=state.meta_mgr,
                         text=text,
                         chunk_size=req.chunk_size,

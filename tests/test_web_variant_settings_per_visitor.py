@@ -361,13 +361,14 @@ def test_settings_page_choices_belong_to_one_visitor(server):
         aggressive = _element(a, ui.switch, lambda e: 'Aggressive' in str(e.text))
         _fire(a, aggressive, 'update:modelValue', True)
         numbers = [e for e in a._client.elements.values() if isinstance(e, ui.number)]
-        by_max = {int(e._props.get('max')): e for e in numbers
+        by_max = {int(e._props.get('max')): e for e in numbers if int(e._props.get('max')) != 3
                   if (e._props.get('min'), e._props.get('max')) != (5, 100)}  # not History entries
         _fire(a, by_max[5], 'update:modelValue', 4)     # Limit Short Words
-        _fire(a, by_max[3], 'update:modelValue', 1)     # Max Changes per Word
+        extended = _element(a, ui.number, lambda e: 'max-changes-extended' in e._markers)
+        _fire(a, extended, 'update:modelValue', 3)      # Max Changes per Word, Extended
         _fire(a, by_max[100], 'update:modelValue', 55)  # Lab Min Score
         await asyncio.sleep(0.05)
-        assert stored(a, 'search_max_changes') == 1
+        assert stored(a, 'search_max_changes_by_level') == {'basic': 1, 'extended': 3, 'maximum': 2}
         await a.open('/search')
         submit(a, f'?? {WORD}')
         await wait_for_payloads(server.queue, 1)
@@ -382,7 +383,7 @@ def test_settings_page_choices_belong_to_one_visitor(server):
     assert sent[WORD]['custom_variants'] == {pair: True}
     assert sent[WORD]['variant_aggressive'] is True
     assert sent[WORD]['variant_min_word_len'] == 4
-    assert sent[WORD]['variant_max_changes'] == 1
+    assert sent[WORD]['variant_max_changes'] == 3          # ?? = Extended, its own x3
     assert sent[WORD]['comp_min_score'] == 55
     from web.variant_preferences import WEBSITE_DEFAULTS
     for name in ('custom_variants', 'variant_aggressive', 'variant_min_word_len', 'comp_min_score'):

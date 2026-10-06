@@ -3621,6 +3621,7 @@ TRANSLATIONS.update({
     "Variant intensity: more pairs = more results but slower": "עוצמת וריאנטים: יותר זוגות = יותר תוצאות אך איטי יותר",
     "Total estimated variants for all words in query": "סך הווריאנטים המשוערים לכל המילים בשאילתה",
     "Max character changes per word (1-3)": "מקסימום שינויי תווים למילה (1-3)",
+    "Letter changes per word at this level (1-3)": "שינויי אותיות למילה ברמה זו (1-3)",
     "Filter results by physical measurements (post-search)": "סנן תוצאות לפי מידות פיזיות (לאחר החיפוש)",
     "Variant search (uses slider level)": "חיפוש וריאנטים (משתמש ברמת המחוון)",
     "Variant intensity": "עוצמת וריאנטים",

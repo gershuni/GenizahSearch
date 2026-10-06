@@ -5800,6 +5800,7 @@ class GenizahGUI(QMainWindow):
         self.variant_slider.valueChanged.connect(lambda v: (
             self.variant_slider_label.setText(str(v)),
             self._sync_variant_sliders(v, 'search') if hasattr(self, '_sync_variant_sliders') else None,
+            self._show_level_max_changes() if hasattr(self, 'spin_max_changes') else None,
             self._update_variant_count_preview()
         ))
 
@@ -5816,10 +5817,11 @@ class GenizahGUI(QMainWindow):
         # Max changes spinbox
         self.spin_max_changes = QSpinBox()
         self.spin_max_changes.setRange(1, 3)
-        self.spin_max_changes.setValue(getattr(self.lab_engine.settings if hasattr(self, 'lab_engine') and self.lab_engine else None, 'variant_max_changes', 2) if hasattr(self, 'lab_engine') else 2)
+        self.spin_max_changes.setValue(self._level_max_changes())
         self.spin_max_changes.setFixedWidth(40)
-        self.spin_max_changes.setToolTip(tr("Max character changes per word (1-3)"))
+        self.spin_max_changes.setToolTip(tr("Letter changes per word at this level (1-3)"))
         self.spin_max_changes.setPrefix("×")
+        self.spin_max_changes.valueChanged.connect(self._on_max_changes_spin)
 
         # Add widgets to main container
         variant_layout.addWidget(self.variant_presets_widget)
@@ -17096,6 +17098,63 @@ class GenizahGUI(QMainWindow):
                 self._min_delimiter_distance_temp = min_distance_spin.value()
             self._update_boundary_stats()
 
+    # ?, ?? and ??? choose Basic, Extended and Maximum, like the preset buttons.
+    _PREFIX_VARIANT_PRESETS = {'variants': 30, 'variants_extended': 70, 'variants_maximum': 150}
+
+    def _apply_prefix_variant_preset(self, target_mode):
+        """Select the level a variant prefix names; return the combo mode to show."""
+        preset = self._PREFIX_VARIANT_PRESETS.get(target_mode)
+        if preset is None:
+            return target_mode
+        self._set_variant_preset(preset)
+        return 'variants'
+
+    def _lab_settings(self):
+        engine = getattr(self, 'lab_engine', None)
+        return getattr(engine, 'settings', None) if engine else None
+
+    def _level_max_changes(self, pairs_count=None):
+        """x1-x3 of the variant level *pairs_count* (default: the one shown)."""
+        settings = self._lab_settings()
+        if pairs_count is None:
+            pairs_count = self._get_current_variant_pairs_count() if hasattr(self, 'variant_slider') else 30
+        from shared.variants import max_changes_by_preset, variant_preset_of
+        table = max_changes_by_preset(getattr(settings, 'variant_max_changes_by_preset', None))
+        return table[variant_preset_of(pairs_count)]
+
+    def _show_level_max_changes(self):
+        """Put the shown level's x1-x3 in the spin box (no change event)."""
+        if hasattr(self, 'spin_max_changes'):
+            self.spin_max_changes.blockSignals(True)
+            self.spin_max_changes.setValue(self._level_max_changes())
+            self.spin_max_changes.blockSignals(False)
+
+    def _on_max_changes_spin(self, value):
+        """The spin box sets x1-x3 for the level shown, and keeps it."""
+        settings = self._lab_settings()
+        if settings is None:
+            return
+        from shared.variants import max_changes_by_preset, variant_preset_of
+        table = max_changes_by_preset(getattr(settings, 'variant_max_changes_by_preset', None))
+        table[variant_preset_of(self._get_current_variant_pairs_count())] = max(1, min(3, int(value)))
+        settings.variant_max_changes_by_preset = table
+        if hasattr(settings, 'save'):
+            settings.save()
+        self._update_variant_count_preview()
+
+    def _use_variant_changes(self, mode, pairs_count=None):
+        """Set the per-word limit the next search runs with: the level's x1-x3 for
+        Variants, x2 for Fuzzy, otherwise Basic's (Responsa, composition, Joins)."""
+        settings = self._lab_settings()
+        if settings is None:
+            return
+        if mode == 'variants':
+            settings.variant_max_changes = self._level_max_changes(pairs_count)
+        elif mode == 'fuzzy':
+            settings.variant_max_changes = 2
+        else:
+            settings.variant_max_changes = self._level_max_changes(30)
+
     def _set_variant_preset(self, pairs_count):
         """Set variant level from preset button."""
         self._current_variant_preset = pairs_count
@@ -17116,6 +17175,9 @@ class GenizahGUI(QMainWindow):
             self.variant_slider.setValue(pairs_count)
             self.variant_slider_label.setText(str(pairs_count))
             self.variant_slider.blockSignals(False)
+
+        # The level's own x1-x3
+        self._show_level_max_changes()
 
         # Update preview
         self._update_variant_count_preview()
@@ -17168,8 +17230,7 @@ class GenizahGUI(QMainWindow):
                 self.query_input.blockSignals(False)
                 # Switch mode combo
                 modes = ['literal', 'variants', 'responsa', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
-                if target_mode in ('variants_extended', 'variants_maximum'):
-                    target_mode = 'variants'
+                target_mode = self._apply_prefix_variant_preset(target_mode)
                 try:
                     combo_idx = modes.index(target_mode)
                     self.mode_combo.setCurrentIndex(combo_idx)
@@ -17205,6 +17266,7 @@ class GenizahGUI(QMainWindow):
             # Set variant level from current UI (preset or slider)
             pairs_count = self._get_current_variant_pairs_count()
             self.var_mgr.set_variant_level(pairs_count)
+            self._use_variant_changes('variants', pairs_count)
 
             # Calculate total variants for all words
             total_variants = 0
@@ -20677,9 +20739,8 @@ class GenizahGUI(QMainWindow):
             # Handle 'exact' vs 'literal' naming difference if present
             core_mode = mode_override
             if core_mode == 'exact': core_mode = 'literal'
-            # Map old extended/maximum to variants (slider controls intensity)
-            if core_mode in ('variants_extended', 'variants_maximum'):
-                core_mode = 'variants'
+            # ?, ?? and ??? select their level (shown on the buttons or slider)
+            core_mode = self._apply_prefix_variant_preset(core_mode)
 
             try:
                 combo_idx = modes.index(core_mode)
@@ -20723,9 +20784,10 @@ class GenizahGUI(QMainWindow):
         if mode == 'variants' and self.var_mgr:
             pairs_count = self._get_current_variant_pairs_count()
             self.var_mgr.set_variant_level(pairs_count)
-            # Update max_changes in settings
-            if self.lab_engine and hasattr(self, 'spin_max_changes'):
-                self.lab_engine.settings.variant_max_changes = self.spin_max_changes.value()
+            self._use_variant_changes('variants', pairs_count)
+        else:
+            # Responsa variants use Basic's x1-x3, Fuzzy x2 (owner ruling 2026-09-28).
+            self._use_variant_changes(mode)
         gap = int(self.gap_input.text()) if self.gap_input.text().isdigit() else 0
 
         # Get Excluded Words
@@ -27721,6 +27783,8 @@ class GenizahGUI(QMainWindow):
         # Update variant level from slider before search
         if mode == 'variants' and hasattr(self, 'comp_variant_slider') and self.var_mgr:
             self.var_mgr.set_variant_level(self.comp_variant_slider.value())
+        # Composition variants use Basic's x1-x3, its Fuzzy x2 (owner ruling 2026-09-28).
+        self._use_variant_changes('fuzzy' if mode == 'fuzzy' else 'composition')
 
         excluded_ids = self._excl_get('composition', 'raw')
 
@@ -31543,6 +31607,7 @@ class GenizahGUI(QMainWindow):
                 self.text_position_combo.setCurrentIndex(params['text_position'])
             if 'variant_preset' in params:
                 self._current_variant_preset = params['variant_preset']
+                self._show_level_max_changes()
             # Feature 1 (Phase 96 fix-7): restore corpus scope dropdown so
             # history re-use searches the same corpus as the original run.
             if 'corpus_scope' in params:
@@ -32226,6 +32291,7 @@ class GenizahGUI(QMainWindow):
                 self.text_position_combo.setCurrentIndex(reg['text_position'])
             if reg.get('variant_preset') is not None:
                 self._current_variant_preset = reg['variant_preset']
+                self._show_level_max_changes()
 
             # Restore exclusion state BEFORE displaying results
             self._domain_exclusions = set(reg.get('domain_exclusions', []))
