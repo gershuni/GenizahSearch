@@ -1521,14 +1521,11 @@ def create_parallels_page(initial_text: str = None):
                     def set_level(level_value):
                         """Remember this visitor's variant level (sent with each search)."""
                         current_preset['value'] = level_value
-                        # Num Changes shows the level's own x1-x3 (no change event).
-                        max_changes_select.value = variant_preferences.max_changes(
-                            variant_preferences.level_of(level_value))
 
                     def save_max_changes():
-                        variant_preferences.set_max_changes(
-                            variant_preferences.level_of(current_preset['value']),
-                            int(max_changes_select.value))
+                        # Composition runs at Basic's x1-x3 at every level (owner ruling
+                        # K-20): this control is Basic's value, the search page's ? level.
+                        variant_preferences.set_max_changes('basic', int(max_changes_select.value))
                     max_changes_select.on('update:model-value', save_max_changes)
 
                     if variant_level_select:

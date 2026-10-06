@@ -12,7 +12,7 @@ from __future__ import annotations
 import httpx
 
 from tests.test_web_variant_settings_per_visitor import (  # noqa: F401  (server is a fixture)
-    WORD, WORD2, run, server, store, submit, wait_for_payloads,
+    WORD, WORD2, _element, _fire, run, server, store, submit, wait_for_payloads,
 )
 
 
@@ -74,3 +74,41 @@ def test_the_api_runs_variants_at_x1_and_fuzzy_at_x2(server):  # noqa: F811 (the
 
     run(driver)
     assert _sent(server.queue) == {WORD: 1, WORD2: 2}
+
+
+def test_composition_runs_at_basics_value_at_every_level(server):  # noqa: F811 (the imported fixture)
+    """/parallels searches at the chosen level's pairs but Basic's x1-x3 (owner
+    ruling K-20): Basic x1 / Extended x3 sends composition at Extended with x1."""
+    from nicegui import events, ui
+    from shared.search_engine import SearchEngine
+    from tests.test_web_variant_settings_per_visitor import FakeSearchEngine
+    from web.state import state
+    # The worker queue records the job; only the real signature is needed here.
+    server.monkeypatch.setattr(FakeSearchEngine, 'search_composition_logic',
+                               SearchEngine.search_composition_logic, raising=False)
+    server.monkeypatch.setattr(state, 'is_ready', lambda: True)
+
+    async def driver(a, b):
+        await a.open('/parallels')
+        store(a, search_max_changes_by_level={'basic': 1, 'extended': 3, 'maximum': 3})
+        await a.open('/parallels')
+        mode = _element(a, ui.select, lambda e: isinstance(e.options, dict) and 'fuzzy' in e.options
+                        and 'variants' in e.options)
+        _fire(a, mode, 'update:modelValue', 'variants')
+        level = _element(a, ui.select, lambda e: isinstance(e.options, dict) and 70 in e.options
+                         and 150 in e.options)
+        _fire(a, level, 'update:modelValue', 70)
+        text = _element(a, ui.textarea, lambda e: e.props.get('placeholder') == 'Paste your Hebrew text here...')
+        with a._client:
+            text.value = 'אבגד הוזח טיכל מנסע פצקר שתאב'
+        button = _element(a, ui.button, lambda e: e.text == 'Find Parallels')
+        with a._client:
+            for listener in button._event_listeners.values():
+                if listener.type == 'click':
+                    events.handle_event(listener.handler, events.GenericEventArguments(
+                        sender=button, client=a._client, args={}))
+        await wait_for_payloads(server.queue, 1)
+
+    run(driver)
+    sent = server.queue.payloads[0]['settings']
+    assert (sent['variant_pairs_count'], sent['variant_max_changes']) == (70, 1), sent
