@@ -1763,6 +1763,16 @@ Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /
 - **Function** `preview_shows_final_rows` — True when no post-search filter could hide an early row, so the page may show the worker's preview
 - **Function** `engine_mode` — the engine mode a web search runs: the page's Exact is the engine's `literal` (whole words, Exact's fast paths)
 
+## web/variant_preferences.py
+
+Variant and Lab preferences of one website visitor, kept in that visitor's storage and sent with that visitor's searches; the web never writes the shared LabSettings or its file.
+
+- **Constant** `WEBSITE_DEFAULTS` — what a visitor who changed nothing gets, and what every API job uses (Basic 30 pairs, ×2, short words one change, the eleven custom pairs, Lab min score 70)
+- **Constant** `REQUEST_SETTINGS` — the settings one search may choose, each with its check
+- **Function** `request_settings` — checked copies; an unknown name raises
+- **Function** `get` / `set` — this visitor's Settings-page value
+- **Function** `for_search` — the complete settings one of this visitor's searches runs with
+
 ## web/pages/search_results.py
 
 - **Function** `_apply_highlight_marks` — Quick View text as HTML: escaped, search terms marked on the raw text, newlines as `<br>`

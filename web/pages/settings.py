@@ -21,6 +21,7 @@ def create_settings_page():
     # safe_user_get so a prune_user_storage race doesn't 500 /settings.
     # Phase 87 FOUND-02: writes also routed through safe_user_set.
     from web.safe_storage import safe_user_get as _safe_get, safe_user_set as _safe_set
+    from web import variant_preferences
 
     with ui.column().classes('w-full max-w-4xl mx-auto gap-2 fade-in p-4'):
 
@@ -154,185 +155,101 @@ def create_settings_page():
                     ui.label(tr('Maximum number of past searches to remember per search type')).classes('text-xs mr-10').style('color: var(--text-muted);')
 
             # === Variant Settings Tab ===
+            # Kept per visitor (web.variant_preferences) and sent with that
+            # visitor's searches; the server's settings object is shared by every
+            # visitor, so nothing here writes it or its file.
             with ui.tab_panel('variants'):
-                # Get lab settings
-                lab_settings = None
-                if state.lab_engine:
-                    try:
-                        lab_settings = state.lab_engine.settings
-                    except Exception:
-                        pass  # Browser storage operation failed; preference not persisted
+                with ui.column().classes('w-full gap-4'):
+                    # Options row
+                    with ui.row().classes('w-full gap-6 flex-wrap'):
+                        # Min word length
+                        with ui.column().classes('gap-1'):
+                            ui.label(tr('Limit Short Words (≤N chars)')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                            variant_min_len = ui.number(
+                                value=variant_preferences.get('variant_min_word_len'), min=1, max=5
+                            ).props('outlined dense').classes('w-20')
 
-                if lab_settings:
-                    with ui.column().classes('w-full gap-4'):
-                        # Options row
-                        with ui.row().classes('w-full gap-6 flex-wrap'):
-                            # Min word length
-                            with ui.column().classes('gap-1'):
-                                ui.label(tr('Limit Short Words (≤N chars)')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                                min_len_val = getattr(lab_settings, 'variant_min_word_len', 2)
-                                variant_min_len = ui.number(
-                                    value=min_len_val, min=1, max=5
-                                ).props('outlined dense').classes('w-20')
+                            def apply_min_len():
+                                if variant_min_len.value is not None:
+                                    variant_preferences.set('variant_min_word_len', int(variant_min_len.value))
+                            variant_min_len.on('update:model-value', apply_min_len)
 
-                                def apply_min_len():
-                                    lab_settings.variant_min_word_len = int(variant_min_len.value)
-                                    if hasattr(lab_settings, 'save'):
-                                        lab_settings.save()
-                                variant_min_len.on('update:model-value', apply_min_len)
+                        # Max changes: the same preference as the search bar's Num Changes.
+                        with ui.column().classes('gap-1'):
+                            ui.label(tr('Max Changes per Word')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                            variant_max_changes = ui.number(
+                                value=variant_preferences.max_changes(), min=1, max=3
+                            ).props('outlined dense').classes('w-20')
 
-                            # Max changes
-                            with ui.column().classes('gap-1'):
-                                ui.label(tr('Max Changes per Word')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                                max_changes_val = getattr(lab_settings, 'variant_max_changes', 2)
-                                variant_max_changes = ui.number(
-                                    value=max_changes_val, min=1, max=3
-                                ).props('outlined dense').classes('w-20')
+                            def apply_max_changes():
+                                if variant_max_changes.value is not None:
+                                    _safe_set('search_max_changes', max(1, min(3, int(variant_max_changes.value))))
+                            variant_max_changes.on('update:model-value', apply_max_changes)
 
-                                def apply_max_changes():
-                                    lab_settings.variant_max_changes = int(variant_max_changes.value)
-                                    if hasattr(lab_settings, 'save'):
-                                        lab_settings.save()
-                                variant_max_changes.on('update:model-value', apply_max_changes)
+                    # Toggles
+                    ui.separator().classes('my-2')
 
-                        # Toggles
-                        ui.separator().classes('my-2')
+                    variant_aggressive = ui.switch(tr('Aggressive Mode (ignore word length limits)'),
+                                                   value=variant_preferences.get('variant_aggressive'))
+                    ui.label(tr('Apply max changes to all words regardless of length')).classes('text-xs mr-10').style('color: var(--text-muted);')
 
-                        aggressive_val = getattr(lab_settings, 'variant_aggressive', False)
-                        variant_aggressive = ui.switch(tr('Aggressive Mode (ignore word length limits)'), value=aggressive_val)
-                        ui.label(tr('Apply max changes to all words regardless of length')).classes('text-xs mr-10').style('color: var(--text-muted);')
+                    def apply_aggressive():
+                        variant_preferences.set('variant_aggressive', bool(variant_aggressive.value))
+                    variant_aggressive.on('update:model-value', apply_aggressive)
 
-                        def apply_aggressive():
-                            lab_settings.variant_aggressive = variant_aggressive.value
-                            if hasattr(lab_settings, 'save'):
-                                lab_settings.save()
-                        variant_aggressive.on('update:model-value', apply_aggressive)
+                    variant_use_slider = ui.switch(tr('Use slider instead of preset buttons (Basic, Extended, Maximum)'),
+                                                   value=variant_preferences.get('variant_use_slider')).classes('mt-2')
+                    ui.label(tr('When enabled, shows a slider in the search bar instead of preset buttons')).classes('text-xs mr-10').style('color: var(--text-muted);')
 
-                        use_slider_val = getattr(lab_settings, 'variant_use_slider', False)
-                        variant_use_slider = ui.switch(tr('Use slider instead of preset buttons (Basic, Extended, Maximum)'), value=use_slider_val).classes('mt-2')
-                        ui.label(tr('When enabled, shows a slider in the search bar instead of preset buttons')).classes('text-xs mr-10').style('color: var(--text-muted);')
+                    def apply_use_slider():
+                        variant_preferences.set('variant_use_slider', bool(variant_use_slider.value))
+                        ui.notify(tr('Refresh page to see changes'), type='info')
+                    variant_use_slider.on('update:model-value', apply_use_slider)
 
-                        def apply_use_slider():
-                            lab_settings.variant_use_slider = variant_use_slider.value
-                            if hasattr(lab_settings, 'save'):
-                                lab_settings.save()
-                            ui.notify(tr('Refresh page to see changes'), type='info')
-                        variant_use_slider.on('update:model-value', apply_use_slider)
+                    # Custom Variants
+                    ui.separator().classes('my-2')
+                    with ui.expansion(tr('Custom Variant Pairs'), icon='edit').classes('w-full'):
+                        ui.label(tr('Add character pairs that should be treated as interchangeable (one per line: ק=א)')).classes('text-xs mb-2').style('color: var(--text-muted);')
+                        custom_variants = variant_preferences.get('custom_variants')
+                        existing_text = '\n'.join(custom_variants.keys()) if custom_variants else ''
+                        custom_textarea = ui.textarea(
+                            placeholder='ק=א\nכו=מ\nב=פ',
+                            value=existing_text
+                        ).classes('w-full').props('outlined rows=4')
 
-                        # Custom Variants
-                        ui.separator().classes('my-2')
-                        with ui.expansion(tr('Custom Variant Pairs'), icon='edit').classes('w-full'):
-                            ui.label(tr('Add character pairs that should be treated as interchangeable (one per line: ק=א)')).classes('text-xs mb-2').style('color: var(--text-muted);')
-                            custom_variants = getattr(lab_settings, 'custom_variants', {})
-                            existing_text = '\n'.join(custom_variants.keys()) if custom_variants else ''
-                            custom_textarea = ui.textarea(
-                                placeholder='ק=א\nכו=מ\nב=פ',
-                                value=existing_text
-                            ).classes('w-full').props('outlined rows=4')
-
-                            def apply_custom_variants():
-                                try:
-                                    text = custom_textarea.value.strip()
-                                    custom = {}
-                                    if text:
-                                        for line in text.split('\n'):
-                                            line = line.strip()
-                                            if '=' in line:
-                                                custom[line] = True
-                                    lab_settings.custom_variants = custom
-                                    if hasattr(lab_settings, 'save'):
-                                        lab_settings.save()
-                                except Exception as e:
-                                    logger.error("Custom variants error: %s", e)
-                            custom_textarea.on('blur', apply_custom_variants)
-
-                else:
-                    with ui.column().classes('items-center py-6'):
-                        ui.icon('spellcheck').classes('text-4xl').style('color: var(--text-muted);')
-                        ui.label(tr('Lab Engine not initialized')).classes('mt-2 text-sm').style('color: var(--text-muted);')
+                        def apply_custom_variants():
+                            try:
+                                text = (custom_textarea.value or '').strip()
+                                custom = {}
+                                if text:
+                                    for line in text.split('\n'):
+                                        line = line.strip()
+                                        if '=' in line:
+                                            custom[line] = True
+                                variant_preferences.set('custom_variants', custom)
+                            except Exception as e:
+                                logger.error("Custom variants error: %s", e)
+                        custom_textarea.on('blur', apply_custom_variants)
 
             # === Lab Mode Tab ===
+            # Only the minimum score is read by the website's Lab searches; it is
+            # kept per visitor like the variant preferences.
             with ui.tab_panel('lab'):
-                settings = None
-                if state.lab_engine:
-                    try:
-                        settings = state.lab_engine.settings
-                    except Exception:
-                        pass  # Filter operation failed; continue with defaults
+                with ui.column().classes('w-full gap-4'):
+                    ui.label(tr('Parameters for composition/parallel search using the Shmidman-Koppel-Porat algorithm.')).classes('text-xs').style('color: var(--text-muted);')
 
-                if settings:
-                    with ui.column().classes('w-full gap-4'):
-                        ui.label(tr('Parameters for composition/parallel search using the Shmidman-Koppel-Porat algorithm.')).classes('text-xs').style('color: var(--text-muted);')
+                    with ui.row().classes('w-full gap-6 flex-wrap'):
+                        # Min Score
+                        with ui.column().classes('gap-1'):
+                            ui.label(tr('Min Score')).classes('text-sm font-medium').style('color: var(--text-secondary);')
+                            min_score = ui.number(
+                                value=variant_preferences.get('comp_min_score'), min=10, max=100
+                            ).props('outlined dense').classes('w-20')
 
-                        with ui.row().classes('w-full gap-6 flex-wrap'):
-                            # Candidate Limit
-                            with ui.column().classes('gap-1'):
-                                ui.label(tr('Candidate Limit')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                                candidate_val = getattr(settings, 'candidate_limit', 5000)
-                                candidate_limit = ui.number(
-                                    value=candidate_val, min=100, max=50000, step=100
-                                ).props('outlined dense').classes('w-28')
-
-                                def apply_candidate_limit():
-                                    if hasattr(settings, 'candidate_limit'):
-                                        settings.candidate_limit = int(candidate_limit.value)
-                                        if hasattr(settings, 'save'):
-                                            settings.save()
-                                candidate_limit.on('update:model-value', apply_candidate_limit)
-
-                            # Display Limit
-                            with ui.column().classes('gap-1'):
-                                ui.label(tr('Display Limit')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                                display_val = getattr(settings, 'lab_display_limit', getattr(settings, 'display_limit', 500))
-                                display_limit = ui.number(
-                                    value=display_val, min=50, max=2000, step=50
-                                ).props('outlined dense').classes('w-28')
-
-                                def apply_display_limit():
-                                    if hasattr(settings, 'lab_display_limit'):
-                                        settings.lab_display_limit = int(display_limit.value)
-                                    elif hasattr(settings, 'display_limit'):
-                                        settings.display_limit = int(display_limit.value)
-                                    if hasattr(settings, 'save'):
-                                        settings.save()
-                                display_limit.on('update:model-value', apply_display_limit)
-
-                            # Chunk Size
-                            with ui.column().classes('gap-1'):
-                                ui.label(tr('Default Chunk Size')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                                chunk_val = getattr(settings, 'comp_chunk_size', getattr(settings, 'chunk_size', 5))
-                                chunk_size = ui.number(
-                                    value=chunk_val, min=2, max=15
-                                ).props('outlined dense').classes('w-20')
-
-                                def apply_chunk_size():
-                                    if hasattr(settings, 'comp_chunk_size'):
-                                        settings.comp_chunk_size = int(chunk_size.value)
-                                    elif hasattr(settings, 'chunk_size'):
-                                        settings.chunk_size = int(chunk_size.value)
-                                    if hasattr(settings, 'save'):
-                                        settings.save()
-                                chunk_size.on('update:model-value', apply_chunk_size)
-
-                            # Min Score
-                            with ui.column().classes('gap-1'):
-                                ui.label(tr('Min Score')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                                score_val = getattr(settings, 'comp_min_score', getattr(settings, 'min_score', 30))
-                                min_score = ui.number(
-                                    value=score_val, min=10, max=100
-                                ).props('outlined dense').classes('w-20')
-
-                                def apply_min_score():
-                                    if hasattr(settings, 'comp_min_score'):
-                                        settings.comp_min_score = int(min_score.value)
-                                    if hasattr(settings, 'save'):
-                                        settings.save()
-                                min_score.on('update:model-value', apply_min_score)
-
-                else:
-                    with ui.column().classes('items-center py-6'):
-                        ui.icon('science').classes('text-4xl').style('color: var(--text-muted);')
-                        ui.label(tr('Lab Engine not initialized')).classes('mt-2 text-sm').style('color: var(--text-muted);')
+                            def apply_min_score():
+                                if min_score.value is not None:
+                                    variant_preferences.set('comp_min_score', int(min_score.value))
+                            min_score.on('update:model-value', apply_min_score)
 
             # === Status Tab ===
             with ui.tab_panel('status'):

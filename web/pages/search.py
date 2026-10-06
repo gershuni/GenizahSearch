@@ -54,7 +54,8 @@ from web.document_service import (
     get_fragments_by_tag, get_all_distinct_tags,
 )
 from web.search_load_control import enrichment_batch_slot
-from web.research_jobs import ResearchJobError, run_research_call
+from web.research_jobs import ResearchJobError, run_research_call, with_request_settings
+from web import variant_preferences
 from shared.fgp_service import get_sys_ids_with_fgp_sources
 from shared.search_regex import SearchBudgetExceeded
 from shared.transcription_service import union_manual_transcriptions
@@ -170,9 +171,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     saved_max_changes = _safe_get('search_max_changes', 2)
     saved_gap = _safe_get('search_gap', 0)
 
-    use_slider = False
-    if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
-        use_slider = getattr(state.lab_engine.settings, 'variant_use_slider', False)
+    use_slider = bool(variant_preferences.get('variant_use_slider'))
 
     # Count saved results to detect back-navigation from /browse: a non-zero
     # count combined with URL `q` matching saved_query means the browser restored
@@ -553,6 +552,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     query_input.value = clean
                                     # Switch mode (map variant subtypes for slider)
                                     if use_slider and target_mode in ('variants_extended', 'variants_maximum'):
+                                        # ?? and ??? name a level: the slider shows it.
+                                        _show_level_on_slider(target_mode)
                                         mode_select.value = 'variants'
                                     else:
                                         mode_select.value = target_mode
@@ -675,11 +676,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     max_changes_col.set_visibility(is_variant_mode and not use_slider)
 
                     def set_level(level_value):
-                        """Set variant level."""
+                        """Remember this visitor's variant level (sent with each search)."""
                         current_preset['value'] = level_value
                         _safe_set('search_preset', level_value)
-                        if state.var_mgr:
-                            state.var_mgr.set_variant_level(level_value)
 
 
                     # Gap Control - restore from storage
@@ -825,9 +824,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     val = int(variant_slider.value)
                     current_preset['value'] = val
                     _safe_set('search_preset', val)
-                    if state.var_mgr:
-                        state.var_mgr.set_variant_level(val)
                 variant_slider.on('update:model-value', on_slider_change)
+
+            def _show_level_on_slider(mode):
+                """In slider mode ?? and ??? choose a level, as the preset buttons do."""
+                level = variant_preferences.PRESET_PAIRS[mode]
+                if variant_slider:
+                    variant_slider.value = level
+                current_preset['value'] = level
+                _safe_set('search_preset', level)
 
             # Save max changes on change (handle both slider and non-slider modes)
             if max_changes_select:
@@ -1516,6 +1521,24 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             status_label = ui.label('').classes('text-sm px-6 py-1 font-medium').style('color: var(--text-secondary); display: none;')
 
         # === Phase 55: Refinement replay helpers ===
+        def _step_searcher():
+            """Each step is searched again with the variant settings it first ran with.
+
+            A step saved without them (before they were recorded) runs at its level's
+            preset with this visitor's preferences, read here: in the replay's worker
+            thread the visitor's storage cannot be read.
+            """
+            changes = variant_preferences.max_changes()
+            fallback = {mode: variant_preferences.for_search(mode, None, changes)
+                        for mode in variant_preferences.PRESET_PAIRS}
+            fallback.update(fuzzy=variant_preferences.for_search('fuzzy'),
+                            other=variant_preferences.for_search('other'))
+
+            def pick(step):
+                settings = step.variant_settings or fallback.get(step.mode, fallback['other'])
+                return with_request_settings(state.searcher, **settings)
+            return pick
+
         async def _deferred_chain_replay():
             """Replay saved refinement chain on session restore (D-14). Shows feedback."""
             if not search_state.refinement_chain:
@@ -1523,8 +1546,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             status_label.text = tr('Restoring refinement chain...')
             status_label.style('display: block;')
             try:
+                step_searcher = _step_searcher()
                 def _do_replay():
-                    return replay_chain(search_state.refinement_chain, state.searcher, search_state.restrict_sys_ids)
+                    return replay_chain(search_state.refinement_chain, state.searcher, search_state.restrict_sys_ids,
+                                        searcher_for_step=step_searcher)
                 result = await run.io_bound(_do_replay)
                 search_state.refinement_restrict_sys_ids = result
                 search_state._refinement_scope_sig = scope_signature(search_state.restrict_sys_ids)
@@ -1548,8 +1573,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             status_label.text = tr('Re-evaluating refinement...')
             status_label.style('display: block;')
             try:
+                step_searcher = _step_searcher()
                 def _do_replay():
-                    return replay_chain(search_state.refinement_chain, state.searcher, search_state.restrict_sys_ids)
+                    return replay_chain(search_state.refinement_chain, state.searcher, search_state.restrict_sys_ids,
+                                        searcher_for_step=step_searcher)
                 result = await run.io_bound(_do_replay)
                 search_state.refinement_restrict_sys_ids = result
                 persist_value('search_refinement_chain', [s.to_dict() for s in search_state.refinement_chain])
@@ -2254,6 +2281,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # replay runs the same search.
                 mode=engine_mode(mode_select.value),
                 gap=int(gap_input.value),
+                variant_settings=search_state.last_variant_settings,
                 result_count=len(search_state.results),
             )
             # Capture page-level uids for "all terms" filter
@@ -2390,8 +2418,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # Replay to rebuild restrict from remaining chain
                 async def _replay_and_search():
                     try:
+                        step_searcher = _step_searcher()
                         def _do_replay():
-                            return replay_chain(search_state.refinement_chain, state.searcher, search_state.restrict_sys_ids)
+                            return replay_chain(search_state.refinement_chain, state.searcher, search_state.restrict_sys_ids,
+                                                searcher_for_step=step_searcher)
                         result = await run.io_bound(_do_replay)
                         search_state.refinement_restrict_sys_ids = result
                     except Exception:
@@ -4697,23 +4727,29 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             clean_query = parsed_query
             # In slider mode, map all variant modes to 'variants'
             if use_slider and mode in ('variants', 'variants_extended', 'variants_maximum'):
+                if mode != 'variants':
+                    _show_level_on_slider(mode)
                 mode = 'variants'
             mode_select.value = mode
         else:
             mode = mode_select.value
 
-        # Update variant level and max changes from UI before search
-        is_variant_mode = mode in ('variants', 'variants_extended', 'variants_maximum')
-        if is_variant_mode and state.var_mgr:
-            # Get pairs count: from slider, or from mode name, or from current_preset
+        # This visitor's variant level and Num Changes, read now: they travel with
+        # this search only. The engine's settings object is shared by every visitor
+        # and is never written here.
+        if mode in ('variants', 'variants_extended', 'variants_maximum', 'fuzzy'):
             if variant_slider:
                 pairs_count = int(variant_slider.value)
+            elif mode == 'fuzzy':
+                pairs_count = int(current_preset['value'])
             else:
                 pairs_count = get_level_from_mode(mode)
-            state.var_mgr.set_variant_level(pairs_count)
-            # Update max_changes in settings
-            if state.lab_engine and state.lab_engine.settings and max_changes_select:
-                state.lab_engine.settings.variant_max_changes = int(max_changes_select.value)
+            changes = (int(max_changes_select.value)
+                       if max_changes_select and mode != 'fuzzy' else None)
+            variant_settings = variant_preferences.for_search(mode, pairs_count, changes)
+        else:
+            variant_settings = variant_preferences.for_search(mode)
+        search_state.last_variant_settings = dict(variant_settings)
 
         # Reset UI
         search_state.is_running = True
@@ -4923,7 +4959,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             try:
                 if lab_mode.value:
                     lab_search_mode = 'variants' if mode not in ['Regex', 'exact'] else mode
-                    return state.lab_engine.lab_search(
+                    return with_request_settings(state.lab_engine, **variant_settings).lab_search(
                         clean_query,
                         mode=lab_search_mode,
                         gap=int(gap_input.value),
@@ -4932,7 +4968,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     )
                 else:
                     tp = text_position_select.value
-                    return state.searcher.execute_search(
+                    return with_request_settings(state.searcher, **variant_settings).execute_search(
                         clean_query,
                         mode=engine_mode(mode),
                         gap=int(gap_input.value),
@@ -5165,6 +5201,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     exclude_words=not_words if not_words else [],
                     text_position=text_position_select.value if text_position_select.value != 'anywhere' else None,
                     responsa_options=responsa_options,
+                    variant_settings=dict(variant_settings),
                     result_count=len(results),  # total results (matches display count)
                 )
                 # Capture page-level uids for "all terms" filter

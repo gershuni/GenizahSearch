@@ -875,6 +875,7 @@ def compute_parallels_search_fingerprint(
     min_delimiter_distance=None,
     variant_level=None,
     variant_max_changes=None,
+    variant_preferences=None,
     library_mode=None,
     library_filter=None,
     restrict=None,
@@ -958,6 +959,15 @@ def compute_parallels_search_fingerprint(
     # with bigger budgets.
     if depth not in (None, 'normal'):
         payload['depth'] = depth
+    # The visitor's Settings-page variant preferences (per visitor since
+    # 2026-10-06) enter only when they differ from the website defaults, under
+    # the same rule: every earlier fingerprint was made with the defaults.
+    if variant_preferences:
+        from web.variant_preferences import website_defaults
+        defaults = website_defaults()
+        changed = {k: v for k, v in variant_preferences.items() if defaults.get(k) != v}
+        if changed:
+            payload['variant_preferences'] = changed
     for key in _PARALLELS_FINGERPRINT_SET_INPUTS:
         value = payload.get(key)
         if value is not None:

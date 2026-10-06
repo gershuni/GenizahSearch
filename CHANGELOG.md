@@ -18,6 +18,20 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 - Operators: `GENIZAH_RESEARCH_PRESTART` (default on) and the worker-count trade-offs are in
   `docs/search-matching-timeouts.md`.
 
+### Variant and Lab settings are kept per visitor (web)
+
+- **Settings are now kept per visitor.** The variant level, Num Changes and everything on the
+  Settings page (short-word limit, Aggressive Mode, the slider, custom letter pairs, Lab
+  minimum score) are kept with the visitor's own browser session and sent with that
+  visitor's searches. A refined search replays each step with the settings it first ran with.
+- **Defaults for a visitor who changed nothing:** the Basic / Extended / Maximum buttons (the
+  slider is a choice in Settings), short words (two letters or fewer) get one letter change
+  (Aggressive Mode in Settings lifts this), and the website's custom letter pairs.
+- **API:** `variants` searches use these website defaults (Basic, 30 pairs), so an API search
+  and a website search with default settings give the same results.
+- The Settings page's Lab tab keeps Min Score; Candidate Limit, Display Limit and Default Chunk
+  Size are removed (the website's Lab searches do not read them).
+
 ## [9.5.0] - 2026-10-04 — Faster, complete search
 
 A desktop installer and a web deploy. Search is much faster, and its results are more

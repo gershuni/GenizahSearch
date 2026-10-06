@@ -47,14 +47,18 @@ class ResearchJobError(RuntimeError):
     """A computation stopped without returning misleading partial results."""
 
 
-def snapshot_settings(engine):
+def snapshot_settings(engine, overrides=None):
+    """The engine's settings as a worker rebuilds them, with *overrides* on top."""
     settings = getattr(engine, 'settings', None)
     if settings is None:
         variants = getattr(engine, 'var_mgr', None)
         if variants is None:
             variants = getattr(getattr(engine, 'text_fetcher', None), 'var_mgr', None)
         settings = getattr(variants, '_settings', None)
-    return deepcopy(vars(settings)) if settings is not None else None
+    snapshot = deepcopy(vars(settings)) if settings is not None else None
+    if overrides:
+        snapshot = {**(snapshot or {}), **deepcopy(overrides)}
+    return snapshot
 
 
 def _integer(name, default, minimum=1, maximum=1024):
@@ -448,19 +452,46 @@ def get_queue():
 
 
 class IsolatedEngine:
-    """Preserve the engine interface; isolate only expensive entry points."""
-    def __init__(self, engine, kind, *, options=None, cancel=None, status=None, deadline=None):
+    """Preserve the engine interface; isolate only expensive entry points.
+
+    Every job starts from the website's variant defaults
+    (``web.variant_preferences.WEBSITE_DEFAULTS``) with this wrapper's per-search
+    settings on top, never from the variant values in the server's LabSettings:
+    that object is shared by every visitor, and nothing a visitor does may change
+    another visitor's search.
+    """
+    def __init__(self, engine, kind, *, options=None, cancel=None, status=None, deadline=None,
+                 settings=None):
         self._engine = engine
         self._kind = kind
         self._options = options or {}
         self._cancel = cancel
         self._status = status
         self._deadline = deadline
+        self._settings = dict(settings or {})
 
     def controlled(self, *, cancel=None, status=None, seconds=None):
         return IsolatedEngine(self._engine, self._kind, options=self._options,
                               cancel=cancel, status=status,
-                              deadline=None if seconds is None else time.monotonic() + seconds)
+                              deadline=None if seconds is None else time.monotonic() + seconds,
+                              settings=self._settings)
+
+    def with_settings(self, **values):
+        """A view of this engine whose jobs carry these settings (checked).
+
+        The shared engine and its settings object are not modified, so two
+        visitors searching at the same time cannot change each other's search.
+        """
+        from web.variant_preferences import request_settings
+        return IsolatedEngine(self._engine, self._kind, options=self._options,
+                              cancel=self._cancel, status=self._status,
+                              deadline=self._deadline,
+                              settings={**self._settings, **request_settings(**values)})
+
+    def job_settings(self):
+        """The settings snapshot a job of this wrapper hands its worker."""
+        from web.variant_preferences import website_defaults
+        return snapshot_settings(self._engine, {**website_defaults(), **self._settings})
 
     def __getattr__(self, name):
         original = getattr(self._engine, name)
@@ -478,7 +509,7 @@ class IsolatedEngine:
             preview = arguments.pop('preview_callback', None)
             queue = get_queue()
             payload = {'kind': self._kind, 'method': name, 'arguments': arguments,
-                       'options': self._options, 'settings': snapshot_settings(self._engine)}
+                       'options': self._options, 'settings': self.job_settings()}
             if preview is not None:
                 payload['preview'] = True
             job = queue.submit(payload)
@@ -526,12 +557,29 @@ class IsolatedEngine:
         return call
 
 
+def with_request_settings(engine, **values):
+    """Bind one search's settings to an engine that runs its searches in workers.
+
+    Engines that do not run in workers (fakes in tests) are returned unchanged,
+    but the names are still checked.
+    """
+    if isinstance(engine, IsolatedEngine):
+        return engine.with_settings(**values)
+    from web.variant_preferences import request_settings
+    request_settings(**values)
+    return engine
+
+
 def api_engine(engine, request, seconds):
-    """Bind API job cancellation/progress without changing fake test engines."""
+    """Bind API job cancellation/progress without changing fake test engines.
+
+    API jobs run with the website defaults only (``controlled`` starts a wrapper
+    with no per-search settings), never with anything a website visitor chose.
+    """
     if not isinstance(engine, IsolatedEngine):
         return engine
     background = request.scope.get('research_job')
-    return engine.controlled(
+    return IsolatedEngine(engine._engine, engine._kind, options=engine._options).controlled(
         cancel=background.cancel if background else None,
         status=background.update if background else None,
         seconds=None if background else seconds,

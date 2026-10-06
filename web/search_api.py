@@ -278,11 +278,12 @@ DEFAULT_LIMIT = 50
 MAX_LIMIT = 100  # 81A D-06 — lowered from 200 (also enforced via Pydantic Field(le=100))
 
 # 81A — translate API search_mode → internal mode value space consumed by
-# SearchEngine.execute_search (genizah_core.py:7249). For non-Responsa text
-# searches, the internal `mode` argument is THE variant-tier knob:
-# genizah_core.py:6467 calls var_mgr.get_variants(term, mode, limit=200),
-# so 'exact' → no variant expansion, 'variants' → 30-pair variant expansion.
-# Mirrors desktop UI semantics (genizah_app.py:15796 toggles 'variants' vs 'exact').
+# SearchEngine.execute_search (shared/search_engine.py). For non-Responsa text
+# searches the internal `mode` selects the variant tier passed to
+# VariantManager.get_variants: 'exact' → no variant expansion, 'variants' → the
+# 30 most frequent letter-confusion pairs. Every API job runs with the website
+# defaults (web.variant_preferences.WEBSITE_DEFAULTS, via api_engine), so an API
+# result never depends on what a website visitor chose.
 _SEARCH_MODE_TO_INTERNAL = {
     'exact':     'exact',
     'variants':  'variants',

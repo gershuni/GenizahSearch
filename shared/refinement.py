@@ -42,6 +42,9 @@ class RefinementStep:
     # candidate limit or was stopped, or a step before it did (it was restricted to an
     # incomplete set). Its count shows as "N+".
     result_count_capped: bool = False
+    # The variant settings the step was searched with (the website records them, so a
+    # replay searches exactly as the step first did; None = not recorded).
+    variant_settings: Optional[dict] = None
 
     # Runtime-only fields (not serialized, rebuilt on replay)
     _result_uids: set = field(default_factory=set, repr=False, compare=False)
@@ -121,6 +124,8 @@ def replay_chain(
     chain: list[RefinementStep],
     searcher,
     filter_restrict: set | None,
+    *,
+    searcher_for_step=None,
 ) -> set | None:
     """Replay a refinement chain to rebuild restrict sets.
 
@@ -132,6 +137,8 @@ def replay_chain(
         chain: List of RefinementStep to replay.
         searcher: Object with execute_search(query, mode, gap, **kwargs) method.
         filter_restrict: Pre-search filter restrict set (or None).
+        searcher_for_step: Optional ``step -> searcher``; the website binds each
+            step's own variant settings with it. Default: *searcher* for every step.
 
     Returns:
         Final accumulated restrict set, or None if chain is empty.
@@ -145,7 +152,8 @@ def replay_chain(
     for step in chain:
         effective = compute_effective_restrict(filter_restrict, accumulated_restrict)
 
-        results = searcher.execute_search(
+        step_searcher = searcher_for_step(step) if searcher_for_step else searcher
+        results = step_searcher.execute_search(
             step.query,
             step.mode,
             step.gap,
@@ -201,6 +209,8 @@ def complete_chain(
     filter_restrict: set | None,
     progress_callback=None,
     upto: int | None = None,
+    *,
+    searcher_for_step=None,
 ) -> dict:
     """Complete every step of *chain* that left matches out (D8, 2026-10-04).
 
@@ -214,6 +224,7 @@ def complete_chain(
 
     *upto* limits the work to the first *upto* steps: the all-terms filter only
     filters the shown rows, so the step that produced them needs no completing.
+    *searcher_for_step* is as in ``replay_chain``.
 
     Returns {'restrict': the last completed step's manuscripts (None for no step),
     'interrupted': bool}.
@@ -225,7 +236,8 @@ def complete_chain(
             incomplete = True
         elif step.result_count_capped or step._result_sys_ids is None:
             effective = compute_effective_restrict(filter_restrict, accumulated)
-            rows = searcher.execute_search(
+            step_searcher = searcher_for_step(step) if searcher_for_step else searcher
+            rows = step_searcher.execute_search(
                 step.query, step.mode, step.gap,
                 exclude_words=step.exclude_words or None,
                 responsa_options=step.responsa_options,

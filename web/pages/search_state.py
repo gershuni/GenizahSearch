@@ -107,6 +107,7 @@ class SearchUIState:
         self.search_generation: int = 0  # Monotonic counter to discard stale background enrichment
         # Refinement chain state (Phase 55 -- search within results)
         self.refinement_chain: list = []               # list of RefinementStep (the chain)
+        self.last_variant_settings: dict = None        # variant settings of the last search sent (recorded on its step)
         self.refinement_restrict_sys_ids: set = None   # sys_ids from last chain step (RAW results, not post-filtered)
         self._refine_mode: bool = False                # True when user clicked "Search within" and is entering query
         self._refinement_stale: bool = False           # True when filters changed during active chain (D-16)

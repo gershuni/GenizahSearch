@@ -9,8 +9,11 @@ The web process owns a FIFO queue. Stop removes a queued request or kills its
 running process; its slot is released after process exit. A crashed worker does
 not take down the server. Workers also exit when their parent server disappears.
 Waiting uses a separate thread pool so it does not occupy the browsing pool.
-Each job snapshots the effective variant and Lab settings from its submitting
-engine. Later UI changes do not alter jobs that are already queued.
+Each job carries its own variant and Lab settings: the website defaults
+(`web/variant_preferences.py::WEBSITE_DEFAULTS`) with what its search sent on top
+(the visitor's level, Num Changes and Settings-page preferences; an API job sends
+nothing, so it runs with the defaults). A search never changes the server's
+settings, and later UI changes do not alter jobs that are already queued.
 
 Workers hold shared leases for the LOCAL index directories. My Library atomic
 rebuild/reset operations hold exclusive leases through handle closure, directory
