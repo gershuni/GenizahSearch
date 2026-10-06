@@ -856,9 +856,20 @@ def _canonical_witnesses(witnesses) -> list:
     return out
 
 
-# What every search ran with before variant preferences were kept per visitor,
-# where it differs from the website defaults (owner's server file, 2026-09-28).
-_SETTINGS_BEFORE_PER_VISITOR = {'variant_aggressive': True}
+# What every search ran with before variant preferences were kept per visitor
+# (the server's settings file, read 2026-09-28), written out in full so that a
+# later change to the website defaults cannot change which old fingerprints a
+# search matches.
+_SETTINGS_BEFORE_PER_VISITOR = {
+    'variant_min_word_len': 2,
+    'variant_aggressive': True,
+    'custom_variants': {
+        **{pair: True for pair in ('ב=כ', 'ה=ח', 'ד=ר', 'ס=ם')},
+        'ה' + chr(0x0308) + '=ה': True,
+        **{letter + chr(0x0307) + '=' + letter: True for letter in 'תדטכצץ'},
+    },
+    'comp_min_score': 70,
+}
 
 
 def compute_parallels_search_fingerprint(
@@ -970,9 +981,8 @@ def compute_parallels_search_fingerprint(
     # until then) -- under the same rule: an old fingerprint keeps matching a
     # search with the same settings, and only that.
     if variant_preferences:
-        from web.variant_preferences import website_defaults
-        baseline = {**website_defaults(), **_SETTINGS_BEFORE_PER_VISITOR}
-        changed = {k: v for k, v in variant_preferences.items() if baseline.get(k) != v}
+        changed = {k: v for k, v in variant_preferences.items()
+                   if _SETTINGS_BEFORE_PER_VISITOR.get(k) != v}
         if changed:
             payload['variant_preferences'] = changed
     for key in _PARALLELS_FINGERPRINT_SET_INPUTS:
