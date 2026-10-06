@@ -1526,18 +1526,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         def _step_searcher():
             """Each step is searched again with the variant settings it first ran with.
 
-            A step saved without them (before they were recorded) runs at its level's
-            preset with this visitor's preferences, read here: in the replay's worker
-            thread the visitor's storage cannot be read.
+            A step saved without them (before they were recorded) runs with the
+            website defaults at its level's preset (Fuzzy at x2) -- never with this
+            visitor's current preferences, which say nothing about how it first ran.
             """
-            changes = variant_preferences.max_changes()
-            fallback = {mode: variant_preferences.for_search(mode, None, changes)
-                        for mode in variant_preferences.PRESET_PAIRS}
-            fallback.update(fuzzy=variant_preferences.for_search('fuzzy'),
-                            other=variant_preferences.for_search('other'))
-
             def pick(step):
-                settings = step.variant_settings or fallback.get(step.mode, fallback['other'])
+                settings = step.variant_settings
+                if settings is None:
+                    settings = {'variant_pairs_count': variant_preferences.PRESET_PAIRS.get(
+                        step.mode, variant_preferences.BASIC_PAIRS)}
+                    if step.mode == 'fuzzy':
+                        settings['variant_max_changes'] = 2
                 return with_request_settings(state.searcher, **settings)
             return pick
 
