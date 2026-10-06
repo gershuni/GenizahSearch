@@ -252,6 +252,10 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
         if arguments.get('restrict_sys_ids') is not None:
             arguments['restrict_sys_ids'] = set(arguments['restrict_sys_ids'])
         arguments['progress_callback'] = _time_limited(report, payload.get('time_limit'), stopped)
+        if kind == 'passage':
+            # The letter-level searcher leaves progress_callback alone (the desktop's
+            # drives a chunk progress bar); it is stopped through `checkpoint`.
+            arguments['checkpoint'] = arguments['progress_callback']
         if payload.get('preview') and kind == 'search' and payload['method'] == 'execute_search':
             sent = [0]
 

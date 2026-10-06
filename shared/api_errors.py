@@ -63,8 +63,10 @@ ERROR_CODES = frozenset({
 # Surfaced in top-level `warnings: []` arrays (D-07), NOT as errors.
 WARNING_CODES = frozenset({
     'query_downgraded',
-    # /api/search: the engine read its candidate limit (Config.SEARCH_LIMIT), so
-    # `total` counts the matches it reached and more exist (D8, 2026-10-06).
+    # The result may be incomplete; more may exist. /api/search: the engine read its
+    # candidate limit (Config.SEARCH_LIMIT), so `total` counts the matches it reached
+    # (D8, 2026-10-06). /api/search and /api/parallels: a background job reached the
+    # website's time limit and returned what it had found (2026-10-07).
     'results_cut_off',
     # Phase 80 (/api/parallels) additions:
     'truncated_to_200',         # D-07: parallels group count exceeds 200; top 200 returned

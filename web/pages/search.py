@@ -5195,11 +5195,22 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         finally:
             if _painter is not None:
                 _painter.cancel()
-        # Cut at the candidate limit, stopped at the time limit, or searched within an
-        # incomplete set: the list leaves matches out.
+        # The web side stopped a worker that had not stopped itself at its time limit
+        # (TIME_LIMIT_GRACE_SECONDS later), or the limit stopped a part of the search
+        # that returns no rows: the early rows it had handed over are verified rows,
+        # the start of its list. They are kept, as Stop keeps them.
+        _forced_stop = bool(isinstance(results, dict) and results.get('error') == 'search_budget_exceeded'
+                            and _preview_box['rows'])
+        if _forced_stop:
+            results = list(_preview_box['rows'])
+        _time_limited = bool(_run_cutoff.get('time_limit') or _forced_stop)
+        # Cut at the candidate limit, stopped (Stop or the time limit), or searched
+        # within an incomplete set: the list leaves matches out. The time limit counts
+        # on its own: an engine that returns its rows without saying it was stopped
+        # would otherwise show a list the limit cut short as complete.
         search_state.result_count_capped = bool(_run_cutoff.get('capped') or _run_cutoff.get('interrupted')
-                                                or _restricted_to_incomplete)
-        if _run_cutoff.get('time_limit'):
+                                                or _time_limited or _restricted_to_incomplete)
+        if _time_limited:
             ui.notify(tr('The search stopped after {minutes} minutes; showing the results found so far.').format(minutes=Config.WEB_SEARCH_TIME_LIMIT // 60),
                       type='warning', timeout=10000, close_button=True)
 
@@ -5225,8 +5236,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             render_results([])
             return
 
-        # Skip expensive enrichment when search was cancelled (GAP-R7 round 3)
-        if search_state.is_cancelled:
+        # Skip expensive enrichment when search was cancelled (GAP-R7 round 3), or the
+        # web side stopped it at the time limit after it had handed over early rows.
+        if search_state.is_cancelled or _forced_stop:
             # Stop kills the worker, so it returns nothing; the early rows it had
             # handed over are verified rows (the start of its list): keep them.
             if not results and _preview_box['rows']:
@@ -5298,7 +5310,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             results_count.text = f"{len(results)} {tr('Results')} · {total_elapsed_str} ({tr('partial')})"
             status_label.text = ''
-            ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
+            if not _forced_stop:  # the time-limit notice above already says so
+                ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
 
             # Fast title-only translation fetch for partial results (~1ms SQLite)
             _partial_sids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
