@@ -305,8 +305,11 @@ def test_api_variants_request_uses_the_website_defaults_after_a_web_visitor(serv
 
 def test_restored_refinement_steps_replay_with_their_own_settings(server):
     """A refinement chain restored from the visitor's session is replayed step by
-    step, each with the variant settings it was first searched with (or its level's
-    preset when none were recorded), never with the server-wide object's values."""
+    step, each with the variant settings it was first searched with, never with the
+    server-wide object's values. A step saved before settings were recorded runs
+    with the website defaults at its level's preset -- not with this visitor's
+    current preferences, which say nothing about how it first ran (design 4.3)."""
+    from web.variant_preferences import WEBSITE_DEFAULTS
     chain = [
         {'query': WORD, 'mode': 'variants_maximum', 'gap': 0,
          'variant_settings': {'variant_pairs_count': 120, 'variant_max_changes': 1}},
@@ -315,15 +318,48 @@ def test_restored_refinement_steps_replay_with_their_own_settings(server):
 
     async def driver(a, b):
         await a.open('/search')
-        store(a, search_refinement_chain=chain, search_mode='variants_maximum', search_query=WORD)
+        store(a, search_refinement_chain=chain, search_mode='variants_maximum', search_query=WORD,
+              variant_pref_custom_variants={'ש=ס': True}, variant_pref_variant_aggressive=True,
+              search_max_changes=3)
         await a.open('/search')
         await wait_for_payloads(server.queue, 2)
 
     run(driver)
     sent = {server.queue.query_of(p): p['settings'] for p in server.queue.payloads[:2]}
     assert (sent[WORD]['variant_pairs_count'], sent[WORD]['variant_max_changes']) == (120, 1), sent[WORD]
-    assert sent[WORD2]['variant_pairs_count'] == 70, sent[WORD2]['variant_pairs_count']
+    legacy = sent[WORD2]
+    # Extended's preset and its default x2 (the store's x3 is this visitor's choice now)
+    assert (legacy['variant_pairs_count'], legacy['variant_max_changes']) == (70, 2), legacy
+    level_keys = ('variant_pairs_count', 'variant_max_changes')
+    assert {k: legacy[k] for k in WEBSITE_DEFAULTS if k not in level_keys} == {
+        k: v for k, v in WEBSITE_DEFAULTS.items() if k not in level_keys}, legacy
     assert server_values(server.settings) == SERVER
+
+
+def test_the_shown_results_settings_survive_a_reload():
+    """The settings the shown results were searched with are saved with them, so a
+    refinement started after a reload records step 0 with them (not None, which
+    would replay it with other settings)."""
+    from web.pages import search_state as ss
+
+    saved = {}
+    sent = {'variant_pairs_count': 120, 'variant_max_changes': 1, 'custom_variants': {'ש=ס': True}}
+    state = ss.SearchUIState()
+    state.last_variant_settings = dict(sent)
+    with patch.object(ss, 'safe_user_get', lambda key, default=None: saved.get(key, default)), \
+            patch.object(ss, 'safe_user_set', lambda key, value: saved.__setitem__(key, value) or True), \
+            patch.object(ss, '_get_tab_storage', lambda: None):
+        ss.persist_search_snapshot(state)
+        restored = ss.SearchUIState()
+        ss.restore_search_snapshot(restored)
+    assert restored.last_variant_settings == sent
+
+    tab = {}
+    with patch.object(ss, '_get_tab_storage', lambda: tab):
+        ss.persist_search_active_snapshot(state)
+        restored = ss.SearchUIState()
+        assert ss.restore_search_active_snapshot(restored)
+    assert restored.last_variant_settings == sent
 
 
 def test_slider_mode_prefix_moves_the_slider(server):
@@ -441,12 +477,18 @@ def test_website_defaults_are_the_eleven_server_pairs_with_one_change_for_short_
 
 
 def test_parallels_fingerprint_keeps_old_identities_and_tells_preferences_apart():
+    """An old fingerprint was made with the server's settings then: the website
+    defaults with Aggressive Mode on. It keeps matching a search with exactly those
+    settings, and no other -- the new defaults (Aggressive off) included, or an old
+    tab could show a newer search's rows as its own."""
     from web.export_state import compute_parallels_search_fingerprint
     from web.variant_preferences import website_defaults
     defaults = {k: v for k, v in website_defaults().items()
                 if k in ('variant_min_word_len', 'variant_aggressive', 'custom_variants', 'comp_min_score')}
     base = dict(text=WORD, engine='chunk', mode='variants', variant_level=30, variant_max_changes=2)
     old = compute_parallels_search_fingerprint(**base)
-    assert compute_parallels_search_fingerprint(**base, variant_preferences=defaults) == old
-    changed = {**defaults, 'custom_variants': {'ש=ס': True}}
+    as_before = {**defaults, 'variant_aggressive': True}
+    assert compute_parallels_search_fingerprint(**base, variant_preferences=as_before) == old
+    assert compute_parallels_search_fingerprint(**base, variant_preferences=defaults) != old
+    changed = {**as_before, 'custom_variants': {'ש=ס': True}}
     assert compute_parallels_search_fingerprint(**base, variant_preferences=changed) != old

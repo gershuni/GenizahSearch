@@ -1,9 +1,16 @@
 # Research search resource policy
 
 Web transcription, lab, and parallels searches run in disposable subprocesses.
-Interactive searches and the background API have no elapsed-time cutoff inside
-those workers. A slow valid query may finish as long as it stays within resource
-limits. The ordinary synchronous API retains its existing HTTP deadlines.
+Every job a worker runs -- an interactive search, a completion, a replay, an API
+background job -- stops after `Config.WEB_SEARCH_TIME_LIMIT` (180 s; owner ruling
+2026-09-28) and returns what it had checked: the worker's progress callback raises
+the engine's Stop, the engine returns its verified rows with the cut-off signal
+`interrupted`, the page shows the count as "N+" with "stopped after 3 minutes",
+and the API adds `results_cut_off`. A part of a search that cannot return partial
+rows reports the limit instead (the page's time-limit message). A worker that has
+not stopped 60 s after its limit (`TIME_LIMIT_GRACE_SECONDS`, stuck outside the
+engine's checks) is killed. The limit counts from when the job leaves the queue.
+The ordinary synchronous API keeps its own HTTP deadlines; the desktop has none.
 
 The web process owns a FIFO queue. Stop removes a queued request or kills its
 running process; its slot is released after process exit. A crashed worker does

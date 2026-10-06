@@ -41,6 +41,17 @@ from shared.research_worker import PREVIEW_MAX_BYTES
 log = logging.getLogger(__name__)
 _cancel_context = ContextVar('research_cancel', default=None)
 _status_context = ContextVar('research_status', default=None)
+# A worker that has not stopped this long after its time limit is stopped by force.
+TIME_LIMIT_GRACE_SECONDS = 60
+_time_limit_stop = threading.local()
+
+
+def consume_time_limit_stop() -> bool:
+    """Whether the last research call on this thread was stopped by the website's
+    time limit (Config.WEB_SEARCH_TIME_LIMIT), then forget it."""
+    stopped = bool(getattr(_time_limit_stop, 'value', False))
+    _time_limit_stop.value = False
+    return stopped
 
 
 class ResearchJobError(RuntimeError):
@@ -378,6 +389,9 @@ class ResearchQueue:
                 result = pickle.load(stream)
             log.info('Research result transferred: %d compressed bytes, %d expanded bytes', output_bytes, expanded_bytes)
             if result.get('error'):
+                if result.get('time_limit'):
+                    from shared.search_regex import SearchBudgetExceeded
+                    raise SearchBudgetExceeded()
                 if result.get('exception') == 'NoWitnessesResolved':
                     from shared.passage_parallels import NoWitnessesResolved
                     raise NoWitnessesResolved(result['report'])
@@ -511,15 +525,20 @@ class IsolatedEngine:
             # and a call that fails or is stopped leaves none.
             from shared.search_engine import consume_last_search_cutoff
             consume_last_search_cutoff()
+            consume_time_limit_stop()
             queue = get_queue()
+            from shared.config import Config
+            time_limit = Config.WEB_SEARCH_TIME_LIMIT
             payload = {'kind': self._kind, 'method': name, 'arguments': arguments,
-                       'options': self._options, 'settings': self.job_settings()}
+                       'options': self._options, 'settings': self.job_settings(),
+                       'time_limit': time_limit}
             if preview is not None:
                 payload['preview'] = True
             job = queue.submit(payload)
             cancelled = self._cancel or _cancel_context.get()
             update = self._status or _status_context.get()
             previewed = 0
+            running_since = None
             try:
                 while True:
                     if cancelled is not None and cancelled.is_set():
@@ -530,6 +549,13 @@ class IsolatedEngine:
                     if deadline is not None and time.monotonic() >= deadline:
                         raise SearchBudgetExceeded()
                     position = queue.position(job)
+                    # The worker stops itself at its time limit; one that cannot
+                    # (stuck outside the engine's checks) is stopped here.
+                    if not position and running_since is None:
+                        running_since = time.monotonic()
+                    if (time_limit and running_since is not None
+                            and time.monotonic() - running_since >= time_limit + TIME_LIMIT_GRACE_SECONDS):
+                        raise SearchBudgetExceeded()
                     status = f'Queued: {position}' if position else job.status
                     if update:
                         update(status, job.progress)
@@ -557,6 +583,7 @@ class IsolatedEngine:
             cutoff = result.get('cutoff') or {}
             _note_search_cutoff(capped=bool(cutoff.get('capped')),
                                 interrupted=bool(cutoff.get('interrupted')))
+            _time_limit_stop.value = bool(result.get('time_limit'))
             if result.get('downgrade'):
                 _set_last_responsa_downgrade(result['downgrade'])
             if result.get('cascade'):

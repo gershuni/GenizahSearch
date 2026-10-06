@@ -44,7 +44,8 @@ from web.pages.search_results import (
 from genizah_core import generate_tabular_syntax
 from shared.browse_map_utils import get_library_display, LIBRARY_CODES, library_codes_with_manuscripts, sanitize_library_codes
 from shared.refinement import (RefinementStep, chain_needs_completion, complete_chain, compute_effective_restrict,
-                               needs_mode_labels, truncate_chain, replay_chain, scope_signature)
+                               needs_mode_labels, truncate_chain, replay_chain, scope_signature,
+                               steps_that_cannot_complete)
 from shared.search_engine import consume_last_search_cutoff
 from shared.exclusion_service import (
     ExclusionSource, parse_shelfmark_file, parse_csv_shelfmarks,
@@ -56,7 +57,9 @@ from web.document_service import (
     get_fragments_by_tag, get_all_distinct_tags,
 )
 from web.search_load_control import enrichment_batch_slot
-from web.research_jobs import ResearchJobError, run_research_call, with_request_settings
+from web.research_jobs import (ResearchJobError, consume_time_limit_stop, run_research_call,
+                                with_request_settings)
+from shared.config import Config
 from web import variant_preferences
 from shared.fgp_service import get_sys_ids_with_fgp_sources
 from shared.search_regex import SearchBudgetExceeded
@@ -1543,17 +1546,23 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         def _step_searcher():
             """Each step is searched again with the variant settings it first ran with.
 
-            A step saved without them (before they were recorded) runs at its level's
-            preset with this visitor's preferences, read here: in the replay's worker
-            thread the visitor's storage cannot be read.
+            A step saved without them (before they were recorded) runs with the
+            website defaults at its level's preset and that level's default x1-x3
+            (Fuzzy at x2) -- never with this visitor's current preferences, which
+            say nothing about how it first ran.
             """
-            fallback = {mode: variant_preferences.for_search(mode)
-                        for mode in variant_preferences.PRESET_PAIRS}
-            fallback.update(fuzzy=variant_preferences.for_search('fuzzy'),
-                            other=variant_preferences.for_search('other'))
+            from shared.variants import DEFAULT_MAX_CHANGES_BY_PRESET
 
             def pick(step):
-                settings = step.variant_settings or fallback.get(step.mode, fallback['other'])
+                settings = step.variant_settings
+                if settings is None:
+                    pairs = variant_preferences.PRESET_PAIRS.get(step.mode, variant_preferences.BASIC_PAIRS)
+                    settings = {'variant_pairs_count': pairs}
+                    if step.mode == 'fuzzy':
+                        settings['variant_max_changes'] = 2
+                    elif step.mode in variant_preferences.PRESET_PAIRS:
+                        settings['variant_max_changes'] = DEFAULT_MAX_CHANGES_BY_PRESET[
+                            variant_preferences.level_of(pairs)]
                 return with_request_settings(state.searcher, **settings)
             return pick
 
@@ -2281,17 +2290,68 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     # === Phase 55: Refinement UI helper functions ===
 
+    def _responsa_options_from_controls():
+        """The Responsa options the controls describe (None outside Responsa mode)."""
+        if mode_select.value != 'responsa':
+            return None
+        return {
+            'responsa_mode': True,
+            'variants': responsa_variants_cb.value,
+            'ja': responsa_ja_cb.value,
+            'flex_spacing': responsa_flex_cb.value,
+            'bidirectional': bidirectional_cb.value,
+            'variant_mode': 'variants' if responsa_variants_cb.value else 'exact',
+        }
+
     def _run_params_from_controls():
         """The shown results' search as the controls describe it, for results restored
-        from a session (no run recorded on this page): the query without its mode
-        prefix, so a replay or a completion runs the search that was shown."""
+        from a session saved before the search itself was saved with them
+        (search_state.last_run): the query without its mode prefix, its NOT-words,
+        position and Responsa options, so a replay or a completion runs the search
+        that was shown."""
         raw = query_input.value.strip()
         is_responsa = mode_select.value == 'responsa'
         mode_override, parsed = state.searcher.parse_query_syntax(raw, responsa_mode=is_responsa)
+        not_words = (not_filter.value.split() if not_filter.value else []) + list(
+            search_state.builder_negated_words or [])
+        position = text_position_select.value
         return {'query': parsed if mode_override else raw,
                 'mode': engine_mode(mode_override or mode_select.value),
-                'gap': int(gap_input.value), 'corpus_scope': 'genizah',
+                'gap': int(gap_input.value), 'exclude_words': not_words,
+                'text_position': position if position != 'anywhere' else None,
+                'responsa_options': _responsa_options_from_controls(),
+                'corpus_scope': 'genizah',
                 'variant_settings': search_state.last_variant_settings}
+
+    def _shown_run():
+        """The parameters of the search the shown results came from: as it ran
+        (search_state.last_run, saved with them), else as the controls describe it.
+        Only RefinementStep's own fields, whatever a saved session holds."""
+        run_params = search_state.last_run or _run_params_from_controls()
+        return {k: v for k, v in run_params.items()
+                if k in RefinementStep.__dataclass_fields__ and not k.startswith('_')}
+
+    def _commit_refinement_step(rows):
+        """Append the search that just ran (search_state.last_run) to the refinement
+        chain, with the manuscripts and pages of *rows* (its raw results, before the
+        display filters). No rows: no step, and the zero-result recovery shows (D-14a)."""
+        raw_ids = {r.get('display', {}).get('id') for r in rows if r.get('display', {}).get('id')}
+        if not raw_ids:
+            search_state._zero_result_refine = True
+            return
+        step = RefinementStep(**_shown_run(),
+                              result_count=len(rows),  # total results (matches display count)
+                              result_count_capped=search_state.result_count_capped)
+        step._result_sys_ids = set(raw_ids)
+        # Capture page-level uids for "all terms" filter
+        step._result_uids = {r.get('uid') or r.get('display', {}).get('id') for r in rows
+                             if r.get('uid') or r.get('display', {}).get('id')}
+        search_state.refinement_chain.append(step)
+        search_state.refinement_restrict_sys_ids = raw_ids
+        search_state._refinement_scope_sig = scope_signature(search_state.restrict_sys_ids)
+        search_state._zero_result_refine = False
+        # Persist chain metadata only (D-14) -- no sys_id lists stored
+        persist_value('search_refinement_chain', [s.to_dict() for s in search_state.refinement_chain])
 
     async def _enter_refine_mode():
         """D-02: Activate refine mode -- scroll to search bar, show badge."""
@@ -2305,9 +2365,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state._refinement_scope_sig = scope_signature(search_state.restrict_sys_ids)
         # Add the CURRENT search as step 0 if chain is empty (so breadcrumb shows the original query)
         if not search_state.refinement_chain and query_input.value:
-            run_params = search_state.last_run or _run_params_from_controls()
             step0 = RefinementStep(
-                **run_params,
+                **_shown_run(),
                 result_count=len(search_state.results),
                 result_count_capped=search_state.result_count_capped,
             )
@@ -2324,6 +2383,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # off is completed first, or the search would miss what it left out. Stopped
         # or failed, it searches within the shown results' manuscripts, said "+".
         completed = await _complete_chain(None)
+        if completed is None and search_state.refinement_chain:
+            # Nothing left to complete: an earlier completion already gave the last
+            # step its complete set, which the shown rows may only start.
+            known = search_state.refinement_chain[-1]._result_sys_ids
+            if known is not None and raw_ids <= known:
+                raw_ids = set(known)
+                search_state.refinement_restrict_sys_ids = raw_ids
+        if steps_that_cannot_complete(search_state.refinement_chain):
+            ui.notify(tr('A search with a line break cannot be completed; searching within the shown results.'), type='warning')
         if completed and not completed['interrupted'] and completed['restrict'] is not None:
             if raw_ids <= completed['restrict']:
                 raw_ids = completed['restrict']
@@ -2410,7 +2478,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         else:
             _clear_refinement_chain()
 
-    async def _complete_chain(upto):
+    async def _complete_chain(upto, *, notify_failure=True):
         """Complete the refinement chain's cut-off steps (D8; shared.refinement.complete_chain).
 
         Returns None when nothing needed completing; else complete_chain's
@@ -2429,9 +2497,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if total > 0:
                 search_state.progress = current / total
 
+        stopped = {'time_limit': False}
+
         def _complete():
-            return complete_chain(chain, state.searcher, filter_restrict, progress_callback=_progress,
-                                  upto=upto, searcher_for_step=step_searcher)
+            try:
+                return complete_chain(chain, state.searcher, filter_restrict, progress_callback=_progress,
+                                      upto=upto, searcher_for_step=step_searcher)
+            finally:
+                stopped['time_limit'] = consume_time_limit_stop()
 
         was_running = search_state.is_running
         search_state.is_running = True
@@ -2446,14 +2519,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             result = {'restrict': None, 'interrupted': True}
         except Exception as e:
             logger.warning('Completing the refinement chain failed: %s', e)
-            ui.notify(tr('Could not complete the cut-off results; searching within the shown ones.'),
-                      type='warning')
+            if notify_failure:
+                ui.notify(tr('Could not complete the cut-off results; searching within the shown ones.'),
+                          type='warning')
             result = {'restrict': None, 'interrupted': True}
         finally:
             search_state.running_label = None
             search_state.is_running = was_running
             if not was_running:
                 results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}"
+        if stopped['time_limit'] and notify_failure:
+            # The time limit stopped the completion: the search within uses the shown rows.
+            ui.notify(tr('Could not complete the cut-off results; searching within the shown ones.'),
+                      type='warning')
         persist_value('search_refinement_chain', [s.to_dict() for s in search_state.refinement_chain])
         _update_refinement_strip()
         return result
@@ -2465,8 +2543,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if checked and len(search_state.refinement_chain) >= 2:
             # D8: the earlier steps' page sets must be complete, or rows they left
             # out would hide shown rows (the shown step only filters what is shown).
-            await _complete_chain(len(search_state.refinement_chain) - 1)
+            completed = await _complete_chain(len(search_state.refinement_chain) - 1,
+                                              notify_failure=False)
             results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}"
+            if completed and completed['interrupted']:
+                # Earlier steps' page sets are incomplete: filtering by them would hide
+                # shown rows that do have every term. Leave the filter off and say so.
+                search_state._all_terms_filter = False
+                persist_value('search_all_terms_filter', False)
+                ui.notify(tr('Could not complete the cut-off results; the \"Only results with all terms\" filter was not applied.'), type='warning')
+                _update_refinement_strip()
         # Re-render with filter applied
         if search_state.results:
             render_results(search_state.results, page=0)
@@ -3837,7 +3923,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             with ui.column().classes('w-full gap-2'):
                 ui.label(tr('Filter by Domain')).classes('text-lg font-bold')
                 ui.label(
-                    f"{tr('Showing')} {total_results} {tr('of')} {total_results} {tr('results')}"
+                    f"{tr('Showing')} {total_results} {tr('of')} {_total_text(total_results)} {tr('results')}"
                 ).classes('text-sm text-gray-500')
 
                 # Single HTML container with all checkboxes (JS helpers loaded at page level)
@@ -4473,7 +4559,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             count_parts = [f"{n_excl} {tr('excluded')}"]
             if search_state.library_filter:  # SEED-026 (WR-04 / Codex): indicator in the library-active branch
                 count_parts.append(tr('Library filter'))
-            results_count.text = f"{showing} {tr('Results')} ({', '.join(count_parts)})"
+            results_count.text = f"{showing} {tr('of')} {_total_text(total)} {tr('Results')} ({', '.join(count_parts)})"
             render_results(filtered, page=0)
         else:
             filtered = _apply_library_filter(filtered)  # SEED-026 (LIBFILTER-01): library-only post-word-search
@@ -4922,16 +5008,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             not_words = not_words + search_state.builder_negated_words
 
         # Build Responsa options dict from mode selection
-        responsa_options = None
-        if mode_select.value == 'responsa':
-            responsa_options = {
-                'responsa_mode': True,
-                'variants': responsa_variants_cb.value,
-                'ja': responsa_ja_cb.value,
-                'flex_spacing': responsa_flex_cb.value,
-                'bidirectional': bidirectional_cb.value,
-                'variant_mode': 'variants' if responsa_variants_cb.value else 'exact',
-            }
+        responsa_options = _responsa_options_from_controls()
 
         _tp = text_position_select.value
         search_state.last_run = {
@@ -5086,6 +5163,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 return _run_core_search()
             finally:
                 _run_cutoff.update(consume_last_search_cutoff())
+                _run_cutoff['time_limit'] = consume_time_limit_stop()
 
         def _run_core_search():
             try:
@@ -5139,7 +5217,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         finally:
             if _painter is not None:
                 _painter.cancel()
-        search_state.result_count_capped = bool(_run_cutoff.get('capped') or _restricted_to_incomplete)
+        # Cut at the candidate limit, stopped at the time limit, or searched within an
+        # incomplete set: the list leaves matches out.
+        search_state.result_count_capped = bool(_run_cutoff.get('capped') or _run_cutoff.get('interrupted')
+                                                or _restricted_to_incomplete)
+        if _run_cutoff.get('time_limit'):
+            ui.notify(tr('The search stopped after {minutes} minutes; showing the results found so far.').format(minutes=Config.WEB_SEARCH_TIME_LIMIT // 60),
+                      type='warning', timeout=10000, close_button=True)
 
         # Handle validation errors from explosion guard (returned as sentinel dict
         # because run_core_search runs in io_bound thread and cannot call ui.notify)
@@ -5169,6 +5253,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # handed over are verified rows (the start of its list): keep them.
             if not results and _preview_box['rows']:
                 results = list(_preview_box['rows'])
+            # Stopped, the rows are the start of the list, never all of it: "+", and a
+            # search within them completes the step first (D8).
+            search_state.result_count_capped = True
             search_state.is_running = False
             search_state.is_cancelled = False
             search_state.progress = 1.0
@@ -5197,7 +5284,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 'text_any': list(getattr(search_state, 'filter_text_any', None) or []),
                 'text_not': list(getattr(search_state, 'filter_text_not', None) or []),
             }
-            _last_search_warnings = ['partial-results']  # signal partial-result fidelity to consumers
+            _last_search_warnings = ['partial-results', 'results-cut-off']  # signal partial-result fidelity to consumers
             _last_results = results
             from web.export_state import set_search_export
             set_search_export(
@@ -5217,6 +5304,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             )
             results = compact_result_rows(results)
             search_state.results = results
+            # A stopped search within results is still the chain's next step: marked
+            # "+", it is completed before anything searches within it.
+            if search_state._refine_mode and results:
+                _commit_refinement_step(results)
+                search_state._refine_mode = False
+                search_state._refinement_stale = False
 
             # Compute elapsed
             total_elapsed = time.time() - search_state.search_start_time if search_state.search_start_time else 0
@@ -5295,7 +5388,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             'text_any': list(getattr(search_state, 'filter_text_any', None) or []),
             'text_not': list(getattr(search_state, 'filter_text_not', None) or []),
         }
-        _last_search_warnings = []  # Phase 78 will populate; Phase 77 always [] per D-07
+        # A cut-off list exports as one: its count says "N+".
+        _last_search_warnings = ['results-cut-off'] if search_state.result_count_capped else []
         _last_results = results
         from web.export_state import set_search_export
         set_search_export(
@@ -5321,37 +5415,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # --- Phase 55: Refinement chain update ---
         if search_state._refine_mode:
-            # Use RAW result sys_ids (before domain/printed/measurement post-filters)
-            raw_result_sys_ids = set(all_sys_ids)  # all_sys_ids computed above
-            if len(raw_result_sys_ids) == 0:
-                # Zero-result refinement (D-14a) -- don't commit step, show recovery UI
-                search_state._zero_result_refine = True
-            else:
-                step = RefinementStep(
-                    query=clean_query,
-                    mode=engine_mode(mode),  # what it ran with, for its replays
-                    gap=int(gap_input.value),
-                    exclude_words=not_words if not_words else [],
-                    text_position=text_position_select.value if text_position_select.value != 'anywhere' else None,
-                    responsa_options=responsa_options,
-                    variant_settings=dict(variant_settings),
-                    corpus_scope='genizah',
-                    result_count=len(results),  # total results (matches display count)
-                    result_count_capped=search_state.result_count_capped,
-                )
-                step._result_sys_ids = set(raw_result_sys_ids)
-                # Capture page-level uids for "all terms" filter
-                step._result_uids = {
-                    r.get('uid') or r.get('display', {}).get('id')
-                    for r in results
-                    if r.get('uid') or r.get('display', {}).get('id')
-                }
-                search_state.refinement_chain.append(step)
-                search_state.refinement_restrict_sys_ids = raw_result_sys_ids
-                search_state._refinement_scope_sig = scope_signature(search_state.restrict_sys_ids)
-                search_state._zero_result_refine = False
-                # Persist chain metadata only (D-14) -- no sys_id lists stored
-                persist_value('search_refinement_chain', [s.to_dict() for s in search_state.refinement_chain])
+            # RAW results (before domain/printed/measurement post-filters)
+            _commit_refinement_step(results)
             search_state._refine_mode = False
             search_state._refinement_stale = False
 

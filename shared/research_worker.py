@@ -187,7 +187,24 @@ def main(directory):
             gc.collect()
 
 
+def _time_limited(report, seconds, stopped):
+    """*report*, stopping the search once *seconds* have passed: the engine treats
+    the InterruptedError as a Stop and returns what it had checked, with its cut-off
+    signal 'interrupted'. *stopped* records that the time limit stopped it."""
+    if not seconds:
+        return report
+    deadline = time.monotonic() + seconds
+
+    def progress(*args, **kwargs):
+        if time.monotonic() >= deadline:
+            stopped['time_limit'] = True
+            raise InterruptedError('Search time limit reached')
+        return report(*args, **kwargs)
+    return progress
+
+
 def run_query(root, payload, report, *, native_matching=False, meta=None):
+    stopped = {'time_limit': False}
     try:
         from shared.metadata_manager import MetadataManager
         from shared.variants import VariantManager
@@ -234,7 +251,7 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
         arguments = payload['arguments']
         if arguments.get('restrict_sys_ids') is not None:
             arguments['restrict_sys_ids'] = set(arguments['restrict_sys_ids'])
-        arguments['progress_callback'] = report
+        arguments['progress_callback'] = _time_limited(report, payload.get('time_limit'), stopped)
         if payload.get('preview') and kind == 'search' and payload['method'] == 'execute_search':
             sent = [0]
 
@@ -250,7 +267,11 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
         # combination relies on it.
         result = {'value': value, 'downgrade': _consume_last_responsa_downgrade(),
                   'cascade': _consume_last_responsa_downgrade_meta(),
-                  'cutoff': consume_last_search_cutoff()}
+                  'cutoff': consume_last_search_cutoff(),
+                  'time_limit': stopped['time_limit']}
+    except InterruptedError:
+        # The limit stopped a part of the search that cannot return what it had.
+        result = {'error': 'The search reached its time limit.', 'time_limit': True}
     except ValueError as exc:
         result = {'error': str(exc), 'validation': True}
         if type(exc).__name__ == 'NoWitnessesResolved':
