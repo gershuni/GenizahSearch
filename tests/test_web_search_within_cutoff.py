@@ -542,3 +542,119 @@ def test_a_step_saves_without_copying_its_runtime_sets(monkeypatch):
     assert not any(value is step._result_sys_ids or value is step._result_uids for value in copied)
     assert saved['variant_settings'] == {'variant_pairs_count': 30}
     assert saved['variant_settings'] is not step.variant_settings
+
+
+# --- The website's time limit (owner ruling 2026-09-28) ---------------------------
+
+def _slow_engine(seen, escape=False):
+    """A search engine that checks two rows per progress call, for up to 5 seconds
+    (without a time limit it then finishes, so a broken limit fails the test rather
+    than hanging it), and returns what it had checked when a progress call stops it
+    -- as the real engine does."""
+    import time as _time
+
+    from shared.search_engine import _note_search_cutoff
+
+    class Engine:
+        def __init__(self, meta, variants, *, worker_mode=False, open_local=True):
+            self.searcher = object()
+
+        def execute_search(self, query_str, mode, gap, progress_callback=None, corpus_scope='all'):
+            rows = []
+            if escape:
+                for _ in range(500):
+                    progress_callback(len(rows), 0)
+                    _time.sleep(0.01)
+                return rows
+            try:
+                for _ in range(500):
+                    progress_callback(len(rows), 0)
+                    rows += [{'uid': f'p{len(rows)}'}, {'uid': f'p{len(rows) + 1}'}]
+                    seen['rows'] = len(rows)
+                    _time.sleep(0.01)
+            except InterruptedError:
+                _note_search_cutoff(interrupted=True)
+            return rows
+    return Engine
+
+
+def _run_worker(tmp_path, monkeypatch, time_limit, escape=False):
+    from shared import research_worker
+    seen = {}
+    monkeypatch.setattr('shared.search_engine.SearchEngine', _slow_engine(seen, escape))
+    monkeypatch.setenv('GENIZAH_RESEARCH_MEMORY_MB', '512')
+    payload = {'kind': 'search', 'method': 'execute_search', 'settings': None, 'time_limit': time_limit,
+               'arguments': {'query_str': WORD, 'mode': 'literal', 'gap': 0, 'corpus_scope': 'genizah'}}
+    research_worker.run_query(tmp_path, payload, lambda *a: None, meta=SimpleNamespace())
+    with gzip.open(tmp_path / 'output.pkl', 'rb') as stream:
+        return pickle.load(stream), seen
+
+
+def test_the_worker_stops_at_its_time_limit_and_returns_what_it_checked(tmp_path, monkeypatch):
+    result, seen = _run_worker(tmp_path, monkeypatch, time_limit=0.3)
+    assert result['time_limit'] is True
+    assert result['cutoff'] == {'capped': False, 'interrupted': True}
+    assert len(result['value']) == seen['rows'] > 0
+
+
+def test_a_part_that_cannot_return_rows_reports_the_limit(tmp_path, monkeypatch):
+    result, _ = _run_worker(tmp_path, monkeypatch, time_limit=0.2, escape=True)
+    assert result.get('time_limit') is True and 'error' in result
+
+
+def test_the_web_side_says_the_time_limit_stopped_the_call(page):
+    from web.research_jobs import consume_time_limit_stop
+    from web.state import state
+    from shared.config import Config
+    queue = page({(WORD, False): ([_row('M1')], {'capped': False, 'interrupted': True})})
+    real_submit = queue.submit
+
+    def submit_stopped(payload):
+        job = real_submit(payload)
+        result = job.future.result()
+        result['time_limit'] = True
+        return job
+    queue.submit = submit_stopped
+    state.searcher.execute_search(WORD, 'literal', 0)
+    assert queue.payloads[0]['time_limit'] == Config.WEB_SEARCH_TIME_LIMIT == 180
+    assert consume_time_limit_stop() is True
+    assert consume_time_limit_stop() is False
+
+
+def test_a_worker_that_does_not_stop_is_stopped_after_the_grace(page, monkeypatch):
+    """A job still running TIME_LIMIT_GRACE_SECONDS after its limit (stuck where the
+    engine never checks) is cancelled, which frees the queue."""
+    from shared.config import Config
+    from shared.search_regex import SearchBudgetExceeded
+    from web import research_jobs
+    from web.state import state
+    cancelled = []
+
+    class Stuck:
+        def submit(self, payload):
+            return research_jobs.Job(payload)
+
+        def position(self, job):
+            return 0
+
+        def cancel(self, job):
+            cancelled.append(job)
+    monkeypatch.setattr(research_jobs, 'get_queue', lambda: Stuck())
+    monkeypatch.setattr(Config, 'WEB_SEARCH_TIME_LIMIT', 0.2)
+    monkeypatch.setattr(research_jobs, 'TIME_LIMIT_GRACE_SECONDS', 0.2)
+    with pytest.raises(SearchBudgetExceeded):
+        state.searcher.execute_search(WORD, 'literal', 0)
+    assert len(cancelled) == 1
+
+
+def test_a_search_stopped_by_the_time_limit_shows_n_plus(page):
+    """The rows a time-limited search returns are the start of its list: "N+"."""
+    queue = page({(WORD, False): ([_row('M1')], {'capped': False, 'interrupted': True})})
+
+    async def driver(a, b):
+        await a.open('/search')
+        submit(a, WORD)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)))
+
+    run(driver)

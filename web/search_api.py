@@ -1773,9 +1773,10 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             #    the thread-local is drained even on the exception path so it
             #    cannot leak into the next request on this worker thread.
             warnings_list: list = []
-            if (search_cutoff or {}).get('capped'):
-                # The engine read its 50,000-candidate limit: `total` counts the
-                # matches among those, and more exist.
+            if (search_cutoff or {}).get('capped') or (search_cutoff or {}).get('interrupted'):
+                # The engine read its 50,000-candidate limit, or a background job
+                # reached the website's time limit: `total` counts the matches it
+                # checked, and more may exist.
                 warnings_list.append('results_cut_off')
             if downgrade_msg:
                 warnings_list.append(f'query_downgraded: {downgrade_msg}')

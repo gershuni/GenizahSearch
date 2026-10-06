@@ -3302,6 +3302,7 @@ TRANSLATIONS = {
     "Re-evaluating refinement...": "מעריך מחדש צמצום...",
     "Restoring refinement chain...": "משחזר שרשרת צמצום...",
     "Completing the cut-off results": "משלים את התוצאות שנקטעו",
+    "The search stopped after {minutes} minutes; showing the results found so far.": "החיפוש נעצר אחרי {minutes} דקות; מוצגות התוצאות שנמצאו עד כה.",
     "Could not complete the cut-off results; searching within the shown ones.": "לא ניתן היה להשלים את התוצאות שנקטעו; החיפוש יתבצע בתוך התוצאות המוצגות.",
     "Could not complete the cut-off results; the \"Only results with all terms\" filter was not applied.": "לא ניתן היה להשלים את התוצאות שנקטעו; המסנן \"רק תוצאות עם כל המונחים\" לא הוחל.",
     "A search with a line break cannot be completed; searching within the shown results.": "לא ניתן להשלים חיפוש עם מעבר שורה; החיפוש יתבצע בתוך התוצאות המוצגות.",

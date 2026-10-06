@@ -57,7 +57,9 @@ from web.document_service import (
     get_fragments_by_tag, get_all_distinct_tags,
 )
 from web.search_load_control import enrichment_batch_slot
-from web.research_jobs import ResearchJobError, run_research_call, with_request_settings
+from web.research_jobs import (ResearchJobError, consume_time_limit_stop, run_research_call,
+                                with_request_settings)
+from shared.config import Config
 from web import variant_preferences
 from shared.fgp_service import get_sys_ids_with_fgp_sources
 from shared.search_regex import SearchBudgetExceeded
@@ -2472,9 +2474,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if total > 0:
                 search_state.progress = current / total
 
+        stopped = {'time_limit': False}
+
         def _complete():
-            return complete_chain(chain, state.searcher, filter_restrict, progress_callback=_progress,
-                                  upto=upto, searcher_for_step=step_searcher)
+            try:
+                return complete_chain(chain, state.searcher, filter_restrict, progress_callback=_progress,
+                                      upto=upto, searcher_for_step=step_searcher)
+            finally:
+                stopped['time_limit'] = consume_time_limit_stop()
 
         was_running = search_state.is_running
         search_state.is_running = True
@@ -2498,6 +2505,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.is_running = was_running
             if not was_running:
                 results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}"
+        if stopped['time_limit'] and notify_failure:
+            # The time limit stopped the completion: the search within uses the shown rows.
+            ui.notify(tr('Could not complete the cut-off results; searching within the shown ones.'),
+                      type='warning')
         persist_value('search_refinement_chain', [s.to_dict() for s in search_state.refinement_chain])
         _update_refinement_strip()
         return result
@@ -5130,6 +5141,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 return _run_core_search()
             finally:
                 _run_cutoff.update(consume_last_search_cutoff())
+                _run_cutoff['time_limit'] = consume_time_limit_stop()
 
         def _run_core_search():
             try:
@@ -5183,7 +5195,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         finally:
             if _painter is not None:
                 _painter.cancel()
-        search_state.result_count_capped = bool(_run_cutoff.get('capped') or _restricted_to_incomplete)
+        # Cut at the candidate limit, stopped at the time limit, or searched within an
+        # incomplete set: the list leaves matches out.
+        search_state.result_count_capped = bool(_run_cutoff.get('capped') or _run_cutoff.get('interrupted')
+                                                or _restricted_to_incomplete)
+        if _run_cutoff.get('time_limit'):
+            ui.notify(tr('The search stopped after {minutes} minutes; showing the results found so far.').format(minutes=Config.WEB_SEARCH_TIME_LIMIT // 60),
+                      type='warning', timeout=10000, close_button=True)
 
         # Handle validation errors from explosion guard (returned as sentinel dict
         # because run_core_search runs in io_bound thread and cannot call ui.notify)
