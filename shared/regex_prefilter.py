@@ -351,11 +351,60 @@ def _has_literal_brace(seq) -> bool:
     return False
 
 
+_SET_OPERATORS = frozenset("-&~|")
+
+
+def _set_syntax_diverges(pattern: str) -> bool:
+    """True when a character class in the pattern holds a '[' or a doubled set
+    operator ('--', '&&', '~~', '||').
+
+    The regex module reads '[:alpha:]' / '[:^digit:]' inside a class as a POSIX
+    class (anywhere in it, not only at its start); stdlib re reads the same '['
+    as a literal and closes the class at the POSIX class's ']', so
+    'ש[a[:alpha:]]ום' needs the text ']ום' in re's parse and matches 'שלום' in
+    regex's. stdlib warns ("Possible nested set") only for '[[' at a class's
+    start and for doubled operators, and catching that warning is process-wide
+    state, so the source is read here: a class opens at an unescaped '[', a
+    '\\' escapes the next character, and a ']' first in the class (after an
+    optional '^') is a literal, as both engines read it. Conservative: any '['
+    inside a class counts, even where the engines agree (it costs speed, never
+    a match)."""
+    i, n = 0, len(pattern)
+    while i < n:
+        ch = pattern[i]
+        if ch == "\\":
+            i += 2
+            continue
+        i += 1
+        if ch != "[":
+            continue
+        if i < n and pattern[i] == "^":
+            i += 1
+        if i < n and pattern[i] == "]":
+            i += 1
+        while i < n:
+            ch = pattern[i]
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == "]":
+                i += 1
+                break
+            if ch == "[":
+                return True
+            if ch in _SET_OPERATORS and i + 1 < n and pattern[i + 1] == ch:
+                return True
+            i += 1
+    return False
+
+
 def extract_formula(pattern: str, *, stripped: bool, anchors: bool = True):
     # The in-process matcher is the regex module (shared/search_regex.py
     # compile()); native research workers use stdlib re. The structure below
     # comes from stdlib's parser, so any pattern the two engines may read
     # differently gets no prefilter: all documents are candidates.
+    if _set_syntax_diverges(pattern):
+        return TRUE   # e.g. 'ש[a[:alpha:]]ום': a POSIX class in regex, a literal '[' in re
     try:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")

@@ -33,6 +33,9 @@ DIVERGENT = [
     "שלום{e<=1}",
     "ש[[:alpha:]]ום",
     "ירו[[:alpha:]]לים",
+    # A POSIX class later in the set: re gives no warning, and its parse needs ']ום'.
+    "ש[a[:alpha:]]ום",
+    "ש[^[:digit:]]ום",
 ]
 
 

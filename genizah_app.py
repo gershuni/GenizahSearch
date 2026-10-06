@@ -21697,7 +21697,9 @@ class GenizahGUI(QMainWindow):
         if not results:
             self.reset_ui()
             self._update_local_scope_strip(0, cancelled=was_cancelled)
-            if was_cancelled:
+            # A run cut off at the candidate limit checked only some candidates (a Regex
+            # with no prefilter: the first 50,000 pages): finding none there is not "none".
+            if was_cancelled or self._run_left_matches_out():
                 self.status_label.setText(f"{tr('No results found.')} ({tr('Partial results')})")
             else:
                 self.status_label.setText(tr("No results found."))
