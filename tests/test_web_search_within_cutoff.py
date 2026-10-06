@@ -20,6 +20,7 @@ import asyncio
 import gzip
 import os
 import pickle
+import re
 import threading
 from types import SimpleNamespace
 
@@ -28,7 +29,7 @@ import pytest
 os.environ.setdefault('GENIZAH_STORAGE_SECRET', 'search-within-cutoff-secret-0123456789abcdef')
 
 from tests.test_web_variant_settings_per_visitor import (  # noqa: E402
-    FakeSearchEngine, run, submit, wait_for_payloads,
+    FakeSearchEngine, run, store, submit, wait_for_payloads,
 )
 
 WORD = 'אבגד'
@@ -46,7 +47,8 @@ class AnsweringQueue:
     """Stands in for ResearchQueue: answers each job by its query, records them all."""
 
     def __init__(self, answers):
-        self.answers = answers          # (query, ids_only) -> (rows, cutoff)
+        # (query, ids_only) -> (rows, cutoff) or (rows, cutoff, stopped by the time limit)
+        self.answers = answers
         self.payloads = []
         self.lock = threading.Lock()
 
@@ -55,10 +57,12 @@ class AnsweringQueue:
         with self.lock:
             self.payloads.append(payload)
         args = payload['arguments']
-        rows, cutoff = self.answers.get((args.get('query_str'), bool(args.get('ids_only'))), ([], None))
+        rows, cutoff, *time_limit = self.answers.get((args.get('query_str'), bool(args.get('ids_only'))),
+                                                     ([], None))
         job = Job(payload)
         job.future.set_result({'value': [dict(r) for r in rows],
-                               'cutoff': cutoff or {'capped': False, 'interrupted': False}})
+                               'cutoff': cutoff or {'capped': False, 'interrupted': False},
+                               'time_limit': bool(time_limit and time_limit[0])})
         return job
 
     def position(self, job):
@@ -164,11 +168,16 @@ def _label_texts(user):
                 if isinstance(getattr(e, 'text', None), str) and e.text]
 
 
-async def _wait_for(predicate, timeout=15.0):
+_COUNTS = re.compile(r'Results|Search within|Searching within')
+
+
+async def _wait_for(predicate, timeout=15.0, user=None):
+    """Wait until *predicate* holds; on a timeout, say what *user*'s page shows."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while not predicate():
-        assert loop.time() < deadline, 'timed out'
+        assert loop.time() < deadline, 'timed out' + (
+            f'; the page shows {[t for t in _label_texts(user) if _COUNTS.search(t)]}' if user else '')
         await asyncio.sleep(0.05)
 
 
@@ -658,3 +667,207 @@ def test_a_search_stopped_by_the_time_limit_shows_n_plus(page):
         await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)))
 
     run(driver)
+
+
+# --- Review round 2 (2026-10-07): every time-limited search says so ----------------
+
+TIME_LIMIT_NOTE = 'The search stopped after 3 minutes; showing the results found so far.'
+
+
+class FakeLabEngine:
+    """The real lab_search signature; never runs in process."""
+
+    def __init__(self, settings, var_mgr):
+        self.settings, self.var_mgr = settings, var_mgr
+
+    def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0, deep_scan=False,
+                   scan_limit=50000, corpus_scope='genizah'):
+        raise AssertionError('must run through the worker queue, not in process')
+
+
+def _search_within_text(user):
+    from nicegui import ui
+    with user._client:
+        return next(e.text for e in user._client.elements.values()
+                    if isinstance(e, ui.button) and str(e.text).startswith('Search within'))
+
+
+def test_a_search_the_time_limit_stopped_shows_n_plus_and_says_why(page):
+    """The worker stopped the search at the time limit: its rows are the start of the
+    list ("N+"), and the page says that the time limit stopped it."""
+    queue = page({(WORD, False): ([_row('M1')], {'capped': False, 'interrupted': True}, True)})
+    seen = {}
+
+    async def driver(a):
+        await a.open('/search')
+        submit(a, WORD)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
+        seen['notes'] = list(a.notify.messages)
+
+    run(driver, count=1)
+    assert TIME_LIMIT_NOTE in seen['notes'], seen['notes']
+
+
+def test_a_lab_search_the_time_limit_stopped_is_cut_off(page, monkeypatch):
+    """Review round 2, finding 1: a Lab search the time limit stopped returned its rows
+    with no cut-off signal, so the page showed "1 Results", "Search within 1
+    manuscripts" and searched within the shown rows as if they were all. The time
+    limit alone makes the list incomplete."""
+    from nicegui import ui
+    from web.research_jobs import IsolatedEngine
+    from web.state import state
+    monkeypatch.setattr(state, 'lab_engine', IsolatedEngine(
+        FakeLabEngine(state.lab_engine._engine.settings, state.var_mgr), 'lab'))
+    queue = page({(WORD, False): ([_row('M1')], {'capped': False, 'interrupted': False}, True)})
+    seen = {}
+
+    async def driver(a):
+        await a.open('/search')
+        with a._client:
+            switch = next(e for e in a._client.elements.values()
+                          if isinstance(e, ui.switch) and e.text == 'Enable Lab Mode algorithms')
+            switch.value = True
+        submit(a, WORD)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
+        seen['button'] = _search_within_text(a)
+        seen['notes'] = list(a.notify.messages)
+
+    run(driver, count=1)
+    assert (queue.payloads[0]['kind'], queue.payloads[0]['method']) == ('lab', 'lab_search')
+    assert seen['button'] == 'Search within 1+ manuscripts'
+    assert TIME_LIMIT_NOTE in seen['notes'], seen['notes']
+
+
+def test_searching_within_a_cut_off_line_break_search_says_it_cannot_be_completed(page):
+    """Review round 2, test gap (b): a cut-off Responsa line-break step cannot be
+    completed (that search has no ids-only path), so Search within says it searches
+    within the shown results -- on the page, not only in the helper."""
+    query = f'{WORD} | {WORD2}'
+    queue = page({(query, False): ([_row('M1')], {'capped': True, 'interrupted': False})})
+    seen = {}
+
+    async def driver(a):
+        await a.open('/search')
+        store(a, search_mode='responsa')
+        await a.open('/search')
+        submit(a, query)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
+        _click_search_within(a)
+        await _wait_for(lambda: any('Searching within 1+ manuscripts' in t for t in _label_texts(a)), user=a)
+        seen['notes'] = list(a.notify.messages)
+
+    run(driver, count=1)
+    assert queue.payloads[0]['arguments']['responsa_options']['responsa_mode'] is True
+    assert len(queue.payloads) == 1, 'a line-break step is not run again to complete it'
+    assert ('A search with a line break cannot be completed; searching within the shown results.'
+            in seen['notes']), seen['notes']
+
+
+def _forced_stop(page, monkeypatch, early_rows):
+    """WORD's search hands over *early_rows*, then never finishes: the web side stops
+    it TIME_LIMIT_GRACE_SECONDS after its time limit (both made short here)."""
+    from shared.config import Config
+    from web import research_jobs
+    queue = StoppableQueue({}, early_rows=early_rows)
+    monkeypatch.setattr(research_jobs, 'get_queue', lambda: queue)
+    monkeypatch.setattr(Config, 'WEB_SEARCH_TIME_LIMIT', 0.4)
+    monkeypatch.setattr(research_jobs, 'TIME_LIMIT_GRACE_SECONDS', 0.4)
+    return queue
+
+
+def test_a_forced_stop_keeps_the_rows_already_shown(page, monkeypatch):
+    """Review round 2, finding 4: when the web side has to stop a worker that did not
+    stop itself, the rows it had already handed over are verified rows (the start of
+    its list): they are kept, as Stop keeps them -- "+", partial, the time-limit
+    notice -- instead of "0 Results" and an error."""
+    from web import export_state
+    queue = _forced_stop(page, monkeypatch, early_rows=[_row('M1')])
+    seen = {}
+
+    async def driver(a):
+        await a.open('/search')
+        submit(a, WORD)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any('(partial)' in t for t in _label_texts(a)), user=a)
+        with a._client:     # result cards show the shelfmark as html
+            seen['html'] = [e.content for e in a._client.elements.values()
+                            if isinstance(getattr(e, 'content', None), str)]
+        seen['button'] = _search_within_text(a)
+        seen['notes'] = list(a.notify.messages)
+        with a._client:
+            seen['export'] = export_state.get_search_export()
+
+    run(driver, count=1)
+    assert any('S-M1' in h for h in seen['html']), 'the row shown is still shown'
+    assert seen['button'] == 'Search within 1+ manuscripts'
+    assert any(n.startswith('The search stopped after') for n in seen['notes']), seen['notes']
+    assert not any('exceeded its time limit' in n for n in seen['notes']), seen['notes']
+    assert 'results-cut-off' in seen['export']['warnings']
+    assert [r['uid'] for r in seen['export']['results']] == ['M1_1']
+
+
+def test_a_forced_stop_with_nothing_shown_says_the_search_was_stopped(page, monkeypatch):
+    """Without rows to keep, the page says what it said before."""
+    queue = _forced_stop(page, monkeypatch, early_rows=[])
+    seen = {}
+
+    async def driver(a):
+        await a.open('/search')
+        submit(a, WORD)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t == '0 Results' for t in _label_texts(a)), user=a)
+        seen['notes'] = list(a.notify.messages)
+
+    run(driver, count=1)
+    assert any('exceeded its time limit' in n for n in seen['notes']), seen['notes']
+
+
+# --- The worker: a letter-level (passage) search checks the time limit -------------
+
+def test_the_worker_stops_a_letter_level_search_at_its_time_limit(tmp_path, monkeypatch):
+    """Review round 2, finding 3: the passage engine never called anything the worker's
+    time limit could stop, so the job ran on until the web side killed it 60 s past the
+    limit, returning nothing. The worker hands it the limit as `checkpoint`; stopped,
+    the real PassageSearcher returns what it had completed, marked partial."""
+    from shared import research_worker
+    from shared.passage_builder import build_index
+    from tests.test_passage_multi_witness import _aperiodic, _rid
+    motif = _aperiodic(90, salt=11)
+    texts = {_rid(1): _aperiodic(150, salt=101) + ' ' + motif + ' ' + _aperiodic(150, salt=102)}
+    for r in range(10, 16):
+        texts[_rid(r)] = _aperiodic(300, salt=900 + r)
+    build_index(list(texts.items()), str(tmp_path / 'passage'), partitions=2, apply_hygiene=False)
+
+    class TextFetcher:
+        def __init__(self, meta, variants, *, worker_mode=False, open_local=True):
+            self.searcher = None
+
+        def get_full_text_by_header(self, header):
+            return texts.get(header)
+    monkeypatch.setattr('shared.search_engine.SearchEngine', TextFetcher)
+    monkeypatch.setenv('GENIZAH_RESEARCH_MEMORY_MB', '512')
+
+    def run_with(time_limit, root):
+        root.mkdir()
+        payload = {'kind': 'passage', 'method': 'search_composition_logic', 'settings': None,
+                   'time_limit': time_limit, 'arguments': {'full_text': motif},
+                   'options': {'path': str(tmp_path / 'passage'), 'preset': 'standard-40',
+                               'length': 'normal', 'depth': 'normal', 'render_cap': None}}
+        research_worker.run_query(root, payload, lambda *a: None, meta=SimpleNamespace())
+        with gzip.open(root / 'output.pkl', 'rb') as stream:
+            return pickle.load(stream)
+
+    whole = run_with(60, tmp_path / 'whole')
+    assert whole['time_limit'] is False and 'partial' not in whole['value']
+    assert [r['raw_header'] for r in whole['value']['main']] == [_rid(1)]
+
+    # A limit already past (time.monotonic() ticks every ~16 ms on Windows, so a
+    # tiny positive limit may not have passed at the first check).
+    stopped = run_with(-1, tmp_path / 'stopped')
+    assert stopped['time_limit'] is True, stopped
+    assert stopped['value']['partial'] is True
+    assert stopped['value']['main'] == []
+    assert stopped['cutoff']['interrupted'] is True

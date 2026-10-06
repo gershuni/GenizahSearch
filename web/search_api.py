@@ -2559,6 +2559,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         # 7. Surface group-cap warning (D-07).
         if bundle.truncated_to_200:
             warnings_list.append('truncated_to_200')
+        # The search stopped before it finished -- a background job reached the
+        # website's time limit -- and returned what it had found: more parallels
+        # may exist. Same code and meaning as /api/search's.
+        if bundle.partial:
+            warnings_list.append('results_cut_off')
         # Codex review finding #16(b): a row dropped because its display-text
         # lookup failed is counted, never silently blank -- surfaced here so
         # the count is never lost between the searcher and the client (this

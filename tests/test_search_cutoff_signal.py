@@ -128,6 +128,25 @@ def test_stop_is_reported(engine):
     assert se.consume_last_search_cutoff()["interrupted"]
 
 
+def test_a_stopped_composition_search_is_reported(engine):
+    """The website's time limit stops a composition search (a background /api/parallels
+    job) through its progress callback: the payload says 'partial', and the cut-off
+    signal says so too, as for every other search (2026-10-07)."""
+    text = " ".join([f"אבג {W} דהו {C} זחט"] * 3)
+
+    def stop(i, total):
+        if i >= 2:
+            raise InterruptedError
+    se.consume_last_search_cutoff()
+    result = engine.search_composition_logic(text, 2, float("inf"), "literal", progress_callback=stop)
+    assert result["partial"] is True
+    assert result["main"], "the matches of the chunks searched before the stop are kept"
+    assert se.consume_last_search_cutoff()["interrupted"]
+    whole = engine.search_composition_logic(text, 2, float("inf"), "literal")
+    assert whole["partial"] is False
+    assert not se.consume_last_search_cutoff()["interrupted"], "a finished scan is not"
+
+
 def test_the_signal_belongs_to_one_search(engine):
     se.consume_last_search_cutoff()
     with patch.object(Config, "SEARCH_LIMIT", 2):

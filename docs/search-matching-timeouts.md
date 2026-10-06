@@ -6,11 +6,27 @@ background job -- stops after `Config.WEB_SEARCH_TIME_LIMIT` (180 s; owner rulin
 2026-09-28) and returns what it had checked: the worker's progress callback raises
 the engine's Stop, the engine returns its verified rows with the cut-off signal
 `interrupted`, the page shows the count as "N+" with "stopped after 3 minutes",
-and the API adds `results_cut_off`. A part of a search that cannot return partial
-rows reports the limit instead (the page's time-limit message). A worker that has
-not stopped 60 s after its limit (`TIME_LIMIT_GRACE_SECONDS`, stuck outside the
-engine's checks) is killed. The limit counts from when the job leaves the queue.
-The ordinary synchronous API keeps its own HTTP deadlines; the desktop has none.
+and the API adds `results_cut_off` (on `/api/search`, and on `/api/parallels` when
+the composition search comes back `partial`). The page counts the limit itself as
+well, so a list the limit cut short shows "N+" even from an engine that did not say
+it was stopped. Every engine does: the text search, the Lab search and Lab
+composition search (fast and deep scan, My Library included) and the composition
+search note `interrupted` when a stop ends them. A part of a search that cannot
+return partial rows reports the limit instead (the page's time-limit message). A
+worker that has not stopped 60 s after its limit (`TIME_LIMIT_GRACE_SECONDS`, stuck
+outside the engine's checks) is killed; the rows a text search had already shown
+are kept, marked "N+" and partial, as Stop keeps them. The limit counts from when
+the job leaves the queue. The ordinary synchronous API keeps its own HTTP
+deadlines; the desktop has none.
+
+The letter-level (passage) search is checked through `checkpoint`, not its progress
+callback (the desktop passes one that must not be called during a letter-level
+scan): between witnesses, and before each candidate is verified -- where a long
+query spends its time. Stopped, it returns the witnesses searched so far, the last
+one's matches from the candidates it had verified, marked `partial`. Gathering one
+witness's candidates and rendering the rows found have no checkpoint; both are
+bounded (the posting budget, `verify_cap`), and the kill after the grace period
+remains the fallback for them.
 
 The web process owns a FIFO queue. Stop removes a queued request or kills its
 running process; its slot is released after process exit. A crashed worker does

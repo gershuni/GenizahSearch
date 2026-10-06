@@ -266,7 +266,8 @@ def _candidates(idx: PassageIndex, codes: np.ndarray, qpos: np.ndarray,
 
 
 def _verify_and_merge(idx: PassageIndex, qstream: str, cand, policy:
-                      PassagePolicy, report: QueryReport) -> dict:
+                      PassagePolicy, report: QueryReport,
+                      checkpoint=None) -> dict:
     """Extend, align, accept, and merge per record.
 
     Returns record -> [(q0, q1, r0, r1, density), ...] merged spans. The
@@ -274,13 +275,19 @@ def _verify_and_merge(idx: PassageIndex, qstream: str, cand, policy:
     then (record, bucket) -- so verify_cap keeps the best-evidenced
     candidates and cuts deterministically; when it fires the envelope says
     so.
+
+    `checkpoint(done, total)` (see search_passage) is asked before each
+    candidate; False ends verification there, keeping what was verified.
     """
     g_rec, min_q, max_q, min_r, max_r = cand
     by_record: dict = {}
     n_verified = 0
+    to_verify = min(len(g_rec), policy.verify_cap)
     for i in range(len(g_rec)):
         if n_verified >= policy.verify_cap:
             report.verify_truncated = True
+            break
+        if checkpoint is not None and not checkpoint(n_verified, to_verify):
             break
         n_verified += 1
         ri = int(g_rec[i])
@@ -338,12 +345,21 @@ def _verify_and_merge(idx: PassageIndex, qstream: str, cand, policy:
 def search_passage(idx: PassageIndex, query_text: str,
                    policy: PassagePolicy = DEFAULT_POLICY,
                    record_allowed=None,
+                   checkpoint=None,
                    ) -> tuple[list, QueryReport]:
     """The full arrangement-C query. Returns (hits, report).
 
     Hits are sorted by (-score, record) -- deterministic, and score is
     matched letters, directly comparable to the chunk path's merged-span
     character score.
+
+    `checkpoint`, when given, is called as `checkpoint(done, total)` before
+    each candidate is verified -- verification is where a long query spends
+    its time -- and returning False stops the search there: the hits come from
+    the candidates verified so far (the strongest-evidenced ones, in candidate
+    order), and `report.verified` counts them. The caller owns the decision
+    and knows it stopped; nothing else in the result says so. (The website's
+    time limit, through shared/passage_parallels.py.)
     """
     t0 = time.time()
     report = QueryReport(policy_id=policy.policy_id, policy_name=policy.name)
@@ -367,7 +383,8 @@ def search_passage(idx: PassageIndex, query_text: str,
 
     cand = _candidates(idx, codes, qpos, admitted, policy, report,
                        record_allowed=record_allowed)
-    merged = _verify_and_merge(idx, qstream, cand, policy, report)
+    merged = _verify_and_merge(idx, qstream, cand, policy, report,
+                               checkpoint=checkpoint)
 
     hits = []
     for ri, spans in merged.items():

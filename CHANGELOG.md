@@ -69,6 +69,10 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 - A website search -- and an API background job -- stops after 3 minutes and shows the
   results it found so far, marked "N+", with "The search stopped after 3 minutes". The next
   search no longer waits behind a very long one. The desktop has no limit.
+- This holds for every kind of search: Lab Mode searches, Parallels searches (word-level
+  and letter-level, which now stops between witnesses and while checking candidates), and
+  a search the website has to stop itself keeps the results it had already shown. An API
+  Parallels job stopped this way answers with `results_cut_off`: more parallels may exist.
 
 ### Num Changes (×1–×3) works in every variant level (both)
 

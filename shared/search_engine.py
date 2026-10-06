@@ -4984,6 +4984,10 @@ class SearchEngine:
         main_list = [item for item in all_items if not item.get('is_filtered', False)]
         filtered_list = [item for item in all_items if item.get('is_filtered', False)]
 
+        if was_cancelled:
+            # Stopped (Stop, or the website's time limit): the cut-off signal agrees
+            # with 'partial', as execute_search's does.
+            _note_search_cutoff(interrupted=True)
         # A word's spellings cut (build_tantivy_query takes a word's first 200, the
         # regex its first 8,000; _variants_noting_cutoff notes the cut): pages only
         # the others reach were not searched, so the run is partial, as the main

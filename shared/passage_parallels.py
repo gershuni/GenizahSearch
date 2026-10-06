@@ -229,6 +229,19 @@ site:
   disabling `passage` for non-Genizah scope is the CALLER's job (API
   validation / the page's method selector), not this searcher's -- see
   web/search_api.py.
+* `checkpoint` (keyword-only, 2026-10-07) is how a search is STOPPED, and it
+  is deliberately not `progress_callback`: the desktop passes its composition
+  thread's callback, which drives a chunk progress bar and a Stop/Pause the
+  desktop refuses during a letter-level scan (genizah_app.py,
+  `_refuse_stop_during_passage_scan`), so calling it would change the
+  desktop. The website's research worker passes its time limit
+  (Config.WEB_SEARCH_TIME_LIMIT) as `checkpoint`; it is asked between
+  witnesses and before each candidate is verified, and an InterruptedError
+  from it ends the search with what was completed, marked `'partial': True`
+  -- the key the /parallels page and /api/parallels read for the chunk
+  engine. A witness's candidate gathering and the rendering of found rows
+  have no checkpoint (both are bounded: the posting budget, verify_cap); the
+  web side's kill TIME_LIMIT_GRACE_SECONDS after the limit is the fallback.
 """
 from __future__ import annotations
 
@@ -346,6 +359,28 @@ def _synthesize_query_report(reports: list) -> dict:
             # per request), so the first is the whole truth.
             out[key] = value
     return out
+
+
+class _Checkpoint:
+    """A caller's `checkpoint` as a go-on test: True to continue, False once it
+    has raised InterruptedError (the website's time limit,
+    shared/research_worker.py::_time_limited). After that it is never called
+    again -- the time-limit check raises on every call past its deadline -- and
+    `stopped` says the search was cut short."""
+
+    def __init__(self, check):
+        self._check = check
+        self.stopped = False
+
+    def __call__(self, done: int, total: int) -> bool:
+        if self.stopped:
+            return False
+        try:
+            self._check(done, total)
+        except InterruptedError:
+            self.stopped = True
+            return False
+        return True
 
 
 def _derive_uid(record_id: str) -> str:
@@ -515,6 +550,7 @@ class PassageSearcher:
         *,
         witnesses: Optional[list] = None,
         witness_text_cap: Optional[int] = None,
+        checkpoint=None,
         **_ignored,
     ) -> dict:
         """Same parameter names/order as
@@ -560,6 +596,13 @@ class PassageSearcher:
             that does not say so is a correctness defect" (QueryReport's own
             contract).
 
+            ``'partial': True`` is added ONLY when `checkpoint` stopped the
+            search (see the module docstring): the rows are those of the
+            witnesses searched before the stop -- the last one's from the
+            candidates it had verified -- and `witness_report['searched']`
+            counts the witnesses that ran. An unstopped result has no
+            `partial` key, byte-identical to before.
+
         Raises:
             ValueError: if `boundary_mode != 'full'` -- passage-matching has
                 no cross-paragraph/token-boundary concept over a letter
@@ -588,11 +631,23 @@ class PassageSearcher:
 
         queries, witness_report = self._resolve_witnesses(
             witnesses, full_text, witness_text_cap)
-        multi = len(queries) > 1
 
-        runs = [self._run_one_witness(wid, label, text, restrict_sys_ids,
-                                      min_boundary_matches)
-                for wid, label, text in queries]
+        # Asked between witnesses and, inside each, before every candidate is
+        # verified. Stopped, the witnesses searched so far are what there is.
+        stop = _Checkpoint(checkpoint) if checkpoint is not None else None
+        runs = []
+        for n, (wid, label, text) in enumerate(queries):
+            if stop is not None and not stop(n, len(queries)):
+                break
+            runs.append(self._run_one_witness(wid, label, text, restrict_sys_ids,
+                                              min_boundary_matches, checkpoint=stop))
+            if stop is not None and stop.stopped:
+                break
+        stopped = stop is not None and stop.stopped
+        if stopped and witness_report:
+            witness_report['searched'] = len(runs)
+        # Fused only when two or more witnesses actually ran.
+        multi = len(runs) > 1
 
         filter_stream = norm_stream_fast(filter_text) if filter_text else ''
 
@@ -663,9 +718,10 @@ class PassageSearcher:
             # `score`, which stays matched letters (review finding).
             order_key = 'fusion_score'
         else:
-            only = runs[0]
-            eligible_rows = eligible_by_witness[only.wid]
-            filtered_candidate_rows = filtered_by_witness[only.wid]
+            # One witness ran -- or none, when the search was stopped before the
+            # first, and there is nothing to render.
+            eligible_rows = eligible_by_witness[runs[0].wid] if runs else []
+            filtered_candidate_rows = filtered_by_witness[runs[0].wid] if runs else []
             order_key = None
 
         # Finding #1 ("THE BIG ONE") + finding #16(a): apply the SAME
@@ -786,6 +842,12 @@ class PassageSearcher:
                  'report': r.report} for r in runs
             ]
             result['witness_report'] = witness_report
+        if stopped:
+            # The key both engines' consumers read; the cut-off signal agrees,
+            # as the chunk engine's does.
+            from shared.search_engine import _note_search_cutoff  # noqa: PLC0415 -- lazy: only a stopped search pays for it
+            _note_search_cutoff(interrupted=True)
+            result['partial'] = True
         return result
 
     # -- multi-witness plumbing ---------------------------------------------
@@ -910,8 +972,12 @@ class PassageSearcher:
         return queries, report
 
     def _run_one_witness(self, wid: str, label: str, text: str,
-                         restrict_sys_ids, min_boundary_matches: int):
+                         restrict_sys_ids, min_boundary_matches: int,
+                         checkpoint=None):
         """Search ONE witness and build everything its rendering will need.
+
+        `checkpoint` goes to search_passage: stopped, the witness's hits are
+        those of the candidates it had verified.
 
         Never call this with two witnesses joined into one string. The
         passage engine spends a per-query POSTING BUDGET, so a concatenated
@@ -931,7 +997,8 @@ class PassageSearcher:
         _allowed = (None if restrict_sys_ids is None else
                     (lambda rid: _extract_sys_id(rid) in restrict_sys_ids))
         hits, report = search_passage(self.index, text, self.policy,
-                                      record_allowed=_allowed)
+                                      record_allowed=_allowed,
+                                      **({} if checkpoint is None else {'checkpoint': checkpoint}))
 
         if min_boundary_matches:
             hits = [h for h in hits if h.n_spans >= min_boundary_matches]
