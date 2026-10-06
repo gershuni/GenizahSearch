@@ -772,11 +772,13 @@ def _forced_stop(page, monkeypatch, early_rows):
     from shared.config import Config
     from web import research_jobs
     queue = StoppableQueue({}, early_rows=early_rows)
+    # The job counts as queued until the caller has taken its early rows, so the
+    # web side's clock -- which starts when the job runs -- starts only after the
+    # rows are on the page: the kill can never come first, however slow the machine.
+    queue.position = lambda job: (0 if job is not queue.held or not early_rows or job.handed else 1)
     monkeypatch.setattr(research_jobs, 'get_queue', lambda: queue)
-    # Long enough that the early rows (polled every 0.1 s) reach the page first, even
-    # on a loaded machine; short enough to keep the test quick.
-    monkeypatch.setattr(Config, 'WEB_SEARCH_TIME_LIMIT', 1.5)
-    monkeypatch.setattr(research_jobs, 'TIME_LIMIT_GRACE_SECONDS', 1.5)
+    monkeypatch.setattr(Config, 'WEB_SEARCH_TIME_LIMIT', 0.5)
+    monkeypatch.setattr(research_jobs, 'TIME_LIMIT_GRACE_SECONDS', 0.5)
     return queue
 
 
