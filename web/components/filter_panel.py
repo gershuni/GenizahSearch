@@ -235,7 +235,7 @@ def persist_value(key, value):
 # Session state functions
 # ============================================================================
 
-def load_filter_state(state, storage_prefix: str):
+def load_filter_state(state, storage_prefix: str) -> list:
     """Restore filter state from session storage.
 
     2026-05-12: routed through ``safe_user_get`` because this is called
@@ -245,6 +245,13 @@ def load_filter_state(state, storage_prefix: str):
     Args:
         state: State object to populate with filter values.
         storage_prefix: Storage key prefix (e.g., 'search' or 'parallels').
+
+    Returns:
+        The keys of saved measurement filters removed (from state AND from
+        storage) because the open catalog is KNOWN not to have that data
+        (#17); empty otherwise -- including when there is no catalog at all,
+        which may be temporary, so nothing is dropped then. The caller shows
+        one notice when the list is non-empty.
     """
     from web.safe_storage import safe_user_get as _sg
     pfx = storage_prefix
@@ -282,6 +289,34 @@ def load_filter_state(state, storage_prefix: str):
     state.filter_text_density_max = _sg(f'{pfx}_filter_text_density_max', None)
     _fmm = _sg(f'{pfx}_filter_measurement_material')
     state.filter_measurement_material = _fmm if _fmm is not None else []
+
+    # #17: a saved filter the open catalog is known not to answer would make
+    # every search fail; drop it here, once, and say so.
+    try:
+        from shared.fjms_service import unavailable_measurement_filter_keys
+        bad = unavailable_measurement_filter_keys()
+    except Exception:
+        logger.debug("load_filter_state: catalog capability check failed", exc_info=True)
+        bad = frozenset()
+    dropped = []
+    for key in sorted(bad):
+        attr = f'filter_{key}'
+        empty = [] if key == 'measurement_material' else None
+        if getattr(state, attr, None) not in (None, [], ()):
+            dropped.append(key)
+            setattr(state, attr, empty)
+            persist_value(f'{pfx}_filter_{key}', empty)
+    return dropped
+
+
+def filter_unavailable_message(exc, tr_func) -> str:
+    """The notice for a search not run because its filters could not be
+    applied (#17), chosen by ``FilterUnavailable.reason``."""
+    if getattr(exc, 'reason', 'query_failed') == 'query_failed':
+        return tr_func("The filters could not be applied, so the search was not run. "
+                       "Try again, or remove the filters.")
+    return tr_func("The catalog data these filters need is not available, so the search "
+                   "was not run. Remove the filters to search.")
 
 
 def consume_incoming_filters(state, storage_prefix: str, require_from_browse: bool = False) -> bool:
@@ -394,10 +429,10 @@ async def recompute_filter_count(state, update_chip_bar_fn, on_state=None):
         update_chip_bar_fn: Callback to update the chip bar UI after recompute.
         on_state: Optional callback receiving a status string for per-op feedback
                   (#11): 'pending' when the background compute starts, 'done' on
-                  success, 'error' if the FJMS lookup raised. Stale completions
-                  (superseded by a newer recompute) do NOT emit a terminal state.
-                  Backward compatible — callers that omit it (e.g. parallels) are
-                  unaffected.
+                  success, 'error' if the FJMS lookup raised -- including
+                  FilterUnavailable, a lookup that could not run (#17). Stale
+                  completions (superseded by a newer recompute) do NOT emit a
+                  terminal state. Both /search and /parallels pass it.
     """
     def _emit(status):
         if on_state is not None:
@@ -449,9 +484,10 @@ async def recompute_filter_count(state, update_chip_bar_fn, on_state=None):
     _measurement_material = getattr(state, 'filter_measurement_material', None) or None
 
     def _compute():
+        # No is_available() short-cut: with no sidecar get_filter_sys_ids
+        # raises FilterUnavailable, which the except below shows as 'error'
+        # -- never as "all manuscripts" (#17).
         fjms = get_fjms_service(thread_safe=True)
-        if not fjms.is_available():
-            return None
         kwargs = dict(
             date_from=_date_from,
             date_to=_date_to,

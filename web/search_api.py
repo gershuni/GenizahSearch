@@ -381,7 +381,10 @@ def _resolve_fjms_filters_sync(filters_dict: dict) -> Optional[set]:
 
     Raises ``shared.api_errors.APIError`` from ``validate_filter_values``
     unchanged; it re-raises at the ``await``, so the endpoints' 400/503 paths
-    are the same as before.
+    are the same as before. ``shared.fjms_service.FilterUnavailable`` from the
+    lookup also re-raises at the ``await``; the endpoints turn it into 503
+    ``filter_unavailable`` there (see ``_filter_unavailable_error``). Do not
+    catch it here.
 
     Late-binds ``shared.fjms_service`` at CALL time so test fixtures can
     monkeypatch ``validate_filter_values`` / ``get_filter_sys_ids``.
@@ -396,6 +399,31 @@ def _resolve_fjms_filters_sync(filters_dict: dict) -> Optional[set]:
         date_from=filters_dict.get('date_from'),
         date_to=filters_dict.get('date_to'),
     )
+
+
+def _filter_unavailable_error(exc) -> APIError:
+    """503 ``filter_unavailable``: filters that validated but could not be
+    applied (#17). No Retry-After: there is no honest retry time for a
+    missing sidecar or a failed lookup."""
+    return APIError(
+        'filter_unavailable',
+        'The manuscript filters could not be applied right now '
+        f'({getattr(exc, "reason", "query_failed")}); the request was not run '
+        'without them. Retry later, or send the request without filters.',
+        http_status=503,
+    )
+
+
+async def _resolve_fjms_filters(filters_dict: dict) -> Optional[set]:
+    """Await ``_resolve_fjms_filters_sync`` off the event loop; a lookup that
+    could not run becomes 503 ``filter_unavailable`` (#17), never a 200 with
+    zero results or with the filters silently ignored."""
+    from shared.fjms_service import FilterUnavailable
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, _resolve_fjms_filters_sync, filters_dict)
+    except FilterUnavailable as exc:
+        raise _filter_unavailable_error(exc) from exc
 
 
 async def _intersect_library_filter(restrict_sys_ids, filters_dict, meta_mgr):
@@ -1604,11 +1632,10 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 # shared.api_errors; it re-raises here, at the await.
                 # Off the event loop: both FJMS steps are blocking SQLite
                 # reads (see _resolve_fjms_filters_sync, which late-binds
-                # shared.fjms_service for test fixtures).
-                loop = asyncio.get_running_loop()
-                restrict_sys_ids = await loop.run_in_executor(
-                    None, _resolve_fjms_filters_sync, filters_dict
-                )
+                # shared.fjms_service for test fixtures). A lookup that could
+                # not run is 503 filter_unavailable (#17); the engine is
+                # never called.
+                restrict_sys_ids = await _resolve_fjms_filters(filters_dict)
                 # SEED-026: intersect the library filter BEFORE the result cap.
                 restrict_sys_ids = await _intersect_library_filter(
                     restrict_sys_ids, filters_dict, state.meta_mgr
@@ -2241,11 +2268,9 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         if req.filters is not None:
             filters_dict = req.filters.model_dump(exclude_none=True)
             # Off the event loop (blocking FJMS SQLite reads); an APIError from
-            # validation re-raises at the await.
-            loop = asyncio.get_running_loop()
-            restrict_sys_ids = await loop.run_in_executor(
-                None, _resolve_fjms_filters_sync, filters_dict
-            )
+            # validation re-raises at the await, and a lookup that could not
+            # run is 503 filter_unavailable (#17).
+            restrict_sys_ids = await _resolve_fjms_filters(filters_dict)
             # SEED-026: intersect the library filter BEFORE the result cap (parity
             # with /api/search; otherwise filters.library would be silently ignored).
             restrict_sys_ids = await _intersect_library_filter(

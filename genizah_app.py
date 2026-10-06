@@ -1508,6 +1508,13 @@ class GenizahGUI(QMainWindow):
         # Pre-search filter state (Phase 45-03)
         self.pre_search_filters = {}  # dict: domain, author, work, date_from, date_to, material_exclude
         self.pre_search_restrict_sys_ids = None  # computed set or None
+        # #17: why the last pre-search lookup could not run (a FilterUnavailable
+        # reason or 'error'), and whether one is still running (K-14). Every
+        # READ uses getattr with a default: tests build this window with
+        # GenizahGUI.__new__, so __init__ may never have run.
+        self._pre_search_filter_error = None
+        self._filter_lookup_gen = 0
+        self._filter_lookup_pending = False
         # Phase 57: Visual Similarity restriction state
         self._vs_restrict_sys_ids = None
         self._vs_restrict_label = ''
@@ -12319,23 +12326,42 @@ class GenizahGUI(QMainWindow):
             filters['library'] = list(self._catalog_library_filter)
         return filters
 
-    def _catalog_search_in_results(self):
-        """Navigate to search tab with browse filters as pre-search filters."""
-        filters = self._catalog_build_browse_filters()
-        if not filters:
-            return
-        self.pre_search_filters = filters
-        # Recompute restrict_sys_ids for the filter set
-        from shared.fjms_service import get_fjms_service, resolve_library_sys_ids
-        fjms = get_fjms_service()
-        if fjms.is_available():
-            self.pre_search_restrict_sys_ids = fjms.get_filter_sys_ids(
+    def _apply_catalog_handoff_filters(self, filters) -> bool:
+        """Make the catalog browse filters the pre-search filters (#17).
+
+        The scope is computed FIRST. If the lookup cannot run (no catalog,
+        or the query failed), the user is told and neither the filters nor
+        the scope change -- the old code kept the previous scope under the
+        new filters, or set an empty one ("no manuscripts match").
+        Returns True when the filters were applied.
+        """
+        from shared.fjms_service import get_fjms_service, FilterUnavailable
+        try:
+            restrict = get_fjms_service().get_filter_sys_ids(
                 domain=filters.get('domain'),
                 author=filters.get('author'),
                 work=filters.get('work'),
                 date_from=filters.get('date_from'),
                 date_to=filters.get('date_to'),
             )
+        except FilterUnavailable as exc:
+            QMessageBox.warning(self, tr("Filters"), self._filter_unavailable_text(exc.reason))
+            return False
+        self._supersede_filter_lookup()
+        self.pre_search_filters = filters
+        self.pre_search_restrict_sys_ids = restrict
+        return True
+
+    def _catalog_search_in_results(self):
+        """Navigate to search tab with browse filters as pre-search filters."""
+        filters = self._catalog_build_browse_filters()
+        if not filters:
+            return
+        # #17: the browse filters replace the search filters only if they
+        # could be applied; otherwise nothing changes and the user is told.
+        if not self._apply_catalog_handoff_filters(filters):
+            return
+        from shared.fjms_service import resolve_library_sys_ids
         # GAP-H / DMF-07: library filter handoff — Show-only carries the allowlist;
         # Hide mode SUPPRESSES the restriction (Codex HIGH #4: do NOT invert a Hide-set
         # into an include-list; the full-corpus complement is out of scope for restrict_sys_ids).
@@ -12368,18 +12394,11 @@ class GenizahGUI(QMainWindow):
         filters = self._catalog_build_browse_filters()
         if not filters:
             return
-        self.pre_search_filters = filters
-        # Recompute restrict_sys_ids for the filter set
-        from shared.fjms_service import get_fjms_service, resolve_library_sys_ids
-        fjms = get_fjms_service()
-        if fjms.is_available():
-            self.pre_search_restrict_sys_ids = fjms.get_filter_sys_ids(
-                domain=filters.get('domain'),
-                author=filters.get('author'),
-                work=filters.get('work'),
-                date_from=filters.get('date_from'),
-                date_to=filters.get('date_to'),
-            )
+        # #17: the browse filters replace the search filters only if they
+        # could be applied; otherwise nothing changes and the user is told.
+        if not self._apply_catalog_handoff_filters(filters):
+            return
+        from shared.fjms_service import resolve_library_sys_ids
         # GAP-H / DMF-07: library filter handoff — Show-only carries the allowlist;
         # Hide mode SUPPRESSES the restriction (Codex HIGH #4).
         if self._catalog_library_filter:
@@ -19987,6 +20006,14 @@ class GenizahGUI(QMainWindow):
         lc_min, lc_max = _add_range_row(2, tr('Lines'), 'line_count_min', 'line_count_max', 200, 0)
         lh_min, lh_max = _add_range_row(3, tr('Line Height'), 'line_height_min', 'line_height_max', 20, 1, tr('mm'))
         td_min, td_max = _add_range_row(4, tr('Text Density'), 'text_density_min', 'text_density_max', 100, 1)
+        # #17: Line Height is shown only when the catalog is known to have it
+        # (the spins keep any value, so a hidden row never drops one by itself).
+        from shared.fjms_service import line_height_filter_available
+        if not line_height_filter_available():
+            for _col in range(3):
+                _item = grid.itemAtPosition(3, _col)
+                if _item is not None and _item.widget() is not None:
+                    _item.widget().setVisible(False)
 
         # Material checkboxes
         grid.addWidget(QLabel(tr('Material')), 5, 0)
@@ -20049,6 +20076,10 @@ class GenizahGUI(QMainWindow):
         """Open the pre-search filter dialog."""
         dlg = PreSearchFilterDialog(self, current_filters=self.pre_search_filters)
         if dlg.exec() == QDialog.DialogCode.Accepted:
+            # The dialog accepts only a scope it computed (#17: OK stays
+            # disabled while its count failed), so it replaces any running
+            # lookup and any earlier error.
+            self._supersede_filter_lookup()
             self.pre_search_filters = dlg.get_filters()
             self.pre_search_restrict_sys_ids = dlg.get_restrict_sys_ids()
             # Phase 55: Stale detection (D-16)
@@ -20181,6 +20212,11 @@ class GenizahGUI(QMainWindow):
             if restrict is not None:
                 count_str = f"{len(restrict):,}"
                 new_count_label.setText(f"{count_str} {tr('manuscripts')}")
+            elif getattr(self, '_pre_search_filter_error', None) and any(
+                    k != 'include_mode' for k in filters):
+                # #17: the lookup could not run -- not "all manuscripts".
+                new_count_label.setText(tr("Could not update filter count"))
+                new_count_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #e74c3c;")
             chip_layout.addWidget(new_count_label)
             chip_layout.addStretch()
 
@@ -20224,17 +20260,128 @@ class GenizahGUI(QMainWindow):
             # filters['library'] into the recomputed set (preserves library
             # restriction after non-library chip removal).
             worker = FilterCountWorker(self.pre_search_filters, meta_mgr=self.meta_mgr)
-            worker.finished.connect(self._on_filter_recompute_finished)
+            self._connect_filter_worker(worker, self._on_filter_recompute_finished)
             self._filter_recompute_worker = worker
             worker.start()
         else:
+            self._supersede_filter_lookup()
             self.pre_search_filters = {}
             self.pre_search_restrict_sys_ids = None
             self._update_filter_chip_bar()
             self._schedule_session_save()
 
+    # ---- #17: pre-search filter lookups that cannot run ----
+
+    def _filter_unavailable_text(self, reason):
+        """The message for a search not run because its filters could not be
+        applied, chosen by FilterUnavailable.reason ('error' = any other
+        failure)."""
+        if reason in ('query_failed', 'error', None, ''):
+            return tr("The filters could not be applied, so the search was not run. "
+                      "Try again, or remove the filters.")
+        return tr("The catalog data these filters need is not available, so the search "
+                  "was not run. Remove the filters with Focus Search to search.")
+
+    def _supersede_filter_lookup(self):
+        """The pre-search filters were just replaced by a known scope (dialog
+        OK, catalog hand-off, last chip removed, New): a lookup still running
+        for the OLD filters must neither re-scope nor block, and the old
+        error no longer applies."""
+        self._filter_lookup_gen = getattr(self, '_filter_lookup_gen', 0) + 1
+        self._filter_lookup_pending = False
+        self._pre_search_filter_error = None
+
+    def _connect_filter_worker(self, worker, on_finished):
+        """Connect a FilterCountWorker so only the NEWEST one counts.
+
+        A superseded worker's answer or failure is ignored, so it can neither
+        re-scope nor block. Until the newest one answers, Search and
+        Composition wait for it (K-14) instead of running on the old or None
+        scope.
+        """
+        self._filter_lookup_gen = getattr(self, '_filter_lookup_gen', 0) + 1
+        gen = self._filter_lookup_gen
+        self._filter_lookup_pending = True
+
+        def _on_worker_finished(result, g=gen):
+            if g != getattr(self, '_filter_lookup_gen', 0):
+                return
+            self._filter_lookup_pending = False
+            self._pre_search_filter_error = None
+            on_finished(result)
+
+        def _on_worker_failed(reason, g=gen):
+            if g != getattr(self, '_filter_lookup_gen', 0):
+                return
+            self._filter_lookup_pending = False
+            self._on_filter_lookup_failed(reason)
+
+        worker.finished.connect(_on_worker_finished)
+        worker.failed.connect(_on_worker_failed)
+
+    def _on_filter_lookup_failed(self, reason):
+        """A pre-search recompute could not run. Keep the chips, show the
+        error, and block searches until the filters change -- never run with
+        a stale or None scope."""
+        self._pre_search_filter_error = reason or 'error'
+        self.pre_search_restrict_sys_ids = None
+        was_waiting = (getattr(self, '_rerun_search_after_filter', False)
+                       or getattr(self, '_rerun_comp_after_filter', False))
+        self._rerun_search_after_filter = False
+        self._rerun_comp_after_filter = False
+        self._rerun_comp_custom_text = None
+        if was_waiting:
+            QMessageBox.warning(self, tr("Filters"), self._filter_unavailable_text(reason))
+        self._update_filter_chip_bar()
+
+    def _pre_search_filters_blocked(self, rerun=None, custom_text=None) -> bool:
+        """True when a search must not start now because of its filters.
+
+        - A lookup is still running (K-14): the run is deferred -- ``rerun``
+          'search' or 'composition' arms the re-run that fires when the
+          lookup answers (``custom_text`` is kept for a composition).
+        - The last lookup could not run (#17): the user is told, and nothing
+          runs until the filters change.
+        Filters with nothing but include_mode never block.
+        """
+        filters = getattr(self, 'pre_search_filters', None) or {}
+        if not any(k != 'include_mode' for k in filters):
+            return False
+        if getattr(self, '_filter_lookup_pending', False):
+            if rerun == 'composition':
+                self._rerun_comp_after_filter = True
+                self._rerun_comp_custom_text = custom_text
+            else:
+                self._rerun_search_after_filter = True
+            self.statusBar().showMessage(
+                tr("The filters are still being applied; the search will start as soon "
+                   "as they are ready."), 8000)
+            return True
+        reason = getattr(self, '_pre_search_filter_error', None)
+        if reason:
+            QMessageBox.warning(self, tr("Filters"), self._filter_unavailable_text(reason))
+            return True
+        return False
+
+    def _run_deferred_after_filter(self):
+        """Run the search or composition that waited for a filter lookup."""
+        if getattr(self, '_rerun_search_after_filter', False):
+            self._rerun_search_after_filter = False
+            if self.query_input.text().strip() and not getattr(self, 'is_searching', False):
+                self.start_search()
+        elif getattr(self, '_rerun_comp_after_filter', False):
+            self._rerun_comp_after_filter = False
+            custom_text = getattr(self, '_rerun_comp_custom_text', None)
+            self._rerun_comp_custom_text = None
+            if self.comp_text_area.toPlainText().strip() and not getattr(self, 'is_comp_running', False):
+                if custom_text is not None:
+                    self.run_composition(custom_text=custom_text)
+                else:
+                    self.run_composition()
+
     def _on_filter_recompute_finished(self, result_set):
         """Handle recomputed filter set after chip removal."""
+        self._pre_search_filter_error = None
         self.pre_search_restrict_sys_ids = result_set
         # Phase 55: Stale detection (D-16)
         if self.refinement_chain:
@@ -20246,21 +20393,18 @@ class GenizahGUI(QMainWindow):
                     self._update_refinement_strip()
         self._update_filter_chip_bar()
         self._schedule_session_save()
+        # K-14: a search started while this lookup ran waited for it.
+        self._run_deferred_after_filter()
 
     def _on_restore_filter_finished(self, result_set):
         """Handle filter recompute after session/history restore."""
+        self._pre_search_filter_error = None
         self.pre_search_restrict_sys_ids = result_set
         self._update_filter_chip_bar()
         # History re-use: run the deferred search now that pre-search filters
-        # have resolved (set by _restore_*_from_state when re-running).
-        if getattr(self, '_rerun_search_after_filter', False):
-            self._rerun_search_after_filter = False
-            if self.query_input.text().strip() and not getattr(self, 'is_searching', False):
-                self.start_search()
-        elif getattr(self, '_rerun_comp_after_filter', False):
-            self._rerun_comp_after_filter = False
-            if self.comp_text_area.toPlainText().strip() and not getattr(self, 'is_comp_running', False):
-                self.run_composition()
+        # have resolved (set by _restore_*_from_state when re-running, or by
+        # a search started while the lookup ran -- K-14).
+        self._run_deferred_after_filter()
 
     def _exclude_word_search_result(self, sys_id, row):
         """Exclude a manuscript -- every row of it -- from the search results.
@@ -20693,6 +20837,10 @@ class GenizahGUI(QMainWindow):
     def start_search(self):
         query = self.query_input.text().strip()
         if not query: return
+        # #17 / K-14: never on a scope still being computed, or one that
+        # could not be computed.
+        if self._pre_search_filters_blocked(rerun='search'):
+            return
         self._set_local_scope_strip_visible(False)
         self._local_scope_hint_blocked = False
 
@@ -21283,6 +21431,13 @@ class GenizahGUI(QMainWindow):
         self.word_excluded_sys_ids = set()
 
         # 9. Clear pre-search filter state (domain, author, work filters)
+        # #17: a lookup still running for the old filters must not
+        # re-scope or block the cleared state (the same three fields as
+        # _supersede_filter_lookup; assigned here because the reset also
+        # runs on hosts that borrow only these methods).
+        self._filter_lookup_gen = getattr(self, '_filter_lookup_gen', 0) + 1
+        self._filter_lookup_pending = False
+        self._pre_search_filter_error = None
         self.pre_search_filters = {}
         self.pre_search_restrict_sys_ids = None
         self._update_filter_chip_bar()
@@ -22483,17 +22638,24 @@ class GenizahGUI(QMainWindow):
                     self._result_measurement_map = {}  # Lookup failed; use empty dict
                 self._measurement_fetch_complete = True
                 if hasattr(self, 'btn_measurement_filter'):
-                    self.btn_measurement_filter.setEnabled(bool(self._result_measurement_map))
+                    # #17: also off when the catalog is known to have no
+                    # measurement data at all.
+                    from shared.fjms_service import measurement_filters_available
+                    self.btn_measurement_filter.setEnabled(
+                        bool(self._result_measurement_map) and measurement_filters_available())
                 # Initialize post-search measurement filters from pre-search ONLY if
                 # post-search filters are empty (avoids overwriting session-restored state)
                 if not self._post_measurement_filters:
-                    _meas_keys = ('width_min', 'width_max', 'height_min', 'height_max',
-                                  'line_count_min', 'line_count_max', 'line_height_min', 'line_height_max',
-                                  'text_density_min', 'text_density_max', 'measurement_material')
-                    self._post_measurement_filters = {
+                    from shared.fjms_service import (
+                        MEASUREMENT_FILTER_KEYS as _meas_keys,
+                        drop_unavailable_measurement_filters,
+                    )
+                    # #17: never a bound the catalog is known to lack -- every
+                    # row has no value for it, so it would hide every row.
+                    self._post_measurement_filters, _ = drop_unavailable_measurement_filters({
                         k: v for k, v in (getattr(self, 'pre_search_filters', {}) or {}).items()
                         if k in _meas_keys
-                    }
+                    })
             else:
                 # All-LOCAL (or no-id) result set — no Genizah enrichment to do.
                 self._result_measurement_map = {}
@@ -27607,6 +27769,13 @@ class GenizahGUI(QMainWindow):
         self.lbl_comp_domain_filter.setVisible(False)
 
         # 9. Clear pre-search filter state (shared)
+        # #17: a lookup still running for the old filters must not
+        # re-scope or block the cleared state (the same three fields as
+        # _supersede_filter_lookup; assigned here because the reset also
+        # runs on hosts that borrow only these methods).
+        self._filter_lookup_gen = getattr(self, '_filter_lookup_gen', 0) + 1
+        self._filter_lookup_pending = False
+        self._pre_search_filter_error = None
         self.pre_search_filters = {}
         self.pre_search_restrict_sys_ids = None
         self._update_filter_chip_bar()
@@ -27688,6 +27857,10 @@ class GenizahGUI(QMainWindow):
         txt = (custom_text if custom_text is not None else self.comp_text_area.toPlainText()).strip()
         if not txt:
             QMessageBox.warning(self, tr("Error"), tr("Please enter text to search."))
+            return
+        # #17 / K-14: never on a scope still being computed, or one that
+        # could not be computed.
+        if self._pre_search_filters_blocked(rerun='composition', custom_text=custom_text):
             return
 
         # Auto-fill title with first 4 words if empty
@@ -31591,18 +31764,26 @@ class GenizahGUI(QMainWindow):
                         self.corpus_scope_combo.blockSignals(True)
                         self.corpus_scope_combo.setCurrentIndex(_idx)
                         self.corpus_scope_combo.blockSignals(False)
-            # Restore pre-search filters
-            psf = entry.get('pre_search_filters', {})
+            # Restore pre-search filters. #17: a COPY (assigning the entry
+            # itself let a later chip removal edit the saved history), without
+            # a measurement bound the open catalog is known not to have.
+            from shared.fjms_service import drop_unavailable_measurement_filters
+            psf, _dropped = drop_unavailable_measurement_filters(
+                entry.get('pre_search_filters') or {})
+            if _dropped:
+                self.statusBar().showMessage(
+                    tr('Some saved filters were removed: this catalog data is not available.'), 8000)
             self.pre_search_filters = psf
             if psf and any(k != 'include_mode' for k in psf):
                 # FINDING 2 (129-07): pass meta_mgr so library restriction is
                 # preserved across history/session restore.
                 worker = FilterCountWorker(psf, meta_mgr=self.meta_mgr)
-                worker.finished.connect(self._on_restore_filter_finished)
+                self._connect_filter_worker(worker, self._on_restore_filter_finished)
                 worker.start()
                 self._filter_restore_worker = worker
                 filter_pending = True
             else:
+                self._supersede_filter_lookup()
                 self.pre_search_restrict_sys_ids = None
             self._update_filter_chip_bar()
 
@@ -31679,18 +31860,26 @@ class GenizahGUI(QMainWindow):
             # `absent_method` left at its default: a history entry with no
             # method is pre-v9, which is chunk by definition.
             self._restore_comp_passage_preferences(params or {})
-            # Restore pre-search filters
-            psf = entry.get('pre_search_filters', {})
+            # Restore pre-search filters. #17: a COPY (assigning the entry
+            # itself let a later chip removal edit the saved history), without
+            # a measurement bound the open catalog is known not to have.
+            from shared.fjms_service import drop_unavailable_measurement_filters
+            psf, _dropped = drop_unavailable_measurement_filters(
+                entry.get('pre_search_filters') or {})
+            if _dropped:
+                self.statusBar().showMessage(
+                    tr('Some saved filters were removed: this catalog data is not available.'), 8000)
             self.pre_search_filters = psf
             if psf and any(k != 'include_mode' for k in psf):
                 # FINDING 2 (129-07): pass meta_mgr so library restriction is
                 # preserved across composition history restore.
                 worker = FilterCountWorker(psf, meta_mgr=self.meta_mgr)
-                worker.finished.connect(self._on_restore_filter_finished)
+                self._connect_filter_worker(worker, self._on_restore_filter_finished)
                 worker.start()
                 self._filter_restore_worker = worker
                 filter_pending = True
             else:
+                self._supersede_filter_lookup()
                 self.pre_search_restrict_sys_ids = None
             self._update_filter_chip_bar()
 
@@ -32490,15 +32679,25 @@ class GenizahGUI(QMainWindow):
                         refresh_authors=True, refresh_works=True))
                 QTimer.singleShot(450, self._catalog_update_chips)
 
-            # Restore pre-search filters (Phase 45-03)
-            self.pre_search_filters = state.get('pre_search_filters', {})
-            self._post_measurement_filters = state.get('post_measurement_filters', {})
+            # Restore pre-search filters (Phase 45-03). #17: without a
+            # measurement bound the open catalog is KNOWN not to have (never
+            # just because the catalog is missing), with one notice.
+            from shared.fjms_service import drop_unavailable_measurement_filters
+            self.pre_search_filters, _dropped_pre = drop_unavailable_measurement_filters(
+                state.get('pre_search_filters') or {})
+            self._post_measurement_filters, _dropped_post = drop_unavailable_measurement_filters(
+                state.get('post_measurement_filters') or {})
+            if _dropped_pre or _dropped_post:
+                self.statusBar().showMessage(
+                    tr('Some saved filters were removed: this catalog data is not available.'), 8000)
             if self.pre_search_filters:
                 # Recompute restrict_sys_ids from saved filters.
                 # FINDING 2 (129-07): pass meta_mgr so library restriction is
-                # preserved across session restore.
+                # preserved across session restore. Until it answers, Search
+                # and Composition wait for it (K-14); if it cannot run, they
+                # are blocked with a message (#17).
                 worker = FilterCountWorker(self.pre_search_filters, meta_mgr=self.meta_mgr)
-                worker.finished.connect(self._on_restore_filter_finished)
+                self._connect_filter_worker(worker, self._on_restore_filter_finished)
                 self._restore_filter_worker = worker
                 worker.start()
             else:

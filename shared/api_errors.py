@@ -31,6 +31,7 @@ ERROR_CODES = frozenset({
     'unknown_filter_key',
     'unresolvable_filter_value',
     'filter_vocabulary_unavailable',  # R2-#3: fail-closed when vocabulary loader fails
+    'filter_unavailable',  # 503 (#17): the filters were valid but could not be applied; the request is never run without them
     'rate_limited',
     'disabled',
     'localhost_only',

@@ -20,7 +20,7 @@ from web.components.filter_panel import (
     build_domain_options, build_author_options, build_work_options,
     build_filter_summary, has_active_filters, persist_value,
     load_filter_state, consume_incoming_filters, recompute_filter_count,
-    create_filter_handlers,
+    create_filter_handlers, filter_unavailable_message,
 )
 from web.search_bootstrap import resolve_search_bootstrap
 from web.pages.search_state import (
@@ -256,7 +256,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     # Restore filter state from session only when the request itself is not explicit
     if restore_saved_filters and not _filters_from_browse:
-        load_filter_state(search_state, 'search')
+        if load_filter_state(search_state, 'search'):
+            # #17: a saved measurement filter the catalog is known to lack.
+            ui.notify(tr('Some saved filters were removed: this catalog data is not available.'),
+                      type='info')
 
     # Restore word search excluded ids from session
     if restore_saved_exclusions:
@@ -1087,9 +1090,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _rebuild_text_chips()
 
                 # --- Measurement filters (Phase 54, DIM-02) ---
+                # #17: shown only when the open catalog is known to have the
+                # data. Hidden controls keep their objects (the chip bar and
+                # the restore below reference them).
+                from shared.fjms_service import (
+                    measurement_filters_available, line_height_filter_available,
+                )
+                _meas_ok = measurement_filters_available()
+                _lh_ok = line_height_filter_available()
                 with ui.expansion(tr('Measurements'), icon='straighten').classes('w-full').props(
                     'dense default-closed header-class="text-sm"'
-                ):
+                ).mark('filter-measurements-group') as _meas_expansion:
+                    _meas_expansion.set_visibility(_meas_ok)
                     with ui.column().classes('gap-2 w-full'):
                         def _make_meas_range_row(label, suffix=''):
                             with ui.row().classes('gap-1 items-center w-full'):
@@ -1119,7 +1131,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 'outlined dense type=number step=1'
                             ).classes('w-20')
 
-                        meas_lh_min_inp, meas_lh_max_inp = _make_meas_range_row(tr('Line Height'), tr('mm'))
+                        with ui.element('div').classes('w-full').mark('filter-line-height-row') as _lh_row:
+                            meas_lh_min_inp, meas_lh_max_inp = _make_meas_range_row(tr('Line Height'), tr('mm'))
+                        _lh_row.set_visibility(_lh_ok)
                         meas_td_min_inp, meas_td_max_inp = _make_meas_range_row(tr('Text Density'), '/10' + tr('cm') + '\u00b2')
 
                         meas_material_select = ui.select(
@@ -2145,9 +2159,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ).classes('w-full').props('outlined dense clearable').style('direction: rtl;')
 
                 # Post-search measurement filters (Phase 54, DIM-03)
+                # #17: same visibility rule as the pre-search panel. Post-search
+                # values are not persisted (only these inputs set them).
+                from shared.fjms_service import (
+                    measurement_filters_available as _post_meas_available,
+                    line_height_filter_available as _post_lh_available,
+                )
                 with ui.expansion(tr('Measurements'), icon='straighten').classes('w-full').props(
                     'dense default-closed header-class="text-sm"'
-                ):
+                ).mark('post-filter-measurements-group') as _post_meas_expansion:
+                    _post_meas_expansion.set_visibility(_post_meas_available())
                     with ui.column().classes('gap-2 w-full'):
                         def _make_post_meas_row(label, suffix=''):
                             with ui.row().classes('gap-1 items-center w-full'):
@@ -2177,7 +2198,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 'outlined dense type=number step=1'
                             ).classes('w-20')
 
-                        post_lh_min, post_lh_max = _make_post_meas_row(tr('Line Height'), tr('mm'))
+                        with ui.element('div').classes('w-full').mark('post-filter-line-height-row') as _post_lh_row:
+                            post_lh_min, post_lh_max = _make_post_meas_row(tr('Line Height'), tr('mm'))
+                        _post_lh_row.set_visibility(_post_lh_available())
                         post_td_min, post_td_max = _make_post_meas_row(tr('Text Density'), '/10' + tr('cm') + '\u00b2')
 
                         post_mat_select = ui.select(
@@ -4809,9 +4832,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             from shared.fjms_service import get_fjms_service
 
             def _compute_restrict():
+                # No is_available() short-cut: with no sidecar the lookup
+                # raises FilterUnavailable (handled below) instead of running
+                # the search over the whole corpus (#17).
                 fjms = get_fjms_service(thread_safe=True)
-                if not fjms.is_available():
-                    return None
                 _inc = search_state.filter_include_mode
                 kwargs = dict(
                     date_from=search_state.filter_date_from,
@@ -4845,7 +4869,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 ))
                 return fjms.get_filter_sys_ids(**kwargs)
 
-            restrict_sys_ids = await run.io_bound(_compute_restrict)
+            from shared.fjms_service import FilterUnavailable
+            try:
+                restrict_sys_ids = await run.io_bound(_compute_restrict)
+            except FilterUnavailable as exc:
+                # #17: the filters could not be applied. Never "no manuscripts
+                # match", never a search without them: say so, and stop.
+                logger.warning("search: filters could not be applied (%s)", exc.reason)
+                ui.notify(filter_unavailable_message(exc, tr), type='negative')
+                search_state.is_running = False
+                search_state.is_cancelled = False
+                search_btn.style('display: inline-flex;')
+                stop_btn.style('display: none;')
+                progress_bar.classes('opacity-0')
+                render_results([])
+                return
             search_state.restrict_sys_ids = restrict_sys_ids
 
         # Phase 55: compute effective restrict = intersection of filter restrict + refinement restrict

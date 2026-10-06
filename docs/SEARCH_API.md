@@ -1090,6 +1090,7 @@ public API surface — renaming any is a breaking change).
 | `unknown_filter_key` | 400 | reserved in `ERROR_CODES` for future use; in practice, an unknown `filters` key is caught first by Pydantic `extra='forbid'` and returns `invalid_request` (not this code) |
 | `unresolvable_filter_value` | 400 | filter value not in vocabulary |
 | `filter_vocabulary_unavailable` | 503 | vocabulary loader failed (Phase 78 R2-#3 fail-closed) |
+| `filter_unavailable` | 503 | the filters were valid but could not be applied (the catalog sidecar is absent, or the filter lookup failed). The request is never run without its filters. No `Retry-After`; retry later or drop `filters`. Unfiltered and Library-only requests are unaffected. |
 | `rate_limited` | 429 + `Retry-After` | per-IP sliding window exhausted on the endpoint's own bucket |
 | `heavy_search_busy` | 503 + `Retry-After` | heavy-mode (variants/fuzzy/parallels) concurrency budget (`SEARCH_API_HEAVY_CONCURRENCY`, default 2) exhausted; fail-fast instead of queueing unboundedly; retry shortly |
 | `disabled` | 503 | `SEARCH_API_MODE=disabled` |

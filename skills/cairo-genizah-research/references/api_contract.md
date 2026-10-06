@@ -94,7 +94,9 @@ Errors usually return `error: {code, message}`; edge proxies may return non-JSON
 bodies. Scripts handle JSON decoding failure and retain HTTP status in the message.
 Common errors: rate_limited, heavy_search_busy, core_timeout, invalid_request,
 manuscript_page_not_found, locator_conflict, passage_unavailable,
-passage_multi_witness_unavailable, passage_option_unsupported.
+passage_multi_witness_unavailable, passage_option_unsupported,
+filter_unavailable (503: valid filters could not be applied; the request was not
+run without them -- no Retry-After; retry later or send it without filters).
 Report failures and continue independent work without automatic retry loops.
 Retry-After can accompany 429 or 503. Scripts self-throttle each endpoint.
 Chunk requests allow 130 seconds for the documented 110-second server ceiling;

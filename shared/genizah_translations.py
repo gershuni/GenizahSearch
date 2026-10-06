@@ -4566,6 +4566,24 @@ TRANSLATIONS.update({
     # web/components/filter_panel.py — filter-count recompute failure (#11)
     "Could not update filter count":
         "לא ניתן לעדכן את מניין הסינון",
+    # #17 — web /search and /parallels, desktop Search and Composition: the
+    # filter lookup failed, so the search was not started
+    "The filters could not be applied, so the search was not run. Try again, or remove the filters.":
+        "לא ניתן היה להחיל את הסינון, ולכן החיפוש לא הורץ. נסו שוב, או הסירו את הסינון.",
+    # #17 — web: the catalog data a filter needs is missing, search not started
+    "The catalog data these filters need is not available, so the search was not run. Remove the filters to search.":
+        "נתוני הקטלוג שהסינון זקוק להם אינם זמינים, ולכן החיפוש לא הורץ. הסירו את הסינון כדי לחפש.",
+    # #17 — desktop: same, pointing to the Focus Search button ("מקד חיפוש")
+    "The catalog data these filters need is not available, so the search was not run. Remove the filters with Focus Search to search.":
+        "נתוני הקטלוג שהסינון זקוק להם אינם זמינים, ולכן החיפוש לא הורץ. הסירו את הסינון דרך \"מקד חיפוש\" כדי לחפש.",
+    # #17 — web notice and desktop status bar: saved measurement filters
+    # dropped because the open catalog is known to lack that data
+    "Some saved filters were removed: this catalog data is not available.":
+        "חלק מהסינונים השמורים הוסרו: נתוני קטלוג אלה אינם זמינים.",
+    # #17 (K-14) — desktop status bar: Search/Composition pressed while the
+    # pre-search filters are still being computed; it runs when they are ready
+    "The filters are still being applied; the search will start as soon as they are ready.":
+        "הסינון עדיין מוחל; החיפוש יתחיל ברגע שיהיה מוכן.",
     # web/pages/search.py — search-history entry delete control
     "Delete history entry":
         "מחק רשומת היסטוריה",

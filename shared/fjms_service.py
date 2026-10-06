@@ -9,6 +9,9 @@ database. Used by both the web app and desktop app.
 All methods handle errors gracefully, returning empty results rather than
 raising exceptions. When the sidecar database is missing, the service
 degrades gracefully (is_available() returns False, all queries return empty).
+The exception is get_filter_sys_ids: an active filter it cannot evaluate
+raises FilterUnavailable, because an empty result there would mean "no
+manuscript matches" and None would mean "no filter" (#17).
 
 Thread-safe: uses per-thread SQLite connections via ThreadLocalConnection
 so concurrent NiceGUI run.io_bound() calls each get their own connection.
@@ -31,6 +34,56 @@ from shared.thread_local_db import ThreadLocalConnection
 from shared.api_errors import APIError
 
 logger = logging.getLogger(__name__)
+
+
+class FilterUnavailable(RuntimeError):
+    """An active catalog filter could not be evaluated.
+
+    Raised by FjmsService.get_filter_sys_ids instead of returning a value,
+    because every return value means something to the caller: None is "no
+    restriction" and an empty set is "the filters matched nothing". A lookup
+    that could not run is neither. Callers must tell the user (web notice,
+    desktop error label, HTTP 503 filter_unavailable) and must not run the
+    search unfiltered or report zero matches.
+
+    reason is one of:
+      'sidecar_unavailable' -- no FJMS sidecar connection;
+      'column_missing'      -- the sidecar is KNOWN (its schema was read) to
+                               lack the table or column a filter needs;
+                               ``filters`` names which: ('line_height',) or
+                               ('measurements',);
+      'query_failed'        -- the SQL raised (I/O error, locked or replaced
+                               file, per-thread connection failed to open).
+    """
+
+    REASONS = ('sidecar_unavailable', 'column_missing', 'query_failed')
+
+    def __init__(self, reason='query_failed', message='', filters=()):
+        # No validation that raises: BaseException pickling re-calls
+        # __init__ with self.args, so every argument must round-trip.
+        self.reason = reason if reason in self.REASONS else 'query_failed'
+        self.message = message
+        self.filters = tuple(filters or ())
+        super().__init__(self.reason, message, self.filters)
+
+    def __str__(self):
+        return self.message or self.reason
+
+
+# Capability of the open sidecar for a filter (K-16: three states, never two).
+# Only a schema inspection that SUCCEEDED can say 'unsupported'; a missing
+# sidecar or a failed inspection is 'unknown', and saved values are kept.
+FILTER_SUPPORTED = 'supported'
+FILTER_UNSUPPORTED = 'unsupported'
+FILTER_SUPPORT_UNKNOWN = 'unknown'
+
+_LINE_HEIGHT_COLUMN = 'avg_line_height_mm'
+LINE_HEIGHT_FILTER_KEYS = ('line_height_min', 'line_height_max')
+MEASUREMENT_FILTER_KEYS = (
+    'width_min', 'width_max', 'height_min', 'height_max',
+    'line_count_min', 'line_count_max', 'line_height_min', 'line_height_max',
+    'text_density_min', 'text_density_max', 'measurement_material',
+)
 
 # Default sidecar filename
 _SIDECAR_FILENAME = "fjms_enrichment.db"
@@ -730,6 +783,13 @@ class FjmsService:
         self._domain_translations_lock = threading.Lock()
         self._has_persons_titles: bool = False  # Set True if v5+ tables exist
         self._has_bib_extended: bool = False  # Set True if extended bib columns exist
+        # Columns of manuscript_measurements (#17). None = not known: no
+        # sidecar, or the schema could not be read (retried on the next
+        # question). An empty frozenset = read, and the table is absent.
+        # The desktop swaps sidecars through reset_fjms_service(); the web
+        # reads a replaced file only after a process restart.
+        self._measurement_columns: Optional[frozenset] = None
+        self._measurement_probe_failed = False
         # R2-#3: cache of distinct catalog_fields.FieldValue for FragmentMaterial.
         # None = not yet computed. Empty set = computed but vocabulary is empty
         # (which validate_filter_values treats as fail-closed, NOT allow-all).
@@ -808,6 +868,9 @@ class FjmsService:
                 logger.info("FjmsService: extended bibliography columns detected")
             except Exception:
                 self._has_bib_extended = False  # Feature detection failed; assume not available
+
+            # Which measurement filters this file can answer (#17).
+            self._probe_measurement_schema()
         except Exception as e:
             logger.error(f"FjmsService: Failed to connect to {db_path}: {e}")
             self._conn = None
@@ -815,6 +878,76 @@ class FjmsService:
     def is_available(self) -> bool:
         """Returns True if the sidecar database connection is active."""
         return self._conn is not None
+
+    # ------------------------------------------------------------------
+    # #17: what the open sidecar can answer, in three states.
+    # ------------------------------------------------------------------
+
+    def _probe_measurement_schema(self) -> None:
+        """Read manuscript_measurements' columns into ``_measurement_columns``.
+
+        Leaves it None (unknown) when there is no connection or the
+        inspection fails. Only a successful inspection is an answer: an empty
+        result means the table is absent.
+        """
+        if self._conn is None:
+            return
+        try:
+            rows = self._conn.execute(
+                "PRAGMA table_info(manuscript_measurements)").fetchall()
+        except Exception as e:
+            log = logger.debug if self._measurement_probe_failed else logger.warning
+            log("FjmsService: could not read the manuscript_measurements schema "
+                "(%s); measurement filter support is unknown", e)
+            self._measurement_probe_failed = True
+            return
+        cols = frozenset(row[1] for row in rows)
+        self._measurement_columns = cols
+        if not cols:
+            logger.info("FjmsService: no manuscript_measurements table; "
+                        "measurement filters are unavailable")
+        elif _LINE_HEIGHT_COLUMN not in cols:
+            logger.info("FjmsService: manuscript_measurements has no %s; "
+                        "the Line Height filter is unavailable", _LINE_HEIGHT_COLUMN)
+
+    def _known_measurement_columns(self) -> Optional[frozenset]:
+        """The measurement columns, or None when they are not known.
+
+        A failed inspection is retried here, so a transient error (a locked
+        file) does not fix the answer for the life of the process.
+        """
+        if self._conn is None:
+            return None
+        if self._measurement_columns is None:
+            self._probe_measurement_schema()
+        return self._measurement_columns
+
+    def measurement_filter_support(self) -> str:
+        """FILTER_SUPPORTED / FILTER_UNSUPPORTED / FILTER_SUPPORT_UNKNOWN for
+        the measurement filters (width, height, lines, density, material)."""
+        cols = self._known_measurement_columns()
+        if cols is None:
+            return FILTER_SUPPORT_UNKNOWN
+        return FILTER_SUPPORTED if cols else FILTER_UNSUPPORTED
+
+    def line_height_filter_support(self) -> str:
+        """Same three states for the Line Height filter."""
+        cols = self._known_measurement_columns()
+        if cols is None:
+            return FILTER_SUPPORT_UNKNOWN
+        return FILTER_SUPPORTED if _LINE_HEIGHT_COLUMN in cols else FILTER_UNSUPPORTED
+
+    @property
+    def has_measurement_table(self) -> bool:
+        """True when the open sidecar is known to have measurement data.
+        (Not to be confused with has_measurements(sys_id), a per-manuscript
+        lookup.)"""
+        return self.measurement_filter_support() == FILTER_SUPPORTED
+
+    @property
+    def has_line_height(self) -> bool:
+        """True when the open sidecar is known to answer a Line Height filter."""
+        return self.line_height_filter_support() == FILTER_SUPPORTED
 
     def get_version(self) -> Optional[str]:
         """
@@ -1026,6 +1159,13 @@ class FjmsService:
             None when ALL filter params are None/empty (meaning "no restriction").
             set of matching AlmaId strings when any filter is active.
             Empty set when filters are active but match nothing.
+
+        Raises:
+            FilterUnavailable: a filter is active but cannot be evaluated --
+                no sidecar ('sidecar_unavailable'), a table or column the
+                open sidecar is KNOWN to lack ('column_missing'), or a query
+                error ('query_failed'). Never reported as None or an empty
+                set: those are answers, and this is not one.
         """
         # Legacy single-value -> list conversion
         if domain is not None and not domains:
@@ -1061,7 +1201,32 @@ class FjmsService:
             return None
 
         if self._conn is None:
-            return None
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+
+        # One definition of "a measurement bound is set", used here and in
+        # the query below.
+        _has_measurement_filter = any([
+            width_min is not None, width_max is not None,
+            height_min is not None, height_max is not None,
+            line_count_min is not None, line_count_max is not None,
+            line_height_min is not None, line_height_max is not None,
+            text_density_min is not None, text_density_max is not None,
+            bool(measurement_material),
+        ])
+        if _has_measurement_filter:
+            # Only a KNOWN absence is reported as column_missing. When the
+            # schema could not be read, the query runs; if it then fails, that
+            # is query_failed below.
+            if self.measurement_filter_support() == FILTER_UNSUPPORTED:
+                raise FilterUnavailable('column_missing',
+                                        'this FJMS sidecar has no measurement data',
+                                        filters=('measurements',))
+            if ((line_height_min is not None or line_height_max is not None)
+                    and self.line_height_filter_support() == FILTER_UNSUPPORTED):
+                raise FilterUnavailable('column_missing',
+                                        'this FJMS sidecar has no line-height data',
+                                        filters=('line_height',))
 
         try:
             conditions = []
@@ -1295,14 +1460,6 @@ class FjmsService:
                         params.extend([_fts_escape(term), like_pat, like_pat])
 
             # Measurement filters (D-15, D-21) — subquery on manuscript_measurements
-            _has_measurement_filter = any([
-                width_min is not None, width_max is not None,
-                height_min is not None, height_max is not None,
-                line_count_min is not None, line_count_max is not None,
-                line_height_min is not None, line_height_max is not None,
-                text_density_min is not None, text_density_max is not None,
-                bool(measurement_material),
-            ])
             if _has_measurement_filter:
                 # Backend guard: normalize reversed min/max per D-19 (review concern #3)
                 width_min, width_max = _normalize_range(width_min, width_max)
@@ -1369,8 +1526,10 @@ class FjmsService:
             return {row["AlmaId"] for row in cursor}
 
         except Exception as e:
-            logger.error(f"FjmsService.get_filter_sys_ids error: {e}")
-            return set()
+            # An empty set here would read as "nothing matches" (#17).
+            logger.error("FjmsService.get_filter_sys_ids error: %s", e, exc_info=True)
+            raise FilterUnavailable('query_failed',
+                                    'the catalog filter lookup failed') from e
 
     # ------------------------------------------------------------------
     # Phase 78 Plan 03 (D-17, API-07, R2-#3): fail-closed filter validation.
@@ -3856,8 +4015,72 @@ def get_filter_sys_ids(**kwargs):
     function (rather than the bound method) so test fixtures can
     monkeypatch shared.fjms_service.get_filter_sys_ids to inject empty
     intersections without spinning up the real FJMS sidecar.
+
+    Raises FilterUnavailable exactly as the method does.
     """
     return get_fjms_service(thread_safe=True).get_filter_sys_ids(**kwargs)
+
+
+# ── #17: what the open catalog can answer (for the filter controls) ───────
+# These read a value cached at connect time (a failed schema read is retried),
+# so they are safe on a UI thread or the event loop once the singleton exists.
+
+def measurement_filter_support(service=None) -> str:
+    """FILTER_SUPPORTED / FILTER_UNSUPPORTED / FILTER_SUPPORT_UNKNOWN."""
+    svc = service if service is not None else get_fjms_service(thread_safe=True)
+    return svc.measurement_filter_support()
+
+
+def line_height_filter_support(service=None) -> str:
+    """Three states for the Line Height filter; never 'supported' when the
+    measurement table itself is not."""
+    svc = service if service is not None else get_fjms_service(thread_safe=True)
+    if svc.measurement_filter_support() == FILTER_UNSUPPORTED:
+        return FILTER_UNSUPPORTED
+    return svc.line_height_filter_support()
+
+
+def measurement_filters_available(service=None) -> bool:
+    """Show the measurement controls: True only when the open catalog is
+    KNOWN to have measurement data. Hiding a control never drops a saved
+    value by itself -- see unavailable_measurement_filter_keys."""
+    return measurement_filter_support(service) == FILTER_SUPPORTED
+
+
+def line_height_filter_available(service=None) -> bool:
+    """Show the Line Height controls: True only when the open catalog is
+    KNOWN to answer a Line Height filter."""
+    return line_height_filter_support(service) == FILTER_SUPPORTED
+
+
+def unavailable_measurement_filter_keys(service=None) -> frozenset:
+    """Filter keys the OPEN sidecar is KNOWN not to support.
+
+    Empty when the answer is not known -- no sidecar, or its schema could not
+    be read. An absent sidecar can come back (a download in progress, a file
+    being replaced), so saved values are kept and the lookup reports
+    FilterUnavailable instead. Only a successful schema inspection may
+    authorize dropping a saved value (K-16).
+    """
+    if measurement_filter_support(service) == FILTER_UNSUPPORTED:
+        return frozenset(MEASUREMENT_FILTER_KEYS)
+    if line_height_filter_support(service) == FILTER_UNSUPPORTED:
+        return frozenset(LINE_HEIGHT_FILTER_KEYS)
+    return frozenset()
+
+
+def drop_unavailable_measurement_filters(filters, service=None):
+    """Return (kept, dropped): a NEW dict without the keys the open sidecar is
+    known not to answer, and the dropped keys that held a value.
+
+    Never mutates ``filters`` (it may be a search-history entry).
+    """
+    kept = dict(filters or {})
+    bad = unavailable_measurement_filter_keys(service)
+    dropped = sorted(k for k in kept if k in bad and kept[k] not in (None, [], ()))
+    for k in bad:
+        kept.pop(k, None)
+    return kept, dropped
 
 
 def resolve_library_sys_ids(library_codes, meta_mgr) -> set:
