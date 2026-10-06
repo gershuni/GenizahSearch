@@ -529,12 +529,15 @@ class TestSchemaSourceGuards:
             assert f'add_text_field("{field}", stored=False, tokenizer_name="whitespace")' in src
 
     def test_create_index_content_is_hebword_with_content_search(self):
-        src = inspect.getsource(Indexer.create_index)
+        from shared.indexer import build_main_schema
+        assert "build_main_schema()" in inspect.getsource(Indexer.create_index)
+        src = inspect.getsource(build_main_schema)
         assert 'add_text_field("content", stored=True, tokenizer_name="hebword")' in src
         assert 'add_text_field("content_search"' in src
 
     def test_create_index_position_fields_stay_whitespace(self):
-        src = inspect.getsource(Indexer.create_index)
+        from shared.indexer import build_main_schema
+        src = inspect.getsource(build_main_schema)
         for field in ("content_head", "content_tail", "line_starts", "line_ends"):
             assert f'add_text_field("{field}", stored=False, tokenizer_name="whitespace")' in src
 

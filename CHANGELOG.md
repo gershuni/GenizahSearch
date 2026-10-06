@@ -32,6 +32,27 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 - The Settings page's Lab tab keeps Min Score; Candidate Limit, Display Limit and Default Chunk
   Size are removed (the website's Lab searches do not read them).
 
+### Regex search checks every page the pattern can match (both)
+
+- **Regex mode finds every page its pattern matches.** Before the pattern runs, the index now
+  narrows the pages only by what the pattern requires: `שלום|שדה` reads pages with either word,
+  `ה?מלך` pages where מלך stands inside a longer word too, and a pattern with nothing fixed reads
+  every page. On the desktop a list that reaches the reading limit shows "N+", and search within
+  results completes it first. Applies to My Library as well.
+- A pattern that does not start at the beginning of a word takes a few seconds longer: the index
+  looks for its letters inside every word.
+
+### Website: a cut-off list says "N+", and search within completes it first (web)
+
+- **A result list that reached the search's reading limit now shows "N+"** on the website, as
+  on the desktop (a very common word reads 50,000 candidate pages, then stops). The count
+  keeps its "+" after a reload.
+- **Search within results reads the whole list first.** Before searching inside a cut-off
+  list, the website reads every match of it (with progress and Stop), so the search within
+  covers every manuscript the first search matched, not only the shown ones. The "Only
+  results with all terms" filter does the same.
+- **API:** `/api/search` adds a `results_cut_off` warning when `total` is a lower bound.
+
 ## [9.5.0] - 2026-10-04 — Faster, complete search
 
 A desktop installer and a web deploy. Search is much faster, and its results are more
@@ -452,7 +473,6 @@ returns to the Composition tab.
 
 - Repo structure Rounds 1 and 2 (#344–#354): the root alias stubs are gone; `desktop/` and
   `shared/` hold every moved module. Their notes follow, as part of this release.
-
 
 ### Internal -- repo structure Round 1, stage 2: the cross-app modules and the dev-server CLI (2026-09-20; no behaviour change)
 
@@ -911,7 +931,6 @@ in the `gui` lane for what needs a live event loop — thread affinity,
 queued-vs-direct delivery, a stale acknowledgement crossing a run boundary, and
 real `wait()` timing. New EN/HE keys: Pause / Resume / Pausing… / Paused.
 
-
 ### Web memory — allocator-ratchet attribution + remediation (2026-07-08, web)
 
 The recurring "web process at 13.4G" was definitively attributed with live under-load probes: the bulk of RSS is **dead-but-resident allocator high-water** (pymalloc/glibc arenas absorbing per-request transient churn, never returned to the OS — smaps showed ~12G across ~300 arena-class anon regions while live Python allocations grew single-digit MB in a traced window), driven to the systemd `MemoryHigh` cap within ~12h of every restart by **SemrushBot** crawling `/browse` 24/7 (~7K req/day, 41% of traffic). Remediation shipped in two tiers (Codex pre-flight: APPROVE-WITH-CHANGES ×4, `_tmp/codex-tier2-critique-2026-07-08.md`):
@@ -1271,7 +1290,6 @@ and discards the rest in silence, so for 43 of those keys the site was showing a
 Hebrew string nobody had chosen, and the entry a translator had edited was dead
 code. The shadowed entries are gone and the values that were already winning are
 unchanged, so nothing on screen moves. A new test refuses any future duplicate.
-
 
 ### Fixed — Oxford viewer, transcription default, credits (web + desktop, 2026-09-02)
 

@@ -395,3 +395,23 @@ def compile(pattern, flags=0):
         raise re.error(str(exc)) from exc
     _check_deadline()
     return Pattern(compiled, validated.pattern, validated.flags)
+
+
+@lru_cache(maxsize=1)
+def _every_character():
+    return "".join(map(chr, range(sys.maxunicode + 1)))
+
+
+@lru_cache(maxsize=4096)
+def matched_chars(atom, flags=0):
+    """Every character a single-character pattern matches, under both engines.
+
+    In-process searches match with ``regex``; supervised workers may match with
+    stdlib ``re``. A candidate prefilter must allow either, so return the union.
+    Surrogates are dropped: indexed text is valid UTF-8 and cannot contain them.
+    """
+    compiled = compile(atom, flags)
+    text = _every_character()
+    found = set(compiled._compiled.findall(text)) | set(compiled._stdlib.findall(text))
+    return frozenset(c for c in found if not 0xD800 <= ord(c) <= 0xDFFF)
+
