@@ -773,8 +773,10 @@ def _forced_stop(page, monkeypatch, early_rows):
     from web import research_jobs
     queue = StoppableQueue({}, early_rows=early_rows)
     monkeypatch.setattr(research_jobs, 'get_queue', lambda: queue)
-    monkeypatch.setattr(Config, 'WEB_SEARCH_TIME_LIMIT', 0.4)
-    monkeypatch.setattr(research_jobs, 'TIME_LIMIT_GRACE_SECONDS', 0.4)
+    # Long enough that the early rows (polled every 0.1 s) reach the page first, even
+    # on a loaded machine; short enough to keep the test quick.
+    monkeypatch.setattr(Config, 'WEB_SEARCH_TIME_LIMIT', 1.5)
+    monkeypatch.setattr(research_jobs, 'TIME_LIMIT_GRACE_SECONDS', 1.5)
     return queue
 
 
