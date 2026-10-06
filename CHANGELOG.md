@@ -41,6 +41,11 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
   results completes it first. Applies to My Library as well.
 - A pattern that does not start at the beginning of a word takes a few seconds longer: the index
   looks for its letters inside every word.
+- A pattern with a POSIX class inside a set (`[a[:alpha:]]`) reads every page: the desktop's
+  matcher and the index read such a set differently.
+- **A list that exactly reaches the reading limit no longer shows "N+"** (every mode, both
+  apps): the search now looks one candidate further to know whether any was left out. On the
+  desktop, a cut-off search that found nothing says "No results found. (Partial results)".
 
 ### Website: a cut-off list says "N+", and search within completes it first (web)
 
@@ -50,8 +55,20 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 - **Search within results reads the whole list first.** Before searching inside a cut-off
   list, the website reads every match of it (with progress and Stop), so the search within
   covers every manuscript the first search matched, not only the shown ones. The "Only
-  results with all terms" filter does the same.
+  results with all terms" filter does the same; if that cannot finish, the filter stays off
+  and says so.
+- **Stop keeps the rows found so far, marked "N+"**, and a search within them completes the
+  list first. Searching within again later keeps the completed list.
+- **After a reload, the search runs again exactly as it ran** -- with its NOT-words, position
+  and Responsa options -- when search within needs the complete list.
+- The "+" stays on the count after display filters, in the pages and in the Excel download.
 - **API:** `/api/search` adds a `results_cut_off` warning when `total` is a lower bound.
+
+### Website searches stop after 3 minutes and show what they found (web)
+
+- A website search -- and an API background job -- stops after 3 minutes and shows the
+  results it found so far, marked "N+", with "The search stopped after 3 minutes". The next
+  search no longer waits behind a very long one. The desktop has no limit.
 
 ### Num Changes (×1–×3) works in every variant level (both)
 
