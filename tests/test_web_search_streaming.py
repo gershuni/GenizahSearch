@@ -418,8 +418,22 @@ def test_search_within_steps_record_the_mode_they_ran_with():
              and isinstance(n.func, ast.Name) and n.func.id == 'RefinementStep']
     assert len(steps) == 2
     for call in steps:
-        mode = next(ast.unparse(k.value) for k in call.keywords if k.arg == 'mode')
-        assert mode.startswith('engine_mode('), mode
+        modes = [ast.unparse(k.value) for k in call.keywords if k.arg == 'mode']
+        if modes:
+            assert modes[0].startswith('engine_mode('), modes[0]
+        else:
+            # The first step of a chain is built from the run recorded at dispatch
+            # (search_state.last_run) or, for restored results, from the controls.
+            assert any(k.arg is None for k in call.keywords), ast.unparse(call)
+    # Both sources of a step's run record the engine's mode.
+    sources = [n.value for n in ast.walk(tree) if isinstance(n, ast.Assign)
+               and any(isinstance(t, ast.Attribute) and t.attr == 'last_run' for t in n.targets)]
+    sources += [r.value for f in ast.walk(tree) if isinstance(f, ast.FunctionDef)
+                and f.name == '_run_params_from_controls'
+                for r in ast.walk(f) if isinstance(r, ast.Return)]
+    recorded = [ast.unparse(v) for d in sources if isinstance(d, ast.Dict)
+                for k, v in zip(d.keys, d.values) if isinstance(k, ast.Constant) and k.value == 'mode']
+    assert len(recorded) == 2 and all(v.startswith('engine_mode(') for v in recorded), recorded
     # Undo puts a 'literal' step back in the selector as Exact.
     source = ast.unparse(tree)
     assert "mode_select.value = 'exact' if last_step.mode == 'literal'" in source
