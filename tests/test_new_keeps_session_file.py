@@ -89,6 +89,7 @@ class _Host:
     _discardable = APP._discardable
     _deliver_unless_discarded = APP._deliver_unless_discarded
     _reset_is_pending = APP._reset_is_pending
+    _clear_comp_chunk_notice = APP._clear_comp_chunk_notice
 
     def __init__(self):
         self._restoring_session = False
@@ -100,7 +101,8 @@ class _Host:
                      "btn_domain_filter", "lbl_domain_filter", "btn_search",
                      "search_progress", "comp_text_area", "comp_title_input",
                      "comp_tree", "comp_mode_combo", "btn_comp_domain_filter",
-                     "lbl_comp_domain_filter", "btn_comp_run", "comp_progress"):
+                     "lbl_comp_domain_filter", "btn_comp_run", "comp_progress",
+                     "lbl_comp_chunk_notice"):
             setattr(self, name, _Widget())
         self.query_input.setText("old query")
         self.comp_text_area.setText("old source text")
