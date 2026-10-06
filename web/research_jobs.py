@@ -507,6 +507,10 @@ class IsolatedEngine:
             # Early rows come back through the job (preview.pkl), not by pickling
             # the caller's callback into the child.
             preview = arguments.pop('preview_callback', None)
+            # The cut-off signal is per thread: this call's answer replaces any older one,
+            # and a call that fails or is stopped leaves none.
+            from shared.search_engine import consume_last_search_cutoff
+            consume_last_search_cutoff()
             queue = get_queue()
             payload = {'kind': self._kind, 'method': name, 'arguments': arguments,
                        'options': self._options, 'settings': self.job_settings()}
@@ -548,7 +552,11 @@ class IsolatedEngine:
             except BaseException:
                 queue.cancel(job)
                 raise
-            from shared.search_engine import _set_last_responsa_downgrade, _set_last_responsa_downgrade_meta
+            from shared.search_engine import (_note_search_cutoff, _set_last_responsa_downgrade,
+                                              _set_last_responsa_downgrade_meta)
+            cutoff = result.get('cutoff') or {}
+            _note_search_cutoff(capped=bool(cutoff.get('capped')),
+                                interrupted=bool(cutoff.get('interrupted')))
             if result.get('downgrade'):
                 _set_last_responsa_downgrade(result['downgrade'])
             if result.get('cascade'):

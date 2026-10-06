@@ -74,6 +74,8 @@ Warnings can be strings OR objects. Important warnings:
 - passage_results_truncated: candidate/verification budget hit. Report it; neither
   zero results nor a small list proves that no other parallels exist.
 - truncated_to_200: only the top 200 manuscript groups returned.
+- results_cut_off (search): the search reached its candidate limit; `total` is a lower
+  bound, not the number of matches. Say so when reporting a count.
 - duplicate_photography_demoted: apparent copies of the same photographed page.
 - witness_ref_unresolved / witness_duplicate_skipped: some input witnesses skipped.
 - sort_not_applied: too few witnesses resolved to apply fusion ordering.

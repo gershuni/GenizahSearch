@@ -192,7 +192,8 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
         from shared.metadata_manager import MetadataManager
         from shared.variants import VariantManager
         from shared.lab_engine import LabEngine
-        from shared.search_engine import SearchEngine, _consume_last_responsa_downgrade, _consume_last_responsa_downgrade_meta
+        from shared.search_engine import (SearchEngine, _consume_last_responsa_downgrade,
+                                          _consume_last_responsa_downgrade_meta, consume_last_search_cutoff)
         from shared.search_regex import isolated_matching
 
         if meta is None:
@@ -244,8 +245,12 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
         write_progress(root, {'status': 'Preparing search', 'progress': (0, 0)})
         with isolated_matching(native=native_matching):
             value = getattr(engine, payload['method'])(**arguments)
+        # 'cutoff': the search reached its candidate limit, or was stopped (D8);
+        # the web shows such a count as "N+" and completes the step before a
+        # combination relies on it.
         result = {'value': value, 'downgrade': _consume_last_responsa_downgrade(),
-                  'cascade': _consume_last_responsa_downgrade_meta()}
+                  'cascade': _consume_last_responsa_downgrade_meta(),
+                  'cutoff': consume_last_search_cutoff()}
     except ValueError as exc:
         result = {'error': str(exc), 'validation': True}
         if type(exc).__name__ == 'NoWitnessesResolved':

@@ -1646,6 +1646,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # see an empty (wrong-thread) signal.
             downgrade_msg = None
             cascade_meta = None
+            search_cutoff = {}
             if short_circuit_empty:
                 results = []
                 total = 0
@@ -1661,6 +1662,8 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     core_timeout = None
 
                 def _run_search_sync():
+                    from shared.search_engine import consume_last_search_cutoff
+                    consume_last_search_cutoff()
                     with search_budget(core_timeout if core_timeout is not None else 0):
                         res = worker_searcher.execute_search(
                             query_str=query,
@@ -1675,7 +1678,9 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     from genizah_core import (
                         _consume_last_responsa_downgrade_meta as _consume_meta_inner,
                     )
-                    return res, _consume_last_responsa_downgrade(), _consume_meta_inner()
+                    # D8: whether the search reached its candidate limit (same thread).
+                    return (res, _consume_last_responsa_downgrade(), _consume_meta_inner(),
+                            consume_last_search_cutoff())
 
                 loop = asyncio.get_event_loop()
 
@@ -1723,7 +1728,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                             http_status=504,
                         )
                     try:
-                        results, downgrade_msg, cascade_meta = _search_fut.result()
+                        results, downgrade_msg, cascade_meta, search_cutoff = _search_fut.result()
                     except ResearchJobError as exc:
                         raise APIError('research_worker_stopped', str(exc), http_status=503) from exc
                     except SearchBudgetExceeded as exc:
@@ -1768,6 +1773,10 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             #    the thread-local is drained even on the exception path so it
             #    cannot leak into the next request on this worker thread.
             warnings_list: list = []
+            if (search_cutoff or {}).get('capped'):
+                # The engine read its 50,000-candidate limit: `total` counts the
+                # matches among those, and more exist.
+                warnings_list.append('results_cut_off')
             if downgrade_msg:
                 warnings_list.append(f'query_downgraded: {downgrade_msg}')
             elif results:
