@@ -64,14 +64,14 @@ Move to "Completed Issues" section at bottom with date
 |----------|------|
 | P1 Critical Bugs | 0 |
 | P2 Medium Bugs | 47 |
-| P3 Low Priority | 103 |
+| P3 Low Priority | 104 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 20 |
 | Untested Areas | 4 |
 | Deferred to v7.15+ | 6 |
 | 2026-05-29 audit follow-up | 2 |
 | FGP integration (§4.5) | 5 |
-| **Total open** | **189** |
+| **Total open** | **190** |
 
 > Counts here exclude closed items (recomputed 2026-08-14 by counting rows carrying ❌/⏸/⏳); closed history lives in docs/archive/OPEN_ISSUES_ARCHIVE.md.
 > Count notes from 2026-09-25 to 2026-10-05 moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-06.
@@ -79,6 +79,7 @@ Move to "Completed Issues" section at bottom with date
 > 2026-10-06 (regex prefilter): P2 #9 rewritten to its website half (still 1); P3 +3 -- 189.
 > 2026-10-06 (website "N+" and search-within completion): P2 -1 (#9 closed) -- 188.
 > 2026-10-06 (regex review fixes): P3 +1 (My Library hint on a cut-off empty search) -- 189.
+> 2026-10-06 (website cut-off review fixes, 3-minute limit): P3 +1 (desktop Excel count) -- 190.
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 
@@ -300,6 +301,7 @@ Move to "Completed Issues" section at bottom with date
 | **Regex patterns that do not start at a word edge cost a pass over the whole term dictionary** | `shared/regex_prefilter.py` (a run not anchored at a token start becomes `.*X.*`) | ❌ Open (2026-10-06) | 8-12 s per such pattern on 2.2M documents (measured 2026-10-06 under load; 3.4-5.0 s in the 2026-09-28 design run); a start-anchored run takes 0.01-0.04 s. A term vocabulary sidecar or fewer index segments would cut it. |
 | **One Regex pattern can match differently on the desktop and on the website** | `shared/search_regex.py` (in-process `regex` module; website workers use stdlib `re`) | ❌ Open (2026-09-28, logged 2026-10-06) | `x{e<=1}` is a fuzzy constraint in `regex` and literal text in `re`; `[[:alpha:]]` is a POSIX class in one and a nested set in the other. Such patterns get no prefilter (no match is lost), but the two apps can return different pages. |
 | **My Library: a cut-off search with no matches offers the Genizah corpus as if My Library had none** | `genizah_app.py::on_search_finished` (zero-result branch: `_update_local_scope_strip(0, cancelled=...)`) | ❌ Open (2026-10-06) | Since 2026-10-06 the status line says "(Partial results)" when a cut-off search found nothing, but the My Library hint below it still reads "No results in My Library" and offers the Genizah corpus. Only a My Library search that reached the 50,000-candidate limit without a match (a Regex pattern with no prefilter) gets there. `tests/test_local_scope_zero_result_hint.py` pins the current source line. |
+| **Desktop Excel downloads count a cut-off list as complete** | `genizah_app.py` (the search Excel writer: `result_count=len(results)` on the Credits and Info sheet) | ❌ Open (2026-10-06) | Since 2026-10-06 the website writes "N+" there for a list that reached the reading limit or was stopped; the desktop still writes the plain number. Pass `_shown_results_capped()` through as the website does (`web/export_service.py::export_search_results_excel(result_count_capped=)`). |
 | **Lab Mode ignores Regex mode** | `shared/lab_engine.py::lab_search` (never reads `mode`), web `/search` Lab switch, desktop `LabSearchThread` | ❌ Open (2026-09-28, logged 2026-10-06) | A Regex pattern in Lab Mode is searched as words. Owner 2026-09-28: Lab Mode is minor. |
 
 ---
