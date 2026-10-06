@@ -247,6 +247,7 @@ _SEARCH_SNAPSHOT_KEYS = (
     'word_search_excluded_ids', 'search_exclusion_sources',
     'search_refinement_chain', 'search_results',
     'search_all_terms_filter', 'search_result_count_capped', 'search_last_variant_settings',
+    'search_last_run',
 )
 
 # Filter keys cleared by clear_search_snapshot (read/written by filter_panel).
@@ -369,6 +370,7 @@ def restore_search_active_snapshot(state: 'SearchUIState') -> bool:
         state.refinement_chain = []
     state.exclusion_sources = raw.get('search_exclusion_sources', []) or []
     state.last_variant_settings = _settings_or_none(raw.get('last_variant_settings'))
+    state.last_run = _settings_or_none(raw.get('last_run'))
     return True
 
 
@@ -394,6 +396,7 @@ def persist_search_active_snapshot(state: 'SearchUIState') -> None:
             'search_refinement_chain': [s.to_dict() for s in (state.refinement_chain or [])],
             'search_exclusion_sources': list(state.exclusion_sources or []),
             'last_variant_settings': state.last_variant_settings,
+            'last_run': state.last_run,
         }
     except Exception:
         pass
@@ -461,6 +464,8 @@ def restore_search_snapshot(state: 'SearchUIState') -> None:
         state.exclusion_sources = safe_user_get('search_exclusion_sources', []) or []
         # the variant settings the shown results were searched with (step 0 of a refinement)
         state.last_variant_settings = _settings_or_none(safe_user_get('search_last_variant_settings', None))
+        # the search they came from, exactly as it ran (a completion runs it again)
+        state.last_run = _settings_or_none(safe_user_get('search_last_run', None))
         # NOTE: search_mode, search_query, search_preset, search_max_changes,
         # search_gap are read as needed by search.py's bootstrap block
         # (they feed resolve_search_bootstrap). They are not stored on
@@ -502,6 +507,7 @@ def persist_search_snapshot(state: 'SearchUIState') -> None:
             safe_user_set('search_refinement_chain', [])
         safe_user_set('search_exclusion_sources', list(state.exclusion_sources or []))
         safe_user_set('search_last_variant_settings', state.last_variant_settings)
+        safe_user_set('search_last_run', state.last_run)
     except Exception:
         pass  # Browser storage operation failed; snapshot not persisted (D-08)
 
@@ -539,6 +545,7 @@ def clear_search_snapshot() -> None:
         safe_user_set(key, value)
     # Remaining snapshot keys: drop them.
     for key in ('search_refinement_chain', 'search_result_count_capped', 'search_last_variant_settings',
+                'search_last_run',
                 'search_all_terms_filter', 'search_snapshot_schema_version'):
         safe_user_pop(key, None)
     clear_search_active_snapshot()

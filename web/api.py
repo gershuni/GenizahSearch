@@ -2449,6 +2449,8 @@ def init_api_routes(app_override=None):
                 printed_ids=_printed_ids,
                 result_domains=_result_domains,
                 lang=_ui_lang,
+                # A selection is counted as selected; a whole cut-off list says "N+".
+                result_count_capped=(not _sel and 'results-cut-off' in (payload.get('warnings') or [])),
                 # Smoke verification round 2 (2026-05-21):
                 search_mode=_search_mode,
                 search_gap=_search_gap,

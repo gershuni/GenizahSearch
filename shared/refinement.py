@@ -16,6 +16,7 @@ Contract:
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 from dataclasses import dataclass, field
 from typing import Optional
@@ -53,11 +54,10 @@ class RefinementStep:
 
     def to_dict(self) -> dict:
         """Serialize to a plain dict (JSON-safe for session persistence).
-        Excludes runtime-only _result_uids."""
-        d = dataclasses.asdict(self)
-        d.pop('_result_uids', None)
-        d.pop('_result_sys_ids', None)
-        return d
+        Excludes the runtime-only sets, without copying them first (a completed
+        step can hold hundreds of thousands of ids)."""
+        return {f.name: copy.deepcopy(getattr(self, f.name))
+                for f in dataclasses.fields(self) if not f.name.startswith('_')}
 
     @classmethod
     def from_dict(cls, d: dict) -> RefinementStep:
@@ -194,6 +194,12 @@ def _cannot_complete(step: RefinementStep) -> bool:
         return False
     from shared.responsa import _has_line_break_syntax
     return bool(_has_line_break_syntax(step.query))
+
+
+def steps_that_cannot_complete(chain: list[RefinementStep], upto: int | None = None) -> list:
+    """The cut-off steps of *chain* (of its first *upto*) that completing cannot read
+    in full (a Responsa line-break search), so a search within them stays "+"."""
+    return [s for s in chain[:upto] if s.result_count_capped and _cannot_complete(s)]
 
 
 def chain_needs_completion(chain: list[RefinementStep], upto: int | None = None) -> bool:

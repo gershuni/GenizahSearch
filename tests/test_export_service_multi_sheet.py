@@ -413,3 +413,21 @@ def test_image_page_and_source_columns_compacted_row(export_service, stub_dossie
     ws = wb['Search Results']
     assert ws.cell(2, 5).value == '3r'
     assert ws.cell(2, 6).value == 'doc'
+
+
+def test_a_cut_off_search_exports_its_count_as_n_plus(export_service, stub_dossier):
+    """A search that reached its limit (or was stopped) exports as it shows: the
+    Credits and Info count says "N+"; a complete one keeps the plain number."""
+    results = [_make_result('99001234567890')]
+
+    def count_cell(content):
+        ws = _load_wb(content)['Credits and Info']
+        for row in ws.iter_rows(min_col=1, max_col=2):
+            if row[0].value == 'Result count':
+                return row[1].value
+        raise AssertionError('no Result count row')
+
+    capped, _ = export_service.export_search_results_excel(results, 'q', result_count_capped=True)
+    complete, _ = export_service.export_search_results_excel(results, 'q')
+    assert count_cell(capped) == '1+'
+    assert count_cell(complete) == 1

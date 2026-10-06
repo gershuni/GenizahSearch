@@ -1123,7 +1123,7 @@ outcome, or a per-source enrichment soft failure — none of which are item-scop
 | Code | Endpoint | Meaning |
 | ---- | -------- | ------- |
 | `query_downgraded: <message>` | search | Responsa cascade disabled one or more options (`variants`, `ja`, `flex_spacing`, `bidirectional`); also surfaced via `responsa_options_effective` divergence in the request echo. The `tr()` strings are the canonical signal alongside the echo. |
-| `results_cut_off` | search | the engine read its 50,000-candidate limit, so `total` counts the matches among those candidates and more exist (a very common word). Narrow the query or add filters for a complete count. Added 2026-10-06. |
+| `results_cut_off` | search | the engine read its 50,000-candidate limit, so `total` counts the matches among those candidates and more may exist (a very common word). Narrow the query or add filters for a complete count. Added 2026-10-06. |
 | `volume_ie_defaulted` | browse | `sys_id`-only request resolved against a multi-IE manuscript; server auto-picked the default IE (Phase 79 D-04). Includes `volume_ie` field naming the picked IE. |
 | `enrichment_timeout` | browse | per-source PGP/FJMS/NLI fetch hit `SEARCH_API_BROWSE_TIMEOUT` (default 1.0s); soft failure; partial bundle returned with the corresponding `metadata.<source>` set to `null`. |
 | `enrichment_failed` | browse | per-source PGP/FJMS/NLI fetch raised an exception; soft failure; partial bundle returned (same null-out behavior). |

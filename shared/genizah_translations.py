@@ -3303,6 +3303,8 @@ TRANSLATIONS = {
     "Restoring refinement chain...": "משחזר שרשרת צמצום...",
     "Completing the cut-off results": "משלים את התוצאות שנקטעו",
     "Could not complete the cut-off results; searching within the shown ones.": "לא ניתן היה להשלים את התוצאות שנקטעו; החיפוש יתבצע בתוך התוצאות המוצגות.",
+    "Could not complete the cut-off results; the \"Only results with all terms\" filter was not applied.": "לא ניתן היה להשלים את התוצאות שנקטעו; המסנן \"רק תוצאות עם כל המונחים\" לא הוחל.",
+    "A search with a line break cannot be completed; searching within the shown results.": "לא ניתן להשלים חיפוש עם מעבר שורה; החיפוש יתבצע בתוך התוצאות המוצגות.",
     "Back to previous step": "חזרה לשלב הקודם",
     "Scope changed \u2014 results will update on next search": "הטווח השתנה \u2014 התוצאות יתעדכנו בחיפוש הבא",
     "0 results within current scope": "0 תוצאות בטווח הנוכחי",

@@ -288,3 +288,257 @@ def test_completion_runs_the_search_that_ran_not_the_search_box(page):
     completion = queue.payloads[1]['arguments']
     assert (completion['query_str'], completion['mode'], completion['corpus_scope']) == (WORD, 'literal', 'genizah')
     assert completion['ids_only'] is True
+
+
+# --- Review round 1 (Codex, 2026-10-06) ---------------------------------------
+
+def _watched_job_class():
+    from web.research_jobs import Job
+
+    class WatchedJob(Job):
+        """A job whose early rows record when the waiting caller took them."""
+        rows = None
+        handed = False
+
+        @property
+        def preview(self):
+            if self.rows is not None:
+                self.handed = True
+            return self.rows
+
+        @preview.setter
+        def preview(self, value):
+            self.rows = value
+    return WatchedJob
+
+
+class _LazyJob:
+    def __call__(self, payload):
+        return _watched_job_class()(payload)
+
+
+_WatchedJob = _LazyJob()
+
+
+class StoppableQueue(AnsweringQueue):
+    """WORD's ordinary search hands over early rows, then waits until Stop cancels
+    it; every other job is answered as AnsweringQueue answers it."""
+
+    def __init__(self, answers, early_rows):
+        super().__init__(answers)
+        self.early_rows = early_rows
+        self.held = None
+
+    def submit(self, payload):
+        args = payload['arguments']
+        if args.get('query_str') == WORD and not args.get('ids_only') and self.held is None:
+            with self.lock:
+                self.payloads.append(payload)
+            job = _WatchedJob(payload)
+            job.rows = [dict(r) for r in self.early_rows]
+            job.preview_sequence = 1
+            self.held = job
+            return job
+        return super().submit(payload)
+
+    def cancel(self, job):
+        if not job.future.done():
+            job.future.set_exception(InterruptedError('Search cancelled'))
+
+
+def _click(user, kind, test):
+    from nicegui import events
+    with user._client:
+        element = next(e for e in user._client.elements.values() if isinstance(e, kind) and test(e))
+        for listener in element._event_listeners.values():
+            if listener.type == 'click':
+                events.handle_event(listener.handler, events.GenericEventArguments(
+                    sender=element, client=user._client, args={}))
+
+
+def _input(user, placeholder):
+    from nicegui import ui
+    with user._client:
+        return next(e for e in user._client.elements.values()
+                    if isinstance(e, ui.input) and e.props.get('placeholder') == placeholder)
+
+
+def test_stopped_rows_are_cut_off_and_search_within_completes_them(page, monkeypatch):
+    """Stop keeps the early rows; they are the start of the list, never all of it:
+    the count and Search within say "+", and the search within completes the step
+    (M2, beyond the rows shown, is searched too)."""
+    from nicegui import ui
+    from web import research_jobs
+    queue = StoppableQueue({
+        (WORD, True): ([_row('M1'), _row('M2')], None),
+        (WORD2, False): ([_row('M2')], None),
+    }, early_rows=[_row('M1')])
+    monkeypatch.setattr(research_jobs, 'get_queue', lambda: queue)
+    seen = {}
+
+    async def driver(a, b):
+        await a.open('/search')
+        submit(a, WORD)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: queue.held is not None and queue.held.handed)
+        await asyncio.sleep(0.3)                   # the caller hands them to the page
+        _click(a, ui.button, lambda e: e.text == 'Stop')
+        await _wait_for(lambda: any('(partial)' in t for t in _label_texts(a)))
+        seen['button'] = _click_search_within(a)
+        await wait_for_payloads(queue, 2)          # the completion job
+        await _wait_for(lambda: any('Searching within 2 manuscripts' in t for t in _label_texts(a)))
+        submit(a, WORD2)
+        await wait_for_payloads(queue, 3)
+
+    run(driver)
+    assert seen['button'] == 'Search within 1+ manuscripts'
+    completion, within = queue.payloads[1], queue.payloads[2]
+    assert completion['arguments']['query_str'] == WORD and completion['arguments']['ids_only'] is True
+    assert set(within['arguments']['restrict_sys_ids']) == {'M1', 'M2'}
+
+
+def test_search_within_again_keeps_the_completed_set(page):
+    """Complete {M1} to {M1, M2}, cancel the refinement, click Search within again:
+    the next search is still restricted to both manuscripts (the shown rows only
+    reach M1), and nothing is completed twice."""
+    from nicegui import ui
+    queue = page({
+        (WORD, False): ([_row('M1')], {'capped': True, 'interrupted': False}),
+        (WORD, True): ([_row('M1'), _row('M2')], None),
+        (WORD2, False): ([_row('M2')], None),
+    })
+
+    async def driver(a, b):
+        await a.open('/search')
+        submit(a, WORD)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)))
+        _click_search_within(a)
+        await wait_for_payloads(queue, 2)
+        await _wait_for(lambda: any('Searching within 2 manuscripts' in t for t in _label_texts(a)))
+        _click(a, ui.button, lambda e: e.text == 'Cancel' and e.props.get('icon') == 'close')
+        await _wait_for(lambda: not any('Searching within' in t for t in _label_texts(a)
+                                        if t.startswith('Searching within')) or True)
+        _click_search_within(a)
+        await _wait_for(lambda: any('Searching within 2 manuscripts' in t for t in _label_texts(a)))
+        submit(a, WORD2)
+        await wait_for_payloads(queue, 3)
+
+    run(driver)
+    assert [bool(p['arguments'].get('ids_only')) for p in queue.payloads] == [False, True, False]
+    assert set(queue.payloads[2]['arguments']['restrict_sys_ids']) == {'M1', 'M2'}
+
+
+def test_a_reload_completes_the_search_that_ran_with_its_not_words(page):
+    """The search the shown results came from is saved with them: after a reload a
+    completion runs it again exactly, NOT-words included -- whatever the controls
+    hold by then."""
+    queue = page({
+        (WORD, False): ([_row('M1')], {'capped': True, 'interrupted': False}),
+        (WORD, True): ([_row('M1'), _row('M2')], None),
+    })
+    not_words = 'אאא'
+
+    async def driver(a, b):
+        await a.open('/search')
+        with a._client:
+            _input(a, 'Words to exclude (space separated)').value = not_words
+        submit(a, WORD)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)))
+        await a.open('/search')
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)))
+        with a._client:
+            _input(a, 'Words to exclude (space separated)').value = 'בבב'
+        _click_search_within(a)
+        await wait_for_payloads(queue, 2)
+
+    run(driver)
+    first, completion = queue.payloads[0]['arguments'], queue.payloads[1]['arguments']
+    assert first['exclude_words'] == [not_words]
+    assert completion['ids_only'] is True
+    assert completion['exclude_words'] == [not_words], completion['exclude_words']
+
+
+class FailingCompletionQueue(AnsweringQueue):
+    def submit(self, payload):
+        if payload['arguments'].get('ids_only'):
+            from web.research_jobs import Job
+            with self.lock:
+                self.payloads.append(payload)
+            job = Job(payload)
+            job.future.set_exception(RuntimeError('worker died'))
+            return job
+        return super().submit(payload)
+
+
+def test_a_failed_all_terms_completion_leaves_the_filter_off(page, monkeypatch):
+    """The all-terms filter needs every earlier step's complete pages; when completing
+    them fails it is not applied (it would hide shown rows that have every term):
+    the box comes back unchecked and stays off after a reload."""
+    from nicegui import ui
+    from web import research_jobs
+    from tests.test_web_variant_settings_per_visitor import _fire, stored
+    queue = FailingCompletionQueue({
+        (WORD, False): ([_row('M1')], {'capped': True, 'interrupted': False}),
+        (WORD2, False): ([_row('M1', page=2)], None),
+    })
+    monkeypatch.setattr(research_jobs, 'get_queue', lambda: queue)
+    seen = {}
+
+    def all_terms_box(user):
+        with user._client:
+            return next(e for e in user._client.elements.values()
+                        if isinstance(e, ui.checkbox) and e.text == 'Only results with all terms')
+
+    async def driver(a, b):
+        await a.open('/search')
+        submit(a, WORD)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)))
+        _click_search_within(a)
+        await wait_for_payloads(queue, 2)          # completion fails: within the shown rows
+        await _wait_for(lambda: any('Searching within 1+ manuscripts' in t for t in _label_texts(a)))
+        submit(a, WORD2)
+        await wait_for_payloads(queue, 3)
+        await _wait_for(lambda: any(t == 'Only results with all terms' for t in _label_texts(a)))
+        _fire(a, all_terms_box(a), 'update:modelValue', True)
+        await wait_for_payloads(queue, 4)          # the second completion, failing too
+        await _wait_for(lambda: all_terms_box(a).value is False)
+        seen['stored'] = stored(a, 'search_all_terms_filter')
+
+    run(driver)
+    assert seen['stored'] is False
+
+
+def test_a_line_break_step_is_named_as_one_that_cannot_be_completed():
+    from shared.refinement import RefinementStep, steps_that_cannot_complete
+    line_break = RefinementStep(query='אבג | דהו', mode='exact', result_count_capped=True,
+                                responsa_options={'responsa_mode': True})
+    plain = RefinementStep(query='אבג', mode='exact', result_count_capped=True)
+    complete = RefinementStep(query='אבג | דהו', mode='exact',
+                              responsa_options={'responsa_mode': True})
+    assert steps_that_cannot_complete([plain, line_break, complete]) == [line_break]
+    assert steps_that_cannot_complete([plain, line_break], upto=1) == []
+
+
+def test_a_step_saves_without_copying_its_runtime_sets(monkeypatch):
+    """to_dict never copies a step's id sets (a completed step can hold hundreds of
+    thousands): only the fields that are saved."""
+    import copy
+    from shared.refinement import RefinementStep
+    step = RefinementStep(query=WORD, mode='literal', variant_settings={'variant_pairs_count': 30})
+    step._result_sys_ids = {'M1'}
+    step._result_uids = {'p1'}
+    copied = []
+    real = copy.deepcopy
+
+    def watching(value, *args, **kwargs):
+        copied.append(value)
+        return real(value, *args, **kwargs)
+    monkeypatch.setattr(copy, 'deepcopy', watching)
+    saved = step.to_dict()
+    assert '_result_sys_ids' not in saved and '_result_uids' not in saved
+    assert not any(value is step._result_sys_ids or value is step._result_uids for value in copied)
+    assert saved['variant_settings'] == {'variant_pairs_count': 30}
+    assert saved['variant_settings'] is not step.variant_settings

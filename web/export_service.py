@@ -577,6 +577,8 @@ class ExportService:
         # Phase 94 EXPORT-META-05/D-04 — UI lang for conditional sheet RTL.
         # Content is always English per D-04; lang ONLY controls view direction.
         lang: str = 'en',
+        # The search reached its limit or was stopped: the count is "N+".
+        result_count_capped: bool = False,
         # Smoke verification round 2 (2026-05-21):
         # search-metadata + domain-name-map kwargs for the new 4th sheet
         # ("Credits and Info") and Hebrew domain substitution on the main
@@ -972,7 +974,7 @@ class ExportService:
             lab_mode_on=None,  # Web has no Lab Mode UI; omit the row.
             deep_scan_on=None,
             export_datetime=_export_dt,
-            result_count=len(results),
+            result_count=f"{len(results)}+" if result_count_capped else len(results),
         )
 
         # --- Default-active sheet per D-03 ---
