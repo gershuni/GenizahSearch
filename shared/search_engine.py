@@ -4395,7 +4395,15 @@ class SearchEngine:
         opt-in via Lab Mode (LabEngine.lab_composition_search). The default path
         has no weights-hash / no staleness; an empty LOCAL result is just "no
         results" (no staleness banner).
+
+        'partial' is True when the run may have missed matches: Stop ended it
+        ('cancelled'), or a word had more spellings within the variant settings
+        than a chunk's query holds, so pages only the others reach were not
+        searched ('capped', the cut-off signal execute_search reports as "N+").
         """
+        # The cut-off signal of this run only: what an earlier search on this
+        # thread left there must not mark it (execute_search drains it the same way).
+        consume_last_search_cutoff()
         # Phase 110 C4: fail CLOSED — never expose LOCAL on a bad value.
         if corpus_scope not in ('genizah', 'local', 'all'):
             corpus_scope = 'genizah'
@@ -4976,7 +4984,16 @@ class SearchEngine:
         main_list = [item for item in all_items if not item.get('is_filtered', False)]
         filtered_list = [item for item in all_items if item.get('is_filtered', False)]
 
-        return {'main': main_list, 'filtered': filtered_list, 'partial': was_cancelled,
+        # A word's spellings cut (build_tantivy_query takes a word's first 200, the
+        # regex its first 8,000; _variants_noting_cutoff notes the cut): pages only
+        # the others reach were not searched, so the run is partial, as the main
+        # search says "N+" (D8). Read, not cleared: the caller may read it too.
+        capped = bool((getattr(_LAST_SEARCH_CUTOFF, 'value', None) or {}).get('capped'))
+
+        return {'main': main_list, 'filtered': filtered_list,
+                'partial': was_cancelled or capped,
+                # Which of the two: Stop, or spellings (and so pages) left out.
+                'cancelled': was_cancelled, 'capped': capped,
                 'boundary_stats': boundary_stats,
                 # Phase 110 A2 + Round-2 #4: per-run scope + staleness verdict.
                 'corpus_scope': corpus_scope, 'local_lab_stale': _local_lab_stale}

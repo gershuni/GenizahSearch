@@ -2470,23 +2470,27 @@ def test_a_held_action_waits_out_a_search_that_is_running(completing):
 # leaves them in the shared settings. Running a step again -- a chip removed, a session
 # restored, a cut-off or out-of-scope chain completed -- used whatever the last search
 # left there: a step searched at Basic x1 ran again at Maximum x3, another search. The
-# step records its level and x1-x3; a step saved before that runs as before.
+# step records its level and x1-x3; a step saved before that runs as before. A step runs
+# on a view of the engine of its own: the shared settings are not written, not even
+# while it runs (a value put back after it could land under a newer search).
 
 _FIRST, _SECOND = "ראשון", "שני"
 
 
 class _SettingsEngine:
-    """Records, at each search, the level and x1-x3 the shared settings hold."""
+    """Records, at each search, the level and x1-x3 its variant manager expands with,
+    and (in shared_seen) what the shared settings hold at that moment."""
 
-    def __init__(self, settings, rows):
-        self.settings, self.rows, self.ran = settings, rows, []
+    def __init__(self, settings, var_mgr, rows):
+        self.settings, self.var_mgr, self.rows, self.ran, self.shared_seen = settings, var_mgr, rows, [], []
 
     def parse_query_syntax(self, q, responsa_mode=False):
         return None, q
 
     def execute_search(self, query, mode, gap, **kw):
-        self.ran.append((query, self.settings.variant_pairs_count,
-                         self.settings.variant_max_changes, bool(kw.get("ids_only"))))
+        self.ran.append((query, self.var_mgr.get_variant_level(),
+                         self.var_mgr._max_changes_setting(2), bool(kw.get("ids_only"))))
+        self.shared_seen.append((self.settings.variant_pairs_count, self.settings.variant_max_changes))
         return list(self.rows.get(query, []))
 
 
@@ -2521,7 +2525,8 @@ def _two_variant_steps(w, monkeypatch):
         variant_max_changes_by_preset={"basic": 1, "extended": 2, "maximum": 3})
     w.lab_engine = SimpleNamespace(settings=settings)
     w.var_mgr = VariantManager(settings)
-    w.searcher = _SettingsEngine(settings, {_FIRST: _rows(A, 2) + _rows(B, 1), _SECOND: _rows(A, 1)})
+    w.searcher = _SettingsEngine(settings, w.var_mgr,
+                                 {_FIRST: _rows(A, 2) + _rows(B, 1), _SECOND: _rows(A, 1)})
     _variants_search(w, monkeypatch, _FIRST, 30)
     w._enter_refine_mode()
     assert w._refine_mode
@@ -2530,6 +2535,7 @@ def _two_variant_steps(w, monkeypatch):
     assert (settings.variant_pairs_count, settings.variant_max_changes) == (150, 3)
     assert w.var_mgr.get_variant_level() == 150
     w.searcher.ran.clear()
+    w.searcher.shared_seen.clear()
     return settings
 
 
@@ -2546,8 +2552,8 @@ def test_removing_a_chip_runs_the_steps_left_with_their_own_settings(completing,
     settings = _two_variant_steps(w, monkeypatch)
     w._remove_refinement_step(1)
     assert w.searcher.ran == [(_FIRST, 30, 1, False)]
-    assert (settings.variant_pairs_count, settings.variant_max_changes) == (150, 3), (
-        "the shared settings are put back after the step")
+    assert w.searcher.shared_seen == [(150, 3)], "the shared settings are not written"
+    assert (settings.variant_pairs_count, settings.variant_max_changes) == (150, 3)
     assert w.var_mgr.get_variant_level() == 150
     assert w.refinement_restrict_sys_ids == {A, B}
 
@@ -2578,6 +2584,7 @@ def test_a_restored_session_replays_each_step_with_its_own_settings(completing, 
     monkeypatch.setattr(app, "RefinementReplayThread", _Now)
     w._replay_for_restore()
     assert w.searcher.ran == [(_FIRST, 30, 1, False), (_SECOND, 150, 3, False)]
+    assert w.searcher.shared_seen == [(150, 3), (150, 3)]
     assert (settings.variant_pairs_count, settings.variant_max_changes) == (150, 3)
     assert w.refinement_restrict_sys_ids == {A}
 
@@ -2595,5 +2602,6 @@ def test_completing_the_chain_runs_each_step_with_its_own_settings(completing, m
     w._forget_chain_sets()          # the filter scope changed under the chain
     w._enter_refine_mode()          # search within: every step runs again first (D8)
     assert w.searcher.ran == [(_FIRST, 30, 1, True), (_SECOND, 150, 3, True)]
+    assert w.searcher.shared_seen == [(150, 3), (150, 3)]
     assert (settings.variant_pairs_count, settings.variant_max_changes) == (150, 3)
     assert w._refine_mode and w.refinement_restrict_sys_ids == {A}

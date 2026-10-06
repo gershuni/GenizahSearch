@@ -4979,6 +4979,12 @@ def create_parallels_page(initial_text: str = None):
             main_results = result_data.get('main', [])
             filtered_results = result_data.get('filtered', [])
             is_partial = result_data.get('partial', False)
+            # Partial: Stop ended the run ('cancelled'), or a word's spellings were cut
+            # ('capped', search_composition_logic). A run that does not say which (Lab,
+            # letter-level) was stopped, as before. A cut run searched every chunk.
+            was_cancelled = result_data.get('cancelled', is_partial)
+            if is_partial and not was_cancelled and p_state.chunks_total:
+                p_state.chunks_processed = p_state.chunks_total
 
             # PR #324 round 4: a capped passage search must say so HERE too.
             # The API path warns (`passage_results_truncated`), and this
@@ -5392,8 +5398,10 @@ def create_parallels_page(initial_text: str = None):
 
                 render_results(main_results, filtered_results, is_partial=is_partial)
             else:
-                if is_partial:
+                if was_cancelled:
                     summary_label.text = f"{tr('Search cancelled')} \u2014 {total_elapsed_str} \u2014 {tr('no results yet')}"
+                elif is_partial:        # every chunk searched, but spellings were cut
+                    summary_label.text = f"{tr('Partial results')} \u2014 {total_elapsed_str} \u2014 {p_state.chunks_total} {tr('chunks')}, 0 {tr('Results')}"
                 results_header.text = tr('No results')
                 with results_container:
                     show_empty_state()

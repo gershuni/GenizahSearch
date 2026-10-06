@@ -448,3 +448,76 @@ def test_end_to_end_responsa_searches_say_plus(small_engine):
     assert uids == {'w2'} and capped is True                     # the line-break search
     uids, capped = _search(small_engine, COMMON, mode='literal', responsa_options=dict(RESPONSA))
     assert uids == {'c1'} and capped is False
+
+
+
+def test_end_to_end_a_bound_search_runs_on_its_own_view_of_the_engine(small_engine):
+    """The desktop's refinement replays and Joins searches (desktop/variant_run_settings.py)
+    run on a shallow copy of the real engine with a variant manager of their own: the
+    index is shared, the engine's own settings are not touched."""
+    from desktop.variant_run_settings import recorded_settings_searcher
+    settings = small_engine.var_mgr._settings
+    bound = recorded_settings_searcher(small_engine, settings,
+                                       {'variant_pairs_count': 30, 'variant_max_changes': 1})
+    during = []
+
+    def progress(*_args):           # called while the search runs
+        during.append((settings.variant_pairs_count, settings.variant_max_changes))
+    assert _search(bound, LONG, text_position='start', progress_callback=progress) == ({'w1'}, False)  # x1: 25
+    assert during and set(during) == {(30, 2)}, during
+    assert _search(small_engine, LONG, text_position='start') == ({'w1'}, True)  # x2: 249, 200 in
+    assert (settings.variant_pairs_count, settings.variant_max_changes) == (30, 2)
+
+# Composition (/parallels, the desktop Composition tab) searches each chunk with the
+# index query, which holds a word's first 200 spellings. A cut there left pages out
+# while the result said partial=False, which both apps show as complete.
+
+COMPOSITION = f'{LONG} אבג דהו'          # chunks of 2: [LONG אבג], [אבג דהו]
+
+
+def _at(engine, pairs, changes):
+    """*engine* expanding with *pairs* / *changes* (a view: the module's engine is shared)."""
+    import copy
+    view = copy.copy(engine)
+    view.var_mgr = VariantManager(_settings(pairs=pairs, changes=changes))
+    return view
+
+
+def _compose(engine):
+    return engine.search_composition_logic(COMPOSITION, 2, 100, 'variants', corpus_scope='genizah')
+
+
+def test_end_to_end_composition_says_partial_when_spellings_were_cut(small_engine):
+    result = _compose(small_engine)             # Basic x2: 249 spellings, the query holds 200
+    assert result['partial'] is True
+    assert (result.get('capped'), result.get('cancelled')) == (True, False), 'a cut, not a Stop'
+    assert result['main'], 'the chunks were searched'
+
+
+def test_end_to_end_composition_with_every_spelling_is_complete(small_engine):
+    result = _compose(_at(small_engine, 30, 1))  # Basic x1: 25 spellings, all in
+    assert result['partial'] is False
+    assert (result.get('capped'), result.get('cancelled')) == (False, False)
+    assert result['main']
+
+
+def test_an_earlier_searchs_cut_does_not_mark_a_composition(small_engine):
+    """The signal is per thread: a search before this one on the same thread may have
+    left 'capped' there."""
+    from shared.search_engine import _note_search_cutoff
+    _note_search_cutoff(capped=True)
+    assert _compose(_at(small_engine, 30, 1))['partial'] is False
+
+
+def test_a_returned_list_is_the_callers_own():
+    """Every limit is a cut of one cached list. A caller that changes the list it got
+    (build_regex_pattern appends the word when it is missing) must not change what
+    the next call gets -- also when the whole list fits the limit."""
+    mgr = VariantManager(_settings(pairs=30, changes=1))
+    first = mgr.get_variants(COMMON, 'variants', limit=8000)      # all 17: fits the limit
+    expected = list(first)
+    first.clear()
+    assert mgr.get_variants(COMMON, 'variants', limit=8000) == expected
+    cut = mgr.get_variants(COMMON, 'variants', limit=5)
+    cut.append('x')
+    assert mgr.get_variants(COMMON, 'variants', limit=8000) == expected

@@ -22151,17 +22151,17 @@ class GenizahGUI(QMainWindow):
 
     def _refinement_step_searcher(self):
         """searcher_for_step for replay_chain / complete_chain: each step searches with
-        the variant settings it first ran with (RefinementStep.variant_settings), and
-        the shared ones are put back after it. A step saved before they were recorded
+        the variant settings it first ran with (RefinementStep.variant_settings), on a
+        view of the engine of its own -- the shared settings are not touched, so a
+        search started meanwhile keeps its own. A step saved before they were recorded
         searches as before, with the shared settings as they are."""
         searcher = self.searcher
         settings = self._lab_settings()
-        var_mgr = getattr(self, 'var_mgr', None)
 
         def for_step(step):
             if settings is None or not step.variant_settings:
                 return searcher
-            return recorded_settings_searcher(searcher, settings, var_mgr, step.variant_settings)
+            return recorded_settings_searcher(searcher, settings, step.variant_settings)
         return for_step
 
     def _enter_refine_mode(self):
@@ -28314,10 +28314,15 @@ class GenizahGUI(QMainWindow):
         # REGULAR My-Library index, which has no staleness concept — an empty LOCAL
         # result is treated exactly like an empty Genizah result. No staleness label.
 
-        # Detect partial results (search was cancelled)
+        # Detect partial results: the search was cancelled, or a word's spellings
+        # were cut (search_composition_logic's 'capped') -- both may miss matches.
         is_partial = False
+        was_cancelled = False
         if isinstance(result_obj, dict):
             is_partial = result_obj.get('partial', False)
+            # A run that says which (the standard engine) is 'cancelled' only when
+            # it was; one that does not (Lab Mode, letter-level) as before.
+            was_cancelled = result_obj.get('cancelled', is_partial)
 
         # Show completion summary in progress bar (stays visible until next search)
         # Monotonic and pause-discounted. This one fixes the ETA too: rate is
@@ -28356,7 +28361,9 @@ class GenizahGUI(QMainWindow):
         if getattr(self, '_comp_last_result_method', 'chunk') == 'passage':
             chunks_part = ""
         elif is_partial:
-            chunks_part = f"{chunks_processed}/{chunks_total} {tr('chunks')}, "
+            # A run left partial only by cut spellings searched every chunk.
+            done = chunks_processed if was_cancelled else chunks_total
+            chunks_part = f"{done}/{chunks_total} {tr('chunks')}, "
         else:
             chunks_part = f"{chunks_total} {tr('chunks')}, "
         if is_partial:
@@ -28373,12 +28380,13 @@ class GenizahGUI(QMainWindow):
         self._notify_search_complete(result_count, '', search_type='composition')
 
         # Phase 114 USAGE-03: emit composition search telemetry.
-        # is_partial=True → user cancelled (comp cancel sets cancel_flag; thread emits partial=True).
+        # was_cancelled → user cancelled (comp cancel sets cancel_flag; the core returns
+        # 'cancelled'); a run left partial only by cut spellings was not cancelled.
         # _app_shutting_down guard (REVIEWS HIGH-2) is the first line of _emit_comp_search_telemetry
         # and suppresses the emit during the cooperative-interrupt shutdown window.
         # Placed BEFORE the no-results return so zero-result completed comp still emits (D-07).
         self._emit_comp_search_telemetry(
-            'cancelled' if is_partial else 'completed',
+            'cancelled' if was_cancelled else 'completed',
             result_count,
         )
 

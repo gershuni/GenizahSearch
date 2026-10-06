@@ -11,7 +11,9 @@ x3 instead of Basic's x1.
 
 A real JoinWorkbenchWindow and its real JoinCandidatePane. The SearchThread and the
 other-side worker are the real classes, run on this thread (start() calls run()); the
-engine is a stub that records the shared x1-x3 at each search.
+engine is a stub with a real VariantManager that records, at each search, the x1-x3
+its variant manager expands with and the shared value at that moment: a Joins search
+runs on a view of the engine of its own and writes nothing shared.
 """
 import sys
 from types import SimpleNamespace
@@ -34,13 +36,16 @@ OTHER_SIDE = "הוזח"
 
 
 class _Engine:
-    """Records (query, mode, the shared x1-x3) at each search."""
+    """Records (query, mode, the x1-x3 the search expands with, the shared x1-x3)."""
 
     def __init__(self, settings):
+        from shared.variants import VariantManager
         self.settings, self.ran = settings, []
+        self.var_mgr = VariantManager(settings)
 
     def execute_search(self, query, mode, gap, **kw):
-        self.ran.append((query, mode, self.settings.variant_max_changes))
+        self.ran.append((query, mode, self.var_mgr._max_changes_setting(2),
+                         self.settings.variant_max_changes))
         return [{"display": {"id": SID, "shelfmark": "T-S 1", "title": "",
                              "library_code": "CUL", "img": page},
                  "uid": f"{SID}_P{page:04d}", "full_text": "x"} for page in (3, 4)]
@@ -124,9 +129,11 @@ def _pump_until(pred, timeout_ms=3000):
 
 
 def _ran(engine):
-    """(which side, mode, x1-x3) of each search."""
+    """(which side, mode, x1-x3) of each search; the shared value stays the main
+    window's x3 while each one runs."""
+    assert [shared for *_, shared in engine.ran] == [3] * len(engine.ran), "shared value written"
     return [("anchor" if ANCHOR_SIDE in q else "other" if OTHER_SIDE in q else q, mode, x)
-            for q, mode, x in engine.ran]
+            for q, mode, x, _shared in engine.ran]
 
 
 @pytest.mark.parametrize("mode_idx,core_mode", [(0, "exact"), (2, "variants"), (3, "fuzzy")])
@@ -136,7 +143,7 @@ def test_a_joins_search_runs_with_basics_changes(lab, mode_idx, core_mode):
     pane.builder.from_state(_anchor_side(mode_idx))
     pane.do_search()                         # Find Candidates
     assert _ran(engine) == [("anchor", core_mode, 1)]
-    assert settings.variant_max_changes == 3, "the main window's value is put back"
+    assert settings.variant_max_changes == 3, "the main window's value is not touched"
 
 
 def test_a_restored_joins_search_runs_with_basics_changes(lab):

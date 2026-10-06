@@ -77,14 +77,16 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
   not act on Variants search at all, so every level ran at ×1.
 - **Each level keeps its own value:** by default ×1 for Basic and ×2 for Extended and
   Maximum. A value saved before this change carries into Extended and Maximum; Basic starts
-  at ×1. Responsa, composition and Joins use Basic's value; Fuzzy uses ×2. Short words keep
-  their one-change limit.
+  at ×1. Responsa, composition and Joins use Basic's value; Fuzzy uses ×2. The one-change
+  limit for short words (two letters, by default) applies to each spelling separately: a
+  short word's two-letters-for-one spelling of three letters or more gets the level's value
+  like any other word, so אב at Maximum ×3 has 3,573 spellings.
 - **Desktop: `?`, `??` and `???` select Basic, Extended and Maximum** (they ran at the level
   the slider happened to show).
 - **A higher Num Changes never drops a spelling a lower one finds.** Spellings with up to two
   changes, and the two-letters-for-one spellings, come first; a third change only fills the
   room left in the spelling budget. A word whose spellings do not all fit marks the count
-  "N+".
+  "N+", and a composition search "Partial results".
 - **Desktop Extended and Maximum now run at ×2, as the website's always did: they find more
   and are much slower.** Measured on the desktop engine, whole Genizah (searches stopped
   after 5 minutes):
