@@ -2114,12 +2114,11 @@ class SearchEngine:
 
             return " AND ".join(parts)
 
-        # --- Existing path (unchanged) ---
         if mode == 'Regex':
-            regex_str = terms[0]
-            candidates = re.findall(r'[\u0590-\u05FF]{2,}', regex_str)
-            if candidates: return " AND ".join(candidates)
-            else: return "*"
+            # A query string cannot hold Regex mode's candidates without losing
+            # matches (it made every Hebrew run a required whole word): use
+            # _regex_candidate_query.
+            raise ValueError('Regex mode has no query-string form; use _regex_candidate_query')
 
         parts = []
         for term in terms:
@@ -2328,12 +2327,30 @@ class SearchEngine:
             return None
         return tantivy.Query.boolean_query(per_term) if per_term else None
 
+    def _regex_candidate_query(self, pattern, index, *, stripped):
+        """Regex mode's candidates in *index*: a query that every document the pattern
+        can match satisfies (shared/regex_prefilter.py), or every document when the
+        pattern cannot be narrowed. *stripped*: the regex runs on the text with its
+        square brackets removed."""
+        try:
+            from shared.regex_prefilter import build_candidate_query
+            query, _formula = build_candidate_query(pattern, index, stripped=stripped)
+        except (MemoryError, SearchBudgetExceeded):
+            raise
+        except Exception as e:
+            LOGGER.warning("Regex candidate query failed; every document is a candidate: %r", e)
+            query = None
+        return query if query is not None else tantivy.Query.all_query()
+
     def _local_forms_query(self, query_str, mode):
         """My Library candidates for Variants and Fuzzy: build_variant_query on the
         LOCAL index -- every form as a whole token, not the typed word alone (Codex
         review of PR #375: a local document holding only a near spelling or a
-        variant was never found). None for other modes, which keep the typed query,
+        variant was never found). Regex: _regex_candidate_query (the LOCAL regex runs
+        on the stored text). None for other modes, which keep the typed query,
         and if the query cannot be built (then the typed query still runs)."""
+        if mode == 'Regex' and getattr(self, 'local_index', None) is not None:
+            return self._regex_candidate_query(query_str, self.local_index, stripped=False)
         if mode not in _WHOLE_WORD_MODES or mode == 'literal' or getattr(self, 'local_index', None) is None:
             return None
         cs = 'content_search' if getattr(self, '_local_has_content_search', False) else None
@@ -3778,7 +3795,14 @@ class SearchEngine:
                         _cross_page_terms = (terms[0], terms[-1])
                         # Words a crossing match can hold on one side of the break.
                         _cross_page_side_words = (len(terms) - 1) * (gap + 1)
-                if t_query_str is None:
+                if mode == 'Regex':
+                    # Candidates that cannot lose a match: only what the pattern
+                    # requires, read from the content field whatever the position
+                    # (the position is checked on each candidate below).
+                    t_query_obj = self._regex_candidate_query(
+                        query_str, self.index, stripped=not _query_has_brackets(query_str))
+                    t_query_str = '(Regex candidates)'
+                elif t_query_str is None:
                     t_query_str = self.build_tantivy_query(terms, mode, content_search_field=_cs_field)
                 # Variants match whole words too (owner 2026-10-01), so they get
                 # Literal's paths: every verifier form retrieved as a whole token,

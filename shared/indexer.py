@@ -53,6 +53,32 @@ def _strip_brackets(text: str) -> str:
     return text.replace('[', '').replace(']', '')
 
 
+def build_main_schema() -> tantivy.Schema:
+    """The main (Genizah) index schema. Register the search tokenizers
+    (shared.search_tokenizer.register_search_tokenizers) on any index built from it."""
+    builder = tantivy.SchemaBuilder()
+    builder.add_text_field("unique_id", stored=True)
+    # SEED-006 Stage 1: hebword tokenizer makes punctuation-attached words
+    # (בסגן, -> בסגן) retrievable; stored value stays original (display intact).
+    # content_head/tail + line_starts/line_ends KEEP whitespace — their
+    # L{n}:word colon markers would be shattered by hebword.
+    builder.add_text_field("content", stored=True, tokenizer_name="hebword")
+    builder.add_text_field("content_head", stored=False, tokenizer_name="whitespace")
+    builder.add_text_field("content_tail", stored=False, tokenizer_name="whitespace")
+    builder.add_text_field("line_starts", stored=False, tokenizer_name="whitespace")
+    builder.add_text_field("line_ends", stored=False, tokenizer_name="whitespace")
+    # SEED-006 Stage 2: additive, non-stored, diacritic-folded retrieval field
+    # (= strip_search_diacritics(content)) so צמאן / צ'מאן find the corpus
+    # form צ̇מאן (U+0307). Lower-weighted OR fallback only; display reads `content`.
+    builder.add_text_field("content_search", stored=False, tokenizer_name="hebword")
+    builder.add_text_field("source", stored=True)
+    builder.add_text_field("full_header", stored=True)
+    builder.add_text_field("shelfmark", stored=True)
+    builder.add_text_field("scope", stored=True)
+    builder.add_text_field("boundaries", stored=True)
+    return builder.build()
+
+
 class Indexer:
     """Create or update the Tantivy index and keep browse maps in sync."""
     def __init__(self, meta_mgr):
@@ -241,27 +267,7 @@ class Indexer:
             shutil.rmtree(db_path)
         os.makedirs(db_path)
 
-        builder = tantivy.SchemaBuilder()
-        builder.add_text_field("unique_id", stored=True)
-        # SEED-006 Stage 1: hebword tokenizer makes punctuation-attached words
-        # (בסגן, -> בסגן) retrievable; stored value stays original (display intact).
-        # content_head/tail + line_starts/line_ends KEEP whitespace — their
-        # L{n}:word colon markers would be shattered by hebword.
-        builder.add_text_field("content", stored=True, tokenizer_name="hebword")
-        builder.add_text_field("content_head", stored=False, tokenizer_name="whitespace")
-        builder.add_text_field("content_tail", stored=False, tokenizer_name="whitespace")
-        builder.add_text_field("line_starts", stored=False, tokenizer_name="whitespace")
-        builder.add_text_field("line_ends", stored=False, tokenizer_name="whitespace")
-        # SEED-006 Stage 2: additive, non-stored, diacritic-folded retrieval field
-        # (= strip_search_diacritics(content)) so צמאן / צ'מאן find the corpus
-        # form צ̇מאן (U+0307). Lower-weighted OR fallback only; display reads `content`.
-        builder.add_text_field("content_search", stored=False, tokenizer_name="hebword")
-        builder.add_text_field("source", stored=True)
-        builder.add_text_field("full_header", stored=True)
-        builder.add_text_field("shelfmark", stored=True)
-        builder.add_text_field("scope", stored=True)
-        builder.add_text_field("boundaries", stored=True)
-        schema = builder.build()
+        schema = build_main_schema()
 
         index = tantivy.Index(schema, path=db_path)
         # SEED-006: register hebword (+ builtins) before the writer tokenizes content.
