@@ -856,6 +856,11 @@ def _canonical_witnesses(witnesses) -> list:
     return out
 
 
+# What every search ran with before variant preferences were kept per visitor,
+# where it differs from the website defaults (owner's server file, 2026-09-28).
+_SETTINGS_BEFORE_PER_VISITOR = {'variant_aggressive': True}
+
+
 def compute_parallels_search_fingerprint(
     *,
     text,
@@ -960,12 +965,14 @@ def compute_parallels_search_fingerprint(
     if depth not in (None, 'normal'):
         payload['depth'] = depth
     # The visitor's Settings-page variant preferences (per visitor since
-    # 2026-10-06) enter only when they differ from the website defaults, under
-    # the same rule: every earlier fingerprint was made with the defaults.
+    # 2026-10-06) enter only when they differ from what every earlier search ran
+    # with -- the website defaults with Aggressive Mode on (the server's settings
+    # until then) -- under the same rule: an old fingerprint keeps matching a
+    # search with the same settings, and only that.
     if variant_preferences:
         from web.variant_preferences import website_defaults
-        defaults = website_defaults()
-        changed = {k: v for k, v in variant_preferences.items() if defaults.get(k) != v}
+        baseline = {**website_defaults(), **_SETTINGS_BEFORE_PER_VISITOR}
+        changed = {k: v for k, v in variant_preferences.items() if baseline.get(k) != v}
         if changed:
             payload['variant_preferences'] = changed
     for key in _PARALLELS_FINGERPRINT_SET_INPUTS:

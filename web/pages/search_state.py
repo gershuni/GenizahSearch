@@ -236,7 +236,7 @@ _SEARCH_SNAPSHOT_KEYS = (
     'domain_exclusions', 'search_printed_filter',
     'word_search_excluded_ids', 'search_exclusion_sources',
     'search_refinement_chain', 'search_results',
-    'search_all_terms_filter',
+    'search_all_terms_filter', 'search_last_variant_settings',
 )
 
 # Filter keys cleared by clear_search_snapshot (read/written by filter_panel).
@@ -357,7 +357,14 @@ def restore_search_active_snapshot(state: 'SearchUIState') -> bool:
     except Exception:
         state.refinement_chain = []
     state.exclusion_sources = raw.get('search_exclusion_sources', []) or []
+    state.last_variant_settings = _settings_or_none(raw.get('last_variant_settings'))
     return True
+
+
+def _settings_or_none(value):
+    """A restored settings snapshot, or None when absent or not a dict (they are
+    checked again by request_settings when a search sends them)."""
+    return dict(value) if isinstance(value, dict) else None
 
 
 def persist_search_active_snapshot(state: 'SearchUIState') -> None:
@@ -373,6 +380,7 @@ def persist_search_active_snapshot(state: 'SearchUIState') -> None:
             'domain_exclusions': list(state.domain_exclusions or []),
             'search_refinement_chain': [s.to_dict() for s in (state.refinement_chain or [])],
             'search_exclusion_sources': list(state.exclusion_sources or []),
+            'last_variant_settings': state.last_variant_settings,
         }
     except Exception:
         pass
@@ -437,6 +445,8 @@ def restore_search_snapshot(state: 'SearchUIState') -> None:
             state.refinement_chain = []
         # exclusion sources (list[dict])
         state.exclusion_sources = safe_user_get('search_exclusion_sources', []) or []
+        # the variant settings the shown results were searched with (step 0 of a refinement)
+        state.last_variant_settings = _settings_or_none(safe_user_get('search_last_variant_settings', None))
         # NOTE: search_mode, search_query, search_preset, search_max_changes,
         # search_gap are read as needed by search.py's bootstrap block
         # (they feed resolve_search_bootstrap). They are not stored on
@@ -475,6 +485,7 @@ def persist_search_snapshot(state: 'SearchUIState') -> None:
         except Exception:
             safe_user_set('search_refinement_chain', [])
         safe_user_set('search_exclusion_sources', list(state.exclusion_sources or []))
+        safe_user_set('search_last_variant_settings', state.last_variant_settings)
     except Exception:
         pass  # Browser storage operation failed; snapshot not persisted (D-08)
 
@@ -511,7 +522,7 @@ def clear_search_snapshot() -> None:
         # Class A try/except collapsed — safe_user_set absorbs AssertionError.
         safe_user_set(key, value)
     # Remaining snapshot keys: drop them.
-    for key in ('search_refinement_chain',
+    for key in ('search_refinement_chain', 'search_last_variant_settings',
                 'search_all_terms_filter', 'search_snapshot_schema_version'):
         safe_user_pop(key, None)
     clear_search_active_snapshot()
