@@ -93,19 +93,20 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
   | והמשפטים | ×1 | ×2 | ×3 |
   |---|---|---|---|
-  | Basic (30 pairs) | 2.1 s | 8.6 s | 68.6 s |
-  | Extended (70) | 4.6 s | 117 s | over 5 min |
-  | Maximum (150) | 17.4 s | over 5 min | over 5 min |
+  | Basic (30 pairs) | 3.2 s | 7.1 s | 48 s |
+  | Extended (70) | 2.6 s | 75 s | over 5 min |
+  | Maximum (150) | 13.9 s | over 5 min | over 5 min |
 
   | ישראל | ×1 | ×2 | ×3 |
   |---|---|---|---|
-  | Basic (30 pairs) | 6.8 s | 22.5 s | over 5 min |
-  | Extended (70) | 13.7 s | 215 s | over 5 min |
-  | Maximum (150) | 47.5 s | over 5 min | over 5 min |
+  | Basic (30 pairs) | 8.8 s | 17.7 s | 73 s |
+  | Extended (70) | 8.0 s | 114 s | over 5 min |
+  | Maximum (150) | 37.2 s | over 5 min | over 5 min |
 
   Before, the desktop ran every level at ×1 (the first column). The new defaults are ×1
-  Basic and ×2 Extended/Maximum. Responsa with variants on והמשפטים: 49 s at ×1, over 5
-  minutes at ×2 and ×3. A 5-word composition search: 1.3 s, 2.2 s, 4.7 s.
+  Basic and ×2 Extended/Maximum. Responsa with variants on והמשפטים: 38 s at ×1, about 5
+  minutes at ×2 and ×3. A 5-word composition search: 1.1 s, 1.6 s, 4.2 s. (One run each on
+  the real index, 2026-10-07; a website search stops after 3 minutes.)
 - **Website:** Settings has one Num Changes value per level. **API:** `variants` runs at
   ×1 (Basic, as before) and `fuzzy` at ×2.
 
