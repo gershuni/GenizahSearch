@@ -1056,7 +1056,9 @@ class ParallelsRequest(BaseModel):
         default=PARALLELS_CHUNK_SIZE_DEFAULT,
         ge=2,
         le=20,
-        description="Number of words per chunk for sliding-window matching. Default 5.",
+        description="Number of words per chunk for sliding-window matching. Default 5. "
+                    "A text with fewer words is searched as one chunk of all its words, "
+                    "and the response carries a `text_shorter_than_chunk_size` warning.",
     )
     mode: Literal['exact', 'variants', 'fuzzy'] = Field(
         default=PARALLELS_MODE_DEFAULT,
@@ -2574,6 +2576,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 'verified': int(_rep.get('verified') or 0),
                 'candidates': int(_rep.get('candidates') or 0),
             })
+        # Chunk method: the text did not fit the requested settings (searched
+        # as one shorter chunk, chunk size raised, min chunk matches lowered,
+        # or not searched at all). The request echo keeps what was asked;
+        # each warning carries what was used.
+        warnings_list.extend(dict(n) for n in bundle.composition_notices)
         if bundle.duplicate_photography_demoted:
             warnings_list.append({
                 'code': 'duplicate_photography_demoted',

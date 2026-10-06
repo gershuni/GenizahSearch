@@ -321,18 +321,19 @@ class TestLabCompositionSharedPrepOnce:
                     return result
 
                 with patch.object(genizah_core, "text_to_fingerprint", side_effect=counting_t2f):
-                    # 4-token source → 2 chunks of size 3 (indices 0, 1).
-                    # chunk_size default is taken from lab_composition_search signature —
-                    # pass chunk_size explicitly so the number of chunks is predictable.
-                    source_text = "אחד שניים שלושה ארבעה חמישה"  # 5 tokens → 3 chunks of size 3
+                    # Pass chunk_size explicitly so the number of chunks is
+                    # predictable. 9 words at chunk size 4, stride 2: windows
+                    # start at 0, 2, 4, plus one window ending on the last
+                    # word (start 5), so every word is searched.
+                    source_text = "אחד שניים שלושה ארבעה חמישה שישה שבעה שמונה תשעה"
 
                     engine.lab_composition_search(
                         full_text=source_text,
-                        chunk_size=3,
+                        chunk_size=4,
                         corpus_scope="all",
                     )
 
-        n_chunks = 3  # 5 tokens, chunk_size=3 → indices 0,1,2
+        n_chunks = 4  # starts 0, 2, 4 and the end-anchored 5
         assert len(call_count) == n_chunks, (
             f"text_to_fingerprint must be called ONCE per qualifying chunk "
             f"(expected {n_chunks}, got {len(call_count)}).  "

@@ -77,6 +77,10 @@ Warnings can be strings OR objects. Important warnings:
 - duplicate_photography_demoted: apparent copies of the same photographed page.
 - witness_ref_unresolved / witness_duplicate_skipped: some input witnesses skipped.
 - sort_not_applied: too few witnesses resolved to apply fusion ordering.
+- text_shorter_than_chunk_size (chunk method): fewer words than chunk_size; the
+  whole text was searched as one shorter chunk (see effective_chunk_size).
+- text_too_short (chunk method): under two words, nothing was searched. An empty
+  result here says nothing about whether parallels exist.
 
 `text_source` is pgp_transcription, snippet, or none. Use
 `format_output.honesty_annotation(response)` in research notes for API-derived

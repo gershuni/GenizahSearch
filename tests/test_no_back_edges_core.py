@@ -135,6 +135,8 @@ EXTRACTED_MODULES = [
     "shared/web_links.py",
     # 2026-09-25: crash-safe writes for config.pkl, lang.pkl and lists.pkl.
     "shared/atomic_io.py",
+    # Window placement shared by both composition engines.
+    "shared/composition_windows.py",
 ]
 
 # Compound statement types whose bodies run at import time

@@ -6433,7 +6433,7 @@ class GenizahGUI(QMainWindow):
         cr = self.comp_options_row.flow
 
         # 2. Parameters
-        self.spin_chunk = QSpinBox(); self.spin_chunk.setValue(5); self.spin_chunk.setPrefix(tr("Chunk: "))
+        self.spin_chunk = QSpinBox(); self.spin_chunk.setRange(2, 20); self.spin_chunk.setValue(5); self.spin_chunk.setPrefix(tr("Chunk: "))
         self.spin_chunk.setToolTip(tr("Words per search block (Rec: 5-7)"))
         self.spin_chunk.valueChanged.connect(self._update_boundary_stats)
         
@@ -6653,6 +6653,13 @@ class GenizahGUI(QMainWindow):
             "color: #e74c3c; font-size: 11px;")
         self.lbl_comp_passage_dropped_warning.setVisible(False)
 
+        # Chunk and Lab runs: the text did not fit the requested settings.
+        self.lbl_comp_chunk_notice = QLabel("")
+        self.lbl_comp_chunk_notice.setWordWrap(True)
+        self.lbl_comp_chunk_notice.setStyleSheet(
+            "color: #e67e22; font-size: 11px;")
+        self.lbl_comp_chunk_notice.setVisible(False)
+
         self.comp_passage_label = QLabel(tr("Letter-level options") + ":")
         passage_row.addWidget(self.comp_passage_label)
         passage_row.addWidget(self.comp_passage_width_combo)
@@ -6665,6 +6672,7 @@ class GenizahGUI(QMainWindow):
         in_l.addWidget(self.comp_passage_row)
         in_l.addWidget(self.lbl_comp_passage_reason)
         in_l.addWidget(self.lbl_comp_passage_dropped_warning)
+        in_l.addWidget(self.lbl_comp_chunk_notice)
 
         # The paragraph controls belong to CHUNK search (letter-level has no
         # paragraph boundaries), so they come after the method that selects
@@ -17939,6 +17947,7 @@ class GenizahGUI(QMainWindow):
             return False
         if not self._restored_provenance_is_valid(comp):
             return False
+        self._clear_comp_chunk_notice()
         self.comp_raw_items = comp.get('results', [])
         self.comp_raw_filtered = comp.get('filtered_results', [])
         # The chunk stamp is cleared rather than reconstructed: the export's
@@ -19287,6 +19296,28 @@ class GenizahGUI(QMainWindow):
                     if row.get('reason') == 'empty_text'
                     else tr("The letter-level search could not be completed. "
                             "Details have been written to the log."))
+
+    def _show_comp_chunk_notice(self, result_obj):
+        """Say when a chunk or Lab run did not search what the settings
+        asked for: the text was one shorter chunk, the chunk size or the
+        minimum chunk matches was adjusted, or nothing was searched. Clears
+        the line for a run with nothing to say (including every
+        letter-level run, whose results carry no notices)."""
+        from shared.composition_windows import chunk_notice_message  # noqa: PLC0415
+        lbl = getattr(self, 'lbl_comp_chunk_notice', None)
+        if lbl is None:
+            return
+        notices = (result_obj.get('composition_notices') or []
+                   if isinstance(result_obj, dict) else [])
+        msgs = [m for m in (chunk_notice_message(n, tr) for n in notices) if m]
+        lbl.setText("\n".join(msgs))
+        lbl.setVisible(bool(msgs))
+
+    def _clear_comp_chunk_notice(self):
+        lbl = getattr(self, 'lbl_comp_chunk_notice', None)
+        if lbl is not None:
+            lbl.setText("")
+            lbl.setVisible(False)
 
     def _clear_passage_dropped_warning(self):
         lbl = getattr(self, 'lbl_comp_passage_dropped_warning', None)
@@ -27526,6 +27557,7 @@ class GenizahGUI(QMainWindow):
         self._comp_view_groups = []
 
         # 6. Reset composition result state
+        self._clear_comp_chunk_notice()
         self.comp_main = []
         self.comp_appendix = {}
         self.comp_summary = {}
@@ -27818,6 +27850,7 @@ class GenizahGUI(QMainWindow):
                          and self.chk_lab_deep_comp.isChecked()),
         }
         self._clear_passage_dropped_warning()
+        self._clear_comp_chunk_notice()
         self._refresh_comp_method_enabled()
 
         # 1. נתיב מעבדה (LAB MODE)
@@ -28134,6 +28167,10 @@ class GenizahGUI(QMainWindow):
             # worker to wait for, one the user never asked for.
             self._stop_auto_expand('')
             return
+
+        # Chunk and Lab runs report when the text did not fit the settings;
+        # a letter-level result carries no notices and clears the line.
+        self._show_comp_chunk_notice(result_obj)
 
         # Phase 146: rows the passage searcher matched but could not load
         # text for. Only meaningful for a run STAMPED passage -- reading the

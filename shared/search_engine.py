@@ -4360,9 +4360,22 @@ class SearchEngine:
         if filter_text:
             filter_text = strip_nikud(filter_text)
 
-        if len(tokens) < chunk_size:
-            return {'main': [], 'filtered': [], 'boundary_stats': None,
-                    'corpus_scope': corpus_scope, 'local_lab_stale': _local_lab_stale}
+        # Window placement: shared/composition_windows.py. A text shorter
+        # than chunk_size is one window of all its words; under two words
+        # nothing is searched. Either way the result says so.
+        from shared.composition_windows import (  # noqa: PLC0415
+            cap_min_chunk_matches, distinct_windows, plan_windows)
+        window_plan = plan_windows(len(tokens), chunk_size)
+        composition_notices = list(window_plan.notices)
+        if not window_plan.starts:
+            return {'main': [], 'filtered': [], 'partial': False, 'boundary_stats': None,
+                    'corpus_scope': corpus_scope, 'local_lab_stale': _local_lab_stale,
+                    'effective_chunk_size': None,
+                    'composition_notices': composition_notices}
+        chunk_size = window_plan.size
+        if boundary_mode == 'full':
+            min_boundary_matches = cap_min_chunk_matches(
+                min_boundary_matches, distinct_windows(tokens, window_plan), composition_notices)
 
         # Get boundary stats (includes parsed boundaries to avoid double parsing)
         from genizah_core import get_boundary_stats, get_crossed_boundaries  # noqa: PLC0415 -- lazy; GUARD-01 safe
@@ -4371,7 +4384,7 @@ class SearchEngine:
 
         # Build chunks with boundary tracking
         chunks_data = []
-        for i in range(len(tokens) - chunk_size + 1):
+        for i in window_plan.starts:
             crossed_bounds = get_crossed_boundaries(i, i + chunk_size, boundaries)
             chunks_data.append((i, tokens[i:i + chunk_size], crossed_bounds))
 
@@ -4929,7 +4942,9 @@ class SearchEngine:
         return {'main': main_list, 'filtered': filtered_list, 'partial': was_cancelled,
                 'boundary_stats': boundary_stats,
                 # Phase 110 A2 + Round-2 #4: per-run scope + staleness verdict.
-                'corpus_scope': corpus_scope, 'local_lab_stale': _local_lab_stale}
+                'corpus_scope': corpus_scope, 'local_lab_stale': _local_lab_stale,
+                'effective_chunk_size': chunk_size,
+                'composition_notices': composition_notices}
 
     def group_pages_by_manuscript(self, pages_list):
         """Aggregate individual page results into manuscript-level items.

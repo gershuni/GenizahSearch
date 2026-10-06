@@ -24,6 +24,10 @@ from shared.config import Config
 from shared.lab_settings import LabSettings
 from shared.text_normalize import strip_nikud, strip_search_diacritics
 from shared.sys_id_patterns import CORPUS_SYS_ID_RE
+from shared.composition_windows import (
+    LAB_MIN_WINDOW, TEXT_TOO_COMMON, TEXT_TOO_SHORT, cap_min_chunk_matches, distinct_windows,
+    plan_windows,
+)
 
 LOGGER = logging.getLogger("genizah." + __name__)
 
@@ -971,7 +975,10 @@ class LabEngine:
 
         if not full_text:
             return {'main': [], 'filtered': [], 'known': [], 'partial': False, 'boundary_stats': None,
-                    'corpus_scope': corpus_scope, 'local_lab_stale': _local_lab_stale}
+                    'corpus_scope': corpus_scope, 'local_lab_stale': _local_lab_stale,
+                    'effective_chunk_size': None,
+                    'composition_notices': [{'code': TEXT_TOO_SHORT, 'words': 0,
+                                             'minimum': LAB_MIN_WINDOW}]}
 
         # Strip combining diacritical marks and geresh/gershayim from queries
         full_text = strip_search_diacritics(full_text)
@@ -999,29 +1006,38 @@ class LabEngine:
         token_matches = list(re.finditer(r"[\w֐-׿\']+", full_text))
         tokens = [strip_nikud(m.group()) for m in token_matches]  # Strip nikud from tokens
         token_positions = [(m.start(), m.end()) for m in token_matches]  # Store positions
-        c_size = chunk_size if chunk_size else 15
-        step = max(1, int(c_size * 0.5))
+        # Window placement: shared/composition_windows.py -- half-window
+        # stride plus one window ending on the last word; never under
+        # LAB_MIN_WINDOW words (a smaller chunk size is raised and reported);
+        # a text shorter than the window is one whole-text window.
+        window_plan = plan_windows(len(tokens), chunk_size if chunk_size else 15,
+                             stride=lambda size: size * 0.5,
+                             min_window=LAB_MIN_WINDOW)
+        composition_notices = list(window_plan.notices)
+        c_size = window_plan.size
 
         # Strip nikud from filter text for consistent matching
         if filter_text:
             filter_text = strip_nikud(filter_text)
 
+        if not window_plan.starts:
+            return {'main': [], 'filtered': [], 'known': [], 'partial': False, 'boundary_stats': None,
+                    'corpus_scope': corpus_scope, 'local_lab_stale': _local_lab_stale,
+                    'effective_chunk_size': None,
+                    'composition_notices': composition_notices}
+        if boundary_mode == 'full':
+            min_boundary_matches = cap_min_chunk_matches(
+                min_boundary_matches, distinct_windows(tokens, window_plan), composition_notices)
+
         # Get boundary stats (includes parsed boundaries to avoid double parsing)
         boundary_stats = get_boundary_stats(full_text, boundary_delimiter, c_size, min_delimiter_distance)
         boundaries = boundary_stats.get('boundaries', [])
 
-        # Build chunks - handle short texts first to avoid wasteful iteration
         chunks_data = []
-        if len(tokens) < c_size:
-            # Short text: single chunk with all tokens
-            crossed_bounds = get_crossed_boundaries(0, len(tokens), boundaries)
-            chunks_data = [(0, tokens, crossed_bounds)]
-        else:
-            # Normal text: create overlapping chunks
-            for i in range(0, max(1, len(tokens) - c_size + 1), step):
-                chunk_end = i + c_size
-                crossed_bounds = get_crossed_boundaries(i, chunk_end, boundaries)
-                chunks_data.append((i, tokens[i : i + c_size], crossed_bounds))
+        for i in window_plan.starts:
+            chunk_end = i + c_size
+            crossed_bounds = get_crossed_boundaries(i, chunk_end, boundaries)
+            chunks_data.append((i, tokens[i:chunk_end], crossed_bounds))
 
         total_chunks = len(chunks_data)
         results_map = {}
@@ -1059,7 +1075,7 @@ class LabEngine:
                     lab_chunk_plans.append(None)
                     continue
                 lcp_fp_str = text_to_fingerprint(lcp_chunk_text, freq_map=target_map)
-                if not lcp_fp_str or len(lcp_chunk_tokens) < 4:
+                if not lcp_fp_str or len(lcp_chunk_tokens) < LAB_MIN_WINDOW:
                     lab_chunk_plans.append(None)
                     continue
                 lcp_fp_list = lcp_fp_str.split()
@@ -1076,6 +1092,9 @@ class LabEngine:
                     needed_unique_fps=lcp_needed_unique_fps,
                     core_query=lcp_core_query,
                 ))
+            if lab_chunk_plans and all(p is None for p in lab_chunk_plans):
+                # Nothing will be queried: do not claim the text was searched.
+                composition_notices = [{'code': TEXT_TOO_COMMON, 'words': len(tokens)}]
 
         # (Part 2: Scanning) - wrapped in try/except to support partial results on cancel
         try:
@@ -1400,7 +1419,9 @@ class LabEngine:
 
         # (Part 3: Result Processing) - runs even if interrupted to return partial results
         raw_final_items = []
-        is_short_search = (total_chunks <= 3)
+        # Counted WITHOUT the end-anchored tail window, so adding that window
+        # does not move a run from the short-search rule to the long one.
+        is_short_search = (window_plan.stride_count <= 3)
 
         for uid, data in results_map.items():
             if not is_short_search:
@@ -1592,6 +1613,8 @@ class LabEngine:
             # Phase 110 A2 + Round-2 #4: per-run scope + staleness verdict.
             'corpus_scope': corpus_scope,
             'local_lab_stale': _local_lab_stale,
+            'effective_chunk_size': c_size,
+            'composition_notices': composition_notices,
         }
 
     @lru_cache(maxsize=10000)

@@ -235,6 +235,12 @@ def main() -> int:
             lo, hi = s[f'recall@{k}_ci']
             print(f'  recall@{k:<3} = {s[f"recall@{k}"]:.3f}  [{lo:.3f}, {hi:.3f}]', flush=True)
         print(f'  p50={s["p50_ms"]}ms  p95={s["p95_ms"]}ms', flush=True)
+        notices = getattr(r, 'notice_counts', None)
+        if notices:
+            # e.g. text_shorter_than_chunk_size: those queries ran as one
+            # whole-text window, not at this config's chunk size.
+            s['composition_notices'] = dict(notices)
+            print(f'  composition notices: {dict(sorted(notices.items()))}', flush=True)
         for name in stratum_names:
             cells = '  '.join(
                 f'{key}:{v["recall@50"]:.2f}(n={v["n"]})'

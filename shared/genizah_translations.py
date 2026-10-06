@@ -1738,6 +1738,17 @@ TRANSLATIONS = {
     "No manuscript found": "לא נמצא כתב יד",
     "Enter at least 10 words": "הזן לפחות 10 מילים",
     "Enter at least 3 words": "הזן לפחות 3 מילים",
+    # Composition search notices (shared/composition_windows.py)
+    "The text has {words} words, fewer than the chunk size ({chunk_size}), so it was searched as one chunk of {words} words.":
+        "בטקסט {words} מילים, פחות מגודל המקטע ({chunk_size}), ולכן הוא נבדק כמקטע אחד בן {words} מילים.",
+    "The text is too short to search: enter at least {minimum} words.":
+        "הטקסט קצר מכדי לחפש: הזן לפחות {minimum} מילים.",
+    "This search uses at least {effective_chunk_size} words per chunk, so the chunk size was raised from {chunk_size} to {effective_chunk_size}.":
+        "חיפוש זה בודק לפחות {effective_chunk_size} מילים בכל מקטע, ולכן גודל המקטע הוגדל מ-{chunk_size} ל-{effective_chunk_size}.",
+    "The text has {windows} chunk(s) in all, so the minimum chunk matches was lowered from {min_chunk_matches} to {windows}.":
+        "בטקסט יש {windows} מקטעים בסך הכול, ולכן מינימום התאמות המקטע הורד מ-{min_chunk_matches} ל-{windows}.",
+    "Every chunk of the text is made of very common words, so Lab Mode did not search it. Try a longer or more distinctive text.":
+        "כל מקטעי הטקסט מורכבים ממילים נפוצות מאוד, ולכן מצב מעבדה לא חיפש בו. נסה טקסט ארוך או ייחודי יותר.",
     "Lab Engine not initialized": "מנוע המעבדה לא אותחל",
     "Paste your Hebrew text here...": "הדבק טקסט עברי כאן...",
     "Final forms": "צורות סופיות",

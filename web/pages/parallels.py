@@ -41,6 +41,7 @@ from shared.browse_map_utils import (
     library_codes_with_manuscripts,
 )
 from shared.sys_id_patterns import CORPUS_SYS_ID_RE
+from shared.composition_windows import chunk_notice_message, is_warning as chunk_notice_is_warning
 
 # --- Multi-witness letter-level search ------------------------------------
 # The witness-resolution rules live in `shared/passage_witness_source.py` so
@@ -5013,6 +5014,15 @@ def create_parallels_page(initial_text: str = None):
                         cap=PARALLELS_GROUP_CAP),
                     type='info',
                 )
+            # Chunk and Lab runs: the text did not fit the requested settings.
+            # Shown for every run, including one that found nothing, so an
+            # empty result is never mistaken for "no parallels exist".
+            for _cnotice in (result_data.get('composition_notices') or []):
+                _cmsg = chunk_notice_message(_cnotice, tr)
+                if _cmsg:
+                    ui.notify(_cmsg,
+                              type='warning' if chunk_notice_is_warning(_cnotice) else 'info',
+                              timeout=10000)
 
             # Built from DISPATCH-TIME captures, so it describes the search
             # that RAN -- which is why it sits outside the result guard below
@@ -5150,7 +5160,7 @@ def create_parallels_page(initial_text: str = None):
                     'max_freq': float(captured_freq_threshold) if captured_freq_threshold is not None else None,
                     'filters': _parallels_filters,
                     'boundary_options': None,  # Phase 77: not yet exposed as user-settable; placeholder for parity with /api/parallels API-02
-                    'warnings': [],  # Phase 78 will populate
+                    'warnings': [dict(n) for n in (result_data.get('composition_notices') or [])],
                 }
                 # DMF-09 HYBRID Hide post-fetch filter (Phase 131-05 / Codex MED #6).
                 # Applied BEFORE set_parallels_export / safe_user_set so exports + stored

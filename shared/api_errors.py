@@ -80,6 +80,12 @@ WARNING_CODES = frozenset({
     # and `fusion_score`. Carries `count` and a `witnesses` list naming each
     # skipped entry and the one it duplicates.
     'witness_duplicate_skipped',
+    # Chunk method (shared/composition_windows.py). Each carries the numbers
+    # it names: the text has fewer words than chunk_size and was searched as
+    # one chunk (`words`, `chunk_size`, `effective_chunk_size`); fewer than
+    # two words, nothing searched (`words`, `minimum`).
+    'text_shorter_than_chunk_size',
+    'text_too_short',
 })
 
 

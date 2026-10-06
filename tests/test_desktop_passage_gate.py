@@ -144,6 +144,8 @@ class _Win:
     # Borrowed, not stubbed: Reset clears the auto-expand state before it
     # defers, and a stand-in would let that call vanish silently.
     _stop_auto_expand = APP._stop_auto_expand
+    # New and a restore clear the chunk-size notice line.
+    _clear_comp_chunk_notice = APP._clear_comp_chunk_notice
 
     def _emit_comp_search_telemetry(self, action, result_count=None):
         # A recorder, not the real one: New reports a batch it discards as
