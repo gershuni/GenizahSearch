@@ -64,20 +64,21 @@ Move to "Completed Issues" section at bottom with date
 |----------|------|
 | P1 Critical Bugs | 0 |
 | P2 Medium Bugs | 47 |
-| P3 Low Priority | 102 |
+| P3 Low Priority | 103 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 20 |
 | Untested Areas | 4 |
 | Deferred to v7.15+ | 6 |
 | 2026-05-29 audit follow-up | 2 |
 | FGP integration (§4.5) | 5 |
-| **Total open** | **188** |
+| **Total open** | **189** |
 
 > Counts here exclude closed items (recomputed 2026-08-14 by counting rows carrying ❌/⏸/⏳); closed history lives in docs/archive/OPEN_ISSUES_ARCHIVE.md.
 > Count notes from 2026-09-25 to 2026-10-05 moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-06.
 > 2026-10-06 (local checks + sweep items): Deferred -1 (D-F12 fixed); P3 -1 (the 90-minute chunk hang merged into the findings-page hang row) +12; P2 +5; Documentation +1; Code Quality Debt +4 -- 186.
 > 2026-10-06 (regex prefilter): P2 #9 rewritten to its website half (still 1); P3 +3 -- 189.
 > 2026-10-06 (website "N+" and search-within completion): P2 -1 (#9 closed) -- 188.
+> 2026-10-06 (regex review fixes): P3 +1 (My Library hint on a cut-off empty search) -- 189.
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 
@@ -298,6 +299,7 @@ Move to "Completed Issues" section at bottom with date
 | **Two groups of tests never run in CI** | `tests/conftest.py` (`collect_ignore_glob` when `GITHUB_ACTIONS` is set), `tests/e2e/`, `.github/workflows/ci.yml` (slow-tests comment) | ❌ Open (sweep #37, #38; rechecked 2026-10-06) | (a) About 133 desktop tests in 10 file patterns (My Library tab, LOCAL PDF rendering, opt-out persistence, recovery-scan cleanup, Joins Lab construction, ...) are skipped on both CI systems; D-F15 covers only one of them. (b) `tests/e2e/` (17 tests) skips everywhere: selenium is in no requirements file, although the slow-tests job's comment says the e2e test runs there. |
 | **Regex patterns that do not start at a word edge cost a pass over the whole term dictionary** | `shared/regex_prefilter.py` (a run not anchored at a token start becomes `.*X.*`) | ❌ Open (2026-10-06) | 8-12 s per such pattern on 2.2M documents (measured 2026-10-06 under load; 3.4-5.0 s in the 2026-09-28 design run); a start-anchored run takes 0.01-0.04 s. A term vocabulary sidecar or fewer index segments would cut it. |
 | **One Regex pattern can match differently on the desktop and on the website** | `shared/search_regex.py` (in-process `regex` module; website workers use stdlib `re`) | ❌ Open (2026-09-28, logged 2026-10-06) | `x{e<=1}` is a fuzzy constraint in `regex` and literal text in `re`; `[[:alpha:]]` is a POSIX class in one and a nested set in the other. Such patterns get no prefilter (no match is lost), but the two apps can return different pages. |
+| **My Library: a cut-off search with no matches offers the Genizah corpus as if My Library had none** | `genizah_app.py::on_search_finished` (zero-result branch: `_update_local_scope_strip(0, cancelled=...)`) | ❌ Open (2026-10-06) | Since 2026-10-06 the status line says "(Partial results)" when a cut-off search found nothing, but the My Library hint below it still reads "No results in My Library" and offers the Genizah corpus. Only a My Library search that reached the 50,000-candidate limit without a match (a Regex pattern with no prefilter) gets there. `tests/test_local_scope_zero_result_hint.py` pins the current source line. |
 | **Lab Mode ignores Regex mode** | `shared/lab_engine.py::lab_search` (never reads `mode`), web `/search` Lab switch, desktop `LabSearchThread` | ❌ Open (2026-09-28, logged 2026-10-06) | A Regex pattern in Lab Mode is searched as words. Owner 2026-09-28: Lab Mode is minor. |
 
 ---
