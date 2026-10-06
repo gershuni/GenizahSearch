@@ -127,3 +127,17 @@ def test_a_stopped_search_still_says_partial(lang):
 def test_both_strings_are_translated():
     from shared.genizah_translations import TRANSLATIONS
     assert "No results found." in TRANSLATIONS and "Partial results" in TRANSLATIONS
+
+
+def test_a_cut_off_search_within_results_with_no_match_says_partial(lang):
+    """Inside a refinement the zero-result line is "0 results within current scope";
+    a cut-off run must not lose its "(Partial results)" there either."""
+    tr = genizah_app.tr
+    host = _Host({"capped": True, "interrupted": False})
+    host._refine_mode = True
+    host.on_search_finished([])
+    assert host.status_label.text == f"{tr('0 results within current scope')} ({tr('Partial results')})"
+    complete = _Host({"capped": False, "interrupted": False})
+    complete._refine_mode = True
+    complete.on_search_finished([])
+    assert complete.status_label.text == tr('0 results within current scope')

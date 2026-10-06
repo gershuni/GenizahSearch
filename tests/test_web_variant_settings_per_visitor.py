@@ -27,6 +27,7 @@ os.environ.setdefault('GENIZAH_STORAGE_SECRET', 'variant-settings-test-secret-01
 
 WORD = 'אבגד'
 WORD2 = 'הוזח'
+WORD3 = 'טיכל'
 PLACEHOLDER = 'Enter Hebrew text to search'
 
 # Server values chosen to differ from every website default.
@@ -314,6 +315,7 @@ def test_restored_refinement_steps_replay_with_their_own_settings(server):
         {'query': WORD, 'mode': 'variants_maximum', 'gap': 0,
          'variant_settings': {'variant_pairs_count': 120, 'variant_max_changes': 1}},
         {'query': WORD2, 'mode': 'variants_extended', 'gap': 0},
+        {'query': WORD3, 'mode': 'fuzzy', 'gap': 0},
     ]
 
     async def driver(a, b):
@@ -322,10 +324,10 @@ def test_restored_refinement_steps_replay_with_their_own_settings(server):
               variant_pref_custom_variants={'ש=ס': True}, variant_pref_variant_aggressive=True,
               search_max_changes=3)
         await a.open('/search')
-        await wait_for_payloads(server.queue, 2)
+        await wait_for_payloads(server.queue, 3)
 
     run(driver)
-    sent = {server.queue.query_of(p): p['settings'] for p in server.queue.payloads[:2]}
+    sent = {server.queue.query_of(p): p['settings'] for p in server.queue.payloads[:3]}
     assert (sent[WORD]['variant_pairs_count'], sent[WORD]['variant_max_changes']) == (120, 1), sent[WORD]
     legacy = sent[WORD2]
     # Extended's preset and its default x2 (the store's x3 is this visitor's choice now)
@@ -333,6 +335,8 @@ def test_restored_refinement_steps_replay_with_their_own_settings(server):
     level_keys = ('variant_pairs_count', 'variant_max_changes')
     assert {k: legacy[k] for k in WEBSITE_DEFAULTS if k not in level_keys} == {
         k: v for k, v in WEBSITE_DEFAULTS.items() if k not in level_keys}, legacy
+    fuzzy = sent[WORD3]          # a Fuzzy step runs at x2 on Basic's pairs
+    assert (fuzzy['variant_pairs_count'], fuzzy['variant_max_changes']) == (30, 2), fuzzy
     assert server_values(server.settings) == SERVER
 
 
@@ -360,6 +364,17 @@ def test_the_shown_results_settings_survive_a_reload():
         restored = ss.SearchUIState()
         assert ss.restore_search_active_snapshot(restored)
     assert restored.last_variant_settings == sent
+
+    # New Search clears them with the rest of the snapshot.
+    with patch.object(ss, 'safe_user_get', lambda key, default=None: saved.get(key, default)), \
+            patch.object(ss, 'safe_user_set', lambda key, value: saved.__setitem__(key, value) or True), \
+            patch.object(ss, 'safe_user_pop', lambda key, default=None: saved.pop(key, default)), \
+            patch.object(ss, '_get_tab_storage', lambda: None):
+        ss.clear_search_snapshot()
+        cleared = ss.SearchUIState()
+        ss.restore_search_snapshot(cleared)
+    assert 'search_last_variant_settings' not in saved
+    assert cleared.last_variant_settings is None
 
 
 def test_slider_mode_prefix_moves_the_slider(server):
@@ -492,3 +507,21 @@ def test_parallels_fingerprint_keeps_old_identities_and_tells_preferences_apart(
     assert compute_parallels_search_fingerprint(**base, variant_preferences=defaults) != old
     changed = {**as_before, 'custom_variants': {'ש=ס': True}}
     assert compute_parallels_search_fingerprint(**base, variant_preferences=changed) != old
+    assert compute_parallels_search_fingerprint(
+        **base, variant_preferences={**as_before, 'comp_min_score': 50}) != old
+
+
+def test_old_fingerprints_do_not_follow_a_change_of_the_website_defaults(monkeypatch):
+    """The settings old fingerprints were made with are written out: changing the
+    website defaults later must not make an old fingerprint match other settings."""
+    from web import variant_preferences
+    from web.export_state import compute_parallels_search_fingerprint
+    base = dict(text=WORD, engine='chunk', mode='variants', variant_level=30, variant_max_changes=2)
+    old = compute_parallels_search_fingerprint(**base)
+    before = {k: v for k, v in variant_preferences.website_defaults().items()
+              if k in ('variant_min_word_len', 'variant_aggressive', 'custom_variants', 'comp_min_score')}
+    before['variant_aggressive'] = True
+    monkeypatch.setitem(variant_preferences.WEBSITE_DEFAULTS, 'variant_min_word_len', 3)
+    assert compute_parallels_search_fingerprint(**base, variant_preferences=before) == old
+    assert compute_parallels_search_fingerprint(
+        **base, variant_preferences={**before, 'variant_min_word_len': 3}) != old

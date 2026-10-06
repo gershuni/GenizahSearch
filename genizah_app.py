@@ -21804,7 +21804,11 @@ class GenizahGUI(QMainWindow):
                     self.refine_badge.setVisible(False)
                 if hasattr(self, 'refine_cancel_btn'):
                     self.refine_cancel_btn.setVisible(False)
-                self.status_label.setText(tr('0 results within current scope'))
+                zero_in_scope = tr('0 results within current scope')
+                if was_cancelled or self._run_left_matches_out():
+                    # Cut off or stopped: nothing found among the pages it read.
+                    zero_in_scope = f"{zero_in_scope} ({tr('Partial results')})"
+                self.status_label.setText(zero_in_scope)
                 if hasattr(self, '_update_refinement_strip'):
                     self._update_refinement_strip()
                 if hasattr(self, '_zero_result_back_btn'):
