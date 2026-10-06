@@ -29,7 +29,10 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
   failed lookup read as "no manuscripts match", and a missing catalog file searched
   everything. The API answers 503 `filter_unavailable` for a filtered request it cannot apply
   (it used to answer 200 unfiltered). Line Height is hidden until the catalog carries it; a
-  saved Line Height filter is removed with a notice.
+  saved Line Height filter is removed with a notice (in Focus Search too).
+- **Search history keeps its filters (web):** removing a filter chip, or adding a term, after
+  restoring a search from history -- or after a reload -- no longer changes the saved history
+  entry.
 
 ## [9.5.0] - 2026-10-04 — Faster, complete search
 
