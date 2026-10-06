@@ -322,3 +322,16 @@ def test_ids_only_is_not_cut_off_when_every_doc_matches(tmp_path):
     assert len(rows) == 3 and not cutoff["capped"]
     eng = None
     gc.collect()
+
+
+def test_a_cut_main_search_stays_cut_when_my_library_fits(engine, tmp_path):
+    """Both corpora: the main index reaches the limit and My Library does not -- the
+    search as a whole still left matches out, so it stays "N+"."""
+    local = _build(str(tmp_path / "local"), [("l0", f"אבג {W}", "page", "")])
+    saved = (getattr(engine, "local_index", None), getattr(engine, "local_searcher", None))
+    engine.local_index, engine.local_searcher = local, local.searcher()
+    try:
+        _rows, cut = _run(engine, W, 2, corpus_scope="all")
+        assert cut["capped"]
+    finally:
+        engine.local_index, engine.local_searcher = saved

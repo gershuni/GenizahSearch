@@ -88,3 +88,16 @@ def test_an_ordinary_class_still_gets_a_prefilter(index):
 ])
 def test_set_syntax_divergence_is_read_from_the_source(pattern, diverges):
     assert regex_prefilter._set_syntax_diverges(pattern) is diverges
+
+
+def test_a_leading_close_bracket_after_caret_is_a_literal_in_the_set():
+    """`[^]a[:digit:]]`: the `]` right after `^` is a literal, so the set still holds
+    `[` -- the regex module reads a POSIX class there and the pattern gets no
+    prefilter (it matches שלום, which a prefilter built from stdlib's reading
+    would exclude)."""
+    import regex
+    from shared.regex_prefilter import TRUE, extract_formula
+    pattern = 'ש[^]a[:digit:]]ום'
+    assert regex.search(pattern, 'שלום')
+    for stripped in (True, False):
+        assert extract_formula(pattern, stripped=stripped) is TRUE
