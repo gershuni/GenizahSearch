@@ -101,9 +101,13 @@ class LabSettings:
                     self.variant_min_word_len = data.get('variant_min_word_len', 2)
                     self.variant_max_changes = data.get('variant_max_changes', 2)
                     from shared.variants import max_changes_by_preset
+                    # A table that is not a dict (a damaged file) is no table: the single
+                    # value saved before seeds it, as on the website (max_changes_table).
+                    stored_table = data.get('variant_max_changes_by_preset')
+                    if not isinstance(stored_table, dict):
+                        stored_table = None
                     self.variant_max_changes_by_preset = max_changes_by_preset(
-                        data.get('variant_max_changes_by_preset'),
-                        legacy=data.get('variant_max_changes'))
+                        stored_table, legacy=data.get('variant_max_changes'))
                     self.variant_aggressive = data.get('variant_aggressive', False)
                     self.variant_pairs_count = data.get('variant_pairs_count', 50)
                     self.variant_use_slider = data.get('variant_use_slider', False)

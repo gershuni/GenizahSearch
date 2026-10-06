@@ -77,6 +77,8 @@ DESKTOP_MODULES = [
     "desktop/lists_web_removals_dialog.py",
     # 2026-09-29: no running QThread is destroyed at exit.
     "desktop/qthread_exit.py",
+    # 2026-10-06: Joins Lab and refinement replays search with their own variant settings.
+    "desktop/variant_run_settings.py",
 ]
 
 # Compound statement types whose bodies run at import time

@@ -199,3 +199,148 @@ def test_responsa_runs_with_basics_changes():
     host = _Host(WORD, 150, mode_idx=2)
     host.start_search()
     assert host.lab_engine.settings.variant_max_changes == 1
+
+
+# --- The spin box shows the x1-x3 the next search runs with (2026-10-06) ------------
+# It changes with the level. Three ways of changing the level, or the table, left it
+# showing another level's value: the Composition slider (it moves the search slider
+# with signals blocked), saving Search Settings, and startup (the box is built with
+# the defaults before the saved settings are read).
+
+def test_the_composition_slider_moves_the_spin_box_with_the_search_slider():
+    host = _Host(WORD, 30, use_slider=True, mode_idx=1)
+    host._show_level_max_changes()
+    assert host.spin_max_changes.value() == 1                  # Basic
+    host._sync_variant_sliders(150, 'comp')                    # the Composition slider moved
+    assert host.variant_slider.value() == 150
+    assert host.spin_max_changes.value() == 3, 'the spin box still shows Basic x1'
+    host.start_search()
+    assert host.lab_engine.settings.variant_max_changes == host.spin_max_changes.value()
+
+
+def test_saving_search_settings_shows_the_new_value(monkeypatch):
+    class _Dialog:          # Search Settings: Extended changed to x3, Save & Close
+        def __init__(self, parent, settings):
+            self.settings = settings
+
+        def exec(self):
+            self.settings.variant_max_changes_by_preset = {'basic': 1, 'extended': 3, 'maximum': 3}
+            return True
+
+    monkeypatch.setattr(genizah_app, 'SearchSettingsDialog', _Dialog)
+    host = _Host(WORD, 70, mode_idx=1)
+    host._show_level_max_changes()
+    assert host.spin_max_changes.value() == 2
+    host.open_search_settings()
+    assert host.spin_max_changes.value() == 3, 'the spin box still shows the old x2'
+    host.start_search()
+    assert host.lab_engine.settings.variant_max_changes == 3
+
+
+def test_startup_shows_the_saved_value_of_the_shown_level(monkeypatch, tmp_path):
+    from unittest.mock import MagicMock
+    saved = SimpleNamespace(variant_use_slider=False, variant_pairs_count=70,
+                            variant_max_changes_by_preset={'basic': 1, 'extended': 3, 'maximum': 3})
+    monkeypatch.setattr(genizah_app, 'LabEngine', lambda meta, var_mgr: SimpleNamespace(settings=saved))
+    monkeypatch.setattr(genizah_app, 'ListsManager', lambda meta: MagicMock())
+    monkeypatch.setattr(genizah_app, 'JoinsManager', lambda client: MagicMock())
+    monkeypatch.setattr(genizah_app, 'QMessageBox', MagicMock())
+    monkeypatch.setattr(genizah_app.Config, 'REPORTS_DIR', str(tmp_path / 'reports'))
+    monkeypatch.setattr(genizah_app.Config, 'INDEX_DIR', str(tmp_path))
+    host = MagicMock()                        # the window init_ui built
+    host.spin_max_changes = _Spin(2)          # built before the settings were read: the defaults
+    host._current_variant_preset = 70         # Extended
+    for name in ('_show_level_max_changes', '_level_max_changes', '_lab_settings',
+                 '_get_current_variant_pairs_count'):
+        setattr(host, name, getattr(APP, name).__get__(host))
+    APP.on_startup_finished(host, MagicMock(), MagicMock(), MagicMock(), MagicMock())
+    assert host.lab_engine.settings is saved
+    assert host.spin_max_changes.value() == 3, 'the spin box shows the default x2'
+
+
+# --- A damaged saved table falls back to the single value saved before (2026-10-06) --
+# As on the website (web/variant_preferences.py::max_changes_table): a table that is
+# not a dict is no table, so the old single value seeds Extended and Maximum.
+
+@pytest.mark.parametrize('damaged', [[1, 2, 3], 'x', 2, True])
+def test_a_damaged_table_falls_back_to_the_single_value(tmp_path, monkeypatch, damaged):
+    import json
+    from shared import lab_settings
+    from shared.variants import max_changes_by_preset
+    path = tmp_path / 'lab_config.json'
+    path.write_text(json.dumps({'variant_max_changes': 3, 'variant_max_changes_by_preset': damaged}),
+                    encoding='utf-8')
+    monkeypatch.setattr(lab_settings.Config, 'LAB_CONFIG_FILE', str(path))
+    monkeypatch.setattr(lab_settings.Config, 'LAB_DIR', str(tmp_path))
+    table = lab_settings.LabSettings().variant_max_changes_by_preset
+    assert table == {'basic': 1, 'extended': 3, 'maximum': 3}
+    assert table == max_changes_by_preset(legacy=3)       # the website's fallback
+
+
+# --- desktop/variant_run_settings.py ---------------------------------------------------
+
+def _shared(pairs=150, changes=3):
+    settings = SimpleNamespace(variant_pairs_count=pairs, variant_max_changes=changes,
+                               variant_min_word_len=2, variant_aggressive=False, custom_variants={})
+    return settings, VariantManager(settings)
+
+
+class _Recorder:
+    def __init__(self, settings, var_mgr):
+        self.settings, self.var_mgr, self.ran = settings, var_mgr, []
+
+    def execute_search(self, *a, **kw):
+        self.ran.append((self.settings.variant_pairs_count, self.settings.variant_max_changes,
+                         self.var_mgr.get_variant_level()))
+        if kw.get('fail'):
+            raise RuntimeError('engine failed')
+        return ['row']
+
+    def get_browse_page(self, sid):
+        return {'sid': sid}
+
+
+def test_a_bound_searcher_runs_with_its_values_and_puts_the_shared_ones_back():
+    from desktop.variant_run_settings import recorded_settings_searcher
+    settings, var_mgr = _shared()
+    engine = _Recorder(settings, var_mgr)
+    bound = recorded_settings_searcher(engine, settings, var_mgr,
+                                       {'variant_pairs_count': 30, 'variant_max_changes': 1})
+    assert bound.execute_search('q', 'variants', 0) == ['row']
+    assert engine.ran == [(30, 1, 30)]
+    assert (settings.variant_pairs_count, settings.variant_max_changes) == (150, 3)
+    assert var_mgr.get_variant_level() == 150
+    assert bound.get_browse_page('s') == {'sid': 's'}, 'everything else is the engine'
+    with pytest.raises(RuntimeError):
+        bound.execute_search('q', 'variants', 0, fail=True)
+    assert (settings.variant_pairs_count, settings.variant_max_changes) == (150, 3), 'put back on failure'
+
+
+def test_a_value_another_search_set_meanwhile_is_kept():
+    """Joins Lab can search beside the main window: a value changed during the search
+    is that other search's, and is not overwritten with the one from before."""
+    from desktop.variant_run_settings import variant_settings_applied
+    settings, var_mgr = _shared(70, 2)
+    with variant_settings_applied(settings, var_mgr, {'variant_max_changes': 1}):
+        assert settings.variant_max_changes == 1
+        settings.variant_max_changes = 3                # a main-window Maximum search started
+    assert settings.variant_max_changes == 3
+
+
+@pytest.mark.parametrize('values', [None, {}, {'variant_max_changes': 'x', 'variant_pairs_count': 0},
+                                    ['not', 'a', 'dict']])
+def test_unusable_values_leave_the_shared_settings_alone(values):
+    from desktop.variant_run_settings import variant_settings_applied
+    settings, var_mgr = _shared(70, 2)
+    with variant_settings_applied(settings, var_mgr, values):
+        assert (settings.variant_pairs_count, settings.variant_max_changes) == (70, 2)
+    assert (settings.variant_pairs_count, settings.variant_max_changes) == (70, 2)
+
+
+def test_the_recorded_settings_are_what_the_search_runs_with():
+    from desktop.variant_run_settings import variant_settings_now
+    settings, var_mgr = _shared(70, 2)
+    var_mgr.set_variant_level(150)
+    settings.variant_max_changes = 3
+    assert variant_settings_now(settings, var_mgr) == {'variant_pairs_count': 150, 'variant_max_changes': 3}
+    assert variant_settings_now(None, var_mgr) is None
