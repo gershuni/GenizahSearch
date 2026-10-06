@@ -27,6 +27,11 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
   results completes it first. Applies to My Library as well.
 - A pattern that does not start at the beginning of a word takes a few seconds longer: the index
   looks for its letters inside every word.
+- A pattern with a POSIX class inside a set (`[a[:alpha:]]`) reads every page: the desktop's
+  matcher and the index read such a set differently.
+- **A list that exactly reaches the reading limit no longer shows "N+"** (every mode, both
+  apps): the search now looks one candidate further to know whether any was left out. On the
+  desktop, a cut-off search that found nothing says "No results found. (Partial results)".
 
 ## [9.5.0] - 2026-10-04 — Faster, complete search
 
