@@ -80,6 +80,10 @@ class ChunkRetriever:
     # (shared/composition_windows.py): a query shorter than chunk_size ran as
     # one whole-text window, so it is not the configuration config_id names.
     notice_counts: dict = field(default_factory=dict, compare=False, repr=False)
+    # ...and at which size those queries actually ran (K-13): for each notice
+    # that carries an effective_chunk_size, {code: {effective size: queries}}.
+    # A two- and a three-word query at chunk 5 are two different searches.
+    effective_size_counts: dict = field(default_factory=dict, compare=False, repr=False)
 
     @property
     def config_id(self) -> str:
@@ -93,6 +97,10 @@ class ChunkRetriever:
         for notice in res.get('composition_notices') or []:
             code = notice.get('code')
             self.notice_counts[code] = self.notice_counts.get(code, 0) + 1
+            size = notice.get('effective_chunk_size')
+            if size is not None:
+                by_size = self.effective_size_counts.setdefault(code, {})
+                by_size[size] = by_size.get(size, 0) + 1
         rows = list(res.get('main') or [])
         if self.include_filtered:
             rows += list(res.get('filtered') or [])

@@ -4419,20 +4419,23 @@ def create_parallels_page(initial_text: str = None):
         # Restore filter state from history entry
         filters = params.get('filters')
         if filters and isinstance(filters, dict):
+            # Every list is a COPY: the entry lives in the visitor's storage,
+            # and a chip removal or an added term edits these lists in place
+            # -- sharing them rewrote the saved history entry.
             # Migrate from legacy single-value to lists
-            _d = filters.get('domains') or ([filters['domain']] if filters.get('domain') else [])
-            _a = filters.get('authors') or ([filters['author']] if filters.get('author') else [])
-            _w = filters.get('works') or ([filters['work']] if filters.get('work') else [])
+            _d = list(filters.get('domains') or ([filters['domain']] if filters.get('domain') else []))
+            _a = list(filters.get('authors') or ([filters['author']] if filters.get('author') else []))
+            _w = list(filters.get('works') or ([filters['work']] if filters.get('work') else []))
             p_state.filter_domains = _d
             p_state.filter_authors = _a
             p_state.filter_works = _w
             p_state.filter_include_mode = filters.get('include_mode', True)
             p_state.filter_date_from = filters.get('date_from')
             p_state.filter_date_to = filters.get('date_to')
-            p_state.filter_material_exclude = filters.get('material_exclude', [])
-            p_state.filter_text_all = filters.get('text_all', [])
-            p_state.filter_text_any = filters.get('text_any', [])
-            p_state.filter_text_not = filters.get('text_not', [])
+            p_state.filter_material_exclude = list(filters.get('material_exclude') or [])
+            p_state.filter_text_all = list(filters.get('text_all') or [])
+            p_state.filter_text_any = list(filters.get('text_any') or [])
+            p_state.filter_text_not = list(filters.get('text_not') or [])
             # Update filter UI elements
             p_domain_select.value = p_state.filter_domains
             p_author_select.value = p_state.filter_authors
@@ -5309,17 +5312,20 @@ def create_parallels_page(initial_text: str = None):
                             # included -- so this is observability, not a
                             # restore contract).
                             'engine': captured_engine,
+                            # COPIES: a live list loaded from storage is stored
+                            # as-is, so the entry would share it and a later chip
+                            # removal would rewrite the saved history.
                             'filters': {
-                                'domains': p_state.filter_domains,
-                                'authors': p_state.filter_authors,
-                                'works': p_state.filter_works,
+                                'domains': list(p_state.filter_domains or []),
+                                'authors': list(p_state.filter_authors or []),
+                                'works': list(p_state.filter_works or []),
                                 'include_mode': p_state.filter_include_mode,
                                 'date_from': p_state.filter_date_from,
                                 'date_to': p_state.filter_date_to,
-                                'material_exclude': p_state.filter_material_exclude,
-                                'text_all': p_state.filter_text_all,
-                                'text_any': p_state.filter_text_any,
-                                'text_not': p_state.filter_text_not,
+                                'material_exclude': list(p_state.filter_material_exclude or []),
+                                'text_all': list(p_state.filter_text_all or []),
+                                'text_any': list(p_state.filter_text_any or []),
+                                'text_not': list(p_state.filter_text_not or []),
                             } if _has_active_filters() else None,
                         },
                         state_snapshot={

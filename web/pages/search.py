@@ -4510,20 +4510,23 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Restore filters if present
         filters = params.get('filters')
         if filters and isinstance(filters, dict):
+            # Every list is a COPY: the entry lives in the visitor's storage,
+            # and a chip removal or an added term edits these lists in place
+            # -- sharing them rewrote the saved history entry.
             # Migrate from legacy single-value to lists
-            _d = filters.get('domains') or ([filters['domain']] if filters.get('domain') else [])
-            _a = filters.get('authors') or ([filters['author']] if filters.get('author') else [])
-            _w = filters.get('works') or ([filters['work']] if filters.get('work') else [])
+            _d = list(filters.get('domains') or ([filters['domain']] if filters.get('domain') else []))
+            _a = list(filters.get('authors') or ([filters['author']] if filters.get('author') else []))
+            _w = list(filters.get('works') or ([filters['work']] if filters.get('work') else []))
             search_state.filter_domains = _d
             search_state.filter_authors = _a
             search_state.filter_works = _w
             search_state.filter_include_mode = filters.get('include_mode', True)
             search_state.filter_date_from = filters.get('date_from')
             search_state.filter_date_to = filters.get('date_to')
-            search_state.filter_material_exclude = filters.get('material_exclude', [])
-            search_state.filter_text_all = filters.get('text_all', [])
-            search_state.filter_text_any = filters.get('text_any', [])
-            search_state.filter_text_not = filters.get('text_not', [])
+            search_state.filter_material_exclude = list(filters.get('material_exclude') or [])
+            search_state.filter_text_all = list(filters.get('text_all') or [])
+            search_state.filter_text_any = list(filters.get('text_any') or [])
+            search_state.filter_text_not = list(filters.get('text_not') or [])
             # Update filter UI elements
             domain_select.value = search_state.filter_domains
             author_select.value = search_state.filter_authors
@@ -5324,17 +5327,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         'preset': current_preset.get('value', 30) if isinstance(current_preset, dict) else 30,
                         'gap': int(gap_input.value or 0),
                         'text_position': text_position_select.value,
+                        # COPIES: a live list loaded from storage is stored
+                        # as-is, so the entry would share it and a later chip
+                        # removal would rewrite the saved history.
                         'filters': {
-                            'domains': search_state.filter_domains,
-                            'authors': search_state.filter_authors,
-                            'works': search_state.filter_works,
+                            'domains': list(search_state.filter_domains or []),
+                            'authors': list(search_state.filter_authors or []),
+                            'works': list(search_state.filter_works or []),
                             'include_mode': search_state.filter_include_mode,
                             'date_from': search_state.filter_date_from,
                             'date_to': search_state.filter_date_to,
-                            'material_exclude': search_state.filter_material_exclude,
-                            'text_all': search_state.filter_text_all,
-                            'text_any': search_state.filter_text_any,
-                            'text_not': search_state.filter_text_not,
+                            'material_exclude': list(search_state.filter_material_exclude or []),
+                            'text_all': list(search_state.filter_text_all or []),
+                            'text_any': list(search_state.filter_text_any or []),
+                            'text_not': list(search_state.filter_text_not or []),
                         } if _has_active_filters() else None,
                     },
                     state_snapshot={

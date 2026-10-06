@@ -1008,6 +1008,7 @@ class PreSearchFilterDialog(QDialog):
         # lookup runs or the user clears them (K-17).
         from shared.fjms_service import (
             FILTER_SUPPORTED, FILTER_UNSUPPORTED,
+            LINE_HEIGHT_FILTER_KEYS, MEASUREMENT_FILTER_KEYS,
             measurement_filter_support, line_height_filter_support,
         )
         _meas_support = measurement_filter_support()
@@ -1103,6 +1104,17 @@ class PreSearchFilterDialog(QDialog):
                 self.meas_line_height_min.setValue(_cf['line_height_min'])
             if _cf.get('line_height_max'):
                 self.meas_line_height_max.setValue(_cf['line_height_max'])
+        # The saved values just dropped (they held something). The restores
+        # drop such values with a notice, but a value kept while the catalog
+        # was absent reaches this dialog once a catalog known to lack it has
+        # opened -- and OK would then lose it silently. The notice is shown
+        # below, above the count.
+        _gone = set()
+        if not meas_keep:
+            _gone.update(MEASUREMENT_FILTER_KEYS)
+        if not lh_keep:
+            _gone.update(LINE_HEIGHT_FILTER_KEYS)
+        self.dropped_saved_filters = sorted(k for k in _gone if _cf.get(k))
 
         right_layout.addWidget(meas_group)
 
@@ -1129,6 +1141,14 @@ class PreSearchFilterDialog(QDialog):
         layout.addWidget(chip_scroll)
         self.domain_tree.itemChanged.connect(self._on_domain_tree_changed)
         self._rebuild_dialog_chips()
+
+        # --- Saved filters this catalog cannot answer (#17) ---
+        self.dropped_notice_label = QLabel(
+            tr('Some saved filters were removed: this catalog data is not available.'))
+        self.dropped_notice_label.setWordWrap(True)
+        self.dropped_notice_label.setStyleSheet("color: #e67e22; font-size: 11px; padding: 2px 4px;")
+        self.dropped_notice_label.setVisible(bool(self.dropped_saved_filters))
+        layout.addWidget(self.dropped_notice_label)
 
         # --- Manuscript count ---
         self.count_label = QLabel("")

@@ -306,17 +306,40 @@ def test_lab_min_chunk_cap_counts_distinct_chunk_texts(monkeypatch):
 
 def test_eval_chunk_retriever_counts_composition_notices():
     # Codex design review K-13: a query shorter than chunk_size runs as one
-    # whole-text window; the evaluation must be able to say how many did.
+    # whole-text window; the evaluation must be able to say how many did AND
+    # at which size each ran -- a two-word and a three-word query at chunk 5
+    # are two different searches. The notices are the real ones the engine
+    # returns (plan_windows), not hand-written dicts.
+    import importlib.util
+    import json
+    from pathlib import Path
+
+    from shared.composition_windows import plan_windows
     from shared.retrieval_adapters import ChunkRetriever
 
     class _Engine:
         def search_composition_logic(self, text, chunk_size, max_freq, mode):
-            notices = ([{'code': 'text_shorter_than_chunk_size'}]
-                       if len(text.split()) < chunk_size else [])
-            return {'main': [], 'composition_notices': notices}
+            plan = plan_windows(len(text.split()), chunk_size)
+            return {'main': [], 'composition_notices': list(plan.notices)}
 
     retriever = ChunkRetriever(engine=_Engine(), chunk_size=5)
     for text in ('a b', 'a b c d e f', 'a b c'):
         retriever.retrieve(text)
     assert retriever.notice_counts == {'text_shorter_than_chunk_size': 2}
+    assert retriever.effective_size_counts == {'text_shorter_than_chunk_size': {2: 1, 3: 1}}
     assert retriever.config_id == ChunkRetriever(engine=None, chunk_size=5).config_id
+
+    # The evaluation script's summary and printout keep the breakdown, and
+    # the summary still goes into the ledger (json, sort_keys).
+    spec = importlib.util.spec_from_file_location(
+        '_eval_methods', Path(__file__).resolve().parents[1] / 'scripts' / 'eval_methods.py')
+    eval_methods = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(eval_methods)
+    summary, lines = eval_methods.composition_notice_report(retriever)
+    assert summary == {
+        'composition_notices': {'text_shorter_than_chunk_size': 2},
+        'composition_notice_effective_sizes': {'text_shorter_than_chunk_size': {2: 1, 3: 1}},
+    }
+    assert any('{2: 1, 3: 1}' in line for line in lines), lines
+    json.dumps(summary, sort_keys=True)
+    assert eval_methods.composition_notice_report(object()) == ({}, [])

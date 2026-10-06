@@ -144,6 +144,24 @@ def test_drop_returns_a_new_dict_and_leaves_the_input_alone(no_lh_svc):
         "the caller's dict (a search-history entry) was modified")
 
 
+@pytest.mark.parametrize("which", ["drops", "absent"])
+def test_kept_filters_share_no_list_with_the_saved_entry(tmp_path, no_lh_svc, which):
+    """The caller makes ``kept`` the live filters, and a chip removal edits a
+    list such as ``domains`` IN PLACE. A shallow copy let that edit reach the
+    saved history entry -- restore domains=['Halakha'], remove the chip, and
+    the history said domains=[]."""
+    svc = no_lh_svc if which == "drops" else FjmsService(db_path=str(tmp_path / "absent.db"))
+    saved = {'domains': ['Halakha'], 'text_all': ['word'],
+             'measurement_material': ['Paper'], 'line_height_min': 3.0}
+    kept, _dropped = fjms_service.drop_unavailable_measurement_filters(saved, service=svc)
+    kept['domains'].remove('Halakha')
+    kept['text_all'].append('other')
+    kept['measurement_material'].clear()
+    assert saved == {'domains': ['Halakha'], 'text_all': ['word'],
+                     'measurement_material': ['Paper'], 'line_height_min': 3.0}, (
+        f"editing the live filters changed the saved entry: {saved}")
+
+
 @pytest.mark.parametrize("which", ["absent", "unknown"])
 def test_drop_keeps_everything_when_the_answer_is_not_known(tmp_path, unknown_svc, which):
     svc = unknown_svc if which == "unknown" else FjmsService(db_path=str(tmp_path / "absent.db"))

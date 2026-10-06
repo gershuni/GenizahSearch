@@ -271,6 +271,52 @@ def test_a_waiting_search_is_cancelled_with_a_message_when_the_lookup_fails(warn
     assert len(warned) == 2
 
 
+# -- a restored history entry never shares a list with the live filters --
+
+class _IdleWorker(_FakeWorker):
+    """Stands in for FilterCountWorker: connected like the real one, never run."""
+
+    def __init__(self, *a, **k):
+        super().__init__()
+
+    def start(self):
+        pass
+
+
+def _history_entry():
+    return {'query': 'word', 'state': {'source_text': 'a b c d e f'},
+            'pre_search_filters': {'include_mode': True, 'domains': ['Halakha', 'Piyyut'],
+                                   'text_all': ['word']}}
+
+
+@pytest.mark.parametrize("restore", ["_restore_regular_search_from_state",
+                                     "_restore_comp_search_from_state"])
+def test_removing_a_restored_chip_leaves_the_history_entry_alone(monkeypatch, tmp_path, restore):
+    """Restore a history entry with domains=['Halakha', ...], then remove that
+    chip: _remove_filter edits the live list IN PLACE, so a restore that
+    shared the entry's lists rewrote the saved history (domains lost
+    'Halakha'). Drives the real restore and the real chip removal."""
+    monkeypatch.setattr(fjms_service, "_default_service",
+                        FjmsService(db_path=str(tmp_path / "absent.db")))
+    monkeypatch.setattr(genizah_app, "FilterCountWorker", _IdleWorker)
+    w = _bare_window()
+    w.query_input = QLineEdit()
+    w._set_local_scope_strip_visible = lambda visible: None
+    w.comp_text_area = QPlainTextEdit()
+    w.comp_title_input = QLineEdit()
+    w._witness_edits_are_locked = lambda: False
+    w._restore_comp_passage_preferences = lambda params: None
+    w.composition_tab = None
+    entry = _history_entry()
+    getattr(w, restore)(entry['state'], entry)
+    assert w.pre_search_filters == entry['pre_search_filters'], "the restore lost a filter"
+    w._remove_filter(('domains', 'Halakha'))
+    w._remove_filter(('text_all', 'word'))
+    assert w.pre_search_filters == {'include_mode': True, 'domains': ['Piyyut']}
+    assert entry == _history_entry(), (
+        f"removing a chip changed the saved history entry: {entry['pre_search_filters']}")
+
+
 def test_dialog_ok_supersedes_a_pending_lookup(monkeypatch, warned):
     """A scope the dialog computed replaces any lookup still running; the
     late answer of the old one must not overwrite it."""

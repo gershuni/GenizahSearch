@@ -195,6 +195,59 @@ def test_dialog_keeps_saved_values_when_support_is_unknown(monkeypatch, tmp_path
         == (3.0, 6.0, 10.0), out
 
 
+DROPPED_NOTICE = 'Some saved filters were removed: this catalog data is not available.'
+
+
+def _visible_notices(dlg):
+    return [lbl for lbl in dlg.findChildren(QLabel)
+            if lbl.text() == DROPPED_NOTICE and not lbl.isHidden()]
+
+
+def test_dialog_says_so_when_it_drops_a_saved_line_height(monkeypatch, tmp_path):
+    """The reported case: a Line Height value restored while the catalog was
+    ABSENT is kept (support unknown); a catalog KNOWN to lack the column then
+    opens, and the Focus Search dialog drops the value. It must say so, with
+    the notice the restores show -- OK used to lose it silently."""
+    import genizah_core
+    monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'en')
+    absent = FjmsService(db_path=str(tmp_path / "absent.db"))
+    restored, dropped = fjms_service.drop_unavailable_measurement_filters(SAVED, service=absent)
+    assert (restored.get('line_height_min'), dropped) == (3.0, []), "the restore was not the reported one"
+    svc = FjmsService(db_path=build_sidecar(tmp_path / "s.db", with_line_height=False))
+    dlg = _open_dialog(monkeypatch, restored, svc)
+    assert len(_visible_notices(dlg)) == 1, "the dialog dropped a saved Line Height silently"
+    assert dlg.dropped_saved_filters == ['line_height_max', 'line_height_min']
+    out = dlg.get_filters()
+    assert 'line_height_min' not in out and out.get('width_min') == 10.0, out
+
+
+def test_dialog_names_every_measurement_it_drops_when_the_table_is_missing(monkeypatch, tmp_path):
+    import genizah_core
+    monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'en')
+    svc = FjmsService(db_path=build_sidecar(tmp_path / "s.db", with_measurements=False))
+    dlg = _open_dialog(monkeypatch, dict(SAVED, measurement_material=['Paper']), svc)
+    assert len(_visible_notices(dlg)) == 1
+    assert dlg.dropped_saved_filters == ['line_height_max', 'line_height_min',
+                                         'measurement_material', 'width_min']
+
+
+@pytest.mark.parametrize("case", ["data_has_it", "support_unknown", "nothing_saved_to_drop"])
+def test_dialog_shows_no_notice_when_nothing_was_dropped(monkeypatch, tmp_path, case):
+    import genizah_core
+    monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'en')
+    saved = SAVED
+    if case == "data_has_it":
+        svc = FjmsService(db_path=build_sidecar(tmp_path / "s.db", with_line_height=True))
+    elif case == "support_unknown":
+        svc = unknown_schema_service(build_sidecar(tmp_path / "s.db", with_line_height=False))
+    else:
+        svc = FjmsService(db_path=build_sidecar(tmp_path / "s.db", with_line_height=False))
+        saved = {'include_mode': True, 'width_min': 10.0, 'line_height_min': 0}
+    dlg = _open_dialog(monkeypatch, saved, svc)
+    assert _visible_notices(dlg) == []
+    assert dlg.dropped_saved_filters == []
+
+
 def test_dialog_without_a_catalog_blocks_ok_until_the_filters_are_cleared(
         monkeypatch, tmp_path, absent_sidecar):
     """K-17: with no catalog, saved filters are kept, the count says it could

@@ -14,6 +14,11 @@ Find Parallels control. Each case must:
 
 Also K-18: /parallels shows the "saved filters were removed" notice when a
 saved measurement filter is one the open catalog is known to lack.
+
+And a search-history entry never shares a list with the live filters, in
+either direction: a chip removal edits the live list IN PLACE, so a shared
+list rewrote the saved entry (restore domains=['Halakha'], remove the chip,
+and the history said domains=[]).
 """
 from __future__ import annotations
 
@@ -26,7 +31,7 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-from nicegui import core, ui
+from nicegui import core, events, ui
 from nicegui.context import context as nicegui_context
 from nicegui.testing.general import prepare_simulation
 from nicegui.testing.user import User
@@ -247,3 +252,244 @@ def test_parallels_drops_a_saved_filter_the_catalog_lacks_with_a_notice(monkeypa
 
     _run(go)
     assert DROPPED_NOTICE in notices, notices
+
+
+# -- search history never shares a list with the live filters --
+
+def _found_lookup(monkeypatch, tmp_path):
+    """A real catalog whose filter lookup answers, so a search can run. The
+    small file has no domain tables, so the author/work option lists a chip
+    removal refreshes are stubbed to empty."""
+    svc = FjmsService(db_path=build_sidecar(tmp_path / 'ok.db'))
+    monkeypatch.setattr(svc, 'get_filter_sys_ids', lambda **kwargs: {'990001'})
+    monkeypatch.setattr(fjms_service, '_default_service', svc)
+    for page in ('search', 'parallels'):
+        for name in ('build_author_options', 'build_work_options'):
+            monkeypatch.setattr(f'web.pages.{page}.{name}', lambda *a, **k: {})
+
+
+def _chips(user, text):
+    return [c for c in _elements(user, ui.chip) if c.text == text]
+
+
+def _remove_chip(user, text):
+    """Press the x on the chip showing ``text``; False when there is none.
+
+    A text term has two chips (the panel's own row and the chip bar) that
+    remove the same term, so the first one serves. The listeners are read
+    from a snapshot: /parallels removes synchronously and rebuilds the chip
+    bar inside the handler, which UserInteraction.trigger's live loop over
+    the listener dict does not survive.
+    """
+    found = _chips(user, text)
+    if not found:
+        return False
+    chip = found[0]
+    with user.client:
+        for listener in list(chip._event_listeners.values()):
+            if listener.type == 'remove':
+                events.handle_event(listener.handler, events.GenericEventArguments(
+                    sender=chip, client=user.client, args={}))
+    return True
+
+
+def _saved_history_entry():
+    return {'query': 'word', 'result_count': 0, 'mode': 'exact',
+            'timestamp': '2026-10-06T10:00:00',
+            'params': {'mode': 'exact', 'filters': {
+                'domains': ['Halakha', 'Piyyut'], 'authors': [], 'works': [],
+                'include_mode': True, 'date_from': None, 'date_to': None,
+                'material_exclude': [], 'text_all': ['term'], 'text_any': [],
+                'text_not': []}},
+            'state': {}}
+
+
+def test_search_history_restore_shares_no_list_with_the_saved_entry(monkeypatch, tmp_path):
+    """Restore an entry from the history menu, then remove two chips."""
+    _found_lookup(monkeypatch, tmp_path)
+    history = [_saved_history_entry()]
+    monkeypatch.setattr('web.pages.search.get_search_history', lambda: history)
+    monkeypatch.setattr('web.pages.search.add_to_search_history', lambda **kwargs: None)
+    engine = _Engine()
+    seen = {}
+
+    async def go():
+        async with _user(engine, {}) as user:
+            await user.open('/search')
+            history_btn = next(b for b in _elements(user, ui.button)
+                               if b.props.get('icon') == 'history')
+            UserInteraction(user, {history_btn}, None).click()
+            item = next(m for m in _elements(user, ui.menu_item)
+                        if any(str(getattr(d, 'text', '')).startswith('word')
+                               for d in m.descendants()))
+            UserInteraction(user, {item}, None).click()
+            for _ in range(60):
+                if 'Re-running search from history' in user.notify.messages:
+                    break
+                await asyncio.sleep(0.05)
+            await asyncio.sleep(0.2)
+            seen['removed'] = (_remove_chip(user, 'Halakha'), _remove_chip(user, '+ term'))
+            await asyncio.sleep(0.2)
+            seen['left'] = len(_chips(user, 'Halakha'))
+
+    _run(go)
+    assert seen == {'removed': (True, True), 'left': 0}, (
+        f"the restored chips were not shown and removed; nothing was exercised: {seen}")
+    assert history == [_saved_history_entry()], (
+        f"removing a chip changed the saved history entry: {history[0]['params']['filters']}")
+
+
+def test_search_history_records_a_copy_of_the_live_filters(monkeypatch, tmp_path):
+    """Run a search with saved filters, then remove a chip: the entry handed to
+    the history must not change with it. (A live list loaded from storage is
+    stored as-is by NiceGUI, so an entry holding it is the live list.)"""
+    _found_lookup(monkeypatch, tmp_path)
+    recorded = []
+    monkeypatch.setattr('web.pages.search.add_to_search_history',
+                        lambda **kwargs: recorded.append(kwargs['params']))
+    engine = _Engine()
+    seen = {}
+
+    async def go():
+        async with _user(engine, {'search_filter_domains': ['Halakha', 'Piyyut'],
+                                  'search_filter_text_all': ['term']}) as user:
+            await user.open('/search')
+            query = next(e for e in _elements(user, ui.input)
+                         if e.props.get('placeholder') == 'Enter Hebrew text to search')
+            with user.client:
+                query.value = 'word'
+            UserInteraction(user, {_button(user, 'Search', 'px-8')}, None).click()
+            for _ in range(60):
+                if recorded:
+                    break
+                await asyncio.sleep(0.05)
+            seen['notices'] = list(user.notify.messages)
+            seen['removed'] = (_remove_chip(user, 'Halakha'), _remove_chip(user, '+ term'))
+            await asyncio.sleep(0.2)
+            seen['left'] = len(_chips(user, 'Halakha'))
+
+    _run(go)
+    assert recorded, f"the search never reached the history: {seen}"
+    assert (seen['removed'], seen['left']) == ((True, True), 0), (
+        f"the chips were not shown and removed; nothing was exercised: {seen}")
+    filters = recorded[0]['filters']
+    assert (filters['domains'], filters['text_all']) == (['Halakha', 'Piyyut'], ['term']), (
+        f"removing a chip changed the recorded history entry: {filters}")
+
+
+def _saved_comp_history_entry():
+    return {'title': 'ברוך אתה', 'result_count': 1,
+            'timestamp': '2026-10-06T10:00:00',
+            'params': {'chunk_size': 5, 'mode': 'exact', 'filters': {
+                'domains': ['Halakha', 'Piyyut'], 'authors': [], 'works': [],
+                'include_mode': True, 'date_from': None, 'date_to': None,
+                'material_exclude': [], 'text_all': ['term'], 'text_any': [],
+                'text_not': []}},
+            'state': {'source_text': 'ברוך אתה יי אלהינו מלך העולם'}}
+
+
+def _storage_hook(monkeypatch, module, history_key, history=None, recorded=None):
+    """Serve ``history`` for the page's history key and/or record what the
+    page writes there; every other key goes to the real storage."""
+    real_get = getattr(module, 'safe_user_get')
+    real_set = getattr(module, 'safe_user_set')
+
+    def _get(key, default=None):
+        if history is not None and key == history_key:
+            return history
+        return real_get(key, default)
+
+    def _set(key, value):
+        if recorded is not None and key == history_key:
+            recorded.append(value)
+            return True
+        return real_set(key, value)
+
+    monkeypatch.setattr(module, 'safe_user_get', _get)
+    monkeypatch.setattr(module, 'safe_user_set', _set)
+
+
+def test_parallels_history_restore_shares_no_list_with_the_saved_entry(monkeypatch, tmp_path):
+    """Restore an entry from the Composition History menu, then remove two chips."""
+    import web.pages.parallels as parallels_page
+    _found_lookup(monkeypatch, tmp_path)
+    history = [_saved_comp_history_entry()]
+    _storage_hook(monkeypatch, parallels_page, 'composition_history',
+                  history=history, recorded=[])
+    engine = _Engine()
+    seen = {}
+
+    async def go():
+        async with _user(engine, {}) as user:
+            await user.open('/parallels')
+            history_btn = next(b for b in _elements(user, ui.button)
+                               if b.props.get('label') == 'Composition History')
+            UserInteraction(user, {history_btn}, None).click()
+            item = next(m for m in _elements(user, ui.menu_item)
+                        if any(str(getattr(d, 'text', '')).startswith('ברוך אתה')
+                               for d in m.descendants()))
+            UserInteraction(user, {item}, None).click()
+            for _ in range(60):
+                if 'Re-running composition from history' in user.notify.messages:
+                    break
+                await asyncio.sleep(0.05)
+            await asyncio.sleep(0.2)
+            seen['removed'] = (_remove_chip(user, 'Halakha'), _remove_chip(user, '+ term'))
+            await asyncio.sleep(0.2)
+            seen['left'] = len(_chips(user, 'Halakha'))
+
+    _run(go)
+    assert seen == {'removed': (True, True), 'left': 0}, (
+        f"the restored chips were not shown and removed; nothing was exercised: {seen}")
+    assert history == [_saved_comp_history_entry()], (
+        f"removing a chip changed the saved history entry: {history[0]['params']['filters']}")
+
+
+class _OneRowEngine(_Engine):
+    """A composition run with one result, so /parallels records it in history."""
+
+    def search_composition_logic(self, *args, **kwargs):
+        result = super().search_composition_logic(*args, **kwargs)
+        result['main'] = [{'uid': '990001_1', 'raw_header': '990001', 'score': 1,
+                           'display': {'id': '990001', 'shelfmark': 'T-S 1.1', 'title': ''},
+                           'text': '', 'source_text': '', 'matches': []}]
+        return result
+
+
+def test_parallels_history_records_a_copy_of_the_live_filters(monkeypatch, tmp_path):
+    """Run a composition search with saved filters, then remove a chip: the
+    entry written to the history must not change with it."""
+    import web.pages.parallels as parallels_page
+    _found_lookup(monkeypatch, tmp_path)
+    recorded = []
+    _storage_hook(monkeypatch, parallels_page, 'composition_history', recorded=recorded)
+    engine = _OneRowEngine()
+    seen = {}
+
+    async def go():
+        async with _user(engine, {'parallels_filter_domains': ['Halakha', 'Piyyut'],
+                                  'parallels_filter_text_all': ['term']}) as user:
+            await user.open('/parallels')
+            text_box = next(e for e in _elements(user, ui.textarea)
+                            if e.props.get('placeholder') == 'Paste your Hebrew text here...')
+            with user.client:
+                text_box.value = 'ברוך אתה יי אלהינו מלך'
+            run_btn = next(b for b in _elements(user, ui.button)
+                           if b.props.get('label') == 'Find Parallels')
+            UserInteraction(user, {run_btn}, None).click()
+            for _ in range(60):
+                if recorded:
+                    break
+                await asyncio.sleep(0.05)
+            seen['notices'] = list(user.notify.messages)
+            seen['removed'] = (_remove_chip(user, 'Halakha'), _remove_chip(user, '+ term'))
+            await asyncio.sleep(0.2)
+            seen['left'] = len(_chips(user, 'Halakha'))
+
+    _run(go)
+    assert recorded, f"the search never reached the history: {seen}"
+    assert (seen['removed'], seen['left']) == ((True, True), 0), (
+        f"the chips were not shown and removed; nothing was exercised: {seen}")
+    filters = recorded[0][0]['params']['filters']
+    assert (filters['domains'], filters['text_all']) == (['Halakha', 'Piyyut'], ['term']), (
+        f"removing a chip changed the recorded history entry: {filters}")

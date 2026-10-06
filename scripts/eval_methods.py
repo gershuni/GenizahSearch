@@ -104,6 +104,28 @@ def build_retrievers(spec: str, index_dir: str,
     return out
 
 
+def composition_notice_report(retriever) -> tuple:
+    """(summary entries, printed lines) for a config's composition notices.
+
+    A query shorter than the chunk size ran as one whole-text window, not at
+    this config's chunk size, so the summary keeps HOW MANY did and, per
+    notice, the size each actually ran at (K-13). Empty for a retriever
+    without notices (the passage engine).
+    """
+    counts = getattr(retriever, 'notice_counts', None) or {}
+    sizes = getattr(retriever, 'effective_size_counts', None) or {}
+    summary, lines = {}, []
+    if counts:
+        summary['composition_notices'] = dict(sorted(counts.items()))
+        lines.append(f'  composition notices: {summary["composition_notices"]}')
+    if sizes:
+        summary['composition_notice_effective_sizes'] = {
+            code: dict(sorted(by_size.items())) for code, by_size in sorted(sizes.items())}
+        for code, by_size in summary['composition_notice_effective_sizes'].items():
+            lines.append(f'    {code}, queries by effective chunk size: {by_size}')
+    return summary, lines
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument('--queries', required=True)
@@ -235,12 +257,10 @@ def main() -> int:
             lo, hi = s[f'recall@{k}_ci']
             print(f'  recall@{k:<3} = {s[f"recall@{k}"]:.3f}  [{lo:.3f}, {hi:.3f}]', flush=True)
         print(f'  p50={s["p50_ms"]}ms  p95={s["p95_ms"]}ms', flush=True)
-        notices = getattr(r, 'notice_counts', None)
-        if notices:
-            # e.g. text_shorter_than_chunk_size: those queries ran as one
-            # whole-text window, not at this config's chunk size.
-            s['composition_notices'] = dict(notices)
-            print(f'  composition notices: {dict(sorted(notices.items()))}', flush=True)
+        notice_summary, notice_lines = composition_notice_report(r)
+        s.update(notice_summary)
+        for line in notice_lines:
+            print(line, flush=True)
         for name in stratum_names:
             cells = '  '.join(
                 f'{key}:{v["recall@50"]:.2f}(n={v["n"]})'

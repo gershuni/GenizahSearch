@@ -17,6 +17,7 @@ Thread-safe: uses per-thread SQLite connections via ThreadLocalConnection
 so concurrent NiceGUI run.io_bound() calls each get their own connection.
 """
 
+import copy
 import json
 import logging
 import os
@@ -4073,9 +4074,12 @@ def drop_unavailable_measurement_filters(filters, service=None):
     """Return (kept, dropped): a NEW dict without the keys the open sidecar is
     known not to answer, and the dropped keys that held a value.
 
-    Never mutates ``filters`` (it may be a search-history entry).
+    Never mutates ``filters`` (it may be a search-history entry), and shares
+    nothing with it: ``kept`` is a DEEP copy, because the caller makes it the
+    live filters and a chip removal edits a list such as ``domains`` in place
+    -- a shallow copy let that edit reach the saved history.
     """
-    kept = dict(filters or {})
+    kept = copy.deepcopy(dict(filters or {}))
     bad = unavailable_measurement_filter_keys(service)
     dropped = sorted(k for k in kept if k in bad and kept[k] not in (None, [], ()))
     for k in bad:
