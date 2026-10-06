@@ -98,6 +98,7 @@ from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog
 from desktop.filter_text_dialog import FilterTextDialog
 from desktop.column_filter_dialog import ColumnFilterDialog  # moved 2026-09-19; alias stub at the root
 from desktop.list_filter_dialog import ListFilterDialog
+from desktop.variant_run_settings import recorded_settings_searcher, variant_settings_now
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared_export_utils import coerce_img_page_cell
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
@@ -1803,6 +1804,9 @@ class GenizahGUI(QMainWindow):
             # Connect VariantManager to Lab settings for variant search configuration
             if self.var_mgr and self.lab_engine:
                 self.var_mgr.set_settings(self.lab_engine.settings)
+            # The saved per-level x1-x3 is known only now; the spin box was built
+            # with the defaults.
+            self._show_level_max_changes()
 
             # Setup Panels (guaranteed to exist as init_ui runs before startup thread)
             if hasattr(self, 'lab_panel_search'):
@@ -16933,6 +16937,10 @@ class GenizahGUI(QMainWindow):
                 self.variant_presets_widget.setVisible(not use_slider)
             if hasattr(self, 'variant_slider_widget'):
                 self.variant_slider_widget.setVisible(use_slider)
+            # The dialog may have changed the shown level's x1-x3, or switched between
+            # buttons and slider (another level shown): the search bar shows what the
+            # next search uses.
+            self._show_level_max_changes()
 
     def _on_search_mode_changed(self, index):
         """Show/hide variant controls and swap query/tag input based on selected mode."""
@@ -17203,6 +17211,9 @@ class GenizahGUI(QMainWindow):
             self.variant_slider.setValue(value)
             self.variant_slider_label.setText(str(value))
             self.variant_slider.blockSignals(False)
+            # The search slider may now be at another level: its x1-x3, as the
+            # search slider's own change shows it (signals were blocked above).
+            self._show_level_max_changes()
 
     # Shortcut prefixes: longest first to avoid partial matches (??? before ??)
     _SHORTCUT_PREFIXES = [
@@ -20891,7 +20902,10 @@ class GenizahGUI(QMainWindow):
             # the widgets may have changed since, and the query lost its mode prefix.
             self._last_search_params = dict(
                 query=query, gap=gap, exclude_words=list(exclude_words), text_position=text_position,
-                responsa_options=responsa_options, corpus_scope=_corpus_scope)
+                responsa_options=responsa_options, corpus_scope=_corpus_scope,
+                # The level and x1-x3 this run searched with (set above): a replay of
+                # its step searches with them, not with what a later search left.
+                variant_settings=variant_settings_now(self._lab_settings(), getattr(self, 'var_mgr', None)))
         self._search_cutoff = None    # this run's arrives (cutoff_signal) before its results
         # The previous run's enrichment (domains, measurements) arrives again only after
         # this run ends (_launch_enrichment_workers). Until then a preview row must not be
@@ -22032,7 +22046,8 @@ class GenizahGUI(QMainWindow):
             self.status_label.setText(tr('Re-evaluating refinement...'))
             QApplication.processEvents()
         try:
-            result = replay_chain(self.refinement_chain, self.searcher, self.pre_search_restrict_sys_ids)
+            result = replay_chain(self.refinement_chain, self.searcher, self.pre_search_restrict_sys_ids,
+                                  searcher_for_step=self._refinement_step_searcher())
             self.refinement_restrict_sys_ids = result
         except Exception as e:
             import traceback
@@ -22060,7 +22075,8 @@ class GenizahGUI(QMainWindow):
         # pre_search_restrict_sys_ids is set by now — capture the scope sig.
         self._refinement_scope_sig = scope_signature(self.pre_search_restrict_sys_ids)
         thread = RefinementReplayThread(
-            self.refinement_chain, self.searcher, self.pre_search_restrict_sys_ids
+            self.refinement_chain, self.searcher, self.pre_search_restrict_sys_ids,
+            searcher_for_step=self._refinement_step_searcher(),
         )
         thread.finished_signal.connect(self._on_replay_for_restore_finished)
         thread.error_signal.connect(self._on_replay_for_restore_error)
@@ -22116,7 +22132,8 @@ class GenizahGUI(QMainWindow):
     def _apply_run_params(self, step):
         """Fill *step* with what the search that produced the shown results ran with
         (_last_search_params): its query without a mode prefix, gap, NOT-words,
-        position, Responsa options and corpus. Both step builders took some of these
+        position, Responsa options, corpus and variant settings (level and x1-x3).
+        Both step builders took some of these
         from the widgets and left the rest at defaults -- the first step of a chain
         lost all four, the committed step its NOT-words -- so a replay ran another
         search. A Lab run, or results restored from a session, keep the widgets' values."""
@@ -22129,6 +22146,23 @@ class GenizahGUI(QMainWindow):
         step.text_position = params['text_position']
         step.responsa_options = params['responsa_options']
         step.corpus_scope = params['corpus_scope']
+        recorded = params.get('variant_settings')
+        step.variant_settings = dict(recorded) if recorded else None
+
+    def _refinement_step_searcher(self):
+        """searcher_for_step for replay_chain / complete_chain: each step searches with
+        the variant settings it first ran with (RefinementStep.variant_settings), and
+        the shared ones are put back after it. A step saved before they were recorded
+        searches as before, with the shared settings as they are."""
+        searcher = self.searcher
+        settings = self._lab_settings()
+        var_mgr = getattr(self, 'var_mgr', None)
+
+        def for_step(step):
+            if settings is None or not step.variant_settings:
+                return searcher
+            return recorded_settings_searcher(searcher, settings, var_mgr, step.variant_settings)
+        return for_step
 
     def _enter_refine_mode(self):
         """D-02, D-03: Activate refine mode on desktop search bar."""
@@ -22350,7 +22384,8 @@ class GenizahGUI(QMainWindow):
         self._pause_search.reset_for_run(run_id, time.monotonic())
         thread = ChainCompletionThread(self.refinement_chain, self.searcher,
                                        getattr(self, 'pre_search_restrict_sys_ids', None),
-                                       upto=upto, run_id=run_id)
+                                       upto=upto, run_id=run_id,
+                                       searcher_for_step=self._refinement_step_searcher())
         self.search_thread = thread
         # The shown results were not stopped: Stop here must not mark them partial.
         was_cancelled = getattr(self, '_search_was_cancelled', False)
