@@ -4558,6 +4558,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Restore results and state from snapshot
         if state_snapshot.get('results'):
             search_state.results = state_snapshot['results']
+            # An entry from a build that kept the rows: their variant settings are
+            # unknown, never those of the search shown before (a step recorded from
+            # them replays with the website defaults at its level).
+            search_state.last_variant_settings = None
             search_state.domain_exclusions = set(state_snapshot.get('domain_exclusions', []))
             search_state.printed_filter = state_snapshot.get('printed_filter', 'all')
             # Phase 88: populate per-session export payload after history restore so JSON
