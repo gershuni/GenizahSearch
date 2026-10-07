@@ -215,18 +215,42 @@ class TestExistingModesUnchanged:
 
     # --- Regex mode ---
 
-    def test_regex_tantivy_query_extracts_hebrew_candidates(self):
-        """Regex mode: Tantivy query extracts Hebrew word candidates from regex string."""
+    def test_regex_mode_has_no_query_string_form(self):
+        """Regex mode: build_tantivy_query refuses. A query string could only
+        hold whole-word terms, which drop partial-word matches (ושלום for שלום.*)."""
         engine = _make_search_engine()
-        # Hebrew word of 2+ chars should be extracted
-        result = engine.build_tantivy_query(['\u05e9\u05dc\u05d5\u05dd.*'], 'Regex')
-        assert '\u05e9\u05dc\u05d5\u05dd' in result
+        with pytest.raises(ValueError):
+            engine.build_tantivy_query(['שלום.*'], 'Regex')
 
-    def test_regex_tantivy_query_fallback_to_wildcard(self):
-        """Regex mode: When no Hebrew candidates found, falls back to wildcard."""
-        engine = _make_search_engine()
-        result = engine.build_tantivy_query(['test.*'], 'Regex')
-        assert result == '*'
+    @pytest.mark.parametrize('pattern, text', [
+        ('שלום.*', 'ושלום לכם'),  # שלום.* in ושלום לכם
+        ('test.*', 'Rabbi TESTING case'),                                    # Latin, IGNORECASE
+    ])
+    def test_regex_candidates_keep_partial_word_matches(self, pattern, text, monkeypatch):
+        """Regex mode: a page whose token only CONTAINS the literal is still found,
+        through the real execute_search against a hebword index. The candidate
+        limit is 1 and the non-matching page is indexed first, so a candidate query that
+        admits every page is cut before it reaches the hit."""
+        import tantivy
+        from types import SimpleNamespace
+        from shared.config import Config
+        from shared.indexer import build_main_schema
+        from shared.search_tokenizer import register_search_tokenizers
+        idx = tantivy.Index(build_main_schema())
+        register_search_tokenizers(idx)
+        writer = idx.writer(heap_size=15_000_000)
+        for uid, body in (('other', 'טקסט אחר'), ('hit', text)):
+            writer.add_document(tantivy.Document(
+                unique_id=[uid], content=[body], source=['V0.8'], full_header=[uid],
+                shelfmark=[uid], scope=['page'], boundaries=['']))
+        writer.commit()
+        idx.reload()
+        engine = SearchEngine.__new__(SearchEngine)
+        engine.index, engine.searcher, engine.local_searcher = idx, idx.searcher(), None
+        engine.meta_mgr = SimpleNamespace(get_display_data=lambda h, s: {'source': s, 'id': h})
+        monkeypatch.setattr(Config, 'SEARCH_LIMIT', 1)
+        found = [r['uid'] for r in engine.execute_search(pattern, 'Regex', 0, corpus_scope='genizah')]
+        assert found == ['hit']
 
     def test_regex_pattern_matches_expected_text(self):
         """Regex mode: Pattern from 'test.*' matches 'testing' and 'testable'."""

@@ -137,6 +137,8 @@ EXTRACTED_MODULES = [
     "shared/atomic_io.py",
     # Window placement shared by both composition engines.
     "shared/composition_windows.py",
+    # 2026-10-06: Regex mode's candidate query that cannot lose a match.
+    "shared/regex_prefilter.py",
 ]
 
 # Compound statement types whose bodies run at import time
