@@ -41,20 +41,51 @@ from shared.research_worker import PREVIEW_MAX_BYTES
 log = logging.getLogger(__name__)
 _cancel_context = ContextVar('research_cancel', default=None)
 _status_context = ContextVar('research_status', default=None)
+# A worker that has not stopped this long after its time limit is stopped by force.
+TIME_LIMIT_GRACE_SECONDS = 60
+_time_limit_stop = threading.local()
+
+
+def consume_time_limit_stop() -> bool:
+    """Whether the last research call on this thread was stopped by the website's
+    time limit (Config.WEB_SEARCH_TIME_LIMIT), then forget it."""
+    stopped = bool(getattr(_time_limit_stop, 'value', False))
+    _time_limit_stop.value = False
+    return stopped
+
+
+_shared_limit = ContextVar('research_shared_time_limit', default=None)
+
+
+@contextmanager
+def shared_time_limit():
+    """The searches run inside share one time limit (Config.WEB_SEARCH_TIME_LIMIT):
+    their running times add up, so a refinement chain run again step by step stops
+    after the limit as one search does. A step started after the limit is spent
+    stops at once and comes back cut off, like any search the limit stopped."""
+    token = _shared_limit.set({'left': None})
+    try:
+        yield
+    finally:
+        _shared_limit.reset(token)
 
 
 class ResearchJobError(RuntimeError):
     """A computation stopped without returning misleading partial results."""
 
 
-def snapshot_settings(engine):
+def snapshot_settings(engine, overrides=None):
+    """The engine's settings as a worker rebuilds them, with *overrides* on top."""
     settings = getattr(engine, 'settings', None)
     if settings is None:
         variants = getattr(engine, 'var_mgr', None)
         if variants is None:
             variants = getattr(getattr(engine, 'text_fetcher', None), 'var_mgr', None)
         settings = getattr(variants, '_settings', None)
-    return deepcopy(vars(settings)) if settings is not None else None
+    snapshot = deepcopy(vars(settings)) if settings is not None else None
+    if overrides:
+        snapshot = {**(snapshot or {}), **deepcopy(overrides)}
+    return snapshot
 
 
 def _integer(name, default, minimum=1, maximum=1024):
@@ -300,6 +331,10 @@ class ResearchQueue:
     def _execute(self, job, slot):
         if job.cancel.is_set():
             raise InterruptedError('Search cancelled')
+        if isinstance(job.payload, dict) and job.payload.get('time_limit'):
+            # The job has left the queue: its time limit counts from now, the
+            # worker's loading and its wait for the index leases included.
+            job.payload['started_at'] = time.time()
         worker = self._take_spare(slot)
         if worker is None:
             # Don't start another worker while the machine lacks even the website's
@@ -374,6 +409,9 @@ class ResearchQueue:
                 result = pickle.load(stream)
             log.info('Research result transferred: %d compressed bytes, %d expanded bytes', output_bytes, expanded_bytes)
             if result.get('error'):
+                if result.get('time_limit'):
+                    from shared.search_regex import SearchBudgetExceeded
+                    raise SearchBudgetExceeded()
                 if result.get('exception') == 'NoWitnessesResolved':
                     from shared.passage_parallels import NoWitnessesResolved
                     raise NoWitnessesResolved(result['report'])
@@ -448,19 +486,46 @@ def get_queue():
 
 
 class IsolatedEngine:
-    """Preserve the engine interface; isolate only expensive entry points."""
-    def __init__(self, engine, kind, *, options=None, cancel=None, status=None, deadline=None):
+    """Preserve the engine interface; isolate only expensive entry points.
+
+    Every job starts from the website's variant defaults
+    (``web.variant_preferences.WEBSITE_DEFAULTS``) with this wrapper's per-search
+    settings on top, never from the variant values in the server's LabSettings:
+    that object is shared by every visitor, and nothing a visitor does may change
+    another visitor's search.
+    """
+    def __init__(self, engine, kind, *, options=None, cancel=None, status=None, deadline=None,
+                 settings=None):
         self._engine = engine
         self._kind = kind
         self._options = options or {}
         self._cancel = cancel
         self._status = status
         self._deadline = deadline
+        self._settings = dict(settings or {})
 
     def controlled(self, *, cancel=None, status=None, seconds=None):
         return IsolatedEngine(self._engine, self._kind, options=self._options,
                               cancel=cancel, status=status,
-                              deadline=None if seconds is None else time.monotonic() + seconds)
+                              deadline=None if seconds is None else time.monotonic() + seconds,
+                              settings=self._settings)
+
+    def with_settings(self, **values):
+        """A view of this engine whose jobs carry these settings (checked).
+
+        The shared engine and its settings object are not modified, so two
+        visitors searching at the same time cannot change each other's search.
+        """
+        from web.variant_preferences import request_settings
+        return IsolatedEngine(self._engine, self._kind, options=self._options,
+                              cancel=self._cancel, status=self._status,
+                              deadline=self._deadline,
+                              settings={**self._settings, **request_settings(**values)})
+
+    def job_settings(self):
+        """The settings snapshot a job of this wrapper hands its worker."""
+        from web.variant_preferences import website_defaults
+        return snapshot_settings(self._engine, {**website_defaults(), **self._settings})
 
     def __getattr__(self, name):
         original = getattr(self._engine, name)
@@ -476,15 +541,30 @@ class IsolatedEngine:
             # Early rows come back through the job (preview.pkl), not by pickling
             # the caller's callback into the child.
             preview = arguments.pop('preview_callback', None)
+            # The cut-off signal is per thread: this call's answer replaces any older one,
+            # and a call that fails or is stopped leaves none.
+            from shared.search_engine import consume_last_search_cutoff
+            consume_last_search_cutoff()
+            consume_time_limit_stop()
             queue = get_queue()
+            from shared.config import Config
+            time_limit = Config.WEB_SEARCH_TIME_LIMIT
+            shared = _shared_limit.get()
+            if shared is not None and time_limit:
+                if shared['left'] is None:
+                    shared['left'] = float(time_limit)
+                # What is left of the shared limit; 0 would mean no limit to the worker.
+                time_limit = max(shared['left'], 0.001)
             payload = {'kind': self._kind, 'method': name, 'arguments': arguments,
-                       'options': self._options, 'settings': snapshot_settings(self._engine)}
+                       'options': self._options, 'settings': self.job_settings(),
+                       'time_limit': time_limit}
             if preview is not None:
                 payload['preview'] = True
             job = queue.submit(payload)
             cancelled = self._cancel or _cancel_context.get()
             update = self._status or _status_context.get()
             previewed = 0
+            running_since = None
             try:
                 while True:
                     if cancelled is not None and cancelled.is_set():
@@ -495,6 +575,13 @@ class IsolatedEngine:
                     if deadline is not None and time.monotonic() >= deadline:
                         raise SearchBudgetExceeded()
                     position = queue.position(job)
+                    # The worker stops itself at its time limit; one that cannot
+                    # (stuck outside the engine's checks) is stopped here.
+                    if not position and running_since is None:
+                        running_since = time.monotonic()
+                    if (time_limit and running_since is not None
+                            and time.monotonic() - running_since >= time_limit + TIME_LIMIT_GRACE_SECONDS):
+                        raise SearchBudgetExceeded()
                     status = f'Queued: {position}' if position else job.status
                     if update:
                         update(status, job.progress)
@@ -517,7 +604,15 @@ class IsolatedEngine:
             except BaseException:
                 queue.cancel(job)
                 raise
-            from shared.search_engine import _set_last_responsa_downgrade, _set_last_responsa_downgrade_meta
+            finally:
+                if shared is not None and shared['left'] is not None and running_since is not None:
+                    shared['left'] -= time.monotonic() - running_since
+            from shared.search_engine import (_note_search_cutoff, _set_last_responsa_downgrade,
+                                              _set_last_responsa_downgrade_meta)
+            cutoff = result.get('cutoff') or {}
+            _note_search_cutoff(capped=bool(cutoff.get('capped')),
+                                interrupted=bool(cutoff.get('interrupted')))
+            _time_limit_stop.value = bool(result.get('time_limit'))
             if result.get('downgrade'):
                 _set_last_responsa_downgrade(result['downgrade'])
             if result.get('cascade'):
@@ -526,12 +621,29 @@ class IsolatedEngine:
         return call
 
 
+def with_request_settings(engine, **values):
+    """Bind one search's settings to an engine that runs its searches in workers.
+
+    Engines that do not run in workers (fakes in tests) are returned unchanged,
+    but the names are still checked.
+    """
+    if isinstance(engine, IsolatedEngine):
+        return engine.with_settings(**values)
+    from web.variant_preferences import request_settings
+    request_settings(**values)
+    return engine
+
+
 def api_engine(engine, request, seconds):
-    """Bind API job cancellation/progress without changing fake test engines."""
+    """Bind API job cancellation/progress without changing fake test engines.
+
+    API jobs run with the website defaults only (``controlled`` starts a wrapper
+    with no per-search settings), never with anything a website visitor chose.
+    """
     if not isinstance(engine, IsolatedEngine):
         return engine
     background = request.scope.get('research_job')
-    return engine.controlled(
+    return IsolatedEngine(engine._engine, engine._kind, options=engine._options).controlled(
         cancel=background.cancel if background else None,
         status=background.update if background else None,
         seconds=None if background else seconds,

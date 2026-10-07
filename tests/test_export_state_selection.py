@@ -187,6 +187,36 @@ def test_export_json_filename_no_suffix_when_full_set_selected(client, session_w
     assert '-selected-' not in cd, f"Suffix should only appear when len(filtered) < len(full): {cd}"
 
 
+def test_export_excel_of_a_cut_off_list_counts_it_as_n_plus(client, session_with_5_results):
+    """A list the search cut off (its candidate limit, Stop, or the website's time
+    limit) is exported as it is shown: the workbook's Result count says "N+". The
+    route passes that on from the session's 'results-cut-off' warning; a selection
+    is counted as selected (review round 2, 2026-10-07: only the export service
+    was tested)."""
+    import io
+
+    from openpyxl import load_workbook
+
+    from web import export_state
+
+    def result_count():
+        r = client.get('/api/export/excel')
+        assert r.status_code == 200, r.text
+        sheet = load_workbook(io.BytesIO(r.content))['Credits and Info']
+        for name, value in sheet.iter_rows(min_col=1, max_col=2, values_only=True):
+            if name == 'Result count':
+                return value
+        raise AssertionError('no Result count row')
+
+    assert result_count() == 5
+    export_state.set_search_export(
+        results=export_state.get_search_export()['results'], query='foo', mode='text',
+        gap=None, filters=None, warnings=['results-cut-off'], selected_uids=None)
+    assert result_count() == '5+'
+    export_state.update_search_export_selection(['u1', 'u3'])
+    assert result_count() == 2
+
+
 # --- Gap #1 test: reset clears per-session payload ----------------------
 
 def test_reset_clears_per_session_payload_then_export_returns_400(client, session_with_5_results):

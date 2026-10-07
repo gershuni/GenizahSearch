@@ -187,12 +187,33 @@ def main(directory):
             gc.collect()
 
 
+def _time_limited(report, seconds, stopped, started=None):
+    """*report*, stopping the search once *seconds* have passed: the engine treats
+    the InterruptedError as a Stop and returns what it had checked, with its cut-off
+    signal 'interrupted'. *stopped* records that the time limit stopped it. The time
+    counts from *started* (``time.time()`` when the job left the queue, stamped by
+    web/research_jobs.py), so loading and the index-lease wait count too."""
+    if not seconds:
+        return report
+    spent = max(0.0, time.time() - started) if started else 0.0
+    deadline = time.monotonic() + seconds - spent
+
+    def progress(*args, **kwargs):
+        if time.monotonic() >= deadline:
+            stopped['time_limit'] = True
+            raise InterruptedError('Search time limit reached')
+        return report(*args, **kwargs)
+    return progress
+
+
 def run_query(root, payload, report, *, native_matching=False, meta=None):
+    stopped = {'time_limit': False}
     try:
         from shared.metadata_manager import MetadataManager
         from shared.variants import VariantManager
         from shared.lab_engine import LabEngine
-        from shared.search_engine import SearchEngine, _consume_last_responsa_downgrade, _consume_last_responsa_downgrade_meta
+        from shared.search_engine import (SearchEngine, _consume_last_responsa_downgrade,
+                                          _consume_last_responsa_downgrade_meta, consume_last_search_cutoff)
         from shared.search_regex import isolated_matching
 
         if meta is None:
@@ -233,7 +254,12 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
         arguments = payload['arguments']
         if arguments.get('restrict_sys_ids') is not None:
             arguments['restrict_sys_ids'] = set(arguments['restrict_sys_ids'])
-        arguments['progress_callback'] = report
+        arguments['progress_callback'] = _time_limited(report, payload.get('time_limit'), stopped,
+                                                       payload.get('started_at'))
+        if kind == 'passage':
+            # The letter-level searcher leaves progress_callback alone (the desktop's
+            # drives a chunk progress bar); it is stopped through `checkpoint`.
+            arguments['checkpoint'] = arguments['progress_callback']
         if payload.get('preview') and kind == 'search' and payload['method'] == 'execute_search':
             sent = [0]
 
@@ -244,8 +270,16 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
         write_progress(root, {'status': 'Preparing search', 'progress': (0, 0)})
         with isolated_matching(native=native_matching):
             value = getattr(engine, payload['method'])(**arguments)
+        # 'cutoff': the search reached its candidate limit, or was stopped (D8);
+        # the web shows such a count as "N+" and completes the step before a
+        # combination relies on it.
         result = {'value': value, 'downgrade': _consume_last_responsa_downgrade(),
-                  'cascade': _consume_last_responsa_downgrade_meta()}
+                  'cascade': _consume_last_responsa_downgrade_meta(),
+                  'cutoff': consume_last_search_cutoff(),
+                  'time_limit': stopped['time_limit']}
+    except InterruptedError:
+        # The limit stopped a part of the search that cannot return what it had.
+        result = {'error': 'The search reached its time limit.', 'time_limit': True}
     except ValueError as exc:
         result = {'error': str(exc), 'validation': True}
         if type(exc).__name__ == 'NoWitnessesResolved':

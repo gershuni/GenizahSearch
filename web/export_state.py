@@ -856,6 +856,39 @@ def _canonical_witnesses(witnesses) -> list:
     return out
 
 
+# What every search ran with before variant preferences were kept per visitor
+# (the server's settings file, read 2026-09-28), written out in full so that a
+# later change to the website defaults cannot change which old fingerprints a
+# search matches.
+_SETTINGS_BEFORE_PER_VISITOR = {
+    'variant_min_word_len': 2,
+    'variant_aggressive': True,
+    'custom_variants': {
+        **{pair: True for pair in ('ב=כ', 'ה=ח', 'ד=ר', 'ס=ם')},
+        'ה' + chr(0x0308) + '=ה': True,
+        **{letter + chr(0x0307) + '=' + letter: True for letter in 'תדטכצץ'},
+    },
+    'comp_min_score': 70,
+}
+
+
+# Which of the visitor's preferences each /parallels engine reads: the word-level
+# (chunk) search expands variants with the first three (not in Exact mode), Lab
+# reads only its minimum score, and the letter-level (passage) search none.
+_PREFERENCES_READ = {
+    'chunk': ('variant_min_word_len', 'variant_aggressive', 'custom_variants'),
+    'lab': ('comp_min_score',),
+}
+
+
+def _preferences_read(engine, mode, preferences):
+    """The part of *preferences* the *engine* in *mode* actually reads."""
+    if engine == 'chunk' and mode in ('exact', 'literal'):
+        return {}
+    read = _PREFERENCES_READ.get(engine, ())
+    return {k: v for k, v in preferences.items() if k in read}
+
+
 def compute_parallels_search_fingerprint(
     *,
     text,
@@ -875,6 +908,7 @@ def compute_parallels_search_fingerprint(
     min_delimiter_distance=None,
     variant_level=None,
     variant_max_changes=None,
+    variant_preferences=None,
     library_mode=None,
     library_filter=None,
     restrict=None,
@@ -958,6 +992,17 @@ def compute_parallels_search_fingerprint(
     # with bigger budgets.
     if depth not in (None, 'normal'):
         payload['depth'] = depth
+    # The visitor's Settings-page variant preferences (per visitor since
+    # 2026-10-06) enter only when they differ from what every earlier search ran
+    # with -- the website defaults with Aggressive Mode on (the server's settings
+    # until then) -- under the same rule: an old fingerprint keeps matching a
+    # search with the same settings, and only that. Only the preferences the
+    # engine reads count: a setting it never read is not part of the search.
+    if variant_preferences:
+        changed = {k: v for k, v in _preferences_read(engine, mode, variant_preferences).items()
+                   if _SETTINGS_BEFORE_PER_VISITOR.get(k) != v}
+        if changed:
+            payload['variant_preferences'] = changed
     for key in _PARALLELS_FINGERPRINT_SET_INPUTS:
         value = payload.get(key)
         if value is not None:

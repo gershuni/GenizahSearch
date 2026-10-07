@@ -98,7 +98,20 @@ def test_worker_receives_selected_settings_snapshot(queue, monkeypatch, kind):
         settings.custom_variants.clear()
         return job
     monkeypatch.setattr(queue, 'submit', submit_then_change_live_settings)
+    from web.variant_preferences import WEBSITE_DEFAULTS
+    # The variant values of the server's shared object never reach a job: a job
+    # gets the website defaults unless its own search set them.
     received = IsolatedEngine(engine, kind).execute_search('אבג', 'variants', 0)
+    restored = restore_settings(received['settings'])
+    assert restored.variant_pairs_count == WEBSITE_DEFAULTS['variant_pairs_count']
+    assert restored.custom_variants == WEBSITE_DEFAULTS['custom_variants']
+    assert restored.gap_penalty == 7
+    # Settings chosen for one search reach its job, and later changes to the
+    # live object do not.
+    settings.variant_pairs_count = 123
+    received = IsolatedEngine(engine, kind).with_settings(
+        variant_pairs_count=123, variant_max_changes=1,
+        custom_variants={'א=ת': True}).execute_search('אבג', 'variants', 0)
     restored = restore_settings(received['settings'])
     worker_variants = VariantManager(restored)
     assert worker_variants._get_pairs_count() == 123

@@ -832,3 +832,39 @@ def test_old_mode_field_rejected_with_helpful_message(client, populated_state, c
     assert 'mode' in msg and 'search_mode' in msg, msg
     # Specifically, the cutover string from the handler:
     assert "unknown field 'mode'" in msg, msg
+
+
+def test_a_cut_off_search_says_so(client, populated_state, clean_env):
+    """D8: when the engine reads its candidate limit, `total` counts only the
+    matches it reached; the response says more exist (results_cut_off)."""
+    from shared.search_engine import _note_search_cutoff
+    searcher, _meta = populated_state
+    rows = searcher.execute_search.return_value
+
+    def cut_off(*args, **kwargs):
+        _note_search_cutoff(capped=True)
+        return rows
+    searcher.execute_search.side_effect = cut_off
+    r = client.post('/api/search', json={'query': 'שלום', 'search_mode': 'exact'})
+    assert r.status_code == 200, r.text
+    assert 'results_cut_off' in r.json()['warnings']
+    searcher.execute_search.side_effect = None
+    r = client.post('/api/search', json={'query': 'שלום', 'search_mode': 'exact'})
+    assert 'results_cut_off' not in r.json()['warnings']
+
+
+def test_a_search_stopped_at_the_time_limit_says_its_total_is_a_lower_bound(client, populated_state, clean_env):
+    """A background job the website's time limit stopped returns the matches it had
+    checked; the response says more may exist (results_cut_off)."""
+    from shared.search_engine import _note_search_cutoff
+    searcher, _meta = populated_state
+    rows = searcher.execute_search.return_value
+
+    def stopped(*args, **kwargs):
+        _note_search_cutoff(interrupted=True)
+        return rows
+    searcher.execute_search.side_effect = stopped
+    r = client.post('/api/search', json={'query': 'שלום', 'search_mode': 'exact'})
+    assert r.status_code == 200, r.text
+    assert 'results_cut_off' in r.json()['warnings']
+    searcher.execute_search.side_effect = None

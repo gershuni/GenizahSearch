@@ -26,15 +26,20 @@ class WebSearchExecutor:
 
     Thin passthrough — no per-app normalizer (Phase-106 D-01).
 
-    The class has no ``__init__``; it reads ``state.searcher`` and ``state.meta_mgr``
-    at each call site so that callers do not need to construct or inject the searcher —
-    they just instantiate ``WebSearchExecutor()`` once the app is ready (``state.is_ready()``
-    is True).
+    It reads ``state.searcher`` and ``state.meta_mgr`` at each call site so that callers
+    do not need to construct or inject the searcher — they just instantiate
+    ``WebSearchExecutor()`` once the app is ready (``state.is_ready()`` is True).
+    *variant_settings* are the visitor's settings, read by the page when it builds the
+    executor (the searches run in worker threads, where the visitor's storage cannot be
+    read); they travel with each search and never change the shared engine.
 
     All four ``execute_search`` calls MUST be dispatched via ``await run.io_bound(fn)``
     by the async NiceGUI page handler; never call this class's methods directly inside an
     ``async def`` handler.
     """
+
+    def __init__(self, variant_settings: "dict | None" = None):
+        self._variant_settings = dict(variant_settings or {})
 
     def execute_search(
         self,
@@ -59,7 +64,11 @@ class WebSearchExecutor:
         adapter re-raising.  Keep the plain ``except Exception: return []``.
         """
         try:
-            return state.searcher.execute_search(
+            searcher = state.searcher
+            if self._variant_settings:
+                from web.research_jobs import with_request_settings
+                searcher = with_request_settings(searcher, **self._variant_settings)
+            return searcher.execute_search(
                 query_str,
                 mode,
                 gap,

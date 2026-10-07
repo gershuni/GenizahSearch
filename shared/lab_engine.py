@@ -689,7 +689,7 @@ class LabEngine:
         composition path (lab_composition_search).
         """
         from genizah_core import text_to_fingerprint, HEBREW_FREQ  # noqa: PLC0415 — lazy; GUARD-01 safe
-        from shared.search_engine import make_mark_tolerant_pattern  # noqa: PLC0415 — lazy; GUARD-01 safe
+        from shared.search_engine import _note_search_cutoff, make_mark_tolerant_pattern  # noqa: PLC0415 — lazy; GUARD-01 safe
         # Phase 110 C4: fail CLOSED — never expose LOCAL on a bad value.
         if corpus_scope not in ('genizah', 'local', 'all'):
             corpus_scope = 'genizah'
@@ -913,7 +913,10 @@ class LabEngine:
                     except Exception as _local_exc:
                         LAB_LOGGER.warning("lab_search LOCAL LAB scan failed: %r", _local_exc)
         except InterruptedError:
-            pass  # cancelled mid-scan — fall through and return what we have
+            # Cancelled mid-scan (Stop, or the website's time limit): fall through and
+            # return what we have, and say that the list leaves matches out -- the
+            # rows alone look complete ("N+", search within, the API's warning).
+            _note_search_cutoff(interrupted=True)
 
         # 4. Sort & Dedup (Logic Fixed: Prioritize V0.8 over V0.7)
         v8_map = {r['uid']: r for r in results if r['display']['source'] == "V0.8"}
@@ -964,6 +967,7 @@ class LabEngine:
         from genizah_core import calculate_boundary_quality, calculate_final_score_with_boost  # noqa: PLC0415 — lazy; GUARD-01 safe
         from shared.search_engine import _count_unique_chunks  # noqa: PLC0415 — lazy; GUARD-01 safe
         from shared.search_engine import _LabChunkPlan  # noqa: PLC0415 — lazy; GUARD-01 safe
+        from shared.search_engine import _note_search_cutoff  # noqa: PLC0415 — lazy; GUARD-01 safe
         # Phase 110 C4: fail CLOSED — never expose LOCAL on a bad value.
         if corpus_scope not in ('genizah', 'local', 'all'):
             corpus_scope = 'genizah'
@@ -1581,6 +1585,12 @@ class LabEngine:
         # Truncate limit only on main list
         if len(main_list) > MAX_FINAL:
             main_list = main_list[:MAX_FINAL]
+
+        if was_interrupted:
+            # Stopped (Stop, or the website's time limit) in either loop, fast or deep
+            # scan: the cut-off signal says so as well as 'partial', for every
+            # consumer that reads the signal rather than this payload.
+            _note_search_cutoff(interrupted=True)
 
         # Split return so GUI builds tree correctly
         return {

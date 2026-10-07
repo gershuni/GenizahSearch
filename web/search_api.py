@@ -278,11 +278,12 @@ DEFAULT_LIMIT = 50
 MAX_LIMIT = 100  # 81A D-06 — lowered from 200 (also enforced via Pydantic Field(le=100))
 
 # 81A — translate API search_mode → internal mode value space consumed by
-# SearchEngine.execute_search (genizah_core.py:7249). For non-Responsa text
-# searches, the internal `mode` argument is THE variant-tier knob:
-# genizah_core.py:6467 calls var_mgr.get_variants(term, mode, limit=200),
-# so 'exact' → no variant expansion, 'variants' → 30-pair variant expansion.
-# Mirrors desktop UI semantics (genizah_app.py:15796 toggles 'variants' vs 'exact').
+# SearchEngine.execute_search (shared/search_engine.py). For non-Responsa text
+# searches the internal `mode` selects the variant tier passed to
+# VariantManager.get_variants: 'exact' → no variant expansion, 'variants' → the
+# 30 most frequent letter-confusion pairs. Every API job runs with the website
+# defaults (web.variant_preferences.WEBSITE_DEFAULTS, via api_engine), so an API
+# result never depends on what a website visitor chose.
 _SEARCH_MODE_TO_INTERNAL = {
     'exact':     'exact',
     'variants':  'variants',
@@ -1645,6 +1646,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # see an empty (wrong-thread) signal.
             downgrade_msg = None
             cascade_meta = None
+            search_cutoff = {}
             if short_circuit_empty:
                 results = []
                 total = 0
@@ -1660,6 +1662,8 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     core_timeout = None
 
                 def _run_search_sync():
+                    from shared.search_engine import consume_last_search_cutoff
+                    consume_last_search_cutoff()
                     with search_budget(core_timeout if core_timeout is not None else 0):
                         res = worker_searcher.execute_search(
                             query_str=query,
@@ -1674,7 +1678,9 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     from genizah_core import (
                         _consume_last_responsa_downgrade_meta as _consume_meta_inner,
                     )
-                    return res, _consume_last_responsa_downgrade(), _consume_meta_inner()
+                    # D8: whether the search reached its candidate limit (same thread).
+                    return (res, _consume_last_responsa_downgrade(), _consume_meta_inner(),
+                            consume_last_search_cutoff())
 
                 loop = asyncio.get_event_loop()
 
@@ -1722,7 +1728,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                             http_status=504,
                         )
                     try:
-                        results, downgrade_msg, cascade_meta = _search_fut.result()
+                        results, downgrade_msg, cascade_meta, search_cutoff = _search_fut.result()
                     except ResearchJobError as exc:
                         raise APIError('research_worker_stopped', str(exc), http_status=503) from exc
                     except SearchBudgetExceeded as exc:
@@ -1767,6 +1773,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             #    the thread-local is drained even on the exception path so it
             #    cannot leak into the next request on this worker thread.
             warnings_list: list = []
+            if (search_cutoff or {}).get('capped') or (search_cutoff or {}).get('interrupted'):
+                # The engine read its 50,000-candidate limit, or a background job
+                # reached the website's time limit: `total` counts the matches it
+                # checked, and more may exist.
+                warnings_list.append('results_cut_off')
             if downgrade_msg:
                 warnings_list.append(f'query_downgraded: {downgrade_msg}')
             elif results:
@@ -2543,6 +2554,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         # 7. Surface group-cap warning (D-07).
         if bundle.truncated_to_200:
             warnings_list.append('truncated_to_200')
+        # The search stopped before it finished -- a background job reached the
+        # website's time limit -- and returned what it had found: more parallels
+        # may exist. Same code and meaning as /api/search's.
+        if bundle.partial:
+            warnings_list.append('results_cut_off')
         # Codex review finding #16(b): a row dropped because its display-text
         # lookup failed is counted, never silently blank -- surfaced here so
         # the count is never lost between the searcher and the client (this
