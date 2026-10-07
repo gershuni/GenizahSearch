@@ -513,3 +513,51 @@ def test_a_stopped_composition_is_still_cancelled(monkeypatch):
 def test_a_complete_composition_says_completed(monkeypatch):
     shown, action = _comp_summary(monkeypatch, _comp_result(partial=False, capped=False, cancelled=False))
     assert shown.startswith('Completed in') and action == 'completed'
+
+
+# --- GitHub review (Codex on #386, 2026-10-07): composition writes nothing shared ---
+
+def _composition_window(monkeypatch, mode_idx):
+    """The real run_composition on a mock window, with the real settings, variant
+    manager and level helpers; CompositionThread records how it was built."""
+    from types import MethodType
+    from unittest.mock import MagicMock
+    settings, shared = _shared(150, 3)      # a main-window Maximum x3 search runs on these
+    settings.variant_max_changes_by_preset = {'basic': 1, 'extended': 2, 'maximum': 3}
+    settings.boundary_boost, settings.min_boundary_matches, settings.min_delimiter_distance = 1.5, 0, 3
+    w = MagicMock()
+    w.lab_engine = SimpleNamespace(settings=settings)
+    w.var_mgr = shared
+    w.searcher = SimpleNamespace(var_mgr=shared)
+    w._run_seq = 0
+    for name in ('_lab_settings', '_level_max_changes', '_use_variant_changes'):
+        setattr(w, name, MethodType(getattr(APP, name), w))
+    w.comp_text_area.toPlainText.return_value = f'{WORD} {WORD} {WORD}'
+    w.comp_title_input.text.return_value = 'title'
+    w.comp_mode_combo.currentIndex.return_value = mode_idx
+    w.comp_variant_slider.value.return_value = 50
+    w.boundary_mode_combo.currentData.return_value = 'full'
+    w.comp_corpus_scope_combo.currentData.return_value = 'genizah'
+    w.btn_lab_mode_toggle_comp.isChecked.return_value = False
+    w._comp_method.return_value = 'chunk'
+    thread = MagicMock()
+    monkeypatch.setattr(genizah_app, 'CompositionThread', thread)
+    return w, settings, shared, thread
+
+
+@pytest.mark.parametrize('mode_idx,level,changes', [(1, 50, 1), (2, None, 2)], ids=['variants', 'fuzzy'])
+def test_a_composition_runs_on_its_own_settings_and_writes_nothing_shared(monkeypatch, mode_idx, level,
+                                                                          changes):
+    """A composition started while a main-window Maximum x3 search runs changed the
+    shared x to Basic's, and the shared level to its slider's, under that search.
+    It now runs on a view of the engine with its own level and x."""
+    w, settings, shared, thread = _composition_window(monkeypatch, mode_idx)
+    APP.run_composition(w)
+    assert thread.call_count == 1
+    searcher = thread.call_args.args[0]
+    assert (settings.variant_pairs_count, settings.variant_max_changes) == (150, 3)
+    assert shared.get_variant_level() == 150 and _spellings(shared) == 8000
+    assert searcher.var_mgr is not shared
+    assert searcher.var_mgr._settings.variant_max_changes == changes
+    if level is not None:
+        assert searcher.var_mgr.get_variant_level() == level

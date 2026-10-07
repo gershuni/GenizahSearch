@@ -98,7 +98,8 @@ from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog
 from desktop.filter_text_dialog import FilterTextDialog
 from desktop.column_filter_dialog import ColumnFilterDialog  # moved 2026-09-19; alias stub at the root
 from desktop.list_filter_dialog import ListFilterDialog
-from desktop.variant_run_settings import recorded_settings_searcher, variant_settings_now
+from desktop.variant_run_settings import (engine_with_variant_settings, recorded_settings_searcher,
+                                          variant_settings_now)
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared_export_utils import coerce_img_page_cell
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
@@ -17152,7 +17153,8 @@ class GenizahGUI(QMainWindow):
 
     def _use_variant_changes(self, mode, pairs_count=None):
         """Set the per-word limit the next search runs with: the level's x1-x3 for
-        Variants, x2 for Fuzzy, otherwise Basic's (Responsa, composition, Joins)."""
+        Variants, x2 for Fuzzy, otherwise Basic's (Responsa). Composition and Joins
+        bind theirs to a view of the engine instead (desktop/variant_run_settings.py)."""
         settings = self._lab_settings()
         if settings is None:
             return
@@ -27821,11 +27823,13 @@ class GenizahGUI(QMainWindow):
         else:
             mode = 'variants'
 
-        # Update variant level from slider before search
-        if mode == 'variants' and hasattr(self, 'comp_variant_slider') and self.var_mgr:
-            self.var_mgr.set_variant_level(self.comp_variant_slider.value())
-        # Composition variants use Basic's x1-x3, its Fuzzy x2 (owner ruling 2026-09-28).
-        self._use_variant_changes('fuzzy' if mode == 'fuzzy' else 'composition')
+        # Composition variants use its slider's level and Basic's x1-x3, its Fuzzy x2
+        # (owner ruling 2026-09-28). They are bound to this run's view of the engine
+        # below, never written to the shared settings: a main-window search may be
+        # running on those (desktop/variant_run_settings.py).
+        _comp_variant_values = {'variant_max_changes': 2 if mode == 'fuzzy' else self._level_max_changes(30)}
+        if mode == 'variants' and hasattr(self, 'comp_variant_slider'):
+            _comp_variant_values['variant_pairs_count'] = self.comp_variant_slider.value()
 
         excluded_ids = self._excl_get('composition', 'raw')
 
@@ -28001,7 +28005,8 @@ class GenizahGUI(QMainWindow):
                 _comp_min_boundary = 1
             else:
                 _comp_multi = False
-                _comp_searcher = self.searcher
+                _comp_searcher = engine_with_variant_settings(
+                    self.searcher, self._lab_settings(), _comp_variant_values)
                 _comp_mode_arg = mode
                 _comp_boundary_mode = boundary_mode
                 _comp_min_boundary = min_boundary_matches

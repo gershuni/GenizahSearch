@@ -111,6 +111,8 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
   Basic and ×2 Extended/Maximum. Responsa with variants on והמשפטים: 38 s at ×1, about 5
   minutes at ×2 and ×3. A 5-word composition search: 1.1 s, 1.6 s, 4.2 s. (One run each on
   the real index, 2026-10-07; a website search stops after 3 minutes.)
+- **Desktop:** a Composition, Joins Lab or refinement search runs with its own level and Num
+  Changes, so starting one while another search runs no longer changes that search's.
 - **Website:** Settings has one Num Changes value per level. **API:** `variants` runs at
   ×1 (Basic, as before) and `fuzzy` at ×2.
 
