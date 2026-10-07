@@ -220,6 +220,75 @@ def test_a_stopped_title_or_shelfmark_search_is_reported(mode):
     assert not se.consume_last_search_cutoff()["interrupted"], "a finished scan is not"
 
 
+# --- Exactly the limit is not a cut (Codex review of the Regex prefilter PR) --------
+# A query with exactly SEARCH_LIMIT candidates left nothing out, yet showed "N+": the
+# flag was len(hits) >= limit. Now one more hit is asked for and only `limit` are read.
+
+def _run(engine, query, limit, mode="literal", **kw):
+    se.consume_last_search_cutoff()
+    with patch.object(Config, "SEARCH_LIMIT", limit):
+        rows = engine.execute_search(query, mode, 0, **kw)
+        return rows, se.consume_last_search_cutoff()
+
+
+@pytest.mark.parametrize("mode", ["literal", "variants", "fuzzy", "Regex"])
+def test_exactly_the_limit_is_not_a_cut(engine, mode):
+    n = len(PAGES)                     # the page docs holding W; every one matches
+    rows, cut = _run(engine, W, n, mode, corpus_scope="genizah")
+    assert len(rows) == n and cut == {"capped": False, "interrupted": False}
+    rows, cut = _run(engine, W, n - 1, mode, corpus_scope="genizah")
+    assert len(rows) == n - 1, "only `limit` candidates are read"
+    assert cut["capped"]
+
+
+def test_exactly_the_limit_of_whole_manuscript_docs_is_not_a_cut(engine):
+    n = len(AGGS)                      # the phrase is found only in the aggregates
+    rows, cut = _run(engine, f"{B1} {B2}", n, corpus_scope="genizah")
+    assert len(rows) == n and not cut["capped"]
+    rows, cut = _run(engine, f"{B1} {B2}", n - 1, corpus_scope="genizah")
+    assert len(rows) == n - 1 and cut["capped"]
+
+
+def test_exactly_the_limit_of_the_line_break_search_is_not_a_cut(engine):
+    opts = {"responsa_mode": True}
+    n = len(PAGES)
+    rows, cut = _run(engine, f"{W} | {C}", n, corpus_scope="genizah", responsa_options=opts)
+    assert len(rows) == n and not cut["capped"]
+    rows, cut = _run(engine, f"{W} | {C}", n - 1, corpus_scope="genizah", responsa_options=opts)
+    assert len(rows) == n - 1 and cut["capped"]
+
+
+@pytest.mark.parametrize("mode", ["literal", "Regex"])
+def test_exactly_the_limit_of_my_library_is_not_a_cut(engine, tmp_path, mode):
+    n = 3
+    local = _build(str(tmp_path / "local"), [(f"l{i}", f"אבג {W}", "page", "") for i in range(n)])
+    saved = (getattr(engine, "local_index", None), getattr(engine, "local_searcher", None))
+    engine.local_index, engine.local_searcher = local, local.searcher()
+    try:
+        rows, cut = _run(engine, W, n, mode, corpus_scope="local")
+        assert len(rows) == n and not cut["capped"]
+        rows, cut = _run(engine, W, n - 1, mode, corpus_scope="local")
+        assert len(rows) == n - 1 and cut["capped"]
+    finally:
+        engine.local_index, engine.local_searcher = saved
+
+
+def test_the_extra_hit_changes_no_candidate(tmp_path):
+    # _top_hits keeps exactly what a search for `limit` hits kept, in the same order,
+    # ties included (equal texts score equally).
+    docs = [(f"t{i}", f"{W} " * (1 + i % 3) + "אבג", "page", "") for i in range(12)]
+    idx = _build(str(tmp_path / "ties"), docs)
+    searcher = idx.searcher()
+    q = idx.parse_query(W, ["content"])
+
+    def key(hits):
+        return [(score, addr.segment_ord, addr.doc) for score, addr in hits]
+    for limit in range(1, len(docs) + 2):
+        hits, capped = se._top_hits(searcher, q, limit)
+        assert key(hits) == key(searcher.search(q, limit).hits)
+        assert capped is (limit < len(docs))
+
+
 def test_ids_only_is_not_cut_off_when_every_doc_matches(tmp_path):
     # Its limit was the doc count: a query every doc matched filled it and read as cut off.
     root = tmp_path / "all_match"
@@ -234,3 +303,16 @@ def test_ids_only_is_not_cut_off_when_every_doc_matches(tmp_path):
     assert len(rows) == 3 and not cutoff["capped"]
     eng = None
     gc.collect()
+
+
+def test_a_cut_main_search_stays_cut_when_my_library_fits(engine, tmp_path):
+    """Both corpora: the main index reaches the limit and My Library does not -- the
+    search as a whole still left matches out, so it stays "N+"."""
+    local = _build(str(tmp_path / "local"), [("l0", f"אבג {W}", "page", "")])
+    saved = (getattr(engine, "local_index", None), getattr(engine, "local_searcher", None))
+    engine.local_index, engine.local_searcher = local, local.searcher()
+    try:
+        _rows, cut = _run(engine, W, 2, corpus_scope="all")
+        assert cut["capped"]
+    finally:
+        engine.local_index, engine.local_searcher = saved

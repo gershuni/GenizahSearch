@@ -18,6 +18,21 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 - Operators: `GENIZAH_RESEARCH_PRESTART` (default on) and the worker-count trade-offs are in
   `docs/search-matching-timeouts.md`.
 
+### Regex search checks every page the pattern can match (both)
+
+- **Regex mode finds every page its pattern matches.** Before the pattern runs, the index now
+  narrows the pages only by what the pattern requires: `שלום|שדה` reads pages with either word,
+  `ה?מלך` pages where מלך stands inside a longer word too, and with nothing fixed every page is a
+  candidate (up to the reading limit). On the desktop a list that reaches the reading limit shows "N+", and search within
+  results completes it first. Applies to My Library as well.
+- A pattern that does not start at the beginning of a word takes a few seconds longer: the index
+  looks for its letters inside every word.
+- With a POSIX class inside a set (`[a[:alpha:]]`) every page is a candidate (up to the reading
+  limit): the desktop's matcher and the index read such a set differently.
+- **A list that exactly reaches the reading limit no longer shows "N+"** (every mode, both
+  apps): the search now looks one candidate further to know whether any was left out. On the
+  desktop, a cut-off search that found nothing says "No results found. (Partial results)".
+
 ## [9.5.0] - 2026-10-04 — Faster, complete search
 
 A desktop installer and a web deploy. Search is much faster, and its results are more
