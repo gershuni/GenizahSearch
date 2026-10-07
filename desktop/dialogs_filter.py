@@ -815,6 +815,11 @@ class DomainFilterDialog(QDialog):
 
 
 
+# Count-label styles (#17: an error shows red; a later answer resets it).
+_COUNT_STYLE_OK = "font-size: 12px; font-weight: bold; color: #2980b9; padding: 4px;"
+_COUNT_STYLE_ERROR = "font-size: 12px; font-weight: bold; color: #e74c3c; padding: 4px;"
+
+
 class PreSearchFilterDialog(QDialog):
     """Pre-search filter dialog with multi-select domain, author, work, date range,
     include/exclude mode, text filters, and material controls.
@@ -993,12 +998,33 @@ class PreSearchFilterDialog(QDialog):
         right_layout.addWidget(text_group)
 
         # --- Measurement filters (Phase 54, DIM-02) ---
+        # #17: decided ONCE, from the data -- never from widget visibility:
+        # this block runs before meas_group is added to the dialog, so
+        # isVisibleTo() is False for every widget here. Three states (K-16):
+        # controls are SHOWN only when the catalog is known to have the data;
+        # saved values are DROPPED only when it is known NOT to; when it is
+        # not known (no catalog, or its schema could not be read) the values
+        # are kept, hidden or not, and the count below blocks OK until the
+        # lookup runs or the user clears them (K-17).
+        from shared.fjms_service import (
+            FILTER_SUPPORTED, FILTER_UNSUPPORTED,
+            LINE_HEIGHT_FILTER_KEYS, MEASUREMENT_FILTER_KEYS,
+            measurement_filter_support, line_height_filter_support,
+        )
+        _meas_support = measurement_filter_support()
+        _lh_support = line_height_filter_support()
+        meas_ok = _meas_support == FILTER_SUPPORTED
+        lh_ok = _lh_support == FILTER_SUPPORTED
+        meas_keep = _meas_support != FILTER_UNSUPPORTED
+        lh_keep = _lh_support != FILTER_UNSUPPORTED
         meas_group = QGroupBox(tr("Measurements"))
+        self.meas_group = meas_group
         meas_layout = QGridLayout(meas_group)
         MEASUREMENT_MATERIALS = ['Paper', 'Vellum', 'Papyrus', 'Mix', 'Wood']
 
         def _make_meas_spin(row, label, max_val, decimals, suffix):
-            meas_layout.addWidget(QLabel(label), row, 0)
+            lbl = QLabel(label)
+            meas_layout.addWidget(lbl, row, 0)
             spin_min = QDoubleSpinBox()
             spin_min.setRange(0, max_val)
             spin_min.setDecimals(decimals)
@@ -1019,13 +1045,20 @@ class PreSearchFilterDialog(QDialog):
             spin_max.setPrefix(tr("Max") + ": ")
             spin_max.editingFinished.connect(self._on_filter_changed)
             meas_layout.addWidget(spin_max, row, 2)
-            return spin_min, spin_max
+            return lbl, spin_min, spin_max
 
-        self.meas_width_min, self.meas_width_max = _make_meas_spin(0, tr("Width (cm)"), 100, 1, "cm")
-        self.meas_height_min, self.meas_height_max = _make_meas_spin(1, tr("Height (cm)"), 100, 1, "cm")
-        self.meas_lines_min, self.meas_lines_max = _make_meas_spin(2, tr("Lines"), 200, 0, "")
-        self.meas_line_height_min, self.meas_line_height_max = _make_meas_spin(3, tr("Line Height (mm)"), 20, 1, "mm")
-        self.meas_density_min, self.meas_density_max = _make_meas_spin(4, tr("Text Density"), 100, 1, "")
+        _, self.meas_width_min, self.meas_width_max = _make_meas_spin(0, tr("Width (cm)"), 100, 1, "cm")
+        _, self.meas_height_min, self.meas_height_max = _make_meas_spin(1, tr("Height (cm)"), 100, 1, "cm")
+        _, self.meas_lines_min, self.meas_lines_max = _make_meas_spin(2, tr("Lines"), 200, 0, "")
+        (self.meas_line_height_label, self.meas_line_height_min,
+         self.meas_line_height_max) = _make_meas_spin(3, tr("Line Height (mm)"), 20, 1, "mm")
+        _, self.meas_density_min, self.meas_density_max = _make_meas_spin(4, tr("Text Density"), 100, 1, "")
+        if not lh_ok:
+            for _w in (self.meas_line_height_label, self.meas_line_height_min,
+                       self.meas_line_height_max):
+                _w.setVisible(False)
+        if not meas_ok:
+            meas_group.setVisible(False)
 
         # Material multi-select via checkboxes -- "Material (measured)" per review concern #7
         meas_layout.addWidget(QLabel(tr("Material (measured)")), 5, 0)
@@ -1042,29 +1075,46 @@ class PreSearchFilterDialog(QDialog):
             self._meas_material_checks[mat] = cb
         meas_layout.addWidget(mat_widget, 5, 1, 1, 2)
 
-        # Restore measurement values from current_filters
-        if self._current_filters.get('width_min'):
-            self.meas_width_min.setValue(self._current_filters['width_min'])
-        if self._current_filters.get('width_max'):
-            self.meas_width_max.setValue(self._current_filters['width_max'])
-        if self._current_filters.get('height_min'):
-            self.meas_height_min.setValue(self._current_filters['height_min'])
-        if self._current_filters.get('height_max'):
-            self.meas_height_max.setValue(self._current_filters['height_max'])
-        if self._current_filters.get('line_count_min'):
-            self.meas_lines_min.setValue(self._current_filters['line_count_min'])
-        if self._current_filters.get('line_count_max'):
-            self.meas_lines_max.setValue(self._current_filters['line_count_max'])
-        if self._current_filters.get('line_height_min'):
-            self.meas_line_height_min.setValue(self._current_filters['line_height_min'])
-        if self._current_filters.get('line_height_max'):
-            self.meas_line_height_max.setValue(self._current_filters['line_height_max'])
-        if self._current_filters.get('text_density_min'):
-            self.meas_density_min.setValue(self._current_filters['text_density_min'])
-        if self._current_filters.get('text_density_max'):
-            self.meas_density_max.setValue(self._current_filters['text_density_max'])
-        for mat, cb in self._meas_material_checks.items():
-            cb.setChecked(mat in (self._current_filters.get('measurement_material') or []))
+        # Restore measurement values from current_filters -- unless the
+        # catalog is KNOWN not to have that data (then the value is dropped:
+        # it could only make every search fail). Guarded on the data, never
+        # on visibility (see above).
+        _cf = self._current_filters
+        if meas_keep:
+            if _cf.get('width_min'):
+                self.meas_width_min.setValue(_cf['width_min'])
+            if _cf.get('width_max'):
+                self.meas_width_max.setValue(_cf['width_max'])
+            if _cf.get('height_min'):
+                self.meas_height_min.setValue(_cf['height_min'])
+            if _cf.get('height_max'):
+                self.meas_height_max.setValue(_cf['height_max'])
+            if _cf.get('line_count_min'):
+                self.meas_lines_min.setValue(_cf['line_count_min'])
+            if _cf.get('line_count_max'):
+                self.meas_lines_max.setValue(_cf['line_count_max'])
+            if _cf.get('text_density_min'):
+                self.meas_density_min.setValue(_cf['text_density_min'])
+            if _cf.get('text_density_max'):
+                self.meas_density_max.setValue(_cf['text_density_max'])
+            for mat, cb in self._meas_material_checks.items():
+                cb.setChecked(mat in (_cf.get('measurement_material') or []))
+        if lh_keep:
+            if _cf.get('line_height_min'):
+                self.meas_line_height_min.setValue(_cf['line_height_min'])
+            if _cf.get('line_height_max'):
+                self.meas_line_height_max.setValue(_cf['line_height_max'])
+        # The saved values just dropped (they held something). The restores
+        # drop such values with a notice, but a value kept while the catalog
+        # was absent reaches this dialog once a catalog known to lack it has
+        # opened -- and OK would then lose it silently. The notice is shown
+        # below, above the count.
+        _gone = set()
+        if not meas_keep:
+            _gone.update(MEASUREMENT_FILTER_KEYS)
+        if not lh_keep:
+            _gone.update(LINE_HEIGHT_FILTER_KEYS)
+        self.dropped_saved_filters = sorted(k for k in _gone if _cf.get(k))
 
         right_layout.addWidget(meas_group)
 
@@ -1091,6 +1141,14 @@ class PreSearchFilterDialog(QDialog):
         layout.addWidget(chip_scroll)
         self.domain_tree.itemChanged.connect(self._on_domain_tree_changed)
         self._rebuild_dialog_chips()
+
+        # --- Saved filters this catalog cannot answer (#17) ---
+        self.dropped_notice_label = QLabel(
+            tr('Some saved filters were removed: this catalog data is not available.'))
+        self.dropped_notice_label.setWordWrap(True)
+        self.dropped_notice_label.setStyleSheet("color: #e67e22; font-size: 11px; padding: 2px 4px;")
+        self.dropped_notice_label.setVisible(bool(self.dropped_saved_filters))
+        layout.addWidget(self.dropped_notice_label)
 
         # --- Manuscript count ---
         self.count_label = QLabel("")
@@ -1592,6 +1650,7 @@ class PreSearchFilterDialog(QDialog):
         has_filter = any(k != 'include_mode' for k in filters)
         if not has_filter:
             self.count_label.setText(tr("All manuscripts (no filters)"))
+            self.count_label.setStyleSheet(_COUNT_STYLE_OK)
             self._result_set = None
             if hasattr(self, 'ok_btn'):
                 self.ok_btn.setEnabled(True)
@@ -1603,7 +1662,22 @@ class PreSearchFilterDialog(QDialog):
         self._count_worker.finished.connect(
             lambda result_set, gen=generation: self._on_count_finished(result_set, gen)
         )
+        self._count_worker.failed.connect(
+            lambda reason, gen=generation: self._on_count_failed(reason, gen)
+        )
         self._count_worker.start()
+
+    def _on_count_failed(self, reason, generation=None):
+        """The filters could not be evaluated (#17): say so, and keep OK
+        disabled -- accepting would store None, which means an unrestricted
+        search. The user can change the filters, Clear All, or Cancel."""
+        if generation is not None and generation != self._count_generation:
+            return
+        self._result_set = None
+        self.count_label.setText(tr("Could not update filter count"))
+        self.count_label.setStyleSheet(_COUNT_STYLE_ERROR)
+        if hasattr(self, 'ok_btn'):
+            self.ok_btn.setEnabled(False)
 
     def _on_count_finished(self, result_set, generation=None):
         """Handle count worker result."""
@@ -1612,6 +1686,7 @@ class PreSearchFilterDialog(QDialog):
         self._result_set = result_set
         if result_set is None:
             self.count_label.setText(tr("All manuscripts (no filters)"))
+            self.count_label.setStyleSheet(_COUNT_STYLE_OK)
         elif len(result_set) == 0:
             self.count_label.setText(tr("No manuscripts match"))
             self.count_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #e74c3c; padding: 4px;")

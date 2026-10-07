@@ -523,6 +523,7 @@ def _comp_summary(monkeypatch, result):
         _prime_comp_local_filepath_cache=lambda _rows: None,
         comp_chunks_processed=1, comp_chunks_total=3, comp_progress=_Bar(),   # progress last said chunk 1
         _notify_search_complete=lambda *a, **k: None,
+        _show_comp_chunk_notice=lambda _result: None,   # short-text notices (#13)
         _emit_comp_search_telemetry=telemetry)
     with pytest.raises(_ShownSummary):
         APP.on_comp_scan_finished(host, result)
@@ -578,6 +579,7 @@ def _composition_window(monkeypatch, mode_idx):
     w.comp_corpus_scope_combo.currentData.return_value = 'genizah'
     w.btn_lab_mode_toggle_comp.isChecked.return_value = False
     w._comp_method.return_value = 'chunk'
+    w._pre_search_filters_blocked.return_value = False   # no filter lookup pending (#17)
     thread = MagicMock()
     monkeypatch.setattr(genizah_app, 'CompositionThread', thread)
     return w, settings, shared, thread

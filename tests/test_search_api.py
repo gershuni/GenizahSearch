@@ -317,6 +317,12 @@ def test_filter_resolution_known_good(client, populated_state, clean_env, monkey
         'shared.fjms_service.is_valid_domain_token',
         lambda v: v in ('Piyyut', 'Liturgy'), raising=False,
     )
+    # The lookup itself is stubbed: this test reached 200 only through the
+    # old no-sidecar None path (an unfiltered search), which is now a 503
+    # filter_unavailable (#17).
+    monkeypatch.setattr(
+        'shared.fjms_service.get_filter_sys_ids', lambda **kw: {'990001'},
+    )
     r = client.post('/api/search', json={
         'query': 'x', 'search_mode': 'exact',
         'filters': {'domains': ['Piyyut']},

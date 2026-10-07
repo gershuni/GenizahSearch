@@ -191,6 +191,7 @@ class _FilterWorker:
         self.filters = filters
         self.parent = parent
         self.finished = _Signal()
+        self.failed = _Signal()   # #17: the dialog also handles a lookup that could not run
         self.started = False
         self.__class__.instances.append(self)
 

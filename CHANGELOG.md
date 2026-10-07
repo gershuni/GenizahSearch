@@ -118,6 +118,22 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 - **Website:** Settings has one Num Changes value per level. **API:** `variants` runs at
   ×1 (Basic, as before) and `fuzzy` at ×2.
 
+### Composition search: short texts, every word, honest filters (both)
+
+- **A text shorter than the chunk size is searched** as one chunk of all its words, with a
+  notice (it came back empty). Lab Mode searches a window ending on the last word, so the end
+  of a text is always searched, and "Min. chunk matches" higher than the text can give (in
+  Lab Mode: than the chunks it searches) is lowered, with a notice. The API adds `text_shorter_than_chunk_size` / `text_too_short`
+  warnings (additive).
+- **A catalog filter that cannot be applied says so** and the search is not run: before, a
+  failed lookup read as "no manuscripts match", and a missing catalog file searched
+  everything. The API answers 503 `filter_unavailable` for a filtered request it cannot apply
+  (it used to answer 200 unfiltered). Line Height is hidden until the catalog carries it; a
+  saved Line Height filter is removed with a notice (in Focus Search too).
+- **Search history keeps its filters (web):** removing a filter chip, or adding a term, after
+  restoring a search from history -- or after a reload -- no longer changes the saved history
+  entry.
+
 ## [9.5.0] - 2026-10-04 — Faster, complete search
 
 A desktop installer and a web deploy. Search is much faster, and its results are more

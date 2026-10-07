@@ -26,7 +26,7 @@ from web.components.filter_panel import (
     build_domain_options, build_author_options, build_work_options,
     build_filter_summary, has_active_filters, persist_value,
     load_filter_state, consume_incoming_filters, recompute_filter_count,
-    create_filter_handlers,
+    create_filter_handlers, filter_unavailable_message,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,7 @@ from shared.browse_map_utils import (
     library_codes_with_manuscripts,
 )
 from shared.sys_id_patterns import CORPUS_SYS_ID_RE
+from shared.composition_windows import chunk_notice_message, is_warning as chunk_notice_is_warning
 
 # --- Multi-witness letter-level search ------------------------------------
 # The witness-resolution rules live in `shared/passage_witness_source.py` so
@@ -466,7 +467,10 @@ def create_parallels_page(initial_text: str = None):
 
     # Restore filter state from session (only if NOT from browse, browse takes priority)
     if not _filters_from_browse:
-        load_filter_state(p_state, 'parallels')
+        if load_filter_state(p_state, 'parallels'):
+            # #17 (K-18): a saved measurement filter the catalog is known to lack.
+            ui.notify(tr('Some saved filters were removed: this catalog data is not available.'),
+                      type='info')
 
     # Restore per-manuscript exclusions from session.
     # 2026-05-12: pruned-session AssertionError fix — safe_user_get returns
@@ -2024,6 +2028,33 @@ def create_parallels_page(initial_text: str = None):
         )
         p_chip_bar_container.set_visibility(False)
 
+        # #17: the filter-count recompute's pending/error state, as on /search
+        # (search.py _set_filter_recompute_state). Outside the chip bar,
+        # because _update_p_chip_bar() clears that container.
+        _p_filter_status_row = ui.row().classes('w-full px-4 items-center gap-1')
+        _p_filter_status_row.set_visibility(False)
+        with _p_filter_status_row:
+            _p_filter_status_spinner = ui.spinner(size='sm').props('aria-hidden=true')
+            _p_filter_status_label = ui.label('').classes('text-xs').style('color: var(--text-muted);')
+
+        def _set_p_filter_recompute_state(status):
+            """Render pending/error feedback for the /parallels filter count."""
+            try:
+                if status == 'pending':
+                    _p_filter_status_spinner.set_visibility(True)
+                    _p_filter_status_label.text = tr('Updating filter count…')
+                    _p_filter_status_label.style('color: var(--text-muted);')
+                    _p_filter_status_row.set_visibility(True)
+                elif status == 'error':
+                    _p_filter_status_spinner.set_visibility(False)
+                    _p_filter_status_label.text = tr('Could not update filter count')
+                    _p_filter_status_label.style('color: var(--accent-red, #ef4444);')
+                    _p_filter_status_row.set_visibility(True)
+                else:  # 'done'
+                    _p_filter_status_row.set_visibility(False)
+            except Exception:
+                logger.debug("parallels filter recompute status render failed", exc_info=True)
+
         def _get_p_display_name(key, opts_dict):
             """Extract display name from options dict (strip trailing count suffix only)."""
             if isinstance(opts_dict, dict) and key in opts_dict:
@@ -2199,7 +2230,8 @@ def create_parallels_page(initial_text: str = None):
 
         async def _recompute_p_filter_count():
             """Recompute manuscript count for current filters (background)."""
-            await recompute_filter_count(p_state, _update_p_chip_bar)
+            await recompute_filter_count(p_state, _update_p_chip_bar,
+                                         on_state=_set_p_filter_recompute_state)
 
         # --- Filter change handlers (via shared factory) ---
         _p_handlers = create_filter_handlers(
@@ -4388,20 +4420,23 @@ def create_parallels_page(initial_text: str = None):
         # Restore filter state from history entry
         filters = params.get('filters')
         if filters and isinstance(filters, dict):
+            # Every list is a COPY: the entry lives in the visitor's storage,
+            # and a chip removal or an added term edits these lists in place
+            # -- sharing them rewrote the saved history entry.
             # Migrate from legacy single-value to lists
-            _d = filters.get('domains') or ([filters['domain']] if filters.get('domain') else [])
-            _a = filters.get('authors') or ([filters['author']] if filters.get('author') else [])
-            _w = filters.get('works') or ([filters['work']] if filters.get('work') else [])
+            _d = list(filters.get('domains') or ([filters['domain']] if filters.get('domain') else []))
+            _a = list(filters.get('authors') or ([filters['author']] if filters.get('author') else []))
+            _w = list(filters.get('works') or ([filters['work']] if filters.get('work') else []))
             p_state.filter_domains = _d
             p_state.filter_authors = _a
             p_state.filter_works = _w
             p_state.filter_include_mode = filters.get('include_mode', True)
             p_state.filter_date_from = filters.get('date_from')
             p_state.filter_date_to = filters.get('date_to')
-            p_state.filter_material_exclude = filters.get('material_exclude', [])
-            p_state.filter_text_all = filters.get('text_all', [])
-            p_state.filter_text_any = filters.get('text_any', [])
-            p_state.filter_text_not = filters.get('text_not', [])
+            p_state.filter_material_exclude = list(filters.get('material_exclude') or [])
+            p_state.filter_text_all = list(filters.get('text_all') or [])
+            p_state.filter_text_any = list(filters.get('text_any') or [])
+            p_state.filter_text_not = list(filters.get('text_not') or [])
             # Update filter UI elements
             p_domain_select.value = p_state.filter_domains
             p_author_select.value = p_state.filter_authors
@@ -4756,9 +4791,10 @@ def create_parallels_page(initial_text: str = None):
             _works = p_state.filter_works or None
 
             def _compute_restrict():
+                # No is_available() short-cut: with no sidecar the lookup
+                # raises FilterUnavailable (handled below) instead of running
+                # the search over the whole corpus (#17).
                 fjms = get_fjms_service(thread_safe=True)
-                if not fjms.is_available():
-                    return None
                 kwargs = dict(
                     date_from=p_state.filter_date_from,
                     date_to=p_state.filter_date_to,
@@ -4766,6 +4802,20 @@ def create_parallels_page(initial_text: str = None):
                     text_all=p_state.filter_text_all or None,
                     text_any=p_state.filter_text_any or None,
                     text_not=p_state.filter_text_not or None,
+                    # K-15: the measurement bounds the live count already
+                    # applies (has_active_filters counts them) -- the search
+                    # must apply the same ones.
+                    width_min=getattr(p_state, 'filter_width_min', None),
+                    width_max=getattr(p_state, 'filter_width_max', None),
+                    height_min=getattr(p_state, 'filter_height_min', None),
+                    height_max=getattr(p_state, 'filter_height_max', None),
+                    line_count_min=getattr(p_state, 'filter_line_count_min', None),
+                    line_count_max=getattr(p_state, 'filter_line_count_max', None),
+                    line_height_min=getattr(p_state, 'filter_line_height_min', None),
+                    line_height_max=getattr(p_state, 'filter_line_height_max', None),
+                    text_density_min=getattr(p_state, 'filter_text_density_min', None),
+                    text_density_max=getattr(p_state, 'filter_text_density_max', None),
+                    measurement_material=getattr(p_state, 'filter_measurement_material', None) or None,
                 )
                 if include_mode:
                     kwargs['domains'] = _domains
@@ -4777,15 +4827,31 @@ def create_parallels_page(initial_text: str = None):
                     kwargs['works_exclude'] = _works
                 return fjms.get_filter_sys_ids(**kwargs)
 
-            restrict_sys_ids = await run.io_bound(_compute_restrict)
+            def _stop_before_running():
+                # Undo the "searching" UI set above: no run will clear it.
+                p_state.is_running = False
+                search_indicator.style('display: none;')
+                progress_bar.style('opacity: 0;')
+                results_header.text = tr('Results')
+                results_container.clear()
+                run_btn.enable()
+                ui.run_javascript('if (window.__hideLoadingBar) window.__hideLoadingBar();')
+
+            from shared.fjms_service import FilterUnavailable
+            try:
+                restrict_sys_ids = await run.io_bound(_compute_restrict)
+            except FilterUnavailable as exc:
+                # #17: the filters could not be applied. Never "no manuscripts
+                # match", never a search without them: say so, and stop.
+                logger.warning("parallels: filters could not be applied (%s)", exc.reason)
+                ui.notify(filter_unavailable_message(exc, tr), type='negative')
+                _stop_before_running()
+                return
             p_state.restrict_sys_ids = restrict_sys_ids
             # If filters are active but match nothing, show message and return
             if restrict_sys_ids is not None and len(restrict_sys_ids) == 0:
                 ui.notify(tr("No manuscripts match the current filters."), type='warning')
-                p_state.is_running = False
-                search_indicator.style('display: none;')
-                progress_bar.style('opacity: 0;')
-                ui.run_javascript('if (window.__hideLoadingBar) window.__hideLoadingBar();')
+                _stop_before_running()
                 return
 
         # DMF-09 HYBRID Show-only library pre-query intersect (Phase 131-05 / Codex R3 F4).
@@ -5025,6 +5091,15 @@ def create_parallels_page(initial_text: str = None):
                         cap=PARALLELS_GROUP_CAP),
                     type='info',
                 )
+            # Chunk and Lab runs: the text did not fit the requested settings.
+            # Shown for every run, including one that found nothing, so an
+            # empty result is never mistaken for "no parallels exist".
+            for _cnotice in (result_data.get('composition_notices') or []):
+                _cmsg = chunk_notice_message(_cnotice, tr)
+                if _cmsg:
+                    ui.notify(_cmsg,
+                              type='warning' if chunk_notice_is_warning(_cnotice) else 'info',
+                              timeout=10000)
 
             # Built from DISPATCH-TIME captures, so it describes the search
             # that RAN -- which is why it sits outside the result guard below
@@ -5163,7 +5238,7 @@ def create_parallels_page(initial_text: str = None):
                     'max_freq': float(captured_freq_threshold) if captured_freq_threshold is not None else None,
                     'filters': _parallels_filters,
                     'boundary_options': None,  # Phase 77: not yet exposed as user-settable; placeholder for parity with /api/parallels API-02
-                    'warnings': [],  # Phase 78 will populate
+                    'warnings': [dict(n) for n in (result_data.get('composition_notices') or [])],
                 }
                 # DMF-09 HYBRID Hide post-fetch filter (Phase 131-05 / Codex MED #6).
                 # Applied BEFORE set_parallels_export / safe_user_set so exports + stored
@@ -5250,17 +5325,20 @@ def create_parallels_page(initial_text: str = None):
                             # included -- so this is observability, not a
                             # restore contract).
                             'engine': captured_engine,
+                            # COPIES: a live list loaded from storage is stored
+                            # as-is, so the entry would share it and a later chip
+                            # removal would rewrite the saved history.
                             'filters': {
-                                'domains': p_state.filter_domains,
-                                'authors': p_state.filter_authors,
-                                'works': p_state.filter_works,
+                                'domains': list(p_state.filter_domains or []),
+                                'authors': list(p_state.filter_authors or []),
+                                'works': list(p_state.filter_works or []),
                                 'include_mode': p_state.filter_include_mode,
                                 'date_from': p_state.filter_date_from,
                                 'date_to': p_state.filter_date_to,
-                                'material_exclude': p_state.filter_material_exclude,
-                                'text_all': p_state.filter_text_all,
-                                'text_any': p_state.filter_text_any,
-                                'text_not': p_state.filter_text_not,
+                                'material_exclude': list(p_state.filter_material_exclude or []),
+                                'text_all': list(p_state.filter_text_all or []),
+                                'text_any': list(p_state.filter_text_any or []),
+                                'text_not': list(p_state.filter_text_not or []),
                             } if _has_active_filters() else None,
                         },
                         state_snapshot={
