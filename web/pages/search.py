@@ -2526,8 +2526,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             completed = await _complete_chain(len(search_state.refinement_chain) - 1,
                                               notify_failure=False)
             results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}"
-            if completed and completed['interrupted']:
-                # Earlier steps' page sets are incomplete: filtering by them would hide
+            earlier = len(search_state.refinement_chain) - 1
+            if ((completed and completed['interrupted'])
+                    or steps_that_cannot_complete(search_state.refinement_chain, earlier)):
+                # Earlier steps' page sets are incomplete (the completion stopped, or a
+                # line-break step cannot be completed): filtering by them would hide
                 # shown rows that do have every term. Leave the filter off and say so.
                 search_state._all_terms_filter = False
                 persist_value('search_all_terms_filter', False)

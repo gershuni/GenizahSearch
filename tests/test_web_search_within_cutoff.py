@@ -801,6 +801,46 @@ def test_searching_within_a_cut_off_line_break_search_says_it_cannot_be_complete
             in seen['notes']), seen['notes']
 
 
+def test_the_all_terms_filter_stays_off_over_a_line_break_step(page):
+    """GitHub review (Codex on #385, round 4): an earlier cut-off Responsa line-break
+    step cannot be completed (completing skips it and is not "interrupted"), so its
+    page set stays partial; the all-terms filter over it would hide shown rows that
+    have every term. The box comes back unchecked, as when completing fails."""
+    from nicegui import ui
+    from tests.test_web_variant_settings_per_visitor import _fire, stored
+    query = f'{WORD} | {WORD2}'
+    queue = page({
+        (query, False): ([_row('M1')], {'capped': True, 'interrupted': False}),
+        (WORD2, False): ([_row('M1', page=2)], None),
+    })
+    seen = {}
+
+    def all_terms_box(user):
+        with user._client:
+            return next(e for e in user._client.elements.values()
+                        if isinstance(e, ui.checkbox) and e.text == 'Only results with all terms')
+
+    async def driver(a):
+        await a.open('/search')
+        store(a, search_mode='responsa')
+        await a.open('/search')
+        submit(a, query)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
+        _click_search_within(a)
+        await _wait_for(lambda: any('Searching within 1+ manuscripts' in t for t in _label_texts(a)), user=a)
+        submit(a, WORD2)
+        await wait_for_payloads(queue, 2)
+        await _wait_for(lambda: any(t == 'Only results with all terms' for t in _label_texts(a)), user=a)
+        _fire(a, all_terms_box(a), 'update:modelValue', True)
+        await _wait_for(lambda: all_terms_box(a).value is False, user=a)
+        seen['stored'] = stored(a, 'search_all_terms_filter')
+
+    run(driver, count=1)
+    assert len(queue.payloads) == 2, 'the line-break step is not run again'
+    assert seen['stored'] is False
+
+
 def _forced_stop(page, monkeypatch, early_rows):
     """WORD's search hands over *early_rows*, then never finishes: the web side stops
     it TIME_LIMIT_GRACE_SECONDS after its time limit (both made short here)."""
