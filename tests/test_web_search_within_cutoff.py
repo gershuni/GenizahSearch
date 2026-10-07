@@ -841,6 +841,47 @@ def test_the_all_terms_filter_stays_off_over_a_line_break_step(page):
     assert seen['stored'] is False
 
 
+def test_a_restored_history_entry_is_not_the_shown_search(page):
+    """GitHub review (Codex on #385, round 5): restoring an old history entry that
+    kept its rows replaced the results but kept the shown search's run and its "+":
+    the count read "1+", and Search within completed the OTHER search (WORD) and
+    restricted by it. The restored rows are their own search: no "+" (the entry
+    does not say it was cut), and Search within runs on their manuscripts."""
+    from nicegui import ui
+    from tests.test_web_variant_settings_per_visitor import (
+        PLACEHOLDER, WORD3, _element, _legacy_history_entry, _restore_history, stored)
+    queue = page({
+        (WORD, False): ([_row('M1')], {'capped': True, 'interrupted': False}),
+        (WORD, True): ([_row('M1'), _row('M2')], None),
+        (WORD2, False): ([_row('990000000000099')], None),
+    })
+    seen = {}
+
+    async def driver(a):
+        await a.open('/search')
+        submit(a, WORD)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
+        store(a, search_history=[_legacy_history_entry(WORD3, '990000000000099')])
+        _restore_history(a, WORD3)
+        box = _element(a, ui.input, lambda e: e.props.get('placeholder') == PLACEHOLDER)
+        await _wait_for(lambda: box.value == WORD3, user=a)
+        await _wait_for(lambda: any(t.startswith('1 Results') for t in _label_texts(a)), user=a)
+        _click_search_within(a)
+        await _wait_for(lambda: any('Searching within 1 manuscripts' in t for t in _label_texts(a)), user=a)
+        submit(a, WORD2)
+        await wait_for_payloads(queue, 2)
+        await _wait_for(lambda: bool(stored(a, 'search_refinement_chain')), user=a)
+        seen['step0'] = stored(a, 'search_refinement_chain')[0]
+
+    run(driver, count=1)
+    assert seen['step0']['query'] == WORD3, seen['step0']     # the restored search, not WORD
+    within = queue.payloads[1]['arguments']
+    assert not within.get('ids_only'), 'the shown search was completed instead'
+    assert within['query_str'] == WORD2
+    assert set(within['restrict_sys_ids']) == {'990000000000099'}
+
+
 def _forced_stop(page, monkeypatch, early_rows):
     """WORD's search hands over *early_rows*, then never finishes: the web side stops
     it TIME_LIMIT_GRACE_SECONDS after its time limit (both made short here)."""

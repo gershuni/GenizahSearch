@@ -377,6 +377,78 @@ def test_the_shown_results_settings_survive_a_reload():
     assert cleared.last_variant_settings is None
 
 
+def _legacy_history_entry(query, sys_id):
+    """A search-history entry from an older build: it kept the result rows."""
+    row = {'uid': f'{sys_id}_1', 'raw_header': f'{sys_id}_1', 'snippet': '', 'full_text': '',
+           'source': 'V0.8', 'display': {'id': sys_id, 'shelfmark': f'S-{sys_id}', 'title': '',
+                                         'source': 'V0.8', 'library': ''}}
+    return {'query': query, 'mode': 'exact', 'result_count': 1, 'params': {'mode': 'exact'},
+            'state': {'results': [row]}}
+
+
+def _restore_history(user, query):
+    from nicegui import ui
+    _fire(user, _element(user, ui.button, lambda e: e.props.get('icon') == 'history'), 'click')
+    item = _element(user, ui.menu_item, lambda e: any(
+        str(getattr(c, 'text', '')).startswith(query) for c in e.descendants()))
+    _fire(user, item, 'click')
+
+
+def test_a_restored_history_entry_does_not_take_the_shown_searchs_settings(server):
+    """GitHub review (Codex, 2026-10-07): restoring an old history entry that kept
+    its rows left the variant settings of the search shown before it, so a search
+    within the restored rows recorded -- and would replay -- its first step with
+    those (here Maximum). Their settings are unknown: none are recorded, and a
+    replay runs the website defaults at the step's level."""
+    from concurrent.futures import Future
+    from nicegui import ui
+    seen = {}
+    shown = _legacy_history_entry(WORD, '990000000000011')['state']['results']
+    answer = server.queue.submit
+
+    def submit_answering(payload):          # the shown search finds a row
+        job = answer(payload)
+        if server.queue.query_of(payload) == WORD:
+            job.future = Future()
+            job.future.set_result({'value': [dict(r) for r in shown]})
+        return job
+    server.queue.submit = submit_answering
+
+    async def driver(a, b):
+        await a.open('/search')
+        store(a, search_mode='variants_maximum')
+        await a.open('/search')
+        submit(a, WORD)
+        await wait_for_payloads(server.queue, 1)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 15
+        while not any(str(getattr(e, 'text', '')).startswith('Search within')
+                      for e in list(a._client.elements.values())):
+            assert loop.time() < deadline, 'the shown search has no Search within button'
+            await asyncio.sleep(0.05)
+        store(a, search_history=[_legacy_history_entry(WORD2, '990000000000099')])
+        _restore_history(a, WORD2)
+        box = _element(a, ui.input, lambda e: e.props.get('placeholder') == PLACEHOLDER)
+        while box.value != WORD2:                 # the restore runs as a task
+            assert loop.time() < deadline, box.value
+            await asyncio.sleep(0.05)
+        await asyncio.sleep(0.2)
+        _fire(a, _element(a, ui.button, lambda e: str(e.text).startswith('Search within')), 'click')
+        submit(a, WORD3)
+        await wait_for_payloads(server.queue, 2)
+        deadline = loop.time() + 15
+        while not stored(a, 'search_refinement_chain'):
+            assert loop.time() < deadline, stored(a, 'search_refinement_chain')
+            await asyncio.sleep(0.05)
+        seen['chain'] = stored(a, 'search_refinement_chain')
+
+    run(driver)
+    step0 = seen['chain'][0]
+    assert step0['query'] == WORD2
+    assert step0.get('variant_settings') is None, step0
+    assert server.queue.payloads[0]['settings']['variant_pairs_count'] == 150   # the shown search was Maximum
+
+
 def test_slider_mode_prefix_moves_the_slider(server):
     """In slider mode (a per-visitor choice) ??? sends the Maximum level, as the desktop does."""
     from nicegui import ui
