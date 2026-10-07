@@ -5312,7 +5312,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             else:
                 total_elapsed_str = f"{int(total_elapsed // 60)}:{int(total_elapsed % 60):02d}"
 
-            results_count.text = f"{len(results)} {tr('Results')} · {total_elapsed_str} ({tr('partial')})"
+            results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str} ({tr('partial')})"
             status_label.text = ''
             if not _forced_stop:  # the time-limit notice above already says so
                 ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
