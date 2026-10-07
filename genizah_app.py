@@ -98,8 +98,8 @@ from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog
 from desktop.filter_text_dialog import FilterTextDialog
 from desktop.column_filter_dialog import ColumnFilterDialog  # moved 2026-09-19; alias stub at the root
 from desktop.list_filter_dialog import ListFilterDialog
-from desktop.variant_run_settings import (engine_with_variant_settings, recorded_settings_searcher,
-                                          variant_settings_now)
+from desktop.variant_run_settings import (PreviewVariants, engine_with_variant_settings,
+                                          recorded_settings_searcher, variant_settings_now)
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared_export_utils import coerce_img_page_cell
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
@@ -17276,16 +17276,19 @@ class GenizahGUI(QMainWindow):
             return
 
         try:
-            # Set variant level from current UI (preset or slider)
+            # The level and x1-x3 shown, counted on the preview's own VariantManager:
+            # the shared one and the shared settings are the running search's.
             pairs_count = self._get_current_variant_pairs_count()
-            self.var_mgr.set_variant_level(pairs_count)
-            self._use_variant_changes('variants', pairs_count)
+            if getattr(self, '_variant_preview', None) is None:
+                self._variant_preview = PreviewVariants()
+            preview = self._variant_preview.manager(
+                self._lab_settings(), pairs_count, self._level_max_changes(pairs_count))
 
             # Calculate total variants for all words
             total_variants = 0
             for word in words:
                 if len(word) >= 2:
-                    variants = self.var_mgr.get_variants(word, 'variants', limit=500)
+                    variants = preview.get_variants(word, 'variants', limit=500)
                     total_variants += len(variants)
                 else:
                     total_variants += 1  # Single char = 1 variant (itself)

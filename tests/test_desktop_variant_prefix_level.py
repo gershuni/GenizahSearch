@@ -561,3 +561,34 @@ def test_a_composition_runs_on_its_own_settings_and_writes_nothing_shared(monkey
     assert searcher.var_mgr._settings.variant_max_changes == changes
     if level is not None:
         assert searcher.var_mgr.get_variant_level() == level
+
+
+def test_the_count_preview_counts_on_its_own_and_writes_nothing_shared():
+    """GitHub review (Codex on #386, round 3): the variant-count preview, run as the
+    user types or changes the level, wrote the shown level's x into the shared
+    settings and reset the shared VariantManager -- under a search still running
+    on them. It now counts on a VariantManager of its own."""
+    import copy
+    from types import MethodType
+    from unittest.mock import MagicMock
+    settings, shared = _shared(150, 3)      # a main-window Maximum x3 search runs on these
+    settings.variant_max_changes_by_preset = {'basic': 1, 'extended': 2, 'maximum': 3}
+    w = MagicMock()
+    w.lab_engine = SimpleNamespace(settings=settings)
+    w.var_mgr = shared
+    w._variant_preview = None
+    for name in ('_update_variant_count_preview', '_lab_settings', '_level_max_changes',
+                 '_use_variant_changes'):
+        setattr(w, name, MethodType(getattr(APP, name), w))
+    w._get_current_variant_pairs_count = lambda: 30   # Basic shown, x1
+    w.query_input.text.return_value = f'{COMMON} {WORD}'
+    w._update_variant_count_preview()
+    assert (settings.variant_pairs_count, settings.variant_max_changes) == (150, 3)
+    assert shared.get_variant_level() == 150 and _spellings(shared) == 8000
+    own = copy.copy(settings)
+    own.variant_pairs_count, own.variant_max_changes = 30, 1
+    expected = sum(len(VariantManager(own).get_variants(t, 'variants', limit=500)) for t in (COMMON, WORD))
+    assert w.variant_count_label.setText.call_args.args[0] == f'≈{expected}'
+    first = w._variant_preview._mgr
+    w._update_variant_count_preview()
+    assert w._variant_preview._mgr is first, 'typing reuses the preview manager and its cache'

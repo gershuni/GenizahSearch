@@ -112,6 +112,33 @@ def recorded_settings_searcher(searcher, settings, values):
     return SettingsBoundSearcher(searcher, lambda: (settings, values))
 
 
+class PreviewVariants:
+    """Spellings for the search bar's variant-count preview, from a VariantManager of
+    its own over a copy of the settings: the shared VariantManager and LabSettings
+    belong to the search that may be running, and the preview -- recomputed as the
+    user types or changes the level -- must not change what that search expands
+    with. The manager is rebuilt only when a value it reads changes, so its cache
+    serves the preview while the user types."""
+
+    def __init__(self):
+        self._key = None
+        self._mgr = None
+
+    def manager(self, settings, pairs_count, max_changes):
+        key = (pairs_count, max_changes,
+               getattr(settings, 'variant_min_word_len', 2),
+               bool(getattr(settings, 'variant_aggressive', False)),
+               tuple(sorted(str(k) for k in (getattr(settings, 'custom_variants', None) or {}))))
+        if self._mgr is None or key != self._key:
+            own = copy.copy(settings) if settings is not None else None
+            if own is not None:
+                own.variant_pairs_count = pairs_count
+                own.variant_max_changes = max_changes
+            self._mgr = VariantManager(settings=own)
+            self._key = key
+        return self._mgr
+
+
 def basic_changes_searcher(searcher, settings_of):
     """*searcher* running each search with Basic's Num Changes, whatever the last
     search left in the shared value (Joins Lab, like the website's: owner ruling
