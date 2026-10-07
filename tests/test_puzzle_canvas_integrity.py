@@ -2103,6 +2103,8 @@ def test_work_that_finishes_while_a_first_close_waits_for_a_modal_is_kept(
         raise _PastTheCloseCheck()
 
     h._refresh_comp_method_enabled = _show_scan
+    # The first thing past the close check now: the chunk notice (#13).
+    h._show_comp_chunk_notice = lambda _result: _show_scan()
     monkeypatch.setattr(ga.passage_lifecycle, "install_passage_state",
                         lambda state: kept.append(state.live_dir))
     for name in ("_finish_passage_build", "_honour_deferred_comp_method",

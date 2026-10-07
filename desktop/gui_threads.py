@@ -1798,8 +1798,19 @@ class PuzzleMetaLoaderThread(QThread):
 
 
 class FilterCountWorker(QThread):
-    """Background worker to compute manuscript count for pre-search filters."""
+    """Background worker to compute manuscript count for pre-search filters.
+
+    Emits exactly one of:
+      finished(set | None) -- the lookup ran (None only when no catalog
+                              filter is set and no library restriction);
+      failed(str)          -- the lookup could not run (#17); the argument is
+                              a FilterUnavailable reason, or 'error'. Never
+                              reported as finished(set()) ("no manuscripts
+                              match") or finished(None) (an unrestricted
+                              search).
+    """
     finished = pyqtSignal(object)  # set or None
+    failed = pyqtSignal(str)
 
     def __init__(self, filters: dict, parent=None, *, meta_mgr=None):
         super().__init__(parent)
@@ -1812,12 +1823,13 @@ class FilterCountWorker(QThread):
         self._meta_mgr = meta_mgr
 
     def run(self):
+        # Imported before the try so the except clause can name it. No
+        # is_available() short-cut: with no sidecar an active filter raises
+        # FilterUnavailable, and a Library-only filter (which needs no
+        # sidecar) still reaches the library step below.
+        from shared.fjms_service import FjmsService, FilterUnavailable
         try:
-            from shared.fjms_service import FjmsService
             fjms = FjmsService(thread_safe=True)
-            if not fjms.is_available():
-                self.finished.emit(None)
-                return
             include_mode = self.filters.get('include_mode', True)
             kwargs = dict(
                 date_from=self.filters.get('date_from'),
@@ -1877,5 +1889,8 @@ class FilterCountWorker(QThread):
                 else:
                     result = lib_ids if result is None else (result & lib_ids)
             self.finished.emit(result)
+        except FilterUnavailable as exc:
+            self.failed.emit(exc.reason)
         except Exception:
-            self.finished.emit(None)  # Operation failed; emit empty/None so caller handles gracefully
+            logger.exception("FilterCountWorker: filter lookup failed")
+            self.failed.emit('error')

@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Protocol
 
 from shared.canonical_works import partition_rows
@@ -153,6 +153,10 @@ class ParallelsResultBundle:
     witness_report: Optional[dict] = None
     per_witness_query_reports: Optional[list] = None
     multi_witness: bool = False
+    # Chunk path only: what the engine reports when the text did not fit the
+    # requested settings (shared/composition_windows.py). Empty for an
+    # ordinary run and for the passage path.
+    composition_notices: list = field(default_factory=list)
     # The searcher was stopped before it finished (on the website: its time limit,
     # Config.WEB_SEARCH_TIME_LIMIT) and returned what it had found -- the
     # searcher's own 'partial' key, from either engine. More parallels may exist;
@@ -418,6 +422,8 @@ async def fetch_parallels_results(
     # fusion_score and must not be ranked by one.
     multi_witness = bool(witness_report
                          and (witness_report.get('searched') or 0) > 1)
+    composition_notices = [dict(n) for n in
+                           ((result or {}).get('composition_notices') or [])]
 
     # Optional: hide manuscripts the catalogue identifies as canonical works
     # ("hide canonical works by the catalogue"). Applied HERE, after the
@@ -473,5 +479,6 @@ async def fetch_parallels_results(
         witness_report=witness_report,
         per_witness_query_reports=per_witness_query_reports,
         multi_witness=multi_witness,
+        composition_notices=composition_notices,
         partial=bool((result or {}).get('partial')),
     )

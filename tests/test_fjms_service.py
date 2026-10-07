@@ -1571,11 +1571,17 @@ def test_get_filter_sys_ids_returns_set_type(filter_svc):
     assert isinstance(result, set)
 
 
-def test_get_filter_sys_ids_graceful_degradation():
-    """Returns None when connection is unavailable (no crash)."""
+def test_get_filter_sys_ids_without_sidecar_is_unavailable():
+    """An active filter with no sidecar raises FilterUnavailable (#17).
+
+    It used to return None, which every caller reads as "no restriction",
+    so the search ran over the whole corpus while the filter was shown."""
+    from shared.fjms_service import FilterUnavailable
     svc = FjmsService(db_path="nonexistent_filter_test.db")
-    result = svc.get_filter_sys_ids(domain="Halakha")
-    assert result is None
+    with pytest.raises(FilterUnavailable) as info:
+        svc.get_filter_sys_ids(domain="Halakha")
+    assert info.value.reason == 'sidecar_unavailable'
+    assert svc.get_filter_sys_ids() is None, "no active filter is still 'no restriction'"
     svc.close()
 
 

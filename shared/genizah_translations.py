@@ -1738,6 +1738,19 @@ TRANSLATIONS = {
     "No manuscript found": "לא נמצא כתב יד",
     "Enter at least 10 words": "הזן לפחות 10 מילים",
     "Enter at least 3 words": "הזן לפחות 3 מילים",
+    # Composition search notices (shared/composition_windows.py)
+    "The text has {words} words, fewer than the chunk size ({chunk_size}), so it was searched as one chunk of {words} words.":
+        "בטקסט {words} מילים, פחות מגודל המקטע ({chunk_size}), ולכן הוא נבדק כמקטע אחד בן {words} מילים.",
+    "The text is too short to search: enter at least {minimum} words.":
+        "הטקסט קצר מכדי לחפש: הזן לפחות {minimum} מילים.",
+    "This search uses at least {effective_chunk_size} words per chunk, so the chunk size was raised from {chunk_size} to {effective_chunk_size}.":
+        "חיפוש זה בודק לפחות {effective_chunk_size} מילים בכל מקטע, ולכן גודל המקטע הוגדל מ-{chunk_size} ל-{effective_chunk_size}.",
+    "The text has {windows} chunk(s) in all, so the minimum chunk matches was lowered from {min_chunk_matches} to {windows}.":
+        "בטקסט יש {windows} מקטעים שונים בסך הכול, ולכן מינימום התאמות המקטע הורד מ-{min_chunk_matches} ל-{windows}.",
+    "Every chunk of the text is made of very common words, so Lab Mode did not search it. Try a longer or more distinctive text.":
+        "כל מקטעי הטקסט מורכבים ממילים נפוצות מאוד, ולכן מצב מעבדה לא חיפש בו. נסה טקסט ארוך או ייחודי יותר.",
+    "Lab Mode searched only {windows} of the text's chunks (the others are made of very common words), so the minimum chunk matches was lowered from {min_chunk_matches} to {windows}.":
+        "מצב מעבדה חיפש רק {windows} ממקטעי הטקסט (האחרים מורכבים ממילים נפוצות מאוד), ולכן מינימום התאמות המקטע הורד מ-{min_chunk_matches} ל-{windows}.",
     "Lab Engine not initialized": "מנוע המעבדה לא אותחל",
     "Paste your Hebrew text here...": "הדבק טקסט עברי כאן...",
     "Final forms": "צורות סופיות",
@@ -4559,6 +4572,24 @@ TRANSLATIONS.update({
     # web/components/filter_panel.py — filter-count recompute failure (#11)
     "Could not update filter count":
         "לא ניתן לעדכן את מניין הסינון",
+    # #17 — web /search and /parallels, desktop Search and Composition: the
+    # filter lookup failed, so the search was not started
+    "The filters could not be applied, so the search was not run. Try again, or remove the filters.":
+        "לא ניתן היה להחיל את הסינון, ולכן החיפוש לא הורץ. נסו שוב, או הסירו את הסינון.",
+    # #17 — web: the catalog data a filter needs is missing, search not started
+    "The catalog data these filters need is not available, so the search was not run. Remove the filters to search.":
+        "נתוני הקטלוג שהסינון זקוק להם אינם זמינים, ולכן החיפוש לא הורץ. הסירו את הסינון כדי לחפש.",
+    # #17 — desktop: same, pointing to the Focus Search button ("מקד חיפוש")
+    "The catalog data these filters need is not available, so the search was not run. Remove the filters with Focus Search to search.":
+        "נתוני הקטלוג שהסינון זקוק להם אינם זמינים, ולכן החיפוש לא הורץ. הסירו את הסינון דרך \"מקד חיפוש\" כדי לחפש.",
+    # #17 — web notice and desktop status bar: saved measurement filters
+    # dropped because the open catalog is known to lack that data
+    "Some saved filters were removed: this catalog data is not available.":
+        "חלק מהסינונים השמורים הוסרו: נתוני קטלוג אלה אינם זמינים.",
+    # #17 (K-14) — desktop status bar: Search/Composition pressed while the
+    # pre-search filters are still being computed; it runs when they are ready
+    "The filters are still being applied; the search will start as soon as they are ready.":
+        "תנאי הסינון עדיין נבדקים; החיפוש יתחיל מיד עם סיום הבדיקה.",
     # web/pages/search.py — search-history entry delete control
     "Delete history entry":
         "מחק רשומת היסטוריה",

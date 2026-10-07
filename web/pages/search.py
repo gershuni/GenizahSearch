@@ -20,7 +20,7 @@ from web.components.filter_panel import (
     build_domain_options, build_author_options, build_work_options,
     build_filter_summary, has_active_filters, persist_value,
     load_filter_state, consume_incoming_filters, recompute_filter_count,
-    create_filter_handlers,
+    create_filter_handlers, filter_unavailable_message,
 )
 from web.search_bootstrap import resolve_search_bootstrap
 from web.pages.search_state import (
@@ -260,7 +260,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     # Restore filter state from session only when the request itself is not explicit
     if restore_saved_filters and not _filters_from_browse:
-        load_filter_state(search_state, 'search')
+        if load_filter_state(search_state, 'search'):
+            # #17: a saved measurement filter the catalog is known to lack.
+            ui.notify(tr('Some saved filters were removed: this catalog data is not available.'),
+                      type='info')
 
     # Restore word search excluded ids from session
     if restore_saved_exclusions:
@@ -1097,9 +1100,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _rebuild_text_chips()
 
                 # --- Measurement filters (Phase 54, DIM-02) ---
+                # #17: shown only when the open catalog is known to have the
+                # data. Hidden controls keep their objects (the chip bar and
+                # the restore below reference them).
+                from shared.fjms_service import (
+                    measurement_filters_available, line_height_filter_available,
+                )
+                _meas_ok = measurement_filters_available()
+                _lh_ok = line_height_filter_available()
                 with ui.expansion(tr('Measurements'), icon='straighten').classes('w-full').props(
                     'dense default-closed header-class="text-sm"'
-                ):
+                ).mark('filter-measurements-group') as _meas_expansion:
+                    _meas_expansion.set_visibility(_meas_ok)
                     with ui.column().classes('gap-2 w-full'):
                         def _make_meas_range_row(label, suffix=''):
                             with ui.row().classes('gap-1 items-center w-full'):
@@ -1129,7 +1141,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 'outlined dense type=number step=1'
                             ).classes('w-20')
 
-                        meas_lh_min_inp, meas_lh_max_inp = _make_meas_range_row(tr('Line Height'), tr('mm'))
+                        with ui.element('div').classes('w-full').mark('filter-line-height-row') as _lh_row:
+                            meas_lh_min_inp, meas_lh_max_inp = _make_meas_range_row(tr('Line Height'), tr('mm'))
+                        _lh_row.set_visibility(_lh_ok)
                         meas_td_min_inp, meas_td_max_inp = _make_meas_range_row(tr('Text Density'), '/10' + tr('cm') + '\u00b2')
 
                         meas_material_select = ui.select(
@@ -2178,9 +2192,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ).classes('w-full').props('outlined dense clearable').style('direction: rtl;')
 
                 # Post-search measurement filters (Phase 54, DIM-03)
+                # #17: same visibility rule as the pre-search panel. Post-search
+                # values are not persisted (only these inputs set them).
+                from shared.fjms_service import (
+                    measurement_filters_available as _post_meas_available,
+                    line_height_filter_available as _post_lh_available,
+                )
                 with ui.expansion(tr('Measurements'), icon='straighten').classes('w-full').props(
                     'dense default-closed header-class="text-sm"'
-                ):
+                ).mark('post-filter-measurements-group') as _post_meas_expansion:
+                    _post_meas_expansion.set_visibility(_post_meas_available())
                     with ui.column().classes('gap-2 w-full'):
                         def _make_post_meas_row(label, suffix=''):
                             with ui.row().classes('gap-1 items-center w-full'):
@@ -2210,7 +2231,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 'outlined dense type=number step=1'
                             ).classes('w-20')
 
-                        post_lh_min, post_lh_max = _make_post_meas_row(tr('Line Height'), tr('mm'))
+                        with ui.element('div').classes('w-full').mark('post-filter-line-height-row') as _post_lh_row:
+                            post_lh_min, post_lh_max = _make_post_meas_row(tr('Line Height'), tr('mm'))
+                        _post_lh_row.set_visibility(_post_lh_available())
                         post_td_min, post_td_max = _make_post_meas_row(tr('Text Density'), '/10' + tr('cm') + '\u00b2')
 
                         post_mat_select = ui.select(
@@ -4696,20 +4719,23 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Restore filters if present
         filters = params.get('filters')
         if filters and isinstance(filters, dict):
+            # Every list is a COPY: the entry lives in the visitor's storage,
+            # and a chip removal or an added term edits these lists in place
+            # -- sharing them rewrote the saved history entry.
             # Migrate from legacy single-value to lists
-            _d = filters.get('domains') or ([filters['domain']] if filters.get('domain') else [])
-            _a = filters.get('authors') or ([filters['author']] if filters.get('author') else [])
-            _w = filters.get('works') or ([filters['work']] if filters.get('work') else [])
+            _d = list(filters.get('domains') or ([filters['domain']] if filters.get('domain') else []))
+            _a = list(filters.get('authors') or ([filters['author']] if filters.get('author') else []))
+            _w = list(filters.get('works') or ([filters['work']] if filters.get('work') else []))
             search_state.filter_domains = _d
             search_state.filter_authors = _a
             search_state.filter_works = _w
             search_state.filter_include_mode = filters.get('include_mode', True)
             search_state.filter_date_from = filters.get('date_from')
             search_state.filter_date_to = filters.get('date_to')
-            search_state.filter_material_exclude = filters.get('material_exclude', [])
-            search_state.filter_text_all = filters.get('text_all', [])
-            search_state.filter_text_any = filters.get('text_any', [])
-            search_state.filter_text_not = filters.get('text_not', [])
+            search_state.filter_material_exclude = list(filters.get('material_exclude') or [])
+            search_state.filter_text_all = list(filters.get('text_all') or [])
+            search_state.filter_text_any = list(filters.get('text_any') or [])
+            search_state.filter_text_not = list(filters.get('text_not') or [])
             # Update filter UI elements
             domain_select.value = search_state.filter_domains
             author_select.value = search_state.filter_authors
@@ -5031,9 +5057,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             from shared.fjms_service import get_fjms_service
 
             def _compute_restrict():
+                # No is_available() short-cut: with no sidecar the lookup
+                # raises FilterUnavailable (handled below) instead of running
+                # the search over the whole corpus (#17).
                 fjms = get_fjms_service(thread_safe=True)
-                if not fjms.is_available():
-                    return None
                 _inc = search_state.filter_include_mode
                 kwargs = dict(
                     date_from=search_state.filter_date_from,
@@ -5067,7 +5094,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 ))
                 return fjms.get_filter_sys_ids(**kwargs)
 
-            restrict_sys_ids = await run.io_bound(_compute_restrict)
+            from shared.fjms_service import FilterUnavailable
+            try:
+                restrict_sys_ids = await run.io_bound(_compute_restrict)
+            except FilterUnavailable as exc:
+                # #17: the filters could not be applied. Never "no manuscripts
+                # match", never a search without them: say so, and stop.
+                logger.warning("search: filters could not be applied (%s)", exc.reason)
+                ui.notify(filter_unavailable_message(exc, tr), type='negative')
+                search_state.is_running = False
+                search_state.is_cancelled = False
+                search_btn.style('display: inline-flex;')
+                stop_btn.style('display: none;')
+                progress_bar.classes('opacity-0')
+                render_results([])
+                return
             search_state.restrict_sys_ids = restrict_sys_ids
 
         # D8: search-within completes the chain first (_enter_refine_mode); a step
@@ -5530,17 +5571,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         'preset': current_preset.get('value', 30) if isinstance(current_preset, dict) else 30,
                         'gap': int(gap_input.value or 0),
                         'text_position': text_position_select.value,
+                        # COPIES: a live list loaded from storage is stored
+                        # as-is, so the entry would share it and a later chip
+                        # removal would rewrite the saved history.
                         'filters': {
-                            'domains': search_state.filter_domains,
-                            'authors': search_state.filter_authors,
-                            'works': search_state.filter_works,
+                            'domains': list(search_state.filter_domains or []),
+                            'authors': list(search_state.filter_authors or []),
+                            'works': list(search_state.filter_works or []),
                             'include_mode': search_state.filter_include_mode,
                             'date_from': search_state.filter_date_from,
                             'date_to': search_state.filter_date_to,
-                            'material_exclude': search_state.filter_material_exclude,
-                            'text_all': search_state.filter_text_all,
-                            'text_any': search_state.filter_text_any,
-                            'text_not': search_state.filter_text_not,
+                            'material_exclude': list(search_state.filter_material_exclude or []),
+                            'text_all': list(search_state.filter_text_all or []),
+                            'text_any': list(search_state.filter_text_any or []),
+                            'text_not': list(search_state.filter_text_not or []),
                         } if _has_active_filters() else None,
                     },
                     state_snapshot={

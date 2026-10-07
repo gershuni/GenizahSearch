@@ -143,6 +143,7 @@ Error code → plain-text mapping:
 | `invalid_combination` | `invalid field combination` (e.g. responsa_options with non-responsa mode) |
 | `invalid_filter_value` | `unknown filter value` |
 | `filter_vocabulary_unavailable` | `filter vocabulary not loaded — try without filters` |
+| `filter_unavailable` | `filters could not be applied right now — retry later, or try without filters` |
 | `query_required` | `query field empty` |
 | `query_too_long` | `query exceeds 1000 chars` |
 | `composition_required` | `composition text empty` |
