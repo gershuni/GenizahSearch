@@ -4,6 +4,18 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Website: steadier when a step is interrupted (web)
+
+- **Pages keep working when a search, filter or lookup is interrupted** -- by a newer search, a closed
+  tab or a server restart. The website now stops that step quietly instead of carrying on with half an
+  answer; all 141 such places were checked.
+- **Joins Lab: a search that runs past its time limit says "Search timed out".**
+- **Operators:** nginx can log and pass on each visitor's own address behind Cloudflare
+  (`scripts/genizah_cloudflare_realip.conf`, refreshed by `scripts/refresh_cloudflare_realip.py`);
+  the install steps are in `docs/guides/DEPLOYMENT_TECHNICAL.md`.
+
 ## [9.6.0] - 2026-10-07 — Search fixes
 
 Search fixes on both apps: Regex mode searches every page its pattern can match, Num Changes

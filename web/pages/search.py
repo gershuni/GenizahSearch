@@ -11,6 +11,7 @@ A comprehensive search interface with:
 """
 
 from nicegui import ui, run, app
+from web import io_bound_result
 from web.state import state
 from web.pages.search_helpers import compute_selected_uids
 from web.translations import tr, is_rtl, get_language, using_language
@@ -604,6 +605,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         from shared.pgp_tag_translations import get_categorized_tags_for_display
                         from web.translations import get_language
                         tags = await run.io_bound(get_all_distinct_tags)
+                        if tags is None:
+                            return  # cancelled or the app is stopping
                         lang = get_language()
                         categorized = get_categorized_tags_for_display(tags, lang)
                         # NiceGUI dict format: {value: label} — category headers as visual separators
@@ -1496,6 +1499,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if _filter_refresh_seq['author'] != seq:
                 return  # Stale -- newer request in flight
             author_select.props(remove='loading')
+            if new_opts is None:
+                return  # cancelled or app stopping: keep the options shown
             author_select.options = new_opts
             author_select.update()
 
@@ -1511,6 +1516,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if _filter_refresh_seq['work'] != seq:
                 return  # Stale -- newer request in flight
             work_select.props(remove='loading')
+            if new_opts is None:
+                return  # cancelled or app stopping: keep the options shown
             work_select.options = new_opts
             work_select.update()
 
@@ -1580,26 +1587,42 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 return with_request_settings(state.searcher, **settings)
             return pick
 
+        def _still_the_chain(chain):
+            """Whether the page's refinement chain is still *chain* (the same steps).
+            A replay answers for the chain it replayed: when the visitor cleared or
+            changed the chain while it ran or waited for a worker (a new search, Clear
+            all, a chip), its answer belongs to no chain on the page -- never commit it."""
+            current = search_state.refinement_chain
+            return len(current) == len(chain) and all(a is b for a, b in zip(current, chain))
+
         async def _deferred_chain_replay():
             """Replay saved refinement chain on session restore (D-14). Shows feedback."""
             if not search_state.refinement_chain:
                 return
             status_label.text = tr('Restoring refinement chain...')
             status_label.style('display: block;')
+            # Read now, not in the worker: an emptied chain replays to None.
+            chain = list(search_state.refinement_chain)
             try:
                 step_searcher = _step_searcher()
+                filter_restrict = search_state.restrict_sys_ids
                 def _do_replay():
                     with shared_time_limit():  # one time limit for the chain, not one per step
-                        return replay_chain(search_state.refinement_chain, state.searcher,
-                                            search_state.restrict_sys_ids, searcher_for_step=step_searcher)
+                        return replay_chain(chain, state.searcher,
+                                            filter_restrict, searcher_for_step=step_searcher)
                 result = await run.io_bound(_do_replay)
-                search_state.refinement_restrict_sys_ids = result
-                search_state._refinement_scope_sig = scope_signature(search_state.restrict_sys_ids)
+                # None: no answer (cancelled, or the app is stopping) -- a non-empty
+                # chain never replays to None, and None would mean "no restriction".
+                # Keep what is set; the strip below is still brought up to date.
+                if result is not None and _still_the_chain(chain):
+                    search_state.refinement_restrict_sys_ids = result
+                    search_state._refinement_scope_sig = scope_signature(filter_restrict)
             except Exception as e:
                 logger.error(f"Refinement chain replay failed: {e}")
-                search_state.refinement_chain = []
-                search_state.refinement_restrict_sys_ids = None
-                persist_value('search_refinement_chain', [])
+                if _still_the_chain(chain):  # never clear a chain built since
+                    search_state.refinement_chain = []
+                    search_state.refinement_restrict_sys_ids = None
+                    persist_value('search_refinement_chain', [])
             finally:
                 status_label.text = ''
                 status_label.style('display: none;')
@@ -1616,12 +1639,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             status_label.style('display: block;')
             try:
                 step_searcher = _step_searcher()
+                # Read now, not in the worker: an emptied chain replays to None.
+                chain = list(search_state.refinement_chain)
+                filter_restrict = search_state.restrict_sys_ids
                 def _do_replay():
                     with shared_time_limit():  # one time limit for the chain, not one per step
-                        return replay_chain(search_state.refinement_chain, state.searcher,
-                                            search_state.restrict_sys_ids, searcher_for_step=step_searcher)
+                        return replay_chain(chain, state.searcher,
+                                            filter_restrict, searcher_for_step=step_searcher)
                 result = await run.io_bound(_do_replay)
-                search_state.refinement_restrict_sys_ids = result
+                # None: no answer (cancelled, or the app is stopping) -- a non-empty
+                # chain never replays to None, and None would mean "no restriction".
+                # Keep the restriction (the next "Search within" sets it again); the
+                # shortened chain is still what the visitor asked for.
+                if result is not None and _still_the_chain(chain):
+                    search_state.refinement_restrict_sys_ids = result
                 persist_value('search_refinement_chain', [s.to_dict() for s in search_state.refinement_chain])
             except Exception as e:
                 logger.error(f"Refinement replay failed: {e}")
@@ -2636,20 +2667,37 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if search_state.refinement_chain:
                 # Replay to rebuild restrict from remaining chain
                 async def _replay_and_search():
+                    # Read now, not in the worker: an emptied chain replays to None. Taken
+                    # before the try, so the failure path checks ownership as well.
+                    chain = list(search_state.refinement_chain)
                     try:
                         step_searcher = _step_searcher()
+                        filter_restrict = search_state.restrict_sys_ids
                         def _do_replay():
                             with shared_time_limit():  # one time limit for the chain, not one per step
-                                return replay_chain(search_state.refinement_chain, state.searcher,
-                                                    search_state.restrict_sys_ids, searcher_for_step=step_searcher)
+                                return replay_chain(chain, state.searcher,
+                                                    filter_restrict, searcher_for_step=step_searcher)
                         result = await run.io_bound(_do_replay)
-                        search_state.refinement_restrict_sys_ids = result
-                        # D8: the replay reads cut-off lists; complete them first.
-                        completed = await _complete_chain(None)
-                        if completed and not completed['interrupted'] and completed['restrict'] is not None:
-                            search_state.refinement_restrict_sys_ids = completed['restrict']
+                        if not _still_the_chain(chain):
+                            # Cleared or changed meanwhile (a new search, Clear all, a
+                            # chip): that action owns the page now; search nothing here.
+                            return
+                        # None: no answer (cancelled, or the app is stopping) -- never
+                        # search within "no restriction". The search below then runs
+                        # within the restriction already set, as after a failed replay.
+                        if result is not None:
+                            search_state.refinement_restrict_sys_ids = result
+                            # D8: the replay reads cut-off lists; complete them first.
+                            completed = await _complete_chain(None)
+                            if (completed and not completed['interrupted'] and completed['restrict'] is not None
+                                    and _still_the_chain(chain)):
+                                search_state.refinement_restrict_sys_ids = completed['restrict']
                     except Exception:
-                        pass  # Shelfmark lookup failed; use fallback identifier
+                        pass  # the replay failed: search within the restriction already set
+                    if not _still_the_chain(chain):
+                        # Cleared or changed while the replay ran or failed: that action owns
+                        # the page now. Never re-enter refinement for a chain that is gone.
+                        return
                     search_state._refine_mode = True
                     await execute_search()
                 await _replay_and_search()
@@ -4308,9 +4356,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             search_state._exclusion_shelf_map = await run.io_bound(
                                 build_shelf_map, state.meta_mgr.csv_bank
                             )
-                        ids, unresolved, entries = await run.io_bound(
+                            if search_state._exclusion_shelf_map is None:
+                                return  # cancelled or app stopping
+                        resolved = await run.io_bound(
                             resolve_shelfmarks, lines, search_state._exclusion_shelf_map
                         )
+                        if resolved is None:
+                            return  # cancelled or app stopping
+                        ids, unresolved, entries = resolved
                         if not ids:
                             paste_report.clear()
                             with paste_report:
@@ -4477,10 +4530,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             search_state._exclusion_shelf_map = await run.io_bound(
                                 build_shelf_map, state.meta_mgr.csv_bank
                             )
+                            if search_state._exclusion_shelf_map is None:
+                                return  # cancelled or app stopping
 
-                        ids, unresolved, entries = await run.io_bound(
+                        resolved = await run.io_bound(
                             resolve_shelfmarks, lines, search_state._exclusion_shelf_map
                         )
+                        if resolved is None:
+                            return  # cancelled or app stopping
+                        ids, unresolved, entries = resolved
                         file_source_ref['entries'] = entries
                         file_source_ref['ids'] = ids
                         file_source_ref['unresolved'] = unresolved
@@ -5060,8 +5118,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         }
 
         # Phase 55: If not in refine mode, clear any stale refinement chain
-        # A normal search should NOT be restricted by a previous refinement
-        if not search_state._refine_mode and (search_state.refinement_chain or search_state.refinement_restrict_sys_ids):
+        # A normal search should NOT be restricted by a previous refinement --
+        # an EMPTY restriction ("within no manuscripts") included, falsy as it is.
+        if not search_state._refine_mode and (search_state.refinement_chain
+                                              or search_state.refinement_restrict_sys_ids is not None):
             search_state.refinement_chain = []
             search_state.refinement_restrict_sys_ids = None
             search_state._refinement_stale = False
@@ -5078,58 +5138,78 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if _has_active_filters():
             from shared.fjms_service import get_fjms_service
 
+            # Every filter is read HERE, on the loop, and the lists copied: the
+            # lookup can wait for a free worker, and a filter the visitor changes
+            # meanwhile must not change the search they asked for.
+            _inc = search_state.filter_include_mode
+
+            def _copied(values):
+                if not values:
+                    return None
+                return list(values) if isinstance(values, (list, tuple, set, frozenset)) else values
+
+            filter_kwargs = dict(
+                date_from=search_state.filter_date_from,
+                date_to=search_state.filter_date_to,
+                material_exclude=_copied(search_state.filter_material_exclude),
+                text_all=_copied(search_state.filter_text_all),
+                text_any=_copied(search_state.filter_text_any),
+                text_not=_copied(search_state.filter_text_not),
+            )
+            if _inc:
+                filter_kwargs['domains'] = _copied(search_state.filter_domains)
+                filter_kwargs['authors'] = _copied(search_state.filter_authors)
+                filter_kwargs['works'] = _copied(search_state.filter_works)
+            else:
+                filter_kwargs['domains_exclude'] = _copied(search_state.filter_domains)
+                filter_kwargs['authors_exclude'] = _copied(search_state.filter_authors)
+                filter_kwargs['works_exclude'] = _copied(search_state.filter_works)
+            # Measurement filter params (Phase 54)
+            filter_kwargs.update(dict(
+                width_min=search_state.filter_width_min,
+                width_max=search_state.filter_width_max,
+                height_min=search_state.filter_height_min,
+                height_max=search_state.filter_height_max,
+                line_count_min=search_state.filter_line_count_min,
+                line_count_max=search_state.filter_line_count_max,
+                line_height_min=search_state.filter_line_height_min,
+                line_height_max=search_state.filter_line_height_max,
+                text_density_min=search_state.filter_text_density_min,
+                text_density_max=search_state.filter_text_density_max,
+                measurement_material=_copied(search_state.filter_measurement_material),
+            ))
+
             def _compute_restrict():
                 # No is_available() short-cut: with no sidecar the lookup
                 # raises FilterUnavailable (handled below) instead of running
                 # the search over the whole corpus (#17).
                 fjms = get_fjms_service(thread_safe=True)
-                _inc = search_state.filter_include_mode
-                kwargs = dict(
-                    date_from=search_state.filter_date_from,
-                    date_to=search_state.filter_date_to,
-                    material_exclude=search_state.filter_material_exclude or None,
-                    text_all=search_state.filter_text_all or None,
-                    text_any=search_state.filter_text_any or None,
-                    text_not=search_state.filter_text_not or None,
-                )
-                if _inc:
-                    kwargs['domains'] = search_state.filter_domains or None
-                    kwargs['authors'] = search_state.filter_authors or None
-                    kwargs['works'] = search_state.filter_works or None
-                else:
-                    kwargs['domains_exclude'] = search_state.filter_domains or None
-                    kwargs['authors_exclude'] = search_state.filter_authors or None
-                    kwargs['works_exclude'] = search_state.filter_works or None
-                # Measurement filter params (Phase 54)
-                kwargs.update(dict(
-                    width_min=search_state.filter_width_min,
-                    width_max=search_state.filter_width_max,
-                    height_min=search_state.filter_height_min,
-                    height_max=search_state.filter_height_max,
-                    line_count_min=search_state.filter_line_count_min,
-                    line_count_max=search_state.filter_line_count_max,
-                    line_height_min=search_state.filter_line_height_min,
-                    line_height_max=search_state.filter_line_height_max,
-                    text_density_min=search_state.filter_text_density_min,
-                    text_density_max=search_state.filter_text_density_max,
-                    measurement_material=search_state.filter_measurement_material or None,
-                ))
-                return fjms.get_filter_sys_ids(**kwargs)
+                return fjms.get_filter_sys_ids(**filter_kwargs)
 
-            from shared.fjms_service import FilterUnavailable
-            try:
-                restrict_sys_ids = await run.io_bound(_compute_restrict)
-            except FilterUnavailable as exc:
-                # #17: the filters could not be applied. Never "no manuscripts
-                # match", never a search without them: say so, and stop.
-                logger.warning("search: filters could not be applied (%s)", exc.reason)
-                ui.notify(filter_unavailable_message(exc, tr), type='negative')
+            def _stop_before_running():
+                # Undo the "searching" UI set above: no run will clear it.
                 search_state.is_running = False
                 search_state.is_cancelled = False
                 search_btn.style('display: inline-flex;')
                 stop_btn.style('display: none;')
                 progress_bar.classes('opacity-0')
                 render_results([])
+
+            from shared.fjms_service import FilterUnavailable
+            try:
+                restrict_sys_ids = await io_bound_result.io_bound(_compute_restrict)
+            except FilterUnavailable as exc:
+                # #17: the filters could not be applied. Never "no manuscripts
+                # match", never a search without them: say so, and stop.
+                logger.warning("search: filters could not be applied (%s)", exc.reason)
+                ui.notify(filter_unavailable_message(exc, tr), type='negative')
+                _stop_before_running()
+                return
+            if restrict_sys_ids is io_bound_result.INTERRUPTED:
+                # No answer (cancelled, or the app is stopping) -- not the lookup's
+                # own None, which means "no restriction". Never a search without
+                # the filters (#17): stop.
+                _stop_before_running()
                 return
             search_state.restrict_sys_ids = restrict_sys_ids
 
@@ -5194,6 +5274,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     titles = await run.io_bound(_fetch_preview_titles) if sids else {}
                 except Exception:
                     titles = {}  # Titles are added again with the result.
+                if titles is None:
+                    # run.io_bound swallows the cancel the search sends this painter when
+                    # it ends (or the app is stopping) and returns None: stop painting.
+                    return
                 if (search_state.search_generation != generation or not search_state.is_running
                         or search_state.is_cancelled):
                     return
@@ -5401,7 +5485,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         tt = svc.get_title_translations_batch(_partial_sids) if svc.titles_available() else {}
                         svc.close()
                         return tt
-                    search_state.title_translations = await run.io_bound(_fetch_partial_titles)
+                    # None (cancelled or app stopping): no titles, never None.
+                    search_state.title_translations = await run.io_bound(_fetch_partial_titles) or {}
                 except Exception:
                     pass  # Translation lookup failed; continue without translation
 
@@ -5424,7 +5509,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     tt = svc.get_title_translations_batch(all_sys_ids) if svc.titles_available() else {}
                     svc.close()
                     return tt
-                search_state.title_translations = await run.io_bound(_fetch_titles_fast)
+                # None (cancelled or app stopping): no titles, never None.
+                search_state.title_translations = await run.io_bound(_fetch_titles_fast) or {}
             except Exception:
                 pass  # Translation lookup failed; continue without translation
 
@@ -5734,16 +5820,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # SEED-022: fetch the PGP-text set and FGP set alongside the existing
             # PGP link-presence set (transcription_ids, which still feeds the PGP
             # badge). pgp_text ∪ fgp = the new "has manual transcription" union.
-            fjms_tuple, transcription_ids, trans_data, vs_avail, pgp_text_ids, fgp_ids = await asyncio.gather(
-                run.io_bound(collect_fjms_enrichment, visible_ids),
-                run.io_bound(get_sys_ids_with_transcriptions, visible_ids),
-                run.io_bound(collect_translations, visible_ids, _show_trans_for_enrich),
-                run.io_bound(collect_vs_availability, visible_ids),
-                run.io_bound(get_sys_ids_with_pgp_text, visible_ids),
-                run.io_bound(_web_fgp_sys_ids, visible_ids),
+            _visible_enrichment = await asyncio.gather(
+                io_bound_result.io_bound(collect_fjms_enrichment, visible_ids),
+                io_bound_result.io_bound(get_sys_ids_with_transcriptions, visible_ids),
+                io_bound_result.io_bound(collect_translations, visible_ids, _show_trans_for_enrich),
+                io_bound_result.io_bound(collect_vs_availability, visible_ids),
+                io_bound_result.io_bound(get_sys_ids_with_pgp_text, visible_ids),
+                io_bound_result.io_bound(_web_fgp_sys_ids, visible_ids),
             )
-            # Check generation before applying (user may have started a new search)
-            if search_state.search_generation == this_generation:
+            fjms_tuple, transcription_ids, trans_data, vs_avail, pgp_text_ids, fgp_ids = _visible_enrichment
+            # Check generation before applying (user may have started a new search).
+            # A lookup with no answer (cancelled, or the app is stopping) commits
+            # nothing: the cards keep their plain form, the filter buttons stay hidden.
+            if (search_state.search_generation == this_generation
+                    and not io_bound_result.interrupted(*_visible_enrichment)):
                 raw_domains, catalog_counts, printed_ids, meas_batch = fjms_tuple
                 search_state._measurement_cache.update(meas_batch)  # Phase 54
                 _process_domain_data(raw_domains)
@@ -5801,16 +5891,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     if search_state.search_generation != this_generation:
                         return  # A newer search owns the page now.
                     chunk_ids = remaining_ids[chunk_start:chunk_start + CHUNK_SIZE]
-                    bg_fjms_tuple, bg_trans_ids, bg_trans_data, bg_vs, bg_pgp_text_ids, bg_fgp_ids = await asyncio.gather(
-                        run.io_bound(collect_fjms_enrichment, chunk_ids),
-                        run.io_bound(get_sys_ids_with_transcriptions, chunk_ids),
-                        run.io_bound(collect_translations, chunk_ids, _show_trans_for_enrich),
-                        run.io_bound(collect_vs_availability, chunk_ids),
-                        run.io_bound(get_sys_ids_with_pgp_text, chunk_ids),
-                        run.io_bound(_web_fgp_sys_ids, chunk_ids),
+                    _chunk_enrichment = await asyncio.gather(
+                        io_bound_result.io_bound(collect_fjms_enrichment, chunk_ids),
+                        io_bound_result.io_bound(get_sys_ids_with_transcriptions, chunk_ids),
+                        io_bound_result.io_bound(collect_translations, chunk_ids, _show_trans_for_enrich),
+                        io_bound_result.io_bound(collect_vs_availability, chunk_ids),
+                        io_bound_result.io_bound(get_sys_ids_with_pgp_text, chunk_ids),
+                        io_bound_result.io_bound(_web_fgp_sys_ids, chunk_ids),
                     )
                     if search_state.search_generation != this_generation:
                         return
+                    if io_bound_result.interrupted(*_chunk_enrichment):
+                        return  # no answer (cancelled, or the app is stopping): commit nothing
+                    bg_fjms_tuple, bg_trans_ids, bg_trans_data, bg_vs, bg_pgp_text_ids, bg_fgp_ids = _chunk_enrichment
                     bg_domains, bg_counts, bg_printed, bg_meas = bg_fjms_tuple
                     search_state._measurement_cache.update(bg_meas)
                     _process_domain_data(bg_domains)
@@ -5923,7 +6016,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 if _tag_all_sids:
                     _tag_manual_ids = await run.io_bound(
                         _web_manual_transcription_ids, _tag_all_sids
-                    )
+                    ) or set()  # None (cancelled / app stopping): no badge
             except Exception:
                 pass  # Manual-transcription lookup failed; omit the badge
 
@@ -6021,13 +6114,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     async def _deferred_filter_init():
         """Load filter select options asynchronously after page renders."""
         lang = get_language()  # Capture in client context before io_bound
+        # None (cancelled / app stopping) would break the select: options=None.
         d = await run.io_bound(build_domain_options, lang)
+        if d is None:
+            return
         domain_select.options = d
         domain_select.update()
         a = await run.io_bound(build_author_options, lang, search_state.filter_domains)
+        if a is None:
+            return
         author_select.options = a
         author_select.update()
         w = await run.io_bound(build_work_options, lang, search_state.filter_domains, search_state.filter_authors)
+        if w is None:
+            return
         work_select.options = w
         work_select.update()
         _update_chip_bar()
@@ -6056,15 +6156,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # reloaded session.
                 try:
                     link_ids, manual_ids = await asyncio.gather(
-                        run.io_bound(get_sys_ids_with_transcriptions, sys_ids),
-                        run.io_bound(_web_manual_transcription_ids, sys_ids),
+                        io_bound_result.io_bound(get_sys_ids_with_transcriptions, sys_ids),
+                        io_bound_result.io_bound(_web_manual_transcription_ids, sys_ids),
                     )
+                    if io_bound_result.interrupted(link_ids, manual_ids):
+                        return  # no answer (cancelled, or the app is stopping): never store it
                     search_state.transcription_sys_ids = link_ids
                     search_state.manual_transcription_sys_ids = manual_ids
                 except Exception:
-                    search_state.transcription_sys_ids = await run.io_bound(
-                        get_sys_ids_with_transcriptions, sys_ids
-                    )
+                    link_ids = await run.io_bound(get_sys_ids_with_transcriptions, sys_ids)
+                    if link_ids is None:
+                        return  # cancelled or app stopping: never store None
+                    search_state.transcription_sys_ids = link_ids
                     search_state.manual_transcription_sys_ids = set()
                 # SEED-026 (smoke 2026-06-29): re-run the cheap FJMS enrichment on restore
                 # (domains + printed + catalog counts + measurements) so the domain/printed

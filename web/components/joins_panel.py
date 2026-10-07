@@ -638,6 +638,8 @@ def create_joins_button(
             fetch_connected_fragments,
             shelfmark=shelfmark, document_id=document_id, pgpid=pgpid,
         )
+        if data is None:
+            return  # cancelled or app stopping
         join_count['value'] = data.get('total_fragments', 1)
         total = join_count['value']
         if button_ref['btn']:
@@ -747,6 +749,15 @@ def create_joins_dialog(
                 fetch_connected_fragments,
                 shelfmark=shelfmark, document_id=document_id, pgpid=pgpid,
             )
+            if data is None:
+                # Cancelled or app stopping: no answer -- drop the spinner, show no claim.
+                if not spinner_state['deleted']:
+                    try:
+                        spinner_state['spinner'].delete()
+                    except Exception:
+                        pass  # Already gone with the dialog
+                    spinner_state['deleted'] = True
+                return
             # Community puzzle joins: blocking PostgREST reads, also off the loop.
             community_rows = []
             if WEB_PUZZLE_ENABLED and document_id:

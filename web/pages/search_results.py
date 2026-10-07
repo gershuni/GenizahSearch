@@ -891,6 +891,8 @@ def create_result_card(search_state, refs, index, result):
                         # The Lab remains useful when the optional lookup is unavailable.
                         ui.navigate.to(url, new_tab=True)
                         return
+                    if data is None:
+                        return  # cancelled or app stopping
                     if data.get('total_joins', 0) > 0:
                         create_joins_dialog(
                             shelfmark=sm,

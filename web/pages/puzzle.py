@@ -13,6 +13,7 @@ import logging
 import json
 
 from nicegui import ui, app, run
+from web import io_bound_result
 from web.translations import tr, get_language
 from web.state import state
 from web.safe_storage import safe_user_pop
@@ -2558,13 +2559,17 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     notes=save_notes.value or '',
                     fragments=fragments,
                 )
-                saved_id = await run.io_bound(lambda: _save_doc_with_thumbnail(joins, doc, fragments))
-                if not saved_id and doc_state['current_doc_id']:
+                saved_id = await io_bound_result.io_bound(lambda: _save_doc_with_thumbnail(joins, doc, fragments))
+                # INTERRUPTED (cancelled, or the app is stopping) is no answer, not
+                # "not this visitor's document": a retry under a new id would leave
+                # a second draft if the first save did complete in its thread.
+                if (saved_id is not io_bound_result.INTERRUPTED and not saved_id
+                        and doc_state['current_doc_id']):
                     # The open document is not this visitor's (for example they
                     # signed in or out since opening it): keep their work as a
                     # new document of their own instead.
                     doc.id = doc_id = str(uuid.uuid4())
-                    saved_id = await run.io_bound(lambda: _save_doc_with_thumbnail(joins, doc, fragments))
+                    saved_id = await io_bound_result.io_bound(lambda: _save_doc_with_thumbnail(joins, doc, fragments))
                 if not saved_id:
                     ui.notify(tr('Could not save this join'), type='negative')
                     return
@@ -2801,7 +2806,10 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         joins = _visitor_joins()
         if joins is None:
             return
-        if not await run.io_bound(joins.owns, doc_state['current_doc_id']):
+        owned = await io_bound_result.io_bound(joins.owns, doc_state['current_doc_id'])
+        if owned is io_bound_result.INTERRUPTED:
+            return  # no answer (cancelled, or the app is stopping): not "not saved"
+        if not owned:
             ui.notify(tr('Save the puzzle first'), type='warning')
             return
 
@@ -2811,7 +2819,13 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 from shared.puzzle_publish_service import unpublish_join
                 from web.supabase_client import get_user_client
                 client = get_user_client()
-                await run.io_bound(unpublish_join, client, user_id, doc_state['current_doc_id'])
+                # unpublish_join answers None when it is done: only INTERRUPTED
+                # (cancelled, or the app is stopping) says it may not be.
+                done = await io_bound_result.io_bound(unpublish_join, client, user_id, doc_state['current_doc_id'])
+                if done is io_bound_result.INTERRUPTED:
+                    ui.notify(tr('The change could not be saved. Check your connection and try again.'),
+                              type='negative')
+                    return
                 doc_state['is_published'] = False
                 publish_btn.props('flat')
                 publish_btn.props(remove='color')
@@ -2849,6 +2863,8 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     img_svc = get_puzzle_image_service().for_browser(image_browser_key)
                     client = get_user_client()
                     published_id = await run.io_bound(publish_join, client, user_id, doc, img_svc)
+                    if published_id is None:
+                        return  # cancelled or app stopping: never a /puzzle?doc=None link
                     doc_state['is_published'] = True
                     publish_btn.props(remove='flat')
                     publish_btn.props('color=green')
@@ -2919,9 +2935,19 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     if joins is None:
                         dlg.close()
                         return
+                    def _not_confirmed():
+                        # No answer (cancelled, or the app is stopping): never "Deleted".
+                        dlg.close()
+                        ui.notify(tr('The change could not be saved. Check your connection and try again.'),
+                                  type='negative')
+
                     # Only the visitor's own document can be deleted (or,
                     # with it, unpublished).
-                    if not await run.io_bound(joins.owns, doc_id):
+                    owned = await io_bound_result.io_bound(joins.owns, doc_id)
+                    if owned is io_bound_result.INTERRUPTED:
+                        _not_confirmed()
+                        return
+                    if not owned:
                         dlg.close()
                         ui.notify(tr('Could not load document'), type='warning')
                         await refresh_docs_list()
@@ -2934,10 +2960,17 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                         if GlobalAuthState.is_logged_in():
                             client = get_user_client()
                             user_id = GlobalAuthState.get_user_id()
-                            await run.io_bound(unpublish_join, client, user_id, doc_id)
+                            unpublished = await io_bound_result.io_bound(unpublish_join, client, user_id, doc_id)
+                            if unpublished is io_bound_result.INTERRUPTED:
+                                # A published copy may still be up: keep the saved one too.
+                                _not_confirmed()
+                                return
                     except Exception:
                         pass  # Not published or not logged in — fine
-                    await run.io_bound(joins.delete_document, doc_id)
+                    deleted = await io_bound_result.io_bound(joins.delete_document, doc_id)
+                    if deleted is io_bound_result.INTERRUPTED:
+                        _not_confirmed()
+                        return
                     if doc_state['current_doc_id'] == doc_id:
                         doc_state['current_doc_id'] = None
                         doc_state['is_published'] = False
@@ -3157,7 +3190,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 fjms_joins = []
                 fjms_svc = get_fjms_service()
                 if fjms_svc and fjms_svc.is_available():
-                    fjms_joins = await run.io_bound(fjms_svc.get_join_group, sel_sys_id)
+                    fjms_joins = await run.io_bound(fjms_svc.get_join_group, sel_sys_id) or []
 
                 # Build unique fragment map: sys_id -> shelfmark
                 frag_map = {}

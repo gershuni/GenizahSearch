@@ -321,6 +321,8 @@ def create_version_selector(
             versions_data = await fetch_page_versions_async(
                 document_id, page_number
             )
+            if versions_data is None:
+                return  # cancelled or app stopping (run.io_bound returned None)
             current_default = versions_data.get('current_default')
 
             if current_default:
@@ -352,11 +354,15 @@ def create_version_selector(
                 ui.menu_item(tr('Loading...')).props('disable')
 
             async def load_versions():
-                corrections, pending_corrections = (
-                    await fetch_version_menu_data_async(
-                        document_id, page_number
-                    )
+                menu_data = await fetch_version_menu_data_async(
+                    document_id, page_number
                 )
+                if menu_data is None:
+                    # Cancelled or app stopping: close the "Loading..." menu; the
+                    # next click loads it again.
+                    menu.close()
+                    return
+                corrections, pending_corrections = menu_data
 
                 # Rebuild the menu
                 menu.clear()

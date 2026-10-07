@@ -363,7 +363,9 @@ def _review_outbound_write(seed: Optional[str] = None) -> List[str]:
     async def _direct(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
-    patch.setattr(ir.run, "io_bound", _direct)
+    # The module reaches run.io_bound through web.io_bound_result (2026-10-07); this is
+    # the same NiceGUI `run` module object it used to import itself.
+    patch.setattr(ir.io_bound_result.run, "io_bound", _direct)
     try:
         asyncio.run(_run())
     finally:

@@ -265,6 +265,8 @@ async def do_login(email: str, password: str) -> Dict:
     from nicegui import run
     from web.analytics import posthog_capture
     result = await run.io_bound(supabase_sign_in, email, password)
+    if result is None:  # cancelled or app stopping
+        return {"error": "Sign-in was interrupted. Please try again."}
 
     if "error" in result:
         posthog_capture('login_failed', {
@@ -329,6 +331,8 @@ async def do_register(email: str, username: str, password: str,
 
     from nicegui import run
     result = await run.io_bound(supabase_sign_up, email, password, metadata if metadata else None)
+    if result is None:  # cancelled or app stopping
+        return {"error": "Registration was interrupted. Please try again."}
 
     if "error" in result:
         return result
@@ -395,6 +399,8 @@ def create_forgot_password_dialog():
                 return
             from nicegui import run
             result = await run.io_bound(request_password_reset, email)
+            if result is None:
+                return  # cancelled or app stopping
             if 'error' in result:
                 # Codex review 2026-07-28 MEDIUM-4: never render the raw
                 # Supabase/httpx error string. It is English-only (leaks into

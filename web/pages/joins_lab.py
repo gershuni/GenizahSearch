@@ -74,6 +74,7 @@ from shared.joins_lab import (
     detect_self_match, merge_candidates,
 )
 from shared.visual_similarity_service import get_vs_service
+from web import io_bound_result
 from web.auth_state import GlobalAuthState, create_login_dialog
 from web.components.anchor_viewer import AnchorViewer, inject_viewer_assets
 from web.components.candidate_grid import (
@@ -1006,6 +1007,8 @@ def create_joins_lab_page(
             if anchor_sid and anchor_sid not in sys_ids:
                 sys_ids.append(anchor_sid)
             enrichment = await _enrich_candidates(sys_ids)
+            if enrichment is None:
+                return  # cancelled or app stopping (run.io_bound returned None)
             # Store in the page-level dict (shared with filter dialog + table cells)
             _enrichment.clear()
             _enrichment.update(enrichment)
@@ -1639,7 +1642,9 @@ def create_joins_lab_page(
         Fast path: if query looks like a sys_id (all digits, starts with '99'),
         return it directly (mirrors browse.py:729).
         Otherwise call service.search_by_shelfmark off the event loop.
-        Returns None when not found.
+        Returns None when not found, and ``io_bound_result.INTERRUPTED`` (falsy)
+        when the lookup gave no answer (cancelled, or the app is stopping) --
+        which is not "not found".
         """
         query = query.strip()
         if not query:
@@ -1648,9 +1653,12 @@ def create_joins_lab_page(
         if query.isdigit() and query.startswith('99'):
             return query
         # Shelfmark resolution (I/O-bound SQLite — off the event loop)
-        results, _ = await run.io_bound(
+        found = await io_bound_result.io_bound(
             lambda: get_service().search_by_shelfmark(query, limit=20)
         )
+        if found is io_bound_result.INTERRUPTED:
+            return found
+        results, _ = found
         if results:
             return results[0].sys_id
         return None
@@ -2376,6 +2384,14 @@ def create_joins_lab_page(
             # A newer anchor superseded this fetch while it was in flight — discard.
             if anchor_gen != _anchor_generation['value']:
                 return
+            if data is None:
+                # Cancelled or app stopping: no answer -- say so, as for a failed fetch.
+                known_joins_container.clear()
+                with known_joins_container:
+                    ui.label(tr('Could not load joins. Check your connection.')).classes(
+                        'text-xs'
+                    ).style('color: var(--text-muted);')
+                return
 
             def _on_reanchor(member_sys_id: str, member_shelfmark: str) -> None:
                 """Re-anchor to a known-join member (D-16: does NOT clear builder state)."""
@@ -2650,6 +2666,8 @@ def create_joins_lab_page(
             # F-VSavail: probe availability off-loop on first VS fetch attempt
             if not _vs_available['checked']:
                 available = await run.io_bound(_check_vs_service_available)
+                if available is None:
+                    return  # cancelled or app stopping: probe again next time
                 _vs_available['checked'] = True
                 _vs_available['available'] = available
                 if not available:
@@ -2732,7 +2750,11 @@ def create_joins_lab_page(
                     return enriched
 
                 try:
-                    vs_cands = await run.io_bound(run_vs_meta_core)
+                    enriched_cands = await run.io_bound(run_vs_meta_core)
+                    # None (cancelled or app stopping): keep vs_cands as they are,
+                    # as when the enrichment fails -- usable, without metadata.
+                    if enriched_cands is not None:
+                        vs_cands = enriched_cands
                 except Exception:
                     logger.debug('VS metadata enrichment failed', exc_info=True)
                     # vs_cands stays as-is (no metadata, but still usable)
@@ -2821,6 +2843,8 @@ def create_joins_lab_page(
         load_btn.props('loading=true disabled=true')
         try:
             resolved = await resolve_anchor_input(query)
+            if resolved is io_bound_result.INTERRUPTED:
+                return  # no answer (cancelled, or the app is stopping): not "not found"
             if resolved:
                 await load_anchor(resolved)
             else:
@@ -3606,6 +3630,14 @@ def create_joins_lab_page(
 
             try:
                 raw_results = await _current_task['task']
+                if raw_results is None:
+                    # wait_for hands back what the cancelled coroutine returned, and
+                    # run.io_bound swallows the timeout's cancel and returns None: the
+                    # time limit (or the app stopping), never an answer. A newer
+                    # search owns the status line, so a superseded one stays quiet.
+                    if not _should_apply_results(my_gen, _search_generation):
+                        return
+                    raise asyncio.TimeoutError
 
             except asyncio.TimeoutError:
                 search_status.set_text(
@@ -3719,6 +3751,8 @@ def create_joins_lab_page(
                         # Re-check stale generation after the second await
                         if not _should_apply_results(my_gen, _search_generation):
                             return
+                        if merge_result is None:
+                            raise asyncio.TimeoutError  # see raw_results above
                         final_candidates = list(merge_result.candidates)
                     except asyncio.TimeoutError:
                         # MED (CR): the final render hides search_status immediately,

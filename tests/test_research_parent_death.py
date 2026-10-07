@@ -11,6 +11,20 @@ import pytest
 from shared.research_worker import protect_parent_death
 
 
+def _alive(process):
+    """Running and not yet a zombie.
+
+    is_running() and status() are two separate /proc reads. A worker killed
+    with its parent is reparented to init, which reaps it at once; if that
+    lands between the two reads, status() raises NoSuchProcess. That is the
+    death being waited for, not an error (CI run 37628811155).
+    """
+    try:
+        return process.is_running() and process.status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:  # includes ZombieProcess
+        return False
+
+
 def test_unsupported_platform_disables_native_matching(monkeypatch):
     monkeypatch.setattr(sys, 'platform', 'win32')
     assert protect_parent_death(os.getpid()) is False
@@ -28,7 +42,9 @@ from shared.search_regex import compile, isolated_matching
 assert protect_parent_death(os.getppid())
 pattern = compile('(a|aa)+$')
 with isolated_matching(native=True):
-    Path(sys.argv[2]).write_text(str(os.getpid()))
+    # Renamed into place: the test must never read a created-but-empty file.
+    Path(sys.argv[2] + '.tmp').write_text(str(os.getpid()))
+    os.replace(sys.argv[2] + '.tmp', sys.argv[2])
     pattern.search('a' * 10000 + '!')
 '''
     parent = '''
@@ -53,11 +69,11 @@ sys.stdin.read(1)
             time.sleep(0.02)
         worker = psutil.Process(int(ready.read_text()))
         time.sleep(0.1)
-        assert worker.is_running() and worker.status() != psutil.STATUS_ZOMBIE
+        assert _alive(worker), 'worker stopped matching before its parent died'
         proc.kill()
         proc.wait(timeout=5)
         deadline = time.monotonic() + 5
-        while worker.is_running() and worker.status() != psutil.STATUS_ZOMBIE:
+        while _alive(worker):
             assert time.monotonic() < deadline, 'native matcher survived parent death'
             time.sleep(0.02)
     finally:
@@ -69,6 +85,17 @@ sys.stdin.read(1)
                 worker.kill()
             except psutil.NoSuchProcess:
                 pass
+
+
+@pytest.mark.skipif(sys.platform != 'linux', reason='Linux /proc reap timing')
+def test_worker_reaped_between_psutil_reads_counts_as_dead(monkeypatch):
+    """The interleaving CI hit: is_running() read /proc before the reap,
+    status() after it. The wait loop must report death, not raise."""
+    child = subprocess.Popen([sys.executable, '-c', 'pass'])
+    process = psutil.Process(child.pid)
+    child.wait(timeout=10)  # exited and reaped: /proc/<pid> is gone
+    monkeypatch.setattr(process, 'is_running', lambda: True)  # read before the reap
+    assert _alive(process) is False
 
 
 @pytest.mark.skipif(sys.platform != 'linux', reason='Linux kernel parent-death signal')

@@ -1,6 +1,6 @@
 # GenizahSearch Technical Deployment Guide
 
-> Last updated: 2026-03-13
+> Last updated: 2026-10-07
 > For: Developers, System Administrators, AI Assistants
 
 ---
@@ -194,22 +194,35 @@ WantedBy=multi-user.target
 
 ### Nginx Configuration (`/etc/nginx/sites-available/genizah`)
 
+As on the server (copied read-only 2026-10-07), plus the Cloudflare realip `include` described
+below. The SEO-bot snippet and its `map` (`conf.d/seo_bot_block_map.conf`) exist only on the
+server; the realip snippet is generated from this repo.
+
 ```nginx
 server {
-    listen 80;
+    # Cloudflare edge -> real visitor in $remote_addr (see "Real visitor addresses behind Cloudflare").
+    include /etc/nginx/snippets/genizah_cloudflare_realip.conf;
+
     server_name genizahsearch.com www.genizahsearch.com;
-    return 301 https://$server_name$request_uri;
-}
+    # Block aggressive crawlers that don't execute JS
+    if ($http_user_agent ~* "meta-externalagent") {
+        return 403;
+    }
 
-server {
-    listen 443 ssl;
-    server_name genizahsearch.com www.genizahsearch.com;
+    # robots.txt must stay reachable by ALL crawlers (served by the app, web/api.py::robots_txt).
+    location = /robots.txt {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 
-    ssl_certificate /etc/letsencrypt/live/genizahsearch.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/genizahsearch.com/privkey.pem;
-
-    # All traffic goes to NiceGUI (no separate /api route needed)
+    # Web frontend (NiceGUI) - requires WebSocket support
     location / {
+        # SEO-tool crawler 403 (2026-07-08); UA map in conf.d/seo_bot_block_map.conf.
+        include /etc/nginx/snippets/genizah_seo_bot_block.conf;
+
         proxy_pass http://127.0.0.1:8081;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -222,8 +235,208 @@ server {
         proxy_set_header Connection "upgrade";
         proxy_read_timeout 86400;
     }
+
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/genizahsearch.com/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/genizahsearch.com/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+}
+server {
+    include /etc/nginx/snippets/genizah_cloudflare_realip.conf;
+
+    if ($host = www.genizahsearch.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+    if ($host = genizahsearch.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+    listen 80;
+    server_name genizahsearch.com www.genizahsearch.com;
+    return 404; # managed by Certbot
 }
 ```
+
+Despite its comment, `/robots.txt` is not reachable by every crawler: the server-level
+`meta-externalagent` `if` runs before any `location` is chosen, so that crawler gets 403 there too.
+
+### Real visitor addresses behind Cloudflare
+
+**Why.** DNS is proxied through Cloudflare, so every request reaches nginx from a Cloudflare
+edge. Without the realip module `$remote_addr` is that edge: the access log, `X-Real-IP` and the
+address nginx appends to `X-Forwarded-For` all name Cloudflare. On 2026-10-07 the site was
+overloaded after a restart, and the access log showed only `172.70.153.x`: the source had to be
+found in the Cloudflare dashboard. The app's per-IP limiters and the
+PostHog IP hash keyed on the edge too (sweep item L8), so visitors sharing an edge shared a bucket.
+
+**The change.** `scripts/genizah_cloudflare_realip.conf` lists every Cloudflare range as
+`set_real_ip_from` (fetched 2026-10-07 from `https://www.cloudflare.com/ips-v4` and `/ips-v6`)
+and sets `real_ip_header CF-Connecting-IP`. It is included at the top of both `server` blocks.
+For a connection whose peer is in those ranges, nginx replaces `$remote_addr` with the
+`CF-Connecting-IP` value Cloudflare set; from any other peer the header is ignored.
+
+**What the app then receives** (no app change was needed):
+
+| Request | `X-Forwarded-For` reaching the app | Address the app keys on |
+|---|---|---|
+| Visitor V via Cloudflare, before | `V, <edge>` | `<edge>` |
+| Visitor V via Cloudflare, after | `V, V` | `V` |
+| V sends its own `X-Forwarded-For: F` and `CF-Connecting-IP: F` | `F, V, V` | `V` |
+| Client A connects to the origin directly, forging `CF-Connecting-IP: V` | `<A's own XFF>, A` | `A` |
+
+uvicorn's `ProxyHeadersMiddleware` (on by default under `ui.run`, trusting only `127.0.0.1`,
+i.e. nginx) sets `request.client` to the right-most `X-Forwarded-For` entry -- the one nginx
+appended -- and `web/api_hardening._resolve_rate_limit_key` and the puzzle limiter in
+`web/api.py` read `request.client.host`. Two things must stay true. `FORWARDED_ALLOW_IPS` stays
+unset -- not empty, and never `*` (with `*` uvicorn takes the LEFT-most entry, which the visitor
+writes; empty trusts no host, so every request keeps nginx's `127.0.0.1`). And no module in
+`web/` reads `CF-Connecting-IP` or `X-Real-IP` itself: nginx passes a client-sent
+`CF-Connecting-IP` through untouched from any peer, and although it always overwrites
+`X-Real-IP`, a client that reached the app on port 8081 directly could send either.
+`tests/test_api_hardening_behind_cloudflare.py` runs the real uvicorn middleware on header values
+written out by hand from nginx's documented behaviour (it runs neither nginx nor the puzzle
+limiter itself), shows what `*`, an empty value or an extra `API_TRUSTED_PROXIES` entry would
+break, and fails if `web/` reads those headers or sets `FORWARDED_ALLOW_IPS`. It cannot see the
+server's environment: step 0 below checks that.
+
+**Limits.** The origin listens on `0.0.0.0:443` and `:80` with no Cloudflare-only restriction in
+the nginx config, and its address is in this public repo (Server Details above); whether the AWS
+security group admits only Cloudflare is not visible from the config. The snippet does not stop a
+direct request -- it only guarantees that such a request is logged and limited under its true
+address. The app itself listens on `0.0.0.0:8081` (NiceGUI's default when `ui.run` gets no
+`host`), which would skip nginx and Cloudflare altogether; checked 2026-10-07, port 8081 is not
+reachable from outside (the security group drops it), and binding the app to `127.0.0.1` would
+make that hold whatever the security group says. Restricting 443/80 to Cloudflare's ranges
+(security group) or enabling Cloudflare
+Authenticated Origin Pulls is the separate step that closes the origin. A range Cloudflare adds
+before the next refresh shows up as an edge address again (degraded, never spoofable). Per-IP
+limits now apply per visitor: one heavy visitor gets the whole per-IP allowance to itself, and
+other visitors behind the same edge are no longer throttled with it.
+
+**Refreshing the ranges.** `scripts/refresh_cloudflare_realip.py` (stdlib only, run as root)
+fetches both lists from `https://www.cloudflare.com/` only (a redirect elsewhere is refused
+before it is followed) and refuses a body shorter than its `Content-Length`; an empty, malformed,
+non-public or over-broad (`< /8` IPv4, `< /16` IPv6) list; and, unless `--allow-large-change`, a
+list that keeps fewer than half of the installed networks of either family (`--dry-run` applies
+this too). A cut-off list it can still miss: a body with no length to check that keeps enough
+networks -- at least half of each family against an installed snippet, or any count when nothing
+is installed yet (hence the diff in step 2). A new write marks the reload pending before the
+snippet changes, so a run killed before its reload finishes is finished by the next. It keeps the
+previous snippet as `<dest>.prev`, runs `nginx -t` before reloading and puts the previous snippet
+back if the test fails. A failed reload leaves `<dest>.reload-pending`, and the next run retries
+`nginx -t` and the reload even if nothing changed. While one run holds `<dest>.lock`, a second is
+refused. Unchanged ranges with no reload pending mean no write and no reload. `--dry-run` prints
+and writes nothing; `--no-reload` writes and tests only (reloading is then yours). Exit codes: 0
+ok/unchanged, 1 refused or locked (nothing written), 2 `nginx -t` failed (nothing reloaded; a new
+snippet was put back), 3 reload failed (the next run retries it).
+
+**Install (owner, once).** Code first (`./deploy.sh master-main`), then on the server. First the
+checks, which change nothing nginx reads:
+
+```bash
+# 0. uvicorn must keep its default (expect NO output from both):
+grep -n FORWARDED_ALLOW_IPS /home/ubuntu/GenizahSearch/.env
+systemctl show genizah-web -p Environment | grep -o 'FORWARDED_ALLOW_IPS=[^ ]*'
+ls -l /etc/nginx/sites-enabled/          # confirm the live site file is .../sites-available/genizah
+
+# 1. A root-owned copy of the refresh script (cron must not run a file the deploy user can rewrite):
+sudo install -o root -g root -m 0755 /home/ubuntu/GenizahSearch/scripts/refresh_cloudflare_realip.py \
+    /usr/local/sbin/genizah-refresh-cloudflare-realip
+
+# 2. Fetch + validate, write nothing; compare with the reviewed copy (expect only the
+#    Fetched / Last-Modified comment lines to differ, unless Cloudflare changed a range).
+#    A REFUSED message means: stop here.
+sudo /usr/local/sbin/genizah-refresh-cloudflare-realip --dry-run \
+    | diff - /home/ubuntu/GenizahSearch/scripts/genizah_cloudflare_realip.conf
+```
+
+Then, only after reading that diff, paste this block whole. It stops at the first failure, puts
+the site file back if step 5 or `nginx -t` fails, and is safe to paste again after fixing the
+cause: the first backup is never overwritten and the `include` is never added twice. (If only the
+final reload fails, the tested file stays and nginx keeps its running config; rerun the reload.)
+
+```bash
+(
+set -eu
+SITE=/etc/nginx/sites-available/genizah
+BAK=/root/genizah.nginx.before-realip
+INC='include /etc/nginx/snippets/genizah_cloudflare_realip.conf;'
+undo() { sudo cp -a "$BAK" "$SITE"; echo "STOPPED at $1: $SITE restored from $BAK; nginx NOT reloaded" >&2; exit 1; }
+
+# 3. Back up the site file OUTSIDE sites-enabled/ (nginx loads every file there) -- once.
+sudo test -e "$BAK" || sudo cp -a "$SITE" "$BAK"
+
+# 4. Write the snippet (not yet included anywhere). A refusal stops the block here.
+sudo /usr/local/sbin/genizah-refresh-cloudflare-realip --no-reload
+
+# 5. Include it as the first line of BOTH server blocks (unless an earlier paste already did).
+sudo grep -qF "$INC" "$SITE" || sudo sed -i "s|^server {\$|server {\n    $INC|" "$SITE" || undo 'step 5'
+[ "$(sudo grep -cF "$INC" "$SITE")" = 2 ] || undo 'step 5: the include is not there exactly twice'
+
+# 6. Test, then reload (a reload keeps serving; nothing restarts).
+sudo nginx -t || undo 'step 6: nginx -t'
+sudo systemctl reload nginx
+echo 'realip snippet installed and nginx reloaded'
+)
+```
+
+`&&` and `||` are fine here because this is bash on the server (the PowerShell warning in this
+repo is about the Windows side).
+
+**Verify.** From your own computer (not the server):
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -A realip-check https://genizahsearch.com/robots.txt
+curl -s -o /dev/null -w '%{http_code}\n' -A realip-spoof -H 'CF-Connecting-IP: 203.0.113.9' \
+     -H 'X-Forwarded-For: 203.0.113.9' https://genizahsearch.com/robots.txt
+```
+
+Both should print `200`. Another code for the spoof request does not by itself say who answered
+it: if its line is missing from the access log below, Cloudflare did; if its line is there, it
+reached nginx, and the rule below holds for it too.
+
+then on the server:
+
+```bash
+sudo grep -E 'realip-(check|spoof)' /var/log/nginx/access.log | tail -n 2
+sudo tail -n 2000 /var/log/nginx/access.log | awk '{print $1}' | sort | uniq -c | sort -rn | head
+```
+
+Both lines must start with your own public address (the one Cloudflare's dashboard shows for
+you), never `203.0.113.9` and never a Cloudflare range (`172.64-71.x`, `162.158-159.x`,
+`104.16-27.x`, ...). The marked lines are the decisive check: the second command counts the last
+2,000 requests, some from before the reload, so edges leave its top entries only as those age out.
+
+**Keep it current.** Weekly, Monday 04:17 server time:
+
+```bash
+printf '%s\n' 'PATH=/usr/sbin:/usr/bin:/sbin:/bin' \
+    '17 4 * * 1 root /usr/local/sbin/genizah-refresh-cloudflare-realip >> /var/log/genizah-cloudflare-realip.log 2>&1 || logger -t genizah-realip "refresh failed (exit $?); see /var/log/genizah-cloudflare-realip.log"' \
+    | sudo tee /etc/cron.d/genizah-cloudflare-realip
+```
+
+Nothing alerts you by itself. A failed run (any non-zero exit) also leaves a `genizah-realip` line
+in the system journal; when you look at the server, check both of these:
+
+```bash
+journalctl -t genizah-realip -n 20        # expect "-- No entries --"
+ls /etc/nginx/snippets/genizah_cloudflare_realip.conf.reload-pending   # expect "No such file"
+```
+
+An occasional exit 1 (a fetch that failed or was refused) is simply retried by the next week's
+run; repeated failures, or a pending reload, need a look at the log. Re-run step 1 whenever
+`scripts/refresh_cloudflare_realip.py` changes in the repo.
+
+**Roll back.**
+
+```bash
+sudo cp -a /root/genizah.nginx.before-realip /etc/nginx/sites-available/genizah
+sudo nginx -t && sudo systemctl reload nginx
+sudo rm /etc/cron.d/genizah-cloudflare-realip      # if the cron entry was added
+```
+
+The snippet file can stay; nothing reads it once the `include` lines are gone.
 
 ---
 
@@ -334,7 +547,8 @@ sudo journalctl -u genizah-web -f          # Real-time
 sudo journalctl -u genizah-web -n 100      # Last 100 lines
 sudo journalctl -u genizah-web --since today
 
-# Nginx logs
+# Nginx logs (first field = the real visitor once the Cloudflare realip snippet is in;
+# before it, a Cloudflare edge address)
 sudo tail -f /var/log/nginx/access.log
 sudo tail -f /var/log/nginx/error.log
 ```

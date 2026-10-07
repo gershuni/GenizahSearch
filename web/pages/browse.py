@@ -773,9 +773,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 await load_page(p_num=1)
                 return
 
-            results, exact_match = await run.io_bound(
+            found = await run.io_bound(
                 lambda: service.search_by_shelfmark(_query, limit=20)
             )
+            if found is None:
+                # run.io_bound returns None when the lookup was cancelled or the
+                # app is stopping: nothing to show, and not an error.
+                state.is_loading = False
+                update_content()
+                return
+            results, exact_match = found
 
             if not results:
                 # Show inline error below search bar instead of full-page error

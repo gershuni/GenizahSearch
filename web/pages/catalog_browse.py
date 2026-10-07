@@ -233,6 +233,8 @@ def create_catalog_browse_page(
     async def fetch_authors():
         """Fetch authors list (optionally filtered by current domain)."""
         data = await run.io_bound(fjms.get_browse_authors, current_domain['value'])
+        if data is None:
+            return None  # cancelled or app stopping: keep the cached list
         authors_list['data'] = data
         _update_author_options()
         return data
@@ -244,6 +246,8 @@ def create_catalog_browse_page(
             current_domain['value'],
             current_author['value'],
         )
+        if data is None:
+            return None  # cancelled or app stopping: keep the cached list
         works_list['data'] = data
         _update_work_options()
         return data
@@ -470,11 +474,13 @@ def create_catalog_browse_page(
             data = {"results": [], "total": 0}
 
         if this_refresh != refresh_serial['value']:
-            return
+            return  # superseded: the newer refresh owns the indicators
 
         if loading_spinner['ref']:
             loading_spinner['ref'].set_visibility(False)
         ui.run_javascript('window.__hideLoadingBar && window.__hideLoadingBar()')
+        if data is None:
+            return  # cancelled or app stopping: the table keeps its rows
 
         results = data.get('results', [])
         total = data.get('total', 0)
@@ -497,7 +503,8 @@ def create_catalog_browse_page(
                 current_pgp_filter['value'],
                 current_editions_filter['value'],
             )
-            current_library_facets['value'] = new_facets
+            # None (cancelled or app stopping): no counts, as when the lookup fails.
+            current_library_facets['value'] = new_facets if new_facets is not None else {}
         except Exception as e:
             logger.warning("catalog_browse: facet refresh failed: %s", e)
             current_library_facets['value'] = {}
@@ -508,7 +515,12 @@ def create_catalog_browse_page(
         # Batch resolve shelfmarks via io_bound
         resolved_meta = await run.io_bound(_resolve_all, results)
         if this_refresh != refresh_serial['value']:
-            return
+            return  # superseded
+        if resolved_meta is None:
+            # Cancelled or app stopping: these results still replace the previous
+            # ones, without the shelfmark/detail lookup (rows show their sys_id).
+            resolved_meta = [{'shelfmark': '', 'library_code': '', 'catalog_count': 0,
+                              'snippet': '', 'is_printed': False} for _ in results]
 
         # Build table rows with resolved shelfmarks + detail data
         rows = []

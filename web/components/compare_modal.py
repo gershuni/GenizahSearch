@@ -981,8 +981,10 @@ def create_compare_modal(
                     run.io_bound(metadata_prefetcher, cand_current.sys_id),
                 )
 
+                # A None (cancelled, or the app is stopping) is no metadata: that
+                # pane's info row stays empty rather than claiming "no catalog".
                 # Populate anchor pane info row
-                if _anchor_info_row_ref:
+                if _anchor_info_row_ref and anchor_meta is not None:
                     _populate_pane_info_row(
                         _anchor_info_row_ref[0],
                         anchor_cand.sys_id,
@@ -991,7 +993,7 @@ def create_compare_modal(
                     )
 
                 # Populate candidate pane info row
-                if _cand_info_row_ref:
+                if _cand_info_row_ref and cand_meta is not None:
                     _populate_pane_info_row(
                         _cand_info_row_ref[0],
                         cand_current.sys_id,
