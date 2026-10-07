@@ -3,8 +3,8 @@
 
 Runs the real GenizahGUI.start_search on a stub window (no QApplication), with
 the real VariantManager and the real preset/level methods bound to the stub.
-The run stops at _drain_previous_worker, which is after the variant level has
-been applied and before any worker starts.
+The run stops just after _drain_previous_worker and the variant level (applied
+once the previous search has stopped), before any worker starts.
 """
 from __future__ import annotations
 
@@ -84,9 +84,22 @@ class _Spin:
         pass
 
 
+class _Launched(Exception):
+    """Raised where start_search would start its worker: the run stops there."""
+
+
+def _launch(*_a):
+    raise _Launched()
+
+
 class _Host:
     MODE_RESPONSA = 2  # set per instance in GenizahGUI.__init__ (genizah_app.py:5627)
-    start_search = APP.start_search
+
+    def start_search(self):
+        try:
+            APP.start_search(self)
+        except _Launched:
+            pass
     _on_query_text_changed = APP._on_query_text_changed
     _SHORTCUT_PREFIXES = APP._SHORTCUT_PREFIXES
     _set_variant_preset = APP._set_variant_preset
@@ -117,7 +130,8 @@ class _Host:
         self._refine_mode = False
         self.refinement_chain = []
         self.reached_worker_start = False
-        self._pause_search = None
+        self._run_seq = 0
+        self._pause_search = SimpleNamespace(reset_for_run=_launch)
 
     def __getattr__(self, name):
         # Any other GenizahGUI method (for example a helper a fix introduces)
@@ -137,7 +151,7 @@ class _Host:
 
     def _drain_previous_worker(self, *_a):
         self.reached_worker_start = True
-        return False  # stop here: the level is applied, nothing is launched
+        return True  # the previous search has stopped; the run stops at _launch
 
 
 @pytest.mark.parametrize('prefix,start_preset,expected', [
@@ -176,13 +190,37 @@ def test_typed_prefix_selects_its_preset_then_search_keeps_it(prefix, start_pres
     host._on_query_text_changed()
     assert host.query_input.text() == ''
     assert host.mode_combo.currentIndex() == 1  # Variants
-    assert host.var_mgr.get_variant_level() == expected
+    assert host._get_current_variant_pairs_count() == expected
+    # GitHub review (Codex on #386, round 4): typing the prefix only selects the
+    # level shown; the shared VariantManager, which a search may be running on, is
+    # set when the next search starts.
+    assert host.var_mgr.get_variant_level() == start_preset
     # The user now types the word and presses Enter.
     host.query_input.setText(WORD)
     host.start_search()
     assert host.reached_worker_start
     assert host.var_mgr.get_variant_level() == expected
     assert host._get_current_variant_pairs_count() == expected
+
+
+def test_a_preset_click_and_a_refused_start_leave_the_running_search_alone():
+    """GitHub review (Codex on #386, round 4): a level chosen while a search runs
+    (a preset button, or a prefix) is applied by the next search, only once the
+    previous one has stopped; a start refused because it will not stop changes
+    nothing that search reads."""
+    host = _Host(f'??? {WORD}', 30, mode_idx=1)      # a Basic x1 search is running
+    host._set_variant_preset(150)
+    assert host.var_mgr.get_variant_level() == 30
+    assert host.lab_engine.settings.variant_max_changes == 2
+
+    def refused(*_a):
+        host.reached_worker_start = True
+        return False
+    host._drain_previous_worker = refused
+    host.start_search()
+    assert host.reached_worker_start
+    assert host.var_mgr.get_variant_level() == 30
+    assert host.lab_engine.settings.variant_max_changes == 2
 
 
 @pytest.mark.parametrize('prefix,changes', [('?', 1), ('??', 2), ('???', 3)])

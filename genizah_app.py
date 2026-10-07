@@ -17175,9 +17175,8 @@ class GenizahGUI(QMainWindow):
             self.btn_variant_extended.setChecked(pairs_count == 70)
             self.btn_variant_maximum.setChecked(pairs_count == 150)
 
-        # Update variant manager
-        if hasattr(self, 'var_mgr') and self.var_mgr:
-            self.var_mgr.set_variant_level(pairs_count)
+        # The shared VariantManager is NOT set here: a search may be running on it.
+        # start_search applies the level shown once the previous search has stopped.
 
         # Sync slider if visible
         if hasattr(self, 'variant_slider'):
@@ -20796,14 +20795,6 @@ class GenizahGUI(QMainWindow):
             'emitted': False,
         }
 
-        # Update variant level and max changes from UI before search
-        if mode == 'variants' and self.var_mgr:
-            pairs_count = self._get_current_variant_pairs_count()
-            self.var_mgr.set_variant_level(pairs_count)
-            self._use_variant_changes('variants', pairs_count)
-        else:
-            # Responsa variants use Basic's x1-x3, Fuzzy x2 (owner ruling 2026-09-28).
-            self._use_variant_changes(mode)
         gap = int(self.gap_input.text()) if self.gap_input.text().isdigit() else 0
 
         # Get Excluded Words
@@ -20823,6 +20814,16 @@ class GenizahGUI(QMainWindow):
 
         if not self._drain_previous_worker('search_thread', self._pause_search):
             return
+        # The shared variant settings, set from the UI only now that the previous
+        # search has stopped: it read them as it went (and a refused start leaves
+        # them alone). Nothing else writes them while a search runs.
+        if mode == 'variants' and self.var_mgr:
+            pairs_count = self._get_current_variant_pairs_count()
+            self.var_mgr.set_variant_level(pairs_count)
+            self._use_variant_changes('variants', pairs_count)
+        else:
+            # Responsa variants use Basic's x1-x3, Fuzzy x2 (owner ruling 2026-09-28).
+            self._use_variant_changes(mode)
         self._run_seq += 1
         _run_id = self._run_seq
         self._pause_search.reset_for_run(_run_id, time.monotonic())

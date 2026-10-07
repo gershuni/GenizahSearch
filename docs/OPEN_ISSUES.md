@@ -64,14 +64,14 @@ Move to "Completed Issues" section at bottom with date
 |----------|------|
 | P1 Critical Bugs | 0 |
 | P2 Medium Bugs | 46 |
-| P3 Low Priority | 109 |
+| P3 Low Priority | 108 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 20 |
 | Untested Areas | 4 |
 | Deferred to v7.15+ | 6 |
 | 2026-05-29 audit follow-up | 2 |
 | FGP integration (§4.5) | 5 |
-| **Total open** | **194** |
+| **Total open** | **193** |
 
 > Counts here exclude closed items (recomputed 2026-08-14 by counting rows carrying ❌/⏸/⏳); closed history lives in docs/archive/OPEN_ISSUES_ARCHIVE.md.
 > Count notes from 2026-09-25 to 2026-10-05 moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-06.
@@ -85,6 +85,7 @@ Move to "Completed Issues" section at bottom with date
 > 2026-10-07 (time-limit review round 2): P3 +1 (letter-level stop shown badly on /parallels) -- 192.
 > 2026-10-07 (full suites): P3 +1 (a test-order failure of the library-mode API tests, pre-existing) -- 193.
 > 2026-10-07 (GitHub review round 3): P3 +1 (a level click during a running desktop search, pre-existing) -- 194.
+> 2026-10-07 (GitHub review round 4): P3 -1 (that level click, fixed on fix/variant-changes-per-preset) -- 193.
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 
@@ -307,7 +308,6 @@ Move to "Completed Issues" section at bottom with date
 | **My Library: a cut-off search with no matches offers the Genizah corpus as if My Library had none** | `genizah_app.py::on_search_finished` (zero-result branch: `_update_local_scope_strip(0, cancelled=...)`) | ❌ Open (2026-10-06) | Since 2026-10-06 the status line says "(Partial results)" when a cut-off search found nothing, but the My Library hint below it still reads "No results in My Library" and offers the Genizah corpus. Only a My Library search that reached the 50,000-candidate limit without a match (a Regex pattern with no prefilter) gets there. `tests/test_local_scope_zero_result_hint.py` pins the current source line. |
 | **Desktop Excel downloads count a cut-off list as complete** | `genizah_app.py` (the search Excel writer: `result_count=len(results)` on the Credits and Info sheet) | ❌ Open (2026-10-06) | Since 2026-10-06 the website writes "N+" there for a list that reached the reading limit or was stopped; the desktop still writes the plain number. Pass `_shown_results_capped()` through as the website does (`web/export_service.py::export_search_results_excel(result_count_capped=)`). |
 | **Desktop Joins Lab searches at the main window's pair count** | `desktop/variant_run_settings.py::basic_changes_searcher`, `desktop/join_workbench.py` | ❌ Open (2026-10-07) | Since 2026-10-07 Joins Lab runs at Basic's Num Changes (owner ruling), but its Variants and Responsa-variants searches still use the pair count the main window last set (e.g. 150 after a Maximum search). The website's Joins Lab uses Basic's 30 pairs. Bind the pair count too (`engine_with_variant_settings` already takes it). |
-| **Desktop: a level click during a running search changes that search's pair count** | `genizah_app.py::_set_variant_preset`, `shared/variants.py::VariantManager.set_variant_level` | ❌ Open (2026-10-07) | Clicking Basic / Extended / Maximum while a desktop Variants search runs sets the shared VariantManager's level, which the running search reads for each later word -- as on master. Composition, Joins, refinement replays and the count preview no longer write it (2026-10-07, Codex review on #386). Fix: run the main search on a settings view of its own, keeping a cache per level so repeated searches stay fast. |
 | **Variants verification could check words against the spelling set instead of one long regex** | `shared/search_engine.py` (the variant regex built from up to 8,000 spellings and run over every candidate page) | ❌ Open (2026-10-07, enhancement) | Extended x2 takes 75-114 s on common words (CHANGELOG). Codex (2026-10-06) prototyped matching each word of a page against the permitted spelling set with the existing Fuzzy word scanner: 0.376 s -> 0.004 s on 200 synthetic pages (ישראל, 70 pairs x2, 577 spellings). Measure on the real index, comparing ids, spans and highlighting, before adopting; keep the regex for custom multi-letter forms the scanner cannot express. |
 | **`test_search_api_library_mode.py` fails (500 `internal_error`) after two other test files in one process** | `tests/test_search_api_v2.py` + `tests/test_web_saved_joins_isolation.py`, then `tests/test_search_api_library_mode.py` | ❌ Open (2026-10-07) | Run in that order in one pytest process, 6 of the 9 library-mode tests get a 500 from `/api/search` and `/api/parallels`; each file passes alone, and so does either of the first two with the third. Reproduced on master-main 6f710013, so not a product change: one of the two leaves process state (the app's middleware stack or a patched module attribute) that the third reads. `run_local_tests.py` put the three in one chunk on `fix/web-search-cutoff` (2026-10-07). |
 | **A letter-level search the website stopped is shown badly on /parallels** | `web/pages/parallels.py` (the passage dispatch, its witness panel), `shared/passage_parallels.py` (`witness_report`) | ❌ Open (2026-10-07) | Since 2026-10-07 a letter-level search stops at the 3-minute limit and returns what it verified, marked partial. On /parallels a search the web side had to kill (60 s after the limit) is caught by a generic `except Exception` and shows nothing, with no message; the witness panel (one job per witness) marks a witness the limit cut as "searched" without saying it was partial; and in a stopped multi-witness result the witnesses that never ran still show `resolved: true` (only the `searched` count is right). The API is right (`results_cut_off`). Behind `PASSAGE_PARALLELS_ENABLED`. |
