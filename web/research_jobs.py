@@ -331,6 +331,10 @@ class ResearchQueue:
     def _execute(self, job, slot):
         if job.cancel.is_set():
             raise InterruptedError('Search cancelled')
+        if isinstance(job.payload, dict) and job.payload.get('time_limit'):
+            # The job has left the queue: its time limit counts from now, the
+            # worker's loading and its wait for the index leases included.
+            job.payload['started_at'] = time.time()
         worker = self._take_spare(slot)
         if worker is None:
             # Don't start another worker while the machine lacks even the website's

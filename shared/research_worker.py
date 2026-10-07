@@ -187,13 +187,16 @@ def main(directory):
             gc.collect()
 
 
-def _time_limited(report, seconds, stopped):
+def _time_limited(report, seconds, stopped, started=None):
     """*report*, stopping the search once *seconds* have passed: the engine treats
     the InterruptedError as a Stop and returns what it had checked, with its cut-off
-    signal 'interrupted'. *stopped* records that the time limit stopped it."""
+    signal 'interrupted'. *stopped* records that the time limit stopped it. The time
+    counts from *started* (``time.time()`` when the job left the queue, stamped by
+    web/research_jobs.py), so loading and the index-lease wait count too."""
     if not seconds:
         return report
-    deadline = time.monotonic() + seconds
+    spent = max(0.0, time.time() - started) if started else 0.0
+    deadline = time.monotonic() + seconds - spent
 
     def progress(*args, **kwargs):
         if time.monotonic() >= deadline:
@@ -251,7 +254,8 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
         arguments = payload['arguments']
         if arguments.get('restrict_sys_ids') is not None:
             arguments['restrict_sys_ids'] = set(arguments['restrict_sys_ids'])
-        arguments['progress_callback'] = _time_limited(report, payload.get('time_limit'), stopped)
+        arguments['progress_callback'] = _time_limited(report, payload.get('time_limit'), stopped,
+                                                       payload.get('started_at'))
         if kind == 'passage':
             # The letter-level searcher leaves progress_callback alone (the desktop's
             # drives a chunk progress bar); it is stopped through `checkpoint`.
