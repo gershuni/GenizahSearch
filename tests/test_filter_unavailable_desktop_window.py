@@ -431,3 +431,23 @@ def test_search_and_composition_both_waiting_both_run(warned):
     w._connect_filter_worker(later, w._on_filter_recompute_finished)
     later.finished.emit({'990002'})
     assert ran == ['search', 'composition'], 'nothing starts at a later lookup'
+
+
+@pytest.mark.parametrize('reset', ['_reset_search', '_reset_composition'])
+def test_new_cancels_a_run_waiting_for_the_filters(reset):
+    """GitHub review (Codex on #387, round 4): New cleared the filters and made a
+    running lookup stale, but left a waiting search or composition armed; it then
+    started when a later lookup (a restored history entry's) answered."""
+    from unittest.mock import MagicMock
+    w = MagicMock()
+    w._filter_lookup_gen = 3
+    w._rerun_search_after_filter = True
+    w._rerun_comp_after_filter = True
+    w._rerun_comp_custom_text = 'other text'
+    w._refuse_stop_during_passage_scan.return_value = False   # no scan to protect
+    w._passage_batch_in_flight.return_value = False
+    w.search_thread = w.comp_thread = w.group_thread = None   # nothing running
+    getattr(GenizahGUI, reset)(w)
+    assert w._filter_lookup_gen == 4 and w.pre_search_filters == {}
+    assert (w._rerun_search_after_filter, w._rerun_comp_after_filter, w._rerun_comp_custom_text) == (
+        False, False, None)

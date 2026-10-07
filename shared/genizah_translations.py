@@ -1746,7 +1746,7 @@ TRANSLATIONS = {
     "This search uses at least {effective_chunk_size} words per chunk, so the chunk size was raised from {chunk_size} to {effective_chunk_size}.":
         "חיפוש זה בודק לפחות {effective_chunk_size} מילים בכל מקטע, ולכן גודל המקטע הוגדל מ-{chunk_size} ל-{effective_chunk_size}.",
     "The text has {windows} chunk(s) in all, so the minimum chunk matches was lowered from {min_chunk_matches} to {windows}.":
-        "בטקסט יש {windows} מקטעים בסך הכול, ולכן מינימום התאמות המקטע הורד מ-{min_chunk_matches} ל-{windows}.",
+        "בטקסט יש {windows} מקטעים שונים בסך הכול, ולכן מינימום התאמות המקטע הורד מ-{min_chunk_matches} ל-{windows}.",
     "Every chunk of the text is made of very common words, so Lab Mode did not search it. Try a longer or more distinctive text.":
         "כל מקטעי הטקסט מורכבים ממילים נפוצות מאוד, ולכן מצב מעבדה לא חיפש בו. נסה טקסט ארוך או ייחודי יותר.",
     "Lab Mode searched only {windows} of the text's chunks (the others are made of very common words), so the minimum chunk matches was lowered from {min_chunk_matches} to {windows}.":
@@ -4585,7 +4585,7 @@ TRANSLATIONS.update({
     # #17 (K-14) — desktop status bar: Search/Composition pressed while the
     # pre-search filters are still being computed; it runs when they are ready
     "The filters are still being applied; the search will start as soon as they are ready.":
-        "הסינון עדיין מוחל; החיפוש יתחיל ברגע שיהיה מוכן.",
+        "תנאי הסינון עדיין נבדקים; החיפוש יתחיל מיד עם סיום הבדיקה.",
     # web/pages/search.py — search-history entry delete control
     "Delete history entry":
         "מחק רשומת היסטוריה",

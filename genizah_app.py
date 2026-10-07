@@ -21444,12 +21444,16 @@ class GenizahGUI(QMainWindow):
 
         # 9. Clear pre-search filter state (domain, author, work filters)
         # #17: a lookup still running for the old filters must not
-        # re-scope or block the cleared state (the same three fields as
+        # re-scope or block the cleared state, and a search or composition
+        # waiting for it is cancelled (the same fields as
         # _supersede_filter_lookup; assigned here because the reset also
         # runs on hosts that borrow only these methods).
         self._filter_lookup_gen = getattr(self, '_filter_lookup_gen', 0) + 1
         self._filter_lookup_pending = False
         self._pre_search_filter_error = None
+        self._rerun_search_after_filter = False
+        self._rerun_comp_after_filter = False
+        self._rerun_comp_custom_text = None
         self.pre_search_filters = {}
         self.pre_search_restrict_sys_ids = None
         self._update_filter_chip_bar()
@@ -27782,12 +27786,16 @@ class GenizahGUI(QMainWindow):
 
         # 9. Clear pre-search filter state (shared)
         # #17: a lookup still running for the old filters must not
-        # re-scope or block the cleared state (the same three fields as
+        # re-scope or block the cleared state, and a search or composition
+        # waiting for it is cancelled (the same fields as
         # _supersede_filter_lookup; assigned here because the reset also
         # runs on hosts that borrow only these methods).
         self._filter_lookup_gen = getattr(self, '_filter_lookup_gen', 0) + 1
         self._filter_lookup_pending = False
         self._pre_search_filter_error = None
+        self._rerun_search_after_filter = False
+        self._rerun_comp_after_filter = False
+        self._rerun_comp_custom_text = None
         self.pre_search_filters = {}
         self.pre_search_restrict_sys_ids = None
         self._update_filter_chip_bar()
