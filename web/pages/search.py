@@ -4742,6 +4742,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # unknown, never those of the search shown before (a step recorded from
             # them replays with the website defaults at its level).
             search_state.last_variant_settings = None
+            # Nor are they the shown search's rows: their search is the restored one,
+            # as the controls now describe it, and cut off only if the entry says so.
+            search_state.last_run = None
+            search_state.result_count_capped = bool(state_snapshot.get('result_count_capped'))
             search_state.domain_exclusions = set(state_snapshot.get('domain_exclusions', []))
             search_state.printed_filter = state_snapshot.get('printed_filter', 'all')
             # Phase 88: populate per-session export payload after history restore so JSON
