@@ -393,6 +393,7 @@ def test_stopped_rows_are_cut_off_and_search_within_completes_them(page, monkeyp
         await asyncio.sleep(0.3)                   # the caller hands them to the page
         _click(a, ui.button, lambda e: e.text == 'Stop')
         await _wait_for(lambda: any('(partial)' in t for t in _label_texts(a)))
+        seen['count'] = next(t for t in _label_texts(a) if '(partial)' in t)
         seen['button'] = _click_search_within(a)
         await wait_for_payloads(queue, 2)          # the completion job
         await _wait_for(lambda: any('Searching within 2 manuscripts' in t for t in _label_texts(a)))
@@ -400,6 +401,8 @@ def test_stopped_rows_are_cut_off_and_search_within_completes_them(page, monkeyp
         await wait_for_payloads(queue, 3)
 
     run(driver)
+    # GitHub review (Codex on #385, round 3): the count said "1 Results" after Stop.
+    assert seen['count'].startswith('1+ Results'), seen['count']
     assert seen['button'] == 'Search within 1+ manuscripts'
     completion, within = queue.payloads[1], queue.payloads[2]
     assert completion['arguments']['query_str'] == WORD and completion['arguments']['ids_only'] is True
