@@ -22,8 +22,8 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 - **A text shorter than the chunk size is searched** as one chunk of all its words, with a
   notice (it came back empty). Lab Mode searches a window ending on the last word, so the end
-  of a text is always searched, and "Min. chunk matches" higher than the text can give is
-  lowered, with a notice. The API adds `text_shorter_than_chunk_size` / `text_too_short`
+  of a text is always searched, and "Min. chunk matches" higher than the text can give (in
+  Lab Mode: than the chunks it searches) is lowered, with a notice. The API adds `text_shorter_than_chunk_size` / `text_too_short`
   warnings (additive).
 - **A catalog filter that cannot be applied says so** and the search is not run: before, a
   failed lookup read as "no manuscripts match", and a missing catalog file searched

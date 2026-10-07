@@ -1749,6 +1749,8 @@ TRANSLATIONS = {
         "בטקסט יש {windows} מקטעים בסך הכול, ולכן מינימום התאמות המקטע הורד מ-{min_chunk_matches} ל-{windows}.",
     "Every chunk of the text is made of very common words, so Lab Mode did not search it. Try a longer or more distinctive text.":
         "כל מקטעי הטקסט מורכבים ממילים נפוצות מאוד, ולכן מצב מעבדה לא חיפש בו. נסה טקסט ארוך או ייחודי יותר.",
+    "Lab Mode searched only {windows} of the text's chunks (the others are made of very common words), so the minimum chunk matches was lowered from {min_chunk_matches} to {windows}.":
+        "מצב מעבדה חיפש רק {windows} ממקטעי הטקסט (האחרים מורכבים ממילים נפוצות מאוד), ולכן מינימום התאמות המקטע הורד מ-{min_chunk_matches} ל-{windows}.",
     "Lab Engine not initialized": "מנוע המעבדה לא אותחל",
     "Paste your Hebrew text here...": "הדבק טקסט עברי כאן...",
     "Final forms": "צורות סופיות",

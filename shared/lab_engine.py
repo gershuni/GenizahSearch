@@ -1025,10 +1025,6 @@ class LabEngine:
                     'corpus_scope': corpus_scope, 'local_lab_stale': _local_lab_stale,
                     'effective_chunk_size': None,
                     'composition_notices': composition_notices}
-        if boundary_mode == 'full':
-            min_boundary_matches = cap_min_chunk_matches(
-                min_boundary_matches, distinct_windows(tokens, window_plan), composition_notices)
-
         # Get boundary stats (includes parsed boundaries to avoid double parsing)
         boundary_stats = get_boundary_stats(full_text, boundary_delimiter, c_size, min_delimiter_distance)
         boundaries = boundary_stats.get('boundaries', [])
@@ -1095,6 +1091,15 @@ class LabEngine:
             if lab_chunk_plans and all(p is None for p in lab_chunk_plans):
                 # Nothing will be queried: do not claim the text was searched.
                 composition_notices = [{'code': TEXT_TOO_COMMON, 'words': len(tokens)}]
+        if boundary_mode == 'full' and not (lab_chunk_plans and all(p is None for p in lab_chunk_plans)):
+            # A result's chunk count counts the distinct chunk texts it matched, and a
+            # chunk of very common words (a None plan) is not searched, so it matches none.
+            windows = distinct_windows(tokens, window_plan)
+            searched = len({p.chunk_text for p in lab_chunk_plans if p is not None})
+            too_common = 0 < searched < windows
+            min_boundary_matches = cap_min_chunk_matches(
+                min_boundary_matches, searched if too_common else windows, composition_notices,
+                too_common=too_common)
 
         # (Part 2: Scanning) - wrapped in try/except to support partial results on cancel
         try:

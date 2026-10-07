@@ -91,14 +91,18 @@ def distinct_windows(tokens, plan: WindowPlan) -> int:
     return len({' '.join(tokens[i:i + plan.size]) for i in plan.starts})
 
 
-def cap_min_chunk_matches(min_chunk_matches: int, windows: int, notices: List[dict]) -> int:
+def cap_min_chunk_matches(min_chunk_matches: int, windows: int, notices: List[dict], *,
+                          too_common: bool = False) -> int:
     """A document cannot match more distinct chunks than the text has
-    (*windows*: ``distinct_windows``). When the filter asks for more, lower it
-    to that number and say so."""
+    (*windows*: ``distinct_windows``), or than Lab Mode searches (*too_common*:
+    the others are made of very common words). When the filter asks for more,
+    lower it to that number and say so."""
     if windows and min_chunk_matches > windows:
-        notices.append({'code': MIN_CHUNKS_LOWERED,
-                        'min_chunk_matches': min_chunk_matches,
-                        'windows': windows})
+        notice = {'code': MIN_CHUNKS_LOWERED, 'min_chunk_matches': min_chunk_matches,
+                  'windows': windows}
+        if too_common:
+            notice['too_common'] = True
+        notices.append(notice)
         return windows
     return min_chunk_matches
 
@@ -114,8 +118,11 @@ _MSG_MIN_LOWERED = ('The text has {windows} chunk(s) in all, so the minimum chun
                     'matches was lowered from {min_chunk_matches} to {windows}.')
 _MSG_TOO_COMMON = ('Every chunk of the text is made of very common words, so '
                    'Lab Mode did not search it. Try a longer or more distinctive text.')
+_MSG_MIN_LOWERED_COMMON = ("Lab Mode searched only {windows} of the text's chunks (the others "
+                           'are made of very common words), so the minimum chunk matches was '
+                           'lowered from {min_chunk_matches} to {windows}.')
 NOTICE_STRINGS = (_MSG_SHORTER, _MSG_TOO_SHORT, _MSG_RAISED, _MSG_MIN_LOWERED,
-                  _MSG_TOO_COMMON)
+                  _MSG_TOO_COMMON, _MSG_MIN_LOWERED_COMMON)
 _BY_CODE = {TEXT_SHORTER: _MSG_SHORTER, TEXT_TOO_SHORT: _MSG_TOO_SHORT,
             CHUNK_SIZE_RAISED: _MSG_RAISED, MIN_CHUNKS_LOWERED: _MSG_MIN_LOWERED,
             TEXT_TOO_COMMON: _MSG_TOO_COMMON}
@@ -126,7 +133,9 @@ def chunk_notice_message(notice: Optional[dict], tr: Callable[[str], str]) -> Op
     """The translated sentence for one notice, or None for an unknown code."""
     if not notice:
         return None
-    template = _BY_CODE.get(notice.get('code'))
+    template = (_MSG_MIN_LOWERED_COMMON
+                if notice.get('code') == MIN_CHUNKS_LOWERED and notice.get('too_common')
+                else _BY_CODE.get(notice.get('code')))
     if template is None:
         return None
     return tr(template).format(**notice)

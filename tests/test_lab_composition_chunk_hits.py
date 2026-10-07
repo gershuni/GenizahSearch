@@ -613,3 +613,43 @@ class TestLabCompositionMinChunksFilter:
             f"Expected chunk_count >= 2 for distinct-token source; "
             f"got {target.get('chunk_count')}, chunk_hits={target.get('chunk_hits')}"
         )
+
+    def test_the_minimum_counts_only_the_chunks_lab_searches(self):
+        """GitHub review (Codex on #387): nine words at chunk size 5 make three
+        windows, so "min 3" stood -- but the first window is made of very common
+        words and is not searched, so no manuscript could reach 3 and every match
+        of the other two was dropped. The minimum is lowered to the 2 chunks Lab
+        searches, and the notice says why."""
+        from genizah_core import LabEngine
+        from shared.composition_windows import chunk_notice_message
+
+        engine = self._build_engine()
+        source_text = "אלף בית גימל דלת הא וו זין חית טית"
+        synthetic_uid = "uid_common_window_test"
+        engine.lab_searcher.search.side_effect = lambda *_a, **_k: MagicMock(hits=[(0.9, "addr_99")])
+        engine.lab_searcher.doc.return_value = {
+            "content": ["צורת המשפט במכתב יד זה דוגמה למבחן " * 3],
+            "unique_id": [synthetic_uid],
+            "full_header": ["header_9988776655443322_IE99_P3"],
+            "source": ["V0.8"],
+        }
+
+        def fake_metrics(self, text, query_fingerprints_list, original_query_str, freq_map=None):
+            matches = [{"fp": fp, "word": f"word_{idx}", "start": idx * 3, "end": idx * 3 + 5}
+                       for idx, fp in enumerate(query_fingerprints_list)]
+            # 150 a hit: two hits clear a short text's score floor (250).
+            return 150.0, matches, (0, len(matches) - 1) if matches else (0, 0)
+
+        with patch.object(LabEngine, "_calculate_match_metrics", autospec=True, side_effect=fake_metrics), \
+             patch.object(LabEngine, "_is_phrase_statistically_weak", autospec=True,
+                          side_effect=lambda self, text: text.startswith("אלף")):
+            result = engine.lab_composition_search(source_text, mode="variants", chunk_size=5,
+                                                   boundary_mode='full', min_boundary_matches=3)
+
+        assert result["composition_notices"] == [{
+            'code': 'min_chunk_matches_lowered', 'min_chunk_matches': 3, 'windows': 2, 'too_common': True}]
+        assert chunk_notice_message(result["composition_notices"][0], lambda s: s).startswith(
+            "Lab Mode searched only 2 of the text's chunks")
+        items = list(result.get("main", [])) + list(result.get("filtered", [])) + list(result.get("known", []))
+        target = next((i for i in items if i.get("uid") == synthetic_uid), None)
+        assert target is not None and target["chunk_count"] == 2, items

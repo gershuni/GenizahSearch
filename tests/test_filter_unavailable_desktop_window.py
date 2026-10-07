@@ -343,3 +343,60 @@ def test_dialog_ok_supersedes_a_pending_lookup(monkeypatch, warned):
     assert w._filter_lookup_pending is False
     old.finished.emit({'990777'})
     assert w.pre_search_restrict_sys_ids == {'990002'}
+
+
+# -- GitHub review (Codex on #387, 2026-10-07): replacing the filters cancels a waiting run --
+
+class _AcceptedDialog:
+    def __init__(self, *a, **k):
+        pass
+
+    def exec(self):
+        return genizah_app.QDialog.DialogCode.Accepted
+
+    def get_filters(self):
+        return {'include_mode': True, 'date_from': 1100}
+
+    def get_restrict_sys_ids(self):
+        return {'990002'}
+
+
+def test_replacing_the_filters_cancels_a_waiting_search(monkeypatch, warned):
+    """Search pressed while a lookup runs waits for it. When the filters are then
+    replaced (dialog OK), the wait is cancelled and the status bar says so: left
+    armed, the search started when a later, unrelated lookup answered."""
+    w = _search_window(None)
+    w._connect_filter_worker(_FakeWorker(), w._on_filter_recompute_finished)
+    try:
+        w.start_search()
+    except _Stop:
+        pytest.fail("start_search ran on the old scope while the filter lookup was running")
+    assert w._rerun_search_after_filter is True
+    monkeypatch.setattr(genizah_app, 'PreSearchFilterDialog', _AcceptedDialog)
+    w._open_pre_search_filter_dialog()
+    assert w._rerun_search_after_filter is False
+    assert w.statusBar().currentMessage() == 'Search cancelled'
+    ran = []
+    w.start_search = lambda: ran.append(w.pre_search_restrict_sys_ids)
+    later = _FakeWorker()
+    w._connect_filter_worker(later, w._on_filter_recompute_finished)
+    later.finished.emit({'990003'})
+    assert ran == [], 'a search cancelled with its filters started at a later lookup'
+    assert not warned
+
+
+def test_removing_the_last_filter_cancels_a_waiting_composition(warned):
+    w = _comp_window()
+    w._connect_filter_worker(_FakeWorker(), w._on_filter_recompute_finished)
+    try:
+        w.run_composition(custom_text='other text')
+    except _Stop:
+        pytest.fail("run_composition ran on the old scope while the filter lookup was running")
+    assert w._rerun_comp_after_filter is True
+    w._remove_filter('date_from')
+    assert w.pre_search_filters == {}
+    assert (w._rerun_comp_after_filter, w._rerun_comp_custom_text) == (False, None)
+    ran = []
+    w.run_composition = lambda **k: ran.append(k)
+    w._run_deferred_after_filter()
+    assert ran == []

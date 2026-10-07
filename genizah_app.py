@@ -20286,10 +20286,20 @@ class GenizahGUI(QMainWindow):
         """The pre-search filters were just replaced by a known scope (dialog
         OK, catalog hand-off, last chip removed, New): a lookup still running
         for the OLD filters must neither re-scope nor block, and the old
-        error no longer applies."""
+        error no longer applies. A search or composition that was waiting for
+        that lookup is cancelled, and the status bar says so: it was asked for
+        under the old filters, and left armed it would start when some later,
+        unrelated lookup answers."""
         self._filter_lookup_gen = getattr(self, '_filter_lookup_gen', 0) + 1
         self._filter_lookup_pending = False
         self._pre_search_filter_error = None
+        was_waiting = (getattr(self, '_rerun_search_after_filter', False)
+                       or getattr(self, '_rerun_comp_after_filter', False))
+        self._rerun_search_after_filter = False
+        self._rerun_comp_after_filter = False
+        self._rerun_comp_custom_text = None
+        if was_waiting:
+            self.statusBar().showMessage(tr("Search cancelled"), 8000)
 
     def _connect_filter_worker(self, worker, on_finished):
         """Connect a FilterCountWorker so only the NEWEST one counts.
