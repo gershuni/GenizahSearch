@@ -587,13 +587,14 @@ def _slow_engine(seen, escape=False):
     return Engine
 
 
-def _run_worker(tmp_path, monkeypatch, time_limit, escape=False):
+def _run_worker(tmp_path, monkeypatch, time_limit, escape=False, **extra):
     from shared import research_worker
     seen = {}
     monkeypatch.setattr('shared.search_engine.SearchEngine', _slow_engine(seen, escape))
     monkeypatch.setenv('GENIZAH_RESEARCH_MEMORY_MB', '512')
     payload = {'kind': 'search', 'method': 'execute_search', 'settings': None, 'time_limit': time_limit,
-               'arguments': {'query_str': WORD, 'mode': 'literal', 'gap': 0, 'corpus_scope': 'genizah'}}
+               'arguments': {'query_str': WORD, 'mode': 'literal', 'gap': 0, 'corpus_scope': 'genizah'},
+               **extra}
     research_worker.run_query(tmp_path, payload, lambda *a: None, meta=SimpleNamespace())
     with gzip.open(tmp_path / 'output.pkl', 'rb') as stream:
         return pickle.load(stream), seen
@@ -604,6 +605,37 @@ def test_the_worker_stops_at_its_time_limit_and_returns_what_it_checked(tmp_path
     assert result['time_limit'] is True
     assert result['cutoff'] == {'capped': False, 'interrupted': True}
     assert len(result['value']) == seen['rows'] > 0
+
+
+def test_the_workers_limit_counts_from_when_the_job_left_the_queue(tmp_path, monkeypatch):
+    """GitHub review (Codex on #385): the worker's clock started just before the
+    engine, so loading and the index-lease wait were not counted. A job that left
+    the queue 10 s ago with a 3 s limit stops at its first check."""
+    import time
+    result, seen = _run_worker(tmp_path, monkeypatch, time_limit=3, started_at=time.time() - 10)
+    assert result['time_limit'] is True
+    assert result['value'] == [] and 'rows' not in seen
+
+
+def test_the_queue_stamps_when_a_job_leaves_it():
+    import time
+    from web.research_jobs import Job, ResearchQueue
+
+    class Handed(Exception):
+        pass
+    handed = {}
+
+    def start(slot, payload):
+        handed.update(payload)
+        raise Handed()
+    queue = ResearchQueue.__new__(ResearchQueue)
+    queue._take_spare = lambda slot: None
+    queue._memory_for_new_worker = lambda: True
+    queue._start_worker = start
+    before = time.time()
+    with pytest.raises(Handed):
+        queue._execute(Job({'kind': 'search', 'time_limit': 180}), 0)
+    assert before <= handed['started_at'] <= time.time()
 
 
 def test_a_part_that_cannot_return_rows_reports_the_limit(tmp_path, monkeypatch):
