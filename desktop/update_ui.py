@@ -94,6 +94,14 @@ class UpdateNotificationBar(QFrame):
         self.dismissed.emit(self.version_tag)
 
 
+# The What's New CONTENT the bar and dialog describe -- not APP_VERSION. The bar
+# shows until this content has been dismissed, so a release with no desktop news
+# keeps the value and shows nothing to whoever already read it (9.6.0, owner
+# 2026-10-07: no desktop What's New). Change it together with the bar and dialog
+# texts.
+WHATS_NEW_CONTENT_VERSION = "9.5.0"
+
+
 class WhatsNewBar(QFrame):
     """A notification bar showing new features after a version update."""
 
@@ -160,6 +168,8 @@ class WhatsNewBar(QFrame):
         # v9.4.0: the owner's own sentence (2026-09-28); the dialog says the rest.
         # v9.5.0: the owner's own Hebrew sentence (2026-10-04): speed first, and
         # fuller results said plainly, with no before/after figures.
+        # v9.6.0: no desktop What's New (owner, 2026-10-07); this text stays, and
+        # WHATS_NEW_CONTENT_VERSION keeps it from showing again once dismissed.
         self.lbl_msg.setText(tr("New: much faster search, and more comprehensive results, also in searches with many results"))
         self.show()
 

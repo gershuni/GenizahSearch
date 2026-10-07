@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-07 (evening) -- **Search correctness PR 3 merged** (#383 per-visitor settings, #384 regex, #385 website cut-off and 3-minute limit, #386 Num Changes per level, #387 short composition text and filters that cannot be applied; master `5c5489a4`, CI green). The owner deployed the website after #383-#385 merged; the web halves of #386 and #387 merged later and wait for a deploy, and their desktop halves (with #384's) ship with the next installer. GitHub Codex ran five review rounds; round 5's two findings are the P3 rows "rows kept by Stop ... not saved for a reload" and "Num Changes shows the saved mode's value after a link". Counts unchanged (195). Docs: CHANGELOG [Unreleased] now also lists #378 (language follows the browser) and #380 (API `channel`).
+> **Last Updated:** 2026-10-07 (release) -- **v9.6.0 "Search fixes" (both)**: releases PR 3 (#383-#387) with #377, #378 and #380; the website deploy carries the web halves of #386 and #387, and installer 9.6.0 the desktop halves of #384-#387. No desktop What's New this release (owner): the bar now follows `WHATS_NEW_CONTENT_VERSION`, which stays 9.5.0. Counts unchanged (195).
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 

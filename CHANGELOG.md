@@ -4,7 +4,13 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [9.6.0] - 2026-10-07 — Search fixes
+
+Search fixes on both apps: Regex mode searches every page its pattern can match, Num Changes
+works in every variant level, Composition Search searches short texts and every word, and a
+list that reached the search's limit says so ("N+"). On the website the first results appear
+while the search runs, settings and language are kept per visitor, and a search stops after 3
+minutes with what it found. Desktop: installer 9.6.0.
 
 ### Web search: first results while it searches, and faster (web)
 
@@ -22,10 +28,8 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 - **A visitor who has not chosen a language sees the website in their browser's language:**
   Hebrew when the browser's first language is Hebrew, English otherwise. A choice made with
-  the language button still wins. Before, such a visitor could get the language another
-  visitor had chosen last.
-- **The language button switches from the language its own page shows** (it could save the
-  language already shown and reload to no change).
+  the language button still wins.
+- **The language button switches from the language its own page shows.**
 - The Excel download's sheet direction follows the same rule.
 - A page requested with no language preference, as search engines' crawlers request it, is
   in English (it was in Hebrew).
@@ -91,8 +95,6 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 ### Num Changes (×1–×3) works in every variant level (both)
 
 - **Num Changes now sets how many letters in each word may be swapped, in every level.**
-  Before, ×3 did the same as ×2 and ×2 did nothing in Basic; on the desktop the control did
-  not act on Variants search at all, so every level ran at ×1.
 - **Each level keeps its own value:** by default ×1 for Basic and ×2 for Extended and
   Maximum. A value saved before this change carries into Extended and Maximum; Basic starts
   at ×1. Responsa, composition and Joins use Basic's value; Fuzzy uses ×2. The one-change
@@ -133,14 +135,13 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 ### Composition search: short texts, every word, honest filters (both)
 
 - **A text shorter than the chunk size is searched** as one chunk of all its words, with a
-  notice (it came back empty). Lab Mode searches a window ending on the last word, so the end
+  notice. Lab Mode searches a window ending on the last word, so the end
   of a text is always searched, and "Min. chunk matches" higher than the text can give (in
   Lab Mode: than the chunks it searches) is lowered, with a notice. The API adds `text_shorter_than_chunk_size` / `text_too_short`
   warnings (additive).
-- **A catalog filter that cannot be applied says so** and the search is not run: before, a
-  failed lookup read as "no manuscripts match", and a missing catalog file searched
-  everything. The API answers 503 `filter_unavailable` for a filtered request it cannot apply
-  (it used to answer 200 unfiltered). Line Height is hidden until the catalog carries it; a
+- **A catalog filter that cannot be applied says so** and the search is not run. The API
+  answers 503 `filter_unavailable` for a filtered request it cannot apply (it used to answer
+  200 unfiltered). Line Height is hidden until the catalog carries it; a
   saved Line Height filter is removed with a notice (in Focus Search too).
 - **Search history keeps its filters (web):** removing a filter chip, or adding a term, after
   restoring a search from history -- or after a reload -- no longer changes the saved history

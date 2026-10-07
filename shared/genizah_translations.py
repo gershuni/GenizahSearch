@@ -5424,6 +5424,8 @@ TRANSLATIONS.update({
         "תוצאות מקיפות יותר, גם בחיפושים מרובי תוצאות: „חפש בתוך\", „רק תוצאות עם כל המונחים\" וחיפוש חיבורים עם מסננים פועלים על הקבוצה כולה, בכל גודל, ורשימה ארוכה מסומנת „N+\".",
     "New: faster search, more comprehensive results in searches with many results, and whole-word matching in Variants and Fuzzy":
         "חדש: חיפוש מהיר יותר, תוצאות מקיפות יותר בחיפושים מרובי תוצאות, והתאמה למילים שלמות בווריאנטים ובמקורב",
+    "New: first results while the search runs, and further improvements to search quality":
+        "חדש: תוצאות ראשונות כבר בזמן החיפוש, ושיפורים נוספים באיכות החיפוש",
 })
 
 # Web What's New banner, v9.2.1 (2026-09-18): the GPT pilot went live.

@@ -94,7 +94,7 @@ from desktop import passage_lifecycle  # Phase 146: letter-level (passage) searc
 from desktop import passage_witnesses  # multi-witness state machine (pure)
 from shared import passage_witness_source  # witness resolution (pure, shared with web)
 from shared import passage_fusion  # RRF fusion (pure, shared with web + API)
-from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog, TelemetryConsentBar  # Phase 127 update_ui; SEED-031 re-ask bar
+from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog, TelemetryConsentBar, WHATS_NEW_CONTENT_VERSION  # Phase 127 update_ui; SEED-031 re-ask bar
 from desktop.filter_text_dialog import FilterTextDialog
 from desktop.column_filter_dialog import ColumnFilterDialog  # moved 2026-09-19; alias stub at the root
 from desktop.list_filter_dialog import ListFilterDialog
@@ -1885,10 +1885,9 @@ class GenizahGUI(QMainWindow):
                 self._vs_cache.check_and_update_version(self._VS_SERVER_URL)
             threading.Thread(target=_check_vs_cache_version, daemon=True).start()
 
-            # Show What's New bar if version is new
+            # Show What's New bar until its content has been dismissed
             cfg = load_app_config()
-            if cfg.get('whats_new_seen') != APP_VERSION:
-                self.whats_new_bar.show_whats_new(APP_VERSION)
+            self._maybe_show_whats_new(cfg)
 
             # SEED-031: gently re-invite not-yet-opted-in decliners (throttled,
             # non-modal). Mutually exclusive with the first-run modal by
@@ -31507,9 +31506,14 @@ class GenizahGUI(QMainWindow):
         """Save dismissed version to config."""
         save_app_config({'last_dismissed_version': version})
 
+    def _maybe_show_whats_new(self, cfg):
+        """Show the What's New bar unless its CONTENT was dismissed, whatever the version."""
+        if cfg.get('whats_new_seen') != WHATS_NEW_CONTENT_VERSION:
+            self.whats_new_bar.show_whats_new(WHATS_NEW_CONTENT_VERSION)
+
     def on_whats_new_dismissed(self):
-        """Save that user has seen What's New for this version."""
-        save_app_config({'whats_new_seen': APP_VERSION})
+        """Save that the user has seen this What's New content."""
+        save_app_config({'whats_new_seen': WHATS_NEW_CONTENT_VERSION})
 
     def show_whats_new_dialog(self):
         """Show detailed What's New dialog."""

@@ -7,6 +7,23 @@ The authoritative release history is [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
+## What's New in Version 9.5.0? (the README's own text, 2026-10-04 to 2026-10-07)
+
+**Faster, complete search**, on the desktop (installer 9.5.0) and the website:
+
+- **Much faster**: on the desktop the first results appear while the search runs, and
+  Exact and Variants searches take a fraction of the time (Exact שלום: 10 s → 1.7 s;
+  Variants אהרן הכהן: 89 s → 8 s)
+- **More comprehensive results, also in searches with many results**: search within results
+  and Parallels filters search the whole set directly, at any size; on the desktop a long
+  list shows "N+" and is searched in full
+- **Whole words**: Variants and Fuzzy (and Exact on the desktop) match whole words, so
+  שלום finds שלום and not בשלום; Variants searches with every spelling form
+- **Fuzzy finds near spellings**: whole words one letter different (two in longer words)
+- **Desktop**: closing the program while background work is still running no longer crashes
+
+---
+
 ## What's New in Version 9.4.0? (the README's own text, 2026-09-28 to 2026-10-04)
 
 **On the desktop** (installer 9.4.0):

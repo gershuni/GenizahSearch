@@ -211,8 +211,8 @@ def test_a_box_without_the_index_announces_only_what_it_actually_has():
         # v9.2.1: the always-available entry is the GPT / AI tools one.
         assert 'ChatGPT' in text, (
             'the toast does not name the always-available entry: %r' % text[:400])
-        # v9.5.0: the search entry is ungated too.
-        assert 'more comprehensive results' in text, text[:400]
+        # v9.6.0: the search entry is ungated too.
+        assert 'further improvements to search quality' in text, text[:400]
         assert 'Letter-level' not in text, (
             'a GATED surface is advertised on a box whose index never opened')
         assert 'textual witnesses' not in text
@@ -261,7 +261,7 @@ def test_toast_is_translated_rather_than_leaking_english_into_the_hebrew_ui():
         assert 'תכונות חדשות!' in text
         assert 'חיפוש מקבילות ברמת האות' in text
         assert 'עדי נוסח' in text
-        assert 'תוצאות מקיפות יותר בחיפושים מרובי תוצאות' in text     # v9.5.0
+        assert 'ושיפורים נוספים באיכות החיפוש' in text     # v9.6.0
         assert 'Letter-level parallels search' not in text
         assert 'New Features!' not in text
 

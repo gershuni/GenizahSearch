@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 9.5.0
+# Dicta Genizah Search Pro 9.6.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,23 +8,24 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 9.5.0?
+## What's New in Version 9.6.0?
 
-**Faster, complete search**, on the desktop (installer 9.5.0) and the website:
+**Search fixes**, on the desktop (installer 9.6.0) and the website:
 
-- **Much faster**: on the desktop the first results appear while the search runs, and
-  Exact and Variants searches take a fraction of the time (Exact שלום: 10 s → 1.7 s;
-  Variants אהרן הכהן: 89 s → 8 s)
-- **More comprehensive results, also in searches with many results**: search within results
-  and Parallels filters search the whole set directly, at any size; on the desktop a long
-  list shows "N+" and is searched in full
-- **Whole words**: Variants and Fuzzy (and Exact on the desktop) match whole words, so
-  שלום finds שלום and not בשלום; Variants searches with every spelling form
-- **Fuzzy finds near spellings**: whole words one letter different (two in longer words)
-- **Desktop**: closing the program while background work is still running no longer crashes
+- **Num Changes (×1–×3) works in every variant level**, and each level keeps its own value
+  (×1 Basic, ×2 Extended and Maximum). At ×2, Extended and Maximum find more spellings and
+  take longer; ×1 is the quick choice. On the desktop `?`, `??` and `???` select the level
+- **Regex searches every page its pattern can match**, in My Library too
+- **Composition Search searches short texts and every word**: a text shorter than the chunk
+  size is searched whole, and Lab Mode always searches the end of the text
+- **Clear counts**: a list that reaches the search's limit shows "N+" on both apps, and a
+  catalog filter that cannot be applied says so instead of running the search
+- **Website**: the first results appear while the search runs; Search within results reads the
+  whole list first; searches stop after 3 minutes and show what they found; settings and
+  language are kept per visitor (the language follows the browser until you choose one)
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md). The README's previous What's New sections
-(8.1.0 to 9.4.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
+(8.1.0 to 9.5.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
 
 ---
 
@@ -98,7 +99,7 @@ Open the **GenizahSearch GPT** in ChatGPT from [genizahsearch.com/ai](https://ge
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V9.5.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
+1. **Download:** the installer (`GenizahSearchPro_V9.6.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
