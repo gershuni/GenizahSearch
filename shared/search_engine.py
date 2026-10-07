@@ -145,6 +145,19 @@ def _top_hits(searcher, query, limit):
     return hits[:limit], len(hits) > limit
 
 
+def _variants_noting_cutoff(var_mgr, term, mode, limit):
+    """*term*'s first *limit* spellings (var_mgr.get_variants). When the word has
+    more within the settings than that (variants_overflowed), the pages only the
+    others reach are not searched: the search is marked cut off (D8, "N+"). Cheap:
+    every limit is a cut of the word's one cached list. A stand-in without
+    variants_overflowed, or one that does not answer True, marks nothing."""
+    forms = var_mgr.get_variants(term, mode, limit=limit)
+    overflowed = getattr(var_mgr, 'variants_overflowed', None)
+    if overflowed is not None and overflowed(term, mode, limit=limit) is True:
+        _note_search_cutoff(capped=True)
+    return forms
+
+
 def _set_last_responsa_downgrade_meta(meta: dict) -> None:
     """Phase 81A — record a structured per-flag cascade outcome.
 
@@ -1892,12 +1905,10 @@ class SearchEngine:
             return cleaned_map
 
     def _get_or_compute_variants(self, terms, mode):
-        """Pre-compute variants at the larger limit for each search term.
-
-        This ensures that when build_tantivy_query requests variants with
-        limit=200 and build_regex_pattern later requests limit=8000 for the
-        same term+mode, the second call is served from the superset cache
-        (via slicing) instead of recomputing from scratch.
+        """Compute each search term's variants once, before the query and the
+        regex ask for them (VariantManager caches one list per word, and every
+        limit is a cut of it), and mark the search cut off when a word has more
+        spellings within the settings than the 8,000 budget holds (D8).
         """
         if not self.var_mgr or not terms:
             return
@@ -1906,8 +1917,7 @@ class SearchEngine:
         for term in terms:
             if term.upper() in ['AND', 'OR', 'NOT', '(', ')']:
                 continue
-            # Pre-compute at the larger limit; Tantivy phase will slice from cache
-            self.var_mgr.get_variants(term, mode, limit=max_limit)
+            _variants_noting_cutoff(self.var_mgr, term, mode, max_limit)
             if regex_mode != mode:
                 self.var_mgr.get_variants(term, regex_mode, limit=max_limit)
 
@@ -2007,7 +2017,7 @@ class SearchEngine:
                 ve = []
                 for w in expanded_words:
                     try:
-                        ve.extend(self.var_mgr.get_variants(w, variant_mode, limit=200))
+                        ve.extend(_variants_noting_cutoff(self.var_mgr, w, variant_mode, 200))
                     except MemoryError:
                         raise
                     except Exception:
@@ -2041,7 +2051,10 @@ class SearchEngine:
         return t_query_str, regex
 
     def build_tantivy_query(self, terms, mode, responsa_components=None, responsa_options=None,
-                            content_search_field=None):
+                            content_search_field=None, note_cutoff=True):
+        # *note_cutoff*: a word whose spellings do not all fit the query's 200 marks
+        # the search cut off (D8). False where the query is not the retrieval: the
+        # whole-word Variants path retrieves every verifier form (build_variant_query).
         # SEED-006 Stage 2: when *content_search_field* is supplied (only by the
         # plain word-search + composition retrieval sites, NOT position /
         # line-break / responsa), each term gets an extra lower-weighted
@@ -2152,7 +2165,8 @@ class SearchEngine:
                 else: parts.append(f'"{term}"~2')
             else:
                 # 1. Get variants (limit 200 is usually enough if quality is good)
-                all_vars = self.var_mgr.get_variants(term, mode, limit=200)
+                all_vars = (_variants_noting_cutoff(self.var_mgr, term, mode, 200) if note_cutoff
+                            else self.var_mgr.get_variants(term, mode, limit=200))
 
                 # 2. Prepare list
                 clean_vars = []
@@ -2280,7 +2294,7 @@ class SearchEngine:
         Fuzzy, its near spellings (VariantManager has no Fuzzy tier)."""
         if mode == 'fuzzy':
             return sorted(_near_spellings(term) or (term,))
-        forms = set(self.var_mgr.get_variants(term, mode, limit=Config.REGEX_VARIANTS_LIMIT))
+        forms = set(_variants_noting_cutoff(self.var_mgr, term, mode, Config.REGEX_VARIANTS_LIMIT))
         forms.add(term)
         return sorted(f for f in forms if f)
 
@@ -2415,7 +2429,8 @@ class SearchEngine:
                     clean, 'content', [content_search_field or 'content'], index=index)))
                 continue
             clauses = [(should, index.parse_query(
-                self.build_tantivy_query([clean], mode, content_search_field=content_search_field), ['content']))]
+                self.build_tantivy_query([clean], mode, content_search_field=content_search_field,
+                                         note_cutoff=False), ['content']))]
             clauses.append((should, tantivy.Query.term_set_query(
                 schema, 'content', with_brackets(self._verifier_forms(clean, mode)))))
             if content_search_field:
@@ -2536,7 +2551,7 @@ class SearchEngine:
             regex_mode = 'variants_maximum' if mode == 'fuzzy' else mode
 
             # 1. Get variants
-            vars_list = self.var_mgr.get_variants(term, regex_mode, limit=Config.REGEX_VARIANTS_LIMIT)
+            vars_list = _variants_noting_cutoff(self.var_mgr, term, regex_mode, Config.REGEX_VARIANTS_LIMIT)
 
             # 2. Ensure exact term
             if term not in vars_list:
@@ -2999,7 +3014,7 @@ class SearchEngine:
             var = []
             for w in expanded:
                 try:
-                    var.extend(self.var_mgr.get_variants(w, variant_mode, limit=200))
+                    var.extend(_variants_noting_cutoff(self.var_mgr, w, variant_mode, 200))
                 except MemoryError:
                     raise
                 except Exception:
@@ -3704,7 +3719,7 @@ class SearchEngine:
                     var_expanded = []
                     for w in expanded_words:
                         try:
-                            variants = self.var_mgr.get_variants(w, variant_mode, limit=200)
+                            variants = _variants_noting_cutoff(self.var_mgr, w, variant_mode, 200)
                             var_expanded.extend(variants)
                         except MemoryError:
                             raise
@@ -3783,11 +3798,17 @@ class SearchEngine:
                     terms = None
 
             if terms is not None:
-                # Pre-compute variants at max limit so Tantivy (limit=200) can
-                # slice from cache instead of recomputing when regex (limit=8000) runs.
-                # Fuzzy uses no VariantManager forms here (near spellings instead).
+                # Compute each word's variants once (the query asks for 200, the regex
+                # for 8,000: both are cuts of the one cached list). Fuzzy uses no
+                # VariantManager forms here (near spellings instead).
                 if mode not in ('Regex', 'fuzzy'):
                     self._get_or_compute_variants(terms, mode)
+                # Variants match whole words too (owner 2026-10-01), so they get
+                # Literal's paths: every verifier form retrieved as a whole token
+                # (build_variant_query below), so the query string's first 200
+                # spellings are not what retrieves them. Position searches keep the
+                # old query (their fields hold head/tail tokens only).
+                _by_forms = mode in _WHOLE_WORD_MODES and mode != 'literal' and not text_position
 
                 # SEED-006 Stage 2: only fold-fallback for a plain content search.
                 # When text_position is set the query is reused against
@@ -3812,14 +3833,12 @@ class SearchEngine:
                         query_str, self.index, stripped=not _query_has_brackets(query_str))
                     t_query_str = '(Regex candidates)'
                 elif t_query_str is None:
-                    t_query_str = self.build_tantivy_query(terms, mode, content_search_field=_cs_field)
-                # Variants match whole words too (owner 2026-10-01), so they get
-                # Literal's paths: every verifier form retrieved as a whole token,
-                # page docs for one word, aggregates only for page-break crossings.
-                # Measured: שמעון הצדיק 19.8 s, אהרן הכהן 150 s were regex over
-                # whole manuscripts. Position searches keep the old query (their
-                # fields hold head/tail tokens only).
-                if mode in _WHOLE_WORD_MODES and mode != 'literal' and not text_position:
+                    t_query_str = self.build_tantivy_query(terms, mode, content_search_field=_cs_field,
+                                                           note_cutoff=not _by_forms)
+                # Whole-word Variants: page docs for one word, aggregates only for
+                # page-break crossings. Measured: שמעון הצדיק 19.8 s, אהרן הכהן
+                # 150 s were regex over whole manuscripts.
+                if _by_forms:
                     t_query_obj = self.build_variant_query(terms, mode, content_search_field=_cs_field)
                     if t_query_obj is not None and len(terms) > 1:
                         _cross_page_terms = (self._cross_page_term(terms[0], mode),
@@ -4376,7 +4395,15 @@ class SearchEngine:
         opt-in via Lab Mode (LabEngine.lab_composition_search). The default path
         has no weights-hash / no staleness; an empty LOCAL result is just "no
         results" (no staleness banner).
+
+        'partial' is True when the run may have missed matches: Stop ended it
+        ('cancelled'), or a word had more spellings within the variant settings
+        than a chunk's query holds, so pages only the others reach were not
+        searched ('capped', the cut-off signal execute_search reports as "N+").
         """
+        # The cut-off signal of this run only: what an earlier search on this
+        # thread left there must not mark it (execute_search drains it the same way).
+        consume_last_search_cutoff()
         # Phase 110 C4: fail CLOSED — never expose LOCAL on a bad value.
         if corpus_scope not in ('genizah', 'local', 'all'):
             corpus_scope = 'genizah'
@@ -4970,8 +4997,16 @@ class SearchEngine:
             # Stopped (Stop, or the website's time limit): the cut-off signal agrees
             # with 'partial', as execute_search's does.
             _note_search_cutoff(interrupted=True)
+        # A word's spellings cut (build_tantivy_query takes a word's first 200, the
+        # regex its first 8,000; _variants_noting_cutoff notes the cut): pages only
+        # the others reach were not searched, so the run is partial, as the main
+        # search says "N+" (D8). Read, not cleared: the caller may read it too.
+        capped = bool((getattr(_LAST_SEARCH_CUTOFF, 'value', None) or {}).get('capped'))
 
-        return {'main': main_list, 'filtered': filtered_list, 'partial': was_cancelled,
+        return {'main': main_list, 'filtered': filtered_list,
+                'partial': was_cancelled or capped,
+                # Which of the two: Stop, or spellings (and so pages) left out.
+                'cancelled': was_cancelled, 'capped': capped,
                 'boundary_stats': boundary_stats,
                 # Phase 110 A2 + Round-2 #4: per-run scope + staleness verdict.
                 'corpus_scope': corpus_scope, 'local_lab_stale': _local_lab_stale,

@@ -173,10 +173,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     raw_saved_mode = _safe_get('search_mode', 'exact')
     raw_saved_query = _safe_get('search_query', '')
     saved_preset = _safe_get('search_preset', 30)
-    saved_max_changes = _safe_get('search_max_changes', 2)
     saved_gap = _safe_get('search_gap', 0)
 
     use_slider = bool(variant_preferences.get('variant_use_slider'))
+    # Num Changes shows the x1-x3 of the level the page opens on.
+    saved_max_changes = variant_preferences.max_changes(variant_preferences.level_of(
+        (saved_preset or 30) if use_slider else
+        variant_preferences.PRESET_PAIRS.get(raw_saved_mode, 30)))
 
     # Count saved results to detect back-navigation from /browse: a non-zero
     # count combined with URL `q` matching saved_query means the browser restored
@@ -677,7 +680,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     with ui.column().classes('gap-1') as max_changes_col:
                         h3(tr('Num Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
                         max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-16').props('outlined dense')
-                        ui.tooltip(tr('Max character changes per word'))
+                        ui.tooltip(tr('Letter changes per word at this level (1-3)'))
 
                     # Show max changes only for variant modes when not using slider
                     is_variant_mode = saved_mode in ('variants', 'variants_extended', 'variants_maximum')
@@ -824,7 +827,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ui.label(tr('Variant Level')).classes('text-sm font-medium').style('color: var(--text-secondary);')
                     variant_slider = ui.slider(min=10, max=300, value=current_preset['value'], step=10).classes('flex-grow').props('label-always')
                     max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-20').props('outlined dense')
-                    ui.tooltip(tr('Max character changes per word'))
+                    ui.tooltip(tr('Letter changes per word at this level (1-3)'))
                 variant_slider_row.set_visibility(saved_mode == 'variants')
 
                 # Slider change handler
@@ -832,6 +835,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     val = int(variant_slider.value)
                     current_preset['value'] = val
                     _safe_set('search_preset', val)
+                    _show_level_changes()
                 variant_slider.on('update:model-value', on_slider_change)
 
             def _show_level_on_slider(mode):
@@ -841,11 +845,23 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     variant_slider.value = level
                 current_preset['value'] = level
                 _safe_set('search_preset', level)
+                _show_level_changes()
 
-            # Save max changes on change (handle both slider and non-slider modes)
+            def _shown_level():
+                """The variant level the controls show: the slider's, or the mode's."""
+                if variant_slider:
+                    return variant_preferences.level_of(int(variant_slider.value))
+                return variant_preferences.level_of(mode_select.value)
+
+            def _show_level_changes():
+                """Num Changes shows the shown level's own x1-x3 (no change event)."""
+                if max_changes_select:
+                    max_changes_select.value = variant_preferences.max_changes(_shown_level())
+
+            # Save max changes on change: for the level shown (each level keeps its own)
             if max_changes_select:
                 def save_max_changes():
-                    _safe_set('search_max_changes', int(max_changes_select.value))
+                    variant_preferences.set_max_changes(_shown_level(), int(max_changes_select.value))
                 max_changes_select.on('update:model-value', save_max_changes)
 
             # Mode change handler (must be after variant_slider_row is defined)
@@ -864,6 +880,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     max_changes_col.set_visibility(is_variants and not is_tags)
                     if is_variants:
                         set_level(get_level_from_mode(mode))
+                        _show_level_changes()
 
                 # Toggle between query input and tag select
                 query_column.set_visibility(not is_tags)
@@ -1544,16 +1561,22 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             """Each step is searched again with the variant settings it first ran with.
 
             A step saved without them (before they were recorded) runs with the
-            website defaults at its level's preset (Fuzzy at x2) -- never with this
-            visitor's current preferences, which say nothing about how it first ran.
+            website defaults at its level's preset and that level's default x1-x3
+            (Fuzzy at x2) -- never with this visitor's current preferences, which
+            say nothing about how it first ran.
             """
+            from shared.variants import DEFAULT_MAX_CHANGES_BY_PRESET
+
             def pick(step):
                 settings = step.variant_settings
                 if settings is None:
-                    settings = {'variant_pairs_count': variant_preferences.PRESET_PAIRS.get(
-                        step.mode, variant_preferences.BASIC_PAIRS)}
+                    pairs = variant_preferences.PRESET_PAIRS.get(step.mode, variant_preferences.BASIC_PAIRS)
+                    settings = {'variant_pairs_count': pairs}
                     if step.mode == 'fuzzy':
                         settings['variant_max_changes'] = 2
+                    elif step.mode in variant_preferences.PRESET_PAIRS:
+                        settings['variant_max_changes'] = DEFAULT_MAX_CHANGES_BY_PRESET[
+                            variant_preferences.level_of(pairs)]
                 return with_request_settings(state.searcher, **settings)
             return pick
 
@@ -4957,9 +4980,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 pairs_count = int(current_preset['value'])
             else:
                 pairs_count = get_level_from_mode(mode)
-            changes = (int(max_changes_select.value)
-                       if max_changes_select and mode != 'fuzzy' else None)
-            variant_settings = variant_preferences.for_search(mode, pairs_count, changes)
+            variant_settings = variant_preferences.for_search(mode, pairs_count)
+            _show_level_changes()
         else:
             variant_settings = variant_preferences.for_search(mode)
         search_state.last_variant_settings = dict(variant_settings)

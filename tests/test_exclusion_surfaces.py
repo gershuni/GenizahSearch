@@ -996,7 +996,7 @@ def test_a_refinement_replay_leaves_the_summary_not_a_blank(window, monkeypatch,
     elif writer == "restore failed":
         w._on_replay_for_restore_error("boom")
     else:
-        monkeypatch.setattr(app, "replay_chain", lambda chain, searcher, scope: set())
+        monkeypatch.setattr(app, "replay_chain", lambda chain, searcher, scope, **kw: set())
         w._replay_refinement_chain()
     assert w.status_label.text() == _showing(1, 2, excluded=1)
 
@@ -2113,7 +2113,7 @@ def test_history_records_a_cut_off_count(window, monkeypatch):
 class _CompletionThread(_RunningSearchThread):
     made = []
 
-    def __init__(self, chain, searcher, filter_restrict, upto=None, run_id=0):
+    def __init__(self, chain, searcher, filter_restrict, upto=None, run_id=0, searcher_for_step=None):
         super().__init__()
         self.chain, self.filter_restrict, self.upto = chain, filter_restrict, upto
         self.finished_signal = _QueuedSignal()
@@ -2463,3 +2463,145 @@ def test_a_held_action_waits_out_a_search_that_is_running(completing):
     w._replay_restore_thread.running = False
     w._on_replay_for_restore_finished(None)
     assert _CompletionThread.made == []
+
+
+# --- Each refinement step runs again with the variant settings it ran with (2026-10-06) --
+# Since 25ed814e the level and Num Changes (x1-x3) act on Variants search, and a search
+# leaves them in the shared settings. Running a step again -- a chip removed, a session
+# restored, a cut-off or out-of-scope chain completed -- used whatever the last search
+# left there: a step searched at Basic x1 ran again at Maximum x3, another search. The
+# step records its level and x1-x3; a step saved before that runs as before. A step runs
+# on a view of the engine of its own: the shared settings are not written, not even
+# while it runs (a value put back after it could land under a newer search).
+
+_FIRST, _SECOND = "ראשון", "שני"
+
+
+class _SettingsEngine:
+    """Records, at each search, the level and x1-x3 its variant manager expands with,
+    and (in shared_seen) what the shared settings hold at that moment."""
+
+    def __init__(self, settings, var_mgr, rows):
+        self.settings, self.var_mgr, self.rows, self.ran, self.shared_seen = settings, var_mgr, rows, [], []
+
+    def parse_query_syntax(self, q, responsa_mode=False):
+        return None, q
+
+    def execute_search(self, query, mode, gap, **kw):
+        self.ran.append((query, self.var_mgr.get_variant_level(),
+                         self.var_mgr._max_changes_setting(2), bool(kw.get("ids_only"))))
+        self.shared_seen.append((self.settings.variant_pairs_count, self.settings.variant_max_changes))
+        return list(self.rows.get(query, []))
+
+
+def _variants_search(w, monkeypatch, query, preset):
+    """The real start_search, in Variants at *preset* (Basic 30, Maximum 150); its
+    worker delivers what the engine holds for *query*."""
+    monkeypatch.setattr(app, "SearchThread", _RunningSearchThread)
+    if w.mode_combo.count() == 0:
+        w.mode_combo.addItems(["literal"] * 8)
+    w.mode_combo.setCurrentIndex(1)                     # Variants
+    w.MODE_RESPONSA, w.MODE_PGP_TAGS = 2, 7
+    w.gap_input, w.exclude_input = QLineEdit(), QLineEdit()
+    w.text_position_combo = QComboBox()
+    w.btn_lab_mode_toggle, w.search_within_btn = QPushButton(), QPushButton()
+    w._run_seq = getattr(w, "_run_seq", 0)
+    w._current_variant_preset = preset
+    w.query_input.setText(query)
+    w.start_search()
+    w._search_elapsed_timer.stop()
+    run = w.search_thread
+    run.running = False
+    run.results_signal.deliver(w.searcher.rows[query])
+
+
+def _two_variant_steps(w, monkeypatch):
+    """Basic x1, then -- searching within it -- Maximum x3: the shared settings are
+    left at Maximum x3."""
+    from shared.variants import VariantManager
+    settings = SimpleNamespace(
+        variant_pairs_count=70, variant_max_changes=2, variant_min_word_len=2,
+        variant_aggressive=False, custom_variants={}, variant_use_slider=False,
+        variant_max_changes_by_preset={"basic": 1, "extended": 2, "maximum": 3})
+    w.lab_engine = SimpleNamespace(settings=settings)
+    w.var_mgr = VariantManager(settings)
+    w.searcher = _SettingsEngine(settings, w.var_mgr,
+                                 {_FIRST: _rows(A, 2) + _rows(B, 1), _SECOND: _rows(A, 1)})
+    _variants_search(w, monkeypatch, _FIRST, 30)
+    w._enter_refine_mode()
+    assert w._refine_mode
+    _variants_search(w, monkeypatch, _SECOND, 150)
+    assert [s.query for s in w.refinement_chain] == [_FIRST, _SECOND]
+    assert (settings.variant_pairs_count, settings.variant_max_changes) == (150, 3)
+    assert w.var_mgr.get_variant_level() == 150
+    w.searcher.ran.clear()
+    w.searcher.shared_seen.clear()
+    return settings
+
+
+def test_a_step_records_the_level_and_changes_its_run_searched_with(completing, monkeypatch):
+    w = completing
+    _two_variant_steps(w, monkeypatch)
+    assert [s.variant_settings for s in w.refinement_chain] == [
+        {"variant_pairs_count": 30, "variant_max_changes": 1},
+        {"variant_pairs_count": 150, "variant_max_changes": 3}]
+
+
+def test_removing_a_chip_runs_the_steps_left_with_their_own_settings(completing, monkeypatch):
+    w = completing
+    settings = _two_variant_steps(w, monkeypatch)
+    w._remove_refinement_step(1)
+    assert w.searcher.ran == [(_FIRST, 30, 1, False)]
+    assert w.searcher.shared_seen == [(150, 3)], "the shared settings are not written"
+    assert (settings.variant_pairs_count, settings.variant_max_changes) == (150, 3)
+    assert w.var_mgr.get_variant_level() == 150
+    assert w.refinement_restrict_sys_ids == {A, B}
+
+
+def test_a_step_saved_before_the_settings_were_recorded_runs_as_before(completing, monkeypatch):
+    """No recorded settings: the shared ones as they are -- and they are as they were,
+    not the ones the step before it ran with."""
+    w = completing
+    _two_variant_steps(w, monkeypatch)
+    w.refinement_chain[1].variant_settings = None
+    w._replay_refinement_chain()
+    assert w.searcher.ran == [(_FIRST, 30, 1, False), (_SECOND, 150, 3, False)]
+
+
+def test_a_restored_session_replays_each_step_with_its_own_settings(completing, monkeypatch):
+    import json
+    from desktop.gui_threads import RefinementReplayThread
+    from shared.refinement import RefinementStep
+
+    class _Now(RefinementReplayThread):
+        def start(self):
+            self.run()                              # same thread: delivered directly
+
+    w = completing
+    settings = _two_variant_steps(w, monkeypatch)
+    saved = json.loads(json.dumps([s.to_dict() for s in w.refinement_chain]))  # the session file
+    w.refinement_chain = [RefinementStep.from_dict(d) for d in saved]
+    monkeypatch.setattr(app, "RefinementReplayThread", _Now)
+    w._replay_for_restore()
+    assert w.searcher.ran == [(_FIRST, 30, 1, False), (_SECOND, 150, 3, False)]
+    assert w.searcher.shared_seen == [(150, 3), (150, 3)]
+    assert (settings.variant_pairs_count, settings.variant_max_changes) == (150, 3)
+    assert w.refinement_restrict_sys_ids == {A}
+
+
+def test_completing_the_chain_runs_each_step_with_its_own_settings(completing, monkeypatch):
+    from desktop.gui_threads import ChainCompletionThread
+
+    class _Now(ChainCompletionThread):
+        def start(self):
+            self.run()
+
+    w = completing
+    settings = _two_variant_steps(w, monkeypatch)
+    monkeypatch.setattr(app, "ChainCompletionThread", _Now)
+    w._forget_chain_sets()          # the filter scope changed under the chain
+    w._enter_refine_mode()          # search within: every step runs again first (D8)
+    assert w.searcher.ran == [(_FIRST, 30, 1, True), (_SECOND, 150, 3, True)]
+    assert w.searcher.shared_seen == [(150, 3), (150, 3)]
+    assert (settings.variant_pairs_count, settings.variant_max_changes) == (150, 3)
+    assert w._refine_mode and w.refinement_restrict_sys_ids == {A}

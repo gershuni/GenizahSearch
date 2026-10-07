@@ -30,7 +30,7 @@ BASIC_PAIRS = PRESET_PAIRS['variants']
 
 WEBSITE_DEFAULTS = {
     'variant_pairs_count': BASIC_PAIRS,
-    'variant_max_changes': 2,
+    'variant_max_changes': 1,          # Basic's x1 (each level keeps its own: max_changes)
     'variant_min_word_len': 2,
     'variant_aggressive': False,
     'custom_variants': WEBSITE_CUSTOM_VARIANTS,
@@ -132,23 +132,52 @@ def current() -> dict:
     return {name: get(name) for name in _SENT}
 
 
-def max_changes() -> int:
-    """This visitor's Num Changes choice (the search bar's control)."""
+def level_of(mode_or_pairs) -> str:
+    """'basic', 'extended' or 'maximum' for a variant mode or a pair count."""
+    from shared.variants import variant_preset_of
+    return variant_preset_of(PRESET_PAIRS.get(mode_or_pairs, mode_or_pairs))
+
+
+def max_changes_table() -> dict:
+    """This visitor's x1-x3 per level (Num Changes). The single value saved before
+    each level had its own seeds Extended and Maximum only; Basic starts at x1."""
+    from shared.variants import max_changes_by_preset
     from web.safe_storage import safe_user_get
-    return request_settings(variant_max_changes=safe_user_get(
-        'search_max_changes', WEBSITE_DEFAULTS['variant_max_changes']))['variant_max_changes']
+    stored = safe_user_get('search_max_changes_by_level', None)
+    if isinstance(stored, dict):
+        return max_changes_by_preset(stored)
+    return max_changes_by_preset(legacy=safe_user_get('search_max_changes', None))
+
+
+def max_changes(level: str = 'basic') -> int:
+    """This visitor's x1-x3 for one level."""
+    return max_changes_table()[level]
+
+
+def set_max_changes(level: str, value) -> bool:
+    """Keep this visitor's x1-x3 for one level."""
+    from web.safe_storage import safe_user_set
+    table = max_changes_table()
+    table[level] = request_settings(variant_max_changes=value)['variant_max_changes']
+    return safe_user_set('search_max_changes_by_level', table)
 
 
 def for_search(mode: str, pairs_count: int | None = None, changes: int | None = None) -> dict:
     """The complete settings one of this visitor's searches runs with.
 
-    Variant modes use *pairs_count* (the slider or the level's preset) and
-    *changes* (the Num Changes control). Every other mode -- Responsa, composition,
-    Joins -- uses the Basic level with the visitor's Settings-page preferences.
+    Variant modes use *pairs_count* (the slider or the level's preset) and the
+    level's x1-x3 (or *changes*). Fuzzy uses x2. Every other mode -- Responsa,
+    composition, Joins -- uses the Basic level and Basic's x1-x3, with the visitor's
+    Settings-page preferences (owner ruling 2026-09-28).
     """
     settings = {**website_defaults(), **current()}
     if mode in PRESET_PAIRS or mode == 'fuzzy':
-        settings['variant_pairs_count'] = pairs_count or PRESET_PAIRS.get(mode, BASIC_PAIRS)
-        if changes is not None:
-            settings['variant_max_changes'] = changes
+        pairs = pairs_count or PRESET_PAIRS.get(mode, BASIC_PAIRS)
+        settings['variant_pairs_count'] = pairs
+        if mode == 'fuzzy':
+            settings['variant_max_changes'] = changes or 2
+        else:
+            settings['variant_max_changes'] = changes or max_changes(level_of(pairs))
+    else:
+        settings['variant_max_changes'] = max_changes('basic')
     return request_settings(**settings)

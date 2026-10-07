@@ -6,6 +6,7 @@ Pure helpers are import-safe without a QApplication so they can be unit-tested h
 """
 from genizah_core import CURRENT_LANG, get_logger, tr  # noqa: F401
 from shared.joins_lab import htmlify, page_of, snippet_html, snippet_plain  # D-18: reuse Phase 106
+from desktop.variant_run_settings import basic_changes_searcher
 
 logger = get_logger(__name__)
 
@@ -4998,7 +4999,12 @@ if _QT_AVAILABLE:
             self.setModal(False)
             self._app = app
             self.meta_mgr = app.meta_mgr
-            self.searcher = app.searcher
+            # Every Joins search -- the anchor side, the other side, a restored one --
+            # runs with Basic's Num Changes (owner ruling 2026-09-28), not with what the
+            # last main-window search left in the shared value (x3 after Maximum x3).
+            self.searcher = basic_changes_searcher(
+                app.searcher,
+                lambda: getattr(getattr(app, "lab_engine", None), "settings", None))
             self.joins_mgr = app.joins_mgr
             self.corrections_client = getattr(app, "corrections_client", None)
 

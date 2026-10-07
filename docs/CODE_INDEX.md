@@ -1777,11 +1777,13 @@ Where a composition search's windows go, for both engines, and the notices that 
 
 Variant and Lab preferences of one website visitor, kept in that visitor's storage and sent with that visitor's searches; the web never writes the shared LabSettings or its file.
 
-- **Constant** `WEBSITE_DEFAULTS` — what a visitor who changed nothing gets, and what every API job uses (Basic 30 pairs, ×2, short words one change, the eleven custom pairs, Lab min score 70)
+- **Constant** `WEBSITE_DEFAULTS` — what a visitor who changed nothing gets, and what every API job uses (Basic 30 pairs, ×1, short words one change, the eleven custom pairs, Lab min score 70)
 - **Constant** `REQUEST_SETTINGS` — the settings one search may choose, each with its check
 - **Function** `request_settings` — checked copies; an unknown name raises
 - **Function** `get` / `set` — this visitor's Settings-page value
-- **Function** `for_search` — the complete settings one of this visitor's searches runs with
+- **Function** `level_of` — 'basic', 'extended' or 'maximum' for a variant mode or pair count
+- **Function** `max_changes_table` / `max_changes` / `set_max_changes` — this visitor's ×1-×3 per level (key `search_max_changes_by_level`; the old single `search_max_changes` seeds Extended and Maximum)
+- **Function** `for_search` — the complete settings one of this visitor's searches runs with: the level's ×1-×3 in variant modes, ×2 in Fuzzy, Basic's elsewhere
 
 ## web/pages/search_results.py
 
@@ -1828,6 +1830,10 @@ moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `deskt
 
 ## shared/variants.py
 
+- **Constant** `DEFAULT_MAX_CHANGES_BY_PRESET` — ×1 Basic, ×2 Extended and Maximum (owner ruling 2026-09-28)
+- **Function** `variant_preset_of` — the level a pair count belongs to (under 70 Basic, under 150 Extended, else Maximum)
+- **Function** `max_changes_by_preset` — a checked per-level ×1-×3 table; a legacy single value seeds Extended and Maximum only
+- **Method** `VariantManager.variants_overflowed` — whether a word's spellings were cut at the budget (feeds "N+")
 - **Class** `VariantManager` (Line 21) — Generate spelling variants for Hebrew search terms using unified frequency-based pairs.
     - Method `make_multimap` (Line 50) — Create bidirectional mapping from character pairs.
     - Method `__init__` (Line 58)

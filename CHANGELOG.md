@@ -76,6 +76,48 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
   not 3 minutes per step. An API
   Parallels job stopped this way answers with `results_cut_off`: more parallels may exist.
 
+### Num Changes (×1–×3) works in every variant level (both)
+
+- **Num Changes now sets how many letters in each word may be swapped, in every level.**
+  Before, ×3 did the same as ×2 and ×2 did nothing in Basic; on the desktop the control did
+  not act on Variants search at all, so every level ran at ×1.
+- **Each level keeps its own value:** by default ×1 for Basic and ×2 for Extended and
+  Maximum. A value saved before this change carries into Extended and Maximum; Basic starts
+  at ×1. Responsa, composition and Joins use Basic's value; Fuzzy uses ×2. The one-change
+  limit for short words (two letters, by default) applies to each spelling separately: a
+  short word's two-letters-for-one spelling of three letters or more gets the level's value
+  like any other word, so אב at Maximum ×3 has 3,573 spellings.
+- **Desktop: `?`, `??` and `???` select Basic, Extended and Maximum** (they ran at the level
+  the slider happened to show).
+- **A higher Num Changes never drops a spelling a lower one finds.** Spellings with up to two
+  changes, and the two-letters-for-one spellings, come first; a third change only fills the
+  room left in the spelling budget. A word whose spellings do not all fit marks the count
+  "N+", and a composition search "Partial results".
+- **Desktop Extended and Maximum now run at ×2, as the website's always did: they find more
+  and are much slower.** Measured on the desktop engine, whole Genizah (searches stopped
+  after 5 minutes):
+
+  | והמשפטים | ×1 | ×2 | ×3 |
+  |---|---|---|---|
+  | Basic (30 pairs) | 3.2 s | 7.1 s | 48 s |
+  | Extended (70) | 2.6 s | 75 s | over 5 min |
+  | Maximum (150) | 13.9 s | over 5 min | over 5 min |
+
+  | ישראל | ×1 | ×2 | ×3 |
+  |---|---|---|---|
+  | Basic (30 pairs) | 8.8 s | 17.7 s | 73 s |
+  | Extended (70) | 8.0 s | 114 s | over 5 min |
+  | Maximum (150) | 37.2 s | over 5 min | over 5 min |
+
+  Before, the desktop ran every level at ×1 (the first column). The new defaults are ×1
+  Basic and ×2 Extended/Maximum. Responsa with variants on והמשפטים: 38 s at ×1, about 5
+  minutes at ×2 and ×3. A 5-word composition search: 1.1 s, 1.6 s, 4.2 s. (One run each on
+  the real index, 2026-10-07; a website search stops after 3 minutes.)
+- **Desktop:** a Composition, Joins Lab or refinement search runs with its own level and Num
+  Changes, so starting one while another search runs no longer changes that search's.
+- **Website:** Settings has one Num Changes value per level. **API:** `variants` runs at
+  ×1 (Basic, as before) and `fuzzy` at ×2.
+
 ### Composition search: short texts, every word, honest filters (both)
 
 - **A text shorter than the chunk size is searched** as one chunk of all its words, with a

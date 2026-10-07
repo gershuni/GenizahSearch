@@ -18,6 +18,40 @@ except ImportError:
     UNIFIED_VARIANT_PAIRS = []
 
 
+
+# x1-x3 (single-letter changes per word) is kept per variant level. Defaults: x1 for
+# Basic, x2 for Extended and Maximum (owner ruling 2026-09-28) -- what the website
+# has always given; the desktop's Extended and Maximum gave x1 (their tier was Basic).
+DEFAULT_MAX_CHANGES_BY_PRESET = {'basic': 1, 'extended': 2, 'maximum': 2}
+
+
+def variant_preset_of(pairs_count) -> str:
+    """The level a pair count belongs to: Basic (under 70), Extended (under 150),
+    Maximum. The slider's values map onto the nearest level at or below them."""
+    try:
+        n = int(pairs_count)
+    except (TypeError, ValueError):
+        return 'basic'
+    return 'basic' if n < 70 else ('extended' if n < 150 else 'maximum')
+
+
+def max_changes_by_preset(stored=None, legacy=None) -> dict:
+    """A checked per-level x1-x3 table. *stored*: a saved table (any missing or
+    unreadable level gets its default). *legacy*: the single value saved before the
+    table existed -- it seeds Extended and Maximum only; Basic starts at x1 (owner
+    ruling: the old global x2 is not carried into Basic)."""
+    table = dict(DEFAULT_MAX_CHANGES_BY_PRESET)
+    if stored is None and legacy is not None:
+        stored = {'extended': legacy, 'maximum': legacy}
+    for level in table:
+        try:
+            value = int((stored or {}).get(level, table[level]))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        table[level] = max(1, min(3, value))
+    return table
+
+
 class VariantManager:
     """
     Generate spelling variants for Hebrew search terms using unified frequency-based pairs.
@@ -39,7 +73,10 @@ class VariantManager:
         'variants_maximum': 150,  # Maximum (???): top 150 pairs
     }
 
-    # Tier configuration for balanced flexibility vs explosion prevention
+    # Tier configuration for balanced flexibility vs explosion prevention.
+    # max_changes is the limit used only when there are no settings (tests,
+    # callers without LabSettings); with settings, variant_max_changes (x1-x3,
+    # kept per level: max_changes_for) is the per-word limit in every tier.
     _TIER_CONFIG = {
         'variants': {'max_changes': 1, 'per_term_limit': 50},
         'variants_extended': {'max_changes': 2, 'per_term_limit': 100},
@@ -59,9 +96,17 @@ class VariantManager:
         # Settings reference (can be updated later via set_settings)
         self._settings = settings
 
-        # Cache for frequently searched terms
+        # Per (term, mode, pairs, change settings): the word's spellings in their one
+        # canonical order, up to Config.VARIANT_GEN_LIMIT; every limit is a cut of it.
         self._cache = {}
         self._cache_max_size = 5000
+        # ...and at most this many spellings in all (about 150 MB of strings): a
+        # Responsa query asks for many prefixed forms, each list up to 8,000 long.
+        self._cache_max_spellings = 2_000_000
+        self._cached_spellings = 0
+        # Per cache key: more spellings exist within the settings than the list holds
+        # (it stopped at VARIANT_GEN_LIMIT, or the multi-letter cap left some out).
+        self._overflow = {}
 
         # Build maps (will include custom variants if settings has them)
         self._rebuild_maps()
@@ -151,34 +196,21 @@ class VariantManager:
 
         return unified_multi + custom_multi
 
-    def _generate_multichar_variants(self, term: str, mode: str = 'variants') -> set:
-        """
-        Generate variants using multi-character substitution pairs.
-        Each pair is applied as simple string replacement (bidirectional).
-        Returns set of variant terms (may have different lengths than original).
-
-        Limited to MAX_MULTICHAR_VARIANTS to prevent explosion.
-        """
-        multi_pairs = self._get_multichar_pairs_for_mode(mode)
-        if not multi_pairs:
-            return set()
-
-        variants = set()
-        for a, b in multi_pairs:
-            # a -> b substitution
-            if a in term:
-                variants.add(term.replace(a, b))
-                if len(variants) >= self.MAX_MULTICHAR_VARIANTS:
-                    break
-            # b -> a substitution
-            if b in term:
-                variants.add(term.replace(b, a))
-                if len(variants) >= self.MAX_MULTICHAR_VARIANTS:
-                    break
-
-        # Remove original term if present
-        variants.discard(term)
-        return variants
+    def _multichar_spellings(self, term: str, mode: str = 'variants') -> tuple[list[str], bool]:
+        """The word's multi-letter ("two letters for one") spellings: each multi-
+        character pair applied as a whole-string replacement, both ways, in the order
+        of the pairs (most frequent first). At most MAX_MULTICHAR_VARIANTS of them, to
+        prevent explosion; the second value says whether that cap left any out."""
+        found = []
+        seen = {term}
+        for a, b in self._get_multichar_pairs_for_mode(mode):
+            for old, new in ((a, b), (b, a)):
+                if old in term:
+                    spelling = term.replace(old, new)
+                    if spelling not in seen:
+                        seen.add(spelling)
+                        found.append(spelling)
+        return found[:self.MAX_MULTICHAR_VARIANTS], len(found) > self.MAX_MULTICHAR_VARIANTS
 
     def _rebuild_maps(self):
         """Build variant maps from unified frequency-sorted pairs list."""
@@ -208,7 +240,7 @@ class VariantManager:
         """Update settings reference, rebuild maps, and clear cache."""
         self._settings = settings
         self._rebuild_maps()
-        self._cache.clear()
+        self.clear_cache()
 
     def set_variant_level(self, n: int):
         """
@@ -224,7 +256,7 @@ class VariantManager:
         self.slider_map = self.make_multimap(slider_single + custom_single)
 
         # Clear cache since pairs changed
-        self._cache.clear()
+        self.clear_cache()
 
     def get_variant_level(self) -> int:
         """Get current variant pairs count."""
@@ -234,14 +266,26 @@ class VariantManager:
         """Get total number of available variant pairs."""
         return len(UNIFIED_VARIANT_PAIRS)
 
+    def _max_changes_setting(self, base_max: int) -> int:
+        """The per-word limit of single-letter changes: the x1-x3 setting, in every
+        tier (owner ruling 2026-09-28, option A). Without settings, the tier's own."""
+        if not self._settings:
+            return min(base_max, 2)
+        try:
+            value = int(getattr(self._settings, 'variant_max_changes', 2))
+        except (TypeError, ValueError):
+            value = 2
+        return max(1, min(3, value))
+
     def _get_max_changes_for_length(self, term_len: int, base_max: int) -> int:
         """
         Dynamic max_changes based on term length to prevent combinatorial explosion.
         Respects settings if available (variant_min_word_len, variant_aggressive).
         """
+        cap = self._max_changes_setting(base_max)
         # Check for aggressive mode (old behavior - no limits based on length)
         if self._settings and getattr(self._settings, 'variant_aggressive', False):
-            return min(base_max, getattr(self._settings, 'variant_max_changes', 2))
+            return cap
 
         # Get threshold from settings or use default
         min_len = 2
@@ -251,12 +295,28 @@ class VariantManager:
         if term_len <= min_len:
             # Short words: only 1 change
             return 1
-        else:
-            # Longer words: allow full base_max (capped by settings or 2)
-            max_cap = 2
-            if self._settings:
-                max_cap = getattr(self._settings, 'variant_max_changes', 2)
-            return min(base_max, max_cap)
+        # Longer words: the per-word limit
+        return cap
+
+    def _change_settings(self):
+        """The settings that decide which variants a word gets besides the pairs:
+        part of the cache key, because they change between calls without a reset."""
+        if not self._settings:
+            return None
+        return (getattr(self._settings, 'variant_max_changes', 2),
+                getattr(self._settings, 'variant_min_word_len', 2),
+                bool(getattr(self._settings, 'variant_aggressive', False)))
+
+    def variants_overflowed(self, term: str, mode: str, limit: int = None) -> bool:
+        """Whether get_variants(term, mode, limit) (default limit: the regex budget)
+        leaves spellings out: more exist within the settings than it returns, so a
+        search over them can miss pages. A list that holds them all exactly is not cut."""
+        limit = Config.REGEX_VARIANTS_LIMIT if limit is None else limit
+        spellings = self._spellings(term, mode)
+        if spellings is None:
+            return False
+        sequence, more = spellings
+        return more or len(sequence) > min(limit, Config.VARIANT_GEN_LIMIT)
 
     def hamming_distance(self, term: str, variant: str) -> int:
         """Calculate character difference count between term and variant."""
@@ -264,154 +324,149 @@ class VariantManager:
             return len(term) + len(variant)
         return sum(1 for a, b in zip(term, variant) if a != b)
 
+    @staticmethod
+    def _replaceable(base: str, mapping: Mapping[str, set[str]]) -> list:
+        """(position, its replacement letters in sorted order) for each letter of
+        *base* the pairs can change. Sorted, so the order never depends on
+        PYTHONHASHSEED (the mapping holds sets)."""
+        out = []
+        for i, char in enumerate(base):
+            repls = mapping.get(char)       # .get: the defaultdict gains no keys
+            others = sorted(repls - {char}) if repls else ()
+            if others:
+                out.append((i, tuple(others)))
+        return out
+
+    @staticmethod
+    def _changes(base: str, replaceable: list, k: int):
+        """*base*'s spellings with exactly *k* letters changed, in a fixed order: the
+        changed positions left to right (itertools.combinations), then the letters in
+        sorted order. Lazy, so a caller can stop at its budget."""
+        chars = list(base)
+        for combo in itertools.combinations(replaceable, k):
+            positions = [p for p, _ in combo]
+            for letters in itertools.product(*(r for _, r in combo)):
+                for p, c in zip(positions, letters):
+                    chars[p] = c
+                yield ''.join(chars)
+            for p in positions:
+                chars[p] = base[p]
+
     def generate_variants(self, term: str, mapping: Mapping[str, set[str]],
                           max_changes: int, limit: int) -> set[str]:
-        """
-        Generate variants with early termination and smart position filtering.
-        Only considers positions that actually have replacements in the mapping.
-        """
-        term_len = len(term)
+        """Up to *limit* of *term*'s spellings with 1..max_changes single-letter
+        changes, fewest changes first (only positions the mapping can change)."""
         limit = min(limit, Config.VARIANT_GEN_LIMIT)
         result = set()
-
-        # Pre-filter: find positions that have possible replacements
-        replaceable_positions = []
-        for i, char in enumerate(term):
-            if char in mapping and mapping[char] - {char}:
-                replaceable_positions.append(i)
-
-        if not replaceable_positions:
-            return result
-
-        # Generate variants by number of changes (1 change first, then 2, etc.)
-        for num_changes in range(1, max_changes + 1):
-            if num_changes > len(replaceable_positions):
-                break
-
-            for positions in itertools.combinations(replaceable_positions, num_changes):
-                # Build character options for each position
-                char_options = []
-                valid = True
-
-                for i in range(term_len):
-                    if i in positions:
-                        repls = mapping[term[i]] - {term[i]}
-                        if not repls:
-                            valid = False
-                            break
-                        char_options.append(repls)
-                    else:
-                        char_options.append((term[i],))
-
-                if not valid:
-                    continue
-
-                # Generate all combinations for these positions
-                for combo in itertools.product(*char_options):
-                    result.add("".join(combo))
-                    if len(result) >= limit:
-                        return result
-
+        replaceable = self._replaceable(term, mapping)
+        for k in range(1, max_changes + 1):
+            for spelling in self._changes(term, replaceable, k):
+                if len(result) >= limit:
+                    return result
+                result.add(spelling)
         return result
 
-    def get_variants(self, term: str, mode: str, limit: int = None) -> list[str]:
-        """
-        Generate spelling variants for Hebrew search terms.
+    def _spelling_sequence(self, term: str, mode: str, mapping: Mapping[str, set[str]],
+                           base_max: int) -> tuple[list[str], bool]:
+        """The word's spellings in their one canonical order, up to
+        Config.VARIANT_GEN_LIMIT, and whether more exist within the settings.
 
-        Uses unified frequency-sorted pairs with slider-based selection.
-        The number of pairs used is determined by settings.variant_pairs_count.
-
-        Also applies multi-character substitutions for pairs where one side
-        has more than one character (2<->1 substitutions).
+        The order: the word; its multi-letter spellings; then by the number of
+        single-letter changes k = 1, 2, 3 -- at each k the word's own k-change
+        spellings, then each multi-letter spelling's (each base within its own
+        length rule, _get_max_changes_for_length). So the list is the same whatever
+        limit a caller asks for and whatever was asked before (every limit is a cut
+        of it), and x1's list is the start of x2's and x2's of x3's: raising Num
+        Changes never drops a spelling a lower one finds. Before, a word's own
+        2-change spellings filled the budget ahead of its multi-letter spellings'
+        1-change ones (והמשפטים at 150 pairs: 104 of x1's 316 were missing at x2).
         """
+        cap = Config.VARIANT_GEN_LIMIT
+        multi, more = self._multichar_spellings(term, mode)
+        out = [term, *multi]
+        if len(out) > cap:
+            return out[:cap], True
+        seen = set(out)
+        bases = [(base, self._get_max_changes_for_length(len(base), base_max),
+                  self._replaceable(base, mapping))
+                 for base in out if len(base) >= 2]
+        top = max((most for _, most, _ in bases), default=0)
+        for k in range(1, top + 1):
+            for base, most, replaceable in bases:
+                if k > most or k > len(replaceable):
+                    continue
+                for spelling in self._changes(base, replaceable, k):
+                    if spelling in seen:
+                        continue
+                    if len(out) >= cap:
+                        return out, True        # one more exists than the budget holds
+                    seen.add(spelling)
+                    out.append(spelling)
+        return out, more
+
+    def _spellings(self, term: str, mode: str):
+        """(the canonical sequence, more exist) for *term* in *mode*, cached; None
+        when the word gets no variants (one letter, or a mode with no tier)."""
         if len(term) < 2:
-            return [term]
-
-        # Get tier configuration
+            return None
         tier = self._TIER_CONFIG.get(mode)
         if not tier:
-            return [term]
-
-        # Apply limit from tier config if not specified
-        if limit is None:
-            limit = tier['per_term_limit']
-        else:
-            limit = min(limit, Config.VARIANT_GEN_LIMIT)
-
-        # Get current pairs count for cache key
-        pairs_count = self._get_pairs_count(mode)
-
-        # Check cache (include pairs_count for proper invalidation)
-        cache_key = (term, mode, limit, pairs_count)
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-
-        # Check if a larger-limit result exists that we can slice from
-        for cached_key, cached_value in self._cache.items():
-            if (cached_key[0] == term and cached_key[1] == mode
-                    and cached_key[3] == pairs_count and cached_key[2] >= limit):
-                # Larger result exists; slice to our limit
-                sliced = cached_value[:limit]
-                self._cache[cache_key] = sliced
-                return sliced
+            return None
 
         # Select the appropriate map based on mode
         # Use slider_map when settings has custom pairs count
         if self._settings and hasattr(self._settings, 'variant_pairs_count'):
-            # Rebuild slider map with current value if needed
             mapping = self.slider_map
         elif mode == 'variants':
             mapping = self.basic_map
         elif mode == 'variants_extended':
             mapping = self.extended_map
-        elif mode == 'variants_maximum':
-            mapping = self.maximum_map
         else:
+            mapping = self.maximum_map
+
+        # Pairs count and change settings: they change between calls without a reset.
+        key = (term, mode, self._get_pairs_count(mode), self._change_settings(),
+               Config.VARIANT_GEN_LIMIT)
+        sequence = self._cache.get(key)
+        more = self._overflow.get(key)
+        if sequence is not None and more is not None:
+            return sequence, more
+
+        sequence, more = self._spelling_sequence(term, mode, mapping, tier['max_changes'])
+
+        if (len(self._cache) >= self._cache_max_size
+                or self._cached_spellings + len(sequence) > self._cache_max_spellings):
+            # Simple eviction: drop the older half
+            for k in list(self._cache)[:max(1, len(self._cache) // 2)]:
+                dropped = self._cache.pop(k, None)
+                self._overflow.pop(k, None)
+                if dropped is not None:
+                    self._cached_spellings -= len(dropped)
+        self._cache[key] = sequence
+        self._overflow[key] = more
+        self._cached_spellings += len(sequence)
+        return sequence, more
+
+    def get_variants(self, term: str, mode: str, limit: int = None) -> list[str]:
+        """
+        Spelling variants of a Hebrew search term, closest first: the word, its
+        multi-letter (2<->1) spellings, then by the number of single-letter changes.
+
+        Uses unified frequency-sorted pairs with slider-based selection; the number
+        of pairs is settings.variant_pairs_count, the changes per word x1-x3 its
+        variant_max_changes. *limit* (default: the tier's per-term limit) cuts the
+        word's one canonical list (_spelling_sequence), so the answer never depends
+        on the calls made before. variants_overflowed says whether it left any out.
+        """
+        spellings = self._spellings(term, mode)
+        if spellings is None:
             return [term]
-
-        # Dynamic max_changes based on term length
-        base_max = tier['max_changes']
-        max_changes = self._get_max_changes_for_length(len(term), base_max)
-
-        # Step 1: Generate multi-char substitution variants (e.g., kv=m)
-        multichar_variants = self._generate_multichar_variants(term, mode)
-
-        # Step 2: Generate single-char variants for original term
-        variants = self.generate_variants(term, mapping, max_changes, limit)
-        variants.add(term)  # Always include original
-
-        # Step 3: Generate single-char variants for each multi-char variant
-        for mc_variant in multichar_variants:
-            variants.add(mc_variant)
-            if len(variants) < limit and len(mc_variant) >= 2:
-                mc_max_changes = self._get_max_changes_for_length(len(mc_variant), base_max)
-                mc_single_variants = self.generate_variants(
-                    mc_variant, mapping, mc_max_changes,
-                    limit - len(variants)  # Remaining budget
-                )
-                variants.update(mc_single_variants)
-
-        # Sort: original term first, then by similarity
-        def sort_key(v):
-            if v == term:
-                return (0, 0, v)
-            elif v in multichar_variants:
-                return (1, 0, v)  # Multi-char variants second
-            else:
-                return (2, self.hamming_distance(term, v) if len(v) == len(term) else 100, v)
-
-        sorted_variants = sorted(variants, key=sort_key)[:limit]
-
-        # Cache result (with size limit)
-        if len(self._cache) >= self._cache_max_size:
-            # Simple eviction: clear half the cache
-            keys_to_remove = list(self._cache.keys())[:self._cache_max_size // 2]
-            for k in keys_to_remove:
-                del self._cache[k]
-
-        self._cache[cache_key] = sorted_variants
-        return sorted_variants
+        if limit is None:
+            limit = self._TIER_CONFIG[mode]['per_term_limit']
+        return spellings[0][:min(limit, Config.VARIANT_GEN_LIMIT)]
 
     def clear_cache(self):
-        """Clear the variant cache."""
+        """Clear the variant cache (and the overflow flags kept beside it)."""
         self._cache.clear()
+        self._overflow.clear()
+        self._cached_spellings = 0

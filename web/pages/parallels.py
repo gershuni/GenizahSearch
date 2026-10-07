@@ -1510,7 +1510,7 @@ def create_parallels_page(initial_text: str = None):
 
                             with ui.column().classes('gap-1'):
                                 h3(tr('Num Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                                max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=2).classes('w-16').props('outlined dense')
+                                max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=variant_preferences.max_changes('basic')).classes('w-16').props('outlined dense')
                         else:
                             # Slider mode
                             with ui.column().classes('gap-1 w-full'):
@@ -1520,11 +1520,17 @@ def create_parallels_page(initial_text: str = None):
                                     variant_slider_label = ui.label('30').classes('text-sm font-medium w-10').style('color: var(--primary-600);')
                             with ui.column().classes('gap-1'):
                                 h3(tr('Num Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                                max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=2).classes('w-16').props('outlined dense')
+                                max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=variant_preferences.max_changes('basic')).classes('w-16').props('outlined dense')
 
                     def set_level(level_value):
                         """Remember this visitor's variant level (sent with each search)."""
                         current_preset['value'] = level_value
+
+                    def save_max_changes():
+                        # Composition runs at Basic's x1-x3 at every level (owner ruling
+                        # K-20): this control is Basic's value, the search page's ? level.
+                        variant_preferences.set_max_changes('basic', int(max_changes_select.value))
+                    max_changes_select.on('update:model-value', save_max_changes)
 
                     if variant_level_select:
                         def on_level_change():
@@ -1534,7 +1540,7 @@ def create_parallels_page(initial_text: str = None):
                     if variant_slider:
                         def on_slider_change():
                             val = int(variant_slider.value)
-                            current_preset['value'] = val
+                            set_level(val)
                             variant_slider_label.set_text(str(val))
                         variant_slider.on('update:model-value', on_slider_change)
 
@@ -5039,6 +5045,12 @@ def create_parallels_page(initial_text: str = None):
             main_results = result_data.get('main', [])
             filtered_results = result_data.get('filtered', [])
             is_partial = result_data.get('partial', False)
+            # Partial: Stop ended the run ('cancelled'), or a word's spellings were cut
+            # ('capped', search_composition_logic). A run that does not say which (Lab,
+            # letter-level) was stopped, as before. A cut run searched every chunk.
+            was_cancelled = result_data.get('cancelled', is_partial)
+            if is_partial and not was_cancelled and p_state.chunks_total:
+                p_state.chunks_processed = p_state.chunks_total
 
             # PR #324 round 4: a capped passage search must say so HERE too.
             # The API path warns (`passage_results_truncated`), and this
@@ -5464,8 +5476,10 @@ def create_parallels_page(initial_text: str = None):
 
                 render_results(main_results, filtered_results, is_partial=is_partial)
             else:
-                if is_partial:
+                if was_cancelled:
                     summary_label.text = f"{tr('Search cancelled')} \u2014 {total_elapsed_str} \u2014 {tr('no results yet')}"
+                elif is_partial:        # every chunk searched, but spellings were cut
+                    summary_label.text = f"{tr('Partial results')} \u2014 {total_elapsed_str} \u2014 {p_state.chunks_total} {tr('chunks')}, 0 {tr('Results')}"
                 results_header.text = tr('No results')
                 with results_container:
                     show_empty_state()

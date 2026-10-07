@@ -174,17 +174,21 @@ def create_settings_page():
                                     variant_preferences.set('variant_min_word_len', int(variant_min_len.value))
                             variant_min_len.on('update:model-value', apply_min_len)
 
-                        # Max changes: the same preference as the search bar's Num Changes.
+                        # Max changes per level: the same preference as the search bar's Num Changes.
                         with ui.column().classes('gap-1'):
                             ui.label(tr('Max Changes per Word')).classes('text-sm font-medium').style('color: var(--text-secondary);')
-                            variant_max_changes = ui.number(
-                                value=variant_preferences.max_changes(), min=1, max=3
-                            ).props('outlined dense').classes('w-20')
+                            with ui.row().classes('items-center gap-2'):
+                                for _level, _label in (('basic', tr('Basic')), ('extended', tr('Extended')),
+                                                       ('maximum', tr('Maximum'))):
+                                    ui.label(_label).classes('text-xs').style('color: var(--text-muted);')
+                                    _changes = ui.number(
+                                        value=variant_preferences.max_changes(_level), min=1, max=3
+                                    ).props('outlined dense').classes('w-16').mark(f'max-changes-{_level}')
 
-                            def apply_max_changes():
-                                if variant_max_changes.value is not None:
-                                    _safe_set('search_max_changes', max(1, min(3, int(variant_max_changes.value))))
-                            variant_max_changes.on('update:model-value', apply_max_changes)
+                                    def apply_max_changes(_e=None, _lvl=_level, _input=_changes):
+                                        if _input.value is not None:
+                                            variant_preferences.set_max_changes(_lvl, int(_input.value))
+                                    _changes.on('update:model-value', apply_max_changes)
 
                     # Toggles
                     ui.separator().classes('my-2')

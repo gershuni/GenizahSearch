@@ -193,13 +193,22 @@ class SearchSettingsDialog(QDialog):
         grid.addWidget(QLabel(tr("Limit Short Words (≤N chars):")), 1, 0)
         grid.addWidget(self.spin_variant_min_len, 1, 1)
 
-        # Max Changes
-        self.spin_variant_max_changes = QSpinBox()
-        self.spin_variant_max_changes.setRange(1, 3)
-        self.spin_variant_max_changes.setValue(getattr(self.settings, 'variant_max_changes', 2))
-        self.spin_variant_max_changes.setToolTip(tr("Maximum character substitutions per word. Higher = more results but slower."))
+        # Max Changes, one per variant level
+        from shared.variants import max_changes_by_preset
+        table = max_changes_by_preset(getattr(self.settings, 'variant_max_changes_by_preset', None))
+        self.spin_variant_max_changes_by_preset = {}
+        changes_row = QHBoxLayout()
+        for level, label in (('basic', tr('Basic')), ('extended', tr('Extended')), ('maximum', tr('Maximum'))):
+            spin = QSpinBox()
+            spin.setRange(1, 3)
+            spin.setPrefix("×")
+            spin.setValue(table[level])
+            spin.setToolTip(tr("Maximum character substitutions per word. Higher = more results but slower."))
+            self.spin_variant_max_changes_by_preset[level] = spin
+            changes_row.addWidget(QLabel(label))
+            changes_row.addWidget(spin)
         grid.addWidget(QLabel(tr("Max Changes per Word:")), 2, 0)
-        grid.addWidget(self.spin_variant_max_changes, 2, 1)
+        grid.addLayout(changes_row, 2, 1)
 
         # Aggressive Mode
         self.chk_variant_aggressive = QCheckBox(tr("Aggressive Mode (ignore word length limits)"))
@@ -294,7 +303,8 @@ class SearchSettingsDialog(QDialog):
     def save_and_close(self):
         # Save variant limits
         self.settings.variant_min_word_len = self.spin_variant_min_len.value()
-        self.settings.variant_max_changes = self.spin_variant_max_changes.value()
+        self.settings.variant_max_changes_by_preset = {
+            level: spin.value() for level, spin in self.spin_variant_max_changes_by_preset.items()}
         self.settings.variant_aggressive = self.chk_variant_aggressive.isChecked()
         self.settings.variant_pairs_count = self.slider_variant_pairs.value()
         self.settings.variant_use_slider = self.chk_use_slider.isChecked()

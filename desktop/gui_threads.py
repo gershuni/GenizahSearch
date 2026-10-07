@@ -138,16 +138,20 @@ class RefinementReplayThread(QThread):
     finished_signal = pyqtSignal(object)  # accumulated restrict set, or None
     error_signal = pyqtSignal(str)
 
-    def __init__(self, chain, searcher, filter_restrict):
+    def __init__(self, chain, searcher, filter_restrict, searcher_for_step=None):
         super().__init__()
         self.chain = chain
         self.searcher = searcher
         self.filter_restrict = filter_restrict
+        # step -> searcher: each step searches with its own variant settings
+        # (GenizahGUI._refinement_step_searcher). None: *searcher* for every step.
+        self.searcher_for_step = searcher_for_step
 
     def run(self):
         try:
             from shared.refinement import replay_chain
-            result = replay_chain(self.chain, self.searcher, self.filter_restrict)
+            result = replay_chain(self.chain, self.searcher, self.filter_restrict,
+                                  searcher_for_step=self.searcher_for_step)
             self.finished_signal.emit(result)
         except Exception as e:  # noqa: BLE001
             logger.warning("RefinementReplayThread failed: %s", e)
@@ -346,12 +350,14 @@ class ChainCompletionThread(PausableSearchMixin, QThread):
     error_signal = pyqtSignal(str)
     pause_ack_signal = pyqtSignal(int, int)
 
-    def __init__(self, chain, searcher, filter_restrict, upto=None, run_id=0):
+    def __init__(self, chain, searcher, filter_restrict, upto=None, run_id=0, searcher_for_step=None):
         super().__init__()
         self.chain = chain
         self.searcher = searcher
         self.filter_restrict = filter_restrict
         self.upto = upto
+        # As RefinementReplayThread's: each step searches with its own variant settings.
+        self.searcher_for_step = searcher_for_step
         self._init_pause_support(run_id)
 
     def run(self):
@@ -363,7 +369,8 @@ class ChainCompletionThread(PausableSearchMixin, QThread):
                 self._checkpoint()
                 self.progress_signal.emit(curr, total)
             self.finished_signal.emit(complete_chain(self.chain, self.searcher, self.filter_restrict,
-                                                     progress_callback=cb, upto=self.upto))
+                                                     progress_callback=cb, upto=self.upto,
+                                                     searcher_for_step=self.searcher_for_step))
         except InterruptedError:
             self.finished_signal.emit({'restrict': None, 'interrupted': True})
         except Exception as e:  # noqa: BLE001

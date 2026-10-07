@@ -98,6 +98,8 @@ from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog
 from desktop.filter_text_dialog import FilterTextDialog
 from desktop.column_filter_dialog import ColumnFilterDialog  # moved 2026-09-19; alias stub at the root
 from desktop.list_filter_dialog import ListFilterDialog
+from desktop.variant_run_settings import (PreviewVariants, engine_with_variant_settings,
+                                          recorded_settings_searcher, variant_settings_now)
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared_export_utils import coerce_img_page_cell
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
@@ -1810,6 +1812,9 @@ class GenizahGUI(QMainWindow):
             # Connect VariantManager to Lab settings for variant search configuration
             if self.var_mgr and self.lab_engine:
                 self.var_mgr.set_settings(self.lab_engine.settings)
+            # The saved per-level x1-x3 is known only now; the spin box was built
+            # with the defaults.
+            self._show_level_max_changes()
 
             # Setup Panels (guaranteed to exist as init_ui runs before startup thread)
             if hasattr(self, 'lab_panel_search'):
@@ -5807,6 +5812,7 @@ class GenizahGUI(QMainWindow):
         self.variant_slider.valueChanged.connect(lambda v: (
             self.variant_slider_label.setText(str(v)),
             self._sync_variant_sliders(v, 'search') if hasattr(self, '_sync_variant_sliders') else None,
+            self._show_level_max_changes() if hasattr(self, 'spin_max_changes') else None,
             self._update_variant_count_preview()
         ))
 
@@ -5823,10 +5829,11 @@ class GenizahGUI(QMainWindow):
         # Max changes spinbox
         self.spin_max_changes = QSpinBox()
         self.spin_max_changes.setRange(1, 3)
-        self.spin_max_changes.setValue(getattr(self.lab_engine.settings if hasattr(self, 'lab_engine') and self.lab_engine else None, 'variant_max_changes', 2) if hasattr(self, 'lab_engine') else 2)
+        self.spin_max_changes.setValue(self._level_max_changes())
         self.spin_max_changes.setFixedWidth(40)
-        self.spin_max_changes.setToolTip(tr("Max character changes per word (1-3)"))
+        self.spin_max_changes.setToolTip(tr("Letter changes per word at this level (1-3)"))
         self.spin_max_changes.setPrefix("×")
+        self.spin_max_changes.valueChanged.connect(self._on_max_changes_spin)
 
         # Add widgets to main container
         variant_layout.addWidget(self.variant_presets_widget)
@@ -16958,6 +16965,10 @@ class GenizahGUI(QMainWindow):
                 self.variant_presets_widget.setVisible(not use_slider)
             if hasattr(self, 'variant_slider_widget'):
                 self.variant_slider_widget.setVisible(use_slider)
+            # The dialog may have changed the shown level's x1-x3, or switched between
+            # buttons and slider (another level shown): the search bar shows what the
+            # next search uses.
+            self._show_level_max_changes()
 
     def _on_search_mode_changed(self, index):
         """Show/hide variant controls and swap query/tag input based on selected mode."""
@@ -17123,6 +17134,64 @@ class GenizahGUI(QMainWindow):
                 self._min_delimiter_distance_temp = min_distance_spin.value()
             self._update_boundary_stats()
 
+    # ?, ?? and ??? choose Basic, Extended and Maximum, like the preset buttons.
+    _PREFIX_VARIANT_PRESETS = {'variants': 30, 'variants_extended': 70, 'variants_maximum': 150}
+
+    def _apply_prefix_variant_preset(self, target_mode):
+        """Select the level a variant prefix names; return the combo mode to show."""
+        preset = self._PREFIX_VARIANT_PRESETS.get(target_mode)
+        if preset is None:
+            return target_mode
+        self._set_variant_preset(preset)
+        return 'variants'
+
+    def _lab_settings(self):
+        engine = getattr(self, 'lab_engine', None)
+        return getattr(engine, 'settings', None) if engine else None
+
+    def _level_max_changes(self, pairs_count=None):
+        """x1-x3 of the variant level *pairs_count* (default: the one shown)."""
+        settings = self._lab_settings()
+        if pairs_count is None:
+            pairs_count = self._get_current_variant_pairs_count() if hasattr(self, 'variant_slider') else 30
+        from shared.variants import max_changes_by_preset, variant_preset_of
+        table = max_changes_by_preset(getattr(settings, 'variant_max_changes_by_preset', None))
+        return table[variant_preset_of(pairs_count)]
+
+    def _show_level_max_changes(self):
+        """Put the shown level's x1-x3 in the spin box (no change event)."""
+        if hasattr(self, 'spin_max_changes'):
+            self.spin_max_changes.blockSignals(True)
+            self.spin_max_changes.setValue(self._level_max_changes())
+            self.spin_max_changes.blockSignals(False)
+
+    def _on_max_changes_spin(self, value):
+        """The spin box sets x1-x3 for the level shown, and keeps it."""
+        settings = self._lab_settings()
+        if settings is None:
+            return
+        from shared.variants import max_changes_by_preset, variant_preset_of
+        table = max_changes_by_preset(getattr(settings, 'variant_max_changes_by_preset', None))
+        table[variant_preset_of(self._get_current_variant_pairs_count())] = max(1, min(3, int(value)))
+        settings.variant_max_changes_by_preset = table
+        if hasattr(settings, 'save'):
+            settings.save()
+        self._update_variant_count_preview()
+
+    def _use_variant_changes(self, mode, pairs_count=None):
+        """Set the per-word limit the next search runs with: the level's x1-x3 for
+        Variants, x2 for Fuzzy, otherwise Basic's (Responsa). Composition and Joins
+        bind theirs to a view of the engine instead (desktop/variant_run_settings.py)."""
+        settings = self._lab_settings()
+        if settings is None:
+            return
+        if mode == 'variants':
+            settings.variant_max_changes = self._level_max_changes(pairs_count)
+        elif mode == 'fuzzy':
+            settings.variant_max_changes = 2
+        else:
+            settings.variant_max_changes = self._level_max_changes(30)
+
     def _set_variant_preset(self, pairs_count):
         """Set variant level from preset button."""
         self._current_variant_preset = pairs_count
@@ -17133,9 +17202,8 @@ class GenizahGUI(QMainWindow):
             self.btn_variant_extended.setChecked(pairs_count == 70)
             self.btn_variant_maximum.setChecked(pairs_count == 150)
 
-        # Update variant manager
-        if hasattr(self, 'var_mgr') and self.var_mgr:
-            self.var_mgr.set_variant_level(pairs_count)
+        # The shared VariantManager is NOT set here: a search may be running on it.
+        # start_search applies the level shown once the previous search has stopped.
 
         # Sync slider if visible
         if hasattr(self, 'variant_slider'):
@@ -17143,6 +17211,9 @@ class GenizahGUI(QMainWindow):
             self.variant_slider.setValue(pairs_count)
             self.variant_slider_label.setText(str(pairs_count))
             self.variant_slider.blockSignals(False)
+
+        # The level's own x1-x3
+        self._show_level_max_changes()
 
         # Update preview
         self._update_variant_count_preview()
@@ -17168,6 +17239,9 @@ class GenizahGUI(QMainWindow):
             self.variant_slider.setValue(value)
             self.variant_slider_label.setText(str(value))
             self.variant_slider.blockSignals(False)
+            # The search slider may now be at another level: its x1-x3, as the
+            # search slider's own change shows it (signals were blocked above).
+            self._show_level_max_changes()
 
     # Shortcut prefixes: longest first to avoid partial matches (??? before ??)
     _SHORTCUT_PREFIXES = [
@@ -17195,8 +17269,7 @@ class GenizahGUI(QMainWindow):
                 self.query_input.blockSignals(False)
                 # Switch mode combo
                 modes = ['literal', 'variants', 'responsa', 'fuzzy', 'Regex', 'Title', 'Shelfmark']
-                if target_mode in ('variants_extended', 'variants_maximum'):
-                    target_mode = 'variants'
+                target_mode = self._apply_prefix_variant_preset(target_mode)
                 try:
                     combo_idx = modes.index(target_mode)
                     self.mode_combo.setCurrentIndex(combo_idx)
@@ -17229,15 +17302,19 @@ class GenizahGUI(QMainWindow):
             return
 
         try:
-            # Set variant level from current UI (preset or slider)
+            # The level and x1-x3 shown, counted on the preview's own VariantManager:
+            # the shared one and the shared settings are the running search's.
             pairs_count = self._get_current_variant_pairs_count()
-            self.var_mgr.set_variant_level(pairs_count)
+            if getattr(self, '_variant_preview', None) is None:
+                self._variant_preview = PreviewVariants()
+            preview = self._variant_preview.manager(
+                self._lab_settings(), pairs_count, self._level_max_changes(pairs_count))
 
             # Calculate total variants for all words
             total_variants = 0
             for word in words:
                 if len(word) >= 2:
-                    variants = self.var_mgr.get_variants(word, 'variants', limit=500)
+                    variants = preview.get_variants(word, 'variants', limit=500)
                     total_variants += len(variants)
                 else:
                     total_variants += 1  # Single char = 1 variant (itself)
@@ -20868,9 +20945,8 @@ class GenizahGUI(QMainWindow):
             # Handle 'exact' vs 'literal' naming difference if present
             core_mode = mode_override
             if core_mode == 'exact': core_mode = 'literal'
-            # Map old extended/maximum to variants (slider controls intensity)
-            if core_mode in ('variants_extended', 'variants_maximum'):
-                core_mode = 'variants'
+            # ?, ?? and ??? select their level (shown on the buttons or slider)
+            core_mode = self._apply_prefix_variant_preset(core_mode)
 
             try:
                 combo_idx = modes.index(core_mode)
@@ -20910,13 +20986,6 @@ class GenizahGUI(QMainWindow):
             'emitted': False,
         }
 
-        # Update variant level and max changes from UI before search
-        if mode == 'variants' and self.var_mgr:
-            pairs_count = self._get_current_variant_pairs_count()
-            self.var_mgr.set_variant_level(pairs_count)
-            # Update max_changes in settings
-            if self.lab_engine and hasattr(self, 'spin_max_changes'):
-                self.lab_engine.settings.variant_max_changes = self.spin_max_changes.value()
         gap = int(self.gap_input.text()) if self.gap_input.text().isdigit() else 0
 
         # Get Excluded Words
@@ -20936,6 +21005,16 @@ class GenizahGUI(QMainWindow):
 
         if not self._drain_previous_worker('search_thread', self._pause_search):
             return
+        # The shared variant settings, set from the UI only now that the previous
+        # search has stopped: it read them as it went (and a refused start leaves
+        # them alone). Nothing else writes them while a search runs.
+        if mode == 'variants' and self.var_mgr:
+            pairs_count = self._get_current_variant_pairs_count()
+            self.var_mgr.set_variant_level(pairs_count)
+            self._use_variant_changes('variants', pairs_count)
+        else:
+            # Responsa variants use Basic's x1-x3, Fuzzy x2 (owner ruling 2026-09-28).
+            self._use_variant_changes(mode)
         self._run_seq += 1
         _run_id = self._run_seq
         self._pause_search.reset_for_run(_run_id, time.monotonic())
@@ -21020,7 +21099,10 @@ class GenizahGUI(QMainWindow):
             # the widgets may have changed since, and the query lost its mode prefix.
             self._last_search_params = dict(
                 query=query, gap=gap, exclude_words=list(exclude_words), text_position=text_position,
-                responsa_options=responsa_options, corpus_scope=_corpus_scope)
+                responsa_options=responsa_options, corpus_scope=_corpus_scope,
+                # The level and x1-x3 this run searched with (set above): a replay of
+                # its step searches with them, not with what a later search left.
+                variant_settings=variant_settings_now(self._lab_settings(), getattr(self, 'var_mgr', None)))
         self._search_cutoff = None    # this run's arrives (cutoff_signal) before its results
         # The previous run's enrichment (domains, measurements) arrives again only after
         # this run ends (_launch_enrichment_workers). Until then a preview row must not be
@@ -22176,7 +22258,8 @@ class GenizahGUI(QMainWindow):
             self.status_label.setText(tr('Re-evaluating refinement...'))
             QApplication.processEvents()
         try:
-            result = replay_chain(self.refinement_chain, self.searcher, self.pre_search_restrict_sys_ids)
+            result = replay_chain(self.refinement_chain, self.searcher, self.pre_search_restrict_sys_ids,
+                                  searcher_for_step=self._refinement_step_searcher())
             self.refinement_restrict_sys_ids = result
         except Exception as e:
             import traceback
@@ -22204,7 +22287,8 @@ class GenizahGUI(QMainWindow):
         # pre_search_restrict_sys_ids is set by now — capture the scope sig.
         self._refinement_scope_sig = scope_signature(self.pre_search_restrict_sys_ids)
         thread = RefinementReplayThread(
-            self.refinement_chain, self.searcher, self.pre_search_restrict_sys_ids
+            self.refinement_chain, self.searcher, self.pre_search_restrict_sys_ids,
+            searcher_for_step=self._refinement_step_searcher(),
         )
         thread.finished_signal.connect(self._on_replay_for_restore_finished)
         thread.error_signal.connect(self._on_replay_for_restore_error)
@@ -22260,7 +22344,8 @@ class GenizahGUI(QMainWindow):
     def _apply_run_params(self, step):
         """Fill *step* with what the search that produced the shown results ran with
         (_last_search_params): its query without a mode prefix, gap, NOT-words,
-        position, Responsa options and corpus. Both step builders took some of these
+        position, Responsa options, corpus and variant settings (level and x1-x3).
+        Both step builders took some of these
         from the widgets and left the rest at defaults -- the first step of a chain
         lost all four, the committed step its NOT-words -- so a replay ran another
         search. A Lab run, or results restored from a session, keep the widgets' values."""
@@ -22273,6 +22358,23 @@ class GenizahGUI(QMainWindow):
         step.text_position = params['text_position']
         step.responsa_options = params['responsa_options']
         step.corpus_scope = params['corpus_scope']
+        recorded = params.get('variant_settings')
+        step.variant_settings = dict(recorded) if recorded else None
+
+    def _refinement_step_searcher(self):
+        """searcher_for_step for replay_chain / complete_chain: each step searches with
+        the variant settings it first ran with (RefinementStep.variant_settings), on a
+        view of the engine of its own -- the shared settings are not touched, so a
+        search started meanwhile keeps its own. A step saved before they were recorded
+        searches as before, with the shared settings as they are."""
+        searcher = self.searcher
+        settings = self._lab_settings()
+
+        def for_step(step):
+            if settings is None or not step.variant_settings:
+                return searcher
+            return recorded_settings_searcher(searcher, settings, step.variant_settings)
+        return for_step
 
     def _enter_refine_mode(self):
         """D-02, D-03: Activate refine mode on desktop search bar."""
@@ -22494,7 +22596,8 @@ class GenizahGUI(QMainWindow):
         self._pause_search.reset_for_run(run_id, time.monotonic())
         thread = ChainCompletionThread(self.refinement_chain, self.searcher,
                                        getattr(self, 'pre_search_restrict_sys_ids', None),
-                                       upto=upto, run_id=run_id)
+                                       upto=upto, run_id=run_id,
+                                       searcher_for_step=self._refinement_step_searcher())
         self.search_thread = thread
         # The shown results were not stopped: Stop here must not mark them partial.
         was_cancelled = getattr(self, '_search_was_cancelled', False)
@@ -27949,9 +28052,13 @@ class GenizahGUI(QMainWindow):
         else:
             mode = 'variants'
 
-        # Update variant level from slider before search
-        if mode == 'variants' and hasattr(self, 'comp_variant_slider') and self.var_mgr:
-            self.var_mgr.set_variant_level(self.comp_variant_slider.value())
+        # Composition variants use its slider's level and Basic's x1-x3, its Fuzzy x2
+        # (owner ruling 2026-09-28). They are bound to this run's view of the engine
+        # below, never written to the shared settings: a main-window search may be
+        # running on those (desktop/variant_run_settings.py).
+        _comp_variant_values = {'variant_max_changes': 2 if mode == 'fuzzy' else self._level_max_changes(30)}
+        if mode == 'variants' and hasattr(self, 'comp_variant_slider'):
+            _comp_variant_values['variant_pairs_count'] = self.comp_variant_slider.value()
 
         excluded_ids = self._excl_get('composition', 'raw')
 
@@ -28128,7 +28235,8 @@ class GenizahGUI(QMainWindow):
                 _comp_min_boundary = 1
             else:
                 _comp_multi = False
-                _comp_searcher = self.searcher
+                _comp_searcher = engine_with_variant_settings(
+                    self.searcher, self._lab_settings(), _comp_variant_values)
                 _comp_mode_arg = mode
                 _comp_boundary_mode = boundary_mode
                 _comp_min_boundary = min_boundary_matches
@@ -28449,10 +28557,15 @@ class GenizahGUI(QMainWindow):
         # REGULAR My-Library index, which has no staleness concept — an empty LOCAL
         # result is treated exactly like an empty Genizah result. No staleness label.
 
-        # Detect partial results (search was cancelled)
+        # Detect partial results: the search was cancelled, or a word's spellings
+        # were cut (search_composition_logic's 'capped') -- both may miss matches.
         is_partial = False
+        was_cancelled = False
         if isinstance(result_obj, dict):
             is_partial = result_obj.get('partial', False)
+            # A run that says which (the standard engine) is 'cancelled' only when
+            # it was; one that does not (Lab Mode, letter-level) as before.
+            was_cancelled = result_obj.get('cancelled', is_partial)
 
         # Show completion summary in progress bar (stays visible until next search)
         # Monotonic and pause-discounted. This one fixes the ETA too: rate is
@@ -28491,7 +28604,9 @@ class GenizahGUI(QMainWindow):
         if getattr(self, '_comp_last_result_method', 'chunk') == 'passage':
             chunks_part = ""
         elif is_partial:
-            chunks_part = f"{chunks_processed}/{chunks_total} {tr('chunks')}, "
+            # A run left partial only by cut spellings searched every chunk.
+            done = chunks_processed if was_cancelled else chunks_total
+            chunks_part = f"{done}/{chunks_total} {tr('chunks')}, "
         else:
             chunks_part = f"{chunks_total} {tr('chunks')}, "
         if is_partial:
@@ -28508,12 +28623,13 @@ class GenizahGUI(QMainWindow):
         self._notify_search_complete(result_count, '', search_type='composition')
 
         # Phase 114 USAGE-03: emit composition search telemetry.
-        # is_partial=True → user cancelled (comp cancel sets cancel_flag; thread emits partial=True).
+        # was_cancelled → user cancelled (comp cancel sets cancel_flag; the core returns
+        # 'cancelled'); a run left partial only by cut spellings was not cancelled.
         # _app_shutting_down guard (REVIEWS HIGH-2) is the first line of _emit_comp_search_telemetry
         # and suppresses the emit during the cooperative-interrupt shutdown window.
         # Placed BEFORE the no-results return so zero-result completed comp still emits (D-07).
         self._emit_comp_search_telemetry(
-            'cancelled' if is_partial else 'completed',
+            'cancelled' if was_cancelled else 'completed',
             result_count,
         )
 
@@ -31779,6 +31895,7 @@ class GenizahGUI(QMainWindow):
                 self.text_position_combo.setCurrentIndex(params['text_position'])
             if 'variant_preset' in params:
                 self._current_variant_preset = params['variant_preset']
+                self._show_level_max_changes()
             # Feature 1 (Phase 96 fix-7): restore corpus scope dropdown so
             # history re-use searches the same corpus as the original run.
             if 'corpus_scope' in params:
@@ -32478,6 +32595,7 @@ class GenizahGUI(QMainWindow):
                 self.text_position_combo.setCurrentIndex(reg['text_position'])
             if reg.get('variant_preset') is not None:
                 self._current_variant_preset = reg['variant_preset']
+                self._show_level_max_changes()
 
             # Restore exclusion state BEFORE displaying results
             self._domain_exclusions = set(reg.get('domain_exclusions', []))

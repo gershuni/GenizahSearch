@@ -50,7 +50,11 @@ class LabSettings:
 
         # Variant Search Settings (affects standard search when using variants mode)
         self.variant_min_word_len = 2      # Words <= this length get only 1 change
-        self.variant_max_changes = 2       # Max character changes per word
+        self.variant_max_changes = 2       # Max character changes per word (the search being run)
+        # x1-x3 per variant level (shared/variants.py::max_changes_by_preset); a search
+        # sets variant_max_changes from it.
+        from shared.variants import max_changes_by_preset
+        self.variant_max_changes_by_preset = max_changes_by_preset()
         self.variant_aggressive = False    # If True, ignore length limits (like old behavior)
         self.variant_pairs_count = 50      # Number of top variant pairs to use (slider value)
         self.variant_use_slider = False    # If True, show slider instead of preset buttons
@@ -96,6 +100,14 @@ class LabSettings:
                     # Load variant settings
                     self.variant_min_word_len = data.get('variant_min_word_len', 2)
                     self.variant_max_changes = data.get('variant_max_changes', 2)
+                    from shared.variants import max_changes_by_preset
+                    # A table that is not a dict (a damaged file) is no table: the single
+                    # value saved before seeds it, as on the website (max_changes_table).
+                    stored_table = data.get('variant_max_changes_by_preset')
+                    if not isinstance(stored_table, dict):
+                        stored_table = None
+                    self.variant_max_changes_by_preset = max_changes_by_preset(
+                        stored_table, legacy=data.get('variant_max_changes'))
                     self.variant_aggressive = data.get('variant_aggressive', False)
                     self.variant_pairs_count = data.get('variant_pairs_count', 50)
                     self.variant_use_slider = data.get('variant_use_slider', False)
@@ -108,6 +120,12 @@ class LabSettings:
                     self.min_delimiter_distance = data.get('min_delimiter_distance', 3)
             except Exception as e:
                 LOGGER.warning('Failed to load lab config from %s: %s', Config.LAB_CONFIG_FILE, e)
+
+    def max_changes_for(self, pairs_count) -> int:
+        """x1-x3 for the variant level *pairs_count* belongs to."""
+        from shared.variants import max_changes_by_preset, variant_preset_of
+        table = max_changes_by_preset(getattr(self, 'variant_max_changes_by_preset', None))
+        return table[variant_preset_of(pairs_count)]
 
     def save(self):
         try:
@@ -141,6 +159,7 @@ class LabSettings:
                     # Variant settings
                     'variant_min_word_len': self.variant_min_word_len,
                     'variant_max_changes': self.variant_max_changes,
+                    'variant_max_changes_by_preset': self.variant_max_changes_by_preset,
                     'variant_aggressive': self.variant_aggressive,
                     'variant_pairs_count': self.variant_pairs_count,
                     'variant_use_slider': self.variant_use_slider,
