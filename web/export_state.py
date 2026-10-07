@@ -872,6 +872,23 @@ _SETTINGS_BEFORE_PER_VISITOR = {
 }
 
 
+# Which of the visitor's preferences each /parallels engine reads: the word-level
+# (chunk) search expands variants with the first three (not in Exact mode), Lab
+# reads only its minimum score, and the letter-level (passage) search none.
+_PREFERENCES_READ = {
+    'chunk': ('variant_min_word_len', 'variant_aggressive', 'custom_variants'),
+    'lab': ('comp_min_score',),
+}
+
+
+def _preferences_read(engine, mode, preferences):
+    """The part of *preferences* the *engine* in *mode* actually reads."""
+    if engine == 'chunk' and mode in ('exact', 'literal'):
+        return {}
+    read = _PREFERENCES_READ.get(engine, ())
+    return {k: v for k, v in preferences.items() if k in read}
+
+
 def compute_parallels_search_fingerprint(
     *,
     text,
@@ -979,9 +996,10 @@ def compute_parallels_search_fingerprint(
     # 2026-10-06) enter only when they differ from what every earlier search ran
     # with -- the website defaults with Aggressive Mode on (the server's settings
     # until then) -- under the same rule: an old fingerprint keeps matching a
-    # search with the same settings, and only that.
+    # search with the same settings, and only that. Only the preferences the
+    # engine reads count: a setting it never read is not part of the search.
     if variant_preferences:
-        changed = {k: v for k, v in variant_preferences.items()
+        changed = {k: v for k, v in _preferences_read(engine, mode, variant_preferences).items()
                    if _SETTINGS_BEFORE_PER_VISITOR.get(k) != v}
         if changed:
             payload['variant_preferences'] = changed
