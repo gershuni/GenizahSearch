@@ -504,8 +504,33 @@ def test_parallels_fingerprint_keeps_old_identities_and_tells_preferences_apart(
     assert compute_parallels_search_fingerprint(**base, variant_preferences=defaults) != old
     changed = {**as_before, 'custom_variants': {'ש=ס': True}}
     assert compute_parallels_search_fingerprint(**base, variant_preferences=changed) != old
+    # Lab reads its minimum score; the word-level search does not.
     assert compute_parallels_search_fingerprint(
-        **base, variant_preferences={**as_before, 'comp_min_score': 50}) != old
+        **base, variant_preferences={**as_before, 'comp_min_score': 50}) == old
+    lab = {**base, 'engine': 'lab'}
+    assert (compute_parallels_search_fingerprint(**lab, variant_preferences={**as_before, 'comp_min_score': 50})
+            != compute_parallels_search_fingerprint(**lab))
+
+
+def test_a_preference_the_engine_does_not_read_is_not_part_of_the_search():
+    """GitHub review (Codex, 2026-10-07): the letter-level search reads none of the
+    visitor's preferences, Lab only its minimum score, and Exact mode no variant
+    preference -- two such searches differing only there are the same search, so
+    same-search export recovery keeps their richer rows."""
+    from web.export_state import compute_parallels_search_fingerprint
+    from web.variant_preferences import website_defaults
+    as_before = {k: v for k, v in website_defaults().items()
+                 if k in ('variant_min_word_len', 'variant_aggressive', 'custom_variants', 'comp_min_score')}
+    as_before['variant_aggressive'] = True
+    changed = {**as_before, 'variant_aggressive': False, 'variant_min_word_len': 3,
+               'custom_variants': {'ש=ס': True}}
+    for engine, mode in (('passage', 'variants'), ('passage', 'exact'), ('lab', 'variants'), ('chunk', 'exact')):
+        base = dict(text=WORD, engine=engine, mode=mode, variant_level=30, variant_max_changes=2)
+        assert (compute_parallels_search_fingerprint(**base, variant_preferences=changed)
+                == compute_parallels_search_fingerprint(**base)), (engine, mode)
+    base = dict(text=WORD, engine='chunk', mode='variants', variant_level=30, variant_max_changes=2)
+    assert (compute_parallels_search_fingerprint(**base, variant_preferences=changed)
+            != compute_parallels_search_fingerprint(**base))
 
 
 def test_old_fingerprints_do_not_follow_a_change_of_the_website_defaults(monkeypatch):
