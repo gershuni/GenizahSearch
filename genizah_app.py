@@ -20374,12 +20374,14 @@ class GenizahGUI(QMainWindow):
         return False
 
     def _run_deferred_after_filter(self):
-        """Run the search or composition that waited for a filter lookup."""
+        """Run the search and the composition that waited for a filter lookup --
+        both, when both were pressed while it ran: each was told it would start,
+        and one left armed would start at some later, unrelated lookup."""
         if getattr(self, '_rerun_search_after_filter', False):
             self._rerun_search_after_filter = False
             if self.query_input.text().strip() and not getattr(self, 'is_searching', False):
                 self.start_search()
-        elif getattr(self, '_rerun_comp_after_filter', False):
+        if getattr(self, '_rerun_comp_after_filter', False):
             self._rerun_comp_after_filter = False
             custom_text = getattr(self, '_rerun_comp_custom_text', None)
             self._rerun_comp_custom_text = None

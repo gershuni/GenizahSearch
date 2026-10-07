@@ -400,3 +400,34 @@ def test_removing_the_last_filter_cancels_a_waiting_composition(warned):
     w.run_composition = lambda **k: ran.append(k)
     w._run_deferred_after_filter()
     assert ran == []
+
+
+def test_search_and_composition_both_waiting_both_run(warned):
+    """GitHub review (Codex on #387, round 3): Search, then Composition, pressed
+    while one lookup runs: both wait. When it answers, both run, and neither stays
+    armed for a later, unrelated lookup."""
+    w = _search_window(None)
+    w.comp_text_area = QPlainTextEdit("some composition text")
+
+    class _Title:
+        def text(self):
+            raise _Stop()
+    w.comp_title_input = _Title()
+    worker = _FakeWorker()
+    w._connect_filter_worker(worker, w._on_filter_recompute_finished)
+    for start in (w.start_search, w.run_composition):
+        try:
+            start()
+        except _Stop:
+            pytest.fail("a run started on the old scope while the filter lookup was running")
+    assert (w._rerun_search_after_filter, w._rerun_comp_after_filter) == (True, True)
+    ran = []
+    w.start_search = lambda: ran.append('search')
+    w.run_composition = lambda **k: ran.append('composition')
+    worker.finished.emit({'990001'})
+    assert ran == ['search', 'composition']
+    assert (w._rerun_search_after_filter, w._rerun_comp_after_filter) == (False, False)
+    later = _FakeWorker()
+    w._connect_filter_worker(later, w._on_filter_recompute_finished)
+    later.finished.emit({'990002'})
+    assert ran == ['search', 'composition'], 'nothing starts at a later lookup'
