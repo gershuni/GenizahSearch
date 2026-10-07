@@ -18,6 +18,18 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 - Operators: `GENIZAH_RESEARCH_PRESTART` (default on) and the worker-count trade-offs are in
   `docs/search-matching-timeouts.md`.
 
+### The website's language follows the visitor's browser (web)
+
+- **A visitor who has not chosen a language sees the website in their browser's language:**
+  Hebrew when the browser's first language is Hebrew, English otherwise. A choice made with
+  the language button still wins. Before, such a visitor could get the language another
+  visitor had chosen last.
+- **The language button switches from the language its own page shows** (it could save the
+  language already shown and reload to no change).
+- The Excel download's sheet direction follows the same rule.
+- A page requested with no language preference, as search engines' crawlers request it, is
+  in English (it was in Hebrew).
+
 ### Variant and Lab settings are kept per visitor (web)
 
 - **Settings are now kept per visitor.** The variant level, Num Changes and everything on the
@@ -133,6 +145,13 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 - **Search history keeps its filters (web):** removing a filter chip, or adding a term, after
   restoring a search from history -- or after a reload -- no longer changes the saved history
   entry.
+
+### API usage counted by surface (web, operators)
+
+- The public API's PostHog event `search_api_request` has a `channel` property: `api` and
+  `api_job` for direct calls and background jobs, `chatgpt` and `chatgpt_job` for the
+  GenizahSearch GPT's calls, so GPT use can be counted apart from direct API use. Searches
+  from the Claude skill use `/api/*` and count as `api`.
 
 ## [9.5.0] - 2026-10-04 — Faster, complete search
 
