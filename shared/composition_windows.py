@@ -20,10 +20,10 @@ of half a window. This module is the single placement rule for both:
   (its fingerprint match is not selective below that); the standard
   engine's is two.
 
-Two more notices are produced by the engines themselves, not here:
-``min_chunk_matches_lowered`` (the minimum-chunk-matches filter asked for
-more chunks than the text has) and ``text_too_common`` (Lab Mode skipped
-every window as statistically weak, so nothing was searched).
+Two more notices come from the search itself: ``min_chunk_matches_lowered``
+(the minimum-chunk-matches filter asked for more chunks than the text has, or
+than Lab Mode searches; :func:`cap_min_chunk_matches`) and ``text_too_common``
+(Lab Mode skipped every window as statistically weak, so nothing was searched).
 
 Each engine returns its notices as ``composition_notices`` (a list, empty for
 an ordinary run). The public API appends them to ``warnings[]``; the web page
@@ -105,6 +105,30 @@ def cap_min_chunk_matches(min_chunk_matches: int, windows: int, notices: List[di
         notices.append(notice)
         return windows
     return min_chunk_matches
+
+
+def plan_standard(tokens, chunk_size, boundary_mode='full', min_chunk_matches=0):
+    """The standard engine's windows for *tokens*
+    (SearchEngine.search_composition_logic): ``(plan, min_chunk_matches, notices)``,
+    the minimum lowered (``boundary_mode`` 'full') when the text has fewer
+    distinct chunks."""
+    plan = plan_windows(len(tokens), chunk_size)
+    notices = list(plan.notices)
+    if plan.starts and boundary_mode == 'full':
+        min_chunk_matches = cap_min_chunk_matches(min_chunk_matches, distinct_windows(tokens, plan),
+                                                  notices)
+    return plan, min_chunk_matches, notices
+
+
+def standard_notices(text, chunk_size, boundary_mode='full', min_chunk_matches=0) -> List[dict]:
+    """The notices the standard engine gives *text*, without searching it: for a
+    request answered before any search runs (/api/parallels with filters that
+    match nothing). Words as that engine reads them, nikud stripped."""
+    import re
+    from shared.config import Config
+    from shared.text_normalize import strip_nikud
+    tokens = [strip_nikud(m.group()) for m in re.finditer(Config.WORD_TOKEN_PATTERN, text or '')]
+    return plan_standard(tokens, chunk_size, boundary_mode, min_chunk_matches)[2]
 
 
 # Every user-facing string, so the translation test can find them all.

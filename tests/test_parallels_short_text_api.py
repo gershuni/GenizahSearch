@@ -143,3 +143,31 @@ def test_full_length_text_response_shape_is_unchanged(client, clean_env, real_en
         'limit_effective', 'filters', 'method',
     }
     assert len(real_engine.build_tantivy_query.call_args_list) == 4
+
+
+# GitHub review (Codex on #387, round 2): filters that match nothing answer without
+# searching; the text's warnings must still be there, the same as a search gives.
+
+_NOTICE_CODES = {'text_shorter_than_chunk_size', 'text_too_short', 'chunk_size_raised',
+                 'min_chunk_matches_lowered'}
+
+
+@pytest.mark.parametrize('words,chunk_size', [(1, 5), (3, 5), (8, 5), (2, 3)])
+def test_filters_that_match_nothing_still_give_the_texts_warnings(client, clean_env, real_engine,
+                                                                   monkeypatch, words, chunk_size):
+    import web.search_api as search_api
+    payload = {'text': ' '.join(_WORDS[:words]), 'chunk_size': chunk_size}
+    searched = client.post('/api/parallels', json=payload)
+    assert searched.status_code == 200, searched.text
+    expected = [w for w in searched.json().get('warnings', [])
+                if isinstance(w, dict) and w.get('code') in _NOTICE_CODES]
+    real_engine.build_tantivy_query.reset_mock()
+    monkeypatch.setattr(search_api, '_resolve_fjms_filters_sync', lambda filters: set())
+    empty = client.post('/api/parallels', json={**payload, 'filters': {'domains': ['Halakha']}})
+    assert empty.status_code == 200, empty.text
+    assert empty.json()['results'] == []
+    assert not real_engine.build_tantivy_query.called, 'nothing is searched'
+    got = [w for w in empty.json().get('warnings', [])
+           if isinstance(w, dict) and w.get('code') in _NOTICE_CODES]
+    assert got == expected
+    assert bool(expected) == (words < chunk_size), expected

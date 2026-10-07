@@ -2404,6 +2404,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 },
                 truncated_to_200=False,
             )
+            if req.method != 'passage':
+                # No search ran, but the text's fit to the chunk size is known
+                # without one: the same warnings a search would have given.
+                from shared.composition_windows import standard_notices
+                bundle.composition_notices = standard_notices(text, req.chunk_size, req.boundary_mode)
         elif req.method == 'passage':
             # Phase 145: passage's OWN bounded budget (semaphore capacity 4 +
             # its own dedicated ThreadPoolExecutor), never the chunk path's
