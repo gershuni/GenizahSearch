@@ -875,3 +875,83 @@ def test_the_worker_stops_a_letter_level_search_at_its_time_limit(tmp_path, monk
     assert stopped['value']['partial'] is True
     assert stopped['value']['main'] == []
     assert stopped['cutoff']['interrupted'] is True
+
+
+# --- GitHub review (Codex on #385, 2026-10-07): one time limit for a chain -------
+
+class _TimedQueue(AnsweringQueue):
+    """Answers as AnsweringQueue does, each job after *seconds* of running."""
+
+    def __init__(self, answers, seconds):
+        super().__init__(answers)
+        self.seconds = seconds
+
+    def submit(self, payload):
+        from web.research_jobs import Job
+        result = super().submit(payload).future.result()
+        timed = Job(payload)
+        threading.Timer(self.seconds, timed.future.set_result, (result,)).start()
+        return timed
+
+
+def test_searches_inside_shared_time_limit_share_one_limit(page, monkeypatch):
+    """Each search inside shared_time_limit() gets what the ones before it left of
+    the one limit; once it is spent the next stops at once. Outside, a search gets
+    the whole limit again."""
+    from shared.config import Config
+    from web import research_jobs
+    from web.research_jobs import shared_time_limit
+    from web.state import state
+    monkeypatch.setattr(Config, 'WEB_SEARCH_TIME_LIMIT', 1.0)
+    queue = _TimedQueue({}, 0.6)
+    monkeypatch.setattr(research_jobs, 'get_queue', lambda: queue)
+    with shared_time_limit():
+        for _ in range(3):
+            state.searcher.execute_search(WORD, 'literal', 0)
+    state.searcher.execute_search(WORD, 'literal', 0)
+    limits = [p['time_limit'] for p in queue.payloads]
+    assert limits[0] == 1.0
+    assert 0.001 < limits[1] < 0.5, limits       # what the first search left
+    assert limits[2] == 0.001, limits            # spent: stops at its first check
+    assert limits[3] == 1.0, limits
+
+
+def test_a_restored_chain_and_its_completion_each_run_under_one_limit(page, monkeypatch):
+    """A reload replays a two-step chain, and Search within then completes both
+    steps: the second job of each runs with what the first left of one limit, not
+    with a fresh one (an N-step chain could otherwise hold the queue N x 3 min)."""
+    from shared.config import Config
+    from web import research_jobs
+    monkeypatch.setattr(Config, 'WEB_SEARCH_TIME_LIMIT', 30)
+    answers = {
+        (WORD, False): ([_row('M1')], {'capped': True, 'interrupted': False}),
+        (WORD, True): ([_row('M1'), _row('M2')], None),
+        (WORD2, False): ([_row('M2')], None),
+        (WORD2, True): ([_row('M2')], None),
+    }
+    queue = _TimedQueue(answers, 0.3)
+    monkeypatch.setattr(research_jobs, 'get_queue', lambda: queue)
+
+    async def driver(a, b):
+        await a.open('/search')
+        submit(a, WORD)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)))
+        _click_search_within(a)
+        await wait_for_payloads(queue, 2)          # completes WORD
+        await _wait_for(lambda: any('Searching within 2 manuscripts' in t for t in _label_texts(a)))
+        submit(a, WORD2)
+        await wait_for_payloads(queue, 3)          # the chain is WORD > WORD2
+        await _wait_for(lambda: any(t.startswith('1 Results') for t in _label_texts(a)), user=a)
+        await a.open('/search')
+        await wait_for_payloads(queue, 5)          # the reload replays both steps
+        await _wait_for(lambda: not any('Restoring refinement chain' in t for t in _label_texts(a)))
+        _click_search_within(a)
+        await wait_for_payloads(queue, 7)          # completes both steps
+
+    run(driver)
+    jobs = [(p['arguments']['query_str'], bool(p['arguments'].get('ids_only')), p['time_limit'])
+            for p in queue.payloads]
+    assert [j[:2] for j in jobs[3:7]] == [(WORD, False), (WORD2, False), (WORD, True), (WORD2, True)], jobs
+    assert jobs[3][2] == 30 and jobs[5][2] == 30, jobs
+    assert jobs[4][2] < 29.8 and jobs[6][2] < 29.8, jobs

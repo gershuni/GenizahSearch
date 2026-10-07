@@ -16,7 +16,10 @@ return partial rows reports the limit instead (the page's time-limit message). A
 worker that has not stopped 60 s after its limit (`TIME_LIMIT_GRACE_SECONDS`, stuck
 outside the engine's checks) is killed; the rows a text search had already shown
 are kept, marked "N+" and partial, as Stop keeps them. The limit counts from when
-the job leaves the queue. The ordinary synchronous API keeps its own HTTP
+the job leaves the queue. The steps of a refinement chain run again together
+(restored after a reload, re-evaluated, or completed before Search within) share one
+limit (`web/research_jobs.py::shared_time_limit`): each step gets what the steps
+before it left, and a step started after it is spent stops at once, cut off. The ordinary synchronous API keeps its own HTTP
 deadlines; the desktop has none.
 
 The letter-level (passage) search is checked through `checkpoint`, not its progress

@@ -54,6 +54,22 @@ def consume_time_limit_stop() -> bool:
     return stopped
 
 
+_shared_limit = ContextVar('research_shared_time_limit', default=None)
+
+
+@contextmanager
+def shared_time_limit():
+    """The searches run inside share one time limit (Config.WEB_SEARCH_TIME_LIMIT):
+    their running times add up, so a refinement chain run again step by step stops
+    after the limit as one search does. A step started after the limit is spent
+    stops at once and comes back cut off, like any search the limit stopped."""
+    token = _shared_limit.set({'left': None})
+    try:
+        yield
+    finally:
+        _shared_limit.reset(token)
+
+
 class ResearchJobError(RuntimeError):
     """A computation stopped without returning misleading partial results."""
 
@@ -529,6 +545,12 @@ class IsolatedEngine:
             queue = get_queue()
             from shared.config import Config
             time_limit = Config.WEB_SEARCH_TIME_LIMIT
+            shared = _shared_limit.get()
+            if shared is not None and time_limit:
+                if shared['left'] is None:
+                    shared['left'] = float(time_limit)
+                # What is left of the shared limit; 0 would mean no limit to the worker.
+                time_limit = max(shared['left'], 0.001)
             payload = {'kind': self._kind, 'method': name, 'arguments': arguments,
                        'options': self._options, 'settings': self.job_settings(),
                        'time_limit': time_limit}
@@ -578,6 +600,9 @@ class IsolatedEngine:
             except BaseException:
                 queue.cancel(job)
                 raise
+            finally:
+                if shared is not None and shared['left'] is not None and running_since is not None:
+                    shared['left'] -= time.monotonic() - running_since
             from shared.search_engine import (_note_search_cutoff, _set_last_responsa_downgrade,
                                               _set_last_responsa_downgrade_meta)
             cutoff = result.get('cutoff') or {}

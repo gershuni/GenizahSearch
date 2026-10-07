@@ -58,7 +58,7 @@ from web.document_service import (
 )
 from web.search_load_control import enrichment_batch_slot
 from web.research_jobs import (ResearchJobError, consume_time_limit_stop, run_research_call,
-                                with_request_settings)
+                                shared_time_limit, with_request_settings)
 from shared.config import Config
 from web import variant_preferences
 from shared.fgp_service import get_sys_ids_with_fgp_sources
@@ -1575,8 +1575,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             try:
                 step_searcher = _step_searcher()
                 def _do_replay():
-                    return replay_chain(search_state.refinement_chain, state.searcher, search_state.restrict_sys_ids,
-                                        searcher_for_step=step_searcher)
+                    with shared_time_limit():  # one time limit for the chain, not one per step
+                        return replay_chain(search_state.refinement_chain, state.searcher,
+                                            search_state.restrict_sys_ids, searcher_for_step=step_searcher)
                 result = await run.io_bound(_do_replay)
                 search_state.refinement_restrict_sys_ids = result
                 search_state._refinement_scope_sig = scope_signature(search_state.restrict_sys_ids)
@@ -1602,8 +1603,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             try:
                 step_searcher = _step_searcher()
                 def _do_replay():
-                    return replay_chain(search_state.refinement_chain, state.searcher, search_state.restrict_sys_ids,
-                                        searcher_for_step=step_searcher)
+                    with shared_time_limit():  # one time limit for the chain, not one per step
+                        return replay_chain(search_state.refinement_chain, state.searcher,
+                                            search_state.restrict_sys_ids, searcher_for_step=step_searcher)
                 result = await run.io_bound(_do_replay)
                 search_state.refinement_restrict_sys_ids = result
                 persist_value('search_refinement_chain', [s.to_dict() for s in search_state.refinement_chain])
@@ -2501,8 +2503,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         def _complete():
             try:
-                return complete_chain(chain, state.searcher, filter_restrict, progress_callback=_progress,
-                                      upto=upto, searcher_for_step=step_searcher)
+                with shared_time_limit():  # one time limit for the chain, not one per step
+                    return complete_chain(chain, state.searcher, filter_restrict, progress_callback=_progress,
+                                          upto=upto, searcher_for_step=step_searcher)
             finally:
                 stopped['time_limit'] = consume_time_limit_stop()
 
@@ -2610,8 +2613,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     try:
                         step_searcher = _step_searcher()
                         def _do_replay():
-                            return replay_chain(search_state.refinement_chain, state.searcher, search_state.restrict_sys_ids,
-                                                searcher_for_step=step_searcher)
+                            with shared_time_limit():  # one time limit for the chain, not one per step
+                                return replay_chain(search_state.refinement_chain, state.searcher,
+                                                    search_state.restrict_sys_ids, searcher_for_step=step_searcher)
                         result = await run.io_bound(_do_replay)
                         search_state.refinement_restrict_sys_ids = result
                         # D8: the replay reads cut-off lists; complete them first.

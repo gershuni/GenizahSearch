@@ -71,7 +71,9 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
   search no longer waits behind a very long one. The desktop has no limit.
 - This holds for every kind of search: Lab Mode searches, Parallels searches (word-level
   and letter-level, which now stops between witnesses and while checking candidates), and
-  a search the website has to stop itself keeps the results it had already shown. An API
+  a search the website has to stop itself keeps the results it had already shown. Running a
+  chain of searches within again (after a reload, or to complete it) takes 3 minutes in all,
+  not 3 minutes per step. An API
   Parallels job stopped this way answers with `results_cut_off`: more parallels may exist.
 
 ### Num Changes (×1–×3) works in every variant level (both)
