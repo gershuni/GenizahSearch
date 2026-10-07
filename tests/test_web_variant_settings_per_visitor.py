@@ -434,6 +434,10 @@ def test_a_restored_history_entry_does_not_take_the_shown_searchs_settings(serve
             await asyncio.sleep(0.05)
         await asyncio.sleep(0.2)
         _fire(a, _element(a, ui.button, lambda e: str(e.text).startswith('Search within')), 'click')
+        while not any(str(getattr(e, 'text', '')).startswith('Searching within')
+                      for e in list(a._client.elements.values())):   # the click runs as a task
+            assert loop.time() < deadline, 'Search within did not start'
+            await asyncio.sleep(0.05)
         submit(a, WORD3)
         await wait_for_payloads(server.queue, 2)
         deadline = loop.time() + 15
