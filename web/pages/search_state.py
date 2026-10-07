@@ -107,6 +107,17 @@ class SearchUIState:
         self.search_generation: int = 0  # Monotonic counter to discard stale background enrichment
         # Refinement chain state (Phase 55 -- search within results)
         self.refinement_chain: list = []               # list of RefinementStep (the chain)
+        self.last_variant_settings: dict = None        # variant settings of the last search sent (recorded on its step)
+        # The shown results leave matches out (D8): the search reached its candidate
+        # limit, the list was restricted to a cut-off step, or the saved snapshot kept
+        # only part of it. The count shows "N+", and search-within completes it first.
+        self.result_count_capped: bool = False
+        self.running_label: str = None   # what the progress line says while running (default "Searching...")
+        # What the last search sent ran with (query without its mode prefix, engine
+        # mode, gap, NOT-words, position, Responsa options, scope, variant settings):
+        # the first step of a search-within chain is built from it, so a replay or a
+        # completion runs the same search (the desktop's D8 commit 2).
+        self.last_run: dict = None
         self.refinement_restrict_sys_ids: set = None   # sys_ids from last chain step (RAW results, not post-filtered)
         self._refine_mode: bool = False                # True when user clicked "Search within" and is entering query
         self._refinement_stale: bool = False           # True when filters changed during active chain (D-16)
@@ -235,7 +246,8 @@ _SEARCH_SNAPSHOT_KEYS = (
     'domain_exclusions', 'search_printed_filter',
     'word_search_excluded_ids', 'search_exclusion_sources',
     'search_refinement_chain', 'search_results',
-    'search_all_terms_filter',
+    'search_all_terms_filter', 'search_result_count_capped', 'search_last_variant_settings',
+    'search_last_run',
 )
 
 # Filter keys cleared by clear_search_snapshot (read/written by filter_panel).
@@ -349,6 +361,7 @@ def restore_search_active_snapshot(state: 'SearchUIState') -> bool:
     state.printed_filter = raw.get('printed_filter', 'all')
     _de = raw.get('domain_exclusions')
     state.domain_exclusions = set(_de) if _de else set()
+    state.result_count_capped = bool(raw.get('result_count_capped'))
     from shared.refinement import RefinementStep
     raw_chain = raw.get('search_refinement_chain', []) or []
     try:
@@ -356,7 +369,15 @@ def restore_search_active_snapshot(state: 'SearchUIState') -> bool:
     except Exception:
         state.refinement_chain = []
     state.exclusion_sources = raw.get('search_exclusion_sources', []) or []
+    state.last_variant_settings = _settings_or_none(raw.get('last_variant_settings'))
+    state.last_run = _settings_or_none(raw.get('last_run'))
     return True
+
+
+def _settings_or_none(value):
+    """A restored settings snapshot, or None when absent or not a dict (they are
+    checked again by request_settings when a search sends them)."""
+    return dict(value) if isinstance(value, dict) else None
 
 
 def persist_search_active_snapshot(state: 'SearchUIState') -> None:
@@ -368,10 +389,14 @@ def persist_search_active_snapshot(state: 'SearchUIState') -> None:
         tab[_SEARCH_ACTIVE_TAB_KEY] = {
             'version': _SEARCH_ACTIVE_TAB_VERSION,
             'results': _compact_result_rows((state.results or [])[:1000]),
+            # A list longer than what is kept here comes back as a cut-off one.
+            'result_count_capped': bool(state.result_count_capped or len(state.results or []) > 1000),
             'printed_filter': state.printed_filter,
             'domain_exclusions': list(state.domain_exclusions or []),
             'search_refinement_chain': [s.to_dict() for s in (state.refinement_chain or [])],
             'search_exclusion_sources': list(state.exclusion_sources or []),
+            'last_variant_settings': state.last_variant_settings,
+            'last_run': state.last_run,
         }
     except Exception:
         pass
@@ -424,6 +449,7 @@ def restore_search_snapshot(state: 'SearchUIState') -> None:
         if restore_search_active_snapshot(state):
             return
         state.results = safe_user_get('search_results', []) or []
+        state.result_count_capped = bool(safe_user_get('search_result_count_capped', False))
         state.printed_filter = safe_user_get('search_printed_filter', 'all')
         _de = safe_user_get('domain_exclusions')
         state.domain_exclusions = set(_de) if _de else set()
@@ -436,6 +462,10 @@ def restore_search_snapshot(state: 'SearchUIState') -> None:
             state.refinement_chain = []
         # exclusion sources (list[dict])
         state.exclusion_sources = safe_user_get('search_exclusion_sources', []) or []
+        # the variant settings the shown results were searched with (step 0 of a refinement)
+        state.last_variant_settings = _settings_or_none(safe_user_get('search_last_variant_settings', None))
+        # the search they came from, exactly as it ran (a completion runs it again)
+        state.last_run = _settings_or_none(safe_user_get('search_last_run', None))
         # NOTE: search_mode, search_query, search_preset, search_max_changes,
         # search_gap are read as needed by search.py's bootstrap block
         # (they feed resolve_search_bootstrap). They are not stored on
@@ -462,6 +492,8 @@ def persist_search_snapshot(state: 'SearchUIState') -> None:
         safe_user_set('search_results', _compact_result_rows(
             (state.results or [])[:_SEARCH_ACTIVE_USER_FALLBACK_LIMIT]
         ))
+        safe_user_set('search_result_count_capped', bool(
+            state.result_count_capped or len(state.results or []) > _SEARCH_ACTIVE_USER_FALLBACK_LIMIT))
         safe_user_set('search_printed_filter', state.printed_filter)
         safe_user_set('domain_exclusions', list(state.domain_exclusions or []))
         # refinement_chain (list[RefinementStep] -> list[dict])
@@ -474,6 +506,8 @@ def persist_search_snapshot(state: 'SearchUIState') -> None:
         except Exception:
             safe_user_set('search_refinement_chain', [])
         safe_user_set('search_exclusion_sources', list(state.exclusion_sources or []))
+        safe_user_set('search_last_variant_settings', state.last_variant_settings)
+        safe_user_set('search_last_run', state.last_run)
     except Exception:
         pass  # Browser storage operation failed; snapshot not persisted (D-08)
 
@@ -510,7 +544,8 @@ def clear_search_snapshot() -> None:
         # Class A try/except collapsed — safe_user_set absorbs AssertionError.
         safe_user_set(key, value)
     # Remaining snapshot keys: drop them.
-    for key in ('search_refinement_chain',
+    for key in ('search_refinement_chain', 'search_result_count_capped', 'search_last_variant_settings',
+                'search_last_run',
                 'search_all_terms_filter', 'search_snapshot_schema_version'):
         safe_user_pop(key, None)
     clear_search_active_snapshot()

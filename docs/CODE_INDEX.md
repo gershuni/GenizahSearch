@@ -1770,7 +1770,18 @@ Where a composition search's windows go, for both engines, and the notices that 
 - **Function** `plan_windows` — window starts and size: a short text is one whole-text window; a window always ends on the last word
 - **Function** `distinct_windows` — how many different chunk texts the plan searches (what a result's chunk count can reach)
 - **Function** `cap_min_chunk_matches` — lowers an unreachable "Min. chunk matches", with a notice
+- **Function** `plan_standard` / `standard_notices` — the standard engine's windows, and its notices for a text answered without searching
 - **Function** `chunk_notice_message` — the translated sentence for a notice
+
+## web/variant_preferences.py
+
+Variant and Lab preferences of one website visitor, kept in that visitor's storage and sent with that visitor's searches; the web never writes the shared LabSettings or its file.
+
+- **Constant** `WEBSITE_DEFAULTS` — what a visitor who changed nothing gets, and what every API job uses (Basic 30 pairs, ×2, short words one change, the eleven custom pairs, Lab min score 70)
+- **Constant** `REQUEST_SETTINGS` — the settings one search may choose, each with its check
+- **Function** `request_settings` — checked copies; an unknown name raises
+- **Function** `get` / `set` — this visitor's Settings-page value
+- **Function** `for_search` — the complete settings one of this visitor's searches runs with
 
 ## web/pages/search_results.py
 

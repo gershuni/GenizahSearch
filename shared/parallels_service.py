@@ -157,6 +157,11 @@ class ParallelsResultBundle:
     # requested settings (shared/composition_windows.py). Empty for an
     # ordinary run and for the passage path.
     composition_notices: list = field(default_factory=list)
+    # The searcher was stopped before it finished (on the website: its time limit,
+    # Config.WEB_SEARCH_TIME_LIMIT) and returned what it had found -- the
+    # searcher's own 'partial' key, from either engine. More parallels may exist;
+    # the route says so (`results_cut_off`).
+    partial: bool = False
 
 
 async def _run_sync(func, *args, _executor=None, **kwargs):
@@ -475,4 +480,5 @@ async def fetch_parallels_results(
         per_witness_query_reports=per_witness_query_reports,
         multi_witness=multi_witness,
         composition_notices=composition_notices,
+        partial=bool((result or {}).get('partial')),
     )

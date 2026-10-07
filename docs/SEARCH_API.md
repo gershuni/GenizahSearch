@@ -281,7 +281,7 @@ when the offending key is the legacy `mode` field (renamed to `search_mode` in P
 | Name | Type | Constraint | Default | Notes |
 | ---- | ---- | ---------- | ------- | ----- |
 | `query` | string | 1..1000 chars (post-strip; empty → `query_required`; over cap → `query_too_long`) | required | `QUERY_LENGTH_CAP=1000` |
-| `search_mode` | enum | `exact \| variants \| responsa \| title \| shelfmark \| fuzzy` | required | `regex` was intentionally dropped per Phase 81A D-09. `fuzzy` (added 2026-06) finds near spellings — whole words one letter away, two from 5 letters, prefixed forms included (since 2026-10; before, the exact word only) — bounded by `SEARCH_API_FUZZY_TIMEOUT` (default 110s as of 2026-09-08, down from 300s — see "Edge-Timeout Ceiling" below), not the interactive 30s baseline |
+| `search_mode` | enum | `exact \| variants \| responsa \| title \| shelfmark \| fuzzy` | required | `regex` was intentionally dropped per Phase 81A D-09. `variants` uses the website's default variant settings (Basic: the 30 most frequent letter-confusion pairs plus the website's custom letter pairs), the same as a website search with default settings. `fuzzy` (added 2026-06) finds near spellings — whole words one letter away, two from 5 letters, prefixed forms included (since 2026-10; before, the exact word only) — bounded by `SEARCH_API_FUZZY_TIMEOUT` (default 110s as of 2026-09-08, down from 300s — see "Edge-Timeout Ceiling" below), not the interactive 30s baseline |
 | `responsa_options` | object \| null | valid only when `search_mode="responsa"` | `null` | see sub-table below |
 | `gap` | integer | must be `0` when `search_mode in {title, shelfmark}` | `0` | proximity slop for keyword search |
 | `limit` | integer | `1..100` for non-fuzzy modes (`MAX_LIMIT=100`); `1..SEARCH_API_FUZZY_MAX_LIMIT` (default 500, max 2000) for `fuzzy` | `50` (fuzzy with no explicit limit widens to a recall-oriented default of 250) | P9X: fuzzy recall-over-precision — non-fuzzy boundary unchanged |
@@ -846,7 +846,9 @@ is appended to `warnings[]` — not an object. This section described it as
 table, which had it right.
 
 **`warnings[]` is a mixed-type array.** Most entries are objects with a `code` key, but
-`truncated_to_200` and `query_downgraded: <message>` are plain strings. A client must
+`truncated_to_200`, `results_cut_off` and `query_downgraded: <message>` are plain strings.
+`results_cut_off` here means a background job reached the 3-minute time limit and the
+parallels are those it had found when it stopped. A client must
 therefore type-check each entry — `w["code"]` over this array raises `TypeError` on the
 string entries. See the Warnings Array table, which marks the shape of every code.
 
@@ -1124,6 +1126,7 @@ outcome, or a per-source enrichment soft failure — none of which are item-scop
 | Code | Endpoint | Meaning |
 | ---- | -------- | ------- |
 | `query_downgraded: <message>` | search | Responsa cascade disabled one or more options (`variants`, `ja`, `flex_spacing`, `bidirectional`); also surfaced via `responsa_options_effective` divergence in the request echo. The `tr()` strings are the canonical signal alongside the echo. |
+| `results_cut_off` | search, parallels | the result may be incomplete; more may exist. On search: the engine read its 50,000-candidate limit, so `total` counts the matches among those candidates (a very common word), or a background job reached the 3-minute time limit. On parallels (both `method`s): a background job reached the 3-minute time limit and returned the parallels it had found -- the ones of the chunks, or of the witnesses and candidates, it had searched. A bare string. Narrow the query or add filters for a complete result. Added 2026-10-06; parallels 2026-10-07. |
 | `volume_ie_defaulted` | browse | `sys_id`-only request resolved against a multi-IE manuscript; server auto-picked the default IE (Phase 79 D-04). Includes `volume_ie` field naming the picked IE. |
 | `enrichment_timeout` | browse | per-source PGP/FJMS/NLI fetch hit `SEARCH_API_BROWSE_TIMEOUT` (default 1.0s); soft failure; partial bundle returned with the corresponding `metadata.<source>` set to `null`. |
 | `enrichment_failed` | browse | per-source PGP/FJMS/NLI fetch raised an exception; soft failure; partial bundle returned (same null-out behavior). |

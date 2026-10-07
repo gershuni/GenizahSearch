@@ -132,6 +132,11 @@ class Config:
 
     # Settings
     SEARCH_LIMIT = 50000
+    # A website search (and an API background job) stops after this many seconds
+    # and returns what it had checked, marked "N+" (owner ruling 2026-09-28): the
+    # website has one search worker, and a stuck search would hold every other
+    # visitor's search behind it. The desktop has no limit.
+    WEB_SEARCH_TIME_LIMIT = 180
     VARIANT_GEN_LIMIT = 8000
     REGEX_VARIANTS_LIMIT = 8000
     WORD_TOKEN_PATTERN = r"[\w֐-׿\']+"

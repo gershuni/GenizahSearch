@@ -325,7 +325,8 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
         # Pagination controls at top (always reserve space to prevent CLS)
         if total_pages > 1:
             with ui.row().classes('w-full justify-between items-center px-4 pt-2'):
-                ui.label(f"{start + 1}-{end} {tr('of')} {total}").classes('text-sm').style('color: var(--text-muted);')
+                ui.label(f"{start + 1}-{end} {tr('of')} {total}{'+' if search_state.result_count_capped else ''}"
+                         ).classes('text-sm').style('color: var(--text-muted);')
                 def on_page_change_top(e, _ss=search_state, _r=refs):
                     _ss.current_page = e.value - 1  # ui.pagination is 1-indexed
                     render_results(_ss, _r, results, page=_ss.current_page, scroll_to_top=True)

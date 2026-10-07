@@ -529,3 +529,114 @@ def test_the_cap_keeps_the_fusion_ranked_group_not_the_wordiest(cap_corpus):
                                  {'id': 'w2', 'text': motif_2}])
     assert _headers(capped['main']) == {CAP_RID_SHARED}
     assert capped['truncated_to_200'] is True
+
+
+# ---------------------------------------------------------------------------
+# 7. The website's time limit (review round 2, 2026-10-07).
+# ---------------------------------------------------------------------------
+# The web worker hands its time-limit check to the searcher as `checkpoint`
+# (shared/research_worker.py). An InterruptedError from it stops the search,
+# which returns what it had completed, marked `partial` -- the key the
+# /parallels page and the API already read for the chunk engine.
+# `progress_callback` stays unused: the desktop's drives a chunk progress bar
+# and a Stop/Pause it deliberately does not offer during a letter-level scan.
+
+def test_a_stop_between_witnesses_keeps_the_witnesses_already_searched(
+        monkeypatch, searcher, two_motif_corpus):
+    _idx, _o, motif_1, motif_2 = two_motif_corpus
+    finished: list = []
+    real = pp.search_passage
+
+    def _spy(index, text, policy, **kw):
+        out = real(index, text, policy, **kw)
+        finished.append(text)
+        return out
+    monkeypatch.setattr(pp, 'search_passage', _spy)
+
+    def checkpoint(done, total):
+        if finished:            # witness 1 is searched; then the limit is reached
+            raise InterruptedError('Search time limit reached')
+
+    result = searcher.search_composition_logic(full_text='', witnesses=[
+        {'id': 'w1', 'text': motif_1}, {'id': 'w2', 'text': motif_2}],
+        checkpoint=checkpoint)
+    assert finished == [motif_1], 'the second witness is not searched'
+    assert result['partial'] is True
+    found = _headers(result['main'])
+    assert RID_ONLY_1 in found and RID_BOTH in found and RID_ONLY_2 not in found
+    # Only one witness ran: no fusion, and the report says one was searched.
+    assert result['witness_report']['searched'] == 1
+    assert [r['witness_id'] for r in result['per_witness_query_reports']] == ['w1']
+    assert all('fusion_score' not in row for row in result['main'])
+
+
+def test_a_stop_inside_verification_keeps_the_candidates_already_verified(
+        monkeypatch, searcher, two_motif_corpus):
+    """A single witness is stopped between two verified candidates: the one
+    verified (the strongest, verification goes strongest-evidence-first) is
+    returned, the result is partial."""
+    from types import SimpleNamespace
+
+    from shared import passage_search as ps
+    _idx, _o, motif_1, _m2 = two_motif_corpus
+    whole = searcher.search_composition_logic(full_text=motif_1)
+    assert len(whole['main']) >= 2, 'fixture precondition: two records match'
+
+    aligned: list = []
+    real = ps.Levenshtein.distance
+
+    def _counting(*args, **kwargs):
+        aligned.append(1)
+        return real(*args, **kwargs)
+    monkeypatch.setattr(ps, 'Levenshtein', SimpleNamespace(distance=_counting))
+
+    def checkpoint(done, total):
+        if aligned:             # one candidate verified; then the limit is reached
+            raise InterruptedError('Search time limit reached')
+
+    result = searcher.search_composition_logic(full_text=motif_1, checkpoint=checkpoint)
+    assert len(aligned) == 1
+    assert result['partial'] is True
+    assert result['query_report']['verified'] == 1
+    assert len(result['main']) == 1
+    assert _headers(result['main']) <= _headers(whole['main'])
+
+
+def test_a_stop_before_anything_is_searched_returns_an_empty_partial_result(
+        searcher, two_motif_corpus):
+    _idx, _o, motif_1, motif_2 = two_motif_corpus
+
+    def checkpoint(done, total):
+        raise InterruptedError('Search time limit reached')
+
+    for kwargs in ({'full_text': motif_1},
+                   {'full_text': '', 'witnesses': [{'text': motif_1}, {'text': motif_2}]}):
+        result = searcher.search_composition_logic(checkpoint=checkpoint, **kwargs)
+        assert result['partial'] is True
+        assert result['main'] == [] and result['filtered'] == []
+        assert result['truncated_to_200'] is False
+
+
+def test_a_search_that_is_not_stopped_is_not_partial(searcher, two_motif_corpus):
+    _idx, _o, motif_1, _m2 = two_motif_corpus
+    calls: list = []
+    result = searcher.search_composition_logic(
+        full_text=motif_1, checkpoint=lambda done, total: calls.append((done, total)))
+    assert calls, 'the search checks its limit'
+    assert 'partial' not in result
+    assert _headers(result['main']) == _headers(
+        searcher.search_composition_logic(full_text=motif_1)['main'])
+
+
+def test_the_progress_callback_is_still_never_called(searcher, two_motif_corpus):
+    """The desktop passes its composition thread's callback here: calling it
+    would drive the chunk progress bar and the Stop/Pause checkpoint the
+    desktop refuses during a letter-level scan (genizah_app.py,
+    _refuse_stop_during_passage_scan)."""
+    _idx, _o, motif_1, motif_2 = two_motif_corpus
+
+    def progress(*args):
+        raise AssertionError('PassageSearcher called its progress_callback')
+    searcher.search_composition_logic(full_text=motif_1, progress_callback=progress)
+    searcher.search_composition_logic(full_text='', progress_callback=progress, witnesses=[
+        {'text': motif_1}, {'text': motif_2}])

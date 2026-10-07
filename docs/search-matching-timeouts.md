@@ -1,16 +1,46 @@
 # Research search resource policy
 
 Web transcription, lab, and parallels searches run in disposable subprocesses.
-Interactive searches and the background API have no elapsed-time cutoff inside
-those workers. A slow valid query may finish as long as it stays within resource
-limits. The ordinary synchronous API retains its existing HTTP deadlines.
+Every job a worker runs -- an interactive search, a completion, a replay, an API
+background job -- stops after `Config.WEB_SEARCH_TIME_LIMIT` (180 s; owner ruling
+2026-09-28) and returns what it had checked: the worker's progress callback raises
+the engine's Stop, the engine returns its verified rows with the cut-off signal
+`interrupted`, the page shows the count as "N+" with "stopped after 3 minutes",
+and the API adds `results_cut_off` (on `/api/search`, and on `/api/parallels` when
+the composition search comes back `partial`). The page counts the limit itself as
+well, so a list the limit cut short shows "N+" even from an engine that did not say
+it was stopped. Every engine does: the text search, the Lab search and Lab
+composition search (fast and deep scan, My Library included) and the composition
+search note `interrupted` when a stop ends them. A part of a search that cannot
+return partial rows reports the limit instead (the page's time-limit message). A
+worker that has not stopped 60 s after its limit (`TIME_LIMIT_GRACE_SECONDS`, stuck
+outside the engine's checks) is killed; the rows a text search had already shown
+are kept, marked "N+" and partial, as Stop keeps them. The limit counts from when
+the job leaves the queue (`started_at`), the worker's loading and its index-lease wait
+included. The steps of a refinement chain run again together
+(restored after a reload, re-evaluated, or completed before Search within) share one
+limit (`web/research_jobs.py::shared_time_limit`): each step gets what the steps
+before it left, and a step started after it is spent stops at once, cut off. The ordinary synchronous API keeps its own HTTP
+deadlines; the desktop has none.
+
+The letter-level (passage) search is checked through `checkpoint`, not its progress
+callback (the desktop passes one that must not be called during a letter-level
+scan): between witnesses, and before each candidate is verified -- where a long
+query spends its time. Stopped, it returns the witnesses searched so far, the last
+one's matches from the candidates it had verified, marked `partial`. Gathering one
+witness's candidates and rendering the rows found have no checkpoint; both are
+bounded (the posting budget, `verify_cap`), and the kill after the grace period
+remains the fallback for them.
 
 The web process owns a FIFO queue. Stop removes a queued request or kills its
 running process; its slot is released after process exit. A crashed worker does
 not take down the server. Workers also exit when their parent server disappears.
 Waiting uses a separate thread pool so it does not occupy the browsing pool.
-Each job snapshots the effective variant and Lab settings from its submitting
-engine. Later UI changes do not alter jobs that are already queued.
+Each job carries its own variant and Lab settings: the website defaults
+(`web/variant_preferences.py::WEBSITE_DEFAULTS`) with what its search sent on top
+(the visitor's level, Num Changes and Settings-page preferences; an API job sends
+nothing, so it runs with the defaults). A search never changes the server's
+settings, and later UI changes do not alter jobs that are already queued.
 
 Workers hold shared leases for the LOCAL index directories. My Library atomic
 rebuild/reset operations hold exclusive leases through handle closure, directory

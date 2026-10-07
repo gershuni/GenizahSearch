@@ -4966,6 +4966,11 @@ class SearchEngine:
         main_list = [item for item in all_items if not item.get('is_filtered', False)]
         filtered_list = [item for item in all_items if item.get('is_filtered', False)]
 
+        if was_cancelled:
+            # Stopped (Stop, or the website's time limit): the cut-off signal agrees
+            # with 'partial', as execute_search's does.
+            _note_search_cutoff(interrupted=True)
+
         return {'main': main_list, 'filtered': filtered_list, 'partial': was_cancelled,
                 'boundary_stats': boundary_stats,
                 # Phase 110 A2 + Round-2 #4: per-run scope + staleness verdict.

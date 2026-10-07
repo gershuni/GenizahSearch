@@ -114,7 +114,8 @@ from web.passage_assets import (passage_available, get_passage_searcher,
 # Codex review finding #15: route the page's passage search through the
 # SAME bounded execution budget POST /api/parallels uses -- one semaphore,
 # one dedicated ThreadPoolExecutor, one timeout ceiling, for BOTH surfaces.
-from web.research_jobs import ResearchJobError, run_research_call
+from web.research_jobs import ResearchJobError, run_research_call, with_request_settings
+from web import variant_preferences
 from shared.api_errors import APIError
 
 
@@ -1483,9 +1484,7 @@ def create_parallels_page(initial_text: str = None):
                     ).classes('w-full').props('outlined dense')
 
                     # Check if user prefers slider or presets (default: presets)
-                    use_slider = False
-                    if state.lab_engine and hasattr(state.lab_engine, 'settings') and state.lab_engine.settings:
-                        use_slider = getattr(state.lab_engine.settings, 'variant_use_slider', False)
+                    use_slider = bool(variant_preferences.get('variant_use_slider'))
 
                     # Track current preset level (default: Basic=30)
                     current_preset = {'value': 30}
@@ -1524,10 +1523,8 @@ def create_parallels_page(initial_text: str = None):
                                 max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=2).classes('w-16').props('outlined dense')
 
                     def set_level(level_value):
-                        """Set variant level."""
+                        """Remember this visitor's variant level (sent with each search)."""
                         current_preset['value'] = level_value
-                        if state.var_mgr:
-                            state.var_mgr.set_variant_level(level_value)
 
                     if variant_level_select:
                         def on_level_change():
@@ -1539,8 +1536,6 @@ def create_parallels_page(initial_text: str = None):
                             val = int(variant_slider.value)
                             current_preset['value'] = val
                             variant_slider_label.set_text(str(val))
-                            if state.var_mgr:
-                                state.var_mgr.set_variant_level(val)
                         variant_slider.on('update:model-value', on_slider_change)
 
                     def on_mode_change():
@@ -4621,18 +4616,21 @@ def create_parallels_page(initial_text: str = None):
         # configuration the engine never used, colliding with a tab that
         # really searched it. The captures below are, by construction, the
         # exact values that initialized the engine.
+        # They travel with this search only: the engine's settings object is
+        # shared by every visitor and is never written here.
         captured_variant_level = None
         captured_variant_max_changes = None
-        if mode_select.value == 'variants' and state.var_mgr:
+        if mode_select.value == 'variants':
             # Get pairs count from preset or slider
             captured_variant_level = (int(variant_slider.value)
                                       if variant_slider
                                       else current_preset['value'])
-            state.var_mgr.set_variant_level(captured_variant_level)
-            if state.lab_engine and state.lab_engine.settings:
-                captured_variant_max_changes = int(max_changes_select.value)
-                state.lab_engine.settings.variant_max_changes = (
-                    captured_variant_max_changes)
+            captured_variant_max_changes = int(max_changes_select.value)
+            captured_variant_settings = variant_preferences.for_search(
+                'variants', captured_variant_level, captured_variant_max_changes)
+        else:
+            captured_variant_settings = variant_preferences.for_search(mode_select.value)
+        captured_variant_preferences = variant_preferences.current()
 
         # Reset state
         p_state.is_running = True
@@ -4912,7 +4910,8 @@ def create_parallels_page(initial_text: str = None):
             try:
                 if captured_lab_mode:
                     # LAB MODE: Use fingerprint-based search with advanced features
-                    result = state.lab_engine.lab_composition_search(
+                    result = with_request_settings(
+                        state.lab_engine, **captured_variant_settings).lab_composition_search(
                         text,
                         mode=captured_mode,
                         progress_callback=progress_cb,
@@ -4927,7 +4926,8 @@ def create_parallels_page(initial_text: str = None):
                     )
                 else:
                     # STANDARD MODE: Use direct Tantivy search (faster, simpler)
-                    result = state.searcher.search_composition_logic(
+                    result = with_request_settings(
+                        state.searcher, **captured_variant_settings).search_composition_logic(
                         text,
                         chunk_size=captured_chunk_size,
                         max_freq=captured_freq_threshold,
@@ -5147,6 +5147,7 @@ def create_parallels_page(initial_text: str = None):
                     min_delimiter_distance=captured_min_delimiter_distance,
                     variant_level=captured_variant_level,
                     variant_max_changes=captured_variant_max_changes,
+                    variant_preferences=captured_variant_preferences,
                     # The library 'hide' pass below reads these same
                     # captures, so the identity and the filtering that
                     # shaped the rows cannot disagree.

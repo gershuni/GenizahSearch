@@ -1094,6 +1094,103 @@ def test_parallel_worker_failures_are_retryable_503(client, mock_searcher, clean
     assert response.json()['error']['code'] == 'research_worker_stopped'
 
 
+def _post_parallels(client, payload, background):
+    """POST /api/parallels, or run it as a background job (inside `with client:`,
+    which starts the job runner) and fetch its result."""
+    if not background:
+        return client.post('/api/parallels', json=payload)
+    created = client.post('/api/parallels/jobs', json=payload)
+    assert created.status_code == 202, created.text
+    urls = created.json()
+    deadline = time.monotonic() + 5
+    while client.get(urls['status_url']).json()['state'] not in ('completed', 'failed'):
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    return client.get(urls['result_url'])
+
+
+@pytest.mark.parametrize('method', ['chunk', 'passage'])
+@pytest.mark.parametrize('background', [False, True])
+def test_a_partial_parallels_result_says_more_may_exist(client, mock_searcher, clean_env, monkeypatch,
+                                                        method, background):
+    """Review round 2 (2026-10-07), finding 2: a composition search the website's
+    time limit stopped (a background job's worker) returns what it had found,
+    marked partial. The response answered 200 with no warning, so a caller took
+    the rows for every parallel there is: it now carries results_cut_off."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    monkeypatch.setattr('web.passage_assets.get_passage_searcher', lambda *args, **kwargs: mock_searcher)
+    mock_searcher.policy.as_dict.return_value = _fake_passage_policy()
+    payload = {'text': 'hello world', 'method': method}
+    with client:
+        for partial in (True, False):
+            mock_searcher.search_composition_logic.return_value = {
+                'main': [_make_main_row()], 'filtered': [], 'boundary_stats': None, 'partial': partial}
+            response = _post_parallels(client, payload, background)
+            assert response.status_code == 200, response.text
+            body = response.json()
+            assert len(body['results']) == 1, 'the rows found are returned'
+            assert ('results_cut_off' in body['warnings']) is partial, body['warnings']
+
+
+def test_a_background_job_the_time_limit_stopped_says_more_may_exist(client, clean_env, monkeypatch, tmp_path):
+    """The same, end to end: /api/parallels/jobs -> IsolatedEngine -> the research
+    worker (run in this process, its time limit already past) -> the REAL
+    SearchEngine.search_composition_logic over a real (tiny) index, which the limit
+    stops at its first chunk -> the response says results_cut_off."""
+    pytest.importorskip('tantivy')
+    import gzip
+    import pickle
+    from unittest.mock import MagicMock
+
+    from shared import research_worker
+    from shared.config import Config
+    from shared.search_engine import SearchEngine
+    from tests.test_search_cutoff_signal import C, PAGES, W, _build, _Meta
+    from web import research_jobs
+    from web.research_jobs import IsolatedEngine, Job
+    from web.state import state
+
+    _build(str(tmp_path / 'index' / 'tantivy_db'), PAGES)
+    monkeypatch.setattr(Config, 'INDEX_DIR', str(tmp_path / 'index'))
+    # A limit already past at the engine's first check.
+    monkeypatch.setattr(Config, 'WEB_SEARCH_TIME_LIMIT', -1)
+    monkeypatch.setenv('GENIZAH_RESEARCH_MEMORY_MB', '512')
+    results = []
+
+    class InlineWorkerQueue:
+        """ResearchQueue with the worker's run_query called in this process."""
+        def submit(self, payload):
+            root = tmp_path / f'job{len(results)}'
+            root.mkdir()
+            research_worker.run_query(root, payload, lambda *a: None, meta=_Meta())
+            with gzip.open(root / 'output.pkl', 'rb') as stream:
+                result = pickle.load(stream)
+            results.append(result)
+            job = Job(payload)
+            job.future.set_result(result)
+            return job
+
+        def position(self, job):
+            return 0
+
+        def cancel(self, job):
+            pass
+    monkeypatch.setattr(research_jobs, 'get_queue', lambda: InlineWorkerQueue())
+    monkeypatch.setattr(research_jobs, '_wait_executor', None)
+    meta = MagicMock()
+    meta.parse_full_id_components.return_value = {'sys_id': None, 'ie_id': None, 'p_num': None, 'fl_id': None}
+    monkeypatch.setattr(state, 'searcher', IsolatedEngine(SearchEngine.__new__(SearchEngine), 'search'))
+    monkeypatch.setattr(state, 'meta_mgr', meta)
+
+    text = ' '.join([f'אבג {W} דהו {C} זחט'] * 3)
+    with client:
+        response = _post_parallels(client, {'text': text, 'chunk_size': 2}, background=True)
+    assert response.status_code == 200, response.text
+    assert results and results[0]['time_limit'] is True, results
+    assert results[0]['value']['partial'] is True
+    assert 'results_cut_off' in response.json()['warnings']
+
+
 def test_parallels_method_passage_unavailable_returns_503(client, mock_searcher, clean_env):
     """method='passage' with no loaded index (the default test environment --
     this worktree carries no real passage_index/) is a clean 503, never a

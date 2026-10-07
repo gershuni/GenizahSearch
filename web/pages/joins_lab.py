@@ -1173,8 +1173,9 @@ def create_joins_lab_page(
 
     # One WebSearchExecutor per page render (used for SEARCH only —
     # NOT for anchor image data; AnchorViewer resolves its own rich BrowsePage,
-    # HIGH-1).
-    executor = WebSearchExecutor()
+    # HIGH-1). It carries this visitor's variant settings (Basic level).
+    from web import variant_preferences
+    executor = WebSearchExecutor(variant_settings=variant_preferences.for_search('variants'))
 
     # -----------------------------------------------------------------------
     # Direction-aware layout (D-01 / D-02)
