@@ -125,7 +125,8 @@ async def _fetch_original_info(sys_id: str, shelfmark: str = '') -> dict:
         return result
 
     try:
-        info = await run.io_bound(_do_fetch)
+        # None (cancelled or app stopping): keep the empty default above.
+        info = await run.io_bound(_do_fetch) or info
     except Exception:
         pass  # Dialog operation failed; continue with available data
     return info
@@ -201,6 +202,8 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
             return suggestions
 
         data = await run.io_bound(_enrich, data)
+        if data is None:
+            return  # cancelled or app stopping
 
     lang = get_language()
     is_heb = lang == 'he'

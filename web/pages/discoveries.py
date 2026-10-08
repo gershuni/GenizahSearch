@@ -429,15 +429,19 @@ def create_discoveries_page():
                 run.io_bound(_fetch_feed),
             )
 
+            # A None from either (cancelled, or the app is stopping) is no answer:
+            # no numbers rather than zeros, and a feed that says it did not load.
             # Render stats
             stats_row.clear()
-            with stats_row:
-                _render_stat_cards(stats)
+            if stats is not None:
+                with stats_row:
+                    _render_stat_cards(stats)
 
             # Render feed
             feed_container.clear()
             with feed_container:
-                _render_feed_result(feed_result, on_refresh=refresh_feed)
+                _render_feed_result(feed_result if feed_result is not None else {'error': 'no answer'},
+                                    on_refresh=refresh_feed)
 
         async def _deferred_initial_load():
             await asyncio.sleep(0.1)

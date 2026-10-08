@@ -273,10 +273,13 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
             return all_sources, pgp_doc, full_htr
 
         try:
-            return await run.io_bound(_pgp_sync)
+            result = await run.io_bound(_pgp_sync)
         except Exception as e:
             logger.error(f"Failed to fetch PGP data: {e}")
             return None, None, None
+        # None (cancelled or app stopping): no PGP data, as when the fetch fails --
+        # never a None the three-way unpack below would fail on, losing the rest.
+        return result if result is not None else (None, None, None)
 
     async def fetch_fjms():
         _page_sys_id = page.sys_id
@@ -331,6 +334,10 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
 
         try:
             result = await run.io_bound(_crossref_sync)
+            if result is None:
+                # Cancelled or app stopping: nothing was read. Never cache None in
+                # the process-wide cache -- every later visit would get no crossref.
+                return {}
             _crossref_cache[_page_sys_id] = result  # Cache for session
             return result
         except Exception as e:

@@ -7,8 +7,9 @@ from html import escape
 from typing import Any, Dict, Mapping, Optional
 from urllib.parse import quote
 
-from nicegui import run, ui
+from nicegui import ui
 
+from web import io_bound_result
 from web.identification_reviews import (
     DIRECT_NOVELTY_ALREADY_KNOWN,
     DIRECT_NOVELTY_OTHER_UNSURE,
@@ -375,8 +376,13 @@ def render_identification_review_action(
                             str(item.get("rendered_relation") or "") or None
                         ),
                     )
-                    await run.io_bound(submit_review, submission, client=client)
+                    sent = await io_bound_result.io_bound(
+                        submit_review, submission, client=client)
                 except IdentificationReviewError:
+                    ui.notify(review_text("unavailable", lang), type="negative")
+                    return
+                if sent is io_bound_result.INTERRUPTED:
+                    # No answer (cancelled, or the app is stopping): never "sent".
                     ui.notify(review_text("unavailable", lang), type="negative")
                     return
                 dialog.close()

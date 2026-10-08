@@ -11,6 +11,7 @@ Find parallel texts in the Genizah corpus using:
 import logging
 
 from nicegui import ui, run, app
+from web import io_bound_result
 from web.state import state
 from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import tr, get_language
@@ -2210,6 +2211,8 @@ def create_parallels_page(initial_text: str = None):
             if _p_filter_refresh_seq['author'] != seq:
                 return  # Stale -- newer request in flight
             p_author_select.props(remove='loading')
+            if new_opts is None:
+                return  # cancelled or app stopping: keep the options shown
             p_author_select.options = new_opts
             p_author_select.update()
 
@@ -2225,6 +2228,8 @@ def create_parallels_page(initial_text: str = None):
             if _p_filter_refresh_seq['work'] != seq:
                 return  # Stale -- newer request in flight
             p_work_select.props(remove='loading')
+            if new_opts is None:
+                return  # cancelled or app stopping: keep the options shown
             p_work_select.options = new_opts
             p_work_select.update()
 
@@ -3189,9 +3194,12 @@ def create_parallels_page(initial_text: str = None):
 
         p_state.promoting = True
         try:
-            texts, failed = await run.io_bound(_fetch)
+            # None (cancelled or app stopping) would not unpack: stop instead.
+            texts, failed = await run.io_bound(_fetch) or (None, None)
         finally:
             p_state.promoting = False
+        if texts is None:
+            return
         # Re-read the list AFTER the await: the guard above stops a second
         # promotion, but a witness can also arrive from the add dialog while
         # the fetch is in flight.
@@ -4780,71 +4788,86 @@ def create_parallels_page(initial_text: str = None):
         else:
             captured_min_boundary_matches = int(min_boundary_matches.value) if min_boundary_matches.value else 0
 
+        def _stop_before_running():
+            # Undo the "searching" UI set above: no run will clear it.
+            p_state.is_running = False
+            search_indicator.style('display: none;')
+            progress_bar.style('opacity: 0;')
+            results_header.text = tr('Results')
+            results_container.clear()
+            run_btn.enable()
+            ui.run_javascript('if (window.__hideLoadingBar) window.__hideLoadingBar();')
+
         # Compute pre-search filter set from active filters
         restrict_sys_ids = None
         if _has_active_filters():
             from shared.fjms_service import get_fjms_service
 
+            # Every filter is read HERE, on the loop, and the lists copied: the
+            # lookup can wait for a free worker, and a filter the visitor changes
+            # meanwhile must not change the search they asked for.
             include_mode = p_state.filter_include_mode
-            _domains = p_state.filter_domains or None
-            _authors = p_state.filter_authors or None
-            _works = p_state.filter_works or None
+
+            def _copied(values):
+                if not values:
+                    return None
+                return list(values) if isinstance(values, (list, tuple, set, frozenset)) else values
+
+            _domains = _copied(p_state.filter_domains)
+            _authors = _copied(p_state.filter_authors)
+            _works = _copied(p_state.filter_works)
+            filter_kwargs = dict(
+                date_from=p_state.filter_date_from,
+                date_to=p_state.filter_date_to,
+                material_exclude=_copied(p_state.filter_material_exclude),
+                text_all=_copied(p_state.filter_text_all),
+                text_any=_copied(p_state.filter_text_any),
+                text_not=_copied(p_state.filter_text_not),
+                # K-15: the measurement bounds the live count already
+                # applies (has_active_filters counts them) -- the search
+                # must apply the same ones.
+                width_min=getattr(p_state, 'filter_width_min', None),
+                width_max=getattr(p_state, 'filter_width_max', None),
+                height_min=getattr(p_state, 'filter_height_min', None),
+                height_max=getattr(p_state, 'filter_height_max', None),
+                line_count_min=getattr(p_state, 'filter_line_count_min', None),
+                line_count_max=getattr(p_state, 'filter_line_count_max', None),
+                line_height_min=getattr(p_state, 'filter_line_height_min', None),
+                line_height_max=getattr(p_state, 'filter_line_height_max', None),
+                text_density_min=getattr(p_state, 'filter_text_density_min', None),
+                text_density_max=getattr(p_state, 'filter_text_density_max', None),
+                measurement_material=_copied(getattr(p_state, 'filter_measurement_material', None)),
+            )
+            if include_mode:
+                filter_kwargs['domains'] = _domains
+                filter_kwargs['authors'] = _authors
+                filter_kwargs['works'] = _works
+            else:
+                filter_kwargs['domains_exclude'] = _domains
+                filter_kwargs['authors_exclude'] = _authors
+                filter_kwargs['works_exclude'] = _works
 
             def _compute_restrict():
                 # No is_available() short-cut: with no sidecar the lookup
                 # raises FilterUnavailable (handled below) instead of running
                 # the search over the whole corpus (#17).
                 fjms = get_fjms_service(thread_safe=True)
-                kwargs = dict(
-                    date_from=p_state.filter_date_from,
-                    date_to=p_state.filter_date_to,
-                    material_exclude=p_state.filter_material_exclude or None,
-                    text_all=p_state.filter_text_all or None,
-                    text_any=p_state.filter_text_any or None,
-                    text_not=p_state.filter_text_not or None,
-                    # K-15: the measurement bounds the live count already
-                    # applies (has_active_filters counts them) -- the search
-                    # must apply the same ones.
-                    width_min=getattr(p_state, 'filter_width_min', None),
-                    width_max=getattr(p_state, 'filter_width_max', None),
-                    height_min=getattr(p_state, 'filter_height_min', None),
-                    height_max=getattr(p_state, 'filter_height_max', None),
-                    line_count_min=getattr(p_state, 'filter_line_count_min', None),
-                    line_count_max=getattr(p_state, 'filter_line_count_max', None),
-                    line_height_min=getattr(p_state, 'filter_line_height_min', None),
-                    line_height_max=getattr(p_state, 'filter_line_height_max', None),
-                    text_density_min=getattr(p_state, 'filter_text_density_min', None),
-                    text_density_max=getattr(p_state, 'filter_text_density_max', None),
-                    measurement_material=getattr(p_state, 'filter_measurement_material', None) or None,
-                )
-                if include_mode:
-                    kwargs['domains'] = _domains
-                    kwargs['authors'] = _authors
-                    kwargs['works'] = _works
-                else:
-                    kwargs['domains_exclude'] = _domains
-                    kwargs['authors_exclude'] = _authors
-                    kwargs['works_exclude'] = _works
-                return fjms.get_filter_sys_ids(**kwargs)
-
-            def _stop_before_running():
-                # Undo the "searching" UI set above: no run will clear it.
-                p_state.is_running = False
-                search_indicator.style('display: none;')
-                progress_bar.style('opacity: 0;')
-                results_header.text = tr('Results')
-                results_container.clear()
-                run_btn.enable()
-                ui.run_javascript('if (window.__hideLoadingBar) window.__hideLoadingBar();')
+                return fjms.get_filter_sys_ids(**filter_kwargs)
 
             from shared.fjms_service import FilterUnavailable
             try:
-                restrict_sys_ids = await run.io_bound(_compute_restrict)
+                restrict_sys_ids = await io_bound_result.io_bound(_compute_restrict)
             except FilterUnavailable as exc:
                 # #17: the filters could not be applied. Never "no manuscripts
                 # match", never a search without them: say so, and stop.
                 logger.warning("parallels: filters could not be applied (%s)", exc.reason)
                 ui.notify(filter_unavailable_message(exc, tr), type='negative')
+                _stop_before_running()
+                return
+            if restrict_sys_ids is io_bound_result.INTERRUPTED:
+                # No answer (cancelled, or the app is stopping) -- not the lookup's
+                # own None, which means "no restriction". Never a search without
+                # the filters (#17): stop.
                 _stop_before_running()
                 return
             p_state.restrict_sys_ids = restrict_sys_ids
@@ -4861,9 +4884,14 @@ def create_parallels_page(initial_text: str = None):
         # exclusion subtraction below so library-only AND advanced+library cases both compose.
         if p_state.library_mode == 'show_only' and p_state.library_filter:
             from shared.fjms_service import resolve_library_sys_ids as _resolve_lib_ids
-            lib_ids = await run.io_bound(
+            lib_ids = await io_bound_result.io_bound(
                 _resolve_lib_ids, list(p_state.library_filter), state.meta_mgr
             )
+            if lib_ids is io_bound_result.INTERRUPTED:
+                # No answer (cancelled, or the app is stopping). Show-only has no
+                # later filtering pass: running now would search every library.
+                _stop_before_running()
+                return
             if lib_ids:  # fail-open: skip intersect if resolution returned empty
                 restrict_sys_ids = lib_ids if restrict_sys_ids is None else (restrict_sys_ids & lib_ids)
 
@@ -5388,11 +5416,16 @@ def create_parallels_page(initial_text: str = None):
                             return {}, {}
 
                     import asyncio as _asyncio
-                    raw_domains, printed_result, trans_tuple = await _asyncio.gather(
-                        run.io_bound(collect_parallels_domains, all_sys_ids),
-                        run.io_bound(collect_parallels_printed, all_sys_ids),
-                        run.io_bound(collect_parallels_translations, all_sys_ids, _par_show_trans),
+                    _enrichment = await _asyncio.gather(
+                        io_bound_result.io_bound(collect_parallels_domains, all_sys_ids),
+                        io_bound_result.io_bound(collect_parallels_printed, all_sys_ids),
+                        io_bound_result.io_bound(collect_parallels_translations, all_sys_ids, _par_show_trans),
                     )
+                    if io_bound_result.interrupted(*_enrichment):
+                        # A lookup gave no answer (cancelled, or the app is stopping):
+                        # no enrichment at all, as for rows without sys_ids.
+                        _enrichment = ({}, set(), ({}, {}))
+                    raw_domains, printed_result, trans_tuple = _enrichment
                     p_state.printed_ids = printed_result
                     p_state.title_translations, p_state.translation_data = trans_tuple
                     p_state.all_result_domains = {}
@@ -6654,15 +6687,31 @@ def create_parallels_page(initial_text: str = None):
     async def _deferred_p_filter_init():
         """Load filter select options asynchronously after page renders."""
         lang = get_language()  # Capture in client context before io_bound
+
+        def _stop_loading():
+            # None (cancelled / app stopping) would break the select (options=None):
+            # keep the options shown, and stop the selects saying they are loading.
+            for select in (p_domain_select, p_author_select, p_work_select):
+                select.props(remove='loading')
+
         d = await run.io_bound(build_domain_options, lang)
+        if d is None:
+            _stop_loading()
+            return
         p_domain_select.options = d
         p_domain_select.props(remove='loading')
         p_domain_select.update()
         a = await run.io_bound(build_author_options, lang, p_state.filter_domains)
+        if a is None:
+            _stop_loading()
+            return
         p_author_select.options = a
         p_author_select.props(remove='loading')
         p_author_select.update()
         w = await run.io_bound(build_work_options, lang, p_state.filter_domains, p_state.filter_authors)
+        if w is None:
+            _stop_loading()
+            return
         p_work_select.options = w
         p_work_select.props(remove='loading')
         p_work_select.update()

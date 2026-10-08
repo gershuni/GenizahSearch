@@ -1359,6 +1359,8 @@ def _render_password_recovery_handler():
                     result = await run.io_bound(
                         supabase_change_password, new_pw.value, access_token,
                     )
+                    if result is None:
+                        return  # cancelled or app stopping
                     if result.get('success'):
                         # Recovery is complete -- retire the pending flag so
                         # later `/` visits stop re-offering the dialog.

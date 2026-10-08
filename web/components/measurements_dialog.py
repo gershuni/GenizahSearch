@@ -26,6 +26,8 @@ async def show_measurements_dialog(sys_id: str, shelfmark: str, fjms_service=Non
 
     # Fetch data off the event loop
     data = await run.io_bound(fjms_service.get_measurements, sys_id)
+    if data is None:
+        return  # cancelled or app stopping
     lang = get_language()
     is_heb = lang == 'he'
 

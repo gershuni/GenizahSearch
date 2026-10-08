@@ -102,6 +102,19 @@ def _resolve_rate_limit_key(request: Request) -> str:
     Concrete consequence: with the default _TRUSTED_PROXIES = LOOPBACK_IPS,
     every entry in XFF='client.ip, hop1.ip, hop2.ip' is non-trusted, so the
     right-most entry ('hop2.ip') wins.
+
+    In production uvicorn's ProxyHeadersMiddleware (on by default under
+    `ui.run`, trusting only FORWARDED_ALLOW_IPS=127.0.0.1) has ALREADY
+    rewritten request.client to that same right-most non-loopback XFF entry
+    -- the one nginx appended as $remote_addr -- so the "direct peer is not
+    trusted" branch is the one taken. Behind Cloudflare that entry is the
+    real visitor only once nginx's realip snippet is installed
+    (scripts/genizah_cloudflare_realip.conf); without it, it is the edge.
+    Never read CF-Connecting-IP / X-Real-IP here: a client reaching the
+    origin directly can send either. Pinned for uvicorn's middleware and
+    this helper, on hand-written nginx header values (nginx itself and the
+    puzzle limiter are not executed), by
+    tests/test_api_hardening_behind_cloudflare.py.
     """
     if not request.client or not request.client.host:
         return 'unknown'

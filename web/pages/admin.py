@@ -310,6 +310,8 @@ async def create_admin_page():
         logger.error("Admin page: no authenticated client (%s)", type(e).__name__)
         user_client = None
     data = await run.io_bound(_load_admin_data, user_client)
+    if data is None:
+        return  # cancelled or app stopping
 
     with ui.column().classes('w-full max-w-6xl mx-auto gap-6 fade-in'):
 
@@ -724,6 +726,8 @@ async def create_pending_correction_card(corr):
                 result = await run.io_bound(
                     update_correction_status, cid, 'approved',
                     review_notes=notes.value, client=get_user_client())
+                if result is None:
+                    return  # cancelled or app stopping
                 if "error" in result:
                     ui.notify(result["error"], type='negative')
                 else:
@@ -735,6 +739,8 @@ async def create_pending_correction_card(corr):
                 result = await run.io_bound(
                     update_correction_status, cid, 'rejected',
                     rejection_reason=rejection_text, client=get_user_client())
+                if result is None:
+                    return  # cancelled or app stopping
                 if "error" in result:
                     ui.notify(result["error"], type='negative')
                 else:
@@ -819,6 +825,8 @@ def create_user_row(user):
                 async def change_role(uid, new_role):
                     result = await run.io_bound(
                         update_user_role, uid, new_role, client=get_user_client())
+                    if result is None:
+                        return  # cancelled or app stopping
                     if "error" in result:
                         ui.notify(result['error'], type='negative')
                     else:
@@ -837,6 +845,8 @@ def create_user_row(user):
                                 result = await run.io_bound(
                                     delete_user, uid, client=get_user_client())
                                 confirm_dialog.close()
+                                if result is None:
+                                    return  # cancelled or app stopping
                                 if "error" in result:
                                     ui.notify(result['error'], type='negative')
                                 else:
@@ -871,6 +881,8 @@ async def create_stats_view(users=None, pending=None, total_corrections=None):
         pending = await run.io_bound(get_pending_corrections)
     if total_corrections is None:
         total_corrections = await run.io_bound(get_all_corrections_count)
+    if users is None or pending is None or total_corrections is None:
+        return  # a fetch was cancelled or the app is stopping
 
     # Calculate stats
     total_users = len(users)
