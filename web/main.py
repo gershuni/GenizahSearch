@@ -1961,15 +1961,7 @@ def create_layout():
                     ('/about', 'info', tr('About the Genizah'), None),
                     ('/ai', 'smart_toy', 'כלי AI' if get_language() == 'he' else 'AI tools', None),
                     ('/search', 'search', tr('Search'), None),
-                    # Badge gated on passage_available() -- the flag ANDed
-                    # with a loaded index -- and NOT on the flag alone, the
-                    # same discipline the Atlas and Computed Identifications
-                    # entries below use. A box without the index hides the
-                    # method selector entirely, so advertising it there would
-                    # promote something the page does not offer.
-                    ('/parallels', 'compare_arrows', tr('Find Parallels'),
-                     tr('New! Fast search feature') if passage_available()
-                     else None),
+                    ('/parallels', 'compare_arrows', tr('Find Parallels'), None),
                     ('/browse', 'menu_book', tr('Browse by Shelfmark'), None),
                     ('/catalog-browse', 'category', tr('Browse by Identification'), None),
                     ('/discoveries', 'lightbulb', tr('Community'), None),
