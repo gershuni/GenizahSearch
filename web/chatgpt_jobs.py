@@ -11,8 +11,9 @@ import json
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 
+from web.api_hardening import API_CHANNEL_SCOPE_KEY
 from web.research_api import APIJob
-from web.chatgpt_pagination import build_pages, MAX_STORED_BYTES
+from web.chatgpt_pagination import build_pages, page_budget, MAX_STORED_BYTES
 
 MAX_JOBS = 32
 MAX_ACTIVE_PER_OWNER = 2
@@ -46,6 +47,9 @@ def register_chatgpt_jobs(app, handlers, prepare, finish, owner):
                             headers={'Cache-Control': 'no-store', 'Retry-After': '2'})
 
     async def run(job, handler, request):
+        # Read the caller's channel here, before the pagination closure is handed to a
+        # thread: MCP pages are sized for MCP's serializer (web/chatgpt_pagination.py).
+        page_bytes, measure = page_budget(request.scope.get(API_CHANNEL_SCOPE_KEY))
         try:
             response = await asyncio.wait_for(handler(request), MAX_JOB_SECONDS)
             if not isinstance(response, Response):
@@ -54,7 +58,8 @@ def register_chatgpt_jobs(app, handlers, prepare, finish, owner):
                 if len(response.body) > MAX_RAW_BYTES:
                     raise ValueError('Search output exceeds the storage allowance; narrow the query.')
                 def paginate():
-                    return build_pages(json.loads(response.body), job.token)
+                    return build_pages(json.loads(response.body), job.token,
+                                       page_bytes=page_bytes, measure=measure)
                 # Serialization is performed once off the event loop.
                 pages, size = await asyncio.to_thread(paginate)
                 prune()

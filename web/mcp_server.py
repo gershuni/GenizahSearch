@@ -24,11 +24,13 @@ from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecurityMiddleware, TransportSecuritySettings
 from mcp_types import CallToolResult, TextContent, ToolAnnotations
+from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
 
 from version import APP_VERSION
 from web.api_hardening import API_CHANNEL_SCOPE_KEY, _resolve_rate_limit_key, capture_mcp_tool_event
+from web.chatgpt_pagination import MCP_RESPONSE_BYTES
 from web.feature_flags import MCP_ENABLED
 
 MCP_PATH = '/mcp'
@@ -103,6 +105,33 @@ def _tool_error(response: httpx.Response) -> CallToolResult:
     return CallToolResult(content=[TextContent(type='text', text=text)], is_error=True)
 
 
+# What the SDK adds around a tool result beyond the JSON-RPC envelope measured
+# below; tests/test_mcp_budget.py checks real HTTP bodies against the bound.
+META_RESERVE = 1_000
+
+
+def _wire_size(ctx: Context, result: CallToolResult) -> int:
+    """The response's size as the negotiated protocol serializes it: UTF-8 for the
+    2025 handshake generation, json.dumps' default ensure_ascii for 2026-07-28 on."""
+    modern = ctx.protocol_version not in HANDSHAKE_PROTOCOL_VERSIONS
+    body = {'jsonrpc': '2.0', 'id': ctx.request_id,
+            'result': result.model_dump(mode='json', by_alias=True, exclude_none=True)}
+    return len(json.dumps(body, separators=(',', ':'), ensure_ascii=modern).encode('utf-8'))
+
+
+def _bounded(ctx: Context, result: CallToolResult):
+    """``(result, None)``, or an explicit error when it would exceed the bound. Never a truncation."""
+    size = _wire_size(ctx, result) + META_RESERVE
+    if size <= MCP_RESPONSE_BYTES:
+        return result, None
+    error = {'code': 'mcp_response_too_large',
+             'message': ('This result is too large for this client. Narrow the request, '
+                         'follow pagination, or open it on genizahsearch.com.'),
+             'response_bytes': size, 'limit_bytes': MCP_RESPONSE_BYTES}
+    text = json.dumps({'error': error}, ensure_ascii=False)
+    return CallToolResult(content=[TextContent(type='text', text=text)], is_error=True), error['code']
+
+
 _LABEL_UNSAFE = re.compile(r'[^A-Za-z0-9 ._-]')
 
 
@@ -127,9 +156,12 @@ async def _call_tool(target, ctx: Context, tool: str, method: str, path: str, **
         if status_code >= 400:
             result = _tool_error(response)
             error_code = json.loads(result.content[0].text)['error']['code']
-            return result
-        error_code = None
-        return response.text
+        else:
+            result = CallToolResult(content=[TextContent(type='text', text=response.text)], is_error=False)
+            error_code = None
+        result, oversize = _bounded(ctx, result)
+        error_code = oversize or error_code
+        return result
     finally:
         capture_mcp_tool_event(
             tool=tool, status_code=status_code, error_code=error_code,
@@ -160,7 +192,7 @@ def build_server(facade_app) -> MCPServer:
         annotations=READ_ONLY,
         structured_output=False,
     )
-    async def get_capabilities(ctx: Context) -> str | CallToolResult:
+    async def get_capabilities(ctx: Context) -> CallToolResult:
         return await _call_tool(target, ctx, 'get_capabilities', 'GET', '/chatgpt/capabilities')
 
     return server

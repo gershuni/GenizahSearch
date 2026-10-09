@@ -1,4 +1,5 @@
 """Build small immutable result pages once, never during subsequent retrieval."""
+import json
 from copy import deepcopy
 
 from fastapi.responses import JSONResponse
@@ -7,12 +8,35 @@ PAGE_SIZE = 10
 PAGE_BYTES = 80000
 MAX_STORED_BYTES = 8 * 1024 * 1024
 
+# MCP clients (docs/plans/MCP_SERVER_PLAN.md D9). A page reaches an MCP client as
+# the text of a JSON-RPC result, and the 2026-07-28 SDK serializer writes it with
+# json.dumps' default ensure_ascii=True: every Hebrew character becomes a 6-byte
+# \uXXXX and every quote is escaped again. An 80,000-byte Hebrew page measured
+# 239,113 bytes on the wire. So MCP pages are sized by that escaped form, never by
+# raw bytes, for both protocol generations (a stored page may be polled under either).
+MCP_RESPONSE_BYTES = 100_000
+MCP_ENVELOPE_RESERVE = 2_000
+MCP_PAGE_BYTES = MCP_RESPONSE_BYTES - MCP_ENVELOPE_RESERVE
 
-def build_pages(payload, job_id):
+
+def mcp_escaped_size(raw: bytes) -> int:
+    """Bytes ``raw`` (UTF-8 JSON) occupies once embedded as an ASCII-escaped JSON string."""
+    return len(json.dumps(raw.decode('utf-8')))
+
+
+def page_budget(channel):
+    """``(page_bytes, measure)`` for build_pages: MCP's escaped budget, else the GPT's."""
+    if channel == 'mcp':
+        return MCP_PAGE_BYTES, mcp_escaped_size
+    return PAGE_BYTES, len
+
+
+def build_pages(payload, job_id, *, page_bytes=PAGE_BYTES, measure=len):
     """Return collection -> response bytes. Preserve order and complete spans.
 
     Limits fail explicitly rather than silently discarding later candidates.
-    Only a single candidate page is copied at a time.
+    Only a single candidate page is copied at a time. ``measure`` sizes a page
+    against ``page_bytes``; storage is always counted in actual stored bytes.
     """
     envelope = {k: v for k, v in payload.items() if k not in ('results', 'filtered', 'count')}
     collections = {'results': payload['results'], 'filtered': payload.get('filtered', [])}
@@ -44,7 +68,7 @@ def build_pages(payload, job_id):
                 # count consistently counts main results, even on filtered pages.
                 data['count'] = len(data['results'])
                 raw = JSONResponse(data).body
-                if len(raw) <= PAGE_BYTES:
+                if measure(raw) <= page_bytes:
                     break
                 if len(candidates) <= 1:
                     raise ValueError('A result or its fixed metadata exceeds the page allowance. Narrow the query or use the website.')
