@@ -48,6 +48,7 @@ class Engine:
         self.gate = asyncio.Event()
         self.gate.set()
         self.payload = search_payload()
+        self.failure = None  # (status, body, headers): the engine's own failure
         self.browse = {'schema_version': 1, 'source': 'browse', 'locator': {'sys_id': '990001', 'p_num': 1},
                        'shelfmark': 'T-S 1', 'library': {'code': 'CUL', 'name': 'Cambridge University Library'},
                        'text': 'טקסט', 'text_source': 'snippet', 'metadata': {}, 'warnings': []}
@@ -60,6 +61,9 @@ class Engine:
         if request.url.path.endswith('/capabilities'):
             return JSONResponse({'search_modes': ['exact']})
         await self.gate.wait()
+        if self.failure:
+            status, failure, headers = self.failure
+            return JSONResponse(failure, status_code=status, headers=headers)
         return JSONResponse(self.payload)
 
 
@@ -140,8 +144,9 @@ def test_six_tools_with_the_planned_annotations(stack):
 def test_every_search_mode_is_explained():
     description = mcp_server.SEARCH_MODES
     for phrase in ('exact = the words as typed', 'variants = also the common letter-confusion',
-                   'fuzzy = near spellings', 'responsa = the Responsa-Project query syntax',
-                   'NOT a filter for responsa literature', 'title = catalogue work titles',
+                   'fuzzy = near spellings', 'only the word as typed for one or two letters',
+                   'responsa = the Responsa-Project query syntax',
+                   'NOT a filter for responsa literature', 'title = words in the catalogue titles',
                    'shelfmark = a call number'):
         assert phrase in description
     assert 'morphological' not in description
@@ -258,21 +263,166 @@ def test_a_full_job_store_is_a_coded_error(stack, monkeypatch):
     assert error['code'] == 'research_queue_full' and error['http_status'] == 503
 
 
-def test_a_cancelled_call_leaves_its_search_running_and_retrievable(stack, monkeypatch):
-    host, child, engine = stack
+def test_cancelling_the_in_tool_wait_leaves_the_search_running_and_retrievable(stack, monkeypatch):
+    # Codex (build 5-6 review): the old version never cancelled the server side. This
+    # cancels the tool's own wait mid-poll and checks the job outlives it.
+    _, child, engine = stack
     monkeypatch.setattr(chatgpt_jobs, 'POLL_SECONDS', 2)
     engine.gate.clear()
+    target = mcp_server._with_mcp_channel(child)
+
+    async def go():
+        wait = asyncio.create_task(mcp_server._start_and_wait(
+            target, '198.51.100.9', '/chatgpt/search/jobs', {'query': 'א', 'search_mode': 'exact'}))
+        while not child.state.chatgpt_jobs:
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.2)  # inside a facade poll now
+        wait.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await wait
+        [(job_id, job)] = list(child.state.chatgpt_jobs.items())
+        assert job.finished is None and not job.task.done()
+        engine.gate.set()
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=target, client=('198.51.100.9', 1)),
+                                     base_url='http://t') as client:
+            for _ in range(200):
+                page = await client.get(f'/chatgpt/jobs/{job_id}')
+                if page.status_code == 200:
+                    return page.json()
+        raise AssertionError('the job did not finish')
+    page = asyncio.run(asyncio.wait_for(go(), timeout=30))
+    assert page['pagination']['page'] == 0 and len(page['results']) == 10
+
+
+def test_a_cancelled_tool_call_records_one_cancelled_event(stack):
+    from types import SimpleNamespace
+    ctx = SimpleNamespace(request_context=SimpleNamespace(request=None, session=None),
+                          protocol_version='2025-11-25', request_id='1')
+
+    async def go():
+        async def never(client_ip):
+            await asyncio.Event().wait()
+        task = asyncio.create_task(mcp_server._run_tool(ctx, 'search_manuscripts', never))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    asyncio.run(go())
+    [event] = drain_events()
+    assert (event['properties']['status_code'], event['properties']['error_code']) == (499, 'cancelled')
+
+
+def drain_events():
+    found = []
+    while not hardening._event_queue.empty():
+        found.append(hardening._event_queue.get())
+    return found
+
+
+def test_a_search_waits_exactly_three_polls_before_handing_over(stack, monkeypatch):
+    host, _, engine = stack
+    engine.gate.clear()
+    calls, original = [], mcp_server._facade
+
+    async def recording(target, client_ip, method, path, **kwargs):
+        calls.append((method, path.split('/jobs/')[0] + ('/jobs/<id>' if '/jobs/' in path else '')))
+        return await original(target, client_ip, method, path, **kwargs)
+    monkeypatch.setattr(mcp_server, '_facade', recording)
 
     async def script(client):
-        with pytest.raises(TimeoutError):
-            await asyncio.wait_for(client.call_tool('search_manuscripts', {'query': 'א', 'search_mode': 'exact'}),
-                                   timeout=0.5)
-        [job_id] = list(child.state.chatgpt_jobs)
-        engine.gate.set()
-        await asyncio.sleep(0.2)
-        return body(await client.call_tool('get_research_job', {'job_id': job_id}))
-    page = run(host, script)
-    assert page['pagination']['page'] == 0 and len(page['results']) == 10
+        return body(await client.call_tool('search_manuscripts', {'query': 'א', 'search_mode': 'exact'}))
+    assert 'job_id' in run(host, script)
+    assert calls == [('POST', '/chatgpt/search/jobs')] + [('GET', '/chatgpt/jobs/<id>')] * 3
+
+
+def test_a_failed_search_is_an_error_with_its_job_id_not_pending(stack):
+    host, _, engine = stack
+    engine.failure = (429, {'error': {'code': 'rate_limited', 'message': 'Too many requests'}}, {'Retry-After': '60'})
+
+    async def script(client):
+        return body(await client.call_tool('search_manuscripts', {'query': 'א', 'search_mode': 'exact'}))
+    error = run(host, script)['error']
+    assert (error['code'], error['http_status'], error['retry_after_seconds']) == ('rate_limited', 429, 60)
+    assert len(error['job_id']) >= 16
+
+
+def test_every_argument_reaches_the_facade_unchanged(stack):
+    host, _, engine = stack
+    responsa = {'variants': True, 'ja': False, 'flex_spacing': True, 'bidirectional': True}
+    filters = {'library': ['CUL'], 'library_filter_mode': 'exclude', 'materials': ['paper'],
+               'domains': ['d'], 'authors': ['a'], 'works': ['w'], 'date_from': 1000, 'date_to': 1200}
+
+    async def script(client):
+        await client.call_tool('search_manuscripts', {'query': 'א', 'search_mode': 'responsa', 'limit': 7,
+                                                      'gap': 2, 'responsa_options': responsa, 'filters': filters})
+        await client.call_tool('find_passage_parallels', {'text': 'א', 'filters': {'library': ['JTS']}})
+    run(host, script)
+    assert [sent for _, sent in engine.calls] == [
+        {'query': 'א', 'search_mode': 'responsa', 'limit': 7, 'gap': 2, 'responsa_options': responsa,
+         'filters': filters},
+        {'method': 'passage', 'text': 'א', 'filters': {'library': ['JTS']}}]
+
+
+def raw_tool_call(host, name, arguments, protocol='2025-11-25'):
+    params = {'name': name, 'arguments': arguments}
+    if protocol == MODERN:  # 2026-07-28 carries version and capabilities on every request
+        params['_meta'] = {'io.modelcontextprotocol/protocolVersion': MODERN,
+                           'io.modelcontextprotocol/clientCapabilities': {}}
+
+    async def go():
+        async with host.router.lifespan_context(host):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=host),
+                                         base_url='http://127.0.0.1:8081') as client:
+                return await client.post('/mcp', json={
+                    'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': params}, headers={
+                    'accept': 'application/json, text/event-stream', 'mcp-protocol-version': protocol,
+                    'mcp-method': 'tools/call', 'mcp-name': name})
+    return asyncio.run(asyncio.wait_for(go(), timeout=30))
+
+
+def test_an_undeclared_argument_is_refused_not_dropped(stack):
+    host, _, engine = stack
+    # 'filter' for 'filters': the SDK would drop it and run an unfiltered search.
+    response = raw_tool_call(host, 'search_manuscripts',
+                             {'query': 'א', 'search_mode': 'exact', 'filter': {'library': ['CUL']}})
+    assert response.status_code == 400 and 'unknown_argument' in response.text
+    assert engine.calls == []
+
+
+@pytest.mark.parametrize('arguments', [
+    {'query': 'א', 'search_mode': 'exact', 'limit': True},
+    {'query': 'א', 'search_mode': 'exact', 'limit': '5'},
+    {'query': 'א', 'search_mode': 'exact', 'filters': {'date_from': '1000'}},
+])
+def test_numbers_must_be_numbers(stack, arguments):
+    host, _, engine = stack
+
+    async def script(client):
+        return await client.call_tool('search_manuscripts', arguments)
+    assert refused_by_the_tool_schema(run(host, script))
+    assert engine.calls == []
+
+
+@pytest.mark.parametrize('protocol', ['2025-11-25', MODERN])
+def test_a_huge_validation_error_is_refused_not_sent(stack, protocol):
+    # Codex: 1,000 unknown filter fields made a 188 KB validation reply.
+    host, _, engine = stack
+    junk = {f'field_{i:04d}': 'x' * 40 for i in range(1000)}
+    response = raw_tool_call(host, 'search_manuscripts', {'query': 'א', 'search_mode': 'exact', 'filters': junk},
+                             protocol)
+    assert len(response.content) <= MCP_RESPONSE_BYTES
+    assert 'mcp_response_too_large' in response.text and response.json()['id'] == 1
+    assert engine.calls == []
+
+
+def test_the_guard_knows_exactly_the_advertised_arguments(stack):
+    host, _, _ = stack
+    [guard] = [route.app for route in host.router.routes if getattr(route, 'path', '') == '/mcp']
+
+    async def script(client):
+        return (await client.list_tools()).tools
+    advertised = {tool.name: frozenset(tool.input_schema.get('properties', {})) for tool in run(host, script)}
+    assert guard.declared == advertised
 
 
 def test_shutdown_cancels_running_searches(stack):

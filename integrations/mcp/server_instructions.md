@@ -33,4 +33,5 @@ Credit Dicta Genizah Search (https://genizahsearch.com) with the retrieval date.
 Incomplete results and errors
 - Results are saved in pages. For more, call get_research_job with the SAME job_id and pagination.next_page; never rerun the search. Stop at next_page null. Check collection=filtered page 0 when filtered_available is above zero. Report how many candidates you examined; saved results need not cover the whole corpus.
 - Keep every warning, including truncation, unresolved or duplicate witnesses, demoted photographs and unapplied sorting. Small or empty results do not prove absence.
-- An error carries a code, a message, the HTTP status and sometimes retry_after_seconds: report them, wait as told, and never present an error as "no matches". mcp_response_too_large means narrow the request or follow pagination.
+- A tool error carries a code, a message, the HTTP status and sometimes retry_after_seconds and job_id: report them, wait as told, and never present an error as "no matches". mcp_response_too_large means narrow the request or follow pagination.
+- Arguments are checked before anything runs. An argument a tool does not list is refused (unknown_argument), and an invalid value comes back as plain text naming the argument: correct it from the tool's schema and try again; do not drop a filter the user asked for.

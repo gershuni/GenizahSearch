@@ -86,15 +86,17 @@ SEARCH_MODES = (
     'exact = the words as typed, with no spelling variation. '
     'variants = also the common letter-confusion spellings (the 30 most frequent letter-confusion '
     "pairs, the website's default variant settings). "
-    'fuzzy = near spellings: every whole word within one edit of a query word (two edits from five '
-    'letters; an edit adds, drops or changes a letter, or swaps two neighbours), prefixed forms '
-    'included; slow, for damaged or uncertain readings. '
+    'fuzzy = near spellings: every whole word within one edit of a query word of three or four '
+    'letters, two edits from five letters, and only the word as typed for one or two letters (an '
+    'edit adds, drops or changes a letter, or swaps two neighbours); prefixed forms included; slow, '
+    'for damaged or uncertain readings. '
     'responsa = the Responsa-Project query syntax: word* and *word wildcards, #word for Hebrew '
     'prefixes and word# for suffixes, %word for plene/defective spelling, (a/b) alternatives, -word '
     'to exclude, word1 [3] word2 for up to three words between; responsa_options adds letter '
     'variants, Judeo-Arabic transliteration, flexible spacing and either word order. It is a query '
     'syntax, NOT a filter for responsa literature. '
-    'title = catalogue work titles (FJMS metadata), not manuscript text. '
+    'title = words in the catalogue titles of the manuscripts (the library catalogue records and the NLI '
+    'catalogue cache), not manuscript text; filtering by work is filters.works. '
     'shelfmark = a call number such as T-S 12.123 or ENA 1628.38.'
 )
 
@@ -123,8 +125,8 @@ class SearchFilters(BaseModel):
     materials: list[str] | None = Field(None, description='Physical support (paper, parchment), not genre.')
     library: list[str] | None = Field(None, description='Known library codes, e.g. CUL, JTS, Oxford.')
     library_filter_mode: Literal['include', 'exclude'] | None = None
-    date_from: int | None = None
-    date_to: int | None = None
+    date_from: int | None = Field(None, strict=True)
+    date_to: int | None = Field(None, strict=True)
 
 
 class Witness(BaseModel):
@@ -163,8 +165,13 @@ MAX_ID_CHARS = 128
 MAX_NAME_CHARS = 64
 
 
-def _refusal(body: bytes) -> str | None:
-    """The reason to refuse a JSON-RPC request before dispatch, or None."""
+def _refusal(body: bytes, declared: dict) -> str | None:
+    """The reason to refuse a JSON-RPC request before dispatch, or None.
+
+    ``declared`` maps each tool to its argument names: the SDK silently drops an
+    argument a tool does not declare, so a misspelt ``filter`` would run an
+    unfiltered search (Codex, build 5-6 review). Refused instead.
+    """
     try:
         message = json.loads(body)
     except (ValueError, UnicodeDecodeError):
@@ -177,18 +184,36 @@ def _refusal(body: bytes) -> str | None:
         if isinstance(item.get('method'), str) and len(item['method']) > MAX_NAME_CHARS:
             return 'method_too_long'
         params = item.get('params')
-        if isinstance(params, dict) and isinstance(params.get('name'), str) and len(params['name']) > MAX_NAME_CHARS:
-            return 'tool_name_too_long'
+        if isinstance(params, dict) and isinstance(params.get('name'), str):
+            if len(params['name']) > MAX_NAME_CHARS:
+                return 'tool_name_too_long'
+            arguments = params.get('arguments')
+            if (item.get('method') == 'tools/call' and params['name'] in declared
+                    and isinstance(arguments, dict) and not set(arguments) <= declared[params['name']]):
+                return 'unknown_argument'
     return None
 
 
-class _RequestGuard:
-    """ASGI wrapper for POST /mcp: body size, id and name limits, with a small
-    JSON-RPC error that echoes nothing. A class, because Starlette treats a plain
-    function endpoint as a request handler rather than an ASGI app."""
+def _request_id(body: bytes):
+    """The id of a single JSON-RPC request, for an error reply; None otherwise."""
+    try:
+        message = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return message.get('id') if isinstance(message, dict) else None
 
-    def __init__(self, app):
+
+class _RequestGuard:
+    """ASGI wrapper for POST /mcp. Before dispatch: body size, id, name and argument
+    checks, refused with a small JSON-RPC error that echoes nothing. After: no reply
+    over MCP_RESPONSE_BYTES leaves, whatever produced it -- including the SDK's own
+    argument-validation errors, which run before any tool (Codex, build 5-6 review).
+    A class, because Starlette treats a plain function endpoint as a request handler
+    rather than an ASGI app."""
+
+    def __init__(self, app, declared: dict):
         self.app = app
+        self.declared = declared
 
     async def __call__(self, scope, receive, send):
         if scope.get('type') != 'http':
@@ -205,7 +230,7 @@ class _RequestGuard:
                 return
             if not message.get('more_body', False):
                 break
-        reason = _refusal(bytes(body))
+        reason = _refusal(bytes(body), self.declared)
         if reason:
             await self._refuse(scope, send, 400, reason)
             return
@@ -218,7 +243,36 @@ class _RequestGuard:
             delivered = True
             return {'type': 'http.request', 'body': bytes(body), 'more_body': False}
 
-        await self.app(scope, replay, send)
+        start, chunks = None, []
+
+        async def capped(message):
+            nonlocal start
+            if message['type'] == 'http.response.start':
+                start = message
+                return
+            if message['type'] != 'http.response.body':
+                await send(message)
+                return
+            chunks.append(message.get('body', b''))
+            if message.get('more_body', False):
+                return
+            payload = b''.join(chunks)
+            if len(payload) > MCP_RESPONSE_BYTES:
+                capture_mcp_tool_event(
+                    tool='(reply over the bound)', status_code=start['status'],
+                    error_code='mcp_response_too_large', latency_seconds=0.0, protocol_version=None,
+                    client_label=None, client_ip=_resolve_rate_limit_key(Request(scope)))
+                payload = json.dumps({'jsonrpc': '2.0', 'id': _request_id(bytes(body)), 'error': {
+                    'code': -32603, 'message': ('Reply refused: mcp_response_too_large. Narrow the '
+                                                'request or correct its arguments.')}}).encode()
+                headers = [(k, v) for k, v in start['headers']
+                           if k.lower() not in (b'content-length', b'content-type')]
+                start = {**start, 'headers': headers + [(b'content-type', b'application/json'),
+                                                        (b'content-length', str(len(payload)).encode())]}
+            await send(start)
+            await send({'type': 'http.response.body', 'body': payload, 'more_body': False})
+
+        await self.app(scope, replay, capped)
 
     @staticmethod
     async def _refuse(scope, send, status: int, reason: str):
@@ -414,20 +468,34 @@ async def _start_and_wait(target, client_ip: str, path: str, body: dict) -> http
 
     Returns page 0 when the job finishes within WAIT_POLLS facade polls, else the
     pending reply with its job_id, so the model continues with get_research_job
-    instead of resubmitting. A refused poll (429) also hands back the pending reply.
+    instead of resubmitting. An error after submission -- the search's own failure
+    (e.g. a 429 it got from the engine) or a refused poll -- is returned as that
+    error, never as "pending", with the job_id added so the job is not lost.
     """
     submitted = await _facade(target, client_ip, 'POST', path, json=body)
     if submitted.status_code != 202:
         return submitted
-    job_path = _job_path(submitted.json()['job_id'])
+    job_id = submitted.json()['job_id']
     response = submitted
     for _ in range(WAIT_POLLS):
-        response = await _facade(target, client_ip, 'GET', job_path)
-        if response.status_code == 429:
-            return submitted
+        response = await _facade(target, client_ip, 'GET', _job_path(job_id))
         if response.status_code != 202:
             break
+    if response.status_code >= 400:
+        return _with_job_id(response, job_id)
     return response
+
+
+def _with_job_id(response: httpx.Response, job_id: str) -> httpx.Response:
+    """The same failure, with ``job_id`` added to its error object."""
+    try:
+        failure = response.json()
+        failure['error']['job_id'] = job_id
+    except (ValueError, KeyError, TypeError):
+        return response
+    headers = {k: v for k, v in response.headers.items() if k.lower() not in ('content-length', 'content-encoding')}
+    return httpx.Response(response.status_code, headers=headers,
+                          content=json.dumps(failure, ensure_ascii=False).encode('utf-8'))
 
 
 def build_server(facade_app) -> MCPServer:
@@ -472,9 +540,9 @@ def build_server(facade_app) -> MCPServer:
     async def browse_manuscript_page(
         ctx: Context,
         sys_id: Annotated[str, Field(description='locator.sys_id from a result, copied exactly.')],
-        p_num: Annotated[int, Field(ge=1, description='The one-based locator.p_num from a result.')],
+        p_num: Annotated[int, Field(ge=1, strict=True, description='The one-based locator.p_num from a result.')],
         volume_ie: Annotated[str | None, Field(description='locator.volume_ie when present.')] = None,
-        text_cap: Annotated[int, Field(ge=100, le=10000, description='Characters of text: start with 4000, '
+        text_cap: Annotated[int, Field(ge=100, le=10000, strict=True, description='Characters of text: start with 4000, '
                                                                       'raise to 10000 only if needed.')] = 4000,
     ) -> CallToolResult:
         params = {'sys_id': sys_id, 'p_num': p_num, 'text_cap': text_cap}
@@ -502,9 +570,9 @@ def build_server(facade_app) -> MCPServer:
         query: Annotated[str, Field(min_length=1, max_length=1000, description='The words to search for, or a shelfmark.')],
         search_mode: Annotated[Literal['exact', 'variants', 'fuzzy', 'responsa', 'title', 'shelfmark'],
                                Field(description='See the search modes in the tool description.')],
-        limit: Annotated[int | None, Field(ge=1, le=500, description='Candidates to save: at most 100, '
+        limit: Annotated[int | None, Field(ge=1, le=500, strict=True, description='Candidates to save: at most 100, '
                                                                     'or 500 for fuzzy.')] = None,
-        gap: Annotated[int | None, Field(ge=0, description='Words allowed between terms; 0 for title and '
+        gap: Annotated[int | None, Field(ge=0, strict=True, description='Words allowed between terms; 0 for title and '
                                                            'shelfmark.')] = None,
         responsa_options: ResponsaOptions | None = None,
         filters: SearchFilters | None = None,
@@ -575,7 +643,7 @@ def build_server(facade_app) -> MCPServer:
     async def get_research_job(
         ctx: Context,
         job_id: Annotated[str, Field(pattern=JOB_ID_PATTERN, description='The job_id returned by the search.')],
-        page: Annotated[int, Field(ge=0, description='0, then pagination.next_page.')] = 0,
+        page: Annotated[int, Field(ge=0, strict=True, description='0, then pagination.next_page.')] = 0,
         collection: Literal['results', 'filtered'] = 'results',
     ) -> CallToolResult:
         return await _call_tool(target, ctx, 'get_research_job', 'GET', _job_path(job_id),
@@ -600,7 +668,7 @@ def build_server(facade_app) -> MCPServer:
         sys_id: Annotated[str, Field(pattern=r'^[A-Za-z0-9_-]{1,100}$',
                                      description='A sys_id from a search or browse result; never guessed.')],
         section: Literal[DETAIL_SECTIONS],
-        offset: Annotated[int, Field(ge=0, description='0, then next_offset.')] = 0,
+        offset: Annotated[int, Field(ge=0, strict=True, description='0, then next_offset.')] = 0,
         snapshot: Annotated[str | None, Field(max_length=200, description='Omit at first; then copy it.')] = None,
     ) -> CallToolResult:
         params = {'sys_id': sys_id, 'section': section, 'offset': offset}
@@ -636,7 +704,12 @@ def register_mcp_server(app, facade_app) -> bool:
     server.streamable_http_app(json_response=True, stateless_http=True,
                                transport_security=SECURITY_SETTINGS)
     manager = server.session_manager
-    app.router.add_route(MCP_PATH, _RequestGuard(StreamableHTTPASGIApp(manager)), methods=['POST'],
+    # Each tool's declared arguments, for the guard's unknown-argument check. The
+    # SDK's ToolManager is private but has no public synchronous listing in 2.3.0;
+    # tests/test_mcp_tools.py pins this map against the advertised input schemas.
+    declared = {tool.name: frozenset(tool.parameters.get('properties', {}))
+                for tool in server._tool_manager.list_tools()}
+    app.router.add_route(MCP_PATH, _RequestGuard(StreamableHTTPASGIApp(manager), declared), methods=['POST'],
                          include_in_schema=False)
     # A function route defaults to GET only; list every method Starlette's own slash
     # redirect would have answered, so the redirect behaves the same apart from the check.
