@@ -182,10 +182,11 @@ def wire_host(monkeypatch):
     facade = FastAPI()
     facade.state.chatgpt_jobs = {}
     facade.state.body = b'{}'
+    facade.state.status = 200
 
     @facade.get('/chatgpt/capabilities')
     async def capabilities():
-        return Response(facade.state.body, media_type='application/json')
+        return Response(facade.state.body, status_code=facade.state.status, media_type='application/json')
 
     @asynccontextmanager
     async def lifespan(app):
@@ -242,3 +243,99 @@ def test_every_real_response_stays_under_the_bound(wire_host, body, mode, fits):
         assert result.is_error is True
         error = json.loads(result.content[0].text)['error']
         assert error['code'] == 'mcp_response_too_large' and error['limit_bytes'] == MCP_RESPONSE_BYTES
+
+
+# --- exact GPT boundaries (Codex build review: the digests above never reach them) -----------
+# Literal numbers on purpose: importing PAGE_BYTES would let a changed limit pass.
+
+def _one_row_payload(snippet):
+    return {'schema_version': 1, 'source': 'search', 'generated_at': '2026-10-09T00:00:00Z',
+            'request': {}, 'count': 1, 'total': 1, 'warnings': [],
+            'results': [{'uid': '0', 'snippet': snippet}], 'filtered': []}
+
+
+def _sized_gpt_page(target_bytes):
+    overhead = len(build_pages(_one_row_payload(''), 'job-token')[0]['results'][0])
+    return _one_row_payload('a' * (target_bytes - overhead))
+
+
+def test_a_gpt_page_of_exactly_80000_bytes_still_fits():
+    pages, _ = build_pages(_sized_gpt_page(80_000), 'job-token')
+    assert [len(page) for page in pages['results']] == [80_000]
+
+
+def test_a_gpt_page_of_80001_bytes_is_refused():
+    with pytest.raises(ValueError):
+        build_pages(_sized_gpt_page(80_001), 'job-token')
+
+
+def test_a_gpt_details_record_of_exactly_70000_bytes_is_served_and_70001_is_not():
+    section = sorted(SECTIONS)[0]
+    fits = details_app([{'t': 'a' * (70_000 - len('{"t":""}'))}])
+    assert get_details(fits, sys_id='990003', section=section).json()['returned'] == 1
+    too_big = details_app([{'t': 'a' * (70_001 - len('{"t":""}'))}])
+    refused = get_details(too_big, sys_id='990004', section=section)
+    assert refused.status_code == 503 and refused.json()['error']['code'] == 'details_too_large'
+
+
+# --- error paths and refusals on the wire ----------------------------------------------------------
+
+@pytest.mark.parametrize('mode,code', [('legacy', 'rate_limited'), (MODERN, 'mcp_response_too_large')])
+def test_an_oversized_error_message_is_bounded_too(wire_host, mode, code):
+    host, facade = wire_host
+    # 40,000 Hebrew letters: about 80 KB as UTF-8, about 240 KB once ASCII-escaped.
+    facade.state.body = json.dumps({'error': {'code': 'rate_limited', 'message': 'א' * 40_000}},
+                                   ensure_ascii=False).encode()
+    facade.state.status = 429
+    result, size = call_on_the_wire(host, mode)
+    assert size <= MCP_RESPONSE_BYTES and result.is_error is True
+    assert json.loads(result.content[0].text)['error']['code'] == code
+
+
+def raw_post(host, body, protocol='2025-11-25'):
+    async def go():
+        async with host.router.lifespan_context(host):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=host),
+                                         base_url='http://127.0.0.1:8081') as client:
+                return await client.post('/mcp', content=body, headers={
+                    'accept': 'application/json, text/event-stream', 'content-type': 'application/json',
+                    'mcp-protocol-version': protocol})
+    return asyncio.run(asyncio.wait_for(go(), timeout=30))
+
+
+# Long enough to break the id/name limits, short enough to stay under the 64 KiB body limit,
+# so these reach the id and name checks themselves.
+MEDIUM = 'x' * 5_000
+
+
+@pytest.mark.parametrize('protocol', ['2025-11-25', MODERN])
+@pytest.mark.parametrize('message,reason', [
+    ({'jsonrpc': '2.0', 'id': MEDIUM, 'method': 'tools/list'}, 'request_id_too_long'),
+    ({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': MEDIUM, 'arguments': {}}},
+     'tool_name_too_long'),
+    ({'jsonrpc': '2.0', 'id': 1, 'method': MEDIUM}, 'method_too_long'),
+], ids=['long-id', 'long-tool-name', 'long-method'])
+def test_oversized_ids_and_names_are_refused_without_echo(wire_host, protocol, message, reason):
+    host, _ = wire_host
+    response = raw_post(host, json.dumps(message).encode(), protocol)
+    assert response.status_code == 400
+    assert response.json()['error']['message'] == f'Request refused: {reason}.'
+    assert len(response.content) < 500 and MEDIUM[:200] not in response.text
+
+
+@pytest.mark.parametrize('protocol', ['2025-11-25', MODERN])
+def test_a_body_over_64_kib_is_refused_without_echo(wire_host, protocol):
+    # Codex's case: a 100,001-character id made the reply exceed 100,000 bytes.
+    host, _ = wire_host
+    response = raw_post(host, json.dumps({'jsonrpc': '2.0', 'id': 'x' * 100_001, 'method': 'tools/list'}).encode(),
+                        protocol)
+    assert response.status_code == 413
+    assert response.json()['error']['message'] == 'Request refused: request_too_large.'
+    assert len(response.content) < 500
+
+
+def test_limits_leave_ordinary_requests_alone(wire_host):
+    host, _ = wire_host
+    ok = raw_post(host, json.dumps({'jsonrpc': '2.0', 'id': 'a' * 128, 'method': 'initialize', 'params': {
+        'protocolVersion': '2025-11-25', 'capabilities': {}, 'clientInfo': {'name': 't', 'version': '0'}}}).encode())
+    assert ok.status_code == 200 and ok.json()['id'] == 'a' * 128

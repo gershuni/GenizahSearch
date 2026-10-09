@@ -14,6 +14,7 @@ Starlette's automatic slash redirect would otherwise answer first, to any host.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -91,6 +92,90 @@ async def _facade(target, client_ip: str, method: str, path: str, **kwargs) -> h
     transport = httpx.ASGITransport(app=target, client=(client_ip, 0))
     async with httpx.AsyncClient(transport=transport, base_url=FACADE_BASE_URL) as client:
         return await client.request(method, path, **kwargs)
+
+
+# Request limits checked before the SDK sees a request. The SDK echoes a request's
+# id in every reply and an unknown tool's name in its error, so an oversized id or
+# name would carry an oversized response past the final guard (Codex, build review).
+MAX_REQUEST_BYTES = 64 * 1024     # the GPT facade's own request cap
+MAX_ID_CHARS = 128
+MAX_NAME_CHARS = 64
+
+
+def _refusal(body: bytes) -> str | None:
+    """The reason to refuse a JSON-RPC request before dispatch, or None."""
+    try:
+        message = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        return None  # the SDK answers a parse error without echoing the body
+    for item in message if isinstance(message, list) else [message]:
+        if not isinstance(item, dict):
+            continue
+        if isinstance(item.get('id'), str) and len(item['id']) > MAX_ID_CHARS:
+            return 'request_id_too_long'
+        if isinstance(item.get('method'), str) and len(item['method']) > MAX_NAME_CHARS:
+            return 'method_too_long'
+        params = item.get('params')
+        if isinstance(params, dict) and isinstance(params.get('name'), str) and len(params['name']) > MAX_NAME_CHARS:
+            return 'tool_name_too_long'
+    return None
+
+
+class _RequestGuard:
+    """ASGI wrapper for POST /mcp: body size, id and name limits, with a small
+    JSON-RPC error that echoes nothing. A class, because Starlette treats a plain
+    function endpoint as a request handler rather than an ASGI app."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get('type') != 'http':
+            await self.app(scope, receive, send)
+            return
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message['type'] == 'http.disconnect':
+                return
+            body.extend(message.get('body', b''))
+            if len(body) > MAX_REQUEST_BYTES:
+                await self._refuse(scope, send, 413, 'request_too_large')
+                return
+            if not message.get('more_body', False):
+                break
+        reason = _refusal(bytes(body))
+        if reason:
+            await self._refuse(scope, send, 400, reason)
+            return
+        delivered = False
+
+        async def replay():
+            nonlocal delivered
+            if delivered:
+                return await receive()
+            delivered = True
+            return {'type': 'http.request', 'body': bytes(body), 'more_body': False}
+
+        await self.app(scope, replay, send)
+
+    @staticmethod
+    async def _refuse(scope, send, status: int, reason: str):
+        capture_mcp_tool_event(
+            tool='(refused before dispatch)', status_code=status, error_code=reason, latency_seconds=0.0,
+            protocol_version=None, client_label=None, client_ip=_resolve_rate_limit_key(Request(scope)))
+        payload = json.dumps({'jsonrpc': '2.0', 'id': None,
+                              'error': {'code': -32600, 'message': f'Request refused: {reason}.'}}).encode()
+        await send({'type': 'http.response.start', 'status': status,
+                    'headers': [(b'content-type', b'application/json'),
+                                (b'content-length', str(len(payload)).encode())]})
+        await send({'type': 'http.response.body', 'body': payload})
+
+
+ADAPTER_FAILURE = {'code': 'adapter_exception',
+                   'message': ('The tool failed inside the server; no result is available. '
+                               'This is an error, not an empty result.'),
+                   'http_status': 500}
 
 
 def _tool_error(response: httpx.Response) -> CallToolResult:
@@ -199,25 +284,36 @@ def _with_how_to_cite(response: httpx.Response) -> str:
     return json.dumps(page, ensure_ascii=False, separators=(',', ':'))
 
 
-async def _call_tool(target, ctx: Context, tool: str, method: str, path: str, *, transform=None, **kwargs):
-    """Run one facade call for ``tool`` and record exactly one ``mcp_tool_call`` event.
+async def _run_tool(ctx: Context, tool: str, operation, *, transform=None) -> CallToolResult:
+    """Run ``operation(client_ip)`` -- one or more facade calls ending in the response
+    the tool reports -- and record exactly one ``mcp_tool_call`` event.
 
-    ``transform`` turns a successful facade response into the tool's text.
+    ``transform`` turns a successful facade response into the tool's text. Any
+    ordinary exception becomes the coded ``adapter_exception`` error; every result,
+    errors included, passes the final size guard.
     """
     request = ctx.request_context.request
     client_ip = _resolve_rate_limit_key(request) if request is not None else 'unknown'
     started = time.monotonic()
     status_code, error_code = 500, 'adapter_exception'
     try:
-        response = await _facade(target, client_ip, method, path, **kwargs)
-        status_code = response.status_code
-        if status_code >= 400:
-            result = _tool_error(response)
-            error_code = json.loads(result.content[0].text)['error']['code']
-        else:
-            text = transform(response) if transform else response.text
-            result = CallToolResult(content=[TextContent(type='text', text=text)], is_error=False)
-            error_code = None
+        try:
+            response = await operation(client_ip)
+            status_code = response.status_code
+            if status_code >= 400:
+                result = _tool_error(response)
+                error_code = json.loads(result.content[0].text)['error']['code']
+            else:
+                text = transform(response) if transform else response.text
+                result = CallToolResult(content=[TextContent(type='text', text=text)], is_error=False)
+                error_code = None
+        except asyncio.CancelledError:
+            status_code, error_code = 499, 'cancelled'
+            raise
+        except Exception:
+            status_code, error_code = 500, 'adapter_exception'
+            result = CallToolResult(content=[TextContent(type='text', text=json.dumps({'error': ADAPTER_FAILURE}))],
+                                    is_error=True)
         result, oversize = _bounded(ctx, result)
         error_code = oversize or error_code
         return result
@@ -228,6 +324,13 @@ async def _call_tool(target, ctx: Context, tool: str, method: str, path: str, *,
             protocol_version=ctx.protocol_version, client_label=_client_label(ctx),
             client_ip=client_ip,
         )
+
+
+async def _call_tool(target, ctx: Context, tool: str, method: str, path: str, *, transform=None, **kwargs):
+    """One facade call for ``tool`` (see ``_run_tool``)."""
+    async def operation(client_ip):
+        return await _facade(target, client_ip, method, path, **kwargs)
+    return await _run_tool(ctx, tool, operation, transform=transform)
 
 
 def build_server(facade_app) -> MCPServer:
@@ -310,7 +413,7 @@ def register_mcp_server(app, facade_app) -> bool:
     server.streamable_http_app(json_response=True, stateless_http=True,
                                transport_security=SECURITY_SETTINGS)
     manager = server.session_manager
-    app.router.add_route(MCP_PATH, StreamableHTTPASGIApp(manager), methods=['POST'],
+    app.router.add_route(MCP_PATH, _RequestGuard(StreamableHTTPASGIApp(manager)), methods=['POST'],
                          include_in_schema=False)
     # A function route defaults to GET only; list every method Starlette's own slash
     # redirect would have answered, so the redirect behaves the same apart from the check.

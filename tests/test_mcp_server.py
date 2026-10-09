@@ -198,7 +198,9 @@ def test_one_event_per_refused_call(host, facade, events):
 
 def test_one_event_when_the_facade_raises(host, facade, events):
     facade.state.reply = (200, RuntimeError('facade crashed'), {})
-    assert call(host).is_error is True
+    assert error_of(call(host)) == {
+        'code': 'adapter_exception', 'http_status': 500,
+        'message': 'The tool failed inside the server; no result is available. This is an error, not an empty result.'}
     [event] = events()
     assert (event['properties']['status_code'], event['properties']['error_code']) == (500, 'adapter_exception')
 

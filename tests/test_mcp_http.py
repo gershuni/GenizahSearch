@@ -195,6 +195,49 @@ def test_origin_check(monkeypatch, origin, expected):
     run(go())
 
 
+# --- behind the proxy, as production runs ------------------------------------------
+# uvicorn's ProxyHeadersMiddleware trusting only 127.0.0.1 (FORWARDED_ALLOW_IPS), as in
+# production behind nginx; tests/test_api_hardening_behind_cloudflare.py pins the rest.
+
+def behind_proxy(host):
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+    return ProxyHeadersMiddleware(host, trusted_hosts='127.0.0.1')
+
+
+def test_the_facade_sees_the_forwarded_visitor_not_the_proxy(monkeypatch):
+    facade = make_facade()
+    host, _ = make_host(facade, monkeypatch)
+
+    async def go():
+        async with host.router.lifespan_context(host):
+            http = httpx2.AsyncClient(
+                transport=httpx2.ASGITransport(app=behind_proxy(host), client=('127.0.0.1', 5000)),
+                base_url='http://127.0.0.1:8081', headers={'x-forwarded-for': '203.0.113.9'})
+            async with Client(streamable_http_client('http://127.0.0.1:8081/mcp', http_client=http),
+                              mode='legacy') as client:
+                await client.call_tool('get_capabilities', {})
+            spoof = httpx2.AsyncClient(
+                transport=httpx2.ASGITransport(app=behind_proxy(host), client=('198.51.100.20', 5000)),
+                base_url='http://127.0.0.1:8081', headers={'x-forwarded-for': '203.0.113.66'})
+            async with Client(streamable_http_client('http://127.0.0.1:8081/mcp', http_client=spoof),
+                              mode='legacy') as client:
+                await client.call_tool('get_capabilities', {})
+    run(go())
+    assert facade.state.seen == ['203.0.113.9', '198.51.100.20']
+
+
+def test_the_slash_redirect_keeps_the_forwarded_https(monkeypatch):
+    host, _ = make_host(make_facade(), monkeypatch)
+
+    async def go():
+        async with raw_client(behind_proxy(host), base_url='http://genizahsearch.com',
+                              client=('127.0.0.1', 5000)) as c:
+            return await c.post('/mcp/', headers={'x-forwarded-proto': 'https'})
+    response = run(go())
+    assert response.status_code == 307
+    assert response.headers['location'] == 'https://genizahsearch.com/mcp'
+
+
 # --- lifespan -------------------------------------------------------------------
 
 def test_requests_need_the_host_lifespan(monkeypatch):
