@@ -308,6 +308,16 @@ their mutations with the recorded red result**, not saved for the end.
 Commits 1-3 touch shared code only behind the flag or additively; 4 and 5 change code the live GPT
 uses, so their "GPT output byte-identical" tests are the gate.
 
+**Build progress (2026-10-09, branch `feat/mcp-server`, not pushed):** commits 1-6 done —
+`07dd2939` `b40aeea7` `4fa217fd` `c6f398dd` `df877fb6` `46cec34e` — each with its mutations
+recorded RED in its message. Codex reviewed 1-4 (SHIP WITH FIXES → `b60dc93b`), 5-6 (SHIP WITH
+FIXES, no citation defect → `82c43c80`), then verified the fixes (three conditional LOW in the reply
+cap → `770dbe8a`) and returned **SHIP** on `770dbe8a`. Beyond the plan, the build added: a request
+guard (64 KiB body, id/name/undeclared-argument checks, strict integers) and a reply cap on every
+response, both in front of the SDK. MCP + GPT facade tests: 199 passed. **Commit 7 waits on the
+owner:** terms text (governing law; the full-corpus-access line), the privacy-policy extension,
+and a directory icon.
+
 **If OpenAI's review isn't done by 12-04:** `/ai` gives the MCP URL with setup steps for the
 account types that passed the dark-deploy fallback test, and says plainly which accounts cannot
 add a custom server. It does not promise access to everyone.
