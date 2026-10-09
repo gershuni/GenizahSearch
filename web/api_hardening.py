@@ -349,10 +349,18 @@ def _build_envelope_response(*args) -> JSONResponse:
 API_CHANNEL_SCOPE_KEY = 'genizah_api_channel'
 
 
+API_CHANNELS = ('chatgpt', 'mcp')
+
+
 def api_channel(request) -> str:
-    """'api' | 'api_job' | 'chatgpt' | 'chatgpt_job'."""
+    """'api' | 'chatgpt' | 'mcp', with '_job' appended for a background job.
+
+    'mcp' is set by web/mcp_server.py's private in-process wrapper, which only the
+    MCP adapter can reach; the GPT facade's own marker keeps it (``_mark_chatgpt``).
+    """
     scope = getattr(request, 'scope', None) or {}
-    channel = 'chatgpt' if scope.get(API_CHANNEL_SCOPE_KEY) == 'chatgpt' else 'api'
+    marker = scope.get(API_CHANNEL_SCOPE_KEY)
+    channel = marker if marker in API_CHANNELS else 'api'
     return channel + '_job' if scope.get('research_job') is not None else channel
 
 
@@ -696,12 +704,57 @@ def capture_api_event(
         pass
 
 
+def capture_mcp_tool_event(
+    *,
+    tool: str,
+    status_code: int,
+    error_code: Optional[str],
+    latency_seconds: float,
+    protocol_version: Optional[str],
+    client_label: Optional[str],
+    client_ip: str,
+) -> None:
+    """Enqueue an ``mcp_tool_call`` PostHog event. Never blocks; never raises.
+
+    One per MCP tool call (docs/plans/MCP_SERVER_PLAN.md section 4), including
+    calls the facade refuses before any search handler runs, which emit no
+    ``search_api_request``. ``client_label`` is the caller-supplied MCP clientInfo
+    name: a diagnostic label only, never an identity. NEVER logged: tool
+    arguments, queries, results.
+    """
+    global _dropped_events
+    _start_drain_thread_once()
+    if not _should_sample():
+        return
+    try:
+        event = {
+            'event': 'mcp_tool_call',
+            'distinct_id': hash_ip(client_ip),
+            'properties': {
+                'tool': tool,
+                'status_code': status_code,
+                'error_code': error_code,
+                'latency_bucket': latency_bucket(latency_seconds),
+                'protocol_version': protocol_version,
+                'client_label': client_label,
+            },
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            _event_queue.put_nowait(event)
+        except queue.Full:
+            with _dropped_events_lock:
+                _dropped_events += 1
+    except Exception:
+        pass
+
+
 __all__ = [
     'RateLimiter', 'APIError', 'ERROR_CODES', 'WARNING_CODES',
     'enforce_mode_gate',
     '_resolve_rate_limit_key', '_is_loopback_request',
-    'hash_ip', 'capture_api_event', 'get_dropped_event_count',
-    'API_CHANNEL_SCOPE_KEY', 'api_channel',
+    'hash_ip', 'capture_api_event', 'capture_mcp_tool_event', 'get_dropped_event_count',
+    'API_CHANNEL_SCOPE_KEY', 'API_CHANNELS', 'api_channel',
     'latency_bucket', 'result_count_bucket',
     'wrap_endpoint', '_build_envelope_response',
     'POSTHOG_CAPTURE_URL', 'LOOPBACK_IPS', 'RATE_LIMIT_BUCKET_TTL',

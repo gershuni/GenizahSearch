@@ -14,18 +14,21 @@ Starlette's automatic slash redirect would otherwise answer first, to any host.
 """
 from __future__ import annotations
 
+import json
+import re
+import time
 from contextlib import asynccontextmanager
 
 import httpx
 from mcp.server.mcpserver import Context, MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecurityMiddleware, TransportSecuritySettings
-from mcp_types import ToolAnnotations
+from mcp_types import CallToolResult, TextContent, ToolAnnotations
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
 
 from version import APP_VERSION
+from web.api_hardening import API_CHANNEL_SCOPE_KEY, _resolve_rate_limit_key, capture_mcp_tool_event
 from web.feature_flags import MCP_ENABLED
 
 MCP_PATH = '/mcp'
@@ -63,24 +66,82 @@ READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False,
                             idempotentHint=True, openWorldHint=False)
 
 
-async def _facade(facade_app, ctx: Context, method: str, path: str, **kwargs) -> httpx.Response:
-    """Call a facade route of ``facade_app`` as the visitor who called this tool."""
-    from web.api_hardening import _resolve_rate_limit_key
-    request = ctx.request_context.request
-    client_ip = _resolve_rate_limit_key(request) if request is not None else 'unknown'
-    transport = httpx.ASGITransport(app=facade_app, client=(client_ip, 0))
+def _with_mcp_channel(facade_app):
+    """The facade as only this adapter reaches it: every request labelled 'mcp'.
+
+    A scope key, unlike a header or a tool argument, cannot be set by a caller, so
+    the shared handlers' ``channel`` property cannot be spoofed (web/api_hardening.py).
+    """
+    async def channel_marked(scope, receive, send):
+        if scope.get('type') == 'http':
+            scope = {**scope, API_CHANNEL_SCOPE_KEY: 'mcp'}
+        await facade_app(scope, receive, send)
+    return channel_marked
+
+
+async def _facade(target, client_ip: str, method: str, path: str, **kwargs) -> httpx.Response:
+    """Call a facade route in-process as the visitor ``client_ip``."""
+    transport = httpx.ASGITransport(app=target, client=(client_ip, 0))
     async with httpx.AsyncClient(transport=transport, base_url=FACADE_BASE_URL) as client:
         return await client.request(method, path, **kwargs)
 
 
-def _text_or_error(response: httpx.Response) -> str:
-    if response.status_code >= 400:
-        raise ToolError(response.text)
-    return response.text
+def _tool_error(response: httpx.Response) -> CallToolResult:
+    """A facade failure as one JSON text block: its code and message, the original
+    HTTP status, and Retry-After only when the facade sent one. Never an empty result."""
+    try:
+        error = response.json()['error']
+        if not isinstance(error, dict) or 'code' not in error:
+            raise TypeError
+    except (ValueError, KeyError, TypeError):
+        error = {'code': 'upstream_error', 'message': response.text[:2000]}
+    error = {**error, 'http_status': response.status_code}
+    retry_after = response.headers.get('retry-after')
+    if retry_after is not None:
+        error['retry_after_seconds'] = int(retry_after) if retry_after.isdigit() else retry_after
+    text = json.dumps({'error': error}, ensure_ascii=False)
+    return CallToolResult(content=[TextContent(type='text', text=text)], is_error=True)
+
+
+_LABEL_UNSAFE = re.compile(r'[^A-Za-z0-9 ._-]')
+
+
+def _client_label(ctx: Context):
+    """The caller-supplied MCP clientInfo name, if any: a diagnostic label, never an identity."""
+    try:
+        name = ctx.request_context.session.client_params.client_info.name
+    except AttributeError:
+        return None
+    return _LABEL_UNSAFE.sub('', str(name))[:64] or None
+
+
+async def _call_tool(target, ctx: Context, tool: str, method: str, path: str, **kwargs):
+    """Run one facade call for ``tool`` and record exactly one ``mcp_tool_call`` event."""
+    request = ctx.request_context.request
+    client_ip = _resolve_rate_limit_key(request) if request is not None else 'unknown'
+    started = time.monotonic()
+    status_code, error_code = 500, 'adapter_exception'
+    try:
+        response = await _facade(target, client_ip, method, path, **kwargs)
+        status_code = response.status_code
+        if status_code >= 400:
+            result = _tool_error(response)
+            error_code = json.loads(result.content[0].text)['error']['code']
+            return result
+        error_code = None
+        return response.text
+    finally:
+        capture_mcp_tool_event(
+            tool=tool, status_code=status_code, error_code=error_code,
+            latency_seconds=time.monotonic() - started,
+            protocol_version=ctx.protocol_version, client_label=_client_label(ctx),
+            client_ip=client_ip,
+        )
 
 
 def build_server(facade_app) -> MCPServer:
     """An MCP server whose tools call ``facade_app`` (one server per facade)."""
+    target = _with_mcp_channel(facade_app)
     server = MCPServer(
         name='GenizahSearch',
         title='GenizahSearch',
@@ -99,8 +160,8 @@ def build_server(facade_app) -> MCPServer:
         annotations=READ_ONLY,
         structured_output=False,
     )
-    async def get_capabilities(ctx: Context) -> str:
-        return _text_or_error(await _facade(facade_app, ctx, 'GET', '/chatgpt/capabilities'))
+    async def get_capabilities(ctx: Context) -> str | CallToolResult:
+        return await _call_tool(target, ctx, 'get_capabilities', 'GET', '/chatgpt/capabilities')
 
     return server
 
