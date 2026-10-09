@@ -65,6 +65,14 @@ PASSAGE_MULTI_WITNESS_ENABLED = _env_enabled("PASSAGE_MULTI_WITNESS_ENABLED",
                                              False)
 
 
+# docs/plans/MCP_SERVER_PLAN.md (D6) -- the public MCP server at /mcp that replaces
+# the GenizahSearch GPT (OpenAI retires custom GPTs on 2026-12-11). Default OFF.
+# NOTE: necessary but NOT sufficient -- web/mcp_server.py::register_mcp_server()
+# also requires the /api/chatgpt facade to be registered, and registers no route
+# at all otherwise, so a flag-ON/facade-missing window answers 404.
+MCP_ENABLED = _env_enabled("MCP_ENABLED", False)
+
+
 def web_fgp_enabled() -> bool:
     """Whether FGP transcriptions surface in the WEB version chooser.
 

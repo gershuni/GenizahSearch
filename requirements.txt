@@ -21,3 +21,4 @@ Brotli==1.2.0   # Phase 133 (133-03, MEDIUM-3) — verify the atlas .bin.br side
 rapidfuzz==3.14.5   # Phase 143 -- Levenshtein for the passage matcher (shared/passage_search.py, shared/passage_hygiene.py)
 regex==2026.9.10  # Bounded, GIL-releasing query matching
 psutil==7.2.2  # Research worker resource supervision
+mcp==2.3.0  # Public MCP server at /mcp (web/mcp_server.py, docs/plans/MCP_SERVER_PLAN.md); 2.3.0 is the first release with MCPServer(subscriptions=False)
