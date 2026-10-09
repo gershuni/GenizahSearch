@@ -243,36 +243,7 @@ class _RequestGuard:
             delivered = True
             return {'type': 'http.request', 'body': bytes(body), 'more_body': False}
 
-        start, chunks = None, []
-
-        async def capped(message):
-            nonlocal start
-            if message['type'] == 'http.response.start':
-                start = message
-                return
-            if message['type'] != 'http.response.body':
-                await send(message)
-                return
-            chunks.append(message.get('body', b''))
-            if message.get('more_body', False):
-                return
-            payload = b''.join(chunks)
-            if len(payload) > MCP_RESPONSE_BYTES:
-                capture_mcp_tool_event(
-                    tool='(reply over the bound)', status_code=start['status'],
-                    error_code='mcp_response_too_large', latency_seconds=0.0, protocol_version=None,
-                    client_label=None, client_ip=_resolve_rate_limit_key(Request(scope)))
-                payload = json.dumps({'jsonrpc': '2.0', 'id': _request_id(bytes(body)), 'error': {
-                    'code': -32603, 'message': ('Reply refused: mcp_response_too_large. Narrow the '
-                                                'request or correct its arguments.')}}).encode()
-                headers = [(k, v) for k, v in start['headers']
-                           if k.lower() not in (b'content-length', b'content-type')]
-                start = {**start, 'headers': headers + [(b'content-type', b'application/json'),
-                                                        (b'content-length', str(len(payload)).encode())]}
-            await send(start)
-            await send({'type': 'http.response.body', 'body': payload, 'more_body': False})
-
-        await self.app(scope, replay, capped)
+        await self.app(scope, replay, _ReplyCap(send, scope, _request_id(bytes(body))))
 
     @staticmethod
     async def _refuse(scope, send, status: int, reason: str):
@@ -285,6 +256,84 @@ class _RequestGuard:
                     'headers': [(b'content-type', b'application/json'),
                                 (b'content-length', str(len(payload)).encode())]})
         await send({'type': 'http.response.body', 'body': payload})
+
+
+# Headers that describe a body's representation, and so must not survive its replacement.
+_REPRESENTATION_HEADERS = (b'content-length', b'content-type', b'content-encoding', b'transfer-encoding')
+
+
+class _ReplyCap:
+    """The ASGI ``send`` that keeps every reply within MCP_RESPONSE_BYTES.
+
+    A JSON reply (all this server produces: stateless, JSON responses, no
+    subscriptions, GET refused) is held until complete; if it is too large it is
+    replaced by a small JSON-RPC error carrying the request id, its representation
+    headers rewritten. Anything else is never held (Codex, fix verification): a
+    streamed reply passes through as it comes, with a running byte count that ends
+    the stream at the bound, and a non-body message (e.g. ``http.response.pathsend``)
+    first releases the held start so ASGI ordering holds.
+    """
+
+    def __init__(self, send, scope, request_id):
+        self.send, self.scope, self.request_id = send, scope, request_id
+        self.start, self.chunks, self.streaming, self.sent, self.closed = None, [], False, 0, False
+
+    async def __call__(self, message):
+        kind = message['type']
+        if self.closed:
+            return
+        if kind == 'http.response.start':
+            self.start = message
+            content_type = dict(message.get('headers', [])).get(b'content-type', b'')
+            self.streaming = not content_type.startswith(b'application/json')
+            if self.streaming:
+                await self.send(message)
+            return
+        if kind != 'http.response.body':
+            await self._release_start()
+            await self.send(message)
+            return
+        if self.streaming:
+            await self._stream(message)
+            return
+        self.chunks.append(message.get('body', b''))
+        if message.get('more_body', False):
+            return
+        payload = b''.join(self.chunks)
+        start = self.start
+        if len(payload) > MCP_RESPONSE_BYTES:
+            self._record(start['status'])
+            payload = json.dumps({'jsonrpc': '2.0', 'id': self.request_id, 'error': {
+                'code': -32603, 'message': ('Reply refused: mcp_response_too_large. Narrow the '
+                                            'request or correct its arguments.')}}).encode()
+            headers = [(k, v) for k, v in start.get('headers', []) if k.lower() not in _REPRESENTATION_HEADERS]
+            start = {**start, 'headers': headers + [(b'content-type', b'application/json'),
+                                                    (b'content-length', str(len(payload)).encode())]}
+        self.start = None
+        await self.send(start)
+        await self.send({'type': 'http.response.body', 'body': payload, 'more_body': False})
+
+    async def _release_start(self):
+        if self.start is not None and not self.streaming:
+            start, self.start = self.start, None
+            self.streaming = True  # from here on, nothing more is held
+            await self.send(start)
+
+    async def _stream(self, message):
+        chunk = message.get('body', b'')
+        if self.sent + len(chunk) > MCP_RESPONSE_BYTES:
+            self._record(self.start['status'] if self.start else 200)
+            self.closed = True
+            await self.send({'type': 'http.response.body', 'body': b'', 'more_body': False})
+            return
+        self.sent += len(chunk)
+        await self.send(message)
+
+    def _record(self, status):
+        capture_mcp_tool_event(
+            tool='(reply over the bound)', status_code=status, error_code='mcp_response_too_large',
+            latency_seconds=0.0, protocol_version=None, client_label=None,
+            client_ip=_resolve_rate_limit_key(Request(self.scope)))
 
 
 ADAPTER_FAILURE = {'code': 'adapter_exception',
