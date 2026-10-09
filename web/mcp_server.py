@@ -18,8 +18,11 @@ import json
 import re
 import time
 from contextlib import asynccontextmanager
+from typing import Annotated
+from urllib.parse import urlencode
 
 import httpx
+from pydantic import Field
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.streamable_http_manager import StreamableHTTPASGIApp
 from mcp.server.transport_security import TransportSecurityMiddleware, TransportSecuritySettings
@@ -28,6 +31,7 @@ from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
 
+from shared.export_utils import GENIZAHSEARCH_URL
 from version import APP_VERSION
 from web.api_hardening import API_CHANNEL_SCOPE_KEY, _resolve_rate_limit_key, capture_mcp_tool_event
 from web.chatgpt_pagination import MCP_RESPONSE_BYTES
@@ -35,6 +39,7 @@ from web.feature_flags import MCP_ENABLED
 
 MCP_PATH = '/mcp'
 FACADE_BASE_URL = 'http://facade.internal'
+SITE_URL = GENIZAHSEARCH_URL
 
 # Host-header allow-list (DNS-rebinding protection). The SDK's default accepts only
 # localhost, which would answer 421 to every request through Cloudflare. The SDK
@@ -144,8 +149,61 @@ def _client_label(ctx: Context):
     return _LABEL_UNSAFE.sub('', str(name))[:64] or None
 
 
-async def _call_tool(target, ctx: Context, tool: str, method: str, path: str, **kwargs):
-    """Run one facade call for ``tool`` and record exactly one ``mcp_tool_call`` event."""
+def _page_url(locator: dict):
+    """The durable /browse address of a page: the same sys_id/page/volume_ie the
+    website's own citation uses (web/pages/browse.py::_citation_page_url)."""
+    if not locator.get('sys_id'):
+        return None
+    params = {'sys_id': locator['sys_id']}
+    p_num = locator.get('p_num')
+    if p_num is not None and int(p_num) > 0:
+        params['page'] = int(p_num)
+    if locator.get('volume_ie'):
+        params['volume_ie'] = locator['volume_ie']
+    return f'{SITE_URL}/browse?{urlencode(params)}'
+
+
+def how_to_cite(page: dict, retrieved_on: str) -> dict:
+    """The page citation for a browse result, from shared/transcription_credits.py.
+
+    Whose text is credited follows ``text_source`` -- what was actually served --
+    never the presence of metadata: a PGP page transcription credits PGP; a
+    snippet is the indexed automatic transcription and credits MiDRASH even when
+    the page also carries PGP metadata; ``none`` credits no transcription.
+    """
+    from shared.transcription_credits import page_citation
+    source = page.get('text_source')
+    pgp = (page.get('metadata') or {}).get('pgp') or {}
+    if source == 'pgp_transcription':
+        version_info, shown = {'source': 'pgp', 'attribution': pgp.get('transcription_source'),
+                               'pgp_url': pgp.get('pgp_url')}, True
+    elif source == 'none':
+        version_info, shown = None, False
+    else:  # 'snippet', and anything unrecognised: the automatic transcription
+        version_info, shown = None, True
+    locator = page.get('locator') or {}
+    shelfmark = page.get('shelfmark') or (f"ID: {locator['sys_id']}" if locator.get('sys_id') else None)
+    citations = {lang: page_citation(version_info, lang=lang,
+                                     library=(page.get('library') or {}).get('name') or None,
+                                     shelfmark=shelfmark, page_url=_page_url(locator),
+                                     retrieved_on=retrieved_on, transcription_shown=shown)
+                 for lang in ('en', 'he')}
+    return {'en': citations['en'].text, 'he': citations['he'].text,
+            'credits_midrash': citations['en'].credits_midrash, 'kind': citations['en'].kind}
+
+
+def _with_how_to_cite(response: httpx.Response) -> str:
+    from web.citation_chip import retrieved_today
+    page = response.json()
+    page['how_to_cite'] = how_to_cite(page, retrieved_today())
+    return json.dumps(page, ensure_ascii=False, separators=(',', ':'))
+
+
+async def _call_tool(target, ctx: Context, tool: str, method: str, path: str, *, transform=None, **kwargs):
+    """Run one facade call for ``tool`` and record exactly one ``mcp_tool_call`` event.
+
+    ``transform`` turns a successful facade response into the tool's text.
+    """
     request = ctx.request_context.request
     client_ip = _resolve_rate_limit_key(request) if request is not None else 'unknown'
     started = time.monotonic()
@@ -157,7 +215,8 @@ async def _call_tool(target, ctx: Context, tool: str, method: str, path: str, **
             result = _tool_error(response)
             error_code = json.loads(result.content[0].text)['error']['code']
         else:
-            result = CallToolResult(content=[TextContent(type='text', text=response.text)], is_error=False)
+            text = transform(response) if transform else response.text
+            result = CallToolResult(content=[TextContent(type='text', text=text)], is_error=False)
             error_code = None
         result, oversize = _bounded(ctx, result)
         error_code = oversize or error_code
@@ -194,6 +253,35 @@ def build_server(facade_app) -> MCPServer:
     )
     async def get_capabilities(ctx: Context) -> CallToolResult:
         return await _call_tool(target, ctx, 'get_capabilities', 'GET', '/chatgpt/capabilities')
+
+    @server.tool(
+        name='browse_manuscript_page',
+        title='Read a manuscript page',
+        description=(
+            'Read one manuscript page returned by a search: its text, where the text comes from, '
+            'catalogue metadata, an image link, and how_to_cite. Read a page before quoting it '
+            'or judging a match. Copy sys_id, p_num and volume_ie exactly from a result locator; '
+            'never invent them. text_source says what the text is: pgp_transcription (a Princeton '
+            'Geniza Project edition), snippet (part of the automatic transcription only; say so '
+            'and infer nothing unseen), or none. An image link is not an inspection of the image. '
+            'Cite with how_to_cite (en/he), which credits whoever made the text shown. '
+            'Website link: https://genizahsearch.com/browse?sys_id=SID&page=P_NUM&volume_ie=IE.'),
+        annotations=READ_ONLY,
+        structured_output=False,
+    )
+    async def browse_manuscript_page(
+        ctx: Context,
+        sys_id: Annotated[str, Field(description='locator.sys_id from a result, copied exactly.')],
+        p_num: Annotated[int, Field(ge=1, description='The one-based locator.p_num from a result.')],
+        volume_ie: Annotated[str | None, Field(description='locator.volume_ie when present.')] = None,
+        text_cap: Annotated[int, Field(ge=100, le=10000, description='Characters of text: start with 4000, '
+                                                                      'raise to 10000 only if needed.')] = 4000,
+    ) -> CallToolResult:
+        params = {'sys_id': sys_id, 'p_num': p_num, 'text_cap': text_cap}
+        if volume_ie:
+            params['volume_ie'] = volume_ie
+        return await _call_tool(target, ctx, 'browse_manuscript_page', 'GET', '/chatgpt/browse',
+                                params=params, transform=_with_how_to_cite)
 
     return server
 

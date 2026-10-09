@@ -91,6 +91,9 @@ KIND_PGP = 'pgp'
 KIND_TRANSLATION = 'translation'
 KIND_USER = 'user'
 KIND_PENDING = 'pending'
+# A page cited with no transcription on it at all (`page_citation(...,
+# transcription_shown=False)`): nobody's text is credited, MiDRASH included.
+KIND_NONE = 'none'
 
 
 # ---------------------------------------------------------------------------
@@ -560,6 +563,7 @@ def page_citation(
     page_url: Optional[str] = None,
     retrieved_on=None,
     software: Optional[str] = None,
+    transcription_shown: bool = True,
 ) -> PageCitation:
     """The "how to cite this page" sentence.
 
@@ -567,6 +571,12 @@ def page_citation(
     automatic transcription -- and by default, since `version_info=None` means
     the plain HTR text -- while someone else's edition, translation or
     correction is credited to them instead.
+
+    `transcription_shown=False` is for a page served with no text at all (the
+    public API's `text_source: none`): the citation names the manuscript and the
+    site only, and credits no transcription -- not even MiDRASH, whose text was
+    not used. It must be asked for explicitly; `version_info=None` keeps meaning
+    "the automatic transcription", and passing both is refused.
 
     This module never reads the clock: the surface passes `retrieved_on`. Not
     fastidiousness -- an accessed-date is a property of the READER's visit, so
@@ -587,6 +597,11 @@ def page_citation(
             'pass software= OR page_url=/retrieved_on=, never both '
             '(got software=%r, page_url=%r, retrieved_on=%r)'
             % (software, page_url, retrieved_on))
+    if not transcription_shown and version_info is not None:
+        raise ValueError(
+            'a page with no transcription shown has no transcription to credit: '
+            'pass version_info OR transcription_shown=False, never both '
+            '(got version_info=%r)' % (version_info,))
 
     labels = _labels(lang)
     clauses = []
@@ -619,12 +634,15 @@ def page_citation(
         clauses.append(where)
 
     text = '. '.join(clauses)
-    source = _source_clause(version_info, lang)
+    source = _source_clause(version_info, lang) if transcription_shown else ''
     if source:
         text = '%s, %s %s' % (text, labels['using'], source)
     if not text.endswith('.'):
         text += '.'
 
+    if not transcription_shown:
+        return PageCitation(heading=labels['how_to_cite'], text=text,
+                            credits_midrash=False, kind=KIND_NONE)
     credit = resolve_transcription_credit(version_info, lang=lang)
     return PageCitation(
         heading=labels['how_to_cite'],
