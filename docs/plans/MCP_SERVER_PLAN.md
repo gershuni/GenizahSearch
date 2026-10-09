@@ -120,7 +120,15 @@ the facade runs. `_mark_chatgpt` keeps an existing `mcp` value instead of overwr
 `api_channel` recognizes `mcp`/`mcp_job`. The marker is never derived from a header or a tool
 argument; external callers cannot reach the wrapper. Because the facade emits no event for job
 admission refusals, polls or details, the adapter records its own `mcp_tool_call` event per call:
-tool, HTTP status, error code, duration, and the `clientInfo.name` label if present.
+tool, HTTP status, error code, duration, the **negotiated protocol version**, and the
+`clientInfo.name` label if present.
+
+**Mode meanings are an acceptance requirement.** In the spike ChatGPT guessed what each search mode
+means, partly wrongly. The `search_manuscripts` description and the server instructions define every
+mode in one line, from the implementation rather than the API schema (whose "variants
+(morphological)" is itself misleading: the variant tiers are letter-confusion spellings). `responsa`
+is the Responsa-Project query syntax and its expansion options, not a filter for responsa
+literature.
 
 ## 5. Instructions and credits
 
@@ -187,7 +195,8 @@ fetches. Re-check every row against the live pages before submitting.
 
 | Requirement | What we need | Src |
 |---|---|---|
-| Submit | Developer portal (`claude.ai/directory/manage` → MCP connector); any paid Claude plan; no verified status needed for an authless server | o |
+| Submit | Developer portal (`claude.ai/directory/manage` → MCP connector). **Pro/Max: from your own account. Team/Enterprise: an Owner** (Enterprise: or a custom role with the Directory permission). **The listing belongs to the organization you submit from.** Free accounts cannot submit. No verified status needed for an authless server. Connectors are scanned and listed as Community by default; Anthropic may escalate to Verified review | o |
+| Plugin bundle (optional) | Anthropic recommends also submitting a plugin bundle whose skills teach Claude to use the connector, from a **public GitHub repo**, paired with the connector when both come from the same organization | o |
 | Auth | "No authentication for public data" is allowed | o |
 | Tools | Every tool has a **`title`** and **`readOnlyHint` or `destructiveHint`** | o |
 | Listing | Documentation URL; privacy-policy URL | o |
@@ -222,7 +231,7 @@ own help page did not surface; verify before writing setup steps)
 |---|---|---|
 | Tue 10-13 | **Spike.** Pin a concrete SDK release (v2 line) and its server API; add to `requirements.txt`/lock; confirm it resolves against fastapi 0.135.1 / starlette 0.52.1 / pydantic 2.12.5 / nicegui 3.8.0. Register a one-tool server as an exact `Route('/mcp')`, manager in the host lifespan, `Host` allow-list set, subscriptions disabled; record which protocol generation each client actually sends. Call it from MCP Inspector and Claude Code locally. **Then real clients:** with owner approval, a temporary Cloudflare quick tunnel to the local server, added once in ChatGPT developer mode and once as a Claude custom connector, closed afterwards. | Inspector and both real clients get a real `get_capabilities` result; `run_local_tests.py` green. If the owner declines the tunnel, real-client compatibility is proven only at the dark deploy (10-28), and the plan says so. If deps conflict, switch to D1's fallback here. |
 | Fri 10-23 | **Build.** All six tools with §4's annotations and descriptions; server instructions; `how_to_cite` with the helper's new no-transcription option (§5.3); flag + readiness; telemetry (§4); D9 serialization-aware page budgets and the final-response guard; `Host`/`Origin` checks. **Session bypass for `/mcp` in both** `_CacheSafeSessionMiddleware` **and** `_CacheSafeRequestTrackingMiddleware` (`web/framework_patches.py`), through a separate session-free predicate, not the public-cacheable-asset one. **Public pages:** privacy policy covering MCP, terms of use (new; Claude drafts, owner approves, §10.4), new `/support` page, `/.well-known/openai-apps-challenge`, icon. All name Hillel Gershuni as operator (D7). **Plugin package:** manifest, MCP configuration, `SKILL.md` from `instructions.md`; validate it locally. Docs: `docs/SEARCH_API.md` (contract doc; header date gated by `check_docs.py`), `integrations/mcp/README.md`, `docs/guides/ENV_VARS.md`, CLAUDE.md flag table. PR with Codex review. | §8's tests pass and each is shown able to fail; ruff clean; `check_docs.py` clean. |
-| Wed 10-28 | **Deploy dark.** Web deploy with `MCP_ENABLED=1`, not announced. Run `integrations/mcp/acceptance-tests.md` in ChatGPT developer mode and as a Claude custom connector, English and Hebrew, **from each account type we will tell users to use** (at least ChatGPT Plus and Claude Free). Install the plugin package as a private plugin and run the same tests through it. `smoke_test.py` against production. | Every acceptance case recorded pass/fail with transcripts, including whether ChatGPT asks to confirm each search; Cloudflare not challenging OpenAI/Anthropic egress. |
+| Wed 10-28 | **Deploy dark.** Web deploy with `MCP_ENABLED=1`, not announced. Run `integrations/mcp/acceptance-tests.md` in ChatGPT (Settings → Plugins → + → Add custom MCP server) and as a Claude custom connector (from a personal Pro/Max account or with an org Owner), English and Hebrew, **from each account type we will tell users to use** (at least ChatGPT Plus and Claude Free). Install the plugin package as a private plugin and run the same tests through it. `smoke_test.py` against production. | Every acceptance case recorded pass/fail with transcripts, including whether ChatGPT asks to confirm each search; Cloudflare not challenging OpenAI/Anthropic egress. |
 | Fri 10-30 | **Submit.** OpenAI: plugin package, 5 positive + 3 negative test cases from the acceptance tests, demo video from the dark deploy, domain verification, release notes. Anthropic: connector listing with documentation URL. | Submission confirmations; automated scans passed. |
 | Nov | Review fixes as they come. Buffer: ~6 weeks before retirement. **After approval, publish explicitly** (approval alone does not list it). | Listed and reachable by search in both directories. |
 | Nov | **Gemini (best effort, owner 2026-10-09).** Publish a Gemini CLI extension (public repo with `gemini-extension.json` pointing at `/mcp`) to its gallery. Run the acceptance tests in the Gemini web app only if someone with an eligible account (US, personal, paid tier) can do it; otherwise the `/ai` Gemini steps say "reported to work" and name the eligibility limits. | Extension listed; Gemini app result recorded or marked untested. |
@@ -253,14 +262,51 @@ in-process call is listed in its `EXEMPT` with a reason) and the known batch-onl
   off; production has them on.)
 - **claude.ai: not testable from the owner's account** — it belongs to an organization, and
   "Ask an organization owner to add this for your team". Consequences: (a) `/ai` setup steps
-  must say that Team/Enterprise members need their org owner; (b) **check before 10-30 whether
-  this account can submit to the Anthropic directory at all**, or whether a personal paid Claude
-  account is needed (D7 says personal publisher).
+  must say that Team/Enterprise members need their org owner; (b) **directory submission: only
+  an Owner can submit from a Team/Enterprise account, and the listing belongs to that
+  organization** (§6). Under D7 (personal publisher) that means a personal Pro/Max account —
+  owner decision pending. The claude.ai client stays an explicit untested gate for the dark deploy.
 - **Claude Code (Anthropic's MCP client): works** — a one-off headless run with a temporary
   `--mcp-config` (no persistent config) called `get_capabilities` through the tunnel and returned
   the six modes and API 9.6.0. Evidence for Anthropic's client, not for the claude.ai web client.
 - Which protocol generation ChatGPT used is not visible in the server log → the `mcp_tool_call`
   event (§4) records the negotiated protocol version.
+
+**Build order** (Codex consultation on the spike, 2026-10-09; spike code verdict SHIP WITH
+FIXES). `MCP_ENABLED` stays off by default throughout. Each commit carries its own §8 tests **and
+their mutations with the recorded red result**, not saved for the end.
+
+1. **Isolated registration + transport tests.** Bind the facade per server (the spike's module
+   global let a second registered app answer for the first); validate `Host`/`Origin` before the
+   slash redirect; spell out bare and default-port host forms (`localhost`, `[::1]`,
+   `genizahsearch.com:443`). New `tests/test_mcp_http.py`: flag/readiness 404s, exact route, 307,
+   404, 405s, subscriptions, allowed/rejected hosts, lifespan enter/exit, two-app isolation.
+2. **No sessions for MCP.** Separate session-free predicate in both middleware classes
+   (`web/framework_patches.py`), covering `/mcp` and its slash redirect, not the cacheable-asset
+   one. Tests: no cookie and no user storage on success, error and redirect; browser sessions
+   unchanged.
+3. **Error and telemetry contract.** Tool errors become one JSON text block with code, message,
+   original status and `Retry-After` when present, `isError: true` (the spike's `ToolError` kept
+   them only inside SDK-prefixed text); private channel wrapper, `_mark_chatgpt` preserves `mcp`,
+   `api_channel` knows `mcp`/`mcp_job`, one `mcp_tool_call` per call with the protocol version.
+   GPT channels unchanged.
+4. **D9 size budgets** before any large result is exposed: channel read in `run()` before the
+   thread handoff, `build_pages(page_bytes)`, details budget at page selection (cached snapshots
+   included), storage accounting in real bytes, final guard incl. request ID and metadata. GPT
+   output byte-identical.
+5. **Citations + browse tool:** `page_citation` no-transcription keyword (default unchanged,
+   existing callers byte-identical), `how_to_cite` from `text_source`, browse tool.
+6. **The other four tools + instructions:** search, passage parallels, job retrieval, details;
+   descriptions with mode meanings; `integrations/mcp/server_instructions.md`; polling, pending
+   IDs, pagination, capacity limits, cancellation, shutdown; the all-six-tools wire-size matrix.
+7. **Public pages and assets:** privacy generalized (old GPT URL kept), terms (only after the
+   owner approves the draft), `/support`, icon, `/.well-known/openai-apps-challenge`.
+8. **Package, document, close the Build gates:** plugin manifest + MCP config + skill, README,
+   acceptance tests, smoke client, `docs/SEARCH_API.md`, `ENV_VARS.md`, CLAUDE.md; full §8 suite,
+   ruff, `check_docs.py`. Live client tests wait for the dark deploy.
+
+Commits 1-3 touch shared code only behind the flag or additively; 4 and 5 change code the live GPT
+uses, so their "GPT output byte-identical" tests are the gate.
 
 **If OpenAI's review isn't done by 12-04:** `/ai` gives the MCP URL with setup steps for the
 account types that passed the dark-deploy fallback test, and says plainly which accounts cannot
@@ -290,6 +336,9 @@ HTTP tests through the real outer app, its middleware and its lifespan (pattern:
   produces the same explicit error.
 - Flag on, checked **without** following redirects: `POST /mcp` → 200; `/mcp/` → 307 to `/mcp`;
   `/mcp/mcp` → 404; site routes after `/mcp` still answer.
+- **Host/Origin are validated before routing can redirect**: `POST /mcp/` with a disallowed `Host`
+  → 421, never a 307 to that host (the spike redirected to `http://evil.invalid/mcp`); with an
+  allowed host, the 307 `Location` is `https://` behind the proxy.
 - `GET /mcp` and `DELETE /mcp` → 405, and a `subscriptions/listen` request cannot hold open an
   SSE stream.
 - Flag off ⇒ 404; flag on with the facade not registered ⇒ 404.
@@ -344,6 +393,9 @@ Answered 2026-10-09:
    and images keep their makers' and libraries' rights (MiDRASH, PGP, FGP, holding libraries);
    usage limits apply and bulk scraping is not allowed; provided free and as is, may change or
    stop. Governing law (Israel or none): ask at draft review.
+6. **Claude directory account (2026-10-09):** the owner submits from his **personal** Claude
+   Pro/Max account (not the organization account he works in), so the listing is his, matching
+   D7. The same account runs the claude.ai acceptance tests at the dark deploy.
 5. **Spike tunnel:** approved, about an hour. Installing `cloudflared` (not on this machine) is a
    download that is asked for separately at spike time.
 
@@ -392,3 +444,14 @@ the route is restricted to `methods=['POST']`, which is what produces the promis
 Starlette 0.52.1 that the restricted route returns 405 for GET/DELETE and that removing the
 restriction forwards both; DELETE → 405 is permitted by the 2025-11-25 spec and recommended by
 2026-07-28.
+
+**Build consultation (Codex, 2026-10-09, on spike commit 59e731ec): SHIP WITH FIXES.** Spike-code
+findings folded into the build order (§7): error metadata reduced to text (MED), slash redirect
+before Host/Origin validation (MED, reproduced by Claude: `307 → http://evil.invalid/mcp`), MCP
+creating browser sessions (MED, planned build item), MCP not yet distinguishable from GPT traffic
+(MED, planned), module-global facade (LOW), host spellings (LOW), no committed MCP tests (MED).
+Confirmed sound: the lifespan nesting (NiceGUI startup → MCP manager → serve → manager exits →
+NiceGUI shutdown), route placement, and per-call ASGI transports. Plan changes: Anthropic
+submission eligibility (§6; verified by Claude on claude.com/docs/directory/publish), mode
+meanings as an acceptance requirement and protocol version in telemetry (§4), the redirect/Host
+test (§8), the ChatGPT Plugins path (§7).
