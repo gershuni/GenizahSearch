@@ -325,6 +325,13 @@ CODE_INDEX.md). Full local suite: 14,922 passed, 0 failed. **Next: the dark depl
 the real-client acceptance tests and submission. The Gemini gallery needs the extension at the
 root of its own public repository tagged `gemini-cli-extension`.
 
+**Reviewed (2026-10-10):** Codex reviewed builds 7-8: DO NOT SHIP (the privacy text omitted that
+server logs can hold search text; the OpenAI package lacked `$schema`; the Claude directory's
+whole-repository size limit) → `91f6fbfb`; verification DO NOT SHIP (the new log sentence was
+over-specific) → `970b1bef`; verification **SHIP** on `970b1bef`. The Claude plugin and the Gemini
+extension now ship from one small separate public repository written by
+`build_packages.py --export`.
+
 **If OpenAI's review isn't done by 12-04:** `/ai` gives the MCP URL with setup steps for the
 account types that passed the dark-deploy fallback test, and says plainly which accounts cannot
 add a custom server. It does not promise access to everyone.
