@@ -1,6 +1,6 @@
 # GenizahSearch - Plans Index
 
-**Last Updated:** 2026-09-30
+**Last Updated:** 2026-10-08
 
 ---
 
@@ -8,6 +8,7 @@
 
 | Plan | Status | Description |
 |------|--------|-------------|
+| [MCP_SERVER_PLAN.md](MCP_SERVER_PLAN.md) | Codex SHIP (rev. 5, 2026-10-08); owner decisions recorded 2026-10-09; spike next | Public MCP server at `/mcp` over the `/api/chatgpt` facade, replacing the GenizahSearch GPT before OpenAI retires GPTs on 2026-12-11; ChatGPT plugin + Claude connector listings |
 | [SEARCH_PERF_HANDOFF.md](SEARCH_PERF_HANDOFF.md) | In progress (step 1 on `ccr-b3b8c7ac-jyxlw3`) | Desktop search ~28 s -> index is 0.24 s of it; per-hit Python loop, duplicates, silent 50,000 cap; next steps + equivalence tool |
 | [MOBILE_RESPONSIVE_PLAN.md](MOBILE_RESPONSIVE_PLAN.md) | Planned | Mobile/tablet responsive design |
 | [JOIN_FINDER_IMPLEMENTATION_PLAN.md](JOIN_FINDER_IMPLEMENTATION_PLAN.md) | Planned | Direction-aware join finder, caching, and manuscript-view UI |

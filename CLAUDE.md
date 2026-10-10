@@ -158,6 +158,7 @@ Never treat a flag alone as proof a feature is live.
 | `IDENTIFICATION_REVIEWS_ENABLED` | `true` | community identification reviews (beta) | — |
 | `FGP_TRANSCRIPTIONS_ENABLED` | `true` | FGP transcriptions as a version-chooser source | presence of `fgp_data/` |
 | `WEB_PUZZLE_ENABLED` | `true` | the web Fragment Puzzle page | — |
+| `MCP_ENABLED` | `false` | the public MCP server at `POST /mcp` (replaces the GPT; `docs/plans/MCP_SERVER_PLAN.md`) | the `/api/chatgpt` facade being registered |
 | `SEARCH_API_MODE` | `open` | the public API (`open`/`localhost-only`/`disabled`) | — |
 
 Four more you will hit directly while working:

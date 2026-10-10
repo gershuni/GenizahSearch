@@ -11,6 +11,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 
 from shared.manuscript_details import SECTIONS, load_section
+from web.api_hardening import API_CHANNEL_SCOPE_KEY
+from web.chatgpt_pagination import MCP_PAGE_BYTES, mcp_escaped_size
 
 MAX_SECTION_BYTES = 1024 * 1024
 MAX_CACHE_BYTES = 8 * 1024 * 1024
@@ -20,6 +22,9 @@ TTL = 600
 WAIT_SECONDS = 10
 PAGE_BYTES = 70000
 PAGE_ROWS = 10
+# MCP: records' escaped size, leaving room for this response's own envelope and
+# warnings once escaped (web/chatgpt_pagination.py, MCP_SERVER_PLAN.md D9).
+MCP_DETAILS_RECORD_BYTES = MCP_PAGE_BYTES - 8_000
 
 
 def encode(value):
@@ -118,13 +123,23 @@ def register_manuscript_details(app, owner, loader=load_web_section, limiter=Non
         rows = record['rows']
         if offset > len(rows) or (offset == len(rows) and offset != 0):
             return error('invalid_offset', 'Follow next_offset from the preceding page.', 400)
+        # The page budget is the caller's, chosen here at page selection so that a
+        # cached snapshot serves GPT and MCP callers alike (MCP_SERVER_PLAN.md D9).
+        if request.scope.get(API_CHANNEL_SCOPE_KEY) == 'mcp':
+            record_bytes, measure = MCP_DETAILS_RECORD_BYTES, mcp_escaped_size
+        else:
+            record_bytes, measure = PAGE_BYTES, len
         selected = []
         size = 0
         for raw in rows[offset:offset + PAGE_ROWS]:
-            if size + len(raw) > PAGE_BYTES:
+            if size + measure(raw) > record_bytes:
                 break
             selected.append(json.loads(raw))
-            size += len(raw)
+            size += measure(raw)
+        if rows[offset:] and not selected:
+            # Only reachable under the MCP budget: prepare_section caps every row at
+            # PAGE_BYTES. An empty page would repeat this offset forever.
+            return error('details_too_large', 'A single record exceeds this client\'s transfer allowance; consult the website.', 503)
         next_offset = offset + len(selected)
         warnings = [{'code': 'local_source_coverage', 'message':
                      'Local records only, not an exhaustive bibliography. Empty results do not establish absence; legacy source lookups may also return no rows on failure.'}]

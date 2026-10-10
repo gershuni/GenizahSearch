@@ -152,9 +152,13 @@ def _job_owner(request):
 
 
 def _mark_chatgpt(request):
-    """Label the request so the shared handlers' telemetry counts it as GPT traffic."""
+    """Label the request so the shared handlers' telemetry counts it as GPT traffic.
+
+    Keeps a marker already present: the MCP adapter (web/mcp_server.py) calls these
+    same routes in-process and has already labelled its requests 'mcp'.
+    """
     from web.api_hardening import API_CHANNEL_SCOPE_KEY
-    request.scope[API_CHANNEL_SCOPE_KEY] = 'chatgpt'
+    request.scope.setdefault(API_CHANNEL_SCOPE_KEY, 'chatgpt')
 
 
 def register_chatgpt_api(app):

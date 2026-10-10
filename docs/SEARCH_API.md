@@ -1,6 +1,6 @@
 # GenizahSearch Search-Helper API
 
-> Contract `schema_version: 1` · Verified against site release 9.2.0 · Last updated: 2026-10-03
+> Contract `schema_version: 1` · Verified against site release 9.2.0 · Last updated: 2026-10-10
 
 The **site release** above is the GenizahSearch version this document was last checked
 against — it is NOT a separate API version, and it does not gate what is true. The
@@ -1572,3 +1572,62 @@ Browse metadata additionally includes `metadata.pgp.transcription_source` and
 `doc_relation` for the selected PGP document, when supplied. Match other PGP/FGP
 credits to the document and page scope; do not attribute a displayed transcription
 to every scholar listed for the manuscript.
+
+## MCP server
+
+**Status: built on branch `feat/mcp-server`, not yet deployed.** Production answers `/mcp` with 404
+until it is deployed with `MCP_ENABLED=1`; this section describes that build so integrators and
+reviewers read one contract. Plan and decisions: `docs/plans/MCP_SERVER_PLAN.md`.
+
+`POST https://genizahsearch.com/mcp` is a public, authless [Model Context Protocol](https://modelcontextprotocol.io)
+server for ChatGPT (as a plugin), Claude (as a connector), Gemini and other MCP clients. It is a thin
+adapter over the `/api/chatgpt` facade above: the same handlers, limits and research jobs, called
+in-process as the visitor who made the call.
+
+- **Transport:** Streamable HTTP, stateless, JSON responses; both protocol generations (2025-11-25
+  with its initialize handshake, and 2026-07-28). `GET` and `DELETE /mcp` answer 405; `/mcp/`
+  redirects to `/mcp` (307) only after the Host/Origin check. No sessions, no subscriptions, no
+  cookies.
+- **Requests:** at most 64 KiB; a string `id` of at most 128 characters; method and tool names of at
+  most 64; an argument a tool does not declare is refused (`unknown_argument`) rather than dropped;
+  integer arguments are strict (`true` or `"5"` is refused).
+- **Replies:** at most 100,000 bytes, measured as the negotiated protocol serializes them (the
+  2026-07-28 serializer escapes non-ASCII, roughly tripling Hebrew), so MCP result pages hold fewer
+  candidates than the GPT's. A larger reply becomes `mcp_response_too_large`, never a truncation.
+
+| Tool | Facade route | Annotations |
+| --- | --- | --- |
+| `get_capabilities` | `GET /api/chatgpt/capabilities` | read-only |
+| `search_manuscripts` | `POST /api/chatgpt/search/jobs`, then polls | starts a job (`readOnlyHint=false`, not idempotent) |
+| `find_passage_parallels` | `POST /api/chatgpt/parallels/jobs` (`method=passage` fixed), then polls | starts a job |
+| `get_research_job` | `GET /api/chatgpt/jobs/{job_id}` | read-only |
+| `browse_manuscript_page` | `GET /api/chatgpt/browse`, plus `how_to_cite` | read-only |
+| `get_manuscript_details` | `GET /api/chatgpt/manuscript-details` | builds a snapshot (`readOnlyHint=false`, idempotent) |
+
+The two job tools wait inside the call for up to three facade polls; they return page 0 if the job
+finishes, or `job_id` with `next_action: get_research_job` if not. `how_to_cite` gives the page
+citation in English and Hebrew from `shared/transcription_credits.py`, crediting whoever made the text
+served (`text_source`): the PGP edition, MiDRASH for the automatic transcription, or nobody when no
+text was served.
+
+**Errors** come in three kinds:
+
+1. **Tool errors** -- a tool result with `isError: true` and one JSON text block
+   `{"error": {"code", "message", "http_status", "retry_after_seconds"?, "job_id"?}}`, carrying the
+   facade's own code and message. `adapter_exception` (status 500) means the tool failed inside the
+   server. A result too large for the bound is `{"error": {"code": "mcp_response_too_large",
+   "message", "response_bytes", "limit_bytes"}}`, with no `http_status`.
+2. **Argument errors** -- an invalid argument value comes back from the SDK as a tool result with
+   `isError: true` and plain text naming the argument.
+3. **Refused requests** -- HTTP 400 or 413 with a JSON-RPC error `{"code": -32600, "message":
+   "Request refused: <reason>."}`, where reason is `request_too_large`, `request_id_too_long`,
+   `method_too_long`, `tool_name_too_long` or `unknown_argument`; and a reply the server would have
+   sent over the bound becomes a JSON-RPC error `-32603` "Reply refused: mcp_response_too_large".
+
+**Telemetry** (best-effort; sampled when `SEARCH_API_POSTHOG_SAMPLE_N` > 1): facade events carry
+`channel: mcp` / `mcp_job`; a tool call adds one `mcp_tool_call` event (tool, status, error code,
+latency bucket, negotiated protocol version, the client's self-reported name when it sends one,
+hashed IP; never arguments or results).
+
+Publisher pages for the listings: [terms](https://genizahsearch.com/terms),
+[support](https://genizahsearch.com/support), [privacy](https://genizahsearch.com/ai/privacy).

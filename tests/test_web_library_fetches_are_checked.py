@@ -67,6 +67,9 @@ EXEMPT = {
         'PostHog analytics: a fixed capture URL, the response is not read',
     ('web/supabase_client.py', 'change_password'):
         "Supabase auth: the app's own backend at the fixed SUPABASE_URL",
+    ('web/mcp_server.py', '_facade'):
+        "MCP adapter: an in-process ASGI call (httpx.ASGITransport) into this app's own "
+        '/api sub-app; it never opens a network connection',
 }
 
 # Modules the scan must reach (a closure that misses them proves nothing).

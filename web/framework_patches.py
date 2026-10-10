@@ -66,13 +66,33 @@ def _is_public_cacheable_asset_path(path: str) -> bool:
     )
 
 
+# The public MCP endpoint (web/mcp_server.py: MCP_PATH and its slash redirect), and the
+# static pages the AI-directory listings link to (web/public_pages.py). MCP clients are
+# servers, and crawlers read the legal pages without cookies: a session would be
+# discarded, and NiceGUI would create user storage for every request. NOT cacheable
+# assets -- tool results must never be cached -- so this is a separate predicate. Kept as
+# literals so this module imports neither the MCP SDK nor the pages; tests pin them
+# (tests/test_mcp_sessions.py, tests/test_public_pages.py).
+_SESSION_FREE_PATHS = frozenset({'/mcp', '/mcp/', '/terms', '/support', '/ai/privacy',
+                                 '/.well-known/openai-apps-challenge'})
+
+
+def _is_session_free_path(path: str) -> bool:
+    """Return whether ``path`` must never read, create or reissue a session."""
+    return path in _SESSION_FREE_PATHS
+
+
+def _skips_session(path: str) -> bool:
+    return _is_public_cacheable_asset_path(path) or _is_session_free_path(path)
+
+
 class _CacheSafeSessionMiddleware(_StarletteSessionMiddleware):
-    """Bypass cookie parsing/signing only for known-public immutable assets."""
+    """Bypass cookie parsing/signing for known-public assets and session-free endpoints."""
 
     async def __call__(self, scope, receive, send) -> None:
         if (
             scope.get('type') == 'http'
-            and _is_public_cacheable_asset_path(scope.get('path', ''))
+            and _skips_session(scope.get('path', ''))
         ):
             await self.app(scope, receive, send)
             return
@@ -96,14 +116,14 @@ def _validate_session_id(scope) -> None:
 
 
 class _CacheSafeRequestTrackingMiddleware(_NiceGUIRequestTrackingMiddleware):
-    """Skip NiceGUI user storage for public asset requests; validate the session id otherwise.
+    """Skip NiceGUI user storage for public assets and session-free endpoints; validate the session id otherwise.
 
     ``web.session_hardening.require_session_id_validation()`` refuses to start
     the web app unless this class is the one NiceGUI installs.
     """
 
     async def dispatch(self, request, call_next):
-        if _is_public_cacheable_asset_path(request.url.path):
+        if _skips_session(request.url.path):
             # _CacheSafeSessionMiddleware bypassed these paths: no session in scope.
             return await call_next(request)
         _validate_session_id(request.scope)
