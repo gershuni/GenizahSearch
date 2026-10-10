@@ -10,7 +10,7 @@
 
 # Terms of Use — Dicta Genizah Search
 
-*Effective date: [OWNER: effective date]*
+*Effective date: 10.10.26*
 
 ## Who we are
 
@@ -20,7 +20,7 @@ web app, a Windows desktop app, a public Search API, and AI integrations — an 
 `https://genizahsearch.com/mcp` that ChatGPT, Claude, and Gemini users can connect to, and
 (for as long as it lasts) the GenizahSearch custom GPT in ChatGPT.
 
-GenizahSearch is published by Hillel Gershuni personally, with the support of Dicta — The
+GenizahSearch is published by Hillel Gershuni, with the support of Dicta — The
 Israel Center for Text Analysis.
 
 ## Acceptance
@@ -72,10 +72,6 @@ GenizahSearch is provided free of charge, as is, with no warranty of any kind. W
 guarantee the site, the desktop app, the Search API, or the AI integrations (the MCP server
 or the GPT) will always be available, accurate, or unchanged — any of them may change or stop
 without notice.
-
-## Governing law
-
-[OWNER: governing law — Israel, or omit?]
 
 ## Changes to these terms
 

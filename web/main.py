@@ -785,6 +785,10 @@ app.mount("/api", _search_helper_app)
 # before the page routes below; no route at all unless MCP_ENABLED and the facade.
 from web.mcp_server import register_mcp_server
 register_mcp_server(app, _search_helper_app)
+# The pages the AI-directory listings link to: /terms, /support, /ai/privacy, and
+# OpenAI's domain-verification file (served only when OPENAI_APPS_CHALLENGE is set).
+from web.public_pages import register_public_pages
+register_public_pages(app)
 
 # Serve static files for SEO images
 STATIC_DIR = os.path.join(os.path.dirname(__file__), 'static')
