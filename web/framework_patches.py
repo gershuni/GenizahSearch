@@ -66,13 +66,15 @@ def _is_public_cacheable_asset_path(path: str) -> bool:
     )
 
 
-# The public MCP endpoint (web/mcp_server.py: MCP_PATH and its slash redirect).
-# Its clients are servers, not browsers: a session cookie would be discarded, and
-# NiceGUI would create user storage for every call. NOT a cacheable asset -- tool
-# results must never be cached -- so it is a separate predicate. Kept as literals so
-# this module never imports the MCP SDK; tests/test_mcp_sessions.py pins them to
-# web.mcp_server.MCP_PATH.
-_SESSION_FREE_PATHS = frozenset({'/mcp', '/mcp/'})
+# The public MCP endpoint (web/mcp_server.py: MCP_PATH and its slash redirect), and the
+# static pages the AI-directory listings link to (web/public_pages.py). MCP clients are
+# servers, and crawlers read the legal pages without cookies: a session would be
+# discarded, and NiceGUI would create user storage for every request. NOT cacheable
+# assets -- tool results must never be cached -- so this is a separate predicate. Kept as
+# literals so this module imports neither the MCP SDK nor the pages; tests pin them
+# (tests/test_mcp_sessions.py, tests/test_public_pages.py).
+_SESSION_FREE_PATHS = frozenset({'/mcp', '/mcp/', '/terms', '/support', '/ai/privacy',
+                                 '/.well-known/openai-apps-challenge'})
 
 
 def _is_session_free_path(path: str) -> bool:

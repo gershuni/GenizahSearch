@@ -1,4 +1,5 @@
 {
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "genizahsearch",
   "version": "1.0.0",
   "description": "Search the Cairo Genizah manuscripts of Dicta Genizah Search: phrases, shelfmarks, passage parallels, manuscript pages with citations, and catalogue records.",
@@ -8,7 +9,8 @@
     "url": "https://genizahsearch.com"
   },
   "homepage": "https://genizahsearch.com/ai",
-  "skills": "./skills/",
+  "repository": "https://github.com/gershuni/GenizahSearch",
+  "license": "CC-BY-NC-SA-4.0",
   "extensions": {
     "com.openai": {
       "interface": {

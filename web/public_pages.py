@@ -39,6 +39,7 @@ async def openai_challenge():
 
 
 def register_public_pages(app) -> None:
+    # HEAD too: link checkers and directory validators use it (Codex, build 7-8 review).
     for path, source in PAGES.items():
-        app.add_api_route(path, _page(source), methods=['GET'], include_in_schema=False)
-    app.add_api_route(OPENAI_CHALLENGE_PATH, openai_challenge, methods=['GET'], include_in_schema=False)
+        app.add_api_route(path, _page(source), methods=['GET', 'HEAD'], include_in_schema=False)
+    app.add_api_route(OPENAI_CHALLENGE_PATH, openai_challenge, methods=['GET', 'HEAD'], include_in_schema=False)

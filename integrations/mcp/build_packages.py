@@ -3,14 +3,19 @@
     python integrations/mcp/build_packages.py --check          # what tests run
     python integrations/mcp/build_packages.py --write          # regenerate the skill files
     python integrations/mcp/build_packages.py --zip dist/genizahsearch-openai-plugin.zip
+    python integrations/mcp/build_packages.py --export dist/genizahsearch-ai-plugins
 
 One source of truth: integrations/mcp/server_instructions.md, which the MCP server itself
 sends. The Claude plugin's SKILL.md and the Gemini extension's GEMINI.md are generated
-from it (and committed, because both are published straight from a repository); the
-OpenAI plugin's skill is generated into its ZIP. --check fails when any generated file
-is stale or any manifest breaks a directory's documented limit (formats checked
-2026-10-10 against developers.openai.com/plugins, claude.com/docs/plugins and
-geminicli.com/docs/extensions).
+from it and committed; the OpenAI plugin's skill is generated into its ZIP; --export writes
+the separate small repository the Gemini gallery and the Claude directory need.
+
+--check enforces what is written in problems(), no more: stale generated files; the
+OpenAI manifests against the transcribed Agent Plugins 1.0.0 schemas plus the submission
+page's field limits; the Claude bundle's fields, remote server shape, README length and
+per-file limits; the Gemini manifest's name, version, server and context file; the icon.
+Formats checked 2026-10-10 against developers.openai.com/plugins, claude.com/docs/plugins
+and geminicli.com/docs/extensions; the directories' own validators remain the authority.
 """
 from __future__ import annotations
 
@@ -57,6 +62,42 @@ def gemini_text() -> str:
 
 GENERATED = {CLAUDE_SKILL: skill_text, GEMINI_CONTEXT: gemini_text}
 
+# The Agent Plugins 1.0.0 schemas OpenAI's portable format validates against, transcribed
+# 2026-10-10 from https://agent-plugins.org/schemas/1.0.0/{plugin,mcp}.schema.json (the
+# constraints this package touches; both roots are closed). Codex caught a package that
+# broke them -- no $schema, and a root `skills` key the closed root rejects.
+PLUGIN_SCHEMA = {
+    'type': 'object', 'required': ['$schema', 'name'], 'additionalProperties': False,
+    'properties': {
+        '$schema': {'const': 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json'},
+        'name': {'type': 'string', 'minLength': 1, 'maxLength': 64,
+                 'pattern': r'^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$'},
+        'version': {'type': 'string'}, 'description': {'type': 'string'},
+        'author': {'type': 'object', 'additionalProperties': False,
+                   'properties': {'name': {'type': 'string'}, 'email': {'type': 'string'},
+                                  'url': {'type': 'string'}}},
+        'homepage': {'type': 'string'}, 'repository': {'type': 'string'}, 'license': {'type': 'string'},
+        'keywords': {'type': 'array', 'items': {'type': 'string'}},
+        'extensions': {'type': 'object', 'additionalProperties': {'type': 'object'}},
+    },
+}
+_REMOTE_SERVER = {
+    'type': 'object', 'required': ['type', 'url'], 'additionalProperties': False,
+    'properties': {'type': {'enum': ['streamable-http', 'sse']}, 'url': {'type': 'string', 'minLength': 1},
+                   'headers': {'type': 'object', 'additionalProperties': {'type': 'string'}}},
+}
+MCP_SCHEMA = {
+    'type': 'object', 'required': ['$schema', 'mcpServers'], 'additionalProperties': False,
+    'properties': {'$schema': {'const': 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json'},
+                   'mcpServers': {'type': 'object', 'additionalProperties': _REMOTE_SERVER}},
+}
+
+
+def _schema_problems(document: dict, schema: dict, label: str) -> list[str]:
+    import jsonschema
+    validator = jsonschema.Draft202012Validator(schema)
+    return [f'{label}: {error.json_path}: {error.message}' for error in validator.iter_errors(document)]
+
 
 def _json(path: Path) -> dict:
     return json.loads(path.read_text(encoding='utf-8'))
@@ -75,6 +116,8 @@ def problems() -> list[str]:
         found.append(f'SKILL.md frontmatter does not parse to name and description: {meta}')
 
     openai = _json(PLUGIN / 'openai' / 'plugin.json')
+    found += _schema_problems(openai, PLUGIN_SCHEMA, 'openai plugin.json')
+    found += _schema_problems(_json(PLUGIN / 'openai' / 'mcp.json'), MCP_SCHEMA, 'openai mcp.json')
     interface = openai['extensions']['com.openai']['interface']
     if not re.fullmatch(r'[a-z0-9]+(-[a-z0-9]+)*', openai['name']) or len(openai['name']) > 64:
         found.append('openai plugin.json: name must be kebab-case, at most 64 characters')
@@ -105,6 +148,15 @@ def problems() -> list[str]:
     if [s.get('httpUrl') for s in gemini['mcpServers'].values()] != [MCP_URL] or \
             gemini.get('contextFileName') != 'GEMINI.md':
         found.append('gemini-extension.json: httpUrl at the MCP URL, contextFileName GEMINI.md')
+    if not re.fullmatch(r'[a-z0-9]+(-[a-z0-9]+)*', gemini.get('name', '')) or not gemini.get('version'):
+        found.append('gemini-extension.json: a lowercase dashed name and a version are required')
+
+    # The Claude directory validates the WHOLE repository (under 50 MiB archived, 256 MiB
+    # unpacked, fewer than 10,000 files), so the bundle is published from its own small
+    # repository (export_distribution); here, the per-file limits it holds for a reviewer.
+    for file in (PLUGIN / 'claude').rglob('*'):
+        if file.is_file() and (file.stat().st_size > 256 * 1024 or file.suffix not in ('.json', '.md')):
+            found.append(f'claude bundle: {file.relative_to(PLUGIN)} must be a text file under 256 KiB')
 
     from PIL import Image
     with Image.open(ICON) as icon:
@@ -134,11 +186,50 @@ def build_zip(target: Path) -> list[str]:
     return sorted(entries)
 
 
+DISTRIBUTION_README = """# GenizahSearch AI plugins
+
+Connect AI assistants to Dicta Genizah Search, a free research platform for the Cairo Genizah
+manuscripts at https://genizahsearch.com, through its public MCP server at
+https://genizahsearch.com/mcp (no account needed).
+
+- The repository root is a Gemini CLI extension (`gemini-extension.json`, `GEMINI.md`).
+- `claude-plugin/` is the Claude plugin: the connector plus a research skill.
+
+Generated from https://github.com/gershuni/GenizahSearch (`integrations/mcp/build_packages.py --export`);
+change the files there, not here. Support: https://genizahsearch.com/support. Privacy:
+https://genizahsearch.com/ai/privacy. Terms: https://genizahsearch.com/terms.
+"""
+
+
+def export_distribution(target: Path) -> list[str]:
+    """Write the small public repository the Gemini gallery and the Claude directory read.
+
+    Both need a repository of their own: the Gemini gallery reads gemini-extension.json
+    only at a repository ROOT, and the Claude directory validates the whole repository
+    (under 50 MiB archived, 256 MiB unpacked), which GenizahSearch far exceeds.
+    """
+    files = {
+        'README.md': DISTRIBUTION_README.encode('utf-8'),
+        'LICENSE': (ROOT / 'LICENSE').read_bytes(),
+        'gemini-extension.json': (PLUGIN / 'gemini' / 'gemini-extension.json').read_bytes(),
+        'GEMINI.md': gemini_text().encode('utf-8'),
+    }
+    for file in (PLUGIN / 'claude').rglob('*'):
+        if file.is_file():
+            files['claude-plugin/' + file.relative_to(PLUGIN / 'claude').as_posix()] = file.read_bytes()
+    for name, data in files.items():
+        path = target / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    return sorted(files)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--write', action='store_true')
     parser.add_argument('--zip', type=Path)
+    parser.add_argument('--export', type=Path, help='write the separate public distribution repository here')
     args = parser.parse_args()
     if args.write:
         write()
@@ -147,6 +238,8 @@ def main() -> int:
         print('PROBLEM:', problem)
     if args.zip and not found:
         print('built', args.zip, build_zip(args.zip))
+    if args.export and not found:
+        print('exported', args.export, export_distribution(args.export))
     if not found:
         print('packages OK')
     return 1 if found else 0

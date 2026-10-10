@@ -61,9 +61,43 @@ def test_the_published_terms_are_exactly_the_owner_approved_text(client):
 def test_the_privacy_policy_discloses_the_mcp_usage_record(client):
     text = client.get('/ai/privacy').text
     for phrase in ('https://genizahsearch.com/mcp', 'the tool name', 'MCP protocol version',
-                   'the name the client gives itself', 'never include tool arguments, search text, or results',
-                   'keeps no conversation state', 'Anthropic', 'Google'):
+                   'the name the client gives itself when it sends one',
+                   'never include tool arguments, search text, or results',
+                   'keeps no conversation state', 'Analytics are best-effort and may be sampled',
+                   'Anthropic', 'Google'):
         assert phrase in text, phrase
+
+
+def test_the_privacy_policy_discloses_that_search_text_reaches_the_diagnostic_log(client):
+    # Codex (build 7-8 review): the search engine logs each query's first 200 characters and
+    # its derived pattern at DEBUG into a size-rotated file. If that changes, change both.
+    engine = (ROOT / 'shared' / 'search_engine.py').read_text(encoding='utf-8')
+    assert 'Query: {query_str[:200]}' in engine
+    core = (ROOT / 'genizah_core.py').read_text(encoding='utf-8')
+    assert 'maxBytes=1_000_000, backupCount=3' in core
+    text = client.get('/ai/privacy').text
+    assert 'records the beginning of each search query (up to 200 characters)' in text
+    assert 'keeping about four megabytes in all' in text
+
+
+@pytest.mark.parametrize('path', ['/terms', '/support', '/ai/privacy'])
+def test_head_is_answered_like_get(client, path):
+    response = client.head(path)
+    assert response.status_code == 200 and response.headers['content-type'].startswith('text/html')
+
+
+def test_the_pages_never_create_a_browser_session():
+    from web.framework_patches import (_CacheSafeRequestTrackingMiddleware, _CacheSafeSessionMiddleware,
+                                       _SESSION_FREE_PATHS)
+    from web.public_pages import PAGES
+    assert set(PAGES) | {OPENAI_CHALLENGE_PATH} <= _SESSION_FREE_PATHS
+    app = FastAPI()
+    register_public_pages(app)
+    stack = _CacheSafeSessionMiddleware(_CacheSafeRequestTrackingMiddleware(app), secret_key='test-secret')
+    with TestClient(stack) as stacked:
+        for path in [*PAGES, OPENAI_CHALLENGE_PATH]:
+            response = stacked.get(path, headers={'Cookie': 'session=an-existing-cookie'})
+            assert 'set-cookie' not in response.headers, path
 
 
 def test_the_openai_challenge_is_served_only_when_configured(client, monkeypatch):
@@ -73,6 +107,7 @@ def test_the_openai_challenge_is_served_only_when_configured(client, monkeypatch
     response = client.get(OPENAI_CHALLENGE_PATH)
     assert response.status_code == 200 and response.text == 'token-from-openai-123'
     assert response.headers['content-type'].startswith('text/plain')
+    assert client.head(OPENAI_CHALLENGE_PATH).status_code == 200
 
 
 def test_the_directory_icon_is_a_512_pixel_square_png():

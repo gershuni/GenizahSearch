@@ -1610,13 +1610,24 @@ citation in English and Hebrew from `shared/transcription_credits.py`, crediting
 served (`text_source`): the PGP edition, MiDRASH for the automatic transcription, or nobody when no
 text was served.
 
-**Errors** are tool results with `isError: true` and one JSON text block:
-`{"error": {"code", "message", "http_status", "retry_after_seconds"?, "job_id"?}}` -- the facade's
-code and message unchanged. Argument-validation failures come back as plain text naming the argument.
+**Errors** come in three kinds:
 
-**Telemetry:** facade events carry `channel: mcp` / `mcp_job`; each tool call adds one
-`mcp_tool_call` event (tool, status, error code, latency bucket, negotiated protocol version, the
-client's self-reported name, hashed IP; never arguments or results).
+1. **Tool errors** -- a tool result with `isError: true` and one JSON text block
+   `{"error": {"code", "message", "http_status", "retry_after_seconds"?, "job_id"?}}`, carrying the
+   facade's own code and message. `adapter_exception` (status 500) means the tool failed inside the
+   server. A result too large for the bound is `{"error": {"code": "mcp_response_too_large",
+   "message", "response_bytes", "limit_bytes"}}`, with no `http_status`.
+2. **Argument errors** -- an invalid argument value comes back from the SDK as a tool result with
+   `isError: true` and plain text naming the argument.
+3. **Refused requests** -- HTTP 400 or 413 with a JSON-RPC error `{"code": -32600, "message":
+   "Request refused: <reason>."}`, where reason is `request_too_large`, `request_id_too_long`,
+   `method_too_long`, `tool_name_too_long` or `unknown_argument`; and a reply the server would have
+   sent over the bound becomes a JSON-RPC error `-32603` "Reply refused: mcp_response_too_large".
+
+**Telemetry** (best-effort; sampled when `SEARCH_API_POSTHOG_SAMPLE_N` > 1): facade events carry
+`channel: mcp` / `mcp_job`; a tool call adds one `mcp_tool_call` event (tool, status, error code,
+latency bucket, negotiated protocol version, the client's self-reported name when it sends one,
+hashed IP; never arguments or results).
 
 Publisher pages for the listings: [terms](https://genizahsearch.com/terms),
 [support](https://genizahsearch.com/support), [privacy](https://genizahsearch.com/ai/privacy).

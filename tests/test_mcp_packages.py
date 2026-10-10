@@ -55,9 +55,7 @@ def test_the_openai_zip_holds_the_manifest_server_skill_and_icon(tmp_path):
         assert archive.read('assets/icon.png') == packages.ICON.read_bytes()
 
 
-@pytest.mark.parametrize('field,value', [('displayName', 'G' * 31), ('shortDescription', 'S' * 31),
-                                         ('supportURL', 'http://genizahsearch.com/support')])
-def test_a_manifest_over_a_documented_limit_is_reported(tmp_path, monkeypatch, field, value):
+def copied_plugins(tmp_path, monkeypatch):
     plugin = tmp_path / 'plugin'
     for part in ('openai', 'claude', 'gemini'):
         source = packages.PLUGIN / part
@@ -66,10 +64,64 @@ def test_a_manifest_over_a_documented_limit_is_reported(tmp_path, monkeypatch, f
                 target = plugin / part / file.relative_to(source)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(file.read_bytes())
-    manifest_path = plugin / 'openai' / 'plugin.json'
-    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-    manifest['extensions']['com.openai']['interface'][field] = value
-    manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
     monkeypatch.setattr(packages, 'PLUGIN', plugin)
     monkeypatch.setattr(packages, 'GENERATED', {})
+    return plugin
+
+
+def edit_json(path, change):
+    document = json.loads(path.read_text(encoding='utf-8'))
+    change(document)
+    path.write_text(json.dumps(document), encoding='utf-8')
+
+
+@pytest.mark.parametrize('field,value', [('displayName', 'G' * 31), ('shortDescription', 'S' * 31),
+                                         ('supportURL', 'http://genizahsearch.com/support')])
+def test_a_manifest_over_a_documented_limit_is_reported(tmp_path, monkeypatch, field, value):
+    plugin = copied_plugins(tmp_path, monkeypatch)
+    edit_json(plugin / 'openai' / 'plugin.json',
+              lambda m: m['extensions']['com.openai']['interface'].__setitem__(field, value))
     assert any(field in problem for problem in packages.problems())
+
+
+@pytest.mark.parametrize('file,change,expected', [
+    # Codex (build 7-8 review): the package shipped without $schema and with a root `skills`.
+    ('plugin.json', lambda m: m.pop('$schema'), "'$schema' is a required property"),
+    ('plugin.json', lambda m: m.__setitem__('skills', './skills/'), "'skills' was unexpected"),
+    ('plugin.json', lambda m: m['author'].__setitem__('phone', '1'), "'phone' was unexpected"),
+    ('mcp.json', lambda m: m.pop('$schema'), "'$schema' is a required property"),
+    ('mcp.json', lambda m: m['mcpServers']['genizahsearch'].__setitem__('type', 'http'), "'http' is not one of"),
+], ids=['no-schema', 'root-skills', 'author-extra', 'mcp-no-schema', 'mcp-wrong-type'])
+def test_the_openai_manifests_are_validated_against_the_agent_plugins_schemas(tmp_path, monkeypatch,
+                                                                              file, change, expected):
+    plugin = copied_plugins(tmp_path, monkeypatch)
+    edit_json(plugin / 'openai' / file, change)
+    assert any(expected in problem for problem in packages.problems()), packages.problems()
+
+
+@pytest.mark.parametrize('key', ['name', 'version'])
+def test_the_gemini_manifest_needs_a_name_and_version(tmp_path, monkeypatch, key):
+    plugin = copied_plugins(tmp_path, monkeypatch)
+    edit_json(plugin / 'gemini' / 'gemini-extension.json', lambda m: m.pop(key))
+    assert any('name and a version are required' in problem for problem in packages.problems())
+
+
+def test_a_binary_file_in_the_claude_bundle_is_reported(tmp_path, monkeypatch):
+    plugin = copied_plugins(tmp_path, monkeypatch)
+    (plugin / 'claude' / 'logo.ico').write_bytes(b'\x00\x01')
+    assert any('logo.ico' in problem for problem in packages.problems())
+
+
+def test_the_distribution_repository_fits_both_directories(tmp_path):
+    target = tmp_path / 'dist-repo'
+    names = packages.export_distribution(target)
+    assert {'gemini-extension.json', 'GEMINI.md', 'README.md', 'LICENSE',
+            'claude-plugin/.claude-plugin/plugin.json', 'claude-plugin/.mcp.json', 'claude-plugin/README.md',
+            f'claude-plugin/skills/{packages.SKILL_NAME}/SKILL.md'} == set(names)
+    files = [path for path in target.rglob('*') if path.is_file()]
+    # Claude: the whole repository under 256 MiB unpacked and 10,000 files (50 MiB archived
+    # is implied); every plugin-folder file under 256 KiB. Gemini: the manifest at the root.
+    assert sum(path.stat().st_size for path in files) < 256 * 1024 * 1024 and len(files) < 10_000
+    assert all(path.stat().st_size < 256 * 1024 for path in (target / 'claude-plugin').rglob('*') if path.is_file())
+    assert json.loads((target / 'gemini-extension.json').read_text(encoding='utf-8'))['contextFileName'] == 'GEMINI.md'
+    assert (target / 'GEMINI.md').read_text(encoding='utf-8') == packages.gemini_text()

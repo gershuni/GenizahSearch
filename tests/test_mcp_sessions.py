@@ -32,7 +32,7 @@ EXISTING_COOKIE = {'Cookie': 'session=an-existing-cookie-must-not-be-read-or-rei
 
 
 def test_mcp_paths_are_session_free_but_never_cacheable():
-    assert {mcp_server.MCP_PATH, mcp_server.MCP_PATH + '/'} == patches._SESSION_FREE_PATHS
+    assert {mcp_server.MCP_PATH, mcp_server.MCP_PATH + '/'} <= patches._SESSION_FREE_PATHS
     for path in ('/mcp', '/mcp/'):
         assert _is_session_free_path(path)
         assert not _is_public_cacheable_asset_path(path)

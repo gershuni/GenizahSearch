@@ -27,9 +27,15 @@ escapes non-ASCII. `/mcp` never touches browser sessions (`web/framework_patches
 | `terms.html`, `support.html` | Served at `/terms` and `/support` (`web/public_pages.py`). |
 | `TERMS_DRAFT.md` | The owner-approved terms text; `tests/test_public_pages.py` checks `/terms` carries it word for word. |
 | `plugin/openai/` | The ChatGPT plugin manifest (`plugin.json`) and server reference (`mcp.json`). |
-| `plugin/claude/` | The Claude plugin bundle (`.claude-plugin/plugin.json`, `.mcp.json`, skill, README); submit with plugin path `integrations/mcp/plugin/claude`. |
-| `plugin/gemini/` | The Gemini CLI extension; the gallery needs it at the ROOT of its own public repo tagged `gemini-cli-extension`. |
-| `build_packages.py` | Generates the skills from `server_instructions.md`, checks every manifest against the directories' limits, and builds the ChatGPT plugin ZIP. |
+| `plugin/claude/` | The Claude plugin bundle (`.claude-plugin/plugin.json`, `.mcp.json`, skill, README). |
+| `plugin/gemini/` | The Gemini CLI extension. |
+| `build_packages.py` | Generates the skills from `server_instructions.md`, checks the manifests (see its docstring for exactly what), builds the ChatGPT plugin ZIP, and exports the separate distribution repository. |
+
+The Claude and Gemini packages are published from a **separate small public repository**, not from
+this one: the Gemini gallery reads `gemini-extension.json` only at a repository root, and the Claude
+directory validates the whole repository (under 50 MiB archived, 256 MiB unpacked), which this
+repository far exceeds. `build_packages.py --export DIR` writes that repository: the Gemini extension
+at its root and the Claude plugin in `claude-plugin/`.
 
 The privacy policy is `integrations/chatgpt/privacy.html`, served at `/ai/privacy` and, for the GPT's
 existing link, `/api/chatgpt/privacy`. The directory icon is `web/static/genizahsearch-icon-512.png`.
@@ -40,16 +46,18 @@ existing link, `/api/chatgpt/privacy`. The directory icon is `web/static/genizah
    `MCPServer(subscriptions=False)`).
 2. Set `MCP_ENABLED=1` and restart the web service. Without it `/mcp` is a plain 404.
 3. Check from outside: `python integrations/mcp/smoke_test.py https://genizahsearch.com`.
-4. Cloudflare and nginx: `/mcp` is ordinary POST JSON (no SSE, no long requests: tools wait at most
-   about 30 s). Make sure no bot rule challenges OpenAI's or Anthropic's servers on `/mcp`.
+4. Cloudflare and nginx: `/mcp` is ordinary POST JSON (no SSE). The two job tools wait about 30 s
+   (three facade polls); the other tools inherit the facade's 40 s deadline, so every call stays
+   inside Cloudflare's 125 s. Make sure no bot rule challenges OpenAI's or Anthropic's servers on
+   `/mcp`.
 
 ## Connecting a client
 
 - **ChatGPT:** Settings → Plugins → **+** → *Add custom MCP server*; URL `https://genizahsearch.com/mcp`,
   no authentication. ChatGPT asks the user to confirm the first search, passage search or details call
   in each conversation (those tools start server-side jobs, so they are honestly not read-only).
-- **Claude (claude.ai):** Settings → Connectors → *Add custom connector*, same URL. In a Team or
-  Enterprise organization only an Owner can add it.
+- **Claude (claude.ai):** individuals: Customize → Connectors → *Add custom connector*, same URL.
+  In a Team or Enterprise organization an Owner adds it under Organization settings → Connectors.
 - **Claude Code:** `claude mcp add --transport http genizahsearch https://genizahsearch.com/mcp`.
 - **Gemini app:** Settings → Connected Apps → *Add a custom app* (web only; reported to need a US,
   personal, paid account).
@@ -68,13 +76,17 @@ client.
 After any change to `server_instructions.md` or a manifest:
 
 ```bash
-python integrations/mcp/build_packages.py --write --zip dist/genizahsearch-openai-plugin.zip
+python integrations/mcp/build_packages.py --write --zip dist/genizahsearch-openai-plugin.zip --export dist/genizahsearch-ai-plugins
 ```
+
+Copy `dist/genizahsearch-ai-plugins` into the distribution repository and push it there.
 
 - **OpenAI (plugin):** upload `dist/genizahsearch-openai-plugin.zip`; a verified OpenAI platform account; the privacy, terms and support URLs above;
   the icon; the five positive and three negative test cases in `acceptance-tests.md`; a demo video;
   domain verification by setting `OPENAI_APPS_CHALLENGE` to the value OpenAI gives (served at
   `/.well-known/openai-apps-challenge`); after approval, publish explicitly.
-- **Anthropic (connector):** from the owner's personal Pro/Max account (a Team/Enterprise listing
-  belongs to that organization); `claude.ai/directory/manage` → MCP connector.
-- **Gemini CLI gallery:** a public repository with a `gemini-extension.json` pointing at the URL.
+- **Anthropic:** from the owner's personal Pro/Max account (a Team/Enterprise listing belongs to that
+  organization), at `claude.ai/directory/manage`: the server as an MCP connector, then optionally the
+  plugin bundle from the distribution repository with plugin path `claude-plugin`.
+- **Gemini CLI gallery:** add the GitHub topic `gemini-cli-extension` to the distribution repository;
+  the gallery's daily crawl lists it.
