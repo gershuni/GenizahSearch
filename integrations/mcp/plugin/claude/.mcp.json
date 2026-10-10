@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "genizahsearch": {
+      "type": "http",
+      "url": "https://genizahsearch.com/mcp"
+    }
+  }
+}

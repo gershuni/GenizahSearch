@@ -314,9 +314,16 @@ recorded RED in its message. Codex reviewed 1-4 (SHIP WITH FIXES → `b60dc93b`)
 FIXES, no citation defect → `82c43c80`), then verified the fixes (three conditional LOW in the reply
 cap → `770dbe8a`) and returned **SHIP** on `770dbe8a`. Beyond the plan, the build added: a request
 guard (64 KiB body, id/name/undeclared-argument checks, strict integers) and a reply cap on every
-response, both in front of the SDK. MCP + GPT facade tests: 199 passed. **Commit 7 waits on the
-owner:** terms text (governing law; the full-corpus-access line), the privacy-policy extension,
-and a directory icon.
+response, both in front of the SDK. MCP + GPT facade tests: 199 passed.
+
+**Build complete (2026-10-10):** commit 7 `7c736009` (public pages: owner-approved terms, support,
+the privacy policy extended to MCP, the owner's logo as the icon, the OpenAI challenge) and
+commit 8 (packages and docs: ChatGPT plugin ZIP, Claude plugin bundle, Gemini extension, all
+generated from `server_instructions.md` by `integrations/mcp/build_packages.py`; smoke test passing
+against the real local app under both protocol generations; SEARCH_API.md, ENV_VARS.md, CLAUDE.md,
+CODE_INDEX.md). Full local suite: 14,922 passed, 0 failed. **Next: the dark deploy (owner),** then
+the real-client acceptance tests and submission. The Gemini gallery needs the extension at the
+root of its own public repository tagged `gemini-cli-extension`.
 
 **If OpenAI's review isn't done by 12-04:** `/ai` gives the MCP URL with setup steps for the
 account types that passed the dark-deploy fallback test, and says plainly which accounts cannot

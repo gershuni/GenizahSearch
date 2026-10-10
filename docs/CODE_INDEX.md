@@ -1223,6 +1223,21 @@ Partial entry: the filter-state → read paths only, not the whole surface.
 - **Function** `_patch_nicegui_esm_handler` (Line 20) — add is_file() guard to ESM route handler (prevents RuntimeError on directory URLs)
 - **Function** `_patch_html_lang_attribute` (Line 63) — patch NiceGUI index.html to add `lang="he"` for Lighthouse a11y
 - **Function** `apply_all_patches` (Line 92) — apply all NiceGUI monkey-patches; call once before ui.run()
+- **Function** `_is_session_free_path` — `/mcp` and `/mcp/`: never read, create or reissue a session (not cacheable; 2026-10-09)
+
+## web/mcp_server.py
+
+Public MCP server at `POST /mcp` (docs/plans/MCP_SERVER_PLAN.md; contract in docs/SEARCH_API.md "MCP server").
+- **Function** `register_mcp_server` — adds the exact POST route, the `/mcp/` redirect and the SDK manager in the host lifespan; no route unless `MCP_ENABLED` and the facade
+- **Function** `build_server` — the six tools over one facade (`get_capabilities`, `search_manuscripts`, `find_passage_parallels`, `get_research_job`, `browse_manuscript_page`, `get_manuscript_details`)
+- **Class** `_RequestGuard` — before dispatch: 64 KiB body, id/name lengths, undeclared arguments refused
+- **Class** `_ReplyCap` — every reply within 100,000 bytes; streams never held; ASGI order kept
+- **Function** `_run_tool` / `_start_and_wait` — one `mcp_tool_call` event per call; coded errors; in-tool wait of three polls
+- **Function** `how_to_cite` — page citation from `shared/transcription_credits.py`, by `text_source`
+
+## web/public_pages.py
+
+- **Function** `register_public_pages` — `/terms`, `/support`, `/ai/privacy`, and `/.well-known/openai-apps-challenge` (only when `OPENAI_APPS_CHALLENGE` is set)
 
 ## web/session_hardening.py
 

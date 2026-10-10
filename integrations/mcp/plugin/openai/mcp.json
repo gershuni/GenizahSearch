@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "genizahsearch": {
+      "type": "streamable-http",
+      "url": "https://genizahsearch.com/mcp"
+    }
+  }
+}

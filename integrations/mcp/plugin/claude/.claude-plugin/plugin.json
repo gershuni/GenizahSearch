@@ -1,0 +1,18 @@
+{
+  "name": "genizahsearch",
+  "displayName": "GenizahSearch",
+  "version": "1.0.0",
+  "description": "Search the Cairo Genizah manuscripts of Dicta Genizah Search: phrases, shelfmarks, passage parallels, manuscript pages with citations, and catalogue records.",
+  "author": {
+    "name": "Hillel Gershuni",
+    "email": "gershuni@gmail.com",
+    "url": "https://genizahsearch.com"
+  },
+  "homepage": "https://genizahsearch.com/ai",
+  "repository": "https://github.com/gershuni/GenizahSearch",
+  "license": "CC-BY-NC-SA-4.0",
+  "documentationUrl": "https://github.com/gershuni/GenizahSearch/blob/master-main/integrations/mcp/README.md",
+  "supportUrl": "https://genizahsearch.com/support",
+  "privacyPolicyUrl": "https://genizahsearch.com/ai/privacy",
+  "termsOfServiceUrl": "https://genizahsearch.com/terms"
+}
