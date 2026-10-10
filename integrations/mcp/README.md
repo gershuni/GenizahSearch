@@ -47,9 +47,10 @@ existing link, `/api/chatgpt/privacy`. The directory icon is `web/static/genizah
 2. Set `MCP_ENABLED=1` and restart the web service. Without it `/mcp` is a plain 404.
 3. Check from outside: `python integrations/mcp/smoke_test.py https://genizahsearch.com`.
 4. Cloudflare and nginx: `/mcp` is ordinary POST JSON (no SSE). The two job tools wait about 30 s
-   (three facade polls); the other tools inherit the facade's 40 s deadline, so every call stays
-   inside Cloudflare's 125 s. Make sure no bot rule challenges OpenAI's or Anthropic's servers on
-   `/mcp`.
+   (three facade polls of up to 10 s); `get_research_job` and `get_manuscript_details` wait up to
+   10 s; `browse_manuscript_page` and `get_capabilities` run under the facade's 40 s deadline. Every
+   call stays inside Cloudflare's 125 s. Make sure no bot rule challenges OpenAI's or Anthropic's
+   servers on `/mcp`.
 
 ## Connecting a client
 

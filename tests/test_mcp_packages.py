@@ -106,10 +106,12 @@ def test_the_gemini_manifest_needs_a_name_and_version(tmp_path, monkeypatch, key
     assert any('name and a version are required' in problem for problem in packages.problems())
 
 
-def test_a_binary_file_in_the_claude_bundle_is_reported(tmp_path, monkeypatch):
+@pytest.mark.parametrize('name,data', [('logo.ico', b'\x00\x01'),
+                                       ('payload.md', b'\x89PNG\r\n\x1a\n\x00\x00')])  # Codex: a binary named .md
+def test_a_binary_file_in_the_claude_bundle_is_reported(tmp_path, monkeypatch, name, data):
     plugin = copied_plugins(tmp_path, monkeypatch)
-    (plugin / 'claude' / 'logo.ico').write_bytes(b'\x00\x01')
-    assert any('logo.ico' in problem for problem in packages.problems())
+    (plugin / 'claude' / name).write_bytes(data)
+    assert any(name in problem for problem in packages.problems())
 
 
 def test_the_distribution_repository_fits_both_directories(tmp_path):

@@ -68,16 +68,18 @@ def test_the_privacy_policy_discloses_the_mcp_usage_record(client):
         assert phrase in text, phrase
 
 
-def test_the_privacy_policy_discloses_that_search_text_reaches_the_diagnostic_log(client):
-    # Codex (build 7-8 review): the search engine logs each query's first 200 characters and
-    # its derived pattern at DEBUG into a size-rotated file. If that changes, change both.
-    engine = (ROOT / 'shared' / 'search_engine.py').read_text(encoding='utf-8')
-    assert 'Query: {query_str[:200]}' in engine
-    core = (ROOT / 'genizah_core.py').read_text(encoding='utf-8')
-    assert 'maxBytes=1_000_000, backupCount=3' in core
+def test_the_privacy_policy_discloses_that_server_logs_can_hold_search_text(client):
+    # Codex (build 7-8 reviews): search text reaches several logs -- the rotated
+    # application files, the console log (an uncapped derived pattern at WARNING), worker
+    # output, exception messages -- whose retention is a server setting. The policy says so
+    # in general terms and must not promise a size bound or describe "every search".
     text = client.get('/ai/privacy').text
-    assert 'records the beginning of each search query (up to 200 characters)' in text
-    assert 'keeping about four megabytes in all' in text
+    assert ("Server logs, meaning the application's log files and the service's console log, can also "
+            "include search queries, search patterns derived from them, and error messages that contain "
+            "request content") in html.unescape(text)
+    assert "kept according to the server's log settings, not the ten-minute job expiry" in html.unescape(text)
+    for overclaim in ('megabyte', 'every search', 'rotated by size'):
+        assert overclaim not in text
 
 
 @pytest.mark.parametrize('path', ['/terms', '/support', '/ai/privacy'])

@@ -99,6 +99,17 @@ def _schema_problems(document: dict, schema: dict, label: str) -> list[str]:
     return [f'{label}: {error.json_path}: {error.message}' for error in validator.iter_errors(document)]
 
 
+def _is_text(data: bytes) -> bool:
+    """UTF-8 without NUL bytes: a binary renamed .md is not text (Codex, fix verification)."""
+    if b'\x00' in data:
+        return False
+    try:
+        data.decode('utf-8')
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
 def _json(path: Path) -> dict:
     return json.loads(path.read_text(encoding='utf-8'))
 
@@ -155,7 +166,8 @@ def problems() -> list[str]:
     # unpacked, fewer than 10,000 files), so the bundle is published from its own small
     # repository (export_distribution); here, the per-file limits it holds for a reviewer.
     for file in (PLUGIN / 'claude').rglob('*'):
-        if file.is_file() and (file.stat().st_size > 256 * 1024 or file.suffix not in ('.json', '.md')):
+        if file.is_file() and (file.stat().st_size > 256 * 1024 or file.suffix not in ('.json', '.md')
+                               or not _is_text(file.read_bytes())):
             found.append(f'claude bundle: {file.relative_to(PLUGIN)} must be a text file under 256 KiB')
 
     from PIL import Image
