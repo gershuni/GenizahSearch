@@ -6,6 +6,14 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
+### AI integrations and the public API: chunk search and the Extended variant level (web)
+
+- **ChatGPT, Claude and other AI assistants can run the website's composition (chunk) search**, with a
+  chosen chunk size (new MCP tool `find_chunk_parallels`; exact, variants or fuzzy).
+- **The Extended variant level** in the public API (`search_mode=variants_extended`, background jobs
+  only: `/api/search/jobs`) and the MCP server, matching the website's defaults. Maximum is held: on
+  the real index it ran past the search time limit.
+
 ### Website: steadier when a step is interrupted (web)
 
 - **Pages keep working when a search, filter or lookup is interrupted** -- by a newer search, a closed

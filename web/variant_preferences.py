@@ -162,6 +162,28 @@ def set_max_changes(level: str, value) -> bool:
     return safe_user_set('search_max_changes_by_level', table)
 
 
+def default_search(mode: str, *, composition: bool = False) -> tuple[str, dict]:
+    """(engine mode, settings) of a search in *mode* by a visitor who has chosen nothing.
+
+    The public API runs every search this way, so it gives what the website gives
+    that visitor. The search page runs Extended and Maximum as their own engine
+    modes, at their pair counts and their default x1-x3 (x2). The parallels page runs
+    every level as engine mode 'variants' at the level's pair count and Basic's x1-x3
+    (owner ruling K-20). Fuzzy runs at x2 on both pages.
+    """
+    from shared.variants import DEFAULT_MAX_CHANGES_BY_PRESET
+    settings = website_defaults()
+    if mode in PRESET_PAIRS:
+        settings['variant_pairs_count'] = PRESET_PAIRS[mode]
+        level = 'basic' if composition else level_of(mode)
+        settings['variant_max_changes'] = DEFAULT_MAX_CHANGES_BY_PRESET[level]
+        if composition:
+            mode = 'variants'
+    elif mode == 'fuzzy':
+        settings['variant_max_changes'] = 2
+    return mode, request_settings(**settings)
+
+
 def for_search(mode: str, pairs_count: int | None = None, changes: int | None = None) -> dict:
     """The complete settings one of this visitor's searches runs with.
 

@@ -111,7 +111,7 @@ def test_admission_input_bounds_and_shutdown(monkeypatch):
         for _ in range(2):
             assert client.post('/api/chatgpt/search/jobs', json=BODY).status_code == 202
         assert client.post('/api/chatgpt/search/jobs', json=BODY).status_code == 429
-        assert client.post('/api/chatgpt/parallels/jobs', json={'method': 'chunk'}).status_code == 400
+        assert client.post('/api/chatgpt/parallels/jobs', json={'method': 'lab'}).status_code == 400
         assert client.post('/api/chatgpt/search/jobs', content='x' * 65537).status_code == 413
         # Mounted sub-app lifecycle is explicitly forwarded by production main.
         records = list(child.state.chatgpt_jobs.values())

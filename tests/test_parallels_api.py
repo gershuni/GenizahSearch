@@ -1308,6 +1308,39 @@ def _fake_passage_policy() -> dict:
     }
 
 
+@pytest.mark.parametrize('mode', ['variants', 'fuzzy'])
+def test_parallels_method_passage_rejects_every_variant_level(
+    client, mock_searcher, clean_env, monkeypatch, mode,
+):
+    """Passage matching has no variant levels: Extended and Maximum are refused like
+    Basic, never silently ignored."""
+    monkeypatch.setattr('web.passage_assets.passage_available', lambda: True)
+    r = client.post('/api/parallels', json={'text': 'hello world', 'method': 'passage', 'mode': mode})
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'passage_option_unsupported'
+    mock_searcher.search_composition_logic.assert_not_called()
+
+
+@pytest.mark.parametrize('mode', ['variants_extended', 'variants_maximum'])
+@pytest.mark.parametrize('background', [False, True])
+def test_chunk_search_offers_no_higher_variant_level(client, mock_searcher, clean_env, mode, background):
+    """Held (2026-10-11): on the real index chunk search at Extended found nothing within
+    the worker time limit and Maximum's workers were stopped by force."""
+    with client:
+        if background:
+            r = client.post('/api/parallels/jobs', json={'text': 'hello world', 'mode': mode})
+        else:
+            r = client.post('/api/parallels', json={'text': 'hello world', 'mode': mode})
+    assert r.status_code == 400, r.text
+    mock_searcher.search_composition_logic.assert_not_called()
+
+
+def test_an_unknown_chunk_mode_is_still_refused(client, mock_searcher, clean_env):
+    r = client.post('/api/parallels', json={'text': 'hello world', 'mode': 'variants_ultra'})
+    assert r.status_code == 400, r.text
+    mock_searcher.search_composition_logic.assert_not_called()
+
+
 @pytest.mark.parametrize('chunk_size', [2, 4, 6, 20])
 def test_parallels_method_passage_nondefault_chunk_size_returns_400(
     client, mock_searcher, clean_env, monkeypatch, chunk_size,

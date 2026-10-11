@@ -102,11 +102,17 @@ def test_wrapper_forwards_caller_and_enforces_bounded_inputs():
         assert calls == [('testclient', 'kept', {'query': 'a', 'search_mode': 'exact', 'limit': 5})]
         for body in ({'limit': 500}, {'limit': True}):
             assert client.post('/api/chatgpt/search', json=body).status_code == 400
-        for body in ({'method': 'chunk', 'text': 'abc'},
+        for body in ({'text': 'abc'}, {'method': 'lab', 'text': 'abc'},
                      {'method': 'passage', 'text': 'x' * 5001},
+                     {'method': 'chunk', 'text': 'x' * 5001},
                      {'method': 'passage', 'witnesses': [{'text': 'a'}] * 4}):
             assert client.post('/api/chatgpt/parallels', json=body).status_code == 400
         assert client.post('/api/chatgpt/search', content='x' * 65537).status_code == 413
+        assert len(calls) == 1
+        # A chunk search runs only as a job (the one-at-a-time admission lives there, Codex
+        # build review): the synchronous route refuses it and names the job route.
+        refused = client.post('/api/chatgpt/parallels', json={'method': 'chunk', 'text': 'abc'})
+        assert refused.status_code == 400 and '/api/chatgpt/parallels/jobs' in refused.json()['error']['message']
         assert len(calls) == 1
 
 

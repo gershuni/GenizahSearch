@@ -49,6 +49,8 @@ from shared.api_errors import ERROR_CODES  # noqa: E402
 # ---------------------------------------------------------------------------
 
 SEARCH_MODES = ['exact', 'variants', 'responsa', 'title', 'shelfmark', 'fuzzy']
+# The website's Extended and Maximum levels: accepted only by POST /api/search/jobs.
+BACKGROUND_MODES = ['variants_extended']
 
 # Concrete fixture queries per AC2 — picked so a real Tantivy index would
 # return ≥1 result. Layer-2 tests are skipped in environments without an
@@ -60,6 +62,7 @@ QUERIES_PER_MODE = {
     'title':     'ברכת המזון',
     'shelfmark': 'T-S 12.123',
     'fuzzy':     'ברכת המזון',
+    'variants_extended': 'ברכת המזון',
 }
 
 # Internal `mode` argument to SearchEngine.execute_search per
@@ -71,6 +74,7 @@ EXPECTED_INTERNAL_MODE = {
     'title': 'Title',
     'shelfmark': 'Shelfmark',
     'fuzzy': 'fuzzy',
+    'variants_extended': 'variants_extended',
 }
 
 REQUEST_ECHO_KEYS = {
@@ -791,9 +795,10 @@ def test_posthog_search_mode_value_null_on_unknown_enum_value(
 
 def test_search_mode_to_internal_mapping_complete():
     """Every UI search_mode maps to a non-None internal mode."""
-    for m in SEARCH_MODES:
+    for m in SEARCH_MODES + BACKGROUND_MODES:
         assert m in _SEARCH_MODE_TO_INTERNAL
         assert _SEARCH_MODE_TO_INTERNAL[m] == EXPECTED_INTERNAL_MODE[m]
+    assert set(_SEARCH_MODE_TO_INTERNAL) == set(SEARCH_MODES + BACKGROUND_MODES)
 
 
 def test_invalid_combination_code_registered():
@@ -1312,3 +1317,66 @@ def test_intersect_helper_intersects_with_existing_restrict(monkeypatch):
         fjms_module, 'resolve_library_sys_ids', lambda codes, mgr: {'b', 'c', 'd'})
     out = asyncio.run(_intersect_library_filter({'a', 'b', 'c'}, {'library': ['CUL']}, object()))
     assert out == {'b', 'c'}
+
+
+@pytest.mark.parametrize('path', ['/api/search', '/api/search/jobs'])
+def test_the_maximum_level_is_not_offered(client, stub_searcher, path):
+    """Held (2026-10-11): on the real index Maximum overran the worker time limit and
+    its workers were stopped by force, stalling every other search meanwhile."""
+    with client:
+        r = client.post(path, json={'query': 'ברכת המזון', 'search_mode': 'variants_maximum'})
+    assert r.status_code == 400, r.text
+    assert stub_searcher.calls == []
+
+
+@pytest.mark.parametrize('search_mode', BACKGROUND_MODES)
+def test_a_synchronous_variant_level_is_refused_and_pointed_to_jobs(client, stub_searcher, search_mode):
+    """Measured 2026-10-11: Extended and Maximum outlast any synchronous ceiling (owner
+    decision: background jobs only). Refused before any search runs, naming the job route."""
+    r = _post_search(client, query=QUERIES_PER_MODE[search_mode], search_mode=search_mode)
+    assert r.status_code == 400, r.text
+    error = r.json()['error']
+    assert error['code'] == 'background_job_required' and 'POST /api/search/jobs' in error['message']
+    assert error['code'] in ERROR_CODES
+    assert stub_searcher.calls == []
+
+
+@pytest.mark.parametrize('search_mode', BACKGROUND_MODES)
+def test_a_variant_level_runs_as_a_background_job(client, stub_searcher, search_mode):
+    import time
+    with client:
+        created = client.post('/api/search/jobs', json={'query': QUERIES_PER_MODE[search_mode],
+                                                        'search_mode': search_mode})
+        assert created.status_code == 202, created.text
+        urls = created.json()
+        deadline = time.monotonic() + 5
+        while client.get(urls['status_url']).json()['state'] not in ('completed', 'failed'):
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        result = client.get(urls['result_url'])
+    assert result.status_code == 200, result.text
+    assert [call['mode'] for call in stub_searcher.calls] == [EXPECTED_INTERNAL_MODE[search_mode]]
+    assert result.json()['request']['search_mode'] == search_mode
+
+
+@pytest.mark.parametrize('search_mode,heavy', [('variants', True), ('fuzzy', True), ('exact', False)])
+def test_the_heavy_budget_still_gates_basic_variants_and_fuzzy(client, stub_searcher, monkeypatch,
+                                                              search_mode, heavy):
+    """With every heavy slot taken, Basic variants and fuzzy are refused at once (503
+    heavy_search_busy) while exact still runs."""
+    import asyncio
+    from web.search_api import DEFAULT_HEAVY_CONCURRENCY, _acquire_heavy_slot, _HeavySemaphoreState
+
+    monkeypatch.setenv('SEARCH_API_HEAVY_CONCURRENCY', '1')
+    _HeavySemaphoreState.reset(1)
+    release = asyncio.run(_acquire_heavy_slot())
+    try:
+        r = _post_search(client, query=QUERIES_PER_MODE[search_mode], search_mode=search_mode)
+    finally:
+        release()
+        _HeavySemaphoreState.reset(DEFAULT_HEAVY_CONCURRENCY)
+    if heavy:
+        assert r.status_code == 503 and r.json()['error']['code'] == 'heavy_search_busy', r.text
+        assert stub_searcher.calls == []
+    else:
+        assert r.status_code == 200, r.text
