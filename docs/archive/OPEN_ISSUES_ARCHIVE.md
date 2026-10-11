@@ -9,6 +9,14 @@
 
 > Previous (2026-08-10, fourth session close) — **the citations question was put to Codex twice and the answer reframed the work.** WP4 is **DEFERRED by measurement**: the multi-alignment rate is 24.0% (not 7.0% — `n_spans` counts page hulls), and the "spurious piece" is usually either the work's own doublet (`תנ"ך, שמות` command//execution) or a compilation quoting its source — 34 works at ≥2x their length peers hold 53% of all conflicts. "Later work is probably the citation" was built twice and fires in the RIGHT direction, but the bake starved it 26,608→1,484 (both sides must already be `shipped`, and the verdict is unrecordable in the single `routing_reason` column). The deeper defect is **decision-to-surface integrity** (Codex's phrase): the findings chip is a constant ("Direct match" on 28,462 of 28,464 public main-pool rows), the expansion pane never reads the router, the one honesty warning dies on the v3 swap (108,235 rows → 0), and the public projection ships the quoter (`ילקוט שמעוני` 625 ids) while deleting the quoted work (`תנחומא` 0) and promoting 280 tie-broken rows. The owner's divergence statistic marks the off works and his own blind grades validate it (0 of 57 `ילקוט` rows correct; `ראב"ש` at #2/#3/#6/#14) — a curated quoter/quoted-inside flag seeded from that ranking is the proposed fix (curation sheet delivered). Session-4 record is inline below; no separate handout this session.
 
+### MCP event tests lost their events to the real PostHog drain thread (2026-10-11, found and fixed same day)
+
+Branch `claude/epic-robinson-97f1d7`, found by the full local suite:
+
+| Issue | File | Status | Notes |
+|-------|------|--------|-------|
+| **`tests/test_mcp_server.py` event tests failed by timing ("expected 1, got 0")** | `web/api_hardening.py::_drain_posthog_queue`, `tests/test_mcp_server.py`, `tests/test_mcp_tools.py` | ✅ Fixed (2026-10-11) | The drain thread re-reads the module global `_event_queue` after each 60 s wait; once an earlier test in the process had started it, it took the events of a test that had patched in a real queue (repro: 66 of 66 in 66 s). A different event test failed in 3 of 5 runs of one chunk (0 of 5 on the base), depending on timing. Both files now capture with `tests/mcp_events.py::CapturedEvents`, which the thread cannot take from (repro: 0 of 66); the chunk then passed 3 of 3 and the full suite 14,918 of 14,918. |
+
 ### Desktop exit abort with a running QThread in a hidden window (2026-09-29, found and fixed same day)
 
 Branch `fix/desktop-exit-running-qthreads`. From "1. Outstanding Bugs" (P2):
@@ -1043,6 +1051,8 @@ Moved verbatim by `scripts/archive_closed_issues.py`. Nothing was edited or dele
 
 Moved verbatim from the top of the tracker on 2026-09-18 (the 2026-09-06 split did the same for the headers before them).
 
+> Previous: 2026-10-07 (night) -- **After the v9.6.0 deploy** (branch `fix/post-release-9.6.0`): the website no longer breaks when NiceGUI's `run.io_bound` hands back None for a cancelled task (62 call sites guarded after an audit of 141; the preview-card crash seen in production is the first), Joins Lab's search time limit works, a CI flake in the parent-death test is fixed (a reap race in the test's own poll), and nginx can see real visitors behind Cloudflare (snippet + refresh script; owner installs). Logged: the restart reload loops that saturated the site after the deploy (P2), /catalog-browse opening with no results (P2, confirmed live), and five P3s. Codex reviewed all three fixes (gpt-6-astra). Counts 195 -> 203.
+>
 > Previous: 2026-10-07 (release) -- **v9.6.0 "Search fixes" (both)**: releases PR 3 (#383-#387) with #377, #378 and #380; the website deploy carries the web halves of #386 and #387, and installer 9.6.0 the desktop halves of #384-#387. No desktop What's New this release (owner): the bar now follows `WHATS_NEW_CONTENT_VERSION`, which stays 9.5.0. Counts unchanged (195).
 >
 > Previous: 2026-10-07 (evening) -- **Search correctness PR 3 merged** (#383 per-visitor settings, #384 regex, #385 website cut-off and 3-minute limit, #386 Num Changes per level, #387 short composition text and filters that cannot be applied; master `5c5489a4`, CI green). The owner deployed the website after #383-#385 merged; the web halves of #386 and #387 merged later and wait for a deploy, and their desktop halves (with #384's) ship with the next installer. GitHub Codex ran five review rounds; round 5's two findings are the P3 rows "rows kept by Stop ... not saved for a reload" and "Num Changes shows the saved mode's value after a link". Counts unchanged (195). Docs: CHANGELOG [Unreleased] now also lists #378 (language follows the browser) and #380 (API `channel`).

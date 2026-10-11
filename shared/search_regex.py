@@ -323,9 +323,11 @@ def _preserve_word_classes(pattern, flags):
 
 
 class Pattern:
-    def __init__(self, compiled, original, flags):
+    def __init__(self, compiled, original, flags, stdlib=None):
         self._compiled = compiled
-        self._stdlib = re.compile(original, flags)
+        # compile() hands over the pattern it validated: compiling it again cost a
+        # second full compile (re's cache misses: its flags now include UNICODE).
+        self._stdlib = stdlib if stdlib is not None else re.compile(original, flags)
         self.pattern = original
         self.flags = flags
 
@@ -394,7 +396,7 @@ def compile(pattern, flags=0):
     except _regex.error as exc:
         raise re.error(str(exc)) from exc
     _check_deadline()
-    return Pattern(compiled, validated.pattern, validated.flags)
+    return Pattern(compiled, validated.pattern, validated.flags, stdlib=validated)
 
 
 @lru_cache(maxsize=1)

@@ -6,6 +6,12 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
+### Extended and Maximum: much faster, and they stop on time (both)
+
+- **Extended and Maximum search many times faster.** Each word's thousands of spellings are now written as a compact tree that matches the same text: preparing a four-word Maximum search takes about 4 s instead of about 22 s, and each page is checked tens of times faster (Extended: about 0.3 s instead of 2.3 s to prepare). Basic is unchanged.
+- **Website: an Extended or Maximum search stops at the 3-minute limit with what it found**, as Basic does, and so does an Extended or Maximum composition search: it finishes the page it is checking (or the passage it is preparing) and then stops, usually within a few seconds of the limit. Before, they could run on past it until the search worker was stopped by force, and other visitors' searches waited while a new worker loaded.
+- **Desktop: Stop answers sooner during a slow Extended, Maximum or composition search** (it was checked once every 200 pages).
+
 ### AI integrations and the public API: chunk search and the Extended variant level (web)
 
 - **ChatGPT, Claude and other AI assistants can run the website's composition (chunk) search**, with a

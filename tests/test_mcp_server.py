@@ -26,40 +26,20 @@ import web.api_hardening as hardening
 import web.mcp_server as mcp_server
 from web.api_hardening import API_CHANNEL_SCOPE_KEY, api_channel
 from web.chatgpt_api import _mark_chatgpt
+from tests.mcp_events import CapturedEvents
 
 LEGACY, MODERN = '2025-11-25', '2026-07-28'
 
 
-class _Captured:
-    """Records events and never hands one out through get().
-
-    A PostHog drain thread that an earlier test in the same process started reads
-    whichever queue is installed (web/api_hardening.py::_drain_posthog_queue), so with a
-    real queue.Queue it could take this test's event when its 60 s wait ended mid-test:
-    a full-suite-only flake (2026-10-11, a different test of this file each run)."""
-
-    def __init__(self):
-        self.items = []
-
-    def put_nowait(self, event):
-        self.items.append(event)
-
-    def get(self, timeout=None):
-        time.sleep(timeout or 0)
-        raise queue.Empty
-
-
 @pytest.fixture
 def events(monkeypatch):
-    captured = _Captured()
+    # Not a real queue: the real drain thread, if an earlier test started it, took
+    # these events (tests/mcp_events.py).
+    captured = CapturedEvents()
     monkeypatch.setattr(hardening, '_event_queue', captured)
     monkeypatch.setattr(hardening, '_start_drain_thread_once', lambda: None)
     monkeypatch.delenv('SEARCH_API_POSTHOG_SAMPLE_N', raising=False)
-
-    def drain():
-        found, captured.items = captured.items, []
-        return found
-    return drain
+    return captured.drain
 
 
 @pytest.fixture

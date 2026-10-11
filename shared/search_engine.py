@@ -189,6 +189,11 @@ def _consume_last_responsa_downgrade_meta() -> Optional[dict]:
 # checkpoint + a cross-thread Qt signal) once per this many hits. It was every
 # 5 hits: 10,000 signals for a 50,000-candidate search.
 _PROGRESS_TICK_EVERY = 200
+# ...and at the next candidate once this long has passed since the last tick (one
+# candidate's own check is not interrupted). A worker's time limit and the
+# desktop's Stop act only at a tick: Maximum's 200 candidates took 209 s
+# (2026-10-11), so the website's 180 s limit stopped the search at 277 s.
+_PROGRESS_TICK_SECONDS = 0.5
 
 # execute_search(preview_callback=...) hands over result rows while the search is
 # still running, so the desktop can show them at once: the rows so far at most
@@ -660,6 +665,58 @@ def make_mark_tolerant_pattern(escaped_term: str) -> str:
     # Split escaped string into tokens: \\X (escape sequences) or single chars
     tokens = re.findall(r'\\.|.', escaped_term)
     return MARK_TOLERANT_INSERTER.join(tokens)
+
+
+_PREFIX_TREE_MAX_FORM = 64
+
+
+def _prefix_tree(forms):
+    """The alternation of *forms*, all of one length (each mark-tolerant), as a
+    prefix tree: forms that begin with the same characters share their branch.
+    Being of one length, a form ends only where no other continues."""
+    tree = {}
+    for form in forms:
+        node = tree
+        for char in form:
+            node = node.setdefault(char, {})
+
+    def after(node):
+        # What follows a character: nothing at a form's end, else a mark gap
+        # and the next characters.
+        branches = [re.escape(char) + after(node[char]) for char in sorted(node)]
+        if not branches:
+            return ''
+        return MARK_TOLERANT_INSERTER + (branches[0] if len(branches) == 1
+                                         else '(?:' + '|'.join(branches) + ')')
+
+    return '|'.join(re.escape(char) + after(tree[char]) for char in sorted(tree))
+
+
+def _variant_alternation(forms):
+    """build_regex_pattern's alternation of *forms* -- each mark-tolerant, longest
+    first -- written as one prefix tree per form length, longest first.
+
+    It matches the same texts, and it tries the forms of each length before any
+    shorter one, as the flat alternation does. Among forms of one length the flat
+    order was set order (it changes with each process's string hashing); the tree
+    tries those forms in another order, so where two of them match at the same
+    place it gives a span the flat alternation could give too. Maximum's spellings
+    of אתה זכור מעשה עולם (19,000), flat: 904,000 characters, about 22 s to
+    compile, 3.6 s (regex) and 0.36 s (re) to search one 4,000-character page; as
+    trees: 238,000 characters, 3-4 s, 0.06 s and 0.001 s (2026-10-11).
+
+    Forms are joined flat as before when one is empty, longer than
+    _PREFIX_TREE_MAX_FORM (a tree nests a group per character: regex's compiler
+    fails between 100 and 200 levels, and the renderer recurses), or holds a
+    newline (make_mark_tolerant_pattern's tokenizer does not read one as a
+    character, so a tree would match it differently).
+    """
+    if any(not form or len(form) > _PREFIX_TREE_MAX_FORM or '\n' in form for form in forms):
+        return '|'.join(make_mark_tolerant_pattern(re.escape(form)) for form in forms)
+    by_length = {}
+    for form in forms:
+        by_length.setdefault(len(form), []).append(form)
+    return '|'.join(_prefix_tree(by_length[n]) for n in sorted(by_length, reverse=True))
 
 
 def _gap_separator(max_gap):
@@ -2547,9 +2604,13 @@ class SearchEngine:
             except re.error: return None
 
         parts = []
+        regex_mode = 'variants_maximum' if mode == 'fuzzy' else mode
+        # Extended and Maximum spell a word up to 8,000 ways: written as a prefix
+        # tree (_variant_alternation), which matches the same and compiles and
+        # searches many times faster. Basic keeps its pattern as it was.
+        level = getattr(self.var_mgr, 'variant_level', None)
+        prefix_tree = callable(level) and level(regex_mode) in ('extended', 'maximum')
         for term in terms:
-            regex_mode = 'variants_maximum' if mode == 'fuzzy' else mode
-
             # 1. Get variants
             vars_list = _variants_noting_cutoff(self.var_mgr, term, regex_mode, Config.REGEX_VARIANTS_LIMIT)
 
@@ -2561,6 +2622,9 @@ class SearchEngine:
             # This is the correct fix for the visual glitch.
             # Favor longer matches before short variants
             unique_vars = sorted(list(set(vars_list)), key=len, reverse=True)
+            if prefix_tree and len(unique_vars) > 1:
+                parts.append(f"({_variant_alternation(unique_vars)})")
+                continue
 
             # 4. Escape special chars
             escaped = [make_mark_tolerant_pattern(re.escape(v)) for v in unique_vars]
@@ -3974,6 +4038,9 @@ class SearchEngine:
             room = _limit
             if agg_q is None:
                 return
+            if progress_callback:
+                # A checkpoint before the second query, which cannot be stopped.
+                progress_callback(len(hits), total_hits)
             started = time.perf_counter()
             try:
                 more, more_capped = _top_hits(self.searcher, agg_q, room)
@@ -4028,10 +4095,14 @@ class SearchEngine:
         materialize_started = time.perf_counter()
         document_load_seconds = 0.0
         candidate_match_seconds = 0.0
+        last_tick = time.monotonic()
+        i = 0       # read below when the checkpoint before the aggregates stops an empty run
         try:
             for i, (score, doc_addr) in enumerate(_page_hits_then_aggregates()):
-                if progress_callback and i % _PROGRESS_TICK_EVERY == 0:
+                if progress_callback and (i % _PROGRESS_TICK_EVERY == 0
+                                          or time.monotonic() - last_tick >= _PROGRESS_TICK_SECONDS):
                     progress_callback(i, total_hits)
+                    last_tick = time.monotonic()
                 if _preview is not None:
                     if len(results) > _preview_scanned:
                         for r in results[_preview_scanned:]:
@@ -4477,10 +4548,14 @@ class SearchEngine:
             # nothing in its own manuscripts (2026-10-04; main search had the same).
             _sid_restriction = self._restriction_query(restrict_sys_ids, pages_only=True)
 
-        # SEED-011 (125a): Build per-chunk plans ONCE before the index loops.
+        # SEED-011 (125a): Build per-chunk plans ONCE for both index loops.
         # Each _ChunkPlan carries both flavor query strings (Genizah raw +
         # LOCAL diacritic-folded) and both compiled regexes.  Both loops then
-        # consume the pre-built plans rather than re-deriving them independently.
+        # consume the same plans rather than re-deriving them independently.
+        # A plan is built when its chunk is first reached, after that chunk's
+        # progress checkpoint: an Extended or Maximum chunk regex takes seconds to
+        # compile, and building them all first ran past the worker's time limit
+        # with no checkpoint (2026-10-11: 0-1 results, or the worker killed).
         # build_tantivy_query / build_regex_pattern are called once per
         # (chunk x flavor) — for corpus_scope='all' that is the same 2*N as base
         # (the two flavors genuinely differ: LOCAL folds diacritics for SEED-006
@@ -4493,9 +4568,8 @@ class SearchEngine:
         # Predicates mirror the Genizah loop gate (corpus_scope != 'local') and the
         # LOCAL block gate (corpus_scope != 'genizah' + local index present +
         # is_searchable) below.  (`not was_cancelled` is intentionally omitted: it
-        # can only flip mid-Genizah-loop, AFTER this pre-pass; in that rare cancel
-        # case the LOCAL loop is skipped anyway, so the pre-built LOCAL plans are
-        # simply unused — wasted work on an already-cancelled run, identical result.)
+        # can only flip mid-Genizah-loop; in that rare cancel case the LOCAL loop
+        # is skipped anyway, so the LOCAL flavors built are simply unused.)
         _do_genizah_pp = (corpus_scope != 'local')
         _scl_tab_pp = self._my_library_tab_ref() if getattr(self, "_my_library_tab_ref", None) is not None else None
         _scl_is_searchable_pp = getattr(_scl_tab_pp, "is_searchable", True) if _scl_tab_pp is not None else True
@@ -4503,8 +4577,12 @@ class SearchEngine:
                         and getattr(self, 'local_searcher', None) is not None
                         and getattr(self, 'local_index', None) is not None
                         and _scl_is_searchable_pp)
-        chunk_plans = []
-        for (token_idx_pp, chunk_pp, chunk_crossed_pp) in chunks_data:
+        chunk_plans = [None] * len(chunks_data)
+
+        def _chunk_plan(index):
+            if chunk_plans[index] is not None:
+                return chunk_plans[index]
+            token_idx_pp, chunk_pp, chunk_crossed_pp = chunks_data[index]
             # Genizah flavor: raw chunk, with content_search_field if available
             if _do_genizah_pp:
                 _genizah_q_str = self.build_tantivy_query(chunk_pp, mode, content_search_field=_cs_field)
@@ -4524,7 +4602,7 @@ class SearchEngine:
                 _local_chunk_q = chunk_pp
                 _local_q_str = None
                 _local_regex = None
-            chunk_plans.append(_ChunkPlan(
+            chunk_plans[index] = _ChunkPlan(
                 token_idx=token_idx_pp,
                 chunk=chunk_pp,
                 chunk_crossed_bounds=chunk_crossed_pp,
@@ -4533,7 +4611,8 @@ class SearchEngine:
                 local_query_str=_local_q_str,
                 compiled_regex_local=_local_regex,
                 local_chunk_q=_local_chunk_q,
-            ))
+            )
+            return chunk_plans[index]
 
         # 2. Scan chunks (wrapped in try/except to support partial results on cancel)
         try:
@@ -4541,13 +4620,17 @@ class SearchEngine:
           # doc_hits/was_cancelled/total_chunks are initialized ABOVE this branch (M1),
           # so a corpus_scope='local' run never NameErrors on a loop-local variable.
           if corpus_scope != 'local':
-            for i, plan in enumerate(chunk_plans):
+            last_tick = time.monotonic()
+            for i in range(total_chunks):
+                if progress_callback:
+                    progress_callback(i, total_chunks)
+                    last_tick = time.monotonic()
+                plan = _chunk_plan(i)
                 token_idx = plan.token_idx
                 chunk = plan.chunk
                 chunk_crossed_bounds = plan.chunk_crossed_bounds
-                if progress_callback: progress_callback(i, total_chunks)
 
-                # Consume pre-built Genizah-flavor query + regex (SEED-011)
+                # Consume the Genizah-flavor query + regex (SEED-011)
                 t_query = plan.genizah_query_str
                 regex = plan.compiled_regex_genizah
                 if not regex: continue
@@ -4569,6 +4652,11 @@ class SearchEngine:
                     is_freq_filtered = len(hits) > max_freq
 
                     for score, doc_addr in hits:
+                        # Within a chunk too, while its documents are slow to check:
+                        # one Extended chunk's 50 hits took 198 s (2026-10-11).
+                        if progress_callback and time.monotonic() - last_tick >= _PROGRESS_TICK_SECONDS:
+                            progress_callback(i, total_chunks)
+                            last_tick = time.monotonic()
                         doc = self.searcher.doc(doc_addr)
 
                         # Pre-search filter: skip manuscripts outside the restrict set
@@ -4655,7 +4743,8 @@ class SearchEngine:
                             if chunk_crossed_bounds:
                                 rec['boundary_chunk_scores'].append(score)
                                 rec['crossed_boundaries'].update(chunk_crossed_bounds)
-                except SearchBudgetExceeded:
+                except (SearchBudgetExceeded, InterruptedError):
+                    # InterruptedError is an OSError: the handler below would eat a stop.
                     raise
                 except MemoryError:
                     raise
@@ -4696,6 +4785,7 @@ class SearchEngine:
         # and consume None plans, silently dropping every LOCAL hit.  (A
         # present->absent flip is still handled by the inner None-guard below.)
         if not was_cancelled and _do_local_pp:
+            _plan_error = None
             try:
                 _local_index_scl = self.local_index
                 _local_searcher_scl = self.local_searcher
@@ -4708,12 +4798,12 @@ class SearchEngine:
                 if _local_has_cs_scl:
                     _local_fields_scl.append("content_search")
                 if _local_index_scl is not None and _local_searcher_scl is not None:
-                    # SEED-011 (125a): consume pre-built LOCAL-flavor plans instead of
-                    # re-deriving query/regex per chunk.  The diacritic-folded
-                    # local_query_str / compiled_regex_local were computed in the
-                    # pre-pass above (SEED-006 M1 fold already applied).
+                    # SEED-011 (125a): consume the chunk plans (built by the Genizah
+                    # loop, or here on a LOCAL-only run) instead of re-deriving
+                    # query/regex per chunk.  The diacritic-folded local_query_str /
+                    # compiled_regex_local have the SEED-006 M1 fold already applied.
                     _total_scl = len(chunk_plans)
-                    for _i_scl, _plan_scl in enumerate(chunk_plans):
+                    for _i_scl in range(_total_scl):
                         # Every chunk, no modulo: one chunk is a parse_query + a
                         # 50-hit search + up to 50 materializations, far too coarse
                         # to skip. Outside the per-chunk try below, whose broad
@@ -4727,6 +4817,16 @@ class SearchEngine:
                                 raise
                             except Exception:
                                 pass  # progress is advisory; cancellation is not
+                        try:
+                            _plan_scl = _chunk_plan(_i_scl)
+                        except (InterruptedError, SearchBudgetExceeded, MemoryError):
+                            raise
+                        except Exception as _exc:
+                            # Raised after this block, which would log it and report
+                            # empty results: a chunk that cannot be prepared fails the
+                            # search, as it did when all were prepared first.
+                            _plan_error = _exc
+                            break
                         _token_idx_scl = _plan_scl.token_idx
                         _chunk_scl = _plan_scl.chunk
                         _chunk_crossed_scl = _plan_scl.chunk_crossed_bounds
@@ -4850,6 +4950,8 @@ class SearchEngine:
                 LAB_LOGGER.warning(
                     "search_composition_logic: LOCAL (regular-index) scan failed: %r", _scl_exc
                 )
+            if _plan_error is not None:
+                raise _plan_error
 
         # 3. Build results with Wide Context
         def build_items(hits_dict):
