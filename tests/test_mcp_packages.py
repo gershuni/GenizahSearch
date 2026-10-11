@@ -76,7 +76,8 @@ def edit_json(path, change):
 
 
 @pytest.mark.parametrize('field,value', [('displayName', 'G' * 31), ('shortDescription', 'S' * 31),
-                                         ('supportURL', 'http://genizahsearch.com/support')])
+                                         ('supportURL', 'http://genizahsearch.com/support'),
+                                         ('category', 'Research')])  # refused by OpenAI's dashboard
 def test_a_manifest_over_a_documented_limit_is_reported(tmp_path, monkeypatch, field, value):
     plugin = copied_plugins(tmp_path, monkeypatch)
     edit_json(plugin / 'openai' / 'plugin.json',

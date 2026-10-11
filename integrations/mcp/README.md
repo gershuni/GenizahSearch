@@ -10,7 +10,7 @@ Contract: the "MCP server" section of [`docs/SEARCH_API.md`](../../docs/SEARCH_A
 ## How it works
 
 `web/mcp_server.py` registers an exact `POST /mcp` route on the web app when `MCP_ENABLED=1` and the
-`/api/chatgpt` facade is registered. Its six tools call that facade in-process as the visitor who
+`/api/chatgpt` facade is registered. Its seven tools call that facade in-process as the visitor who
 called them, so the facade's mode gate, rate limits, validation and research jobs apply unchanged. No
 corpus logic lives in the adapter.
 
@@ -46,7 +46,7 @@ existing link, `/api/chatgpt/privacy`. The directory icon is `web/static/genizah
    `MCPServer(subscriptions=False)`).
 2. Set `MCP_ENABLED=1` and restart the web service. Without it `/mcp` is a plain 404.
 3. Check from outside: `python integrations/mcp/smoke_test.py https://genizahsearch.com`.
-4. Cloudflare and nginx: `/mcp` is ordinary POST JSON (no SSE). The two job tools wait about 30 s
+4. Cloudflare and nginx: `/mcp` is ordinary POST JSON (no SSE). The three job tools wait about 30 s
    (three facade polls of up to 10 s); `get_research_job` and `get_manuscript_details` wait up to
    10 s; `browse_manuscript_page` and `get_capabilities` run under the facade's 40 s deadline. Every
    call stays inside Cloudflare's 125 s. Make sure no bot rule challenges OpenAI's or Anthropic's
@@ -82,7 +82,12 @@ python integrations/mcp/build_packages.py --write --zip dist/genizahsearch-opena
 
 Copy `dist/genizahsearch-ai-plugins` into the distribution repository and push it there.
 
-- **OpenAI (plugin):** upload `dist/genizahsearch-openai-plugin.zip`; a verified OpenAI platform account; the privacy, terms and support URLs above;
+- **OpenAI (plugin):** at platform.openai.com/plugins (the ChatGPT "Upload plugin archive" menu only
+  installs it privately), upload `dist/genizahsearch-openai-plugin.zip`; a verified developer identity
+  (organization settings); the category must be one of the dashboard's (`OPENAI_CATEGORIES` in
+  `build_packages.py`; we use Education & Research) and the description may not mention pricing, so
+  not even "free"; negative test cases are prompts where the plugin should NOT be invoked; the video is
+  a URL; the privacy, terms and support URLs above;
   the icon; the five positive and three negative test cases in `acceptance-tests.md`; a demo video;
   domain verification by setting `OPENAI_APPS_CHALLENGE` to the value OpenAI gives (served at
   `/.well-known/openai-apps-challenge`); after approval, publish explicitly.

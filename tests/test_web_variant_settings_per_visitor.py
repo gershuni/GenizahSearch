@@ -83,6 +83,12 @@ class FakeSearchEngine:
                        ids_only=False):
         raise AssertionError('must run through the worker queue, not in process')
 
+    def search_composition_logic(self, full_text, chunk_size, max_freq, mode, filter_text=None,
+                                 progress_callback=None, boundary_mode='full', boundary_delimiter='\n',
+                                 boundary_boost=1.5, min_boundary_matches=0, min_delimiter_distance=3,
+                                 restrict_sys_ids=None, corpus_scope='genizah'):
+        raise AssertionError('must run through the worker queue, not in process')
+
 
 @pytest.fixture
 def server(monkeypatch):
@@ -302,6 +308,96 @@ def test_api_variants_request_uses_the_website_defaults_after_a_web_visitor(serv
     assert web_a['settings']['variant_aggressive'] is True
     # A visitor who changed nothing searches exactly as the API does.
     assert {k: web_b['settings'][k] for k in WEBSITE_DEFAULTS} == WEBSITE_DEFAULTS
+
+
+async def _api_posts(*requests):
+    """POST each (path, body) to the app; returns the responses in order."""
+    import httpx
+    from nicegui import core
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(core.app),
+                                 base_url='http://test') as api:
+        return [await api.post(path, json=body) for path, body in requests]
+
+
+@pytest.mark.parametrize('mode,prefix,pairs,changes', [('variants_extended', '??', 70, 2)])
+def test_an_api_variant_level_queues_what_the_search_page_queues(server, mode, prefix, pairs, changes):
+    """A visitor who changed nothing types '?? word'; the API asks for the
+    same level by name -- as its own background job and through the MCP/GPT facade's
+    job (synchronously it is refused). Every worker gets the same engine mode and
+    settings. (docs/plans/MCP_CHUNK_AND_VARIANT_LEVELS_PLAN.md, section 3.)"""
+    body = {'query': WORD, 'search_mode': mode}
+
+    async def driver(a, b):
+        await a.open('/search')
+        submit(a, f'{prefix} {WORD}')
+        await wait_for_payloads(server.queue, 1)
+        sync, job, facade = await _api_posts(('/api/search', body), ('/api/search/jobs', body),
+                                             ('/api/chatgpt/search/jobs', body))
+        assert sync.status_code == 400 and sync.json()['error']['code'] == 'background_job_required', sync.text
+        assert job.status_code in (200, 202), job.text
+        assert facade.status_code == 202, facade.text
+        await wait_for_payloads(server.queue, 3)
+
+    run(driver)
+    web, *api = server.queue.payloads
+    assert len(api) == 2
+    assert web['arguments']['mode'] == mode
+    assert (web['settings']['variant_pairs_count'], web['settings']['variant_max_changes']) == (pairs, changes)
+    for sent in api:
+        assert sent['arguments']['mode'] == mode
+        assert sent['settings'] == web['settings']
+    assert server_values(server.settings) == SERVER
+
+
+def test_an_api_fuzzy_search_queues_two_changes_like_the_search_page(server):
+    """Fuzzy used to bind only variant_max_changes=2; it now takes default_search's full
+    settings. The worker must still get x2 on Basic's pairs, synchronously and as a job."""
+    from web.variant_preferences import WEBSITE_DEFAULTS
+    body = {'query': WORD, 'search_mode': 'fuzzy'}
+
+    async def driver(a, b):
+        sync, job = await _api_posts(('/api/search', body), ('/api/search/jobs', body))
+        assert sync.status_code == 200, sync.text
+        assert job.status_code in (200, 202), job.text
+        await wait_for_payloads(server.queue, 2)
+
+    run(driver)
+    for sent in server.queue.payloads:
+        assert sent['arguments']['mode'] == 'fuzzy'
+        settings = sent['settings']
+        assert (settings['variant_pairs_count'], settings['variant_max_changes']) == (30, 2)
+        for name in ('variant_min_word_len', 'variant_aggressive', 'custom_variants', 'comp_min_score'):
+            assert settings[name] == WEBSITE_DEFAULTS[name], name
+
+
+@pytest.mark.parametrize('mode,engine_mode,pairs,changes', [
+    ('variants', 'variants', 30, 1), ('fuzzy', 'fuzzy', 30, 2), ('exact', 'exact', 30, 1)])
+def test_an_api_chunk_search_queues_the_parallels_pages_mode_and_settings(server, mode, engine_mode,
+                                                                          pairs, changes):
+    """The API's chunk search runs as the parallels page does with default settings
+    (Basic: 30 pairs at x1; fuzzy at x2) synchronously, as a background job and through
+    the facade's job. (Extended and Maximum are not offered for chunk search.)"""
+    from web.variant_preferences import WEBSITE_DEFAULTS
+    body = {'text': f'{WORD} {WORD2} {WORD3}', 'method': 'chunk', 'chunk_size': 2, 'mode': mode}
+
+    async def driver(a, b):
+        sync, job, facade = await _api_posts(('/api/parallels', body), ('/api/parallels/jobs', body),
+                                             ('/api/chatgpt/parallels/jobs', body))
+        assert sync.status_code == 200, sync.text
+        assert sync.json()['request']['mode'] == mode
+        assert job.status_code in (200, 202), job.text
+        assert facade.status_code == 202, facade.text
+        await wait_for_payloads(server.queue, 3)
+
+    run(driver)
+    for sent in server.queue.payloads:
+        assert sent['method'] == 'search_composition_logic'
+        assert sent['arguments']['mode'] == engine_mode
+        settings = sent['settings']
+        assert (settings['variant_pairs_count'], settings['variant_max_changes']) == (pairs, changes)
+        for name in ('variant_min_word_len', 'variant_aggressive', 'custom_variants', 'comp_min_score'):
+            assert settings[name] == WEBSITE_DEFAULTS[name], name
+    assert server_values(server.settings) == SERVER
 
 
 def test_restored_refinement_steps_replay_with_their_own_settings(server):

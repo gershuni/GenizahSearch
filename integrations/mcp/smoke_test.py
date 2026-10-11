@@ -18,9 +18,11 @@ import time
 
 from mcp.client import Client
 
-EXPECTED_TOOLS = {'get_capabilities', 'search_manuscripts', 'find_passage_parallels', 'get_research_job',
-                  'browse_manuscript_page', 'get_manuscript_details'}
+EXPECTED_TOOLS = {'get_capabilities', 'search_manuscripts', 'find_passage_parallels', 'find_chunk_parallels',
+                  'get_research_job', 'browse_manuscript_page', 'get_manuscript_details'}
 SHELFMARK = 'ENA 1628.38'
+CHUNK_TEXT = 'ברוך אתה ה אלהינו מלך העולם'   # short: one chunk job holds a shared research worker
+CHUNK_BUSY_TRIES = 5
 JOB_DEADLINE = 600      # the facade's job allowance (web/chatgpt_jobs.py MAX_JOB_SECONDS)
 DETAILS_DEADLINE = 60   # details_pending is temporary; give the local lookup a minute
 
@@ -93,6 +95,28 @@ async def run(base_url, mode, failures):
                 failures.append(f'{mode}: details still pending after {DETAILS_DEADLINE} s')
                 break
             await asyncio.sleep(details['error'].get('retry_after_seconds', 5))
+        await check_chunk_search(client, failures, mode)
+
+
+async def check_chunk_search(client, failures, mode):
+    """A chunk search with spelling variants completes and says which search it ran."""
+    arguments = {'text': CHUNK_TEXT, 'chunk_size': 3, 'mode': 'variants'}
+    for _ in range(CHUNK_BUSY_TRIES):  # one chunk search runs at a time for all users
+        chunk = await call(client, failures, 'find_chunk_parallels', arguments, retry_codes=('research_jobs_busy',))
+        if not chunk or 'error' not in chunk:
+            break
+        await asyncio.sleep(chunk['error'].get('retry_after_seconds', 30))
+    else:
+        failures.append(f'{mode}: chunk search still busy after {CHUNK_BUSY_TRIES} tries')
+        return
+    chunk = await wait_for_job(client, failures, chunk)
+    if chunk is None:
+        return
+    echo = chunk.get('request') or {}
+    if (echo.get('method'), echo.get('mode'), echo.get('chunk_size')) != ('chunk', 'variants', 3):
+        failures.append(f'{mode}: the chunk search ran as {echo}')
+    if not isinstance(chunk.get('results'), list):
+        failures.append(f'{mode}: the chunk search returned no results list')
 
 
 def main():

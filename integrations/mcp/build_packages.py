@@ -32,6 +32,13 @@ PLUGIN = HERE / 'plugin'
 INSTRUCTIONS = HERE / 'server_instructions.md'
 ICON = ROOT / 'web' / 'static' / 'genizahsearch-icon-512.png'
 MCP_URL = 'https://genizahsearch.com/mcp'
+
+# The listing categories OpenAI's plugin dashboard accepts (developers.openai.com/plugins/deploy/
+# submission-errors, plugin_category_unknown, 2026-10-11). "Research" alone was refused.
+OPENAI_CATEGORIES = frozenset({
+    'Productivity', 'Creativity', 'Developer Tools', 'Business & Operations', 'Data & Analytics',
+    'Communication', 'Education & Research', 'Security', 'Finance', 'Healthcare', 'Travel',
+    'Entertainment', 'Other'})
 SKILL_NAME = 'genizahsearch-research'
 SKILL_DESCRIPTION = (
     'Research Cairo Genizah manuscripts with the GenizahSearch tools: search a Hebrew or Judeo-Arabic '
@@ -135,6 +142,9 @@ def problems() -> list[str]:
     for key, limit in (('displayName', 30), ('shortDescription', 30), ('longDescription', 4000)):
         if not interface.get(key) or len(interface[key]) > limit:
             found.append(f'openai plugin.json: {key} missing or over {limit} characters')
+    if interface.get('category') not in OPENAI_CATEGORIES:
+        found.append(f"openai plugin.json: category {interface.get('category')!r} is not one of the "
+                     f'dashboard categories: {sorted(OPENAI_CATEGORIES)}')
     for key in ('websiteURL', 'supportURL', 'privacyPolicyURL', 'termsOfServiceURL'):
         value = interface.get(key, '')
         if not value.startswith('https://') or len(value) > 1024:

@@ -12,6 +12,14 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 - **Website: an Extended or Maximum search stops at the 3-minute limit with what it found**, as Basic does, and so does an Extended or Maximum composition search: it finishes the page it is checking (or the passage it is preparing) and then stops, usually within a few seconds of the limit. Before, they could run on past it until the search worker was stopped by force, and other visitors' searches waited while a new worker loaded.
 - **Desktop: Stop answers sooner during a slow Extended, Maximum or composition search** (it was checked once every 200 pages).
 
+### AI integrations and the public API: chunk search and the Extended variant level (web)
+
+- **ChatGPT, Claude and other AI assistants can run the website's composition (chunk) search**, with a
+  chosen chunk size (new MCP tool `find_chunk_parallels`; exact, variants or fuzzy).
+- **The Extended variant level** in the public API (`search_mode=variants_extended`, background jobs
+  only: `/api/search/jobs`) and the MCP server, matching the website's defaults. Maximum is held: on
+  the real index it ran past the search time limit.
+
 ### Website: steadier when a step is interrupted (web)
 
 - **Pages keep working when a search, filter or lookup is interrupted** -- by a newer search, a closed

@@ -637,9 +637,9 @@ def capture_api_event(
     status_code: int,
     error_code: Optional[str],
     client_ip: str,
-    # Phase 81A D-08 additions: literal `search_mode` enum value (one of
-    # exact|variants|responsa|title|shelfmark, or None when the field is
-    # structurally absent/invalid) and count of True flags in the validated
+    # Phase 81A D-08 additions: literal `search_mode` enum value (any key of
+    # web.search_api._SEARCH_MODE_TO_INTERNAL, recorded as given; None when the
+    # field is structurally absent/invalid) and count of True flags in the validated
     # ResponsaOptions (0 when search_mode != 'responsa' or options omitted).
     search_mode_value: Optional[str] = None,
     responsa_options_count: int = 0,

@@ -12,6 +12,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 
 from web.api_hardening import API_CHANNEL_SCOPE_KEY
+from web.chatgpt_api import CHUNK_JOB_SCOPE_KEY
 from web.research_api import APIJob
 from web.chatgpt_pagination import build_pages, page_budget, MAX_STORED_BYTES
 
@@ -23,6 +24,11 @@ POLL_SECONDS = 10
 MAX_CACHE_BYTES = 64 * 1024 * 1024
 MAX_RAW_BYTES = 16 * 1024 * 1024
 RETRIEVALS_PER_MINUTE = 60
+# Chunk parallels run up to the website's time limit (three minutes) on a research
+# worker shared with website searches, and these jobs bypass the API's heavy-search
+# budget: at most this many run at once, so they can never hold every worker.
+MAX_ACTIVE_CHUNK_JOBS = 1
+CHUNK_BUSY_RETRY_SECONDS = 30
 
 
 def register_chatgpt_jobs(app, handlers, prepare, finish, owner):
@@ -101,7 +107,15 @@ def register_chatgpt_jobs(app, handlers, prepare, finish, owner):
                 return error('chatgpt_storage_limit', 'Saved-result capacity is full. Try later; no new search was started.', 503)
             if sum(j.owner == client and j.finished is None for j in jobs.values()) >= MAX_ACTIVE_PER_OWNER:
                 return error('research_jobs_busy', 'Two searches are already active. Retrieve their results before submitting another.', 429)
+            chunk = bool(prepared.scope.get(CHUNK_JOB_SCOPE_KEY))
+            if chunk and sum(getattr(j, 'chunk', False) and j.finished is None
+                             for j in jobs.values()) >= MAX_ACTIVE_CHUNK_JOBS:
+                busy = error('research_jobs_busy', 'Another chunk search is running on the shared search '
+                             'workers. Retry after the indicated delay; no search was started.', 429)
+                busy.headers['Retry-After'] = str(CHUNK_BUSY_RETRY_SECONDS)
+                return busy
             job = APIJob(client)
+            job.chunk = chunk
             job.response = None
             job.pages, job.stored_bytes = {}, 0
             job.read_times = []

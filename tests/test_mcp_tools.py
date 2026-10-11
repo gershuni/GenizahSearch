@@ -98,12 +98,12 @@ def stack(monkeypatch):
     return host, child, engine
 
 
-def client_for(host, mode='legacy', sizes=None):
+def client_for(host, mode='legacy', sizes=None, ip='198.51.100.9'):
     async def hook(response):
         if sizes is not None and b'"tools/call"' in (response.request.content or b''):
             await response.aread()
             sizes.append(len(response.content))
-    http = httpx2.AsyncClient(transport=httpx2.ASGITransport(app=host, client=('198.51.100.9', 4444)),
+    http = httpx2.AsyncClient(transport=httpx2.ASGITransport(app=host, client=(ip, 4444)),
                               base_url='http://127.0.0.1:8081', event_hooks={'response': [hook]})
     return Client(streamable_http_client('http://127.0.0.1:8081/mcp', http_client=http), mode=mode)
 
@@ -123,7 +123,7 @@ def run(host, script, mode='legacy', sizes=None):
 
 # --- the tool list -------------------------------------------------------------------------------
 
-def test_six_tools_with_the_planned_annotations(stack):
+def test_seven_tools_with_the_planned_annotations(stack):
     host, _, _ = stack
 
     async def script(client):
@@ -135,12 +135,20 @@ def test_six_tools_with_the_planned_annotations(stack):
         'browse_manuscript_page': (True, True, False, False),
         'search_manuscripts': (False, False, False, False),
         'find_passage_parallels': (False, False, False, False),
+        'find_chunk_parallels': (False, False, False, False),
         'get_research_job': (True, True, False, False),
         'get_manuscript_details': (False, True, False, False),
     }
     assert all(tool.title for tool in tools.values())
     assert tools['get_manuscript_details'].input_schema['properties']['section']['enum'] == sorted(SECTIONS)
     assert 'method' not in tools['find_passage_parallels'].input_schema['properties']
+    chunk = tools['find_chunk_parallels'].input_schema
+    assert set(chunk['properties']) == {'text', 'chunk_size', 'mode', 'filters'}
+    assert chunk['required'] == ['text']
+    assert chunk['properties']['mode']['enum'] == ['exact', 'variants', 'fuzzy']
+    assert (chunk['properties']['chunk_size']['minimum'], chunk['properties']['chunk_size']['maximum']) == (2, 20)
+    search_modes = set(tools['search_manuscripts'].input_schema['properties']['search_mode']['enum'])
+    assert 'variants_extended' in search_modes and 'variants_maximum' not in search_modes
 
 
 def test_every_search_mode_is_explained():
@@ -149,9 +157,33 @@ def test_every_search_mode_is_explained():
                    'fuzzy = near spellings', 'only the word as typed for one or two letters',
                    'responsa = the Responsa-Project query syntax',
                    'NOT a filter for responsa literature', 'title = words in the catalogue titles',
-                   'shelfmark = a call number'):
+                   'shelfmark = a call number', 'variants_extended = 70 pairs, up to two changes',
+                   'The Maximum level is not offered'):
         assert phrase in description
     assert 'morphological' not in description
+    # Chunk search: Basic only (ONE change per word); the higher levels are held and said so.
+    assert 'ONE change per word' in mcp_server.CHUNK_MODES and 'two changes' not in mcp_server.CHUNK_MODES
+    assert 'Extended and Maximum levels are not offered for chunk search' in mcp_server.CHUNK_MODES
+
+
+def test_the_instructions_send_chunk_requests_to_the_chunk_tool():
+    """The first real ChatGPT test asked for 'חיפוש מקטעים, מקטע=3, וריאנטים מורחב' and got a refusal."""
+    text = mcp_server.INSTRUCTIONS
+    assert 'חיפוש מקטעים' in text and 'means find_chunk_parallels' in text
+    assert 'then variants_extended' in text and 'the Maximum level is not offered' in text
+    assert 'Extended or Maximum level there, say it is not available' in text
+    assert 'research_jobs_busy' in text and 'snippet_omitted' in text and 'results_cut_off' in text
+
+
+def test_the_smoke_script_expects_exactly_the_served_tools():
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[1] / 'integrations' / 'mcp' / 'smoke_test.py'
+    spec = importlib.util.spec_from_file_location('mcp_smoke_tools', path)
+    smoke = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(smoke)
+    served = {tool.name for tool in mcp_server.build_server(FastAPI())._tool_manager.list_tools()}
+    assert smoke.EXPECTED_TOOLS == served
 
 
 def test_the_first_512_characters_of_the_instructions_carry_the_rules():
@@ -206,6 +238,142 @@ def test_passage_parallels_always_send_method_passage(stack):
     assert [sent for _, sent in engine.calls] == [
         {'method': 'passage', 'text': 'ברוך אתה'},
         {'method': 'passage', 'witnesses': [{'label': 'A', 'text': 'א'}, {'raw_header': 'H'}], 'sort': 'fused'}]
+
+
+def test_chunk_parallels_always_send_method_chunk_with_their_options(stack):
+    host, _, engine = stack
+
+    async def script(client):
+        await client.call_tool('find_chunk_parallels', {'text': 'ברוך אתה ה'})
+        await client.call_tool('find_chunk_parallels', {'text': 'ברוך אתה ה', 'chunk_size': 3,
+                                                        'mode': 'variants',
+                                                        'filters': {'library': ['CUL']}})
+    run(host, script)
+    assert all(path.endswith('/chatgpt/parallels/jobs') for path, _ in engine.calls)
+    assert [sent for _, sent in engine.calls] == [
+        {'method': 'chunk', 'text': 'ברוך אתה ה', 'chunk_size': 5, 'mode': 'exact'},
+        {'method': 'chunk', 'text': 'ברוך אתה ה', 'chunk_size': 3, 'mode': 'variants',
+         'filters': {'library': ['CUL']}}]
+
+
+@pytest.mark.parametrize('arguments', [
+    {'text': 'א ב', 'chunk_size': 1}, {'text': 'א ב', 'chunk_size': 21}, {'text': 'א ב', 'chunk_size': True},
+    {'text': 'א ב', 'mode': 'variants_ultra'}, {'text': 'א ב', 'mode': 'variants_extended'},
+    {'text': 'א ב', 'mode': 'variants_maximum'}, {'text': 'א' * 5001}, {'text': ''}, {}])
+def test_chunk_arguments_are_checked_before_anything_runs(stack, arguments):
+    host, _, engine = stack
+
+    async def script(client):
+        return await client.call_tool('find_chunk_parallels', arguments)
+    assert refused_by_the_tool_schema(run(host, script))
+    assert engine.calls == []
+
+
+@pytest.mark.parametrize('extra', [{'witnesses': [{'text': 'א'}]}, {'sort': 'fused'}, {'method': 'passage'}])
+def test_passage_options_are_not_chunk_arguments(stack, extra):
+    host, _, engine = stack
+    response = raw_tool_call(host, 'find_chunk_parallels', {'text': 'א ב', **extra})
+    assert response.status_code == 400 and 'unknown_argument' in response.text
+    assert engine.calls == []
+
+
+async def finish(client, job_id):
+    """Poll get_research_job until the job is no longer pending; returns its last body."""
+    while True:
+        result = body(await client.call_tool('get_research_job', {'job_id': job_id}))
+        if result.get('state') not in ('queued', 'running'):
+            return result
+        await asyncio.sleep(0.01)
+
+
+def test_only_one_chunk_search_runs_at_a_time(stack):
+    """Chunk jobs share the research workers with the website and bypass the API's
+    heavy budget: a second one is refused with a retry delay, other searches are not,
+    and the next chunk search is admitted once the first has finished."""
+    host, _, engine = stack
+    engine.gate.clear()
+
+    async def script(client):
+        first = body(await client.call_tool('find_chunk_parallels', {'text': 'א ב ג'}))
+        second = body(await client.call_tool('find_chunk_parallels', {'text': 'ד ה ו'}))
+        passage = body(await client.call_tool('find_passage_parallels', {'text': 'א'}))
+        engine.gate.set()
+        await finish(client, first['job_id'])
+        await finish(client, passage['job_id'])
+        third = body(await client.call_tool('find_chunk_parallels', {'text': 'ז ח ט'}))
+        return first, second, passage, third
+    first, second, passage, third = run(host, script)
+    assert first['state'] in ('queued', 'running') and 'job_id' in first
+    assert second['error']['code'] == 'research_jobs_busy' and second['error']['http_status'] == 429
+    assert second['error']['retry_after_seconds'] == chatgpt_jobs.CHUNK_BUSY_RETRY_SECONDS
+    assert 'job_id' in passage
+    assert 'error' not in third
+    assert [sent['text'] for _, sent in engine.calls] == ['א ב ג', 'א', 'ז ח ט']
+
+
+def test_one_overlong_chunk_row_keeps_the_job_and_says_its_text_was_omitted(stack):
+    """A chunk parallel's snippet joins every matched fragment and has no length limit.
+    One such row no longer fails the job: it loses its snippet and excerpt (not its
+    locator or matches) and says so; every other row arrives whole."""
+    host, _, engine = stack
+    payload = search_payload(n=3, chars=300)
+    payload['source'] = 'parallels'
+    payload['results'][1].update(snippet=HEBREW * 6000, excerpt=HEBREW * 10,
+                                 matches=[{'chunk_index': 0, 'source_chunk_text': 'א ב', 'manuscript_snippet': 'א ב'}])
+    engine.payload = payload
+
+    async def script(client):
+        first = body(await client.call_tool('find_chunk_parallels', {'text': 'א ב ג', 'chunk_size': 2}))
+        job_id = first['pagination']['job_id']
+        pages = [first]
+        while pages[-1]['pagination']['next_page'] is not None:
+            pages.append(body(await client.call_tool('get_research_job', {
+                'job_id': job_id, 'page': pages[-1]['pagination']['next_page']})))
+        return pages
+    pages = run(host, script, MODERN)
+    rows = [row for page in pages for row in page['results']]
+    assert [row['uid'] for row in rows] == ['0', '1', '2']
+    long_row = rows[1]
+    assert long_row['snippet_omitted'] is True
+    assert 'snippet' not in long_row and 'excerpt' not in long_row
+    assert long_row['locator'] == payload['results'][1]['locator']
+    assert long_row['matches'] == payload['results'][1]['matches']  # every span, each whole
+    assert all(row['snippet'] == payload['results'][0]['snippet'] and 'snippet_omitted' not in row
+               for row in (rows[0], rows[2]))
+
+
+def test_a_second_caller_waits_for_the_running_chunk_search(stack):
+    """The guard counts every caller's chunk jobs, not only one caller's (Codex build review)."""
+    host, _, engine = stack
+    engine.gate.clear()
+
+    async def go():
+        async with host.router.lifespan_context(host):
+            async with client_for(host) as first, client_for(host, ip='203.0.113.7') as second:
+                running = body(await first.call_tool('find_chunk_parallels', {'text': 'א ב ג'}))
+                refused = body(await second.call_tool('find_chunk_parallels', {'text': 'ד ה ו'}))
+                searching = body(await second.call_tool('search_manuscripts', {'query': 'א',
+                                                                               'search_mode': 'exact'}))
+                engine.gate.set()
+                return running, refused, searching
+    running, refused, searching = asyncio.run(asyncio.wait_for(go(), timeout=60))
+    assert 'job_id' in running
+    assert refused['error']['code'] == 'research_jobs_busy'
+    assert refused['error']['retry_after_seconds'] == chatgpt_jobs.CHUNK_BUSY_RETRY_SECONDS
+    assert 'error' not in searching
+
+
+def test_a_failed_chunk_search_frees_the_next_one(stack):
+    host, _, engine = stack
+    engine.failure = (500, {'error': {'code': 'internal_error', 'message': 'boom'}}, {})
+
+    async def script(client):
+        failed = body(await client.call_tool('find_chunk_parallels', {'text': 'א ב ג'}))
+        engine.failure = None
+        return failed, body(await client.call_tool('find_chunk_parallels', {'text': 'ד ה ו'}))
+    failed, second = run(host, script)
+    assert failed['error']['code'] == 'internal_error'
+    assert 'error' not in second
 
 
 # --- job ids, capacity, cancellation, shutdown -----------------------------------------------------
@@ -481,10 +649,11 @@ def test_every_tool_stays_under_the_bound_on_the_wire(stack, mode):
         page = await client.call_tool('search_manuscripts', {'query': 'א', 'search_mode': 'exact'})
         job_id = body(page)['pagination']['job_id']
         results += [page, await client.call_tool('get_research_job', {'job_id': job_id, 'page': 1}),
-                    await client.call_tool('find_passage_parallels', {'text': 'א'})]
+                    await client.call_tool('find_passage_parallels', {'text': 'א'}),
+                    await client.call_tool('find_chunk_parallels', {'text': 'א ב ג', 'chunk_size': 2})]
         return results
     results = run(host, script, mode, sizes)
-    assert len(sizes) == 6 and max(sizes) <= MCP_RESPONSE_BYTES
+    assert len(sizes) == 7 and max(sizes) <= MCP_RESPONSE_BYTES
     assert not any(result.is_error for result in results)
 
 

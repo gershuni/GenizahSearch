@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import queue
+import time
 from contextlib import asynccontextmanager
 
 import httpx
@@ -172,6 +174,30 @@ def test_mark_chatgpt_keeps_an_existing_mcp_label():
 
 
 # --- telemetry ------------------------------------------------------------------------
+
+def test_a_live_drain_thread_cannot_take_the_events_under_test(host, events):
+    """Regression for the full-suite flake: a drain thread that reads the installed queue,
+    as production's does, must not see the events these tests count."""
+    import threading
+    stolen, stop = [], threading.Event()
+
+    def drain_like_production():
+        while not stop.is_set():
+            try:
+                stolen.append(hardening._event_queue.get(timeout=0.01))
+            except queue.Empty:
+                continue
+    worker = threading.Thread(target=drain_like_production, daemon=True)
+    worker.start()
+    try:
+        call(host)
+        time.sleep(0.05)  # give the thread its chance
+        recorded = events()
+    finally:
+        stop.set()
+        worker.join(timeout=2)
+    assert [event['properties']['tool'] for event in recorded] == ['get_capabilities'] and stolen == []
+
 
 @pytest.mark.parametrize('mode,label', [(LEGACY, None), (MODERN, 'mcp')])
 def test_one_event_per_successful_call(host, events, mode, label):

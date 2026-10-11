@@ -34,7 +34,7 @@ import os
 import re as _re
 import time
 from dataclasses import dataclass
-from typing import Literal, Optional, List, TYPE_CHECKING
+from typing import Literal, Optional, List, TYPE_CHECKING, get_args
 
 if TYPE_CHECKING:
     from concurrent.futures import ThreadPoolExecutor
@@ -58,6 +58,7 @@ from web.api_hardening import (
 from shared.api_errors import APIError
 from shared.search_regex import SearchBudgetExceeded, search_budget
 from web.research_jobs import api_engine, wait_executor, with_request_settings, ResearchJobError
+from web.variant_preferences import default_search
 # Phase 79 imports.
 from shared.browse_service import (
     fetch_browse_bundle,
@@ -221,9 +222,10 @@ class SearchRequest(BaseModel):
         ...,
         description="Search query string. Max 1000 chars after stripping. Empty after strip -> 400 query_required.",
     )
-    search_mode: Literal['exact', 'variants', 'responsa', 'title', 'shelfmark', 'fuzzy'] = Field(
+    search_mode: Literal['exact', 'variants', 'variants_extended',
+                         'responsa', 'title', 'shelfmark', 'fuzzy'] = Field(
         ...,
-        description="Search mode: 'exact' (literal), 'variants' (morphological), 'responsa' (Responsa Project style), 'title' (FJMS title metadata), 'shelfmark' (call number lookup), 'fuzzy' (near spellings: whole words one letter away, two from 5 letters, prefixed forms included — slowest mode).",
+        description="Search mode: 'exact' (literal), 'variants' (letter-confusion spellings: the 30 most frequent pairs, one change per word; the website's Basic level), 'variants_extended' (the website's Extended level: 70 pairs, up to two changes per word; background jobs only, POST /api/search/jobs), 'responsa' (Responsa Project style), 'title' (FJMS title metadata), 'shelfmark' (call number lookup), 'fuzzy' (near spellings: whole words one letter away, two from 5 letters, prefixed forms included — slowest mode).",
     )
     responsa_options: Optional[ResponsaOptions] = Field(
         default=None,
@@ -281,12 +283,17 @@ MAX_LIMIT = 100  # 81A D-06 — lowered from 200 (also enforced via Pydantic Fie
 # SearchEngine.execute_search (shared/search_engine.py). For non-Responsa text
 # searches the internal `mode` selects the variant tier passed to
 # VariantManager.get_variants: 'exact' → no variant expansion, 'variants' → the
-# 30 most frequent letter-confusion pairs. Every API job runs with the website
-# defaults (web.variant_preferences.WEBSITE_DEFAULTS, via api_engine), so an API
-# result never depends on what a website visitor chose.
+# 30 most frequent letter-confusion pairs, 'variants_extended' → 70. Every API job runs with the website defaults
+# (web.variant_preferences.WEBSITE_DEFAULTS, via api_engine; the variant levels and
+# fuzzy with default_search's pairs and x1-x3 on top), so an API result never
+# depends on what a website visitor chose.
 _SEARCH_MODE_TO_INTERNAL = {
     'exact':     'exact',
     'variants':  'variants',
+    # The website's Extended level: its own engine mode, run with
+    # web.variant_preferences.default_search's pairs and x1-x3 (search page). Maximum
+    # is held: on the real index it overran the worker time limit (2026-10-11).
+    'variants_extended': 'variants_extended',
     'responsa':  'Responsa',
     'title':     'Title',
     'shelfmark': 'Shelfmark',
@@ -321,6 +328,27 @@ DEFAULT_VARIANTS_TIMEOUT = 60.0
 DEFAULT_FUZZY_TIMEOUT = 110.0
 DEFAULT_PARALLELS_TIMEOUT = 110.0
 DEFAULT_HEAVY_CONCURRENCY = 2
+# Modes whose variant settings differ from the website defaults every job starts
+# from (web.variant_preferences.default_search): bound per search.
+VARIANT_SETTINGS_MODES = frozenset({'variants_extended', 'fuzzy'})
+# The website's Extended level outlasts any synchronous request: measured on the real
+# index (2026-10-11), common phrases ran to the three-minute worker limit, and each
+# timed-out request kept a worker the website shares busy for up to a minute more. It
+# runs only as a background job (/api/search/jobs and the MCP/GPT facade's jobs); owner
+# decision 2026-10-11 (docs/plans/MCP_CHUNK_AND_VARIANT_LEVELS_PLAN.md). Maximum, and the
+# levels in chunk parallels, are not offered at all (same plan: they overran the limit).
+BACKGROUND_JOB_MODES = frozenset({'variants_extended'})
+
+
+def _require_background_job(request, mode, endpoint):
+    """Refuse a synchronous request for a background-only mode, naming the job route."""
+    if mode in BACKGROUND_JOB_MODES and not request.scope.get('research_job'):
+        raise APIError(
+            'background_job_required',
+            f"{mode} runs longer than a synchronous request can wait. Submit the same body to "
+            f"POST /api{endpoint}/jobs, then poll its status_url; the result is at its result_url.",
+            http_status=400,
+        )
 HEAVY_SEARCH_MODES = frozenset({'variants', 'fuzzy'})
 
 # Phase 145 (passage-matching parallels search): its OWN ceiling, separate
@@ -342,6 +370,7 @@ def _resolve_search_timeout(search_mode: str) -> tuple:
 
     Re-reads the env on every call (no caching) so prod can flip timeouts
     without a restart. responsa and interactive modes use the baseline knob.
+    (The Extended and Maximum levels never run synchronously: BACKGROUND_JOB_MODES.)
     """
     if search_mode == 'variants':
         return (
@@ -1091,7 +1120,7 @@ class ParallelsRequest(BaseModel):
     )
     mode: Literal['exact', 'variants', 'fuzzy'] = Field(
         default=PARALLELS_MODE_DEFAULT,
-        description="Matching mode for each chunk: 'exact' (literal), 'variants' (morphological), 'fuzzy' (approximate).",
+        description="Matching mode for each chunk: 'exact' (literal), 'variants' (the 30 most frequent letter-confusion pairs, one change per word: the website's Basic level), 'fuzzy' (approximate).",
     )
     max_freq: Optional[float] = Field(
         default=None,
@@ -1581,6 +1610,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
 
             # 1. Mode gate (D-02, D-03, D-04).
             enforce_mode_gate(request)
+            _require_background_job(request, req.search_mode, '/search')
 
             # 2. Rate limit check (D-01 sliding window). Key is the trusted
             #    real client IP per Concern #1. On limit hit, RateLimiter.check
@@ -1687,9 +1717,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 core_timeout, timeout_env = _resolve_search_timeout(req.search_mode)
                 background_job = request.scope.get('research_job')
                 worker_searcher = api_engine(state.searcher, request, core_timeout)
-                if req.search_mode == 'fuzzy':
-                    # The website defaults give x1 (Basic); Fuzzy runs at x2.
-                    worker_searcher = with_request_settings(worker_searcher, variant_max_changes=2)
+                if req.search_mode in VARIANT_SETTINGS_MODES:
+                    # The website's pairs and x1-x3 for this level (fuzzy: x2). Bound
+                    # AFTER api_engine, which builds a fresh wrapper without them.
+                    internal_mode, level_settings = default_search(internal_mode)
+                    worker_searcher = with_request_settings(worker_searcher, **level_settings)
                 if background_job:
                     core_timeout = None
 
@@ -2530,19 +2562,21 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # SOLE releaser; it fires on success, exception, or post-timeout
             # completion, so no finally release is needed.
             parallels_ceiling = None if request.scope.get('research_job') else _resolve_parallels_timeout()
+            # The parallels page's engine mode, pairs and x1-x3 for this mode (fuzzy at
+            # x2). Bound AFTER api_engine, which builds a fresh wrapper without them.
+            chunk_engine_mode, chunk_settings = default_search(req.mode, composition=True)
             _par_release = (lambda: None) if request.scope.get('research_job') else await _acquire_heavy_slot()
             try:
                 _par_task = asyncio.ensure_future(
                     fetch_parallels_results(
                         # SEED-016 #3: inject the SearchEngine + MetadataManager
                         # singletons (was read off web.state inside shared/).
-                        searcher=(with_request_settings(
-                            api_engine(state.searcher, request, parallels_ceiling), variant_max_changes=2)
-                            if req.mode == 'fuzzy' else api_engine(state.searcher, request, parallels_ceiling)),
+                        searcher=with_request_settings(
+                            api_engine(state.searcher, request, parallels_ceiling), **chunk_settings),
                         meta_mgr=state.meta_mgr,
                         text=text,
                         chunk_size=req.chunk_size,
-                        mode=req.mode,
+                        mode=chunk_engine_mode,
                         max_freq=req.max_freq,
                         boundary_mode=req.boundary_mode,
                         restrict_sys_ids=restrict_sys_ids,
@@ -2855,12 +2889,17 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # insertion order is preserved, and _SEARCH_MODE_TO_INTERNAL's
             # own definition order already matches the documented contract.
             'search_modes': list(_SEARCH_MODE_TO_INTERNAL.keys()),
+            # search_mode values only POST /api/search/jobs accepts (2026-10-11).
+            'background_job_modes': sorted(BACKGROUND_JOB_MODES),
             'features': {
                 'passage': _passage_on,
                 'passage_multi_witness': _multi_witness_on,
             },
             'parallels': {
                 'methods': ['chunk', 'passage'] if _passage_on else ['chunk'],
+                # The `mode` values method='chunk' accepts, read off the request
+                # model so this list cannot drift from what validation allows.
+                'chunk_modes': list(get_args(ParallelsRequest.model_fields['mode'].annotation)),
                 'multi_witness': _multi_witness_on,
                 # EFFECTIVE, not configured -- see
                 # _resolve_effective_max_witnesses(): a lowered passage

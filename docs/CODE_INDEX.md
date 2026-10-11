@@ -1229,7 +1229,7 @@ Partial entry: the filter-state → read paths only, not the whole surface.
 
 Public MCP server at `POST /mcp` (docs/plans/MCP_SERVER_PLAN.md; contract in docs/SEARCH_API.md "MCP server").
 - **Function** `register_mcp_server` — adds the exact POST route, the `/mcp/` redirect and the SDK manager in the host lifespan; no route unless `MCP_ENABLED` and the facade
-- **Function** `build_server` — the six tools over one facade (`get_capabilities`, `search_manuscripts`, `find_passage_parallels`, `get_research_job`, `browse_manuscript_page`, `get_manuscript_details`)
+- **Function** `build_server` — the seven tools over one facade (`get_capabilities`, `search_manuscripts`, `find_passage_parallels`, `find_chunk_parallels`, `get_research_job`, `browse_manuscript_page`, `get_manuscript_details`; chunk tool and variant levels: docs/plans/MCP_CHUNK_AND_VARIANT_LEVELS_PLAN.md)
 - **Class** `_RequestGuard` — before dispatch: 64 KiB body, id/name lengths, undeclared arguments refused
 - **Class** `_ReplyCap` — every reply within 100,000 bytes; streams never held; ASGI order kept
 - **Function** `_run_tool` / `_start_and_wait` — one `mcp_tool_call` event per call; coded errors; in-tool wait of three polls
@@ -1797,6 +1797,7 @@ Variant and Lab preferences of one website visitor, kept in that visitor's stora
 - **Function** `request_settings` — checked copies; an unknown name raises
 - **Function** `get` / `set` — this visitor's Settings-page value
 - **Function** `level_of` — 'basic', 'extended' or 'maximum' for a variant mode or pair count
+- **Function** `default_search` — (engine mode, settings) of a search by a visitor who chose nothing, per page (search page: Basic ×1, Extended and Maximum as their own modes at ×2; parallels page: every level as `variants` at Basic's ×1; fuzzy ×2); what every API search runs -- the API offers Basic and Extended for search, Basic for chunk (2026-10-11)
 - **Function** `max_changes_table` / `max_changes` / `set_max_changes` — this visitor's ×1-×3 per level (key `search_max_changes_by_level`; the old single `search_max_changes` seeds Extended and Maximum)
 - **Function** `for_search` — the complete settings one of this visitor's searches runs with: the level's ×1-×3 in variant modes, ×2 in Fuzzy, Basic's elsewhere
 
