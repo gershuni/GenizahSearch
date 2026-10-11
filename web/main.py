@@ -716,6 +716,8 @@ from web.discovery_assets import load_discovery_state, discovery_available  # no
 from web.passage_assets import (load_passage_state, passage_available,  # Phase 145: passage-matching parallels search
                                 passage_multi_witness_available)
 from web.start_content import demo_url, load_start_content  # the /start page's own prepared parallels demo, reused by the What's New toast
+from web.ai_listings import (current as ai_listings_current, page_description as ai_page_description,  # the live AI listings
+                             whats_new_suffix as ai_whats_new_suffix)  # (docs/plans/AI_LISTINGS_LAUNCH_PLAN.md)
 from web.discovery import (  # Phase 135 (BAND-05): /help methods-section wiring — noindex predicate + band-precision/claim-count readers (patched as web.main.* in the render-smoke test)
     discovery_methods_noindex,
     get_all_band_precision,
@@ -736,6 +738,12 @@ from version import APP_VERSION
 # as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
 WHATS_NEW_VERSION = "9.6.0-search"
+# The What's New entry for each combination of live AI listings (web/ai_listings.py).
+AI_LAUNCH_WHATS_NEW = {
+    ('ChatGPT', 'Claude'): "New: GenizahSearch in ChatGPT and Claude - ask about the manuscripts in your own words, from the AI tools page.",
+    ('ChatGPT',): "New: GenizahSearch in ChatGPT - ask about the manuscripts in your own words, from the AI tools page.",
+    ('Claude',): "New: GenizahSearch in Claude - ask about the manuscripts in your own words, from the AI tools page.",
+}
 APP_PORT = int(os.environ.get('GENIZAH_PORT', 8081))
 
 # Initialize API routes (Image Proxy, Export)
@@ -1724,12 +1732,21 @@ def create_layout():
     # occurs. See the two rewritten tests in that file.
     # v9.2.1 (2026-09-18): the GPT is live for every reader, so this entry is
     # ungated too, and it points at the page that explains all three ways in.
-    _new_surfaces.append(
-        (tr("New: ask the Genizah in ChatGPT - the GenizahSearch GPT, a research "
-            "skill for other AI assistants, and the public API, from the AI tools page."), '/ai'))
+    # 2026-10-11 (docs/plans/AI_LISTINGS_LAUNCH_PLAN.md): once the ChatGPT plugin or
+    # the Claude connector is live (a production setting), the newest entry names it
+    # and the GPT entry goes; the GPT entry also goes when OpenAI retires GPTs.
+    _ai = ai_listings_current()
+    if _ai.live:
+        _new_surfaces.insert(0, (tr(AI_LAUNCH_WHATS_NEW[tuple(n for n, _ in _ai.live)]), '/ai'))
+    elif _ai.gpt_available:
+        _new_surfaces.append(
+            (tr("New: ask the Genizah in ChatGPT - the GenizahSearch GPT, a research "
+                "skill for other AI assistants, and the public API, from the AI tools page."), '/ai'))
 
     _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
-    _whats_new_unseen = safe_user_get('whats_new_dismissed') != WHATS_NEW_VERSION
+    # Each listing launch lights the unread dot again (whats_new_suffix).
+    _whats_new_key = WHATS_NEW_VERSION + ai_whats_new_suffix()
+    _whats_new_unseen = safe_user_get('whats_new_dismissed') != _whats_new_key
 
     # === Modular Header Rendering Functions ===
     # These allow us to reverse DOM order for RTL without using CSS order or row-reverse
@@ -1881,7 +1898,7 @@ def create_layout():
                     if not _whats_new_pending['unseen']:
                         return
                     _whats_new_pending['unseen'] = False
-                    safe_user_set('whats_new_dismissed', WHATS_NEW_VERSION)
+                    safe_user_set('whats_new_dismissed', _whats_new_key)
                     ui.run_javascript(
                         'document.getElementById("whats-new-dot")?.remove();')
 
@@ -2454,9 +2471,11 @@ def dashboard_page():
 
 @app.get('/chatgpt', include_in_schema=False)
 def chatgpt_redirect():
+    # The ChatGPT plugin listing once it is live, else the GPT until it retires,
+    # else the AI page (web/ai_listings.py).
     from fastapi.responses import RedirectResponse
-    from web.pages.ai_tools import GPT_URL
-    return RedirectResponse(GPT_URL, status_code=307)
+    from web.ai_listings import chatgpt_target
+    return RedirectResponse(chatgpt_target(), status_code=307)
 
 
 @ui.page('/ai', title='AI tools | כלי AI — Dicta Genizah Search')
@@ -2465,7 +2484,7 @@ def ai_tools_route():
     ui.add_head_html(page_meta(
         '/ai',
         title='AI tools | כלי AI — Dicta Genizah Search',
-        description='Research Cairo Genizah manuscripts with ChatGPT, a research skill, or the public API.',
+        description=ai_page_description(),
     ))
     ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(POSTHOG_SCRIPT)

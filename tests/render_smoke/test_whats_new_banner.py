@@ -217,7 +217,12 @@ def test_a_box_without_the_index_announces_only_what_it_actually_has():
             'a GATED surface is advertised on a box whose index never opened')
         assert 'textual witnesses' not in text
 
-    _run(driver, passage_on=False, witnesses_on=False)
+    # The GPT entry exists only before OpenAI retires GPTs and while no AI listing is
+    # live (web/ai_listings.py): pin both, or this test fails on 2026-12-11.
+    from datetime import date
+    with (patch('web.ai_listings._today', return_value=date(2026, 11, 1)),
+          patch.dict(os.environ, {'AI_CHATGPT_PLUGIN_URL': '', 'AI_CLAUDE_CONNECTOR_URL': ''})):
+        _run(driver, passage_on=False, witnesses_on=False)
 
 
 def test_toast_suppresses_itself_where_the_page_already_presents_this():
