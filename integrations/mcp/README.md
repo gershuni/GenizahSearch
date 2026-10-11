@@ -82,7 +82,12 @@ python integrations/mcp/build_packages.py --write --zip dist/genizahsearch-opena
 
 Copy `dist/genizahsearch-ai-plugins` into the distribution repository and push it there.
 
-- **OpenAI (plugin):** upload `dist/genizahsearch-openai-plugin.zip`; a verified OpenAI platform account; the privacy, terms and support URLs above;
+- **OpenAI (plugin):** at platform.openai.com/plugins (the ChatGPT "Upload plugin archive" menu only
+  installs it privately), upload `dist/genizahsearch-openai-plugin.zip`; a verified developer identity
+  (organization settings); the category must be one of the dashboard's (`OPENAI_CATEGORIES` in
+  `build_packages.py`; we use Education & Research) and the description may not mention pricing, so
+  not even "free"; negative test cases are prompts where the plugin should NOT be invoked; the video is
+  a URL; the privacy, terms and support URLs above;
   the icon; the five positive and three negative test cases in `acceptance-tests.md`; a demo video;
   domain verification by setting `OPENAI_APPS_CHALLENGE` to the value OpenAI gives (served at
   `/.well-known/openai-apps-challenge`); after approval, publish explicitly.

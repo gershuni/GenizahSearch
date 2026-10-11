@@ -16,9 +16,9 @@
       "interface": {
         "displayName": "GenizahSearch",
         "shortDescription": "Cairo Genizah manuscripts",
-        "longDescription": "Research the Cairo Genizah with Dicta Genizah Search. Find manuscripts containing a Hebrew or Judeo-Arabic word or phrase (exact, with common spelling variants, or near spellings), look up a shelfmark such as T-S 12.123 or ENA 1628.38, find parallels to a passage across the corpus, read a manuscript page with its transcription and a citation that credits whoever made the text, and read catalogue records and bibliography. Answers link to each page on genizahsearch.com. Free; no account needed.",
+        "longDescription": "Research the Cairo Genizah with Dicta Genizah Search. Find manuscripts containing a Hebrew or Judeo-Arabic word or phrase (exact, with common spelling variants, or near spellings), look up a shelfmark such as T-S 12.123 or ENA 1628.38, find parallels to a passage across the corpus, read a manuscript page with its transcription and a citation that credits whoever made the text, and read catalogue records and bibliography. Answers link to each page on genizahsearch.com. No account needed.",
         "developerName": "Hillel Gershuni",
-        "category": "Research",
+        "category": "Education & Research",
         "websiteURL": "https://genizahsearch.com",
         "supportURL": "https://genizahsearch.com/support",
         "privacyPolicyURL": "https://genizahsearch.com/ai/privacy",
