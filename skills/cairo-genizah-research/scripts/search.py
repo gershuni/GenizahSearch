@@ -10,6 +10,8 @@ Per SKILL-01 / D-09: GENIZAH_API_BASE env var overrides --base-url.
 This INVERTS the typical CLI convention — env wins.
 
 Valid search_mode values: exact | variants | responsa | title | shelfmark | fuzzy
+(The website's Extended level, variants_extended, runs only as a background job --
+POST /api/search/jobs -- which this synchronous script does not use.)
 
 Runtime notes:
 - fuzzy mode is the slowest (variants_maximum tier); the server allows up to

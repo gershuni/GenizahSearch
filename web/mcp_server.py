@@ -85,7 +85,10 @@ SEARCH_MODES = (
     'Search modes: '
     'exact = the words as typed, with no spelling variation. '
     'variants = also the common letter-confusion spellings (the 30 most frequent letter-confusion '
-    "pairs, the website's default variant settings). "
+    "pairs, one change per word: the website's Basic level). "
+    'variants_extended = 70 pairs, up to two changes per word (the Extended level): slow, and on '
+    'common phrases it stops at the time limit with results_cut_off. The Maximum level is not '
+    'offered. '
     'fuzzy = near spellings: every whole word within one edit of a query word of three or four '
     'letters, two edits from five letters, and only the word as typed for one or two letters (an '
     'edit adds, drops or changes a letter, or swaps two neighbours); prefixed forms included; slow, '
@@ -98,6 +101,13 @@ SEARCH_MODES = (
     'title = words in the catalogue titles of the manuscripts (the library catalogue records and the NLI '
     'catalogue cache), not manuscript text; filtering by work is filters.works. '
     'shelfmark = a call number such as T-S 12.123 or ENA 1628.38.'
+)
+
+CHUNK_MODES = (
+    'mode: exact = the words as typed; variants = the 30 most frequent letter-confusion pairs, ONE '
+    "change per word (the website's Basic level); fuzzy = near spellings. The Extended and Maximum "
+    'levels are not offered for chunk search: they do not finish within the time limit. If the user '
+    'asks for one, say so and offer variants.'
 )
 
 JOB_ID_PATTERN = r'^[A-Za-z0-9_-]{16,128}$'
@@ -609,7 +619,7 @@ def build_server(facade_app) -> MCPServer:
             'minutes after it finishes, then waits briefly: you get the first page of results, or a '
             'job_id to pass to get_research_job. Never resubmit a pending search; a retry after a lost '
             'reply starts a second search. Start with exact; for a composition search two to four '
-            'distinctive phrases separately. ' + SEARCH_MODES +
+            'distinctive phrases separately, or find_chunk_parallels for a whole text. ' + SEARCH_MODES +
             ' limit is how many candidates to save (default 100, fuzzy 500), not the page size.'),
         annotations=STARTS_A_JOB,
         structured_output=False,
@@ -617,7 +627,8 @@ def build_server(facade_app) -> MCPServer:
     async def search_manuscripts(
         ctx: Context,
         query: Annotated[str, Field(min_length=1, max_length=1000, description='The words to search for, or a shelfmark.')],
-        search_mode: Annotated[Literal['exact', 'variants', 'fuzzy', 'responsa', 'title', 'shelfmark'],
+        search_mode: Annotated[Literal['exact', 'variants', 'variants_extended', 'fuzzy',
+                                       'responsa', 'title', 'shelfmark'],
                                Field(description='See the search modes in the tool description.')],
         limit: Annotated[int | None, Field(ge=1, le=500, strict=True, description='Candidates to save: at most 100, '
                                                                     'or 500 for fuzzy.')] = None,
@@ -650,7 +661,8 @@ def build_server(facade_app) -> MCPServer:
             'search longer input in sections and say what was covered. Starts a private background '
             'job like search_manuscripts and waits briefly: you get the first page or a job_id for '
             'get_research_job. Scores count matching letters; they are not probabilities. sort only '
-            'with witnesses (fused unless asked otherwise).'),
+            'with witnesses (fused unless asked otherwise). For word-chunk matching with a chunk size '
+            "(the website's composition search), use find_chunk_parallels."),
         annotations=STARTS_A_JOB,
         structured_output=False,
     )
@@ -677,10 +689,47 @@ def build_server(facade_app) -> MCPServer:
         return await _run_tool(ctx, 'find_passage_parallels', operation, transform=_job_text)
 
     @server.tool(
+        name='find_chunk_parallels',
+        title='Find parallels by word chunks',
+        description=(
+            "Find manuscripts that share word chunks with a text, like the website's composition "
+            '(chunk) search: the text is cut into overlapping runs of chunk_size words and every run is '
+            'searched in the corpus. Use it when the user asks for chunk search (Hebrew: חיפוש מקטעים) '
+            'or a chunk size for parallels; for spelling-tolerant passage matching use '
+            'find_passage_parallels. Give one text of at most 5,000 characters; label and search longer '
+            'input in sections and say what was covered. A smaller chunk_size finds shorter shared '
+            'phrases and runs longer. ' + CHUNK_MODES + ' Starts a private background job like '
+            'search_manuscripts and waits briefly: you get the first page or a job_id for '
+            'get_research_job. One chunk search runs at a time for all users: on research_jobs_busy wait '
+            'retry_after_seconds when given (otherwise finish your own running searches first), then try '
+            'again. A search that stops early (its time limit, or a limit on spellings or candidates) '
+            'returns what it found with the results_cut_off warning. Scores rank candidates by their '
+            'matched chunks; they are not probabilities.'),
+        annotations=STARTS_A_JOB,
+        structured_output=False,
+    )
+    async def find_chunk_parallels(
+        ctx: Context,
+        text: Annotated[str, Field(min_length=1, max_length=5000, description='The text to find parallels to.')],
+        chunk_size: Annotated[int, Field(ge=2, le=20, strict=True,
+                                         description='Words per chunk (default 5).')] = 5,
+        mode: Literal['exact', 'variants', 'fuzzy'] = 'exact',
+        filters: SearchFilters | None = None,
+    ) -> CallToolResult:
+        body = {'method': 'chunk', 'text': text, 'chunk_size': chunk_size, 'mode': mode}
+        if filters is not None:
+            body['filters'] = filters.model_dump(exclude_none=True)
+
+        async def operation(client_ip):
+            return await _start_and_wait(target, client_ip, '/chatgpt/parallels/jobs', body)
+        return await _run_tool(ctx, 'find_chunk_parallels', operation, transform=_job_text)
+
+    @server.tool(
         name='get_research_job',
         title='Get search results',
         description=(
-            'Poll or page through one search started by search_manuscripts or find_passage_parallels. '
+            'Poll or page through one search started by search_manuscripts, find_passage_parallels or '
+            'find_chunk_parallels. '
             'Copy job_id exactly; a pending state means the search is still running, not that it found '
             'nothing. Pages hold up to ten candidates: continue with the SAME job_id and '
             'pagination.next_page until it is null; never rerun the search. collection=filtered holds '

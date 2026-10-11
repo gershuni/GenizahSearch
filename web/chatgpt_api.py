@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse, Response
 
 MAX_RESPONSE_BYTES = 80000  # Conservative: below the 100,000-character Actions cap.
 ACTION_TIMEOUT = 40
+CHUNK_JOB_SCOPE_KEY = 'genizah_chunk_job'
 
 
 def _error(code, message, status=400):
@@ -74,8 +75,13 @@ def _validate_pilot_body(kind, body, background=False):
             return f'ChatGPT search limit must be an integer from 1 to {maximum} for this mode.'
         body['limit'] = limit
     if kind == 'parallels':
-        if body.get('method') != 'passage':
-            return 'This action requires method=passage; chunk search is not supported here.'
+        # The GPT's schema sends passage only; MCP's find_chunk_parallels sends chunk.
+        # The API itself refuses witnesses/sort with chunk and chunk options with passage.
+        if body.get('method') not in ('passage', 'chunk'):
+            return 'This action requires method=passage or method=chunk.'
+        if body.get('method') == 'chunk' and not background:
+            # Only a job passes the one-chunk-job-at-a-time admission (web/chatgpt_jobs.py).
+            return 'method=chunk runs only as a background job: POST /api/chatgpt/parallels/jobs.'
         texts = [body.get('text', '')]
         witnesses = body.get('witnesses')
         if witnesses is not None:
@@ -103,6 +109,10 @@ async def _prepare_request(kind, request, background=False):
     problem = _validate_pilot_body(kind, body, background)
     if problem:
         return _error('invalid_request', problem)
+    if kind == 'parallels' and body.get('method') == 'chunk':
+        # Read by the background job admission (web/chatgpt_jobs.py): chunk jobs run
+        # one at a time so they cannot hold every research worker.
+        request.scope[CHUNK_JOB_SCOPE_KEY] = True
     encoded = json.dumps(body, ensure_ascii=False).encode('utf-8')
 
     async def receive():

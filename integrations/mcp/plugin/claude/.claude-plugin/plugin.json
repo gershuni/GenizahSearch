@@ -1,8 +1,8 @@
 {
   "name": "genizahsearch",
   "displayName": "GenizahSearch",
-  "version": "1.0.0",
-  "description": "Search the Cairo Genizah manuscripts of Dicta Genizah Search: phrases, shelfmarks, passage parallels, manuscript pages with citations, and catalogue records.",
+  "version": "1.1.0",
+  "description": "Search the Cairo Genizah manuscripts of Dicta Genizah Search: phrases with spelling variants, shelfmarks, passage and chunk parallels, manuscript pages with citations, and catalogue records.",
   "author": {
     "name": "Hillel Gershuni",
     "email": "gershuni@gmail.com",

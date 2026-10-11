@@ -40,7 +40,7 @@ import version as version_module
 
 PINNED_TOP_KEYS = {
     'schema_version', 'request', 'api_version', 'endpoints', 'search_modes',
-    'features', 'parallels', 'limits', 'timeouts',
+    'background_job_modes', 'features', 'parallels', 'limits', 'timeouts',
 }
 
 
@@ -136,8 +136,25 @@ def test_capabilities_search_modes_derived_from_real_enum(client, clean_env):
     body = r.json()
     assert body['search_modes'] == list(_SEARCH_MODE_TO_INTERNAL.keys())
     assert body['search_modes'] == [
-        'exact', 'variants', 'responsa', 'title', 'shelfmark', 'fuzzy',
+        'exact', 'variants', 'variants_extended',
+        'responsa', 'title', 'shelfmark', 'fuzzy',
     ]
+
+
+def test_capabilities_lists_the_chunk_modes_validation_accepts(client, clean_env):
+    from typing import get_args
+    from web.search_api import ParallelsRequest
+    chunk_modes = _get(client).json()['parallels']['chunk_modes']
+    assert chunk_modes == list(get_args(ParallelsRequest.model_fields['mode'].annotation))
+    assert chunk_modes == ['exact', 'variants', 'fuzzy']
+
+
+def test_capabilities_names_the_modes_only_jobs_accept(client, clean_env):
+    from web.search_api import BACKGROUND_JOB_MODES
+    body = _get(client).json()
+    assert body['background_job_modes'] == sorted(BACKGROUND_JOB_MODES) == ['variants_extended']
+    # Sync never runs them, so no synchronous timeout is advertised for them.
+    assert not set(body['timeouts']) & BACKGROUND_JOB_MODES
 
 
 # ---------------------------------------------------------------------------

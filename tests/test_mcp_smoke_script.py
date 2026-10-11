@@ -78,3 +78,26 @@ def test_a_result_without_a_page_number_is_reported_not_read_as_page_one(monkeyp
     asyncio.run(smoke.run('http://x', 'legacy', failures))
     assert 'browse_manuscript_page' not in fake.calls
     assert any('no usable locator' in failure for failure in failures)
+
+
+def test_a_busy_chunk_search_is_retried_then_checked(monkeypatch):
+    busy = result({'error': {'code': 'research_jobs_busy', 'retry_after_seconds': 0}}, is_error=True)
+    page = {'results': [], 'request': {'method': 'chunk', 'mode': 'variants', 'chunk_size': 3}}
+    client = FakeClient({'find_chunk_parallels': lambda n: busy if n == 1 else result(page)})
+    failures = []
+    asyncio.run(smoke.check_chunk_search(client, failures, 'legacy'))
+    assert client.calls == ['find_chunk_parallels', 'find_chunk_parallels'] and failures == []
+
+
+def test_a_chunk_search_that_ran_as_something_else_is_reported():
+    page = {'results': [], 'request': {'method': 'chunk', 'mode': 'exact', 'chunk_size': 3}}
+    client, failures = FakeClient({'find_chunk_parallels': result(page)}), []
+    asyncio.run(smoke.check_chunk_search(client, failures, 'legacy'))
+    assert len(failures) == 1 and 'ran as' in failures[0]
+
+
+def test_a_chunk_search_busy_every_time_is_a_failure(monkeypatch):
+    busy = result({'error': {'code': 'research_jobs_busy', 'retry_after_seconds': 0}}, is_error=True)
+    client, failures = FakeClient({'find_chunk_parallels': busy}), []
+    asyncio.run(smoke.check_chunk_search(client, failures, 'legacy'))
+    assert len(client.calls) == smoke.CHUNK_BUSY_TRIES and 'still busy' in failures[0]

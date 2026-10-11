@@ -91,8 +91,19 @@ def test_mcp_pages_fit_their_escaped_budget_and_keep_every_candidate(payload):
     assert len(pages['results']) > len(gpt_pages['results'])
 
 
-def test_a_row_too_large_for_mcp_fails_explicitly():
+def test_a_row_too_large_for_mcp_drops_its_snippet_not_the_job():
     payload = hebrew_payload(n=1, chars=20000)
+    pages, _ = build_pages(payload, 'job-token')  # fits the GPT's raw-byte page whole
+    assert 'snippet_omitted' not in json.loads(pages['results'][0])['results'][0]
+    pages, _ = build_pages(payload, 'job-token', page_bytes=MCP_PAGE_BYTES, measure=mcp_escaped_size)
+    row = json.loads(pages['results'][0])['results'][0]
+    assert row['snippet_omitted'] is True and 'snippet' not in row
+    assert row['locator'] == payload['results'][0]['locator'] and len(row['matches']) == 3
+
+
+def test_a_row_too_large_even_without_its_snippet_fails_explicitly():
+    payload = hebrew_payload(n=1, chars=20000)
+    payload['results'][0]['matches'] = [{'text': payload['results'][0]['snippet']}]
     build_pages(payload, 'job-token')  # fits the GPT's raw-byte page
     with pytest.raises(ValueError):
         build_pages(payload, 'job-token', page_bytes=MCP_PAGE_BYTES, measure=mcp_escaped_size)
@@ -248,15 +259,17 @@ def test_every_real_response_stays_under_the_bound(wire_host, body, mode, fits):
 # --- exact GPT boundaries (Codex build review: the digests above never reach them) -----------
 # Literal numbers on purpose: importing PAGE_BYTES would let a changed limit pass.
 
-def _one_row_payload(snippet):
+def _one_row_payload(filler, field='shelfmark'):
+    # The size sits in a field that is never dropped, so the page limit itself is
+    # what decides; a snippet would be omitted instead (test below).
     return {'schema_version': 1, 'source': 'search', 'generated_at': '2026-10-09T00:00:00Z',
             'request': {}, 'count': 1, 'total': 1, 'warnings': [],
-            'results': [{'uid': '0', 'snippet': snippet}], 'filtered': []}
+            'results': [{'uid': '0', field: filler}], 'filtered': []}
 
 
-def _sized_gpt_page(target_bytes):
-    overhead = len(build_pages(_one_row_payload(''), 'job-token')[0]['results'][0])
-    return _one_row_payload('a' * (target_bytes - overhead))
+def _sized_gpt_page(target_bytes, field='shelfmark'):
+    overhead = len(build_pages(_one_row_payload('', field), 'job-token')[0]['results'][0])
+    return _one_row_payload('a' * (target_bytes - overhead), field)
 
 
 def test_a_gpt_page_of_exactly_80000_bytes_still_fits():
@@ -267,6 +280,14 @@ def test_a_gpt_page_of_exactly_80000_bytes_still_fits():
 def test_a_gpt_page_of_80001_bytes_is_refused():
     with pytest.raises(ValueError):
         build_pages(_sized_gpt_page(80_001), 'job-token')
+
+
+def test_an_80001_byte_snippet_row_is_served_without_its_snippet():
+    pages, _ = build_pages(_sized_gpt_page(80_000, 'snippet'), 'job-token')
+    assert [len(page) for page in pages['results']] == [80_000]
+    pages, _ = build_pages(_sized_gpt_page(80_001, 'snippet'), 'job-token')
+    row = json.loads(pages['results'][0])['results'][0]
+    assert row == {'uid': '0', 'snippet_omitted': True}
 
 
 def test_a_gpt_details_record_of_exactly_70000_bytes_is_served_and_70001_is_not():

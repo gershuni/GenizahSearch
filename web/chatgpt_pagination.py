@@ -31,6 +31,21 @@ def page_budget(channel):
     return PAGE_BYTES, len
 
 
+def _omit_snippet(row):
+    """Drop a row's display text (snippet/excerpt) when the row alone cannot fit a
+    page; its locator and its match spans (already at most three, each complete;
+    matches_available counts the rest) stay, and snippet_omitted says so. A chunk
+    parallel's snippet joins every matched fragment and has no length limit; failing
+    the whole job for one such row would lose every other result. False when there
+    is nothing left to drop."""
+    if row.get('snippet_omitted') or not ({'snippet', 'excerpt'} & row.keys()):
+        return False
+    row.pop('snippet', None)
+    row.pop('excerpt', None)
+    row['snippet_omitted'] = True
+    return True
+
+
 def build_pages(payload, job_id, *, page_bytes=PAGE_BYTES, measure=len):
     """Return collection -> response bytes. Preserve order and complete spans.
 
@@ -70,6 +85,8 @@ def build_pages(payload, job_id, *, page_bytes=PAGE_BYTES, measure=len):
                 raw = JSONResponse(data).body
                 if measure(raw) <= page_bytes:
                     break
+                if len(candidates) == 1 and _omit_snippet(candidates[0]):
+                    continue  # One long row keeps its place, locator and matches.
                 if len(candidates) <= 1:
                     raise ValueError('A result or its fixed metadata exceeds the page allowance. Narrow the query or use the website.')
                 candidates.pop()

@@ -8,6 +8,7 @@
 
 | Plan | Status | Description |
 |------|--------|-------------|
+| [MCP_CHUNK_AND_VARIANT_LEVELS_PLAN.md](MCP_CHUNK_AND_VARIANT_LEVELS_PLAN.md) | Rev 3 (2026-10-11): built; Maximum and chunk levels held by measurement | Chunk parallels in the MCP server (`find_chunk_parallels`) and the website's Extended/Maximum variant levels in MCP and the public API |
 | [MCP_SERVER_PLAN.md](MCP_SERVER_PLAN.md) | Codex SHIP (rev. 5, 2026-10-08); owner decisions recorded 2026-10-09; spike next | Public MCP server at `/mcp` over the `/api/chatgpt` facade, replacing the GenizahSearch GPT before OpenAI retires GPTs on 2026-12-11; ChatGPT plugin + Claude connector listings |
 | [SEARCH_PERF_HANDOFF.md](SEARCH_PERF_HANDOFF.md) | In progress (step 1 on `ccr-b3b8c7ac-jyxlw3`) | Desktop search ~28 s -> index is 0.24 s of it; per-hit Python loop, duplicates, silent 50,000 cap; next steps + equivalence tool |
 | [MOBILE_RESPONSIVE_PLAN.md](MOBILE_RESPONSIVE_PLAN.md) | Planned | Mobile/tablet responsive design |

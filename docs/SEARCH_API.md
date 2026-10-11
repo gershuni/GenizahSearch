@@ -1,6 +1,6 @@
 # GenizahSearch Search-Helper API
 
-> Contract `schema_version: 1` · Verified against site release 9.2.0 · Last updated: 2026-10-10
+> Contract `schema_version: 1` · Verified against site release 9.2.0 · Last updated: 2026-10-11
 
 The **site release** above is the GenizahSearch version this document was last checked
 against — it is NOT a separate API version, and it does not gate what is true. The
@@ -281,7 +281,7 @@ when the offending key is the legacy `mode` field (renamed to `search_mode` in P
 | Name | Type | Constraint | Default | Notes |
 | ---- | ---- | ---------- | ------- | ----- |
 | `query` | string | 1..1000 chars (post-strip; empty → `query_required`; over cap → `query_too_long`) | required | `QUERY_LENGTH_CAP=1000` |
-| `search_mode` | enum | `exact \| variants \| responsa \| title \| shelfmark \| fuzzy` | required | `regex` was intentionally dropped per Phase 81A D-09. `variants` uses the website's default variant settings (Basic: the 30 most frequent letter-confusion pairs plus the website's custom letter pairs), the same as a website search with default settings. `fuzzy` (added 2026-06) finds near spellings — whole words one letter away, two from 5 letters, prefixed forms included (since 2026-10; before, the exact word only) — bounded by `SEARCH_API_FUZZY_TIMEOUT` (default 110s as of 2026-09-08, down from 300s — see "Edge-Timeout Ceiling" below), not the interactive 30s baseline |
+| `search_mode` | enum | `exact \| variants \| variants_extended \| responsa \| title \| shelfmark \| fuzzy` | required | `regex` was intentionally dropped per Phase 81A D-09. `variants` uses the website's default variant settings (Basic: the 30 most frequent letter-confusion pairs plus the website's custom letter pairs, one change per word), the same as a website search with default settings. `variants_extended` (added 2026-10-11) is the website's Extended level at its defaults: 70 pairs, up to two changes per word. **It runs only as a background job** (`POST /api/search/jobs`): measured on the real index, common phrases run to the three-minute worker limit and return what they found with `results_cut_off`, so a synchronous request is refused with 400 `background_job_required`. The website's Maximum level is not offered: it overran the worker time limit and its workers were stopped by force. `fuzzy` (added 2026-06) finds near spellings — whole words one letter away, two from 5 letters, prefixed forms included (since 2026-10; before, the exact word only) — bounded by `SEARCH_API_FUZZY_TIMEOUT` (default 110s as of 2026-09-08, down from 300s — see "Edge-Timeout Ceiling" below), not the interactive 30s baseline |
 | `responsa_options` | object \| null | valid only when `search_mode="responsa"` | `null` | see sub-table below |
 | `gap` | integer | must be `0` when `search_mode in {title, shelfmark}` | `0` | proximity slop for keyword search |
 | `limit` | integer | `1..100` for non-fuzzy modes (`MAX_LIMIT=100`); `1..SEARCH_API_FUZZY_MAX_LIMIT` (default 500, max 2000) for `fuzzy` | `50` (fuzzy with no explicit limit widens to a recall-oriented default of 250) | P9X: fuzzy recall-over-precision — non-fuzzy boundary unchanged |
@@ -580,7 +580,7 @@ mode is `mode`, NOT `search_mode` — see "Naming Inconsistency" below.
 | ---- | ---- | ---------- | ------- | ----- |
 | `text` | string \| null | 1..20000 chars (post-strip; `COMPOSITION_LENGTH_CAP=20000`; empty → `composition_required`; over cap → `composition_too_long`) | required *unless* `witnesses` is sent | Omit it ONLY when sending `witnesses` instead. Sending both → 400 `witnesses_and_text_conflict`; sending neither → 400 `composition_required`. |
 | `chunk_size` | integer | `2..20` | `5` | size of sliding chunks. A text with fewer words than `chunk_size` is searched as ONE chunk of all its words and warns `text_shorter_than_chunk_size`; a text under 2 words is not searched and warns `text_too_short`. The `request.chunk_size` echo stays the requested value; the warning carries `effective_chunk_size`. |
-| `mode` | enum | `exact \| variants \| fuzzy` | `"exact"` | **field name is `mode`, not `search_mode`** — see "Naming Inconsistency" |
+| `mode` | enum | `exact \| variants \| fuzzy` | `"exact"` | **field name is `mode`, not `search_mode`** — see "Naming Inconsistency". `variants` runs as the website's composition search does with default settings (30 letter-confusion pairs, one change per word). Its Extended and Maximum levels are not offered here (2026-10-11: on the real index they found nothing within the worker time limit, and Maximum's workers were stopped by force). `method='passage'` refuses every mode but `exact` |
 | `max_freq` | float \| null | `>= 1`. A **document count**, not a ratio: a chunk matching more than `max_freq` documents is treated as too common. `null` disables high-frequency filtering | `null` | **Effective range is `[1, 50)`.** The engine tests `len(hits) > max_freq` against a per-chunk retrieval hard-capped at 50 hits, so any `max_freq >= 50` can never fire and behaves exactly like `null`. It is therefore not a corpus frequency: it counts hits inside a truncated top-50 and cannot tell a chunk in 51 manuscripts from one in 5,000. A value below 1 would discard every chunk that matches anything, so such values are rejected with `invalid_request` rather than silently returning an empty result set. Documented as a `0.0-1.0` ratio until 2026-08-24 — the docs were wrong, not the code |
 | `boundary_mode` | enum | `full \| boundary \| combined` | `"full"` | only boundary knob exposed since the initial public release (Phase 80 D-03) |
 | `filters` | object \| null | reuses Phase 78 `FiltersModel` verbatim | `null` | same shape as `/api/search.filters` |
@@ -922,13 +922,15 @@ curl -s https://genizahsearch.com/api/capabilities | python -m json.tool
   "request": {},
   "api_version": "9.2.0",
   "endpoints": ["/api/search", "/api/browse", "/api/parallels", "/api/capabilities"],
-  "search_modes": ["exact", "variants", "responsa", "title", "shelfmark", "fuzzy"],
+  "search_modes": ["exact", "variants", "variants_extended", "responsa", "title", "shelfmark", "fuzzy"],
+  "background_job_modes": ["variants_extended"],
   "features": {
     "passage": true,
     "passage_multi_witness": true
   },
   "parallels": {
     "methods": ["chunk", "passage"],
+    "chunk_modes": ["exact", "variants", "fuzzy"],
     "multi_witness": true,
     "max_witnesses": 25,
     "max_witness_chars": 20000,
@@ -964,8 +966,10 @@ curl -s https://genizahsearch.com/api/capabilities | python -m json.tool
 | `api_version` | The site release this deployment is running (`version.py::APP_VERSION`), read live — NOT a hardcoded string, and NOT the same thing as `schema_version`. |
 | `endpoints` | The four public paths as absolute `/api/...` strings — what a client actually calls, regardless of what path prefix this router happens to be mounted under. |
 | `search_modes` | The live `search_mode` enum accepted by `POST /api/search`, in the order documented above. |
+| `background_job_modes` | The `search_mode` values accepted only by `POST /api/search/jobs` (synchronously: 400 `background_job_required`; added 2026-10-11). |
 | `features.passage` | `web.passage_assets.passage_available()` — both `PASSAGE_PARALLELS_ENABLED=1` AND a successfully-loaded passage index. |
 | `features.passage_multi_witness` | `web.passage_assets.passage_multi_witness_available()` — both `PASSAGE_MULTI_WITNESS_ENABLED=1` AND `features.passage`. |
+| `parallels.chunk_modes` | The `mode` values `method='chunk'` accepts, read off the request model (added 2026-10-11). |
 | `parallels.methods` | `["chunk"]` when `features.passage` is `false`; `["chunk", "passage"]` when it is `true`. Never lists `"passage"` on a deployment where it would 503. |
 | `parallels.multi_witness` | Mirrors `features.passage_multi_witness`. |
 | `parallels.max_witnesses` | The **effective** cap — the largest witness count a request would actually be accepted with, which is the lower of `SEARCH_API_PASSAGE_MAX_WITNESSES` (default 25) and what the passage ceiling can afford. Two gates reject a witness list, not one: the handler also refuses on projected cost (`witnesses × 0.75 s > SEARCH_API_PASSAGE_TIMEOUT` → 400 `too_many_witnesses`), so lowering the passage timeout lowers the real cap without touching the cap variable. At defaults the projection binds nothing (30 / 0.75 = 40, above 25); at a 10 s ceiling the real cap is 13. `0` is a truthful answer when the ceiling cannot afford even one witness. |
@@ -1113,6 +1117,7 @@ public API surface — renaming any is a breaking change).
 | `too_many_witnesses` | 400 | more than `SEARCH_API_PASSAGE_MAX_WITNESSES` entries, OR a list whose projected cost exceeds `SEARCH_API_PASSAGE_TIMEOUT` |
 | `witness_too_long` | 400 | a **pasted** witness exceeds `COMPOSITION_LENGTH_CAP`; a resolved `raw_header` over the cap is skipped-and-reported instead |
 | `sort_requires_multi_witness` | 400 | `sort` sent without `witnesses` |
+| `background_job_required` | 400 | `search_mode=variants_extended` sent to synchronous `/api/search`; submit the same body to `POST /api/search/jobs` (2026-10-11) |
 | `passage_search_busy` | 503 + `Retry-After` | Phase 145: passage-matching concurrency budget (`SEARCH_API_PASSAGE_CONCURRENCY`, default 4) exhausted; fail-fast; retry shortly |
 
 See [shared/api_errors.py](../shared/api_errors.py) for the authoritative frozenset.
@@ -1225,7 +1230,7 @@ flipped at runtime without a restart.
 
 Certain search classes are inherently slow:
 
-- **variants** — morphological expansion (30+ variant pairs)
+- **variants** — letter-confusion expansion (30 pairs). Extended (70 pairs) is not in this tier: it runs only as a background job
 - **fuzzy** — near spellings: every whole word within one edit of the query word (two from 5 letters; an edit is a letter added, dropped or changed, or two neighbours swapped), prefixed forms included
 - **/api/parallels** — multi-minute sliding-window composition matching
 
@@ -1318,6 +1323,24 @@ The following improvements are documented here as future work but are NOT implem
 ---
 
 ## Changelog
+
+### 2026-10-11 — The Extended variant level; chunk parallels over MCP
+
+- `POST /api/search` `search_mode` accepts `variants_extended`, the website's Extended level at its
+  default settings (70 pairs, up to two changes per word), **only as a background job**
+  (`/api/search/jobs`): synchronously it is refused with 400 `background_job_required`, because on the
+  real index common phrases ran to the three-minute worker limit. Additive: `schema_version` stays 1.
+  Owner decisions 2026-10-11, reversing Phase 81A D-03 for this level. Held: the Maximum level
+  everywhere, and both higher levels for `/api/parallels` -- measured, they found nothing within the
+  worker time limit or had their workers stopped by force
+  (`docs/plans/MCP_CHUNK_AND_VARIANT_LEVELS_PLAN.md`). Responsa stays at Basic.
+- `GET /api/capabilities` adds `background_job_modes` and `parallels.chunk_modes`.
+- The `/api/chatgpt` facade accepts `method=chunk` as a job only (`/api/chatgpt/parallels/jobs`; the
+  synchronous route refuses it), at most one chunk job at a time; a result row too
+  large for a page alone loses its `snippet`/`excerpt` (`snippet_omitted: true`) instead of failing the
+  job.
+- MCP: new tool `find_chunk_parallels` (exact, variants, fuzzy; any chunk size); `search_manuscripts`
+  takes `variants_extended`.
 
 ### 9.2.0 (2026-09-08) — Capabilities endpoint, retroactive Phase 145 changelog entry, and the edge-timeout ceiling
 
@@ -1575,9 +1598,9 @@ to every scholar listed for the manuscript.
 
 ## MCP server
 
-**Status: built on branch `feat/mcp-server`, not yet deployed.** Production answers `/mcp` with 404
-until it is deployed with `MCP_ENABLED=1`; this section describes that build so integrators and
-reviewers read one contract. Plan and decisions: `docs/plans/MCP_SERVER_PLAN.md`.
+**Status: live since 2026-10-10** (`MCP_ENABLED=1` in production). Plans and decisions:
+`docs/plans/MCP_SERVER_PLAN.md` and, for the chunk tool and variant levels,
+`docs/plans/MCP_CHUNK_AND_VARIANT_LEVELS_PLAN.md`.
 
 `POST https://genizahsearch.com/mcp` is a public, authless [Model Context Protocol](https://modelcontextprotocol.io)
 server for ChatGPT (as a plugin), Claude (as a connector), Gemini and other MCP clients. It is a thin
@@ -1600,11 +1623,12 @@ in-process as the visitor who made the call.
 | `get_capabilities` | `GET /api/chatgpt/capabilities` | read-only |
 | `search_manuscripts` | `POST /api/chatgpt/search/jobs`, then polls | starts a job (`readOnlyHint=false`, not idempotent) |
 | `find_passage_parallels` | `POST /api/chatgpt/parallels/jobs` (`method=passage` fixed), then polls | starts a job |
+| `find_chunk_parallels` | `POST /api/chatgpt/parallels/jobs` (`method=chunk` fixed; `chunk_size`, `mode`), then polls | starts a job; one at a time for all callers (`research_jobs_busy`, `Retry-After: 30`) |
 | `get_research_job` | `GET /api/chatgpt/jobs/{job_id}` | read-only |
 | `browse_manuscript_page` | `GET /api/chatgpt/browse`, plus `how_to_cite` | read-only |
 | `get_manuscript_details` | `GET /api/chatgpt/manuscript-details` | builds a snapshot (`readOnlyHint=false`, idempotent) |
 
-The two job tools wait inside the call for up to three facade polls; they return page 0 if the job
+The three job tools wait inside the call for up to three facade polls; they return page 0 if the job
 finishes, or `job_id` with `next_action: get_research_job` if not. `how_to_cite` gives the page
 citation in English and Hebrew from `shared/transcription_credits.py`, crediting whoever made the text
 served (`text_source`): the PGP edition, MiDRASH for the automatic transcription, or nobody when no

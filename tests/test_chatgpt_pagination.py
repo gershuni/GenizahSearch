@@ -60,7 +60,9 @@ def test_large_rows_shrink_pages_without_dropping_candidates_or_spans():
 
 def test_oversize_row_and_storage_overflow_fail_explicitly(monkeypatch):
     original = payload(1)
-    original['results'][0]['snippet'] = 'x' * 100000
+    # An oversized snippet is dropped (snippet_omitted) rather than failing the job
+    # (docs/plans/MCP_CHUNK_AND_VARIANT_LEVELS_PLAN.md D5); a row too large without it fails.
+    original['results'][0]['shelfmark'] = 'x' * 100000
     with pytest.raises(ValueError, match='page allowance'):
         build_pages(original, 'private')
     monkeypatch.setattr('web.chatgpt_pagination.MAX_STORED_BYTES', 1)

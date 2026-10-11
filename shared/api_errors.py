@@ -59,6 +59,8 @@ ERROR_CODES = frozenset({
     'too_many_witnesses',                 # 400 — more than SEARCH_API_PASSAGE_MAX_WITNESSES entries
     'witness_too_long',                   # 400 — a PASTED witness exceeds COMPOSITION_LENGTH_CAP (a resolved reference is skipped-and-reported instead)
     'sort_requires_multi_witness',        # 400 — sort='fused'/'witness_count' without witnesses[]
+    # 2026-10-11: the website's Extended variant level runs only as a background job:
+    'background_job_required',            # 400 — search_mode=variants_extended sent to synchronous /api/search; use /api/search/jobs
 })
 
 # Surfaced in top-level `warnings: []` arrays (D-07), NOT as errors.
