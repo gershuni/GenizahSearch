@@ -262,6 +262,11 @@ class VariantManager:
         """Get current variant pairs count."""
         return self._get_pairs_count()
 
+    def variant_level(self, mode: str = None) -> str:
+        """'basic', 'extended' or 'maximum': the level of the pairs a search in
+        *mode* uses (the settings' pairs count, else the mode's own)."""
+        return variant_preset_of(self._get_pairs_count(mode))
+
     def get_max_variant_pairs(self) -> int:
         """Get total number of available variant pairs."""
         return len(UNIFIED_VARIANT_PAIRS)

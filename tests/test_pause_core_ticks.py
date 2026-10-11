@@ -273,7 +273,8 @@ def test_metadata_search_returns_partials_on_cancel():
 
 def test_composition_local_post_pass_ticks_and_flags_partial():
     fn = SearchEngine.search_composition_logic
-    loop = _find_loop(fn, ['_i_scl', '_plan_scl'])
+    # The loop binds the chunk index only; each chunk's plan is built in it (2026-10-11).
+    loop = _find_loop(fn, ['_i_scl'])
     assert loop is not None, 'LOCAL post-pass loop not found'
     assert _calls_progress_callback(loop), 'LOCAL post-pass has no checkpoint'
     # The enclosing handler must SET the flag, not merely re-raise: the payload

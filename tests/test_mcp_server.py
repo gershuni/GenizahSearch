@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import queue
 from contextlib import asynccontextmanager
 
 import httpx
@@ -25,23 +24,20 @@ import web.api_hardening as hardening
 import web.mcp_server as mcp_server
 from web.api_hardening import API_CHANNEL_SCOPE_KEY, api_channel
 from web.chatgpt_api import _mark_chatgpt
+from tests.mcp_events import CapturedEvents
 
 LEGACY, MODERN = '2025-11-25', '2026-07-28'
 
 
 @pytest.fixture
 def events(monkeypatch):
-    captured = queue.Queue()
+    # Not a real queue: the real drain thread, if an earlier test started it, took
+    # these events (tests/mcp_events.py).
+    captured = CapturedEvents()
     monkeypatch.setattr(hardening, '_event_queue', captured)
     monkeypatch.setattr(hardening, '_start_drain_thread_once', lambda: None)
     monkeypatch.delenv('SEARCH_API_POSTHOG_SAMPLE_N', raising=False)
-
-    def drain():
-        found = []
-        while not captured.empty():
-            found.append(captured.get())
-        return found
-    return drain
+    return captured.drain
 
 
 @pytest.fixture

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import queue
 from contextlib import asynccontextmanager
 
 import httpx
@@ -26,6 +25,7 @@ import web.mcp_server as mcp_server
 from shared.manuscript_details import SECTIONS
 from web.chatgpt_api import register_chatgpt_api
 from web.chatgpt_pagination import MCP_RESPONSE_BYTES
+from tests.mcp_events import CapturedEvents
 
 MODERN = '2026-07-28'
 HEBREW = 'בראשית ברא אלהים "את" השמים '
@@ -69,7 +69,9 @@ class Engine:
 
 @pytest.fixture
 def stack(monkeypatch):
-    monkeypatch.setattr(hardening, '_event_queue', queue.Queue())
+    # Not a real queue: the real drain thread, if an earlier test started it, took
+    # the events drain_events() reads (tests/mcp_events.py).
+    monkeypatch.setattr(hardening, '_event_queue', CapturedEvents())
     monkeypatch.setattr(hardening, '_start_drain_thread_once', lambda: None)
     monkeypatch.setattr(mcp_server, 'MCP_ENABLED', True)
     monkeypatch.setattr(chatgpt_jobs, 'POLL_SECONDS', 0.05)
@@ -313,10 +315,7 @@ def test_a_cancelled_tool_call_records_one_cancelled_event(stack):
 
 
 def drain_events():
-    found = []
-    while not hardening._event_queue.empty():
-        found.append(hardening._event_queue.get())
-    return found
+    return hardening._event_queue.drain()
 
 
 def test_a_search_waits_exactly_three_polls_before_handing_over(stack, monkeypatch):
