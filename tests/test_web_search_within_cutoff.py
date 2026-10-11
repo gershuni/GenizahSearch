@@ -181,11 +181,20 @@ async def _wait_for(predicate, timeout=15.0, user=None):
         await asyncio.sleep(0.05)
 
 
-def _click_search_within(user):
-    from nicegui import events, ui
+def _search_within_button(user):
+    from nicegui import ui
     with user._client:
-        button = next(e for e in user._client.elements.values()
-                      if isinstance(e, ui.button) and str(e.text).startswith('Search within'))
+        return next((e for e in user._client.elements.values()
+                     if isinstance(e, ui.button) and str(e.text).startswith('Search within')), None)
+
+
+async def _click_search_within(user):
+    # The count label and the button are separate updates: the label can show
+    # first (CI, 2026-10-11: StopIteration right after "(partial)" appeared).
+    from nicegui import events
+    await _wait_for(lambda: _search_within_button(user) is not None, user=user)
+    button = _search_within_button(user)
+    with user._client:
         for listener in button._event_listeners.values():
             if listener.type == 'click':
                 events.handle_event(listener.handler, events.GenericEventArguments(
@@ -209,7 +218,7 @@ def test_a_cut_off_list_shows_n_plus_and_search_within_completes_it_first(page):
         submit(a, WORD)
         await wait_for_payloads(queue, 1)
         await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)))
-        seen['button'] = _click_search_within(a)
+        seen['button'] = await _click_search_within(a)
         await wait_for_payloads(queue, 2)          # the completion job
         await _wait_for(lambda: any('Searching within 2 manuscripts' in t for t in _label_texts(a)))
         submit(a, WORD2)
@@ -234,7 +243,7 @@ def test_a_complete_list_is_searched_within_as_shown(page):
         submit(a, WORD)
         await wait_for_payloads(queue, 1)
         await _wait_for(lambda: any(t.startswith('1 Results') for t in _label_texts(a)))
-        _click_search_within(a)
+        await _click_search_within(a)
         await _wait_for(lambda: any('Searching within 1 manuscripts' in t for t in _label_texts(a)))
         submit(a, WORD2)
         await wait_for_payloads(queue, 2)
@@ -289,7 +298,7 @@ def test_completion_runs_the_search_that_ran_not_the_search_box(page):
         submit(a, f'= {WORD}')
         await wait_for_payloads(queue, 1)
         await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)))
-        _click_search_within(a)
+        await _click_search_within(a)
         await wait_for_payloads(queue, 2)
         await _wait_for(lambda: any('Searching within 2 manuscripts' in t for t in _label_texts(a)))
 
@@ -394,7 +403,7 @@ def test_stopped_rows_are_cut_off_and_search_within_completes_them(page, monkeyp
         _click(a, ui.button, lambda e: e.text == 'Stop')
         await _wait_for(lambda: any('(partial)' in t for t in _label_texts(a)))
         seen['count'] = next(t for t in _label_texts(a) if '(partial)' in t)
-        seen['button'] = _click_search_within(a)
+        seen['button'] = await _click_search_within(a)
         await wait_for_payloads(queue, 2)          # the completion job
         await _wait_for(lambda: any('Searching within 2 manuscripts' in t for t in _label_texts(a)))
         submit(a, WORD2)
@@ -425,13 +434,13 @@ def test_search_within_again_keeps_the_completed_set(page):
         submit(a, WORD)
         await wait_for_payloads(queue, 1)
         await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)))
-        _click_search_within(a)
+        await _click_search_within(a)
         await wait_for_payloads(queue, 2)
         await _wait_for(lambda: any('Searching within 2 manuscripts' in t for t in _label_texts(a)))
         _click(a, ui.button, lambda e: e.text == 'Cancel' and e.props.get('icon') == 'close')
         await _wait_for(lambda: not any('Searching within' in t for t in _label_texts(a)
                                         if t.startswith('Searching within')) or True)
-        _click_search_within(a)
+        await _click_search_within(a)
         await _wait_for(lambda: any('Searching within 2 manuscripts' in t for t in _label_texts(a)))
         submit(a, WORD2)
         await wait_for_payloads(queue, 3)
@@ -462,7 +471,7 @@ def test_a_reload_completes_the_search_that_ran_with_its_not_words(page):
         await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)))
         with a._client:
             _input(a, 'Words to exclude (space separated)').value = 'בבב'
-        _click_search_within(a)
+        await _click_search_within(a)
         await wait_for_payloads(queue, 2)
 
     run(driver)
@@ -508,7 +517,7 @@ def test_a_failed_all_terms_completion_leaves_the_filter_off(page, monkeypatch):
         submit(a, WORD)
         await wait_for_payloads(queue, 1)
         await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)))
-        _click_search_within(a)
+        await _click_search_within(a)
         await wait_for_payloads(queue, 2)          # completion fails: within the shown rows
         await _wait_for(lambda: any('Searching within 1+ manuscripts' in t for t in _label_texts(a)))
         submit(a, WORD2)
@@ -720,11 +729,9 @@ class FakeLabEngine:
         raise AssertionError('must run through the worker queue, not in process')
 
 
-def _search_within_text(user):
-    from nicegui import ui
-    with user._client:
-        return next(e.text for e in user._client.elements.values()
-                    if isinstance(e, ui.button) and str(e.text).startswith('Search within'))
+async def _search_within_text(user):
+    await _wait_for(lambda: _search_within_button(user) is not None, user=user)
+    return _search_within_button(user).text
 
 
 def test_a_search_the_time_limit_stopped_shows_n_plus_and_says_why(page):
@@ -766,7 +773,7 @@ def test_a_lab_search_the_time_limit_stopped_is_cut_off(page, monkeypatch):
         submit(a, WORD)
         await wait_for_payloads(queue, 1)
         await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
-        seen['button'] = _search_within_text(a)
+        seen['button'] = await _search_within_text(a)
         seen['notes'] = list(a.notify.messages)
 
     run(driver, count=1)
@@ -790,7 +797,7 @@ def test_searching_within_a_cut_off_line_break_search_says_it_cannot_be_complete
         submit(a, query)
         await wait_for_payloads(queue, 1)
         await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
-        _click_search_within(a)
+        await _click_search_within(a)
         await _wait_for(lambda: any('Searching within 1+ manuscripts' in t for t in _label_texts(a)), user=a)
         seen['notes'] = list(a.notify.messages)
 
@@ -827,7 +834,7 @@ def test_the_all_terms_filter_stays_off_over_a_line_break_step(page):
         submit(a, query)
         await wait_for_payloads(queue, 1)
         await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
-        _click_search_within(a)
+        await _click_search_within(a)
         await _wait_for(lambda: any('Searching within 1+ manuscripts' in t for t in _label_texts(a)), user=a)
         submit(a, WORD2)
         await wait_for_payloads(queue, 2)
@@ -867,7 +874,7 @@ def test_a_restored_history_entry_is_not_the_shown_search(page):
         box = _element(a, ui.input, lambda e: e.props.get('placeholder') == PLACEHOLDER)
         await _wait_for(lambda: box.value == WORD3, user=a)
         await _wait_for(lambda: any(t.startswith('1 Results') for t in _label_texts(a)), user=a)
-        _click_search_within(a)
+        await _click_search_within(a)
         await _wait_for(lambda: any('Searching within 1 manuscripts' in t for t in _label_texts(a)), user=a)
         submit(a, WORD2)
         await wait_for_payloads(queue, 2)
@@ -915,7 +922,7 @@ def test_a_forced_stop_keeps_the_rows_already_shown(page, monkeypatch):
         with a._client:     # result cards show the shelfmark as html
             seen['html'] = [e.content for e in a._client.elements.values()
                             if isinstance(getattr(e, 'content', None), str)]
-        seen['button'] = _search_within_text(a)
+        seen['button'] = await _search_within_text(a)
         seen['notes'] = list(a.notify.messages)
         with a._client:
             seen['export'] = export_state.get_search_export()
@@ -1053,7 +1060,7 @@ def test_a_restored_chain_and_its_completion_each_run_under_one_limit(page, monk
         submit(a, WORD)
         await wait_for_payloads(queue, 1)
         await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)))
-        _click_search_within(a)
+        await _click_search_within(a)
         await wait_for_payloads(queue, 2)          # completes WORD
         await _wait_for(lambda: any('Searching within 2 manuscripts' in t for t in _label_texts(a)))
         submit(a, WORD2)
@@ -1062,7 +1069,7 @@ def test_a_restored_chain_and_its_completion_each_run_under_one_limit(page, monk
         await a.open('/search')
         await wait_for_payloads(queue, 5)          # the reload replays both steps
         await _wait_for(lambda: not any('Restoring refinement chain' in t for t in _label_texts(a)))
-        _click_search_within(a)
+        await _click_search_within(a)
         await wait_for_payloads(queue, 7)          # completes both steps
 
     run(driver)
