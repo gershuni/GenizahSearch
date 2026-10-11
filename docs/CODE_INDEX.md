@@ -1225,6 +1225,13 @@ Partial entry: the filter-state → read paths only, not the whole surface.
 - **Function** `apply_all_patches` (Line 92) — apply all NiceGUI monkey-patches; call once before ui.run()
 - **Function** `_is_session_free_path` — `/mcp` and `/mcp/`: never read, create or reissue a session (not cacheable; 2026-10-09)
 
+## web/ai_listings.py
+
+Which AI listings are live, from production settings (docs/plans/AI_LISTINGS_LAUNCH_PLAN.md).
+- **Function** `current` — the live listings (ChatGPT plugin, Claude connector), whether the GPT is still offered (no plugin, before 2026-12-11), and whether the launch is announced
+- **Function** `chatgpt_target` — where /chatgpt leads: the plugin, else the GPT while it lives, else /ai
+- **Function** `whats_new_suffix` — appended to the What's New key so each launch relights the unread dot
+
 ## web/mcp_server.py
 
 Public MCP server at `POST /mcp` (docs/plans/MCP_SERVER_PLAN.md; contract in docs/SEARCH_API.md "MCP server").

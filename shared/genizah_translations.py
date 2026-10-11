@@ -5429,6 +5429,17 @@ TRANSLATIONS.update({
         "חדש: שאלו את הגניזה ב־ ChatGPT – ה־GPT של GenizahSearch, סקיל מחקר לעוזרי AI אחרים וה־API הציבורי, הכול מעמוד כלי ה־AI.",
 })
 
+# Web What's New banner: the AI listings launch (docs/plans/AI_LISTINGS_LAUNCH_PLAN.md,
+# web/main.py AI_LAUNCH_WHATS_NEW), one entry per combination of live listings.
+TRANSLATIONS.update({
+    "New: GenizahSearch in ChatGPT and Claude - ask about the manuscripts in your own words, from the AI tools page.":
+        "חדש: GenizahSearch ב־ChatGPT וב־Claude – שאלו על כתבי היד במילים שלכם, מעמוד כלי ה־AI.",
+    "New: GenizahSearch in ChatGPT - ask about the manuscripts in your own words, from the AI tools page.":
+        "חדש: GenizahSearch ב־ChatGPT – שאלו על כתבי היד במילים שלכם, מעמוד כלי ה־AI.",
+    "New: GenizahSearch in Claude - ask about the manuscripts in your own words, from the AI tools page.":
+        "חדש: GenizahSearch ב־Claude – שאלו על כתבי היד במילים שלכם, מעמוד כלי ה־AI.",
+})
+
 # Composition Manuscript Viewer: result category, the frozen result-list filter strip,
 # and the way back to the list (user letter, Tishrei 5787 -- A4/A5).
 TRANSLATIONS.update({
