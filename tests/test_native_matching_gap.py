@@ -44,6 +44,26 @@ def test_regex_and_metadata_modes_keep_any_gap(mode):
 
 def test_responsa_keeps_any_gap():
     _validate_word_gap('literal', 50, {'responsa_mode': True})
+    _validate_word_gap('literal', 4294967294, {'responsa_mode': True})
+
+
+@pytest.mark.parametrize('mode, options', [
+    ('literal', {'responsa_mode': True}),   # the request-level Responsa gap (Codex, PR #395)
+    ('Regex', None),
+    ('variants', None),
+])
+def test_the_re_ceiling_is_rejected_in_every_mode(mode, options):
+    with pytest.raises(ValueError, match=r'4294967295 is too large'):
+        _validate_word_gap(mode, 4294967295, options)
+
+
+def test_a_responsa_request_gap_at_the_ceiling_is_rejected_not_emptied():
+    """build_regex_pattern's Responsa branch catches the OverflowError and
+    returns None, which execute_search reported as no results."""
+    engine = _engine()
+    with pytest.raises(ValueError, match='too large'):
+        engine.execute_search('אב גד', 'literal', 4294967295, corpus_scope='genizah',
+                              responsa_options={'responsa_mode': True})
 
 
 def test_a_missing_gap_is_not_a_gap():

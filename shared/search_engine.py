@@ -46,7 +46,7 @@ from shared.responsa import (
     ResponsaComponent, _apply_explosion_guard,  # noqa: F401
     extract_per_pair_gaps, has_document_and, _expand_inline_alternation,
 )
-from shared.responsa import _SOFIT_TO_NORMAL
+from shared.responsa import _SOFIT_TO_NORMAL, _MAX_GAP_TOKEN
 
 LOGGER = logging.getLogger("genizah." + __name__)
 
@@ -834,9 +834,16 @@ def _validate_word_gap(mode, gap, responsa_options=None):
     never clamp: a changed gap is a changed query. Checked at execute_search
     entry, before the LOCAL branch (whose handler swallows a ValueError) and
     the Fuzzy matcher (which never reaches build_regex_pattern)."""
+    if gap is None:
+        return
+    # re's own repeat-count ceiling applies to every mode: one more and the
+    # Responsa builder's broad handler turns the OverflowError into an empty
+    # result (Codex review of PR #395). The [N] token has the same check.
+    if int(gap) > _MAX_GAP_TOKEN:
+        raise ValueError(f"The gap {gap} is too large; the most is {_MAX_GAP_TOKEN}.")
     if responsa_options and responsa_options.get('responsa_mode'):
         return
-    if mode in _GAP_FREE_MODES or gap is None:
+    if mode in _GAP_FREE_MODES:
         return
     if int(gap) > MAX_WORD_GAP:
         raise ValueError(
