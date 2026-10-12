@@ -39,9 +39,11 @@ from fastapi.testclient import TestClient
 from web.search_api import (  # noqa: E402
     init_search_api,
     MAX_LIMIT,
+    SearchRequest,
     _SEARCH_MODE_TO_INTERNAL,
 )
-from shared.api_errors import ERROR_CODES  # noqa: E402
+from shared.api_errors import ERROR_CODES, APIError  # noqa: E402
+from shared.search_engine import MAX_WORD_GAP  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +476,107 @@ def test_gap_with_metadata_mode_rejected(client, mode, gap):
 def test_gap_zero_with_metadata_mode_legal(client, stub_searcher, mode):
     r = _post_search(client, query='x', search_mode=mode, gap=0)
     assert r.status_code == 200, r.text
+
+
+# The word-gap limit (docs/plans/DESKTOP_NATIVE_MATCHING_PLAN.md 3.6, gate 10): every text
+# mode but responsa is capped at MAX_WORD_GAP; responsa's [N] tokens take any gap. Regex is
+# not an API search_mode (D-09), so there is no regex row: the cap covers all four of
+# these, and `variants_extended` is only reachable as a background job.
+GAP_CAPPED_MODES = ['exact', 'variants', 'variants_extended', 'fuzzy']
+
+
+@pytest.mark.parametrize('mode', ['exact', 'variants', 'fuzzy'])
+def test_gap_over_the_limit_is_400_in_the_capped_modes(client, stub_searcher, mode):
+    r = _post_search(client, query='ברכת המזון', search_mode=mode, gap=50)
+    assert r.status_code == 400, r.text
+    err = r.json()['error']
+    assert err['code'] == 'invalid_combination' and err['code'] in ERROR_CODES, err
+    msg = err['message']
+    assert 'gap' in msg and str(MAX_WORD_GAP) in msg and 'responsa' in msg and mode in msg, msg
+    assert stub_searcher.calls == []   # refused at the door, the engine never ran
+
+
+@pytest.mark.parametrize('mode', ['exact', 'variants', 'fuzzy'])
+def test_gap_at_the_limit_is_accepted_and_one_over_is_not(client, stub_searcher, mode):
+    ok = _post_search(client, query='ברכת המזון', search_mode=mode, gap=MAX_WORD_GAP)
+    assert ok.status_code == 200, ok.text
+    assert stub_searcher.calls[0]['gap'] == MAX_WORD_GAP
+    over = _post_search(client, query='ברכת המזון', search_mode=mode, gap=MAX_WORD_GAP + 1)
+    assert over.status_code == 400, over.text
+    assert over.json()['error']['code'] == 'invalid_combination'
+    assert len(stub_searcher.calls) == 1
+
+
+@pytest.mark.parametrize('gap', [MAX_WORD_GAP + 1, 50, 5000])
+def test_gap_over_the_limit_is_accepted_for_responsa(client, stub_searcher, gap):
+    r = _post_search(client, query='שאלה', search_mode='responsa', gap=gap)
+    assert r.status_code == 200, r.text
+    call = stub_searcher.calls[0]
+    assert call['gap'] == gap and call['mode'] == 'Responsa'
+    # The engine skips its own gap cap only for this flag (_validate_word_gap): a request the
+    # API accepts must carry it, or the accepted gap would fail inside the engine.
+    assert call['responsa_options']['responsa_mode'] is True
+    assert r.json()['request']['gap'] == gap
+
+
+@pytest.mark.parametrize('mode', GAP_CAPPED_MODES)
+def test_model_rejects_gap_over_the_limit_in_every_capped_mode(mode):
+    with pytest.raises(APIError) as exc:
+        SearchRequest(query='x', search_mode=mode, gap=50)
+    assert exc.value.code == 'invalid_combination' and exc.value.http_status == 400
+    assert SearchRequest(query='x', search_mode=mode, gap=MAX_WORD_GAP).gap == MAX_WORD_GAP
+
+
+def test_model_builds_for_responsa_at_any_gap():
+    assert SearchRequest(query='x', search_mode='responsa', gap=50).gap == 50
+    assert SearchRequest(query='x', search_mode='responsa', gap=10**6).gap == 10**6
+
+
+def test_gap_default_stays_zero_and_the_field_stays_optional():
+    request = SearchRequest(query='x', search_mode='exact')
+    assert request.gap == 0
+    field = SearchRequest.model_fields['gap']
+    assert field.is_required() is False and field.default == 0
+
+
+def test_gap_field_has_a_floor_and_no_ceiling_and_says_the_limit():
+    """A Pydantic `le` would reject responsa as well; the cap is the mode-aware validator's."""
+    prop = SearchRequest.model_json_schema()['properties']['gap']
+    assert prop.get('minimum') == 0
+    assert not {'maximum', 'exclusiveMaximum'} & set(prop), prop
+    assert str(MAX_WORD_GAP) in prop['description'] and 'responsa' in prop['description']
+
+
+def test_negative_gap_is_400(client, stub_searcher):
+    r = _post_search(client, query='x', search_mode='exact', gap=-1)
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'invalid_request'
+    assert stub_searcher.calls == []
+
+
+def test_responsa_gap_over_the_limit_runs_as_a_background_job(client, stub_searcher):
+    import time
+    with client:
+        created = client.post('/api/search/jobs', json={'query': 'שאלה', 'search_mode': 'responsa', 'gap': 50})
+        assert created.status_code == 202, created.text
+        urls = created.json()
+        deadline = time.monotonic() + 5
+        while client.get(urls['status_url']).json()['state'] not in ('completed', 'failed'):
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        result = client.get(urls['result_url'])
+    assert result.status_code == 200, result.text
+    assert [call['gap'] for call in stub_searcher.calls] == [50]
+
+
+def test_gap_over_the_limit_is_400_on_the_job_route_too(client, stub_searcher):
+    """submit_endpoint used to catch only ValueError/ValidationError, so a model
+    validator's APIError (this one, and the older title/shelfmark gap and
+    responsa_options couplings) escaped as a 500 on POST /api/search/jobs."""
+    r = client.post('/api/search/jobs', json={'query': 'ברכת המזון', 'search_mode': 'variants_extended', 'gap': 50})
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'invalid_combination'
+    assert stub_searcher.calls == []
 
 
 # ---------------------------------------------------------------------------

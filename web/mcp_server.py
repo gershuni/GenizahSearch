@@ -34,6 +34,7 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse
 
 from shared.export_utils import GENIZAHSEARCH_URL
+from shared.search_engine import MAX_WORD_GAP
 from version import APP_VERSION
 from web.api_hardening import API_CHANNEL_SCOPE_KEY, _resolve_rate_limit_key, capture_mcp_tool_event
 from web.chatgpt_pagination import MCP_RESPONSE_BYTES
@@ -109,6 +110,21 @@ CHUNK_MODES = (
     'levels are not offered for chunk search: they do not finish within the time limit. If the user '
     'asks for one, say so and offer variants.'
 )
+
+GAP_DESCRIPTION = (f'Words allowed between terms; 0 for title and shelfmark. At most {MAX_WORD_GAP} in exact, '
+                   f'variants, variants_extended and fuzzy (more is refused, not clamped); responsa has no limit.')
+
+
+def _gap_limit_message(search_mode: str, gap: int | None) -> str | None:
+    """Why ``gap`` is refused for ``search_mode``, or None. The same rule as
+    web/search_api.py::SearchRequest._check_gap_limit: every mode but responsa is capped at
+    MAX_WORD_GAP. title and shelfmark are left to the facade, whose own check says their gap
+    must be 0."""
+    if gap is None or search_mode in ('responsa', 'title', 'shelfmark') or gap <= MAX_WORD_GAP:
+        return None
+    return (f"gap is at most {MAX_WORD_GAP} when search_mode is {search_mode!r} (got gap={gap}); "
+            f"search_mode='responsa' has no limit")
+
 
 JOB_ID_PATTERN = r'^[A-Za-z0-9_-]{16,128}$'
 # Three facade polls of up to ten seconds each: well inside Cloudflare's 125 s.
@@ -632,11 +648,18 @@ def build_server(facade_app) -> MCPServer:
                                Field(description='See the search modes in the tool description.')],
         limit: Annotated[int | None, Field(ge=1, le=500, strict=True, description='Candidates to save: at most 100, '
                                                                     'or 500 for fuzzy.')] = None,
-        gap: Annotated[int | None, Field(ge=0, strict=True, description='Words allowed between terms; 0 for title and '
-                                                           'shelfmark.')] = None,
+        gap: Annotated[int | None, Field(ge=0, strict=True,
+                                         description=GAP_DESCRIPTION)] = None,
         responsa_options: ResponsaOptions | None = None,
         filters: SearchFilters | None = None,
     ) -> CallToolResult:
+        too_wide = _gap_limit_message(search_mode, gap)
+        if too_wide:
+            # Refused here, before a job is queued: the facade would reject the same request
+            # (web/search_api.py::SearchRequest) only after admitting it as a job.
+            async def refuse(client_ip):
+                return httpx.Response(400, json={'error': {'code': 'invalid_combination', 'message': too_wide}})
+            return await _run_tool(ctx, 'search_manuscripts', refuse)
         body = {'query': query, 'search_mode': search_mode}
         if limit is not None:
             body['limit'] = limit

@@ -56,6 +56,7 @@ from web.api_hardening import (
 )
 # Concern #3: APIError from neutral location.
 from shared.api_errors import APIError
+from shared.search_engine import MAX_WORD_GAP
 from shared.search_regex import SearchBudgetExceeded, search_budget
 from web.research_jobs import api_engine, wait_executor, with_request_settings, ResearchJobError
 from web.variant_preferences import default_search
@@ -202,6 +203,11 @@ class ResponsaOptions(BaseModel):
     )
 
 
+# Modes whose word gap is not capped at MAX_WORD_GAP: Responsa's [N] tokens take any gap
+# and always run on the interruptible matcher.
+_GAP_UNLIMITED_MODES = ('responsa',)
+
+
 class SearchRequest(BaseModel):
     """Phase 81A — UI-aligned search_mode + Responsa-only options.
 
@@ -213,6 +219,7 @@ class SearchRequest(BaseModel):
     Validation matrix (81A-CONTEXT.md):
     - Any non-responsa search_mode + non-None responsa_options → 400 invalid_combination
     - search_mode in {'title', 'shelfmark'} + non-zero gap → 400 invalid_combination
+    - any search_mode but 'responsa' + gap > MAX_WORD_GAP (10) → 400 invalid_combination
     - limit must be in [1, 100] (Pydantic Field constraint → 400 invalid_request via Phase 78 envelope wrapper)
     - regex is intentionally NOT in the enum (D-09; deferred to v7.11)
     """
@@ -231,9 +238,16 @@ class SearchRequest(BaseModel):
         default=None,
         description="Responsa expansion flags. Valid only when search_mode='responsa'; rejected otherwise with 400 invalid_combination.",
     )
+    # No `le`: a Pydantic bound would reject responsa too (its [N] tokens take any gap),
+    # and the limit that does apply is per mode -- see _check_gap_limit.
     gap: int = Field(
         default=0,
-        description="Gap between terms (words). Must be 0 when search_mode is 'title' or 'shelfmark'.",
+        ge=0,
+        description=(
+            f"Gap between terms (words). Must be 0 when search_mode is 'title' or 'shelfmark'. "
+            f"At most {MAX_WORD_GAP} for 'exact', 'variants', 'variants_extended' and 'fuzzy': a larger "
+            f"value is rejected with 400 invalid_combination, never clamped. 'responsa' has no limit."
+        ),
     )
     limit: int = Field(
         default=50,
@@ -269,6 +283,22 @@ class SearchRequest(BaseModel):
                 'invalid_combination',
                 f"gap has no effect with metadata-only search modes "
                 f"(search_mode={self.search_mode!r}, gap={self.gap})",
+                http_status=400,
+            )
+        return self
+
+    @model_validator(mode='after')
+    def _check_gap_limit(self):
+        # Desktop native matching plan 3.6 (owner ruling 2026-10-12): the engine rejects a
+        # word gap over MAX_WORD_GAP in every mode but Responsa and Regex
+        # (shared/search_engine.py::_validate_word_gap), so say so at the door with a 400
+        # rather than as a failed job. Regex is not an API search_mode (D-09); if it is
+        # ever added, list it in _GAP_UNLIMITED_MODES -- a new mode is capped until it is.
+        if self.search_mode not in _GAP_UNLIMITED_MODES and self.gap > MAX_WORD_GAP:
+            raise APIError(
+                'invalid_combination',
+                f"gap is at most {MAX_WORD_GAP} when search_mode is {self.search_mode!r} "
+                f"(got gap={self.gap}); search_mode='responsa' has no limit",
                 http_status=400,
             )
         return self

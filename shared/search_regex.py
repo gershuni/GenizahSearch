@@ -4,6 +4,12 @@ Only query patterns use this adapter. Patterns retain Python ``re`` syntax and
 word classes; regex's broader Unicode word definition would change Hebrew hits.
 The deadline bounds matching and is checked between compilation steps; native
 compilation and arbitrary blocking native work are not interruptible in process.
+
+Patterns the engine builds itself from escaped literals (compile_generated) may
+instead match with stdlib ``re``, which is ~60x faster on Extended/Maximum
+prefix trees but holds the GIL: only shapes whose cost per start position is
+bounded, under a subject cap derived from that cost, and never a user's own
+Regex. docs/plans/DESKTOP_NATIVE_MATCHING_PLAN.md has the rules and the review.
 """
 
 from contextlib import contextmanager
@@ -40,6 +46,9 @@ def isolated_matching(*, native=False):
     matching time need not reject a legitimate query. UI highlighting may still
     establish its own explicit short budget inside this context.
     Set native=True only after installing GIL-independent parent-death protection.
+    Engine-generated patterns (compile_generated) are exempt from the regex
+    route outside this context and inside it with native=True; with
+    native=False (Windows workers) they are compiled and routed as any other.
     """
     token = _isolated.set(True)
     native_token = _native_matching.set(native)
@@ -121,6 +130,41 @@ def _check_deadline():
     deadline = _deadline.get()
     if deadline is not None and time.monotonic() >= deadline:
         raise SearchBudgetExceeded()
+
+
+# One native (stdlib re) call may hold the GIL for about this long on degenerate
+# text: an empirical responsiveness target, not a guarantee across machines.
+# The constants were measured 2026-10-12 at 12-17 ns per tree level and 1.1-1.7
+# ns per sibling try at full CPU clock, and up to ~30 ns a level under sustained
+# load: at its cap a degenerate run took 0.5-1.1 s. compile_generated turns a
+# pattern's cost per start position into its subject cap.
+HOLD_BUDGET_S = 1.0
+# Below this cap the native route is not worth its bookkeeping: plain compile().
+NATIVE_MIN_SUBJECT_CHARS = 10_000
+
+_cancel_check = ContextVar("search_regex_cancel_check", default=None)
+
+
+@contextmanager
+def cancel_check(predicate):
+    """Cooperative Stop for native matching: *predicate()* True raises
+    InterruptedError before the next generated call. A stdlib call cannot be
+    interrupted, so this bounds the time from a Stop click to the next
+    checkpoint by one call; it does not shorten a call and does not make
+    QThread.terminate() safe. Set by the desktop search threads around their
+    engine call."""
+    token = _cancel_check.set(predicate)
+    try:
+        yield
+    finally:
+        _cancel_check.reset(token)
+
+
+def _check_cancel():
+    predicate = _cancel_check.get()
+    if predicate is not None and predicate():
+        raise InterruptedError("Search cancelled by user")
+
 
 
 _UNICODE_BLOCK_SIZE = 4096
@@ -323,50 +367,149 @@ def _preserve_word_classes(pattern, flags):
 
 
 class Pattern:
-    def __init__(self, compiled, original, flags, stdlib=None):
+    def __init__(self, compiled, original, flags, stdlib=None, *, generated=False,
+                 native_max_chars=None, shared_chars=None, native_max_chars_shared=None):
+        # The regex-module object. None for a generated pattern until a call falls
+        # back to the interruptible route (see _regex_object).
         self._compiled = compiled
         # compile() hands over the pattern it validated: compiling it again cost a
         # second full compile (re's cache misses: its flags now include UNICODE).
         self._stdlib = stdlib if stdlib is not None else re.compile(original, flags)
         self.pattern = original
         self.flags = flags
+        # Engine-generated (compile_generated): matches with stdlib re in this
+        # process when the subject is within native_max_chars -- or, for a
+        # multi-part pattern whose subject holds one of shared_chars, within the
+        # smaller native_max_chars_shared; else the regex route.
+        self._generated = generated
+        self.native_max_chars = native_max_chars
+        self._shared_chars = shared_chars
+        self.native_max_chars_shared = native_max_chars_shared
 
-    def _call(self, method, *args, **kwargs):
+    def _regex_object(self):
+        """The regex-module object, compiled on first need for a generated pattern."""
+        if self._compiled is None:
+            _check_deadline()
+            self._compiled = _regex_compile(self._stdlib)
+            _check_deadline()
+        return self._compiled
+
+    def _native_allowed(self, name, args, kwargs):
+        """Whether this generated call may run on stdlib re (which holds the GIL).
+
+        sub() never does (its subject is the second argument and no accelerated
+        site substitutes). Supervised Linux workers always do, unbounded, as
+        today; Windows workers never (their watchdog is a Python thread). In
+        process the subject's effective range must be within native_max_chars
+        (the per-pattern cap from its cost per start position, so one call holds
+        the GIL for about HOLD_BUDGET_S at most on degenerate text). A
+        multi-part pattern's subject holding a character the inserter and
+        separator classes share (readable as inside a form or between two parts
+        at every boundary, so a failing match retries their combinations) gets
+        the smaller cap compile_generated derived for that case.
+        """
+        if name == 'sub':
+            return False
+        if _isolated.get():
+            return bool(_native_matching.get())
+        string = args[0]
+        pos = kwargs.get('pos', 0)
+        endpos = kwargs.get('endpos')
+        end = len(string) if endpos is None else min(endpos, len(string))
+        cap = self.native_max_chars
+        if end - pos > cap:
+            return False
+        if self._shared_chars is not None and self._shared_chars.search(string, pos, end) is not None:
+            cap = self.native_max_chars_shared
+        return end - pos <= cap
+
+    def _call(self, name, *args, **kwargs):
+        if self._generated:
+            # An expired budget raises before any work; Stop is honoured between
+            # calls (a stdlib call cannot be interrupted, so this is where a
+            # click lands); then the route.
+            _check_deadline()
+            _check_cancel()
+            if self._native_allowed(name, args, kwargs):
+                return getattr(self._stdlib, name)(*args, **kwargs)
+            compiled = self._regex_object()
+            # The remaining allowance is read AFTER the lazy compile, so its time
+            # cannot leave a stale timeout.
+            timeout = _match_timeout()
+            try:
+                return getattr(compiled, name)(*args, concurrent=True, timeout=timeout, **kwargs)
+            except TimeoutError as exc:
+                raise SearchBudgetExceeded() from exc
         # Disposable workers are supervised by another process, which can kill
         # them even during native matching. Use Python's original matcher there:
         # large transcriptions with variant alternations are much slower in
         # regex. Explicit nested budgets (e.g. highlighting) still need regex's
-        # interruptible operations, as do all calls in the web/desktop process.
+        # interruptible operations, as do all other calls in the web/desktop
+        # process -- except engine-generated patterns, which compile_generated
+        # routes above.
         timeout = _match_timeout()
         if _isolated.get() and _native_matching.get() and timeout is None:
-            return getattr(self._stdlib, method.__name__)(*args, **kwargs)
+            return getattr(self._stdlib, name)(*args, **kwargs)
         try:
-            return method(*args, concurrent=True, timeout=timeout, **kwargs)
+            return getattr(self._compiled, name)(*args, concurrent=True, timeout=timeout, **kwargs)
         except TimeoutError as exc:
             raise SearchBudgetExceeded() from exc
 
     def search(self, string, pos=0, endpos=None):
         kwargs = {} if endpos is None else {"endpos": endpos}
-        return self._call(self._compiled.search, string, pos=pos, **kwargs)
+        return self._call("search", string, pos=pos, **kwargs)
 
     def match(self, string, pos=0, endpos=None):
         kwargs = {} if endpos is None else {"endpos": endpos}
-        return self._call(self._compiled.match, string, pos=pos, **kwargs)
+        return self._call("match", string, pos=pos, **kwargs)
 
     def fullmatch(self, string, pos=0, endpos=None):
         kwargs = {} if endpos is None else {"endpos": endpos}
-        return self._call(self._compiled.fullmatch, string, pos=pos, **kwargs)
+        return self._call("fullmatch", string, pos=pos, **kwargs)
 
     def sub(self, repl, string, count=0):
-        return self._call(self._compiled.sub, repl, string, count=count)
+        return self._call("sub", repl, string, count=count)
 
     @property
     def groups(self):
-        return self._compiled.groups
+        # The \w rewrite adds only non-capturing constructs, so the stdlib
+        # object's count is the regex object's; a generated pattern has no
+        # regex object to ask.
+        return self._stdlib.groups
 
     @property
     def groupindex(self):
-        return self._compiled.groupindex
+        return self._stdlib.groupindex
+
+
+_REGEX_FLAGS = (
+    (re.ASCII, _regex.ASCII), (re.IGNORECASE, _regex.IGNORECASE),
+    (re.MULTILINE, _regex.MULTILINE), (re.DOTALL, _regex.DOTALL),
+    (re.VERBOSE, _regex.VERBOSE), (re.UNICODE, _regex.UNICODE),
+)
+
+
+def _regex_compile(validated):
+    """The regex-module object for a validated stdlib pattern: the same flags,
+    the word escapes rewritten to re's definitions. Native compilation cannot
+    be interrupted; callers check the deadline around it."""
+    mapped = _regex.VERSION0
+    for old, new in _REGEX_FLAGS:
+        if validated.flags & old:
+            mapped |= new
+    rewritten = _preserve_word_classes(validated.pattern, validated.flags)
+    _check_deadline()
+    try:
+        return _regex.compile(rewritten, mapped)
+    except _regex.error as exc:
+        raise re.error(str(exc)) from exc
+
+
+def _validate(pattern, flags):
+    validated = re.compile(pattern, flags)
+    if not isinstance(validated.pattern, str):
+        raise TypeError("search patterns must be strings")
+    return validated
 
 
 def compile(pattern, flags=0):
@@ -378,25 +521,53 @@ def compile(pattern, flags=0):
         if flags:
             raise ValueError("cannot process flags argument with a compiled pattern")
         return pattern
-    validated = re.compile(pattern, flags)
-    if not isinstance(validated.pattern, str):
-        raise TypeError("search patterns must be strings")
-    mapped = _regex.VERSION0
-    for old, new in (
-        (re.ASCII, _regex.ASCII), (re.IGNORECASE, _regex.IGNORECASE),
-        (re.MULTILINE, _regex.MULTILINE), (re.DOTALL, _regex.DOTALL),
-        (re.VERBOSE, _regex.VERBOSE), (re.UNICODE, _regex.UNICODE),
-    ):
-        if validated.flags & old:
-            mapped |= new
-    rewritten = _preserve_word_classes(validated.pattern, validated.flags)
-    _check_deadline()
-    try:
-        compiled = _regex.compile(rewritten, mapped)
-    except _regex.error as exc:
-        raise re.error(str(exc)) from exc
+    validated = _validate(pattern, flags)
+    compiled = _regex_compile(validated)
     _check_deadline()
     return Pattern(compiled, validated.pattern, validated.flags, stdlib=validated)
+
+
+def compile_generated(pattern, flags=0, *, cost_per_start_ns, parts=1, shared_chars=None):
+    """Compile a pattern the ENGINE built from escaped literals, to match with
+    stdlib re where that is safe -- about 60x faster than the regex module on
+    Extended/Maximum prefix trees (2026-10-12).
+
+    The caller vouches for the shape (see search_engine.build_regex_pattern:
+    gap 0, word characters only, caseless, prefix trees, forms <= 64 chars) and
+    passes its cost per start position in nanoseconds (from the built trees:
+    levels and sibling tries) -- the subject cap is HOLD_BUDGET_S over that, so
+    one native call holds the GIL for about the budget at most on degenerate
+    text (an empirical target, not a guarantee across machines). *shared_chars*
+    is the compiled intersection of the inserter and separator classes; on a
+    subject holding one, a multi-part pattern (*parts* > 1) gets a cap smaller
+    by 2**(parts-2): measured 2026-10-12 on degenerate subjects with a shared
+    character at every boundary, a failing match costs x0.5 the model at 2
+    parts, x1 at 3, x1.7 at 4, x2.9 at 5, x4.9 at 6, x15-20 at 8 (the length
+    of the run of shared characters does not matter), so that factor keeps a
+    margin of at least 2x. Where the cap would be under NATIVE_MIN_SUBJECT_CHARS, or in a
+    Windows worker (isolated without parent-death protection, whose watchdog is
+    a Python thread), this is plain compile(): today's object, today's route.
+    A pattern is built and consumed inside one isolation context; composition
+    caches patterns within a run only.
+    """
+    _check_deadline()
+    if isinstance(pattern, Pattern):
+        if flags:
+            raise ValueError("cannot process flags argument with a compiled pattern")
+        return pattern
+    if _isolated.get() and not _native_matching.get():
+        return compile(pattern, flags)
+    if cost_per_start_ns <= 0:
+        raise ValueError("cost_per_start_ns must be positive")
+    native_max_chars = int(HOLD_BUDGET_S / (cost_per_start_ns * 1e-9))
+    if native_max_chars < NATIVE_MIN_SUBJECT_CHARS:
+        return compile(pattern, flags)
+    validated = _validate(pattern, flags)
+    _check_deadline()
+    return Pattern(None, validated.pattern, validated.flags, stdlib=validated, generated=True,
+                   native_max_chars=native_max_chars,
+                   shared_chars=shared_chars if parts > 1 else None,
+                   native_max_chars_shared=native_max_chars >> max(0, parts - 2))
 
 
 @lru_cache(maxsize=1)
@@ -408,8 +579,10 @@ def _every_character():
 def matched_chars(atom, flags=0):
     """Every character a single-character pattern matches, under both engines.
 
-    In-process searches match with ``regex``; supervised workers may match with
-    stdlib ``re``. A candidate prefilter must allow either, so return the union.
+    A user's Regex pattern matches with ``regex`` in process and may match with
+    stdlib ``re`` in a supervised worker (engine-generated patterns match with
+    ``re`` more widely, but they never take the prefilter). A candidate
+    prefilter must allow either, so return the union.
     Surrogates are dropped: indexed text is valid UTF-8 and cannot contain them.
     """
     compiled = compile(atom, flags)

@@ -2,6 +2,10 @@
 import json
 from pathlib import Path
 
+# Mirrors shared.search_engine.MAX_WORD_GAP; this builder imports neither the website nor the
+# corpus, so tests/test_native_matching_api.py pins the two equal.
+MAX_WORD_GAP = 10
+
 
 def obj(properties, required=(), **extra):
     return {'type': 'object', 'properties': properties, **({'required': list(required)} if required else {}), **extra}
@@ -44,7 +48,11 @@ def build():
                             'description': 'Start exact; shelfmark resolves call numbers. Search runs as a background job; poll its returned ID.'},
             'limit': {'type': 'integer', 'minimum': 1, 'maximum': 500,
                       'description': 'Total candidates to save from ONE search, not page size. Use 100 for exact/variants/responsa/title/shelfmark; 500 for fuzzy. Other modes allow at most 100. Retrieval pages contain at most 10 rows.'},
-            'gap': {'type': 'integer', 'minimum': 0, 'default': 0, 'description': 'Words allowed between terms; must be zero for title/shelfmark.'},
+            # No 'maximum': responsa takes any gap, so the bound depends on search_mode and
+            # a schema-level cap would reject valid responsa requests.
+            'gap': {'type': 'integer', 'minimum': 0, 'default': 0,
+                    'description': f'Words allowed between terms; must be zero for title/shelfmark. At most {MAX_WORD_GAP} '
+                                   f'unless search_mode is responsa, which has no limit; a larger value is rejected, not clamped.'},
             'responsa_options': {**ref('ResponsaOptions'), 'description': 'Omit unless search_mode is responsa.'},
             'filters': ref('Filters'),
         }, ('query', 'search_mode', 'limit'), additionalProperties=False),

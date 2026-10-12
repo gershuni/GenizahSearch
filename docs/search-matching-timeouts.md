@@ -131,10 +131,12 @@ has not changed. This makes parent-death cleanup independent of the worker's
 GIL. If that protection is unavailable or fails, the worker retains the
 GIL-releasing matcher and its watchdog thread. The parent can terminate a live
 worker even if native matching cannot check a cooperative deadline.
-Matching in the web/desktop process, and explicit
+Other matching in the web/desktop process, and explicit
 nested budgets such as result highlighting, retain the interruptible `regex`
-matcher. Selecting the matcher happens for each operation, so a pattern created
-inside a worker does not disable deadlines when used outside that context.
+matcher; the exception is a pattern the search engine builds itself, which
+matches with `re` in process under a size cap (next section). Selecting the
+matcher happens for each operation, so a pattern created inside a worker does
+not disable deadlines when used outside that context.
 
 A standalone, low-priority diagnostic on the production index on 2026-09-15
 used `לא יתזוג עליהא`, variants, gap 0, and the saved 30-pair settings. It
@@ -151,6 +153,74 @@ and `candidate_match_ms` for the initial candidate checks. Highlighting,
 metadata formatting, and other per-hit work remain in `materialize_ms`.
 Workers report preparing, checking candidate texts, and saving results through
 the existing progress channel; polling does not start another computation.
+
+### Engine-generated patterns in process (2026-10-12)
+
+The desktop (an in-process QThread search) and Windows research workers matched
+every pattern with `regex`, about 60 times slower than `re` on Extended and Maximum
+prefix trees (a 4-word Maximum query: 0.43 ms a page with `re`, 26-31 ms with
+`regex`). `re` holds the GIL and cannot be interrupted, so it cannot simply replace
+`regex` in the Qt process: a pattern a scholar typed could freeze the window. A
+pattern the engine builds itself from escaped literals has a shape whose cost can
+be bounded, so those match with `re` in process under a size cap. The measurements,
+the rules and the review rounds are in
+[`docs/plans/DESKTOP_NATIVE_MATCHING_PLAN.md`](plans/DESKTOP_NATIVE_MATCHING_PLAN.md).
+
+A pattern is *generated* (`shared/search_regex.py::compile_generated`, called only
+from `shared/search_engine.py`) when `build_regex_pattern` or the Fuzzy typed-word
+site builds it and all of these hold: the word gap is 0; the mode is not Regex and
+there is no Responsa component; each word is a single form or a prefix tree
+(Extended and Maximum); every form is non-empty, at most 64 characters, and made
+only of caseless characters that are neither inserter-class nor separator-class
+characters. So Exact/Literal, Extended and Maximum at gap 0 on plain Hebrew words,
+Fuzzy's typed terms and composition chunks are generated; Basic's multi-form
+alternation, any gap above 0, Latin or quoted forms, Responsa and Regex mode are
+not, and keep the route they had. (The word gap is also capped at 10 in Exact,
+Variants and Fuzzy, `MAX_WORD_GAP`; Responsa and Regex mode have no limit.)
+
+A call on a generated pattern runs on `re` only when all of these hold:
+
+- it is a `search`, `match` or `fullmatch` (`sub` always takes the `regex` route);
+- the subject (`pos` to `endpos`) is at most the pattern's `native_max_chars`:
+  `HOLD_BUDGET_S` (1 s) over its cost per start position, which is summed from the
+  built prefix trees (20 ns a level, 5 ns a sibling tried). A 4-word Maximum query
+  gets about 164,000 characters, a one-word query about 717,000, against an index
+  page at the 99th percentile of 11,000. A pattern whose cap would be under 10,000
+  characters is not generated at all;
+- for a pattern of several words whose subject holds a character that the
+  inserter and separator classes share (today `"`, U+2018-2019 and U+0300-036F,
+  derived from the two classes at first use, not listed by hand), the subject is
+  also within the smaller cap for that case, the cap divided by 2 to the power of
+  (words - 2): such a character can be read two ways at every word boundary, and
+  a failing match retries the combinations (measured 2026-10-12: x0.5 the model at
+  2 words, x1.7 at 4, x4.9 at 6, x15-20 at 8). A 2-word query keeps its whole cap
+  there, a 4-word query a quarter of it, a 9-word query falls to the `regex` route.
+
+Any other call takes the `regex` route, which compiles the `regex` object on its
+first need (the deadline checked before and after) and keeps the per-call timeout.
+An expired budget raises before any work, and the desktop's Stop is honoured
+between calls (`search_regex.cancel_check`), not inside one: the cap is what bounds
+a call, an empirical target of about one second of held GIL on degenerate text,
+not a guarantee across machines.
+
+`GENIZAH_REGEX_TIMEOUT_SECONDS` therefore guards the patterns that are not
+generated (the scholar's own Regex, Responsa, a gap above 0, Basic's multi-form
+alternation, highlighting) and generated patterns on the fallback route (a subject
+over the cap, or over the smaller cap for a subject holding a shared character).
+Linux supervised workers are unchanged:
+`re` for everything, with no cap, no scan and no timer. Windows workers are
+unchanged too: a generated pattern is compiled there as the ordinary eager `regex`
+object, with no timer, because their watchdog is a Python thread that a held GIL
+would starve.
+
+Still on the `regex` route after this change: a gap above 0, Basic's multi-form
+alternation, a query of many words (the cap halves per word beyond the second) on
+the pages (about 13% in a 40,000-page sample, 2026-10-12) that carry a shared
+quote or mark between two letters, documents over a pattern's cap, and the My
+Library composition loop, which checks the time limit per chunk rather than per
+document. The tracker row "Windows: Extended/Maximum patterns match about 60
+times slower with the `regex` module than with `re`" in `docs/OPEN_ISSUES.md`
+follows them.
 
 ## Background API
 
@@ -171,20 +241,27 @@ must use the same server process and client IP to retrieve them.
 
 ## Matching and rendering
 
-Query matching uses the pinned `regex` dependency with GIL release. In isolated
+Query matching uses the pinned `regex` dependency with GIL release, except for
+the patterns the engine builds itself (see "Engine-generated patterns in
+process"), which match with `re` where their size is bounded. In isolated
 workers it has no per-match timer. In-process callers retain the 10-second
-`GENIZAH_REGEX_TIMEOUT_SECONDS` guard and optional
-`GENIZAH_SEARCH_BUDGET_SECONDS` total deadline (default 0, meaning none).
-Nested explicit deadlines cannot be extended. Optional viewer highlighting has
-its own 0.25-second budget and may fall back to escaped plain text without
-aborting the research search.
+`GENIZAH_REGEX_TIMEOUT_SECONDS` guard on every pattern that is not generated and
+on generated patterns on their two fallback routes, and the optional
+`GENIZAH_SEARCH_BUDGET_SECONDS` total deadline (default 0, meaning none), which
+is checked before every call; a native `re` call already running is not cut short,
+so a budget can be overshot by one such call. Nested explicit deadlines cannot be
+extended. Optional viewer highlighting has its own 0.25-second budget and may
+fall back to escaped plain text without aborting the research search.
 
 Compilation checks the active deadline before and after native compilation and
 between Unicode initialization blocks. Completed blocks are cached, so later
 renders retain progress if a short budget interrupts cold initialization. A
 single native compilation remains non-interruptible in process; research-worker
-isolation and resource limits still apply. Lab snippets fall back to plain text
-if either compilation or matching exhausts their budget.
+isolation and resource limits still apply. A generated pattern compiles with `re`
+alone (about half `regex`'s time on a 4-word Maximum query, 2.4 s against 4.5 s);
+its `regex` object is built only when a call takes the `regex` route. Lab
+snippets fall back to plain text if either compilation or matching exhausts their
+budget.
 
 Windows uses [Job Object memory limits](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_extended_limit_information).
 Linux uses [RLIMIT_DATA](https://man7.org/linux/man-pages/man2/getrlimit.2.html),

@@ -117,6 +117,11 @@ def register_research_api(app, prefix, search_endpoint, parallels_endpoint):
             try:
                 parsed = json.loads(body)
                 model.model_validate(parsed)
+            except APIError as exc:
+                # A model validator's coded rejection (gap over the limit, a
+                # metadata mode with a gap) is the same answer the synchronous
+                # route gives, not a bare 500.
+                return error(exc.code, str(exc), exc.http_status)
             except (ValueError, ValidationError):
                 return error('invalid_request', 'Request must match the corresponding search API schema.', 400)
             # Reading the body yields; repeat admission atomically with insertion.

@@ -283,7 +283,7 @@ when the offending key is the legacy `mode` field (renamed to `search_mode` in P
 | `query` | string | 1..1000 chars (post-strip; empty → `query_required`; over cap → `query_too_long`) | required | `QUERY_LENGTH_CAP=1000` |
 | `search_mode` | enum | `exact \| variants \| variants_extended \| responsa \| title \| shelfmark \| fuzzy` | required | `regex` was intentionally dropped per Phase 81A D-09. `variants` uses the website's default variant settings (Basic: the 30 most frequent letter-confusion pairs plus the website's custom letter pairs, one change per word), the same as a website search with default settings. `variants_extended` (added 2026-10-11) is the website's Extended level at its defaults: 70 pairs, up to two changes per word. **It runs only as a background job** (`POST /api/search/jobs`): measured on the real index, common phrases run to the three-minute worker limit and return what they found with `results_cut_off`, so a synchronous request is refused with 400 `background_job_required`. The website's Maximum level is not offered: it overran the worker time limit and its workers were stopped by force. `fuzzy` (added 2026-06) finds near spellings — whole words one letter away, two from 5 letters, prefixed forms included (since 2026-10; before, the exact word only) — bounded by `SEARCH_API_FUZZY_TIMEOUT` (default 110s as of 2026-09-08, down from 300s — see "Edge-Timeout Ceiling" below), not the interactive 30s baseline |
 | `responsa_options` | object \| null | valid only when `search_mode="responsa"` | `null` | see sub-table below |
-| `gap` | integer | must be `0` when `search_mode in {title, shelfmark}` | `0` | proximity slop for keyword search |
+| `gap` | integer | `>= 0`; must be `0` when `search_mode in {title, shelfmark}`; at most `10` unless `search_mode == 'responsa'` (2026-10-12) | `0` | proximity slop for keyword search |
 | `limit` | integer | `1..100` for non-fuzzy modes (`MAX_LIMIT=100`); `1..SEARCH_API_FUZZY_MAX_LIMIT` (default 500, max 2000) for `fuzzy` | `50` (fuzzy with no explicit limit widens to a recall-oriented default of 250) | P9X: fuzzy recall-over-precision — non-fuzzy boundary unchanged |
 | `filters` | object \| null | all sub-fields nullable; unknown filter keys → 400 `invalid_request` (Pydantic `extra='forbid'`); unknown values → 400 `unresolvable_filter_value` | `null` | `library` (library codes, e.g. `["CUL","JTS","Oxford"]` — inclusion or exclusion filter depending on `library_filter_mode`; intersected with the other filters BEFORE the result cap; SEED-026); `library_filter_mode` (`"include"` default, omitted≡include — restrict to the given set; `"exclude"` — restrict to the complement, i.e. manuscripts whose `library_code` is NOT in the set; invalid value → 400 `invalid_request`; applies to both `POST /api/search` and `POST /api/parallels`; Phase 132 DMF-11); `domains`, `authors`, `works`, `materials` (string lists); `date_from`, `date_to` (int years) |
 
@@ -341,6 +341,7 @@ Notes:
 | ------------- | ---------- | ---- | ----- |
 | `responsa_options` set AND `search_mode != "responsa"` | `invalid_combination` | 400 | |
 | `gap != 0` AND `search_mode in {title, shelfmark}` | `invalid_combination` | 400 | |
+| `gap > 10` AND `search_mode != 'responsa'` | `invalid_combination` | 400 | Responsa `[N]` gaps have no limit (2026-10-12) |
 | Top-level `mode` key (legacy Phase 78 shape) | `invalid_request` | 400 | message includes hint `"unknown field 'mode' — use search_mode instead"` per Phase 81A D-13 |
 | `regex` value for `search_mode` | `invalid_request` | 400 | structurally rejected by Literal enum; never part of this API's public surface (dropped before the initial public release, Phase 81A D-09) |
 
@@ -1088,7 +1089,7 @@ public API surface — renaming any is a breaking change).
 | Code | HTTP status | Typical raise condition |
 | ---- | ----------- | ----------------------- |
 | `invalid_request` | 400 | malformed JSON; Pydantic structural validation failure (incl. unknown field — emits "unknown field 'mode' — use search_mode instead" hint per Phase 81A D-13); bad query-param int casts in browse; missing required browse locator; bad `text_cap` bounds; bad `p_num` |
-| `invalid_combination` | 400 | cross-field rejection: `responsa_options` with non-Responsa mode; `gap != 0` with title/shelfmark |
+| `invalid_combination` | 400 | cross-field rejection: `responsa_options` with non-Responsa mode; `gap != 0` with title/shelfmark; `gap > 10` outside Responsa |
 | `invalid_mode` | 400 | reserved (mode validation) |
 | `query_required` | 400 | post-strip empty `query` |
 | `query_too_long` | 400 | `len(query) > 1000` |

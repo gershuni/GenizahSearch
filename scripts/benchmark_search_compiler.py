@@ -21,6 +21,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from shared import search_engine, search_regex  # noqa: E402
 
 
+def _dropping_native_arguments(compiler):
+    """*compiler* in the place of compile_generated_regex: build_regex_pattern
+    sends eligible gap-0 patterns there with the native-matching arguments
+    (cost, parts, shared characters). Dropped, so each arm measures its own
+    compiler on every pattern -- the 'stdlib' arm still re.compile."""
+    def compile_generated(pattern, flags=0, **_native):
+        return compiler(pattern, flags)
+    return compile_generated
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--previous', type=Path)
@@ -52,6 +62,7 @@ def main():
         documents = [' '.join(tokens[:10]), '\n'.join(reversed(tokens[:10])), '\u05E1\u05D9\u05DE\u05DF ' * 10]
     expected_spans = None
     original = search_engine.compile_search_regex
+    original_generated = search_engine.compile_generated_regex
     try:
         for name, compiler in compilers.items():
             started = time.perf_counter()
@@ -65,6 +76,7 @@ def main():
                 re.purge()
                 regex.purge()
                 search_engine.compile_search_regex = compilers[name]
+                search_engine.compile_generated_regex = _dropping_native_arguments(compilers[name])
                 started = time.perf_counter()
                 patterns = [engine.build_regex_pattern(
                     chunk, 'exact', 5 if args.case == 'gaps' else 0,
@@ -99,6 +111,7 @@ def main():
         }, indent=2))
     finally:
         search_engine.compile_search_regex = original
+        search_engine.compile_generated_regex = original_generated
 
 
 if __name__ == '__main__':

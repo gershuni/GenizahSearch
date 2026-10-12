@@ -8,6 +8,7 @@ existing ``from genizah_core import SearchEngine`` callers continue working.
 
 import bisect
 import functools
+import sys
 import logging
 import os
 import re
@@ -31,7 +32,8 @@ from rapidfuzz.distance import OSA
 
 from shared.config import Config
 from shared.search_regex import (
-    compile as compile_search_regex, SearchBudgetExceeded, bounded_search, _check_deadline,
+    compile as compile_search_regex, compile_generated as compile_generated_regex,
+    SearchBudgetExceeded, bounded_search, _check_deadline,
 )
 from shared.text_normalize import strip_nikud, strip_search_diacritics
 from shared.browse_map_utils import natural_sort_key, dedupe_browse_map, _extract_ie_from_header
@@ -711,7 +713,7 @@ def _variant_alternation(forms):
     newline (make_mark_tolerant_pattern's tokenizer does not read one as a
     character, so a tree would match it differently).
     """
-    if any(not form or len(form) > _PREFIX_TREE_MAX_FORM or '\n' in form for form in forms):
+    if _tree_falls_back(forms):
         return '|'.join(make_mark_tolerant_pattern(re.escape(form)) for form in forms)
     by_length = {}
     for form in forms:
@@ -719,13 +721,137 @@ def _variant_alternation(forms):
     return '|'.join(_prefix_tree(by_length[n]) for n in sorted(by_length, reverse=True))
 
 
+def _tree_falls_back(forms):
+    """Whether _variant_alternation joins *forms* flat instead of as prefix trees."""
+    return any(not form or len(form) > _PREFIX_TREE_MAX_FORM or '\n' in form for form in forms)
+
+
+# --- Native matching (stdlib re in process) for engine-built patterns ---------
+# docs/plans/DESKTOP_NATIVE_MATCHING_PLAN.md. The regex module is ~60x slower
+# than stdlib re on Extended/Maximum prefix trees, but re holds the GIL and cannot
+# be stopped, so only shapes whose cost per start position is bounded go native,
+# under a subject cap derived from that cost (search_regex.compile_generated).
+
+# The class the gap-0 separator is built from (its complement, plus the
+# apostrophe, is a word character for the separator).
+_SEPARATOR_CLASS = r'[^\w\u0590-\u05FF\']'
+_INSERTER_CLASS = MARK_TOLERANT_INSERTER[:-1]
+# Cost of one failing attempt at a start position: measured 2026-10-12 on
+# degenerate text at 12-17 ns per tree level (inserter checks included) and
+# 1.1-1.7 ns per sibling branch tried at full CPU clock; under sustained load
+# a level cost up to ~30 ns, so the budget in search_regex is a target.
+_NS_PER_LEVEL = 20
+_NS_PER_SIBLING = 5
+
+
+@functools.lru_cache(maxsize=1)
+def _shared_chars_re():
+    """The characters BOTH the inserter class and the separator class match under
+    IGNORECASE -- today `"`, U+2018-2019 and U+0300-036F -- derived from the two
+    classes over all of Unicode (0.1 s, once per process) so the set cannot drift
+    from them. A multi-part native pattern falls back to the regex route on a
+    subject holding one: at every part boundary such a character can be read as
+    inside a form or between two parts, 2**parts parses on a failing match."""
+    inserter = re.compile(_INSERTER_CLASS, re.IGNORECASE)
+    separator = re.compile(_SEPARATOR_CLASS, re.IGNORECASE)
+    shared = [c for c in map(chr, range(sys.maxunicode + 1))
+              if inserter.fullmatch(c) and separator.fullmatch(c)]
+    return re.compile('[' + ''.join(re.escape(c) for c in shared) + ']')
+
+
+def _native_eligible_forms(forms, flags=re.IGNORECASE):
+    """Whether one part's spellings *forms* may be matched with stdlib re:
+    every form is non-empty, at most _PREFIX_TREE_MAX_FORM characters, without a
+    newline (the prefix-tree conditions), holds no inserter-class and no
+    separator-class character anywhere -- tested under *flags*, since IGNORECASE
+    folds U+0399/U+03B9/U+1FBE into the inserter class -- and is caseless, so
+    under IGNORECASE no two tree branches can match the same text."""
+    inserter = re.compile(_INSERTER_CLASS, flags)
+    separator = re.compile(_SEPARATOR_CLASS, flags)
+    for form in forms:
+        if not form or len(form) > _PREFIX_TREE_MAX_FORM or '\n' in form:
+            return False
+        for ch in form:
+            if inserter.fullmatch(ch) or separator.fullmatch(ch):
+                return False
+            if not (ch == ch.lower() == ch.upper()):
+                return False
+    return True
+
+
+def _compile_typed_term(term):
+    """The pattern for a Fuzzy word matched as typed (not plain Hebrew letters):
+    native when its one form is eligible (digits, say), else the interruptible
+    route (Latin letters are cased; brackets are separator characters)."""
+    pattern = make_mark_tolerant_pattern(re.escape(term))
+    if _native_eligible_forms([term]):
+        return compile_generated_regex(pattern, re.IGNORECASE,
+                                       cost_per_start_ns=_tree_cost_ns([term]))
+    return compile_search_regex(pattern, re.IGNORECASE)
+
+
+def _tree_cost_ns(forms):
+    """Nanoseconds of one failing attempt of *forms* as _variant_alternation
+    matches them (one prefix tree per form length, longest first): per tree its
+    depth in levels, plus the siblings a walk may try before the matching
+    branch -- the maximum over root-to-leaf paths of the children counts along
+    the path. A single form is a tree of one branch per level."""
+    by_length = {}
+    for form in forms:
+        by_length.setdefault(len(form), []).append(form)
+    total = 0
+    for group in by_length.values():
+        tree = {}
+        for form in group:
+            node = tree
+            for char in form:
+                node = node.setdefault(char, {})
+
+        def worst(node):
+            if not node:
+                return 0, 0
+            siblings = depth = 0
+            for child in node.values():
+                s, d = worst(child)
+                siblings = max(siblings, s)
+                depth = max(depth, d)
+            return len(node) + siblings, 1 + depth
+
+        siblings, depth = worst(tree)
+        total += _NS_PER_LEVEL * depth + _NS_PER_SIBLING * siblings
+    return total
+
+
+# Owner ruling 2026-10-12: the word gap is capped in the regular modes (Exact/
+# Literal, Variants, Fuzzy -- the ones that can match natively); Responsa [N]
+# tokens and Regex mode keep any gap and stay on the interruptible route.
+MAX_WORD_GAP = 10
+_GAP_FREE_MODES = frozenset({'Regex', 'Title', 'Shelfmark'})
+
+
+def _validate_word_gap(mode, gap, responsa_options=None):
+    """Reject a gap over MAX_WORD_GAP in a capped mode with a clear message --
+    never clamp: a changed gap is a changed query. Checked at execute_search
+    entry, before the LOCAL branch (whose handler swallows a ValueError) and
+    the Fuzzy matcher (which never reaches build_regex_pattern)."""
+    if responsa_options and responsa_options.get('responsa_mode'):
+        return
+    if mode in _GAP_FREE_MODES or gap is None:
+        return
+    if int(gap) > MAX_WORD_GAP:
+        raise ValueError(
+            f"The word gap is at most {MAX_WORD_GAP} in Exact, Variants and Fuzzy "
+            f"searches (got {gap}); Responsa and Regex searches have no limit.")
+
+
 def _gap_separator(max_gap):
     """The regex between two query words: non-word chars, with up to *max_gap* words between."""
+    max_gap = int(max_gap)
     if max_gap == 0:
         # Flexible separator (any non-word char)
-        return r'[^\w\u0590-\u05FF\']+'
+        return _SEPARATOR_CLASS + '+'
     # Gap logic
-    return rf'(?:[^\w\u0590-\u05FF\']+{Config.WORD_TOKEN_PATTERN}){{0,{max_gap}}}[^\w\u0590-\u05FF\']+'
+    return rf'(?:{_SEPARATOR_CLASS}+{Config.WORD_TOKEN_PATTERN}){{0,{max_gap}}}{_SEPARATOR_CLASS}+'
 
 
 # _add_bracket_variants of a bare word, as (before, after) around it.
@@ -864,7 +990,7 @@ class _FuzzyMatcher:
         typed = tuple(s is None for s in self._spellings)
         # A word that is not plain Hebrew letters is matched as typed, as Exact does.
         self._typed_rx = tuple(
-            compile_search_regex(make_mark_tolerant_pattern(re.escape(t)), re.IGNORECASE) if is_typed else None
+            _compile_typed_term(t) if is_typed else None
             for t, is_typed in zip(self._terms, typed))
         self._typed = typed
         self._gap = max_gap
@@ -2610,6 +2736,11 @@ class SearchEngine:
         # searches many times faster. Basic keeps its pattern as it was.
         level = getattr(self.var_mgr, 'variant_level', None)
         prefix_tree = callable(level) and level(regex_mode) in ('extended', 'maximum')
+        # Native matching (stdlib re) needs gap 0 and, for every part, eligible
+        # forms that are a single form or a prefix tree; its cost per start
+        # position is summed over the parts' trees.
+        native_ok = max_gap == 0
+        native_cost_ns = 0
         for term in terms:
             # 1. Get variants
             vars_list = _variants_noting_cutoff(self.var_mgr, term, regex_mode, Config.REGEX_VARIANTS_LIMIT)
@@ -2622,6 +2753,11 @@ class SearchEngine:
             # This is the correct fix for the visual glitch.
             # Favor longer matches before short variants
             unique_vars = sorted(list(set(vars_list)), key=len, reverse=True)
+            if native_ok:
+                native_ok = ((len(unique_vars) == 1 or prefix_tree)
+                             and _native_eligible_forms(unique_vars))
+                if native_ok:
+                    native_cost_ns += _tree_cost_ns(unique_vars)
             if prefix_tree and len(unique_vars) > 1:
                 parts.append(f"({_variant_alternation(unique_vars)})")
                 continue
@@ -2636,6 +2772,10 @@ class SearchEngine:
         sep = _gap_separator(max_gap)
 
         try:
+            if native_ok and parts:
+                return compile_generated_regex(
+                    sep.join(parts), re.IGNORECASE, cost_per_start_ns=native_cost_ns,
+                    parts=len(parts), shared_chars=_shared_chars_re())
             return compile_search_regex(sep.join(parts), re.IGNORECASE)
         except re.error:
             return None
@@ -3576,6 +3716,11 @@ class SearchEngine:
         if mode in ['Title', 'Shelfmark']:
             return self._execute_metadata_search(query_str, mode, progress_callback, restrict_sys_ids)
 
+        # The common entry for every corpus scope and mode: before the LOCAL
+        # branch (its broad handler would swallow the ValueError) and the Fuzzy
+        # matcher (which never reaches build_regex_pattern).
+        _validate_word_gap(mode, gap, responsa_options)
+
         # Phase 95 smoke-fix (item 2): corpus_scope gates which index is queried.
         # 'local' → query LOCAL side-index only (skip Genizah Tantivy).
         # 'genizah' → query Genizah only (LOCAL merge block below is skipped).
@@ -4279,7 +4424,10 @@ class SearchEngine:
                                 # Phase 77 D-01: Tantivy relevance score for JSON.
                                 'score': float(score),
                             })
-                except SearchBudgetExceeded:
+                except (SearchBudgetExceeded, InterruptedError):
+                    # InterruptedError is an OSError: a Stop raised inside a native
+                    # match call (search_regex.cancel_check) must reach the handler
+                    # below, not be logged as a failed hit.
                     raise
                 except MemoryError:
                     raise
@@ -4671,8 +4819,19 @@ class SearchEngine:
                         # (user pasted text with literal brackets).
                         match_content = content if _query_has_brackets(' '.join(chunk)) else _strip_brackets(content)
 
-                        # Verify exact Regex match
-                        if regex.search(match_content):
+                        # Verify exact Regex match. Both searches complete BEFORE
+                        # the row is touched: a Stop landing between them must not
+                        # leave a row without spans that build_items would emit
+                        # (Codex review, 2026-10-12).
+                        _sm = regex.search(match_content)
+                        if _sm:
+                            # Original content span if possible; else the stripped match,
+                            # mapped onto the original (its offsets cut a bracketed word
+                            # short: *אבג ש[לו*ם -- Codex review of PR #375). The
+                            # stripped match is reused: no third search.
+                            _orig_m = _sm if match_content is content else regex.search(content)
+                            if _orig_m is None:
+                                _orig_m = _Span(*_unstripped_span(content, _sm.start(), _sm.end()))
                             uid = doc['unique_id'][0]
 
                             # Always use single map - accumulate all matches for same uid
@@ -4690,13 +4849,6 @@ class SearchEngine:
                             rec['head'] = doc['full_header'][0]
                             rec['src'] = doc['source'][0]
                             rec['content'] = content
-                            # Original content span if possible; else the stripped match,
-                            # mapped onto the original (its offsets cut a bracketed word
-                            # short: *אבג ש[לו*ם -- Codex review of PR #375).
-                            _orig_m = regex.search(content)
-                            if _orig_m is None:
-                                _sm = regex.search(match_content)
-                                _orig_m = _Span(*_unstripped_span(content, _sm.start(), _sm.end()))
                             _ms_match = _orig_m
                             rec['matches'].append(_ms_match.span())
                             # Save indices of found words in *source* text
@@ -4869,7 +5021,15 @@ class SearchEngine:
                                     if _query_has_brackets(' '.join(_chunk_scl))
                                     else _strip_brackets(_content_scl)
                                 )
-                                if _regex_scl.search(_match_content_scl):
+                                _sm_scl = _regex_scl.search(_match_content_scl)
+                                if _sm_scl:
+                                    # Both searches before the row is touched, as the
+                                    # Genizah loop above.
+                                    _orig_m_scl = (_sm_scl if _match_content_scl is _content_scl
+                                                   else _regex_scl.search(_content_scl))
+                                    if _orig_m_scl is None:
+                                        _orig_m_scl = _Span(*_unstripped_span(
+                                            _content_scl, _sm_scl.start(), _sm_scl.end()))
                                     _uid_scl = _doc_scl['unique_id'][0]
                                     _rec_scl = doc_hits[_uid_scl]
                                     if _is_text_filtered_scl or _is_freq_filtered_scl:
@@ -4891,11 +5051,6 @@ class SearchEngine:
                                     except (KeyError, IndexError, TypeError):
                                         _rec_scl['shelfmark'] = ''
                                     _rec_scl['content'] = _content_scl
-                                    _orig_m_scl = _regex_scl.search(_content_scl)
-                                    if _orig_m_scl is None:          # as the Genizah loop above
-                                        _sm_scl = _regex_scl.search(_match_content_scl)
-                                        _orig_m_scl = _Span(*_unstripped_span(
-                                            _content_scl, _sm_scl.start(), _sm_scl.end()))
                                     _ms_match_scl = _orig_m_scl
                                     _rec_scl['matches'].append(_ms_match_scl.span())
                                     _rec_scl['src_indices'].update(
@@ -4931,7 +5086,9 @@ class SearchEngine:
                                         _rec_scl['chunk_hits'][_existing_scl] = (
                                             _i_scl, ' '.join(_chunk_scl), _new_score_scl, _ms_snip_scl
                                         )
-                        except SearchBudgetExceeded:
+                        except (SearchBudgetExceeded, InterruptedError):
+                            # A Stop raised inside a native match call must reach the
+                            # outer handler (partial=True), not be dropped here.
                             raise
                         except MemoryError:
                             raise

@@ -350,8 +350,10 @@ def test_a_site_that_cuts_at_200_marks_the_search(name):
 def test_a_site_that_cuts_at_8000_marks_the_search(name, monkeypatch):
     import shared.search_engine as se
     # The signal is under test, not the regex: compiling 8,000 mark-tolerant
-    # alternatives costs seconds a word.
+    # alternatives costs seconds a word. An eligible gap-0 pattern is compiled
+    # through compile_generated_regex (native matching) instead, so both go.
     monkeypatch.setattr(se, 'compile_search_regex', lambda pattern, flags=0: pattern)
+    monkeypatch.setattr(se, 'compile_generated_regex', lambda pattern, flags=0, **native: pattern)
     site = SITES_AT_8000[name]
     assert _capped_after(site, _engine(150, 2), LONG) is True
     assert _capped_after(site, _engine(150, 2), COMMON) is False

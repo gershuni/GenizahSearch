@@ -5504,3 +5504,20 @@ TRANSLATIONS.update({
     "Smaller text": "הקטנת הטקסט",
     "Larger text": "הגדלת הטקסט",
 })
+
+# The word gap limit (owner, 2026-10-12): at most 10 in Exact, Variants and Fuzzy;
+# Responsa and Regex have none. The Search press, and a saved step that is not run again.
+TRANSLATIONS.update({
+    "In Exact, Variants and Fuzzy searches the word gap is at most {limit}; "
+    "this search asks for {gap}.\n\nLower the gap, or search in Responsa or "
+    "Regex mode, which have no limit.":
+        "בחיפוש מדויק, וריאנטים ומקורב המרווח בין המילים הוא לכל היותר {limit}; "
+        "בחיפוש הזה הוא {gap}.\n\nהקטינו את המרווח, או חפשו במצב פרויקט השו\"ת "
+        "או ביטוי רגולרי, שאין בהם הגבלה.",
+    "The saved search \"{query}\" uses a word gap of {gap}. In Exact, Variants "
+    "and Fuzzy searches the gap is at most {limit}, so this step was not run "
+    "again. Its gap was not changed.":
+        "החיפוש השמור \"{query}\" משתמש במרווח של {gap} מילים. בחיפוש מדויק, "
+        "וריאנטים ומקורב המרווח הוא לכל היותר {limit}, ולכן השלב הזה לא הורץ שוב. "
+        "המרווח שלו לא שונה.",
+})

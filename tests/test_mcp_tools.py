@@ -23,6 +23,7 @@ import web.chatgpt_details as chatgpt_details
 import web.chatgpt_jobs as chatgpt_jobs
 import web.mcp_server as mcp_server
 from shared.manuscript_details import SECTIONS
+from shared.search_engine import MAX_WORD_GAP
 from web.chatgpt_api import register_chatgpt_api
 from web.chatgpt_pagination import MCP_RESPONSE_BYTES
 from tests.mcp_events import CapturedEvents
@@ -528,6 +529,52 @@ def test_every_argument_reaches_the_facade_unchanged(stack):
         {'query': 'א', 'search_mode': 'responsa', 'limit': 7, 'gap': 2, 'responsa_options': responsa,
          'filters': filters},
         {'method': 'passage', 'text': 'א', 'filters': {'library': ['JTS']}}]
+
+
+# --- the word-gap limit (docs/plans/DESKTOP_NATIVE_MATCHING_PLAN.md 3.6) -------------------------
+
+@pytest.mark.parametrize('mode', ['exact', 'variants', 'variants_extended', 'fuzzy'])
+def test_a_gap_over_the_limit_is_a_coded_error_and_queues_nothing(stack, mode):
+    host, child, engine = stack
+
+    async def script(client):
+        return await client.call_tool('search_manuscripts', {'query': 'א ב', 'search_mode': mode, 'gap': 50})
+    result = run(host, script)
+    error = body(result)['error']
+    assert result.is_error is True
+    assert (error['code'], error['http_status']) == ('invalid_combination', 400)
+    assert str(MAX_WORD_GAP) in error['message'] and 'responsa' in error['message'] and mode in error['message']
+    assert engine.calls == [] and not child.state.chatgpt_jobs   # no job was admitted
+    [event] = drain_events()
+    assert (event['properties']['tool'], event['properties']['status_code'],
+            event['properties']['error_code']) == ('search_manuscripts', 400, 'invalid_combination')
+
+
+def test_responsa_takes_any_gap_and_the_limit_itself_is_allowed(stack):
+    host, _, engine = stack
+
+    async def script(client):
+        return [body(await client.call_tool('search_manuscripts', arguments)) for arguments in (
+            {'query': 'א', 'search_mode': 'responsa', 'gap': 50},
+            {'query': 'א', 'search_mode': 'responsa', 'gap': 10**6},
+            {'query': 'א ב', 'search_mode': 'variants', 'gap': MAX_WORD_GAP})]
+    pages = run(host, script)
+    assert all(len(page['results']) == 10 for page in pages)   # each ran to a first page
+    assert [sent['gap'] for _, sent in engine.calls] == [50, 10**6, MAX_WORD_GAP]
+    events = drain_events()
+    assert len(events) == 3 and all(e['properties']['error_code'] is None for e in events)
+
+
+def test_the_gap_argument_has_a_floor_no_ceiling_and_says_the_limit(stack):
+    host, _, _ = stack
+
+    async def script(client):
+        return {tool.name: tool for tool in (await client.list_tools()).tools}
+    prop = run(host, script)['search_manuscripts'].input_schema['properties']['gap']
+    branches = [b for b in prop['anyOf'] if b.get('type') == 'integer']
+    assert [b.get('minimum') for b in branches] == [0]
+    assert 'maximum' not in json.dumps(prop) and 'exclusiveMaximum' not in json.dumps(prop)
+    assert str(MAX_WORD_GAP) in prop['description'] and 'responsa has no limit' in prop['description']
 
 
 def raw_tool_call(host, name, arguments, protocol='2025-11-25'):

@@ -10,6 +10,7 @@ import requests
 from PyQt6.QtCore import QThread, pyqtSignal
 from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager, get_logger
 from shared.pause_gate import PauseGate  # noqa: F401 — re-exported for callers/tests
+from shared.search_regex import cancel_check
 
 logger = get_logger(__name__)
 
@@ -303,19 +304,23 @@ class SearchThread(PausableSearchMixin, QThread):
 
             def phase_cb(phase):
                 self.phase_signal.emit(str(phase))
-            results = self.searcher.execute_search(
-                self.query,
-                self.mode,
-                self.gap,
-                progress_callback=cb,
-                exclude_words=self.exclude_words,
-                responsa_options=self.responsa_options,
-                restrict_sys_ids=self.restrict_sys_ids,
-                text_position=self.text_position,
-                corpus_scope=self.corpus_scope,
-                phase_callback=phase_cb,
-                preview_callback=self.preview_signal.emit,
-            )
+            # Stop is also honoured between native match calls of engine-generated
+            # patterns (stdlib re cannot be interrupted mid-call); their
+            # InterruptedError takes the same paths as a progress checkpoint's.
+            with cancel_check(self._should_abort):
+                results = self.searcher.execute_search(
+                    self.query,
+                    self.mode,
+                    self.gap,
+                    progress_callback=cb,
+                    exclude_words=self.exclude_words,
+                    responsa_options=self.responsa_options,
+                    restrict_sys_ids=self.restrict_sys_ids,
+                    text_position=self.text_position,
+                    corpus_scope=self.corpus_scope,
+                    phase_callback=phase_cb,
+                    preview_callback=self.preview_signal.emit,
+                )
 
             self.cutoff_signal.emit(_last_search_cutoff())
             self.results_signal.emit(results)
@@ -368,9 +373,12 @@ class ChainCompletionThread(PausableSearchMixin, QThread):
             def cb(curr, total):
                 self._checkpoint()
                 self.progress_signal.emit(curr, total)
-            self.finished_signal.emit(complete_chain(self.chain, self.searcher, self.filter_restrict,
-                                                     progress_callback=cb, upto=self.upto,
-                                                     searcher_for_step=self.searcher_for_step))
+            # As SearchThread: Stop between native match calls too.
+            with cancel_check(self._should_abort):
+                result = complete_chain(self.chain, self.searcher, self.filter_restrict,
+                                        progress_callback=cb, upto=self.upto,
+                                        searcher_for_step=self.searcher_for_step)
+            self.finished_signal.emit(result)
         except InterruptedError:
             self.finished_signal.emit({'restrict': None, 'interrupted': True})
         except Exception as e:  # noqa: BLE001
@@ -502,18 +510,21 @@ class CompositionThread(PausableSearchMixin, QThread):
                 self._checkpoint()
                 self.progress_signal.emit(curr, total)
 
-            # Returns dict {'main': [], 'filtered': []} or list [] (legacy safety)
-            result = self.searcher.search_composition_logic(
-                self.text, self.chunk, self.freq, self.mode,
-                filter_text=self.filter_text, progress_callback=cb,
-                boundary_mode=self.boundary_mode,
-                boundary_delimiter=self.boundary_delimiter,
-                boundary_boost=self.boundary_boost,
-                min_boundary_matches=self.min_boundary_matches,
-                min_delimiter_distance=self.min_delimiter_distance,
-                restrict_sys_ids=self.restrict_sys_ids,
-                corpus_scope=self.corpus_scope
-            )
+            # Returns dict {'main': [], 'filtered': []} or list [] (legacy safety).
+            # As SearchThread: Stop between native match calls too; the engine
+            # turns that InterruptedError into partial=True, as a checkpoint's.
+            with cancel_check(self._should_abort):
+                result = self.searcher.search_composition_logic(
+                    self.text, self.chunk, self.freq, self.mode,
+                    filter_text=self.filter_text, progress_callback=cb,
+                    boundary_mode=self.boundary_mode,
+                    boundary_delimiter=self.boundary_delimiter,
+                    boundary_boost=self.boundary_boost,
+                    min_boundary_matches=self.min_boundary_matches,
+                    min_delimiter_distance=self.min_delimiter_distance,
+                    restrict_sys_ids=self.restrict_sys_ids,
+                    corpus_scope=self.corpus_scope
+                )
             self.scan_finished_signal.emit(result)
             # Phase 115: emit perf signal — ONLY on success path (D-08 / Pitfall 3)
             # Count = len(main)+len(filtered) to match on_comp_scan_finished at genizah_app.py:23157
