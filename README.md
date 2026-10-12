@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 9.6.0
+# Dicta Genizah Search Pro 9.6.1
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,24 +8,20 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 9.6.0?
+## What's New in Version 9.6.1?
 
-**Search fixes**, on the desktop (installer 9.6.0) and the website:
+**Faster Extended and Maximum**, on the desktop (installer 9.6.1) and the website:
 
-- **Num Changes (×1–×3) works in every variant level**, and each level keeps its own value
-  (×1 Basic, ×2 Extended and Maximum). At ×2, Extended and Maximum find more spellings and
-  take longer; ×1 is the quick choice. On the desktop `?`, `??` and `???` select the level
-- **Regex searches every page its pattern can match**, in My Library too
-- **Composition Search searches short texts and every word**: a text shorter than the chunk
-  size is searched whole, and Lab Mode always searches the end of the text
-- **Clear counts**: a list that reaches the search's limit shows "N+" on both apps, and a
-  catalog filter that cannot be applied says so instead of running the search
-- **Website**: the first results appear while the search runs; Search within results reads the
-  whole list first; searches stop after 3 minutes and show what they found; settings and
-  language are kept per visitor (the language follows the browser until you choose one)
+- **Extended and Maximum variant searches run many times faster**, with the same results; Basic is
+  unchanged
+- **Website**: Extended and Maximum searches and composition searches stop at the 3-minute limit with
+  what they found, like Basic searches
+- **Desktop**: Stop answers sooner during a slow variant or composition search
+- **AI assistants** connected to GenizahSearch can run the composition (chunk) search, and the public
+  API offers the Extended level (as background jobs)
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md). The README's previous What's New sections
-(8.1.0 to 9.5.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
+(8.1.0 to 9.6.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
 
 ---
 
@@ -99,7 +95,7 @@ Open the **GenizahSearch GPT** in ChatGPT from [genizahsearch.com/ai](https://ge
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V9.6.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
+1. **Download:** the installer (`GenizahSearchPro_V9.6.1_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

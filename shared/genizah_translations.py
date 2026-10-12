@@ -5423,6 +5423,19 @@ TRANSLATIONS.update({
         "חדש: תוצאות ראשונות כבר בזמן החיפוש, ושיפורים נוספים באיכות החיפוש",
 })
 
+# v9.6.1 desktop What's New bar and dialog, and the web What's New entry
+# (2026-10-11). Drafted for the release and approved.
+TRANSLATIONS.update({
+    "New: Extended and Maximum variant searches are much faster":
+        "חדש: חיפוש בווריאנטים מורחבים ומרביים מהיר בהרבה",
+    "Extended and Maximum, much faster: each word's thousands of spellings are now searched as one compact pattern, with the same results. A four-word Maximum search is ready in about 4 seconds instead of about 22, and each page is checked tens of times faster.":
+        "וריאנטים מורחבים ומרביים – מהר בהרבה: אלפי הכתיבים של כל מילה נבדקים עכשיו כתבנית אחת קומפקטית, עם אותן תוצאות. חיפוש מרבי בן ארבע מילים מוכן בתוך כ־4 שניות במקום כ־22, וכל עמוד נבדק מהר פי עשרות מונים.",
+    "Composition Search with Extended or Maximum variants is faster too.":
+        "גם חיפוש חיבורים בווריאנטים מורחבים או מרביים מהיר יותר.",
+    "Stop answers sooner during a slow search.":
+        "„עצור\" מגיב מהר יותר בחיפוש איטי.",
+})
+
 # Web What's New banner, v9.2.1 (2026-09-18): the GPT pilot went live.
 TRANSLATIONS.update({
     "New: ask the Genizah in ChatGPT - the GenizahSearch GPT, a research skill for other AI assistants, and the public API, from the AI tools page.":

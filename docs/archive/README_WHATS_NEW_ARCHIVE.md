@@ -7,6 +7,24 @@ The authoritative release history is [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
+## What's New in Version 9.6.0? (the README's own text, 2026-10-07 to 2026-10-11)
+
+**Search fixes**, on the desktop (installer 9.6.0) and the website:
+
+- **Num Changes (×1–×3) works in every variant level**, and each level keeps its own value
+  (×1 Basic, ×2 Extended and Maximum). At ×2, Extended and Maximum find more spellings and
+  take longer; ×1 is the quick choice. On the desktop `?`, `??` and `???` select the level
+- **Regex searches every page its pattern can match**, in My Library too
+- **Composition Search searches short texts and every word**: a text shorter than the chunk
+  size is searched whole, and Lab Mode always searches the end of the text
+- **Clear counts**: a list that reaches the search's limit shows "N+" on both apps, and a
+  catalog filter that cannot be applied says so instead of running the search
+- **Website**: the first results appear while the search runs; Search within results reads the
+  whole list first; searches stop after 3 minutes and show what they found; settings and
+  language are kept per visitor (the language follows the browser until you choose one)
+
+---
+
 ## What's New in Version 9.5.0? (the README's own text, 2026-10-04 to 2026-10-07)
 
 **Faster, complete search**, on the desktop (installer 9.5.0) and the website:

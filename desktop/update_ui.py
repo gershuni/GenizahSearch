@@ -99,7 +99,7 @@ class UpdateNotificationBar(QFrame):
 # keeps the value and shows nothing to whoever already read it (9.6.0, owner
 # 2026-10-07: no desktop What's New). Change it together with the bar and dialog
 # texts.
-WHATS_NEW_CONTENT_VERSION = "9.5.0"
+WHATS_NEW_CONTENT_VERSION = "9.6.1"
 
 
 class WhatsNewBar(QFrame):
@@ -168,9 +168,9 @@ class WhatsNewBar(QFrame):
         # v9.4.0: the owner's own sentence (2026-09-28); the dialog says the rest.
         # v9.5.0: the owner's own Hebrew sentence (2026-10-04): speed first, and
         # fuller results said plainly, with no before/after figures.
-        # v9.6.0: no desktop What's New (owner, 2026-10-07); this text stays, and
-        # WHATS_NEW_CONTENT_VERSION keeps it from showing again once dismissed.
-        self.lbl_msg.setText(tr("New: much faster search, and more comprehensive results, also in searches with many results"))
+        # v9.6.0: no desktop What's New (owner, 2026-10-07).
+        # v9.6.1: approved with the release texts (2026-10-11).
+        self.lbl_msg.setText(tr("New: Extended and Maximum variant searches are much faster"))
         self.show()
 
     def on_learn_more(self):
@@ -303,13 +303,13 @@ class WhatsNewDialog(QDialog):
         layout.addWidget(title)
 
         is_heb = CURRENT_LANG == 'he'
-        # v9.5.0 (2026-10-04). Three bullets: speed, whole words, fuller results in large
-        # searches. Approved with the release texts; the timings and the rest are in the
+        # v9.6.1 (2026-10-11). Three bullets: Extended and Maximum faster, Composition
+        # Search too, Stop sooner. Approved with the release texts; the rest is in the
         # CHANGELOG, README and GitHub release.
         items = [
-            tr("Faster search: the first results appear while the search is still running, and Exact and Variants searches take a fraction of the time (Exact שלום: from 10 seconds to under 2)."),
-            tr("Whole words: Exact, Variants and Fuzzy match whole words (שלום, not בשלום), and Fuzzy finds near spellings: one letter different, two in words of five letters or more."),
-            tr("More comprehensive results, also in searches with many results: \"Search within\", \"Only results with all terms\" and Composition Search with filters work on the whole set, at any size, and a long list shows \"N+\"."),
+            tr("Extended and Maximum, much faster: each word's thousands of spellings are now searched as one compact pattern, with the same results. A four-word Maximum search is ready in about 4 seconds instead of about 22, and each page is checked tens of times faster."),
+            tr("Composition Search with Extended or Maximum variants is faster too."),
+            tr("Stop answers sooner during a slow search."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

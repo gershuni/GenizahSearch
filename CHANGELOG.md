@@ -4,21 +4,26 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [9.6.1] - 2026-10-11 — Faster Extended and Maximum
 
-### Extended and Maximum: much faster, and they stop on time (both)
+Extended and Maximum variant searches run many times faster on both apps, and on the website they stop
+at the 3-minute limit with what they found. Also: AI assistants can run the composition search, the
+public API offers the Extended level, and the website is steadier when a step is interrupted.
+Desktop: installer 9.6.1.
+
+### Extended and Maximum: much faster (both)
 
 - **Extended and Maximum search many times faster.** Each word's thousands of spellings are now written as a compact tree that matches the same text: preparing a four-word Maximum search takes about 4 s instead of about 22 s, and each page is checked tens of times faster (Extended: about 0.3 s instead of 2.3 s to prepare). Basic is unchanged.
-- **Website: an Extended or Maximum search stops at the 3-minute limit with what it found**, as Basic does, and so does an Extended or Maximum composition search: it finishes the page it is checking (or the passage it is preparing) and then stops, usually within a few seconds of the limit. Before, they could run on past it until the search worker was stopped by force, and other visitors' searches waited while a new worker loaded.
-- **Desktop: Stop answers sooner during a slow Extended, Maximum or composition search** (it was checked once every 200 pages).
+- **Website: Extended and Maximum searches, and Extended and Maximum composition searches, stop at the 3-minute limit with what they found**, as Basic does: a search finishes the page it is checking (or the passage it is preparing), then stops, usually within a few seconds. Other visitors' searches keep running meanwhile.
+- **Desktop: Stop answers sooner during a slow Extended, Maximum or composition search.**
 
-### AI integrations and the public API: chunk search and the Extended variant level (web)
+### AI assistants and the public API (web)
 
-- **ChatGPT, Claude and other AI assistants can run the website's composition (chunk) search**, with a
-  chosen chunk size (new MCP tool `find_chunk_parallels`; exact, variants or fuzzy).
+- **AI assistants connected to GenizahSearch (MCP) can run the website's composition (chunk) search**,
+  with a chosen chunk size (`find_chunk_parallels`; exact, variants or fuzzy).
 - **The Extended variant level** in the public API (`search_mode=variants_extended`, background jobs
-  only: `/api/search/jobs`) and the MCP server, matching the website's defaults. Maximum is held: on
-  the real index it ran past the search time limit.
+  only: `/api/search/jobs`) and for AI assistants, with the website's defaults. Maximum stays on the
+  website only, for now.
 
 ### Website: steadier when a step is interrupted (web)
 

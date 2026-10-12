@@ -737,7 +737,7 @@ from version import APP_VERSION
 # Names the CONTENT wave, not a release: the seen flag is stored per browser
 # as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
-WHATS_NEW_VERSION = "9.6.0-search"
+WHATS_NEW_VERSION = "9.6.1-variants"
 # The What's New entry for each combination of live AI listings (web/ai_listings.py).
 AI_LAUNCH_WHATS_NEW = {
     ('ChatGPT', 'Claude'): "New: GenizahSearch in ChatGPT and Claude - ask about the manuscripts in your own words, from the AI tools page.",
@@ -1700,8 +1700,12 @@ def create_layout():
         pass
 
     _new_surfaces = []
+    # v9.6.1 (2026-10-11), ungated: Extended and Maximum are faster for every reader.
+    # Approved with the release texts. First, as the newest.
+    _new_surfaces.append(
+        (tr("New: Extended and Maximum variant searches are much faster"), '/search'))
     # v9.6.0 (2026-10-07), ungated: the search changes reach every reader. The
-    # owner's own sentence; it replaces the 9.5.0 search entry. First, as the newest.
+    # owner's own sentence; it replaces the 9.5.0 search entry.
     _new_surfaces.append(
         (tr("New: first results while the search runs, and further improvements "
             "to search quality"), '/search'))
