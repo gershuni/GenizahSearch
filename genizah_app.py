@@ -19822,6 +19822,19 @@ class GenizahGUI(QMainWindow):
         if not on:
             self.__dict__.pop('_passage_cached_chunk_state', None)
 
+        # The variant slider follows the mode combo only through the combo's
+        # signal, which the forced setCurrentIndex above skips (signals
+        # blocked), so Variants chosen before the switch left the slider on
+        # screen in letter-level mode -- where the engine ignores it: passage
+        # matching is edit distance on a letter stream, with no spelling
+        # variants (owner, 2026-10-12). Hidden here; shown again on the way
+        # back only when the restored mode is Variants.
+        slider = getattr(self, 'comp_variant_slider_container', None)
+        combo = getattr(self, 'comp_mode_combo', None)
+        if slider is not None:
+            slider.setVisible(bool(not on and combo is not None
+                                   and combo.currentIndex() == 1))
+
         self._set_passage_options_visible(on)
 
     def _refresh_comp_method_enabled(self):
