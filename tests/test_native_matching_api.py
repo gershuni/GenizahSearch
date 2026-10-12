@@ -22,6 +22,7 @@ import pytest
 import web.mcp_server as mcp_server
 import web.search_api as search_api
 from shared.api_errors import APIError
+from shared.responsa import _MAX_GAP_TOKEN
 from shared.search_engine import MAX_WORD_GAP, _validate_word_gap
 from web.search_api import SearchRequest, _SEARCH_MODE_TO_INTERNAL
 
@@ -29,7 +30,9 @@ CHATGPT_DIR = Path(__file__).resolve().parents[1] / 'integrations' / 'chatgpt'
 
 # The text modes: those the gap limit speaks to (title/shelfmark are gap-0 only).
 TEXT_MODES = ['exact', 'variants', 'variants_extended', 'fuzzy', 'responsa']
-GAPS = [0, 1, MAX_WORD_GAP - 1, MAX_WORD_GAP, MAX_WORD_GAP + 1, 50, 1000]
+# ... up to re's repeat-count ceiling, which every mode meets (Codex, #395 round 2).
+GAPS = [0, 1, MAX_WORD_GAP - 1, MAX_WORD_GAP, MAX_WORD_GAP + 1, 50, 1000,
+        _MAX_GAP_TOKEN, _MAX_GAP_TOKEN + 1]
 
 
 def load_build_schema():
@@ -43,7 +46,10 @@ def api_refuses(mode, gap):
     try:
         SearchRequest(query='x', search_mode=mode, gap=gap)
     except APIError as exc:
-        assert exc.code == 'invalid_combination' and exc.http_status == 400
+        # The policy limit is a cross-field rule (mode x gap); re's ceiling is a plain
+        # out-of-range value, whatever the mode.
+        expected = 'invalid_request' if gap > _MAX_GAP_TOKEN else 'invalid_combination'
+        assert exc.code == expected and exc.http_status == 400
         return True
     return False
 

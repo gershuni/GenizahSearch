@@ -56,6 +56,7 @@ from web.api_hardening import (
 )
 # Concern #3: APIError from neutral location.
 from shared.api_errors import APIError
+from shared.responsa import _MAX_GAP_TOKEN
 from shared.search_engine import MAX_WORD_GAP
 from shared.search_regex import SearchBudgetExceeded, search_budget
 from web.research_jobs import api_engine, wait_executor, with_request_settings, ResearchJobError
@@ -294,6 +295,14 @@ class SearchRequest(BaseModel):
         # (shared/search_engine.py::_validate_word_gap), so say so at the door with a 400
         # rather than as a failed job. Regex is not an API search_mode (D-09); if it is
         # ever added, list it in _GAP_UNLIMITED_MODES -- a new mode is capped until it is.
+        # re's own repeat-count ceiling applies to every mode, Responsa included: the
+        # engine refuses it, which here would be a 500 or a failed job (Codex, #395).
+        if self.gap > _MAX_GAP_TOKEN:
+            raise APIError(
+                'invalid_request',
+                f"gap is at most {_MAX_GAP_TOKEN} (got gap={self.gap})",
+                http_status=400,
+            )
         if self.search_mode not in _GAP_UNLIMITED_MODES and self.gap > MAX_WORD_GAP:
             raise APIError(
                 'invalid_combination',

@@ -554,6 +554,17 @@ def test_negative_gap_is_400(client, stub_searcher):
     assert stub_searcher.calls == []
 
 
+@pytest.mark.parametrize('route', ['/api/search', '/api/search/jobs'])
+def test_a_responsa_gap_over_the_re_ceiling_is_400_on_both_routes(client, stub_searcher, route):
+    """Responsa is exempt from the policy limit, not from re's repeat ceiling:
+    the engine refuses it, which was a 500 here and a failed job on the jobs
+    route (Codex, #395 round 2)."""
+    r = client.post(route, json={'query': 'שאלה', 'search_mode': 'responsa', 'gap': 4294967295})
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'invalid_request'
+    assert stub_searcher.calls == []
+
+
 def test_responsa_gap_over_the_limit_runs_as_a_background_job(client, stub_searcher):
     import time
     with client:

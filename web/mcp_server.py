@@ -34,6 +34,7 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse
 
 from shared.export_utils import GENIZAHSEARCH_URL
+from shared.responsa import _MAX_GAP_TOKEN
 from shared.search_engine import MAX_WORD_GAP
 from version import APP_VERSION
 from web.api_hardening import API_CHANNEL_SCOPE_KEY, _resolve_rate_limit_key, capture_mcp_tool_event
@@ -120,7 +121,12 @@ def _gap_limit_message(search_mode: str, gap: int | None) -> str | None:
     web/search_api.py::SearchRequest._check_gap_limit: every mode but responsa is capped at
     MAX_WORD_GAP. title and shelfmark are left to the facade, whose own check says their gap
     must be 0."""
-    if gap is None or search_mode in ('responsa', 'title', 'shelfmark') or gap <= MAX_WORD_GAP:
+    if gap is None:
+        return None
+    if gap > _MAX_GAP_TOKEN:
+        # re's repeat-count ceiling, every mode (Codex, #395).
+        return f"gap is at most {_MAX_GAP_TOKEN} (got gap={gap})"
+    if search_mode in ('responsa', 'title', 'shelfmark') or gap <= MAX_WORD_GAP:
         return None
     return (f"gap is at most {MAX_WORD_GAP} when search_mode is {search_mode!r} (got gap={gap}); "
             f"search_mode='responsa' has no limit")
