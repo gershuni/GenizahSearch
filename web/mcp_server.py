@@ -662,9 +662,13 @@ def build_server(facade_app) -> MCPServer:
         too_wide = _gap_limit_message(search_mode, gap)
         if too_wide:
             # Refused here, before a job is queued: the facade would reject the same request
-            # (web/search_api.py::SearchRequest) only after admitting it as a job.
+            # (web/search_api.py::SearchRequest) only after admitting it as a job -- with the
+            # facade's own code: a mode/gap combination, or an out-of-range value at re's
+            # ceiling (Codex, #395 round 3).
+            code = 'invalid_request' if gap > _MAX_GAP_TOKEN else 'invalid_combination'
+
             async def refuse(client_ip):
-                return httpx.Response(400, json={'error': {'code': 'invalid_combination', 'message': too_wide}})
+                return httpx.Response(400, json={'error': {'code': code, 'message': too_wide}})
             return await _run_tool(ctx, 'search_manuscripts', refuse)
         body = {'query': query, 'search_mode': search_mode}
         if limit is not None:

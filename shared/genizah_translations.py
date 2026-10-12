@@ -5520,4 +5520,12 @@ TRANSLATIONS.update({
         "החיפוש השמור \"{query}\" משתמש במרווח של {gap} מילים. בחיפוש מדויק, "
         "וריאנטים ומקורב המרווח הוא לכל היותר {limit}, ולכן השלב הזה לא הורץ שוב. "
         "המרווח שלו לא שונה.",
+    # re's own repeat ceiling, in every mode (Codex review of PR #395).
+    "The word gap {gap} is too large; the most a search can take is {limit}.":
+        "המרווח {gap} גדול מדי; המרב שחיפוש יכול לקבל הוא {limit}.",
+    "The saved search \"{query}\" uses a word gap of {gap}, which is too "
+    "large (the most is {limit}), so this step was not run again. Its gap "
+    "was not changed.":
+        "החיפוש השמור \"{query}\" משתמש במרווח של {gap} מילים, שהוא גדול מדי "
+        "(המרב הוא {limit}), ולכן השלב הזה לא הורץ שוב. המרווח שלו לא שונה.",
 })

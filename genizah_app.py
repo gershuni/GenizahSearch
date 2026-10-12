@@ -47,6 +47,7 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
+from shared.responsa import _MAX_GAP_TOKEN
 from shared.search_engine import PHASE_LOCAL_SEARCH, MAX_WORD_GAP, _validate_word_gap
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished, _retire_worker
@@ -21002,10 +21003,16 @@ class GenizahGUI(QMainWindow):
         # does not read the gap.
         if not _is_lab and _word_gap_limit_error(
                 mode, gap, {'responsa_mode': mode_idx == self.MODE_RESPONSA}):
-            _show_ok_notice(self, 'warning', tr("Word gap"), tr(
-                "In Exact, Variants and Fuzzy searches the word gap is at most {limit}; "
-                "this search asks for {gap}.\n\nLower the gap, or search in Responsa or "
-                "Regex mode, which have no limit.").format(limit=MAX_WORD_GAP, gap=gap))
+            if gap > _MAX_GAP_TOKEN:
+                # re's own ceiling, every mode -- so no advice to switch modes.
+                text = tr("The word gap {gap} is too large; the most a search can take "
+                          "is {limit}.").format(gap=gap, limit=_MAX_GAP_TOKEN)
+            else:
+                text = tr(
+                    "In Exact, Variants and Fuzzy searches the word gap is at most {limit}; "
+                    "this search asks for {gap}.\n\nLower the gap, or search in Responsa or "
+                    "Regex mode, which have no limit.").format(limit=MAX_WORD_GAP, gap=gap)
+            _show_ok_notice(self, 'warning', tr("Word gap"), text)
             return
         # D-04: corpus from currentData() (fixed code), NEVER currentText() (translated label)
         _corpus = (
@@ -22385,11 +22392,18 @@ class GenizahGUI(QMainWindow):
         step = _word_gap_refused_step(chain, error)
         if step is None:
             return False
-        _show_ok_notice(self, 'warning', tr("Word gap"), tr(
-            "The saved search \"{query}\" uses a word gap of {gap}. In Exact, Variants "
-            "and Fuzzy searches the gap is at most {limit}, so this step was not run "
-            "again. Its gap was not changed.").format(
-                query=step.query, gap=step.gap, limit=MAX_WORD_GAP))
+        if int(step.gap or 0) > _MAX_GAP_TOKEN:
+            text = tr(
+                "The saved search \"{query}\" uses a word gap of {gap}, which is too "
+                "large (the most is {limit}), so this step was not run again. Its gap "
+                "was not changed.").format(query=step.query, gap=step.gap, limit=_MAX_GAP_TOKEN)
+        else:
+            text = tr(
+                "The saved search \"{query}\" uses a word gap of {gap}. In Exact, Variants "
+                "and Fuzzy searches the gap is at most {limit}, so this step was not run "
+                "again. Its gap was not changed.").format(
+                    query=step.query, gap=step.gap, limit=MAX_WORD_GAP)
+        _show_ok_notice(self, 'warning', tr("Word gap"), text)
         return True
 
     def _search_status_or_blank(self):

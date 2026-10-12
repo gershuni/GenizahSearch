@@ -550,6 +550,24 @@ def test_a_gap_over_the_limit_is_a_coded_error_and_queues_nothing(stack, mode):
             event['properties']['error_code']) == ('search_manuscripts', 400, 'invalid_combination')
 
 
+def test_a_gap_at_the_re_ceiling_is_invalid_request_like_the_api(stack):
+    """Responsa is exempt from the policy limit, not from re's repeat ceiling; the
+    code is the API's for that case (Codex, #395 round 3)."""
+    host, child, engine = stack
+
+    async def script(client):
+        return await client.call_tool('search_manuscripts',
+                                      {'query': 'א ב', 'search_mode': 'responsa', 'gap': 4294967295})
+    result = run(host, script)
+    error = body(result)['error']
+    assert result.is_error is True
+    assert (error['code'], error['http_status']) == ('invalid_request', 400)
+    assert '4294967294' in error['message'] and 'responsa' not in error['message']
+    assert engine.calls == [] and not child.state.chatgpt_jobs
+    [event] = drain_events()
+    assert event['properties']['error_code'] == 'invalid_request'
+
+
 def test_responsa_takes_any_gap_and_the_limit_itself_is_allowed(stack):
     host, _, engine = stack
 

@@ -116,6 +116,22 @@ def test_a_gap_over_the_limit_is_refused_at_the_press(monkeypatch, notices, lang
     w.gap_input.setText.assert_not_called()           # nothing clamped
 
 
+@pytest.mark.parametrize("mode_idx", [RESPONSA, REGEX, VARIANTS], ids=["responsa", "regex", "variants"])
+def test_a_gap_at_the_re_ceiling_gets_the_ceiling_notice_not_mode_advice(monkeypatch, notices, mode_idx):
+    """re's repeat ceiling applies to every mode, so the notice must not tell a
+    Responsa or Regex user to switch to Responsa or Regex (Codex, #395 round 3)."""
+    w, search, lab_search = _pressing(monkeypatch, mode_idx, 4294967295)
+    APP.start_search(w)
+    ((kind, title, text),) = notices
+    assert (kind, title) == ("warning", genizah_core.tr("Word gap"))
+    assert text == genizah_core.tr(
+        "The word gap {gap} is too large; the most a search can take is {limit}."
+    ).format(gap=4294967295, limit=4294967294)
+    assert "Responsa" not in text and "Regex" not in text
+    assert search.call_count == 0 and lab_search.call_count == 0
+    w.gap_input.setText.assert_not_called()
+
+
 def test_the_notice_is_in_the_interface_language(monkeypatch, notices):
     monkeypatch.setattr(genizah_core, "CURRENT_LANG", "he")
     w, _search, _lab = _pressing(monkeypatch, VARIANTS, 12)
