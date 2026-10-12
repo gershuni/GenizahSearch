@@ -93,9 +93,17 @@ def test_the_mcp_message_names_the_limit_the_mode_and_the_unlimited_mode():
 
 def test_the_mcp_check_is_silent_without_a_gap_and_for_the_gap_zero_modes():
     assert mcp_server._gap_limit_message('exact', None) is None
-    # title/shelfmark: the facade's own coupling check says their gap must be 0.
+    # title/shelfmark: the facade's own coupling check says their gap must be 0 --
+    # and it answers first for a gap at re's ceiling too, as the API's validator
+    # order does (Codex, #395 round 4), so the precheck stays out of it.
     assert mcp_server._gap_limit_message('title', 50) is None
     assert mcp_server._gap_limit_message('shelfmark', 50) is None
+    assert mcp_server._gap_limit_message('title', _MAX_GAP_TOKEN + 1) is None
+    assert mcp_server._gap_limit_message('shelfmark', _MAX_GAP_TOKEN + 1) is None
+    # The API side of the same precedence, pinned so the two cannot drift apart.
+    with pytest.raises(APIError) as exc:
+        SearchRequest(query='x', search_mode='title', gap=_MAX_GAP_TOKEN + 1)
+    assert exc.value.code == 'invalid_combination'
 
 
 def test_the_gpt_schema_has_no_maximum_on_gap_names_the_limit_and_keeps_it_optional():

@@ -121,12 +121,14 @@ def _gap_limit_message(search_mode: str, gap: int | None) -> str | None:
     web/search_api.py::SearchRequest._check_gap_limit: every mode but responsa is capped at
     MAX_WORD_GAP. title and shelfmark are left to the facade, whose own check says their gap
     must be 0."""
-    if gap is None:
+    if gap is None or search_mode in ('title', 'shelfmark'):
+        # title/shelfmark: the facade's coupling check answers first there too
+        # (invalid_combination: their gap must be 0), whatever the value.
         return None
     if gap > _MAX_GAP_TOKEN:
-        # re's repeat-count ceiling, every mode (Codex, #395).
+        # re's repeat-count ceiling, every text mode (Codex, #395).
         return f"gap is at most {_MAX_GAP_TOKEN} (got gap={gap})"
-    if search_mode in ('responsa', 'title', 'shelfmark') or gap <= MAX_WORD_GAP:
+    if search_mode == 'responsa' or gap <= MAX_WORD_GAP:
         return None
     return (f"gap is at most {MAX_WORD_GAP} when search_mode is {search_mode!r} (got gap={gap}); "
             f"search_mode='responsa' has no limit")
