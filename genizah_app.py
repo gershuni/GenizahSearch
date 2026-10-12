@@ -47,7 +47,8 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from shared.search_engine import PHASE_LOCAL_SEARCH
+from shared.responsa import _MAX_GAP_TOKEN
+from shared.search_engine import PHASE_LOCAL_SEARCH, MAX_WORD_GAP, _validate_word_gap
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished, _retire_worker
 from desktop.widgets import (
@@ -1367,6 +1368,26 @@ def _report_failed_relaunch(error=None):
     _show_ok_notice(
         None, 'warning', tr("Could not restart"),
         tr("The application could not restart itself. Start it again to use the new language."))
+
+
+def _word_gap_limit_error(mode, gap, responsa_options=None):
+    """What the engine says when it refuses *gap* in *mode*, or None when it
+    searches with it. Owner ruling 2026-10-12: at most MAX_WORD_GAP in Exact,
+    Variants and Fuzzy; Responsa and Regex take any gap. The engine's own rule
+    (execute_search checks it at entry), so the desktop cannot drift from it."""
+    try:
+        _validate_word_gap(mode, gap, responsa_options)
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
+def _word_gap_refused_step(chain, error):
+    """The step of *chain* whose gap the engine refused with *error* (a search
+    saved before the limit), or None when *error* is another failure."""
+    error = str(error)
+    return next((s for s in chain or ()
+                 if _word_gap_limit_error(s.mode, s.gap, s.responsa_options) == error), None)
 
 
 def _telemetry_result_bucket(count: int) -> str:
@@ -20986,6 +21007,26 @@ class GenizahGUI(QMainWindow):
             and self.btn_lab_mode_toggle.isChecked()
         )
         _search_mode_enum = f'lab_{_mode_key}' if _is_lab else _mode_key
+
+        gap = int(self.gap_input.text()) if self.gap_input.text().isdigit() else 0
+        # The word gap is at most MAX_WORD_GAP in Exact, Variants and Fuzzy (owner,
+        # 2026-10-12); Responsa and Regex take any gap. Refused here, with the
+        # reason and before anything of a run starts -- the engine would refuse it
+        # as a bare error. Never clamped: another gap is another search. Lab Mode
+        # does not read the gap.
+        if not _is_lab and _word_gap_limit_error(
+                mode, gap, {'responsa_mode': mode_idx == self.MODE_RESPONSA}):
+            if gap > _MAX_GAP_TOKEN:
+                # re's own ceiling, every mode -- so no advice to switch modes.
+                text = tr("The word gap {gap} is too large; the most a search can take "
+                          "is {limit}.").format(gap=gap, limit=_MAX_GAP_TOKEN)
+            else:
+                text = tr(
+                    "In Exact, Variants and Fuzzy searches the word gap is at most {limit}; "
+                    "this search asks for {gap}.\n\nLower the gap, or search in Responsa or "
+                    "Regex mode, which have no limit.").format(limit=MAX_WORD_GAP, gap=gap)
+            _show_ok_notice(self, 'warning', tr("Word gap"), text)
+            return
         # D-04: corpus from currentData() (fixed code), NEVER currentText() (translated label)
         _corpus = (
             (self.corpus_scope_combo.currentData() or 'genizah')
@@ -20997,8 +21038,6 @@ class GenizahGUI(QMainWindow):
             'corpus': _corpus,
             'emitted': False,
         }
-
-        gap = int(self.gap_input.text()) if self.gap_input.text().isdigit() else 0
 
         # Get Excluded Words
         exclude_text = self.exclude_input.text().strip()
@@ -22269,6 +22308,7 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, 'status_label'):
             self.status_label.setText(tr('Re-evaluating refinement...'))
             QApplication.processEvents()
+        error = None
         try:
             result = replay_chain(self.refinement_chain, self.searcher, self.pre_search_restrict_sys_ids,
                                   searcher_for_step=self._refinement_step_searcher())
@@ -22276,9 +22316,13 @@ class GenizahGUI(QMainWindow):
         except Exception as e:
             import traceback
             traceback.print_exc()
+            error = e
         finally:
             if hasattr(self, 'status_label'):
                 self.status_label.setText(self._search_status_or_blank())
+        if error is not None:
+            # A step whose word gap the engine refused stops the replay there: say so.
+            self._explain_word_gap_refusal(error, self.refinement_chain)
         self._update_refinement_strip()
         self._update_search_within_btn()
         self._schedule_session_save()
@@ -22334,15 +22378,46 @@ class GenizahGUI(QMainWindow):
         self._complete_chain_then(*pending)
 
     def _on_replay_for_restore_error(self, msg):
-        """Replay failed -- clear the chain rather than leave stale state."""
+        """Replay failed -- clear the chain rather than leave stale state.
+
+        Except when the engine refused a step's word gap (over MAX_WORD_GAP in
+        Exact, Variants or Fuzzy: a search saved before the limit). The user is
+        told which step and why, and the chain stays as it was saved: the steps
+        before that one were replayed, that one and the rest have no sets, so a
+        search within it stops at that step again, with the same explanation.
+        Nothing is clamped."""
         logger.warning("Refinement chain replay (restore) failed: %s", msg)
-        self.refinement_chain = []
+        if not self._explain_word_gap_refusal(msg, self.refinement_chain):
+            self.refinement_chain = []
         self.refinement_restrict_sys_ids = None
         if hasattr(self, 'status_label'):
             self.status_label.setText(self._search_status_or_blank())
         if hasattr(self, '_update_refinement_strip'):
             self._update_refinement_strip()
         self._run_after_restore_replay()     # a held action runs on what is left
+
+    def _explain_word_gap_refusal(self, error, chain):
+        """When *error* is the engine refusing the word gap of a step of *chain*
+        (over MAX_WORD_GAP in Exact, Variants or Fuzzy -- a search saved before
+        the limit), tell the user which step and why it was not run again, and
+        return True. The step keeps its gap: it is never run with another one.
+        False for any other failure."""
+        step = _word_gap_refused_step(chain, error)
+        if step is None:
+            return False
+        if int(step.gap or 0) > _MAX_GAP_TOKEN:
+            text = tr(
+                "The saved search \"{query}\" uses a word gap of {gap}, which is too "
+                "large (the most is {limit}), so this step was not run again. Its gap "
+                "was not changed.").format(query=step.query, gap=step.gap, limit=_MAX_GAP_TOKEN)
+        else:
+            text = tr(
+                "The saved search \"{query}\" uses a word gap of {gap}. In Exact, Variants "
+                "and Fuzzy searches the gap is at most {limit}, so this step was not run "
+                "again. Its gap was not changed.").format(
+                    query=step.query, gap=step.gap, limit=MAX_WORD_GAP)
+        _show_ok_notice(self, 'warning', tr("Word gap"), text)
+        return True
 
     def _search_status_or_blank(self):
         """What the replay leaves in the status label once it is done: the
@@ -22639,7 +22714,8 @@ class GenizahGUI(QMainWindow):
 
         def failed(err):
             logger.warning("Completing the refinement chain failed: %s", err)
-            QMessageBox.warning(self, tr("Error"), str(err))
+            if not self._explain_word_gap_refusal(err, thread.chain):
+                QMessageBox.warning(self, tr("Error"), str(err))
             finished({'restrict': None, 'interrupted': True})
 
         _live = partial(self._discardable, '_search_new_generation')

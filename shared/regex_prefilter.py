@@ -399,10 +399,14 @@ def _set_syntax_diverges(pattern: str) -> bool:
 
 
 def extract_formula(pattern: str, *, stripped: bool, anchors: bool = True):
-    # The in-process matcher is the regex module (shared/search_regex.py
-    # compile()); native research workers use stdlib re. The structure below
-    # comes from stdlib's parser, so any pattern the two engines may read
+    # The prefilter serves Regex mode only (the user's own pattern). That
+    # pattern matches with the regex module in process (shared/search_regex.py
+    # compile()) and with stdlib re in a native research worker. The structure
+    # below comes from stdlib's parser, so any pattern the two engines may read
     # differently gets no prefilter: all documents are candidates.
+    # Engine-generated patterns (compile_generated) may match with re in process
+    # too, but they never reach this function
+    # (docs/plans/DESKTOP_NATIVE_MATCHING_PLAN.md).
     if _set_syntax_diverges(pattern):
         return TRUE   # e.g. 'ש[a[:alpha:]]ום': a POSIX class in regex, a literal '[' in re
     try:

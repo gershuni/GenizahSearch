@@ -141,6 +141,19 @@ _GAP_TOKEN_RE = re.compile(r'^\[(\d+)\]$')
 # Regex for matching [|N] line-gap tokens like [|2], [|0]
 _LINE_GAP_TOKEN_RE = re.compile(r'^\[\|(\d+)\]$')
 
+# Responsa gaps have no policy limit (owner, 2026-10-12: "we can get more gap if we
+# want"); only re's own repeat-count ceiling applies -- one more and re.compile
+# raises OverflowError, which the builders do not catch.
+_MAX_GAP_TOKEN = 4_294_967_294
+
+
+def _gap_token_value(digits, token):
+    """The integer of a [N] / [|N] token, rejected with a message at re's ceiling."""
+    value = int(digits)
+    if value > _MAX_GAP_TOKEN:
+        raise ValueError(f"The gap {token} is too large; the most is {_MAX_GAP_TOKEN}.")
+    return value
+
 
 def _has_line_break_syntax(query_str: str) -> bool:
     """Check if a query string contains line-break syntax (| characters).
@@ -228,7 +241,7 @@ def _parse_line_break_query(query_str: str):
         for t in current_tokens:
             gm = _GAP_TOKEN_RE.match(t)
             if gm:
-                pending_word_gap = int(gm.group(1))
+                pending_word_gap = _gap_token_value(gm.group(1), t)
                 continue
             comp = _parse_single_token(t)
             if comps:
@@ -257,7 +270,7 @@ def _parse_line_break_query(query_str: str):
         lg_match = _LINE_GAP_TOKEN_RE.match(token)
         if lg_match:
             _flush_group()
-            pending_line_gap = int(lg_match.group(1))
+            pending_line_gap = _gap_token_value(lg_match.group(1), token)
             continue
 
         # [N] word gap — pass through (ignored in line mode, but keep for component parsing)
@@ -350,7 +363,7 @@ def extract_per_pair_gaps(query_str: str) -> List[Optional[int]]:
             continue
         gap_match = _GAP_TOKEN_RE.match(token)
         if gap_match:
-            gap_value = int(gap_match.group(1))
+            gap_value = _gap_token_value(gap_match.group(1), token)
             if last_was_component and len(gaps) == component_count - 1:
                 gaps.append(gap_value)
             last_was_component = False
