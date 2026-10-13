@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 9.6.1
+# Dicta Genizah Search Pro 9.6.2
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,20 +8,19 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 9.6.1?
+## What's New in Version 9.6.2?
 
-**Faster Extended and Maximum**, on the desktop (installer 9.6.1) and the website:
+**Faster Extended and Maximum on the desktop** (installer 9.6.2), and GenizahSearch in ChatGPT:
 
-- **Extended and Maximum variant searches run many times faster**, with the same results; Basic is
-  unchanged
-- **Website**: Extended and Maximum searches and composition searches stop at the 3-minute limit with
-  what they found, like Basic searches
-- **Desktop**: Stop answers sooner during a slow variant or composition search
-- **AI assistants** connected to GenizahSearch can run the composition (chunk) search, and the public
-  API offers the Extended level (as background jobs)
+- **Desktop: Extended and Maximum searches run many times faster**, with the same results, and
+  Stop answers at once
+- **Desktop: the word gap is at most 10** in Exact, Variants and Fuzzy searches; Responsa-style and
+  Regex searches have no limit
+- **GenizahSearch in ChatGPT**: add the app from [genizahsearch.com/ai](https://genizahsearch.com/ai)
+  and ask about the manuscripts in your own words
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md). The README's previous What's New sections
-(8.1.0 to 9.6.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
+(8.1.0 to 9.6.1) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
 
 ---
 
@@ -68,8 +67,9 @@ Earlier releases: [CHANGELOG.md](CHANGELOG.md). The README's previous What's New
 
 ### AI and automation
 
-- The **GenizahSearch GPT** in ChatGPT, a **research skill** for other AI assistants, and a
-  **public HTTP/JSON API**; see [genizahsearch.com/ai](https://genizahsearch.com/ai)
+- **GenizahSearch in ChatGPT** (an app you add from [genizahsearch.com/ai](https://genizahsearch.com/ai);
+  the GenizahSearch GPT remains until 2026-12-11), a **research skill** for other AI assistants, and a
+  **public HTTP/JSON API**
 
 ---
 
@@ -91,11 +91,11 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### With an AI assistant
 
-Open the **GenizahSearch GPT** in ChatGPT from [genizahsearch.com/ai](https://genizahsearch.com/ai) and ask a question, a name or a passage; no installation. Other assistants can use the [research skill](skills/cairo-genizah-research/README.md) or the [public API](docs/SEARCH_API.md).
+Add **GenizahSearch to ChatGPT** from [genizahsearch.com/ai](https://genizahsearch.com/ai) and ask a question, a name or a passage; no installation (the GenizahSearch GPT remains until 2026-12-11). Other assistants can use the [research skill](skills/cairo-genizah-research/README.md) or the [public API](docs/SEARCH_API.md).
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V9.6.1_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
+1. **Download:** the installer (`GenizahSearchPro_V9.6.2_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

@@ -7,6 +7,20 @@ The authoritative release history is [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
+## What's New in Version 9.6.1? (the README's own text, 2026-10-11 to 2026-10-12)
+
+**Faster Extended and Maximum**, on the desktop (installer 9.6.1) and the website:
+
+- **Extended and Maximum variant searches run many times faster**, with the same results; Basic is
+  unchanged
+- **Website**: Extended and Maximum searches and composition searches stop at the 3-minute limit with
+  what they found, like Basic searches
+- **Desktop**: Stop answers sooner during a slow variant or composition search
+- **AI assistants** connected to GenizahSearch can run the composition (chunk) search, and the public
+  API offers the Extended level (as background jobs)
+
+---
+
 ## What's New in Version 9.6.0? (the README's own text, 2026-10-07 to 2026-10-11)
 
 **Search fixes**, on the desktop (installer 9.6.0) and the website:

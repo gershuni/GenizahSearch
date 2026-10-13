@@ -11,7 +11,7 @@ VERSION_PY = REPO_ROOT / "version.py"
 CHANGELOG_MD = REPO_ROOT / "CHANGELOG.md"
 CLAUDE_MD = REPO_ROOT / "CLAUDE.md"
 
-_TARGET_VERSION = "9.6.1"
+_TARGET_VERSION = "9.6.2"
 
 
 def test_version_matches_target():

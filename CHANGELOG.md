@@ -4,6 +4,43 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [9.6.2] - 2026-10-12 — Faster Extended and Maximum on the desktop; GenizahSearch in ChatGPT
+
+The desktop app checks pages with Python's own fast matcher for the searches it builds itself, so
+Extended and Maximum searches run many times faster with the same results; a word-gap limit for
+the plain modes; GenizahSearch is an app in ChatGPT. Desktop: installer 9.6.2.
+
+### Desktop: Extended and Maximum, many times faster
+
+- **Each page is checked about sixty times faster** in Exact, Variants (Basic single forms,
+  Extended, Maximum) and Fuzzy searches, and in Composition Search by chunks: patterns the app
+  builds itself from plain words now match with Python's own `re` engine; a user's Regex,
+  Responsa and any gap above 0 keep the interruptible engine. Results are identical (checked page
+  by page on the real index). Very long documents, and pages with a quote or a mark between two
+  letters in long multi-word queries, still take the slower route.
+- **Stop answers at once**, even in the middle of a long page.
+- **A huge document no longer ends the search**: before, one document that took over 10 seconds
+  to check stopped the whole search with an error.
+- **Word gap: at most 10 in Exact, Variants and Fuzzy** searches, where a larger gap made the
+  search slower than it was worth; Responsa (`[N]`) and Regex take any gap. A saved search with a
+  larger gap is not run again, and says so; nothing is changed silently.
+- **Composition Search: the Variant intensity slider is hidden in letter-level search**, which
+  does not use it.
+
+### Website and AI assistants
+
+- **GenizahSearch in ChatGPT**: the app is published; "Add to ChatGPT" on
+  [genizahsearch.com/ai](https://genizahsearch.com/ai) and the homepage. The GPT remains until
+  2026-12-11.
+- **Public API and MCP**: the same word-gap rule (`gap` at most 10 except for `responsa`,
+  answered 400); a request the server refuses at the door on `/api/search/jobs` now gets the same
+  answer as on `/api/search` instead of a 500.
+
+### Internal
+
+- Plan and review record: `docs/plans/DESKTOP_NATIVE_MATCHING_PLAN.md` (a panel of five agents
+  and six Codex rounds before implementation, four after).
+
 ## [9.6.1] - 2026-10-11 — Faster Extended and Maximum
 
 Extended and Maximum variant searches run many times faster on both apps, and on the website they stop

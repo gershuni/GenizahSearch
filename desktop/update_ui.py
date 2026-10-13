@@ -99,7 +99,7 @@ class UpdateNotificationBar(QFrame):
 # keeps the value and shows nothing to whoever already read it (9.6.0, owner
 # 2026-10-07: no desktop What's New). Change it together with the bar and dialog
 # texts.
-WHATS_NEW_CONTENT_VERSION = "9.6.1"
+WHATS_NEW_CONTENT_VERSION = "9.6.2"
 
 
 class WhatsNewBar(QFrame):
@@ -170,7 +170,9 @@ class WhatsNewBar(QFrame):
         # fuller results said plainly, with no before/after figures.
         # v9.6.0: no desktop What's New (owner, 2026-10-07).
         # v9.6.1: approved with the release texts (2026-10-11).
-        self.lbl_msg.setText(tr("New: Extended and Maximum variant searches are much faster"))
+        # v9.6.2: faster again -- the matcher changed, not the pattern -- so the bar
+        # says so in one line; the dialog adds the word-gap limit (owner, 2026-10-12).
+        self.lbl_msg.setText(tr("New: Extended and Maximum searches run many times faster"))
         self.show()
 
     def on_learn_more(self):
@@ -303,13 +305,12 @@ class WhatsNewDialog(QDialog):
         layout.addWidget(title)
 
         is_heb = CURRENT_LANG == 'he'
-        # v9.6.1 (2026-10-11). Three bullets: Extended and Maximum faster, Composition
-        # Search too, Stop sooner. Approved with the release texts; the rest is in the
+        # v9.6.2 (2026-10-12). Two bullets: Extended and Maximum faster (the matcher),
+        # the word-gap limit. The owner cut the slider bullet; the rest is in the
         # CHANGELOG, README and GitHub release.
         items = [
-            tr("Extended and Maximum, much faster: each word's thousands of spellings are now searched as one compact pattern, with the same results. A four-word Maximum search is ready in about 4 seconds instead of about 22, and each page is checked tens of times faster."),
-            tr("Composition Search with Extended or Maximum variants is faster too."),
-            tr("Stop answers sooner during a slow search."),
+            tr("Extended and Maximum searches are many times faster: for the patterns the app builds itself, each page is now checked with Python's own fast matcher, with the same results. Stop answers at once."),
+            tr("The word gap (words allowed between the search words) is at most 10 in Exact, Variants and Fuzzy searches; Responsa-style and Regex searches have no limit."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

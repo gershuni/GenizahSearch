@@ -5520,6 +5520,13 @@ TRANSLATIONS.update({
         "החיפוש השמור \"{query}\" משתמש במרווח של {gap} מילים. בחיפוש מדויק, "
         "וריאנטים ומקורב המרווח הוא לכל היותר {limit}, ולכן השלב הזה לא הורץ שוב. "
         "המרווח שלו לא שונה.",
+    # v9.6.2 What's New (desktop bar and dialog; owner-approved 2026-10-12).
+    "New: Extended and Maximum searches run many times faster":
+        "חדש: חיפושי וריאנטים מורחב ומרבי רצים מהר פי כמה",
+    "Extended and Maximum searches are many times faster: for the patterns the app builds itself, each page is now checked with Python's own fast matcher, with the same results. Stop answers at once.":
+        "חיפושי וריאנטים מורחב ומרבי מהירים פי כמה: בתבניות שהתוכנה בונה בעצמה, כל עמוד נבדק עכשיו במנוע המהיר של פייתון, עם אותן תוצאות. עצירה נענית מיד.",
+    "The word gap (words allowed between the search words) is at most 10 in Exact, Variants and Fuzzy searches; Responsa-style and Regex searches have no limit.":
+        "המרווח בין המילים (כמה מילים מותרות בין מילות החיפוש) הוא לכל היותר 10 בחיפוש מדויק, וריאנטים ומקורב; בחיפוש בסגנון פרויקט השו\"ת ובביטוי רגולרי אין מגבלה.",
     # re's own repeat ceiling, in every mode (Codex review of PR #395).
     "The word gap {gap} is too large; the most a search can take is {limit}.":
         "המרווח {gap} גדול מדי; המרב שחיפוש יכול לקבל הוא {limit}.",
