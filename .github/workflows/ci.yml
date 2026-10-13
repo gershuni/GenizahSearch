@@ -32,7 +32,11 @@ jobs:
       - run: python scripts/check_docs.py
 
   tests:
-    timeout-minutes: 60
+    # 90, not 60: the Windows lane runs 15,300 tests in one process in about 41
+    # min on a good runner and was cancelled at 60 twice at 97-99% (2026-10-12
+    # merge of #395, 2026-10-13 release v9.6.2) -- shared Windows runners vary
+    # by half; the Ubuntu lane takes about 23 min.
+    timeout-minutes: 90
     needs: lint-and-docs
     env:
       # PyQt6 tests (e.g. desktop-telemetry consent dialogs) construct a real
