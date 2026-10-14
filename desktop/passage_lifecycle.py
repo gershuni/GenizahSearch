@@ -796,6 +796,39 @@ class PassageSearchAdapter:
         # silently returning None as a passage result.
 
 
+_EXCLUDED_COUNTS: dict = {}
+
+
+def excluded_page_counts() -> dict:
+    """sys_id -> how many of its pages the live letter-level index left out
+    (Stage 0: short, target sheets, library stamps), read once per installed
+    build from its `excluded_records.tsv`. Empty when there is none. Used to
+    say how many pages of a manuscript a condition could not search."""
+    import os
+    path = os.path.join(passage_root(), LIVE_DIRNAME, 'excluded_records.tsv')
+    try:
+        stamp = os.stat(path).st_mtime_ns
+    except OSError:
+        return {}
+    cached = _EXCLUDED_COUNTS.get(path)
+    if cached and cached[0] == stamp:
+        return cached[1]
+    from shared.sys_id_patterns import extract_corpus_sys_id
+    counts: dict = {}
+    try:
+        with open(path, encoding='utf-8') as fh:
+            next(fh, None)                      # header
+            for line in fh:
+                sid = extract_corpus_sys_id(line.split('\t', 1)[0])
+                if sid:
+                    counts[sid] = counts.get(sid, 0) + 1
+    except OSError:
+        return {}
+    _EXCLUDED_COUNTS.clear()
+    _EXCLUDED_COUNTS[path] = (stamp, counts)
+    return counts
+
+
 def get_passage_searcher(text_fetcher, width: str = _DEFAULT_WIDTH,
                           length: str = DEFAULT_LENGTH,
                           depth: str = DEFAULT_DEPTH,

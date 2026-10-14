@@ -501,10 +501,18 @@ class ResultDialog(QDialog):
         self.btn_rd_copy_web.setStyleSheet("background-color: #6b7280; color: white; border-radius: 4px;")
         self.btn_rd_copy_web.clicked.connect(self._rd_copy_web_link)
 
+        # Composition Search conditions: what each text established on the
+        # image shown (docs/plans/COMPOSITION_CONDITIONS_PLAN.md section 5).
+        self.lbl_rd_compound = QLabel("")
+        self.lbl_rd_compound.setStyleSheet("color: #16a085; font-size: 11px;")
+        self.lbl_rd_compound.setWordWrap(True)
+        self.lbl_rd_compound.setVisible(False)
+
         # Wraps onto a second line instead of widening the window.
         self.info_flow = FlowWidget(margin=0)
         for _w in (self.btn_img, self.btn_rd_open_web, self.btn_external_link, self.btn_rd_pgp, self.lbl_info,
-                   self.lbl_rd_domains, self.lbl_rd_printed, self.lbl_meta_loading):
+                   self.lbl_rd_domains, self.lbl_rd_printed, self.lbl_rd_compound,
+                   self.lbl_meta_loading):
             self.info_flow.add_widget(_w)
 
         # Nav Row (Inside Header)
@@ -2709,6 +2717,42 @@ class ResultDialog(QDialog):
             text = text[:s] + "*" + text[s:]
         return text
 
+    # -- Composition Search conditions ------------------------------------------
+
+    def _compound_page_key(self):
+        """The identity of the image shown NOW -- not of the entry it was
+        opened from: page navigation moves within and across manuscripts."""
+        from shared.compound_query import parse_page_key
+        header = (getattr(self, 'current_full_header', '')
+                  or (self.data or {}).get('raw_header', ''))
+        key = parse_page_key(header)
+        return f"{key.sys_id}|{key.ie}|{key.p}" if key else ''
+
+    def _pattern_for_current_page(self):
+        """The highlight for the image shown. An entry from a search with
+        conditions carries the pattern of whichever text matched on each image
+        of its manuscript; an image outside that map gets none, so no text is
+        ever highlighted where it was not judged. Other entries keep their one
+        pattern, as before."""
+        data = self.data or {}
+        patterns = data.get('compound_page_patterns')
+        if patterns is None:
+            return data.get('highlight_pattern')
+        return patterns.get(self._compound_page_key(), '')
+
+    def _refresh_compound_strip(self):
+        lbl = getattr(self, 'lbl_rd_compound', None)
+        if lbl is None:
+            return
+        notes = (self.data or {}).get('compound_page_notes')
+        if notes is None:
+            lbl.setVisible(False)
+            lbl.setText('')
+            return
+        lbl.setText(notes.get(self._compound_page_key())
+                    or tr("This image is not part of the result with conditions."))
+        lbl.setVisible(True)
+
     def load_result_by_index(self, idx):
         data = self.all_results[idx]
         if not data.get('full_text'):
@@ -3203,6 +3247,7 @@ class ResultDialog(QDialog):
         self.current_page_text = page_data.get('text', '')
         self.current_page_uid = page_data.get('uid')
         self._update_add_to_list_button()
+        self._refresh_compound_strip()
 
         # Keep the dialog's data object aligned with the currently displayed folio
         if self.data is not None:
@@ -3233,7 +3278,7 @@ class ResultDialog(QDialog):
         raw_text = page_data['text']
         clean_text = raw_text  # BEFORE manual annotation markers (Codex P2, below)
         raw_text = self._apply_manual_highlights_to_text(raw_text, self.current_page_uid)
-        pattern_str = self.data.get('highlight_pattern')
+        pattern_str = self._pattern_for_current_page()
 
         # 260902 (SEED-033 Option A) — Codex P2: derive the search phrase from the
         # CLEAN page text and `highlight_pattern`, never from `raw_text`. A page

@@ -61,7 +61,7 @@ class ConditionDialog(QDialog):
     def __init__(self, parent=None, condition: Optional[cq.Condition] = None,
                  floor: int = 40):
         super().__init__(parent)
-        self.setWindowTitle(tr("Condition"))
+        self.setWindowTitle(tr("Search condition"))
         if CURRENT_LANG == 'he':
             self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self._floor = int(floor)

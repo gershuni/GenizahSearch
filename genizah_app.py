@@ -18530,6 +18530,130 @@ class GenizahGUI(QMainWindow):
         strip.set_available(ok, '' if ok else tr(
             "Conditions work only with letter-level search."))
 
+    @staticmethod
+    def _compound_key_str(header):
+        key = compound_query.parse_page_key(header)
+        return f"{key.sys_id}|{key.ie}|{key.p}" if key else ''
+
+    def _compound_viewer_fields(self, ms_item):
+        """For a manuscript from a search with conditions: the highlight of
+        each of its result images (by image identity) and the line the viewer's
+        evidence strip shows for each. Empty for any other result."""
+        pages = list(ms_item.get('pages') or [])
+        if not any('compound' in p or p.get('is_condition_evidence') for p in pages):
+            return {}
+        patterns, notes = {}, {}
+        for page in pages:
+            key = self._compound_key_str(page.get('raw_header'))
+            if not key:
+                continue
+            patterns[key] = page.get('highlight_pattern') or ''
+            notes[key] = self._compound_page_note(page)
+        return {'compound_page_patterns': patterns, 'compound_page_notes': notes}
+
+    def _compound_page_note(self, page):
+        """One line: what the main text and each condition established for
+        this image."""
+        if page.get('is_condition_evidence') and 'compound' not in page:
+            return tr("{} matched on this image.").format(
+                self._compound_evidence_labels(page))
+        oc = page.get('compound') or {}
+        key = compound_query.parse_page_key(page.get('raw_header'))
+        parts = [tr("Main text: image {}").format(key.p if key else '?')]
+        conds = (self._comp_compound or {}).get('conditions') or []
+        unsearchable = self._unsearchable_pages(key.sys_id) if key else 0
+        for i, state in enumerate(oc.get('states') or []):
+            name = self._condition_label(i)
+            where = (conds[i] or {}).get('where') if i < len(conds) else ''
+            evidence = (oc.get('evidence') or [[]] * (i + 1))[i]
+            images = sorted({k.p for k in (compound_query.parse_page_key(r)
+                                          for r in evidence) if k})
+            on = ", ".join(str(p) for p in images)
+            if state == compound_query.SATISFIED and images:
+                parts.append(tr("{}: found on image {}").format(name, on))
+            elif state == compound_query.SATISFIED:
+                text = tr("{}: not found in the searchable pages").format(name)
+                if where == compound_query.WHERE_MANUSCRIPT and unsearchable:
+                    text += " " + tr("({} pages of this manuscript could not be searched)"
+                                     ).format(unsearchable)
+                parts.append(text)
+            elif state == compound_query.REMOVED:
+                parts.append(tr("{}: found on image {} (removed)").format(name, on))
+            elif state == compound_query.UNRESOLVED:
+                parts.append(tr("{}: not fully checked").format(name))
+        return " \u00b7 ".join(parts)
+
+    def _unsearchable_pages(self, sys_id):
+        """How many of a manuscript's pages the letter-level index left out
+        (owner ruling 2026-10-14: absence means absence from the searchable
+        pages, and the count is shown)."""
+        try:
+            return passage_lifecycle.excluded_page_counts().get(sys_id, 0)
+        except Exception:
+            return 0
+
+    def _compound_export_buckets(self, has_selection):
+        """(removed, unresolved) manuscripts for an export: the checked rows
+        under the two condition groups, or everything the tree shows in them."""
+        if not has_selection:
+            return (list(getattr(self, '_comp_shown_cond_removed', None) or []),
+                    list(getattr(self, '_comp_shown_cond_unresolved', None) or []))
+        removed, unresolved = [], []
+        root = self.comp_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            node = root.child(i)
+            kind = node.data(0, Qt.ItemDataRole.UserRole + 100)
+            if kind not in ("ROOT_COND_REMOVED", "ROOT_COND_UNRESOLVED"):
+                continue
+            out = removed if kind == "ROOT_COND_REMOVED" else unresolved
+            out.extend(self._checked_items_under(node))
+        return removed, unresolved
+
+    def _checked_items_under(self, node):
+        """Checked manuscript rows under `node` (any depth); a partly checked
+        one keeps only its checked pages."""
+        import copy
+        found = []
+        for k in range(node.childCount()):
+            child = node.child(k)
+            data = child.data(0, Qt.ItemDataRole.UserRole)
+            if not isinstance(data, dict) or not data:
+                found.extend(self._checked_items_under(child))
+                continue
+            state = child.checkState(0)
+            if state == Qt.CheckState.Checked:
+                found.append(data)
+            elif state == Qt.CheckState.PartiallyChecked:
+                item = copy.copy(data)
+                item['pages'] = [child.child(j).data(0, Qt.ItemDataRole.UserRole)
+                                 for j in range(child.childCount())
+                                 if child.child(j).checkState(0) == Qt.CheckState.Checked]
+                if item['pages']:
+                    found.append(item)
+        return found
+
+    @staticmethod
+    def _compound_category_of(ms_item):
+        for page in [ms_item] + list(ms_item.get('pages') or []):
+            cat = (page.get('compound') or {}).get('category')
+            if cat:
+                return cat
+        return None
+
+    def _split_by_compound_category(self, items):
+        """(kept, removed, unresolved): rows judged removed or not fully
+        checked are taken out of whatever bucket carried them."""
+        kept, removed, unresolved = [], [], []
+        for item in items or []:
+            cat = self._compound_category_of(item)
+            if cat == compound_query.CAT_REMOVED:
+                removed.append(item)
+            elif cat == compound_query.CAT_UNRESOLVED:
+                unresolved.append(item)
+            else:
+                kept.append(item)
+        return kept, removed, unresolved
+
     def _comp_compound_has_rows(self):
         c = getattr(self, '_comp_compound', None)
         return bool(c and (c.get('removed') or c.get('unresolved')))
@@ -26515,11 +26639,21 @@ class GenizahGUI(QMainWindow):
             c_filt_appx = self.comp_filtered_appendix
             c_known = self.comp_known
 
+        # Composition Search conditions: the two groups, from the checked rows
+        # or the whole shown list -- and any row judged removed / not fully
+        # checked is filed by its STORED outcome, wherever the tree put it
+        # (the flat view's selection returns every row as Main).
+        c_removed, c_unres = self._compound_export_buckets(has_selection)
+        c_main, _rm, _ur = self._split_by_compound_category(c_main)
+        c_removed, c_unres = c_removed + _rm, c_unres + _ur
+        c_filt, _rm, _ur = self._split_by_compound_category(c_filt)
+        c_removed, c_unres = c_removed + _rm, c_unres + _ur
+
         all_filtered = c_filt[:]
         for v in c_filt_appx.values():
             all_filtered.extend(v)
 
-        if not (c_main or c_appx or c_known or all_filtered):
+        if not (c_main or c_appx or c_known or all_filtered or c_removed or c_unres):
             QMessageBox.warning(self, tr("Save"), tr("No composition data to export."))
             return
 
@@ -26540,6 +26674,8 @@ class GenizahGUI(QMainWindow):
         collect_ids(c_main)
         for group_items in c_appx.values(): collect_ids(group_items)
         collect_ids(c_known)
+        collect_ids(c_removed)
+        collect_ids(c_unres)
         collect_ids(all_filtered)
 
         unique_ids = list(set(all_ids))
@@ -26624,7 +26760,10 @@ class GenizahGUI(QMainWindow):
         # Phase 110 (5a): a LOCAL-only comp export omits the MiDRASH/Stökl/Zenodo
         # data-source credits (meaningless for the user's own documents).
         credit_text = self._get_credit_header(local_only=_local_only_comp_export)
-        query_text = self.comp_text_area.toPlainText().strip()
+        # The DISPATCHED text: editing the box after a search must not relabel
+        # its results. A restored session has no stamp and falls back as before.
+        query_text = (getattr(self, '_comp_last_result_text', None)
+                      or self.comp_text_area.toPlainText()).strip()
         # Phase 146: describes the RUN behind these rows, not the
         # controls as they stand now -- see `_comp_export_settings_lines`.
         comp_settings_lines = self._comp_export_settings_lines()
@@ -26634,6 +26773,17 @@ class GenizahGUI(QMainWindow):
         # run with no witnesses would be a column that means nothing.
         _comp_wit_total = self._comp_witness_total()
         _comp_wit_col = _comp_wit_total > 1
+
+        _comp_cond_col = getattr(self, '_comp_compound', None) is not None
+
+        def _cond_cell(page):
+            """What each condition established for this page, or [] when the
+            export is not of a search with conditions."""
+            if not _comp_cond_col:
+                return []
+            if not (page.get('compound') or page.get('is_condition_evidence')):
+                return ['']
+            return [self._compound_page_note(page)]
 
         def _wit_cell(item):
             """'3 of 17' for one manuscript, or [] when the column is off.
@@ -26789,7 +26939,7 @@ class GenizahGUI(QMainWindow):
                                 f"{ms_score} (P:{page.get('score',0)})",
                                 src_clean,
                                 ms_clean
-                             ] + _wit_cell(ms_item))
+                             ] + _wit_cell(ms_item) + _cond_cell(page))
                     elif item_type == 'manuscript':
                         sid = ms_item['sys_id']
                         shelf, title = self.meta_mgr.get_meta_for_id(sid)
@@ -26819,7 +26969,7 @@ class GenizahGUI(QMainWindow):
                                 f"{ms_score} (P:{page.get('score',0)})",
                                 src_clean,
                                 ms_clean
-                             ] + _wit_cell(ms_item))
+                             ] + _wit_cell(ms_item) + _cond_cell(page))
                     else:
                         # Fallback
                         sid, p_num, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
@@ -26840,14 +26990,14 @@ class GenizahGUI(QMainWindow):
                             str(ms_item.get('score', 0)),
                             src_clean,
                             ms_clean
-                        ] + _wit_cell(ms_item))
+                        ] + _wit_cell(ms_item) + _cond_cell(ms_item))
 
             if self.chk_comp_flat.isChecked():
                 all_items = self._collect_comp_items(
                     c_main, c_appx,
                     c_filt, c_filt_appx,
                     c_known
-                )
+                ) + list(c_removed) + list(c_unres)
                 flat_items = self._sort_comp_items(all_items)
                 add_rows(flat_items, tr("All Results"))
             else:
@@ -26858,6 +27008,8 @@ class GenizahGUI(QMainWindow):
                 for sig, items in sorted(c_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
                     add_rows(items, tr("Filtered Appendix"), sig)
                 add_rows(c_known, tr("Excluded Manuscripts"))
+                add_rows(c_removed, tr("Removed by a condition"))
+                add_rows(c_unres, tr("Not fully checked"))
 
             # --- XLSX ---
             if fmt == 'xlsx':
@@ -26945,7 +27097,8 @@ class GenizahGUI(QMainWindow):
                         tr("Score"),
                         tr("Source Context"),
                         tr("Manuscript Text"),
-                    ] + ([tr("Witnesses")] if _comp_wit_col else [])
+                    ] + ([tr("Witnesses")] if _comp_wit_col else []) + (
+                        [tr("Conditions")] if _comp_cond_col else [])
 
                     # Raw Data sheet (flat)
                     raw_row = _write_credit_block(ws_raw, 1)
@@ -27028,7 +27181,8 @@ class GenizahGUI(QMainWindow):
                                             f"{ms_score} (P:{page.get('score',0)})",
                                             src_clean,
                                             ms_clean
-                                        ])
+                                        ] + ([''] if (_comp_wit_col and _comp_cond_col) else [])
+                                          + _cond_cell(page))
                                 elif item_type == 'manuscript':
                                     sid = ms_item['sys_id']
                                     shelf, title = self.meta_mgr.get_meta_for_id(sid)
@@ -27055,7 +27209,8 @@ class GenizahGUI(QMainWindow):
                                             f"{ms_score} (P:{page.get('score',0)})",
                                             src_clean,
                                             ms_clean
-                                        ])
+                                        ] + ([''] if (_comp_wit_col and _comp_cond_col) else [])
+                                          + _cond_cell(page))
                                 else:
                                     sid, p_num, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
                                     # Get library info
@@ -27108,6 +27263,12 @@ class GenizahGUI(QMainWindow):
                         add_report_section(tr("Appendix - Grouped"), [], groups=sorted(c_appx.items(), key=lambda x: len(x[1]), reverse=True), outline_level=1)
                         add_report_section(tr("Filtered"), self._sort_comp_items(c_filt), groups=sorted(c_filt_appx.items(), key=lambda x: len(x[1]), reverse=True), outline_level=1)
                         add_report_section(tr("Excluded"), self._sort_comp_items(c_known), outline_level=1)
+                        if c_removed:
+                            add_report_section(tr("Removed by a condition"),
+                                               self._sort_comp_items(c_removed), outline_level=1)
+                        if c_unres:
+                            add_report_section(tr("Not fully checked"),
+                                               self._sort_comp_items(c_unres), outline_level=1)
 
                     ws_report.sheet_properties.outlinePr.summaryBelow = True
 
@@ -27215,7 +27376,8 @@ class GenizahGUI(QMainWindow):
                         tr("Score"),
                         tr("Source Context"),
                         tr("Manuscript Text"),
-                    ] + ([tr("Witnesses")] if _comp_wit_col else [])
+                    ] + ([tr("Witnesses")] if _comp_wit_col else []) + (
+                        [tr("Conditions")] if _comp_cond_col else [])
                     from shared.export_dossier import (
                         local_documents_header_row as _local_hdr,
                         sheet_titles as _sheet_titles,
@@ -27288,6 +27450,11 @@ class GenizahGUI(QMainWindow):
                             f"{tr('Filtered by Text (Manuscripts)')}: {filtered_total}",
                             f"{tr('Excluded Manuscripts')}: {known_count}",
                         ]
+                    if c_removed or c_unres:
+                        stats_lines += [
+                            f"{tr('Removed by a condition')}: {len(c_removed)}",
+                            f"{tr('Not fully checked')}: {len(c_unres)}",
+                        ]
                     for line in stats_lines:
                         doc.add_paragraph(line)
                     if not _local_only_comp_export:
@@ -27311,7 +27478,8 @@ class GenizahGUI(QMainWindow):
                             tr("Score"),
                             tr("Source Context"),
                             tr("Manuscript Text"),
-                        ] + ([tr("Witnesses")] if _comp_wit_col else [])
+                        ] + ([tr("Witnesses")] if _comp_wit_col else []) + (
+                        [tr("Conditions")] if _comp_cond_col else [])
                         table = doc.add_table(rows=1, cols=len(headers))
                         table.autofit = False
                         self._set_table_width_pct(table, 100)
@@ -27511,11 +27679,21 @@ class GenizahGUI(QMainWindow):
                 ]
                 detail_lines = [sep, tr("ALL RESULTS"), sep]
 
+                def _fmt_entry(ms_item):
+                    lines = _fmt_ms_entry(ms_item)
+                    if _comp_cond_col:
+                        for page in ms_item.get('pages') or [ms_item]:
+                            if page.get('compound') or page.get('is_condition_evidence'):
+                                lines.append(tr("Conditions") + ": "
+                                             + self._compound_page_note(page))
+                    return lines
+
                 if self.chk_comp_flat.isChecked():
                     flat_items = self._sort_comp_items(
                         self._collect_comp_items(c_main, c_appx, c_filt, c_filt_appx, c_known)
+                        + list(c_removed) + list(c_unres)
                     )
-                    for item in flat_items: detail_lines.extend(_fmt_ms_entry(item))
+                    for item in flat_items: detail_lines.extend(_fmt_entry(item))
                 else:
                     if _local_only_comp_export:
                         summary_lines.extend([
@@ -27533,7 +27711,7 @@ class GenizahGUI(QMainWindow):
                             f"{tr('Excluded Manuscripts')}: {known_count}"
                         ])
                         detail_lines = [sep, tr("MAIN MANUSCRIPTS"), sep]
-                    for item in c_main: detail_lines.extend(_fmt_ms_entry(item))
+                    for item in c_main: detail_lines.extend(_fmt_entry(item))
                     if c_appx:
                         detail_lines.extend([sep, tr("MAIN APPENDIX") + " (Grouped)", sep])
                         for sig, items in sorted(c_appx.items(), key=lambda x: len(x[1]), reverse=True):
@@ -27551,6 +27729,14 @@ class GenizahGUI(QMainWindow):
                         _excl_heading = tr("EXCLUDED DOCUMENTS") if _local_only_comp_export else tr("EXCLUDED MANUSCRIPTS")
                         detail_lines.extend([sep, _excl_heading, sep])
                         for item in c_known: detail_lines.extend(_fmt_ms_entry(item))
+                    if c_removed:
+                        summary_lines.append(f"{tr('Removed by a condition')}: {len(c_removed)}")
+                        detail_lines.extend([sep, tr("Removed by a condition"), sep])
+                        for item in c_removed: detail_lines.extend(_fmt_entry(item))
+                    if c_unres:
+                        summary_lines.append(f"{tr('Not fully checked')}: {len(c_unres)}")
+                        detail_lines.extend([sep, tr("Not fully checked"), sep])
+                        for item in c_unres: detail_lines.extend(_fmt_entry(item))
 
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write(credit_text)
@@ -28561,7 +28747,9 @@ class GenizahGUI(QMainWindow):
             return
         _comp_conditions, _comp_main_list, _comp_fingerprint = _comp_gate
         self._comp_active_run_id = _comp_run_id
-        # PROVENANCE: the conditions this run was dispatched with.
+        # PROVENANCE: the text and the conditions this run was dispatched
+        # with -- exports name these, never the live boxes.
+        self._comp_last_result_text = txt
         self._comp_last_result_conditions = [c.to_dict() for c in _comp_conditions]
         self._comp_last_result_fingerprint = _comp_fingerprint
 
@@ -29654,6 +29842,9 @@ class GenizahGUI(QMainWindow):
             list(getattr(self, 'comp_cond_removed', None) or []), {})
         cond_unres, _unused, known_unr = self._apply_manual_exclusions(
             list(getattr(self, 'comp_cond_unresolved', None) or []), {})
+        # What the tree shows (after Exclude Manuscripts); exports read these.
+        self._comp_shown_cond_removed = list(cond_removed)
+        self._comp_shown_cond_unresolved = list(cond_unres)
 
         if not hasattr(self, 'comp_known'): self.comp_known = []
 
@@ -34041,7 +34232,9 @@ class GenizahGUI(QMainWindow):
             title = ''
             _src_lbl = 'LOCAL'
         subgroup = group.subgroup
+        compound_fields = self._compound_viewer_fields(ms_item)
         return {
+            **compound_fields,
             'uid': page.get('uid', sid),
             'raw_header': raw_h,
             'text': page.get('text', ''),

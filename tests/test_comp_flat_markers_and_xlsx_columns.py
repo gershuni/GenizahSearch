@@ -216,6 +216,11 @@ class _ExportHost:
         self.chk_comp_flat = SimpleNamespace(isChecked=lambda: False)
         self._collect_comp_items = MethodType(GenizahGUI._collect_comp_items, self)
         self.export_comp_report = MethodType(GenizahGUI.export_comp_report, self)
+        # Composition Search conditions: the export files rows by their stored
+        # outcome; borrowed, not stubbed (a plain export has none).
+        self._compound_export_buckets = MethodType(GenizahGUI._compound_export_buckets, self)
+        self._split_by_compound_category = MethodType(GenizahGUI._split_by_compound_category, self)
+        self._compound_category_of = GenizahGUI._compound_category_of
 
     def _collect_checked_comp_page_uids(self):
         return set()
@@ -301,3 +306,100 @@ def test_xlsx_every_sheet_puts_each_value_under_its_own_header(tmp_path, monkeyp
     first_cells = {str(r[0].value) for r in report.iter_rows() if r[0].value}
     assert "T-S 12.34 | Title one" in first_cells, sorted(first_cells)
     assert "ENA 555.6 | Title two" in first_cells, sorted(first_cells)
+
+
+# --------------------------------------------------------------------------------------
+# Composition Search conditions in exports (docs/plans/COMPOSITION_CONDITIONS_PLAN.md):
+# the two groups, the Conditions column, and the DISPATCHED text.
+# --------------------------------------------------------------------------------------
+
+def _compound_host():
+    from shared import compound_query as cq
+
+    def oc(states, evidence):
+        return cq.PageOutcome(cq._category(states), tuple(states),
+                              tuple(tuple(e) for e in evidence), ('',) * len(states)).to_dict()
+
+    main = {"type": "manuscript", "sys_id": "990001", "score": 9, "pages": [
+        {"raw_header": "990001_IE1_P000005_FL1", "score": 9, "source_ctx": "a", "text": "b",
+         "compound": oc([cq.SATISFIED], [[]])}]}
+    removed = {"type": "manuscript", "sys_id": "990002", "score": 4, "pages": [
+        {"raw_header": "990002_IE1_P000003_FL1", "score": 4, "source_ctx": "c", "text": "d",
+         "compound": oc([cq.REMOVED], [["990002_IE1_P000009_FL1"]])}]}
+    host = _ExportHost(main=[main], filtered=[])
+    host._comp_compound = {"conditions": [
+        cq.Condition(cq.REQ_MUST_NOT, cq.WHERE_MANUSCRIPT, ("h",), "HG").to_dict()]}
+    host._comp_shown_cond_removed = [removed]
+    host._comp_shown_cond_unresolved = []
+    host._comp_last_result_text = "the dispatched text"
+    host.comp_text_area = _Line("edited after the search")
+    for name in ("_compound_page_note", "_condition_label", "_compound_evidence_labels"):
+        setattr(host, name, MethodType(getattr(GenizahGUI, name), host))
+    host._unsearchable_pages = lambda sid: 0
+    return host
+
+
+def _patch_dialogs(monkeypatch, out):
+    monkeypatch.setattr(genizah_app.QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **k: (str(out), "")))
+    for name in ("information", "warning"):
+        monkeypatch.setattr(genizah_app.QMessageBox, name, staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(genizah_app.QMessageBox, "critical",
+                        staticmethod(lambda *a, **k: pytest.fail(f"export failed: {a[-1]}")))
+
+
+def test_xlsx_export_of_a_result_with_conditions(tmp_path, monkeypatch):
+    openpyxl = pytest.importorskip("openpyxl")
+    from genizah_core import tr
+    out = tmp_path / "compound.xlsx"
+    _patch_dialogs(monkeypatch, out)
+    host = _compound_host()
+    host.export_comp_report("xlsx")
+    wb = openpyxl.load_workbook(out)
+    seen = {}
+    texts = set()
+    for ws in wb.worksheets:
+        header = None
+        for row in ws.iter_rows():
+            vals = [c.value for c in row]
+            texts.update(str(v) for v in vals if v)
+            if tr("Conditions") in vals and tr("System ID") in vals:
+                header = vals
+                continue
+            if header and len(vals) > header.index(tr("System ID")):
+                sid = vals[header.index(tr("System ID"))]
+                cond = vals[header.index(tr("Conditions"))] if len(vals) > header.index(tr("Conditions")) else None
+                # The flat sheet carries the category on every row; the report
+                # view puts it on the section header instead.
+                if sid in ("990001", "990002") and cond and vals[header.index(tr("Category"))]:
+                    seen.setdefault(sid, (vals[header.index(tr("Category"))], cond))
+    assert seen["990002"][0] == tr("Removed by a condition")
+    assert "HG" in seen["990002"][1]
+    assert "990001" in seen and "HG" in seen["990001"][1]
+    assert not any("edited after the search" in t for t in texts)
+
+
+def test_txt_export_of_a_result_with_conditions(tmp_path, monkeypatch):
+    from genizah_core import tr
+    out = tmp_path / "compound.txt"
+    _patch_dialogs(monkeypatch, out)
+    host = _compound_host()
+    host._default_report_path = lambda title, fallback: title + ".txt"
+    host.export_comp_report("txt")
+    text = out.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    # The SECTION (a line of its own between separators), not the summary count.
+    header = lines.index(tr("Removed by a condition"))
+    assert lines[header - 1].startswith("=") and lines[header + 1].startswith("=")
+    assert any("ENA 555.6" in line for line in lines[header:])
+    assert tr("Conditions") + ": " in text and "HG" in text
+
+
+def test_a_flat_selection_files_a_removed_row_under_removed():
+    """The flat view's selection returns every checked row as Main; the export
+    must file a row by its stored outcome instead."""
+    host = _compound_host()
+    kept, removed, unresolved = host._split_by_compound_category(
+        [host.comp_main[0], host._comp_shown_cond_removed[0]])
+    assert kept == [host.comp_main[0]]
+    assert removed == [host._comp_shown_cond_removed[0]] and unresolved == []

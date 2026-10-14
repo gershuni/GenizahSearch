@@ -5571,7 +5571,7 @@ TRANSLATIONS.update({
 TRANSLATIONS.update({
     'More conditions': 'תנאים נוספים',
     '+ Add condition': '+ הוסף תנאי',
-    'Condition': 'תנאי',
+    'Search condition': 'תנאי חיפוש',
     'Must appear': 'חייב להופיע',
     'Must not appear': 'אסור שיופיע',
     'On the same image': 'באותה תמונה',
@@ -5613,4 +5613,22 @@ TRANSLATIONS.update({
     'Auto-expand is not available while conditions are set.': 'הרחבה אוטומטית אינה זמינה כשמוגדרים תנאים.',
     'The saved conditions could not be read and were cleared.': 'לא ניתן היה לקרוא את התנאים השמורים, והם נוקו.',
     'Results of a search with conditions are not kept between sessions. Search again to see them.': 'תוצאות של חיפוש עם תנאים אינן נשמרות בין הפעלות. חפש שוב כדי לראות אותן.',
+})
+
+# Composition Search conditions, step 5 (Manuscript Viewer evidence strip).
+TRANSLATIONS.update({
+    'This image is not part of the result with conditions.': 'תמונה זו אינה חלק מהתוצאה עם התנאים.',
+    '{} matched on this image.': '{} נמצא בתמונה זו.',
+    'Main text: image {}': 'הטקסט הראשי: תמונה {}',
+    '{}: found on image {}': '{}: נמצא בתמונה {}',
+    '{}: not found in the searchable pages': '{}: לא נמצא בדפים הניתנים לחיפוש',
+    '({} pages of this manuscript could not be searched)': '({} דפים של כתב היד הזה לא ניתנו לחיפוש)',
+    '{}: found on image {} (removed)': '{}: נמצא בתמונה {} (הוסר)',
+    '{}: not fully checked': '{}: לא נבדק עד הסוף',
+})
+
+# Composition Search conditions, step 5 (export category names).
+TRANSLATIONS.update({
+    'Removed by a condition': 'הוסרו בגלל תנאי',
+    'Not fully checked': 'לא נבדקו עד הסוף',
 })
