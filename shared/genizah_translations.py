@@ -5606,4 +5606,11 @@ TRANSLATIONS.update({
     '{} pages without {}': '{} דפים בלי {}',
     '{} pages removed': '{} דפים הוסרו',
     '{} pages not fully checked': '{} דפים לא נבדקו עד הסוף',
+})
+
+# Composition Search conditions, step 6 (persistence and bypass paths).
+TRANSLATIONS.update({
+    'Auto-expand is not available while conditions are set.': 'הרחבה אוטומטית אינה זמינה כשמוגדרים תנאים.',
+    'The saved conditions could not be read and were cleared.': 'לא ניתן היה לקרוא את התנאים השמורים, והם נוקו.',
+    'Results of a search with conditions are not kept between sessions. Search again to see them.': 'תוצאות של חיפוש עם תנאים אינן נשמרות בין הפעלות. חפש שוב כדי לראות אותן.',
 })

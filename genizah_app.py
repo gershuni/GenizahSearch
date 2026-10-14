@@ -1406,6 +1406,20 @@ def _telemetry_result_bucket(count: int) -> str:
     return '100+'
 
 
+def _snapshot_has_compound_rows(*lists):
+    """True when any saved row, or any page of a saved manuscript row, was
+    judged by Composition Search conditions (or is a condition's evidence)."""
+    for rows in lists:
+        for item in rows or ():
+            if not isinstance(item, dict):
+                continue
+            for rec in [item] + list(item.get('pages') or []):
+                if isinstance(rec, dict) and (
+                        'compound' in rec or rec.get('is_condition_evidence')):
+                    return True
+    return False
+
+
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
     browse_thumb_resolved = pyqtSignal(str, object)
@@ -18040,7 +18054,13 @@ class GenizahGUI(QMainWindow):
         MIGRATION: a snapshot with no provenance at all is pre-v9, which is
         chunk by definition -- it is always valid, and no legacy session is
         ever discarded for lacking fields that did not exist when it was
-        written."""
+        written.
+
+        Rows judged by CONDITIONS are never valid here, whatever else the
+        snapshot says: their outcomes cannot be re-verified from it."""
+        if comp.get('compound_results_withheld') or _snapshot_has_compound_rows(
+                comp.get('results'), comp.get('filtered_results')):
+            return False
         method = comp.get('last_result_method')
         if method is None:
             return True
@@ -18473,6 +18493,30 @@ class GenizahGUI(QMainWindow):
 
     def _on_comp_conditions_changed(self, conditions):
         self.comp_conditions = list(conditions)
+        if self.comp_conditions:
+            # An auto-expand round armed before the first condition would
+            # otherwise still fire.
+            self._stop_auto_expand('')
+        self._schedule_session_save()
+
+    def _restore_comp_conditions(self, raw):
+        """Replace the conditions with a saved list (session or history).
+        Strict: anything malformed clears them all and says so -- a restored
+        query is never half-applied. `None`/absent means "no conditions"."""
+        conditions = []
+        try:
+            for d in raw or []:
+                conditions.append(compound_query.Condition.from_dict(d))
+        except ValueError as exc:
+            logger.warning('compound: saved conditions dropped: %s', exc)
+            conditions = []
+            if hasattr(self, 'lbl_comp_status'):
+                self.lbl_comp_status.setText(tr(
+                    "The saved conditions could not be read and were cleared."))
+        self.comp_conditions = conditions
+        strip = getattr(self, 'comp_conditions_strip', None)
+        if strip is not None:
+            strip.set_conditions(conditions)
 
     def _refresh_comp_conditions_available(self):
         """Conditions run only in letter-level mode; elsewhere the strip
@@ -18788,6 +18832,12 @@ class GenizahGUI(QMainWindow):
     def _run_auto_expand(self):
         if self.is_comp_running or getattr(self, '_auto_expand_left', 0):
             return
+        if getattr(self, 'comp_conditions', None):
+            # Promotion picks witnesses from the main text's own ranked list;
+            # mixing it with conditions is not supported in this release.
+            self._witness_notify(tr(
+                "Auto-expand is not available while conditions are set."))
+            return
         if not self._has_comp_results():
             self._witness_notify(tr("Run a letter-level search first."))
             return
@@ -18805,6 +18855,10 @@ class GenizahGUI(QMainWindow):
         """
         left = getattr(self, '_auto_expand_left', 0)
         if left <= 0:
+            return
+        if getattr(self, 'comp_conditions', None):
+            self._stop_auto_expand(tr(
+                "Auto-expand is not available while conditions are set."))
             return
         # The method combo is re-enabled by `on_comp_scan_finished` BEFORE
         # `start_grouping` marks the UI busy, so a user can switch to chunk
@@ -19451,7 +19505,15 @@ class GenizahGUI(QMainWindow):
         """
         can_restrip = bool(self._comp_witness_state().rows)
         self._refresh_witness_panel()
-        if not can_restrip and self._has_comp_results():
+        if getattr(self, '_comp_compound', None) is not None:
+            # Results of a search with conditions are judged as a whole;
+            # re-fusing cached rows would publish pages nobody judged.
+            if self._has_comp_results():
+                self._witness_notify(tr(
+                    "Witness removed. The results on screen were found with "
+                    "the previous witness list \u2014 run the search again to "
+                    "update them."))
+        elif not can_restrip and self._has_comp_results():
             self._witness_notify(tr(
                 "Witness removed. The results on screen were found with the "
                 "previous witness list — run the search again to update "
@@ -32466,6 +32528,9 @@ class GenizahGUI(QMainWindow):
             # `absent_method` left at its default: a history entry with no
             # method is pre-v9, which is chunk by definition.
             self._restore_comp_passage_preferences(params or {})
+            # Replaces the current conditions -- and clears them for an entry
+            # that had none (every entry older than conditions).
+            self._restore_comp_conditions((params or {}).get('comp_conditions'))
             # Restore pre-search filters. #17: a COPY (assigning the entry
             # itself let a later chip removal edit the saved history), without
             # a measurement bound the open catalog is known not to have.
@@ -32497,6 +32562,9 @@ class GenizahGUI(QMainWindow):
 
         results = state.get('results', [])
         filtered = state.get('filtered_results', [])
+        if (results or filtered) and _snapshot_has_compound_rows(results, filtered):
+            # Rows judged by conditions are never re-shown from a snapshot.
+            results, filtered = [], []
         if results or filtered:
             # Legacy entry with a stored snapshot — restore instantly.
             self.comp_raw_items = results
@@ -32624,6 +32692,11 @@ class GenizahGUI(QMainWindow):
                 # the restore side needs no second implementation.
                 'comp_witnesses': getattr(
                     self, '_comp_last_result_witnesses', None) or [],
+                # The conditions this run was DISPATCHED with: part of the
+                # search's identity, so two runs that differ only in their
+                # conditions are two entries, and a re-run applies exactly them.
+                'comp_conditions': list(getattr(
+                    self, '_comp_last_result_conditions', None) or []),
             },
             'pre_search_filters': dict(getattr(self, 'pre_search_filters', {})),
             # NOTE: result snapshots intentionally NOT stored (see
@@ -32853,8 +32926,16 @@ class GenizahGUI(QMainWindow):
                         self, '_comp_last_result_length', None),
                     'last_result_depth': getattr(
                         self, '_comp_last_result_depth', None),
-                    'results': getattr(self, 'comp_raw_items', [])[:5000],
-                    'filtered_results': getattr(self, 'comp_raw_filtered', [])[:5000],
+                    # Results of a search with CONDITIONS are not kept: their
+                    # judgement cannot be re-verified from a capped snapshot,
+                    # and a re-run takes seconds (docs/plans/
+                    # COMPOSITION_CONDITIONS_PLAN.md section 4).
+                    'results': ([] if getattr(self, '_comp_compound', None) is not None
+                                else getattr(self, 'comp_raw_items', [])[:5000]),
+                    'filtered_results': ([] if getattr(self, '_comp_compound', None) is not None
+                                         else getattr(self, 'comp_raw_filtered', [])[:5000]),
+                    'compound_results_withheld': getattr(self, '_comp_compound', None) is not None,
+                    'conditions': [c.to_dict() for c in getattr(self, 'comp_conditions', None) or []],
                     'domain_exclusions': sorted(getattr(self, '_comp_domain_exclusions', set())),
                     'printed_filter': getattr(self, '_comp_printed_filter_state', 'all'),
                     'local_filter_composition': getattr(self, '_local_filter_state_composition', 'all'),
@@ -33131,6 +33212,11 @@ class GenizahGUI(QMainWindow):
             # `absent_method=None`: a session with no stored method has no
             # preference to honour, so the letter-level default stands.
             self._restore_comp_passage_preferences(comp, absent_method=None)
+            self._restore_comp_conditions(comp.get('conditions'))
+            if comp.get('compound_results_withheld') and hasattr(self, 'lbl_comp_status'):
+                self.lbl_comp_status.setText(tr(
+                    "Results of a search with conditions are not kept between "
+                    "sessions. Search again to see them."))
 
             # Exclude Manuscripts, composition surface. Sessions written
             # before the 2026-09-03 split stored ONE shared list; those
