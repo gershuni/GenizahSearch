@@ -4,6 +4,18 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased] -- Composition Search conditions (desktop, branch `feat/composition-conditions`)
+
+Letter-level Composition Search takes up to four extra texts, each "must appear" or "must not
+appear" on the same image, an adjacent image, or anywhere in the same manuscript, so a search can
+drop the works that quote it (Halakhot Gedolot and the Rif when searching the Talmud), ask for two
+texts on neighbouring images, or ask for several texts in one manuscript. Pages a condition removed,
+and pages it could not fully check, are shown in their own groups with the reason. Also: results
+no longer lose a page that shares its number with another image set of the same manuscript.
+Plan and decisions: `docs/plans/COMPOSITION_CONDITIONS_PLAN.md`. Not released.
+
+---
+
 ## [9.6.2] - 2026-10-12 — Faster Extended and Maximum on the desktop; GenizahSearch in ChatGPT
 
 The desktop app checks pages with Python's own fast matcher for the searches it builds itself, so

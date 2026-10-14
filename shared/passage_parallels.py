@@ -298,6 +298,16 @@ _SYS_ID_RE = CORPUS_SYS_ID_RE
 _WITNESS_REF_RE = re.compile(r'^[A-Za-z0-9_]+$')
 
 
+# Caps for a condition search. The search runs over a mask (the pages the
+# condition applies to), so verification is the whole cost. Measured
+# 2026-10-14 on the installed index, condition texts of 5,000-10,000 letters
+# over 5,000 manuscripts: the deepest depth profile's 50,000 verifications cut
+# every one ("not fully checked"); these caps completed all of them, verifying
+# 100,063-186,307 candidates in 2.5-7.2 s. Stop works inside verification.
+CONDITION_VERIFY_CAP = 500_000
+CONDITION_CANDIDATE_CAP = 2_000_000
+
+
 @dataclass(frozen=True)
 class ConditionSearch:
     """What `PassageSearcher.search_condition` established for one version:
@@ -1007,8 +1017,8 @@ class PassageSearcher:
         generation was current can never select the wrong records.
 
         Every query gram present in the index is admitted (no posting budget);
-        the deepest profile's candidate and verify caps apply, and their
-        flags come back on the report. Hits are the engine's VERIFIED hits,
+        the condition caps apply (CONDITION_CANDIDATE_CAP, CONDITION_VERIFY_CAP)
+        and their flags come back on the report. Hits are the engine's VERIFIED hits,
         unrendered: no display cap, text lookup, Filter Text or duplicate-
         photography routing can drop one. Calls `search_passage` directly, not
         `_run_one_witness` (which filters by `min_boundary_matches`).
@@ -1017,7 +1027,6 @@ class PassageSearcher:
         is verified; True stops it, and the result says `stopped=True` --
         the hits found so far are kept, but they no longer prove absence."""
         from shared.passage_pages import page_index_for
-        from shared.passage_policy import DEPTH_PROFILES
         from shared.passage_search import QueryReport
 
         if should_stop is not None and should_stop():
@@ -1029,9 +1038,8 @@ class PassageSearcher:
             # is proven trivially.
             return ConditionSearch((), (), QueryReport(exhaustive_mask=True).as_dict(),
                                    False)
-        _budget, verify_cap, candidate_cap = DEPTH_PROFILES['deepest']
-        policy = replace(self.policy, verify_cap=verify_cap,
-                         candidate_cap=candidate_cap)
+        policy = replace(self.policy, verify_cap=CONDITION_VERIFY_CAP,
+                         candidate_cap=CONDITION_CANDIDATE_CAP)
         stopped = [False]
 
         def _checkpoint(_done, _total):

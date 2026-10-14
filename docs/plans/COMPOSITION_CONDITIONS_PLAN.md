@@ -1,6 +1,7 @@
 # Composition Search conditions: "must appear", "must not appear", adjacent images
 
-**Status:** plan rev. 4, reviewed: Codex rounds 1-4 (DO NOT SHIP, DO NOT SHIP, SHIP WITH FIXES, SHIP; §11). Not
+**Status:** plan rev. 4, reviewed: Codex rounds 1-4 (DO NOT SHIP, DO NOT SHIP, SHIP WITH FIXES, SHIP; §11). BUILT on
+`feat/composition-conditions` (§12); not
 implemented. Owner decisions recorded in §9.
 **Origin:** a heavy desktop user's letter (12 Tishrei 5787), items D1 (exclude text), D2 (all of
 these texts) and D3 (two sides of a leaf). The September plan that triaged the letter is
@@ -172,8 +173,9 @@ is admitted over the mask, not that every alignment the verifier could accept is
 built from very few distinct five-letter sequences (e.g. one letter repeated), or one whose
 every fifth letter differs, forms no candidate on either path (Codex round 3 probes). That is the
 engine's matching rule, shared with the main text, not a condition-specific loss. Condition searches use the
-active width and length profiles with the **deepest** depth profile's candidate and verify caps,
-because the set is small and those caps then rarely bind.
+active width and length profiles with their own caps, 500,000 verifications and 2,000,000
+candidates (as built: the deepest profile's 50,000 cut every 5,000-10,000-letter condition over
+5,000 manuscripts; these caps completed them in 2.5-7.2 s, §12).
 
 **When a condition's search counts as cut** (per version): `candidates_truncated` or
 `verify_truncated` within the set; or the run was stopped before or during it (a stop inside
@@ -464,3 +466,32 @@ Made in this plan (open to review):
   mask to a reordered generation B between the pre-check and the lease), the post-step check on
   failed steps, named mutations for G5, G6 and G9, and what "exhaustive" does and does not promise.
 - **Round 4 (Codex, 2026-10-14): SHIP.** Both round-3 MEDIUM items closed; no new contradiction.
+
+## 12. Implementation status (2026-10-14)
+
+Built on `feat/composition-conditions`, one commit per step: 47372626 (grouping identity), 1ad3589b
+(engine and judgement), 0c1433ef (worker, adapter, gate, Stop), ec463793 (strip, dialog, groups),
+cf5a2cda (persistence and bypass paths), 7880aef5 (viewer and exports), then G8 and the docs.
+Every gate has named mutations, each shown red.
+
+**G8 on the installed index** (`scripts/verify_compound_conditions.py --self-test`, seed 20261014):
+adjacent image found and its decoy dropped; same manuscript kept and a foreign text dropped; must
+not appear removed with the evidence naming the right image, and kept when flipped to must appear;
+exhaustiveness 40/40 for both searches on corrupted single-page texts (the mechanism is proven on
+the synthetic counterexample in `tests/test_compound_query.py`); a 10,000-letter condition over
+5,000 manuscripts in 4.8 s, not cut; with the adjacency rule broken (P+-2) the adjacent case fails.
+The user's two cases are PENDING until he sends the texts (`--cases FILE`).
+
+**Where the build differs from the plan, and why:**
+- Condition caps are their own (500,000 / 2,000,000), not the deepest profile's (§3, measured).
+- Exports carry ONE "Conditions" column stating every condition's outcome for the page, not one
+  column per condition: the column layout stays fixed across xlsx, csv, docx and txt.
+- Results of a search with conditions are never restored from a session; the conditions are, and
+  restore says to search again. A snapshot cannot re-verify a judgement, and a re-run takes seconds.
+- Evidence pages (where a condition matched) are rendered by the condition search itself and join
+  their manuscript with score 0, so they never outrank or replace a main-text page.
+- The dialog title uses its own key ("Search condition"): "Condition" was taken ("מצב").
+
+**Still to do before release:** owner hand test; owner approval of the proposed Hebrew strings;
+the user's two cases through G8; Codex review of the branch; the desktop What's New text; the
+full local suite (`scripts/run_local_tests.py`) and the GUI lane.
