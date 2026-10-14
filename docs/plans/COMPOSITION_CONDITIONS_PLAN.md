@@ -519,3 +519,10 @@ in another group carries that condition's highlight (a regression from the round
 CSV and TXT exports record the dispatched text and every condition; restore refuses non-text
 evidence; the strip's availability rule is tested against a strip. Six named mutations, all red. Not
 addressed (pre-existing, not this branch): the layering guards do not see a dynamic `__import__`.
+
+**Code review round 3 (Codex): SHIP WITH FIXES** -- all five round-2 items confirmed closed; the one
+finding was a test host missing the new helper (fixed in dca14981, exactly the change Codex verified).
+Gates at dca14981: `scripts/run_local_tests.py` 15,505+ passed, 0 failed (at f9db718b; dca14981 changes
+one GUI test file); `scripts/run_gui_tests.py` 60/62 files, the two failures pre-existing and
+identical on master-main (native Qt platform; Hebrew UI language); `ruff check .` clean;
+`scripts/verify_compound_conditions.py --self-test` 6/6, 2 pending (the user's cases).
