@@ -5745,6 +5745,10 @@ TRANSLATIONS.update({
         'בניית האינדקס לחיפוש ברמת האות בספרייה שלי בוטלה. האינדקס הקיים לא השתנה.',
     'Reading My Library pages: {}% ({} pages so far)':
         'קורא את עמודי הספרייה שלי: {}% ({} עמודים עד כה)',
+    'All pages have been read. Arranging the index; this stage shows no '
+    'percentage and can take a while on a large library.':
+        'כל העמודים נקראו. כעת מסודר האינדקס; בשלב זה אין אחוזי התקדמות, '
+        'ובספרייה גדולה הוא עשוי להימשך זמן מה.',
     'Reading the My Library catalogue...':
         'קורא את רשימת הקבצים של הספרייה שלי...',
     'The My Library letter-level index could not be replaced. Reloading the '

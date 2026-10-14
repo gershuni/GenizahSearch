@@ -225,8 +225,17 @@ class LocalPassageBuildThread(PassageBuildThread):
                     last['pct'] = pct
                     self._emit('read', pct, 100, n)
 
-            records = iter_local_records(self._db_path, on_page=_on_page,
-                                         cancel_check=self._cancel_check)
+            def _records():
+                yield from iter_local_records(
+                    self._db_path, on_page=_on_page,
+                    cancel_check=self._cancel_check)
+                # Reading is done, and the builder's next stage (spooling
+                # every posting to scratch, minutes on a large library)
+                # reports nothing until its first partition is sorted. Say
+                # so, rather than leave the dialog parked on "100%".
+                self._emit('arrange', 0, 0, 0)
+
+            records = _records()
             result = lifecycle.run_build_and_swap(
                 self._root, records, [sig], self._db_path,
                 partitions=LOCAL_PARTITIONS, corpus_label='my_library',

@@ -18081,6 +18081,12 @@ class GenizahGUI(QMainWindow):
             dlg.setLabelText(
                 tr("Reading My Library pages: {}% ({} pages so far)")
                 .format(done, '{:,}'.format(records)))
+        elif phase == 'arrange':
+            dlg.setRange(0, 0)
+            dlg.setLabelText(tr(
+                "All pages have been read. Arranging the index; this stage "
+                "shows no percentage and can take a while on a large "
+                "library."))
         elif total:
             dlg.setRange(0, total)
             dlg.setValue(done)
