@@ -387,3 +387,85 @@ def test_grouping_keeps_each_pages_stored_outcome():
             'compound': oc([cq.REMOVED], [[hdr(S1, 1, 3)]])}
     [item] = engine.group_pages_by_manuscript([page])
     assert item['pages'][0]['compound']['category'] == cq.CAT_REMOVED
+
+
+# -- Codex code review round 2 -----------------------------------------------------------
+
+def test_a_grouping_error_lands_only_for_its_run():
+    class _W:
+        _on_grouping_for_run = APP._on_grouping_for_run
+        _comp_active_run_id = 5
+    w = _W()
+    seen = []
+    w._on_grouping_for_run(4, 'stale error', handler=seen.append)
+    w._on_grouping_for_run(5, 'current error', handler=seen.append)
+    assert seen == ['current error']
+    src = inspect.getsource(APP.start_grouping)
+    assert 'handler=self.on_grouping_error' in src
+
+
+def test_evidence_highlight_reaches_a_page_judged_in_another_group():
+    """P1 removed because condition B matched its neighbour P2; P2 itself is a
+    Main result. P2's row must still show B's match."""
+    ev = {hdr(S1, 1, 2): {'raw_header': hdr(S1, 1, 2), 'highlight_pattern': 'COND_B',
+                          'compound_evidence': [{'condition': 0}]}}
+    main_p2 = [{'raw_header': hdr(S1, 1, 2), 'highlight_pattern': 'MAIN',
+                'compound': oc([cq.SATISFIED], [[]])}]
+    judged = {hdr(S1, 1, 1), hdr(S1, 1, 2)}
+    [row] = _AttachWin()._attach_compound_evidence(main_p2, ev, judged)
+    assert row['highlight_pattern'] == '(?:MAIN)|(?:COND_B)'
+    assert row['compound_evidence'] == [{'condition': 0}]
+
+
+def test_restore_refuses_non_text_evidence():
+    with pytest.raises(ValueError):
+        cq.PageOutcome.from_dict({'category': 'removed', 'states': ['removed'],
+                                  'evidence': [[5]], 'reasons': ['']}, 1)
+
+
+@pytest.mark.parametrize('method, lab, ok', [('passage', False, True), ('chunk', False, False),
+                                             ('passage', True, False)])
+def test_the_strip_is_frozen_outside_letter_level(method, lab, ok):
+    class _Strip:
+        calls = []
+
+        def set_available(self, available, reason=''):
+            self.calls.append((available, bool(reason)))
+
+    class _Btn:
+        def isChecked(self):
+            return lab
+
+    class _W:
+        _refresh_comp_conditions_available = APP._refresh_comp_conditions_available
+        comp_conditions_strip = _Strip()
+        btn_lab_mode_toggle_comp = _Btn()
+
+        def _comp_method(self):
+            return method
+    _Strip.calls = []
+    _W()._refresh_comp_conditions_available()
+    assert _Strip.calls == [(ok, not ok)]
+
+
+def _export_host_with_conditions():
+    import tests.test_comp_flat_markers_and_xlsx_columns as tx
+    from types import MethodType
+    host = tx._compound_host()
+    host._comp_last_result_conditions = [
+        Condition(cq.REQ_MUST_NOT, cq.WHERE_MANUSCRIPT, ('the forbidden text',), 'HG').to_dict()]
+    host._comp_export_condition_lines = MethodType(APP._comp_export_condition_lines, host)
+    return tx, host
+
+
+@pytest.mark.parametrize('fmt', ['csv', 'txt'])
+def test_csv_and_txt_record_the_dispatched_text_and_conditions(tmp_path, monkeypatch, fmt):
+    from genizah_core import tr
+    tx, host = _export_host_with_conditions()
+    out = tmp_path / f'r.{fmt}'
+    tx._patch_dialogs(monkeypatch, out)
+    host._default_report_path = lambda title, fallback, f=fmt: title + '.' + f
+    host.export_comp_report(fmt)
+    text = out.read_text(encoding='utf-8-sig')
+    assert 'the dispatched text' in text and 'edited after the search' not in text
+    assert tr("Condition {}").format(1) in text and 'the forbidden text' in text

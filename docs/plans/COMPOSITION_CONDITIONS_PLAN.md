@@ -512,3 +512,10 @@ not record the conditions (they now list each with its versions, and TXT the dis
 Kept as designed, and now stated: a page that lacks a required text is DROPPED even when a
 forbidden text is also on it -- it is not a result either way, and listing it under Removed would
 imply it was one.
+
+**Code review round 2 (Codex): SHIP WITH FIXES.** Every round-1 HIGH confirmed closed. Fixed: grouping
+ERRORS now also land only for their run; a page that is a condition's evidence and a main-text result
+in another group carries that condition's highlight (a regression from the round-1 de-duplication);
+CSV and TXT exports record the dispatched text and every condition; restore refuses non-text
+evidence; the strip's availability rule is tested against a strip. Six named mutations, all red. Not
+addressed (pre-existing, not this branch): the layering guards do not see a dynamic `__import__`.

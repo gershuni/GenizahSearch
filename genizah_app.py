@@ -18391,6 +18391,19 @@ class GenizahGUI(QMainWindow):
         out = [dict(r) for r in rows or []]
         present = {r.get('raw_header'): r for r in out}
         judged = set(judged)
+        for row in out:
+            ev = evidence.get(row.get('raw_header'))
+            if ev is None:
+                continue
+            # This main-text page is also where a condition matched (the
+            # worker sends only evidence some judged page points to, from any
+            # group): show both texts' matches, and say which conditions.
+            mine = row.setdefault('compound_evidence', [])
+            for t in ev.get('compound_evidence') or []:
+                if t not in mine:
+                    mine.append(t)
+            row['highlight_pattern'] = compound_query.merge_patterns(
+                row.get('highlight_pattern'), ev.get('highlight_pattern'))
         for row in list(out):
             for ev_ids in ((row.get('compound') or {}).get('evidence') or []):
                 for rid in ev_ids:
@@ -18399,16 +18412,13 @@ class GenizahGUI(QMainWindow):
                         continue
                     tags = list(ev.get('compound_evidence') or [])
                     if rid in present:
+                        # Already here: a main-text row (merged above) or an
+                        # evidence copy another row of this list added.
                         target = present[rid]
                         mine = target.setdefault('compound_evidence', [])
                         for t in tags:
                             if t not in mine:
                                 mine.append(t)
-                        if not target.get('is_condition_evidence'):
-                            # A main-text page a condition also matched: show
-                            # both texts' matches on it.
-                            target['highlight_pattern'] = compound_query.merge_patterns(
-                                target.get('highlight_pattern'), ev.get('highlight_pattern'))
                         continue
                     if rid in judged:
                         # The page is a main-text result in ANOTHER group, with
@@ -18697,13 +18707,14 @@ class GenizahGUI(QMainWindow):
         self._comp_shown_cond_removed = []
         self._comp_shown_cond_unresolved = []
 
-    def _on_grouping_for_run(self, run_id, *results):
-        """Grouping results land only for the run they grouped."""
+    def _on_grouping_for_run(self, run_id, *results, handler=None):
+        """Grouping results -- and grouping errors -- land only for the run
+        they grouped."""
         if run_id != getattr(self, '_comp_active_run_id', None):
             logger.info('composition: dropped grouping of run %s (active %s)',
                         run_id, getattr(self, '_comp_active_run_id', None))
             return
-        self.on_comp_finished(*results)
+        (handler or self.on_comp_finished)(*results)
 
     def _comp_export_condition_lines(self):
         """The conditions a run was DISPATCHED with, in full, for the
@@ -27493,6 +27504,12 @@ class GenizahGUI(QMainWindow):
                     with open(path, 'w', encoding='utf-8-sig', newline='') as f:
                         f.write(credit_text)
                         writer = csv.writer(f)
+                        if _comp_cond_col:
+                            # A search with conditions: what was searched,
+                            # dispatched, so the rows can be traced to it.
+                            writer.writerow([tr('Search Text'), query_text])
+                            for line in self._comp_export_condition_lines():
+                                writer.writerow([line])
                         writer.writerow([])
                         # Phase 110 (5b): a LOCAL-only export does NOT emit the
                         # 10-column Genizah header/table at all — the Local
@@ -27784,6 +27801,7 @@ class GenizahGUI(QMainWindow):
                     sep, tr("COMPOSITION REPORT SUMMARY"), sep,
                     f"Title: {comp_title}",
                     f"{tr('Search Text')}: {query_text}",
+                    *(self._comp_export_condition_lines() if _comp_cond_col else []),
                     f"{_found_label}: {total_count}"
                 ]
                 detail_lines = [sep, tr("ALL RESULTS"), sep]
@@ -29497,7 +29515,9 @@ class GenizahGUI(QMainWindow):
         _grouping_run = getattr(self, '_comp_active_run_id', None)
         self.group_thread.finished_signal.connect(_comp_live(
             lambda *a, rid=_grouping_run: self._on_grouping_for_run(rid, *a)))
-        self.group_thread.error_signal.connect(_comp_live(self.on_grouping_error))
+        self.group_thread.error_signal.connect(_comp_live(
+            lambda *a, rid=_grouping_run: self._on_grouping_for_run(
+                rid, *a, handler=self.on_grouping_error)))
         self.group_thread.start()
 
     def on_grouping_error(self, err):
