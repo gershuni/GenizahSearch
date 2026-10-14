@@ -333,7 +333,8 @@ def _compound_host():
     host._comp_shown_cond_unresolved = []
     host._comp_last_result_text = "the dispatched text"
     host.comp_text_area = _Line("edited after the search")
-    for name in ("_compound_page_note", "_condition_label", "_compound_evidence_labels"):
+    for name in ("_compound_page_note", "_condition_label", "_compound_evidence_labels",
+                 "_comp_export_condition_lines"):
         setattr(host, name, MethodType(getattr(GenizahGUI, name), host))
     host._unsearchable_pages = lambda sid: 0
     return host
