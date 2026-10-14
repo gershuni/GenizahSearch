@@ -151,12 +151,34 @@ def test_strip_is_hidden_with_no_conditions_and_shown_with_one():
 
 
 def test_editing_a_row_keeps_its_requirement(monkeypatch):
-    monkeypatch.setattr(ConditionDialog, 'exec', lambda self: QDialog.DialogCode.Accepted)
+    def rename_and_accept(dlg):
+        # The user edits the row: a new name, the place changed.
+        dlg.edit_label.setText('Halakhot Gedolot')
+        dlg.combo_where.setCurrentIndex(dlg.combo_where.findData(cq.WHERE_SAME_IMAGE))
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(ConditionDialog, 'exec', rename_and_accept)
     c = Condition(cq.REQ_MUST_NOT, cq.WHERE_MANUSCRIPT, (LONG,), 'HG')
     strip = _strip([c])
+    seen = []
+    strip.changed.connect(seen.append)
     try:
         strip._edit(0)
-        assert strip.conditions() == [c]
+        [edited] = strip.conditions()
+        assert edited.label == 'Halakhot Gedolot'          # the edit landed
+        assert edited.where == cq.WHERE_SAME_IMAGE
+        assert edited.requirement == cq.REQ_MUST_NOT       # ... and kept the requirement
+        assert seen and seen[-1] == [edited]
+    finally:
+        strip.deleteLater()
+
+
+def test_a_long_condition_name_elides_instead_of_widening_the_strip():
+    name = 'הלכות גדולות, הלכות ברכות, פרק ראשון, מהדורת ורשה עם הגהות ' * 3
+    strip = _strip([Condition(cq.REQ_MUST_NOT, cq.WHERE_MANUSCRIPT, (LONG,), name)])
+    try:
+        assert strip.minimumSizeHint().width() < 300
+        row_label = strip._rows_box.itemAt(0).widget().layout().itemAt(0).widget()
+        assert name.strip() in row_label.toolTip()         # the whole line on hover
     finally:
         strip.deleteLater()
 
@@ -303,8 +325,8 @@ def test_filter_texts_menu_has_the_three_items_in_order_with_tooltips():
         win.comp_filter_menu.aboutToShow.emit()
         assert actions[1].toolTip() == tr("For example, the Rif quoting the Talmud")
         assert actions[2].toolTip() == tr(
-            "For example, show only results where the next image includes "
-            "a certain text")
+            "For example, show only results where an adjacent image "
+            "(before or after) includes a certain text")
     finally:
         win.deleteLater()
 
@@ -314,6 +336,33 @@ def test_item_one_opens_the_quoted_texts_dialog_via_open_filter_dialog():
     try:
         win.act_comp_quoted_texts.trigger()
         assert win.opened == [False]            # QAction.triggered sends `checked`
+    finally:
+        win.deleteLater()
+
+
+class _RealFilterWin(_FilterMenuWin):
+    """The window's REAL open_filter_dialog, so item 1 is followed into the
+    Quoted texts dialog itself (not a stub)."""
+    open_filter_dialog = APP.open_filter_dialog
+
+
+def test_item_one_reaches_the_real_quoted_texts_dialog_and_keeps_its_sources(monkeypatch):
+    import genizah_app
+    shown = []
+
+    def accept(dlg):
+        shown.append(dlg.windowTitle())
+        return QDialog.DialogCode.Accepted
+    monkeypatch.setattr(genizah_app.FilterTextDialog, 'exec', accept)
+    win = _RealFilterWin()
+    win.comp_filter_menu = win._build_comp_filter_menu()
+    win.filter_sources = {'Genesis 1': 'בראשית ברא'}
+    win.filter_enabled_sources = {'Genesis 1'}
+    try:
+        win.act_comp_quoted_texts.trigger()
+        assert shown == [tr("Quoted texts")]
+        assert win.filter_sources == {'Genesis 1': 'בראשית ברא'}
+        assert win.filter_enabled_sources == {'Genesis 1'}
     finally:
         win.deleteLater()
 

@@ -5654,6 +5654,6 @@ TRANSLATIONS.update({
     'Add condition...': 'הוסף תנאי...',
     'For example, Bible verses quoted in the Talmud': 'למשל: פסוקי תנ"ך המצוטטים בתלמוד',
     'For example, the Rif quoting the Talmud': 'למשל: הרי"ף המצטט את התלמוד',
-    'For example, show only results where the next image includes a certain text':
-        'למשל: הצג רק תוצאות שבתמונה הבאה מופיע בהן טקסט מסוים',
+    'For example, show only results where an adjacent image (before or after) includes a certain text':
+        'למשל: הצג רק תוצאות שבתמונה סמוכה (לפניה או אחריה) מופיע טקסט מסוים',
 })

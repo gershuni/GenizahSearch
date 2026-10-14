@@ -18631,8 +18631,8 @@ class GenizahGUI(QMainWindow):
         self.act_comp_add_condition.setEnabled(can_add)
         self.act_comp_add_condition.setToolTip(
             reason or tr(
-                "For example, show only results where the next image "
-                "includes a certain text"))
+                "For example, show only results where an adjacent image "
+                "(before or after) includes a certain text"))
 
     @staticmethod
     def _compound_key_str(header):

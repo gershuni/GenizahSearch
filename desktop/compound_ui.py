@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 
 from genizah_core import CURRENT_LANG, tr
 from shared import compound_query as cq
+from desktop.ui_widgets import ElidingLabel
 from shared.passage_normalize import norm_stream_fast
 
 REQUIREMENT_LABELS = (
@@ -307,8 +308,13 @@ class ConditionsStrip(QWidget):
             row = QWidget()
             h = QHBoxLayout(row)
             h.setContentsMargins(12, 0, 0, 0)
-            text = QLabel(condition_summary(cond))
-            text.setToolTip('\n\n'.join(cond.versions)[:600])
+            # Elides rather than widening the window: a long name must not
+            # push the tab past a small screen (300% scaling). The tooltip
+            # carries the whole line.
+            summary = condition_summary(cond)
+            text = ElidingLabel(summary)
+            text.setMinimumWidth(1)
+            text.setToolTip(summary + '\n\n' + '\n\n'.join(cond.versions)[:600])
             h.addWidget(text, 1)
             edit = QToolButton()
             edit.setText('✎')
