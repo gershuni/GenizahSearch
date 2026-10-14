@@ -37,6 +37,7 @@ from typing import Callable, Iterator, Optional
 
 from shared.passage_index import MAX_RECORD_LETTERS, BuildCancelled
 from shared.passage_normalize import norm_stream_fast
+from shared.sys_id_patterns import LOCAL_SYS_ID_PATTERN
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,9 @@ SEGMENT_TARGET_LETTERS = 50_000
 
 _SEGMENT_RE = re.compile(r'^(?P<base>[A-Za-z0-9_]+?)_S(?P<seg>\d+)$')
 # `{sys_id}_LOCAL_P{page}_F{file_id}` -- shared/local_indexer.py::_make_full_header.
+# The sys_id part is the shared LOCAL pattern (group 1), never a copy of it.
 _LOCAL_HEADER_RE = re.compile(
-    r'^(?P<sys_id>97\d{8,})_LOCAL_P(?P<page>\d+)_F(?P<file_id>\d+)$')
+    '^' + LOCAL_SYS_ID_PATTERN + r'_LOCAL_P(?P<page>\d+)_F(?P<file_id>\d+)$')
 _HEADER_CHARS_RE = re.compile(r'^[A-Za-z0-9_]+$')
 _TOKEN_RE = re.compile(r'\S+\s*|\s+')
 
@@ -111,7 +113,7 @@ def parse_local_header(full_header: str) -> Optional[dict]:
     m = _LOCAL_HEADER_RE.match(full_header or '')
     if not m:
         return None
-    return {'sys_id': m.group('sys_id'), 'page': int(m.group('page')),
+    return {'sys_id': m.group(1), 'page': int(m.group('page')),
             'file_id': int(m.group('file_id'))}
 
 
