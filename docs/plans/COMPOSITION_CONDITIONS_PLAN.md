@@ -495,3 +495,20 @@ The user's two cases are PENDING until he sends the texts (`--cases FILE`).
 **Still to do before release:** owner hand test; owner approval of the proposed Hebrew strings;
 the user's two cases through G8; Codex review of the branch; the desktop What's New text; the
 full local suite (`scripts/run_local_tests.py`) and the GUI lane.
+
+**Code review round 1 (Codex, 2026-10-14): DO NOT SHIP, 3 HIGH / 15 MEDIUM; all fixed** (tests in
+`tests/test_compound_review_fixes.py`, 20 named mutations red): the identity finalizer took the lock
+it could be called under (possible deadlock); witnesses gathered for another main text could join a
+run (now only witnesses whose seed matches this text); a removed page could open as its unjudged
+evidence copy (evidence never duplicates a page judged in any group; the clicked row opens itself);
+rendering failures could erase verified hits; restore accepted contradictory outcomes; removing a
+witness with conditions set republished; a plain result shown after a compound one kept its groups;
+Exclude Manuscripts dropped a group's pages (merged now, as §4 required); grouped TXT sections and
+Add-to-List skipped the new groups; grouping and the deferred startup restore had no run check; a
+stopped run hid a failed main text; left-out-page counts came from the CURRENT index (the worker
+now records the judged build's, and the neighbours an adjacent condition could not search);
+two texts on one page kept one highlight; removed-only results blocked view switching; reports did
+not record the conditions (they now list each with its versions, and TXT the dispatched text).
+Kept as designed, and now stated: a page that lacks a required text is DROPPED even when a
+forbidden text is also on it -- it is not a result either way, and listing it under Removed would
+imply it was one.

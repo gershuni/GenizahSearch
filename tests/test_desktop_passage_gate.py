@@ -129,6 +129,9 @@ class _Win:
     _comp_passage_axis = APP._comp_passage_axis
     _comp_axis_label = APP._comp_axis_label
     _comp_export_settings_lines = APP._comp_export_settings_lines
+    # Composition Search conditions: none set in these stubs.
+    _comp_export_condition_lines = APP._comp_export_condition_lines
+    _clear_compound_results = APP._clear_compound_results
     _comp_chunk_preference = APP._comp_chunk_preference
     _PASSAGE_FORCED_CONTROLS = APP._PASSAGE_FORCED_CONTROLS
     _passage_scan_in_flight = APP._passage_scan_in_flight

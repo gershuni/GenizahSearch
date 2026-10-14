@@ -68,15 +68,22 @@ def build_identity(index: PassageIndex) -> str:
     h.update(memoryview(np.ascontiguousarray(index.record_ids)))
     ident = h.hexdigest()
     with _IDENTITY_LOCK:
-        if id(index) not in _IDENTITY:
+        fresh = id(index) not in _IDENTITY
+        if fresh:
             _IDENTITY[id(index)] = ident
-            weakref.finalize(index, _forget_identity, id(index))
+    if fresh:
+        # Registered OUTSIDE the lock: registering allocates, allocating can
+        # run the garbage collector, and the collector can finalize an older
+        # index on this very thread.
+        weakref.finalize(index, _forget_identity, id(index))
     return ident
 
 
 def _forget_identity(key: int) -> None:
-    with _IDENTITY_LOCK:
-        _IDENTITY.pop(key, None)
+    # No lock: a finalizer can run on any thread at any allocation, including
+    # one that already holds _IDENTITY_LOCK, and the lock is not reentrant.
+    # dict.pop is atomic under the GIL.
+    _IDENTITY.pop(key, None)
 
 
 class StaleIndexError(RuntimeError):

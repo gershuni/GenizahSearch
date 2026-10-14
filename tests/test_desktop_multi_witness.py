@@ -785,6 +785,7 @@ class _Win2:
     _sort_comp_items = GAPP._sort_comp_items
     _current_comp_sort_mode = GAPP._current_comp_sort_mode
     _comp_export_settings_lines = GAPP._comp_export_settings_lines
+    _comp_export_condition_lines = GAPP._comp_export_condition_lines
     _comp_chunk_preference = GAPP._comp_chunk_preference
     _restore_comp_passage_preferences = GAPP._restore_comp_passage_preferences
     _add_comp_search_to_history = GAPP._add_comp_search_to_history

@@ -375,6 +375,11 @@ def test_xlsx_export_of_a_result_with_conditions(tmp_path, monkeypatch):
                     seen.setdefault(sid, (vals[header.index(tr("Category"))], cond))
     assert seen["990002"][0] == tr("Removed by a condition")
     assert "HG" in seen["990002"][1]
+    # The human-readable Report View (the first sheet) carries the outcome on the
+    # manuscript's own row too, not only Raw Data.
+    report_rows = [[c.value for c in row] for row in wb.worksheets[0].iter_rows()]
+    mine = [r for r in report_rows if "990001" in [str(v) for v in r]]
+    assert mine and any("HG" in str(v) for r in mine for v in r if v), mine
     assert "990001" in seen and "HG" in seen["990001"][1]
     assert not any("edited after the search" in t for t in texts)
 

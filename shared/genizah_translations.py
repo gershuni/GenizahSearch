@@ -5631,4 +5631,11 @@ TRANSLATIONS.update({
 TRANSLATIONS.update({
     'Removed by a condition': 'הוסרו בגלל תנאי',
     'Not fully checked': 'לא נבדקו עד הסוף',
+})
+
+# Composition Search conditions, code review round 1.
+TRANSLATIONS.update({
+    'Version {}': 'נוסח {}',
+    'Conditions changed. Search again to apply them.': 'התנאים השתנו. חפש שוב כדי להחיל אותם.',
+    '(image {} could not be searched)': '(תמונה {} לא ניתנה לחיפוש)',
 })

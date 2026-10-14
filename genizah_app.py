@@ -17507,7 +17507,9 @@ class GenizahGUI(QMainWindow):
         # A snapshot held back by the startup race is judged HERE, where
         # "not built" finally means what it says.
         deferred = self.__dict__.pop('_deferred_comp_snapshot', None)
-        if deferred is not None:
+        if deferred is not None and getattr(self, '_comp_active_run_id', None) is None:
+            # ...unless a search has been started since launch: its answer is
+            # the one on screen, and a restored older one must not replace it.
             self._display_restored_comp_snapshot(deferred)
         # Only now is "there is no index" a fact rather than "not loaded
         # yet" -- offering before this point would fire on every launch,
@@ -18100,6 +18102,7 @@ class GenizahGUI(QMainWindow):
             return False
         if not self._restored_provenance_is_valid(comp):
             return False
+        self._clear_compound_results()
         self._clear_comp_chunk_notice()
         self.comp_raw_items = comp.get('results', [])
         self.comp_raw_filtered = comp.get('filtered_results', [])
@@ -18192,6 +18195,7 @@ class GenizahGUI(QMainWindow):
             _wits = getattr(self, '_comp_last_result_witnesses', None) or []
             if _wits:
                 lines.append(tr("Witnesses") + ": " + str(len(_wits) + 1))
+            lines.extend(self._comp_export_condition_lines())
             return lines
 
         stamp = getattr(self, '_comp_last_result_chunk', None) or {}
@@ -18326,9 +18330,20 @@ class GenizahGUI(QMainWindow):
         out = [(passage_witnesses.WITNESS_SEED_ID, tr("Your text"), seed_text)]
         state = self._comp_witness_state()
         if state.entries:
+            # Witnesses gathered for ANOTHER main text are marked stale FIRST,
+            # exactly as the ordinary dispatch does -- this list is taken before
+            # that code runs, and a stale witness would search another work.
+            if passage_witnesses.mark_stale_against(state, seed_text):
+                self._refresh_witness_panel()
             self._rehydrate_witness_texts()
+        # Only witnesses gathered for THIS main text. A compound run reuses no
+        # rows, so a witness already searched for another text (status
+        # 'searched', which mark_stale_against leaves alone) is excluded too.
+        digest = passage_witnesses.witness_text_key(seed_text)
         for entry in state.entries:
             if entry.status == passage_witnesses.STATUS_STALE:
+                continue
+            if entry.seed_digest != digest:
                 continue
             if not (entry.text or '').strip():
                 continue
@@ -18367,7 +18382,7 @@ class GenizahGUI(QMainWindow):
             label = (conds[index] or {}).get('label') or ''
         return label or tr("Condition {}").format(index + 1)
 
-    def _attach_compound_evidence(self, rows, evidence):
+    def _attach_compound_evidence(self, rows, evidence, judged=()):
         """Rows plus, for each, the condition pages that are its evidence
         (rendered by the worker), so a manuscript shows WHERE a condition
         matched. An evidence page that is already one of the rows is not
@@ -18375,6 +18390,7 @@ class GenizahGUI(QMainWindow):
         they never outrank, or replace, a main-text page in grouping."""
         out = [dict(r) for r in rows or []]
         present = {r.get('raw_header'): r for r in out}
+        judged = set(judged)
         for row in list(out):
             for ev_ids in ((row.get('compound') or {}).get('evidence') or []):
                 for rid in ev_ids:
@@ -18383,10 +18399,21 @@ class GenizahGUI(QMainWindow):
                         continue
                     tags = list(ev.get('compound_evidence') or [])
                     if rid in present:
-                        mine = present[rid].setdefault('compound_evidence', [])
+                        target = present[rid]
+                        mine = target.setdefault('compound_evidence', [])
                         for t in tags:
                             if t not in mine:
                                 mine.append(t)
+                        if not target.get('is_condition_evidence'):
+                            # A main-text page a condition also matched: show
+                            # both texts' matches on it.
+                            target['highlight_pattern'] = compound_query.merge_patterns(
+                                target.get('highlight_pattern'), ev.get('highlight_pattern'))
+                        continue
+                    if rid in judged:
+                        # The page is a main-text result in ANOTHER group, with
+                        # its own judgement; a second, unjudged copy here
+                        # would be the one the viewer opens.
                         continue
                     added = dict(ev, score=0.0, final_score=0.0,
                                  evidence_score=float(ev.get('score') or 0.0),
@@ -18493,6 +18520,9 @@ class GenizahGUI(QMainWindow):
 
     def _on_comp_conditions_changed(self, conditions):
         self.comp_conditions = list(conditions)
+        if self._has_comp_results() and hasattr(self, 'lbl_comp_status'):
+            self.lbl_comp_status.setText(tr(
+                "Conditions changed. Search again to apply them."))
         if self.comp_conditions:
             # An auto-expand round armed before the first condition would
             # otherwise still fire.
@@ -18576,6 +18606,12 @@ class GenizahGUI(QMainWindow):
                 if where == compound_query.WHERE_MANUSCRIPT and unsearchable:
                     text += " " + tr("({} pages of this manuscript could not be searched)"
                                      ).format(unsearchable)
+                elif where == compound_query.WHERE_ADJACENT and key:
+                    missing = ((self._comp_compound or {}).get('neighbours_left_out') or {}
+                               ).get(f"{key.sys_id}|{key.ie}|{key.p}")
+                    if missing:
+                        text += " " + tr("(image {} could not be searched)").format(
+                            ", ".join(str(p) for p in missing))
                 parts.append(text)
             elif state == compound_query.REMOVED:
                 parts.append(tr("{}: found on image {} (removed)").format(name, on))
@@ -18586,11 +18622,9 @@ class GenizahGUI(QMainWindow):
     def _unsearchable_pages(self, sys_id):
         """How many of a manuscript's pages the letter-level index left out
         (owner ruling 2026-10-14: absence means absence from the searchable
-        pages, and the count is shown)."""
-        try:
-            return passage_lifecycle.excluded_page_counts().get(sys_id, 0)
-        except Exception:
-            return 0
+        pages, and the count is shown) -- in the build the RUN was judged on,
+        as the worker recorded it, never the index installed now."""
+        return int(((self._comp_compound or {}).get('unsearchable') or {}).get(sys_id, 0))
 
     def _compound_export_buckets(self, has_selection):
         """(removed, unresolved) manuscripts for an export: the checked rows
@@ -18653,6 +18687,75 @@ class GenizahGUI(QMainWindow):
             else:
                 kept.append(item)
         return kept, removed, unresolved
+
+    def _clear_compound_results(self):
+        """Forget the last search-with-conditions result (its groups and
+        payload) before showing one that has none."""
+        self._comp_compound = None
+        self.comp_cond_removed = []
+        self.comp_cond_unresolved = []
+        self._comp_shown_cond_removed = []
+        self._comp_shown_cond_unresolved = []
+
+    def _on_grouping_for_run(self, run_id, *results):
+        """Grouping results land only for the run they grouped."""
+        if run_id != getattr(self, '_comp_active_run_id', None):
+            logger.info('composition: dropped grouping of run %s (active %s)',
+                        run_id, getattr(self, '_comp_active_run_id', None))
+            return
+        self.on_comp_finished(*results)
+
+    def _comp_export_condition_lines(self):
+        """The conditions a run was DISPATCHED with, in full, for the
+        report's settings block: requirement, place, name and every version."""
+        from desktop.compound_ui import condition_summary
+        lines = []
+        for i, d in enumerate(getattr(self, '_comp_last_result_conditions', None) or []):
+            try:
+                cond = compound_query.Condition.from_dict(d)
+            except ValueError:
+                continue
+            lines.append(tr("Condition {}").format(i + 1) + ": " + condition_summary(cond))
+            for vi, text in enumerate(cond.versions, start=1):
+                lines.append("  " + tr("Version {}").format(vi) + ": " + text)
+        return lines
+
+    def _merge_comp_known(self, new_known):
+        """Add manually excluded manuscripts to `comp_known`, one item per
+        manuscript or Part. The same manuscript arriving from another group
+        (one page in Main, one removed by a condition) keeps BOTH pages, each
+        with its own stored outcome."""
+        if not hasattr(self, 'comp_known'):
+            self.comp_known = []
+        if new_known:
+            by_key = {}
+            for item in self.comp_known:
+                if item.get('type') == 'part':
+                    by_key[f"PART:{item.get('part_id')}"] = item
+                else:
+                    by_key[item.get('sys_id')] = item
+            for item in new_known:
+                if item.get('type') == 'part':
+                    key = f"PART:{item.get('part_id')}"
+                else:
+                    key = item.get('sys_id')
+                if key and key not in by_key:
+                    self.comp_known.append(item)
+                    by_key[key] = item
+                elif key:
+                    # The same manuscript from another group (e.g. one page in
+                    # Main and one removed by a condition): keep BOTH pages,
+                    # each with its own stored outcome.
+                    kept = by_key[key]
+                    seen = {p.get('raw_header') for p in kept.get('pages') or []}
+                    extra = [p for p in item.get('pages') or []
+                             if p.get('raw_header') not in seen]
+                    if extra:
+                        merged = dict(kept, pages=list(kept.get('pages') or []) + extra)
+                        pos = next(i for i, it in enumerate(self.comp_known)
+                                   if it is kept)
+                        self.comp_known[pos] = merged
+                        by_key[key] = merged
 
     def _comp_compound_has_rows(self):
         c = getattr(self, '_comp_compound', None)
@@ -19629,8 +19732,10 @@ class GenizahGUI(QMainWindow):
         """
         can_restrip = bool(self._comp_witness_state().rows)
         self._refresh_witness_panel()
-        if getattr(self, '_comp_compound', None) is not None:
-            # Results of a search with conditions are judged as a whole;
+        if (getattr(self, '_comp_compound', None) is not None
+                or getattr(self, 'comp_conditions', None)):
+            # Results of a search with conditions are judged as a whole, and
+            # with conditions SET the next answer must be judged too;
             # re-fusing cached rows would publish pages nobody judged.
             if self._has_comp_results():
                 self._witness_notify(tr(
@@ -25286,6 +25391,9 @@ class GenizahGUI(QMainWindow):
                 add_item(item)
         for item in sel_known:
             add_item(item)
+        _removed, _unresolved = self._compound_export_buckets(True)
+        for item in _removed + _unresolved:
+            add_item(item)
 
         return selected
 
@@ -27675,6 +27783,7 @@ class GenizahGUI(QMainWindow):
                 summary_lines = [
                     sep, tr("COMPOSITION REPORT SUMMARY"), sep,
                     f"Title: {comp_title}",
+                    f"{tr('Search Text')}: {query_text}",
                     f"{_found_label}: {total_count}"
                 ]
                 detail_lines = [sep, tr("ALL RESULTS"), sep]
@@ -27716,19 +27825,19 @@ class GenizahGUI(QMainWindow):
                         detail_lines.extend([sep, tr("MAIN APPENDIX") + " (Grouped)", sep])
                         for sig, items in sorted(c_appx.items(), key=lambda x: len(x[1]), reverse=True):
                             detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
-                            for item in items: detail_lines.extend(_fmt_ms_entry(item))
+                            for item in items: detail_lines.extend(_fmt_entry(item))
                     if c_filt:
                         detail_lines.extend([sep, tr("FILTERED"), sep])
-                        for item in c_filt: detail_lines.extend(_fmt_ms_entry(item))
+                        for item in c_filt: detail_lines.extend(_fmt_entry(item))
                     if c_filt_appx:
                         detail_lines.extend([sep, tr("FILTERED APPENDIX") + " (Grouped)", sep])
                         for sig, items in sorted(c_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
                             detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
-                            for item in items: detail_lines.extend(_fmt_ms_entry(item))
+                            for item in items: detail_lines.extend(_fmt_entry(item))
                     if c_known:
                         _excl_heading = tr("EXCLUDED DOCUMENTS") if _local_only_comp_export else tr("EXCLUDED MANUSCRIPTS")
                         detail_lines.extend([sep, _excl_heading, sep])
-                        for item in c_known: detail_lines.extend(_fmt_ms_entry(item))
+                        for item in c_known: detail_lines.extend(_fmt_entry(item))
                     if c_removed:
                         summary_lines.append(f"{tr('Removed by a condition')}: {len(c_removed)}")
                         detail_lines.extend([sep, tr("Removed by a condition"), sep])
@@ -29247,12 +29356,17 @@ class GenizahGUI(QMainWindow):
         removed_raw, unresolved_raw = [], []
         if self._comp_compound:
             _evidence = self._comp_compound.get('evidence') or {}
-            items = self._attach_compound_evidence(items, _evidence)
-            filtered_items = self._attach_compound_evidence(filtered_items, _evidence)
+            _judged = {r.get('raw_header') for r in (
+                list(items) + list(filtered_items)
+                + list(self._comp_compound.get('removed') or [])
+                + list(self._comp_compound.get('unresolved') or []))}
+            items = self._attach_compound_evidence(items, _evidence, _judged)
+            filtered_items = self._attach_compound_evidence(
+                filtered_items, _evidence, _judged)
             removed_raw = self._attach_compound_evidence(
-                self._comp_compound.get('removed') or [], _evidence)
+                self._comp_compound.get('removed') or [], _evidence, _judged)
             unresolved_raw = self._attach_compound_evidence(
-                self._comp_compound.get('unresolved') or [], _evidence)
+                self._comp_compound.get('unresolved') or [], _evidence, _judged)
 
         result_count = len(items) + len(filtered_items)
         # Phase 110 UAT (Issue 1): batch-prime LOCAL filepaths for the comp hits
@@ -29380,7 +29494,9 @@ class GenizahGUI(QMainWindow):
         _comp_live = partial(self._discardable, '_comp_new_generation')
         self.group_thread.status_signal.connect(
             _comp_live(lambda s: self.comp_progress.setFormat(s)))
-        self.group_thread.finished_signal.connect(_comp_live(self.on_comp_finished))
+        _grouping_run = getattr(self, '_comp_active_run_id', None)
+        self.group_thread.finished_signal.connect(_comp_live(
+            lambda *a, rid=_grouping_run: self._on_grouping_for_run(rid, *a)))
         self.group_thread.error_signal.connect(_comp_live(self.on_grouping_error))
         self.group_thread.start()
 
@@ -29850,21 +29966,7 @@ class GenizahGUI(QMainWindow):
 
         # Deduplicate by sys_id/part_id to avoid duplicate entries
         new_known = known_main + known_filt + known_rem + known_unr
-        if new_known:
-            existing_ids = set()
-            for item in self.comp_known:
-                if item.get('type') == 'part':
-                    existing_ids.add(f"PART:{item.get('part_id')}")
-                else:
-                    existing_ids.add(item.get('sys_id'))
-            for item in new_known:
-                if item.get('type') == 'part':
-                    key = f"PART:{item.get('part_id')}"
-                else:
-                    key = item.get('sys_id')
-                if key and key not in existing_ids:
-                    self.comp_known.append(item)
-                    existing_ids.add(key)
+        self._merge_comp_known(new_known)
 
         self.comp_main = clean_main
         self.comp_appendix = clean_appx
@@ -30976,6 +31078,8 @@ class GenizahGUI(QMainWindow):
 
     def _has_comp_results(self):
         if self.comp_main or self.comp_appendix or self.comp_known:
+            return True
+        if self._comp_compound_has_rows():
             return True
         if self.comp_filtered_main or self.comp_filtered_appendix:
             return True
@@ -32758,6 +32862,7 @@ class GenizahGUI(QMainWindow):
             results, filtered = [], []
         if results or filtered:
             # Legacy entry with a stored snapshot — restore instantly.
+            self._clear_compound_results()
             self.comp_raw_items = results
             self.comp_raw_filtered = filtered
             self.comp_has_grouped_results = False
@@ -34274,11 +34379,25 @@ class GenizahGUI(QMainWindow):
         state, host = self._comp_filter_state()
         flat_list = []
         keys = []
+        ids = []
         for group, ms_item, page in _cvf.viewer_pages(groups, state, host):
             flat_list.append(self._comp_viewer_entry(group, ms_item, page))
             keys.append(_cvf.page_key(page))
+            ids.append(id(page))
         if not flat_list:
             return
+        # Composition Search conditions: ONE map of every judged image for the
+        # whole list, so paging into another manuscript of the result still
+        # finds that image's highlight and line.
+        _all_patterns, _all_notes = {}, {}
+        for _entry in flat_list:
+            _all_patterns.update(_entry.get('compound_page_patterns') or {})
+            _all_notes.update(_entry.get('compound_page_notes') or {})
+        if _all_notes:
+            for _entry in flat_list:
+                if 'compound_page_notes' in _entry:
+                    _entry['compound_page_patterns'] = _all_patterns
+                    _entry['compound_page_notes'] = _all_notes
 
         # The clicked target: the clicked page itself, or -- for a manuscript row --
         # its first page that the filters keep (never a hidden first child).
@@ -34289,7 +34408,10 @@ class GenizahGUI(QMainWindow):
             wanted = [_cvf.page_key(data)]
         else:
             wanted = [_cvf.page_key(p) for p in _cvf.eligible_pages(data, state, host)]
-        target_index = next((keys.index(k) for k in wanted if k in keys), -1)
+        # The clicked row ITSELF when it is in the list (the same page can sit
+        # in two groups); by page key otherwise.
+        target_index = (ids.index(id(data)) if is_page_row and id(data) in ids
+                        else next((keys.index(k) for k in wanted if k in keys), -1))
         if target_index == -1:
             # The clicked row is not in the filtered list. Never silently open an
             # unrelated result instead.

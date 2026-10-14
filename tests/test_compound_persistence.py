@@ -66,6 +66,9 @@ class _Win:
     def _passage_disabled_reason_now(self, scope=None):
         return None
 
+    def _has_comp_results(self):
+        return False
+
 
 # -- G6: restore never shows rows judged by conditions ---------------------------------
 

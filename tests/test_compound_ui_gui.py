@@ -160,3 +160,14 @@ def test_removed_and_unresolved_groups_are_collapsed_split_and_registered():
         assert sorted(s for _p, s in added) == ['9901', '9902', '9903', '9904']
     finally:
         w.comp_tree.deleteLater()
+
+
+def test_dialog_refuses_a_version_over_the_letter_limit():
+    dlg = ConditionDialog(None, floor=40)
+    try:
+        dlg.edit_text.setPlainText('אב' * (cq.MAX_VERSION_LETTERS // 2 + 1))
+        assert not _ok(dlg).isEnabled()
+        assert tr("Version {} is too long ({} letters; at most {}).").format(
+            1, cq.MAX_VERSION_LETTERS + 2, cq.MAX_VERSION_LETTERS) in dlg.lbl_info.text()
+    finally:
+        dlg.deleteLater()

@@ -276,6 +276,16 @@ class PageOutcome:
             raise ValueError('unknown reason')
         if _category(states) != cat:
             raise ValueError('category does not follow from the states')
+        for state, ev, reason in zip(states, evidence, reasons):
+            # A reason is exactly the mark of an unresolved condition, and
+            # evidence goes with "found": a stored outcome that says otherwise
+            # would show an unproven absence as clean.
+            if (state == UNRESOLVED) != bool(reason):
+                raise ValueError('a reason without an unresolved state, or the reverse')
+            if state == REMOVED and not ev:
+                raise ValueError('removed without evidence')
+            if state in (FAILED, UNRESOLVED) and ev:
+                raise ValueError('evidence on a condition that was not found')
         return cls(cat, tuple(states), tuple(tuple(e) for e in evidence),
                    tuple(reasons))
 
@@ -368,6 +378,17 @@ def fingerprint(main_texts: Sequence[str], conditions: Sequence[Condition],
                'settings': settings or {}}
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode('utf-8')).hexdigest()
+
+
+def merge_patterns(a, b) -> str:
+    """One highlight pattern for two texts matched on the same page (each is
+    a regex alternation of literals); either may be empty."""
+    a, b = a or '', b or ''
+    if not a or a == b:
+        return b if not a else a
+    if not b:
+        return a
+    return f'(?:{a})|(?:{b})'
 
 
 @dataclass

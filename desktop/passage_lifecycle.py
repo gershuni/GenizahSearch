@@ -799,6 +799,41 @@ class PassageSearchAdapter:
 _EXCLUDED_COUNTS: dict = {}
 
 
+def excluded_pages():
+    """`(counts, pages)` for the live build's left-out pages: sys_id -> how
+    many, and the set of their (sys_id, IE, P). Read once per installed build;
+    `({}, set())` when there is no list."""
+    import os
+    path = os.path.join(passage_root(), LIVE_DIRNAME, 'excluded_records.tsv')
+    try:
+        stamp = os.stat(path).st_mtime_ns
+    except OSError:
+        return {}, set()
+    cached = _EXCLUDED_PAGES.get(path)
+    if cached and cached[0] == stamp:
+        return cached[1], cached[2]
+    from shared.compound_query import parse_page_key
+    counts: dict = {}
+    pages: set = set()
+    try:
+        with open(path, encoding='utf-8') as fh:
+            next(fh, None)
+            for line in fh:
+                key = parse_page_key(line.split('\t', 1)[0])
+                if key is None:
+                    continue
+                counts[key.sys_id] = counts.get(key.sys_id, 0) + 1
+                pages.add((key.sys_id, key.ie, key.p))
+    except OSError:
+        return {}, set()
+    _EXCLUDED_PAGES.clear()
+    _EXCLUDED_PAGES[path] = (stamp, counts, pages)
+    return counts, pages
+
+
+_EXCLUDED_PAGES: dict = {}
+
+
 def excluded_page_counts() -> dict:
     """sys_id -> how many of its pages the live letter-level index left out
     (Stage 0: short, target sheets, library stamps), read once per installed

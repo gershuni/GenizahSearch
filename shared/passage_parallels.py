@@ -1064,7 +1064,15 @@ class PassageSearcher:
                     'score': float(hit.score), 'final_score': float(hit.score),
                     'chunk_count': int(hit.n_spans), 'chunk_hits': [],
                 }
-                if self._render_highlights(row, hit, q_nfc, q_offsets, span_index):
+                try:
+                    ok = self._render_highlights(row, hit, q_nfc, q_offsets, span_index)
+                except Exception as exc:     # noqa: BLE001 -- display only
+                    # Rendering is for SHOWING evidence. The hit is verified
+                    # and is returned below whatever happens here.
+                    logger.warning('condition evidence render failed for %s: %s',
+                                   hit.record_id, exc)
+                    ok = False
+                if ok:
                     rows.append(row)
         return ConditionSearch(tuple(h.record_id for h in hits),
                                tuple((h.record_id, tuple(h.spans)) for h in hits),

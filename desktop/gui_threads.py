@@ -925,11 +925,11 @@ class CompoundCompositionThread(PausableSearchMixin, QThread):
                     partial = True
                     break
 
-            seed_ok = any(s['kind'] == 'main' and s['id'] == pw.WITNESS_SEED_ID
-                          and s['status'] in ('searched', 'stopped') for s in steps)
-            if not seed_ok and not partial:
-                # The main text itself was never searched: there is nothing
-                # the conditions could be judged against.
+            seed = [s for s in steps if s['kind'] == 'main'
+                    and s['id'] == pw.WITNESS_SEED_ID]
+            if (seed and seed[0]['status'] == 'failed') or (not seed and not partial):
+                # The main text itself was not searched: whatever the other
+                # witnesses found is not an answer to it, stopped or not.
                 self.error_signal.emit('the source text itself could not be searched')
                 return
 
@@ -974,8 +974,14 @@ class CompoundCompositionThread(PausableSearchMixin, QThread):
                     tag = {'condition': ci, 'label': cond.label,
                            'requirement': cond.requirement, 'where': cond.where}
                     for row in getattr(found, 'rows', ()) or ():
-                        ev = evidence.setdefault(
-                            row['raw_header'], dict(row, compound_evidence=[]))
+                        ev = evidence.get(row['raw_header'])
+                        if ev is None:
+                            ev = evidence[row['raw_header']] = dict(
+                                row, compound_evidence=[])
+                        else:
+                            # Two texts matched this page: highlight both.
+                            ev['highlight_pattern'] = cq.merge_patterns(
+                                ev.get('highlight_pattern'), row.get('highlight_pattern'))
                         if tag not in ev['compound_evidence']:
                             ev['compound_evidence'].append(tag)
                     if found.stopped:
@@ -996,6 +1002,24 @@ class CompoundCompositionThread(PausableSearchMixin, QThread):
                      else PARALLELS_GROUP_CAP),
                 sys_parser=_RegexSysIdParser(),
                 order_key='fusion_score' if searched_main > 1 else None)
+            # The left-out pages of THIS build (the run is voided below if the
+            # index changed): per manuscript, and the neighbours an adjacent
+            # condition could not search.
+            try:
+                counts, left_out = pl.excluded_pages()
+            except Exception:                  # noqa: BLE001
+                counts, left_out = {}, set()
+            self._abort_if_generation_moved()
+            unsearchable = {k.sys_id: counts.get(k.sys_id, 0) for k in keys if k}
+            neighbours_left_out = {}
+            if any(c.where == cq.WHERE_ADJACENT for c in self.conditions):
+                for k in keys:
+                    if k is None:
+                        continue
+                    miss = [n.p for n in k.neighbours()
+                            if (n.sys_id, n.ie, n.p) in left_out]
+                    if miss:
+                        neighbours_left_out[f'{k.sys_id}|{k.ie}|{k.p}'] = miss
             # Only the evidence some judged page points to travels on.
             referenced = {rid for r in (routed.main + routed.filtered
                                         + routed.removed + routed.unresolved)
@@ -1016,6 +1040,8 @@ class CompoundCompositionThread(PausableSearchMixin, QThread):
                     'failed_counts': list(routed.failed_counts),
                     'evidence': {rid: row for rid, row in evidence.items()
                                  if rid in referenced},
+                    'unsearchable': unsearchable,
+                    'neighbours_left_out': neighbours_left_out,
                     'steps': steps,
                     'run_id': self.run_id,
                 },
