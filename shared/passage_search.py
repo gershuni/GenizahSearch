@@ -26,7 +26,7 @@ candidate order. No randomness, no dict iteration on the hot path.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from rapidfuzz.distance import Levenshtein
@@ -76,6 +76,11 @@ class QueryReport:
     rejected_short: int = 0
     rejected_density: int = 0
     below_min_span_query: bool = False
+    # True when the search ran over a record mask (`search_passage(...,
+    # record_mask=)`): every query gram present in the index was admitted, no
+    # posting budget applied, and `postings_admitted` counts the postings that
+    # fell inside the mask.
+    exhaustive_mask: bool = False
     seconds: float = 0.0
 
     def as_dict(self) -> dict:
@@ -167,16 +172,25 @@ def _admit_grams(idx: PassageIndex, codes: np.ndarray, first_pos: np.ndarray,
 
 def _candidates(idx: PassageIndex, codes: np.ndarray, qpos: np.ndarray,
                 admitted: np.ndarray, policy: PassagePolicy,
-                report: QueryReport, record_allowed=None):
+                report: QueryReport, record_allowed=None, record_mask=None):
     """Diagonal two-hit with DISTINCT gram codes (spec section 6.1).
 
     Returns (rec, min_q, max_q, min_r, max_r) arrays for clusters that carry
     >= policy.min_anchors distinct codes, ordered by (record, bucket) --
     which is also the deterministic truncation order for candidate_cap.
+
+    `record_mask` (a bool array over records) drops every posting outside the
+    mask as each gram's list is read, before anything is concatenated or
+    clustered -- so peak memory is one posting list, and clustering sees only
+    the allowed records.
     """
     parts_rec, parts_qp, parts_rp, parts_code = [], [], [], []
     for i in admitted.tolist():
         pages, positions = idx.postings_for(int(codes[i]))
+        if record_mask is not None and pages.size:
+            inside = record_mask[pages]
+            pages, positions = pages[inside], positions[inside]
+            report.postings_admitted += int(pages.size)
         if not pages.size:
             continue
         parts_rec.append(pages.astype(np.int64))
@@ -346,12 +360,21 @@ def search_passage(idx: PassageIndex, query_text: str,
                    policy: PassagePolicy = DEFAULT_POLICY,
                    record_allowed=None,
                    checkpoint=None,
+                   record_mask=None,
                    ) -> tuple[list, QueryReport]:
     """The full arrangement-C query. Returns (hits, report).
 
     Hits are sorted by (-score, record) -- deterministic, and score is
     matched letters, directly comparable to the chunk path's merged-span
     character score.
+
+    `record_mask`, when given, is a bool array of length `idx.n_records`:
+    the search is EXHAUSTIVE over the masked records. Every query gram present
+    in the index is admitted -- no posting budget, so no match inside the mask
+    can be lost to admission, the one loss no report flag shows -- and each
+    gram's postings are filtered to the mask before clustering. The candidate
+    and verify caps still apply, and say so when they fire. It cannot be
+    combined with `record_allowed` (docs/plans/COMPOSITION_CONDITIONS_PLAN.md).
 
     `checkpoint`, when given, is called as `checkpoint(done, total)` before
     each candidate is verified -- verification is where a long query spends
@@ -361,6 +384,13 @@ def search_passage(idx: PassageIndex, query_text: str,
     and knows it stopped; nothing else in the result says so. (The website's
     time limit, through shared/passage_parallels.py.)
     """
+    if record_mask is not None:
+        if record_allowed is not None:
+            raise ValueError('record_mask and record_allowed are exclusive')
+        record_mask = np.asarray(record_mask, dtype=bool)
+        if record_mask.shape != (idx.n_records,):
+            raise ValueError(f'record_mask has shape {record_mask.shape}, '
+                             f'the index has {idx.n_records} records')
     t0 = time.time()
     report = QueryReport(policy_id=policy.policy_id, policy_name=policy.name)
     qstream, _offsets = norm_stream(query_text)
@@ -376,13 +406,23 @@ def search_passage(idx: PassageIndex, query_text: str,
     qpos = first_idx.astype(np.int64)
     report.query_grams_distinct = int(codes.size)
 
-    admitted = _admit_grams(idx, codes, qpos, policy, report)
+    if record_mask is not None:
+        report.exhaustive_mask = True
+        admitted = _admit_grams(idx, codes, qpos,
+                                replace(policy, budget_policy=BUDGET_NO_CAP),
+                                report)
+        # _admit_grams counted the corpus-wide postings; over a mask only the
+        # ones inside it are read into clustering (_candidates counts them).
+        report.postings_admitted = 0
+        report.postings_excluded = 0
+    else:
+        admitted = _admit_grams(idx, codes, qpos, policy, report)
     if not admitted.size:
         report.seconds = round(time.time() - t0, 4)
         return [], report
 
     cand = _candidates(idx, codes, qpos, admitted, policy, report,
-                       record_allowed=record_allowed)
+                       record_allowed=record_allowed, record_mask=record_mask)
     merged = _verify_and_merge(idx, qstream, cand, policy, report,
                                checkpoint=checkpoint)
 

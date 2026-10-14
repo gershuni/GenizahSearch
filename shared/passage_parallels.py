@@ -248,7 +248,7 @@ from __future__ import annotations
 import logging
 import re
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional, Protocol
 
 from shared.parallels_service import PARALLELS_GROUP_CAP, _cap_main_results_by_group
@@ -296,6 +296,22 @@ _SYS_ID_RE = CORPUS_SYS_ID_RE
 # `PassageSearcher._resolve_witnesses`); web/search_api.py's copy is fail-fast
 # UX for a caller's benefit, not a second boundary.
 _WITNESS_REF_RE = re.compile(r'^[A-Za-z0-9_]+$')
+
+
+@dataclass(frozen=True)
+class ConditionSearch:
+    """What `PassageSearcher.search_condition` established for one version:
+    the verified hits' record ids, their merged spans (for evidence display),
+    the QueryReport as a dict, and whether a stop cut it short."""
+    hit_record_ids: tuple
+    hit_spans: tuple
+    report: dict
+    stopped: bool
+
+    def as_version_search(self):
+        from shared.compound_query import VersionSearch, cut_reason
+        return VersionSearch(self.hit_record_ids,
+                             cut_reason(self.report, stopped=self.stopped))
 
 
 class NoWitnessesResolved(ValueError):
@@ -970,6 +986,59 @@ class PassageSearcher:
         if not queries:
             raise NoWitnessesResolved(report)
         return queries, report
+
+    # -- Composition Search conditions ---------------------------------------
+
+    def search_condition(self, text: str, pages=(), sys_ids=(),
+                         should_stop=None) -> 'ConditionSearch':
+        """One version of a condition, searched EXHAUSTIVELY over its pages
+        (docs/plans/COMPOSITION_CONDITIONS_PLAN.md section 3).
+
+        `pages` are (sys_id, IE, P) keys and `sys_ids` whole manuscripts. The
+        record mask is built HERE, from the page map of the index this
+        searcher holds, and the map is checked against this index's build
+        before any posting is read -- so a scope computed while another index
+        generation was current can never select the wrong records.
+
+        Every query gram present in the index is admitted (no posting budget);
+        the deepest profile's candidate and verify caps apply, and their
+        flags come back on the report. Hits are the engine's VERIFIED hits,
+        unrendered: no display cap, text lookup, Filter Text or duplicate-
+        photography routing can drop one. Calls `search_passage` directly, not
+        `_run_one_witness` (which filters by `min_boundary_matches`).
+
+        `should_stop()` is asked before the search and before each candidate
+        is verified; True stops it, and the result says `stopped=True` --
+        the hits found so far are kept, but they no longer prove absence."""
+        from shared.passage_pages import page_index_for
+        from shared.passage_policy import DEPTH_PROFILES
+        from shared.passage_search import QueryReport
+
+        if should_stop is not None and should_stop():
+            return ConditionSearch((), (), QueryReport().as_dict(), True)
+        mask = page_index_for(self.index).mask_for(
+            self.index, pages=pages, sys_ids=sys_ids)
+        if not mask.any():
+            # Nothing searchable in scope: absence from the searchable pages
+            # is proven trivially.
+            return ConditionSearch((), (), QueryReport(exhaustive_mask=True).as_dict(),
+                                   False)
+        _budget, verify_cap, candidate_cap = DEPTH_PROFILES['deepest']
+        policy = replace(self.policy, verify_cap=verify_cap,
+                         candidate_cap=candidate_cap)
+        stopped = [False]
+
+        def _checkpoint(_done, _total):
+            if should_stop is not None and should_stop():
+                stopped[0] = True
+                return False
+            return True
+
+        hits, report = search_passage(self.index, text, policy,
+                                      record_mask=mask, checkpoint=_checkpoint)
+        return ConditionSearch(tuple(h.record_id for h in hits),
+                               tuple((h.record_id, tuple(h.spans)) for h in hits),
+                               report.as_dict(), stopped[0])
 
     def _run_one_witness(self, wid: str, label: str, text: str,
                          restrict_sys_ids, min_boundary_matches: int,
