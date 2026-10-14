@@ -883,7 +883,9 @@ def test_dispatch_asks_for_an_uncapped_searcher_only_when_fusing():
     witness before the fusion drops every contributor past rank 200 in its
     own witness."""
     src = _fn_src('run_composition')
-    assert 'render_cap=0 if _comp_multi else None' in src, (
+    # A search with conditions is uncapped too: its cap comes after the
+    # judgement (docs/plans/COMPOSITION_CONDITIONS_PLAN.md).
+    assert 'render_cap=0 if (_comp_multi or _comp_conditions) else None' in src, (
         'the multi-witness path no longer asks for an uncapped searcher')
 
 

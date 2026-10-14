@@ -22,6 +22,7 @@ import hashlib
 import json
 import re
 import threading
+import weakref
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
@@ -35,11 +36,47 @@ from shared.sys_id_patterns import CORPUS_SYS_ID_PATTERN
 _RECORD_RE = re.compile(CORPUS_SYS_ID_PATTERN + r'_(IE\d+)_P(\d+)_')
 
 
+# id(index) -> identity. PassageIndex is an (unhashable) dataclass, so the
+# entry is keyed by object id and dropped by a weak finalizer when the index
+# object goes away -- before its id can be reused.
+_IDENTITY: dict = {}
+_IDENTITY_LOCK = threading.Lock()
+
+
 def build_identity(index: PassageIndex) -> str:
-    """A content identity for one index build: sha256 of its manifest."""
-    payload = json.dumps(index.manifest, sort_keys=True, ensure_ascii=True,
-                         default=str)
-    return hashlib.sha256(payload.encode('ascii')).hexdigest()
+    """A content identity for one index build: the manifest AND the record
+    table (each record's id and its position).
+
+    The manifest alone is not enough. Two builds of the same pages in a
+    different record order can carry identical manifests -- same counts, same
+    parameters, and build timings that happen to round to the same values
+    (measured: 1 build pair in 5 on a three-record fixture) -- and record
+    numbers mean nothing across them. Hashing the record-id bytes and the
+    offset table pins the order. Computed once per opened index (about
+    0.1 s on the full index) and remembered for that object."""
+    with _IDENTITY_LOCK:
+        known = _IDENTITY.get(id(index))
+    if known is not None:
+        return known
+    h = hashlib.sha256()
+    h.update(json.dumps(index.manifest, sort_keys=True, ensure_ascii=True,
+                        default=str).encode('ascii'))
+    h.update(b'\0records\0')
+    h.update(np.ascontiguousarray(index.records['id_off']).tobytes())
+    h.update(np.ascontiguousarray(index.records['id_len']).tobytes())
+    h.update(b'\0ids\0')
+    h.update(memoryview(np.ascontiguousarray(index.record_ids)))
+    ident = h.hexdigest()
+    with _IDENTITY_LOCK:
+        if id(index) not in _IDENTITY:
+            _IDENTITY[id(index)] = ident
+            weakref.finalize(index, _forget_identity, id(index))
+    return ident
+
+
+def _forget_identity(key: int) -> None:
+    with _IDENTITY_LOCK:
+        _IDENTITY.pop(key, None)
 
 
 class StaleIndexError(RuntimeError):

@@ -675,6 +675,7 @@ class PassageSearchAdapter:
         min_delimiter_distance: int = 3,
         restrict_sys_ids=None,
         corpus_scope: str = 'genizah',
+        checkpoint=None,
     ) -> dict:
         """Same parameter list as `gui_threads.CompositionThread.run()`'s
         call to `self.searcher.search_composition_logic(...)` -- the
@@ -686,6 +687,38 @@ class PassageSearchAdapter:
         typo'd caller into `**_ignored` on the far side instead of failing
         loudly here with a `TypeError`.
         """
+        _cp_kw = {} if checkpoint is None else {'checkpoint': checkpoint}
+        return self._call_in_lease(
+            lambda searcher: searcher.search_composition_logic(
+                full_text, chunk_size, max_freq, mode,
+                filter_text=filter_text, progress_callback=progress_callback,
+                boundary_mode=boundary_mode,
+                boundary_delimiter=boundary_delimiter,
+                boundary_boost=boundary_boost,
+                min_boundary_matches=min_boundary_matches,
+                min_delimiter_distance=min_delimiter_distance,
+                restrict_sys_ids=restrict_sys_ids,
+                corpus_scope=corpus_scope, **_cp_kw))
+
+    def search_condition(self, text: str, pages=(), sys_ids=(),
+                         should_stop=None):
+        """One version of a Composition Search condition, under its own lease
+        (`PassageSearcher.search_condition`). The page set comes in as KEYS --
+        `(sys_id, IE, P)` and sys_ids -- and the record mask is built inside
+        the lease from the index this call is actually running on, so a scope
+        computed under one index generation can never select records of
+        another (docs/plans/COMPOSITION_CONDITIONS_PLAN.md section 4). The
+        result is a `ConditionSearch`: tuples and a dict, no index reference.
+        """
+        return self._call_in_lease(
+            lambda searcher: searcher.search_condition(
+                text, pages=pages, sys_ids=sys_ids, should_stop=should_stop))
+
+    def _call_in_lease(self, call):
+        """Run `call(searcher)` inside one complete lease, behind the
+        exception boundary described on the class. `call` receives a fresh
+        `PassageSearcher` around the current index and must return plain
+        data; nothing it touched outlives this frame."""
         index = _try_acquire_lease()
         if index is None:
             raise PassageSearchUnavailableError(
@@ -713,16 +746,7 @@ class PassageSearchAdapter:
                     index=index, text_fetcher=self._text_fetcher,
                     policy=compose(self._width, self._length, self._depth),
                     **_cap_kw)
-                return searcher.search_composition_logic(
-                    full_text, chunk_size, max_freq, mode,
-                    filter_text=filter_text, progress_callback=progress_callback,
-                    boundary_mode=boundary_mode,
-                    boundary_delimiter=boundary_delimiter,
-                    boundary_boost=boundary_boost,
-                    min_boundary_matches=min_boundary_matches,
-                    min_delimiter_distance=min_delimiter_distance,
-                    restrict_sys_ids=restrict_sys_ids,
-                    corpus_scope=corpus_scope)
+                return call(searcher)
             except Exception as exc:
                 boundary_failure = (
                     traceback.format_exc(), type(exc).__name__, str(exc))

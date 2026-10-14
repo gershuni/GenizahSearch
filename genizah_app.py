@@ -50,7 +50,7 @@ if _CORE_IMPORT_ERROR:
 from shared.responsa import _MAX_GAP_TOKEN
 from shared.search_engine import PHASE_LOCAL_SEARCH, MAX_WORD_GAP, _validate_word_gap
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
-from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished, _retire_worker
+from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, CompoundCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished, _retire_worker
 from desktop.widgets import (
     text_has_pattern_markers,
     ActionsHoverWidget, _format_add_to_list_label,
@@ -95,6 +95,7 @@ from desktop import passage_lifecycle  # Phase 146: letter-level (passage) searc
 from desktop import passage_witnesses  # multi-witness state machine (pure)
 from shared import passage_witness_source  # witness resolution (pure, shared with web)
 from shared import passage_fusion  # RRF fusion (pure, shared with web + API)
+from shared import compound_query  # Composition Search conditions (pure)
 from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog, TelemetryConsentBar, WHATS_NEW_CONTENT_VERSION  # Phase 127 update_ui; SEED-031 re-ask bar
 from desktop.filter_text_dialog import FilterTextDialog
 from desktop.column_filter_dialog import ColumnFilterDialog  # moved 2026-09-19; alias stub at the root
@@ -1525,6 +1526,11 @@ class GenizahGUI(QMainWindow):
         self.excluded_shelfmarks = set()
         self.exclusion_sources: list = []  # list of ExclusionSource objects (Phase 56)
         self.comp_excluded_raw_entries = []
+        # Composition Search conditions (docs/plans/COMPOSITION_CONDITIONS_PLAN.md):
+        # the editable list, and what the last compound run delivered.
+        self.comp_conditions = []          # [compound_query.Condition]
+        self._comp_compound = None         # the last run's 'compound' payload
+        self._comp_active_run_id = None    # the run whose results may land
         self.comp_excluded_sys_ids = set()
         self.comp_excluded_shelfmarks = set()
         self.comp_exclusion_sources: list = []
@@ -18196,7 +18202,8 @@ class GenizahGUI(QMainWindow):
         """
         thread = getattr(self, 'comp_thread', None)
         return bool(self._passage_scan_in_flight()
-                    and isinstance(thread, MultiWitnessCompositionThread))
+                    and isinstance(thread, (MultiWitnessCompositionThread,
+                                            CompoundCompositionThread)))
 
     def _refuse_stop_during_passage_scan(self):
         """The one guarded stop helper. `PassageSearcher` has no mid-search
@@ -18213,6 +18220,18 @@ class GenizahGUI(QMainWindow):
         """
         if not self._passage_scan_in_flight():
             return False
+        if isinstance(getattr(self, 'comp_thread', None),
+                      CompoundCompositionThread):
+            # A search with conditions checks Stop inside every step, so it
+            # stops promptly; whatever it did not get to is shown as not
+            # fully checked, never as clean.
+            if hasattr(self, 'lbl_comp_status'):
+                self.lbl_comp_status.setText(tr(
+                    "Stopping. Results found so far are kept; conditions "
+                    "not yet searched are marked as not fully checked."))
+                self.lbl_comp_status.setStyleSheet(
+                    "color: #e67e22; font-weight: bold;")
+            return False
         if self._passage_batch_in_flight():
             if hasattr(self, 'lbl_comp_status'):
                 self.lbl_comp_status.setText(tr(
@@ -18228,6 +18247,100 @@ class GenizahGUI(QMainWindow):
             self.lbl_comp_status.setStyleSheet(
                 "color: #e67e22; font-weight: bold;")
         return True
+
+    # --- Composition Search conditions ------------------------------------
+    # The model and the judgement are shared/compound_query.py (pure); the
+    # worker is desktop/gui_threads.py::CompoundCompositionThread.
+
+    def _comp_compound_gate(self, txt, method, is_lab, scope, width, length,
+                            depth):
+        """Decide whether this run's conditions can be honoured, BY THE METHOD
+        THAT WILL ACTUALLY RUN -- `run_composition` calls this after the
+        dispatch-time re-validation, which may have demoted letter-level to
+        chunk. Returns `(conditions, main_list, fingerprint)` -- three empties
+        when there are no conditions -- or None after telling the user why
+        the search cannot run. Any method other than letter-level refuses
+        rather than ignore a condition (fail closed)."""
+        conditions = list(getattr(self, 'comp_conditions', None) or [])
+        if not conditions:
+            return [], [], ''
+        if is_lab or method != 'passage':
+            QMessageBox.warning(self, tr("Conditions"), tr(
+                "Conditions work only with letter-level search. Switch "
+                "the method to letter-level, or remove the conditions."))
+            return None
+        from shared.passage_policy import compose as _passage_compose
+        main_list = self._comp_compound_main_list(txt)
+        floor = _passage_compose(width, length, depth).min_span
+        problems = compound_query.validate(conditions, len(main_list), floor)
+        if problems:
+            QMessageBox.warning(self, tr("Conditions"),
+                                self._compound_problem_text(problems[0]))
+            return None
+        restrict = getattr(self, 'pre_search_restrict_sys_ids', None)
+        fingerprint = compound_query.fingerprint(
+            [t for _w, _l, t in main_list], conditions, {
+                'scope': scope, 'width': width, 'length': length,
+                'depth': depth,
+                'filter_text': self._get_filter_text() or '',
+                'restrict': sorted(restrict) if restrict else None,
+                'generation': passage_lifecycle.current_state_generation(),
+            })
+        return conditions, main_list, fingerprint
+
+    def _comp_compound_main_list(self, seed_text):
+        """`[(witness_id, label, text)]`: the main text and every usable
+        witness. A compound run searches ALL of them every time -- it never
+        reuses cached rows (their completeness was never recorded)."""
+        out = [(passage_witnesses.WITNESS_SEED_ID, tr("Your text"), seed_text)]
+        state = self._comp_witness_state()
+        if state.entries:
+            self._rehydrate_witness_texts()
+        for entry in state.entries:
+            if entry.status == passage_witnesses.STATUS_STALE:
+                continue
+            if not (entry.text or '').strip():
+                continue
+            out.append((entry.id, entry.label, entry.text))
+        return out
+
+    def _compound_problem_text(self, problem):
+        """A `compound_query.Problem` as a sentence for the user."""
+        n = (problem.condition + 1) if problem.condition is not None else 0
+        v = (problem.version + 1) if problem.version is not None else 0
+        texts = {
+            'too_many_conditions': tr("At most {} conditions.").format(
+                compound_query.MAX_CONDITIONS),
+            'too_many_versions': tr("Condition {}: at most {} versions.").format(
+                n, compound_query.MAX_VERSIONS),
+            'too_many_searches': tr(
+                "This would run {} searches; the limit is {}. Remove a "
+                "witness, a condition or a version.").format(
+                    problem.detail, compound_query.MAX_SEARCHES),
+            'version_too_short': tr(
+                "Condition {}, version {}: {} letters is too short for "
+                "letter-level search.").format(n, v, problem.detail),
+            'version_too_long': tr(
+                "Condition {}, version {}: {} letters is too long (the limit "
+                "is {}).").format(n, v, problem.detail,
+                                  compound_query.MAX_VERSION_LETTERS),
+            'no_text': tr("Condition {} has no text.").format(n),
+        }
+        return texts.get(problem.code, tr("Condition {} is not valid.").format(n))
+
+    def _comp_compound_has_rows(self):
+        c = getattr(self, '_comp_compound', None)
+        return bool(c and (c.get('removed') or c.get('unresolved')))
+
+    def _on_compound_step(self, step, total, kind, label):
+        if not hasattr(self, 'lbl_comp_status'):
+            return
+        if kind == 'main':
+            text = tr("Searching the main text ({}/{})").format(step, total)
+        else:
+            text = tr("Searching condition {} ({}/{})").format(label, step, total)
+        self.lbl_comp_status.setText(text)
+        self.lbl_comp_status.setStyleSheet("")
 
     # --- multi-witness letter-level search ---------------------------------
     # The state machine itself is `desktop/passage_witnesses.py` -- pure and
@@ -28207,6 +28320,22 @@ class GenizahGUI(QMainWindow):
         _comp_passage_length = self._comp_passage_axis('length')
         _comp_passage_depth = self._comp_passage_axis('depth')
 
+        # Conditions are checked HERE -- after the method above was
+        # re-validated and possibly demoted to chunk -- because only the
+        # method that will actually run decides whether they can be honoured.
+        # Any other method refuses to run rather than ignore a condition.
+        _comp_gate = self._comp_compound_gate(
+            txt, _comp_dispatch_method, _comp_is_lab, _comp_scope,
+            _comp_passage_width, _comp_passage_length, _comp_passage_depth)
+        if _comp_gate is None:
+            self.reset_comp_ui()
+            return
+        _comp_conditions, _comp_main_list, _comp_fingerprint = _comp_gate
+        self._comp_active_run_id = _comp_run_id
+        # PROVENANCE: the conditions this run was dispatched with.
+        self._comp_last_result_conditions = [c.to_dict() for c in _comp_conditions]
+        self._comp_last_result_fingerprint = _comp_fingerprint
+
         self._current_comp_search_run = {
             'mode': _comp_mode_enum,
             'corpus': _comp_scope,
@@ -28317,7 +28446,7 @@ class GenizahGUI(QMainWindow):
                     _comp_passage_width,
                     _comp_passage_length,
                     _comp_passage_depth,
-                    render_cap=0 if _comp_multi else None)
+                    render_cap=0 if (_comp_multi or _comp_conditions) else None)
                 _comp_mode_arg = 'literal'
                 _comp_boundary_mode = 'full'
                 _comp_min_boundary = 1
@@ -28362,7 +28491,24 @@ class GenizahGUI(QMainWindow):
                     passage_witnesses.contributing_snapshot(
                         self._comp_witness_state()))
 
-            if _comp_multi:
+            if _comp_conditions:
+                self.comp_thread = CompoundCompositionThread(
+                    _comp_searcher,
+                    _comp_main_list,
+                    _comp_conditions,
+                    filter_text=self._get_filter_text(),
+                    restrict_sys_ids=getattr(
+                        self, 'pre_search_restrict_sys_ids', None),
+                    corpus_scope=_comp_scope,
+                    run_id=_comp_run_id,
+                    pinned_generation=(
+                        passage_lifecycle.current_state_generation()),
+                    fingerprint=_comp_fingerprint)
+                self.comp_thread.scan_finished_signal.connect(
+                    _comp_live(self.on_comp_scan_finished))
+                self.comp_thread.step_signal.connect(
+                    _comp_live(self._on_compound_step))
+            elif _comp_multi:
                 # Restored manuscript witnesses carry no text; put it
                 # back BEFORE the dispatch list is built, or they are
                 # silently left out of the search.
@@ -28554,6 +28700,16 @@ class GenizahGUI(QMainWindow):
         QMessageBox.critical(self, tr("Error"), str(err))
         
     def on_comp_scan_finished(self, result_obj):
+        _compound = (result_obj.get('compound')
+                     if isinstance(result_obj, dict) else None)
+        if (_compound is not None
+                and _compound.get('run_id') != self._comp_active_run_id):
+            # A finished run's queued result arriving after a newer run
+            # started: never shown as the newer run's answer.
+            logger.info('compound: dropped a result from run %s (active %s)',
+                        _compound.get('run_id'), self._comp_active_run_id)
+            return
+        self._comp_compound = _compound
         self.is_comp_running = False
         self.reset_comp_ui()
         if getattr(self, '_close_pending', False):
@@ -28730,7 +28886,8 @@ class GenizahGUI(QMainWindow):
         
         self.comp_known = known_manuscripts 
 
-        if not manuscripts and not filtered_manuscripts and not known_manuscripts:
+        if (not manuscripts and not filtered_manuscripts and not known_manuscripts
+                and not self._comp_compound_has_rows()):
             QMessageBox.information(self, tr("No Results"), tr("No composition matches found."))
             self.pending_recursive_search = False
             # No render follows, so the armed round would never fire and the

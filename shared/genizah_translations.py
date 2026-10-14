@@ -5536,3 +5536,32 @@ TRANSLATIONS.update({
         "החיפוש השמור \"{query}\" משתמש במרווח של {gap} מילים, שהוא גדול מדי "
         "(המרב הוא {limit}), ולכן השלב הזה לא הורץ שוב. המרווח שלו לא שונה.",
 })
+
+# Composition Search conditions (docs/plans/COMPOSITION_CONDITIONS_PLAN.md).
+# Proposed wording; the owner approves it before release.
+TRANSLATIONS.update({
+    "Conditions": "תנאים",
+    "Conditions work only with letter-level search. Switch the method to "
+    "letter-level, or remove the conditions.":
+        "תנאים פועלים רק בחיפוש ברמת האות. החלף את שיטת החיפוש לחיפוש ברמת "
+        "האות, או הסר את התנאים.",
+    "At most {} conditions.": "לכל היותר {} תנאים.",
+    "Condition {}: at most {} versions.": "תנאי {}: לכל היותר {} נוסחים.",
+    "This would run {} searches; the limit is {}. Remove a witness, a "
+    "condition or a version.":
+        "החיפוש היה מריץ {} חיפושים, והמגבלה היא {}. הסר עד נוסח, תנאי או נוסח "
+        "של תנאי.",
+    "Condition {}, version {}: {} letters is too short for letter-level "
+    "search.":
+        "תנאי {}, נוסח {}: {} אותיות הן מעט מדי לחיפוש ברמת האות.",
+    "Condition {}, version {}: {} letters is too long (the limit is {}).":
+        "תנאי {}, נוסח {}: {} אותיות הן יותר מדי (המגבלה היא {}).",
+    "Condition {} has no text.": "בתנאי {} אין טקסט.",
+    "Condition {} is not valid.": "תנאי {} אינו תקין.",
+    "Searching the main text ({}/{})": "מחפש את הטקסט הראשי ({}/{})",
+    "Searching condition {} ({}/{})": "מחפש את תנאי {} ({}/{})",
+    "Stopping. Results found so far are kept; conditions not yet searched "
+    "are marked as not fully checked.":
+        "עוצר. התוצאות שנמצאו עד כה נשמרות; תנאים שעדיין לא נבדקו יסומנו "
+        "כ\"לא נבדקו עד הסוף\".",
+})

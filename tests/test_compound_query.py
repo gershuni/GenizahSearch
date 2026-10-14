@@ -413,3 +413,22 @@ def test_route_caps_filtered_too_and_counts_failures():
 def test_route_refuses_an_unjudged_row():
     with pytest.raises(ValueError):
         route([_row(1, 5)], [], {}, 1, cap=200, sys_parser=_RegexSysIdParser())
+
+
+def test_identity_tells_apart_builds_whose_manifests_coincide(tmp_path):
+    """Two builds of the same pages in a different record ORDER can carry
+    identical manifests (measured: 1 pair in 5 when the build timings round
+    alike). Record numbers mean nothing across them, so the identity must
+    differ even when the manifests are made equal."""
+    from shared.passage_pages import build_identity
+    recs = [(rid(S1, 1, 1), _aperiodic(200, 1)), (rid(S1, 1, 2), _aperiodic(200, 2)),
+            (rid(S2, 1, 2), _aperiodic(200, 3))]
+    a_dir, b_dir = str(tmp_path / 'a'), str(tmp_path / 'b')
+    build_index(recs, a_dir, partitions=1, apply_hygiene=False)
+    build_index([recs[1], recs[2], recs[0]], b_dir, partitions=1, apply_hygiene=False)
+    a, b = open_index(a_dir), open_index(b_dir)
+    b.manifest = dict(a.manifest)
+    assert build_identity(a) != build_identity(b)
+    pmap = PageIndex.build_from(a)
+    with pytest.raises(StaleIndexError):
+        pmap.mask_for(b, pages=[(S1, 'IE1', 2)])

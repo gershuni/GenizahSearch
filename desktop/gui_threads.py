@@ -792,6 +792,225 @@ class MultiWitnessCompositionThread(PausableSearchMixin, QThread):
             self.pause_gate.finish()
             _allow_sleep()
 
+class CompoundCompositionThread(PausableSearchMixin, QThread):
+    """A letter-level Composition Search with CONDITIONS: the main text (one
+    or several witnesses, fused as today), then every version of every
+    condition, each searched exhaustively over the pages it applies to, then
+    the judgement (docs/plans/COMPOSITION_CONDITIONS_PLAN.md).
+
+    Built like `MultiWitnessCompositionThread`, with three differences the
+    plan requires:
+
+    * **Every step runs, every time.** No per-witness row cache is read or
+      written: a compound run costs seconds, and a cache that carried rows but
+      not their completeness reports would turn a cut search into a clean one.
+    * **Stop works inside a step**, not just between steps: the main-text
+      searches get a checkpoint that raises, the condition searches a
+      `should_stop` they report back as `stopped`. A step that was stopped,
+      failed, or never reached leaves its condition UNRESOLVED -- never clean.
+    * **The cap comes after the judgement** (`shared.compound_query.route`),
+      on Main and Filtered only. Every step is searched uncapped.
+
+    The index generation is checked before and after EVERY step, including a
+    step that failed: an install mid-run voids the whole answer.
+    """
+
+    progress_signal = pyqtSignal(int, int)
+    status_signal = pyqtSignal(str)
+    scan_finished_signal = pyqtSignal(object)
+    error_signal = pyqtSignal(str)
+    perf_signal = pyqtSignal(float, int)
+    pause_ack_signal = pyqtSignal(int, int)
+    # (step, total, kind, label): kind is 'main' or 'condition'.
+    step_signal = pyqtSignal(int, int, str, str)
+
+    def __init__(self, searcher, main_witnesses, conditions, filter_text=None,
+                 restrict_sys_ids=None, corpus_scope='genizah', run_id=0,
+                 pinned_generation=None, group_cap=None, fingerprint=''):
+        super().__init__()
+        self.searcher = searcher
+        # [(witness_id, label, text)], the seed first. Every one is searched.
+        self.main_witnesses = list(main_witnesses or [])
+        self.conditions = tuple(conditions or ())
+        self.filter_text = filter_text
+        self.restrict_sys_ids = restrict_sys_ids
+        self.corpus_scope = corpus_scope
+        self.pinned_generation = pinned_generation
+        self.group_cap = group_cap
+        self.fingerprint = fingerprint
+        self._init_pause_support(run_id)
+
+    def _abort_if_generation_moved(self):
+        from desktop import passage_lifecycle as pl
+        if pl.generation_changed(self.pinned_generation):
+            raise pl.PassageIndexReplaced(
+                'the letter-level index was replaced while this '
+                'search was running')
+
+    def _raise_if_stopped(self, _done=0, _total=0):
+        """The main-text checkpoint: the engine's wrapper turns this
+        InterruptedError into a stop and marks the result partial."""
+        if self._should_abort():
+            raise InterruptedError('stopped')
+
+    def _between_steps(self) -> bool:
+        """True when the run must not start another step."""
+        if self._should_abort():
+            return True
+        try:
+            self._checkpoint()
+        except InterruptedError:
+            return True
+        return False
+
+    def run(self):
+        from desktop import passage_lifecycle as pl
+        from desktop import passage_witnesses as pw
+        from shared import compound_query as cq
+        from shared.parallels_service import PARALLELS_GROUP_CAP
+        from shared.passage_parallels import _RegexSysIdParser
+
+        _prevent_sleep()
+        t0 = time.perf_counter()
+        steps = []
+        partial = False
+        dropped = 0
+        try:
+            n_main = len(self.main_witnesses)
+            total = n_main + sum(len(c.versions) for c in self.conditions)
+            step = 0
+            rows, filtered = {}, {}
+            for wid, label, text in self.main_witnesses:
+                step += 1
+                if self._between_steps():
+                    partial = True
+                    break
+                self._abort_if_generation_moved()
+                if not (text or '').strip():
+                    steps.append({'kind': 'main', 'id': wid, 'status': 'failed',
+                                  'reason': 'empty_text'})
+                    continue
+                self.step_signal.emit(step, total, 'main', label or wid)
+                self.progress_signal.emit(step, total)
+                try:
+                    result = self.searcher.search_composition_logic(
+                        text, filter_text=self.filter_text,
+                        boundary_mode='full', min_boundary_matches=1,
+                        restrict_sys_ids=self.restrict_sys_ids,
+                        corpus_scope=self.corpus_scope,
+                        checkpoint=self._raise_if_stopped)
+                except pl.PassageSearchUnavailableError:
+                    raise
+                except Exception as exc:
+                    logger.warning('compound: main witness %s failed: %s', wid, exc)
+                    self._abort_if_generation_moved()
+                    steps.append({'kind': 'main', 'id': wid, 'status': 'failed',
+                                  'reason': 'search_failed'})
+                    continue
+                self._abort_if_generation_moved()
+                rows[wid] = list(result.get('main') or [])
+                filtered[wid] = list(result.get('filtered') or [])
+                dropped += int(result.get('dropped_text_lookup_failures') or 0)
+                stopped_inside = bool(result.get('partial'))
+                steps.append({'kind': 'main', 'id': wid,
+                              'status': 'stopped' if stopped_inside else 'searched',
+                              'hits': len(rows[wid]),
+                              'report': result.get('query_report') or {}})
+                if stopped_inside:
+                    partial = True
+                    break
+
+            seed_ok = any(s['kind'] == 'main' and s['id'] == pw.WITNESS_SEED_ID
+                          and s['status'] in ('searched', 'stopped') for s in steps)
+            if not seed_ok and not partial:
+                # The main text itself was never searched: there is nothing
+                # the conditions could be judged against.
+                self.error_signal.emit('the source text itself could not be searched')
+                return
+
+            roster = [(wid, label) for wid, label, _t in self.main_witnesses]
+            fused = pw.fuse_and_cap(pw.fusion_set(roster, rows, filtered), cap=0)
+            main, filt = ([], []) if fused is None else (fused[0], fused[1])
+
+            keys = [cq.parse_page_key(r.get('raw_header')) for r in main + filt]
+            results = []
+            for ci, cond in enumerate(self.conditions):
+                pages, sys_ids = cq.search_scope(cond.where, keys)
+                versions = []
+                for vi, text in enumerate(cond.versions):
+                    step += 1
+                    if partial or self._between_steps():
+                        partial = True
+                        versions.append(cq.VersionSearch((), cq.CUT_NOT_RUN))
+                        continue
+                    self._abort_if_generation_moved()
+                    label = cond.label or f'{ci + 1}'
+                    self.step_signal.emit(step, total, 'condition', label)
+                    self.progress_signal.emit(step, total)
+                    try:
+                        found = self.searcher.search_condition(
+                            text, pages=tuple(pages), sys_ids=tuple(sys_ids),
+                            should_stop=self._should_abort)
+                    except pl.PassageSearchUnavailableError:
+                        raise
+                    except Exception as exc:
+                        logger.warning('compound: condition %d version %d failed: %s',
+                                       ci + 1, vi + 1, exc)
+                        self._abort_if_generation_moved()
+                        versions.append(cq.VersionSearch((), cq.CUT_FAILED))
+                        steps.append({'kind': 'condition', 'id': f'{ci}:{vi}',
+                                      'status': 'failed', 'reason': 'search_failed'})
+                        continue
+                    self._abort_if_generation_moved()
+                    vs = found.as_version_search()
+                    versions.append(vs)
+                    if found.stopped:
+                        partial = True
+                    steps.append({'kind': 'condition', 'id': f'{ci}:{vi}',
+                                  'status': 'stopped' if found.stopped else 'searched',
+                                  'hits': len(found.hit_record_ids),
+                                  'cut': vs.cut, 'report': found.report})
+                results.append(versions)
+
+            outcomes = cq.judge([r.get('raw_header') for r in main + filt],
+                                self.conditions, results)
+            searched_main = sum(1 for s in steps if s['kind'] == 'main'
+                                and s['status'] in ('searched', 'stopped'))
+            routed = cq.route(
+                main, filt, outcomes, len(self.conditions),
+                cap=(self.group_cap if self.group_cap is not None
+                     else PARALLELS_GROUP_CAP),
+                sys_parser=_RegexSysIdParser(),
+                order_key='fusion_score' if searched_main > 1 else None)
+            self.scan_finished_signal.emit({
+                'main': routed.main,
+                'filtered': routed.filtered,
+                'known': [],
+                'dropped_text_lookup_failures': dropped,
+                'truncated_to_200': bool(routed.main_truncated
+                                         or routed.filtered_truncated),
+                'partial': partial,
+                'compound': {
+                    'fingerprint': self.fingerprint,
+                    'conditions': [c.to_dict() for c in self.conditions],
+                    'removed': routed.removed,
+                    'unresolved': routed.unresolved,
+                    'failed_counts': list(routed.failed_counts),
+                    'steps': steps,
+                    'run_id': self.run_id,
+                },
+            })
+            if not self.cancel_flag:
+                self.perf_signal.emit(
+                    (time.perf_counter() - t0
+                     - self.pause_gate.total_paused_s) * 1000.0,
+                    len(routed.main) + len(routed.filtered))
+        except Exception as e:
+            self.error_signal.emit(str(e))
+        finally:
+            self.pause_gate.finish()
+            _allow_sleep()
+
 class LabCompositionThread(PausableSearchMixin, QThread):
     """Execute Lab Composition Search (Broad-to-Narrow)."""
 
