@@ -526,3 +526,23 @@ Gates at dca14981: `scripts/run_local_tests.py` 15,505+ passed, 0 failed (at f9d
 one GUI test file); `scripts/run_gui_tests.py` 60/62 files, the two failures pre-existing and
 identical on master-main (native Qt platform; Hebrew UI language); `ruff check .` clean;
 `scripts/verify_compound_conditions.py --self-test` 6/6, 2 pending (the user's cases).
+
+**Owner revision, entry point (2026-10-14).** The owner replaced the Composition tab's "Filter
+Text" button and the conditions strip's own "+ Add condition" with one "Filter texts" button and
+menu of three items: "Quoted texts..." (opens the existing `FilterTextDialog` unchanged, now titled
+"Quoted texts"), "Quoting texts..." (opens `ConditionDialog` with the requirement FIXED to
+`REQ_MUST_NOT`, defaulting to "Anywhere in the manuscript", titled "Quoting text"), and
+"Add condition..." (opens `ConditionDialog` fixed to `REQ_MUST`, titled "Search condition", the
+dialog's existing default). `ConditionDialog` no longer has a requirement combo -- the requirement is
+a constructor argument, or the edited condition's own when editing a row -- and `ConditionsStrip`
+lost its own "+ Add condition" button in favour of a public `add_condition(requirement)` (still
+owning the 4-condition cap) and is now hidden entirely when there are no conditions, rather than
+always showing its header. The window's `_refresh_comp_filter_menu`, on the menu's `aboutToShow`,
+shows item 1's active quoted-source count and disables items 2/3 (with the reason as their tooltip)
+exactly when `ConditionsStrip.add_disabled_reason()` is non-empty -- reusing
+`_refresh_comp_conditions_available`'s own letter-level/Lab-mode rule rather than a second copy of
+it. `open_filter_dialog`'s Search-tab column-filter branch is untouched. Tests:
+`tests/test_compound_ui_gui.py` (the dialog's fixed requirement and title, the strip's visibility
+and `add_condition`/`can_add`, and the menu's three items, tooltips, enabled state and handlers, on
+a stub built the same way as the existing result-group tests: genizah_app.py's own methods borrowed
+onto a real `QWidget` since `QMenu` needs a `QWidget` parent).

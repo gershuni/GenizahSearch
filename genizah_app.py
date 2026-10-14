@@ -6416,7 +6416,14 @@ class GenizahGUI(QMainWindow):
         btn_exclude = QPushButton(tr("Exclude Manuscripts"))
         btn_exclude.clicked.connect(
             lambda: self.open_exclude_dialog('composition'))
-        btn_filter_text = QPushButton(tr("Filter Text")); btn_filter_text.clicked.connect(self.open_filter_dialog)
+        # "Filter texts" menu (owner, 2026-10-14): replaces the old "Filter
+        # Text" button AND the conditions strip's own "+ Add condition" with
+        # one entry point of three items; see _build_comp_filter_menu. The
+        # menu's own aboutToShow handler reads self.comp_conditions_strip,
+        # created further down in this method -- fine, since the menu cannot
+        # be shown before the tab finishes building.
+        self.btn_comp_filter_texts = QPushButton(tr("Filter texts"))
+        self.btn_comp_filter_texts.setMenu(self._build_comp_filter_menu())
         self.lbl_exclude_status = QLabel("")
         self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
         self.lbl_comp_status = QLabel("")
@@ -6452,7 +6459,7 @@ class GenizahGUI(QMainWindow):
         self.comp_title_actions = FlowWidget(margin=0)
         _title_flow = self.comp_title_actions.flow
         _title_flow.addWidget(self.btn_comp_pre_search_filters)
-        _title_flow.addWidget(btn_exclude); _title_flow.addWidget(btn_filter_text)
+        _title_flow.addWidget(btn_exclude); _title_flow.addWidget(self.btn_comp_filter_texts)
         _title_flow.addWidget(self.btn_comp_domain_filter)
         _title_flow.addWidget(self.lbl_comp_domain_filter)
         _title_flow.addWidget(self.lbl_exclude_status)
@@ -18569,6 +18576,63 @@ class GenizahGUI(QMainWindow):
         ok = self._comp_method() == 'passage' and not lab
         strip.set_available(ok, '' if ok else tr(
             "Conditions work only with letter-level search."))
+
+    # -- "Filter texts" menu (owner, 2026-10-14) ------------------------------
+    # One button, one menu, three fixed-requirement entry points, replacing
+    # the old "Filter Text" button and the conditions strip's own
+    # "+ Add condition". docs/plans/COMPOSITION_CONDITIONS_PLAN.md section 12.
+
+    def _build_comp_filter_menu(self):
+        """Build the menu once; `_refresh_comp_filter_menu` (on aboutToShow)
+        keeps its text, tooltips and enabled state current."""
+        menu = QMenu(self)
+        if CURRENT_LANG == 'he':
+            menu.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        menu.setToolTipsVisible(True)
+
+        self.act_comp_quoted_texts = menu.addAction(tr("Quoted texts..."))
+        self.act_comp_quoted_texts.setToolTip(
+            tr("For example, Bible verses quoted in the Talmud"))
+        self.act_comp_quoted_texts.triggered.connect(self.open_filter_dialog)
+
+        self.act_comp_quoting_texts = menu.addAction(tr("Quoting texts..."))
+        self.act_comp_quoting_texts.triggered.connect(
+            lambda _checked=False: self._comp_add_condition(compound_query.REQ_MUST_NOT))
+
+        self.act_comp_add_condition = menu.addAction(tr("Add condition..."))
+        self.act_comp_add_condition.triggered.connect(
+            lambda _checked=False: self._comp_add_condition(compound_query.REQ_MUST))
+
+        menu.aboutToShow.connect(self._refresh_comp_filter_menu)
+        return menu
+
+    def _comp_add_condition(self, requirement):
+        """"Quoting texts..." / "Add condition..." triggered: open
+        ConditionDialog through the strip, which owns the 4-condition cap."""
+        self.comp_conditions_strip.add_condition(requirement)
+
+    def _refresh_comp_filter_menu(self):
+        """On aboutToShow: item 1 shows how many quoted sources are active;
+        items 2 and 3 are disabled at the cap or outside letter-level, with
+        the reason replacing the example in their tooltip."""
+        self._refresh_comp_conditions_available()
+        n_quoted = len([ref for ref in getattr(self, 'filter_enabled_sources', set())
+                       if ref in getattr(self, 'filter_sources', {})])
+        self.act_comp_quoted_texts.setText(
+            tr("Quoted texts... ({})").format(n_quoted) if n_quoted
+            else tr("Quoted texts..."))
+
+        strip = self.comp_conditions_strip
+        reason = strip.add_disabled_reason()
+        can_add = not reason
+        self.act_comp_quoting_texts.setEnabled(can_add)
+        self.act_comp_quoting_texts.setToolTip(
+            reason or tr("For example, the Rif quoting the Talmud"))
+        self.act_comp_add_condition.setEnabled(can_add)
+        self.act_comp_add_condition.setToolTip(
+            reason or tr(
+                "For example, show only results where the next image "
+                "includes a certain text"))
 
     @staticmethod
     def _compound_key_str(header):

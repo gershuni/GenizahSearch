@@ -12,6 +12,8 @@ drop the works that quote it (Halakhot Gedolot and the Rif when searching the Ta
 texts on neighbouring images, or ask for several texts in one manuscript. Pages a condition removed,
 and pages it could not fully check, are shown in their own groups with the reason. Also: results
 no longer lose a page that shares its number with another image set of the same manuscript.
+One "Filter texts" menu (Quoted texts / Quoting texts / Add condition) now replaces the old
+"Filter Text" button and the conditions strip's own "+ Add condition" (owner, 2026-10-14).
 Plan and decisions: `docs/plans/COMPOSITION_CONDITIONS_PLAN.md`. Not released.
 
 ---

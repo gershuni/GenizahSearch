@@ -54,29 +54,45 @@ def condition_summary(cond: cq.Condition, words: int = 6) -> str:
             f"{_label_for(PLACE_LABELS, cond.where)} · {name}")
 
 
+# Owner decision 2026-10-14: the dialog's requirement is fixed by its entry
+# point (the "Filter texts" menu's "Quoting texts..." / "Add condition..."),
+# never chosen in the dialog; the window title follows it, since "Condition"
+# was taken ("מצב") -- see docs/plans/COMPOSITION_CONDITIONS_PLAN.md section 12.
+_TITLE_FOR_REQUIREMENT = {
+    cq.REQ_MUST: "Search condition",
+    cq.REQ_MUST_NOT: "Quoting text",
+}
+# Only "Quoting texts..." (must-not) gets a non-default starting place; "Add
+# condition..." (must) keeps the first combo item, as before.
+_DEFAULT_WHERE_FOR_REQUIREMENT = {
+    cq.REQ_MUST_NOT: cq.WHERE_MANUSCRIPT,
+}
+
+
 class ConditionDialog(QDialog):
     """Add or edit one condition. `floor` is the active letter-level length
-    floor (letters), used only to warn before Search."""
+    floor (letters), used only to warn before Search.
+
+    The requirement is FIXED for the dialog's lifetime: passed in `requirement`
+    for a new condition, or taken from `condition` when editing one (editing
+    always keeps the row's own requirement). There is no requirement combo."""
 
     def __init__(self, parent=None, condition: Optional[cq.Condition] = None,
-                 floor: int = 40):
+                 floor: int = 40, requirement: Optional[str] = None):
         super().__init__(parent)
-        self.setWindowTitle(tr("Search condition"))
+        self._requirement = condition.requirement if condition is not None else requirement
+        if self._requirement not in cq.REQUIREMENTS:
+            raise ValueError(f'ConditionDialog needs a fixed requirement, got {self._requirement!r}')
+        self.setWindowTitle(tr(_TITLE_FOR_REQUIREMENT.get(self._requirement, "Search condition")))
         if CURRENT_LANG == 'he':
             self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self._floor = int(floor)
         lay = QVBoxLayout(self)
 
-        row = QHBoxLayout()
-        self.combo_requirement = QComboBox()
-        for key, text in REQUIREMENT_LABELS:
-            self.combo_requirement.addItem(tr(text), key)
         self.combo_where = QComboBox()
         for key, text in PLACE_LABELS:
             self.combo_where.addItem(tr(text), key)
-        row.addWidget(self.combo_requirement)
-        row.addWidget(self.combo_where)
-        lay.addLayout(row)
+        lay.addWidget(self.combo_where)
 
         self.edit_label = QLineEdit()
         self.edit_label.setPlaceholderText(tr("Name (optional), e.g. Halakhot Gedolot"))
@@ -118,13 +134,14 @@ class ConditionDialog(QDialog):
         lay.addWidget(self.buttons)
 
         if condition is not None:
-            self.combo_requirement.setCurrentIndex(
-                self.combo_requirement.findData(condition.requirement))
             self.combo_where.setCurrentIndex(self.combo_where.findData(condition.where))
             self.edit_label.setText(condition.label)
             self.edit_text.setPlainText('\n\n'.join(condition.versions))
+        else:
+            default_where = _DEFAULT_WHERE_FOR_REQUIREMENT.get(self._requirement)
+            if default_where is not None:
+                self.combo_where.setCurrentIndex(self.combo_where.findData(default_where))
         self.edit_text.textChanged.connect(self._refresh)
-        self.combo_requirement.currentIndexChanged.connect(self._refresh)
         self._refresh()
         self.resize(560, 420)
 
@@ -148,8 +165,7 @@ class ConditionDialog(QDialog):
             len(versions), ', '.join(str(n) for n in letters)) if versions else '')
         self.lbl_info.setText('\n'.join([info] + problems).strip())
         self.lbl_info.setStyleSheet("color: #c0392b;" if problems else "color: #7f8c8d;")
-        self.lbl_help.setVisible(
-            self.combo_requirement.currentData() == cq.REQ_MUST_NOT)
+        self.lbl_help.setVisible(self._requirement == cq.REQ_MUST_NOT)
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(
             bool(versions) and not problems)
 
@@ -173,14 +189,18 @@ class ConditionDialog(QDialog):
             self.edit_label.setText(os.path.splitext(os.path.basename(paths[0]))[0])
 
     def condition(self) -> cq.Condition:
-        return cq.Condition(self.combo_requirement.currentData(),
+        return cq.Condition(self._requirement,
                             self.combo_where.currentData(),
                             tuple(self.versions()),
                             self.edit_label.text().strip())
 
 
 class ConditionsStrip(QWidget):
-    """The rows under the main text: one per condition, and "+ Add condition".
+    """The rows under the main text: one per condition.
+
+    There is no "Add" button here any more (owner decision 2026-10-14): the
+    Composition tab's "Filter texts" menu calls `add_condition` instead. The
+    whole strip is hidden when there are no conditions.
 
     `changed` carries the new list. `searches_for(n_conditions_versions)` is
     asked for the run's total search count so the strip can show it against
@@ -202,12 +222,9 @@ class ConditionsStrip(QWidget):
         self.lbl_title = QLabel(tr("More conditions") + ":")
         self.lbl_count = QLabel('')
         self.lbl_count.setStyleSheet("color: #7f8c8d;")
-        self.btn_add = QPushButton(tr("+ Add condition"))
-        self.btn_add.clicked.connect(self._add)
         head.addWidget(self.lbl_title)
         head.addWidget(self.lbl_count)
         head.addStretch()
-        head.addWidget(self.btn_add)
         outer.addLayout(head)
         self._rows_box = QVBoxLayout()
         self._rows_box.setSpacing(1)
@@ -234,14 +251,36 @@ class ConditionsStrip(QWidget):
         self.lbl_disabled.setVisible(bool(reason) and not available)
         self._rebuild()
 
-    # -- actions -------------------------------------------------------------
-    def _add(self):
+    def add_disabled_reason(self) -> str:
+        """Why `add_condition` cannot be used right now, or '' if it can.
+        The Composition tab's "Filter texts" menu uses this for the "Quoting
+        texts..." / "Add condition..." items' tooltip and enabled state."""
+        if not self._enabled:
+            return self.lbl_disabled.text() or tr(
+                "Conditions work only with letter-level search.")
         if len(self._conditions) >= cq.MAX_CONDITIONS:
-            return
-        dlg = ConditionDialog(self, floor=self._floor())
+            return tr("At most {} conditions.").format(cq.MAX_CONDITIONS)
+        return ''
+
+    def can_add(self) -> bool:
+        return not self.add_disabled_reason()
+
+    # -- actions -------------------------------------------------------------
+    def add_condition(self, requirement: str) -> bool:
+        """Open the add dialog with a FIXED requirement -- the Composition
+        tab's "Filter texts" menu calls this for "Quoting texts..."
+        (REQ_MUST_NOT) and "Add condition..." (REQ_MUST). Owns the
+        4-condition cap and the letter-level rule (`can_add`), so no caller
+        can add one the menu would have refused. Returns whether a condition
+        was added."""
+        if not self.can_add():
+            return False
+        dlg = ConditionDialog(self, requirement=requirement, floor=self._floor())
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._conditions.append(dlg.condition())
             self._emit()
+            return True
+        return False
 
     def _edit(self, index: int):
         dlg = ConditionDialog(self, self._conditions[index], floor=self._floor())
@@ -284,8 +323,7 @@ class ConditionsStrip(QWidget):
             h.addWidget(edit)
             h.addWidget(remove)
             self._rows_box.addWidget(row)
-        self.btn_add.setEnabled(self._enabled
-                                and len(self._conditions) < cq.MAX_CONDITIONS)
+        self.setVisible(bool(self._conditions))
         if self._conditions:
             total = self._main_searches() + sum(len(c.versions) for c in self._conditions)
             self.lbl_count.setText(tr("{} searches (limit {})").format(

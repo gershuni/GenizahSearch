@@ -5639,3 +5639,21 @@ TRANSLATIONS.update({
     'Conditions changed. Search again to apply them.': 'התנאים השתנו. חפש שוב כדי להחיל אותם.',
     '(image {} could not be searched)': '(תמונה {} לא ניתנה לחיפוש)',
 })
+
+# Composition Search conditions: the "Filter texts" menu (owner decision
+# 2026-10-14), replacing the old "Filter Text" button and the conditions
+# strip's own "+ Add condition" with three fixed-requirement entry points.
+# Proposed wording (owner approval pending)
+TRANSLATIONS.update({
+    'Filter texts': 'סנן טקסטים',
+    'Quoted texts...': 'מקורות מצוטטים...',
+    'Quoted texts': 'מקורות מצוטטים',
+    'Quoted texts... ({})': 'מקורות מצוטטים... ({})',
+    'Quoting texts...': 'חיבורים מצטטים...',
+    'Quoting text': 'חיבור מצטט',
+    'Add condition...': 'הוסף תנאי...',
+    'For example, Bible verses quoted in the Talmud': 'למשל: פסוקי תנ"ך המצוטטים בתלמוד',
+    'For example, the Rif quoting the Talmud': 'למשל: הרי"ף המצטט את התלמוד',
+    'For example, show only results where the next image includes a certain text':
+        'למשל: הצג רק תוצאות שבתמונה הבאה מופיע בהן טקסט מסוים',
+})

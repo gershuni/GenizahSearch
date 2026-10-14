@@ -537,7 +537,11 @@ class FilterTextDialog(QDialog):
             current_sources: dict of {ref: text} for previously loaded sources
         """
         super().__init__(parent)
-        self.setWindowTitle(tr("Filter Text"))
+        # Owner decision 2026-10-14: this is the "Quoted texts..." item of the
+        # Composition tab's "Filter texts" menu; the window keeps its own
+        # behavior, only the title changed (no change to "Filter Text", the
+        # string, which other callers may still use).
+        self.setWindowTitle(tr("Quoted texts"))
         self.resize(600, 500)
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
