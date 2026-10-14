@@ -307,6 +307,11 @@ class ConditionSearch:
     hit_spans: tuple
     report: dict
     stopped: bool
+    # Rendered rows (text, source_ctx, highlight patterns) for the first
+    # `render_limit` hits by score, for showing the evidence; empty unless
+    # asked for. A hit whose page text cannot be read is simply not among
+    # them -- it still counts in `hit_record_ids`, which is what is judged.
+    rows: tuple = ()
 
     def as_version_search(self):
         from shared.compound_query import VersionSearch, cut_reason
@@ -990,7 +995,8 @@ class PassageSearcher:
     # -- Composition Search conditions ---------------------------------------
 
     def search_condition(self, text: str, pages=(), sys_ids=(),
-                         should_stop=None) -> 'ConditionSearch':
+                         should_stop=None,
+                         render_limit: int = 0) -> 'ConditionSearch':
         """One version of a condition, searched EXHAUSTIVELY over its pages
         (docs/plans/COMPOSITION_CONDITIONS_PLAN.md section 3).
 
@@ -1036,9 +1042,25 @@ class PassageSearcher:
 
         hits, report = search_passage(self.index, text, policy,
                                       record_mask=mask, checkpoint=_checkpoint)
+        rows = []
+        if render_limit and hits:
+            q_nfc = nfc(text or '')
+            _q_stream, q_offsets = norm_stream(text or '')
+            starts = sorted({span[0] for h in hits for span in h.spans})
+            span_index = {q0: i for i, q0 in enumerate(starts)}
+            for hit in hits[:render_limit]:           # hits are best first
+                row = {
+                    'uid': _derive_uid(hit.record_id), 'raw_header': hit.record_id,
+                    'src_lbl': '', 'source_ctx': '', 'text': '',
+                    'highlight_pattern': '', 'source_highlight_pattern': '',
+                    'score': float(hit.score), 'final_score': float(hit.score),
+                    'chunk_count': int(hit.n_spans), 'chunk_hits': [],
+                }
+                if self._render_highlights(row, hit, q_nfc, q_offsets, span_index):
+                    rows.append(row)
         return ConditionSearch(tuple(h.record_id for h in hits),
                                tuple((h.record_id, tuple(h.spans)) for h in hits),
-                               report.as_dict(), stopped[0])
+                               report.as_dict(), stopped[0], tuple(rows))
 
     def _run_one_witness(self, wid: str, label: str, text: str,
                          restrict_sys_ids, min_boundary_matches: int,

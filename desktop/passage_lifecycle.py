@@ -701,7 +701,7 @@ class PassageSearchAdapter:
                 corpus_scope=corpus_scope, **_cp_kw))
 
     def search_condition(self, text: str, pages=(), sys_ids=(),
-                         should_stop=None):
+                         should_stop=None, render_limit: int = 0):
         """One version of a Composition Search condition, under its own lease
         (`PassageSearcher.search_condition`). The page set comes in as KEYS --
         `(sys_id, IE, P)` and sys_ids -- and the record mask is built inside
@@ -712,7 +712,8 @@ class PassageSearchAdapter:
         """
         return self._call_in_lease(
             lambda searcher: searcher.search_condition(
-                text, pages=pages, sys_ids=sys_ids, should_stop=should_stop))
+                text, pages=pages, sys_ids=sys_ids, should_stop=should_stop,
+                render_limit=render_limit))
 
     def _call_in_lease(self, call):
         """Run `call(searcher)` inside one complete lease, behind the

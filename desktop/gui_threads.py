@@ -824,6 +824,11 @@ class CompoundCompositionThread(PausableSearchMixin, QThread):
     # (step, total, kind, label): kind is 'main' or 'condition'.
     step_signal = pyqtSignal(int, int, str, str)
 
+    # Evidence rows rendered per condition version (text and highlights, for
+    # showing where a condition matched). Judging uses every verified hit;
+    # this bounds only how many get display text.
+    EVIDENCE_RENDER_LIMIT = 2000
+
     def __init__(self, searcher, main_witnesses, conditions, filter_text=None,
                  restrict_sys_ids=None, corpus_scope='genizah', run_id=0,
                  pinned_generation=None, group_cap=None, fingerprint=''):
@@ -934,6 +939,7 @@ class CompoundCompositionThread(PausableSearchMixin, QThread):
 
             keys = [cq.parse_page_key(r.get('raw_header')) for r in main + filt]
             results = []
+            evidence = {}       # record id -> rendered row, tagged per condition
             for ci, cond in enumerate(self.conditions):
                 pages, sys_ids = cq.search_scope(cond.where, keys)
                 versions = []
@@ -950,7 +956,8 @@ class CompoundCompositionThread(PausableSearchMixin, QThread):
                     try:
                         found = self.searcher.search_condition(
                             text, pages=tuple(pages), sys_ids=tuple(sys_ids),
-                            should_stop=self._should_abort)
+                            should_stop=self._should_abort,
+                            render_limit=self.EVIDENCE_RENDER_LIMIT)
                     except pl.PassageSearchUnavailableError:
                         raise
                     except Exception as exc:
@@ -964,6 +971,13 @@ class CompoundCompositionThread(PausableSearchMixin, QThread):
                     self._abort_if_generation_moved()
                     vs = found.as_version_search()
                     versions.append(vs)
+                    tag = {'condition': ci, 'label': cond.label,
+                           'requirement': cond.requirement, 'where': cond.where}
+                    for row in getattr(found, 'rows', ()) or ():
+                        ev = evidence.setdefault(
+                            row['raw_header'], dict(row, compound_evidence=[]))
+                        if tag not in ev['compound_evidence']:
+                            ev['compound_evidence'].append(tag)
                     if found.stopped:
                         partial = True
                     steps.append({'kind': 'condition', 'id': f'{ci}:{vi}',
@@ -982,6 +996,10 @@ class CompoundCompositionThread(PausableSearchMixin, QThread):
                      else PARALLELS_GROUP_CAP),
                 sys_parser=_RegexSysIdParser(),
                 order_key='fusion_score' if searched_main > 1 else None)
+            # Only the evidence some judged page points to travels on.
+            referenced = {rid for r in (routed.main + routed.filtered
+                                        + routed.removed + routed.unresolved)
+                          for ev in r['compound']['evidence'] for rid in ev}
             self.scan_finished_signal.emit({
                 'main': routed.main,
                 'filtered': routed.filtered,
@@ -996,6 +1014,8 @@ class CompoundCompositionThread(PausableSearchMixin, QThread):
                     'removed': routed.removed,
                     'unresolved': routed.unresolved,
                     'failed_counts': list(routed.failed_counts),
+                    'evidence': {rid: row for rid, row in evidence.items()
+                                 if rid in referenced},
                     'steps': steps,
                     'run_id': self.run_id,
                 },

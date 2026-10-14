@@ -53,9 +53,11 @@ class _Searcher:
             raise self.raises[text]
         return self.main.get(text, {'main': [], 'filtered': []})
 
-    def search_condition(self, text, pages=(), sys_ids=(), should_stop=None):
+    def search_condition(self, text, pages=(), sys_ids=(), should_stop=None,
+                         render_limit=0):
         self.calls.append(('cond', text, {'pages': pages, 'sys_ids': sys_ids,
-                                          'should_stop': should_stop}))
+                                          'should_stop': should_stop,
+                                          'render_limit': render_limit}))
         if self.on_call:
             self.on_call(len(self.calls))
         if text in self.raises:
@@ -63,7 +65,9 @@ class _Searcher:
         answer = self.cond.get(text, ())
         if isinstance(answer, ConditionSearch):
             return answer
-        return ConditionSearch(tuple(answer), (), {}, False)
+        rows = tuple({'raw_header': r, 'score': 50.0, 'text': f'ev {r}',
+                      'highlight_pattern': 'p'} for r in answer)
+        return ConditionSearch(tuple(answer), (), {}, False, rows)
 
 
 mixin = gui_threads.PausableSearchMixin
@@ -73,6 +77,7 @@ CT = gui_threads.CompoundCompositionThread
 def _worker(main_list, conditions, searcher, pinned=None):
     class _W:
         run = CT.run
+        EVIDENCE_RENDER_LIMIT = CT.EVIDENCE_RENDER_LIMIT
         _abort_if_generation_moved = CT._abort_if_generation_moved
         _raise_if_stopped = CT._raise_if_stopped
         _between_steps = CT._between_steps
@@ -431,3 +436,101 @@ def test_a_stale_runs_result_is_dropped(monkeypatch):
     w.reset_comp_ui = lambda: (_ for _ in ()).throw(AssertionError('rendered'))
     APP.on_comp_scan_finished(w, {'main': [], 'compound': {'run_id': 8}})
     assert w._comp_compound == 'untouched'
+
+
+def test_evidence_rows_travel_tagged_and_only_when_referenced():
+    c = Condition(cq.REQ_MUST, cq.WHERE_ADJACENT, ('rashi',), 'Rashi')
+    other = rid(S3, 9, 9)                         # a hit no judged page uses
+    s = _Searcher(main={MAIN: _rows(P1)},
+                  cond={'rashi': (rid(S1, 1, 6), other)})
+    w = _worker([(SEED, '', MAIN)], [c], s)
+    w.run()
+    out = _result(w)
+    assert s.calls[-1][2]['render_limit'] == CT.EVIDENCE_RENDER_LIMIT
+    ev = out['compound']['evidence']
+    assert set(ev) == {rid(S1, 1, 6)}
+    assert ev[rid(S1, 1, 6)]['compound_evidence'] == [
+        {'condition': 0, 'label': 'Rashi', 'requirement': cq.REQ_MUST,
+         'where': cq.WHERE_ADJACENT}]
+
+
+# -- step 4: evidence pages, reasons, flat markers, the score mark -------------------
+
+class _ResultsWin:
+    _attach_compound_evidence = APP._attach_compound_evidence
+    _compound_evidence_labels = APP._compound_evidence_labels
+    _compound_item_reason = APP._compound_item_reason
+    _condition_label = APP._condition_label
+    _comp_flat_marker_map = APP._comp_flat_marker_map
+    _comp_flat_root_label = APP._comp_flat_root_label
+    _format_score_with_boundary = APP._format_score_with_boundary
+    _compound_summary_text = APP._compound_summary_text
+
+    def __init__(self, conditions):
+        self._comp_compound = {'conditions': [c.to_dict() for c in conditions]}
+
+    def _get_filter_reason(self, item):
+        return ''
+
+
+def _judged(header, states, evidence, reasons=None):
+    n = len(states)
+    oc = cq.PageOutcome(cq._category(states), tuple(states),
+                        tuple(tuple(e) for e in evidence),
+                        tuple(reasons or [''] * n))
+    return {'raw_header': header, 'score': 90.0, 'compound': oc.to_dict()}
+
+
+def test_evidence_pages_join_their_manuscript_scoreless_and_once():
+    c = Condition(cq.REQ_MUST, cq.WHERE_ADJACENT, ('r',), 'Rashi')
+    w = _ResultsWin([c])
+    ev_rid = rid(S1, 1, 6)
+    evidence = {ev_rid: {'raw_header': ev_rid, 'score': 77.0, 'text': 't',
+                         'compound_evidence': [{'condition': 0}]}}
+    rows = [_judged(P1, [cq.SATISFIED], [[ev_rid]])]
+    out = w._attach_compound_evidence(rows, evidence)
+    assert [r['raw_header'] for r in out] == [P1, ev_rid]
+    added = out[1]
+    assert added['is_condition_evidence'] and added['score'] == 0.0
+    assert added['evidence_score'] == 77.0
+    assert w._format_score_with_boundary(added) == '◆ Rashi'
+    assert w._format_score_with_boundary(out[0]) == '90'
+    # An evidence page that is itself a main-text page is tagged, not added.
+    rows = [_judged(P1, [cq.SATISFIED], [[P1]])]
+    out = w._attach_compound_evidence(rows, {P1: dict(evidence[ev_rid], raw_header=P1)})
+    assert len(out) == 1 and out[0]['compound_evidence'] == [{'condition': 0}]
+
+
+def test_reasons_name_the_condition_and_what_cut_it():
+    from genizah_core import tr
+    c1 = Condition(cq.REQ_MUST_NOT, cq.WHERE_MANUSCRIPT, ('h',), 'HG')
+    c2 = Condition(cq.REQ_MUST_NOT, cq.WHERE_MANUSCRIPT, ('r',))
+    w = _ResultsWin([c1, c2])
+    ms = {'pages': [_judged(P1, [cq.REMOVED, cq.UNRESOLVED], [[P1], []],
+                            ['', cq.CUT_VERIFY])]}
+    assert w._compound_item_reason(ms, 'removed') == 'HG'
+    assert w._compound_item_reason(ms, 'unresolved') == \
+        f"{tr('Condition {}').format(2)} ({tr('search limit reached')})"
+
+
+def test_flat_view_marks_and_counts_the_two_new_groups():
+    from genizah_core import tr
+    w = _ResultsWin([Condition(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, ('h',))])
+    removed = [{'pages': [_judged(P1, [cq.REMOVED], [[P1]])]}]
+    unresolved = [{'pages': [_judged(P2, [cq.UNRESOLVED], [[]], [cq.CUT_STOPPED])]}]
+    markers = w._comp_flat_marker_map([], [], removed=removed, unresolved=unresolved)
+    kinds = sorted(k for _i, k, _r in markers.values())
+    assert kinds == ['removed', 'unresolved']
+    label = w._comp_flat_root_label(2, markers)
+    assert tr("{} removed by a condition").format(1) in label
+    assert tr("{} not fully checked").format(1) in label
+
+
+def test_summary_says_what_each_condition_did():
+    from genizah_core import tr
+    w = _ResultsWin([Condition(cq.REQ_MUST, cq.WHERE_SAME_IMAGE, ('h',), 'HG')])
+    w._comp_compound.update({'failed_counts': [3], 'removed': [1, 2],
+                             'unresolved': []})
+    text = w._compound_summary_text()
+    assert tr("{} pages without {}").format(3, 'HG') in text
+    assert tr("{} pages removed").format(2) in text

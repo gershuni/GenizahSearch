@@ -3088,6 +3088,8 @@ class _RevertWin(_Win):
     _set_boundary_row_visible = APP._set_boundary_row_visible
     _set_witness_panel_visible = APP._set_witness_panel_visible
     _set_passage_options_visible = APP._set_passage_options_visible
+    # Freezes the conditions strip outside letter-level; a no-op without one.
+    _refresh_comp_conditions_available = APP._refresh_comp_conditions_available
 
 
 def _revert_window(lab=False):

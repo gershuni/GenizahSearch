@@ -1531,6 +1531,8 @@ class GenizahGUI(QMainWindow):
         self.comp_conditions = []          # [compound_query.Condition]
         self._comp_compound = None         # the last run's 'compound' payload
         self._comp_active_run_id = None    # the run whose results may land
+        self.comp_cond_removed = []        # manuscripts a condition removed
+        self.comp_cond_unresolved = []     # manuscripts not fully checked
         self.comp_excluded_sys_ids = set()
         self.comp_excluded_shelfmarks = set()
         self.comp_exclusion_sources: list = []
@@ -6466,6 +6468,15 @@ class GenizahGUI(QMainWindow):
         self.comp_text_area = QPlainTextEdit(); self.comp_text_area.setPlaceholderText(tr("Paste source text..."))
         if CURRENT_LANG == 'he': self.comp_text_area.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         in_l.addWidget(self.comp_text_area)
+
+        # Composition Search conditions, under the main text (owner,
+        # 2026-10-14; docs/plans/COMPOSITION_CONDITIONS_PLAN.md).
+        from desktop.compound_ui import ConditionsStrip
+        self.comp_conditions_strip = ConditionsStrip(
+            self, floor=self._comp_condition_floor,
+            main_searches=lambda: 1 + len(self._comp_witness_state().entries))
+        self.comp_conditions_strip.changed.connect(self._on_comp_conditions_changed)
+        in_l.addWidget(self.comp_conditions_strip)
 
         # Single Row for Controls
         # Wraps like the Search tab's row 2 (see search_row2).
@@ -18328,6 +18339,153 @@ class GenizahGUI(QMainWindow):
         }
         return texts.get(problem.code, tr("Condition {} is not valid.").format(n))
 
+    def _condition_label(self, index):
+        """A condition's label as dispatched, or "Condition N"."""
+        conds = (self._comp_compound or {}).get('conditions') or []
+        label = ''
+        if 0 <= index < len(conds):
+            label = (conds[index] or {}).get('label') or ''
+        return label or tr("Condition {}").format(index + 1)
+
+    def _attach_compound_evidence(self, rows, evidence):
+        """Rows plus, for each, the condition pages that are its evidence
+        (rendered by the worker), so a manuscript shows WHERE a condition
+        matched. An evidence page that is already one of the rows is not
+        added twice; it is tagged instead. Evidence pages carry score 0 so
+        they never outrank, or replace, a main-text page in grouping."""
+        out = [dict(r) for r in rows or []]
+        present = {r.get('raw_header'): r for r in out}
+        for row in list(out):
+            for ev_ids in ((row.get('compound') or {}).get('evidence') or []):
+                for rid in ev_ids:
+                    ev = evidence.get(rid)
+                    if ev is None:
+                        continue
+                    tags = list(ev.get('compound_evidence') or [])
+                    if rid in present:
+                        mine = present[rid].setdefault('compound_evidence', [])
+                        for t in tags:
+                            if t not in mine:
+                                mine.append(t)
+                        continue
+                    added = dict(ev, score=0.0, final_score=0.0,
+                                 evidence_score=float(ev.get('score') or 0.0),
+                                 is_condition_evidence=True)
+                    out.append(added)
+                    present[rid] = added
+        return out
+
+    def _compound_evidence_labels(self, item):
+        tags = item.get('compound_evidence') or []
+        names = []
+        for t in tags:
+            name = self._condition_label(int(t.get('condition', 0)))
+            if name not in names:
+                names.append(name)
+        return ", ".join(names)
+
+    def _compound_item_reason(self, ms_item, kind):
+        """Why a manuscript is in Removed / Not fully checked, from its pages'
+        stored outcomes: the conditions involved, and for an unresolved one
+        what cut its search."""
+        reason_text = {
+            compound_query.CUT_CANDIDATES: tr("search limit reached"),
+            compound_query.CUT_VERIFY: tr("search limit reached"),
+            compound_query.CUT_BELOW_FLOOR: tr("text too short"),
+            compound_query.CUT_STOPPED: tr("stopped"),
+            compound_query.CUT_FAILED: tr("search failed"),
+            compound_query.CUT_NOT_RUN: tr("not searched"),
+            compound_query.CUT_UNIDENTIFIED: tr("page not identified"),
+        }
+        want = (compound_query.REMOVED if kind == 'removed'
+                else compound_query.UNRESOLVED)
+        parts = []
+        for page in [ms_item] + list(ms_item.get('pages') or []):
+            oc = page.get('compound') or {}
+            for i, state in enumerate(oc.get('states') or []):
+                if state != want:
+                    continue
+                name = self._condition_label(i)
+                if kind == 'unresolved':
+                    why = reason_text.get((oc.get('reasons') or [''] * (i + 1))[i], '')
+                    name = f"{name} ({why})" if why else name
+                if name not in parts:
+                    parts.append(name)
+        return ", ".join(parts)
+
+    def _add_compound_groups(self, removed, unresolved, add_node, make_checkable):
+        """The two collapsed condition groups after Excluded, each split by
+        reason, and their ViewGroups so the viewer agrees with the tree."""
+        for kind, items, title, color, category in (
+                ('removed', removed, tr("Removed by a condition ({})"),
+                 QColor('#c0392b'), _cvf.CATEGORY_REMOVED),
+                ('unresolved', unresolved, tr("Not fully checked ({})"),
+                 QColor('#8e44ad'), _cvf.CATEGORY_UNRESOLVED)):
+            if not items:
+                continue
+            root = QTreeWidgetItem(self.comp_tree, [title.format(len(items))])
+            root.setData(0, Qt.ItemDataRole.UserRole + 100,
+                         "ROOT_COND_REMOVED" if kind == 'removed' else "ROOT_COND_UNRESOLVED")
+            root.setForeground(0, color)
+            root.setExpanded(False)
+            make_checkable(root)
+            by_reason = {}
+            for item in items:
+                by_reason.setdefault(self._compound_item_reason(item, kind), []).append(item)
+            for reason, r_items in sorted(by_reason.items()):
+                ordered = self._sort_comp_items(r_items)
+                self._comp_view_groups.append(_cvf.ViewGroup(
+                    category, tuple(ordered), subgroup=reason))
+                node = QTreeWidgetItem(root, [f"{reason} ({len(r_items)})", "", "", ""])
+                node.setData(0, Qt.ItemDataRole.UserRole + 100,
+                             "ROOT_COND_REASON")
+                node.setForeground(0, color)
+                node.setExpanded(False)
+                make_checkable(node)
+                for item in ordered:
+                    add_node(node, item)
+
+    def _compound_summary_text(self):
+        """The summary line's condition part: pages each "must appear"
+        condition dropped, and the sizes of the two groups."""
+        c = getattr(self, '_comp_compound', None)
+        if not c:
+            return ''
+        parts = []
+        for i, n in enumerate(c.get('failed_counts') or []):
+            if n:
+                parts.append(tr("{} pages without {}").format(n, self._condition_label(i)))
+        if c.get('removed'):
+            parts.append(tr("{} pages removed").format(len(c['removed'])))
+        if c.get('unresolved'):
+            parts.append(tr("{} pages not fully checked").format(len(c['unresolved'])))
+        return ", ".join(parts)
+
+    def _comp_condition_floor(self):
+        """The active letter-level length floor, for the dialog's warnings."""
+        from shared.passage_policy import compose as _passage_compose
+        try:
+            return _passage_compose(self._comp_passage_axis('width'),
+                                    self._comp_passage_axis('length'),
+                                    self._comp_passage_axis('depth')).min_span
+        except Exception:
+            return 40
+
+    def _on_comp_conditions_changed(self, conditions):
+        self.comp_conditions = list(conditions)
+
+    def _refresh_comp_conditions_available(self):
+        """Conditions run only in letter-level mode; elsewhere the strip
+        shows them, frozen, with the reason."""
+        strip = getattr(self, 'comp_conditions_strip', None)
+        if strip is None:
+            return
+        lab = bool(getattr(self, 'btn_lab_mode_toggle_comp', None)
+                   and self.btn_lab_mode_toggle_comp.isChecked())
+        ok = self._comp_method() == 'passage' and not lab
+        strip.set_available(ok, '' if ok else tr(
+            "Conditions work only with letter-level search."))
+
     def _comp_compound_has_rows(self):
         c = getattr(self, '_comp_compound', None)
         return bool(c and (c.get('removed') or c.get('unresolved')))
@@ -19857,6 +20015,7 @@ class GenizahGUI(QMainWindow):
         function), so switching letter-level off never leaves them disabled
         with nothing left to re-enable them until Lab Mode is toggled by
         hand."""
+        self._refresh_comp_conditions_available()
         if on and not hasattr(self, '_passage_cached_chunk_state'):
             cache = {}
             for name, kind, _forced in self._PASSAGE_FORCED_CONTROLS:
@@ -19983,6 +20142,8 @@ class GenizahGUI(QMainWindow):
                     or getattr(self, '_passage_build_in_flight', False))
         lab_on = bool(lab_btn is not None and lab_btn.isChecked())
         combo.setEnabled(not busy and not lab_on)
+        # Every change of method or Lab passes through here.
+        self._refresh_comp_conditions_available()
 
     def _revert_comp_method_to_chunk(self, reason_key):
         """Snap the selection back without re-entering this handler."""
@@ -28075,6 +28236,12 @@ class GenizahGUI(QMainWindow):
         self._comp_last_result_witness_total = 0
         self._comp_last_fused_rows = []
         self._comp_last_fused_filtered = []
+        self.comp_conditions = []
+        self._comp_compound = None
+        self.comp_cond_removed = []
+        self.comp_cond_unresolved = []
+        if getattr(self, 'comp_conditions_strip', None) is not None:
+            self.comp_conditions_strip.set_conditions([])
         self._auto_expand_left = 0
         self._auto_expand_armed = False
         self._witness_notify('')
@@ -28827,6 +28994,16 @@ class GenizahGUI(QMainWindow):
             items = result_obj or []
             filtered_items = []
 
+        removed_raw, unresolved_raw = [], []
+        if self._comp_compound:
+            _evidence = self._comp_compound.get('evidence') or {}
+            items = self._attach_compound_evidence(items, _evidence)
+            filtered_items = self._attach_compound_evidence(filtered_items, _evidence)
+            removed_raw = self._attach_compound_evidence(
+                self._comp_compound.get('removed') or [], _evidence)
+            unresolved_raw = self._attach_compound_evidence(
+                self._comp_compound.get('unresolved') or [], _evidence)
+
         result_count = len(items) + len(filtered_items)
         # Phase 110 UAT (Issue 1): batch-prime LOCAL filepaths for the comp hits
         # BEFORE grouping/rendering, so the comp tree + ResultDialog can render
@@ -28861,6 +29038,9 @@ class GenizahGUI(QMainWindow):
             self.comp_summary_text = (
                 f"{tr('Completed in')} {elapsed_str} \u2014 {chunks_part}{pages_part}"
             )
+        _cond_summary = self._compound_summary_text()
+        if _cond_summary:
+            self.comp_summary_text += f" \u2014 {_cond_summary}"
         self.comp_progress.setFormat(self.comp_summary_text)
 
         # Toast notification when app is not focused
@@ -28880,6 +29060,8 @@ class GenizahGUI(QMainWindow):
         manuscripts = self.searcher.group_pages_by_manuscript(items)
         filtered_manuscripts = self.searcher.group_pages_by_manuscript(filtered_items)
         known_manuscripts = self.searcher.group_pages_by_manuscript(known_raw)
+        self.comp_cond_removed = self.searcher.group_pages_by_manuscript(removed_raw)
+        self.comp_cond_unresolved = self.searcher.group_pages_by_manuscript(unresolved_raw)
 
         self.comp_raw_items = manuscripts
         self.comp_raw_filtered = filtered_manuscripts
@@ -29184,6 +29366,9 @@ class GenizahGUI(QMainWindow):
 
     def _format_score_with_boundary(self, item):
         """Format score string with boundary indicator if applicable."""
+        if item.get('is_condition_evidence'):
+            # A page shown because a CONDITION matched it, not the main text.
+            return "\u25c6 " + self._compound_evidence_labels(item)
         score = int(item.get('score', 0))
         has_boundary = item.get('has_boundary_matches', False)
         boundary_count = item.get('boundary_match_count', 0)
@@ -29403,11 +29588,15 @@ class GenizahGUI(QMainWindow):
 
         clean_main, clean_appx, known_main = self._apply_manual_exclusions(main_res, main_appx)
         clean_filt, clean_filt_appx, known_filt = self._apply_manual_exclusions(filt_res, filt_appx)
+        cond_removed, _unused, known_rem = self._apply_manual_exclusions(
+            list(getattr(self, 'comp_cond_removed', None) or []), {})
+        cond_unres, _unused, known_unr = self._apply_manual_exclusions(
+            list(getattr(self, 'comp_cond_unresolved', None) or []), {})
 
         if not hasattr(self, 'comp_known'): self.comp_known = []
 
         # Deduplicate by sys_id/part_id to avoid duplicate entries
-        new_known = known_main + known_filt
+        new_known = known_main + known_filt + known_rem + known_unr
         if new_known:
             existing_ids = set()
             for item in self.comp_known:
@@ -29650,7 +29839,7 @@ class GenizahGUI(QMainWindow):
         if self.chk_comp_flat.isChecked():
             all_flat = self._collect_comp_items(
                 clean_main, clean_appx, clean_filt, clean_filt_appx, self.comp_known
-            )
+            ) + list(cond_removed) + list(cond_unres)
             sorted_flat = self._sort_comp_items(all_flat)
             visible_flat = sorted_flat
             self._comp_view_groups = [_cvf.ViewGroup(_cvf.CATEGORY_ALL, tuple(visible_flat))]
@@ -29658,7 +29847,7 @@ class GenizahGUI(QMainWindow):
             # marked on its own; without it a working Filter Text looked inert.
             self._comp_flat_markers = self._comp_flat_marker_map(
                 list(clean_filt) + [it for v in clean_filt_appx.values() for it in v],
-                self.comp_known)
+                self.comp_known, removed=cond_removed, unresolved=cond_unres)
 
             root = QTreeWidgetItem(self.comp_tree, [self._comp_flat_root_label(
                 len(visible_flat), self._comp_flat_markers)])
@@ -29785,6 +29974,10 @@ class GenizahGUI(QMainWindow):
                     _cvf.ViewGroup(_cvf.CATEGORY_EXCLUDED, tuple(_sorted_known)))
                 for item in _sorted_known:
                     add_manuscript_node(root_known, item)
+
+            # 5-6. Composition conditions: removed, and not fully checked
+            self._add_compound_groups(cond_removed, cond_unres, add_manuscript_node,
+                                      make_checkable)
 
             # Start batched loading for Main Results (deferred to prevent freeze)
             if root_main and visible_sorted_main:
@@ -29975,7 +30168,8 @@ class GenizahGUI(QMainWindow):
             self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'), defer_widgets=defer_widgets)
             return node
 
-    def _comp_flat_marker_map(self, filtered_items, excluded_items):
+    def _comp_flat_marker_map(self, filtered_items, excluded_items,
+                              removed=(), unresolved=()):
         """Rows the flat view must mark: {id(item): (item, kind, reason)}.
 
         The flat view ("Sort by shelfmark only") merges every group into one list,
@@ -29988,6 +30182,11 @@ class GenizahGUI(QMainWindow):
             markers[id(item)] = (item, 'excluded', '')
         for item in filtered_items or ():
             markers[id(item)] = (item, 'filtered', self._get_filter_reason(item))
+        for item in removed or ():
+            markers[id(item)] = (item, 'removed', self._compound_item_reason(item, 'removed'))
+        for item in unresolved or ():
+            markers[id(item)] = (item, 'unresolved',
+                                 self._compound_item_reason(item, 'unresolved'))
         return markers
 
     def _comp_flat_root_label(self, total, markers):
@@ -29995,11 +30194,17 @@ class GenizahGUI(QMainWindow):
         label = tr("All Results ({})").format(total)
         n_filt = sum(1 for e in markers.values() if e[1] == 'filtered')
         n_excl = sum(1 for e in markers.values() if e[1] == 'excluded')
+        n_rem = sum(1 for e in markers.values() if e[1] == 'removed')
+        n_unr = sum(1 for e in markers.values() if e[1] == 'unresolved')
         parts = []
         if n_filt:
             parts.append(tr("{} filtered").format(n_filt))
         if n_excl:
             parts.append(tr("{} excluded").format(n_excl))
+        if n_rem:
+            parts.append(tr("{} removed by a condition").format(n_rem))
+        if n_unr:
+            parts.append(tr("{} not fully checked").format(n_unr))
         if parts:
             label += " — " + ", ".join(parts)
         return label
@@ -30013,6 +30218,14 @@ class GenizahGUI(QMainWindow):
             color = QColor('#f39c12')  # the Filtered group header's amber
             tip = tr("Filtered result: {}").format(reason) if reason else tr("Filtered result")
             node.setText(0, "⊘ " + node.text(0))
+        elif kind == 'removed':
+            color = QColor('#c0392b')  # the Removed-by-a-condition header's red
+            tip = tr("Removed by a condition: {}").format(reason)
+            node.setText(0, "✕ " + node.text(0))
+        elif kind == 'unresolved':
+            color = QColor('#8e44ad')  # the Not-fully-checked header's purple
+            tip = tr("Not fully checked: {}").format(reason)
+            node.setText(0, "? " + node.text(0))
         else:
             color = QColor(Qt.GlobalColor.darkGray)  # the Excluded group header's gray
             tip = tr("Excluded from the results by you")
@@ -33722,6 +33935,8 @@ class GenizahGUI(QMainWindow):
         _cvf.CATEGORY_APPENDIX: "Appendix group",
         _cvf.CATEGORY_FILTERED: "Filtered group",
         _cvf.CATEGORY_EXCLUDED: "Excluded group",
+        _cvf.CATEGORY_REMOVED: "Removed by a condition group",
+        _cvf.CATEGORY_UNRESOLVED: "Not fully checked group",
         _cvf.CATEGORY_ALL: "All results group",
     }
 

@@ -119,6 +119,7 @@ def _mutated(text, every):
 
 
 QUERY = _aperiodic(80, salt=4242)
+RECORD_TEXT: dict = {}        # record id -> text, filled by the fixture
 TARGET = _mutated(QUERY, 10)          # 8 evenly spaced substitutions
 N_TARGETS = 100
 
@@ -143,6 +144,8 @@ def counter_index(tmp_path_factory):
     for ie, p in ((1, 1), (1, 2), (1, 4), (2, 2)):
         records.append((rid(S1, ie, p), _aperiodic(150, salt=ie * 10 + p)))
     build_index(records, d, partitions=2, apply_hygiene=False)
+    RECORD_TEXT.clear()
+    RECORD_TEXT.update(dict(records))
     idx = open_index(d)
     assert idx is not None
     clear_cache()
@@ -432,3 +435,23 @@ def test_identity_tells_apart_builds_whose_manifests_coincide(tmp_path):
     pmap = PageIndex.build_from(a)
     with pytest.raises(StaleIndexError):
         pmap.mask_for(b, pages=[(S1, 'IE1', 2)])
+
+
+class _Texts:
+    def get_full_text_by_header(self, header):
+        return RECORD_TEXT.get(header)
+
+
+def test_rendered_evidence_rows_carry_text_and_a_highlight(counter_index):
+    idx = counter_index
+    sys_ids = {idx.record_id(r).split('_')[0] for r in _target_records(idx)}
+    searcher = PassageSearcher(index=idx, text_fetcher=_Texts(),
+                               policy=get_preset('standard-40'), render_cap=0)
+    found = searcher.search_condition(QUERY, sys_ids=sys_ids, render_limit=5)
+    assert len(found.hit_record_ids) == N_TARGETS
+    assert len(found.rows) == 5
+    for row in found.rows:
+        assert row['raw_header'] in found.hit_record_ids
+        assert row['text'] and row['highlight_pattern']
+    # Not asked for: nothing rendered, and no page text is fetched.
+    assert _searcher(idx).search_condition(QUERY, sys_ids=sys_ids).rows == ()

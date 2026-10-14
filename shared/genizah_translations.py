@@ -5564,4 +5564,46 @@ TRANSLATIONS.update({
     "are marked as not fully checked.":
         "עוצר. התוצאות שנמצאו עד כה נשמרות; תנאים שעדיין לא נבדקו יסומנו "
         "כ\"לא נבדקו עד הסוף\".",
+})
+
+# Composition Search conditions, step 4 (strip, dialog, result groups).
+# Proposed wording; the owner approves it before release.
+TRANSLATIONS.update({
+    'More conditions': 'תנאים נוספים',
+    '+ Add condition': '+ הוסף תנאי',
+    'Condition': 'תנאי',
+    'Must appear': 'חייב להופיע',
+    'Must not appear': 'אסור שיופיע',
+    'On the same image': 'באותה תמונה',
+    'On an adjacent image': 'בתמונה סמוכה',
+    'Anywhere in the manuscript': 'באותו כתב יד',
+    '({} versions)': '({} נוסחים)',
+    'Name (optional), e.g. Halakhot Gedolot': 'שם (לא חובה), למשל הלכות גדולות',
+    'Paste the text. To give several versions, separate them with a blank line; any one of them counts.': 'הדבק את הטקסט. כדי לתת כמה נוסחים, הפרד ביניהם בשורה ריקה; די שאחד מהם יימצא.',
+    'For "must not appear", give the passages of the quoting work that are not quotations of your main text; otherwise the main text\'s own manuscripts are removed too.': 'ב"אסור שיופיע" תן את הקטעים של החיבור המצטט שאינם ציטוט של הטקסט הראשי; אחרת יוסרו גם כתבי היד של הטקסט הראשי עצמו.',
+    'Version {} is too short ({} letters; at least {}).': 'נוסח {} קצר מדי ({} אותיות; נדרשות לפחות {}).',
+    'Version {} is too long ({} letters; at most {}).': 'נוסח {} ארוך מדי ({} אותיות; לכל היותר {}).',
+    'At most {} versions.': 'לכל היותר {} נוסחים.',
+    '{} versions: {} letters': '{} נוסחים: {} אותיות',
+    'Text files (*.txt);;All files (*)': 'קובצי טקסט (*.txt);;כל הקבצים (*)',
+    '{} searches (limit {})': '{} חיפושים (מגבלה {})',
+    'Conditions work only with letter-level search.': 'תנאים פועלים רק בחיפוש ברמת האות.',
+    'Removed by a condition ({})': 'הוסרו בגלל תנאי ({})',
+    'Not fully checked ({})': 'לא נבדקו עד הסוף ({})',
+    '{} removed by a condition': '{} הוסרו בגלל תנאי',
+    '{} not fully checked': '{} לא נבדקו עד הסוף',
+    'Removed by a condition: {}': 'הוסר בגלל תנאי: {}',
+    'Not fully checked: {}': 'לא נבדק עד הסוף: {}',
+    'Condition {}': 'תנאי {}',
+    'search limit reached': 'הגיע למגבלת החיפוש',
+    'text too short': 'הטקסט קצר מדי',
+    'stopped': 'נעצר',
+    'search failed': 'החיפוש נכשל',
+    'not searched': 'לא נבדק',
+    'page not identified': 'הדף לא זוהה',
+    'Removed by a condition group': 'הוסרו בגלל תנאי',
+    'Not fully checked group': 'לא נבדקו עד הסוף',
+    '{} pages without {}': '{} דפים בלי {}',
+    '{} pages removed': '{} דפים הוסרו',
+    '{} pages not fully checked': '{} דפים לא נבדקו עד הסוף',
 })
