@@ -525,6 +525,11 @@ def _comp_summary(monkeypatch, result):
         _notify_search_complete=lambda *a, **k: None,
         _show_comp_chunk_notice=lambda _result: None,   # short-text notices (#13)
         _emit_comp_search_telemetry=telemetry)
+    # Composition Search conditions: borrowed, not stubbed; with no compound
+    # result they add nothing to the summary.
+    from types import MethodType
+    host._compound_summary_text = MethodType(APP._compound_summary_text, host)
+    host._comp_compound_has_rows = MethodType(APP._comp_compound_has_rows, host)
     with pytest.raises(_ShownSummary):
         APP.on_comp_scan_finished(host, result)
     return host.comp_progress.text, told[0]
@@ -569,8 +574,10 @@ def _composition_window(monkeypatch, mode_idx):
     w.var_mgr = shared
     w.searcher = SimpleNamespace(var_mgr=shared)
     w._run_seq = 0
-    for name in ('_lab_settings', '_level_max_changes', '_use_variant_changes'):
+    for name in ('_lab_settings', '_level_max_changes', '_use_variant_changes',
+                 '_comp_compound_gate'):
         setattr(w, name, MethodType(getattr(APP, name), w))
+    w.comp_conditions = []        # no Composition Search conditions set
     w.comp_text_area.toPlainText.return_value = f'{WORD} {WORD} {WORD}'
     w.comp_title_input.text.return_value = 'title'
     w.comp_mode_combo.currentIndex.return_value = mode_idx
