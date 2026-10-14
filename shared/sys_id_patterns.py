@@ -62,8 +62,14 @@ CORPUS_SYS_ID_PATTERN = r'(?<!\d)(99\d{8,})(?!\d)'
 #: parsers. On web, LOCAL cannot exist; prefer the corpus pattern there.
 ANY_SYS_ID_PATTERN = r'(?<!\d)((?:99|97)\d{8,})(?!\d)'
 
+#: LOCAL "My Library" namespace only (``97``). Use this where a record can ONLY
+#: be a LOCAL one -- the My Library letter-level index, which never holds a
+#: corpus record, so a ``99`` there would be a mis-match, not a find.
+LOCAL_SYS_ID_PATTERN = r'(?<!\d)(97\d{8,})(?!\d)'
+
 CORPUS_SYS_ID_RE = re.compile(CORPUS_SYS_ID_PATTERN)
 ANY_SYS_ID_RE = re.compile(ANY_SYS_ID_PATTERN)
+LOCAL_SYS_ID_RE = re.compile(LOCAL_SYS_ID_PATTERN)
 
 
 def extract_corpus_sys_id(text: object) -> Optional[str]:

@@ -1,0 +1,305 @@
+# -*- coding: utf-8 -*-
+"""Letter-level search for My Library: the LOCAL corpus reader, the second
+lifecycle instance, and the scope router.
+
+Everything runs on a temporary LOCAL sidecar built with the indexer's own
+schema (`init_sqlite`), so the reader is tested against the real table
+shapes, never a copy of them.
+"""
+from __future__ import annotations
+
+import os
+import sqlite3
+
+import pytest
+
+from shared.local_indexer import (_make_full_header, compress_cached_text,
+                                  init_sqlite)
+from shared.passage_builder import build_index
+from shared.passage_index import MAX_RECORD_LETTERS, open_index
+from shared.passage_local_corpus import (
+    SEGMENT_TARGET_LETTERS, LocalPageTextFetcher, finish_local_rows,
+    iter_local_records, parse_local_header, segment_record_id, segment_text,
+    split_record_id, write_corpus_signature,
+)
+from shared.passage_normalize import norm_stream_fast
+from shared.passage_parallels import PassageSearcher
+from shared.sys_id_patterns import (CORPUS_SYS_ID_RE, LOCAL_SYS_ID_RE,
+                                    extract_corpus_sys_id)
+
+SYS_A = '970000000100000001'
+SYS_B = '970000000100000002'
+
+PSALM = ('השמים מספרים כבוד אל ומעשה ידיו מגיד הרקיע יום ליום יביע אמר '
+         'ולילה ללילה יחוה דעת אין אמר ואין דברים בלי נשמע קולם בכל הארץ '
+         'יצא קום ובקצה תבל מליהם לשמש שם אהל בהם והוא כחתן יצא מחפתו ישיש '
+         'כגבור לרוץ ארח')
+FILLER = ('ויאמר ראובן אל אחיו הלא אמרתי אליכם לאמר אל תחטאו בילד ולא '
+          'שמעתם וגם דמו הנה נדרש והם לא ידעו כי שמע יוסף כי המליץ בינתם ')
+
+
+def _add_file(conn, sys_id, path, pages, folder_id=1):
+    conn.execute(
+        "INSERT INTO local_files (sys_id, filepath, folder_id, "
+        "original_filename, file_extension, page_count, file_size_bytes, "
+        "extraction_status, last_indexed_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        (sys_id, path, folder_id, os.path.basename(path), '.txt', len(pages),
+         100, 'ok', 0.0))
+    conn.execute(
+        "INSERT INTO processed_files (filepath, mtime, size, sys_id, status) "
+        "VALUES (?,?,?,?, 'committed')", (path, 1.0, 100, sys_id))
+    for n, text in enumerate(pages, start=1):
+        blob, ln = compress_cached_text(text)
+        conn.execute(
+            "INSERT INTO local_pages (sys_id, uid, page_num, cached_text, "
+            "cached_text_codec, cached_text_uncompressed_len) "
+            "VALUES (?,?,?,?, 'zstd', ?)",
+            (sys_id, f'LOCAL_{sys_id}_P{n}', n, blob, ln))
+    file_id = conn.execute('SELECT file_id FROM local_files WHERE sys_id=?',
+                           (sys_id,)).fetchone()[0]
+    return file_id
+
+
+@pytest.fixture
+def local_db(tmp_path):
+    path = str(tmp_path / 'local_index.sqlite3')
+    conn = init_sqlite(path)
+    conn.execute("INSERT INTO folders (path, added_at, status) "
+                 "VALUES ('c:/lib', 0, 'active')")
+    fa = _add_file(conn, SYS_A, 'c:/lib/a.txt',
+                   [FILLER * 3, FILLER + PSALM + FILLER])
+    fb = _add_file(conn, SYS_B, 'c:/lib/b.txt', [PSALM + FILLER * 2])
+    conn.commit()
+    conn.close()
+    return path, fa, fb
+
+
+# ---------------------------------------------------------------------------
+# Namespace.
+# ---------------------------------------------------------------------------
+
+def test_local_pattern_is_local_only():
+    header = _make_full_header(SYS_A, 3, 7)
+    assert LOCAL_SYS_ID_RE.search(header).group(1) == SYS_A
+    assert LOCAL_SYS_ID_RE.search('990051620920205171_IE1_P1_FL2') is None
+    assert extract_corpus_sys_id(header) is None
+    assert CORPUS_SYS_ID_RE.search(header) is None
+
+
+# ---------------------------------------------------------------------------
+# Segmentation.
+# ---------------------------------------------------------------------------
+
+def test_short_page_is_one_record_unchanged():
+    assert segment_text(PSALM) == [PSALM]
+
+
+def test_long_page_splits_at_whitespace_under_the_budget():
+    text = (FILLER * 1500)
+    assert len(norm_stream_fast(text)) >= MAX_RECORD_LETTERS
+    pieces = segment_text(text)
+    assert len(pieces) > 1
+    assert ''.join(pieces) == text
+    for p in pieces:
+        assert len(norm_stream_fast(p)) <= SEGMENT_TARGET_LETTERS
+    # cut only at whitespace: every piece but the last ends in a space
+    assert all(p.endswith(' ') for p in pieces[:-1])
+    assert segment_text(text) == pieces          # deterministic
+
+
+def test_whitespace_free_run_is_cut_by_characters():
+    text = 'א' * (MAX_RECORD_LETTERS + 10)
+    pieces = segment_text(text)
+    assert ''.join(pieces) == text
+    assert max(len(norm_stream_fast(p)) for p in pieces) <= SEGMENT_TARGET_LETTERS
+
+
+def test_segment_ids_round_trip():
+    header = _make_full_header(SYS_A, 12, 3)
+    assert split_record_id(header) == (header, None)
+    assert split_record_id(segment_record_id(header, 4)) == (header, 4)
+    assert parse_local_header(header) == {'sys_id': SYS_A, 'page': 12,
+                                          'file_id': 3}
+    assert parse_local_header('990051620920205171_IE1_P1_FL2') is None
+
+
+# ---------------------------------------------------------------------------
+# Reading the sidecar.
+# ---------------------------------------------------------------------------
+
+def test_records_are_the_pages_under_their_tantivy_headers(local_db):
+    path, fa, fb = local_db
+    recs = list(iter_local_records(path))
+    assert [r[0] for r in recs] == [
+        _make_full_header(SYS_A, 1, fa), _make_full_header(SYS_A, 2, fa),
+        _make_full_header(SYS_B, 1, fb)]
+    assert recs[2][1] == PSALM + FILLER * 2
+
+
+def test_reader_never_writes_to_the_sidecar(local_db):
+    path, _fa, _fb = local_db
+
+    def _state():
+        return [(os.path.getmtime(f), os.path.getsize(f))
+                if os.path.exists(f) else None
+                for f in (path, path + '-wal')]
+
+    before = _state()
+    list(iter_local_records(path))
+    write_corpus_signature(path, path + '.sig')
+    after = _state()
+    # The database file itself is untouched.
+    assert after[0] == before[0]
+    # SQLite may create an EMPTY -wal beside a WAL-mode database on open (its
+    # own housekeeping, even read-only); an existing one is never written.
+    assert after[1] == before[1] or (before[1] is None and after[1][1] == 0)
+
+
+def test_uncommitted_files_are_not_read(local_db):
+    path, _fa, _fb = local_db
+    conn = sqlite3.connect(path)
+    conn.execute("UPDATE processed_files SET status='pending' WHERE sys_id=?",
+                 (SYS_B,))
+    conn.commit()
+    conn.close()
+    assert all(SYS_B not in rid for rid, _t in iter_local_records(path))
+
+
+def test_signature_changes_with_the_library(local_db, tmp_path):
+    path, _fa, _fb = local_db
+    sig = str(tmp_path / 'sig')
+    first = open(write_corpus_signature(path, sig)).read()
+    assert open(write_corpus_signature(path, sig)).read() == first
+    conn = sqlite3.connect(path)
+    conn.execute("UPDATE processed_files SET mtime=2.0 WHERE sys_id=?",
+                 (SYS_B,))
+    conn.commit()
+    conn.close()
+    assert open(write_corpus_signature(path, sig)).read() != first
+
+
+# ---------------------------------------------------------------------------
+# End to end: build, search, render.
+# ---------------------------------------------------------------------------
+
+class _Doc(dict):
+    pass
+
+
+class _FakeLocalIndex:
+    """Just enough of tantivy for `LocalPageTextFetcher`: a phrase query on
+    `full_header` resolves to the stored page."""
+
+    def __init__(self, pages):
+        self.pages = pages               # header -> (text, shelfmark)
+
+    def parse_query(self, q, _fields):
+        return q.split('"')[1]
+
+    def search(self, header, _n):
+        class R:
+            pass
+        r = R()
+        r.hits = [(1.0, header)] if header in self.pages else []
+        return r
+
+    def doc(self, header):
+        text, shelf = self.pages[header]
+        return {'full_header': [header], 'content': [text],
+                'shelfmark': [shelf]}
+
+
+class _Engine:
+    def __init__(self, pages):
+        self.local_index = _FakeLocalIndex(pages)
+        self.local_searcher = self.local_index
+
+
+def _pages(path):
+    out = {}
+    for rid, text in iter_local_records(path):
+        base, _seg = split_record_id(rid)
+        out.setdefault(base, '')
+        out[base] += text
+    return {h: (t, h.split('_')[0] + '.txt') for h, t in out.items()}
+
+
+def test_build_search_and_render(local_db, tmp_path):
+    path, fa, fb = local_db
+    idx_dir = str(tmp_path / 'idx')
+    build_index(iter_local_records(path), idx_dir, partitions=2)
+    index = open_index(idx_dir)
+    try:
+        fetcher = LocalPageTextFetcher(_Engine(_pages(path)))
+        s = PassageSearcher(index=index, text_fetcher=fetcher,
+                            sys_id_re=LOCAL_SYS_ID_RE)
+        res = finish_local_rows(s.search_composition_logic(PSALM), fetcher)
+        rows = res['main'] + res['filtered']
+        headers = {r['raw_header'] for r in rows}
+        assert _make_full_header(SYS_A, 2, fa) in headers
+        assert _make_full_header(SYS_B, 1, fb) in headers
+        for r in rows:
+            assert r['src_lbl'] == 'LOCAL'
+            assert r['uid'].startswith('LOCAL_97')
+            assert r['shelfmark'].endswith('.txt')
+            assert r['text']
+        # restrict_sys_ids is read in the LOCAL namespace
+        only_b = s.search_composition_logic(PSALM, restrict_sys_ids={SYS_B})
+        assert {r['raw_header'].split('_')[0]
+                for r in only_b['main'] + only_b['filtered']} == {SYS_B}
+    finally:
+        index.close()
+
+
+# ---------------------------------------------------------------------------
+# The second lifecycle instance and the router.
+# ---------------------------------------------------------------------------
+
+def test_second_lifecycle_instance_is_independent():
+    import desktop.passage_lifecycle as pl
+    import desktop.passage_lifecycle_local as pll
+    assert pll.lifecycle is not pl
+    assert pll.lifecycle.passage_available() is False
+    # one exception class across both, so one `except` catches either
+    assert pll.lifecycle.PassageSearchUnavailableError is \
+        pl.PassageSearchUnavailableError
+    assert pll.lifecycle.PassageState is pl.PassageState
+    # the size estimate is rebound in the My Library instance only
+    assert pll.lifecycle.estimate_build_bytes is not pl.estimate_build_bytes
+    gen = pl.current_state_generation()
+    pll.lifecycle.install_passage_state(None)
+    assert pl.current_state_generation() == gen
+
+
+def test_router_merges_both_indexes_by_score(monkeypatch):
+    import desktop.passage_lifecycle as pl
+    import desktop.passage_lifecycle_local as pll
+
+    class _S:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def search_composition_logic(self, *_a, **_k):
+            return {'main': list(self.rows), 'filtered': [],
+                    'truncated_to_200': False,
+                    'dropped_text_lookup_failures': 1,
+                    'duplicate_photography_demoted': 0,
+                    'query_report': {}}
+
+    g_row = {'raw_header': '990000000000000001_IE1_P1_FL1', 'score': 50.0}
+    l_header = _make_full_header(SYS_A, 1, 1)
+    l_row = {'raw_header': l_header, 'score': 80.0}
+    monkeypatch.setattr(pl, 'get_passage_searcher',
+                        lambda *a, **k: _S([g_row]))
+    monkeypatch.setattr(pll.lifecycle, 'get_passage_searcher',
+                        lambda *a, **k: _S([l_row]))
+    monkeypatch.setattr(pll.LocalPageTextFetcher, 'shelfmark',
+                        lambda self, h: 'a.txt')
+    r = pll.ScopedPassageSearcher(object(), 'widest-40', 'default',
+                                  'default')
+    both = r.search_composition_logic('x', corpus_scope='all')
+    assert [x['score'] for x in both['main']] == [80.0, 50.0]
+    assert both['main'][0]['src_lbl'] == 'LOCAL'
+    assert both['dropped_text_lookup_failures'] == 2
+    only_g = r.search_composition_logic('x', corpus_scope='genizah')
+    assert [x['score'] for x in only_g['main']] == [50.0]

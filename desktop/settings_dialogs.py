@@ -1350,6 +1350,19 @@ class SettingsDialog(QDialog):
             self.main_win.run_passage_index_build)
         self.main_win.btn_build_passage_index.setEnabled(False)
         btn_row3.addWidget(self.main_win.btn_build_passage_index)
+        # The My Library letter-level index: same gate as the button above
+        # (disabled at creation, enabled once startup completes).
+        self.main_win.btn_build_local_passage_index = QPushButton(
+            tr("Build / Rebuild Letter-Level Index for My Library"))
+        self.main_win.btn_build_local_passage_index.setToolTip(tr(
+            "Builds the index used by letter-level search in My Library, "
+            "from the texts My Library has already extracted. Your My "
+            "Library index is only read, never changed."))
+        self.main_win.btn_build_local_passage_index.clicked.connect(
+            lambda: self.main_win.run_local_passage_index_build())
+        self.main_win.btn_build_local_passage_index.setEnabled(
+            bool(getattr(self.main_win, 'startup_complete', False)))
+        btn_row3.addWidget(self.main_win.btn_build_local_passage_index)
         btn_row3.addStretch()
         layout.addLayout(btn_row3)
         layout.addSpacing(4)

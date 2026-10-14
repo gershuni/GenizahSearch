@@ -647,10 +647,11 @@ class PassageSearchAdapter:
     """
 
     __slots__ = ('_text_fetcher', '_width', '_length', '_depth',
-                 '_render_cap')
+                 '_render_cap', '_sys_id_re')
 
     def __init__(self, text_fetcher, width: str, length: str,
-                 depth: str, render_cap: Optional[int] = None) -> None:
+                 depth: str, render_cap: Optional[int] = None,
+                 sys_id_re=None) -> None:
         self._text_fetcher = text_fetcher
         self._width = width
         self._length = length
@@ -658,6 +659,9 @@ class PassageSearchAdapter:
         # None => let PassageSearcher apply its own default. See
         # `get_passage_searcher` for why 0 is not the same as "no cap given".
         self._render_cap = render_cap
+        # None => PassageSearcher's own default (the corpus namespace). The
+        # My Library instance of this module passes the LOCAL pattern.
+        self._sys_id_re = sys_id_re
 
     def search_composition_logic(
         self,
@@ -743,6 +747,8 @@ class PassageSearchAdapter:
                 # dataclass default with None and crash the cap comparison.
                 _cap_kw = ({} if self._render_cap is None
                            else {'render_cap': self._render_cap})
+                if self._sys_id_re is not None:
+                    _cap_kw['sys_id_re'] = self._sys_id_re
                 searcher = PassageSearcher(
                     index=index, text_fetcher=self._text_fetcher,
                     policy=compose(self._width, self._length, self._depth),
@@ -867,7 +873,8 @@ def excluded_page_counts() -> dict:
 def get_passage_searcher(text_fetcher, width: str = _DEFAULT_WIDTH,
                           length: str = DEFAULT_LENGTH,
                           depth: str = DEFAULT_DEPTH,
-                          render_cap: Optional[int] = None
+                          render_cap: Optional[int] = None,
+                          sys_id_re=None
                           ) -> PassageSearchAdapter:
     """The one obvious way to get something searchable. Returns a
     `PassageSearchAdapter` unconditionally -- whether or not an index is
@@ -916,7 +923,8 @@ def get_passage_searcher(text_fetcher, width: str = _DEFAULT_WIDTH,
         length = DEFAULT_LENGTH
     if depth != DEFAULT_DEPTH and depth not in DEPTH_PROFILES:
         depth = DEFAULT_DEPTH
-    return PassageSearchAdapter(text_fetcher, width, length, depth, render_cap)
+    return PassageSearchAdapter(text_fetcher, width, length, depth, render_cap,
+                                sys_id_re)
 
 
 # ---------------------------------------------------------------------------

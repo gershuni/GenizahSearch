@@ -92,6 +92,7 @@ from desktop.ui_widgets import (ShelfmarkTableWidgetItem, CheckBoxHeader, Hidden
                                 ListsTreeWidget, ElidingLabel)
 from desktop.settings_dialogs import SettingsDialog, SearchSettingsDialog, HelpDialog, TabularQueryBuilderDialog, LabScoringDialog
 from desktop import passage_lifecycle  # Phase 146: letter-level (passage) search
+from desktop import passage_lifecycle_local  # letter-level search for My Library
 from desktop import passage_witnesses  # multi-witness state machine (pure)
 from shared import passage_witness_source  # witness resolution (pure, shared with web)
 from shared import passage_fusion  # RRF fusion (pure, shared with web + API)
@@ -1429,6 +1430,9 @@ class GenizahGUI(QMainWindow):
     # the answer, so the worker never renames anything until the UI thread
     # has actually let go.
     _passage_release_requested = pyqtSignal(int)
+    # The same handoff for the My Library letter-level index, which has its
+    # own lifecycle instance and so its own release.
+    _local_passage_release_requested = pyqtSignal(int)
     # (saved, reason) from ListsManager's save hooks, which run on whichever
     # thread saved. The window saves on the UI thread (list sync applies its
     # results there too), but connected queued the slot runs on the UI thread
@@ -1889,6 +1893,9 @@ class GenizahGUI(QMainWindow):
             # restart. Started here rather than inside StartupThread so its
             # finished_signal signature stays as every other slot expects.
             self._start_passage_load()
+            if hasattr(self, 'btn_build_local_passage_index'):
+                self.btn_build_local_passage_index.setEnabled(True)
+            self._start_local_passage_load()
             # The gate can only now say "not built" instead of "still
             # starting up", so re-run it once startup is genuinely done.
             if hasattr(self, 'comp_method_combo'):
@@ -17512,12 +17519,16 @@ class GenizahGUI(QMainWindow):
         self._apply_default_comp_method()
         self._revalidate_comp_method()
         # A snapshot held back by the startup race is judged HERE, where
-        # "not built" finally means what it says.
-        deferred = self.__dict__.pop('_deferred_comp_snapshot', None)
-        if deferred is not None and getattr(self, '_comp_active_run_id', None) is None:
+        # "not built" finally means what it says -- unless it also waits for
+        # the My Library index, whose load then judges it.
+        deferred = self.__dict__.get('_deferred_comp_snapshot')
+        if deferred is not None and not self._passage_snapshot_must_wait(
+                deferred):
+            self.__dict__.pop('_deferred_comp_snapshot', None)
             # ...unless a search has been started since launch: its answer is
             # the one on screen, and a restored older one must not replace it.
-            self._display_restored_comp_snapshot(deferred)
+            if getattr(self, '_comp_active_run_id', None) is None:
+                self._display_restored_comp_snapshot(deferred)
         # Only now is "there is no index" a fact rather than "not loaded
         # yet" -- offering before this point would fire on every launch,
         # including the ones where an index was about to appear.
@@ -17824,6 +17835,316 @@ class GenizahGUI(QMainWindow):
                "been written to the log. Your existing index was not "
                "changed."))
 
+    # ------------------------------------------------------------------
+    # Letter-level search for My Library: load, freshness, build. The same
+    # protocol as the Genizah index above, on the second lifecycle instance
+    # (`desktop/passage_lifecycle_local.py`). The LOCAL index and its SQLite
+    # sidecar are only ever READ here.
+    # ------------------------------------------------------------------
+
+    def _start_local_passage_load(self):
+        try:
+            from desktop.passage_workers import PassageLoadThread
+            self.local_passage_load_thread = PassageLoadThread(
+                passage_lifecycle_local.local_passage_root(),
+                lifecycle=passage_lifecycle_local.lifecycle)
+            self.local_passage_load_thread.loaded_signal.connect(
+                self._on_local_passage_loaded)
+            self._local_passage_load_in_flight = True
+            self.local_passage_load_thread.start()
+        except Exception:                                    # noqa: BLE001
+            self._local_passage_load_in_flight = False
+            logger.exception('could not start the My Library letter-level '
+                             'index load')
+
+    def _on_local_passage_loaded(self, result):
+        self._local_passage_load_in_flight = False
+        if getattr(self, '_close_pending', False):
+            return
+        index = getattr(result, 'index', None)
+        status = getattr(result, 'status', 'unavailable')
+        if index is not None:
+            passage_lifecycle_local.lifecycle.install_passage_state(
+                passage_lifecycle.PassageState(
+                    index=index, live_dir=getattr(result, 'live_dir', '')))
+        logger.info('My Library letter-level index at startup: %s', status)
+        self._honour_deferred_comp_method()
+        self._revalidate_comp_method()
+        self._judge_deferred_comp_snapshot()
+        if index is not None:
+            self._start_local_freshness_check()
+
+    def _start_local_freshness_check(self):
+        th = getattr(self, 'local_passage_freshness_thread', None)
+        if th is not None and th.isRunning():
+            return
+        try:
+            from desktop.passage_workers import LocalPassageFreshnessThread
+            self.local_passage_freshness_thread = LocalPassageFreshnessThread()
+            self.local_passage_freshness_thread.result_signal.connect(
+                self._on_local_freshness)
+            self.local_passage_freshness_thread.start()
+        except Exception:                                    # noqa: BLE001
+            logger.exception('could not start the My Library freshness check')
+
+    def _on_local_freshness(self, result):
+        logger.info('My Library letter-level index freshness: %s',
+                    result or 'n/a')
+        if result == passage_lifecycle_local.lifecycle.STALE:
+            self.status_label.setText(tr(
+                "My Library has changed since its letter-level index was "
+                "built. Rebuild it from Settings to include the changes."))
+
+    def _maybe_offer_local_passage_build(self):
+        """Asked only on an explicit choice of letter-level search with the
+        My Library or All scope -- never at startup: a library build is long
+        and large, and the user may never want it."""
+        if getattr(self, '_close_pending', False):
+            return
+        if getattr(self, '_local_passage_build_in_flight', False):
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("Build letter-level index for My Library?"))
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(tr(
+            "Letter-level search in My Library needs its own index, built "
+            "from the texts My Library has already extracted. Your My "
+            "Library index is only read, never changed.\n\n"
+            "For a large library this takes up to an hour or more and needs "
+            "a lot of free disk space while it runs; you will see the "
+            "figures before it starts. You can always build it later from "
+            "Settings."))
+        btn_build = box.addButton(tr("Build now"),
+                                  QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(tr("Ask me later"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(btn_build)
+        box.exec()
+        if box.clickedButton() is btn_build:
+            self.run_local_passage_index_build()
+
+    def _local_passage_release_seam(self, expect_generation):
+        """Worker-thread side of the release handoff; see
+        `_passage_release_seam`, which this mirrors for the second
+        lifecycle instance."""
+        import threading as _threading
+        done = _threading.Event()
+        holder = {}
+
+        def _record(value):
+            holder['value'] = value
+            done.set()
+
+        self._local_passage_release_result = _record
+        self._local_passage_release_requested.emit(int(expect_generation))
+        done.wait()
+        return holder.get('value')
+
+    def _on_local_passage_release_requested(self, expect_generation):
+        result = None
+        try:
+            result = passage_lifecycle_local.lifecycle.close_passage_state(
+                int(expect_generation))
+        except Exception:                                    # noqa: BLE001
+            logger.exception('My Library passage release seam failed')
+            result = False
+        finally:
+            recorder = getattr(self, '_local_passage_release_result', None)
+            if recorder is not None:
+                recorder(result)
+
+    def run_local_passage_index_build(self, confirm=True):
+        """Build the My Library letter-level index from the texts the LOCAL
+        indexer has already extracted (read-only)."""
+        if not getattr(self, 'startup_complete', False):
+            QMessageBox.information(
+                self, tr("Please wait"),
+                tr("The application is still starting up. Try again in a "
+                   "moment."))
+            return
+        if getattr(self, '_local_passage_build_in_flight', False):
+            QMessageBox.information(
+                self, tr("Already running"),
+                tr("The My Library letter-level index is already being "
+                   "built."))
+            return
+        from shared.passage_local_corpus import count_local_pages
+        db_path = passage_lifecycle_local.local_db_path()
+        try:
+            n_pages = (count_local_pages(db_path)
+                       if os.path.exists(db_path) else 0)
+        except Exception:                                    # noqa: BLE001
+            logger.exception('could not read the My Library page count')
+            n_pages = 0
+        if not n_pages:
+            QMessageBox.information(
+                self, tr("My Library is empty"),
+                tr("There are no indexed My Library pages to build a "
+                   "letter-level index from. Add folders to My Library "
+                   "and index them first."))
+            return
+
+        import shutil as _shutil
+        root = passage_lifecycle_local.local_passage_root()
+        try:
+            needed = passage_lifecycle_local.lifecycle.estimate_build_bytes(
+                db_path)
+        except Exception:                                    # noqa: BLE001
+            logger.exception('My Library build size estimate failed')
+            needed = 0
+        try:
+            os.makedirs(root, exist_ok=True)
+            available = _shutil.disk_usage(root).free
+            staging = os.path.join(
+                root, passage_lifecycle_local.lifecycle.STAGING_DIRNAME)
+            if os.path.isdir(staging):
+                for dirpath, _dirs, files in os.walk(staging):
+                    for f in files:
+                        try:
+                            available += os.path.getsize(
+                                os.path.join(dirpath, f))
+                        except OSError:
+                            pass
+        except Exception:                                    # noqa: BLE001
+            logger.exception('My Library build free-space check failed')
+            available = None
+        if available is not None and needed and available < needed:
+            QMessageBox.warning(
+                self, tr("Not enough disk space"),
+                tr("Building the letter-level index needs about {} GB free "
+                   "on this drive, and there is about {} GB. Free some space "
+                   "and try again.").format(
+                       '%.0f' % (needed / 1e9), '%.1f' % (available / 1e9)))
+            return
+        if confirm:
+            answer = QMessageBox.question(
+                self, tr("Build letter-level index for My Library"),
+                tr("Build the letter-level index for My Library from {} "
+                   "indexed pages?\n\nThis needs up to about {} GB of free "
+                   "disk space while it runs (the finished index is smaller) "
+                   "and can take an hour or more on a large library. The "
+                   "application stays usable meanwhile. Your My Library "
+                   "index is only read, never changed.").format(
+                       '{:,}'.format(n_pages), '%.0f' % (needed / 1e9)),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self._local_passage_build_in_flight = True
+        self._revalidate_comp_method()
+        self._start_local_passage_build_worker(db_path)
+
+    def _start_local_passage_build_worker(self, db_path):
+        from desktop.passage_workers import LocalPassageBuildThread
+
+        self._local_passage_progress = QProgressDialog(
+            tr("Building the My Library letter-level index..."), tr("Cancel"),
+            0, 100, self)
+        self._local_passage_progress.setWindowTitle(
+            tr("My Library letter-level index"))
+        self._local_passage_progress.setWindowModality(
+            Qt.WindowModality.NonModal)
+        self._local_passage_progress.setMinimumDuration(0)
+        self._local_passage_progress.setAutoClose(False)
+        self._local_passage_progress.setAutoReset(False)
+
+        self.local_passage_build_thread = LocalPassageBuildThread(
+            passage_lifecycle_local.local_passage_root(), db_path,
+            self._local_passage_release_seam, parent=None)
+        try:
+            self._local_passage_release_requested.disconnect()
+        except TypeError:
+            pass
+        self._local_passage_release_requested.connect(
+            self._on_local_passage_release_requested)
+        self._local_passage_progress.canceled.connect(
+            self.local_passage_build_thread.request_cancel)
+        self.local_passage_build_thread.progress_signal.connect(
+            self._on_local_passage_build_progress)
+        self.local_passage_build_thread.finished_signal.connect(
+            self._on_local_passage_build_finished)
+        self.local_passage_build_thread.cancelled_signal.connect(
+            self._on_local_passage_build_cancelled)
+        self.local_passage_build_thread.error_signal.connect(
+            self._on_local_passage_build_error)
+        self.local_passage_build_thread.start()
+        self._local_passage_progress.show()
+
+    def _on_local_passage_build_progress(self, phase, done, total, records=0):
+        dlg = getattr(self, '_local_passage_progress', None)
+        if dlg is None:
+            return
+        if phase == 'signature':
+            dlg.setRange(0, 0)
+            dlg.setLabelText(tr("Reading the My Library catalogue..."))
+        elif phase == 'read':
+            dlg.setRange(0, 100)
+            dlg.setValue(done)
+            dlg.setLabelText(
+                tr("Reading My Library pages: {}% ({} pages so far)")
+                .format(done, '{:,}'.format(records)))
+        elif total:
+            dlg.setRange(0, total)
+            dlg.setValue(done)
+            dlg.setLabelText(tr("Building index: part {} of {}")
+                             .format(done, total))
+
+    def _finish_local_passage_build(self):
+        self._local_passage_build_in_flight = False
+        dlg = getattr(self, '_local_passage_progress', None)
+        if dlg is not None:
+            dlg.close()
+            self._local_passage_progress = None
+        try:
+            self._local_passage_release_requested.disconnect(
+                self._on_local_passage_release_requested)
+        except TypeError:
+            pass
+        self._revalidate_comp_method()
+
+    def _on_local_passage_build_finished(self, result):
+        if getattr(self, '_close_pending', False):
+            self._finish_local_passage_build()
+            return
+        index = getattr(result, 'index', None)
+        live_dir = getattr(result, 'live_dir', '')
+        status = getattr(result, 'status', '')
+        self._finish_local_passage_build()
+        if index is not None:
+            passage_lifecycle_local.lifecycle.install_passage_state(
+                passage_lifecycle.PassageState(index=index,
+                                               live_dir=live_dir))
+        self._honour_deferred_comp_method()
+        self._revalidate_comp_method()
+        if status == 'installed':
+            self.status_label.setText(
+                tr("The My Library letter-level index is ready."))
+        elif status == 'release_timed_out':
+            logger.warning('My Library passage build ended as %r; reloading',
+                           status)
+            self.status_label.setText(tr(
+                "The My Library letter-level index could not be replaced. "
+                "Reloading the existing index."))
+            self._start_local_passage_load()
+        else:
+            logger.warning('My Library passage build ended as %r', status)
+            self.status_label.setText(tr(
+                "The My Library letter-level index could not be replaced. "
+                "The previous index is still in use."))
+
+    def _on_local_passage_build_cancelled(self):
+        self._finish_local_passage_build()
+        self.status_label.setText(tr(
+            "My Library letter-level index build cancelled. Your existing "
+            "index was not changed."))
+
+    def _on_local_passage_build_error(self, message):
+        logger.error('My Library passage index build failed: %s', message)
+        self._finish_local_passage_build()
+        QMessageBox.warning(
+            self, tr("Build failed"),
+            tr("The letter-level index could not be built. Details have "
+               "been written to the log. Your existing index was not "
+               "changed."))
+
     def run_passage_index_build(self, confirm=True):
         """Build the letter-level index from the transcriptions already on
         this computer. Ordering matters: no corpus at all is a different
@@ -18037,7 +18358,8 @@ class GenizahGUI(QMainWindow):
                 # Remember the intent so `_on_passage_loaded` can honour it,
                 # rather than silently losing the user's method on every
                 # launch.
-                if reason == passage_lifecycle.REASON_NOT_BUILT:
+                if reason in (passage_lifecycle.REASON_NOT_BUILT,
+                              passage_lifecycle_local.REASON_LOCAL_NOT_BUILT):
                     self._comp_method_deferred = 'passage'
                 self._revert_comp_method_to_chunk(reason)
             else:
@@ -18095,10 +18417,25 @@ class GenizahGUI(QMainWindow):
         loaded yet", not "impossible". Judging anyway discarded the user's
         rows on every single launch.
         """
-        return bool(
-            (comp.get('results') or comp.get('filtered_results'))
-            and comp.get('last_result_method') == 'passage'
-            and getattr(self, '_passage_load_in_flight', False))
+        if not ((comp.get('results') or comp.get('filtered_results'))
+                and comp.get('last_result_method') == 'passage'):
+            return False
+        if getattr(self, '_passage_load_in_flight', False):
+            return True
+        # The My Library index loads on its own worker; rows from a My
+        # Library or All search wait for it the same way.
+        scope = comp.get('last_result_scope') or 'genizah'
+        return bool(scope in ('local', 'all') and getattr(
+            self, '_local_passage_load_in_flight', False))
+
+    def _judge_deferred_comp_snapshot(self):
+        """Display a snapshot the startup race held back, once nothing it
+        depends on is still loading. Called from both index loads."""
+        deferred = self.__dict__.get('_deferred_comp_snapshot')
+        if deferred is None or self._passage_snapshot_must_wait(deferred):
+            return
+        self.__dict__.pop('_deferred_comp_snapshot', None)
+        self._display_restored_comp_snapshot(deferred)
 
     def _display_restored_comp_snapshot(self, comp):
         """Re-display a saved composition result set, re-establishing the
@@ -20296,13 +20633,38 @@ class GenizahGUI(QMainWindow):
             if not scope:
                 scope = getattr(self, '_comp_corpus_scope', 'genizah')
         lab_btn = getattr(self, 'btn_lab_mode_toggle_comp', None)
-        return passage_lifecycle.passage_disabled_reason(
-            passage_ready=passage_lifecycle.passage_available(),
-            corpus_scope=scope,
-            lab_mode_on=bool(lab_btn is not None and lab_btn.isChecked()),
-            build_in_flight=bool(
-                getattr(self, '_passage_build_in_flight', False)),
-            main_index_ready=main_index_ready)
+        lab_on = bool(lab_btn is not None and lab_btn.isChecked())
+        genizah_build = bool(getattr(self, '_passage_build_in_flight', False))
+        local_build = bool(
+            getattr(self, '_local_passage_build_in_flight', False))
+        if scope not in ('local', 'all'):
+            return passage_lifecycle.passage_disabled_reason(
+                passage_ready=passage_lifecycle.passage_available(),
+                corpus_scope=scope,
+                lab_mode_on=lab_on,
+                build_in_flight=genizah_build,
+                main_index_ready=main_index_ready)
+        # My Library / All: the Genizah gate's scope-independent reasons
+        # first (Lab Mode, a build in flight), asked with the Genizah side's
+        # readiness only where this scope actually searches it; then the My
+        # Library index and the LOCAL index its rows are read from.
+        searches_genizah = scope == 'all'
+        reason = passage_lifecycle.passage_disabled_reason(
+            passage_ready=(passage_lifecycle.passage_available()
+                           if searches_genizah else True),
+            corpus_scope='genizah',
+            lab_mode_on=lab_on,
+            build_in_flight=local_build or (searches_genizah and genizah_build),
+            main_index_ready=main_index_ready if searches_genizah else True)
+        if reason is not None:
+            return reason
+        local_index_ready = (
+            engine is not None
+            and getattr(engine, 'local_index', None) is not None
+            and getattr(engine, 'local_searcher', None) is not None)
+        return passage_lifecycle_local.local_disabled_reason(
+            local_ready=passage_lifecycle_local.local_passage_available(),
+            local_index_ready=local_index_ready)
 
     def _passage_reason_text(self, key):
         """Reason KEY -> translated sentence. The pure function returns keys
@@ -20325,6 +20687,12 @@ class GenizahGUI(QMainWindow):
             passage_lifecycle.REASON_MAIN_INDEX_MISSING: tr(
                 "The main index is not ready yet. Letter-level search needs "
                 "it to load the text of its results."),
+            passage_lifecycle_local.REASON_LOCAL_NOT_BUILT: tr(
+                "The letter-level index for My Library has not been built "
+                "yet. You can build it from Settings."),
+            passage_lifecycle_local.REASON_LOCAL_INDEX_MISSING: tr(
+                "My Library is not loaded. Letter-level search for My "
+                "Library needs it to load the text of its results."),
         }
         return texts.get(key, "")
 
@@ -20556,6 +20924,13 @@ class GenizahGUI(QMainWindow):
             self._save_session()
             return
         reason = self._passage_disabled_reason_now()
+        if reason == passage_lifecycle_local.REASON_LOCAL_NOT_BUILT:
+            # Same shape as the Genizah case below: keep the intent, demote,
+            # and offer the build that would make the choice possible.
+            self._comp_method_deferred = 'passage'
+            self._revert_comp_method_to_chunk(reason)
+            self._maybe_offer_local_passage_build()
+            return
         if reason is not None:
             if reason == passage_lifecycle.REASON_NOT_BUILT:
                 # Remember the intent BEFORE demoting it. The build is about
@@ -29058,7 +29433,9 @@ class GenizahGUI(QMainWindow):
                 # is exactly where a rare witness of a widely-copied work
                 # sits. A single search passes None and keeps the v9.0.0
                 # default byte for byte.
-                _comp_searcher = passage_lifecycle.get_passage_searcher(
+                # Routed by scope: Genizah, My Library, or both. A Genizah
+                # run goes through `get_passage_searcher` exactly as before.
+                _comp_searcher = passage_lifecycle_local.ScopedPassageSearcher(
                     self.searcher,
                     _comp_passage_width,
                     _comp_passage_length,
@@ -33935,6 +34312,12 @@ class GenizahGUI(QMainWindow):
         th = getattr(self, 'passage_load_thread', None)
         if th is not None and th.isRunning():
             reasons.append(tr("the letter-level index is being opened"))
+        for attr in ('local_passage_build_thread', 'local_passage_load_thread',
+                     'local_passage_freshness_thread'):
+            th = getattr(self, attr, None)
+            if th is not None and th.isRunning():
+                reasons.append(tr("the My Library letter-level index is busy"))
+                break
         if self._passage_scan_in_flight():
             reasons.append(tr("a letter-level search is running"))
         return reasons
@@ -33957,6 +34340,12 @@ class GenizahGUI(QMainWindow):
         # anything mid-search.
         if self._passage_batch_in_flight():
             self.comp_thread.request_cancel()
+        # A My Library build can run for an hour; a committed close cancels
+        # it (cooperatively -- the swap protocol leaves the previous index
+        # untouched) instead of waiting it out.
+        th = getattr(self, 'local_passage_build_thread', None)
+        if th is not None and th.isRunning():
+            th.request_cancel()
         event.ignore()
         if not getattr(self, '_close_pending', False):
             self._close_pending = True

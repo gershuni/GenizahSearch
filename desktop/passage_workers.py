@@ -38,13 +38,16 @@ class PassageLoadThread(QThread):
 
     loaded_signal = pyqtSignal(object)   # RecoveryResult, or None on failure
 
-    def __init__(self, root, parent=None):
+    def __init__(self, root, parent=None, lifecycle=None):
         super().__init__(parent)
         self._root = root
+        # Which lifecycle instance to recover into: the Genizah one by
+        # default, or the My Library one (`desktop/passage_lifecycle_local.py`).
+        self._lifecycle = lifecycle or passage_lifecycle
 
     def run(self):
         try:
-            result = passage_lifecycle.recover_at_startup(self._root)
+            result = self._lifecycle.recover_at_startup(self._root)
         except Exception:                                  # noqa: BLE001
             # A startup path must never take the app down with it: the whole
             # feature hiding is an acceptable outcome, a failed launch is not.
@@ -178,3 +181,87 @@ class PassageBuildThread(QThread):
         if phase == 'pass1':
             return
         self._emit(phase, done, total)
+
+
+# ---------------------------------------------------------------------------
+# My Library (LOCAL) letter-level index.
+# ---------------------------------------------------------------------------
+
+# A library can hold ten times the Genizah corpus's letters. Pass 2 sorts one
+# partition at a time, so its memory is total postings / partitions: three
+# times the Genizah count keeps a partition near the same size on a library
+# of ~5 billion letters.
+LOCAL_PARTITIONS = 48
+
+
+class LocalPassageBuildThread(PassageBuildThread):
+    """Builds the My Library letter-level index from the LOCAL SQLite
+    sidecar, read-only, into its own root, through the SAME build/swap
+    protocol as the Genizah index (`run_build_and_swap` of the second
+    lifecycle instance). Only the record source and the corpus fingerprint
+    differ: records come from `iter_local_records`, and the fingerprint is
+    a signature file summarising the library (see
+    `shared/passage_local_corpus.py::write_corpus_signature`)."""
+
+    def __init__(self, root, db_path, release_live_state, parent=None):
+        super().__init__(root, db_path, release_live_state, parent=parent)
+        self._db_path = db_path
+
+    def run(self):
+        from desktop import passage_lifecycle_local as pll
+        from shared.passage_local_corpus import (count_local_pages,
+                                                 iter_local_records)
+        lifecycle = pll.lifecycle
+        try:
+            total = max(1, count_local_pages(self._db_path))
+            self._emit('signature', 0, 0, 0)
+            sig = pll.refresh_signature(self._root,
+                                        cancel_check=self._cancel_check)
+            last = {'pct': -1}
+
+            def _on_page(n):
+                pct = min(100, int(n * 100 / total))
+                if pct != last['pct']:
+                    last['pct'] = pct
+                    self._emit('read', pct, 100, n)
+
+            records = iter_local_records(self._db_path, on_page=_on_page,
+                                         cancel_check=self._cancel_check)
+            result = lifecycle.run_build_and_swap(
+                self._root, records, [sig], self._db_path,
+                partitions=LOCAL_PARTITIONS, corpus_label='my_library',
+                progress=self._on_progress,
+                cancel_check=self._cancel_check,
+                release_live_state=self._release_live_state)
+        except lifecycle.BuildCancelled:
+            self.cancelled_signal.emit()
+            return
+        except Exception as exc:                       # noqa: BLE001
+            logger.exception('My Library letter-level index build failed')
+            self.error_signal.emit(str(exc))
+            return
+        if result.status == 'cancelled':
+            self.cancelled_signal.emit()
+            return
+        if result.status == 'error':
+            self.error_signal.emit(str(getattr(result, 'error', '') or ''))
+            return
+        self.finished_signal.emit(result)
+
+
+class LocalPassageFreshnessThread(QThread):
+    """Is the installed My Library index still built from the library as it
+    is now? Reads the whole LOCAL page table (seconds), so off the UI
+    thread. Emits FRESH / STALE / UNKNOWN, or '' when there is nothing to
+    say (no index, or cancelled)."""
+
+    result_signal = pyqtSignal(str)
+
+    def run(self):
+        from desktop import passage_lifecycle_local as pll
+        try:
+            result = pll.local_freshness()
+        except Exception:                              # noqa: BLE001
+            logger.exception('My Library letter-level freshness check failed')
+            result = None
+        self.result_signal.emit(result or '')
