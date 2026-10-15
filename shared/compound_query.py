@@ -51,6 +51,15 @@ MAX_VERSIONS = 10
 MAX_SEARCHES = 25           # main-text witnesses + condition versions
 MAX_VERSION_LETTERS = 10_000
 
+# "Own text" (owner ruling 2026-10-14): a must_not condition's quoting text
+# often quotes the main text itself (the Rif quoting the Talmud), so a page
+# must not be removed merely because the quoting text matched there -- only
+# when the quoting text contributes letters of its OWN. See own_text_runs.
+OWN_TEXT_MIN = 40          # minimum contiguous uncovered run, page letters
+EDGE_ALLOWANCE = 12        # HTR edge jitter: widens every main-text window
+                           # by this many letters on each side before it is
+                           # subtracted from the quoting text's coverage.
+
 # Per page, per condition.
 SATISFIED = 'satisfied'
 FAILED = 'failed'
@@ -214,6 +223,43 @@ def search_scope(where: str, main_keys: Iterable[PageKey]):
     raise ValueError(f'unknown place {where!r}')
 
 
+def protection_scopes(conditions: Sequence[Condition],
+                      main_keys: Iterable[PageKey]) -> dict:
+    """{where: (pages, sys_ids)} for every DISTINCT scope among the
+    must_not conditions -- what the "own text" rule's protection search (the
+    main text as typed, never a witness) must be searched over, once per
+    scope, shared across every must_not condition that scope applies to
+    (owner, 2026-10-14; docs/plans/COMPOSITION_CONDITIONS_PLAN.md section
+    12). Pure scope planning, nothing about the search call itself -- shared
+    between the desktop worker (desktop/gui_threads.py::
+    CompoundCompositionThread.run, which adds leases, Stop and generation
+    checks around the actual search) and the Qt-free gate
+    (scripts/verify_compound_conditions.py::run_compound) so the two cannot
+    drift apart on WHICH pages get searched."""
+    wheres = sorted({c.where for c in conditions if c.requirement == REQ_MUST_NOT})
+    return {where: search_scope(where, main_keys) for where in wheres}
+
+
+def seed_protection_windows(rows: Iterable[dict]) -> dict:
+    """{record_id: windows} from the main text's own matched-core windows on
+    its OWN result rows (`page_windows`, shared.passage_parallels) -- half of
+    a must_not page's protection union (see must_not_version_search's
+    `seed_windows`). A row without the field (older code, or a row from
+    somewhere other than `search_composition_logic`) is simply skipped, not
+    an error: this is additive, and most rows have no `page_windows` at
+    all."""
+    out: dict = {}
+    for row in rows:
+        wins = row.get('page_windows')
+        if not wins:
+            continue
+        rec_id = row.get('raw_header')
+        if not rec_id:
+            continue
+        out[rec_id] = out.get(rec_id, ()) + tuple(wins)
+    return out
+
+
 # -- searching results in, judgements out ------------------------------------
 
 @dataclass(frozen=True)
@@ -239,6 +285,128 @@ def cut_reason(report, *, stopped: bool = False, failed: bool = False) -> str:
     if get('verify_truncated'):
         return CUT_VERIFY
     return CUT_NONE
+
+
+# -- must_not "own text": the quoting work's own letters, not the main text's -
+
+def _merge_windows(windows: Iterable) -> list:
+    """Sorted, merged (lo, hi) half-open intervals -- touching or
+    overlapping windows become one. `windows` holds (r0, r1) pairs exactly
+    as `shared.passage_search.PassageHit.windows` carries them (page-letter
+    offsets, UNMERGED -- never the coarser `spans`/`hit_spans`)."""
+    ivs = sorted((int(lo), int(hi)) for lo, hi in windows if hi > lo)
+    merged: list = []
+    for lo, hi in ivs:
+        if merged and lo <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+        else:
+            merged.append((lo, hi))
+    return merged
+
+
+def _subtract_windows(covered: list, protected: list) -> list:
+    """`covered` with every `protected` interval removed. Both are already
+    merged, sorted and disjoint. O(len(covered) * len(protected)) -- the
+    window counts on one page are a handful at most, never a hot path."""
+    frags = list(covered)
+    for p_lo, p_hi in protected:
+        nxt = []
+        for lo, hi in frags:
+            if p_hi <= lo or p_lo >= hi:
+                nxt.append((lo, hi))
+                continue
+            if p_lo > lo:
+                nxt.append((lo, p_lo))
+            if p_hi < hi:
+                nxt.append((p_hi, hi))
+        frags = nxt
+    return frags
+
+
+def own_text_runs(cond_windows: dict, protect_windows: dict, *,
+                  min_run: int, edge: int) -> dict:
+    """record id -> the longest contiguous run (page letters) of a must_not
+    version's own verified windows that the main text's windows -- each
+    widened by `edge` letters on both sides, for HTR edge jitter -- do NOT
+    cover.
+
+    Only records whose longest run is >= `min_run` are returned -- several
+    islands under the floor, split apart by a protected stretch, are never
+    added together (owner ruling 2026-10-14, "own text":
+    docs/plans/COMPOSITION_CONDITIONS_PLAN.md section 12).
+
+    `cond_windows` / `protect_windows` are {record_id: windows}, each
+    `windows` a sequence of (r0, r1) page-letter half-open intervals exactly
+    as `PassageHit.windows` / `ConditionSearch.hit_windows` carry them -- the
+    UNMERGED accepted windows. A record missing from `protect_windows` has
+    no protection at all (the main text never matched that page), so every
+    one of the quoting text's windows there counts toward its run."""
+    out = {}
+    for rec_id, wins in cond_windows.items():
+        covered = _merge_windows(wins)
+        if not covered:
+            continue
+        widened = [(max(0, lo - edge), hi + edge)
+                  for lo, hi in protect_windows.get(rec_id, ())]
+        protected = _merge_windows(widened)
+        frags = _subtract_windows(covered, protected)
+        longest = max((hi - lo for lo, hi in frags), default=0)
+        if longest >= min_run:
+            out[rec_id] = longest
+    return out
+
+
+def must_not_version_search(cond_search, protections: Sequence, *,
+                            seed_windows: Optional[dict] = None,
+                            min_run: int = OWN_TEXT_MIN,
+                            edge: int = EDGE_ALLOWANCE) -> VersionSearch:
+    """The VersionSearch to judge for one must_not version, applying the
+    "own text" rule.
+
+    `cond_search` is the quoting text's own `ConditionSearch`
+    (shared.passage_parallels) -- what this version's own search found.
+    `protections` is the main text's own ConditionSearch(es), searched over
+    the SAME scope as this condition (same pages / sys_ids) -- normally a
+    single one, searched once per distinct scope and shared across every
+    must_not condition that scope applies to. It is always the main text AS
+    TYPED (the seed), never another witness: a witness is a stand-in
+    manuscript, not the user's own text, and "own text" means the user's.
+
+    `seed_windows` is the main text's OWN matched-core windows on the pages
+    it found as a RESULT of its own search -- {record_id: windows}, normally
+    `seed_protection_windows(main_rows + filtered_rows)`. Protection for a
+    page is the UNION of these and whatever `protections` re-found there: a
+    SECOND search of the main text, over only a must_not condition's scope,
+    can find FEWER matches on a page than the main search itself already
+    established there (measured on noisy or long pages) -- the main search's
+    own windows must never be lost to that. A page the main search did not
+    itself match (an adjacent image, a manuscript page outside the main
+    results) has no `seed_windows` entry and is protected by `protections`
+    alone, which is exactly what they are for.
+
+    If ANY protection search does not prove its own completeness (stopped,
+    failed before it ever ran, truncated), nothing can safely be called
+    "found": this returns `VersionSearch((), <that reason>)` so the
+    must_not condition removes NOTHING from the pages it covers, and every
+    one of them is judged "not fully checked" instead of main or removed --
+    conservative, and documented so a reviewer does not mistake it for a bug:
+    the one way this rule can go wrong is toward KEEPING a page, never
+    toward losing one.
+    """
+    p_cuts = [c for c in (cut_reason(p.report, stopped=p.stopped)
+                         for p in protections) if c]
+    if p_cuts:
+        return VersionSearch((), p_cuts[0])
+    protect_windows: dict = {}
+    for rec_id, wins in (seed_windows or {}).items():
+        protect_windows[rec_id] = protect_windows.get(rec_id, ()) + tuple(wins)
+    for p in protections:
+        for rec_id, wins in p.hit_windows.items():
+            protect_windows[rec_id] = protect_windows.get(rec_id, ()) + tuple(wins)
+    v_cut = cut_reason(cond_search.report, stopped=cond_search.stopped)
+    runs = own_text_runs(cond_search.hit_windows, protect_windows,
+                        min_run=min_run, edge=edge)
+    return VersionSearch(tuple(sorted(runs)), v_cut)
 
 
 @dataclass(frozen=True)

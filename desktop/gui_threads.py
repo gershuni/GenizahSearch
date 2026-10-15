@@ -821,7 +821,7 @@ class CompoundCompositionThread(PausableSearchMixin, QThread):
     error_signal = pyqtSignal(str)
     perf_signal = pyqtSignal(float, int)
     pause_ack_signal = pyqtSignal(int, int)
-    # (step, total, kind, label): kind is 'main' or 'condition'.
+    # (step, total, kind, label): kind is 'main', 'protection' or 'condition'.
     step_signal = pyqtSignal(int, int, str, str)
 
     # Evidence rows rendered per condition version (text and highlights, for
@@ -882,7 +882,9 @@ class CompoundCompositionThread(PausableSearchMixin, QThread):
         dropped = 0
         try:
             n_main = len(self.main_witnesses)
-            total = n_main + sum(len(c.versions) for c in self.conditions)
+            protection_wheres = sorted(cq.protection_scopes(self.conditions, []))
+            total = (n_main + sum(len(c.versions) for c in self.conditions)
+                    + len(protection_wheres))
             step = 0
             rows, filtered = {}, {}
             for wid, label, text in self.main_witnesses:
@@ -938,10 +940,86 @@ class CompoundCompositionThread(PausableSearchMixin, QThread):
             main, filt = ([], []) if fused is None else (fused[0], fused[1])
 
             keys = [cq.parse_page_key(r.get('raw_header')) for r in main + filt]
+
+            # Protection for the must_not "own text" rule (owner, 2026-10-14,
+            # docs/plans/COMPOSITION_CONDITIONS_PLAN.md section 12): the main
+            # text AS TYPED (the seed -- never a witness), searched once per
+            # DISTINCT scope among the must_not conditions, over the SAME
+            # pages/sys_ids that condition is searched over
+            # (cq.protection_scopes, shared with the Qt-free gate so the two
+            # cannot drift on WHICH pages get searched). Each scope is its own
+            # progress step and obeys Stop/generation exactly like a
+            # condition version: `protection` holds a real ConditionSearch
+            # per scope that searched; `protection_unavailable` holds the
+            # CUT_* reason for a scope that could not be searched at all
+            # (stopped before it ran, or the search itself raised) -- a
+            # must_not version in that scope then removes nothing, by the
+            # SAME short-circuit a failed/skipped condition version already
+            # uses below, never by calling into the pure judging function.
+            #
+            # `seed_windows`: the main search's OWN matched-core windows on
+            # its own result pages (cq.seed_protection_windows, from
+            # `page_windows` on `main`/`filt` rows) -- the other half of a
+            # page's protection, alongside the scope's protection search
+            # itself. A second search of the main text can re-find FEWER
+            # matches on a page than the main search already established
+            # there (measured on noisy/long pages); the main search's own
+            # windows must never be lost to that, and this is the union that
+            # keeps them (shared.compound_query.must_not_version_search).
+            seed_text = next((t for wid, _l, t in self.main_witnesses
+                             if wid == pw.WITNESS_SEED_ID), '')
+            scopes = cq.protection_scopes(self.conditions, keys)
+            # From EVERY main witness's own rows, not the fused rows: a fused
+            # row keeps only its top-ranked witness's fields, so a witness
+            # that matched less of a page would hide the main text's own
+            # windows there.
+            seed_windows = cq.seed_protection_windows(
+                r for wid in rows for r in rows[wid] + filtered.get(wid, []))
+            protection: dict = {}
+            protection_unavailable: dict = {}
+            for where in protection_wheres:
+                step += 1
+                if partial or self._between_steps():
+                    partial = True
+                    protection_unavailable[where] = cq.CUT_NOT_RUN
+                    continue
+                self._abort_if_generation_moved()
+                self.step_signal.emit(step, total, 'protection', where)
+                self.progress_signal.emit(step, total)
+                p_pages, p_sys_ids = scopes[where]
+                try:
+                    p_found = self.searcher.search_condition(
+                        seed_text, pages=tuple(p_pages), sys_ids=tuple(p_sys_ids),
+                        should_stop=self._should_abort)
+                except pl.PassageSearchUnavailableError:
+                    raise
+                except Exception as exc:
+                    logger.warning('compound: protection search for %s failed: %s',
+                                   where, exc)
+                    self._abort_if_generation_moved()
+                    protection_unavailable[where] = cq.CUT_FAILED
+                    steps.append({'kind': 'protection', 'id': where,
+                                  'status': 'failed', 'reason': 'search_failed'})
+                    continue
+                self._abort_if_generation_moved()
+                if p_found.stopped:
+                    partial = True
+                protection[where] = p_found
+                steps.append({'kind': 'protection', 'id': where,
+                              'status': 'stopped' if p_found.stopped else 'searched',
+                              'hits': len(p_found.hit_record_ids),
+                              'report': p_found.report})
+
             results = []
             evidence = {}       # record id -> rendered row, tagged per condition
             for ci, cond in enumerate(self.conditions):
-                pages, sys_ids = cq.search_scope(cond.where, keys)
+                # For a must_not condition this is the EXACT SAME scope its
+                # protection search above already used (`scopes[cond.where]`,
+                # not a value merely equal to it).
+                if cond.requirement == cq.REQ_MUST_NOT:
+                    pages, sys_ids = scopes[cond.where]
+                else:
+                    pages, sys_ids = cq.search_scope(cond.where, keys)
                 versions = []
                 for vi, text in enumerate(cond.versions):
                     step += 1
@@ -969,11 +1047,30 @@ class CompoundCompositionThread(PausableSearchMixin, QThread):
                                       'status': 'failed', 'reason': 'search_failed'})
                         continue
                     self._abort_if_generation_moved()
-                    vs = found.as_version_search()
+                    if cond.requirement == cq.REQ_MUST_NOT:
+                        if cond.where in protection_unavailable:
+                            vs = cq.VersionSearch((), protection_unavailable[cond.where])
+                        else:
+                            vs = cq.must_not_version_search(
+                                found, [protection[cond.where]],
+                                seed_windows=seed_windows)
+                    else:
+                        vs = found.as_version_search()
                     versions.append(vs)
                     tag = {'condition': ci, 'label': cond.label,
                            'requirement': cond.requirement, 'where': cond.where}
+                    # DECISIVE records only (owner, 2026-10-14): for a
+                    # must_not condition `vs.hit_record_ids` is already the
+                    # "own text" subset the rule counted -- a page the
+                    # quoting text matched but that was correctly judged NOT
+                    # removed must not show that text as evidence either. For
+                    # REQ_MUST this is a no-op: `vs.hit_record_ids` there is
+                    # `found.hit_record_ids` itself, and every rendered row's
+                    # id is one of those.
+                    decisive_ids = set(vs.hit_record_ids)
                     for row in getattr(found, 'rows', ()) or ():
+                        if row['raw_header'] not in decisive_ids:
+                            continue
                         ev = evidence.get(row['raw_header'])
                         if ev is None:
                             ev = evidence[row['raw_header']] = dict(

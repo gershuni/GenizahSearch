@@ -59,12 +59,14 @@ def test_dialog_title_and_help_line_follow_the_fixed_requirement():
         dlg2.deleteLater()
 
 
-def test_must_not_dialog_defaults_to_anywhere_in_the_manuscript():
-    """Owner, 2026-10-14: "Quoting texts..." starts at "Anywhere in the
-    manuscript"; "Add condition..." keeps the old first-item default."""
+def test_must_not_dialog_defaults_to_the_same_image():
+    """Owner, 2026-10-14 (all four reviewers recommended it): "Quoting
+    texts..." starts at "On the same image" -- the "own text" rule's common
+    case; "Add condition..." keeps the old first-item default, which is the
+    same place."""
     dlg = ConditionDialog(None, requirement=cq.REQ_MUST_NOT, floor=40)
     try:
-        assert dlg.combo_where.currentData() == cq.WHERE_MANUSCRIPT
+        assert dlg.combo_where.currentData() == cq.WHERE_SAME_IMAGE
     finally:
         dlg.deleteLater()
 

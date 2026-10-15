@@ -24,7 +24,7 @@ from shared.compound_query import (
 from shared.passage_builder import build_index
 from shared.passage_index import open_index
 from shared.passage_pages import PageIndex, StaleIndexError, clear_cache
-from shared.passage_parallels import PassageSearcher, _RegexSysIdParser
+from shared.passage_parallels import ConditionSearch, PassageSearcher, _RegexSysIdParser
 from shared.passage_policy import get_preset
 from shared.passage_search import search_passage
 
@@ -455,3 +455,219 @@ def test_rendered_evidence_rows_carry_text_and_a_highlight(counter_index):
         assert row['text'] and row['highlight_pattern']
     # Not asked for: nothing rendered, and no page text is fetched.
     assert _searcher(idx).search_condition(QUERY, sys_ids=sys_ids).rows == ()
+
+
+# -- own text (owner, 2026-10-14): a must_not condition removes a page only ----
+# when the quoting text contributes letters of its OWN -- not merely because
+# it also quotes (and therefore matches on) the main text's own manuscripts.
+
+R1, R2 = 'rec-1', 'rec-2'
+
+
+def _cs(windows, *, stopped=False, report=None):
+    """A ConditionSearch carrying only what own_text_runs /
+    must_not_version_search read: `windows` is {record_id: ((r0, r1), ...)}."""
+    return ConditionSearch((), (), report or {}, stopped, (), dict(windows))
+
+
+def test_own_text_runs_fully_covered_is_not_found():
+    cond = {R1: ((50, 90),)}
+    # Widened by EDGE_ALLOWANCE=12 the protection already covers (50, 90)
+    # without even needing the margin.
+    protect = {R1: ((40, 100),)}
+    assert cq.own_text_runs(cond, protect, min_run=40, edge=12) == {}
+
+
+def test_own_text_runs_39_vs_40():
+    cond = {R1: ((0, 39),), R2: ((0, 40),)}
+    assert cq.own_text_runs(cond, {}, min_run=40, edge=12) == {R2: 40}
+
+
+def test_own_text_runs_two_islands_do_not_add_up():
+    # One 100-letter quoting match, split by a protected middle (widened to
+    # (25, 75)) into two 25-letter islands -- NEITHER alone reaches 40, and
+    # the rule never adds scattered islands together.
+    cond = {R1: ((0, 100),)}
+    protect = {R1: ((37, 63),)}
+    assert cq.own_text_runs(cond, protect, min_run=40, edge=12) == {}
+
+
+def test_own_text_runs_overhang_within_edge_is_swallowed_but_13_is_not_enough_alone():
+    protect = {R1: ((100, 200),)}         # widened (edge=12) to (88, 212)
+    # Exactly the widened bounds: fully swallowed, nothing left over.
+    assert cq.own_text_runs({R1: ((88, 212),)}, protect, min_run=40, edge=12) == {}
+    # 13 letters past the widened bound on one side -- real overhang, but
+    # far short of OWN_TEXT_MIN on its own.
+    assert cq.own_text_runs({R1: ((88, 225),)}, protect, min_run=40, edge=12) == {}
+    # The SAME overhang, grown until it alone reaches the floor: counted.
+    assert cq.own_text_runs({R1: ((88, 252),)}, protect, min_run=40, edge=12) == {R1: 40}
+
+
+def test_own_text_runs_edge_widening_changes_the_outcome():
+    """Mutation-sensitive: without the edge widening this run would reach
+    OWN_TEXT_MIN (50 letters); with it applied (correct), it falls 2 letters
+    short."""
+    cond = {R1: ((50, 250),)}
+    protect = {R1: ((100, 200),)}
+    assert cq.own_text_runs(cond, protect, min_run=40, edge=12) == {}
+
+
+def test_must_not_version_search_applies_own_text_per_record():
+    cond_search = _cs({R1: ((0, 100),), R2: ((0, 100),)})
+    protection = _cs({R1: ((0, 100),)})     # R1 fully protected, R2 untouched
+    vs = cq.must_not_version_search(cond_search, [protection])
+    assert vs == VersionSearch((R2,), cq.CUT_NONE)
+
+
+def test_must_not_version_search_protection_cut_removes_nothing():
+    """ANY protection search that does not prove its own completeness blocks
+    the whole version -- nothing is "found", regardless of what the quoting
+    text's own search turned up."""
+    cond_search = _cs({R1: ((0, 100),)})          # plenty of "own text"
+    protection = _cs({}, stopped=True)            # the protection search was cut
+    vs = cq.must_not_version_search(cond_search, [protection])
+    assert vs == VersionSearch((), cq.CUT_STOPPED)
+    # The quoting text's OWN cut is still honoured once protection is clean.
+    cut_cond = _cs({}, report={'verify_truncated': True})
+    clean_protection = _cs({})
+    vs2 = cq.must_not_version_search(cut_cond, [clean_protection])
+    assert vs2 == VersionSearch((), cq.CUT_VERIFY)
+
+
+def test_must_not_version_search_seed_windows_protect_too():
+    """`seed_windows` (the main search's OWN matched-core windows on its own
+    result pages) protects a record EVEN WHEN the protection search itself
+    found nothing there -- the union, not a replacement: a page the
+    protection search legitimately covers on its own (R2 here) is still
+    protected without any seed_windows entry for it."""
+    cond_search = _cs({R1: ((0, 100),), R2: ((0, 100),)})
+    protection = _cs({R2: ((0, 100),)})           # protection re-found R2 only
+    seed_windows = {R1: ((0, 100),)}              # the main search found R1 itself
+    vs = cq.must_not_version_search(cond_search, [protection],
+                                    seed_windows=seed_windows)
+    assert vs == VersionSearch((), cq.CUT_NONE)   # neither record removed
+
+
+def test_protection_scopes_one_per_distinct_must_not_where():
+    keys = [cq.PageKey(S1, 'IE1', 5)]
+    conditions = [
+        cond(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE),
+        cond(cq.REQ_MUST_NOT, cq.WHERE_MANUSCRIPT),
+        cond(cq.REQ_MUST_NOT, cq.WHERE_MANUSCRIPT),   # same scope as above
+        cond(cq.REQ_MUST, cq.WHERE_ADJACENT),         # not must_not: no scope
+    ]
+    scopes = cq.protection_scopes(conditions, keys)
+    assert set(scopes) == {cq.WHERE_SAME_IMAGE, cq.WHERE_MANUSCRIPT}
+    assert scopes[cq.WHERE_SAME_IMAGE] == cq.search_scope(cq.WHERE_SAME_IMAGE, keys)
+    assert scopes[cq.WHERE_MANUSCRIPT] == cq.search_scope(cq.WHERE_MANUSCRIPT, keys)
+
+
+def test_seed_protection_windows_unions_by_record_and_skips_blanks():
+    rows = [
+        {'raw_header': R1, 'page_windows': ((0, 50),)},
+        {'raw_header': R1, 'page_windows': ((60, 100),)},   # a second row, same record
+        {'raw_header': R2, 'page_windows': ()},             # present but empty: skipped
+        {'raw_header': R2},                                 # missing entirely: skipped
+        {'page_windows': ((0, 10),)},                       # no raw_header: skipped
+    ]
+    assert cq.seed_protection_windows(rows) == {R1: ((0, 50), (60, 100))}
+    assert cq.seed_protection_windows([]) == {}
+
+
+# -- own text on the REAL engine (owner, 2026-10-14) ---------------------------
+# Pins the fix itself: PassageHit.windows / ConditionSearch.hit_windows must be
+# page-side, PRE-MERGE, MATCHED-CORE bounds -- never the margin-extended
+# alignment window `spans` carries -- or OWN_TEXT_MIN stops meaning "40 page
+# letters actually matched" in both directions (too easy to clear with padding
+# on one side of the comparison, too hard with padding on the other).
+
+S3 = '990000000000000003'
+S4 = '990000000000000004'
+S5 = '990000000000000005'
+QUOTE_TEXT = _aperiodic(100, salt=5151)         # what the main text IS
+OWN_TEXT = _aperiodic(60, salt=6262)            # the quoting work's OWN 60 letters
+# The embedded quote+own copy's last EDGE_NOISE letters are page noise (HTR
+# misread at the tail of the quoted passage), so the true matched span falls
+# a FEW letters short of the full 160 -- which is also what makes this fixture
+# mutation-sensitive: a verbatim, edge-to-edge match never engages the
+# verify-margin extension at all (both q0/q1 clip to the query's own bounds,
+# so core and margin-extended windows come out identical regardless of which
+# one the code stores), so a fixture without this noise cannot tell the fix
+# from the regression it fixes.
+EDGE_NOISE = 4
+
+
+def _edge_noise(s: str, n: int, shift: int = 11) -> str:
+    """`s` with its LAST `n` letters replaced by a different, fixed shift --
+    just enough that the anchors covering the tail no longer match."""
+    if n <= 0:
+        return s
+    head, tail = s[:-n], s[-n:]
+    noisy_tail = ''.join(chr(ALEF + ((ord(c) - ALEF + shift) % 22)) for c in tail)
+    return head + noisy_tail
+
+
+@pytest.fixture(scope='module')
+def own_text_index(tmp_path_factory):
+    """Two pages: S3 is the quoting work's own page (the quote plus 60
+    letters that are its OWN, not the main text's, with the LAST few letters
+    of that embedded copy noised so the match is not edge-to-edge -- see
+    EDGE_NOISE); S4 is "only the quote" -- a control for a page that
+    contributes nothing of its own."""
+    d = str(tmp_path_factory.mktemp('own_text_engine'))
+    noisy_quote_own = _edge_noise(QUOTE_TEXT + OWN_TEXT, EDGE_NOISE)
+    records = [
+        (rid(S3, 1, 1),
+         _aperiodic(150, salt=1) + noisy_quote_own + _aperiodic(150, salt=2)),
+        (rid(S4, 1, 1),
+         _aperiodic(150, salt=3) + QUOTE_TEXT + _aperiodic(150, salt=4)),
+        # The quote twice, 20 letters apart: two matches on one page.
+        (rid(S5, 1, 1),
+         _aperiodic(150, salt=7) + QUOTE_TEXT + _aperiodic(20, salt=8)
+         + QUOTE_TEXT + _aperiodic(150, salt=9)),
+    ]
+    build_index(records, d, partitions=1, apply_hygiene=False)
+    idx = open_index(d)
+    assert idx is not None
+    clear_cache()
+    yield idx
+    clear_cache()
+
+
+def test_own_text_runs_on_real_engine_output(own_text_index):
+    s = _searcher(own_text_index)
+    a_id, b_id = rid(S3, 1, 1), rid(S4, 1, 1)
+    # Protection: the main text, which IS the quote, searched over both pages.
+    protection = s.search_condition(QUOTE_TEXT, sys_ids=(S3, S4))
+    # The quoting work's OWN search: the quote plus its own 60 letters.
+    quoting = s.search_condition(QUOTE_TEXT + OWN_TEXT, sys_ids=(S3, S4))
+    assert a_id in quoting.hit_record_ids
+    # Windows are page-side (fit inside the 460-letter S3 record) and
+    # PRE-MERGE (own_text_runs does its own merging; a window handed to it
+    # already merged into one span would still pass this, so the real
+    # assertion is the exact run length below, which a margin-extended
+    # window gets WRONG -- not absent, not merely under the floor, but a
+    # different, inflated number: 48 instead of 44, measured against the
+    # unfixed code).
+    for wins in quoting.hit_windows.values():
+        for lo, hi in wins:
+            assert 0 <= lo < hi <= 460
+    runs = cq.own_text_runs(quoting.hit_windows, protection.hit_windows,
+                            min_run=cq.OWN_TEXT_MIN, edge=cq.EDGE_ALLOWANCE)
+    # S3's matched core falls EDGE_NOISE=4 letters short of its true 60 own
+    # letters (the noised tail has no matching anchors), and EDGE_ALLOWANCE=12
+    # further widens protection's own core across the quote/own boundary,
+    # eating 12 more -- 60 - 4 - 12 = 44, comfortably over OWN_TEXT_MIN=40.
+    # S4 -- only the quote, nothing of its own -- contributes no run at all.
+    assert runs == {a_id: 44}
+    assert b_id not in runs
+
+
+def test_condition_windows_are_page_offsets_of_each_match_unmerged(own_text_index):
+    """The windows are PAGE offsets (query-side offsets would read (0, 100)),
+    and two matches on one page stay two windows: the merged span would also
+    cover the 20 unmatched letters between them."""
+    s = _searcher(own_text_index)
+    found = s.search_condition(QUOTE_TEXT, sys_ids=(S4, S5))
+    assert found.hit_windows[rid(S4, 1, 1)] == ((150, 250),)
+    assert sorted(found.hit_windows[rid(S5, 1, 1)]) == [(150, 250), (270, 370)]

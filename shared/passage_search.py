@@ -54,6 +54,19 @@ class PassageHit:
     n_spans: int
     spans: list                  # [(q0, q1, r0, r1, density), ...] merged
     score: float                 # = matched_letters (comparable to chunk path)
+    # Page-side (r0, r1) of every ACCEPTED window's MATCHED CORE, UNMERGED --
+    # i.e. before the per-record merge below collapses nearby windows (within
+    # MERGE_GAP) into the coarser `spans` above, and WITHOUT the verify-margin
+    # extension `spans`' own (r0, r1) carries (up to policy.verify_margin
+    # letters past the matched anchors, each side -- see the "MIRRORED
+    # extension" comment below). Composition conditions' "own text" rule
+    # (shared/compound_query.py::own_text_runs) counts page LETTERS ACTUALLY
+    # MATCHED, so a margin-extended window -- which pads both sides with
+    # letters nothing in the query necessarily corresponds to -- would inflate
+    # every count it feeds and make OWN_TEXT_MIN mean something looser than
+    # 40 matched letters. Nothing else reads this field, and it changes no
+    # existing behaviour.
+    windows: tuple = ()
 
 @dataclass
 class QueryReport:
@@ -281,11 +294,16 @@ def _candidates(idx: PassageIndex, codes: np.ndarray, qpos: np.ndarray,
 
 def _verify_and_merge(idx: PassageIndex, qstream: str, cand, policy:
                       PassagePolicy, report: QueryReport,
-                      checkpoint=None) -> dict:
+                      checkpoint=None) -> tuple[dict, dict]:
     """Extend, align, accept, and merge per record.
 
-    Returns record -> [(q0, q1, r0, r1, density), ...] merged spans. The
-    verification order is the candidate order -- anchor strength descending,
+    Returns (merged, windows_by_record): record -> [(q0, q1, r0, r1,
+    density), ...] MERGED spans (the verify-margin-extended alignment
+    window), and record -> [(r0, r1), ...] the same accepted windows'
+    page-side MATCHED-CORE bounds, UNMERGED -- (min_r, max_r+K) per
+    candidate, clipped to the record, BEFORE the margin extension below
+    widens it for alignment (see PassageHit.windows). The verification order
+    is the candidate order -- anchor strength descending,
     then (record, bucket) -- so verify_cap keeps the best-evidenced
     candidates and cuts deterministically; when it fires the envelope says
     so.
@@ -295,6 +313,7 @@ def _verify_and_merge(idx: PassageIndex, qstream: str, cand, policy:
     """
     g_rec, min_q, max_q, min_r, max_r = cand
     by_record: dict = {}
+    core_windows: dict = {}
     n_verified = 0
     to_verify = min(len(g_rec), policy.verify_cap)
     for i in range(len(g_rec)):
@@ -338,7 +357,19 @@ def _verify_and_merge(idx: PassageIndex, qstream: str, cand, policy:
             continue
         by_record.setdefault(ri, []).append(
             (q0, q1, r0, r1, round(density, 4)))
+        # The MATCHED CORE, not the margin-extended (r0, r1) above: exactly
+        # the record-side span the candidate's own anchors cover, clipped to
+        # the record. `own_text_runs` counts letters actually matched, and
+        # r0/r1 pad up to `margin` letters of real-but-unmatched flanking
+        # text onto each side -- counting that as "matched" would make
+        # OWN_TEXT_MIN mean something looser than 40 matched letters, in
+        # both directions (a page with few own letters kept, one with many
+        # removed).
+        core_windows.setdefault(ri, []).append(
+            (int(min_r[i]), min(len(rstream), int(max_r[i]) + K)))
     report.verified = n_verified
+
+    windows_by_record = {ri: tuple(wins) for ri, wins in core_windows.items()}
 
     merged: dict = {}
     for ri, spans in by_record.items():
@@ -353,7 +384,7 @@ def _verify_and_merge(idx: PassageIndex, qstream: str, cand, policy:
                 out.append((q0, q1, r0, r1, d))
         merged[ri] = out
         report.accepted_spans += len(out)
-    return merged
+    return merged, windows_by_record
 
 
 def search_passage(idx: PassageIndex, query_text: str,
@@ -423,8 +454,8 @@ def search_passage(idx: PassageIndex, query_text: str,
 
     cand = _candidates(idx, codes, qpos, admitted, policy, report,
                        record_allowed=record_allowed, record_mask=record_mask)
-    merged = _verify_and_merge(idx, qstream, cand, policy, report,
-                               checkpoint=checkpoint)
+    merged, windows_by_record = _verify_and_merge(idx, qstream, cand, policy, report,
+                                                  checkpoint=checkpoint)
 
     hits = []
     for ri, spans in merged.items():
@@ -433,7 +464,8 @@ def search_passage(idx: PassageIndex, query_text: str,
             record=ri, record_id=idx.record_id(ri),
             matched_letters=matched,
             best_density=min(d for *_x, d in spans),
-            n_spans=len(spans), spans=spans, score=float(matched)))
+            n_spans=len(spans), spans=spans, score=float(matched),
+            windows=windows_by_record.get(ri, ())))
     hits.sort(key=lambda h: (-h.score, h.record))
 
     report.seconds = round(time.time() - t0, 4)

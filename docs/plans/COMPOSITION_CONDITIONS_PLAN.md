@@ -477,6 +477,9 @@ Every gate has named mutations, each shown red.
 **G8 on the installed index** (`scripts/verify_compound_conditions.py --self-test`, seed 20261014):
 adjacent image found and its decoy dropped; same manuscript kept and a foreign text dropped; must
 not appear removed with the evidence naming the right image, and kept when flipped to must appear;
+the "own text" control case (`case_main_as_must_not`) gives the main text AS ITS OWN must_not
+condition, same scope, same page -- every match is protection against itself, so NOTHING is
+removed, the regression the OLD "any match removes the page" rule would fail here outright;
 exhaustiveness 40/40 for both searches on corrupted single-page texts (the mechanism is proven on
 the synthetic counterexample in `tests/test_compound_query.py`); a 10,000-letter condition over
 5,000 manuscripts in 4.8 s, not cut; with the adjacency rule broken (P+-2) the adjacent case fails.
@@ -531,7 +534,8 @@ identical on master-main (native Qt platform; Hebrew UI language); `ruff check .
 Text" button and the conditions strip's own "+ Add condition" with one "Filter texts" button and
 menu of three items: "Quoted texts..." (opens the existing `FilterTextDialog` unchanged, now titled
 "Quoted texts"), "Quoting texts..." (opens `ConditionDialog` with the requirement FIXED to
-`REQ_MUST_NOT`, defaulting to "Anywhere in the manuscript", titled "Quoting text"), and
+`REQ_MUST_NOT`, defaulting to "On the same image" (changed from "Anywhere in the
+manuscript" by the later "own text" ruling below), titled "Quoting text"), and
 "Add condition..." (opens `ConditionDialog` fixed to `REQ_MUST`, titled "Search condition", the
 dialog's existing default). `ConditionDialog` no longer has a requirement combo -- the requirement is
 a constructor argument, or the edited condition's own when editing a row -- and `ConditionsStrip`
@@ -546,3 +550,72 @@ it. `open_filter_dialog`'s Search-tab column-filter branch is untouched. Tests:
 and `add_condition`/`can_add`, and the menu's three items, tooltips, enabled state and handlers, on
 a stub built the same way as the existing result-group tests: genizah_app.py's own methods borrowed
 onto a real `QWidget` since `QMenu` needs a `QWidget` parent).
+
+**"Own text" (owner, 2026-10-14).** A must_not condition used to remove any page the quoting text
+matched on -- but a quoting work routinely quotes the main text itself (the Rif quoting the
+Talmud), so that rule removed the Talmud's own manuscripts too. NEW RULE, for every must_not
+condition: a page counts as found only when the quoting text's verified matches on that page
+contain one CONTIGUOUS stretch of at least `OWN_TEXT_MIN = 40` page letters that the main text's
+own matches on the SAME page do not cover, after widening every main-text match by
+`EDGE_ALLOWANCE = 12` letters on each side (HTR edge jitter). Scattered islands under the floor are
+never added together -- only the single longest uncovered run decides. "Quoting texts..." defaults
+to "On the same image" (all four reviewers recommended it) rather than "Anywhere in the
+manuscript" -- the common case the rule is built for. Every must_not condition saved before this
+change is judged by the new rule the next time it runs; nothing about a saved condition itself
+changes. Proposed English/Hebrew wording for the must-not help line is in
+`shared/genizah_translations.py`, pending owner approval, like every other string from this plan.
+
+The windows the rule compares are the MATCHED CORE, not the verify-margin-extended alignment
+window: `shared/passage_search.py::_verify_and_merge` now captures `(min_r, max_r + K)` per
+accepted candidate, clipped to the record, BEFORE the mirrored margin extension widens it for
+Levenshtein alignment -- that extension pads up to `policy.verify_margin` (30) letters of real but
+UNMATCHED flanking text onto each side, which inflated "letters matched" in both directions (a
+review and a real-data experiment caught this: a Rif page with 60 genuinely own letters was being
+KEPT, and a page with an effective 22 was being REMOVED). `PassageHit.windows` /
+`ConditionSearch.hit_windows` carry the core bounds, UNMERGED, alongside the existing (too coarse
+for letter-level coverage) merged `spans`; an engine-level test in `tests/test_compound_query.py`
+builds a small real index to pin it (a page = the quote plus 60 of its own letters, the last few
+noised so the match is not edge-to-edge and so the fixture actually exercises the margin extension:
+the rule finds a 44-letter run there -- 60 minus the noised letters minus EDGE_ALLOWANCE's 12 -- and
+the SAME fixture caught under the pre-fix code at a different, inflated number; a page that is only
+the quote finds none).
+
+Protection for a page is the UNION of two things, not the second search alone: (a) the main
+search's OWN matched-core windows on the pages it already found as its OWN results -- carried on
+those rows as `page_windows` (`shared/passage_parallels.py::search_composition_logic`, from
+`PassageHit.windows`) and folded in via `shared/compound_query.py::seed_protection_windows`, taken
+from EVERY main witness's own rows before fusion (a fused row keeps only its top-ranked witness's
+fields, so a witness that matched less of a page would otherwise hide the main text's own windows
+there; Claude review, fixed with `test_every_witness_windows_protect_not_only_the_fused_rows`) -- and
+(b) a SEPARATE search of the main text AS TYPED (the seed, never a witness) over the must_not
+condition's own scope, searched once per DISTINCT scope among the must_not conditions (not once per
+condition or version), as its own progress step obeying Stop/generation exactly like a condition
+version. (b) alone was the experiment's remaining weakness: on a noisy or long page, a SECOND
+search of the main text can re-find FEWER matches than the first search already established there
+-- once, zero windows on a page the main search itself had accepted -- so a page the main search
+matched must stay protected by what it already found, whether or not the second search repeats it.
+A known limit, on the keeping side: a window is the span of one alignment's anchors, so when the
+quoting work inserts its own words in place of a main-text stretch of about the same length (within
+the engine's diagonal band, about 20 letters), the main text's window can span the insertion and
+the page is kept. Scope pages that are not themselves main-text results (an adjacent image, the rest of the
+manuscript) have no `page_windows` and rely on the scope search alone, which is exactly what it is
+for. `shared/compound_query.py::protection_scopes` plans which scopes need a protection search (one
+per DISTINCT `where` among the must_not conditions) and is shared, along with
+`seed_protection_windows` and `must_not_version_search` itself, between the desktop worker
+(`desktop/gui_threads.py::CompoundCompositionThread.run`) and the Qt-free gate
+(`scripts/verify_compound_conditions.py::run_compound`), so the gate exercises what the app runs and
+the two cannot drift on which pages get searched. If ANY protection search does not prove its own
+completeness (stopped, failed before it ever ran, truncated), the whole must_not version removes
+NOTHING and its pages are judged "not fully checked" instead -- conservative by construction: the
+one way this rule can go wrong is toward KEEPING a page, never toward losing one. A page that is
+genuinely evidence for one condition must not carry a DIFFERENT must_not condition's tag when that
+condition's match there was not decisive: the worker's evidence-rendering map is now built only
+from each must_not version's DECISIVE records (`VersionSearch.hit_record_ids`, the subset
+`own_text_runs` actually counted), never every row the quoting text's own search happened to match.
+
+Measured on real Bavli manuscripts (option D, protection at the same image, hand-checked): genuine
+manuscripts wrongly removed fell from 22/8/3 under the OLD rule (any match removes the page) to
+2/2/2 under the NEW rule, on Berakhot 2a-b, Berakhot 11a-b and the held-out Shabbat 21a-b; total
+removals (genuine and otherwise) fell from 79/106/55 to 20/34/36; the control (the main text given
+as its own quoting text -- `scripts/verify_compound_conditions.py::case_main_as_must_not`, G8's new
+case) removed 0 manuscripts in all three.

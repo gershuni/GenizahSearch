@@ -242,13 +242,27 @@ site:
   engine. A witness's candidate gathering and the rendering of found rows
   have no checkpoint (both are bounded: the posting budget, verify_cap); the
   web side's kill TIME_LIMIT_GRACE_SECONDS after the limit is the fallback.
+* `page_windows` (owner, 2026-10-14): added to `search_composition_logic`'s
+  rows ONLY -- the record's own matched-core windows there
+  (`PassageHit.windows`, UNMERGED; see its docstring), carried through
+  straight from the hit. For the must_not "own text" rule
+  (`shared/compound_query.py::must_not_version_search`), a page's protection
+  must include what the MAIN search itself already matched there, not only
+  what a SECOND search of the main text (over a must_not condition's scope)
+  later re-finds -- a noisy or long page can re-find less than the first
+  search established. `fuse()` (shared/passage_fusion.py) copies it on a
+  fused row like every other field (`dict(best_row)`); it is additive and
+  every other reader of a row is unaffected by its presence. NOT added to
+  `search_condition`'s evidence rows -- those already carry their OWN
+  `hit_windows` on the `ConditionSearch` they come with, keyed by record id
+  rather than per row.
 """
 from __future__ import annotations
 
 import logging
 import re
 import traceback
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Optional, Protocol
 
 from shared.parallels_service import PARALLELS_GROUP_CAP, _cap_main_results_by_group
@@ -322,6 +336,12 @@ class ConditionSearch:
     # asked for. A hit whose page text cannot be read is simply not among
     # them -- it still counts in `hit_record_ids`, which is what is judged.
     rows: tuple = ()
+    # record_id -> tuple of (r0, r1) page-letter windows, UNMERGED (the same
+    # ones `PassageHit.windows` carries -- never the coarser `hit_spans`
+    # above). Used only by the must_not "own text" rule
+    # (shared/compound_query.py::own_text_runs); every other reader of
+    # ConditionSearch is unaffected by it being empty.
+    hit_windows: dict = field(default_factory=dict)
 
     def as_version_search(self):
         from shared.compound_query import VersionSearch, cut_reason
@@ -708,6 +728,7 @@ class PassageSearcher:
                     'final_score': float(hit.score),
                     'chunk_count': int(hit.n_spans),
                     'chunk_hits': [],
+                    'page_windows': tuple(hit.windows),
                 })
             if multi:
                 # Tag BEFORE the filter split: a witness's rank is its
@@ -1074,9 +1095,11 @@ class PassageSearcher:
                     ok = False
                 if ok:
                     rows.append(row)
+        hit_windows = {h.record_id: tuple(h.windows) for h in hits}
         return ConditionSearch(tuple(h.record_id for h in hits),
                                tuple((h.record_id, tuple(h.spans)) for h in hits),
-                               report.as_dict(), stopped[0], tuple(rows))
+                               report.as_dict(), stopped[0], tuple(rows),
+                               hit_windows)
 
     def _run_one_witness(self, wid: str, label: str, text: str,
                          restrict_sys_ids, min_boundary_matches: int,

@@ -14,6 +14,10 @@ and pages it could not fully check, are shown in their own groups with the reaso
 no longer lose a page that shares its number with another image set of the same manuscript.
 One "Filter texts" menu (Quoted texts / Quoting texts / Add condition) now replaces the old
 "Filter Text" button and the conditions strip's own "+ Add condition" (owner, 2026-10-14).
+A must_not condition now removes a page only where the quoting text contributes at least 40
+letters of its own that the main text does not also cover ("own text", owner, 2026-10-14) -- a
+quoting work that cites the main text itself (the Rif quoting the Talmud) no longer drops the
+Talmud's own manuscripts; "Quoting texts..." now defaults to "On the same image".
 Plan and decisions: `docs/plans/COMPOSITION_CONDITIONS_PLAN.md`. Not released.
 
 ---

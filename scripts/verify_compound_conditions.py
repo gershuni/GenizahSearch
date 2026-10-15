@@ -16,6 +16,10 @@ Every case is built from real records, so its answer is known in advance:
   (c) must not appear: C cut from another page of A's manuscript -> A's page
       removed, the evidence names C's page; the same C as "must appear" ->
       kept (the gate flips).
+  (f) own text control: A given AS ITS OWN must_not condition (same scope,
+      same page) -> every match is protection against itself, so NOTHING is
+      removed. Under the OLD rule (any match removes the page) this removed
+      everything -- a regression this case alone would catch.
   (d) exhaustiveness: corrupted texts (every 8th letter changed) searched for
       their own page by the ordinary budgeted search and by the masked
       condition search; the masked search must find at least as many, and
@@ -83,17 +87,41 @@ class _StreamFetcher:
 
 def run_compound(searcher, main_text, conditions):
     """The worker's pipeline without Qt: main search uncapped, every condition
-    version searched over its scope, judged, routed (cap after judging)."""
+    version searched over its scope, judged, routed (cap after judging).
+
+    Shares `shared.compound_query.must_not_version_search`,
+    `protection_scopes` and `seed_protection_windows` with the desktop worker
+    (desktop/gui_threads.py::CompoundCompositionThread.run) for the must_not
+    "own text" rule, so this gate exercises the same code the app runs:
+    protection (the main text as typed, never a witness) is searched once
+    per DISTINCT scope among the must_not conditions, and a page's
+    protection is the union of that search's windows with the main search's
+    OWN matched-core windows on its own result pages (`page_windows`)."""
     res = searcher.search_composition_logic(
         main_text, boundary_mode='full', min_boundary_matches=1)
     main, filt = list(res.get('main') or []), list(res.get('filtered') or [])
     keys = [cq.parse_page_key(r['raw_header']) for r in main + filt]
+    scopes = cq.protection_scopes(conditions, keys)
+    seed_windows = cq.seed_protection_windows(main + filt)
+    protection = {}
+    for where, (p_pages, p_sys_ids) in scopes.items():
+        protection[where] = searcher.search_condition(
+            main_text, pages=tuple(p_pages), sys_ids=tuple(p_sys_ids))
     results = []
     for c in conditions:
-        pages, sys_ids = cq.search_scope(c.where, keys)
-        results.append([searcher.search_condition(
-            v, pages=tuple(pages), sys_ids=tuple(sys_ids)).as_version_search()
-            for v in c.versions])
+        if c.requirement == cq.REQ_MUST_NOT:
+            pages, sys_ids = scopes[c.where]
+        else:
+            pages, sys_ids = cq.search_scope(c.where, keys)
+        versions = []
+        for v in c.versions:
+            found = searcher.search_condition(v, pages=tuple(pages), sys_ids=tuple(sys_ids))
+            if c.requirement == cq.REQ_MUST_NOT:
+                versions.append(cq.must_not_version_search(
+                    found, [protection[c.where]], seed_windows=seed_windows))
+            else:
+                versions.append(found.as_version_search())
+        results.append(versions)
     outcomes = cq.judge([r['raw_header'] for r in main + filt], conditions, results)
     return cq.route(main, filt, outcomes, len(conditions), cap=0,
                     sys_parser=_RegexSysIdParser()), outcomes
@@ -218,6 +246,23 @@ def case_must_not(searcher, corpus, report):
                    'pass': bool(removed) and evidence_ok and ok_flip})
 
 
+def case_main_as_must_not(searcher, corpus, report):
+    """Control case for the "own text" rule (owner, 2026-10-14): the main
+    text given AS ITS OWN must_not condition, same scope, same page. Every
+    one of its matches is protection against itself, so NOTHING is "own
+    text" and NOTHING is removed. Under the OLD rule (any match removes the
+    page) this removed everything -- the case this gate exists to catch a
+    regression back to."""
+    sys_id, ie, p1, _p2, a, _b = corpus.pick_distant()
+    t0 = time.perf_counter()
+    routed, _ = run_compound(searcher, a, [cq.Condition(
+        cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, (a,), 'self')])
+    ok = sys_id in _sys_of(routed.main + routed.filtered) and not routed.removed
+    report.append({'case': 'must not appear: main text against itself (own text)',
+                   'page': f'{sys_id} {ie} P{p1}', 'kept': ok, 'nothing_removed': not routed.removed,
+                   'seconds': round(time.perf_counter() - t0, 2), 'pass': ok})
+
+
 def _corrupt(text, every=8):
     out = list(text)
     for i in range(every // 2, len(out), every):
@@ -304,6 +349,7 @@ def main(argv=None):
     case_adjacent(searcher, corpus, report)
     case_manuscript(searcher, corpus, report)
     case_must_not(searcher, corpus, report)
+    case_main_as_must_not(searcher, corpus, report)
     case_exhaustive(searcher, corpus, report)
     case_cost(searcher, corpus, report)
     pending = []

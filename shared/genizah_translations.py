@@ -5657,3 +5657,15 @@ TRANSLATIONS.update({
     'For example, show only results where an adjacent image (before or after) includes a certain text':
         'למשל: הצג רק תוצאות שבתמונה סמוכה (לפניה או אחריה) מופיע טקסט מסוים',
 })
+
+# "Own text" (owner, 2026-10-14): the must_not help line restates the new
+# rule, and the OLD key above ('For "must not appear", give the passages...')
+# is left in place, unreferenced, rather than removed or changed.
+# Proposed wording (owner approval pending)
+TRANSLATIONS.update({
+    "Paste the quoting work's passage as it is. A page is removed only "
+    "where at least 40 letters of it are not also in your main text.":
+        'הדבק את קטע החיבור המצטט כמות שהוא. דף יוסר רק אם יש בו לפחות 40 '
+        'אותיות מהחיבור שאינן גם בטקסט הראשי שלך.',
+    'Checking your own text ({}/{})': 'בודק את הטקסט שלך ({}/{})',
+})

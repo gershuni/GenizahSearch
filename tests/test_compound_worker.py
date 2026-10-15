@@ -38,10 +38,19 @@ class _Sig:
 class _Searcher:
     """Main-text rows by text; condition answers by text; records calls."""
 
-    def __init__(self, main=None, cond=None, raises=None, on_call=None):
+    def __init__(self, main=None, cond=None, raises=None, on_call=None,
+                 cond_raises=None):
         self.main = main or {}
         self.cond = cond or {}
         self.raises = raises or {}
+        # Raised ONLY from search_condition -- distinct from `raises`, which
+        # both search_composition_logic and search_condition honour. The
+        # protection step searches `search_condition` with the SAME text the
+        # main-text search already used (the seed), so a test that wants the
+        # PROTECTION search to fail, without also failing the main-text
+        # search that ran moments before with that identical string, needs a
+        # knob that fires only on the search_condition call.
+        self.cond_raises = cond_raises or {}
         self.on_call = on_call
         self.calls = []
 
@@ -60,6 +69,8 @@ class _Searcher:
                                           'render_limit': render_limit}))
         if self.on_call:
             self.on_call(len(self.calls))
+        if text in self.cond_raises:
+            raise self.cond_raises[text]
         if text in self.raises:
             raise self.raises[text]
         answer = self.cond.get(text, ())
@@ -67,7 +78,12 @@ class _Searcher:
             return answer
         rows = tuple({'raw_header': r, 'score': 50.0, 'text': f'ev {r}',
                       'highlight_pattern': 'p'} for r in answer)
-        return ConditionSearch(tuple(answer), (), {}, False, rows)
+        # A big, obviously-"own text" window for every plain-tuple answer
+        # (none of this file's protection stubs overlap it) -- the own-text
+        # rule needs ConditionSearch.hit_windows, not just hit_record_ids, so
+        # a stub that answered without one would now remove nothing at all.
+        windows = {r: ((0, 100),) for r in answer}
+        return ConditionSearch(tuple(answer), (), {}, False, rows, windows)
 
 
 mixin = gui_threads.PausableSearchMixin
@@ -128,14 +144,17 @@ def test_every_step_runs_main_first_then_each_version():
     w.run()
     assert [(k, t) for k, t, _ in s.calls] == [
         ('main', MAIN), ('main', 'witness'),
+        ('cond', MAIN),          # protection: the seed, over c1's (must_not) scope
         ('cond', 'hg one'), ('cond', 'hg two'), ('cond', 'rashi')]
-    # Each condition is searched over the scope its place defines.
+    # Protection and c1 share one scope (same manuscript, must_not only).
     assert set(s.calls[2][2]['sys_ids']) == {S1, S2}
-    assert set(s.calls[4][2]['pages']) == {(S1, 'IE1', 4), (S1, 'IE1', 6),
+    assert set(s.calls[3][2]['sys_ids']) == {S1, S2}
+    assert set(s.calls[5][2]['pages']) == {(S1, 'IE1', 4), (S1, 'IE1', 6),
                                            (S2, 'IE1', 0), (S2, 'IE1', 2)}
-    # Main-text searches get a checkpoint; conditions get should_stop.
+    # Main-text searches get a checkpoint; conditions AND protection get should_stop.
     assert callable(s.calls[0][2]['checkpoint'])
     assert callable(s.calls[2][2]['should_stop'])
+    assert callable(s.calls[3][2]['should_stop'])
 
 
 def test_judgement_end_to_end_removed_kept_and_dropped():
@@ -174,7 +193,9 @@ def test_a_stop_inside_a_condition_leaves_the_rest_not_run():
     w = _worker([(SEED, '', MAIN)], [c1, c2], s)
     w.run()
     out = _result(w)
-    assert [t for k, t, _ in s.calls if k == 'cond'] == ['first']
+    # The protection search (shared scope, both conditions are must_not) runs
+    # first; then 'first' stops and 'second' is never reached.
+    assert [t for k, t, _ in s.calls if k == 'cond'] == [MAIN, 'first']
     [row] = out['compound']['unresolved']
     assert row['compound']['reasons'] == [cq.CUT_STOPPED, cq.CUT_NOT_RUN]
     assert out['partial'] is True and out['main'] == []
@@ -184,10 +205,13 @@ def test_stop_between_steps_runs_nothing_more():
     c = Condition(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, ('a', 'b'))
     s = _Searcher(main={MAIN: _rows(P1)})
     w = _worker([(SEED, '', MAIN)], [c], s)
-    s.on_call = lambda n: setattr(w, 'cancel_flag', n >= 2)
+    # Step 1 is the main search, step 2 the protection search (the must_not
+    # condition's own scope), step 3 version 'a' -- stop lands right after
+    # that, so 'b' is the one left not run.
+    s.on_call = lambda n: setattr(w, 'cancel_flag', n >= 3)
     w.run()
     out = _result(w)
-    assert [t for k, t, _ in s.calls] == [MAIN, 'a']
+    assert [t for k, t, _ in s.calls] == [MAIN, MAIN, 'a']
     [row] = out['compound']['unresolved']
     assert row['compound']['reasons'] == [cq.CUT_NOT_RUN]
 
@@ -450,6 +474,218 @@ def test_evidence_rows_travel_tagged_and_only_when_referenced():
     ev = out['compound']['evidence']
     assert set(ev) == {rid(S1, 1, 6)}
     assert ev[rid(S1, 1, 6)]['compound_evidence'] == [
+        {'condition': 0, 'label': 'Rashi', 'requirement': cq.REQ_MUST,
+         'where': cq.WHERE_ADJACENT}]
+
+
+# -- own text (owner, 2026-10-14): must_not removes only a quoting work's own
+# letters, never a page where it only matched because it quotes the main text.
+
+def test_the_protection_step_gets_its_own_status_line():
+    """`kind='protection'` carries the scope (e.g. 'same_image') as `label`,
+    not a condition name -- it must not be shown as one."""
+    from genizah_core import tr
+    w = _Win([GOOD])
+    w.lbl_comp_status = _Label()
+    APP._on_compound_step(w, 2, 5, 'protection', cq.WHERE_SAME_IMAGE)
+    assert w.lbl_comp_status.text == tr("Checking your own text ({}/{})").format(2, 5)
+
+
+def test_must_not_covered_by_the_main_text_keeps_the_page():
+    c = Condition(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, ('hg',))
+    quoting = ConditionSearch((P1,), (), {}, False, (), {P1: ((50, 90),)})
+    # The main text (protection, searched as MAIN) covers the quoting text's
+    # window on P1 entirely (widened by EDGE_ALLOWANCE besides) -- the Rif
+    # quoting the Talmud, nothing of the Rif's OWN.
+    protection = ConditionSearch((), (), {}, False, (), {P1: ((40, 100),)})
+    s = _Searcher(main={MAIN: _rows(P1)}, cond={'hg': quoting, MAIN: protection})
+    w = _worker([(SEED, '', MAIN)], [c], s)
+    w.run()
+    out = _result(w)
+    assert [r['raw_header'] for r in out['main']] == [P1]
+    assert out['compound']['removed'] == []
+
+
+def test_must_not_with_enough_own_letters_removes_the_page():
+    c = Condition(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, ('hg',))
+    quoting = ConditionSearch((P1,), (), {}, False, (), {P1: ((0, 200),)})
+    # Protection covers only the middle; widened by EDGE_ALLOWANCE=12 that is
+    # (68, 132) -- 68 UNCOVERED letters remain on each side, well past
+    # OWN_TEXT_MIN=40.
+    protection = ConditionSearch((), (), {}, False, (), {P1: ((80, 120),)})
+    s = _Searcher(main={MAIN: _rows(P1)}, cond={'hg': quoting, MAIN: protection})
+    w = _worker([(SEED, '', MAIN)], [c], s)
+    w.run()
+    out = _result(w)
+    assert out['main'] == []
+    removed = out['compound']['removed']
+    assert [r['raw_header'] for r in removed] == [P1]
+
+
+def test_a_cut_protection_search_removes_nothing():
+    """The protection search completed -- it was never Stopped -- but its own
+    verify cap fired, so it cannot prove full coverage of the main text.
+    Nothing is removed; the page is "not fully checked" instead."""
+    c = Condition(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, ('hg',))
+    quoting = ConditionSearch((P1,), (), {}, False, (), {P1: ((0, 200),)})
+    protection = ConditionSearch((), (), {'verify_truncated': True}, False, (), {})
+    s = _Searcher(main={MAIN: _rows(P1)}, cond={'hg': quoting, MAIN: protection})
+    w = _worker([(SEED, '', MAIN)], [c], s)
+    w.run()
+    out = _result(w)
+    assert out['main'] == []
+    assert out['compound']['removed'] == []
+    [row] = out['compound']['unresolved']
+    assert row['raw_header'] == P1
+    assert row['compound']['reasons'] == [cq.CUT_VERIFY]
+
+
+def test_a_failed_protection_search_removes_nothing():
+    """The protection search itself RAISES -- distinct from a condition
+    VERSION raising (test_a_failed_condition_version_is_unresolved_and_the_
+    run_goes_on, above). Nothing can be called "own text" without it, so the
+    must_not version removes nothing and the page is "not fully checked"."""
+    c = Condition(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, ('hg',))
+    quoting = ConditionSearch((P1,), (), {}, False, (), {P1: ((0, 200),)})
+    s = _Searcher(main={MAIN: _rows(P1)}, cond={'hg': quoting},
+                 cond_raises={MAIN: RuntimeError('protection engine error')})
+    w = _worker([(SEED, '', MAIN)], [c], s)
+    w.run()
+    out = _result(w)
+    assert out['main'] == []
+    assert out['compound']['removed'] == []
+    [row] = out['compound']['unresolved']
+    assert row['raw_header'] == P1
+    assert row['compound']['reasons'] == [cq.CUT_FAILED]
+    [pstep] = [st for st in out['compound']['steps'] if st['kind'] == 'protection']
+    assert pstep['status'] == 'failed'
+
+
+def test_a_stop_just_before_protection_removes_nothing():
+    """Cancelled right after the main-text search -- before the protection
+    step ever runs. Nothing is removed, and the whole run is partial."""
+    c = Condition(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, ('hg',))
+    quoting = ConditionSearch((P1,), (), {}, False, (), {P1: ((0, 200),)})
+    s = _Searcher(main={MAIN: _rows(P1)}, cond={'hg': quoting})
+    w = _worker([(SEED, '', MAIN)], [c], s)
+    s.on_call = lambda n: setattr(w, 'cancel_flag', n >= 1)
+    w.run()
+    out = _result(w)
+    assert [t for k, t, _ in s.calls if k == 'cond'] == []   # protection never ran
+    assert out['compound']['removed'] == []
+    assert out['partial'] is True
+    [row] = out['compound']['unresolved']
+    assert row['compound']['reasons'] == [cq.CUT_NOT_RUN]
+
+
+def test_a_stopped_protection_marks_the_run_partial():
+    """The protection search RAN -- it was never cut off before it started,
+    and it did not raise -- but a Stop landed inside it. Nothing is removed,
+    the run is partial, and -- because a stopped step marks the WHOLE run
+    partial immediately -- the condition version is never even attempted
+    (CUT_NOT_RUN, not CUT_STOPPED): no step runs after a stopped one."""
+    c = Condition(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, ('hg',))
+    quoting = ConditionSearch((P1,), (), {}, False, (), {P1: ((0, 200),)})
+    protection = ConditionSearch((), (), {}, True, (), {})       # stopped=True
+    s = _Searcher(main={MAIN: _rows(P1)}, cond={'hg': quoting, MAIN: protection})
+    w = _worker([(SEED, '', MAIN)], [c], s)
+    w.run()
+    out = _result(w)
+    assert [t for k, t, _ in s.calls if k == 'cond'] == [MAIN]   # 'hg' never ran
+    assert out['main'] == []
+    assert out['compound']['removed'] == []
+    [row] = out['compound']['unresolved']
+    assert row['raw_header'] == P1
+    assert row['compound']['reasons'] == [cq.CUT_NOT_RUN]
+    assert out['partial'] is True
+
+
+def test_protection_is_searched_over_each_conditions_own_scope():
+    """Two must_not conditions, two DIFFERENT places -- protection is
+    searched once per scope, with exactly that scope's pages/sys_ids, never
+    the other condition's."""
+    c1 = Condition(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, ('hg',))
+    c2 = Condition(cq.REQ_MUST_NOT, cq.WHERE_MANUSCRIPT, ('rashi',))
+    s = _Searcher(main={MAIN: _rows(P1, P2)})
+    w = _worker([(SEED, '', MAIN)], [c1, c2], s)
+    w.run()
+    _result(w)
+    protection_calls = [c for c in s.calls if c[0] == 'cond' and c[1] == MAIN]
+    assert len(protection_calls) == 2
+    same_image = next(c for c in protection_calls if c[2]['pages'])
+    manuscript = next(c for c in protection_calls if c[2]['sys_ids'])
+    assert set(same_image[2]['pages']) == {(S1, 'IE1', 5), (S2, 'IE1', 1)}
+    assert not same_image[2]['sys_ids']
+    assert set(manuscript[2]['sys_ids']) == {S1, S2}
+    assert not manuscript[2]['pages']
+
+
+def test_main_row_windows_protect_even_when_protection_finds_nothing_there():
+    """The main search's OWN matched-core windows on a page (`page_windows`,
+    carried on its result rows) protect that page even when a SECOND search
+    of the main text (the protection step) re-finds LESS there than the main
+    search itself already established -- the experiment's remaining
+    weakness (docs/plans/COMPOSITION_CONDITIONS_PLAN.md section 12): without
+    this union the page would be wrongly removed below."""
+    c = Condition(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, ('hg',))
+    main_result = {'main': [{'raw_header': P1, 'score': 100.0, 'uid': P1,
+                             'page_windows': ((40, 100),)}], 'filtered': []}
+    quoting = ConditionSearch((P1,), (), {}, False, (), {P1: ((50, 90),)})
+    protection = ConditionSearch((), (), {}, False, (), {})   # found NOTHING on P1
+    s = _Searcher(main={MAIN: main_result}, cond={'hg': quoting, MAIN: protection})
+    w = _worker([(SEED, '', MAIN)], [c], s)
+    w.run()
+    out = _result(w)
+    assert [r['raw_header'] for r in out['main']] == [P1]
+    assert out['compound']['removed'] == []
+
+
+def test_every_witness_windows_protect_not_only_the_fused_rows():
+    """A fused row keeps only its top-ranked witness's fields. Here a second
+    witness ranks P1 higher but matched less of it; the main text's own wider
+    match must still protect the page."""
+    c = Condition(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, ('hg',))
+    seed_rows = {'main': [{'raw_header': P1, 'score': 100.0, 'uid': P1,
+                           'page_windows': ((40, 100),)}], 'filtered': []}
+    other_rows = {'main': [{'raw_header': P1, 'score': 200.0, 'uid': P1,
+                            'page_windows': ((80, 100),)}], 'filtered': []}
+    # Against the second witness's window alone, 20..68 is 48 own letters
+    # (removed); against the main text's own window, only 8 (kept).
+    quoting = ConditionSearch((P1,), (), {}, False, (), {P1: ((20, 90),)})
+    protection = ConditionSearch((), (), {}, False, (), {})
+    s = _Searcher(main={MAIN: seed_rows, 'other witness': other_rows},
+                  cond={'hg': quoting, MAIN: protection})
+    w = _worker([(SEED, '', MAIN), ('w2', 'W2', 'other witness')], [c], s)
+    w.run()
+    out = _result(w)
+    assert [r['raw_header'] for r in out['main']] == [P1]
+    assert out['main'][0]['page_windows'] == ((80, 100),)     # the fused row is W2's
+    assert out['compound']['removed'] == []
+
+
+def test_kept_pages_evidence_not_polluted_by_a_non_decisive_must_not_match():
+    """A page that is genuinely "evidence" for one condition must not ALSO
+    carry a DIFFERENT must_not condition's tag when that condition's match
+    there was not decisive (own text) -- it was correctly judged satisfied,
+    not removed, and must not look like evidence for removing anything."""
+    c1 = Condition(cq.REQ_MUST, cq.WHERE_ADJACENT, ('rashi',), 'Rashi')
+    c2 = Condition(cq.REQ_MUST_NOT, cq.WHERE_MANUSCRIPT, ('hg',), 'HG')
+    e = rid(S1, 1, 6)                     # adjacent to P1 (p=5): P+1=6
+    quoting = ConditionSearch(
+        (e,), (), {}, False,
+        ({'raw_header': e, 'score': 50.0, 'text': 'ev', 'highlight_pattern': 'p'},),
+        {e: ((50, 90),)})
+    protection = ConditionSearch((), (), {}, False, (), {e: ((40, 100),)})
+    s = _Searcher(main={MAIN: _rows(P1)},
+                 cond={'rashi': (e,), 'hg': quoting, MAIN: protection})
+    w = _worker([(SEED, '', MAIN)], [c1, c2], s)
+    w.run()
+    out = _result(w)
+    assert [r['raw_header'] for r in out['main']] == [P1]
+    assert out['compound']['removed'] == []
+    ev = out['compound']['evidence']
+    assert set(ev) == {e}
+    assert ev[e]['compound_evidence'] == [
         {'condition': 0, 'label': 'Rashi', 'requirement': cq.REQ_MUST,
          'where': cq.WHERE_ADJACENT}]
 

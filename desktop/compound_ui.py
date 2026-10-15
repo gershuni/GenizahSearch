@@ -64,9 +64,13 @@ _TITLE_FOR_REQUIREMENT = {
     cq.REQ_MUST_NOT: "Quoting text",
 }
 # Only "Quoting texts..." (must-not) gets a non-default starting place; "Add
-# condition..." (must) keeps the first combo item, as before.
+# condition..." (must) keeps the first combo item, as before. Owner, 2026-10-14
+# (all four reviewers recommended it): now "On the same image" -- the default
+# used to be "Anywhere in the manuscript", wider than the "own text" rule
+# needs (docs/plans/COMPOSITION_CONDITIONS_PLAN.md section 12) for the common
+# case of a quoting work cited right where it is quoted.
 _DEFAULT_WHERE_FOR_REQUIREMENT = {
-    cq.REQ_MUST_NOT: cq.WHERE_MANUSCRIPT,
+    cq.REQ_MUST_NOT: cq.WHERE_SAME_IMAGE,
 }
 
 
@@ -119,9 +123,9 @@ class ConditionDialog(QDialog):
         lay.addWidget(self.lbl_info)
 
         self.lbl_help = QLabel(tr(
-            "For \"must not appear\", give the passages of the quoting work "
-            "that are not quotations of your main text; otherwise the main "
-            "text's own manuscripts are removed too."))
+            "Paste the quoting work's passage as it is. A page is removed "
+            "only where at least 40 letters of it are not also in your main "
+            "text."))
         self.lbl_help.setWordWrap(True)
         self.lbl_help.setStyleSheet("color: #7f8c8d; font-size: 11px;")
         lay.addWidget(self.lbl_help)

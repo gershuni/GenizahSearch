@@ -18841,6 +18841,11 @@ class GenizahGUI(QMainWindow):
             return
         if kind == 'main':
             text = tr("Searching the main text ({}/{})").format(step, total)
+        elif kind == 'protection':
+            # "Own text" (owner, 2026-10-14): `label` here is the scope
+            # (same_image/adjacent_image/manuscript), not a condition name --
+            # a status line of its own rather than showing that raw value.
+            text = tr("Checking your own text ({}/{})").format(step, total)
         else:
             text = tr("Searching condition {} ({}/{})").format(label, step, total)
         self.lbl_comp_status.setText(text)
