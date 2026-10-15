@@ -18597,7 +18597,7 @@ class GenizahGUI(QMainWindow):
 
         self.act_comp_quoting_texts = menu.addAction(tr("Quoting texts..."))
         self.act_comp_quoting_texts.triggered.connect(
-            lambda _checked=False: self._comp_add_condition(compound_query.REQ_MUST_NOT))
+            lambda _checked=False: self.comp_conditions_strip.open_quoting_texts())
 
         self.act_comp_add_condition = menu.addAction(tr("Add condition..."))
         self.act_comp_add_condition.triggered.connect(
@@ -18607,8 +18607,11 @@ class GenizahGUI(QMainWindow):
         return menu
 
     def _comp_add_condition(self, requirement):
-        """"Quoting texts..." / "Add condition..." triggered: open
-        ConditionDialog through the strip, which owns the 4-condition cap."""
+        """"Add condition..." triggered: open the add dialog (ConditionDialog
+        for REQ_MUST) through the strip, which owns the 4-condition cap.
+        "Quoting texts..." has its own entry point since 2026-10-15,
+        `ConditionsStrip.open_quoting_texts` -- it edits the first existing
+        must_not row instead of always adding one."""
         self.comp_conditions_strip.add_condition(requirement)
 
     def _refresh_comp_filter_menu(self):
@@ -18625,9 +18628,10 @@ class GenizahGUI(QMainWindow):
         strip = self.comp_conditions_strip
         reason = strip.add_disabled_reason()
         can_add = not reason
-        self.act_comp_quoting_texts.setEnabled(can_add)
+        quoting_reason = strip.quoting_texts_disabled_reason()
+        self.act_comp_quoting_texts.setEnabled(not quoting_reason)
         self.act_comp_quoting_texts.setToolTip(
-            reason or tr("For example, the Rif quoting the Talmud"))
+            quoting_reason or tr("For example, the Rif quoting the Talmud"))
         self.act_comp_add_condition.setEnabled(can_add)
         self.act_comp_add_condition.setToolTip(
             reason or tr(

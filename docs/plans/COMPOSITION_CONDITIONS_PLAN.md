@@ -619,3 +619,34 @@ manuscripts wrongly removed fell from 22/8/3 under the OLD rule (any match remov
 removals (genuine and otherwise) fell from 79/106/55 to 20/34/36; the control (the main text given
 as its own quoting text -- `scripts/verify_compound_conditions.py::case_main_as_must_not`, G8's new
 case) removed 0 manuscripts in all three.
+
+**Owner revision, "Quoting texts..." as its own dialog (2026-10-15).** The entry point above
+(2026-10-14) opened `ConditionDialog` with `REQ_MUST_NOT` fixed; the owner replaced that with a
+purpose-built `QuotingTextsDialog` (`desktop/quoting_texts_dialog.py`) that LOOKS LIKE the Quoted
+texts dialog (`FilterTextDialog`) instead -- a list of named texts, no free-text paste box, and
+the existing Sefaria library browser (`AllSourcesDialog`) under "Load from Sefaria...": pick a
+book, then give the PASSAGE in a small prompt (pre-filled "<title> ", e.g. "Rif Berakhot 1a-2b")
+since Sefaria returns a whole book otherwise (about 213,000 characters for "Rif Berakhot", 1.5
+million for "Halakhot Gedolot", both far over `MAX_VERSION_LETTERS`); an empty or whole-book
+answer is refused before any fetch runs. "Add Custom Text" and "Load from files..." are reused
+unchanged (one text per file, named after it). `Condition` gained `version_names` (one name per
+version, parallel to `versions`; `to_dict` omits the key when empty, so every condition saved
+before this change, and its fingerprint, is byte-identical) so re-opening a saved condition shows
+the same names rather than "Version 1", "Version 2". The module is separate from
+`desktop/compound_ui.py` specifically so that pure-widgets module never imports Sefaria/network
+code -- `ConditionsStrip` reaches it with a lazy, in-method import. Routing: `ConditionsStrip._edit`
+now dispatches on the ROW's OWN requirement (must_not -> `QuotingTextsDialog`, must ->
+`ConditionDialog`, never the window's choice), and a new `ConditionsStrip.open_quoting_texts()` is
+the "Quoting texts..." menu item's entry point -- it edits the FIRST existing must_not condition if
+there is one, rather than letting repeated clicks pile up several must_not rows (a session already
+holding several, from before this change, still edits each through its own row). `ConditionDialog`
+still accepts `REQ_MUST_NOT` as a constructor argument, but nothing in the UI routes a must_not
+condition to it any more. Review round 1 (Opus, SHIP WITH FIXES), all fixed: a fetch's signals now
+reach only the dialog waiting for THAT fetch (disconnected on cancel or replace, and each slot checks
+it belongs to the current fetch), so a second "Load from Sefaria..." or a closed dialog can no longer
+receive a stale "not found"; "Load from Sefaria..." is disabled while a fetch runs; cancelling one
+passage prompt stops asking for the rest; "Quoting texts..." stays usable at four conditions when it
+would only edit; an older one-text condition keeps its label as the text's name; the strip deletes
+each dialog after use. Tests: `tests/test_quoting_texts_dialog_gui.py` (the dialog itself, no
+network: `AllSourcesDialog`, the passage prompt and `SefariaFetchThread` all stubbed) and the
+routing additions to `tests/test_compound_ui_gui.py`.

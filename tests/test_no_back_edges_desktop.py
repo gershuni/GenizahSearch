@@ -80,6 +80,9 @@ DESKTOP_MODULES = [
     "desktop/qthread_exit.py",
     # 2026-10-06: Joins Lab and refinement replays search with their own variant settings.
     "desktop/variant_run_settings.py",
+    # 2026-10-15: the "Quoting texts..." dialog, kept out of compound_ui.py so
+    # that pure-widgets module stays free of network code.
+    "desktop/quoting_texts_dialog.py",
 ]
 
 # Compound statement types whose bodies run at import time

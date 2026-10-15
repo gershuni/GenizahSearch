@@ -271,27 +271,75 @@ class ConditionsStrip(QWidget):
         return not self.add_disabled_reason()
 
     # -- actions -------------------------------------------------------------
+    def _dialog_for(self, requirement: str, condition: Optional[cq.Condition] = None):
+        """ConditionDialog for REQ_MUST, QuotingTextsDialog for REQ_MUST_NOT
+        (owner, 2026-10-15): must_not conditions are the "Quoting texts..."
+        dialog, never the generic one, whether adding or editing. A lazy
+        import -- desktop/quoting_texts_dialog.py reaches Sefaria over the
+        network, and this module stays free of that (the back-edge guard,
+        tests/test_no_back_edges_desktop.py, registers it all the same)."""
+        if requirement == cq.REQ_MUST_NOT:
+            from desktop.quoting_texts_dialog import QuotingTextsDialog
+            return QuotingTextsDialog(self, condition=condition, floor=self._floor())
+        if condition is not None:
+            return ConditionDialog(self, condition, floor=self._floor())
+        return ConditionDialog(self, requirement=requirement, floor=self._floor())
+
     def add_condition(self, requirement: str) -> bool:
         """Open the add dialog with a FIXED requirement -- the Composition
-        tab's "Filter texts" menu calls this for "Quoting texts..."
-        (REQ_MUST_NOT) and "Add condition..." (REQ_MUST). Owns the
-        4-condition cap and the letter-level rule (`can_add`), so no caller
-        can add one the menu would have refused. Returns whether a condition
-        was added."""
+        tab's "Filter texts" menu calls this for "Add condition..."
+        (REQ_MUST); `open_quoting_texts` is REQ_MUST_NOT's own entry point,
+        but this still dispatches correctly if an older caller passes it.
+        Owns the 4-condition cap and the letter-level rule (`can_add`), so no
+        caller can add one the menu would have refused. Returns whether a
+        condition was added."""
         if not self.can_add():
             return False
-        dlg = ConditionDialog(self, requirement=requirement, floor=self._floor())
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._conditions.append(dlg.condition())
-            self._emit()
+        dlg = self._dialog_for(requirement)
+        try:
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                self._conditions.append(dlg.condition())
+                self._emit()
+                return True
+            return False
+        finally:
+            dlg.deleteLater()
+
+    def quoting_texts_disabled_reason(self) -> str:
+        """Why "Quoting texts..." cannot be used now, or ''. With a must_not
+        row already there it only EDITS that row, so the cap does not apply."""
+        if not self._enabled:
+            return self.add_disabled_reason()
+        if any(c.requirement == cq.REQ_MUST_NOT for c in self._conditions):
+            return ''
+        return self.add_disabled_reason()
+
+    def open_quoting_texts(self) -> bool:
+        """"Quoting texts..." menu item (owner, 2026-10-15): edits the FIRST
+        existing must_not condition if there is one, otherwise adds a new one
+        -- the same cap and letter-level rule as `add_condition`, since this
+        is just its must_not entry point with the "edit instead of
+        duplicating" rule on top. Old sessions that already have several
+        must_not rows are untouched: each keeps editing its own row via
+        `_edit`."""
+        if self.quoting_texts_disabled_reason():
+            return False
+        index = next((i for i, c in enumerate(self._conditions)
+                     if c.requirement == cq.REQ_MUST_NOT), None)
+        if index is not None:
+            self._edit(index)
             return True
-        return False
+        return self.add_condition(cq.REQ_MUST_NOT)
 
     def _edit(self, index: int):
-        dlg = ConditionDialog(self, self._conditions[index], floor=self._floor())
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._conditions[index] = dlg.condition()
-            self._emit()
+        condition = self._conditions[index]
+        dlg = self._dialog_for(condition.requirement, condition)
+        try:
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                self._conditions[index] = dlg.condition()
+                self._emit()
+        finally:
+            dlg.deleteLater()
 
     def _remove(self, index: int):
         del self._conditions[index]

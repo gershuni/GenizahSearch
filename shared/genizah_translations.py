@@ -5669,3 +5669,28 @@ TRANSLATIONS.update({
         'אותיות מהחיבור שאינן גם בטקסט הראשי שלך.',
     'Checking your own text ({}/{})': 'בודק את הטקסט שלך ({}/{})',
 })
+
+# Quoting texts dialog (owner decision 2026-10-15): looks like the
+# Quoted texts dialog and reuses its Sefaria library browser under
+# "Load from Sefaria...". Reuses the existing "Add Custom Text",
+# "Load from files...", "Remove", "OK" and "Cancel" keys.
+# Proposed wording (owner approval pending)
+TRANSLATIONS.update({
+    "Quoting texts": "חיבורים מצטטים",
+    "Load from Sefaria...": "טען מספריא...",
+    "Which passage of {}?": "איזה קטע מתוך {}?",
+    "For example: 1a-2b": "למשל: 1a-2b",
+    "Choose a passage, not the whole book.": "בחר קטע, לא את כל הספר.",
+    "{} is too long ({} letters; at most {}). Choose a shorter passage.":
+        "{} ארוך מדי ({} אותיות; לכל היותר {}). בחר קטע קצר יותר.",
+    "Not found on Sefaria: {}": "לא נמצא בספריא: {}",
+    "Text {}": "טקסט {}",
+    "{} · {} letters": "{} · {} אותיות",
+    "Load or paste the passage of the quoting work that discusses your "
+    "main text (for example Rif Berakhot 1a-2b), not the whole book. A "
+    "page is removed only where at least 40 letters of it are not also "
+    "in your main text.":
+        'טען או הדבק את הקטע מהחיבור המצטט שעוסק בטקסט הראשי שלך (למשל רי"ף ברכות '
+        '1a-2b), ולא את כל הספר. דף יוסר רק אם יש בו לפחות 40 '
+        'אותיות מהחיבור שאינן גם בטקסט הראשי שלך.',
+})

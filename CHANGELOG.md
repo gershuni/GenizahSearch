@@ -18,6 +18,10 @@ A must_not condition now removes a page only where the quoting text contributes 
 letters of its own that the main text does not also cover ("own text", owner, 2026-10-14) -- a
 quoting work that cites the main text itself (the Rif quoting the Talmud) no longer drops the
 Talmud's own manuscripts; "Quoting texts..." now defaults to "On the same image".
+"Quoting texts..." now opens its own dialog (owner, 2026-10-15), styled like the Quoted texts
+dialog, with the Sefaria library browser under "Load from Sefaria..." (pick a book, then the
+passage you want) alongside custom text and files -- editing it again shows each text's own name
+rather than "Version 1", "Version 2".
 Plan and decisions: `docs/plans/COMPOSITION_CONDITIONS_PLAN.md`. Not released.
 
 ---

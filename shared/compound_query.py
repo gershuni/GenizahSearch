@@ -141,19 +141,33 @@ class Condition:
     where: str
     versions: tuple
     label: str = ''
+    # One name per version, parallel to `versions` -- the Quoting texts
+    # dialog's own text names (a Sefaria ref, a custom name, a file name), so
+    # editing a condition shows the same names again rather than "Version N"
+    # (owner, 2026-10-15; desktop/quoting_texts_dialog.py). Empty by default:
+    # a condition with no names is exactly what every condition before this
+    # was, and `to_dict` omits the key in that case so an old saved condition
+    # and its fingerprint stay byte-identical.
+    version_names: tuple = ()
 
     def to_dict(self) -> dict:
-        return {'requirement': self.requirement, 'where': self.where,
-                'versions': list(self.versions), 'label': self.label}
+        d = {'requirement': self.requirement, 'where': self.where,
+             'versions': list(self.versions), 'label': self.label}
+        if self.version_names:
+            d['version_names'] = list(self.version_names)
+        return d
 
     @classmethod
     def from_dict(cls, d) -> 'Condition':
         """Strict: anything malformed raises ValueError (a restored query is
-        never half-applied)."""
+        never half-applied). `version_names` is optional -- absent (every
+        condition saved before 2026-10-15) means no names; present, it must
+        be a list of strings exactly as long as `versions`."""
         if not isinstance(d, dict):
             raise ValueError('condition is not a mapping')
         req, where = d.get('requirement'), d.get('where')
         versions, label = d.get('versions'), d.get('label', '')
+        version_names = d.get('version_names', [])
         if req not in REQUIREMENTS:
             raise ValueError(f'unknown requirement {req!r}')
         if where not in PLACES:
@@ -163,7 +177,12 @@ class Condition:
             raise ValueError('versions must be a non-empty list of texts')
         if not isinstance(label, str):
             raise ValueError('label must be text')
-        return cls(req, where, tuple(versions), label)
+        if (not isinstance(version_names, list)
+                or not all(isinstance(n, str) for n in version_names)):
+            raise ValueError('version_names must be a list of texts')
+        if version_names and len(version_names) != len(versions):
+            raise ValueError('version_names must match versions in length')
+        return cls(req, where, tuple(versions), label, tuple(version_names))
 
 
 @dataclass(frozen=True)

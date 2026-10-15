@@ -355,6 +355,32 @@ def test_condition_round_trip_and_strict_restore():
             Condition.from_dict(broken)
 
 
+def test_condition_version_names_round_trip_and_to_dict_omits_when_empty():
+    """desktop/quoting_texts_dialog.py::QuotingTextsDialog (owner, 2026-10-15):
+    a must_not condition's own text names, one per version. `to_dict` carries
+    the key only when there IS a name, so a condition saved before this
+    change -- and its fingerprint -- stay byte-identical."""
+    c = Condition(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, ('a' * 50, 'b' * 50), 'HG',
+                 version_names=('Rif Berakhot 1a', 'Rif Berakhot 1b'))
+    d = c.to_dict()
+    assert d['version_names'] == ['Rif Berakhot 1a', 'Rif Berakhot 1b']
+    assert Condition.from_dict(d) == c
+
+    nameless = Condition(cq.REQ_MUST, cq.WHERE_SAME_IMAGE, ('x' * 50,))
+    assert 'version_names' not in nameless.to_dict()
+
+
+def test_condition_from_dict_version_names_strict_length_and_old_dict_loads():
+    base = Condition(cq.REQ_MUST, cq.WHERE_SAME_IMAGE, ('a' * 50, 'b' * 50)).to_dict()
+    assert 'version_names' not in base                 # the fixture itself has none
+    restored = Condition.from_dict(base)                # an old dict (no key) still loads
+    assert restored.version_names == ()
+    with pytest.raises(ValueError):
+        Condition.from_dict({**base, 'version_names': ['only one']})
+    with pytest.raises(ValueError):
+        Condition.from_dict({**base, 'version_names': [1, 2]})
+
+
 def test_validate_limits():
     long_ok = 'א' * 60
     ok = [Condition(cq.REQ_MUST, cq.WHERE_SAME_IMAGE, (long_ok,))]

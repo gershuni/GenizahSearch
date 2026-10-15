@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import QApplication, QDialog, QDialogButtonBox, QTreeWidget
 
 from desktop import comp_view_filter as _cvf
 from desktop.compound_ui import ConditionDialog, ConditionsStrip, condition_summary
+from desktop.quoting_texts_dialog import QuotingTextsDialog
 from genizah_core import tr
 from shared import compound_query as cq
 from shared.compound_query import Condition
@@ -153,13 +154,16 @@ def test_strip_is_hidden_with_no_conditions_and_shown_with_one():
 
 
 def test_editing_a_row_keeps_its_requirement(monkeypatch):
+    # A must condition's row edits through ConditionDialog (owner, 2026-10-15:
+    # a must_not row edits through QuotingTextsDialog instead -- see
+    # test_strip_edit_routes_by_the_rows_own_requirement below).
     def rename_and_accept(dlg):
         # The user edits the row: a new name, the place changed.
         dlg.edit_label.setText('Halakhot Gedolot')
         dlg.combo_where.setCurrentIndex(dlg.combo_where.findData(cq.WHERE_SAME_IMAGE))
         return QDialog.DialogCode.Accepted
     monkeypatch.setattr(ConditionDialog, 'exec', rename_and_accept)
-    c = Condition(cq.REQ_MUST_NOT, cq.WHERE_MANUSCRIPT, (LONG,), 'HG')
+    c = Condition(cq.REQ_MUST, cq.WHERE_MANUSCRIPT, (LONG,), 'HG')
     strip = _strip([c])
     seen = []
     strip.changed.connect(seen.append)
@@ -168,8 +172,28 @@ def test_editing_a_row_keeps_its_requirement(monkeypatch):
         [edited] = strip.conditions()
         assert edited.label == 'Halakhot Gedolot'          # the edit landed
         assert edited.where == cq.WHERE_SAME_IMAGE
-        assert edited.requirement == cq.REQ_MUST_NOT       # ... and kept the requirement
+        assert edited.requirement == cq.REQ_MUST           # ... and kept the requirement
         assert seen and seen[-1] == [edited]
+    finally:
+        strip.deleteLater()
+
+
+def test_strip_edit_routes_by_the_rows_own_requirement(monkeypatch):
+    """Owner, 2026-10-15: a must_not row's edit button opens QuotingTextsDialog,
+    a must row's opens ConditionDialog -- `ConditionsStrip._edit` dispatches on
+    the row's OWN stored requirement, never a fixed choice."""
+    opened = []
+    monkeypatch.setattr(ConditionDialog, 'exec',
+                        lambda self: opened.append('condition') or QDialog.DialogCode.Rejected)
+    monkeypatch.setattr(QuotingTextsDialog, 'exec',
+                        lambda self: opened.append('quoting') or QDialog.DialogCode.Rejected)
+    must = Condition(cq.REQ_MUST, cq.WHERE_SAME_IMAGE, (LONG,))
+    must_not = Condition(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, (LONG,))
+    strip = _strip([must, must_not])
+    try:
+        strip._edit(0)
+        strip._edit(1)
+        assert opened == ['condition', 'quoting']
     finally:
         strip.deleteLater()
 
@@ -187,6 +211,7 @@ def test_a_long_condition_name_elides_instead_of_widening_the_strip():
 
 def test_add_condition_owns_the_cap_and_opens_with_the_given_requirement(monkeypatch):
     monkeypatch.setattr(ConditionDialog, 'exec', lambda self: QDialog.DialogCode.Accepted)
+    monkeypatch.setattr(QuotingTextsDialog, 'exec', lambda self: QDialog.DialogCode.Accepted)
     strip = _strip()
     try:
         assert strip.add_condition(cq.REQ_MUST_NOT) is True
@@ -371,12 +396,34 @@ def test_item_one_reaches_the_real_quoted_texts_dialog_and_keeps_its_sources(mon
 
 def test_item_two_yields_a_must_not_condition_and_item_three_a_must_condition(monkeypatch):
     monkeypatch.setattr(ConditionDialog, 'exec', lambda self: QDialog.DialogCode.Accepted)
+    monkeypatch.setattr(QuotingTextsDialog, 'exec', lambda self: QDialog.DialogCode.Accepted)
     win = _menu_win()
     try:
         win.act_comp_quoting_texts.trigger()
         win.act_comp_add_condition.trigger()
         reqs = [c.requirement for c in win.comp_conditions_strip.conditions()]
         assert reqs == [cq.REQ_MUST_NOT, cq.REQ_MUST]
+    finally:
+        win.deleteLater()
+
+
+def test_item_two_opens_quoting_texts_dialog_not_condition_dialog_and_edits_existing(monkeypatch):
+    """Owner, 2026-10-15: "Quoting texts..." never opens ConditionDialog, and
+    a second click edits the one must_not condition already there instead of
+    adding a second."""
+    opened = []
+    monkeypatch.setattr(QuotingTextsDialog, 'exec',
+                        lambda self: opened.append(self) or QDialog.DialogCode.Accepted)
+    monkeypatch.setattr(ConditionDialog, 'exec',
+                        lambda self: pytest.fail('must_not must not open ConditionDialog'))
+    win = _menu_win()
+    try:
+        win.act_comp_quoting_texts.trigger()
+        conditions = win.comp_conditions_strip.conditions()
+        assert len(conditions) == 1 and conditions[0].requirement == cq.REQ_MUST_NOT
+        win.act_comp_quoting_texts.trigger()
+        assert len(win.comp_conditions_strip.conditions()) == 1    # edited, not duplicated
+        assert len(opened) == 2
     finally:
         win.deleteLater()
 
@@ -429,5 +476,49 @@ def test_item_one_shows_the_active_quoted_source_count():
         win.filter_enabled_sources = {'a', 'c'}       # 'b' loaded but not enabled
         win.comp_filter_menu.aboutToShow.emit()
         assert win.act_comp_quoted_texts.text() == tr("Quoted texts... ({})").format(2)
+    finally:
+        win.deleteLater()
+def test_a_must_not_rows_edit_opens_the_dialog_with_its_texts(monkeypatch):
+    seen = []
+
+    def _look(dlg):
+        seen.append(([t['name'] for t in dlg._texts], dlg.combo_where.currentData()))
+        return QDialog.DialogCode.Rejected
+    monkeypatch.setattr(QuotingTextsDialog, 'exec', _look)
+    c = Condition(cq.REQ_MUST_NOT, cq.WHERE_MANUSCRIPT, (LONG, LONG), 'Rif, HG',
+                  version_names=('Rif', 'HG'))
+    strip = _strip([c])
+    try:
+        strip._edit(0)
+        assert seen == [(['Rif', 'HG'], cq.WHERE_MANUSCRIPT)]
+    finally:
+        strip.deleteLater()
+
+
+def test_item_two_edits_the_first_must_not_row(monkeypatch):
+    edited = []
+    monkeypatch.setattr(QuotingTextsDialog, 'exec',
+                        lambda self: edited.append(self.condition().label)
+                        or QDialog.DialogCode.Rejected)
+    win = _menu_win()
+    a = Condition(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, (LONG,), 'first')
+    b = Condition(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, (LONG,), 'second')
+    win.comp_conditions_strip.set_conditions([a, b])
+    try:
+        win.act_comp_quoting_texts.trigger()
+        assert edited == ['first']
+    finally:
+        win.deleteLater()
+
+
+def test_item_two_stays_usable_at_four_conditions_when_it_would_only_edit():
+    win = _menu_win(method='passage')
+    must = Condition(cq.REQ_MUST, cq.WHERE_SAME_IMAGE, (LONG,))
+    must_not = Condition(cq.REQ_MUST_NOT, cq.WHERE_SAME_IMAGE, (LONG,), 'HG')
+    win.comp_conditions_strip.set_conditions([must] * 3 + [must_not])
+    try:
+        win.comp_filter_menu.aboutToShow.emit()
+        assert win.act_comp_quoting_texts.isEnabled()        # edits the HG row
+        assert not win.act_comp_add_condition.isEnabled()    # would add a fifth
     finally:
         win.deleteLater()
