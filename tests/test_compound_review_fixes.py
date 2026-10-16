@@ -237,8 +237,36 @@ def test_grouping_results_land_only_for_the_run_they_grouped():
     w._on_grouping_for_run(4, 'stale')
     w._on_grouping_for_run(5, 'fresh')
     assert w.landed == [('fresh',)]
-    src = inspect.getsource(APP._on_passage_loaded)
-    assert "getattr(self, '_comp_active_run_id', None) is None" in src
+
+
+def test_no_deferred_restore_over_a_search_started_since_launch():
+    """Both index loads (Genizah and My Library) judge a held-back snapshot
+    through ONE function, and it never displays over a run started since
+    launch -- whichever load answers last."""
+    class _J:
+        _judge_deferred_comp_snapshot = APP._judge_deferred_comp_snapshot
+
+        def __init__(self, run_id, wait=False):
+            self._comp_active_run_id = run_id
+            self._deferred_comp_snapshot = {'results': ['r']}
+            self._wait = wait
+            self.shown = []
+
+        def _passage_snapshot_must_wait(self, comp):
+            return self._wait
+
+        def _display_restored_comp_snapshot(self, comp):
+            self.shown.append(comp)
+
+    busy, idle, waiting = _J(5), _J(None), _J(None, wait=True)
+    for w in (busy, idle, waiting):
+        w._judge_deferred_comp_snapshot()
+    assert busy.shown == [] and '_deferred_comp_snapshot' not in busy.__dict__
+    assert idle.shown == [{'results': ['r']}]
+    assert waiting.shown == [] and '_deferred_comp_snapshot' in waiting.__dict__
+    for load_slot in (APP._on_passage_loaded, APP._on_local_passage_loaded):
+        assert 'self._judge_deferred_comp_snapshot()' in inspect.getsource(
+            load_slot)
 
 
 # -- M10: a failed main text is an error, stopped or not -------------------------------------
@@ -443,6 +471,38 @@ def test_the_strip_is_frozen_outside_letter_level(method, lab, ok):
 
         def _comp_method(self):
             return method
+    _Strip.calls = []
+    _W()._refresh_comp_conditions_available()
+    assert _Strip.calls == [(ok, not ok)]
+
+
+@pytest.mark.parametrize('scope, ok', [('genizah', True), ('local', False),
+                                       ('all', False)])
+def test_the_strip_is_frozen_outside_the_genizah_corpus(scope, ok):
+    """Conditions are Genizah-only, so the strip follows the corpus scope
+    too, not only the method."""
+    class _Strip:
+        calls = []
+
+        def set_available(self, available, reason=''):
+            self.calls.append((available, bool(reason)))
+
+    class _Btn:
+        def isChecked(self):
+            return False
+
+    class _Combo:
+        def currentData(self):
+            return scope
+
+    class _W:
+        _refresh_comp_conditions_available = APP._refresh_comp_conditions_available
+        comp_conditions_strip = _Strip()
+        btn_lab_mode_toggle_comp = _Btn()
+        comp_corpus_scope_combo = _Combo()
+
+        def _comp_method(self):
+            return 'passage'
     _Strip.calls = []
     _W()._refresh_comp_conditions_available()
     assert _Strip.calls == [(ok, not ok)]

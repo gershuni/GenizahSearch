@@ -376,6 +376,33 @@ def test_local_slot_unavailable_names_my_library(slots):
             .search_composition_logic(PSALM)
 
 
+def test_router_sends_conditions_to_the_genizah_index(monkeypatch):
+    """`CompoundCompositionThread` calls `search_condition` on whatever
+    searcher it holds. The router must answer it, and only from the Genizah
+    slot: condition masks are built from Genizah page keys."""
+    import desktop.passage_lifecycle as pl
+    import desktop.passage_local as pll
+    calls = []
+
+    class _Adapter:
+        def __init__(self, slot):
+            self.slot = slot
+
+        def search_condition(self, text, **kw):
+            calls.append((self.slot, text, kw))
+            return 'found'
+
+    monkeypatch.setattr(
+        pl, 'get_passage_searcher',
+        lambda *a, slot=pl.SLOT_GENIZAH, **k: _Adapter(slot))
+    r = pll.ScopedPassageSearcher(object(), 'widest-40', 'normal', 'normal')
+    assert r.search_condition('x', pages=(1,), sys_ids=('s',),
+                              render_limit=3) == 'found'
+    assert calls == [(pl.SLOT_GENIZAH, 'x', {
+        'pages': (1,), 'sys_ids': ('s',), 'should_stop': None,
+        'render_limit': 3})]
+
+
 def test_router_merges_both_indexes_by_score(monkeypatch):
     import desktop.passage_lifecycle as pl
     import desktop.passage_local as pll

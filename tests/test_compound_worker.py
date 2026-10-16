@@ -396,6 +396,17 @@ def test_conditions_never_run_on_another_method(warnings, method, lab):
     assert len(warnings) == 1
 
 
+@pytest.mark.parametrize('scope', ['local', 'all'])
+def test_conditions_never_run_outside_the_genizah_corpus(warnings, scope):
+    """A condition selects pages by their Genizah page keys, which no My
+    Library record has: under My Library or All it would silently select
+    nothing on the My Library side, so the run is refused instead."""
+    w = _Win([GOOD])
+    assert w._comp_compound_gate('main ' * 20, 'passage', False, scope,
+                                 'standard-40', 'normal', 'normal') is None
+    assert len(warnings) == 1
+
+
 def test_no_conditions_pass_through_on_any_method(warnings):
     w = _Win([])
     assert w._comp_compound_gate('t', 'chunk', True, 'genizah',

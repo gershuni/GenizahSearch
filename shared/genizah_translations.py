@@ -5773,4 +5773,12 @@ TRANSLATIONS.update({
         'הוסף תיקיות לספרייה שלי ובנה להן אינדקס תחילה.',
     'the My Library letter-level index is busy':
         'האינדקס לחיפוש ברמת האות בספרייה שלי עסוק',
+    # Conditions are Genizah-only (2026-10-16). Proposed wording; the owner
+    # approves it before release.
+    'Conditions work only when the corpus is Genizah. Switch the corpus to '
+    'Genizah, or remove the conditions.':
+        'תנאים פועלים רק כשהקורפוס הוא גניזה. החלף את הקורפוס לגניזה, '
+        'או הסר את התנאים.',
+    'Conditions work only when the corpus is Genizah.':
+        'תנאים פועלים רק כשהקורפוס הוא גניזה.',
 })

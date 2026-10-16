@@ -197,3 +197,15 @@ class ScopedPassageSearcher:
         if len(results) == 1:
             return results[0]
         return _merge(results[0], results[1])
+
+    def search_condition(self, text: str, pages=(), sys_ids=(),
+                         should_stop=None, render_limit: int = 0):
+        """One version of a Composition Search condition -- on the GENIZAH
+        index only. A condition's page set is built from Genizah page keys
+        (`shared/passage_pages.py`), which no My Library record has, so the
+        window refuses conditions under any other scope before a run starts
+        (`_comp_compound_gate`). `CompoundCompositionThread` calls this on
+        whatever searcher it was given, so the router must answer it."""
+        return self._genizah().search_condition(
+            text, pages=pages, sys_ids=sys_ids, should_stop=should_stop,
+            render_limit=render_limit)

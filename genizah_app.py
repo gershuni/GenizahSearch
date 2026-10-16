@@ -17521,14 +17521,7 @@ class GenizahGUI(QMainWindow):
         # A snapshot held back by the startup race is judged HERE, where
         # "not built" finally means what it says -- unless it also waits for
         # the My Library index, whose load then judges it.
-        deferred = self.__dict__.get('_deferred_comp_snapshot')
-        if deferred is not None and not self._passage_snapshot_must_wait(
-                deferred):
-            self.__dict__.pop('_deferred_comp_snapshot', None)
-            # ...unless a search has been started since launch: its answer is
-            # the one on screen, and a restored older one must not replace it.
-            if getattr(self, '_comp_active_run_id', None) is None:
-                self._display_restored_comp_snapshot(deferred)
+        self._judge_deferred_comp_snapshot()
         # Only now is "there is no index" a fact rather than "not loaded
         # yet" -- offering before this point would fire on every launch,
         # including the ones where an index was about to appear.
@@ -18441,12 +18434,18 @@ class GenizahGUI(QMainWindow):
 
     def _judge_deferred_comp_snapshot(self):
         """Display a snapshot the startup race held back, once nothing it
-        depends on is still loading. Called from both index loads."""
+        depends on is still loading. Called from both index loads -- the
+        Genizah one and the My Library one, whichever answers last.
+
+        A search started since launch wins: its answer is the one on screen,
+        and a restored older one must not replace it. The snapshot is then
+        dropped, not kept for later."""
         deferred = self.__dict__.get('_deferred_comp_snapshot')
         if deferred is None or self._passage_snapshot_must_wait(deferred):
             return
         self.__dict__.pop('_deferred_comp_snapshot', None)
-        self._display_restored_comp_snapshot(deferred)
+        if getattr(self, '_comp_active_run_id', None) is None:
+            self._display_restored_comp_snapshot(deferred)
 
     def _display_restored_comp_snapshot(self, comp):
         """Re-display a saved composition result set, re-establishing the
@@ -18658,6 +18657,14 @@ class GenizahGUI(QMainWindow):
             QMessageBox.warning(self, tr("Conditions"), tr(
                 "Conditions work only with letter-level search. Switch "
                 "the method to letter-level, or remove the conditions."))
+            return None
+        if scope != 'genizah':
+            # A condition selects pages by their Genizah page keys
+            # (shared/passage_pages.py), which no My Library record has: run
+            # under My Library or All it would silently select nothing there.
+            QMessageBox.warning(self, tr("Conditions"), tr(
+                "Conditions work only when the corpus is Genizah. Switch the "
+                "corpus to Genizah, or remove the conditions."))
             return None
         from shared.passage_policy import compose as _passage_compose
         main_list = self._comp_compound_main_list(txt)
@@ -18914,16 +18921,25 @@ class GenizahGUI(QMainWindow):
             strip.set_conditions(conditions)
 
     def _refresh_comp_conditions_available(self):
-        """Conditions run only in letter-level mode; elsewhere the strip
-        shows them, frozen, with the reason."""
+        """Conditions run only in letter-level mode, on the Genizah corpus;
+        elsewhere the strip shows them, frozen, with the reason."""
         strip = getattr(self, 'comp_conditions_strip', None)
         if strip is None:
             return
         lab = bool(getattr(self, 'btn_lab_mode_toggle_comp', None)
                    and self.btn_lab_mode_toggle_comp.isChecked())
-        ok = self._comp_method() == 'passage' and not lab
-        strip.set_available(ok, '' if ok else tr(
-            "Conditions work only with letter-level search."))
+        if self._comp_method() != 'passage' or lab:
+            strip.set_available(False, tr(
+                "Conditions work only with letter-level search."))
+            return
+        combo = getattr(self, 'comp_corpus_scope_combo', None)
+        scope = ((combo.currentData() if combo is not None else None)
+                 or getattr(self, '_comp_corpus_scope', 'genizah'))
+        if scope != 'genizah':
+            strip.set_available(False, tr(
+                "Conditions work only when the corpus is Genizah."))
+            return
+        strip.set_available(True, '')
 
     # -- "Filter texts" menu (owner, 2026-10-14) ------------------------------
     # One button, one menu, three fixed-requirement entry points, replacing
@@ -21918,10 +21934,12 @@ class GenizahGUI(QMainWindow):
         if combo is None:
             return
         self._comp_corpus_scope = combo.currentData() or 'genizah'
-        # Phase 146: local/all have no letter-level index -- re-run the
-        # gate so a scope change demotes the method instead of leaving
-        # a selection that dispatch would silently override.
+        # Re-run the gate so a scope change demotes the method when the
+        # scope's letter-level index is not ready, instead of leaving a
+        # selection that dispatch would silently override.
         self._revalidate_comp_method()
+        # Conditions are Genizah-only, so their availability follows scope.
+        self._refresh_comp_conditions_available()
         self._save_session()
 
     def _deliver_unless_discarded(self, attr, generation, slot, *args):

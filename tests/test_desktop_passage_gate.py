@@ -163,6 +163,8 @@ class _Win:
     _on_pause_clicked = APP._on_pause_clicked
     _on_passage_build_finished = APP._on_passage_build_finished
     _passage_snapshot_must_wait = APP._passage_snapshot_must_wait
+    # Borrowed: both index loads hand a held-back snapshot to it.
+    _judge_deferred_comp_snapshot = APP._judge_deferred_comp_snapshot
     _display_restored_comp_snapshot = APP._display_restored_comp_snapshot
     _comp_method = APP._comp_method
     _restore_comp_passage_preferences = APP._restore_comp_passage_preferences
@@ -1934,10 +1936,15 @@ def test_the_restore_defers_instead_of_guessing():
 
 
 def test_the_load_slot_judges_what_was_deferred():
-    seg = _function_source('_on_passage_loaded')
-    assert "_deferred_comp_snapshot" in seg and (
-        '_display_restored_comp_snapshot(deferred)' in seg), (
-        'a snapshot held back by the startup race is never looked at again')
+    # Both index loads hand a held-back snapshot to the one judge, which
+    # displays it once nothing it depends on is still loading.
+    for name in ('_on_passage_loaded', '_on_local_passage_loaded'):
+        assert 'self._judge_deferred_comp_snapshot()' in _function_source(
+            name), (
+            f'{name}: a snapshot held back by the startup race is never '
+            'looked at again')
+    seg = _function_source('_judge_deferred_comp_snapshot')
+    assert '_display_restored_comp_snapshot(deferred)' in seg
 
 
 def test_the_flag_is_set_before_the_thread_starts():
