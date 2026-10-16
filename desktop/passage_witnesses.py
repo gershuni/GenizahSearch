@@ -459,6 +459,7 @@ def fuse_and_cap(state: WitnessSet, cap: int = None):
     from shared.parallels_service import (
         PARALLELS_GROUP_CAP, _cap_main_results_by_group)
     from shared.passage_parallels import _RegexSysIdParser
+    from shared.sys_id_patterns import ANY_SYS_ID_RE
 
     fused = fuse_all(state)
     if fused is None:
@@ -472,7 +473,12 @@ def fuse_and_cap(state: WitnessSet, cap: int = None):
     # short-circuit deliberately leaves rows untouched, and ordering that by a
     # key none of them has would collapse the page into one tie.
     order_key = 'fusion_score' if searched_count(state) > 1 else None
-    parser = _RegexSysIdParser()
+    # Grouped by each row's own sys_id in EITHER namespace: under My Library
+    # or All the fused list holds My Library rows too, and the corpus pattern
+    # put every one of them into a single 'unknown' group -- one cap slot for
+    # the whole library. Every row's header begins with its own id, so the
+    # digit-anchored ANY pattern reads a Genizah row exactly as before.
+    parser = _RegexSysIdParser(ANY_SYS_ID_RE)
     capped_main, truncated = _cap_main_results_by_group(
         main, parser, cap=limit, order_key=order_key)
     # Both buckets, by the same function and the same cap, so rendered rows

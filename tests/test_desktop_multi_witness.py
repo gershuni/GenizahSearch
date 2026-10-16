@@ -203,6 +203,8 @@ def _worker(witnesses, searcher, pinned=None, abort_after=None, cap=None,
     w.restrict_sys_ids = None
     w.corpus_scope = 'genizah'
     w.pinned_generation = pinned
+    # A Genizah-scope batch pins no My Library generation (`scope_pins`).
+    w.pinned_local_generation = None
     w.group_cap = cap
     w.roster = (list(roster) if roster is not None
                 else [(wid, label) for wid, label, _t in w.witnesses])
@@ -1783,7 +1785,7 @@ def _keyed(w, gen=1, filt='', thresh=5, restrict=None, monkeypatch=None):
     w._get_filter_text = lambda: filt
     w.pre_search_restrict_sys_ids = restrict
     if monkeypatch is not None:
-        monkeypatch.setattr(pl, 'current_state_generation', lambda: gen)
+        monkeypatch.setattr(pl, 'current_state_generation', lambda *_slot: gen)
     return w
 
 
@@ -1819,7 +1821,7 @@ def test_the_cache_key_moves_when_the_index_is_replaced(monkeypatch):
     worker pins the generation for the duration of a batch."""
     w = _keyed(_win(), gen=1, monkeypatch=monkeypatch)
     first = _key(w)
-    monkeypatch.setattr(pl, 'current_state_generation', lambda: 2)
+    monkeypatch.setattr(pl, 'current_state_generation', lambda *_slot: 2)
     assert _key(w) != first
 
 

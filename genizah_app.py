@@ -19446,19 +19446,54 @@ class GenizahGUI(QMainWindow):
         uids = self._collect_checked_comp_page_uids()
         if not uids:
             return []
+        # Either namespace: a checked My Library result is promoted too
+        # (owner, 2026-10-16), not silently skipped.
         wanted, seen = [], set()
+        sid_by_uid = {}
         for row in rows:
-            sid = passage_witness_source.witness_sys_id(row)
-            if not sid or sid in seen:
+            sid = passage_local.row_sys_id(row)
+            if not sid:
+                continue
+            if row.get('uid'):
+                sid_by_uid.setdefault(str(row['uid']), sid)
+            if sid in seen:
                 continue
             seen.add(sid)
             wanted.append(sid)
+        # A checked page is identified by its uid, which for a Genizah page is
+        # `IE.._P.._FL..` -- it holds NO sys_id, so reading one out of it
+        # found nothing and a checked Genizah result was never promoted. The
+        # rows know which sys_id each uid belongs to; a My Library uid
+        # (`LOCAL_{sys_id}_P{n}`) also carries it, the fallback for a uid no
+        # row lists.
         checked = set()
         for uid in uids:
-            m = passage_witness_source.WITNESS_SYS_ID_RE.search(str(uid))
-            if m:
-                checked.add(m.group(1))
+            sid = sid_by_uid.get(str(uid))
+            if not sid and str(uid).startswith('LOCAL_'):
+                sid = passage_local.uid_sys_id(uid)
+            if sid:
+                checked.add(sid)
         return [s for s in wanted if s in checked]
+
+    def _witness_label(self, sys_id, rows=()):
+        """What the Witnesses panel calls a promoted result: the shelfmark of
+        a Genizah manuscript, the file name of a My Library one, the bare id
+        when neither can be found."""
+        if passage_local.is_local_sys_id(sys_id):
+            for row in rows or ():
+                if (passage_local.row_sys_id(row) == sys_id
+                        and row.get('shelfmark')):
+                    return row['shelfmark']
+            try:
+                path = self._lookup_local_filepath(sys_id)
+            except Exception:                                # noqa: BLE001
+                path = None
+            return os.path.basename(path) if path else sys_id
+        try:
+            shelf, _title = self.meta_mgr.get_meta_for_id(sys_id)
+            return shelf or sys_id
+        except Exception:                                    # noqa: BLE001
+            return sys_id
 
     def _promote_sys_ids(self, sys_ids, rows):
         """Turn manuscripts into witnesses and search them.
@@ -19475,23 +19510,22 @@ class GenizahGUI(QMainWindow):
         sys_ids = [s for s in sys_ids if s not in already]
         if not sys_ids:
             return 0
-        headers = passage_witness_source.witness_headers_for(sys_ids, rows)
+        # Pages of either index, each read from its own (a My Library page
+        # through the LOCAL index).
+        fetcher = passage_local.WitnessTextFetcher(self.searcher)
+        headers = passage_witness_source.witness_headers_for(
+            sys_ids, rows, sys_id_of=passage_local.row_sys_id)
         texts, failed = passage_witness_source.collect_witness_texts(
             sys_ids, rows,
-            fetch_header=self.searcher.get_full_text_by_header,
-            fetch_manuscript=self.searcher.get_full_manuscript,
+            fetch_header=fetcher.get_full_text_by_header,
+            fetch_manuscript=fetcher.get_full_manuscript,
             headers_by_sid=headers)
         added = 0
         for sid in sys_ids:
             text = texts.get(sid)
             if not text:
                 continue
-            label = sid
-            try:
-                shelf, _title = self.meta_mgr.get_meta_for_id(sid)
-                label = shelf or sid
-            except Exception:
-                pass
+            label = self._witness_label(sid, rows)
             report = passage_witnesses.add_texts(
                 self._comp_witness_state(), [text], self._comp_seed_text(),
                 tr("Pasted text"), label=label, kind='manuscript',
@@ -19500,13 +19534,7 @@ class GenizahGUI(QMainWindow):
         if failed:
             # ONE line naming what failed, not N identical messages saying
             # nothing.
-            names = []
-            for sid in failed[:5]:
-                try:
-                    shelf, _t = self.meta_mgr.get_meta_for_id(sid)
-                except Exception:
-                    shelf = None
-                names.append(shelf or sid)
+            names = [self._witness_label(sid, rows) for sid in failed[:5]]
             more = f' (+{len(failed) - 5})' if len(failed) > 5 else ''
             self._witness_notify(tr(
                 "Could not load text for {n} manuscripts: {names}").format(
@@ -19600,7 +19628,8 @@ class GenizahGUI(QMainWindow):
         already = {e.sys_id for e in state.entries if e.sys_id}
         candidates = []
         for row in rows:
-            sid = passage_witness_source.witness_sys_id(row)
+            # Either namespace: My Library results are candidates too.
+            sid = passage_local.row_sys_id(row)
             if not sid or sid in already or sid in candidates:
                 continue
             candidates.append(sid)
@@ -20112,15 +20141,17 @@ class GenizahGUI(QMainWindow):
         # The headers the PROMOTION used, where the snapshot preserved them.
         # Re-deriving them from whatever rows are on screen now rebuilds a
         # DIFFERENT witness under the same label.
-        derived = passage_witness_source.witness_headers_for(sys_ids, rows)
+        derived = passage_witness_source.witness_headers_for(
+            sys_ids, rows, sys_id_of=passage_local.row_sys_id)
         headers = {e.sys_id: (list(e.headers or [])
                               or derived.get(e.sys_id) or [])
                    for e in stale}
+        fetcher = passage_local.WitnessTextFetcher(self.searcher)
         try:
             texts, failed = passage_witness_source.collect_witness_texts(
                 sys_ids, rows,
-                fetch_header=self.searcher.get_full_text_by_header,
-                fetch_manuscript=self.searcher.get_full_manuscript,
+                fetch_header=fetcher.get_full_text_by_header,
+                fetch_manuscript=fetcher.get_full_manuscript,
                 headers_by_sid=headers)
         except Exception:
             logger.exception('witness rehydrate failed')
@@ -20416,6 +20447,7 @@ class GenizahGUI(QMainWindow):
         list, after these rows exist, so it cannot change them.
         """
         restrict = getattr(self, 'pre_search_restrict_sys_ids', None)
+        pins = passage_local.scope_pins(scope)
         return (
             passage_witnesses.witness_text_key(seed_text),
             self._get_filter_text() or '',
@@ -20423,6 +20455,8 @@ class GenizahGUI(QMainWindow):
             tuple(sorted(restrict)) if restrict else None,
             scope, width, length, depth,
             passage_lifecycle.current_state_generation(),
+            # Rows from a replaced My Library index are no more comparable.
+            pins['pinned_local_generation'],
         )
 
     def _comp_witness_prior_rows(self):
@@ -29600,9 +29634,9 @@ class GenizahGUI(QMainWindow):
                     run_id=_comp_run_id,
                     # Pinned HERE, on the UI thread, before the worker can
                     # take its first lease: a swap between this line and the
-                    # first search would otherwise go unnoticed.
-                    pinned_generation=(
-                        passage_lifecycle.current_state_generation()),
+                    # first search would otherwise go unnoticed. One pin per
+                    # index the scope searches.
+                    **passage_local.scope_pins(_comp_scope),
                     roster=self._comp_witness_roster(),
                     prior_rows=_prior_rows,
                     prior_filtered=_prior_filtered)

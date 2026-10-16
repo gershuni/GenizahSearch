@@ -217,6 +217,215 @@ def test_an_answer_after_close_or_during_a_build_does_nothing():
 
 
 # ---------------------------------------------------------------------------
+# My Library results as witnesses (owner, 2026-10-16).
+# ---------------------------------------------------------------------------
+
+G_SYS = '990051620920205171'
+L_SYS = '970000000100000001'
+L_SYS_2 = '970000000100000002'
+G_HEAD = f'{G_SYS}_IE104538562_P5_FL104538575'
+G_UID = 'IE104538562_P5_FL104538575'        # what `_derive_uid` keeps
+
+
+def _l_head(sys_id, page=3, file_id=7):
+    from shared.local_indexer import _make_full_header
+    return _make_full_header(sys_id, page, file_id)
+
+
+def _l_uid(sys_id, page=3):
+    from shared.local_indexer import _make_uid
+    return _make_uid(sys_id, page)
+
+
+def test_a_row_is_read_in_either_namespace():
+    assert pll.row_sys_id({'raw_header': G_HEAD}) == G_SYS
+    assert pll.row_sys_id({'raw_header': _l_head(L_SYS)}) == L_SYS
+    assert pll.row_sys_id({}) is None
+    assert pll.is_local_sys_id(L_SYS) and not pll.is_local_sys_id(G_SYS)
+
+
+class _CheckWin:
+    _checked_comp_sys_ids = APP._checked_comp_sys_ids
+
+    def __init__(self, uids):
+        self._uids = uids
+
+    def _collect_checked_comp_page_uids(self):
+        return sorted(self._uids)
+
+
+def test_checked_results_of_both_indexes_are_promoted_in_display_order():
+    """A Genizah page's uid holds no sys_id (`IE.._P.._FL..`), so the id is
+    taken from the row the uid belongs to -- reading it out of the uid found
+    nothing, and a checked Genizah result was never promoted. A My Library
+    result is promoted too, not skipped."""
+    rows = [{'raw_header': _l_head(L_SYS), 'uid': _l_uid(L_SYS)},
+            {'raw_header': G_HEAD, 'uid': G_UID},
+            {'raw_header': _l_head(L_SYS_2), 'uid': _l_uid(L_SYS_2)}]
+    w = _CheckWin({G_UID, _l_uid(L_SYS)})
+    assert w._checked_comp_sys_ids(rows) == [L_SYS, G_SYS]
+    # The Genizah half alone: the defect that predates My Library.
+    assert _CheckWin({G_UID})._checked_comp_sys_ids([rows[1]]) == [G_SYS]
+    # Nothing checked, nothing promoted.
+    assert _CheckWin(set())._checked_comp_sys_ids(rows) == []
+
+
+def test_a_genizah_uid_is_never_read_as_an_id():
+    """Only a My Library uid is read directly; a Genizah uid no row lists is
+    not guessed at."""
+    w = _CheckWin({'IE9712345678_P1_FL1'})
+    assert w._checked_comp_sys_ids(
+        [{'raw_header': _l_head(L_SYS), 'uid': _l_uid(L_SYS)}]) == []
+
+
+class _Engine2:
+    """A main engine and a LOCAL Tantivy stand-in, each answering only its
+    own headers."""
+
+    def __init__(self, local_pages, main_pages):
+        from tests.test_passage_local import _FakeLocalIndex
+        self.local_index = _FakeLocalIndex(local_pages)
+        self.local_searcher = self.local_index
+        self._main = main_pages
+
+    def get_full_text_by_header(self, header):
+        return self._main.get(header)
+
+    def get_full_manuscript(self, sys_id):
+        return [{'text': 'whole manuscript'}]
+
+
+def test_witness_text_comes_from_each_pages_own_index():
+    page = 'א ב ג ד ה ו'
+    eng = _Engine2({_l_head(L_SYS): (page, 'a.pdf')}, {G_HEAD: 'genizah text'})
+    f = pll.WitnessTextFetcher(eng)
+    assert f.get_full_text_by_header(_l_head(L_SYS)) == page
+    assert f.get_full_text_by_header(G_HEAD) == 'genizah text'
+    # No whole-file fallback for a My Library file; Genizah keeps its own.
+    assert f.get_full_manuscript(L_SYS) == []
+    assert f.get_full_manuscript(G_SYS) == [{'text': 'whole manuscript'}]
+
+
+class _PromoteWin:
+    _promote_sys_ids = APP._promote_sys_ids
+    _witness_label = APP._witness_label
+    meta_mgr = None                  # a Genizah lookup would raise -> caught
+
+    def __init__(self, engine):
+        from desktop import passage_witnesses
+        self.searcher = engine
+        self._state = passage_witnesses.WitnessSet()
+        self.notes, self.searched = [], 0
+
+    def _comp_witness_state(self):
+        return self._state
+
+    def _comp_seed_text(self):
+        return 'השמים מספרים כבוד אל ומעשה ידיו'
+
+    def _witness_notify(self, msg):
+        self.notes.append(msg)
+
+    def _refresh_witness_panel(self):
+        pass
+
+    def _search_pending_witnesses(self):
+        self.searched += 1
+
+    def _lookup_local_filepath(self, sid):
+        return None
+
+
+def test_a_my_library_result_becomes_a_witness_named_by_its_file():
+    page = 'ויאמר ראובן אל אחיו הלא אמרתי אליכם לאמר אל תחטאו בילד'
+    head = _l_head(L_SYS)
+    eng = _Engine2({head: (page, 'a.pdf')}, {})
+    w = _PromoteWin(eng)
+    rows = [{'raw_header': head, 'uid': _l_uid(L_SYS), 'shelfmark': 'a.pdf'}]
+    assert w._promote_sys_ids([L_SYS], rows) == 1
+    entry = w._state.entries[0]
+    assert (entry.sys_id, entry.label, entry.kind) == (L_SYS, 'a.pdf',
+                                                       'manuscript')
+    assert entry.text == page and entry.headers == [head]
+    assert w.searched == 1 and w.notes == []
+
+
+def test_a_my_library_page_that_no_longer_resolves_is_named_not_dropped():
+    head = _l_head(L_SYS)
+    w = _PromoteWin(_Engine2({}, {}))
+    rows = [{'raw_header': head, 'uid': _l_uid(L_SYS), 'shelfmark': 'a.pdf'}]
+    assert w._promote_sys_ids([L_SYS], rows) == 0
+    assert w._state.entries == [] and w.searched == 0
+    assert any('a.pdf' in n for n in w.notes)
+
+
+def test_auto_expand_and_rehydrate_read_both_namespaces():
+    for name in ('_advance_auto_expand', '_rehydrate_witness_texts',
+                 '_promote_sys_ids'):
+        src = inspect.getsource(getattr(APP, name))
+        assert 'passage_witness_source.witness_sys_id(' not in src, name
+    for name in ('_rehydrate_witness_texts', '_promote_sys_ids'):
+        src = inspect.getsource(getattr(APP, name))
+        assert 'passage_local.WitnessTextFetcher(' in src, name
+        assert 'sys_id_of=passage_local.row_sys_id' in src, name
+
+
+def test_the_fusion_cap_counts_each_my_library_file_as_its_own_group():
+    """With the corpus parser every My Library row fell into ONE 'unknown'
+    group, so a cap of 1 kept the whole library. Each file is its own group
+    now, like each Genizah manuscript."""
+    from desktop import passage_witnesses as pw
+    from shared.passage_witness_source import WITNESS_SEED_ID
+    a, b = _l_head(L_SYS), _l_head(L_SYS_2)
+    st = pw.fusion_set(
+        [(WITNESS_SEED_ID, 'Your text'), ('w1', 'A')],
+        {WITNESS_SEED_ID: [{'raw_header': a, 'score': 90},
+                           {'raw_header': b, 'score': 40}],
+         'w1': [{'raw_header': a, 'score': 80},
+                {'raw_header': b, 'score': 30}]})
+    main, _filtered, truncated = pw.fuse_and_cap(st, cap=1)
+    assert {r['raw_header'] for r in main} == {a}
+    assert truncated is True
+
+
+# ---------------------------------------------------------------------------
+# A multi-witness batch pins every index its scope searches.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize('scope, g, l_pin', [
+    ('genizah', True, False), ('local', False, True), ('all', True, True)])
+def test_scope_pins(scope, g, l_pin):
+    pins = pll.scope_pins(scope)
+    assert (pins['pinned_generation'] is not None) is g
+    assert (pins['pinned_local_generation'] is not None) is l_pin
+
+
+def test_a_my_library_swap_voids_a_batch_that_searches_it(monkeypatch):
+    from desktop.gui_threads import MultiWitnessCompositionThread
+    w = MultiWitnessCompositionThread(
+        object(), [], corpus_scope='local', **pll.scope_pins('local'))
+    w._abort_if_generation_moved()                    # nothing moved yet
+    monkeypatch.setattr(pl._SLOTS[pl.SLOT_LOCAL], 'generation',
+                        pl.current_state_generation(pl.SLOT_LOCAL) + 1)
+    with pytest.raises(pl.PassageIndexReplaced):
+        w._abort_if_generation_moved()
+
+
+def test_a_my_library_swap_leaves_a_genizah_batch_alone(monkeypatch):
+    from desktop.gui_threads import MultiWitnessCompositionThread
+    w = MultiWitnessCompositionThread(
+        object(), [], corpus_scope='genizah', **pll.scope_pins('genizah'))
+    monkeypatch.setattr(pl._SLOTS[pl.SLOT_LOCAL], 'generation',
+                        pl.current_state_generation(pl.SLOT_LOCAL) + 1)
+    w._abort_if_generation_moved()
+
+
+def test_dispatch_pins_by_scope():
+    src = inspect.getsource(APP.run_composition)
+    assert '**passage_local.scope_pins(_comp_scope)' in src
+
+
+# ---------------------------------------------------------------------------
 # The gate: My Library readiness includes the tab's own "searchable".
 # ---------------------------------------------------------------------------
 

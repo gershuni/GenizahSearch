@@ -28,8 +28,9 @@ from shared.config import Config
 from shared.passage_builder import estimate_artifact_bytes
 from shared.passage_local_corpus import (
     SIGNATURE_NAME, LocalPageTextFetcher, finish_local_rows,
-    write_corpus_signature,
+    parse_local_header, split_record_id, write_corpus_signature,
 )
+from shared.sys_id_patterns import ANY_SYS_ID_RE, LOCAL_SYS_ID_RE
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,75 @@ def local_disabled_reason(local_ready: bool, local_index_ready: bool
     if not local_index_ready:
         return REASON_LOCAL_INDEX_MISSING
     return None
+
+
+# ---------------------------------------------------------------------------
+# Rows from either index: ids, witness text, pinned generations.
+# ---------------------------------------------------------------------------
+
+def is_local_sys_id(sys_id: Optional[str]) -> bool:
+    return bool(sys_id) and LOCAL_SYS_ID_RE.fullmatch(sys_id) is not None
+
+
+def row_sys_id(row) -> Optional[str]:
+    """The sys_id a composition result row belongs to -- a Genizah one or a
+    My Library one. On the desktop both kinds of row can sit in one result
+    (scope All), so this reads either namespace: `ANY_SYS_ID_RE` is anchored
+    on digit boundaries, and every row's header begins with its own id, so
+    the first match is the row's id in either case.
+
+    `shared.passage_witness_source.witness_sys_id` stays corpus-only: it is
+    the web's too, and the web has no My Library rows."""
+    m = ANY_SYS_ID_RE.search((row or {}).get('raw_header') or '')
+    return m.group(1) if m else None
+
+
+def uid_sys_id(uid) -> Optional[str]:
+    """The sys_id inside a checked page's uid: `{sys_id}_IE.._P.._FL..` for
+    a Genizah page, `LOCAL_{sys_id}_P{n}` for a My Library one."""
+    m = ANY_SYS_ID_RE.search(str(uid or ''))
+    return m.group(1) if m else None
+
+
+class WitnessTextFetcher:
+    """Page text for promoting a result to a witness (and re-fetching it
+    after a restart), from whichever index the page belongs to: a My Library
+    header through `LocalPageTextFetcher`, anything else through the main
+    engine. A My Library file has no whole-manuscript fallback -- a book is
+    far over the witness length limit, and a page that no longer resolves
+    is reported as a failure, by name, instead."""
+
+    def __init__(self, engine):
+        self._engine = engine
+        self._local = LocalPageTextFetcher(engine)
+
+    def get_full_text_by_header(self, header):
+        base, _seg = split_record_id(header)
+        if parse_local_header(base) is not None:
+            return self._local.get_full_text_by_header(header)
+        return self._engine.get_full_text_by_header(header)
+
+    def get_full_manuscript(self, sys_id):
+        if is_local_sys_id(sys_id):
+            return []
+        return self._engine.get_full_manuscript(sys_id)
+
+
+def scope_pins(scope: str) -> dict:
+    """The index generations a run on `scope` depends on, pinned on the UI
+    thread before the run starts: `{'pinned_generation': <Genizah or None>,
+    'pinned_local_generation': <My Library or None>}`. None for an index
+    the scope does not search, so swapping that one never voids the run."""
+    return {
+        # The bare call is the Genizah slot's: the same call the dispatch
+        # always made, which tests that move the generation replace.
+        'pinned_generation': (
+            passage_lifecycle.current_state_generation()
+            if scope != 'local' else None),
+        'pinned_local_generation': (
+            passage_lifecycle.current_state_generation(SLOT_LOCAL)
+            if scope in ('local', 'all') else None),
+    }
 
 
 # ---------------------------------------------------------------------------

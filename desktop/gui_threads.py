@@ -590,7 +590,8 @@ class MultiWitnessCompositionThread(PausableSearchMixin, QThread):
     def __init__(self, searcher, witnesses, filter_text=None, threshold=5,
                  restrict_sys_ids=None, corpus_scope='genizah', run_id=0,
                  pinned_generation=None, group_cap=None,
-                 roster=None, prior_rows=None, prior_filtered=None):
+                 roster=None, prior_rows=None, prior_filtered=None,
+                 pinned_local_generation=None):
         super().__init__()
         self.searcher = searcher
         # [(witness_id, label, text)] -- the witnesses to SEARCH this run,
@@ -617,6 +618,10 @@ class MultiWitnessCompositionThread(PausableSearchMixin, QThread):
         self.restrict_sys_ids = restrict_sys_ids
         self.corpus_scope = corpus_scope
         self.pinned_generation = pinned_generation
+        # The My Library index's generation, pinned the same way when the
+        # scope searches it (`desktop/passage_local.py::scope_pins`); None
+        # otherwise, and then a My Library swap never voids this batch.
+        self.pinned_local_generation = pinned_local_generation
         self.group_cap = group_cap
         self._init_pause_support(run_id)
 
@@ -627,10 +632,12 @@ class MultiWitnessCompositionThread(PausableSearchMixin, QThread):
         between two witnesses; after, because the lease is acquired inside
         the search and the pre-check cannot cover that window. One helper
         rather than two copies -- a second copy is where the two checks drift
-        apart.
+        apart. Each index the scope searches is checked against its own pin.
         """
         from desktop import passage_lifecycle as pl
-        if pl.generation_changed(self.pinned_generation):
+        if (pl.generation_changed(self.pinned_generation)
+                or pl.generation_changed(self.pinned_local_generation,
+                                         pl.SLOT_LOCAL)):
             raise pl.PassageIndexReplaced(
                 'the letter-level index was replaced while this '
                 'search was running')
