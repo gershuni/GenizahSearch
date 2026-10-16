@@ -162,6 +162,32 @@ def test_a_change_during_a_check_is_never_lost(fresh_threads,
     assert 'Settings' in w.status_label.text
 
 
+def test_no_check_starts_during_a_close(fresh_threads, monkeypatch):
+    """Closing the window cancels a My Library build; the build's cancel (or
+    error) handler then asks for a check. Started, it would hold the close up
+    while it read the whole library -- so during a close nothing starts."""
+    monkeypatch.setattr(genizah_app.QMessageBox, 'warning',
+                        lambda *a, **k: None)
+
+    class _CloseWin(_RealFreshWin):
+        _on_local_passage_build_cancelled = APP._on_local_passage_build_cancelled
+        _on_local_passage_build_error = APP._on_local_passage_build_error
+
+        def _finish_local_passage_build(self):
+            pass
+
+    for end in (lambda w: w._on_local_passage_build_cancelled(),
+                lambda w: w._on_local_passage_build_error('boom'),
+                lambda w: w._start_local_freshness_check()):
+        w = _CloseWin()
+        w._close_pending = True
+        end(w)
+    assert fresh_threads == []
+    # The same handlers do start a check when the window is not closing.
+    _CloseWin()._on_local_passage_build_cancelled()
+    assert len(fresh_threads) == 1
+
+
 def test_no_check_without_an_installed_index(fresh_threads, monkeypatch):
     monkeypatch.setattr(pl, 'installed_live_dir', lambda slot=None: None)
     _RealFreshWin()._start_local_freshness_check()

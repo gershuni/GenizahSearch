@@ -17876,6 +17876,11 @@ class GenizahGUI(QMainWindow):
             self._start_local_freshness_check()
 
     def _start_local_freshness_check(self):
+        # Never during a close: a check reads the whole library, and the
+        # close waits for every running My Library worker -- a check started
+        # by the close's own cancellation of a build would hold it up.
+        if getattr(self, '_close_pending', False):
+            return
         th = getattr(self, 'local_passage_freshness_thread', None)
         if th is not None and th.isRunning():
             # The check already running may have read the library before
