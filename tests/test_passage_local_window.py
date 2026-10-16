@@ -188,6 +188,36 @@ def test_no_check_starts_during_a_close(fresh_threads, monkeypatch):
     assert len(fresh_threads) == 1
 
 
+@pytest.mark.parametrize('command', ['run_local_passage_index_build',
+                                     'run_passage_index_build'])
+def test_no_build_starts_during_a_close(monkeypatch, command):
+    """The window can stay up while a close waits for a worker; a build
+    clicked from Settings then would start one more worker (the preflight
+    or the build) for the close to wait on. Neither command does anything."""
+    import desktop.passage_workers as workers
+    started = []
+
+    class _Boom:
+        def __init__(self, *a, **k):
+            started.append(a)
+            raise AssertionError('a worker was created during a close')
+
+    monkeypatch.setattr(workers, 'LocalPassagePreflightThread', _Boom)
+    monkeypatch.setattr(workers, 'PassageBuildThread', _Boom)
+    monkeypatch.setattr(genizah_app.QMessageBox, 'information',
+                        lambda *a, **k: started.append('dialog'))
+    monkeypatch.setattr(genizah_app.QMessageBox, 'question',
+                        lambda *a, **k: started.append('dialog'))
+
+    class _W:
+        _close_pending = True
+        startup_complete = True
+        status_label = _Label()
+    setattr(_W, command, getattr(APP, command))
+    getattr(_W(), command)()
+    assert started == []
+
+
 def test_no_check_without_an_installed_index(fresh_threads, monkeypatch):
     monkeypatch.setattr(pl, 'installed_live_dir', lambda slot=None: None)
     _RealFreshWin()._start_local_freshness_check()

@@ -18002,6 +18002,11 @@ class GenizahGUI(QMainWindow):
     def run_local_passage_index_build(self, confirm=True):
         """Build the My Library letter-level index from the texts the LOCAL
         indexer has already extracted (read-only)."""
+        if getattr(self, '_close_pending', False):
+            # The window is closing (it can stay up while the close waits for
+            # a worker): a build started now would be one more worker for the
+            # close to wait on.
+            return
         if not getattr(self, 'startup_complete', False):
             QMessageBox.information(
                 self, tr("Please wait"),
@@ -18238,6 +18243,9 @@ class GenizahGUI(QMainWindow):
         this computer. Ordering matters: no corpus at all is a different
         problem with a different answer (fetch it), so that is checked before
         anything is promised about disk or time."""
+        if getattr(self, '_close_pending', False):
+            # Closing: no new build for the close to wait on (as above).
+            return
         if not getattr(self, 'startup_complete', False):
             QMessageBox.information(
                 self, tr("Please wait"),
