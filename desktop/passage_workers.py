@@ -242,7 +242,10 @@ class LocalPassageBuildThread(PassageBuildThread):
                 cancel_check=self._cancel_check,
                 release_live_state=self._release_live_state,
                 slot=passage_lifecycle.SLOT_LOCAL,
-                needed_bytes=needed)
+                needed_bytes=needed,
+                # The Genizah photography filters drop real pages of a
+                # user's own documents (owner, 2026-10-16).
+                apply_hygiene=False)
         except passage_lifecycle.BuildCancelled:
             self.cancelled_signal.emit()
             return
@@ -257,6 +260,39 @@ class LocalPassageBuildThread(PassageBuildThread):
             self.error_signal.emit(str(getattr(result, 'error', '') or ''))
             return
         self.finished_signal.emit(result)
+
+
+class LocalPassagePreflightThread(QThread):
+    """Before a My Library build: count the library's pages and size the
+    build. Both read the whole page table (seconds on a large library), so
+    off the UI thread. Emits `(n_pages, needed_bytes)` as plain objects -- a
+    byte count can pass 2**31. `n_pages` 0 means nothing to build (or the
+    library could not be read); `needed_bytes` 0 means the estimate failed,
+    which the window treats as "skip the disk check", not "refuse"."""
+
+    result_signal = pyqtSignal(object, object)
+
+    def __init__(self, db_path, parent=None):
+        super().__init__(parent)
+        self._db_path = db_path
+
+    def run(self):
+        from desktop import passage_local
+        from shared.passage_local_corpus import count_local_pages
+        n_pages = needed = 0
+        try:
+            if os.path.exists(self._db_path):
+                n_pages = count_local_pages(self._db_path)
+        except Exception:                              # noqa: BLE001
+            logger.exception('could not read the My Library page count')
+            n_pages = 0
+        if n_pages:
+            try:
+                needed = passage_local.estimate_local_build_bytes(self._db_path)
+            except Exception:                          # noqa: BLE001
+                logger.exception('My Library build size estimate failed')
+                needed = 0
+        self.result_signal.emit(n_pages, needed)
 
 
 class LocalPassageFreshnessThread(QThread):

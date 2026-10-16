@@ -335,13 +335,62 @@ class LocalPageTextFetcher:
         return self._shelfmarks[base]
 
 
+def _pattern_literals(pattern: str) -> list:
+    """The literals of a `passage_parallels._match_pattern` alternation
+    (`'|'.join(re.escape(lit) ...)`), recovered exactly: split on every `|`
+    that is not escaped, and drop each escaping backslash."""
+    out, buf, chars = [], [], iter(pattern or '')
+    for ch in chars:
+        if ch == '\\':
+            buf.append(next(chars, ''))
+        elif ch == '|':
+            out.append(''.join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    if buf:
+        out.append(''.join(buf))
+    return [lit for lit in out if lit]
+
+
+def _merge_segment_rows(rows: list, seen: dict, bucket: str) -> list:
+    """One row per PAGE. A long page split into segments can match in more
+    than one of them; each would otherwise come back as its own row under
+    the same page header. One row stands for the page -- within a bucket the
+    best-scoring one, and a page already shown in 'main' is never repeated
+    in 'filtered' -- and its highlight patterns gain every other segment's
+    matches, so the viewer still marks all of them on the page. `seen` maps
+    a page header to `(bucket, row)` across both buckets."""
+    from shared.passage_parallels import _match_pattern
+    out = []
+    for row in rows:
+        head = row.get('raw_header', '')
+        if head not in seen:
+            seen[head] = (bucket, row)
+            out.append(row)
+            continue
+        kept_bucket, kept = seen[head]
+        replace = (kept_bucket == bucket
+                   and float(row.get('score', 0)) > float(kept.get('score', 0)))
+        for key in ('highlight_pattern', 'source_highlight_pattern'):
+            merged = _match_pattern(_pattern_literals(kept.get(key, ''))
+                                    + _pattern_literals(row.get(key, '')))
+            kept[key] = row[key] = merged
+        if replace:
+            # The better segment's row takes the page's place in the list.
+            kept.clear()
+            kept.update(row)
+    return out
+
+
 def finish_local_rows(result: dict, fetcher: LocalPageTextFetcher) -> dict:
     """Give passage rows from the My Library index the shape the LOCAL chunk
     rows have (`shared/search_engine.py`'s LOCAL composition block): the
     page's own header and unique id, `src_lbl` 'LOCAL' and the file name as
-    shelfmark. A segment row is reported against its page; the highlight it
-    carries is a literal pattern, so it marks the same letters on the whole
-    page."""
+    shelfmark. A segment row is reported against its page, and the segments
+    of one page are merged into one row (`_merge_segment_rows`); the
+    highlight a row carries is a literal pattern, so it marks the same
+    letters on the whole page."""
     from shared.local_indexer import _make_uid
 
     for bucket in ('main', 'filtered'):
@@ -355,4 +404,8 @@ def finish_local_rows(result: dict, fetcher: LocalPageTextFetcher) -> dict:
             row['shelfmark'] = fetcher.shelfmark(base)
             if seg is not None:
                 row['segment'] = seg
+    seen: dict = {}
+    for bucket in ('main', 'filtered'):
+        if result.get(bucket):
+            result[bucket] = _merge_segment_rows(result[bucket], seen, bucket)
     return result

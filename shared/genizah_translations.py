@@ -5781,4 +5781,6 @@ TRANSLATIONS.update({
         'או הסר את התנאים.',
     'Conditions work only when the corpus is Genizah.':
         'תנאים פועלים רק כשהקורפוס הוא גניזה.',
+    'Measuring My Library for its letter-level index...':
+        'מודד את הספרייה שלי לקראת בניית האינדקס לחיפוש ברמת האות...',
 })

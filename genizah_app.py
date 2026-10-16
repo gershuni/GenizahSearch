@@ -17871,6 +17871,9 @@ class GenizahGUI(QMainWindow):
     def _start_local_freshness_check(self):
         th = getattr(self, 'local_passage_freshness_thread', None)
         if th is not None and th.isRunning():
+            # The check already running may have read the library before
+            # the change that asked for this one: run again when it answers.
+            self._local_freshness_recheck = True
             return
         live_dir = passage_lifecycle.installed_live_dir(
             passage_lifecycle.SLOT_LOCAL)
@@ -17889,10 +17892,28 @@ class GenizahGUI(QMainWindow):
     def _on_local_freshness(self, result):
         logger.info('My Library letter-level index freshness: %s',
                     result or 'n/a')
+        if getattr(self, '_close_pending', False):
+            return
+        if getattr(self, '_local_freshness_recheck', False):
+            self._local_freshness_recheck = False
+            self._start_local_freshness_check()
+            return
         if result == passage_lifecycle.STALE:
             self.status_label.setText(tr(
                 "My Library has changed since its letter-level index was "
                 "built. Rebuild it from Settings to include the changes."))
+
+    def _on_my_library_changed(self):
+        """MyLibraryTab: a scan finished or a folder was removed. Re-check
+        the My Library letter-level index and say so if it is now out of
+        date. A notice only -- rebuilding stays the user's choice (owner,
+        2026-10-16). With no index installed there is nothing to check; a
+        build in flight is checked when it installs."""
+        if getattr(self, '_close_pending', False):
+            return
+        if getattr(self, '_local_passage_build_in_flight', False):
+            return
+        self._start_local_freshness_check()
 
     def _maybe_offer_local_passage_build(self):
         """Asked only on an explicit choice of letter-level search with the
@@ -17966,14 +17987,40 @@ class GenizahGUI(QMainWindow):
                 tr("The My Library letter-level index is already being "
                    "built."))
             return
-        from shared.passage_local_corpus import count_local_pages
+        th = getattr(self, 'local_passage_preflight_thread', None)
+        if th is not None and th.isRunning():
+            return          # already measuring; its answer opens the dialog
+        # Counting and sizing read the whole page table -- seconds on a large
+        # library -- so they run on a worker, and the dialog opens from its
+        # answer (`_on_local_passage_preflight`).
         db_path = passage_local.local_db_path()
         try:
-            n_pages = (count_local_pages(db_path)
-                       if os.path.exists(db_path) else 0)
+            from desktop.passage_workers import LocalPassagePreflightThread
+            self.local_passage_preflight_thread = LocalPassagePreflightThread(
+                db_path)
+            self.local_passage_preflight_thread.result_signal.connect(
+                lambda n_pages, needed, _db=db_path, _confirm=confirm:
+                self._on_local_passage_preflight(_db, n_pages, needed,
+                                                 _confirm))
+            self.local_passage_preflight_thread.start()
         except Exception:                                    # noqa: BLE001
-            logger.exception('could not read the My Library page count')
-            n_pages = 0
+            logger.exception('could not start the My Library build preflight')
+            return
+        self.status_label.setText(tr(
+            "Measuring My Library for its letter-level index..."))
+
+    def _on_local_passage_preflight(self, db_path, n_pages, needed, confirm):
+        """The rest of `run_local_passage_index_build`, on the UI thread,
+        once the worker has counted the pages (`n_pages`) and sized the build
+        (`needed` bytes; 0 when the estimate failed, which skips the disk
+        check rather than refusing)."""
+        if getattr(self, '_close_pending', False):
+            return
+        if getattr(self, '_local_passage_build_in_flight', False):
+            return
+        self.status_label.setText('')      # the "Measuring..." line above
+        n_pages = int(n_pages or 0)
+        needed = int(needed or 0)
         if not n_pages:
             QMessageBox.information(
                 self, tr("My Library is empty"),
@@ -17984,11 +18031,6 @@ class GenizahGUI(QMainWindow):
 
         import shutil as _shutil
         root = passage_local.local_passage_root()
-        try:
-            needed = passage_local.estimate_local_build_bytes(db_path)
-        except Exception:                                    # noqa: BLE001
-            logger.exception('My Library build size estimate failed')
-            needed = 0
         try:
             os.makedirs(root, exist_ok=True)
             available = _shutil.disk_usage(root).free
@@ -18121,6 +18163,9 @@ class GenizahGUI(QMainWindow):
         if status == 'installed':
             self.status_label.setText(
                 tr("The My Library letter-level index is ready."))
+            # A scan during a long build leaves the new index already out of
+            # date; the check says so if it is.
+            self._start_local_freshness_check()
         elif status == 'release_timed_out':
             logger.warning('My Library passage build ended as %r; reloading',
                            status)
@@ -20685,10 +20730,17 @@ class GenizahGUI(QMainWindow):
             main_index_ready=main_index_ready if searches_genizah else True)
         if reason is not None:
             return reason
+        # The LOCAL Tantivy index the rows' text is read from -- with the same
+        # readiness test the chunk path applies before it searches LOCAL
+        # (`search_composition_logic`): present, and the tab not mid-rebuild.
+        tab_ref = getattr(engine, '_my_library_tab_ref', None)
+        tab = tab_ref() if callable(tab_ref) else None
         local_index_ready = (
             engine is not None
             and getattr(engine, 'local_index', None) is not None
-            and getattr(engine, 'local_searcher', None) is not None)
+            and getattr(engine, 'local_searcher', None) is not None
+            and bool(getattr(tab, 'is_searchable', True)
+                     if tab is not None else True))
         return passage_local.local_disabled_reason(
             local_ready=passage_local.local_passage_available(),
             local_index_ready=local_index_ready)
@@ -34342,7 +34394,8 @@ class GenizahGUI(QMainWindow):
         if th is not None and th.isRunning():
             reasons.append(tr("the letter-level index is being opened"))
         for attr in ('local_passage_build_thread', 'local_passage_load_thread',
-                     'local_passage_freshness_thread'):
+                     'local_passage_freshness_thread',
+                     'local_passage_preflight_thread'):
             th = getattr(self, attr, None)
             if th is not None and th.isRunning():
                 reasons.append(tr("the My Library letter-level index is busy"))

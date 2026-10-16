@@ -1141,9 +1141,16 @@ def execute_build(root: str, records, source_paths: list, *,
                   batch_grams: int = DEFAULT_BATCH_GRAMS,
                   df_cap: Optional[int] = None, corpus_label: str = '',
                   progress: Optional[Callable] = None,
-                  cancel_check: Optional[Callable[[], bool]] = None
+                  cancel_check: Optional[Callable[[], bool]] = None,
+                  apply_hygiene: bool = True
                   ) -> BuildOutcome:
     """Runs `build_index` into `root/passage_index.building`.
+
+    `apply_hygiene` is the builder's Stage-0 page filter
+    (`shared/passage_hygiene.py`: short pages, microfilm target sheets,
+    library stamps), written for Genizah photography. On by default; the My
+    Library build turns it off, because on a user's own documents those rules
+    drop real pages a search could match (owner, 2026-10-16).
 
     Progress passes straight through to `build_index`'s own callback: pass 1
     is INDETERMINATE (records seen and records indexed, neither a total),
@@ -1168,7 +1175,8 @@ def execute_build(root: str, records, source_paths: list, *,
                             partitions=partitions, batch_grams=batch_grams,
                             df_cap=df_cap, corpus_label=corpus_label,
                             source_manifest=pre_manifest, progress=progress,
-                            cancel_check=cancel_check)
+                            cancel_check=cancel_check,
+                            apply_hygiene=apply_hygiene)
         owns_staging = False
     except BuildCancelled:
         return BuildOutcome(status='cancelled', staging_dir=staging)
@@ -1512,7 +1520,8 @@ def run_build_and_swap(root: str, records, source_paths: list,
                        cancel_check: Optional[Callable[[], bool]] = None,
                        release_live_state: Callable[..., Optional[bool]],
                        slot: str = SLOT_GENIZAH,
-                       needed_bytes: Optional[int] = None
+                       needed_bytes: Optional[int] = None,
+                       apply_hygiene: bool = True
                        ) -> BuildAndSwapResult:
     """Build -> validate -> swap, with the cross-process lock held for the
     whole run and released exactly once, in `finally`, regardless of which
@@ -1567,7 +1576,8 @@ def run_build_and_swap(root: str, records, source_paths: list,
 
     `slot` is the index `root` holds: the release seam is authorised
     against THAT slot's generation, so it can only ever close that index.
-    `needed_bytes` is passed to `prepare_staging`.
+    `needed_bytes` is passed to `prepare_staging`, `apply_hygiene` to
+    `execute_build`.
     """
     _get_slot(slot)            # an unknown slot fails before the lock is taken
     lock = acquire_lock(root)
@@ -1579,7 +1589,8 @@ def run_build_and_swap(root: str, records, source_paths: list,
                               construction=construction, partitions=partitions,
                               batch_grams=batch_grams, df_cap=df_cap,
                               corpus_label=corpus_label, progress=progress,
-                              cancel_check=cancel_check)
+                              cancel_check=cancel_check,
+                              apply_hygiene=apply_hygiene)
         if build.status == 'cancelled':
             return BuildAndSwapResult(status='cancelled')
         if build.status == 'error':

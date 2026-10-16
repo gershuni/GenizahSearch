@@ -189,10 +189,19 @@ class ScopedPassageSearcher:
                 full_text, chunk_size, max_freq, mode,
                 corpus_scope='genizah', **kwargs))
         if corpus_scope in ('local', 'all'):
+            # A pre-search restriction (a library filter, search-within,
+            # visual-similarity partners) is a set of GENIZAH sys_ids: it
+            # applies to Genizah rows only, and My Library rows always show
+            # -- exactly as the chunk path's LOCAL loop ignores it
+            # (`shared/search_engine.py`; owner, 2026-10-16). Read in the
+            # LOCAL namespace it would instead hide every My Library row
+            # whenever any Genizah filter was on.
+            local_kwargs = {k: v for k, v in kwargs.items()
+                            if k != 'restrict_sys_ids'}
             fetcher = LocalPageTextFetcher(self._engine)
             local = self._local(fetcher).search_composition_logic(
                 full_text, chunk_size, max_freq, mode,
-                corpus_scope='local', **kwargs)
+                corpus_scope='local', **local_kwargs)
             results.append(finish_local_rows(local, fetcher))
         if len(results) == 1:
             return results[0]

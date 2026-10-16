@@ -356,12 +356,14 @@ def test_local_slot_searches_through_the_router(slots, local_db, tmp_path):
     assert {r['raw_header'] for r in rows} == {
         _make_full_header(SYS_A, 2, fa), _make_full_header(SYS_B, 1, fb)}
     assert all(r['src_lbl'] == 'LOCAL' for r in rows)
-    # The slot, not the caller, picks the namespace: a LOCAL restriction
-    # works through the adapter with no pattern passed in.
-    only_b = router.search_composition_logic(
-        PSALM, corpus_scope='local', restrict_sys_ids={SYS_B})
-    assert {r['raw_header'].split('_')[0]
-            for r in only_b['main'] + only_b['filtered']} == {SYS_B}
+    # A pre-search restriction is a set of Genizah ids and applies to
+    # Genizah rows only: My Library rows always show, as in chunk search
+    # (owner, 2026-10-16) -- not "every My Library row hidden".
+    restricted = router.search_composition_logic(
+        PSALM, corpus_scope='local', restrict_sys_ids={SYS_G})
+    assert {r['raw_header'] for r in
+            restricted['main'] + restricted['filtered']} == {
+        _make_full_header(SYS_A, 2, fa), _make_full_header(SYS_B, 1, fb)}
     # Nothing is installed in the Genizah slot, and saying so is that
     # slot's job -- the My Library index must not answer for it.
     with pytest.raises(pl.PassageSearchUnavailableError):
@@ -374,6 +376,97 @@ def test_local_slot_unavailable_names_my_library(slots):
                        match='My Library'):
         pl.get_passage_searcher(object(), slot=pl.SLOT_LOCAL) \
             .search_composition_logic(PSALM)
+
+
+def test_a_my_library_build_keeps_the_pages_genizah_hygiene_drops(
+        slots, local_db, tmp_path, monkeypatch):
+    """Built through the real lifecycle with the My Library setting: a page
+    with 40-79 Hebrew letters (enough for a match, under the Genizah 80-letter
+    floor) is indexed, and so is a page full of catalogue-card words."""
+    pl = slots
+    path, _fa, _fb = local_db
+    short = 'השמים מספרים כבוד אל ומעשה ידיו מגיד הרקיע יום ליום יביע אמר'
+    assert 40 <= len(norm_stream_fast(short)) < 80
+    card = 'סימן תוכן מחבר שנה הערות ' + PSALM
+    records = list(iter_local_records(path)) + [
+        (_make_full_header(SYS_A, 9, 1), short),
+        (_make_full_header(SYS_A, 10, 1), card)]
+    root = str(tmp_path / 'root')
+    res = pl.run_build_and_swap(
+        root, iter(records), [], path, partitions=2,
+        release_live_state=lambda g: pl.close_passage_state(
+            g, slot=pl.SLOT_LOCAL),
+        slot=pl.SLOT_LOCAL, needed_bytes=0, apply_hygiene=False)
+    assert res.status == 'installed', res
+    try:
+        ids = {res.index.record_id(i) for i in range(res.index.n_records)}
+        assert _make_full_header(SYS_A, 9, 1) in ids
+        assert _make_full_header(SYS_A, 10, 1) in ids
+    finally:
+        res.index.close()
+
+
+def test_the_my_library_build_worker_turns_hygiene_off(monkeypatch, tmp_path):
+    """The call site, not only the parameter: the worker that builds the My
+    Library index passes apply_hygiene=False, to the local slot."""
+    import desktop.passage_lifecycle as pl
+    import desktop.passage_local as passage_local
+    import shared.passage_local_corpus as plc
+    from desktop.passage_workers import LocalPassageBuildThread
+    seen = {}
+
+    def _capture(*a, **k):
+        seen.update(k)
+        return pl.BuildAndSwapResult(status='cancelled')
+
+    monkeypatch.setattr(pl, 'run_build_and_swap', _capture)
+    monkeypatch.setattr(plc, 'count_local_pages', lambda p: 1)
+    monkeypatch.setattr(passage_local, 'estimate_local_build_bytes',
+                        lambda p: 123)
+    monkeypatch.setattr(passage_local, 'refresh_signature',
+                        lambda root, cancel_check=None: 'sig')
+    LocalPassageBuildThread(str(tmp_path), 'db', lambda g: True).run()
+    assert seen['apply_hygiene'] is False
+    assert seen['slot'] == pl.SLOT_LOCAL
+    assert seen['needed_bytes'] == 123
+
+
+def test_segments_of_one_page_come_back_as_one_row():
+    """A long page that matched in two segments is ONE row, the better one,
+    with both segments' matches in its highlight; a page already in 'main'
+    is not repeated in 'filtered'."""
+    import re
+
+    from shared.passage_parallels import _match_pattern
+    from shared.passage_local_corpus import _pattern_literals
+    head = _make_full_header(SYS_A, 3, 1)
+
+    class _F:
+        def shelfmark(self, h):
+            return 'a.txt'
+
+    res = finish_local_rows({
+        'main': [
+            {'raw_header': segment_record_id(head, 0), 'score': 90.0,
+             'highlight_pattern': _match_pattern(['אבג']),
+             'source_highlight_pattern': _match_pattern(['אבג'])},
+            {'raw_header': segment_record_id(head, 2), 'score': 40.0,
+             'highlight_pattern': _match_pattern(['דהו.(x)|y']),
+             'source_highlight_pattern': ''}],
+        'filtered': [
+            {'raw_header': segment_record_id(head, 1), 'score': 99.0,
+             'highlight_pattern': _match_pattern(['זחט']),
+             'source_highlight_pattern': ''}],
+    }, _F())
+    assert [r['raw_header'] for r in res['main']] == [head]
+    assert res['filtered'] == []
+    row = res['main'][0]
+    assert row['score'] == 90.0
+    assert set(_pattern_literals(row['highlight_pattern'])) == {
+        'אבג', 'דהו.(x)|y', 'זחט'}
+    # Still a literal pattern: the special characters stay escaped.
+    assert re.search(row['highlight_pattern'], 'דהו.(x)|y').group(0) == \
+        'דהו.(x)|y'
 
 
 def test_router_sends_conditions_to_the_genizah_index(monkeypatch):
