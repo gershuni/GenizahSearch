@@ -406,6 +406,45 @@ def test_a_my_library_build_keeps_the_pages_genizah_hygiene_drops(
         res.index.close()
 
 
+def test_my_library_never_demotes_a_page_as_a_duplicate_photograph(
+        slots, tmp_path):
+    """Two near-identical pages of a user's files are two pages they own,
+    not one page photographed twice: both stay in the main results. The
+    control -- the same index searched with the Genizah default -- demotes
+    one, so the rule does fire on this text."""
+    pl = slots
+    import desktop.passage_local as passage_local
+    words = (PSALM + ' ' + FILLER).split()
+    text = '\n'.join(' '.join(words[i:i + 6]) for i in range(0, len(words), 6))
+    db = str(tmp_path / 'dup.sqlite3')
+    conn = init_sqlite(db)
+    conn.execute("INSERT INTO folders (path, added_at, status) "
+                 "VALUES ('c:/lib', 0, 'active')")
+    fa = _add_file(conn, SYS_A, 'c:/lib/a.pdf', [text])
+    fb = _add_file(conn, SYS_B, 'c:/lib/b.pdf', [text])
+    conn.commit()
+    conn.close()
+    _install(pl, pl.SLOT_LOCAL, iter_local_records(db), str(tmp_path / 'l'))
+    pages = _pages(db)
+    router = passage_local.ScopedPassageSearcher(
+        _Engine(pages), 'widest-40', 'normal', 'normal')
+    res = router.search_composition_logic(text, corpus_scope='local')
+    assert res['duplicate_photography_demoted'] == 0
+    assert {r['raw_header'] for r in res['main']} == {
+        _make_full_header(SYS_A, 1, fa), _make_full_header(SYS_B, 1, fb)}
+
+    index = open_index(str(tmp_path / 'l'))
+    try:
+        control = PassageSearcher(index=index,
+                                  text_fetcher=LocalPageTextFetcher(
+                                      _Engine(pages)),
+                                  sys_id_re=LOCAL_SYS_ID_RE)
+        assert control.search_composition_logic(text)[
+            'duplicate_photography_demoted'] == 1
+    finally:
+        index.close()
+
+
 def test_the_my_library_build_worker_turns_hygiene_off(monkeypatch, tmp_path):
     """The call site, not only the parameter: the worker that builds the My
     Library index passes apply_hygiene=False, to the local slot."""

@@ -823,9 +823,12 @@ class PassageSearchAdapter:
                 # An index holds exactly one sys_id namespace, and the slot
                 # says which: the Genizah index keeps PassageSearcher's own
                 # (corpus) default, the My Library index the LOCAL pattern.
+                # The Genizah duplicate-photograph rule stays with the
+                # Genizah index (see `PassageSearcher`).
                 if s.name == SLOT_LOCAL:
                     from shared.sys_id_patterns import LOCAL_SYS_ID_RE
                     _cap_kw['sys_id_re'] = LOCAL_SYS_ID_RE
+                    _cap_kw['demote_duplicate_photography'] = False
                 searcher = PassageSearcher(
                     index=index, text_fetcher=self._text_fetcher,
                     policy=compose(self._width, self._length, self._depth),

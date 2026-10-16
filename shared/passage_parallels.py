@@ -585,6 +585,15 @@ class PassageSearcher:
     # ANY pattern: an index holds exactly one namespace, and a pattern that
     # matched the other would group, cap and restrict on a wrong id.
     sys_id_re: Optional[re.Pattern] = None
+    # The post-verify duplicate-PHOTOGRAPHY demotion (below) is a Genizah
+    # rule: the same physical page photographed under two catalogue records.
+    # The My Library index turns it off -- two near-identical pages of a
+    # user's own files are two pages they own, and labelling one a "duplicate
+    # photograph" hid the very page a query was copied from (measured on the
+    # owner's library, 2026-10-16: 22 rows demoted in one search). The
+    # build-time photography filters are off for My Library for the same
+    # reason (owner ruling, 2026-10-16).
+    demote_duplicate_photography: bool = True
 
     def __post_init__(self) -> None:
         if self.policy is None:
@@ -853,7 +862,7 @@ class PassageSearcher:
         # removal. Demote, not delete: the row moves to `filtered`, already
         # rendered, so a skeptical user can still inspect it.
         dup_demoted = 0
-        if len(main_results) > 1:
+        if self.demote_duplicate_photography and len(main_results) > 1:
             survivors: list = []
             for row in main_results:
                 dup_of = None
