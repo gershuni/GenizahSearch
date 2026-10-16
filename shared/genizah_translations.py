@@ -5695,7 +5695,7 @@ TRANSLATIONS.update({
         'אותיות מהחיבור שאינן גם בטקסט הראשי שלך.',
 })
 
-# Letter-level search for My Library (desktop/passage_lifecycle_local.py).
+# Letter-level search for My Library (desktop/passage_local.py).
 TRANSLATIONS.update({
     'Build / Rebuild Letter-Level Index for My Library':
         'בניית / בנייה מחדש של אינדקס לחיפוש ברמת האות בספרייה שלי',

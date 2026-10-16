@@ -92,7 +92,7 @@ from desktop.ui_widgets import (ShelfmarkTableWidgetItem, CheckBoxHeader, Hidden
                                 ListsTreeWidget, ElidingLabel)
 from desktop.settings_dialogs import SettingsDialog, SearchSettingsDialog, HelpDialog, TabularQueryBuilderDialog, LabScoringDialog
 from desktop import passage_lifecycle  # Phase 146: letter-level (passage) search
-from desktop import passage_lifecycle_local  # letter-level search for My Library
+from desktop import passage_local  # letter-level search for My Library
 from desktop import passage_witnesses  # multi-witness state machine (pure)
 from shared import passage_witness_source  # witness resolution (pure, shared with web)
 from shared import passage_fusion  # RRF fusion (pure, shared with web + API)
@@ -17837,17 +17837,17 @@ class GenizahGUI(QMainWindow):
 
     # ------------------------------------------------------------------
     # Letter-level search for My Library: load, freshness, build. The same
-    # protocol as the Genizah index above, on the second lifecycle instance
-    # (`desktop/passage_lifecycle_local.py`). The LOCAL index and its SQLite
-    # sidecar are only ever READ here.
+    # protocol as the Genizah index above, on the lifecycle's second slot
+    # (`passage_lifecycle.SLOT_LOCAL`; My Library specifics in
+    # `desktop/passage_local.py`). The LOCAL index and its SQLite sidecar are
+    # only ever READ here.
     # ------------------------------------------------------------------
 
     def _start_local_passage_load(self):
         try:
             from desktop.passage_workers import PassageLoadThread
             self.local_passage_load_thread = PassageLoadThread(
-                passage_lifecycle_local.local_passage_root(),
-                lifecycle=passage_lifecycle_local.lifecycle)
+                passage_local.local_passage_root())
             self.local_passage_load_thread.loaded_signal.connect(
                 self._on_local_passage_loaded)
             self._local_passage_load_in_flight = True
@@ -17864,9 +17864,10 @@ class GenizahGUI(QMainWindow):
         index = getattr(result, 'index', None)
         status = getattr(result, 'status', 'unavailable')
         if index is not None:
-            passage_lifecycle_local.lifecycle.install_passage_state(
+            passage_lifecycle.install_passage_state(
                 passage_lifecycle.PassageState(
-                    index=index, live_dir=getattr(result, 'live_dir', '')))
+                    index=index, live_dir=getattr(result, 'live_dir', '')),
+                slot=passage_lifecycle.SLOT_LOCAL)
         logger.info('My Library letter-level index at startup: %s', status)
         self._honour_deferred_comp_method()
         self._revalidate_comp_method()
@@ -17878,9 +17879,14 @@ class GenizahGUI(QMainWindow):
         th = getattr(self, 'local_passage_freshness_thread', None)
         if th is not None and th.isRunning():
             return
+        live_dir = passage_lifecycle.installed_live_dir(
+            passage_lifecycle.SLOT_LOCAL)
+        if not live_dir:
+            return
         try:
             from desktop.passage_workers import LocalPassageFreshnessThread
-            self.local_passage_freshness_thread = LocalPassageFreshnessThread()
+            self.local_passage_freshness_thread = LocalPassageFreshnessThread(
+                live_dir)
             self.local_passage_freshness_thread.result_signal.connect(
                 self._on_local_freshness)
             self.local_passage_freshness_thread.start()
@@ -17890,7 +17896,7 @@ class GenizahGUI(QMainWindow):
     def _on_local_freshness(self, result):
         logger.info('My Library letter-level index freshness: %s',
                     result or 'n/a')
-        if result == passage_lifecycle_local.lifecycle.STALE:
+        if result == passage_lifecycle.STALE:
             self.status_label.setText(tr(
                 "My Library has changed since its letter-level index was "
                 "built. Rebuild it from Settings to include the changes."))
@@ -17942,8 +17948,8 @@ class GenizahGUI(QMainWindow):
     def _on_local_passage_release_requested(self, expect_generation):
         result = None
         try:
-            result = passage_lifecycle_local.lifecycle.close_passage_state(
-                int(expect_generation))
+            result = passage_lifecycle.close_passage_state(
+                int(expect_generation), slot=passage_lifecycle.SLOT_LOCAL)
         except Exception:                                    # noqa: BLE001
             logger.exception('My Library passage release seam failed')
             result = False
@@ -17968,7 +17974,7 @@ class GenizahGUI(QMainWindow):
                    "built."))
             return
         from shared.passage_local_corpus import count_local_pages
-        db_path = passage_lifecycle_local.local_db_path()
+        db_path = passage_local.local_db_path()
         try:
             n_pages = (count_local_pages(db_path)
                        if os.path.exists(db_path) else 0)
@@ -17984,18 +17990,16 @@ class GenizahGUI(QMainWindow):
             return
 
         import shutil as _shutil
-        root = passage_lifecycle_local.local_passage_root()
+        root = passage_local.local_passage_root()
         try:
-            needed = passage_lifecycle_local.lifecycle.estimate_build_bytes(
-                db_path)
+            needed = passage_local.estimate_local_build_bytes(db_path)
         except Exception:                                    # noqa: BLE001
             logger.exception('My Library build size estimate failed')
             needed = 0
         try:
             os.makedirs(root, exist_ok=True)
             available = _shutil.disk_usage(root).free
-            staging = os.path.join(
-                root, passage_lifecycle_local.lifecycle.STAGING_DIRNAME)
+            staging = os.path.join(root, passage_lifecycle.STAGING_DIRNAME)
             if os.path.isdir(staging):
                 for dirpath, _dirs, files in os.walk(staging):
                     for f in files:
@@ -18047,7 +18051,7 @@ class GenizahGUI(QMainWindow):
         self._local_passage_progress.setAutoReset(False)
 
         self.local_passage_build_thread = LocalPassageBuildThread(
-            passage_lifecycle_local.local_passage_root(), db_path,
+            passage_local.local_passage_root(), db_path,
             self._local_passage_release_seam, parent=None)
         try:
             self._local_passage_release_requested.disconnect()
@@ -18115,9 +18119,10 @@ class GenizahGUI(QMainWindow):
         status = getattr(result, 'status', '')
         self._finish_local_passage_build()
         if index is not None:
-            passage_lifecycle_local.lifecycle.install_passage_state(
+            passage_lifecycle.install_passage_state(
                 passage_lifecycle.PassageState(index=index,
-                                               live_dir=live_dir))
+                                               live_dir=live_dir),
+                slot=passage_lifecycle.SLOT_LOCAL)
         self._honour_deferred_comp_method()
         self._revalidate_comp_method()
         if status == 'installed':
@@ -18365,7 +18370,7 @@ class GenizahGUI(QMainWindow):
                 # rather than silently losing the user's method on every
                 # launch.
                 if reason in (passage_lifecycle.REASON_NOT_BUILT,
-                              passage_lifecycle_local.REASON_LOCAL_NOT_BUILT):
+                              passage_local.REASON_LOCAL_NOT_BUILT):
                     self._comp_method_deferred = 'passage'
                 self._revert_comp_method_to_chunk(reason)
             else:
@@ -20668,8 +20673,8 @@ class GenizahGUI(QMainWindow):
             engine is not None
             and getattr(engine, 'local_index', None) is not None
             and getattr(engine, 'local_searcher', None) is not None)
-        return passage_lifecycle_local.local_disabled_reason(
-            local_ready=passage_lifecycle_local.local_passage_available(),
+        return passage_local.local_disabled_reason(
+            local_ready=passage_local.local_passage_available(),
             local_index_ready=local_index_ready)
 
     def _passage_reason_text(self, key):
@@ -20693,10 +20698,10 @@ class GenizahGUI(QMainWindow):
             passage_lifecycle.REASON_MAIN_INDEX_MISSING: tr(
                 "The main index is not ready yet. Letter-level search needs "
                 "it to load the text of its results."),
-            passage_lifecycle_local.REASON_LOCAL_NOT_BUILT: tr(
+            passage_local.REASON_LOCAL_NOT_BUILT: tr(
                 "The letter-level index for My Library has not been built "
                 "yet. You can build it from Settings."),
-            passage_lifecycle_local.REASON_LOCAL_INDEX_MISSING: tr(
+            passage_local.REASON_LOCAL_INDEX_MISSING: tr(
                 "My Library is not loaded. Letter-level search for My "
                 "Library needs it to load the text of its results."),
         }
@@ -20930,7 +20935,7 @@ class GenizahGUI(QMainWindow):
             self._save_session()
             return
         reason = self._passage_disabled_reason_now()
-        if reason == passage_lifecycle_local.REASON_LOCAL_NOT_BUILT:
+        if reason == passage_local.REASON_LOCAL_NOT_BUILT:
             # Same shape as the Genizah case below: keep the intent, demote,
             # and offer the build that would make the choice possible.
             self._comp_method_deferred = 'passage'
@@ -29441,7 +29446,7 @@ class GenizahGUI(QMainWindow):
                 # default byte for byte.
                 # Routed by scope: Genizah, My Library, or both. A Genizah
                 # run goes through `get_passage_searcher` exactly as before.
-                _comp_searcher = passage_lifecycle_local.ScopedPassageSearcher(
+                _comp_searcher = passage_local.ScopedPassageSearcher(
                     self.searcher,
                     _comp_passage_width,
                     _comp_passage_length,

@@ -50,6 +50,8 @@ DESKTOP_MODULES = [
     # Registered 2026-09-18 (repo-structure Round 1): these five had no guard before the
     # registry-completeness test below existed.
     "desktop/passage_lifecycle.py",
+    # Letter-level search for My Library (2026-10-16).
+    "desktop/passage_local.py",
     "desktop/passage_witnesses.py",
     "desktop/passage_workers.py",
     "desktop/widgets/__init__.py",

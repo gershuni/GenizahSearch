@@ -252,28 +252,133 @@ def test_build_search_and_render(local_db, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# The second lifecycle instance and the router.
+# The two lifecycle slots and the router.
 # ---------------------------------------------------------------------------
 
-def test_second_lifecycle_instance_is_independent():
+SYS_G = '990000000000000001'
+
+
+@pytest.fixture
+def slots():
+    """Both lifecycle slots, clean before and after (they are module state)."""
     import desktop.passage_lifecycle as pl
-    import desktop.passage_lifecycle_local as pll
-    assert pll.lifecycle is not pl
-    assert pll.lifecycle.passage_available() is False
-    # one exception class across both, so one `except` catches either
-    assert pll.lifecycle.PassageSearchUnavailableError is \
-        pl.PassageSearchUnavailableError
-    assert pll.lifecycle.PassageState is pl.PassageState
-    # the size estimate is rebound in the My Library instance only
-    assert pll.lifecycle.estimate_build_bytes is not pl.estimate_build_bytes
-    gen = pl.current_state_generation()
-    pll.lifecycle.install_passage_state(None)
-    assert pl.current_state_generation() == gen
+    for slot in (pl.SLOT_GENIZAH, pl.SLOT_LOCAL):
+        pl.close_passage_state(slot=slot)
+    yield pl
+    for slot in (pl.SLOT_GENIZAH, pl.SLOT_LOCAL):
+        pl.close_passage_state(slot=slot)
+
+
+def _install(pl, slot, records, idx_dir):
+    build_index(records, idx_dir, partitions=2)
+    index = open_index(idx_dir)
+    assert index is not None
+    assert pl.install_passage_state(
+        pl.PassageState(index=index, live_dir=idx_dir), slot=slot)
+
+
+def _genizah_records():
+    return [(f'{SYS_G}_IE1_P{n}_FL{n}', FILLER + PSALM + FILLER)
+            for n in (1, 2)]
+
+
+def test_slots_install_and_close_independently(slots, local_db, tmp_path):
+    pl = slots
+    path, _fa, _fb = local_db
+    g0 = pl.current_state_generation(pl.SLOT_GENIZAH)
+    _install(pl, pl.SLOT_LOCAL, iter_local_records(path), str(tmp_path / 'l'))
+    # Installing My Library moves only its own slot.
+    assert pl.passage_available(pl.SLOT_LOCAL)
+    assert not pl.passage_available(pl.SLOT_GENIZAH)
+    assert pl.current_state_generation(pl.SLOT_GENIZAH) == g0
+    l1 = pl.current_state_generation(pl.SLOT_LOCAL)
+
+    _install(pl, pl.SLOT_GENIZAH, _genizah_records(), str(tmp_path / 'g'))
+    assert pl.current_state_generation(pl.SLOT_LOCAL) == l1
+    # A release authorised for one generation of one slot cannot close the
+    # other slot, or a later generation of its own.
+    assert pl.close_passage_state(l1 + 7, slot=pl.SLOT_LOCAL) is False
+    assert pl.passage_available(pl.SLOT_LOCAL)
+    assert pl.close_passage_state(l1, slot=pl.SLOT_LOCAL) is True
+    assert not pl.passage_available(pl.SLOT_LOCAL)
+    assert pl.passage_available(pl.SLOT_GENIZAH)
+    with pytest.raises(ValueError):
+        pl.passage_available('elsewhere')
+
+
+def test_a_lease_on_one_slot_does_not_hold_up_closing_the_other(
+        slots, local_db, tmp_path, monkeypatch):
+    """The point of separate slots: a search running against the Genizah
+    index leaves the My Library index free to close or swap, and the
+    Genizah index itself still refuses to close under its reader."""
+    import threading
+
+    import shared.passage_parallels as passage_parallels
+    pl = slots
+    path, _fa, _fb = local_db
+    _install(pl, pl.SLOT_LOCAL, iter_local_records(path), str(tmp_path / 'l'))
+    _install(pl, pl.SLOT_GENIZAH, _genizah_records(), str(tmp_path / 'g'))
+    monkeypatch.setattr(pl, 'LEASE_DRAIN_TIMEOUT_SECONDS', 0.2)
+    monkeypatch.setattr(pl, 'LEASE_DRAIN_POLL_SECONDS', 0.02)
+
+    entered, release = threading.Event(), threading.Event()
+
+    def _blocked(self, *a, **k):
+        entered.set()
+        assert release.wait(timeout=60)
+        return {'main': [], 'filtered': []}
+
+    monkeypatch.setattr(passage_parallels.PassageSearcher,
+                        'search_composition_logic', _blocked)
+    reader = threading.Thread(
+        target=lambda: pl.get_passage_searcher(object())
+        .search_composition_logic(PSALM))
+    reader.start()
+    try:
+        assert entered.wait(timeout=10), 'the Genizah search never started'
+        assert pl.close_passage_state(slot=pl.SLOT_GENIZAH) is False
+        assert pl.close_passage_state(slot=pl.SLOT_LOCAL) is True
+    finally:
+        release.set()
+        reader.join(timeout=10)
+    assert pl.close_passage_state(slot=pl.SLOT_GENIZAH) is True
+
+
+def test_local_slot_searches_through_the_router(slots, local_db, tmp_path):
+    import desktop.passage_local as passage_local
+    pl = slots
+    path, fa, fb = local_db
+    _install(pl, pl.SLOT_LOCAL, iter_local_records(path), str(tmp_path / 'l'))
+    router = passage_local.ScopedPassageSearcher(
+        _Engine(_pages(path)), 'widest-40', 'normal', 'normal')
+    res = router.search_composition_logic(PSALM, corpus_scope='local')
+    rows = res['main'] + res['filtered']
+    assert {r['raw_header'] for r in rows} == {
+        _make_full_header(SYS_A, 2, fa), _make_full_header(SYS_B, 1, fb)}
+    assert all(r['src_lbl'] == 'LOCAL' for r in rows)
+    # The slot, not the caller, picks the namespace: a LOCAL restriction
+    # works through the adapter with no pattern passed in.
+    only_b = router.search_composition_logic(
+        PSALM, corpus_scope='local', restrict_sys_ids={SYS_B})
+    assert {r['raw_header'].split('_')[0]
+            for r in only_b['main'] + only_b['filtered']} == {SYS_B}
+    # Nothing is installed in the Genizah slot, and saying so is that
+    # slot's job -- the My Library index must not answer for it.
+    with pytest.raises(pl.PassageSearchUnavailableError):
+        router.search_composition_logic(PSALM, corpus_scope='genizah')
+
+
+def test_local_slot_unavailable_names_my_library(slots):
+    pl = slots
+    with pytest.raises(pl.PassageSearchUnavailableError,
+                       match='My Library'):
+        pl.get_passage_searcher(object(), slot=pl.SLOT_LOCAL) \
+            .search_composition_logic(PSALM)
 
 
 def test_router_merges_both_indexes_by_score(monkeypatch):
     import desktop.passage_lifecycle as pl
-    import desktop.passage_lifecycle_local as pll
+    import desktop.passage_local as pll
 
     class _S:
         def __init__(self, rows):
@@ -289,10 +394,10 @@ def test_router_merges_both_indexes_by_score(monkeypatch):
     g_row = {'raw_header': '990000000000000001_IE1_P1_FL1', 'score': 50.0}
     l_header = _make_full_header(SYS_A, 1, 1)
     l_row = {'raw_header': l_header, 'score': 80.0}
-    monkeypatch.setattr(pl, 'get_passage_searcher',
-                        lambda *a, **k: _S([g_row]))
-    monkeypatch.setattr(pll.lifecycle, 'get_passage_searcher',
-                        lambda *a, **k: _S([l_row]))
+    monkeypatch.setattr(
+        pl, 'get_passage_searcher',
+        lambda *a, slot=pl.SLOT_GENIZAH, **k:
+            _S([l_row] if slot == pl.SLOT_LOCAL else [g_row]))
     monkeypatch.setattr(pll.LocalPageTextFetcher, 'shelfmark',
                         lambda self, h: 'a.txt')
     r = pll.ScopedPassageSearcher(object(), 'widest-40', 'default',

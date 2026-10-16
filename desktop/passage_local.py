@@ -1,20 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Letter-level search for My Library: a second passage-index lifecycle, and
-the scope router composition search dispatches through.
+"""Letter-level search for My Library: what is specific to the My Library
+index, and the scope router composition search dispatches through.
 
-`desktop/passage_lifecycle.py` keeps its state in module globals -- one
-installed index, one lease count, one generation -- and that single-owner
-design is what its whole test suite proves. My Library needs a second index
-with exactly the same guarantees (leases, drain-before-close, the two-phase
-swap, startup recovery), not a re-implementation of them. So this module
-loads the lifecycle's OWN code a second time as an independent module object:
-same functions, separate globals. Nothing in the original module changes, and
-the Genizah index cannot be affected by anything done to this one.
-
-The shared classes -- the exceptions callers catch, and the result
-dataclasses -- are rebound to the original module's, so `except
-passage_lifecycle.PassageSearchUnavailableError` catches a failure from
-either index.
+The My Library index lives in `desktop/passage_lifecycle.py`'s second slot,
+`SLOT_LOCAL`. It gets the same leases, drain-before-close, two-phase swap and
+startup recovery as the Genizah index, with its own state, lock and
+generation, so neither index can block, close or invalidate the other. This
+module holds only what differs for My Library: where its index and corpus
+live, the build's size estimate, the freshness check against the library's
+signature, and the readiness reasons.
 
 `ScopedPassageSearcher` is what composition search holds: it answers the
 `search_composition_logic` call for 'genizah', 'local' or 'all', merging the
@@ -23,85 +17,35 @@ sides, so the two lists are directly comparable).
 """
 from __future__ import annotations
 
-import importlib.util
+import json
 import logging
 import os
-import sys
-import types
 from typing import Optional
 
-from desktop import passage_lifecycle as genizah_lifecycle
+from desktop import passage_lifecycle
+from desktop.passage_lifecycle import SLOT_LOCAL
 from shared.config import Config
+from shared.passage_builder import estimate_artifact_bytes
 from shared.passage_local_corpus import (
     SIGNATURE_NAME, LocalPageTextFetcher, finish_local_rows,
     write_corpus_signature,
 )
-from shared.sys_id_patterns import LOCAL_SYS_ID_RE
 
 logger = logging.getLogger(__name__)
-
-_IMPL_NAME = 'desktop._passage_lifecycle_local_impl'
-
-# Classes that must be ONE class across both instances.
-_SHARED_NAMES = (
-    'PassageState', 'PassageSearchError', 'PassageSearchUnavailableError',
-    'PassageIndexReplaced', 'BuildCancelled', 'BuildOutcome',
-    'SwapValidation', 'SwapResult', 'BuildAndSwapResult', 'RecoveryResult',
-)
-
-
-def _load_second_instance() -> types.ModuleType:
-    """Execute passage_lifecycle's code object into a fresh module.
-
-    `get_code` is used rather than a file path because in the frozen app the
-    module lives inside the PYZ archive and has no file on disk.
-    """
-    if _IMPL_NAME in sys.modules:
-        return sys.modules[_IMPL_NAME]
-    spec = importlib.util.find_spec(genizah_lifecycle.__name__)
-    if spec is None or spec.loader is None:
-        raise ImportError('cannot locate desktop.passage_lifecycle')
-    code = spec.loader.get_code(genizah_lifecycle.__name__)
-    mod = types.ModuleType(_IMPL_NAME, genizah_lifecycle.__doc__)
-    mod.__package__ = 'desktop'
-    mod.__file__ = getattr(genizah_lifecycle, '__file__', None)
-    sys.modules[_IMPL_NAME] = mod
-    try:
-        exec(code, mod.__dict__)
-    except BaseException:
-        sys.modules.pop(_IMPL_NAME, None)
-        raise
-    for name in _SHARED_NAMES:
-        setattr(mod, name, getattr(genizah_lifecycle, name))
-    return mod
-
-
-#: The My Library lifecycle. Use it exactly like `desktop.passage_lifecycle`
-#: (install/close/recover/run_build_and_swap...), always with an explicit
-#: `root` of `local_passage_root()`.
-lifecycle = _load_second_instance()
-
-
-
-def _estimate_local_build_bytes(db_path: str) -> int:
-    """The second instance's free-space preflight. The Genizah formula sizes
-    a build from its corpus FILE, and the LOCAL sidecar stores its text
-    zstd-compressed -- a file-size bound would understate the need several
-    times over. `prepare_staging` looks this name up at call time, so
-    rebinding it here changes the My Library instance only."""
-    from shared.passage_local_corpus import local_text_bytes
-    letters_ub = local_text_bytes(db_path) // 2
-    return lifecycle.estimate_artifact_bytes(letters_ub) + 8 * letters_ub
-
-
-lifecycle.estimate_build_bytes = _estimate_local_build_bytes
 
 REASON_LOCAL_NOT_BUILT = 'passage_disabled_local_not_built'
 REASON_LOCAL_INDEX_MISSING = 'passage_disabled_local_index_missing'
 
+# Where a freshness check writes its fresh signature. NOT the build's own
+# signature file: a build hashes that file before it starts and again before
+# its swap, so a check rewriting it mid-build would make an hour-long build
+# discard itself as "corpus changed". Same file NAME, because the freshness
+# comparison includes the basename the manifest recorded.
+_FRESHNESS_DIRNAME = '.freshness_check'
+
 
 def local_passage_root() -> str:
-    return Config.LOCAL_PASSAGE_INDEX_DIR
+    return passage_lifecycle.slot_root(SLOT_LOCAL)
 
 
 def local_db_path() -> str:
@@ -114,37 +58,57 @@ def signature_path(root: Optional[str] = None) -> str:
 
 
 def local_passage_available() -> bool:
-    return lifecycle.passage_available()
+    """Is a My Library index installed? Read from the local slot alone. The
+    window's gate asks the Genizah question (`passage_lifecycle.
+    passage_available()`) and this one separately, and they stay separate
+    patch points: replacing the Genizah answer must not change this one."""
+    return passage_lifecycle.installed_live_dir(SLOT_LOCAL) is not None
+
+
+def estimate_local_build_bytes(db_path: str) -> int:
+    """The free-space preflight for a My Library build, passed to
+    `run_build_and_swap` as `needed_bytes`. The Genizah formula sizes a build
+    from its corpus FILE, and the LOCAL sidecar stores its text
+    zstd-compressed -- a file-size bound would understate the need several
+    times over -- so this sums the uncompressed text lengths instead."""
+    from shared.passage_local_corpus import local_text_bytes
+    letters_ub = local_text_bytes(db_path) // 2
+    return estimate_artifact_bytes(letters_ub) + 8 * letters_ub
 
 
 def refresh_signature(root: Optional[str] = None, cancel_check=None) -> str:
-    """Rewrite the corpus signature file from the LOCAL sidecar as it is now
-    and return its path. The build hashes it into its manifest; a freshness
-    check rewrites it and compares."""
+    """Rewrite the build's corpus signature file from the LOCAL sidecar as it
+    is now and return its path. The build hashes it into its manifest."""
     return write_corpus_signature(local_db_path(), signature_path(root),
                                   cancel_check=cancel_check)
 
 
-def local_freshness(cancel_check=None) -> Optional[str]:
-    """FRESH / STALE / UNKNOWN for the installed My Library index, or None
-    when there is none (or the check was cancelled). Reads the corpus, so it
-    belongs off the UI thread."""
-    state = lifecycle._state
-    if state is None:
+def local_freshness(live_dir: Optional[str],
+                    cancel_check=None) -> Optional[str]:
+    """FRESH / STALE / UNKNOWN for the My Library index installed at
+    `live_dir`, or None when there is none (or the check was cancelled).
+
+    `live_dir` is captured on the UI thread
+    (`passage_lifecycle.installed_live_dir(SLOT_LOCAL)`) and handed in: the
+    slot's state is UI-thread-only, and this runs on a worker because it
+    reads the whole library."""
+    if not live_dir:
         return None
     try:
-        import json
-        with open(os.path.join(state.live_dir, 'manifest.json'),
+        with open(os.path.join(live_dir, 'manifest.json'),
                   encoding='utf-8') as fh:
             sources = (json.load(fh).get('corpus') or {}).get('sources') or []
-        path = refresh_signature(cancel_check=cancel_check)
-    except lifecycle.BuildCancelled:
+        check_dir = os.path.join(os.path.dirname(live_dir), _FRESHNESS_DIRNAME)
+        path = write_corpus_signature(
+            local_db_path(), os.path.join(check_dir, SIGNATURE_NAME),
+            cancel_check=cancel_check)
+    except passage_lifecycle.BuildCancelled:
         return None
     except Exception:                                        # noqa: BLE001
         logger.exception('My Library letter-level freshness check failed')
-        return lifecycle.UNKNOWN
-    return lifecycle.compute_freshness(sources, [path],
-                                       cancel_check=cancel_check)
+        return passage_lifecycle.UNKNOWN
+    return passage_lifecycle.compute_freshness(sources, [path],
+                                               cancel_check=cancel_check)
 
 
 def local_disabled_reason(local_ready: bool, local_index_ready: bool
@@ -192,7 +156,7 @@ class ScopedPassageSearcher:
     """What composition search holds for a letter-level run. The scope comes
     in on each call (`corpus_scope`, as CompositionThread already passes it),
     and each index is leased only for the duration of its own call, exactly
-    as `PassageSearchAdapter` does."""
+    as `PassageSearchAdapter` does -- each through its own slot."""
 
     __slots__ = ('_engine', '_width', '_length', '_depth', '_render_cap')
 
@@ -205,14 +169,14 @@ class ScopedPassageSearcher:
         self._render_cap = render_cap
 
     def _genizah(self):
-        return genizah_lifecycle.get_passage_searcher(
+        return passage_lifecycle.get_passage_searcher(
             self._engine, self._width, self._length, self._depth,
             render_cap=self._render_cap)
 
     def _local(self, fetcher):
-        return lifecycle.get_passage_searcher(
+        return passage_lifecycle.get_passage_searcher(
             fetcher, self._width, self._length, self._depth,
-            render_cap=self._render_cap, sys_id_re=LOCAL_SYS_ID_RE)
+            render_cap=self._render_cap, slot=SLOT_LOCAL)
 
     def search_composition_logic(self, full_text, chunk_size=5,
                                  max_freq=100.0, mode='exact', *,

@@ -22,7 +22,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import desktop.passage_lifecycle as pl        # noqa: E402
-import desktop.passage_lifecycle_local as pll  # noqa: E402
+import desktop.passage_local as pll  # noqa: E402
 import genizah_app                            # noqa: E402
 
 APP = genizah_app.GenizahGUI

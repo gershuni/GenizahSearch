@@ -40,8 +40,8 @@ def leased(monkeypatch):
     import shared.passage_parallels as pp
 
     _RecordingSearcher.seen = []
-    monkeypatch.setattr(pl, '_try_acquire_lease', lambda: _Sentinel())
-    monkeypatch.setattr(pl, '_release_lease', lambda: None)
+    monkeypatch.setattr(pl, '_try_acquire_lease', lambda *_a: _Sentinel())
+    monkeypatch.setattr(pl, '_release_lease', lambda *_a: None)
     monkeypatch.setattr(pp, 'PassageSearcher', _RecordingSearcher)
     monkeypatch.setattr(pl, 'compose', lambda *a, **k: 'POLICY')
     return _RecordingSearcher
@@ -124,7 +124,7 @@ def test_an_unchanged_generation_is_not_a_change():
 
 def test_a_bumped_generation_is_a_change(monkeypatch):
     pinned = pl.current_state_generation()
-    monkeypatch.setattr(pl, '_state_generation', pinned + 1)
+    monkeypatch.setattr(pl._SLOTS[pl.SLOT_GENIZAH], 'generation', pinned + 1)
     assert pl.generation_changed(pinned) is True
 
 
@@ -132,7 +132,7 @@ def test_no_pin_is_not_a_change(monkeypatch):
     """A batch that never captured a generation started before anything was
     installed. Its first lease fails with PassageSearchUnavailableError,
     which is the honest error for that case -- not this one."""
-    monkeypatch.setattr(pl, '_state_generation', 99)
+    monkeypatch.setattr(pl._SLOTS[pl.SLOT_GENIZAH], 'generation', 99)
     assert pl.generation_changed(None) is False
 
 
@@ -445,7 +445,7 @@ def test_an_index_swap_mid_batch_voids_the_run(monkeypatch):
 
     def _swap(text, **kw):
         out = original(text, **kw)
-        monkeypatch.setattr(pl, '_state_generation', pinned + 1)
+        monkeypatch.setattr(pl._SLOTS[pl.SLOT_GENIZAH], 'generation', pinned + 1)
         return out
     s.search_composition_logic = _swap
     w.run()
@@ -2828,7 +2828,7 @@ def test_a_swap_during_the_LAST_witness_search_voids_the_batch(monkeypatch):
     def _swap(text, **kw):
         # What a lease acquired INSIDE the call looks like from out here.
         out = original(text, **kw)
-        monkeypatch.setattr(pl, '_state_generation', pinned + 1)
+        monkeypatch.setattr(pl._SLOTS[pl.SLOT_GENIZAH], 'generation', pinned + 1)
         return out
 
     s.search_composition_logic = _swap

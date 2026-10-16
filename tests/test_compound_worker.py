@@ -234,7 +234,7 @@ def test_an_index_swap_after_a_step_voids_the_run(monkeypatch, fail):
 
     def _swap(n):
         if n == 2:
-            monkeypatch.setattr(pl, '_state_generation', pinned + 1)
+            monkeypatch.setattr(pl._SLOTS[pl.SLOT_GENIZAH], 'generation', pinned + 1)
     s.on_call = _swap
     w = _worker([(SEED, '', MAIN)], [c], s, pinned=pinned)
     w.run()
@@ -283,8 +283,8 @@ def _build(tmp_path, name, order):
 
 
 def _lease(monkeypatch, index_box):
-    monkeypatch.setattr(pl, '_try_acquire_lease', lambda: index_box[0])
-    monkeypatch.setattr(pl, '_release_lease', lambda: None)
+    monkeypatch.setattr(pl, '_try_acquire_lease', lambda *_a: index_box[0])
+    monkeypatch.setattr(pl, '_release_lease', lambda *_a: None)
 
 
 class _NoText:
@@ -329,8 +329,8 @@ def test_an_adapter_failure_crosses_the_boundary_as_a_string(monkeypatch):
         def search_condition(self, *a, **k):
             raise ValueError('inside')
     import shared.passage_parallels as pp
-    monkeypatch.setattr(pl, '_try_acquire_lease', lambda: object())
-    monkeypatch.setattr(pl, '_release_lease', lambda: None)
+    monkeypatch.setattr(pl, '_try_acquire_lease', lambda *_a: object())
+    monkeypatch.setattr(pl, '_release_lease', lambda *_a: None)
     monkeypatch.setattr(pp, 'PassageSearcher', _Boom)
     monkeypatch.setattr(pl, 'compose', lambda *a, **k: 'POLICY')
     with pytest.raises(pl.PassageSearchError) as exc:

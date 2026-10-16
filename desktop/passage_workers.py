@@ -38,16 +38,15 @@ class PassageLoadThread(QThread):
 
     loaded_signal = pyqtSignal(object)   # RecoveryResult, or None on failure
 
-    def __init__(self, root, parent=None, lifecycle=None):
+    def __init__(self, root, parent=None):
         super().__init__(parent)
+        # Recovery is pure over `root`, so the same thread serves both slots:
+        # the window installs the result into whichever slot it asked for.
         self._root = root
-        # Which lifecycle instance to recover into: the Genizah one by
-        # default, or the My Library one (`desktop/passage_lifecycle_local.py`).
-        self._lifecycle = lifecycle or passage_lifecycle
 
     def run(self):
         try:
-            result = self._lifecycle.recover_at_startup(self._root)
+            result = passage_lifecycle.recover_at_startup(self._root)
         except Exception:                                  # noqa: BLE001
             # A startup path must never take the app down with it: the whole
             # feature hiding is an acceptable outcome, a failed launch is not.
@@ -197,10 +196,10 @@ LOCAL_PARTITIONS = 48
 class LocalPassageBuildThread(PassageBuildThread):
     """Builds the My Library letter-level index from the LOCAL SQLite
     sidecar, read-only, into its own root, through the SAME build/swap
-    protocol as the Genizah index (`run_build_and_swap` of the second
-    lifecycle instance). Only the record source and the corpus fingerprint
-    differ: records come from `iter_local_records`, and the fingerprint is
-    a signature file summarising the library (see
+    protocol as the Genizah index (`run_build_and_swap` on the
+    `SLOT_LOCAL` slot). Only the record source, the size estimate and the
+    corpus fingerprint differ: records come from `iter_local_records`, and
+    the fingerprint is a signature file summarising the library (see
     `shared/passage_local_corpus.py::write_corpus_signature`)."""
 
     def __init__(self, root, db_path, release_live_state, parent=None):
@@ -208,15 +207,15 @@ class LocalPassageBuildThread(PassageBuildThread):
         self._db_path = db_path
 
     def run(self):
-        from desktop import passage_lifecycle_local as pll
+        from desktop import passage_local
         from shared.passage_local_corpus import (count_local_pages,
                                                  iter_local_records)
-        lifecycle = pll.lifecycle
         try:
             total = max(1, count_local_pages(self._db_path))
+            needed = passage_local.estimate_local_build_bytes(self._db_path)
             self._emit('signature', 0, 0, 0)
-            sig = pll.refresh_signature(self._root,
-                                        cancel_check=self._cancel_check)
+            sig = passage_local.refresh_signature(
+                self._root, cancel_check=self._cancel_check)
             last = {'pct': -1}
 
             def _on_page(n):
@@ -236,13 +235,15 @@ class LocalPassageBuildThread(PassageBuildThread):
                 self._emit('arrange', 0, 0, 0)
 
             records = _records()
-            result = lifecycle.run_build_and_swap(
+            result = passage_lifecycle.run_build_and_swap(
                 self._root, records, [sig], self._db_path,
                 partitions=LOCAL_PARTITIONS, corpus_label='my_library',
                 progress=self._on_progress,
                 cancel_check=self._cancel_check,
-                release_live_state=self._release_live_state)
-        except lifecycle.BuildCancelled:
+                release_live_state=self._release_live_state,
+                slot=passage_lifecycle.SLOT_LOCAL,
+                needed_bytes=needed)
+        except passage_lifecycle.BuildCancelled:
             self.cancelled_signal.emit()
             return
         except Exception as exc:                       # noqa: BLE001
@@ -262,14 +263,21 @@ class LocalPassageFreshnessThread(QThread):
     """Is the installed My Library index still built from the library as it
     is now? Reads the whole LOCAL page table (seconds), so off the UI
     thread. Emits FRESH / STALE / UNKNOWN, or '' when there is nothing to
-    say (no index, or cancelled)."""
+    say (no index, or cancelled).
+
+    `live_dir` is the installed index's directory, read on the UI thread
+    when the check is started -- never from here."""
 
     result_signal = pyqtSignal(str)
 
+    def __init__(self, live_dir, parent=None):
+        super().__init__(parent)
+        self._live_dir = live_dir
+
     def run(self):
-        from desktop import passage_lifecycle_local as pll
+        from desktop import passage_local
         try:
-            result = pll.local_freshness()
+            result = passage_local.local_freshness(self._live_dir)
         except Exception:                              # noqa: BLE001
             logger.exception('My Library letter-level freshness check failed')
             result = None

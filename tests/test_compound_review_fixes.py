@@ -355,8 +355,8 @@ def test_a_failure_inside_the_lease_keeps_no_frame_holding_the_index(monkeypatch
 
         def search_condition(self, *a, **k):
             raise ValueError('inside')
-    monkeypatch.setattr(pl, '_try_acquire_lease', lambda: sentinel)
-    monkeypatch.setattr(pl, '_release_lease', lambda: None)
+    monkeypatch.setattr(pl, '_try_acquire_lease', lambda *_a: sentinel)
+    monkeypatch.setattr(pl, '_release_lease', lambda *_a: None)
     monkeypatch.setattr(pp, 'PassageSearcher', _Boom)
     monkeypatch.setattr(pl, 'compose', lambda *a, **k: 'POLICY')
     with pytest.raises(pl.PassageSearchError) as exc:
