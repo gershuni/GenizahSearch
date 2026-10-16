@@ -144,9 +144,33 @@ def test_reader_never_writes_to_the_sidecar(local_db):
                 if os.path.exists(f) else None
                 for f in (path, path + '-wal')]
 
+    # Every reader opens the sidecar through the one read-only helper, and
+    # that helper refuses a write -- so "reads only" is enforced, not just
+    # observed on this run.
+    import shared.passage_local_corpus as plc
+    opened = []
+    real_connect = plc._connect_ro
+
+    def _spy(p):
+        conn = real_connect(p)
+        opened.append(conn)
+        return conn
+
+    probe = real_connect(path)
+    with pytest.raises(sqlite3.OperationalError):
+        probe.execute('CREATE TABLE intruder (x)')
+    probe.close()
+
     before = _state()
-    list(iter_local_records(path))
-    write_corpus_signature(path, path + '.sig')
+    plc._connect_ro = _spy
+    try:
+        list(iter_local_records(path))
+        write_corpus_signature(path, path + '.sig')
+        plc.count_local_pages(path)
+        plc.local_text_bytes(path)
+    finally:
+        plc._connect_ro = real_connect
+    assert len(opened) == 4
     after = _state()
     # The database file itself is untouched.
     assert after[0] == before[0]
@@ -484,6 +508,9 @@ def test_segments_of_one_page_come_back_as_one_row():
         def shelfmark(self, h):
             return 'a.txt'
 
+        def chunk_locator(self, h):
+            return ''
+
     res = finish_local_rows({
         'main': [
             {'raw_header': segment_record_id(head, 0), 'score': 90.0,
@@ -506,6 +533,50 @@ def test_segments_of_one_page_come_back_as_one_row():
     # Still a literal pattern: the special characters stay escaped.
     assert re.search(row['highlight_pattern'], 'דהו.(x)|y').group(0) == \
         'דהו.(x)|y'
+
+    # A stronger segment arriving LATER in the same bucket takes the page's
+    # row, in the page's place, still carrying both segments' matches.
+    later = finish_local_rows({'main': [
+        {'raw_header': segment_record_id(head, 0), 'score': 10.0,
+         'text': 'weak', 'highlight_pattern': _match_pattern(['אבג']),
+         'source_highlight_pattern': ''},
+        {'raw_header': _make_full_header(SYS_B, 1, 2), 'score': 5.0,
+         'highlight_pattern': '', 'source_highlight_pattern': ''},
+        {'raw_header': segment_record_id(head, 1), 'score': 70.0,
+         'text': 'strong', 'highlight_pattern': _match_pattern(['זחט']),
+         'source_highlight_pattern': ''}]}, _F())
+    assert [r['raw_header'] for r in later['main']] == [
+        head, _make_full_header(SYS_B, 1, 2)]
+    best = later['main'][0]
+    assert (best['score'], best['text']) == (70.0, 'strong')
+    assert set(_pattern_literals(best['highlight_pattern'])) == {'אבג', 'זחט'}
+
+
+def test_rows_carry_their_page_for_the_exports():
+    """Word prints `chunk_locator` verbatim and falls back to `p_num`
+    (shared/docx_export.py); a My Library row without either printed an
+    empty page label."""
+    from shared.docx_export import _page_label
+    head = _make_full_header(SYS_A, 12, 3)
+
+    class _F:
+        def __init__(self, locator):
+            self._locator = locator
+
+        def shelfmark(self, h):
+            return 'a.pdf'
+
+        def chunk_locator(self, h):
+            return self._locator
+
+    for locator, label in (('', 'p. 12'), ('paragraphs 21-40',
+                                           'paragraphs 21-40')):
+        row = finish_local_rows({'main': [{'raw_header': head, 'score': 1.0}]},
+                                _F(locator))['main'][0]
+        assert row['p_num'] == 12
+        # The export's own row conversion (genizah_app.py, the Word block).
+        assert _page_label({'chunk_locator': row.get('chunk_locator', ''),
+                            'p_num': row.get('p_num')}) == label
 
 
 def test_router_sends_conditions_to_the_genizah_index(monkeypatch):

@@ -17784,6 +17784,13 @@ class GenizahGUI(QMainWindow):
         if status == 'installed':
             self.status_label.setText(
                 tr("The letter-level index is ready."))
+        elif status == 'cancelled':
+            # A cancel that landed after the live index was released comes
+            # here WITH the index recovery reopened (it was just installed
+            # above); a bare cancellation never reaches this handler.
+            self.status_label.setText(tr(
+                "Letter-level index build cancelled. Your existing index was "
+                "not changed."))
         elif status == 'release_timed_out':
             # The ONE status that does not leave a working index behind.
             # The seam never answered inside its bound, so the release was
@@ -17872,7 +17879,11 @@ class GenizahGUI(QMainWindow):
         th = getattr(self, 'local_passage_freshness_thread', None)
         if th is not None and th.isRunning():
             # The check already running may have read the library before
-            # the change that asked for this one: run again when it answers.
+            # the change that asked for this one: its answer is not shown,
+            # and a fresh check starts once that thread has really FINISHED
+            # (`_on_local_freshness_thread_finished`). Restarting from the
+            # answer instead lost the request: the answer arrives while the
+            # thread still reports isRunning().
             self._local_freshness_recheck = True
             return
         live_dir = passage_lifecycle.installed_live_dir(
@@ -17885,9 +17896,20 @@ class GenizahGUI(QMainWindow):
                 live_dir)
             self.local_passage_freshness_thread.result_signal.connect(
                 self._on_local_freshness)
+            self.local_passage_freshness_thread.finished.connect(
+                self._on_local_freshness_thread_finished)
             self.local_passage_freshness_thread.start()
         except Exception:                                    # noqa: BLE001
             logger.exception('could not start the My Library freshness check')
+
+    def _on_local_freshness_thread_finished(self):
+        """The check's thread has exited: run the check a change asked for
+        while it was busy."""
+        if getattr(self, '_close_pending', False):
+            return
+        if getattr(self, '_local_freshness_recheck', False):
+            self._local_freshness_recheck = False
+            self._start_local_freshness_check()
 
     def _on_local_freshness(self, result):
         logger.info('My Library letter-level index freshness: %s',
@@ -17895,8 +17917,7 @@ class GenizahGUI(QMainWindow):
         if getattr(self, '_close_pending', False):
             return
         if getattr(self, '_local_freshness_recheck', False):
-            self._local_freshness_recheck = False
-            self._start_local_freshness_check()
+            # Read before a later change; the re-check answers instead.
             return
         if result == passage_lifecycle.STALE:
             self.status_label.setText(tr(
@@ -17907,8 +17928,9 @@ class GenizahGUI(QMainWindow):
         """MyLibraryTab: a scan finished or a folder was removed. Re-check
         the My Library letter-level index and say so if it is now out of
         date. A notice only -- rebuilding stays the user's choice (owner,
-        2026-10-16). With no index installed there is nothing to check; a
-        build in flight is checked when it installs."""
+        2026-10-16). With no index installed there is nothing to check; with
+        a build in flight, the build's end -- installed, cancelled or failed
+        -- runs the check."""
         if getattr(self, '_close_pending', False):
             return
         if getattr(self, '_local_passage_build_in_flight', False):
@@ -18163,27 +18185,38 @@ class GenizahGUI(QMainWindow):
         if status == 'installed':
             self.status_label.setText(
                 tr("The My Library letter-level index is ready."))
-            # A scan during a long build leaves the new index already out of
-            # date; the check says so if it is.
-            self._start_local_freshness_check()
+        elif status == 'cancelled':
+            # A cancel after the live index was released, carrying the index
+            # recovery reopened (installed above).
+            self.status_label.setText(tr(
+                "My Library letter-level index build cancelled. Your existing "
+                "index was not changed."))
         elif status == 'release_timed_out':
             logger.warning('My Library passage build ended as %r; reloading',
                            status)
             self.status_label.setText(tr(
                 "The My Library letter-level index could not be replaced. "
                 "Reloading the existing index."))
+            # The reload checks freshness when it installs.
             self._start_local_passage_load()
+            return
         else:
             logger.warning('My Library passage build ended as %r', status)
             self.status_label.setText(tr(
                 "The My Library letter-level index could not be replaced. "
                 "The previous index is still in use."))
+        # Whatever index is installed now, a scan during the build may have
+        # left it out of date: the change notices were held while it ran.
+        self._start_local_freshness_check()
 
     def _on_local_passage_build_cancelled(self):
         self._finish_local_passage_build()
         self.status_label.setText(tr(
             "My Library letter-level index build cancelled. Your existing "
             "index was not changed."))
+        # The previous index is still installed; a scan during the build may
+        # have changed the library under it.
+        self._start_local_freshness_check()
 
     def _on_local_passage_build_error(self, message):
         logger.error('My Library passage index build failed: %s', message)
@@ -18193,6 +18226,7 @@ class GenizahGUI(QMainWindow):
             tr("The letter-level index could not be built. Details have "
                "been written to the log. Your existing index was not "
                "changed."))
+        self._start_local_freshness_check()
 
     def run_passage_index_build(self, confirm=True):
         """Build the letter-level index from the transcriptions already on
@@ -20447,6 +20481,9 @@ class GenizahGUI(QMainWindow):
         list, after these rows exist, so it cannot change them.
         """
         restrict = getattr(self, 'pre_search_restrict_sys_ids', None)
+        # The generation of each index THIS scope searches, and only those:
+        # a Genizah rebuild must not throw away a My Library run's rows, nor
+        # the reverse (`scope_pins` gives None for an index not searched).
         pins = passage_local.scope_pins(scope)
         return (
             passage_witnesses.witness_text_key(seed_text),
@@ -20454,8 +20491,7 @@ class GenizahGUI(QMainWindow):
             int(self.spin_filter.value()),
             tuple(sorted(restrict)) if restrict else None,
             scope, width, length, depth,
-            passage_lifecycle.current_state_generation(),
-            # Rows from a replaced My Library index are no more comparable.
+            pins['pinned_generation'],
             pins['pinned_local_generation'],
         )
 

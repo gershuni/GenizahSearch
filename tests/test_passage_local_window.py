@@ -82,22 +82,238 @@ def test_a_stale_answer_says_so():
     assert w2.status_label.text is None
 
 
-def test_a_change_during_a_check_runs_it_again_before_answering():
-    """The running check may have read the library before the change: its
-    answer is not shown, and a fresh check runs instead."""
-    class _W(_FreshWin):
-        _start_local_freshness_check = APP._start_local_freshness_check
+class _Sig:
+    def __init__(self):
+        self.slots = []
 
-    w = _W()
-    w.local_passage_freshness_thread = _Thread(running=True)
+    def connect(self, slot):
+        self.slots.append(slot)
+
+    def fire(self, *a):
+        for slot in list(self.slots):
+            slot(*a)
+
+
+class _FakeFreshnessThread:
+    """Stands in for LocalPassageFreshnessThread: `isRunning()` stays True
+    from `start()` until `finish()`, as a real QThread's does after its
+    result is emitted and before `run()` returns."""
+    started = []
+
+    def __init__(self, live_dir, parent=None):
+        self.live_dir = live_dir
+        self.result_signal = _Sig()
+        self.finished = _Sig()
+        self._running = False
+
+    def start(self):
+        self._running = True
+        _FakeFreshnessThread.started.append(self)
+
+    def isRunning(self):
+        return self._running
+
+    def answer(self, result):
+        self.result_signal.fire(result)          # still running here
+
+    def finish(self):
+        self._running = False
+        self.finished.fire()
+
+
+@pytest.fixture
+def fresh_threads(monkeypatch):
+    import desktop.passage_workers as workers
+    _FakeFreshnessThread.started = []
+    monkeypatch.setattr(workers, 'LocalPassageFreshnessThread',
+                        _FakeFreshnessThread)
+    monkeypatch.setattr(pl, 'installed_live_dir',
+                        lambda slot=pl.SLOT_GENIZAH: 'C:/live'
+                        if slot == pl.SLOT_LOCAL else None)
+    return _FakeFreshnessThread.started
+
+
+class _RealFreshWin(_FreshWin):
+    _start_local_freshness_check = APP._start_local_freshness_check
+    _on_local_freshness_thread_finished = APP._on_local_freshness_thread_finished
+
+
+@pytest.mark.parametrize('change_after_answer', [False, True])
+def test_a_change_during_a_check_is_never_lost(fresh_threads,
+                                               change_after_answer):
+    """A change while a check runs -- before its answer, or in the gap
+    between its answer and its thread exiting -- gets a fresh check once that
+    thread has finished. Restarting from the answer lost it: the thread still
+    reports isRunning() then. An answer read before the change is not shown."""
+    w = _RealFreshWin()
     w._start_local_freshness_check()
-    assert w._local_freshness_recheck is True
+    first = fresh_threads[0]
+    if not change_after_answer:
+        w._start_local_freshness_check()        # the change, mid-check
+        first.answer(pl.STALE)
+        assert w.status_label.text is None      # read before the change
+    else:
+        first.answer(pl.FRESH)
+        w._start_local_freshness_check()        # the change, in the gap
+    assert len(fresh_threads) == 1 and w._local_freshness_recheck is True
+    first.finish()
+    assert len(fresh_threads) == 2 and w._local_freshness_recheck is False
+    fresh_threads[1].answer(pl.STALE)
+    assert 'Settings' in w.status_label.text
 
-    restarted = []
-    w._start_local_freshness_check = lambda: restarted.append(1)
-    w._on_local_freshness(pl.FRESH)
-    assert restarted == [1] and w._local_freshness_recheck is False
-    assert w.status_label.text is None
+
+def test_no_check_without_an_installed_index(fresh_threads, monkeypatch):
+    monkeypatch.setattr(pl, 'installed_live_dir', lambda slot=None: None)
+    _RealFreshWin()._start_local_freshness_check()
+    assert fresh_threads == []
+
+
+class _BuildEndWin:
+    _on_local_passage_build_finished = APP._on_local_passage_build_finished
+    _on_local_passage_build_cancelled = APP._on_local_passage_build_cancelled
+    _on_local_passage_build_error = APP._on_local_passage_build_error
+
+    def __init__(self):
+        self.status_label = _Label()
+        self.checks = 0
+        self.installed = []
+
+    def _finish_local_passage_build(self):
+        pass
+
+    def _honour_deferred_comp_method(self):
+        pass
+
+    def _revalidate_comp_method(self):
+        pass
+
+    def _start_local_freshness_check(self):
+        self.checks += 1
+
+
+def test_every_end_of_a_build_rechecks_the_library(monkeypatch):
+    """A scan during a build is held back (`_on_my_library_changed`), so
+    every way the build can end checks the index that is left installed."""
+    monkeypatch.setattr(genizah_app.QMessageBox, 'warning',
+                        lambda *a, **k: None)
+    monkeypatch.setattr(pl, 'install_passage_state',
+                        lambda *a, **k: True)
+    from types import SimpleNamespace
+    for end in ('installed', 'cancelled', 'rename_blocked'):
+        w = _BuildEndWin()
+        w._on_local_passage_build_finished(SimpleNamespace(
+            status=end, index=object(), live_dir='d'))
+        assert w.checks == 1, end
+    for call in (lambda w: w._on_local_passage_build_cancelled(),
+                 lambda w: w._on_local_passage_build_error('boom')):
+        w = _BuildEndWin()
+        call(w)
+        assert w.checks == 1
+
+
+def test_a_cancel_that_brings_back_an_index_installs_it(monkeypatch):
+    """A cancel after the live index was released comes back WITH the index
+    recovery reopened: it is installed into the My Library slot and reported
+    as a cancel, not dropped."""
+    from types import SimpleNamespace
+    installed = []
+    monkeypatch.setattr(pl, 'install_passage_state',
+                        lambda state, slot=pl.SLOT_GENIZAH:
+                        installed.append((state.index, slot)) or True)
+    w = _BuildEndWin()
+    idx = object()
+    w._on_local_passage_build_finished(SimpleNamespace(
+        status='cancelled', index=idx, live_dir='d'))
+    assert installed == [(idx, pl.SLOT_LOCAL)]
+    assert 'cancelled' in w.status_label.text
+
+
+@pytest.mark.parametrize('local', [False, True])
+def test_a_cancelled_result_with_an_index_goes_out_as_finished(
+        monkeypatch, tmp_path, local):
+    """Both build workers: a cancellation that carries a recovered index is
+    delivered to the finished handler (which installs it); only a bare one
+    is a cancellation. Dropped, the slot stayed empty until restart."""
+    import shared.passage_local_corpus as plc
+    from desktop import passage_workers as workers
+    monkeypatch.setattr(plc, 'count_local_pages', lambda p: 1)
+    monkeypatch.setattr(pll, 'estimate_local_build_bytes', lambda p: 0)
+    monkeypatch.setattr(pll, 'refresh_signature',
+                        lambda root, cancel_check=None: 'sig')
+    for carried, signal in ((object(), 'finished'), (None, 'cancelled')):
+        result = pl.BuildAndSwapResult(status='cancelled', index=carried)
+        monkeypatch.setattr(pl, 'run_build_and_swap',
+                            lambda *a, _r=result, **k: _r)
+        cls = (workers.LocalPassageBuildThread if local
+               else workers.PassageBuildThread)
+        t = cls(str(tmp_path), str(tmp_path / 'corpus.txt'), lambda g: True)
+        if not local:
+            t._records_with_progress = lambda path: iter(())
+        got = []
+        t.finished_signal.connect(lambda r: got.append(('finished', r)))
+        t.cancelled_signal.connect(lambda: got.append(('cancelled', None)))
+        t.run()
+        assert [g[0] for g in got] == [signal]
+        if signal == 'finished':
+            assert got[0][1] is result
+
+
+def test_the_genizah_window_words_a_cancel_with_an_index_as_a_cancel(
+        monkeypatch):
+    from types import SimpleNamespace
+
+    class _GWin(_BuildEndWin):
+        _on_passage_build_finished = APP._on_passage_build_finished
+
+        def _finish_passage_build(self):
+            pass
+
+        def _apply_default_comp_method(self):
+            pass
+
+    monkeypatch.setattr(pl, 'install_passage_state', lambda *a, **k: True)
+    w = _GWin()
+    w._on_passage_build_finished(SimpleNamespace(
+        status='cancelled', index=object(), live_dir='d'))
+    assert 'cancelled' in w.status_label.text
+
+
+# ---------------------------------------------------------------------------
+# The witness row cache follows the indexes its scope searches.
+# ---------------------------------------------------------------------------
+
+class _KeyWin:
+    _comp_witness_cache_key = APP._comp_witness_cache_key
+    pre_search_restrict_sys_ids = None
+
+    class _Spin:
+        def value(self):
+            return 5
+
+    spin_filter = _Spin()
+
+    def _get_filter_text(self):
+        return ''
+
+
+@pytest.mark.parametrize('scope, genizah_moves, local_moves', [
+    ('genizah', True, False), ('local', False, True), ('all', True, True)])
+def test_the_witness_cache_key_follows_only_the_scopes_indexes(
+        monkeypatch, scope, genizah_moves, local_moves):
+    """A Genizah rebuild must not throw away a My Library run's cached rows,
+    nor the reverse; All depends on both."""
+    w = _KeyWin()
+
+    def key():
+        return w._comp_witness_cache_key('seed', scope, 'widest-40',
+                                         'normal', 'normal')
+    base = key()
+    for slot, moves in ((pl.SLOT_GENIZAH, genizah_moves),
+                        (pl.SLOT_LOCAL, local_moves)):
+        s = pl._SLOTS[slot]
+        monkeypatch.setattr(s, 'generation', s.generation + 1)
+        assert (key() != base) is moves, (scope, slot)
+        base = key()
 
 
 def test_the_tab_reports_every_change_and_never_raises():
@@ -272,10 +488,13 @@ def test_checked_results_of_both_indexes_are_promoted_in_display_order():
 
 def test_a_genizah_uid_is_never_read_as_an_id():
     """Only a My Library uid is read directly; a Genizah uid no row lists is
-    not guessed at."""
-    w = _CheckWin({'IE9712345678_P1_FL1'})
+    not guessed at. The row here has exactly the id a misread of that uid
+    would produce, so reading Genizah uids directly would promote it."""
+    misread = '9712345678'
+    w = _CheckWin({f'IE{misread}_P1_FL1'})
     assert w._checked_comp_sys_ids(
-        [{'raw_header': _l_head(L_SYS), 'uid': _l_uid(L_SYS)}]) == []
+        [{'raw_header': f'{misread}_LOCAL_P1_F0001',
+          'uid': f'LOCAL_{misread}_P1'}]) == []
 
 
 class _Engine2:
@@ -396,8 +615,10 @@ def test_the_fusion_cap_counts_each_my_library_file_as_its_own_group():
     ('genizah', True, False), ('local', False, True), ('all', True, True)])
 def test_scope_pins(scope, g, l_pin):
     pins = pll.scope_pins(scope)
-    assert (pins['pinned_generation'] is not None) is g
-    assert (pins['pinned_local_generation'] is not None) is l_pin
+    assert pins['pinned_generation'] == (
+        pl.current_state_generation(pl.SLOT_GENIZAH) if g else None)
+    assert pins['pinned_local_generation'] == (
+        pl.current_state_generation(pl.SLOT_LOCAL) if l_pin else None)
 
 
 def test_a_my_library_swap_voids_a_batch_that_searches_it(monkeypatch):

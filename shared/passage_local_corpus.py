@@ -277,6 +277,9 @@ class LocalPageTextFetcher:
     def __init__(self, engine):
         self._engine = engine
         self._shelfmarks: dict = {}
+        # The page's own locator ("p. 3", "paragraphs 21-40"), which the
+        # Word export prints verbatim; '' when the index has none.
+        self._locators: dict = {}
 
     def _fetch_doc(self, full_header: str):
         if not full_header or not _HEADER_CHARS_RE.match(full_header):
@@ -313,12 +316,27 @@ class LocalPageTextFetcher:
             self._shelfmarks[base] = shelf[0] if shelf else ''
         except (KeyError, IndexError, TypeError):
             self._shelfmarks.setdefault(base, '')
+        self._locators[base] = self._first(doc, 'chunk_locator')
         if seg is None:
             return text
         pieces = segment_text(text)
         if seg >= len(pieces):
             return None      # the page changed since the build
         return pieces[seg]
+
+    @staticmethod
+    def _first(doc, field: str) -> str:
+        try:
+            value = doc[field]
+            return str(value[0]) if value else ''
+        except (KeyError, IndexError, TypeError, ValueError):
+            return ''
+
+    def chunk_locator(self, full_header: str) -> str:
+        """The page's locator as the LOCAL index stores it, '' if none --
+        read when the page's text was fetched, never looked up again."""
+        base, _seg = split_record_id(full_header)
+        return self._locators.get(base, '')
 
     def shelfmark(self, full_header: str) -> str:
         base, _seg = split_record_id(full_header)
@@ -400,8 +418,12 @@ def finish_local_rows(result: dict, fetcher: LocalPageTextFetcher) -> dict:
             row['raw_header'] = base
             if parts is not None:
                 row['uid'] = _make_uid(parts['sys_id'], parts['page'])
+                # The page, for the exports: Word prints `chunk_locator`
+                # verbatim and falls back to `p_num` (shared/docx_export.py).
+                row['p_num'] = parts['page']
             row['src_lbl'] = 'LOCAL'
             row['shelfmark'] = fetcher.shelfmark(base)
+            row['chunk_locator'] = fetcher.chunk_locator(base)
             if seg is not None:
                 row['segment'] = seg
     seen: dict = {}

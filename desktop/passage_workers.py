@@ -25,6 +25,21 @@ logger = logging.getLogger(__name__)
 DESKTOP_PARTITIONS = 16
 
 
+def _cancelled_without_index(result) -> bool:
+    """Is this a cancellation with NOTHING to install?
+
+    A cancel that lands after the release seam has already closed the live
+    index (`perform_swap` cancelled) comes back as status 'cancelled' WITH the
+    index recovery reopened -- and so does a cancel during the post-build
+    re-fingerprint. Reported as a bare cancellation, that index was dropped:
+    the slot stayed empty and letter-level search was gone until restart. A
+    cancelled result that carries an index goes out as a finished one, so the
+    window installs it; the window's finished handler words it as a cancel.
+    """
+    return (getattr(result, 'status', '') == 'cancelled'
+            and getattr(result, 'index', None) is None)
+
+
 class PassageLoadThread(QThread):
     """Startup: recover if a previous run died mid-swap, then open the live
     index. `recover_at_startup` does BOTH -- it walks the candidates,
@@ -113,7 +128,7 @@ class PassageBuildThread(QThread):
             logger.exception('passage index build failed')
             self.error_signal.emit(str(exc))
             return
-        if result.status == 'cancelled':
+        if _cancelled_without_index(result):
             self.cancelled_signal.emit()
             return
         if result.status == 'error':
@@ -253,7 +268,7 @@ class LocalPassageBuildThread(PassageBuildThread):
             logger.exception('My Library letter-level index build failed')
             self.error_signal.emit(str(exc))
             return
-        if result.status == 'cancelled':
+        if _cancelled_without_index(result):
             self.cancelled_signal.emit()
             return
         if result.status == 'error':
