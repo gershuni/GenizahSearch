@@ -156,6 +156,37 @@ def test_search_export_saves_under_another_name(window, monkeypatch, tmp_path, l
     assert shown == [str(other)]
 
 
+# --- the CSV bytes are what they were -------------------------------------------
+#
+# CSV and text exports are now built in an io.StringIO and written by
+# save_export. Codex (PR #397) asked whether the buffer normalizes csv.writer's
+# CRLF record endings to LF; a write to StringIO translates nothing, and these
+# read the exported bytes to keep it that way.
+
+def _row_ending(data: bytes, marker: bytes) -> bytes:
+    start = data.index(marker)
+    end = data.index(b"\n", start)
+    return data[end - 2:end + 1]
+
+
+def test_composition_csv_rows_end_in_crlf(monkeypatch, tmp_path):
+    host, out, _shown = _comp_export(monkeypatch, tmp_path, "csv")
+    host.export_comp_report("csv")
+    data = out.read_bytes()
+    for marker in (b"System ID", b"990001"):
+        ending = _row_ending(data, marker)
+        assert ending[1:] == b"\r\n" and ending != b"\r\r\n", (marker, ending)
+
+
+def test_search_csv_rows_end_in_crlf(window, monkeypatch, tmp_path):  # noqa: F811 (the imported fixture)
+    w, out, _shown = _search_export(window, monkeypatch, tmp_path, "csv")
+    w.export_results("csv")
+    data = out.read_bytes()
+    for marker in (A.encode(), B.encode()):
+        ending = _row_ending(data, marker)
+        assert ending[1:] == b"\r\n" and ending != b"\r\r\n", (marker, ending)
+
+
 # --- nothing writes around the helper -------------------------------------------
 
 _APP = Path(genizah_app.__file__)
