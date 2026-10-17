@@ -8,6 +8,7 @@ block instead of a cramped table row.
 from __future__ import annotations
 
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -28,19 +29,87 @@ def _add_highlighted_runs(paragraph, text):
             run.font.bold = True
 
 
+_HEBREW_LETTER_RE = re.compile(r"[א-ת]")
+_LATIN_LETTER_RE = re.compile(r"[A-Za-z]")
+
+# What may follow `w:bidi` inside `w:pPr`, and `w:bidiVisual` inside
+# `w:tblPr` (ECMA-376 sequence order). Word reads these elements by position,
+# so each is inserted before its successors rather than appended.
+_PPR_AFTER_BIDI = (
+    "w:adjustRightInd", "w:snapToGrid", "w:spacing", "w:ind",
+    "w:contextualSpacing", "w:mirrorIndents", "w:suppressOverlap", "w:jc",
+    "w:textDirection", "w:textAlignment", "w:textboxTightWrap",
+    "w:outlineLvl", "w:divId", "w:cnfStyle", "w:rPr", "w:sectPr",
+    "w:pPrChange",
+)
+_TBLPR_AFTER_BIDI_VISUAL = (
+    "w:tblStyleRowBandSize", "w:tblStyleColBandSize", "w:tblW", "w:jc",
+    "w:tblCellSpacing", "w:tblInd", "w:tblBorders", "w:shd", "w:tblLayout",
+    "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription",
+    "w:tblPrChange",
+)
+
+
 def _set_paragraph_rtl(paragraph):
+    """Lay out one paragraph of a Hebrew document.
+
+    A paragraph with Hebrew in it becomes right-to-left (`w:bidi`) with NO
+    alignment of its own: a right-to-left paragraph starts at the right
+    margin by default. Word reads `jc="right"` on such a paragraph as the END
+    of its line -- the left margin -- which is how every Hebrew export came
+    out: right-to-left letters, flush left (rendered through Word,
+    2026-10-17).
+
+    A paragraph of Latin script only (the MiDRASH citation, a URL, a
+    shelfmark) stays left-to-right and is aligned right, so it lines up with
+    the Hebrew around it while its own punctuation keeps its order.
+    """
     from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
-    paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
-    paragraph.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
     ppr = paragraph._p.get_or_add_pPr()
     bidi = ppr.find(qn("w:bidi"))
+    text = paragraph.text
+    if _LATIN_LETTER_RE.search(text) and not _HEBREW_LETTER_RE.search(text):
+        if bidi is not None:
+            ppr.remove(bidi)
+        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+        return
+    paragraph.alignment = None
     if bidi is None:
         bidi = OxmlElement("w:bidi")
-        ppr.append(bidi)
+        ppr.insert_element_before(bidi, *_PPR_AFTER_BIDI)
     bidi.set(qn("w:val"), "1")
+
+
+def _set_table_rtl(table):
+    """Columns run right to left (`w:bidiVisual`)."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl_pr = table._tbl.tblPr
+    bidi_visual = tbl_pr.find(qn("w:bidiVisual"))
+    if bidi_visual is None:
+        bidi_visual = OxmlElement("w:bidiVisual")
+        tbl_pr.insert_element_before(bidi_visual, *_TBLPR_AFTER_BIDI_VISUAL)
+    bidi_visual.set(qn("w:val"), "1")
+
+
+def set_document_rtl(doc, tables=()):
+    """Lay out a whole Hebrew document: every body paragraph, and every
+    paragraph of each table in `tables`, whose columns also run right to
+    left. Run once, after the document is written."""
+    for p in doc.paragraphs:
+        _set_paragraph_rtl(p)
+    for table in tables:
+        if table is None:
+            continue
+        _set_table_rtl(table)
+        for row in table.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    _set_paragraph_rtl(p)
 
 
 def _genizah_url_for(sys_id):
