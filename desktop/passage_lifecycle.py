@@ -261,10 +261,23 @@ def release_lock(handle) -> None:
 
 
 # ---------------------------------------------------------------------------
-# State: single owner. `_state` is the one and only copy this module (or the
-# main window, which must hold no second copy) ever reads a live PassageIndex
-# from.
+# State: single owner PER SLOT. A slot is one letter-level index the app can
+# hold open: the Genizah corpus index (`SLOT_GENIZAH`, the original one and
+# every function's default) and the My Library index (`SLOT_LOCAL`). Each slot
+# has its own installed state, generation, lease count, drain flag and
+# freshness token, so closing or swapping one index never waits on, refuses
+# or invalidates a search running against the other. A slot's `state` is the
+# one and only copy this module (or the main window, which must hold no
+# second copy) ever reads that slot's live PassageIndex from.
+#
+# Every rule documented below for "the" state applies to each slot on its
+# own. The filesystem side needed no change: every function there already
+# takes an explicit `root`.
 # ---------------------------------------------------------------------------
+
+SLOT_GENIZAH = 'genizah'
+SLOT_LOCAL = 'local'
+
 
 @dataclass
 class PassageState:
@@ -272,29 +285,71 @@ class PassageState:
     live_dir: str
 
 
-_state: Optional[PassageState] = None
-
-# Bumped on EVERY mutation of `_state`. A release request is authorised
-# against the generation that was current when it was issued: `_call_release_
-# seam` abandons a seam that does not answer within
-# `UI_RELEASE_SEAM_TIMEOUT_SECONDS`, but abandoning a thread does not stop
-# it -- it cannot be killed from here -- so a wedged UI thread that finally
-# answers minutes later would otherwise run its close against whatever
-# `_state` holds BY THEN. That is a different index: a second build can
-# have succeeded and installed in the meantime, and the late close would
-# silently take the feature offline until restart. Bounding what the late
-# call is permitted to do is the same move `close()`'s poisoning makes --
-# the escaped caller cannot be recalled, so it is denied its effect
-# instead (Codex review round 7, finding 1).
-_state_generation: int = 0
+@dataclass
+class FreshnessState:
+    generation: int = 0
+    checking: bool = False
+    result: Optional[str] = None
 
 
-def current_state_generation() -> int:
-    """The generation `_state` is on right now. A caller that is about to
-    hand a release request across a thread boundary captures this and sends
-    it along; `close_passage_state` refuses any request whose captured
-    generation is no longer current."""
-    return _state_generation
+class _Slot:
+    """The mutable state of one letter-level index. Plain attributes, read
+    and written only through the functions below."""
+
+    __slots__ = ('name', 'state', 'generation', 'lease_lock',
+                 'outstanding_leases', 'draining', 'freshness')
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.state: Optional[PassageState] = None
+        # Bumped on EVERY mutation of `state`. A release request is authorised
+        # against the generation that was current when it was issued:
+        # `_call_release_seam` abandons a seam that does not answer within
+        # `UI_RELEASE_SEAM_TIMEOUT_SECONDS`, but abandoning a thread does not
+        # stop it -- it cannot be killed from here -- so a wedged UI thread
+        # that finally answers minutes later would otherwise run its close
+        # against whatever `state` holds BY THEN. That is a different index: a
+        # second build can have succeeded and installed in the meantime, and
+        # the late close would silently take the feature offline until
+        # restart. Bounding what the late call is permitted to do is the same
+        # move `close()`'s poisoning makes -- the escaped caller cannot be
+        # recalled, so it is denied its effect instead (Codex review round 7,
+        # finding 1).
+        self.generation = 0
+        # See "Reader leases" below.
+        self.lease_lock = threading.Lock()
+        self.outstanding_leases = 0
+        self.draining = False
+        self.freshness = FreshnessState()
+
+
+_SLOTS = {SLOT_GENIZAH: _Slot(SLOT_GENIZAH), SLOT_LOCAL: _Slot(SLOT_LOCAL)}
+
+
+def _get_slot(slot: str) -> _Slot:
+    """An unknown slot name is a programming error, raised loudly here
+    rather than quietly served by the Genizah index."""
+    try:
+        return _SLOTS[slot]
+    except KeyError:
+        raise ValueError(f'unknown passage index slot: {slot!r}') from None
+
+
+def slot_root(slot: str = SLOT_GENIZAH) -> str:
+    """A slot's production root. The Genizah slot goes through
+    `passage_root()`, so a caller (or test) that patches that one function
+    still moves every Genizah path with it."""
+    if _get_slot(slot).name == SLOT_LOCAL:
+        return Config.LOCAL_PASSAGE_INDEX_DIR
+    return passage_root()
+
+
+def current_state_generation(slot: str = SLOT_GENIZAH) -> int:
+    """The generation the slot's state is on right now. A caller that is
+    about to hand a release request across a thread boundary captures this
+    and sends it along; `close_passage_state` refuses any request whose
+    captured generation is no longer current."""
+    return _get_slot(slot).generation
 
 
 class PassageIndexReplaced(RuntimeError):
@@ -313,8 +368,9 @@ class PassageIndexReplaced(RuntimeError):
     """
 
 
-def generation_changed(pinned: Optional[int]) -> bool:
-    """Has `_state` been swapped since `pinned` was captured?
+def generation_changed(pinned: Optional[int],
+                       slot: str = SLOT_GENIZAH) -> bool:
+    """Has the slot's state been swapped since `pinned` was captured?
 
     Pure and module level so a caller can be tested without installing an
     index. `pinned is None` means the caller never captured one, which is not
@@ -322,10 +378,11 @@ def generation_changed(pinned: Optional[int]) -> bool:
     its first lease with `PassageSearchUnavailableError`, which is the honest
     error for that case and not this one.
     """
-    return pinned is not None and pinned != _state_generation
+    return pinned is not None and pinned != _get_slot(slot).generation
 
 
-def load_passage_state(root: Optional[str] = None) -> Optional[PassageState]:
+def load_passage_state(root: Optional[str] = None, *,
+                       slot: str = SLOT_GENIZAH) -> Optional[PassageState]:
     """Computes and RETURNS a state -- never assigns. `open_index` scans the
     full CSR (~109.5 MB on the shipped corpus), so this must run off the UI
     thread; the caller hands the result to `install_passage_state` there.
@@ -334,7 +391,7 @@ def load_passage_state(root: Optional[str] = None) -> Optional[PassageState]:
     module -- `open_index` swallows a transient access error into None just
     like a real missing index, so a single flake here must not report a
     valid `current/` as absent and send the user toward a 3.5 GB rebuild."""
-    root = root if root is not None else passage_root()
+    root = root if root is not None else slot_root(slot)
     live_dir = os.path.join(root, LIVE_DIRNAME)
     idx = _open_with_retry(live_dir)
     if idx is None:
@@ -342,7 +399,8 @@ def load_passage_state(root: Optional[str] = None) -> Optional[PassageState]:
     return PassageState(index=idx, live_dir=live_dir)
 
 
-def install_passage_state(state: Optional[PassageState]) -> bool:
+def install_passage_state(state: Optional[PassageState], *,
+                          slot: str = SLOT_GENIZAH) -> bool:
     """UI-thread-only, like `close_passage_state` (see its docstring for the
     ownership rule). An install that REPLACES a live state must release the
     outgoing one first: `_state` is the only reference this process holds to
@@ -357,20 +415,22 @@ def install_passage_state(state: Optional[PassageState]) -> bool:
     Returns False -- refusing to touch `_state` at all -- when the outgoing
     index has an outstanding `get_passage_searcher()` lease that never
     drained (see `_release_live_index`); True otherwise, including the
-    same-object and None-outgoing no-ops above."""
-    global _state, _state_generation
-    outgoing = _state
+    same-object and None-outgoing no-ops above.
+
+    `_state` here and below means the slot's `state`; only the named slot is
+    touched."""
+    s = _get_slot(slot)
+    outgoing = s.state
     if outgoing is not None and outgoing is not state:
         def _swap_in():
-            global _state, _state_generation
-            _state = state
-            _state_generation += 1
-        if not _release_live_index(outgoing.index, _swap_in):
+            s.state = state
+            s.generation += 1
+        if not _release_live_index(s, outgoing.index, _swap_in):
             return False
         gc.collect()
-        _reset_freshness()
+        _reset_freshness(s)
         return True
-    _state = state
+    s.state = state
     # NOT unconditional: this branch is reached both for a fresh install
     # (outgoing None) and for re-installing the SAME object, which the
     # docstring above already treats as a no-op. Moving the generation for a
@@ -379,12 +439,13 @@ def install_passage_state(state: Optional[PassageState]) -> bool:
     # that refusal as `readers_active`, cleans staging and skips the rename
     # although nothing was blocking it (Codex review round 8, finding 1).
     if outgoing is not state:
-        _state_generation += 1
-    _reset_freshness()
+        s.generation += 1
+    _reset_freshness(s)
     return True
 
 
-def close_passage_state(expect_generation: Optional[int] = None) -> bool:
+def close_passage_state(expect_generation: Optional[int] = None, *,
+                        slot: str = SLOT_GENIZAH) -> bool:
     """Release the live memmaps, then drop the reference. An open memmap
     blocks os.rename/rmtree on Windows for as long as it -- or a traceback
     holding it -- survives, so this is the mandatory step between "the UI
@@ -417,26 +478,35 @@ def close_passage_state(expect_generation: Optional[int] = None) -> bool:
     precisely because `_state` is UI-thread-only. The seam path never omits
     it: `run_build_and_swap` passes it positionally, so a seam that has not
     been taught to accept it raises TypeError on the first build rather
-    than silently reverting to the unguarded behaviour."""
-    global _state, _state_generation
-    if expect_generation is not None and expect_generation != _state_generation:
+    than silently reverting to the unguarded behaviour.
+
+    Only the named slot is closed, and only ITS generation is checked: a
+    release request for one index can never close the other."""
+    s = _get_slot(slot)
+    if expect_generation is not None and expect_generation != s.generation:
         return False
-    if _state is not None:
-        current = _state
+    if s.state is not None:
+        current = s.state
 
         def _clear():
-            global _state, _state_generation
-            _state = None
-            _state_generation += 1
-        if not _release_live_index(current.index, _clear):
+            s.state = None
+            s.generation += 1
+        if not _release_live_index(s, current.index, _clear):
             return False
         gc.collect()
-    _reset_freshness()
+    _reset_freshness(s)
     return True
 
 
-def passage_available() -> bool:
-    return _state is not None
+def passage_available(slot: str = SLOT_GENIZAH) -> bool:
+    return _get_slot(slot).state is not None
+
+
+def installed_live_dir(slot: str = SLOT_GENIZAH) -> Optional[str]:
+    """The live directory of the slot's installed index, or None. A plain
+    string, so a worker can be handed it without touching the index."""
+    state = _get_slot(slot).state
+    return state.live_dir if state is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -463,17 +533,17 @@ def passage_available() -> bool:
 # `_begin_drain()` has run, the same lock refuses every new acquisition
 # until `_end_drain()` runs, so nothing can slip in between "count observed
 # zero" and "mappings torn down" -- see `_release_live_index`.
+#
+# All of this is PER SLOT (`_Slot.lease_lock`, `.outstanding_leases`,
+# `.draining`): a drain of one index refuses new leases on that index only,
+# and waits only for that index's readers.
 # ---------------------------------------------------------------------------
 
 LEASE_DRAIN_TIMEOUT_SECONDS = 5.0
 LEASE_DRAIN_POLL_SECONDS = 0.05
 
-_lease_lock = threading.Lock()
-_outstanding_leases = 0
-_draining = False
 
-
-def _try_acquire_lease():
+def _try_acquire_lease(s: _Slot):
     """The one atomic acquisition step: `_state` is read and the count is
     incremented under the SAME lock, so no other thread ever observes a
     count that was bumped for a state nobody checked, or a state that was
@@ -482,48 +552,44 @@ def _try_acquire_lease():
     installed or a close/swap has already called `_begin_drain()`; a
     request arriving during a drain is refused outright rather than being
     allowed to slip through before the teardown it's racing against."""
-    global _outstanding_leases
-    with _lease_lock:
-        if _state is None or _draining:
+    with s.lease_lock:
+        if s.state is None or s.draining:
             return None
-        _outstanding_leases += 1
-        return _state.index
+        s.outstanding_leases += 1
+        return s.state.index
 
 
-def _release_lease() -> None:
-    global _outstanding_leases
-    with _lease_lock:
+def _release_lease(s: _Slot) -> None:
+    with s.lease_lock:
         # Floored at 0 rather than trusting callers to release exactly
         # once -- `PassageSearchAdapter.search_composition_logic`'s
         # `finally` calls this exactly once per acquired call, but the
         # floor is what keeps a defect there from ever wedging this count
         # below zero and refusing every close forever.
-        if _outstanding_leases > 0:
-            _outstanding_leases -= 1
+        if s.outstanding_leases > 0:
+            s.outstanding_leases -= 1
 
 
-def _leases_outstanding() -> bool:
-    with _lease_lock:
-        return _outstanding_leases > 0
+def _leases_outstanding(s: _Slot) -> bool:
+    with s.lease_lock:
+        return s.outstanding_leases > 0
 
 
-def _begin_drain() -> None:
-    global _draining
-    with _lease_lock:
-        _draining = True
+def _begin_drain(s: _Slot) -> None:
+    with s.lease_lock:
+        s.draining = True
 
 
-def _end_drain() -> None:
+def _end_drain(s: _Slot) -> None:
     """Always the matching call to `_begin_drain()`, success or failure --
     a refused close/swap must leave the no-new-leases flag exactly as it
     found it (cleared), or the NEXT attempt would refuse every acquisition
     for no reason."""
-    global _draining
-    with _lease_lock:
-        _draining = False
+    with s.lease_lock:
+        s.draining = False
 
 
-def _wait_for_leases_to_drain(timeout: Optional[float] = None) -> bool:
+def _wait_for_leases_to_drain(s: _Slot, timeout: Optional[float] = None) -> bool:
     """Polls rather than blocking on a condition variable: a lease is
     released from whichever worker thread's query happens to finish, an
     arbitrary and unpredictable thread from this function's point of view,
@@ -538,14 +604,15 @@ def _wait_for_leases_to_drain(timeout: Optional[float] = None) -> bool:
     if timeout is None:
         timeout = LEASE_DRAIN_TIMEOUT_SECONDS
     deadline = time.monotonic() + timeout
-    while _leases_outstanding():
+    while _leases_outstanding(s):
         if time.monotonic() >= deadline:
             return False
         time.sleep(LEASE_DRAIN_POLL_SECONDS)
     return True
 
 
-def _release_live_index(idx: PassageIndex, on_drained: Callable[[], None]) -> bool:
+def _release_live_index(s: _Slot, idx: PassageIndex,
+                        on_drained: Callable[[], None]) -> bool:
     """The one seam `close_passage_state` and `install_passage_state` both
     route their outgoing-index release through. Draining starts BEFORE the
     wait so no new lease can be issued against `idx` while this function is
@@ -556,15 +623,15 @@ def _release_live_index(idx: PassageIndex, on_drained: Callable[[], None]) -> bo
     as two separately-racy steps. Returns True (mappings closed, `_state`
     mutated) or False (leases survived the wait, nothing touched) -- there
     is no partial outcome either way."""
-    _begin_drain()
+    _begin_drain(s)
     try:
-        if not _wait_for_leases_to_drain():
+        if not _wait_for_leases_to_drain(s):
             return False
         _release_index_handles(idx)
         on_drained()
         return True
     finally:
-        _end_drain()
+        _end_drain(s)
 
 
 class PassageSearchError(RuntimeError):
@@ -647,10 +714,11 @@ class PassageSearchAdapter:
     """
 
     __slots__ = ('_text_fetcher', '_width', '_length', '_depth',
-                 '_render_cap')
+                 '_render_cap', '_slot_name')
 
     def __init__(self, text_fetcher, width: str, length: str,
-                 depth: str, render_cap: Optional[int] = None) -> None:
+                 depth: str, render_cap: Optional[int] = None, *,
+                 slot: str = SLOT_GENIZAH) -> None:
         self._text_fetcher = text_fetcher
         self._width = width
         self._length = length
@@ -658,6 +726,9 @@ class PassageSearchAdapter:
         # None => let PassageSearcher apply its own default. See
         # `get_passage_searcher` for why 0 is not the same as "no cap given".
         self._render_cap = render_cap
+        # Which index every call leases. Validated here, so a bad name fails
+        # when the adapter is made rather than on its first search.
+        self._slot_name = _get_slot(slot).name
 
     def search_composition_logic(
         self,
@@ -720,8 +791,14 @@ class PassageSearchAdapter:
         exception boundary described on the class. `call` receives a fresh
         `PassageSearcher` around the current index and must return plain
         data; nothing it touched outlives this frame."""
-        index = _try_acquire_lease()
+        s = _get_slot(self._slot_name)
+        index = _try_acquire_lease(s)
         if index is None:
+            if s.name == SLOT_LOCAL:
+                raise PassageSearchUnavailableError(
+                    'no My Library letter-level index is installed -- '
+                    'letter-level search in My Library is not available '
+                    'right now')
             raise PassageSearchUnavailableError(
                 'no passage index is installed -- passage search is not '
                 'available right now')
@@ -743,6 +820,15 @@ class PassageSearchAdapter:
                 # dataclass default with None and crash the cap comparison.
                 _cap_kw = ({} if self._render_cap is None
                            else {'render_cap': self._render_cap})
+                # An index holds exactly one sys_id namespace, and the slot
+                # says which: the Genizah index keeps PassageSearcher's own
+                # (corpus) default, the My Library index the LOCAL pattern.
+                # The Genizah duplicate-photograph rule stays with the
+                # Genizah index (see `PassageSearcher`).
+                if s.name == SLOT_LOCAL:
+                    from shared.sys_id_patterns import LOCAL_SYS_ID_RE
+                    _cap_kw['sys_id_re'] = LOCAL_SYS_ID_RE
+                    _cap_kw['demote_duplicate_photography'] = False
                 searcher = PassageSearcher(
                     index=index, text_fetcher=self._text_fetcher,
                     policy=compose(self._width, self._length, self._depth),
@@ -775,7 +861,7 @@ class PassageSearchAdapter:
             # frames hung off of.
             searcher = None
             index = None
-            _release_lease()
+            _release_lease(s)
 
         if boundary_reraise is not None:
             raise boundary_reraise
@@ -799,12 +885,13 @@ class PassageSearchAdapter:
 _EXCLUDED_COUNTS: dict = {}
 
 
-def excluded_pages():
+def excluded_pages(slot: str = SLOT_GENIZAH):
     """`(counts, pages)` for the live build's left-out pages: sys_id -> how
     many, and the set of their (sys_id, IE, P). Read once per installed build;
-    `({}, set())` when there is no list."""
+    `({}, set())` when there is no list. The slot picks WHICH index's list:
+    each build writes its own, beside its own `current/`."""
     import os
-    path = os.path.join(passage_root(), LIVE_DIRNAME, 'excluded_records.tsv')
+    path = os.path.join(slot_root(slot), LIVE_DIRNAME, 'excluded_records.tsv')
     try:
         stamp = os.stat(path).st_mtime_ns
     except OSError:
@@ -834,13 +921,14 @@ def excluded_pages():
 _EXCLUDED_PAGES: dict = {}
 
 
-def excluded_page_counts() -> dict:
+def excluded_page_counts(slot: str = SLOT_GENIZAH) -> dict:
     """sys_id -> how many of its pages the live letter-level index left out
     (Stage 0: short, target sheets, library stamps), read once per installed
     build from its `excluded_records.tsv`. Empty when there is none. Used to
-    say how many pages of a manuscript a condition could not search."""
+    say how many pages of a manuscript a condition could not search. Each
+    slot's list is read in that slot's own sys_id namespace."""
     import os
-    path = os.path.join(passage_root(), LIVE_DIRNAME, 'excluded_records.tsv')
+    path = os.path.join(slot_root(slot), LIVE_DIRNAME, 'excluded_records.tsv')
     try:
         stamp = os.stat(path).st_mtime_ns
     except OSError:
@@ -848,13 +936,19 @@ def excluded_page_counts() -> dict:
     cached = _EXCLUDED_COUNTS.get(path)
     if cached and cached[0] == stamp:
         return cached[1]
-    from shared.sys_id_patterns import extract_corpus_sys_id
+    from shared.sys_id_patterns import LOCAL_SYS_ID_RE, extract_corpus_sys_id
+    if _get_slot(slot).name == SLOT_LOCAL:
+        def _sys_id(head):
+            m = LOCAL_SYS_ID_RE.search(head)
+            return m.group(1) if m else None
+    else:
+        _sys_id = extract_corpus_sys_id
     counts: dict = {}
     try:
         with open(path, encoding='utf-8') as fh:
             next(fh, None)                      # header
             for line in fh:
-                sid = extract_corpus_sys_id(line.split('\t', 1)[0])
+                sid = _sys_id(line.split('\t', 1)[0])
                 if sid:
                     counts[sid] = counts.get(sid, 0) + 1
     except OSError:
@@ -867,7 +961,8 @@ def excluded_page_counts() -> dict:
 def get_passage_searcher(text_fetcher, width: str = _DEFAULT_WIDTH,
                           length: str = DEFAULT_LENGTH,
                           depth: str = DEFAULT_DEPTH,
-                          render_cap: Optional[int] = None
+                          render_cap: Optional[int] = None, *,
+                          slot: str = SLOT_GENIZAH
                           ) -> PassageSearchAdapter:
     """The one obvious way to get something searchable. Returns a
     `PassageSearchAdapter` unconditionally -- whether or not an index is
@@ -909,6 +1004,10 @@ def get_passage_searcher(text_fetcher, width: str = _DEFAULT_WIDTH,
     applied as `if self.render_cap and self.render_cap > 0`, so 0 means no cap
     while None means no opinion. Testing this parameter for truthiness
     anywhere would collapse the two.
+
+    `slot` names the index every call leases (`SLOT_GENIZAH` by default,
+    `SLOT_LOCAL` for My Library); `text_fetcher` must be able to read THAT
+    index's record ids.
     """
     if width not in PRESETS:
         width = _DEFAULT_WIDTH
@@ -916,7 +1015,8 @@ def get_passage_searcher(text_fetcher, width: str = _DEFAULT_WIDTH,
         length = DEFAULT_LENGTH
     if depth != DEFAULT_DEPTH and depth not in DEPTH_PROFILES:
         depth = DEFAULT_DEPTH
-    return PassageSearchAdapter(text_fetcher, width, length, depth, render_cap)
+    return PassageSearchAdapter(text_fetcher, width, length, depth, render_cap,
+                                slot=slot)
 
 
 # ---------------------------------------------------------------------------
@@ -930,33 +1030,24 @@ FRESH = 'fresh'
 STALE = 'stale'
 UNKNOWN = 'unknown'
 
-
-@dataclass
-class FreshnessState:
-    generation: int = 0
-    checking: bool = False
-    result: Optional[str] = None
+# `FreshnessState` is defined with the slots above; each slot keeps its own.
 
 
-_freshness = FreshnessState()
+def _reset_freshness(s: _Slot) -> None:
+    s.freshness = FreshnessState(generation=s.freshness.generation + 1)
 
 
-def _reset_freshness() -> None:
-    global _freshness
-    _freshness = FreshnessState(generation=_freshness.generation + 1)
+def freshness_snapshot(slot: str = SLOT_GENIZAH) -> FreshnessState:
+    return _get_slot(slot).freshness
 
 
-def freshness_snapshot() -> FreshnessState:
-    return _freshness
-
-
-def start_freshness_check() -> int:
+def start_freshness_check(slot: str = SLOT_GENIZAH) -> int:
     """Bumps the generation token and marks 'checking'. Returns the token
     this check's eventual result must be tagged with."""
-    global _freshness
-    _freshness = FreshnessState(generation=_freshness.generation + 1,
-                                checking=True, result=None)
-    return _freshness.generation
+    s = _get_slot(slot)
+    s.freshness = FreshnessState(generation=s.freshness.generation + 1,
+                                 checking=True, result=None)
+    return s.freshness.generation
 
 
 def compute_freshness(corpus_sources: list, source_paths: list,
@@ -980,16 +1071,17 @@ def compute_freshness(corpus_sources: list, source_paths: list,
     return FRESH if current == corpus_sources else STALE
 
 
-def finish_freshness_check(token: int, result: Optional[str]) -> None:
+def finish_freshness_check(token: int, result: Optional[str],
+                           slot: str = SLOT_GENIZAH) -> None:
     """The ONE terminal path. A stale token (the artifact was replaced while
     this check was running) is silently discarded. A None result (the check
     was itself cancelled) clears `checking` and leaves `result` at None --
     nothing stuck 'checking' forever, and no wrong verdict flashed either."""
-    global _freshness
-    if token != _freshness.generation:
+    s = _get_slot(slot)
+    if token != s.freshness.generation:
         return
-    _freshness = FreshnessState(generation=_freshness.generation,
-                                checking=False, result=result)
+    s.freshness = FreshnessState(generation=s.freshness.generation,
+                                 checking=False, result=result)
 
 
 # ---------------------------------------------------------------------------
@@ -1007,7 +1099,8 @@ def estimate_build_bytes(corpus_path: str) -> int:
     return estimate_artifact_bytes(letters_ub) + 8 * letters_ub
 
 
-def prepare_staging(root: str, corpus_path: str) -> None:
+def prepare_staging(root: str, corpus_path: str,
+                    needed_bytes: Optional[int] = None) -> None:
     """Build worker phase 0. Order matters: a crashed staging tree from a
     previous failed attempt can hold nearly the whole headroom a fresh build
     needs, so preflighting BEFORE clearing it would refuse every retry
@@ -1018,11 +1111,18 @@ def prepare_staging(root: str, corpus_path: str) -> None:
     -- and never at the live directory itself: creating an empty `current/`
     here would make a first build look, to every later `os.path.isdir(live)`
     check, exactly like a rebuild.
+
+    `needed_bytes` replaces the file-size estimate for a corpus that is not
+    one plain file (My Library's text lives zstd-compressed in SQLite, where
+    a file-size bound would understate the need several times over). None
+    keeps `estimate_build_bytes(corpus_path)`.
     """
     staging = os.path.join(root, STAGING_DIRNAME)
     if os.path.isdir(staging):
         shutil.rmtree(staging)
-    check_free_space(root, estimate_build_bytes(corpus_path))
+    if needed_bytes is None:
+        needed_bytes = estimate_build_bytes(corpus_path)
+    check_free_space(root, needed_bytes)
 
 
 # ---------------------------------------------------------------------------
@@ -1044,9 +1144,16 @@ def execute_build(root: str, records, source_paths: list, *,
                   batch_grams: int = DEFAULT_BATCH_GRAMS,
                   df_cap: Optional[int] = None, corpus_label: str = '',
                   progress: Optional[Callable] = None,
-                  cancel_check: Optional[Callable[[], bool]] = None
+                  cancel_check: Optional[Callable[[], bool]] = None,
+                  apply_hygiene: bool = True
                   ) -> BuildOutcome:
     """Runs `build_index` into `root/passage_index.building`.
+
+    `apply_hygiene` is the builder's Stage-0 page filter
+    (`shared/passage_hygiene.py`: short pages, microfilm target sheets,
+    library stamps), written for Genizah photography. On by default; the My
+    Library build turns it off, because on a user's own documents those rules
+    drop real pages a search could match (owner, 2026-10-16).
 
     Progress passes straight through to `build_index`'s own callback: pass 1
     is INDETERMINATE (records seen and records indexed, neither a total),
@@ -1071,7 +1178,8 @@ def execute_build(root: str, records, source_paths: list, *,
                             partitions=partitions, batch_grams=batch_grams,
                             df_cap=df_cap, corpus_label=corpus_label,
                             source_manifest=pre_manifest, progress=progress,
-                            cancel_check=cancel_check)
+                            cancel_check=cancel_check,
+                            apply_hygiene=apply_hygiene)
         owns_staging = False
     except BuildCancelled:
         return BuildOutcome(status='cancelled', staging_dir=staging)
@@ -1413,7 +1521,10 @@ def run_build_and_swap(root: str, records, source_paths: list,
                        df_cap: Optional[int] = None, corpus_label: str = '',
                        progress: Optional[Callable] = None,
                        cancel_check: Optional[Callable[[], bool]] = None,
-                       release_live_state: Callable[..., Optional[bool]]
+                       release_live_state: Callable[..., Optional[bool]],
+                       slot: str = SLOT_GENIZAH,
+                       needed_bytes: Optional[int] = None,
+                       apply_hygiene: bool = True
                        ) -> BuildAndSwapResult:
     """Build -> validate -> swap, with the cross-process lock held for the
     whole run and released exactly once, in `finally`, regardless of which
@@ -1465,17 +1576,24 @@ def run_build_and_swap(root: str, records, source_paths: list,
 
     A concurrent second run (another window, a leftover process) is refused
     up front rather than left to race the filesystem.
+
+    `slot` is the index `root` holds: the release seam is authorised
+    against THAT slot's generation, so it can only ever close that index.
+    `needed_bytes` is passed to `prepare_staging`, `apply_hygiene` to
+    `execute_build`.
     """
+    _get_slot(slot)            # an unknown slot fails before the lock is taken
     lock = acquire_lock(root)
     if lock is None:
         return BuildAndSwapResult(status='locked')
     try:
-        prepare_staging(root, corpus_path)
+        prepare_staging(root, corpus_path, needed_bytes)
         build = execute_build(root, records, source_paths,
                               construction=construction, partitions=partitions,
                               batch_grams=batch_grams, df_cap=df_cap,
                               corpus_label=corpus_label, progress=progress,
-                              cancel_check=cancel_check)
+                              cancel_check=cancel_check,
+                              apply_hygiene=apply_hygiene)
         if build.status == 'cancelled':
             return BuildAndSwapResult(status='cancelled')
         if build.status == 'error':
@@ -1504,7 +1622,7 @@ def run_build_and_swap(root: str, records, source_paths: list,
         # the cross-process lock through the whole `try` -- a seam that
         # never answers must not be allowed to hold it forever.
         released = _call_release_seam(release_live_state,
-                                      current_state_generation())
+                                      current_state_generation(slot))
         if released is _RELEASE_SEAM_TIMED_OUT:
             _cleanup_staging(staging)
             return BuildAndSwapResult(status='release_timed_out')

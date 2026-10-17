@@ -1952,6 +1952,9 @@ class MyLibraryTab(QWidget):
         # Release mutex AFTER reload
         self._indexer_mutex.unlock()
 
+        # The letter-level index of My Library may now be out of date.
+        self._notify_library_changed()
+
         # Phase 97.3 R97.3-A (D-12, D-19): cache must be reloaded BEFORE
         # _refresh_folder_list_ui (which calls populate_for_folder).
         self._invalidate_prior_status_cache()
@@ -2529,6 +2532,20 @@ class MyLibraryTab(QWidget):
         # Phase 97.3 R97.3-A (D-12): folder removed — drop its cache entry.
         self._invalidate_prior_status_cache()
         self._refresh_folder_list_ui()
+        self._notify_library_changed()
+
+    def _notify_library_changed(self) -> None:
+        """Tell the window that My Library's contents may have changed (a
+        scan finished, or a folder was removed). The window re-checks its
+        letter-level index of My Library and says so if it is out of date;
+        it never rebuilds it by itself (owner, 2026-10-16). Never raises."""
+        hook = getattr(self._parent_window, '_on_my_library_changed', None)
+        if not callable(hook):
+            return
+        try:
+            hook()
+        except Exception:  # noqa: BLE001
+            logger.exception("MyLibraryTab: library-changed notice failed")
 
     def _on_refresh_clicked(self) -> None:
         """Aggregate ceiling check (W8) then start worker (D-25).

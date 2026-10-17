@@ -22,6 +22,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import desktop.passage_lifecycle as pl        # noqa: E402
+import desktop.passage_local as pll  # noqa: E402
 import genizah_app                            # noqa: E402
 
 APP = genizah_app.GenizahGUI
@@ -114,9 +115,13 @@ class _Engine:
     gate must read -- `close_index` nulls them ON the engine while the window
     keeps holding the engine object."""
 
-    def __init__(self, ready=True):
+    def __init__(self, ready=True, local_ready=True):
         self.index = object() if ready else None
         self.searcher = object() if ready else None
+        # The My Library side-index, which letter-level rows from the My
+        # Library index read their text from.
+        self.local_index = object() if local_ready else None
+        self.local_searcher = object() if local_ready else None
 
 
 class _Win:
@@ -158,6 +163,8 @@ class _Win:
     _on_pause_clicked = APP._on_pause_clicked
     _on_passage_build_finished = APP._on_passage_build_finished
     _passage_snapshot_must_wait = APP._passage_snapshot_must_wait
+    # Borrowed: both index loads hand a held-back snapshot to it.
+    _judge_deferred_comp_snapshot = APP._judge_deferred_comp_snapshot
     _display_restored_comp_snapshot = APP._display_restored_comp_snapshot
     _comp_method = APP._comp_method
     _restore_comp_passage_preferences = APP._restore_comp_passage_preferences
@@ -224,20 +231,55 @@ def _window(scope='genizah', lab=False, engine_ready=True, building=False):
 
 @pytest.mark.parametrize('ready,scope,lab,building,engine_ok,expected', [
     (True,  'genizah', False, False, True,  None),
-    (True,  'local',   False, False, True,  pl.REASON_SCOPE),
-    (True,  'all',     False, False, True,  pl.REASON_SCOPE),
     (False, 'genizah', False, False, True,  pl.REASON_NOT_BUILT),
     (True,  'genizah', True,  False, True,  pl.REASON_LAB_ACTIVE),
     (True,  'genizah', False, True,  True,  pl.REASON_BUILD_IN_FLIGHT),
     (True,  'genizah', False, False, False, pl.REASON_MAIN_INDEX_MISSING),
-    # Scope outranks everything: a My Library search is the wrong surface for
-    # a Genizah-only artifact no matter what else is true.
-    (False, 'local',   True,  True,  False, pl.REASON_SCOPE),
 ])
 def test_the_gate_truth_table(monkeypatch, ready, scope, lab, building,
                               engine_ok, expected):
     monkeypatch.setattr(pl, 'passage_available', lambda: ready)
     w = _window(scope=scope, lab=lab, engine_ready=engine_ok, building=building)
+    assert APP._passage_disabled_reason_now(w) == expected
+
+
+@pytest.mark.parametrize(
+    'g_ready,l_ready,scope,lab,g_build,l_build,engine_ok,local_ok,expected', [
+        # My Library needs only its own index and the LOCAL side-index.
+        (True,  True,  'local', False, False, False, True,  True,  None),
+        (False, True,  'local', False, False, False, False, True,  None),
+        (True,  False, 'local', False, False, False, True,  True,
+         pll.REASON_LOCAL_NOT_BUILT),
+        (True,  True,  'local', False, False, False, True,  False,
+         pll.REASON_LOCAL_INDEX_MISSING),
+        # Lab Mode and a My Library build refuse it; a Genizah build does not.
+        (True,  True,  'local', True,  False, False, True,  True,
+         pl.REASON_LAB_ACTIVE),
+        (True,  True,  'local', False, False, True,  True,  True,
+         pl.REASON_BUILD_IN_FLIGHT),
+        (True,  True,  'local', False, True,  False, True,  True,  None),
+        # All needs both indexes; the Genizah reasons come first.
+        (True,  True,  'all',   False, False, False, True,  True,  None),
+        (False, True,  'all',   False, False, False, True,  True,
+         pl.REASON_NOT_BUILT),
+        (True,  False, 'all',   False, False, False, True,  True,
+         pll.REASON_LOCAL_NOT_BUILT),
+        (True,  True,  'all',   False, True,  False, True,  True,
+         pl.REASON_BUILD_IN_FLIGHT),
+        (True,  True,  'all',   False, False, False, False, True,
+         pl.REASON_MAIN_INDEX_MISSING),
+        # A My Library build does not touch a Genizah-only search.
+        (True,  False, 'genizah', False, False, True, True,  True,  None),
+    ])
+def test_the_gate_truth_table_my_library(monkeypatch, g_ready, l_ready, scope,
+                                         lab, g_build, l_build, engine_ok,
+                                         local_ok, expected):
+    monkeypatch.setattr(pl, 'passage_available', lambda: g_ready)
+    monkeypatch.setattr(pll, 'local_passage_available', lambda: l_ready)
+    w = _window(scope=scope, lab=lab, engine_ready=engine_ok,
+                building=g_build)
+    w.searcher = _Engine(engine_ok, local_ok)
+    w._local_passage_build_in_flight = l_build
     assert APP._passage_disabled_reason_now(w) == expected
 
 
@@ -1894,10 +1936,15 @@ def test_the_restore_defers_instead_of_guessing():
 
 
 def test_the_load_slot_judges_what_was_deferred():
-    seg = _function_source('_on_passage_loaded')
-    assert "_deferred_comp_snapshot" in seg and (
-        '_display_restored_comp_snapshot(deferred)' in seg), (
-        'a snapshot held back by the startup race is never looked at again')
+    # Both index loads hand a held-back snapshot to the one judge, which
+    # displays it once nothing it depends on is still loading.
+    for name in ('_on_passage_loaded', '_on_local_passage_loaded'):
+        assert 'self._judge_deferred_comp_snapshot()' in _function_source(
+            name), (
+            f'{name}: a snapshot held back by the startup race is never '
+            'looked at again')
+    seg = _function_source('_judge_deferred_comp_snapshot')
+    assert '_display_restored_comp_snapshot(deferred)' in seg
 
 
 def test_the_flag_is_set_before_the_thread_starts():

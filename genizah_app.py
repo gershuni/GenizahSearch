@@ -65,6 +65,7 @@ from desktop.single_instance import (
     acquire_instance_lock, relaunch_if_requested, relaunch_looks_possible, request_restart, restarted_from,
 )
 from desktop.qthread_exit import settle_running_threads
+from desktop.qt_translations import install_qt_translations
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
 from desktop.widgets.line_number_text_edit import (
@@ -92,6 +93,7 @@ from desktop.ui_widgets import (ShelfmarkTableWidgetItem, CheckBoxHeader, Hidden
                                 ListsTreeWidget, ElidingLabel)
 from desktop.settings_dialogs import SettingsDialog, SearchSettingsDialog, HelpDialog, TabularQueryBuilderDialog, LabScoringDialog
 from desktop import passage_lifecycle  # Phase 146: letter-level (passage) search
+from desktop import passage_local  # letter-level search for My Library
 from desktop import passage_witnesses  # multi-witness state machine (pure)
 from shared import passage_witness_source  # witness resolution (pure, shared with web)
 from shared import passage_fusion  # RRF fusion (pure, shared with web + API)
@@ -1429,6 +1431,9 @@ class GenizahGUI(QMainWindow):
     # the answer, so the worker never renames anything until the UI thread
     # has actually let go.
     _passage_release_requested = pyqtSignal(int)
+    # The same handoff for the My Library letter-level index, which has its
+    # own lifecycle instance and so its own release.
+    _local_passage_release_requested = pyqtSignal(int)
     # (saved, reason) from ListsManager's save hooks, which run on whichever
     # thread saved. The window saves on the UI thread (list sync applies its
     # results there too), but connected queued the slot runs on the UI thread
@@ -1889,6 +1894,9 @@ class GenizahGUI(QMainWindow):
             # restart. Started here rather than inside StartupThread so its
             # finished_signal signature stays as every other slot expects.
             self._start_passage_load()
+            if hasattr(self, 'btn_build_local_passage_index'):
+                self.btn_build_local_passage_index.setEnabled(True)
+            self._start_local_passage_load()
             # The gate can only now say "not built" instead of "still
             # starting up", so re-run it once startup is genuinely done.
             if hasattr(self, 'comp_method_combo'):
@@ -17512,12 +17520,9 @@ class GenizahGUI(QMainWindow):
         self._apply_default_comp_method()
         self._revalidate_comp_method()
         # A snapshot held back by the startup race is judged HERE, where
-        # "not built" finally means what it says.
-        deferred = self.__dict__.pop('_deferred_comp_snapshot', None)
-        if deferred is not None and getattr(self, '_comp_active_run_id', None) is None:
-            # ...unless a search has been started since launch: its answer is
-            # the one on screen, and a restored older one must not replace it.
-            self._display_restored_comp_snapshot(deferred)
+        # "not built" finally means what it says -- unless it also waits for
+        # the My Library index, whose load then judges it.
+        self._judge_deferred_comp_snapshot()
         # Only now is "there is no index" a fact rather than "not loaded
         # yet" -- offering before this point would fire on every launch,
         # including the ones where an index was about to appear.
@@ -17780,6 +17785,13 @@ class GenizahGUI(QMainWindow):
         if status == 'installed':
             self.status_label.setText(
                 tr("The letter-level index is ready."))
+        elif status == 'cancelled':
+            # A cancel that landed after the live index was released comes
+            # here WITH the index recovery reopened (it was just installed
+            # above); a bare cancellation never reaches this handler.
+            self.status_label.setText(tr(
+                "Letter-level index build cancelled. Your existing index was "
+                "not changed."))
         elif status == 'release_timed_out':
             # The ONE status that does not leave a working index behind.
             # The seam never answered inside its bound, so the release was
@@ -17824,11 +17836,433 @@ class GenizahGUI(QMainWindow):
                "been written to the log. Your existing index was not "
                "changed."))
 
+    # ------------------------------------------------------------------
+    # Letter-level search for My Library: load, freshness, build. The same
+    # protocol as the Genizah index above, on the lifecycle's second slot
+    # (`passage_lifecycle.SLOT_LOCAL`; My Library specifics in
+    # `desktop/passage_local.py`). The LOCAL index and its SQLite sidecar are
+    # only ever READ here.
+    # ------------------------------------------------------------------
+
+    def _start_local_passage_load(self):
+        try:
+            from desktop.passage_workers import PassageLoadThread
+            self.local_passage_load_thread = PassageLoadThread(
+                passage_local.local_passage_root())
+            self.local_passage_load_thread.loaded_signal.connect(
+                self._on_local_passage_loaded)
+            self._local_passage_load_in_flight = True
+            self.local_passage_load_thread.start()
+        except Exception:                                    # noqa: BLE001
+            self._local_passage_load_in_flight = False
+            logger.exception('could not start the My Library letter-level '
+                             'index load')
+
+    def _on_local_passage_loaded(self, result):
+        self._local_passage_load_in_flight = False
+        if getattr(self, '_close_pending', False):
+            return
+        index = getattr(result, 'index', None)
+        status = getattr(result, 'status', 'unavailable')
+        if index is not None:
+            passage_lifecycle.install_passage_state(
+                passage_lifecycle.PassageState(
+                    index=index, live_dir=getattr(result, 'live_dir', '')),
+                slot=passage_lifecycle.SLOT_LOCAL)
+        logger.info('My Library letter-level index at startup: %s', status)
+        self._honour_deferred_comp_method()
+        self._revalidate_comp_method()
+        self._judge_deferred_comp_snapshot()
+        if index is not None:
+            self._start_local_freshness_check()
+
+    def _start_local_freshness_check(self):
+        # Never during a close: a check reads the whole library, and the
+        # close waits for every running My Library worker -- a check started
+        # by the close's own cancellation of a build would hold it up.
+        if getattr(self, '_close_pending', False):
+            return
+        th = getattr(self, 'local_passage_freshness_thread', None)
+        if th is not None and th.isRunning():
+            # The check already running may have read the library before
+            # the change that asked for this one: its answer is not shown,
+            # and a fresh check starts once that thread has really FINISHED
+            # (`_on_local_freshness_thread_finished`). Restarting from the
+            # answer instead lost the request: the answer arrives while the
+            # thread still reports isRunning().
+            self._local_freshness_recheck = True
+            return
+        live_dir = passage_lifecycle.installed_live_dir(
+            passage_lifecycle.SLOT_LOCAL)
+        if not live_dir:
+            return
+        try:
+            from desktop.passage_workers import LocalPassageFreshnessThread
+            self.local_passage_freshness_thread = LocalPassageFreshnessThread(
+                live_dir)
+            self.local_passage_freshness_thread.result_signal.connect(
+                self._on_local_freshness)
+            self.local_passage_freshness_thread.finished.connect(
+                self._on_local_freshness_thread_finished)
+            self.local_passage_freshness_thread.start()
+        except Exception:                                    # noqa: BLE001
+            logger.exception('could not start the My Library freshness check')
+
+    def _on_local_freshness_thread_finished(self):
+        """The check's thread has exited: run the check a change asked for
+        while it was busy."""
+        if getattr(self, '_close_pending', False):
+            return
+        if getattr(self, '_local_freshness_recheck', False):
+            self._local_freshness_recheck = False
+            self._start_local_freshness_check()
+
+    def _on_local_freshness(self, result):
+        logger.info('My Library letter-level index freshness: %s',
+                    result or 'n/a')
+        if getattr(self, '_close_pending', False):
+            return
+        if getattr(self, '_local_freshness_recheck', False):
+            # Read before a later change; the re-check answers instead.
+            return
+        if result == passage_lifecycle.STALE:
+            self.status_label.setText(tr(
+                "My Library has changed since its letter-level index was "
+                "built. Rebuild it from Settings to include the changes."))
+
+    def _on_my_library_changed(self):
+        """MyLibraryTab: a scan finished or a folder was removed. Re-check
+        the My Library letter-level index and say so if it is now out of
+        date. A notice only -- rebuilding stays the user's choice (owner,
+        2026-10-16). With no index installed there is nothing to check; with
+        a build in flight, the build's end -- installed, cancelled or failed
+        -- runs the check."""
+        if getattr(self, '_close_pending', False):
+            return
+        if getattr(self, '_local_passage_build_in_flight', False):
+            return
+        self._start_local_freshness_check()
+
+    def _maybe_offer_local_passage_build(self):
+        """Asked only on an explicit choice of letter-level search with the
+        My Library or All scope -- never at startup: a library build is long
+        and large, and the user may never want it."""
+        if getattr(self, '_close_pending', False):
+            return
+        if getattr(self, '_local_passage_build_in_flight', False):
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("Build letter-level index for My Library?"))
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(tr(
+            "Letter-level search in My Library needs its own index, built "
+            "from the texts My Library has already extracted. The index does "
+            "not update by itself: when My Library changes, you will be told "
+            "to rebuild it.\n\n"
+            "For a large library this takes up to an hour or more and needs "
+            "a lot of free disk space while it runs; you will see the "
+            "figures before it starts. You can always build it later from "
+            "Settings."))
+        btn_build = box.addButton(tr("Build now"),
+                                  QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(tr("Ask me later"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(btn_build)
+        box.exec()
+        if box.clickedButton() is btn_build:
+            self.run_local_passage_index_build()
+
+    def _local_passage_release_seam(self, expect_generation):
+        """Worker-thread side of the release handoff; see
+        `_passage_release_seam`, which this mirrors for the second
+        lifecycle instance."""
+        import threading as _threading
+        done = _threading.Event()
+        holder = {}
+
+        def _record(value):
+            holder['value'] = value
+            done.set()
+
+        self._local_passage_release_result = _record
+        self._local_passage_release_requested.emit(int(expect_generation))
+        done.wait()
+        return holder.get('value')
+
+    def _on_local_passage_release_requested(self, expect_generation):
+        result = None
+        try:
+            result = passage_lifecycle.close_passage_state(
+                int(expect_generation), slot=passage_lifecycle.SLOT_LOCAL)
+        except Exception:                                    # noqa: BLE001
+            logger.exception('My Library passage release seam failed')
+            result = False
+        finally:
+            recorder = getattr(self, '_local_passage_release_result', None)
+            if recorder is not None:
+                recorder(result)
+
+    def run_local_passage_index_build(self, confirm=True):
+        """Build the My Library letter-level index from the texts the LOCAL
+        indexer has already extracted (read-only)."""
+        if getattr(self, '_close_pending', False):
+            # The window is closing (it can stay up while the close waits for
+            # a worker): a build started now would be one more worker for the
+            # close to wait on.
+            return
+        if not getattr(self, 'startup_complete', False):
+            QMessageBox.information(
+                self, tr("Please wait"),
+                tr("The application is still starting up. Try again in a "
+                   "moment."))
+            return
+        if getattr(self, '_local_passage_build_in_flight', False):
+            QMessageBox.information(
+                self, tr("Already running"),
+                tr("The My Library letter-level index is already being "
+                   "built."))
+            return
+        th = getattr(self, 'local_passage_preflight_thread', None)
+        if th is not None and th.isRunning():
+            return          # already measuring; its answer opens the dialog
+        # Counting and sizing read the whole page table -- seconds on a large
+        # library -- so they run on a worker, and the dialog opens from its
+        # answer (`_on_local_passage_preflight`).
+        db_path = passage_local.local_db_path()
+        try:
+            from desktop.passage_workers import LocalPassagePreflightThread
+            self.local_passage_preflight_thread = LocalPassagePreflightThread(
+                db_path)
+            self.local_passage_preflight_thread.result_signal.connect(
+                lambda n_pages, needed, _db=db_path, _confirm=confirm:
+                self._on_local_passage_preflight(_db, n_pages, needed,
+                                                 _confirm))
+            self.local_passage_preflight_thread.start()
+        except Exception:                                    # noqa: BLE001
+            logger.exception('could not start the My Library build preflight')
+            return
+        self.status_label.setText(tr(
+            "Measuring My Library for its letter-level index..."))
+
+    def _on_local_passage_preflight(self, db_path, n_pages, needed, confirm):
+        """The rest of `run_local_passage_index_build`, on the UI thread,
+        once the worker has counted the pages (`n_pages`) and sized the build
+        (`needed` bytes; 0 when the estimate failed, which skips the disk
+        check rather than refusing)."""
+        if getattr(self, '_close_pending', False):
+            return
+        if getattr(self, '_local_passage_build_in_flight', False):
+            return
+        self.status_label.setText('')      # the "Measuring..." line above
+        n_pages = int(n_pages or 0)
+        needed = int(needed or 0)
+        if not n_pages:
+            QMessageBox.information(
+                self, tr("My Library is empty"),
+                tr("There are no indexed My Library pages to build a "
+                   "letter-level index from. Add folders to My Library "
+                   "and index them first."))
+            return
+
+        import shutil as _shutil
+        root = passage_local.local_passage_root()
+        try:
+            os.makedirs(root, exist_ok=True)
+            available = _shutil.disk_usage(root).free
+            staging = os.path.join(root, passage_lifecycle.STAGING_DIRNAME)
+            if os.path.isdir(staging):
+                for dirpath, _dirs, files in os.walk(staging):
+                    for f in files:
+                        try:
+                            available += os.path.getsize(
+                                os.path.join(dirpath, f))
+                        except OSError:
+                            pass
+        except Exception:                                    # noqa: BLE001
+            logger.exception('My Library build free-space check failed')
+            available = None
+        if available is not None and needed and available < needed:
+            QMessageBox.warning(
+                self, tr("Not enough disk space"),
+                tr("Building the letter-level index for My Library needs "
+                   "about {} free on this drive, and there is about {}. Free "
+                   "some space and try again.").format(
+                       passage_local.disk_size_label(needed),
+                       passage_local.disk_size_label(available)))
+            return
+        if confirm:
+            if needed:
+                text = tr(
+                    "Build the letter-level index for My Library from {} "
+                    "indexed pages?\n\nThis needs up to about {} of free disk "
+                    "space while it runs (the finished index is smaller) and "
+                    "can take an hour or more on a large library. The "
+                    "application stays usable meanwhile.\n\nThe index does "
+                    "not update by itself: when My Library changes, you will "
+                    "be told to rebuild it.").format(
+                        '{:,}'.format(n_pages),
+                        passage_local.disk_size_label(needed))
+            else:
+                # The size estimate failed: no figure rather than "0 MB".
+                text = tr(
+                    "Build the letter-level index for My Library from {} "
+                    "indexed pages?\n\nThis can take an hour or more on a "
+                    "large library and needs free disk space while it runs. "
+                    "The application stays usable meanwhile.\n\nThe index "
+                    "does not update by itself: when My Library changes, you "
+                    "will be told to rebuild it.").format(
+                        '{:,}'.format(n_pages))
+            answer = QMessageBox.question(
+                self, tr("Build letter-level index for My Library"), text,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self._local_passage_build_in_flight = True
+        self._revalidate_comp_method()
+        self._start_local_passage_build_worker(db_path)
+
+    def _start_local_passage_build_worker(self, db_path):
+        from desktop.passage_workers import LocalPassageBuildThread
+
+        self._local_passage_progress = QProgressDialog(
+            tr("Building the My Library letter-level index..."), tr("Cancel"),
+            0, 100, self)
+        self._local_passage_progress.setWindowTitle(
+            tr("My Library letter-level index"))
+        self._local_passage_progress.setWindowModality(
+            Qt.WindowModality.NonModal)
+        self._local_passage_progress.setMinimumDuration(0)
+        self._local_passage_progress.setAutoClose(False)
+        self._local_passage_progress.setAutoReset(False)
+
+        self.local_passage_build_thread = LocalPassageBuildThread(
+            passage_local.local_passage_root(), db_path,
+            self._local_passage_release_seam, parent=None)
+        try:
+            self._local_passage_release_requested.disconnect()
+        except TypeError:
+            pass
+        self._local_passage_release_requested.connect(
+            self._on_local_passage_release_requested)
+        self._local_passage_progress.canceled.connect(
+            self.local_passage_build_thread.request_cancel)
+        self.local_passage_build_thread.progress_signal.connect(
+            self._on_local_passage_build_progress)
+        self.local_passage_build_thread.finished_signal.connect(
+            self._on_local_passage_build_finished)
+        self.local_passage_build_thread.cancelled_signal.connect(
+            self._on_local_passage_build_cancelled)
+        self.local_passage_build_thread.error_signal.connect(
+            self._on_local_passage_build_error)
+        self.local_passage_build_thread.start()
+        self._local_passage_progress.show()
+
+    def _on_local_passage_build_progress(self, phase, done, total, records=0):
+        dlg = getattr(self, '_local_passage_progress', None)
+        if dlg is None:
+            return
+        if phase == 'signature':
+            dlg.setRange(0, 0)
+            dlg.setLabelText(tr("Reading the My Library catalogue..."))
+        elif phase == 'read':
+            dlg.setRange(0, 100)
+            dlg.setValue(done)
+            dlg.setLabelText(
+                tr("Reading My Library pages: {}% ({} pages so far)")
+                .format(done, '{:,}'.format(records)))
+        elif phase == 'arrange':
+            dlg.setRange(0, 0)
+            dlg.setLabelText(tr(
+                "All pages have been read. Arranging the index; this stage "
+                "shows no percentage and can take a while on a large "
+                "library."))
+        elif total:
+            dlg.setRange(0, total)
+            dlg.setValue(done)
+            dlg.setLabelText(tr("Building index: part {} of {}")
+                             .format(done, total))
+
+    def _finish_local_passage_build(self):
+        self._local_passage_build_in_flight = False
+        dlg = getattr(self, '_local_passage_progress', None)
+        if dlg is not None:
+            dlg.close()
+            self._local_passage_progress = None
+        try:
+            self._local_passage_release_requested.disconnect(
+                self._on_local_passage_release_requested)
+        except TypeError:
+            pass
+        self._revalidate_comp_method()
+
+    def _on_local_passage_build_finished(self, result):
+        if getattr(self, '_close_pending', False):
+            self._finish_local_passage_build()
+            return
+        index = getattr(result, 'index', None)
+        live_dir = getattr(result, 'live_dir', '')
+        status = getattr(result, 'status', '')
+        self._finish_local_passage_build()
+        if index is not None:
+            passage_lifecycle.install_passage_state(
+                passage_lifecycle.PassageState(index=index,
+                                               live_dir=live_dir),
+                slot=passage_lifecycle.SLOT_LOCAL)
+        self._honour_deferred_comp_method()
+        self._revalidate_comp_method()
+        if status == 'installed':
+            self.status_label.setText(
+                tr("The My Library letter-level index is ready."))
+        elif status == 'cancelled':
+            # A cancel after the live index was released, carrying the index
+            # recovery reopened (installed above).
+            self.status_label.setText(tr(
+                "My Library letter-level index build cancelled. Your existing "
+                "index was not changed."))
+        elif status == 'release_timed_out':
+            logger.warning('My Library passage build ended as %r; reloading',
+                           status)
+            self.status_label.setText(tr(
+                "The My Library letter-level index could not be replaced. "
+                "Reloading the existing index."))
+            # The reload checks freshness when it installs.
+            self._start_local_passage_load()
+            return
+        else:
+            logger.warning('My Library passage build ended as %r', status)
+            self.status_label.setText(tr(
+                "The My Library letter-level index could not be replaced. "
+                "The previous index is still in use."))
+        # Whatever index is installed now, a scan during the build may have
+        # left it out of date: the change notices were held while it ran.
+        self._start_local_freshness_check()
+
+    def _on_local_passage_build_cancelled(self):
+        self._finish_local_passage_build()
+        self.status_label.setText(tr(
+            "My Library letter-level index build cancelled. Your existing "
+            "index was not changed."))
+        # The previous index is still installed; a scan during the build may
+        # have changed the library under it.
+        self._start_local_freshness_check()
+
+    def _on_local_passage_build_error(self, message):
+        logger.error('My Library passage index build failed: %s', message)
+        self._finish_local_passage_build()
+        QMessageBox.warning(
+            self, tr("Build failed"),
+            tr("The letter-level index could not be built. Details have "
+               "been written to the log. Your existing index was not "
+               "changed."))
+        self._start_local_freshness_check()
+
     def run_passage_index_build(self, confirm=True):
         """Build the letter-level index from the transcriptions already on
         this computer. Ordering matters: no corpus at all is a different
         problem with a different answer (fetch it), so that is checked before
         anything is promised about disk or time."""
+        if getattr(self, '_close_pending', False):
+            # Closing: no new build for the close to wait on (as above).
+            return
         if not getattr(self, 'startup_complete', False):
             QMessageBox.information(
                 self, tr("Please wait"),
@@ -18037,7 +18471,8 @@ class GenizahGUI(QMainWindow):
                 # Remember the intent so `_on_passage_loaded` can honour it,
                 # rather than silently losing the user's method on every
                 # launch.
-                if reason == passage_lifecycle.REASON_NOT_BUILT:
+                if reason in (passage_lifecycle.REASON_NOT_BUILT,
+                              passage_local.REASON_LOCAL_NOT_BUILT):
                     self._comp_method_deferred = 'passage'
                 self._revert_comp_method_to_chunk(reason)
             else:
@@ -18095,10 +18530,31 @@ class GenizahGUI(QMainWindow):
         loaded yet", not "impossible". Judging anyway discarded the user's
         rows on every single launch.
         """
-        return bool(
-            (comp.get('results') or comp.get('filtered_results'))
-            and comp.get('last_result_method') == 'passage'
-            and getattr(self, '_passage_load_in_flight', False))
+        if not ((comp.get('results') or comp.get('filtered_results'))
+                and comp.get('last_result_method') == 'passage'):
+            return False
+        if getattr(self, '_passage_load_in_flight', False):
+            return True
+        # The My Library index loads on its own worker; rows from a My
+        # Library or All search wait for it the same way.
+        scope = comp.get('last_result_scope') or 'genizah'
+        return bool(scope in ('local', 'all') and getattr(
+            self, '_local_passage_load_in_flight', False))
+
+    def _judge_deferred_comp_snapshot(self):
+        """Display a snapshot the startup race held back, once nothing it
+        depends on is still loading. Called from both index loads -- the
+        Genizah one and the My Library one, whichever answers last.
+
+        A search started since launch wins: its answer is the one on screen,
+        and a restored older one must not replace it. The snapshot is then
+        dropped, not kept for later."""
+        deferred = self.__dict__.get('_deferred_comp_snapshot')
+        if deferred is None or self._passage_snapshot_must_wait(deferred):
+            return
+        self.__dict__.pop('_deferred_comp_snapshot', None)
+        if getattr(self, '_comp_active_run_id', None) is None:
+            self._display_restored_comp_snapshot(deferred)
 
     def _display_restored_comp_snapshot(self, comp):
         """Re-display a saved composition result set, re-establishing the
@@ -18310,6 +18766,14 @@ class GenizahGUI(QMainWindow):
             QMessageBox.warning(self, tr("Conditions"), tr(
                 "Conditions work only with letter-level search. Switch "
                 "the method to letter-level, or remove the conditions."))
+            return None
+        if scope != 'genizah':
+            # A condition selects pages by their Genizah page keys
+            # (shared/passage_pages.py), which no My Library record has: run
+            # under My Library or All it would silently select nothing there.
+            QMessageBox.warning(self, tr("Conditions"), tr(
+                "Conditions work only when the corpus is Genizah. Switch the "
+                "corpus to Genizah, or remove the conditions."))
             return None
         from shared.passage_policy import compose as _passage_compose
         main_list = self._comp_compound_main_list(txt)
@@ -18566,16 +19030,25 @@ class GenizahGUI(QMainWindow):
             strip.set_conditions(conditions)
 
     def _refresh_comp_conditions_available(self):
-        """Conditions run only in letter-level mode; elsewhere the strip
-        shows them, frozen, with the reason."""
+        """Conditions run only in letter-level mode, on the Genizah corpus;
+        elsewhere the strip shows them, frozen, with the reason."""
         strip = getattr(self, 'comp_conditions_strip', None)
         if strip is None:
             return
         lab = bool(getattr(self, 'btn_lab_mode_toggle_comp', None)
                    and self.btn_lab_mode_toggle_comp.isChecked())
-        ok = self._comp_method() == 'passage' and not lab
-        strip.set_available(ok, '' if ok else tr(
-            "Conditions work only with letter-level search."))
+        if self._comp_method() != 'passage' or lab:
+            strip.set_available(False, tr(
+                "Conditions work only with letter-level search."))
+            return
+        combo = getattr(self, 'comp_corpus_scope_combo', None)
+        scope = ((combo.currentData() if combo is not None else None)
+                 or getattr(self, '_comp_corpus_scope', 'genizah'))
+        if scope != 'genizah':
+            strip.set_available(False, tr(
+                "Conditions work only when the corpus is Genizah."))
+            return
+        strip.set_available(True, '')
 
     # -- "Filter texts" menu (owner, 2026-10-14) ------------------------------
     # One button, one menu, three fixed-requirement entry points, replacing
@@ -19037,19 +19510,54 @@ class GenizahGUI(QMainWindow):
         uids = self._collect_checked_comp_page_uids()
         if not uids:
             return []
+        # Either namespace: a checked My Library result is promoted too
+        # (owner, 2026-10-16), not silently skipped.
         wanted, seen = [], set()
+        sid_by_uid = {}
         for row in rows:
-            sid = passage_witness_source.witness_sys_id(row)
-            if not sid or sid in seen:
+            sid = passage_local.row_sys_id(row)
+            if not sid:
+                continue
+            if row.get('uid'):
+                sid_by_uid.setdefault(str(row['uid']), sid)
+            if sid in seen:
                 continue
             seen.add(sid)
             wanted.append(sid)
+        # A checked page is identified by its uid, which for a Genizah page is
+        # `IE.._P.._FL..` -- it holds NO sys_id, so reading one out of it
+        # found nothing and a checked Genizah result was never promoted. The
+        # rows know which sys_id each uid belongs to; a My Library uid
+        # (`LOCAL_{sys_id}_P{n}`) also carries it, the fallback for a uid no
+        # row lists.
         checked = set()
         for uid in uids:
-            m = passage_witness_source.WITNESS_SYS_ID_RE.search(str(uid))
-            if m:
-                checked.add(m.group(1))
+            sid = sid_by_uid.get(str(uid))
+            if not sid and str(uid).startswith('LOCAL_'):
+                sid = passage_local.uid_sys_id(uid)
+            if sid:
+                checked.add(sid)
         return [s for s in wanted if s in checked]
+
+    def _witness_label(self, sys_id, rows=()):
+        """What the Witnesses panel calls a promoted result: the shelfmark of
+        a Genizah manuscript, the file name of a My Library one, the bare id
+        when neither can be found."""
+        if passage_local.is_local_sys_id(sys_id):
+            for row in rows or ():
+                if (passage_local.row_sys_id(row) == sys_id
+                        and row.get('shelfmark')):
+                    return row['shelfmark']
+            try:
+                path = self._lookup_local_filepath(sys_id)
+            except Exception:                                # noqa: BLE001
+                path = None
+            return os.path.basename(path) if path else sys_id
+        try:
+            shelf, _title = self.meta_mgr.get_meta_for_id(sys_id)
+            return shelf or sys_id
+        except Exception:                                    # noqa: BLE001
+            return sys_id
 
     def _promote_sys_ids(self, sys_ids, rows):
         """Turn manuscripts into witnesses and search them.
@@ -19066,23 +19574,22 @@ class GenizahGUI(QMainWindow):
         sys_ids = [s for s in sys_ids if s not in already]
         if not sys_ids:
             return 0
-        headers = passage_witness_source.witness_headers_for(sys_ids, rows)
+        # Pages of either index, each read from its own (a My Library page
+        # through the LOCAL index).
+        fetcher = passage_local.WitnessTextFetcher(self.searcher)
+        headers = passage_witness_source.witness_headers_for(
+            sys_ids, rows, sys_id_of=passage_local.row_sys_id)
         texts, failed = passage_witness_source.collect_witness_texts(
             sys_ids, rows,
-            fetch_header=self.searcher.get_full_text_by_header,
-            fetch_manuscript=self.searcher.get_full_manuscript,
+            fetch_header=fetcher.get_full_text_by_header,
+            fetch_manuscript=fetcher.get_full_manuscript,
             headers_by_sid=headers)
         added = 0
         for sid in sys_ids:
             text = texts.get(sid)
             if not text:
                 continue
-            label = sid
-            try:
-                shelf, _title = self.meta_mgr.get_meta_for_id(sid)
-                label = shelf or sid
-            except Exception:
-                pass
+            label = self._witness_label(sid, rows)
             report = passage_witnesses.add_texts(
                 self._comp_witness_state(), [text], self._comp_seed_text(),
                 tr("Pasted text"), label=label, kind='manuscript',
@@ -19091,13 +19598,7 @@ class GenizahGUI(QMainWindow):
         if failed:
             # ONE line naming what failed, not N identical messages saying
             # nothing.
-            names = []
-            for sid in failed[:5]:
-                try:
-                    shelf, _t = self.meta_mgr.get_meta_for_id(sid)
-                except Exception:
-                    shelf = None
-                names.append(shelf or sid)
+            names = [self._witness_label(sid, rows) for sid in failed[:5]]
             more = f' (+{len(failed) - 5})' if len(failed) > 5 else ''
             self._witness_notify(tr(
                 "Could not load text for {n} manuscripts: {names}").format(
@@ -19191,7 +19692,8 @@ class GenizahGUI(QMainWindow):
         already = {e.sys_id for e in state.entries if e.sys_id}
         candidates = []
         for row in rows:
-            sid = passage_witness_source.witness_sys_id(row)
+            # Either namespace: My Library results are candidates too.
+            sid = passage_local.row_sys_id(row)
             if not sid or sid in already or sid in candidates:
                 continue
             candidates.append(sid)
@@ -19703,15 +20205,17 @@ class GenizahGUI(QMainWindow):
         # The headers the PROMOTION used, where the snapshot preserved them.
         # Re-deriving them from whatever rows are on screen now rebuilds a
         # DIFFERENT witness under the same label.
-        derived = passage_witness_source.witness_headers_for(sys_ids, rows)
+        derived = passage_witness_source.witness_headers_for(
+            sys_ids, rows, sys_id_of=passage_local.row_sys_id)
         headers = {e.sys_id: (list(e.headers or [])
                               or derived.get(e.sys_id) or [])
                    for e in stale}
+        fetcher = passage_local.WitnessTextFetcher(self.searcher)
         try:
             texts, failed = passage_witness_source.collect_witness_texts(
                 sys_ids, rows,
-                fetch_header=self.searcher.get_full_text_by_header,
-                fetch_manuscript=self.searcher.get_full_manuscript,
+                fetch_header=fetcher.get_full_text_by_header,
+                fetch_manuscript=fetcher.get_full_manuscript,
                 headers_by_sid=headers)
         except Exception:
             logger.exception('witness rehydrate failed')
@@ -20007,13 +20511,18 @@ class GenizahGUI(QMainWindow):
         list, after these rows exist, so it cannot change them.
         """
         restrict = getattr(self, 'pre_search_restrict_sys_ids', None)
+        # The generation of each index THIS scope searches, and only those:
+        # a Genizah rebuild must not throw away a My Library run's rows, nor
+        # the reverse (`scope_pins` gives None for an index not searched).
+        pins = passage_local.scope_pins(scope)
         return (
             passage_witnesses.witness_text_key(seed_text),
             self._get_filter_text() or '',
             int(self.spin_filter.value()),
             tuple(sorted(restrict)) if restrict else None,
             scope, width, length, depth,
-            passage_lifecycle.current_state_generation(),
+            pins['pinned_generation'],
+            pins['pinned_local_generation'],
         )
 
     def _comp_witness_prior_rows(self):
@@ -20296,13 +20805,45 @@ class GenizahGUI(QMainWindow):
             if not scope:
                 scope = getattr(self, '_comp_corpus_scope', 'genizah')
         lab_btn = getattr(self, 'btn_lab_mode_toggle_comp', None)
-        return passage_lifecycle.passage_disabled_reason(
-            passage_ready=passage_lifecycle.passage_available(),
-            corpus_scope=scope,
-            lab_mode_on=bool(lab_btn is not None and lab_btn.isChecked()),
-            build_in_flight=bool(
-                getattr(self, '_passage_build_in_flight', False)),
-            main_index_ready=main_index_ready)
+        lab_on = bool(lab_btn is not None and lab_btn.isChecked())
+        genizah_build = bool(getattr(self, '_passage_build_in_flight', False))
+        local_build = bool(
+            getattr(self, '_local_passage_build_in_flight', False))
+        if scope not in ('local', 'all'):
+            return passage_lifecycle.passage_disabled_reason(
+                passage_ready=passage_lifecycle.passage_available(),
+                corpus_scope=scope,
+                lab_mode_on=lab_on,
+                build_in_flight=genizah_build,
+                main_index_ready=main_index_ready)
+        # My Library / All: the Genizah gate's scope-independent reasons
+        # first (Lab Mode, a build in flight), asked with the Genizah side's
+        # readiness only where this scope actually searches it; then the My
+        # Library index and the LOCAL index its rows are read from.
+        searches_genizah = scope == 'all'
+        reason = passage_lifecycle.passage_disabled_reason(
+            passage_ready=(passage_lifecycle.passage_available()
+                           if searches_genizah else True),
+            corpus_scope='genizah',
+            lab_mode_on=lab_on,
+            build_in_flight=local_build or (searches_genizah and genizah_build),
+            main_index_ready=main_index_ready if searches_genizah else True)
+        if reason is not None:
+            return reason
+        # The LOCAL Tantivy index the rows' text is read from -- with the same
+        # readiness test the chunk path applies before it searches LOCAL
+        # (`search_composition_logic`): present, and the tab not mid-rebuild.
+        tab_ref = getattr(engine, '_my_library_tab_ref', None)
+        tab = tab_ref() if callable(tab_ref) else None
+        local_index_ready = (
+            engine is not None
+            and getattr(engine, 'local_index', None) is not None
+            and getattr(engine, 'local_searcher', None) is not None
+            and bool(getattr(tab, 'is_searchable', True)
+                     if tab is not None else True))
+        return passage_local.local_disabled_reason(
+            local_ready=passage_local.local_passage_available(),
+            local_index_ready=local_index_ready)
 
     def _passage_reason_text(self, key):
         """Reason KEY -> translated sentence. The pure function returns keys
@@ -20325,6 +20866,12 @@ class GenizahGUI(QMainWindow):
             passage_lifecycle.REASON_MAIN_INDEX_MISSING: tr(
                 "The main index is not ready yet. Letter-level search needs "
                 "it to load the text of its results."),
+            passage_local.REASON_LOCAL_NOT_BUILT: tr(
+                "The letter-level index for My Library has not been built "
+                "yet. You can build it from Settings."),
+            passage_local.REASON_LOCAL_INDEX_MISSING: tr(
+                "My Library is not loaded. Letter-level search for My "
+                "Library needs it to load the text of its results."),
         }
         return texts.get(key, "")
 
@@ -20556,6 +21103,13 @@ class GenizahGUI(QMainWindow):
             self._save_session()
             return
         reason = self._passage_disabled_reason_now()
+        if reason == passage_local.REASON_LOCAL_NOT_BUILT:
+            # Same shape as the Genizah case below: keep the intent, demote,
+            # and offer the build that would make the choice possible.
+            self._comp_method_deferred = 'passage'
+            self._revert_comp_method_to_chunk(reason)
+            self._maybe_offer_local_passage_build()
+            return
         if reason is not None:
             if reason == passage_lifecycle.REASON_NOT_BUILT:
                 # Remember the intent BEFORE demoting it. The build is about
@@ -21532,10 +22086,12 @@ class GenizahGUI(QMainWindow):
         if combo is None:
             return
         self._comp_corpus_scope = combo.currentData() or 'genizah'
-        # Phase 146: local/all have no letter-level index -- re-run the
-        # gate so a scope change demotes the method instead of leaving
-        # a selection that dispatch would silently override.
+        # Re-run the gate so a scope change demotes the method when the
+        # scope's letter-level index is not ready, instead of leaving a
+        # selection that dispatch would silently override.
         self._revalidate_comp_method()
+        # Conditions are Genizah-only, so their availability follows scope.
+        self._refresh_comp_conditions_available()
         self._save_session()
 
     def _deliver_unless_discarded(self, attr, generation, slot, *args):
@@ -29058,7 +29614,9 @@ class GenizahGUI(QMainWindow):
                 # is exactly where a rare witness of a widely-copied work
                 # sits. A single search passes None and keeps the v9.0.0
                 # default byte for byte.
-                _comp_searcher = passage_lifecycle.get_passage_searcher(
+                # Routed by scope: Genizah, My Library, or both. A Genizah
+                # run goes through `get_passage_searcher` exactly as before.
+                _comp_searcher = passage_local.ScopedPassageSearcher(
                     self.searcher,
                     _comp_passage_width,
                     _comp_passage_length,
@@ -29142,9 +29700,9 @@ class GenizahGUI(QMainWindow):
                     run_id=_comp_run_id,
                     # Pinned HERE, on the UI thread, before the worker can
                     # take its first lease: a swap between this line and the
-                    # first search would otherwise go unnoticed.
-                    pinned_generation=(
-                        passage_lifecycle.current_state_generation()),
+                    # first search would otherwise go unnoticed. One pin per
+                    # index the scope searches.
+                    **passage_local.scope_pins(_comp_scope),
                     roster=self._comp_witness_roster(),
                     prior_rows=_prior_rows,
                     prior_filtered=_prior_filtered)
@@ -33935,6 +34493,13 @@ class GenizahGUI(QMainWindow):
         th = getattr(self, 'passage_load_thread', None)
         if th is not None and th.isRunning():
             reasons.append(tr("the letter-level index is being opened"))
+        for attr in ('local_passage_build_thread', 'local_passage_load_thread',
+                     'local_passage_freshness_thread',
+                     'local_passage_preflight_thread'):
+            th = getattr(self, attr, None)
+            if th is not None and th.isRunning():
+                reasons.append(tr("the My Library letter-level index is busy"))
+                break
         if self._passage_scan_in_flight():
             reasons.append(tr("a letter-level search is running"))
         return reasons
@@ -33957,6 +34522,12 @@ class GenizahGUI(QMainWindow):
         # anything mid-search.
         if self._passage_batch_in_flight():
             self.comp_thread.request_cancel()
+        # A My Library build can run for an hour; a committed close cancels
+        # it (cooperatively -- the swap protocol leaves the previous index
+        # untouched) instead of waiting it out.
+        th = getattr(self, 'local_passage_build_thread', None)
+        if th is not None and th.isRunning():
+            th.request_cancel()
         event.ignore()
         if not getattr(self, '_close_pending', False):
             self._close_pending = True
@@ -34791,7 +35362,10 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    
+    # Qt's own buttons (the Yes / No of every QMessageBox.question) in
+    # Hebrew; before any dialog, including the "already open" one below.
+    _qt_translator = install_qt_translations(app, CURRENT_LANG)
+
     icon_path = resource_path("icon.ico")
     
     if os.path.exists(icon_path):

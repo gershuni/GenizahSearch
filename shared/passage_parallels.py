@@ -439,8 +439,8 @@ def _derive_uid(record_id: str) -> str:
     return m.group(1) if m else record_id
 
 
-def _extract_sys_id(record_id: str) -> Optional[str]:
-    m = _SYS_ID_RE.search(record_id)
+def _extract_sys_id(record_id: str, sys_id_re=None) -> Optional[str]:
+    m = (sys_id_re or _SYS_ID_RE).search(record_id)
     return m.group(1) if m else None
 
 
@@ -455,8 +455,11 @@ class _RegexSysIdParser:
     applies to the incumbent's rows -- never a forked reimplementation of
     the grouping logic (adversarial review finding #1)."""
 
+    def __init__(self, sys_id_re=None):
+        self._sys_id_re = sys_id_re
+
     def parse_full_id_components(self, uid_or_header: str) -> dict:
-        return {'sys_id': _extract_sys_id(uid_or_header)}
+        return {'sys_id': _extract_sys_id(uid_or_header, self._sys_id_re)}
 
 
 def _orig_span(offsets, start: int, end: int, text_len: int):
@@ -576,6 +579,21 @@ class PassageSearcher:
     # Cost bound when uncapped: verify_cap (3,000 records) bounds the render
     # at ~4s worst case, inside every timeout that guards this path.
     render_cap: int = PARALLELS_GROUP_CAP
+    # Which sys_id namespace this searcher's index holds. The Genizah index
+    # holds corpus (99) records only, hence the default; the My Library index
+    # holds LOCAL (97) records only and passes `LOCAL_SYS_ID_RE`. Never the
+    # ANY pattern: an index holds exactly one namespace, and a pattern that
+    # matched the other would group, cap and restrict on a wrong id.
+    sys_id_re: Optional[re.Pattern] = None
+    # The post-verify duplicate-PHOTOGRAPHY demotion (below) is a Genizah
+    # rule: the same physical page photographed under two catalogue records.
+    # The My Library index turns it off -- two near-identical pages of a
+    # user's own files are two pages they own, and labelling one a "duplicate
+    # photograph" hid the very page a query was copied from (measured on the
+    # owner's library, 2026-10-16: 22 rows demoted in one search). The
+    # build-time photography filters are off for My Library for the same
+    # reason (owner ruling, 2026-10-16).
+    demote_duplicate_photography: bool = True
 
     def __post_init__(self) -> None:
         if self.policy is None:
@@ -784,10 +802,10 @@ class PassageSearcher:
         # passage's filter_text mechanism does not share).
         if self.render_cap and self.render_cap > 0:
             capped_main_candidates, main_truncated = _cap_main_results_by_group(
-                eligible_rows, _RegexSysIdParser(), cap=self.render_cap,
+                eligible_rows, _RegexSysIdParser(self.sys_id_re), cap=self.render_cap,
                 order_key=order_key)
             capped_filtered_candidates, _truncated_f = _cap_main_results_by_group(
-                filtered_candidate_rows, _RegexSysIdParser(), cap=self.render_cap,
+                filtered_candidate_rows, _RegexSysIdParser(self.sys_id_re), cap=self.render_cap,
                 order_key=order_key)
         else:
             # Uncapped: every group survives, so nothing is truncated by
@@ -844,7 +862,7 @@ class PassageSearcher:
         # removal. Demote, not delete: the row moves to `filtered`, already
         # rendered, so a skeptical user can still inspect it.
         dup_demoted = 0
-        if len(main_results) > 1:
+        if self.demote_duplicate_photography and len(main_results) > 1:
             survivors: list = []
             for row in main_results:
                 dup_of = None
@@ -1125,7 +1143,8 @@ class PassageSearcher:
         # belt-and-braces) let out-of-set candidates consume the caps and
         # produced false negatives on filtered searches over common texts.
         _allowed = (None if restrict_sys_ids is None else
-                    (lambda rid: _extract_sys_id(rid) in restrict_sys_ids))
+                    (lambda rid: _extract_sys_id(rid, self.sys_id_re)
+                                  in restrict_sys_ids))
         hits, report = search_passage(self.index, text, self.policy,
                                       record_allowed=_allowed,
                                       **({} if checkpoint is None else {'checkpoint': checkpoint}))
@@ -1135,7 +1154,8 @@ class PassageSearcher:
 
         if restrict_sys_ids is not None:
             hits = [h for h in hits
-                    if _extract_sys_id(h.record_id) in restrict_sys_ids]
+                    if _extract_sys_id(h.record_id, self.sys_id_re)
+                    in restrict_sys_ids]
 
         # Query-side offset map, computed ONCE per witness (not per hit/span
         # -- this is O(query length), never O(corpus)) so every rendered

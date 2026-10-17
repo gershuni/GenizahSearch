@@ -234,7 +234,7 @@ def test_an_index_swap_after_a_step_voids_the_run(monkeypatch, fail):
 
     def _swap(n):
         if n == 2:
-            monkeypatch.setattr(pl, '_state_generation', pinned + 1)
+            monkeypatch.setattr(pl._SLOTS[pl.SLOT_GENIZAH], 'generation', pinned + 1)
     s.on_call = _swap
     w = _worker([(SEED, '', MAIN)], [c], s, pinned=pinned)
     w.run()
@@ -283,8 +283,8 @@ def _build(tmp_path, name, order):
 
 
 def _lease(monkeypatch, index_box):
-    monkeypatch.setattr(pl, '_try_acquire_lease', lambda: index_box[0])
-    monkeypatch.setattr(pl, '_release_lease', lambda: None)
+    monkeypatch.setattr(pl, '_try_acquire_lease', lambda *_a: index_box[0])
+    monkeypatch.setattr(pl, '_release_lease', lambda *_a: None)
 
 
 class _NoText:
@@ -329,8 +329,8 @@ def test_an_adapter_failure_crosses_the_boundary_as_a_string(monkeypatch):
         def search_condition(self, *a, **k):
             raise ValueError('inside')
     import shared.passage_parallels as pp
-    monkeypatch.setattr(pl, '_try_acquire_lease', lambda: object())
-    monkeypatch.setattr(pl, '_release_lease', lambda: None)
+    monkeypatch.setattr(pl, '_try_acquire_lease', lambda *_a: object())
+    monkeypatch.setattr(pl, '_release_lease', lambda *_a: None)
     monkeypatch.setattr(pp, 'PassageSearcher', _Boom)
     monkeypatch.setattr(pl, 'compose', lambda *a, **k: 'POLICY')
     with pytest.raises(pl.PassageSearchError) as exc:
@@ -392,6 +392,17 @@ GOOD = Condition(cq.REQ_MUST_NOT, cq.WHERE_MANUSCRIPT, ('א' * 60,))
 def test_conditions_never_run_on_another_method(warnings, method, lab):
     w = _Win([GOOD])
     assert w._comp_compound_gate('main ' * 20, method, lab, 'genizah',
+                                 'standard-40', 'normal', 'normal') is None
+    assert len(warnings) == 1
+
+
+@pytest.mark.parametrize('scope', ['local', 'all'])
+def test_conditions_never_run_outside_the_genizah_corpus(warnings, scope):
+    """A condition selects pages by their Genizah page keys, which no My
+    Library record has: under My Library or All it would silently select
+    nothing on the My Library side, so the run is refused instead."""
+    w = _Win([GOOD])
+    assert w._comp_compound_gate('main ' * 20, 'passage', False, scope,
                                  'standard-40', 'normal', 'normal') is None
     assert len(warnings) == 1
 

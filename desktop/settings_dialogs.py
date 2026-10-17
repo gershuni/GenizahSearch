@@ -1353,6 +1353,24 @@ class SettingsDialog(QDialog):
         btn_row3.addStretch()
         layout.addLayout(btn_row3)
         layout.addSpacing(4)
+        # The My Library letter-level index: same gate as the button above
+        # (disabled at creation, enabled once startup completes). Its own
+        # row: beside the button above, the Hebrew labels were cut off.
+        btn_row4 = QHBoxLayout()
+        self.main_win.btn_build_local_passage_index = QPushButton(
+            tr("Build / Rebuild Letter-Level Index for My Library"))
+        self.main_win.btn_build_local_passage_index.setToolTip(tr(
+            "Builds the index used by letter-level search in My Library, "
+            "from the texts My Library has already extracted. It does not "
+            "update by itself: rebuild it when My Library changes."))
+        self.main_win.btn_build_local_passage_index.clicked.connect(
+            lambda: self.main_win.run_local_passage_index_build())
+        self.main_win.btn_build_local_passage_index.setEnabled(
+            bool(getattr(self.main_win, 'startup_complete', False)))
+        btn_row4.addWidget(self.main_win.btn_build_local_passage_index)
+        btn_row4.addStretch()
+        layout.addLayout(btn_row4)
+        layout.addSpacing(4)
 
         self.main_win.index_progress = QProgressBar()
         self.main_win.index_progress.setVisible(False)
