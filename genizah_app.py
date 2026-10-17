@@ -20337,7 +20337,10 @@ class GenizahGUI(QMainWindow):
                 "them."))
         else:
             state = self._comp_witness_state()
-            fused = passage_witnesses.fuse_and_cap(state)
+            # The same limit as a search: none. Re-fused at the helper's
+            # default, a removal cut a full list back to 200 manuscripts.
+            fused = passage_witnesses.fuse_and_cap(
+                state, cap=passage_witnesses.DESKTOP_GROUP_CAP)
             if fused is not None:
                 main, filtered, _truncated = fused
                 # This is a re-publish, so it carries the same provenance a
@@ -29607,13 +29610,12 @@ class GenizahGUI(QMainWindow):
             _comp_multi = (_comp_dispatch_method == 'passage'
                            and self._comp_has_witnesses())
             if _comp_dispatch_method == 'passage':
-                # render_cap=0 -- UNCAPPED -- for a batch, because the cap
-                # has to be applied ONCE to the FUSED list. Capping each
-                # witness first fuses N already-truncated lists and drops
-                # every contributor past rank 200 in its own witness, which
-                # is exactly where a rare witness of a widely-copied work
-                # sits. A single search passes None and keeps the v9.0.0
-                # default byte for byte.
+                # No manuscript limit on ANY desktop letter-level run
+                # (`passage_witnesses.DESKTOP_GROUP_CAP`, owner 2026-10-17):
+                # a single search, each witness of a batch, the fused list,
+                # the judged list of a run with conditions, and the All merge
+                # (`ScopedPassageSearcher` caps that with this same value).
+                # A single search used to keep the API's 200 and say nothing.
                 # Routed by scope: Genizah, My Library, or both. A Genizah
                 # run goes through `get_passage_searcher` exactly as before.
                 _comp_searcher = passage_local.ScopedPassageSearcher(
@@ -29621,7 +29623,7 @@ class GenizahGUI(QMainWindow):
                     _comp_passage_width,
                     _comp_passage_length,
                     _comp_passage_depth,
-                    render_cap=0 if (_comp_multi or _comp_conditions) else None)
+                    render_cap=passage_witnesses.DESKTOP_GROUP_CAP)
                 _comp_mode_arg = 'literal'
                 _comp_boundary_mode = 'full'
                 _comp_min_boundary = 1
@@ -29678,6 +29680,7 @@ class GenizahGUI(QMainWindow):
                     run_id=_comp_run_id,
                     pinned_generation=(
                         passage_lifecycle.current_state_generation()),
+                    group_cap=passage_witnesses.DESKTOP_GROUP_CAP,
                     fingerprint=_comp_fingerprint)
                 self.comp_thread.scan_finished_signal.connect(
                     _comp_live(self.on_comp_scan_finished))
@@ -29703,6 +29706,7 @@ class GenizahGUI(QMainWindow):
                     # first search would otherwise go unnoticed. One pin per
                     # index the scope searches.
                     **passage_local.scope_pins(_comp_scope),
+                    group_cap=passage_witnesses.DESKTOP_GROUP_CAP,
                     roster=self._comp_witness_roster(),
                     prior_rows=_prior_rows,
                     prior_filtered=_prior_filtered)

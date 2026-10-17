@@ -881,15 +881,15 @@ def test_the_roster_is_the_full_picture_with_the_seed_first():
     assert len(roster) == 2
 
 
-def test_dispatch_asks_for_an_uncapped_searcher_only_when_fusing():
-    """render_cap=0 for a batch, nothing for a single search. Capping each
-    witness before the fusion drops every contributor past rank 200 in its
-    own witness."""
+def test_dispatch_asks_for_an_uncapped_searcher_for_every_run():
+    """Uncapped for a batch, where capping each witness before the fusion
+    drops every contributor past rank 200 in its own witness -- and, since
+    the owner's 2026-10-17 ruling, for every other run too. The behaviour is
+    driven end to end in tests/test_desktop_letter_level_no_cap.py."""
     src = _fn_src('run_composition')
-    # A search with conditions is uncapped too: its cap comes after the
-    # judgement (docs/plans/COMPOSITION_CONDITIONS_PLAN.md).
-    assert 'render_cap=0 if (_comp_multi or _comp_conditions) else None' in src, (
-        'the multi-witness path no longer asks for an uncapped searcher')
+    assert 'render_cap=passage_witnesses.DESKTOP_GROUP_CAP' in src, (
+        'the dispatch no longer asks for an uncapped searcher')
+    assert pw.DESKTOP_GROUP_CAP == 0
 
 
 def test_dispatch_pins_the_index_generation_on_the_ui_thread():

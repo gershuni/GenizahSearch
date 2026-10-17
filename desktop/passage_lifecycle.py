@@ -988,16 +988,18 @@ def get_passage_searcher(text_fetcher, width: str = _DEFAULT_WIDTH,
     `render_cap` is THREE-valued, and the distinction is load-bearing:
 
     * `None` (default) -- say nothing, and `PassageSearcher` applies its own
-      `PARALLELS_GROUP_CAP` (200). This is the single-witness desktop search,
-      unchanged from v9.0.0.
-    * `0` -- UNCAPPED, for the MULTI-WITNESS path. Each witness must come back
-      whole, because the cap has to be applied ONCE to the FUSED list. Capping
-      each witness first fuses N already-truncated lists and silently drops
-      every contributor that sat past rank 200 in its own witness -- which is
-      exactly where a rare witness of a widely-copied work shows up. The web
-      does the same thing for the same reason
-      (`web/pages/parallels.py`: `render_cap=0` on the seed and on every
-      witness, then one `_cap_main_results_by_group` after the fusion).
+      `PARALLELS_GROUP_CAP` (200). The desktop window no longer asks for this:
+      until 2026-10-17 its single-witness search did, and kept 200
+      manuscripts without saying so.
+    * `0` -- UNCAPPED, what every desktop run passes
+      (`passage_witnesses.DESKTOP_GROUP_CAP`). A multi-witness batch needs it
+      regardless of any later cap: each witness must come back whole, because
+      a cap belongs ONCE on the FUSED list. Capping each witness first fuses N
+      already-truncated lists and silently drops every contributor that sat
+      past rank 200 in its own witness -- which is exactly where a rare
+      witness of a widely-copied work shows up. The web does the same thing
+      for the same reason (`web/pages/parallels.py`: `render_cap=0` on the
+      seed and on every witness).
     * any other int -- that cap, for a caller that knows what it wants.
 
     Note `0` is a real value, not a falsy stand-in for "unset": the caps are

@@ -309,7 +309,8 @@ class ScopedPassageSearcher:
     def _group_cap(self) -> int:
         """The manuscript-group cap each index applied: PassageSearcher's
         default when the caller passed none, else the caller's (0 is
-        uncapped -- a multi-witness or conditions run caps later, once)."""
+        uncapped, which is what the desktop window always passes:
+        `passage_witnesses.DESKTOP_GROUP_CAP`)."""
         if self._render_cap is None:
             from shared.parallels_service import PARALLELS_GROUP_CAP
             return PARALLELS_GROUP_CAP
