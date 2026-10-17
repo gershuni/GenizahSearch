@@ -444,6 +444,41 @@ def _extract_sys_id(record_id: str, sys_id_re=None) -> Optional[str]:
     return m.group(1) if m else None
 
 
+# A record's image set: the `IE` of `{sys_id}_IE{n}_P{######}_FL{n}`.
+_IMAGE_SET_RE = re.compile(r'_(IE\d+)_P\d+')
+
+
+def _image_set(record_id: str) -> Optional[str]:
+    m = _IMAGE_SET_RE.search(record_id or '')
+    return m.group(1) if m else None
+
+
+def _shared_image_sets(rows, sys_id_re=None) -> frozenset:
+    """The image sets (IEs) that more than one catalogue record carries, as
+    this search's own rows show them.
+
+    The duplicate-photography pass uses this to decide WHICH copy of a page
+    to keep. Three RNL microfilm reels are attached to every box record on
+    them (66, 52 and 47 records, each carrying the whole reel: 5.8% of the
+    index, measured 2026-10-17), so a reel page is one photograph listed
+    under dozens of shelfmarks, and the copy kept by score order is usually
+    the wrong box -- while that box's OWN photograph, the one row whose
+    shelfmark is certain, was the copy demoted.
+
+    Read from the rows rather than the index: every record carrying a page
+    returns it (each record holds the same text), so the rows show the
+    sharing without scanning 702K record ids. A pre-search restriction can
+    hide it, and the pass then keeps the higher score, as it always did."""
+    carriers: dict = {}
+    for row in rows:
+        header = row.get('raw_header') or ''
+        ie = _image_set(header)
+        if ie is not None:
+            carriers.setdefault(ie, set()).add(
+                _extract_sys_id(header, sys_id_re))
+    return frozenset(ie for ie, sids in carriers.items() if len(sids) > 1)
+
+
 class _RegexSysIdParser:
     """Minimal `UidComponentParser` (shared/parallels_service.py's Protocol)
     for PassageSearcher's OWN group cap. PassageSearcher has no
@@ -861,24 +896,40 @@ class PassageSearcher:
         # the demoted count ships in the return dict -- never a silent
         # removal. Demote, not delete: the row moves to `filtered`, already
         # rendered, so a skeptical user can still inspect it.
+        #
+        # WHICH copy stays: a record's own photograph over a copy on an image
+        # set several records carry (`_shared_image_sets`), then the higher
+        # score. The own photograph takes the kept copy's place in the list.
         dup_demoted = 0
         if self.demote_duplicate_photography and len(main_results) > 1:
+            shared_images = _shared_image_sets(
+                list(eligible_rows) + list(filtered_candidate_rows),
+                self.sys_id_re)
+
+            def _on_shared_image(r: dict) -> bool:
+                return _image_set(r['raw_header']) in shared_images
+
             survivors: list = []
             for row in main_results:
-                dup_of = None
+                dup_at = None
                 tb = raw_text_by_header.get(row['raw_header'])
                 if tb:
-                    for prev in survivors[-DUP_SCAN_WINDOW:]:
-                        ta = raw_text_by_header.get(prev['raw_header'])
+                    start = max(0, len(survivors) - DUP_SCAN_WINDOW)
+                    for i in range(start, len(survivors)):
+                        ta = raw_text_by_header.get(survivors[i]['raw_header'])
                         if ta and is_duplicate_photography(ta, tb):
-                            dup_of = prev
+                            dup_at = i
                             break
-                if dup_of is not None:
-                    row['filter_reason'] = 'duplicate_photography'
-                    filtered_results.append(row)
-                    dup_demoted += 1
-                else:
+                if dup_at is None:
                     survivors.append(row)
+                    continue
+                demoted = row
+                if (_on_shared_image(survivors[dup_at])
+                        and not _on_shared_image(row)):
+                    demoted, survivors[dup_at] = survivors[dup_at], row
+                demoted['filter_reason'] = 'duplicate_photography'
+                filtered_results.append(demoted)
+                dup_demoted += 1
             main_results = survivors
 
         result = {
