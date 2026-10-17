@@ -87,6 +87,8 @@ DESKTOP_MODULES = [
     "desktop/quoting_texts_dialog.py",
     # 2026-10-17: Qt's own Hebrew strings (Yes / No / OK / Cancel buttons).
     "desktop/qt_translations.py",
+    # 2026-10-17: export saves that ask when the file is open in Word or Excel.
+    "desktop/export_save.py",
 ]
 
 # Compound statement types whose bodies run at import time

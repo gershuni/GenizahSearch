@@ -5,7 +5,7 @@ Word and Excel lock the file they have open, and saving over it raises
 `PermissionError`. Every export showed that as a raw English error inside the
 Hebrew interface ("Failed to save DOCX: [Errno 13] Permission denied: ...";
 owner, 2026-10-17). Every desktop export now writes through `save_export`,
-which asks: Try again (after closing the file), Save under another name, or
+which asks: Retry (after closing the file), Save under another name, or
 Cancel.
 
 The export is built once; only the write is repeated. Any other error still
@@ -87,8 +87,10 @@ def ask_locked(parent, path: str) -> str:
                    'program, such as Word or Excel.').format(
                        name=os.path.basename(path)))
     box.setInformativeText(tr(
-        'Close it and choose Try again, or save it under another name.'))
-    retry = box.addButton(tr("Try again"), QMessageBox.ButtonRole.AcceptRole)
+        'Close it and choose Retry, or save it under another name.'))
+    # "Retry", not "Try again": the website's discovery strings own that key
+    # (tests/test_discovery_display_strings.py), and both read "נסה שוב".
+    retry = box.addButton(tr("Retry"), QMessageBox.ButtonRole.AcceptRole)
     rename = box.addButton(tr("Save under another name"),
                            QMessageBox.ButtonRole.ActionRole)
     box.addButton(tr("Cancel"), QMessageBox.ButtonRole.RejectRole)

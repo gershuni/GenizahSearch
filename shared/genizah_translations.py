@@ -4460,9 +4460,8 @@ TRANSLATIONS.update({
     "File in use":                          "הקובץ בשימוש",
     'Could not save "{name}". It may be open in another program, such as Word or Excel.':
         'לא ניתן לשמור את "{name}". ייתכן שהקובץ פתוח בתוכנה אחרת, כגון Word או Excel.',
-    "Close it and choose Try again, or save it under another name.":
+    "Close it and choose Retry, or save it under another name.":
         'סגור אותו ובחר "נסה שוב", או שמור אותו בשם אחר.',
-    "Try again":                            "נסה שוב",
     "Save under another name":              "שמור בשם אחר",
     "Collapse":                             "כווץ",
     "No candidates to export":              "אין מועמדים לייצוא",
