@@ -213,11 +213,13 @@ def _merge(a: dict, b: dict, cap: int = 0) -> dict:
     truncation flags OR.
 
     `cap` > 0 applies the manuscript-group cap once more, to the merged
-    lists, with the same function and rule each index applied to its own
-    (`_cap_main_results_by_group`, both buckets capped, truncation read from
-    `main`). Each index capped only its own list, so without this two lists
-    of up to `cap` manuscripts each came back as up to twice that, with no
-    truncation reported."""
+    lists, with the same function each index applied to its own
+    (`_cap_main_results_by_group`, both buckets). Each index capped only its
+    own list, so without this two lists of up to `cap` manuscripts each came
+    back as up to twice that, with no truncation reported. Either bucket
+    overflowing sets the flag, as in `passage_witnesses.fuse_and_cap`: the
+    filtered rows are shown and can be promoted to witnesses, so dropping
+    some of them is results omitted too."""
     from shared.parallels_service import _cap_main_results_by_group
     from shared.passage_parallels import (_RegexSysIdParser,
                                           _synthesize_query_report)
@@ -227,8 +229,9 @@ def _merge(a: dict, b: dict, cap: int = 0) -> dict:
     if cap and cap > 0:
         parser = _RegexSysIdParser(ANY_SYS_ID_RE)
         main, main_cut = _cap_main_results_by_group(main, parser, cap=cap)
-        filtered, _cut = _cap_main_results_by_group(filtered, parser, cap=cap)
-        truncated = truncated or main_cut
+        filtered, filtered_cut = _cap_main_results_by_group(
+            filtered, parser, cap=cap)
+        truncated = truncated or main_cut or filtered_cut
     out = {
         'main': sorted(main, key=lambda r: r.get('score', 0), reverse=True),
         'filtered': sorted(filtered, key=lambda r: r.get('score', 0),

@@ -668,11 +668,14 @@ def test_router_sends_conditions_to_the_genizah_index(monkeypatch):
     (150, 150, 0, 300, False),      # 0 is uncapped (batch runs cap later)
     (150, 150, 100, 100, True),     # a caller's own cap
 ])
+@pytest.mark.parametrize('bucket', ['main', 'filtered'])
 def test_all_scope_caps_the_merged_list_once(
-        monkeypatch, n_genizah, n_local, render_cap, kept, truncated):
-    """Codex, PR #397 (P2): each index caps its own list at 200 manuscripts,
-    so the All scope merged up to 400 and reported nothing truncated. The
-    merged list is capped once more, keeping the best-scored manuscripts."""
+        monkeypatch, n_genizah, n_local, render_cap, kept, truncated, bucket):
+    """Codex, PR #397 (P2, two rounds): each index caps its own list at 200
+    manuscripts, so the All scope merged up to 400 and reported nothing
+    truncated. The merged list is capped once more, keeping the best-scored
+    manuscripts, and either bucket overflowing sets the flag -- filtered rows
+    are shown and can be promoted to witnesses."""
     import desktop.passage_lifecycle as pl
     import desktop.passage_local as pll
 
@@ -681,7 +684,9 @@ def test_all_scope_caps_the_merged_list_once(
             self.rows = rows
 
         def search_composition_logic(self, *_a, **_k):
-            return {'main': [dict(r) for r in self.rows], 'filtered': [],
+            rows = [dict(r) for r in self.rows]
+            return {'main': rows if bucket == 'main' else [],
+                    'filtered': rows if bucket == 'filtered' else [],
                     'truncated_to_200': False,
                     'dropped_text_lookup_failures': 0,
                     'duplicate_photography_demoted': 0,
@@ -701,8 +706,8 @@ def test_all_scope_caps_the_merged_list_once(
     r = pll.ScopedPassageSearcher(object(), 'widest-40', 'default',
                                   'default', render_cap=render_cap)
     both = r.search_composition_logic('x', corpus_scope='all')
-    scores = [x['score'] for x in both['main']]
-    assert len({x['raw_header'].split('_')[0] for x in both['main']}) == kept
+    scores = [x['score'] for x in both[bucket]]
+    assert len({x['raw_header'].split('_')[0] for x in both[bucket]}) == kept
     assert scores == sorted((x['score'] for x in g_rows + l_rows),
                             reverse=True)[:kept]
     assert both['truncated_to_200'] is truncated
