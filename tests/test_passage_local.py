@@ -86,6 +86,19 @@ def test_local_pattern_is_local_only():
     assert CORPUS_SYS_ID_RE.search(header) is None
 
 
+@pytest.mark.parametrize('n, label', [
+    (0, '0 MB'),
+    (1, '1 MB'),
+    (282_694_858, '283 MB'),       # the owner's library; it read "0 GB"
+    (999_400_000, '999 MB'),
+    (999_600_000, '1.0 GB'),       # never "1000 MB"
+    (11_000_000_000, '11.0 GB'),
+])
+def test_build_sizes_read_in_mb_below_a_gigabyte(n, label):
+    from desktop.passage_local import disk_size_label
+    assert disk_size_label(n) == label
+
+
 # ---------------------------------------------------------------------------
 # Segmentation.
 # ---------------------------------------------------------------------------

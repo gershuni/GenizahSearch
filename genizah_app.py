@@ -17955,8 +17955,9 @@ class GenizahGUI(QMainWindow):
         box.setIcon(QMessageBox.Icon.Question)
         box.setText(tr(
             "Letter-level search in My Library needs its own index, built "
-            "from the texts My Library has already extracted. Your My "
-            "Library index is only read, never changed.\n\n"
+            "from the texts My Library has already extracted. The index does "
+            "not update by itself: when My Library changes, you will be told "
+            "to rebuild it.\n\n"
             "For a large library this takes up to an hour or more and needs "
             "a lot of free disk space while it runs; you will see the "
             "figures before it starts. You can always build it later from "
@@ -18081,21 +18082,36 @@ class GenizahGUI(QMainWindow):
         if available is not None and needed and available < needed:
             QMessageBox.warning(
                 self, tr("Not enough disk space"),
-                tr("Building the letter-level index needs about {} GB free "
-                   "on this drive, and there is about {} GB. Free some space "
-                   "and try again.").format(
-                       '%.0f' % (needed / 1e9), '%.1f' % (available / 1e9)))
+                tr("Building the letter-level index for My Library needs "
+                   "about {} free on this drive, and there is about {}. Free "
+                   "some space and try again.").format(
+                       passage_local.disk_size_label(needed),
+                       passage_local.disk_size_label(available)))
             return
         if confirm:
+            if needed:
+                text = tr(
+                    "Build the letter-level index for My Library from {} "
+                    "indexed pages?\n\nThis needs up to about {} of free disk "
+                    "space while it runs (the finished index is smaller) and "
+                    "can take an hour or more on a large library. The "
+                    "application stays usable meanwhile.\n\nThe index does "
+                    "not update by itself: when My Library changes, you will "
+                    "be told to rebuild it.").format(
+                        '{:,}'.format(n_pages),
+                        passage_local.disk_size_label(needed))
+            else:
+                # The size estimate failed: no figure rather than "0 MB".
+                text = tr(
+                    "Build the letter-level index for My Library from {} "
+                    "indexed pages?\n\nThis can take an hour or more on a "
+                    "large library and needs free disk space while it runs. "
+                    "The application stays usable meanwhile.\n\nThe index "
+                    "does not update by itself: when My Library changes, you "
+                    "will be told to rebuild it.").format(
+                        '{:,}'.format(n_pages))
             answer = QMessageBox.question(
-                self, tr("Build letter-level index for My Library"),
-                tr("Build the letter-level index for My Library from {} "
-                   "indexed pages?\n\nThis needs up to about {} GB of free "
-                   "disk space while it runs (the finished index is smaller) "
-                   "and can take an hour or more on a large library. The "
-                   "application stays usable meanwhile. Your My Library "
-                   "index is only read, never changed.").format(
-                       '{:,}'.format(n_pages), '%.0f' % (needed / 1e9)),
+                self, tr("Build letter-level index for My Library"), text,
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if answer != QMessageBox.StandardButton.Yes:
                 return

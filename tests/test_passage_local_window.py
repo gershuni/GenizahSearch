@@ -488,6 +488,98 @@ def test_an_answer_after_close_or_during_a_build_does_nothing():
         assert w.started == []
 
 
+# The build's size estimate on the owner's real library (2026-10-17): the
+# dialog showed it as "about 0 GB".
+_REAL_SMALL_BUILD = 282_694_858
+
+
+def _confirm_text(monkeypatch, tmp_path, needed):
+    monkeypatch.setattr(pll, 'local_passage_root', lambda: str(tmp_path))
+    asked = []
+    monkeypatch.setattr(
+        genizah_app.QMessageBox, 'question',
+        lambda *a, **k: asked.append(a[2])
+        or genizah_app.QMessageBox.StandardButton.No)
+    w = _PreWin()
+    w._on_local_passage_preflight('db', 3401, needed, True)
+    assert w.started == []                  # answered No
+    return asked[0]
+
+
+def test_a_small_build_is_sized_in_mb_not_zero_gb(monkeypatch, tmp_path):
+    text = _confirm_text(monkeypatch, tmp_path, _REAL_SMALL_BUILD)
+    assert 'up to about 283 MB of free disk space' in text
+    assert 'GB' not in text
+
+
+def test_a_failed_estimate_shows_no_figure(monkeypatch, tmp_path):
+    """`needed` 0 means the estimate failed: no "0 MB"."""
+    text = _confirm_text(monkeypatch, tmp_path, 0)
+    assert 'MB' not in text and 'GB' not in text
+    assert 'needs free disk space' in text
+
+
+def test_not_enough_space_names_both_sizes(monkeypatch, tmp_path):
+    import collections
+    import shutil
+    monkeypatch.setattr(pll, 'local_passage_root', lambda: str(tmp_path))
+    usage = collections.namedtuple('usage', 'total used free')
+    monkeypatch.setattr(shutil, 'disk_usage',
+                        lambda p: usage(1, 1, 50_000_000))
+    warned = []
+    monkeypatch.setattr(genizah_app.QMessageBox, 'warning',
+                        lambda *a, **k: warned.append(a[2]))
+    w = _PreWin()
+    w._on_local_passage_preflight('db', 3401, _REAL_SMALL_BUILD, True)
+    assert w.started == []
+    assert 'about 283 MB free' in warned[0]
+    assert 'there is about 50 MB.' in warned[0]
+
+
+def _tr_literals(src):
+    import ast
+    import textwrap
+    out = []
+    for node in ast.walk(ast.parse(textwrap.dedent(src))):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'tr' and node.args
+                and isinstance(node.args[0], ast.Constant)):
+            out.append(node.args[0].value)
+    return out
+
+
+def _build_texts():
+    """Every tr() string the My Library build shows: the offer, the
+    preflight's dialogs, and the Settings button's tooltip."""
+    from desktop import settings_dialogs
+    texts = []
+    for fn in (APP._maybe_offer_local_passage_build,
+               APP._on_local_passage_preflight):
+        texts += _tr_literals(inspect.getsource(fn))
+    texts += [s for s in _tr_literals(inspect.getsource(settings_dialogs))
+              if 'My Library' in s]
+    return texts
+
+
+def test_the_build_texts_say_the_index_does_not_update_by_itself():
+    """Hand test 2026-10-17: "Your My Library index is only read, never
+    changed" (meaning the build does not modify the library) read as "this
+    index never updates". It does not update by itself; a notice after each
+    change says to rebuild (owner ruling 2026-10-16)."""
+    texts = _build_texts()
+    assert not [s for s in texts if 'never changed' in s]
+    assert len([s for s in texts if 'does not update by itself' in s]) == 4
+
+
+def test_every_build_text_is_translated():
+    from shared.genizah_translations import TRANSLATIONS
+    texts = _build_texts()
+    assert len(texts) >= 8
+    for s in texts:
+        assert s in TRANSLATIONS, 'no Hebrew for %r' % s[:70]
+        assert s.count('{}') == TRANSLATIONS[s].count('{}'), s[:70]
+
+
 # ---------------------------------------------------------------------------
 # My Library results as witnesses (owner, 2026-10-16).
 # ---------------------------------------------------------------------------

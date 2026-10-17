@@ -1356,8 +1356,8 @@ class SettingsDialog(QDialog):
             tr("Build / Rebuild Letter-Level Index for My Library"))
         self.main_win.btn_build_local_passage_index.setToolTip(tr(
             "Builds the index used by letter-level search in My Library, "
-            "from the texts My Library has already extracted. Your My "
-            "Library index is only read, never changed."))
+            "from the texts My Library has already extracted. It does not "
+            "update by itself: rebuild it when My Library changes."))
         self.main_win.btn_build_local_passage_index.clicked.connect(
             lambda: self.main_win.run_local_passage_index_build())
         self.main_win.btn_build_local_passage_index.setEnabled(

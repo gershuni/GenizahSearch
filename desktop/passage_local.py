@@ -77,6 +77,17 @@ def estimate_local_build_bytes(db_path: str) -> int:
     return estimate_artifact_bytes(letters_ub) + 8 * letters_ub
 
 
+def disk_size_label(n_bytes: int) -> str:
+    """A byte count as the build dialogs show it: MB below 1 GB, since a
+    small library's build needs a few hundred MB, which whole GB rounds to
+    "0 GB"."""
+    n = max(0, int(n_bytes))
+    mb = round(n / 1_000_000)
+    if mb < 1000:
+        return '{} MB'.format(max(1, mb) if n else 0)
+    return '%.1f GB' % (n / 1e9)
+
+
 def refresh_signature(root: Optional[str] = None, cancel_check=None) -> str:
     """Rewrite the build's corpus signature file from the LOCAL sidecar as it
     is now and return its path. The build hashes it into its manifest."""
