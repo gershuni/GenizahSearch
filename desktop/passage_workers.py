@@ -250,6 +250,15 @@ class LocalPassageBuildThread(PassageBuildThread):
                 self._emit('arrange', 0, 0, 0)
 
             records = _records()
+            # `[sig]` is the corpus fingerprint the manifest records, and the
+            # freshness check compares against. The swap's "corpus changed"
+            # re-hash reads that same FILE, which nothing rewrites mid-build,
+            # so a library change DURING the build does not discard it -- by
+            # design: a scan can finish at any point of an hour-long build,
+            # and discarding would leave a first build with no index at all.
+            # The new index is installed, and the window's freshness check
+            # after every build end (`_on_local_passage_build_finished`) shows
+            # the rebuild notice, as after any scan (owner, 2026-10-16).
             result = passage_lifecycle.run_build_and_swap(
                 self._root, records, [sig], self._db_path,
                 partitions=LOCAL_PARTITIONS, corpus_label='my_library',

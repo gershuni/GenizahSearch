@@ -207,18 +207,33 @@ def scope_pins(scope: str) -> dict:
 # Dispatch.
 # ---------------------------------------------------------------------------
 
-def _merge(a: dict, b: dict) -> dict:
+def _merge(a: dict, b: dict, cap: int = 0) -> dict:
     """One result from two indexes. Rows keep their own scores (matched
     letters on both sides) and are re-sorted together; counters add,
-    truncation flags OR."""
-    from shared.passage_parallels import _synthesize_query_report
+    truncation flags OR.
+
+    `cap` > 0 applies the manuscript-group cap once more, to the merged
+    lists, with the same function and rule each index applied to its own
+    (`_cap_main_results_by_group`, both buckets capped, truncation read from
+    `main`). Each index capped only its own list, so without this two lists
+    of up to `cap` manuscripts each came back as up to twice that, with no
+    truncation reported."""
+    from shared.parallels_service import _cap_main_results_by_group
+    from shared.passage_parallels import (_RegexSysIdParser,
+                                          _synthesize_query_report)
+    main = (a.get('main') or []) + (b.get('main') or [])
+    filtered = (a.get('filtered') or []) + (b.get('filtered') or [])
+    truncated = bool(a.get('truncated_to_200') or b.get('truncated_to_200'))
+    if cap and cap > 0:
+        parser = _RegexSysIdParser(ANY_SYS_ID_RE)
+        main, main_cut = _cap_main_results_by_group(main, parser, cap=cap)
+        filtered, _cut = _cap_main_results_by_group(filtered, parser, cap=cap)
+        truncated = truncated or main_cut
     out = {
-        'main': sorted((a.get('main') or []) + (b.get('main') or []),
-                       key=lambda r: r.get('score', 0), reverse=True),
-        'filtered': sorted((a.get('filtered') or []) + (b.get('filtered') or []),
-                           key=lambda r: r.get('score', 0), reverse=True),
-        'truncated_to_200': bool(a.get('truncated_to_200')
-                                 or b.get('truncated_to_200')),
+        'main': sorted(main, key=lambda r: r.get('score', 0), reverse=True),
+        'filtered': sorted(filtered, key=lambda r: r.get('score', 0),
+                           reverse=True),
+        'truncated_to_200': truncated,
         'dropped_text_lookup_failures': int(
             a.get('dropped_text_lookup_failures', 0)
             + b.get('dropped_text_lookup_failures', 0)),
@@ -286,7 +301,16 @@ class ScopedPassageSearcher:
             results.append(finish_local_rows(local, fetcher))
         if len(results) == 1:
             return results[0]
-        return _merge(results[0], results[1])
+        return _merge(results[0], results[1], cap=self._group_cap())
+
+    def _group_cap(self) -> int:
+        """The manuscript-group cap each index applied: PassageSearcher's
+        default when the caller passed none, else the caller's (0 is
+        uncapped -- a multi-witness or conditions run caps later, once)."""
+        if self._render_cap is None:
+            from shared.parallels_service import PARALLELS_GROUP_CAP
+            return PARALLELS_GROUP_CAP
+        return self._render_cap
 
     def search_condition(self, text: str, pages=(), sys_ids=(),
                          should_stop=None, render_limit: int = 0):

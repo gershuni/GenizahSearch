@@ -507,6 +507,49 @@ def test_the_my_library_build_worker_turns_hygiene_off(monkeypatch, tmp_path):
     assert seen['needed_bytes'] == 123
 
 
+@pytest.mark.parametrize('change_mid_build', [False, True])
+def test_a_library_change_during_the_build_reads_stale_after_it(
+        slots, local_db, tmp_path, monkeypatch, change_mid_build):
+    """Codex, PR #397 (P1): a scan that changes My Library during a build
+    does not discard the build (by design; see `LocalPassageBuildThread.
+    run`), so the index it installs must read STALE -- that is what puts up
+    the rebuild notice the window shows after every build end."""
+    pl = slots
+    import desktop.passage_local as passage_local
+    import shared.passage_local_corpus as plc
+    from desktop.passage_workers import LocalPassageBuildThread
+    path, _fa, _fb = local_db
+    monkeypatch.setattr(passage_local, 'local_db_path', lambda: path)
+    real_iter = plc.iter_local_records
+
+    def _iter(db, **kw):
+        for i, rec in enumerate(real_iter(db, **kw)):
+            if i == 1 and change_mid_build:
+                conn = sqlite3.connect(path)
+                conn.execute("UPDATE processed_files SET mtime=2.0 "
+                             "WHERE sys_id=?", (SYS_B,))
+                conn.commit()
+                conn.close()
+            yield rec
+
+    monkeypatch.setattr(plc, 'iter_local_records', _iter)
+    got = []
+    t = LocalPassageBuildThread(
+        str(tmp_path / 'root'), path,
+        lambda g: pl.close_passage_state(g, slot=pl.SLOT_LOCAL))
+    t.finished_signal.connect(got.append)
+    t.error_signal.connect(lambda e: got.append(('error', e)))
+    t.cancelled_signal.connect(lambda: got.append('cancelled'))
+    t.run()
+    assert len(got) == 1 and getattr(got[0], 'status', '') == 'installed', got
+    result = got[0]
+    try:
+        assert passage_local.local_freshness(result.live_dir) == (
+            pl.STALE if change_mid_build else pl.FRESH)
+    finally:
+        result.index.close()
+
+
 def test_segments_of_one_page_come_back_as_one_row():
     """A long page that matched in two segments is ONE row, the better one,
     with both segments' matches in its highlight; a page already in 'main'
@@ -617,6 +660,52 @@ def test_router_sends_conditions_to_the_genizah_index(monkeypatch):
     assert calls == [(pl.SLOT_GENIZAH, 'x', {
         'pages': (1,), 'sys_ids': ('s',), 'should_stop': None,
         'render_limit': 3})]
+
+
+@pytest.mark.parametrize('n_genizah, n_local, render_cap, kept, truncated', [
+    (150, 150, None, 200, True),    # the default cap, applied once to both
+    (120, 50, None, 170, False),    # under the cap: everything, complete
+    (150, 150, 0, 300, False),      # 0 is uncapped (batch runs cap later)
+    (150, 150, 100, 100, True),     # a caller's own cap
+])
+def test_all_scope_caps_the_merged_list_once(
+        monkeypatch, n_genizah, n_local, render_cap, kept, truncated):
+    """Codex, PR #397 (P2): each index caps its own list at 200 manuscripts,
+    so the All scope merged up to 400 and reported nothing truncated. The
+    merged list is capped once more, keeping the best-scored manuscripts."""
+    import desktop.passage_lifecycle as pl
+    import desktop.passage_local as pll
+
+    class _S:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def search_composition_logic(self, *_a, **_k):
+            return {'main': [dict(r) for r in self.rows], 'filtered': [],
+                    'truncated_to_200': False,
+                    'dropped_text_lookup_failures': 0,
+                    'duplicate_photography_demoted': 0,
+                    'query_report': {}}
+
+    # Interleaved scores: Genizah even, My Library odd.
+    g_rows = [{'raw_header': f'99{i:016d}_IE1_P1_FL1',
+               'score': 2000.0 - 2 * i} for i in range(n_genizah)]
+    l_rows = [{'raw_header': _make_full_header(f'97{i:016d}', 1, 1),
+               'score': 1999.0 - 2 * i} for i in range(n_local)]
+    monkeypatch.setattr(
+        pl, 'get_passage_searcher',
+        lambda *a, slot=pl.SLOT_GENIZAH, **k:
+            _S(l_rows if slot == pl.SLOT_LOCAL else g_rows))
+    monkeypatch.setattr(pll.LocalPageTextFetcher, 'shelfmark',
+                        lambda self, h: 'a.txt')
+    r = pll.ScopedPassageSearcher(object(), 'widest-40', 'default',
+                                  'default', render_cap=render_cap)
+    both = r.search_composition_logic('x', corpus_scope='all')
+    scores = [x['score'] for x in both['main']]
+    assert len({x['raw_header'].split('_')[0] for x in both['main']}) == kept
+    assert scores == sorted((x['score'] for x in g_rows + l_rows),
+                            reverse=True)[:kept]
+    assert both['truncated_to_200'] is truncated
 
 
 def test_router_merges_both_indexes_by_score(monkeypatch):
