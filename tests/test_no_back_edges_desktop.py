@@ -85,6 +85,8 @@ DESKTOP_MODULES = [
     # 2026-10-15: the "Quoting texts..." dialog, kept out of compound_ui.py so
     # that pure-widgets module stays free of network code.
     "desktop/quoting_texts_dialog.py",
+    # 2026-10-17: Qt's own Hebrew strings (Yes / No / OK / Cancel buttons).
+    "desktop/qt_translations.py",
 ]
 
 # Compound statement types whose bodies run at import time

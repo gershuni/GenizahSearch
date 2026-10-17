@@ -2525,6 +2525,10 @@ moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `deskt
 - **Function** `running_qthreads` (Line 48) — Every QThread created from Python whose thread is still running, except this one.
 - **Function** `settle_running_threads` (Line 69) — Stop what stops within ``wait_ms``; keep the rest from being destroyed at exit.
 
+## desktop/qt_translations.py
+
+- **Function** `install_qt_translations` (Line 41) — Install Qt's Hebrew translation on `app` when `lang` is 'he' (the Yes / No / OK / Cancel Qt draws itself).
+
 ## Phase 145 — Passage-Matching Parallels Search (web beta)
 
 `shared/passage_parallels.py` and `web/passage_assets.py`, added for the

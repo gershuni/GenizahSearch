@@ -65,6 +65,7 @@ from desktop.single_instance import (
     acquire_instance_lock, relaunch_if_requested, relaunch_looks_possible, request_restart, restarted_from,
 )
 from desktop.qthread_exit import settle_running_threads
+from desktop.qt_translations import install_qt_translations
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
 from desktop.widgets.line_number_text_edit import (
@@ -35361,7 +35362,10 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    
+    # Qt's own buttons (the Yes / No of every QMessageBox.question) in
+    # Hebrew; before any dialog, including the "already open" one below.
+    _qt_translator = install_qt_translations(app, CURRENT_LANG)
+
     icon_path = resource_path("icon.ico")
     
     if os.path.exists(icon_path):
