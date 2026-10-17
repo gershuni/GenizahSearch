@@ -27240,10 +27240,11 @@ class GenizahGUI(QMainWindow):
                     # EXPUX-03: omit MiDRASH credit on Credits sheet when LOCAL-only.
                     local_only=_local_only_export,
                 )
-                with open(path, 'wb') as f:
-                    f.write(content)
-                self._save_last_folder(path)
-                self._show_export_saved_dialog(path)
+                from desktop.export_save import save_export, write_bytes
+                path = save_export(self, path, lambda p: write_bytes(p, content))
+                if path:
+                    self._save_last_folder(path)
+                    self._show_export_saved_dialog(path)
 
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save XLSX:\n{str(e)}")
@@ -27260,7 +27261,11 @@ class GenizahGUI(QMainWindow):
                     csv_headers = headers + [_fp_label, _pg_label]
                 else:
                     csv_headers = headers
-                with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+                from contextlib import nullcontext
+                from desktop.export_save import save_export, write_text
+                # Built in memory, then written by save_export: a file open in
+                # Excel is retried or renamed, never a half-written export.
+                with nullcontext(io.StringIO()) as f:
                     f.write(credit_text)
                     f.write("\n" + search_info_text + "\n")
                     writer = csv.writer(f)
@@ -27283,8 +27288,11 @@ class GenizahGUI(QMainWindow):
                             # (page label per D-02, no double-prefix).
                             clean_row = clean_row + _csv_extra_cols(r, _export_filepath)
                         writer.writerow(clean_row)
-                self._save_last_folder(path)
-                self._show_export_saved_dialog(path)
+                path = save_export(self, path, lambda p: write_text(
+                    p, f.getvalue(), 'utf-8-sig', newline=''))
+                if path:
+                    self._save_last_folder(path)
+                    self._show_export_saved_dialog(path)
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{str(e)}")
 
@@ -27321,16 +27329,20 @@ class GenizahGUI(QMainWindow):
                     # on a right-to-left paragraph as flush LEFT.
                     set_document_rtl(doc)
 
-                doc.save(path)
-                self._save_last_folder(path)
-                self._show_export_saved_dialog(path)
+                from desktop.export_save import save_export
+                path = save_export(self, path, doc.save)
+                if path:
+                    self._save_last_folder(path)
+                    self._show_export_saved_dialog(path)
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save DOCX:\n{str(e)}")
 
         # --- TXT ---
         else:
             try:
-                with open(path, 'w', encoding='utf-8') as f:
+                from contextlib import nullcontext
+                from desktop.export_save import save_export, write_text
+                with nullcontext(io.StringIO()) as f:
                     f.write(credit_text)
                     f.write("\n" + search_info_text + "\n\n")
                     for r in results_to_export:
@@ -27347,8 +27359,10 @@ class GenizahGUI(QMainWindow):
                             # passage when full_text is available; falls back to the
                             # byte-identical pre-v7.17 single-line snippet otherwise.
                             f.write(_format_txt_genizah_block(r, full_text=_full_text_for_export(r)) + "\n\n")
-                self._save_last_folder(path)
-                self._show_export_saved_dialog(path)
+                path = save_export(self, path, lambda p: write_text(p, f.getvalue(), 'utf-8'))
+                if path:
+                    self._save_last_folder(path)
+                    self._show_export_saved_dialog(path)
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{str(e)}")
 
@@ -28086,9 +28100,11 @@ class GenizahGUI(QMainWindow):
                                 wb.remove(_empty_ws)
                         wb.active = wb.index(ws_local)
 
-                    wb.save(path)
-                    self._save_last_folder(path)
-                    self._show_export_saved_dialog(path)
+                    from desktop.export_save import save_export
+                    path = save_export(self, path, wb.save)
+                    if path:
+                        self._save_last_folder(path)
+                        self._show_export_saved_dialog(path)
                 except Exception as e:
                     QMessageBox.critical(self, tr("Error"), f"Failed to save XLSX:\n{e}")
 
@@ -28112,7 +28128,9 @@ class GenizahGUI(QMainWindow):
                         local_documents_header_row as _local_hdr,
                         sheet_titles as _sheet_titles,
                     )
-                    with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+                    from contextlib import nullcontext
+                    from desktop.export_save import save_export, write_text
+                    with nullcontext(io.StringIO()) as f:
                         f.write(credit_text)
                         writer = csv.writer(f)
                         if _comp_cond_col:
@@ -28141,8 +28159,11 @@ class GenizahGUI(QMainWindow):
                             writer.writerow(_local_hdr(CURRENT_LANG))
                             for row in local_table_rows:
                                 writer.writerow([str(val).replace('*', '') for val in row])
-                    self._save_last_folder(path)
-                    self._show_export_saved_dialog(path)
+                    path = save_export(self, path, lambda p: write_text(
+                        p, f.getvalue(), 'utf-8-sig', newline=''))
+                    if path:
+                        self._save_last_folder(path)
+                        self._show_export_saved_dialog(path)
                 except Exception as e:
                     QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{e}")
 
@@ -28321,9 +28342,11 @@ class GenizahGUI(QMainWindow):
                         # it on a right-to-left paragraph as flush LEFT.
                         set_document_rtl(doc, tables=(table, excluded_table))
 
-                    doc.save(path)
-                    self._save_last_folder(path)
-                    self._show_export_saved_dialog(path)
+                    from desktop.export_save import save_export
+                    path = save_export(self, path, doc.save)
+                    if path:
+                        self._save_last_folder(path)
+                        self._show_export_saved_dialog(path)
                 except Exception as e:
                     QMessageBox.critical(self, tr("Error"), f"Failed to save DOCX:\n{e}")
 
@@ -28464,12 +28487,13 @@ class GenizahGUI(QMainWindow):
                         detail_lines.extend([sep, tr("Not fully checked"), sep])
                         for item in c_unres: detail_lines.extend(_fmt_entry(item))
 
-                with open(path, 'w', encoding='utf-8') as f:
-                    f.write(credit_text)
-                    all_lines = summary_lines + detail_lines
-                    f.write("\n".join(all_lines).strip() + "\n")
-                self._save_last_folder(path)
-                self._show_export_saved_dialog(path)
+                from desktop.export_save import save_export, write_text
+                _txt_out = (credit_text
+                            + "\n".join(summary_lines + detail_lines).strip() + "\n")
+                path = save_export(self, path, lambda p: write_text(p, _txt_out, 'utf-8'))
+                if path:
+                    self._save_last_folder(path)
+                    self._show_export_saved_dialog(path)
 
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{e}")
