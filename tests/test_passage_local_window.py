@@ -20,8 +20,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import desktop.passage_lifecycle as pl        # noqa: E402
 import desktop.passage_local as pll           # noqa: E402
 import genizah_app                            # noqa: E402
+import genizah_core                           # noqa: E402
 
 APP = genizah_app.GenizahGUI
+
+
+@pytest.fixture(autouse=True)
+def _pin_english_labels(monkeypatch):
+    """`tr()` reads the language from this machine's saved app config; the
+    assertions here are on the English texts."""
+    monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'en')
 
 
 class _Label:
