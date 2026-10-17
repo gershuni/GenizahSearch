@@ -50,8 +50,17 @@ _TBLPR_AFTER_BIDI_VISUAL = (
 )
 
 
-def _set_paragraph_rtl(paragraph):
-    """Lay out one paragraph of a Hebrew document.
+def has_latin(text) -> bool:
+    return bool(_LATIN_LETTER_RE.search(str(text or "")))
+
+
+def is_latin_only(text) -> bool:
+    """Latin letters and no Hebrew ones: a line that reads left to right."""
+    return has_latin(text) and not _HEBREW_LETTER_RE.search(str(text or ""))
+
+
+def _set_paragraph_rtl(paragraph, align_latin_right: bool = True):
+    """Lay out one paragraph of Hebrew text.
 
     A paragraph with Hebrew in it becomes right-to-left (`w:bidi`) with NO
     alignment of its own: a right-to-left paragraph starts at the right
@@ -61,8 +70,9 @@ def _set_paragraph_rtl(paragraph):
     2026-10-17).
 
     A paragraph of Latin script only (the MiDRASH citation, a URL, a
-    shelfmark) stays left-to-right and is aligned right, so it lines up with
-    the Hebrew around it while its own punctuation keeps its order.
+    shelfmark) stays left-to-right, its own punctuation in order. It is
+    aligned right to line up with the Hebrew of a Hebrew document, or, with
+    `align_latin_right=False`, left where an English document puts it.
     """
     from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
     from docx.oxml import OxmlElement
@@ -70,11 +80,11 @@ def _set_paragraph_rtl(paragraph):
 
     ppr = paragraph._p.get_or_add_pPr()
     bidi = ppr.find(qn("w:bidi"))
-    text = paragraph.text
-    if _LATIN_LETTER_RE.search(text) and not _HEBREW_LETTER_RE.search(text):
+    if is_latin_only(paragraph.text):
         if bidi is not None:
             ppr.remove(bidi)
-        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
+        paragraph.alignment = (WD_PARAGRAPH_ALIGNMENT.RIGHT
+                               if align_latin_right else None)
         return
     paragraph.alignment = None
     if bidi is None:
