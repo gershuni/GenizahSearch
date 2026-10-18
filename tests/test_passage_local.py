@@ -500,7 +500,13 @@ def test_the_my_library_build_worker_turns_hygiene_off(monkeypatch, tmp_path):
     monkeypatch.setattr(passage_local, 'estimate_local_build_bytes',
                         lambda p: 123)
     monkeypatch.setattr(passage_local, 'refresh_signature',
-                        lambda root, cancel_check=None: 'sig')
+                        lambda root, cancel_check=None, conn=None: 'sig')
+
+    class _Snapshot:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(plc, 'open_local_snapshot', lambda p: _Snapshot())
     LocalPassageBuildThread(str(tmp_path), 'db', lambda g: True).run()
     assert seen['apply_hygiene'] is False
     assert seen['slot'] == pl.SLOT_LOCAL
@@ -548,6 +554,85 @@ def test_a_library_change_during_the_build_reads_stale_after_it(
             pl.STALE if change_mid_build else pl.FRESH)
     finally:
         result.index.close()
+
+
+def test_a_snapshot_keeps_seeing_the_library_as_it_was(local_db, tmp_path):
+    """`open_local_snapshot`: the signature and the records read on it
+    describe one library, whatever is committed meanwhile."""
+    import shared.passage_local_corpus as plc
+    path, _fa, _fb = local_db
+    before = open(write_corpus_signature(path, str(tmp_path / 'a'))).read()
+    everything = list(iter_local_records(path))
+    snap = plc.open_local_snapshot(path)
+    try:
+        sig = open(write_corpus_signature(path, str(tmp_path / 'b'),
+                                          conn=snap)).read()
+        writer = sqlite3.connect(path)
+        writer.execute("UPDATE processed_files SET status='pending'")
+        writer.commit()
+        writer.close()
+        assert list(iter_local_records(path)) == []          # read apart
+        assert list(iter_local_records(path, conn=snap)) == everything
+    finally:
+        snap.close()
+    assert sig == before
+
+
+def test_a_reindex_during_the_build_cannot_leave_a_partial_index_reading_fresh(
+        slots, local_db, tmp_path, monkeypatch):
+    """Codex, PR #399 (P1): Re-index All marks every file pending and later
+    restores it unchanged. Landing between the build's signature and its
+    reading of the records, it left a build that read the library apart
+    indexing nothing while recording the unchanged signature -- FRESH. The
+    build reads both from one snapshot, so it indexes the library its
+    signature describes."""
+    pl = slots
+    import desktop.passage_local as passage_local
+    import shared.passage_local_corpus as plc
+    from desktop.passage_workers import LocalPassageBuildThread
+    path, _fa, _fb = local_db
+    monkeypatch.setattr(passage_local, 'local_db_path', lambda: path)
+    everything = list(plc.iter_local_records(path))
+
+    def _set_status(status):
+        conn = sqlite3.connect(path)
+        conn.execute('UPDATE processed_files SET status=?', (status,))
+        conn.commit()
+        conn.close()
+
+    real_sig = passage_local.refresh_signature
+
+    def _signature_then_reindex_starts(*a, **kw):
+        out = real_sig(*a, **kw)
+        _set_status('pending')
+        return out
+
+    real_iter = plc.iter_local_records
+    read = []
+
+    def _iter_then_reindex_restores(db, **kw):
+        for rec in real_iter(db, **kw):
+            read.append(rec)
+            yield rec
+        _set_status('committed')
+
+    monkeypatch.setattr(passage_local, 'refresh_signature',
+                        _signature_then_reindex_starts)
+    monkeypatch.setattr(plc, 'iter_local_records', _iter_then_reindex_restores)
+    got = []
+    t = LocalPassageBuildThread(
+        str(tmp_path / 'root'), path,
+        lambda g: pl.close_passage_state(g, slot=pl.SLOT_LOCAL))
+    t.finished_signal.connect(got.append)
+    t.error_signal.connect(lambda e: got.append(('error', e)))
+    t.cancelled_signal.connect(lambda: got.append('cancelled'))
+    t.run()
+    assert read == everything
+    assert len(got) == 1 and getattr(got[0], 'status', '') == 'installed', got
+    try:
+        assert passage_local.local_freshness(got[0].live_dir) == pl.FRESH
+    finally:
+        got[0].index.close()
 
 
 def test_segments_of_one_page_come_back_as_one_row():

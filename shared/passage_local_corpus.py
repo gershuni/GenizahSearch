@@ -130,6 +130,22 @@ def _connect_ro(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+def open_local_snapshot(db_path: str) -> sqlite3.Connection:
+    """A read-only connection held inside ONE read transaction: every query on
+    it sees the library as it was at its first read, whatever a scan or a
+    Re-index All commits meanwhile (the sidecar is in WAL mode, so writers are
+    not blocked). Close it to end the transaction.
+
+    A build takes its signature and its records from one snapshot, so the
+    signature describes exactly the pages it indexed. Read separately, a
+    Re-index All that marks every file pending and later restores it
+    unchanged could leave a partial index whose signature still matched the
+    library, so the freshness check called it current (PR #399 review)."""
+    conn = _connect_ro(db_path)
+    conn.execute('BEGIN')
+    return conn
+
+
 _PAGES_SQL = """
     SELECT lp.sys_id, lp.page_num, lp.cached_text, lp.cached_text_codec,
            lf.file_id
@@ -169,7 +185,8 @@ def local_text_bytes(db_path: str) -> int:
 
 def iter_local_records(db_path: str, *,
                        on_page: Optional[Callable[[int], None]] = None,
-                       cancel_check: Optional[Callable[[], bool]] = None
+                       cancel_check: Optional[Callable[[], bool]] = None,
+                       conn: Optional[sqlite3.Connection] = None
                        ) -> Iterator[tuple]:
     """Yield (record_id, text) for every committed LOCAL page, in
     (sys_id, page) order, splitting an over-budget page into segments.
@@ -179,10 +196,13 @@ def iter_local_records(db_path: str, *,
     indexer's job, never this reader's. `on_page(n_pages_read)` reports
     progress; `cancel_check` is polled every CANCEL_CHECK_ROWS pages, so a
     cancel lands within seconds even while the builder is still consuming.
+    `conn` is an `open_local_snapshot` the caller owns and closes.
     """
     from shared.local_indexer import _make_full_header, decompress_cached_text
 
-    conn = _connect_ro(db_path)
+    own = conn is None
+    if own:
+        conn = _connect_ro(db_path)
     n = 0
     skipped = 0
     try:
@@ -213,14 +233,16 @@ def iter_local_records(db_path: str, *,
         if on_page is not None:
             on_page(n)
     finally:
-        conn.close()
+        if own:
+            conn.close()
         if skipped:
             logger.info('My Library letter-level build: %d pages had no '
                         'cached text and were skipped', skipped)
 
 
 def write_corpus_signature(db_path: str, out_path: str,
-                           cancel_check: Optional[Callable[[], bool]] = None
+                           cancel_check: Optional[Callable[[], bool]] = None,
+                           conn: Optional[sqlite3.Connection] = None
                            ) -> str:
     """Write a small file that changes whenever the LOCAL corpus does, and
     return its path.
@@ -231,8 +253,13 @@ def write_corpus_signature(db_path: str, out_path: str,
     it (a scan-run row, a WAL checkpoint), so the build and the staleness
     check fingerprint this summary instead: every committed file's path,
     mtime and size, and every page's text length and extraction version.
+
+    Both halves are read from one snapshot: `conn` when the caller passes
+    its own `open_local_snapshot` (and closes it), else a fresh one.
     """
-    conn = _connect_ro(db_path)
+    own = conn is None
+    if own:
+        conn = open_local_snapshot(db_path)
     h = hashlib.sha256()
     try:
         for i, row in enumerate(conn.execute("""
@@ -251,7 +278,8 @@ def write_corpus_signature(db_path: str, out_path: str,
                 raise BuildCancelled('My Library signature cancelled')
             h.update(f'P|{row[0]}|{row[1]}|{row[2]}|{row[3]}\n'.encode('utf-8'))
     finally:
-        conn.close()
+        if own:
+            conn.close()
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     tmp = out_path + '.tmp'
     with open(tmp, 'w', encoding='utf-8', newline='\n') as fh:

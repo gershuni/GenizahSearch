@@ -88,11 +88,14 @@ def disk_size_label(n_bytes: int) -> str:
     return '%.1f GB' % (n / 1e9)
 
 
-def refresh_signature(root: Optional[str] = None, cancel_check=None) -> str:
+def refresh_signature(root: Optional[str] = None, cancel_check=None,
+                      conn=None) -> str:
     """Rewrite the build's corpus signature file from the LOCAL sidecar as it
-    is now and return its path. The build hashes it into its manifest."""
+    is now and return its path. The build hashes it into its manifest.
+    `conn`: the build's `open_local_snapshot`, so the signature describes
+    the same library its records are read from."""
     return write_corpus_signature(local_db_path(), signature_path(root),
-                                  cancel_check=cancel_check)
+                                  cancel_check=cancel_check, conn=conn)
 
 
 def local_freshness(live_dir: Optional[str],

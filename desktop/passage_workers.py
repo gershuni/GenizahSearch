@@ -224,13 +224,19 @@ class LocalPassageBuildThread(PassageBuildThread):
     def run(self):
         from desktop import passage_local
         from shared.passage_local_corpus import (count_local_pages,
-                                                 iter_local_records)
+                                                 iter_local_records,
+                                                 open_local_snapshot)
+        snapshot = None
         try:
             total = max(1, count_local_pages(self._db_path))
             needed = passage_local.estimate_local_build_bytes(self._db_path)
             self._emit('signature', 0, 0, 0)
+            # The signature and the records come from ONE snapshot of the
+            # library, so the signature describes exactly the pages indexed
+            # even if a scan or Re-index All runs meanwhile (PR #399 review).
+            snapshot = open_local_snapshot(self._db_path)
             sig = passage_local.refresh_signature(
-                self._root, cancel_check=self._cancel_check)
+                self._root, cancel_check=self._cancel_check, conn=snapshot)
             last = {'pct': -1}
 
             def _on_page(n):
@@ -240,9 +246,15 @@ class LocalPassageBuildThread(PassageBuildThread):
                     self._emit('read', pct, 100, n)
 
             def _records():
-                yield from iter_local_records(
-                    self._db_path, on_page=_on_page,
-                    cancel_check=self._cancel_check)
+                try:
+                    yield from iter_local_records(
+                        self._db_path, on_page=_on_page,
+                        cancel_check=self._cancel_check, conn=snapshot)
+                finally:
+                    # Reading is over: end the read transaction now rather
+                    # than at the end of the build, so the sidecar's WAL can
+                    # be checkpointed again.
+                    snapshot.close()
                 # Reading is done, and the builder's next stage (spooling
                 # every posting to scratch, minutes on a large library)
                 # reports nothing until its first partition is sorted. Say
@@ -277,6 +289,9 @@ class LocalPassageBuildThread(PassageBuildThread):
             logger.exception('My Library letter-level index build failed')
             self.error_signal.emit(str(exc))
             return
+        finally:
+            if snapshot is not None:
+                snapshot.close()          # a build that never read to the end
         if _cancelled_without_index(result):
             self.cancelled_signal.emit()
             return

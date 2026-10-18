@@ -303,7 +303,13 @@ def test_a_cancelled_result_with_an_index_goes_out_as_finished(
     monkeypatch.setattr(plc, 'count_local_pages', lambda p: 1)
     monkeypatch.setattr(pll, 'estimate_local_build_bytes', lambda p: 0)
     monkeypatch.setattr(pll, 'refresh_signature',
-                        lambda root, cancel_check=None: 'sig')
+                        lambda root, cancel_check=None, conn=None: 'sig')
+
+    class _Snapshot:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(plc, 'open_local_snapshot', lambda p: _Snapshot())
     for carried, signal in ((object(), 'finished'), (None, 'cancelled')):
         result = pl.BuildAndSwapResult(status='cancelled', index=carried)
         monkeypatch.setattr(pl, 'run_build_and_swap',
