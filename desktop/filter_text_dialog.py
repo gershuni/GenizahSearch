@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from genizah_core import tr
+from desktop.gui_threads import _retire_worker
 import requests
 
 # Import shared utilities (no PyQt6 dependency)
@@ -22,7 +23,9 @@ _CACHE_KIND = "clean_v3"
 class SefariaFetchThread(QThread):
     """Background thread for fetching texts from Sefaria API."""
     progress = pyqtSignal(int, int, str)  # current, total, current_item
-    finished = pyqtSignal(dict)  # dict of {ref: cleaned_text}
+    # Not named `finished`: that hid QThread's own finished(), which is what
+    # keeps a cancelled fetch alive until its thread has really ended.
+    fetched = pyqtSignal(dict)  # dict of {ref: cleaned_text}
     error = pyqtSignal(str)  # error message
 
     def __init__(self, refs, use_cache=True):
@@ -68,7 +71,7 @@ class SefariaFetchThread(QThread):
                 self.error.emit(f"Error fetching {ref}: {str(e)}")
 
         self.progress.emit(len(self.refs), len(self.refs), "Done")
-        self.finished.emit(results)
+        self.fetched.emit(results)
 
     def _extract_hebrew_text(self, data):
         """Extract Hebrew text from Sefaria API response."""
@@ -780,7 +783,7 @@ class FilterTextDialog(QDialog):
 
         self.fetch_thread = SefariaFetchThread(new_refs)
         self.fetch_thread.progress.connect(self._on_fetch_progress)
-        self.fetch_thread.finished.connect(self._on_fetch_finished)
+        self.fetch_thread.fetched.connect(self._on_fetch_finished)
         self.fetch_thread.error.connect(self._on_fetch_error)
         self.fetch_thread.start()
 
@@ -817,7 +820,8 @@ class FilterTextDialog(QDialog):
         return self.enabled_sources.copy()
 
     def closeEvent(self, event):
-        if self.fetch_thread and self.fetch_thread.isRunning():
-            self.fetch_thread.cancel()
-            self.fetch_thread.wait()
+        # Never wait here: cancel() is checked only between requests, and the
+        # request in flight can block for its whole 30-second timeout.
+        thread, self.fetch_thread = self.fetch_thread, None
+        _retire_worker(thread, 'progress', 'fetched', 'error')
         super().closeEvent(event)

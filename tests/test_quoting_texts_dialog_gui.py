@@ -66,10 +66,13 @@ class _StubAddCustomTextDialog:
 class _StubFetchThread(QObject):
     """Stands in for desktop.filter_text_dialog.SefariaFetchThread: `start()`
     just marks it running -- a test completes the fetch itself by emitting
-    `finished`/`error`, so timing is fully under the test's control."""
+    `fetched`/`error`, so timing is fully under the test's control. Like the
+    real thread, cancel() only sets a flag: the stub keeps running until a
+    test calls end(), which emits QThread's own `finished`."""
     progress = pyqtSignal(int, int, str)
-    finished = pyqtSignal(dict)
+    fetched = pyqtSignal(dict)
     error = pyqtSignal(str)
+    finished = pyqtSignal()          # QThread's own: the thread has ended
     instances: list = []
 
     def __init__(self, refs, use_cache=True):
@@ -88,17 +91,24 @@ class _StubFetchThread(QObject):
 
     def cancel(self):
         self.cancel_called = True
-        self._running = False
 
-    def wait(self):
+    def wait(self, *args):
         self.wait_called = True
+        return True
+
+    def end(self):
+        if self._running:
+            self._running = False
+            self.finished.emit()
 
 
 @pytest.fixture
 def stub_thread(monkeypatch):
     _StubFetchThread.instances = []
     monkeypatch.setattr(qtd, 'SefariaFetchThread', _StubFetchThread)
-    return _StubFetchThread
+    yield _StubFetchThread
+    for thread in _StubFetchThread.instances:   # release any still kept
+        thread.end()
 
 
 def _accept_with_suffix(suffix):
@@ -225,7 +235,7 @@ def test_sefaria_load_adds_the_text_under_its_ref(monkeypatch, stub_thread):
         dlg._open_load_from_sefaria()
         [thread] = stub_thread.instances
         assert thread.refs == ['Rif Berakhot 1a-2b']
-        thread.finished.emit({'Rif Berakhot 1a-2b': LONG})
+        thread.fetched.emit({'Rif Berakhot 1a-2b': LONG})
         assert dlg._texts == [{'name': 'Rif Berakhot 1a-2b', 'text': LONG}]
         assert dlg.texts_list.item(0).text() == tr("{} · {} letters").format(
             'Rif Berakhot 1a-2b', len(LONG))
@@ -265,7 +275,7 @@ def test_fetched_text_too_long_is_refused_with_the_message(monkeypatch, stub_thr
     try:
         dlg._start_fetch(['Halakhot Gedolot'])
         [thread] = stub_thread.instances
-        thread.finished.emit({'Halakhot Gedolot': huge})
+        thread.fetched.emit({'Halakhot Gedolot': huge})
         assert dlg._texts == []
         assert warnings[-1] == tr(
             "{} is too long ({} letters; at most {}). Choose a shorter passage."
@@ -280,48 +290,78 @@ def test_not_found_on_sefaria_is_refused_with_the_message(monkeypatch, stub_thre
     try:
         dlg._start_fetch(['No Such Ref'])
         [thread] = stub_thread.instances
-        thread.finished.emit({})                      # the ref never came back
+        thread.fetched.emit({})                      # the ref never came back
         assert dlg._texts == []
         assert warnings[-1] == tr("Not found on Sefaria: {}").format('No Such Ref')
     finally:
         dlg.deleteLater()
 
 
-# -- the fetch thread never outlives the dialog ------------------------------
+# -- closing never waits for the fetch thread --------------------------------
+# PR #399 review (Codex): cancel() is checked only between requests, so a
+# wait() on the UI thread froze the app for up to the request's 30-second
+# timeout. The thread is cancelled, disconnected and kept alive (never
+# destroyed while running) until it ends by itself.
 
-def test_reject_cancels_and_waits_for_the_fetch_thread(stub_thread):
-    dlg = qtd.QuotingTextsDialog(None, floor=40)
-    try:
-        dlg._start_fetch(['Some Ref'])
-        [thread] = stub_thread.instances
-        assert thread.isRunning()
-        dlg.reject()
-        assert thread.cancel_called and thread.wait_called
-    finally:
-        dlg.deleteLater()
-
-
-def test_accept_cancels_and_waits_for_the_fetch_thread(stub_thread):
+def _closes_without_waiting(stub_thread, close):
+    from desktop.gui_threads import _ORPHANED_WORKERS
     dlg = qtd.QuotingTextsDialog(None, floor=40)
     try:
         dlg._add_text('A', LONG)                      # so OK is reachable at all
         dlg._start_fetch(['Some Ref'])
         [thread] = stub_thread.instances
-        dlg.accept()
-        assert thread.cancel_called and thread.wait_called
+        assert thread.isRunning()
+        close(dlg)
+        assert thread.cancel_called and not thread.wait_called
+        assert any(t is thread for t in _ORPHANED_WORKERS)
+        thread.fetched.emit({'Some Ref': LONG})       # disconnected: changes nothing
+        assert [t['name'] for t in dlg._texts] == ['A']
+        thread.end()
+        assert not any(t is thread for t in _ORPHANED_WORKERS)
     finally:
         dlg.deleteLater()
 
 
-def test_close_event_cancels_and_waits_for_the_fetch_thread(stub_thread):
-    dlg = qtd.QuotingTextsDialog(None, floor=40)
+def test_reject_cancels_the_fetch_thread_without_waiting(stub_thread):
+    _closes_without_waiting(stub_thread, lambda dlg: dlg.reject())
+
+
+def test_accept_cancels_the_fetch_thread_without_waiting(stub_thread):
+    _closes_without_waiting(stub_thread, lambda dlg: dlg.accept())
+
+
+def test_close_event_cancels_the_fetch_thread_without_waiting(stub_thread):
+    _closes_without_waiting(stub_thread, lambda dlg: dlg.closeEvent(QCloseEvent()))
+
+
+def test_quoted_texts_dialog_delivers_fetched_texts_and_closes_without_waiting(
+        monkeypatch, stub_thread):
+    """The older Quoted texts dialog (FilterTextDialog) had the same wait on
+    close; and its fetch results now arrive on `fetched`."""
+    import desktop.filter_text_dialog as ftd
+    from desktop.gui_threads import _ORPHANED_WORKERS
+    monkeypatch.setattr(ftd, 'SefariaFetchThread', stub_thread)
+    dlg = ftd.FilterTextDialog(None)
     try:
-        dlg._start_fetch(['Some Ref'])
-        [thread] = stub_thread.instances
+        dlg._start_fetch(['First 1a'])
+        first = stub_thread.instances[-1]
+        first.fetched.emit({'First 1a': LONG})
+        assert dlg.loaded_sources.get('First 1a') == LONG
+        first.end()
+        dlg._start_fetch(['Second 2b'])
+        second = stub_thread.instances[-1]
         dlg.closeEvent(QCloseEvent())
-        assert thread.cancel_called and thread.wait_called
+        assert second.cancel_called and not second.wait_called
+        assert dlg.fetch_thread is None
+        assert any(t is second for t in _ORPHANED_WORKERS)
+        second.fetched.emit({'Second 2b': LONG})       # disconnected: changes nothing
+        assert 'Second 2b' not in dlg.loaded_sources
+        second.end()
+        assert not any(t is second for t in _ORPHANED_WORKERS)
     finally:
         dlg.deleteLater()
+
+
 # -- review round 1 (2026-10-15) ---------------------------------------------
 
 def test_a_replaced_fetch_cannot_report_into_the_next_one(monkeypatch, stub_thread):
@@ -334,9 +374,9 @@ def test_a_replaced_fetch_cannot_report_into_the_next_one(monkeypatch, stub_thre
         first = stub_thread.instances[-1]
         dlg._start_fetch(['Second 2b'])
         second = stub_thread.instances[-1]
-        first.finished.emit({})                      # late, from the replaced fetch
+        first.fetched.emit({})                      # late, from the replaced fetch
         assert seen == [] and dlg._texts == []
-        second.finished.emit({'Second 2b': LONG})
+        second.fetched.emit({'Second 2b': LONG})
         assert [t['name'] for t in dlg._texts] == ['Second 2b']
         assert seen == []
     finally:
@@ -350,7 +390,7 @@ def test_a_fetch_finishing_after_the_dialog_closed_changes_nothing(monkeypatch, 
         dlg._start_fetch(['Missing Ref 1a'])
         thread = stub_thread.instances[-1]
         dlg.reject()
-        thread.finished.emit({})
+        thread.fetched.emit({})
         thread.error.emit('late')
         assert seen == [] and dlg._texts == []
     finally:
@@ -362,7 +402,7 @@ def test_load_from_sefaria_is_disabled_while_a_fetch_runs(stub_thread):
     try:
         dlg._start_fetch(['Rif Berakhot 1a'])
         assert not dlg.btn_sefaria.isEnabled()
-        stub_thread.instances[-1].finished.emit({'Rif Berakhot 1a': LONG})
+        stub_thread.instances[-1].fetched.emit({'Rif Berakhot 1a': LONG})
         assert dlg.btn_sefaria.isEnabled()
     finally:
         dlg.deleteLater()
@@ -375,7 +415,7 @@ def test_fetch_errors_are_shown(monkeypatch, stub_thread):
         dlg._start_fetch(['Rif Berakhot 1a'])
         thread = stub_thread.instances[-1]
         thread.error.emit('Error fetching Rif Berakhot 1a: timeout')
-        thread.finished.emit({'Rif Berakhot 1a': LONG})
+        thread.fetched.emit({'Rif Berakhot 1a': LONG})
         assert seen and 'timeout' in seen[-1]
     finally:
         dlg.deleteLater()

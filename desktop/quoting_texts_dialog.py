@@ -38,6 +38,7 @@ from desktop.compound_ui import PLACE_LABELS
 from desktop.filter_text_dialog import (
     AddCustomTextDialog, AllSourcesDialog, SefariaFetchThread,
 )
+from desktop.gui_threads import _retire_worker
 
 
 _STOP = object()     # the user cancelled a passage prompt: ask no more
@@ -271,7 +272,7 @@ class QuotingTextsDialog(QDialog):
         # by a fetch that was replaced or cancelled is dropped, never applied
         # to the next fetch's passages or to a dialog that has closed.
         thread.progress.connect(lambda *a, t=thread: self._on_fetch_progress(*a, thread=t))
-        thread.finished.connect(lambda r, t=thread: self._on_fetch_finished(r, thread=t))
+        thread.fetched.connect(lambda r, t=thread: self._on_fetch_finished(r, thread=t))
         thread.error.connect(lambda m, t=thread: self._on_fetch_error(m, thread=t))
         thread.start()
 
@@ -348,16 +349,11 @@ class QuotingTextsDialog(QDialog):
                             versions, ', '.join(names), version_names=names)
 
     def _cancel_fetch(self) -> None:
+        # Never wait here: cancel() is checked only between requests, and the
+        # request in flight can block for its whole 30-second timeout. The
+        # thread is disconnected and kept alive until it ends by itself.
         thread, self.fetch_thread = self.fetch_thread, None
-        if thread is not None:
-            for sig in (thread.progress, thread.finished, thread.error):
-                try:
-                    sig.disconnect()
-                except TypeError:          # nothing connected
-                    pass
-            if thread.isRunning():
-                thread.cancel()
-                thread.wait()
+        _retire_worker(thread, 'progress', 'fetched', 'error')
         self._pending_refs = []
         self.btn_sefaria.setEnabled(True)
         self.progress_bar.setVisible(False)
