@@ -50,7 +50,7 @@ from shared.refinement import (RefinementStep, chain_needs_completion, complete_
 from shared.search_engine import consume_last_search_cutoff
 from shared.exclusion_service import (
     ExclusionSource, parse_shelfmark_file, parse_csv_shelfmarks,
-    resolve_shelfmarks, build_shelf_map, compute_excluded_ids,
+    resolve_shelfmarks, build_shelf_map, compute_excluded_ids, catalog_fallback,
     serialize_sources, deserialize_sources,
 )
 from web.document_service import (
@@ -4359,7 +4359,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             if search_state._exclusion_shelf_map is None:
                                 return  # cancelled or app stopping
                         resolved = await run.io_bound(
-                            resolve_shelfmarks, lines, search_state._exclusion_shelf_map
+                            resolve_shelfmarks, lines, search_state._exclusion_shelf_map,
+                            catalog_fallback(state.meta_mgr),
                         )
                         if resolved is None:
                             return  # cancelled or app stopping
@@ -4534,7 +4535,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 return  # cancelled or app stopping
 
                         resolved = await run.io_bound(
-                            resolve_shelfmarks, lines, search_state._exclusion_shelf_map
+                            resolve_shelfmarks, lines, search_state._exclusion_shelf_map,
+                            catalog_fallback(state.meta_mgr),
                         )
                         if resolved is None:
                             return  # cancelled or app stopping

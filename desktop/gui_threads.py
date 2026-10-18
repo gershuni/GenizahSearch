@@ -1693,6 +1693,54 @@ class PuzzleImageLoaderThread(QThread):
             self.load_failed.emit(self.fl_id or self.image_url, str(e))
 
 
+class ShelfmarkResolveThread(QThread):
+    """Run ``MetadataManager.resolve_system_by_shelfmark`` off the UI thread.
+
+    Used where a dialog falls back to the shared resolver after its own quick lookup
+    missed (the Puzzle's add box, the Joins dialog's fragment B; catalogue-shelfmark
+    plan, docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md). The first lookup of a session
+    builds the shelfmark index, which takes seconds. ``resolved`` carries the
+    resolver's result dict unchanged.
+    """
+    resolved = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, meta_mgr, text: str):
+        super().__init__()
+        self.meta_mgr = meta_mgr
+        self.text = text
+
+    def run(self):
+        try:
+            self.resolved.emit(self.meta_mgr.resolve_system_by_shelfmark(self.text))
+        except Exception as e:
+            logger.error("Shelfmark lookup failed for %r: %s", self.text, e)
+            self.failed.emit(str(e))
+
+
+class CatalogFormsThread(QThread):
+    """``MetadataManager.resolve_catalog_forms`` off the UI thread, for the Exclude dialog's
+    lines that its shelf map misses (catalogue-shelfmark plan, row F). A cold first call
+    builds the shelfmark index, which takes seconds. ``done`` carries ``{line: sys_id or
+    None}`` for every line asked -- None also when the lookup failed, so nothing waits on it.
+    (Not named ``finished``: that is QThread's own signal.)
+    """
+    done = pyqtSignal(object)
+
+    def __init__(self, meta_mgr, lines):
+        super().__init__()
+        self.meta_mgr = meta_mgr
+        self.lines = list(lines)
+
+    def run(self):
+        try:
+            answers = self.meta_mgr.resolve_catalog_forms(self.lines)
+            self.done.emit({line: (answers.get(line) or {}).get('sys_id') for line in self.lines})
+        except Exception as e:
+            logger.error("Catalogue-form exclusion lookup failed: %s", e)
+            self.done.emit({line: None for line in self.lines})
+
+
 class PuzzleMetaLoaderThread(QThread):
     """Resolve images_nli (with fl_ids) for a sys_id in the background.
 

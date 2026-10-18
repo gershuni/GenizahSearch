@@ -81,6 +81,7 @@ from web.components.candidate_grid import (
     compute_filtered, create_candidate_grid, create_candidate_table, open_filter_dialog,
 )
 from web.components.compare_modal import create_compare_modal
+from web.components.shelfmark_picker import items_from_manuscripts, open_shelfmark_picker
 from web.components.joins_builder import create_joins_builder
 from web.components.joins_panel import fetch_connected_fragments
 from web.components.known_joins_group import render_known_joins_group
@@ -1636,32 +1637,42 @@ def create_joins_lab_page(
     # Async helpers
     # -----------------------------------------------------------------------
 
-    async def resolve_anchor_input(query: str) -> Optional[str]:
-        """Resolve a shelfmark or sys_id string to a sys_id.
+    async def resolve_anchor_candidates(query: str):
+        """Every record a shelfmark or sys_id string names, as picker items.
 
         Fast path: if query looks like a sys_id (all digits, starts with '99'),
-        return it directly (mirrors browse.py:729).
-        Otherwise call service.search_by_shelfmark off the event loop.
-        Returns None when not found, and ``io_bound_result.INTERRUPTED`` (falsy)
-        when the lookup gave no answer (cancelled, or the app is stopping) --
-        which is not "not found".
+        it is the one candidate (mirrors browse.py:729). Otherwise
+        service.search_by_shelfmark runs off the event loop. Returns a list (empty
+        when not found), or ``io_bound_result.INTERRUPTED`` when the lookup gave no
+        answer (cancelled, or the app is stopping) -- which is not "not found".
         """
         query = query.strip()
         if not query:
-            return None
+            return []
         # sys_id fast path
         if query.isdigit() and query.startswith('99'):
-            return query
+            return [{'sys_id': query, 'shelfmark': query, 'title': '', 'library_code': ''}]
         # Shelfmark resolution (I/O-bound SQLite — off the event loop)
         found = await io_bound_result.io_bound(
-            lambda: get_service().search_by_shelfmark(query, limit=20)
+            lambda: get_service().search_by_shelfmark(query, limit=50)
         )
         if found is io_bound_result.INTERRUPTED:
             return found
         results, _ = found
-        if results:
-            return results[0].sys_id
-        return None
+        return items_from_manuscripts(results)
+
+    async def resolve_anchor_input(query: str) -> Optional[str]:
+        """Resolve a shelfmark or sys_id string to ONE sys_id (the first candidate).
+
+        Kept for the `/joins-lab?shelfmark=` deep link, which loads the first match
+        as before (catalogue-shelfmark plan, owner question 3). Returns None when
+        not found, and ``io_bound_result.INTERRUPTED`` (falsy) when the lookup gave
+        no answer -- which is not "not found".
+        """
+        found = await resolve_anchor_candidates(query)
+        if found is io_bound_result.INTERRUPTED:
+            return found
+        return found[0]['sys_id'] if found else None
 
     # -----------------------------------------------------------------------
     # Phase-120 ACT-01: Add-as-Join login gate + pending-action replay (H4)
@@ -2842,11 +2853,16 @@ def create_joins_lab_page(
         error_label.style('display: none;')
         load_btn.props('loading=true disabled=true')
         try:
-            resolved = await resolve_anchor_input(query)
-            if resolved is io_bound_result.INTERRUPTED:
+            candidates = await resolve_anchor_candidates(query)
+            if candidates is io_bound_result.INTERRUPTED:
                 return  # no answer (cancelled, or the app is stopping): not "not found"
-            if resolved:
-                await load_anchor(resolved)
+            if len(candidates) > 1:
+                # Several records (a catalogue form naming a Mosseri unit and its parts,
+                # or an ambiguous shelfmark): ask -- this used to load the first.
+                open_shelfmark_picker(page_container, candidates,
+                                      lambda item: load_anchor(item['sys_id']), query.strip())
+            elif candidates:
+                await load_anchor(candidates[0]['sys_id'])
             else:
                 error_label.set_text(
                     tr('Fragment not found. Check the shelfmark and try again.')
