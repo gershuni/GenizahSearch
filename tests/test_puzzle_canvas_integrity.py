@@ -2109,7 +2109,9 @@ def test_work_that_finishes_while_a_first_close_waits_for_a_modal_is_kept(
                         lambda state: kept.append(state.live_dir))
     for name in ("_finish_passage_build", "_honour_deferred_comp_method",
                  "_apply_default_comp_method", "_revalidate_comp_method",
-                 "_maybe_offer_passage_build"):
+                 "_maybe_offer_passage_build",
+                 # Both index loads hand a held-back snapshot to it.
+                 "_judge_deferred_comp_snapshot"):
         setattr(h, name, lambda: None)
     box = QDialog(env.host)
     _HOSTS.append(box)

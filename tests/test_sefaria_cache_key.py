@@ -197,10 +197,10 @@ def test_desktop_fetch_thread_returns_each_reference_own_text(isolated_cache, fi
     results = {}
 
     t1 = SefariaFetchThread([first])
-    t1.finished.connect(results.update)
+    t1.fetched.connect(results.update)
     t1.run()
     t2 = SefariaFetchThread([second])
-    t2.finished.connect(results.update)
+    t2.fetched.connect(results.update)
     t2.run()
 
     assert results == {first: TEXTS[first], second: TEXTS[second]}
@@ -209,7 +209,7 @@ def test_desktop_fetch_thread_returns_each_reference_own_text(isolated_cache, fi
     # A second run for the same reference is served from the cache.
     again = {}
     t3 = SefariaFetchThread([first])
-    t3.finished.connect(again.update)
+    t3.fetched.connect(again.update)
     t3.run()
     assert again == {first: TEXTS[first]}
     assert calls == [first, second]
@@ -232,7 +232,7 @@ def test_desktop_fetch_thread_refetches_when_cache_file_is_undecodable(isolated_
 
     results = {}
     t = SefariaFetchThread([GENESIS_REF])
-    t.finished.connect(results.update)
+    t.fetched.connect(results.update)
     t.run()
     assert results == {GENESIS_REF: TEXTS[GENESIS_REF]}
     assert calls == [GENESIS_REF]

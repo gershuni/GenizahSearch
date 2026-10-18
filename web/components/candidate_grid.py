@@ -1020,7 +1020,9 @@ def open_filter_dialog(
             mismatch_sw.disable()
 
         # 4. Triage state (multi-select)
-        triage_opts = ["All", "Not triaged", "Yes", "Maybe", "No"]
+        # Values stay the English keys the filter compares against; only the
+        # labels are translated (they were shown in English to Hebrew users).
+        triage_opts = {v: tr(v) for v in ("All", "Not triaged", "Yes", "Maybe", "No")}
         tri_sel = ui.select(
             options=triage_opts,
             value=list(filter_state.get("triage_states") or []),

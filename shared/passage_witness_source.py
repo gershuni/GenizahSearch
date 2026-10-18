@@ -137,7 +137,7 @@ def witnesses_needing_text(pending) -> list:
             and not (w.get('text') or '').strip()]
 
 
-def witness_headers_for(sys_ids, rows) -> dict:
+def witness_headers_for(sys_ids, rows, sys_id_of=None) -> dict:
     """Which page headers make up each promoted manuscript's witness text.
 
     Extracted from `collect_witness_texts` so the promotion can RECORD its
@@ -146,18 +146,24 @@ def witness_headers_for(sys_ids, rows) -> dict:
     property of the result set on screen at that moment. Re-deriving it later
     from a different result set yields a different witness under the same
     label.
+
+    `sys_id_of(row)` reads a row's sys_id; `witness_sys_id` (the corpus
+    namespace) by default. The desktop, where a result can hold My Library
+    rows too, passes a reader for both namespaces.
     """
+    sys_id_of = sys_id_of or witness_sys_id
     wanted = set(sys_ids)
     headers_by_sid: dict = {}
     for row in rows or []:
-        sid = witness_sys_id(row)
+        sid = sys_id_of(row)
         if sid in wanted and row.get('raw_header'):
             headers_by_sid.setdefault(sid, []).append(row['raw_header'])
     return headers_by_sid
 
 
 def collect_witness_texts(sys_ids, rows, fetch_header,
-                          fetch_manuscript=None, headers_by_sid=None):
+                          fetch_manuscript=None, headers_by_sid=None,
+                          sys_id_of=None):
     """Gather the text to search a promoted manuscript WITH.
 
     Module level and dependency-injected so it can be tested without building
@@ -177,7 +183,7 @@ def collect_witness_texts(sys_ids, rows, fetch_header,
       page-level hits; one page is usually a fraction of the witness.
 
     `fetch_manuscript` (optional) is the whole-manuscript fallback, tried only
-    when no header resolves.
+    when no header resolves. `sys_id_of` is passed to `witness_headers_for`.
 
     Returns `(texts_by_sys_id, failed_sys_ids)` -- failures are RETURNED, not
     logged and dropped, so the caller can name them once instead of emitting
@@ -187,7 +193,7 @@ def collect_witness_texts(sys_ids, rows, fetch_header,
     # promotion actually used, and re-deriving them from whatever rows are on
     # screen now would rebuild a different witness under the same label.
     if headers_by_sid is None:
-        headers_by_sid = witness_headers_for(sys_ids, rows)
+        headers_by_sid = witness_headers_for(sys_ids, rows, sys_id_of)
 
     out, failed = {}, []
     for sid in sys_ids:

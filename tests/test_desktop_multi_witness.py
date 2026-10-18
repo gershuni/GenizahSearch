@@ -40,8 +40,8 @@ def leased(monkeypatch):
     import shared.passage_parallels as pp
 
     _RecordingSearcher.seen = []
-    monkeypatch.setattr(pl, '_try_acquire_lease', lambda: _Sentinel())
-    monkeypatch.setattr(pl, '_release_lease', lambda: None)
+    monkeypatch.setattr(pl, '_try_acquire_lease', lambda *_a: _Sentinel())
+    monkeypatch.setattr(pl, '_release_lease', lambda *_a: None)
     monkeypatch.setattr(pp, 'PassageSearcher', _RecordingSearcher)
     monkeypatch.setattr(pl, 'compose', lambda *a, **k: 'POLICY')
     return _RecordingSearcher
@@ -124,7 +124,7 @@ def test_an_unchanged_generation_is_not_a_change():
 
 def test_a_bumped_generation_is_a_change(monkeypatch):
     pinned = pl.current_state_generation()
-    monkeypatch.setattr(pl, '_state_generation', pinned + 1)
+    monkeypatch.setattr(pl._SLOTS[pl.SLOT_GENIZAH], 'generation', pinned + 1)
     assert pl.generation_changed(pinned) is True
 
 
@@ -132,7 +132,7 @@ def test_no_pin_is_not_a_change(monkeypatch):
     """A batch that never captured a generation started before anything was
     installed. Its first lease fails with PassageSearchUnavailableError,
     which is the honest error for that case -- not this one."""
-    monkeypatch.setattr(pl, '_state_generation', 99)
+    monkeypatch.setattr(pl._SLOTS[pl.SLOT_GENIZAH], 'generation', 99)
     assert pl.generation_changed(None) is False
 
 
@@ -203,6 +203,8 @@ def _worker(witnesses, searcher, pinned=None, abort_after=None, cap=None,
     w.restrict_sys_ids = None
     w.corpus_scope = 'genizah'
     w.pinned_generation = pinned
+    # A Genizah-scope batch pins no My Library generation (`scope_pins`).
+    w.pinned_local_generation = None
     w.group_cap = cap
     w.roster = (list(roster) if roster is not None
                 else [(wid, label) for wid, label, _t in w.witnesses])
@@ -445,7 +447,7 @@ def test_an_index_swap_mid_batch_voids_the_run(monkeypatch):
 
     def _swap(text, **kw):
         out = original(text, **kw)
-        monkeypatch.setattr(pl, '_state_generation', pinned + 1)
+        monkeypatch.setattr(pl._SLOTS[pl.SLOT_GENIZAH], 'generation', pinned + 1)
         return out
     s.search_composition_logic = _swap
     w.run()
@@ -785,6 +787,7 @@ class _Win2:
     _sort_comp_items = GAPP._sort_comp_items
     _current_comp_sort_mode = GAPP._current_comp_sort_mode
     _comp_export_settings_lines = GAPP._comp_export_settings_lines
+    _comp_export_condition_lines = GAPP._comp_export_condition_lines
     _comp_chunk_preference = GAPP._comp_chunk_preference
     _restore_comp_passage_preferences = GAPP._restore_comp_passage_preferences
     _add_comp_search_to_history = GAPP._add_comp_search_to_history
@@ -878,13 +881,15 @@ def test_the_roster_is_the_full_picture_with_the_seed_first():
     assert len(roster) == 2
 
 
-def test_dispatch_asks_for_an_uncapped_searcher_only_when_fusing():
-    """render_cap=0 for a batch, nothing for a single search. Capping each
-    witness before the fusion drops every contributor past rank 200 in its
-    own witness."""
+def test_dispatch_asks_for_an_uncapped_searcher_for_every_run():
+    """Uncapped for a batch, where capping each witness before the fusion
+    drops every contributor past rank 200 in its own witness -- and, since
+    the owner's 2026-10-17 ruling, for every other run too. The behaviour is
+    driven end to end in tests/test_desktop_letter_level_no_cap.py."""
     src = _fn_src('run_composition')
-    assert 'render_cap=0 if _comp_multi else None' in src, (
-        'the multi-witness path no longer asks for an uncapped searcher')
+    assert 'render_cap=passage_witnesses.DESKTOP_GROUP_CAP' in src, (
+        'the dispatch no longer asks for an uncapped searcher')
+    assert pw.DESKTOP_GROUP_CAP == 0
 
 
 def test_dispatch_pins_the_index_generation_on_the_ui_thread():
@@ -1780,7 +1785,7 @@ def _keyed(w, gen=1, filt='', thresh=5, restrict=None, monkeypatch=None):
     w._get_filter_text = lambda: filt
     w.pre_search_restrict_sys_ids = restrict
     if monkeypatch is not None:
-        monkeypatch.setattr(pl, 'current_state_generation', lambda: gen)
+        monkeypatch.setattr(pl, 'current_state_generation', lambda *_slot: gen)
     return w
 
 
@@ -1816,7 +1821,7 @@ def test_the_cache_key_moves_when_the_index_is_replaced(monkeypatch):
     worker pins the generation for the duration of a batch."""
     w = _keyed(_win(), gen=1, monkeypatch=monkeypatch)
     first = _key(w)
-    monkeypatch.setattr(pl, 'current_state_generation', lambda: 2)
+    monkeypatch.setattr(pl, 'current_state_generation', lambda *_slot: 2)
     assert _key(w) != first
 
 
@@ -2825,7 +2830,7 @@ def test_a_swap_during_the_LAST_witness_search_voids_the_batch(monkeypatch):
     def _swap(text, **kw):
         # What a lease acquired INSIDE the call looks like from out here.
         out = original(text, **kw)
-        monkeypatch.setattr(pl, '_state_generation', pinned + 1)
+        monkeypatch.setattr(pl._SLOTS[pl.SLOT_GENIZAH], 'generation', pinned + 1)
         return out
 
     s.search_composition_logic = _swap

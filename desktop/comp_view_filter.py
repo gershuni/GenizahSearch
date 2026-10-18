@@ -212,6 +212,8 @@ CATEGORY_MAIN = "main"
 CATEGORY_APPENDIX = "appendix"
 CATEGORY_FILTERED = "filtered"
 CATEGORY_EXCLUDED = "excluded"
+CATEGORY_REMOVED = "removed"          # a "must not appear" condition matched
+CATEGORY_UNRESOLVED = "unresolved"    # a condition could not be fully checked
 CATEGORY_ALL = "all"            # the "Sort by shelfmark only" flat view
 
 

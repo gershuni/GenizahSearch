@@ -4,6 +4,45 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased] -- Composition Search conditions (desktop, branch `feat/composition-conditions`)
+
+Letter-level Composition Search takes up to four extra texts, each "must appear" or "must not
+appear" on the same image, an adjacent image, or anywhere in the same manuscript, so a search can
+drop the works that quote it (Halakhot Gedolot and the Rif when searching the Talmud), ask for two
+texts on neighbouring images, or ask for several texts in one manuscript. Pages a condition removed,
+and pages it could not fully check, are shown in their own groups with the reason. Also: results
+no longer lose a page that shares its number with another image set of the same manuscript.
+One "Filter texts" menu (Quoted texts / Quoting texts / Add condition) now replaces the old
+"Filter Text" button and the conditions strip's own "+ Add condition" (owner, 2026-10-14).
+A must_not condition now removes a page only where the quoting text contributes at least 40
+letters of its own that the main text does not also cover ("own text", owner, 2026-10-14) -- a
+quoting work that cites the main text itself (the Rif quoting the Talmud) no longer drops the
+Talmud's own manuscripts; "Quoting texts..." now defaults to "On the same image".
+"Quoting texts..." now opens its own dialog (owner, 2026-10-15), styled like the Quoted texts
+dialog, with the Sefaria library browser under "Load from Sefaria..." (pick a book, then the
+passage you want) alongside custom text and files -- editing it again shows each text's own name
+rather than "Version 1", "Version 2".
+Help and wording pass (owner, 2026-10-18): Help.html was audited against the program in both
+languages and about 50 places brought in line with what the screen shows (tab and button names
+such as "Browse by Shelfmark" / "Focus Search" / "Add to View", the Responsa mode's Hebrew name,
+the Reading Desk's Hebrew name, stale descriptions of the PGP panel, the Discoveries Center, the
+publish dialog and the XLSX export), plus sections for the Filter texts menu and letter-level
+search in My Library. Hebrew running text now says "הספרייה המקומית" (the tab keeps "הספרייה
+שלי"); "בנייה /" on the three index-building buttons; "מרכז התגליות", "עגן מחדש", "ריווח גמיש",
+and "חיפוש חיבורים" in the resume prompt. The old built-in help texts, shown only when Help.html
+was missing and months out of date, were removed in favour of a short notice that links to the
+website's Help.
+Help, second pass (owner, 2026-10-18): Help.html gains sections for Personal Lists and the
+Community tab, and Focus Search lists all its filters; the website's Help page was audited the same
+way (about 40 places: page names as the menu shows them, the "Search only in..." panel, Search
+History, Joins Lab, Reading Desk, Fragment Puzzle, Lists, Witnesses and others). Fixed on the way:
+the website's Hebrew help showed the Fragment Puzzle sections even when the puzzle is off, the Joins
+Lab "Triage state" filter showed its choices in English, and "חפש רק ב..." / "טוען קטע..." had their
+dots on the wrong side. The desktop Joins Lab size warning now says "אי-התאמת גודל", as the website does.
+Plan and decisions: `docs/plans/COMPOSITION_CONDITIONS_PLAN.md`. Not released.
+
+---
+
 ## [9.6.2] - 2026-10-12 — Faster Extended and Maximum on the desktop; GenizahSearch in ChatGPT
 
 The desktop app checks pages with Python's own fast matcher for the searches it builds itself, so

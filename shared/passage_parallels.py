@@ -242,13 +242,27 @@ site:
   engine. A witness's candidate gathering and the rendering of found rows
   have no checkpoint (both are bounded: the posting budget, verify_cap); the
   web side's kill TIME_LIMIT_GRACE_SECONDS after the limit is the fallback.
+* `page_windows` (owner, 2026-10-14): added to `search_composition_logic`'s
+  rows ONLY -- the record's own matched-core windows there
+  (`PassageHit.windows`, UNMERGED; see its docstring), carried through
+  straight from the hit. For the must_not "own text" rule
+  (`shared/compound_query.py::must_not_version_search`), a page's protection
+  must include what the MAIN search itself already matched there, not only
+  what a SECOND search of the main text (over a must_not condition's scope)
+  later re-finds -- a noisy or long page can re-find less than the first
+  search established. `fuse()` (shared/passage_fusion.py) copies it on a
+  fused row like every other field (`dict(best_row)`); it is additive and
+  every other reader of a row is unaffected by its presence. NOT added to
+  `search_condition`'s evidence rows -- those already carry their OWN
+  `hit_windows` on the `ConditionSearch` they come with, keyed by record id
+  rather than per row.
 """
 from __future__ import annotations
 
 import logging
 import re
 import traceback
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Optional, Protocol
 
 from shared.parallels_service import PARALLELS_GROUP_CAP, _cap_main_results_by_group
@@ -296,6 +310,43 @@ _SYS_ID_RE = CORPUS_SYS_ID_RE
 # `PassageSearcher._resolve_witnesses`); web/search_api.py's copy is fail-fast
 # UX for a caller's benefit, not a second boundary.
 _WITNESS_REF_RE = re.compile(r'^[A-Za-z0-9_]+$')
+
+
+# Caps for a condition search. The search runs over a mask (the pages the
+# condition applies to), so verification is the whole cost. Measured
+# 2026-10-14 on the installed index, condition texts of 5,000-10,000 letters
+# over 5,000 manuscripts: the deepest depth profile's 50,000 verifications cut
+# every one ("not fully checked"); these caps completed all of them, verifying
+# 100,063-186,307 candidates in 2.5-7.2 s. Stop works inside verification.
+CONDITION_VERIFY_CAP = 500_000
+CONDITION_CANDIDATE_CAP = 2_000_000
+
+
+@dataclass(frozen=True)
+class ConditionSearch:
+    """What `PassageSearcher.search_condition` established for one version:
+    the verified hits' record ids, their merged spans (for evidence display),
+    the QueryReport as a dict, and whether a stop cut it short."""
+    hit_record_ids: tuple
+    hit_spans: tuple
+    report: dict
+    stopped: bool
+    # Rendered rows (text, source_ctx, highlight patterns) for the first
+    # `render_limit` hits by score, for showing the evidence; empty unless
+    # asked for. A hit whose page text cannot be read is simply not among
+    # them -- it still counts in `hit_record_ids`, which is what is judged.
+    rows: tuple = ()
+    # record_id -> tuple of (r0, r1) page-letter windows, UNMERGED (the same
+    # ones `PassageHit.windows` carries -- never the coarser `hit_spans`
+    # above). Used only by the must_not "own text" rule
+    # (shared/compound_query.py::own_text_runs); every other reader of
+    # ConditionSearch is unaffected by it being empty.
+    hit_windows: dict = field(default_factory=dict)
+
+    def as_version_search(self):
+        from shared.compound_query import VersionSearch, cut_reason
+        return VersionSearch(self.hit_record_ids,
+                             cut_reason(self.report, stopped=self.stopped))
 
 
 class NoWitnessesResolved(ValueError):
@@ -388,9 +439,44 @@ def _derive_uid(record_id: str) -> str:
     return m.group(1) if m else record_id
 
 
-def _extract_sys_id(record_id: str) -> Optional[str]:
-    m = _SYS_ID_RE.search(record_id)
+def _extract_sys_id(record_id: str, sys_id_re=None) -> Optional[str]:
+    m = (sys_id_re or _SYS_ID_RE).search(record_id)
     return m.group(1) if m else None
+
+
+# A record's image set: the `IE` of `{sys_id}_IE{n}_P{######}_FL{n}`.
+_IMAGE_SET_RE = re.compile(r'_(IE\d+)_P\d+')
+
+
+def _image_set(record_id: str) -> Optional[str]:
+    m = _IMAGE_SET_RE.search(record_id or '')
+    return m.group(1) if m else None
+
+
+def _shared_image_sets(rows, sys_id_re=None) -> frozenset:
+    """The image sets (IEs) that more than one catalogue record carries, as
+    this search's own rows show them.
+
+    The duplicate-photography pass uses this to decide WHICH copy of a page
+    to keep. Three RNL microfilm reels are attached to every box record on
+    them (66, 52 and 47 records, each carrying the whole reel: 5.8% of the
+    index, measured 2026-10-17), so a reel page is one photograph listed
+    under dozens of shelfmarks, and the copy kept by score order is usually
+    the wrong box -- while that box's OWN photograph, the one row whose
+    shelfmark is certain, was the copy demoted.
+
+    Read from the rows rather than the index: every record carrying a page
+    returns it (each record holds the same text), so the rows show the
+    sharing without scanning 702K record ids. A pre-search restriction can
+    hide it, and the pass then keeps the higher score, as it always did."""
+    carriers: dict = {}
+    for row in rows:
+        header = row.get('raw_header') or ''
+        ie = _image_set(header)
+        if ie is not None:
+            carriers.setdefault(ie, set()).add(
+                _extract_sys_id(header, sys_id_re))
+    return frozenset(ie for ie, sids in carriers.items() if len(sids) > 1)
 
 
 class _RegexSysIdParser:
@@ -404,8 +490,11 @@ class _RegexSysIdParser:
     applies to the incumbent's rows -- never a forked reimplementation of
     the grouping logic (adversarial review finding #1)."""
 
+    def __init__(self, sys_id_re=None):
+        self._sys_id_re = sys_id_re
+
     def parse_full_id_components(self, uid_or_header: str) -> dict:
-        return {'sys_id': _extract_sys_id(uid_or_header)}
+        return {'sys_id': _extract_sys_id(uid_or_header, self._sys_id_re)}
 
 
 def _orig_span(offsets, start: int, end: int, text_len: int):
@@ -525,6 +614,21 @@ class PassageSearcher:
     # Cost bound when uncapped: verify_cap (3,000 records) bounds the render
     # at ~4s worst case, inside every timeout that guards this path.
     render_cap: int = PARALLELS_GROUP_CAP
+    # Which sys_id namespace this searcher's index holds. The Genizah index
+    # holds corpus (99) records only, hence the default; the My Library index
+    # holds LOCAL (97) records only and passes `LOCAL_SYS_ID_RE`. Never the
+    # ANY pattern: an index holds exactly one namespace, and a pattern that
+    # matched the other would group, cap and restrict on a wrong id.
+    sys_id_re: Optional[re.Pattern] = None
+    # The post-verify duplicate-PHOTOGRAPHY demotion (below) is a Genizah
+    # rule: the same physical page photographed under two catalogue records.
+    # The My Library index turns it off -- two near-identical pages of a
+    # user's own files are two pages they own, and labelling one a "duplicate
+    # photograph" hid the very page a query was copied from (measured on the
+    # owner's library, 2026-10-16: 22 rows demoted in one search). The
+    # build-time photography filters are off for My Library for the same
+    # reason (owner ruling, 2026-10-16).
+    demote_duplicate_photography: bool = True
 
     def __post_init__(self) -> None:
         if self.policy is None:
@@ -677,6 +781,7 @@ class PassageSearcher:
                     'final_score': float(hit.score),
                     'chunk_count': int(hit.n_spans),
                     'chunk_hits': [],
+                    'page_windows': tuple(hit.windows),
                 })
             if multi:
                 # Tag BEFORE the filter split: a witness's rank is its
@@ -732,10 +837,10 @@ class PassageSearcher:
         # passage's filter_text mechanism does not share).
         if self.render_cap and self.render_cap > 0:
             capped_main_candidates, main_truncated = _cap_main_results_by_group(
-                eligible_rows, _RegexSysIdParser(), cap=self.render_cap,
+                eligible_rows, _RegexSysIdParser(self.sys_id_re), cap=self.render_cap,
                 order_key=order_key)
             capped_filtered_candidates, _truncated_f = _cap_main_results_by_group(
-                filtered_candidate_rows, _RegexSysIdParser(), cap=self.render_cap,
+                filtered_candidate_rows, _RegexSysIdParser(self.sys_id_re), cap=self.render_cap,
                 order_key=order_key)
         else:
             # Uncapped: every group survives, so nothing is truncated by
@@ -791,24 +896,40 @@ class PassageSearcher:
         # the demoted count ships in the return dict -- never a silent
         # removal. Demote, not delete: the row moves to `filtered`, already
         # rendered, so a skeptical user can still inspect it.
+        #
+        # WHICH copy stays: a record's own photograph over a copy on an image
+        # set several records carry (`_shared_image_sets`), then the higher
+        # score. The own photograph takes the kept copy's place in the list.
         dup_demoted = 0
-        if len(main_results) > 1:
+        if self.demote_duplicate_photography and len(main_results) > 1:
+            shared_images = _shared_image_sets(
+                list(eligible_rows) + list(filtered_candidate_rows),
+                self.sys_id_re)
+
+            def _on_shared_image(r: dict) -> bool:
+                return _image_set(r['raw_header']) in shared_images
+
             survivors: list = []
             for row in main_results:
-                dup_of = None
+                dup_at = None
                 tb = raw_text_by_header.get(row['raw_header'])
                 if tb:
-                    for prev in survivors[-DUP_SCAN_WINDOW:]:
-                        ta = raw_text_by_header.get(prev['raw_header'])
+                    start = max(0, len(survivors) - DUP_SCAN_WINDOW)
+                    for i in range(start, len(survivors)):
+                        ta = raw_text_by_header.get(survivors[i]['raw_header'])
                         if ta and is_duplicate_photography(ta, tb):
-                            dup_of = prev
+                            dup_at = i
                             break
-                if dup_of is not None:
-                    row['filter_reason'] = 'duplicate_photography'
-                    filtered_results.append(row)
-                    dup_demoted += 1
-                else:
+                if dup_at is None:
                     survivors.append(row)
+                    continue
+                demoted = row
+                if (_on_shared_image(survivors[dup_at])
+                        and not _on_shared_image(row)):
+                    demoted, survivors[dup_at] = survivors[dup_at], row
+                demoted['filter_reason'] = 'duplicate_photography'
+                filtered_results.append(demoted)
+                dup_demoted += 1
             main_results = survivors
 
         result = {
@@ -971,6 +1092,84 @@ class PassageSearcher:
             raise NoWitnessesResolved(report)
         return queries, report
 
+    # -- Composition Search conditions ---------------------------------------
+
+    def search_condition(self, text: str, pages=(), sys_ids=(),
+                         should_stop=None,
+                         render_limit: int = 0) -> 'ConditionSearch':
+        """One version of a condition, searched EXHAUSTIVELY over its pages
+        (docs/plans/COMPOSITION_CONDITIONS_PLAN.md section 3).
+
+        `pages` are (sys_id, IE, P) keys and `sys_ids` whole manuscripts. The
+        record mask is built HERE, from the page map of the index this
+        searcher holds, and the map is checked against this index's build
+        before any posting is read -- so a scope computed while another index
+        generation was current can never select the wrong records.
+
+        Every query gram present in the index is admitted (no posting budget);
+        the condition caps apply (CONDITION_CANDIDATE_CAP, CONDITION_VERIFY_CAP)
+        and their flags come back on the report. Hits are the engine's VERIFIED hits,
+        unrendered: no display cap, text lookup, Filter Text or duplicate-
+        photography routing can drop one. Calls `search_passage` directly, not
+        `_run_one_witness` (which filters by `min_boundary_matches`).
+
+        `should_stop()` is asked before the search and before each candidate
+        is verified; True stops it, and the result says `stopped=True` --
+        the hits found so far are kept, but they no longer prove absence."""
+        from shared.passage_pages import page_index_for
+        from shared.passage_search import QueryReport
+
+        if should_stop is not None and should_stop():
+            return ConditionSearch((), (), QueryReport().as_dict(), True)
+        mask = page_index_for(self.index).mask_for(
+            self.index, pages=pages, sys_ids=sys_ids)
+        if not mask.any():
+            # Nothing searchable in scope: absence from the searchable pages
+            # is proven trivially.
+            return ConditionSearch((), (), QueryReport(exhaustive_mask=True).as_dict(),
+                                   False)
+        policy = replace(self.policy, verify_cap=CONDITION_VERIFY_CAP,
+                         candidate_cap=CONDITION_CANDIDATE_CAP)
+        stopped = [False]
+
+        def _checkpoint(_done, _total):
+            if should_stop is not None and should_stop():
+                stopped[0] = True
+                return False
+            return True
+
+        hits, report = search_passage(self.index, text, policy,
+                                      record_mask=mask, checkpoint=_checkpoint)
+        rows = []
+        if render_limit and hits:
+            q_nfc = nfc(text or '')
+            _q_stream, q_offsets = norm_stream(text or '')
+            starts = sorted({span[0] for h in hits for span in h.spans})
+            span_index = {q0: i for i, q0 in enumerate(starts)}
+            for hit in hits[:render_limit]:           # hits are best first
+                row = {
+                    'uid': _derive_uid(hit.record_id), 'raw_header': hit.record_id,
+                    'src_lbl': '', 'source_ctx': '', 'text': '',
+                    'highlight_pattern': '', 'source_highlight_pattern': '',
+                    'score': float(hit.score), 'final_score': float(hit.score),
+                    'chunk_count': int(hit.n_spans), 'chunk_hits': [],
+                }
+                try:
+                    ok = self._render_highlights(row, hit, q_nfc, q_offsets, span_index)
+                except Exception as exc:     # noqa: BLE001 -- display only
+                    # Rendering is for SHOWING evidence. The hit is verified
+                    # and is returned below whatever happens here.
+                    logger.warning('condition evidence render failed for %s: %s',
+                                   hit.record_id, exc)
+                    ok = False
+                if ok:
+                    rows.append(row)
+        hit_windows = {h.record_id: tuple(h.windows) for h in hits}
+        return ConditionSearch(tuple(h.record_id for h in hits),
+                               tuple((h.record_id, tuple(h.spans)) for h in hits),
+                               report.as_dict(), stopped[0], tuple(rows),
+                               hit_windows)
+
     def _run_one_witness(self, wid: str, label: str, text: str,
                          restrict_sys_ids, min_boundary_matches: int,
                          checkpoint=None):
@@ -995,7 +1194,8 @@ class PassageSearcher:
         # belt-and-braces) let out-of-set candidates consume the caps and
         # produced false negatives on filtered searches over common texts.
         _allowed = (None if restrict_sys_ids is None else
-                    (lambda rid: _extract_sys_id(rid) in restrict_sys_ids))
+                    (lambda rid: _extract_sys_id(rid, self.sys_id_re)
+                                  in restrict_sys_ids))
         hits, report = search_passage(self.index, text, self.policy,
                                       record_allowed=_allowed,
                                       **({} if checkpoint is None else {'checkpoint': checkpoint}))
@@ -1005,7 +1205,8 @@ class PassageSearcher:
 
         if restrict_sys_ids is not None:
             hits = [h for h in hits
-                    if _extract_sys_id(h.record_id) in restrict_sys_ids]
+                    if _extract_sys_id(h.record_id, self.sys_id_re)
+                    in restrict_sys_ids]
 
         # Query-side offset map, computed ONCE per witness (not per hit/span
         # -- this is O(query length), never O(corpus)) so every rendered

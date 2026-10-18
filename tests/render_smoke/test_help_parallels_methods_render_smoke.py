@@ -112,7 +112,7 @@ EN_CHUNK = 'How Chunk Search Works'
 
 HE_METHOD = 'חיפוש ברמת האות הוא ברירת המחדל'
 HE_HOWTO = 'רצף של אותיות עבריות בלבד'
-HE_WITNESS = 'עדי נוסח** מאפשר לחפש בכולם'
+HE_WITNESS = 'עדים** מאפשר לחפש בכולם'
 HE_CHUNK = 'איך עובד חיפוש מקטעים?'
 
 
@@ -156,3 +156,46 @@ def test_multi_witness_help_follows_its_own_flag(lang, witness):
     on while the fan-out is still being validated."""
     assert witness not in _page_text(lang, passage_on=True, multi_on=False)
     assert witness in _page_text(lang, passage_on=True, multi_on=True)
+
+
+def _puzzle_cards_visible(lang: str, *, puzzle_on: bool) -> dict:
+    """For the Fragment Puzzle and Community Publishing help cards: is the card
+    holding each anchor visible? Hidden elements still exist in the client, so
+    a text check cannot see this; walk from the anchor up to its card."""
+    saved_slots = list(nicegui_context.slot_stack)
+    seen: dict = {}
+
+    async def invoke():
+        with patch('web.pages.help.WEB_PUZZLE_ENABLED', puzzle_on):
+            async with _help_user(lang, passage_on=False, multi_on=False) as user:
+                await user.open('/help')
+                with user._client:
+                    for element in user._client.elements.values():
+                        name = (getattr(element, '_props', None) or {}).get('name')
+                        if name not in ('help-puzzle', 'help-community-publish'):
+                            continue
+                        node, visible = element, True
+                        while node is not None:
+                            visible = visible and bool(getattr(node, 'visible', True))
+                            slot = getattr(node, 'parent_slot', None)
+                            node = slot.parent if slot is not None else None
+                        seen[name] = visible
+
+    try:
+        asyncio.run(invoke())
+    finally:
+        nicegui_context.slot_stack.clear()
+        nicegui_context.slot_stack.extend(saved_slots)
+    return seen
+
+
+@pytest.mark.render_smoke
+@pytest.mark.parametrize('lang', ['en', 'he'])
+def test_puzzle_help_follows_the_web_puzzle_flag_in_both_languages(lang):
+    """The Hebrew half used to show both cards with WEB_PUZZLE_ENABLED off while
+    its table of contents left them out (found 2026-10-18)."""
+    off = _puzzle_cards_visible(lang, puzzle_on=False)
+    on = _puzzle_cards_visible(lang, puzzle_on=True)
+    assert set(off) == set(on) == {'help-puzzle', 'help-community-publish'}
+    assert not any(off.values()), off
+    assert all(on.values()), on

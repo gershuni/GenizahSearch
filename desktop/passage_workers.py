@@ -25,6 +25,21 @@ logger = logging.getLogger(__name__)
 DESKTOP_PARTITIONS = 16
 
 
+def _cancelled_without_index(result) -> bool:
+    """Is this a cancellation with NOTHING to install?
+
+    A cancel that lands after the release seam has already closed the live
+    index (`perform_swap` cancelled) comes back as status 'cancelled' WITH the
+    index recovery reopened -- and so does a cancel during the post-build
+    re-fingerprint. Reported as a bare cancellation, that index was dropped:
+    the slot stayed empty and letter-level search was gone until restart. A
+    cancelled result that carries an index goes out as a finished one, so the
+    window installs it; the window's finished handler words it as a cancel.
+    """
+    return (getattr(result, 'status', '') == 'cancelled'
+            and getattr(result, 'index', None) is None)
+
+
 class PassageLoadThread(QThread):
     """Startup: recover if a previous run died mid-swap, then open the live
     index. `recover_at_startup` does BOTH -- it walks the candidates,
@@ -40,6 +55,8 @@ class PassageLoadThread(QThread):
 
     def __init__(self, root, parent=None):
         super().__init__(parent)
+        # Recovery is pure over `root`, so the same thread serves both slots:
+        # the window installs the result into whichever slot it asked for.
         self._root = root
 
     def run(self):
@@ -111,7 +128,7 @@ class PassageBuildThread(QThread):
             logger.exception('passage index build failed')
             self.error_signal.emit(str(exc))
             return
-        if result.status == 'cancelled':
+        if _cancelled_without_index(result):
             self.cancelled_signal.emit()
             return
         if result.status == 'error':
@@ -178,3 +195,165 @@ class PassageBuildThread(QThread):
         if phase == 'pass1':
             return
         self._emit(phase, done, total)
+
+
+# ---------------------------------------------------------------------------
+# My Library (LOCAL) letter-level index.
+# ---------------------------------------------------------------------------
+
+# A library can hold ten times the Genizah corpus's letters. Pass 2 sorts one
+# partition at a time, so its memory is total postings / partitions: three
+# times the Genizah count keeps a partition near the same size on a library
+# of ~5 billion letters.
+LOCAL_PARTITIONS = 48
+
+
+class LocalPassageBuildThread(PassageBuildThread):
+    """Builds the My Library letter-level index from the LOCAL SQLite
+    sidecar, read-only, into its own root, through the SAME build/swap
+    protocol as the Genizah index (`run_build_and_swap` on the
+    `SLOT_LOCAL` slot). Only the record source, the size estimate and the
+    corpus fingerprint differ: records come from `iter_local_records`, and
+    the fingerprint is a signature file summarising the library (see
+    `shared/passage_local_corpus.py::write_corpus_signature`)."""
+
+    def __init__(self, root, db_path, release_live_state, parent=None):
+        super().__init__(root, db_path, release_live_state, parent=parent)
+        self._db_path = db_path
+
+    def run(self):
+        from desktop import passage_local
+        from shared.passage_local_corpus import (count_local_pages,
+                                                 iter_local_records,
+                                                 open_local_snapshot)
+        snapshot = None
+        try:
+            total = max(1, count_local_pages(self._db_path))
+            needed = passage_local.estimate_local_build_bytes(self._db_path)
+            self._emit('signature', 0, 0, 0)
+            # The signature and the records come from ONE snapshot of the
+            # library, so the signature describes exactly the pages indexed
+            # even if a scan or Re-index All runs meanwhile (PR #399 review).
+            snapshot = open_local_snapshot(self._db_path)
+            sig = passage_local.refresh_signature(
+                self._root, cancel_check=self._cancel_check, conn=snapshot)
+            last = {'pct': -1}
+
+            def _on_page(n):
+                pct = min(100, int(n * 100 / total))
+                if pct != last['pct']:
+                    last['pct'] = pct
+                    self._emit('read', pct, 100, n)
+
+            def _records():
+                try:
+                    yield from iter_local_records(
+                        self._db_path, on_page=_on_page,
+                        cancel_check=self._cancel_check, conn=snapshot)
+                finally:
+                    # Reading is over: end the read transaction now rather
+                    # than at the end of the build, so the sidecar's WAL can
+                    # be checkpointed again.
+                    snapshot.close()
+                # Reading is done, and the builder's next stage (spooling
+                # every posting to scratch, minutes on a large library)
+                # reports nothing until its first partition is sorted. Say
+                # so, rather than leave the dialog parked on "100%".
+                self._emit('arrange', 0, 0, 0)
+
+            records = _records()
+            # `[sig]` is the corpus fingerprint the manifest records, and the
+            # freshness check compares against. The swap's "corpus changed"
+            # re-hash reads that same FILE, which nothing rewrites mid-build,
+            # so a library change DURING the build does not discard it -- by
+            # design: a scan can finish at any point of an hour-long build,
+            # and discarding would leave a first build with no index at all.
+            # The new index is installed, and the window's freshness check
+            # after every build end (`_on_local_passage_build_finished`) shows
+            # the rebuild notice, as after any scan (owner, 2026-10-16).
+            result = passage_lifecycle.run_build_and_swap(
+                self._root, records, [sig], self._db_path,
+                partitions=LOCAL_PARTITIONS, corpus_label='my_library',
+                progress=self._on_progress,
+                cancel_check=self._cancel_check,
+                release_live_state=self._release_live_state,
+                slot=passage_lifecycle.SLOT_LOCAL,
+                needed_bytes=needed,
+                # The Genizah photography filters drop real pages of a
+                # user's own documents (owner, 2026-10-16).
+                apply_hygiene=False)
+        except passage_lifecycle.BuildCancelled:
+            self.cancelled_signal.emit()
+            return
+        except Exception as exc:                       # noqa: BLE001
+            logger.exception('My Library letter-level index build failed')
+            self.error_signal.emit(str(exc))
+            return
+        finally:
+            if snapshot is not None:
+                snapshot.close()          # a build that never read to the end
+        if _cancelled_without_index(result):
+            self.cancelled_signal.emit()
+            return
+        if result.status == 'error':
+            self.error_signal.emit(str(getattr(result, 'error', '') or ''))
+            return
+        self.finished_signal.emit(result)
+
+
+class LocalPassagePreflightThread(QThread):
+    """Before a My Library build: count the library's pages and size the
+    build. Both read the whole page table (seconds on a large library), so
+    off the UI thread. Emits `(n_pages, needed_bytes)` as plain objects -- a
+    byte count can pass 2**31. `n_pages` 0 means nothing to build (or the
+    library could not be read); `needed_bytes` 0 means the estimate failed,
+    which the window treats as "skip the disk check", not "refuse"."""
+
+    result_signal = pyqtSignal(object, object)
+
+    def __init__(self, db_path, parent=None):
+        super().__init__(parent)
+        self._db_path = db_path
+
+    def run(self):
+        from desktop import passage_local
+        from shared.passage_local_corpus import count_local_pages
+        n_pages = needed = 0
+        try:
+            if os.path.exists(self._db_path):
+                n_pages = count_local_pages(self._db_path)
+        except Exception:                              # noqa: BLE001
+            logger.exception('could not read the My Library page count')
+            n_pages = 0
+        if n_pages:
+            try:
+                needed = passage_local.estimate_local_build_bytes(self._db_path)
+            except Exception:                          # noqa: BLE001
+                logger.exception('My Library build size estimate failed')
+                needed = 0
+        self.result_signal.emit(n_pages, needed)
+
+
+class LocalPassageFreshnessThread(QThread):
+    """Is the installed My Library index still built from the library as it
+    is now? Reads the whole LOCAL page table (seconds), so off the UI
+    thread. Emits FRESH / STALE / UNKNOWN, or '' when there is nothing to
+    say (no index, or cancelled).
+
+    `live_dir` is the installed index's directory, read on the UI thread
+    when the check is started -- never from here."""
+
+    result_signal = pyqtSignal(str)
+
+    def __init__(self, live_dir, parent=None):
+        super().__init__(parent)
+        self._live_dir = live_dir
+
+    def run(self):
+        from desktop import passage_local
+        try:
+            result = passage_local.local_freshness(self._live_dir)
+        except Exception:                              # noqa: BLE001
+            logger.exception('My Library letter-level freshness check failed')
+            result = None
+        self.result_signal.emit(result or '')
