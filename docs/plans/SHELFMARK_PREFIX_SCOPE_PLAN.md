@@ -5,7 +5,7 @@ Status: rev. 8 (2026-10-18): Codex rounds 1 (plan, 9 findings), 2 (plan + code, 
 (the count fell 9-5-4-3-3-2, the last three rounds synthetic only), round 7 is for information:
 what it finds is verified and logged in `docs/OPEN_ISSUES.md`. Implemented on
 `feat/shelfmark-prefix-scope` (`044e0885`, on top of PR #400's head `edb3ea61`), merged with
-master-main after #400 and #401; not pushed, no PR yet. Builds on `docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md`, whose helpers it reuses.
+master-main after #400 and #401; PR #402 (not merged). Builds on `docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md`, whose helpers it reuses.
 
 ## 1. Problem (open issue, P3, logged 2026-10-18)
 
@@ -221,7 +221,8 @@ here runs), so they say nothing about cache-only variants; those are pinned by s
    reading `Ms.` case-sensitively; provenance on plain keys; the query head split case-sensitive;
    the `prefix_rule` switch ignored; provenance ignoring the NLI cache; provenance reading the live
    cache instead of the snapshot the index carries; index entries built from the live cache
-   instead of the frozen copy (26 in all, each red).
+   instead of the frozen copy; T2's whole-input key checking only the variant the index kept
+   (27 in all, each red).
 7. **Performance** (Codex round 2, on rev. 3): warm resolver median/p95 for prefixed inputs
    82/130 ms before, 83/128 ms after -- no change per request (the web resolves per request); the
    2M-input batch 162 -> 224 s (+38%), from per-candidate provenance; rev. 4 caches the parse per
@@ -249,6 +250,13 @@ whole-input key keeps the `Ms.`). None changes from today; the GOLDEN rows that 
 
 ## Revision log
 
+- **PR #402 Codex review (GitHub, 1 finding, P2).** T2's whole-input key `w` compared the typed
+  numbers with the one variant the index kept per (record, key), so `GASTER 0123` missed a record
+  storing `GASTER 12 3` before `GASTER 123` -- the round-6 defect, in T2. `w` candidates now use
+  `_carries(..., zeros=True)` (every stored variant, zero-insensitive keys); test
+  `test_the_whole_input_t2_key_sees_every_variant`, mutation 27. No answer changes on today's
+  corpus (2,022,705 full responses byte-identical), so the baseline stands. The same check in
+  #400's older T2 keys is logged as P3.
 - **Codex round 7 (finite audit, informational, SHIP WITH FIXES).** No newly introduced wrong or
   lost record in every GOLDEN row and 53 changed inputs across all 20 population/class pairs;
   every section-4 count confirmed by an exhaustive recount; the round-6 fix changes no answer on

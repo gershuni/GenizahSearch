@@ -370,6 +370,21 @@ def test_the_numeric_check_sees_every_variant_not_only_the_one_the_index_kept(va
     assert sorted(ids(mm.resolve_catalog_form('GASTER 123'))) == ['FULL', 'STUB']
 
 
+@pytest.mark.parametrize('variants, cached', [
+    (['GASTER 12 3', 'GASTER 123'], None),
+    (['GASTER 123', 'GASTER 12 3'], None),
+    ([], {'shelfmark': 'GASTER 12 3', 'shelfmark_alt': 'GASTER 123', 'title': ''}),
+])
+def test_the_whole_input_t2_key_sees_every_variant(variants, cached):
+    """A padded input reaches T2's whole-input key; the record that also stores `GASTER 123`
+    behind `GASTER 12 3` must not depend on call-number order (PR #402, Codex)."""
+    mm = _manager({'FULL': ('BL', variants or ['x']), 'STUB': ('BL', ['GASTER 123'])})
+    mm.nli_cache = {'FULL': cached} if cached else {}
+    got = mm.resolve_catalog_form('GASTER 0123')
+    assert sorted(ids(got)) == ['FULL', 'STUB'] and got['tier'] == 'direct'
+    assert sorted(ids(mm.resolve_system_by_shelfmark('GASTER 0123'))) == ['FULL', 'STUB']
+
+
 def test_no_dotless_rule_for_the_whole_input():
     """`GASTER 21 62` must not reach a record that stores `GASTER 21.62`, although both have the
     integers (21, 62): that is the dotless rule, which the whole input does not use (finding 2)."""

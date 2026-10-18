@@ -217,14 +217,15 @@ def _record_variants(sys_id, csv_bank, cached_variants):
     return out
 
 
-def _carries(hit, key, want, csv_bank, cached_variants, dotless=False):
+def _carries(hit, key, want, csv_bank, cached_variants, dotless=False, zeros=False):
     """Whether the record stores a variant with normalized key ``key`` (or, for a dotless key,
-    that key once dots are dropped) and the integers ``want``. The index keeps one variant per
-    (record, key), so checking only that one could miss `GASTER 123` behind `GASTER 12 3`."""
+    that key once dots are dropped; with ``zeros``, zero-insensitive keys) and the integers
+    ``want``. The index keeps one variant per (record, key), so checking only that one could
+    miss `GASTER 123` behind `GASTER 12 3`."""
     if numbers(hit['shelfmark']) == want:
         return True
     for variant in _record_variants(hit['sys_id'], csv_bank, cached_variants):
-        norm = normalize_shelfmark(variant)
+        norm = zkey(variant) if zeros else normalize_shelfmark(variant)
         if (norm == key or (dotless and norm.replace('.', '') == key)) and numbers(variant) == want:
             return True
     return False
@@ -598,15 +599,23 @@ def resolve_many(queries, tables, csv_bank, limit=100, with_exact=True, prefix_r
         def keep(e_sys_id, needs):
             return not needs or _belongs(e_sys_id, institution, csv_bank, alias_rest, prefix_rule, cached_variants)
 
+        def fits(e, form, tier):
+            if numbers(e[1]) == numbers(form):
+                return True
+            # The whole-input key looks at every stored variant, as T1's prefix rule does:
+            # the index may have kept `GASTER 12 3` for a record that also stores `GASTER 123`.
+            return tier == 'w' and _carries(_entry(e), zkey(form), numbers(form), csv_bank,
+                                            cached_variants, zeros=True)
+
         for e, form, needs, tier in found.get(query, ()):
-            if numbers(e[1]) == numbers(form) and keep(e[0], needs):
+            if fits(e, form, tier) and keep(e[0], needs):
                 cands.append(_entry(e))
         for e in nodot_found.get(query, ()):
             if numbers(e[1]) == want and keep(e[0], institution is not None):
                 cands.append(_entry(e))
         for key, form, tier, needs in plan.keys:
             for e in tables.zero_side.get(key, ()):
-                if numbers(e[1]) == numbers(form) and keep(e[0], needs):
+                if fits(e, form, tier) and keep(e[0], needs):
                     cands.append(_entry(e))
         if plan.bridge_text:
             bridged = _bridge_entry(plan.bridge_text, csv_bank)
