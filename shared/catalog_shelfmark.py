@@ -43,6 +43,9 @@ from shared.browse_map_utils import (
 )
 
 HEAD_RE = re.compile(r'^(?P<head>.+?)[,\s]+(?:Ms\.?|MS\.?)\s+(?P<rest>\S.*)$')
+# What users type: `ms.` in any case (`Mosseri, Jacques, ms. VIII.402`). Stored variants keep
+# the case-sensitive HEAD_RE, so the institution table is derived exactly as measured.
+QUERY_HEAD_RE = re.compile(HEAD_RE.pattern, re.IGNORECASE)
 MIN_HEAD_USES = 3
 _LEADING_ZEROS = re.compile(r'(?<!\d)0+(?=\d)')
 _HAS_LEADING_ZERO = re.compile(r'(?<!\d)0\d')
@@ -157,7 +160,7 @@ class CatalogTables:
 
     def split(self, query):
         """``(head, rest)`` when the query starts with a known institution head, else None."""
-        m = HEAD_RE.match(query)
+        m = QUERY_HEAD_RE.match(query)
         if not m:
             return None
         head = m.group('head').strip().rstrip(',').strip().lower()

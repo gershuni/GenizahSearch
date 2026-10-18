@@ -40,6 +40,8 @@ GOLDEN = {
     'Mosseri, Jacques Ms. VIII.402': (MOSS_402, 2, 'parent'),
     'Mosseri Jacques, Ms. VIII.402': (MOSS_402, 2, 'parent'),
     'Mosseri, Jacques Paris France Ms. VIII.402': (MOSS_402, 2, 'parent'),
+    'Mosseri, Jacques, ms. VIII.402': (MOSS_402, 2, 'parent'),             # any case of "Ms."
+    'cambridge university library, MS. T-S K 08.026': ([CUL_K826], 1, 'direct'),
     'Mosseri, Jacques, Ms. IV.366': (['990053835860205171'], 1, 'direct'),     # the unit, not its parts
     'Mosseri, Jacques, Ms. III 27O': (['990053835020205171'], 1, 'direct'),
     'Mosseri, Jacques, Ms. III 270': NONE,                                     # zero is not letter O

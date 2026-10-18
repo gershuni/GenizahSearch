@@ -116,6 +116,8 @@ def test_heads_come_from_raw_variants_with_three_uses_longest_first():
     assert tables.split('Abc Library Annex, Ms. 5') == ('abc library annex', '5')
     assert tables.split('Abc Library, Ms. 5') == ('abc library', '5')
     assert tables.split('Abc Library Paris France Ms. 5') == ('abc library', '5')
+    assert tables.split('Abc Library, ms. 5') == ('abc library', '5')     # typed in any case
+    assert tables.split('ABC LIBRARY MS 5') == ('abc library', '5')
     assert tables.split('Abc Libraryx, Ms. 5') is None
     assert tables.split('Rare Head, Ms. 1') is None
 
