@@ -106,6 +106,8 @@
         <li><a href="#reading-desk">Reading Desk</a></li>
         <li><a href="#puzzle">Fragment Puzzle</a></li>
         <li><a href="#joins-lab">Joins Lab</a></li>
+        <li><a href="#lists">Personal Lists</a></li>
+        <li><a href="#community">Community Tab</a></li>
         <li><a href="#community-publish">Community Publishing</a></li>
         <li><a href="#lab">Lab Mode</a></li>
         <li><a href="#api">Public API & AI Tools</a></li>
@@ -230,13 +232,16 @@
 
     <h3>Available Filters</h3>
     <ul>
-        <li><b>Subject Domain:</b> Filter by scholarly classification (e.g., Bible, Talmud, Poetry)</li>
-        <li><b>Author:</b> Filter by attributed author</li>
-        <li><b>Work:</b> Filter by specific work title</li>
-        <li><b>Date Range:</b> Filter by manuscript dating</li>
-        <li><b>Type:</b> Filter by material type (manuscript vs. printed)</li>
+        <li><b>Include</b> / <b>Exclude:</b> Choose whether the Subject Domain, Author and Work selections below narrow the search to matching manuscripts, or rule them out instead</li>
+        <li><b>Subject Domain:</b> Filter by scholarly classification (e.g., Bible, Talmud, Poetry); you can select more than one</li>
+        <li><b>Author:</b> Filter by attributed author; you can select more than one</li>
+        <li><b>Work:</b> Filter by specific work title; you can select more than one</li>
+        <li><b>Date Range:</b> Filter by manuscript dating; the <b>Include undated</b> checkbox also includes manuscripts with no recorded date</li>
+        <li><b>Type:</b> Filter by material type: <b>Show all</b>, <b>Exclude printed</b>, or <b>Printed only</b></li>
+        <li><b>Catalog Data Text:</b> Search the catalog's own descriptive text (not the manuscript's transcription) for words you add under <b>All words</b>, <b>Any word</b>, or <b>Not these words</b></li>
+        <li><b>Measurements:</b> Filter by a manuscript's physical measurements &mdash; <b>Width (cm)</b>, <b>Height (cm)</b>, <b>Lines</b>, <b>Line Height (mm)</b>, and <b>Text Density</b> &mdash; and by <b>Material (measured)</b>: <b>Paper</b>, <b>Vellum</b>, <b>Papyrus</b>, <b>Mix</b>, or <b>Wood</b>. This group, and the <b>Line Height (mm)</b> field within it, appear only when the loaded catalog data includes that information.</li>
     </ul>
-    <p>Active filters appear as removable <b>chips</b> above the results. Filters apply to all search modes.</p>
+    <p>A running count of matching manuscripts is shown at the bottom of the window as you adjust filters, and <b>Clear All</b> resets them. Active filters appear as removable <b>chips</b> in this window; after you click <b>OK</b>, they also appear as chips above the results, except for the <b>Measurements</b> filters and <b>Printed only</b>. Filters apply to all search modes, but not in <b>Lab Mode</b>.</p>
     </div>
 
     <div class="section">
@@ -583,6 +588,119 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
     </div>
 
     <div class="section">
+    <h2 id="lists">Personal Lists</h2>
+    <p>The <b>Personal Lists</b> tab lets you keep your own lists of manuscripts and local documents, group
+    them into projects, add notes and tags, and sync them with your account on <bdi dir="ltr">genizahsearch.com</bdi>.</p>
+
+    <h3>Lists and Projects</h3>
+    <ul>
+        <li>Click <b>Add list...</b> (or the <b>+</b> button above the list tree) to create a new list, and
+        <b>Add project...</b> to create a folder that groups several lists together.</li>
+        <li>Use the &#9999;&#65039; <b>Edit List</b> and &#128465;&#65039; <b>Delete List</b> buttons above the items table to
+        rename or delete the list you are viewing (they do not work on the default list or on <b>Recently Viewed</b>);
+        a deleted list goes to the <b>Trash</b>, where you can restore it or delete it permanently.</li>
+        <li><b>Duplicate List</b> makes a copy of the current list; <b>Merge Lists</b> combines it into another list
+        you choose.</li>
+        <li><b>Fix Duplicates</b> finds lists that share the same name (for example, copies left by a sync problem)
+        and merges each group into one list, asking which one to keep when they belong to different projects.</li>
+        <li>There is always a default list, initially named <b>General</b>, and a <b>Recently Viewed</b> list. The
+        default list cannot be deleted; to rename it, right-click it in the list tree and choose <b>Rename List</b>.
+        <b>Recently Viewed</b> fills itself automatically as you view manuscripts; it cannot be renamed or deleted,
+        and is never synced to the cloud.</li>
+    </ul>
+
+    <h3>Adding and Managing Items</h3>
+    <p>Items are added with the <b>&#9734; List</b> button (<b>Add to List</b>) in Search, Composition Search, and the
+    Browse by Shelfmark tab — or the &#9734; icon on each row of Search results — and from candidates in the Joins Lab.</p>
+    <ul>
+        <li>Use the <b>Filter items...</b> box and the <b>Sort by</b> menu (Shelfmark, Title, or Date Added) to find
+        items in a long list.</li>
+        <li>Check items with <b>Select All</b> or individually, then use <b>Move to List...</b>, <b>Add Tag...</b>,
+        or <b>Remove Selected</b> on everything checked.</li>
+        <li>Each row has its own buttons: &#128065;&#65039; <b>Quick View</b> opens a quick view of that page
+        (Genizah manuscripts only; a local document from My Library cannot be opened this way),
+        &#128214; <b>Browse</b> opens the manuscript on the Browse by Shelfmark tab, &#128203; <b>Copy Info</b> copies its details
+        (<b>Compact</b>, <b>Detailed</b>, or <b>With Link</b>) to the clipboard, &#129513; <b>Add to Puzzle</b> sends
+        it to the Fragment Puzzle canvas, and &#128465;&#65039; <b>Remove from List</b> takes it off the current list
+        only.</li>
+    </ul>
+
+    <h3>Item Details and Preview</h3>
+    <p>Selecting an item shows the <b>Item Details</b>: <b>Library</b>, <b>Shelfmark</b>, <b>Image</b>, <b>Title</b>,
+    <b>Lists</b>, <b>System ID</b>, and <b>Tags</b>, next to a text and image preview of the page. The preview is
+    for Genizah manuscripts: a local document from My Library is not previewed there. Type in the <b>Note</b> field
+    and click <b>Save Changes</b> to keep it; the preview panel can be collapsed with the &#9664;/&#9654; button
+    at its top.</p>
+
+    <h3>Export and Import</h3>
+    <ul>
+        <li><b>Export List...</b> saves the list you are viewing as <b>Text (plain)</b>, <b>JSON</b>,
+        <b>Excel (.xlsx)</b>, or <b>Word (.docx)</b>.</li>
+        <li><b>Import List...</b> reads a list back in from a JSON file and reports how many items it added and how
+        many of them it could not identify.</li>
+    </ul>
+
+    <h3>Syncing with Your Account</h3>
+    <p><b>Sync lists now</b> is enabled only when you are signed in to your <bdi dir="ltr">genizahsearch.com</bdi>
+    account; once signed in, every change you make is uploaded automatically.</p>
+    <ul>
+        <li>Clicking <b>Sync lists now</b> offers <b>Download from Cloud</b>, <b>Upload to Cloud</b>,
+        <b>Merge Both</b> (combine what is on this computer with what is in your account), or <b>Skip</b>; each of
+        the first three appears only when there are lists for it to work on.</li>
+        <li>When the same note was edited on both sides, <b>Merge Both</b> keeps both versions, separated by a
+        marker line; uploading alone leaves a differing note in your account as it is.</li>
+        <li>If an item was removed from one of your lists on the website, you are asked to choose, for each such item,
+        <b>Remove from this computer too</b>, <b>Keep it (and add it back on the website)</b>, or <b>Decide later</b>.</li>
+        <li>Items from your local documents (see <a href="#my-library">My Library — Local Documents</a>) are never
+        uploaded, even in a list that is otherwise synced.</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="community">Community Tab</h2>
+    <p>The <b>Community</b> tab brings together what researchers have shared: discoveries and questions, transcription corrections, page comments, and fragment-join proposals — each in its own panel, with a quick list plus a fuller window for browsing more.</p>
+
+    <h3>Signing In</h3>
+    <p>Loading what others have shared needs an internet connection but no account; without a connection, each quick list shows what it loaded last time (for comments, the beginning of each comment's text). To contribute, or to see your own items, sign in.</p>
+    <ul>
+        <li>Click <b>Login</b>, next to the tab bar at the top of the window, to sign in, or click <b>Register</b> in the Community tab's own header to create an account.</li>
+        <li>Once signed in, the header shows <b>Logged in as</b> your username and your <b>Reputation</b> score; signed out, it reads <b>Not logged in - Login to participate in the community</b>.</li>
+    </ul>
+
+    <h3>Discoveries</h3>
+    <p>Share something you noticed about a manuscript, ask a question, announce an identification, or leave a general note — and read what other researchers have shared.</p>
+    <ul>
+        <li>Click <b>+</b> to share one: choose a <b>Type</b> (<b>Discovery - Found something interesting</b>, <b>Question - Need help</b>, <b>Identification - Identified a text</b>, or <b>Note - General observation</b>), fill in a <b>Title</b> and <b>Description</b>, optionally attach one or more shelfmarks, and tick <b>Post anonymously</b> to hide your name.</li>
+        <li>Filter the quick list by type, or click <b>View All Discoveries...</b> to open the <b>Discoveries Center</b>, which adds activity statistics and <b>Type</b> and <b>Period</b> filters spanning corrections, comments, joins, and puzzle joins as well.</li>
+        <li>Double-click an item, or choose <b>View Details</b> from its right-click menu, to read it, vote on it with <b>Upvote</b> or <b>Downvote</b>, and add a response; for a question, its author (or an admin) can also click <b>Mark as Answered</b>.</li>
+        <li>Right-click your own discovery to choose <b>Edit</b> or <b>Delete</b>.</li>
+    </ul>
+
+    <h3>Corrections</h3>
+    <p>A correction is a transcription fix that a researcher proposed while browsing a page.</p>
+    <ul>
+        <li><b>All Corrections</b> and <b>My Corrections</b> list them, each marked with its status: 🔵 pending, ✅ approved, or ❌ rejected. Double-click one to open the page it corrects.</li>
+        <li>Click <b>Browse Corrections...</b> for a table of every correction, which you can filter by status (<b>Pending</b>, <b>Approved</b>, <b>Rejected</b>) and search, showing the original and corrected text side by side.</li>
+        <li>Right-click a correction and choose <b>View Correction Details</b> to vote on it with 👍 (<b>Upvote</b>) or 👎 (<b>Downvote</b>).</li>
+    </ul>
+
+    <h3>Comments</h3>
+    <p>A comment is a note a researcher left on a specific manuscript page while browsing it, with the <b>💬 Comment</b> button on the <b>Browse by Shelfmark</b> tab.</p>
+    <ul>
+        <li><b>All Comments</b> and <b>My Comments</b> list them; double-click one to jump straight to that page.</li>
+        <li>Click <b>View All My Comments...</b> to page through all of your own comments.</li>
+    </ul>
+
+    <h3>Joins</h3>
+    <p>This panel brings together two kinds of fragment-join proposals: records that pair two fragments, and visual puzzle-join reconstructions.</p>
+    <ul>
+        <li><b>All Joins</b> and <b>My Joins</b> list the join records; each pairs two fragments and, when its author chose one, shows the relationship: <b>Physical join</b> or <b>Same composition</b>.</li>
+        <li><b>All Puzzles</b> and <b>My Puzzles</b> list published puzzle-join reconstructions; see <a href="#community-publish">Community Publishing</a> for how to publish, unpublish, and open a copy of one.</li>
+        <li>Click <b>Browse Joins...</b> for the full <b>Fragment Joins</b> window, with all four lists together in one place.</li>
+    </ul>
+    </div>
+
+    <div class="section">
     <h2 id="community-publish">Community Publishing</h2>
     <p>Share your puzzle join reconstructions with the research community and browse joins published by other scholars.</p>
 
@@ -793,6 +911,8 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
         <li><a href="#reading-desk">שולחן עיון (Reading Desk)</a></li>
         <li><a href="#puzzle">פאזל קטעים</a></li>
         <li><a href="#joins-lab">מעבדת צירופים</a></li>
+        <li><a href="#lists">רשימות אישיות</a></li>
+        <li><a href="#community">לשונית קהילה</a></li>
         <li><a href="#community-publish">פרסום לקהילה</a></li>
         <li><a href="#lab">מצב מעבדה</a></li>
         <li><a href="#api">ממשק API וכלי בינה מלאכותית</a></li>
@@ -914,13 +1034,16 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
     <p>לחצו על <b>מקד חיפוש</b> כדי לפתוח את החלון <b>חפש רק ב...</b> ולצמצם את החיפוש לפי מאפייני כתבי היד לפני החיפוש.</p>
     <h3>מסננים זמינים</h3>
     <ul>
-        <li><b>תחום נושא:</b> סינון לפי סיווג מדעי (כגון תנ"ך, תלמוד, שירה)</li>
-        <li><b>מחבר:</b> סינון לפי מחבר מיוחס</li>
-        <li><b>חיבור:</b> סינון לפי שם חיבור</li>
-        <li><b>טווח תאריכים:</b> סינון לפי תיארוך כתב היד</li>
-        <li><b>סוג:</b> סינון לפי סוג חומר (כתב יד מול דפוס)</li>
+        <li><b>כלול</b> / <b>שלילה:</b> בחרו אם הבחירות בתחום הנושא, במחבר ובחיבור שלהלן מצמצמות את החיפוש לכתבי היד התואמים, או מוציאות אותם ממנו</li>
+        <li><b>תחום נושא:</b> סינון לפי סיווג מדעי (כגון תנ"ך, תלמוד, שירה); ניתן לבחור בכמה תחומים</li>
+        <li><b>מחבר:</b> סינון לפי מחבר מיוחס; ניתן לבחור בכמה מחברים</li>
+        <li><b>חיבור:</b> סינון לפי שם חיבור; ניתן לבחור בכמה חיבורים</li>
+        <li><b>טווח תאריכים:</b> סינון לפי תיארוך כתב היד; תיבת הסימון <b>כלול לא מתוארכים</b> מוסיפה גם כתבי יד ללא תיארוך רשום</li>
+        <li><b>סוג:</b> סינון לפי סוג חומר: <b>הצג הכל</b>, <b>ללא דפוסים</b> או <b>דפוסים בלבד</b></li>
+        <li><b>טקסט נתוני קטלוג:</b> חיפוש בטקסט התיאורי של הקטלוג עצמו (לא בתעתוק של כתב היד), לפי מילים שתוסיפו תחת <b>כל המילים</b>, <b>כל מילה</b> או <b>ללא מילים אלה</b></li>
+        <li><b>מידות:</b> סינון לפי מידות פיזיות של כתב היד &mdash; <b>רוחב (ס"מ)</b>, <b>גובה (ס"מ)</b>, <b>שורות</b>, <b>גובה שורה (מ"מ)</b> ו<b>צפיפות טקסט</b> &mdash; ולפי <b>חומר</b>: <b>נייר</b>, <b>קלף</b>, <b>פפירוס</b>, <b>מעורב</b> או <b>עץ</b>. קבוצה זו, ושדה <b>גובה שורה (מ"מ)</b> שבתוכה, מופיעים רק כאשר נתוני הקטלוג הטעון כוללים מידע זה.</li>
     </ul>
-    <p>מסננים פעילים מופיעים כ<b>צ'יפים</b> ניתנים להסרה מעל התוצאות. המסננים חלים על כל מצבי החיפוש.</p>
+    <p>ספירה מתעדכנת של כתבי היד התואמים מוצגת בתחתית החלון בזמן שאתם משנים מסננים, וכפתור <b>ניקוי הכל</b> מאפס אותם. מסננים פעילים מופיעים בחלון זה כ<b>צ'יפים</b> ניתנים להסרה; לאחר שתלחצו על <b>אישור</b> הם מופיעים כצ'יפים גם מעל התוצאות, פרט למסנני <b>מידות</b> ול<b>דפוסים בלבד</b>. המסננים חלים על כל מצבי החיפוש, אך לא ב<b>מצב מעבדה</b>.</p>
     </div>
 
     <div class="section">
@@ -1226,6 +1349,116 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
     מידות או מצב מיון, ועברו ל<b>תצוגת טבלה</b> קומפקטית כשיש הרבה תוצאות. <b>⬇ ייצוא XLSX</b> מייצא את
     המועמדים המסומנים (או את כל המוצגים, אם לא סומן אף אחד) לחוברת Excel. <b>נקה הכל</b> מאפס את העוגן,
     השאילתה, המועמדים ומצב המיון, ומנקה את מסנני הטקסט, החומר והמיון.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="lists">רשימות אישיות</h2>
+    <p>לשונית <b>רשימות אישיות</b> מאפשרת לכם לנהל רשימות משלכם של כתבי יד ומסמכים מהספרייה המקומית, לקבץ
+    אותן בפרויקטים, להוסיף הערות ותגיות, ולסנכרן אותן עם החשבון שלכם באתר <bdi dir="ltr">genizahsearch.com</bdi>.</p>
+
+    <h3>רשימות ופרויקטים</h3>
+    <ul>
+        <li>לחצו על <b>הוסף רשימה...</b> (או על כפתור <b>+</b> מעל עץ הרשימות) כדי ליצור רשימה חדשה, ועל
+        <b>הוסף פרויקט...</b> כדי ליצור תיקייה שמקבצת כמה רשימות יחד.</li>
+        <li>השתמשו בכפתורים &#9999;&#65039; <b>ערוך רשימה</b> ו-&#128465;&#65039; <b>מחק רשימה</b> מעל טבלת הפריטים
+        כדי לשנות את שם הרשימה המוצגת או למחוק אותה (הם אינם פועלים על רשימת ברירת המחדל ועל <b>נצפו לאחרונה</b>);
+        רשימה שנמחקה עוברת ל<b>סל אשפה</b>, שממנו תוכלו לשחזר אותה או למחוק אותה לצמיתות.</li>
+        <li><b>שכפל רשימה</b> יוצר עותק של הרשימה הנוכחית; <b>מזג רשימות</b> ממזג אותה לתוך רשימה אחרת שתבחרו.</li>
+        <li><b>תקן כפילויות</b> מאתר רשימות שיש להן אותו שם (למשל עותקים שנוצרו עקב בעיית סנכרון) וממזג כל קבוצה
+        כזו לרשימה אחת, ושואל איזו מהן לשמור כשהן שייכות לפרויקטים שונים.</li>
+        <li>תמיד קיימות רשימת ברירת מחדל, ששמה בהתחלה <b>כללי</b>, ורשימת <b>נצפו לאחרונה</b>. את רשימת ברירת המחדל
+        אי אפשר למחוק; כדי לשנות את שמה, לחצו עליה לחיצה ימנית בעץ הרשימות ובחרו <b>שנה שם רשימה</b>.
+        רשימת <b>נצפו לאחרונה</b> מתמלאת אוטומטית ככל שאתם צופים בכתבי יד; אי אפשר לשנות את שמה או למחוק אותה,
+        והיא אינה מסתנכרנת לענן.</li>
+    </ul>
+
+    <h3>הוספה וניהול של פריטים</h3>
+    <p>פריטים מתווספים באמצעות כפתור <b>&#9734; רשימה</b> (<b>הוסף לרשימה</b>) בחיפוש, בחיפוש חיבורים ובלשונית
+    עיון לפי מספר מדף — או בסמל &#9734; שבכל שורה בתוצאות החיפוש — וכן ממועמדים במעבדת הצירופים.</p>
+    <ul>
+        <li>השתמשו בתיבת <b>סנן פריטים...</b> ובתפריט <b>מיון לפי</b> (מספר מדף, כותרת או תאריך הוספה) כדי
+        למצוא פריטים ברשימה ארוכה.</li>
+        <li>סמנו פריטים באמצעות <b>בחר הכל</b> או אחד-אחד, ואז השתמשו ב<b>העבר לרשימה...</b>,
+        <b>הוסף תגית...</b> או <b>הסר נבחרים</b> על כל מה שסומן.</li>
+        <li>לכל שורה יש גם כפתורים משלה: &#128065;&#65039; <b>מבט מהיר</b> פותח תצוגה מהירה של העמוד
+        (בכתבי יד מהגניזה בלבד; אי אפשר לפתוח כך מסמך מקומי מהספרייה שלי),
+        &#128214; <b>עיין</b> פותח את כתב היד בלשונית עיון לפי מספר מדף, &#128203; <b>העתק מידע</b> מעתיק את פרטיו
+        (<b>צמצם</b>, <b>מפורט</b> או <b>עם קישור</b>) ללוח ההעתקה, &#129513; <b>הוסף לפאזל</b> שולח אותו ללוח
+        הפאזל, ו-&#128465;&#65039; <b>הסר מרשימה</b> מסיר אותו מהרשימה הנוכחית בלבד.</li>
+    </ul>
+
+    <h3>פרטי הפריט ותצוגה מקדימה</h3>
+    <p>בחירת פריט מציגה את <b>פרטי הפריט</b>: <b>ספרייה</b>, <b>מספר מדף</b>, <b>תמונה</b>, <b>כותרת</b>,
+    <b>רשימות</b>, <b>מספר מערכת</b> ו<b>תגיות</b>, לצד תצוגה מקדימה של הטקסט והתמונה של העמוד. התצוגה המקדימה
+    מיועדת לכתבי יד מהגניזה: מסמך מקומי מהספרייה שלי אינו מוצג בה. הקלידו בשדה <b>הערה</b>
+    ולחצו על <b>שמור שינויים</b> כדי לשמור אותה; את חלונית התצוגה המקדימה אפשר לכווץ בכפתור &#9664;/&#9654;
+    שבראשה.</p>
+
+    <h3>ייצוא וייבוא</h3>
+    <ul>
+        <li><b>ייצוא רשימה...</b> שומר את הרשימה המוצגת כ<b>טקסט (רגיל)</b>, <b>JSON</b>, <b>אקסל (<bdi dir="ltr">.xlsx</bdi>)</b>
+        או <b>וורד (<bdi dir="ltr">.docx</bdi>)</b>.</li>
+        <li><b>ייבוא רשימה...</b> טוען רשימה בחזרה מקובץ JSON, ומדווח כמה פריטים נוספו וכמה מהם לא זוהו.</li>
+    </ul>
+
+    <h3>סנכרון עם החשבון שלכם</h3>
+    <p>כפתור <b>סנכרן רשימות עכשיו</b> פעיל רק כשאתם מחוברים לחשבון שלכם באתר
+    <bdi dir="ltr">genizahsearch.com</bdi>; לאחר ההתחברות, כל שינוי שתעשו מועלה אוטומטית.</p>
+    <ul>
+        <li>לחיצה על <b>סנכרן רשימות עכשיו</b> מציעה <b>הורד מהענן</b>, <b>העלה לענן</b>, <b>מזג את שתיהן</b>
+        (שילוב של מה שיש במחשב הזה עם מה שיש בחשבון שלכם) או <b>דלג</b>; כל אחת משלוש האפשרויות הראשונות מוצגת
+        רק כשיש רשימות שהיא יכולה לפעול עליהן.</li>
+        <li>כשאותה הערה נערכה בשני הצדדים, <b>מזג את שתיהן</b> שומר את שתי הגרסאות, כשביניהן שורה מפרידה; העלאה
+        בלבד משאירה הערה שונה בחשבון שלכם כפי שהיא.</li>
+        <li>אם פריט הוסר מאחת הרשימות שלכם באתר, תתבקשו לבחור עבור כל פריט כזה: <b>להסיר גם מהמחשב הזה</b>,
+        <b>להשאיר (ולהוסיף שוב לאתר)</b> או <b>להחליט אחר כך</b>.</li>
+        <li>פריטים מהספרייה המקומית (ראו <a href="#my-library">הספרייה שלי — מסמכים מקומיים</a>) לעולם אינם
+        מועלים, גם כשהם נמצאים ברשימה ששאר פריטיה מסתנכרנים.</li>
+    </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="community">לשונית קהילה</h2>
+    <p>לשונית <b>קהילה</b> מרכזת את מה שחוקרים שיתפו: תגליות ושאלות, תיקוני תעתיק, הערות על עמודים, והצעות לצירופי קטעים — כל אחד בפאנל משלו, עם רשימה מהירה וגם חלון מלא יותר לעיון נרחב.</p>
+
+    <h3>התחברות</h3>
+    <p>טעינת מה שאחרים שיתפו דורשת חיבור לאינטרנט, אך לא חשבון; בלי חיבור, כל רשימה מהירה מציגה את מה שנטען בה בפעם הקודמת (בהערות — תחילת הטקסט של כל הערה). כדי לתרום, או כדי לראות את הפריטים שלכם, התחברו.</p>
+    <ul>
+        <li>לחצו על <b>התחבר</b>, לצד שורת הלשוניות בראש החלון, כדי להתחבר, או על <b>הרשמה</b> שבכותרת לשונית קהילה עצמה כדי ליצור חשבון.</li>
+        <li>לאחר ההתחברות הכותרת מציגה <b>מחובר כ</b> שם המשתמש שלכם ואת ציון ה<b>מוניטין</b> שלכם; כשאינכם מחוברים היא מציגה <b>לא מחובר - התחבר כדי להשתתף בקהילה</b>.</li>
+    </ul>
+
+    <h3>תגליות</h3>
+    <p>שתפו משהו ששמתם לב אליו בכתב יד, שאלו שאלה, הכריזו על זיהוי, או השאירו הערה כללית — וקראו מה שחוקרים אחרים שיתפו.</p>
+    <ul>
+        <li>לחצו על <b>+</b> כדי לשתף: בחרו <b>סוג</b> (<b>תגלית - מצאתי משהו מעניין</b>, <b>שאלה - צריך עזרה</b>, <b>זיהוי - זיהיתי טקסט</b>, או <b>הערה - תצפית כללית</b>), מלאו <b>כותרת</b> ו<b>תיאור</b>, צרפו אם תרצו מספר מדף אחד או יותר, וסמנו <b>פרסם באופן אנונימי</b> כדי להסתיר את שמכם.</li>
+        <li>סננו את הרשימה המהירה לפי סוג, או לחצו על <b>צפה בכל התגליות...</b> כדי לפתוח את <b>מרכז התגליות</b>, שמוסיף סטטיסטיקות פעילות ומסנני <b>סוג</b> ו<b>תקופה</b> המקיפים גם תיקונים, הערות, צירופים וצירופי פאזל.</li>
+        <li>לחצו פעמיים על פריט, או בחרו <b>הצג פרטים</b> בתפריט הלחיצה הימנית שלו, כדי לקרוא אותו, להצביע עליו בלחיצה על <b>הצבע בעד</b> או <b>הצבע נגד</b>, ולהוסיף תגובה; בשאלה, מי שפרסם אותה (או מנהל) יכול גם ללחוץ על <b>סמן כנענה</b>.</li>
+        <li>לחצו לחיצה ימנית על תגלית שלכם כדי לבחור <b>ערוך</b> או <b>מחק</b>.</li>
+    </ul>
+
+    <h3>תיקונים</h3>
+    <p>תיקון הוא תיקון לתעתיק שחוקר הציע בעת עיון בעמוד.</p>
+    <ul>
+        <li>הלשוניות <b>כל התיקונים</b> ו<b>התיקונים שלי</b> מציגות אותם, כל אחד עם סימן הסטטוס שלו: 🔵 ממתין, ✅ אושר או ❌ נדחה. לחצו פעמיים על אחד מהם כדי לפתוח את העמוד שהוא מתקן.</li>
+        <li>לחצו על <b>עיין בתיקונים...</b> כדי לפתוח טבלה של כל התיקונים, שאפשר לסנן לפי סטטוס (<b>ממתין</b>, <b>אושר</b>, <b>נדחה</b>) ולחפש בה, ובה הטקסט המקורי והמתוקן זה לצד זה.</li>
+        <li>לחצו לחיצה ימנית על תיקון ובחרו <b>צפיה בפרטי השינוי</b> כדי להצביע עליו ב־👍 (<b>הצבע בעד</b>) או ב־👎 (<b>הצבע נגד</b>).</li>
+    </ul>
+
+    <h3>הערות</h3>
+    <p>הערה היא פתק שחוקר השאיר על עמוד מסוים בכתב יד בעת העיון בו, בכפתור <b>💬 הערה</b> שבלשונית <b>עיון לפי מספר מדף</b>.</p>
+    <ul>
+        <li>הלשוניות <b>כל ההערות</b> ו<b>ההערות שלי</b> מציגות אותן; לחצו פעמיים על אחת מהן כדי לעבור ישירות לאותו עמוד.</li>
+        <li>לחצו על <b>צפה בכל ההערות שלי...</b> כדי לדפדף בכל ההערות שלכם.</li>
+    </ul>
+
+    <h3>צירופים</h3>
+    <p>פאנל זה מרכז שני סוגים של הצעות לצירופי קטעים: רשומות המצמידות שני קטעים זה לזה, ושחזורי צירוף חזותיים (פאזל).</p>
+    <ul>
+        <li>הלשוניות <b>כל הצירופים</b> ו<b>הצירופים שלי</b> מציגות את רשומות הצירוף; כל אחת מצמידה שני קטעים, ואם מי שיצר אותה בחר סוג קשר, היא מציגה אותו: <b>צירוף פיזי</b> או <b>אותו חיבור</b>.</li>
+        <li>הלשוניות <b>כל הפאזלים</b> ו<b>הפאזלים שלי</b> מציגות שחזורי צירוף פאזל שפורסמו; ראו <a href="#community-publish">פרסום לקהילה</a> לאופן הפרסום, ביטול הפרסום ופתיחת עותק של אחד מהם.</li>
+        <li>לחצו על <b>עיין בצירופים...</b> כדי לפתוח את חלון <b>צירופי קטעים</b> המלא, שבו כל ארבע הרשימות יחד במקום אחד.</li>
+    </ul>
     </div>
 
     <div class="section">

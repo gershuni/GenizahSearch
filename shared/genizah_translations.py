@@ -1488,7 +1488,7 @@ TRANSLATIONS = {
     "Export JSON": "יצוא ל-JSON",
     "Download JSON": "הורד JSON",
     "Advanced Filters": "סינונים מתקדמים",
-    "Search only in...": "...חפש רק ב",
+    "Search only in...": "חפש רק ב...",
     "Include": "כלול",
     "Search only in selected": "חפש רק בנבחרים",
     "Exclude selected": "החרג נבחרים",
@@ -1756,7 +1756,7 @@ TRANSLATIONS = {
     "Rotation": "סיבוב",
     "Threshold": "סף",
     "No images found": "לא נמצאו תמונות",
-    "Loading fragment...": "...טוען קטע",
+    "Loading fragment...": "טוען קטע...",
     "Manage lists": "ניהול רשימות",
     "Select a document": "בחר מסמך",
     "Select a document:": "בחר מסמך:",
@@ -5767,4 +5767,9 @@ TRANSLATIONS.update({
         'לא ניתן היה לטעון את קובץ העזרה.',
     "Reinstall the application, or read the Help at <a href='https://genizahsearch.com/help'>genizahsearch.com/help</a>.":
         "התקן מחדש את התוכנה, או קרא את העזרה באתר <a href='https://genizahsearch.com/help'>genizahsearch.com/help</a>.",
+})
+
+# Web Joins Lab: the Triage state filter choice that had no Hebrew (2026-10-18).
+TRANSLATIONS.update({
+    'Not triaged': 'לא מוין',
 })

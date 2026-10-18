@@ -32,6 +32,13 @@ search in My Library. Hebrew running text now says "הספרייה המקומי�
 and "חיפוש חיבורים" in the resume prompt. The old built-in help texts, shown only when Help.html
 was missing and months out of date, were removed in favour of a short notice that links to the
 website's Help.
+Help, second pass (owner, 2026-10-18): Help.html gains sections for Personal Lists and the
+Community tab, and Focus Search lists all its filters; the website's Help page was audited the same
+way (about 40 places: page names as the menu shows them, the "Search only in..." panel, Search
+History, Joins Lab, Reading Desk, Fragment Puzzle, Lists, Witnesses and others). Fixed on the way:
+the website's Hebrew help showed the Fragment Puzzle sections even when the puzzle is off, the Joins
+Lab "Triage state" filter showed its choices in English, and "חפש רק ב..." / "טוען קטע..." had their
+dots on the wrong side.
 Plan and decisions: `docs/plans/COMPOSITION_CONDITIONS_PLAN.md`. Not released.
 
 ---
