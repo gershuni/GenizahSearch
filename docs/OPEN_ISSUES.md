@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-18 (catalogue-form shelfmarks, branch `feat/catalogue-shelfmark-forms`, PR #400) -- **Shelfmarks as the NLI catalogue writes them** (`Cambridge University Library, Ms. T-S K 08.026`, `Mosseri, Jacques, Ms. VIII.402`) now resolve on every shelfmark input of both apps, through one fallback (`shared/catalog_shelfmark.py`) that runs only when the resolver found no exact match; pickers replace the web's silent first match. Plan `docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md` (Codex plan rounds 10/5/4/3 findings, SHIP WITH FIXES; implementation rounds 4/1, all fixed). Gates: completer pin, master-main baseline (1,219 inputs), adversarial ~760,000 inputs (0 new wrong records), 17+ mutations caught; local suite 15,384 passed (2 registry checks wait for the new files to be tracked). Four pre-existing resolver behaviours logged in P3.
+> **Last Updated:** 2026-10-18 (branch `claude/pensive-goldberg-g1qu2a`, not merged) -- **The Visual Similarity window's Sort, Library and Domain choices now apply, and it has a Thumbnails view.** Its three selects registered raw `update:model-value` listeners whose handlers read `e.value`, which NiceGUI's `GenericEventArguments` does not have, so every change raised and the list stayed unfiltered and unsorted. Logged `❌ Open` and fixed the same day (entry in the archive). The new List / Thumbnails switch shows each filtered look-alike's low-resolution first image (owner request, from a researcher's report). New `tests/render_smoke/test_visual_similarity_dialog_render_smoke.py`, red on the old code. Merged with master-main after PR #400 (catalogue-form shelfmarks, header archived). P3 +1: the domain names are English in the Hebrew UI and each look-alike keeps only its first domain.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
@@ -64,14 +64,14 @@ Move to "Completed Issues" section at bottom with date
 |----------|------|
 | P1 Critical Bugs | 0 |
 | P2 Medium Bugs | 46 |
-| P3 Low Priority | 131 |
+| P3 Low Priority | 132 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 20 |
 | Untested Areas | 5 |
 | Deferred to v7.15+ | 6 |
 | 2026-05-29 audit follow-up | 2 |
 | FGP integration (§4.5) | 5 |
-| **Total open** | **217** |
+| **Total open** | **218** |
 
 > Counts here exclude closed items (recomputed 2026-08-14 by counting rows carrying ❌/⏸/⏳); closed history lives in docs/archive/OPEN_ISSUES_ARCHIVE.md.
 > Count notes from 2026-09-25 to 2026-10-05 moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-06.
@@ -103,6 +103,7 @@ Move to "Completed Issues" section at bottom with date
 > 2026-10-14 (Codex review of the Filter texts menu): P3 +1 (the Quoted texts dialog too wide at 300%, pre-existing) -- 213.
 > 2026-10-18 (Settings telemetry opt-in): P2 +1 -1 (found and fixed the same day, archived) -- 213.
 > 2026-10-18 (catalogue-form shelfmarks, PR #400): P3 +4 (four pre-existing shelfmark-resolver behaviours, untouched by the change) -- 217.
+> 2026-10-18 (Visual Similarity window): P2 +1 -1 (Sort/Library/Domain never applied; found and fixed the same day, archived); P3 +1 (its English domain names and first-domain-only, pre-existing) -- 218 (after #400).
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 
@@ -351,6 +352,7 @@ Move to "Completed Issues" section at bottom with date
 | **The web app listens on `0.0.0.0:8081`** | `web/main.py` (`ui.run` without `host`) | ❌ Open (2026-10-07; hardening) | NiceGUI defaults to all interfaces, so a request to port 8081 would skip nginx and Cloudflare. Checked 2026-10-07: port 8081 is not reachable from outside (the security group drops it). Binding to `127.0.0.1` (nginx proxies there) would make that hold whatever the security group says; check local-dev use first. |
 | **Website: a completed search-within step is saved without re-checking that its chain is still the page's** | `web/pages/search.py` (`_complete_chain`, its callers after "Back to previous step" and in "Search within") | ❌ Open (2026-10-07) | `_complete_chain` runs a separate background search and then commits its result for the chain it started with. If the visitor clears or changes the chain meanwhile ("Clear all", a new search), the old chain's result can still be saved. The replay paths and "Back to previous step" now check `_still_the_chain` (2026-10-07); the "Search within" completion predates that and was left unchanged. Fix: the same ownership check before committing. |
 | **Fragment Puzzle: Delete says "Deleted" when the delete ran but failed** | `web/pages/puzzle.py` (the delete handler; `delete_document` returns False) | ❌ Open (2026-10-07) | A completed `delete_document` that returns False (nothing deleted) still shows the success message. Found while guarding interruptions (2026-10-07); normal-completion behaviour was deliberately left unchanged there. Fix: show the existing failure message on False. |
+| **Visual Similarity window: domain names are English in the Hebrew UI, and each look-alike keeps only its first domain** | `web/components/visual_similarity_dialog.py::show_visual_similarity_dialog` (`_enrich`) | ❌ Open (2026-10-18, pre-existing) | The Domain filter, sort and labels use `domains[0]['domain']`, the English column, though `get_domains_for_sys_ids` also returns `domain_heb`. A look-alike filed under two domains is shown and filtered under its first only, so choosing the second drops it. Not checked against real data (`fjms_enrichment.db` is not in the repo): how many look-alikes have a domain, a Hebrew name, or more than one. At phone width the fixed 260px Original pane also leaves the list and the thumbnail grid little room. |
 
 ---
 

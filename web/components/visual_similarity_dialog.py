@@ -6,8 +6,10 @@ Displays ranked visual similarity suggestions from FJMS image analysis
 alongside the original manuscript in a side-by-side layout.
 
 Left pane: Original manuscript (image thumbnail + text snippet)
-Right pane: Ranked suggestion list with expandable rows, lazy loading,
-            and action buttons (Browse, Puzzle, Add to List).
+Right pane: Ranked suggestions, filterable by library and domain, shown either
+            as a list with expandable rows or as a grid of low-resolution
+            thumbnails (the visitor's choice is remembered), with action
+            buttons (Browse, Puzzle, Add to List, Add as Join).
 
 Orange color scheme (#e65100 / #ff9800) distinct from other enrichment dialogs.
 
@@ -19,6 +21,8 @@ import logging
 
 from nicegui import ui, run
 
+from web.components.candidate_grid import build_thumbnail_url
+from web.safe_storage import safe_user_get, safe_user_set
 from web.services import get_oxford_direct_image_url, is_oxford_manuscript
 from web.translations import tr, get_language
 
@@ -27,6 +31,30 @@ logger = logging.getLogger(__name__)
 # Number of suggestions to show per batch
 _PAGE_SIZE = 20
 _PREVIEW_IMAGE_WIDTH = 600
+# The visitor's last choice between the list and the thumbnail grid.
+_VIEW_STORAGE_KEY = 'vs_dialog_view'
+_THUMB_HEIGHT_PX = 170
+
+
+def _normalize_view(value) -> str:
+    """'grid' for the thumbnail view; anything else is the list (the default)."""
+    return 'grid' if value == 'grid' else 'list'
+
+
+def _suggestion_thumbnail_url(s: dict) -> str | None:
+    """Low-resolution first-image URL for a suggestion's thumbnail card.
+
+    The same proxy URL the Joins Lab grid shows for these look-alikes (first
+    image, width 300). It is built from local metadata only, so a page of cards
+    costs no metadata enrichment; the list's larger preview still enriches on
+    expand.
+    """
+    return build_thumbnail_url(
+        s['alma_id'],
+        None,
+        shelfmark=s.get('shelfmark', ''),
+        library_code=s.get('library_code', ''),
+    )
 
 
 def _pick_preview_image_url(
@@ -253,6 +281,7 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                 'libraries': [],
                 'domains': [],
                 'visible_count': _PAGE_SIZE,
+                'view': _normalize_view(safe_user_get(_VIEW_STORAGE_KEY)),
             }
 
             with ui.row().classes('w-full items-center gap-2 px-4 pt-2 pb-1 flex-wrap'):
@@ -275,6 +304,11 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                     label=tr('Domain'),
                     multiple=True,
                 ).props('dense outlined use-chips').classes('w-36') if all_domains else None
+
+                view_toggle = ui.toggle(
+                    {'list': tr('List'), 'grid': tr('Thumbnails')},
+                    value=filter_state['view'],
+                ).props('dense no-caps toggle-color=deep-orange')
 
             # Main content: side pane (left) + suggestion list (right)
             with ui.element('div').classes('w-full').style(
@@ -369,17 +403,30 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                             )
                         return
 
-                    for s in display:
-                        _render_suggestion_row(
-                            s,
-                            dialog,
-                            expanded_rows,
-                            text_cache,
-                            image_cache,
-                            is_heb,
-                            original_sys_id=sys_id,
-                            original_shelfmark=shelfmark,
-                        )
+                    if filter_state['view'] == 'grid':
+                        with ui.element('div').classes('w-full p-3').style(
+                            'display: grid; gap: 12px; '
+                            'grid-template-columns: repeat(auto-fill, minmax(min(170px, 100%), 1fr));'
+                        ):
+                            for s in display:
+                                _render_suggestion_card(
+                                    s,
+                                    dialog,
+                                    original_sys_id=sys_id,
+                                    original_shelfmark=shelfmark,
+                                )
+                    else:
+                        for s in display:
+                            _render_suggestion_row(
+                                s,
+                                dialog,
+                                expanded_rows,
+                                text_cache,
+                                image_cache,
+                                is_heb,
+                                original_sys_id=sys_id,
+                                original_shelfmark=shelfmark,
+                            )
 
                     remaining = len(filtered) - filter_state['visible_count']
                     if remaining > 0:
@@ -394,27 +441,38 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                                 'color: #e65100;'
                             )
 
-            # Wire up sort/filter changes
+            # Wire up sort/filter changes. on_value_change, not a raw
+            # 'update:model-value' listener: that one is handed
+            # GenericEventArguments, which has no .value, so these handlers used
+            # to raise and the list was never re-filtered or re-sorted.
             def _on_sort_change(e):
                 filter_state['sort'] = e.value
                 filter_state['visible_count'] = _PAGE_SIZE
                 _render_rows()
 
-            sort_sel.on('update:model-value', _on_sort_change)
+            sort_sel.on_value_change(_on_sort_change)
 
             if lib_filter:
                 def _on_lib_change(e):
                     filter_state['libraries'] = e.value or []
                     filter_state['visible_count'] = _PAGE_SIZE
                     _render_rows()
-                lib_filter.on('update:model-value', _on_lib_change)
+                lib_filter.on_value_change(_on_lib_change)
 
             if dom_filter:
                 def _on_dom_change(e):
                     filter_state['domains'] = e.value or []
                     filter_state['visible_count'] = _PAGE_SIZE
                     _render_rows()
-                dom_filter.on('update:model-value', _on_dom_change)
+                dom_filter.on_value_change(_on_dom_change)
+
+            # Switching views keeps the filters and how many are shown.
+            def _on_view_change(e):
+                filter_state['view'] = _normalize_view(e.value)
+                safe_user_set(_VIEW_STORAGE_KEY, filter_state['view'])
+                _render_rows()
+
+            view_toggle.on_value_change(_on_view_change)
 
             # Initial render
             _render_rows()
@@ -603,62 +661,144 @@ def _render_suggestion_row(
             ui.element('div').classes('flex-grow')
 
             # Action buttons
-            with ui.link(target=browse_url, new_tab=True).classes('no-underline').on(
-                'click', js_handler='(e) => e.stopPropagation()'
-            ).tooltip(tr('Browse manuscript')):
-                ui.button(icon='open_in_new').props('flat dense round size=sm')
-
-            ui.button(
-                icon='extension',
-            ).props('flat dense round size=sm').on(
-                'click.stop', lambda aid=alma_id: (ui.navigate.to(f'/puzzle?add={aid}'), dialog.close())
-            ).tooltip(tr('Add to puzzle'))
-
-            # Add to List button
-            def _add_to_list(aid=alma_id, sm=s['shelfmark']):
-                try:
-                    from web.state import state
-                    from web.components import show_add_to_list_dialog
-                    if state.lists_mgr:
-                        show_add_to_list_dialog(
-                            sys_id=aid,
-                            shelfmark=sm,
-                            lists_mgr=state.lists_mgr,
-                        )
-                except Exception as e:
-                    logger.debug(f"VS dialog: add to list error: {e}")
-
-            ui.button(
-                icon='star_border',
-            ).props('flat dense round size=sm').on(
-                'click.stop', _add_to_list
-            ).tooltip(tr('Add to List'))
-
-            # Add as Join button
-            if original_sys_id:
-                def _add_as_join(aid=alma_id, sm=s['shelfmark'], orig_id=original_sys_id, orig_sm=original_shelfmark):
-                    from web.auth_state import GlobalAuthState
-                    from web.components.joins_panel import show_add_join_form
-                    if not GlobalAuthState.is_logged_in():
-                        # Check before closing, so an anonymous click does not
-                        # dismiss this dialog for nothing (sweep C2).
-                        ui.notify(tr('Login to create joins'), type='warning')
-                        return
-                    dialog.close()
-                    show_add_join_form(
-                        current_shelfmark=orig_sm or '',
-                        document_id=orig_id,
-                        prefill_shelfmark=sm,
-                        prefill_sys_id=aid,
-                    )
-
-                ui.button(
-                    icon='add_link',
-                ).props('flat dense round size=sm').style('color: #388e3c;').on(
-                    'click.stop', _add_as_join
-                ).tooltip(tr('Add as Join'))
+            _render_suggestion_actions(
+                s, dialog, browse_url,
+                original_sys_id=original_sys_id,
+                original_shelfmark=original_shelfmark,
+            )
 
         # Expandable detail section (below the main row)
         detail_container = ui.column().classes('w-full gap-2 px-4 pb-3')
         detail_container.set_visibility(False)
         dc_ref[0] = detail_container
+
+
+def _render_suggestion_actions(
+    s,
+    dialog,
+    browse_url,
+    original_sys_id=None,
+    original_shelfmark=None,
+):
+    """Render the Browse / Puzzle / List / Join buttons for one suggestion.
+
+    Shared by the list row and the thumbnail card. Clicks stop client-side so
+    they never toggle the list row they sit in.
+    """
+    alma_id = s['alma_id']
+
+    with ui.link(target=browse_url, new_tab=True).classes('no-underline').on(
+        'click', js_handler='(e) => e.stopPropagation()'
+    ).tooltip(tr('Browse manuscript')):
+        ui.button(icon='open_in_new').props('flat dense round size=sm')
+
+    ui.button(
+        icon='extension',
+    ).props('flat dense round size=sm').on(
+        'click.stop', lambda aid=alma_id: (ui.navigate.to(f'/puzzle?add={aid}'), dialog.close())
+    ).tooltip(tr('Add to puzzle'))
+
+    # Add to List button
+    def _add_to_list(aid=alma_id, sm=s['shelfmark']):
+        try:
+            from web.state import state
+            from web.components import show_add_to_list_dialog
+            if state.lists_mgr:
+                show_add_to_list_dialog(
+                    sys_id=aid,
+                    shelfmark=sm,
+                    lists_mgr=state.lists_mgr,
+                )
+        except Exception as e:
+            logger.debug(f"VS dialog: add to list error: {e}")
+
+    ui.button(
+        icon='star_border',
+    ).props('flat dense round size=sm').on(
+        'click.stop', _add_to_list
+    ).tooltip(tr('Add to List'))
+
+    # Add as Join button
+    if original_sys_id:
+        def _add_as_join(aid=alma_id, sm=s['shelfmark'], orig_id=original_sys_id, orig_sm=original_shelfmark):
+            from web.auth_state import GlobalAuthState
+            from web.components.joins_panel import show_add_join_form
+            if not GlobalAuthState.is_logged_in():
+                # Check before closing, so an anonymous click does not
+                # dismiss this dialog for nothing (sweep C2).
+                ui.notify(tr('Login to create joins'), type='warning')
+                return
+            dialog.close()
+            show_add_join_form(
+                current_shelfmark=orig_sm or '',
+                document_id=orig_id,
+                prefill_shelfmark=sm,
+                prefill_sys_id=aid,
+            )
+
+        ui.button(
+            icon='add_link',
+        ).props('flat dense round size=sm').style('color: #388e3c;').on(
+            'click.stop', _add_as_join
+        ).tooltip(tr('Add as Join'))
+
+
+def _render_suggestion_card(
+    s,
+    dialog,
+    original_sys_id=None,
+    original_shelfmark=None,
+):
+    """Render one suggestion as a thumbnail card (the grid view).
+
+    The image opens the fragment in a new tab, so the filtered grid stays open
+    while the visitor looks at a candidate.
+    """
+    alma_id = s['alma_id']
+    browse_url = f'/browse?sys_id={alma_id}'
+    thumb_url = _suggestion_thumbnail_url(s)
+    thumb_style = (
+        f'width: 100%; height: {_THUMB_HEIGHT_PX}px; '
+        'background: var(--bg-tertiary, #f3f4f6);'
+    )
+
+    with ui.card().classes('w-full p-0 gap-0').style(
+        'border: 1px solid var(--border-light, #e5e7eb); border-radius: 8px; overflow: hidden;'
+    ):
+        with ui.link(target=browse_url, new_tab=True).classes('block w-full no-underline').tooltip(
+            tr('Browse manuscript')
+        ):
+            if thumb_url:
+                image = ui.image(thumb_url).props('fit=contain').style(thumb_style)
+                with image.add_slot('error'):
+                    ui.icon('hide_image').classes('text-2xl absolute-center').style(
+                        'color: var(--text-muted);'
+                    )
+            else:
+                with ui.element('div').classes('flex items-center justify-center').style(thumb_style):
+                    ui.icon('hide_image').classes('text-2xl').style('color: var(--text-muted);')
+
+        with ui.column().classes('w-full gap-1 p-2'):
+            with ui.row().classes('w-full items-center gap-1 no-wrap'):
+                ui.badge(f'#{s["rank"]}').props(
+                    'color=deep-orange-1 text-color=deep-orange-9'
+                ).classes('text-xs')
+                ui.link(s['shelfmark'], browse_url).classes('text-sm font-semibold ellipsis').style(
+                    'color: var(--primary-700); text-decoration: none; user-select: text; min-width: 0;'
+                ).tooltip(s['shelfmark'])
+
+            with ui.row().classes('w-full items-center gap-1 no-wrap'):
+                ui.label(s.get('domain', '--')).classes('text-xs ellipsis').style(
+                    'color: var(--text-secondary); min-width: 0;'
+                )
+                if s.get('library_code'):
+                    ui.label(s['library_code']).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                        'background: var(--primary-100); color: var(--primary-700);'
+                    )
+
+            with ui.row().classes('w-full items-center gap-0 no-wrap justify-end'):
+                _render_suggestion_actions(
+                    s, dialog, browse_url,
+                    original_sys_id=original_sys_id,
+                    original_shelfmark=original_shelfmark,
+                )

@@ -1,4 +1,35 @@
-from web.components.visual_similarity_dialog import _pick_preview_image_url
+from shared.genizah_translations import TRANSLATIONS
+from web.components.visual_similarity_dialog import (
+    _normalize_view,
+    _pick_preview_image_url,
+    _suggestion_thumbnail_url,
+)
+
+
+def test_view_defaults_to_the_list():
+    assert _normalize_view('grid') == 'grid'
+    for stored in ('list', None, '', 'table', 1):
+        assert _normalize_view(stored) == 'list'
+
+
+def test_thumbnail_is_the_low_resolution_first_image():
+    out = _suggestion_thumbnail_url(
+        {"alma_id": "990051537270205171", "shelfmark": "T-S NS 158.112", "library_code": "CUL"}
+    )
+
+    assert out == "/api/nli_image_by_sysid/990051537270205171?page=0&width=300"
+
+
+def test_oxford_thumbnail_does_not_use_the_nli_proxy():
+    out = _suggestion_thumbnail_url(
+        {"alma_id": "990001234560205171", "shelfmark": "MS Heb. e. 93/58", "library_code": "Oxford"}
+    )
+
+    assert out and "nli_image_by_sysid" not in out
+
+
+def test_thumbnails_label_has_hebrew():
+    assert TRANSLATIONS.get("Thumbnails")
 
 
 def test_pick_preview_image_url_prefers_jts_proxy():
