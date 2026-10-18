@@ -156,7 +156,7 @@ TRANSLATIONS = {
     "Responsa (R)": "פרויקט השו\"ת (R)",
     "Responsa-Project style grammatical expansion for Hebrew search": "הרחבה דקדוקית בסגנון פרויקט השו\"ת לחיפוש עברי",
     "Judeo-Arabic": "ערבית-יהודית",
-    "Flex Spacing": "רווח גמיש",
+    "Flex Spacing": "ריווח גמיש",
     "Bidirectional Gap": "פער דו-כיווני",
     "Bidirectional": "דו-כיווני",
     "Include spelling variant pairs": "כלול זוגות וריאנטים כתיביים",
@@ -337,7 +337,7 @@ TRANSLATIONS = {
     # --- Settings Tab ---
     "Data & Index": "נתונים ואינדקס",
     "Download Transcriptions (Zenodo)": "הורד תעתיקים (Zenodo)",
-    "Build / Rebuild Index": "בנה / בנייה מחדש של אינדקס",
+    "Build / Rebuild Index": "בנייה / בנייה מחדש של אינדקס",
     "AI Configuration": "הגדרות AI",
     "Provider:": "ספק:",
     "Model:": "מודל:",
@@ -665,56 +665,6 @@ TRANSLATIONS = {
     "Composition_Report": "דוח_חיפוש_חיבורים",
     "Manuscript": "כתב יד",
     "MS": "כ\"י",
-
-    # --- HTML Help Content (Search) ---
-    "SEARCH_HELP_HTML": """<div dir='rtl'><h3>מצבי חיפוש</h3>
-    <ul>
-    <li><b>מדויק:</b> מוצא התאמות מדויקות בלבד.</li>
-    <li><b>וריאנטים (?):</b> שגיאות OCR בסיסיות.</li>
-    <li><b>מורחב (??):</b> וריאנטים נוספים.</li>
-    <li><b>מקסימלי (???):</b> חילופים אגרסיביים (השתמש בזהירות).</li>
-    <li><b>מקורב (~):</b> כתיב קרוב: מילים שלמות השונות באות אחת (בשתיים במילים של 5 אותיות ומעלה) &mdash; אות שנוספה, נשמטה או הוחלפה, או שתי אותיות סמוכות שהתחלפו. צורות עם תחילית נכללות (ושלום עבור שלום).</li>
-    <li><b>ביטוי רגולרי:</b> תבניות מורכבות (היעזר ב-AI).</li>
-    <li><b>כותרת:</b> חיפוש בכותרות החיבורים.</li>
-    <li><b>מספר מדף:</b> חיפוש במספרי מדף.</li>
-    <li><b>רספונסה (R):</b> תחביר חיפוש בסגנון פרויקט השו"ת של בר-אילן, עם הרחבת תחיליות/סיומות, תווים כלליים, חלופות כתיב ומרווחים. השתמשו בבונה השאילתות לבניה ויזואלית.</li>
-    </ul>
-    <hr>
-    <b>מרחק (Gap):</b> מרחק מרבי בין מילים (לא רלוונטי לכותרת/מספר מדף).
-    <hr>
-    <h3>חיפוש לפי מיקום בשורה/טקסט</h3>
-    <p>השתמשו ב<b>תפריט המיקום</b> ליד שורת החיפוש כדי להגביל את מיקום ההתאמות: תחילת טקסט, סוף טקסט, תחילת שורה או סוף שורה. שימושי במיוחד ל<b>זיהוי צירופים</b> בין קטעים &mdash; אם ידוע כיצד כתב יד מסתיים, חפשו את המילים האלה ב&ldquo;סוף טקסט&rdquo; כדי למצוא המשכים אפשריים.</p>
-    <p>ב<b>מצב רספונסה</b>, ניתן להחיל אילוצי מיקום לכל מילה בנפרד באמצעות <code>|_</code> (תחילת שורה) ו-<code>_|</code> (סוף שורה). בשילוב עם תחביר שבירת שורה (<code>|</code>), ניתן לבנות שאילתות מיקום רב-שורתיות &mdash; למשל, למצוא מילים מסוימות בסוף שורה אחת ומילים אחרות בתחילת שורה 4 שורות מאוחר יותר. <b>בונה השאילתות הטבלאי</b> מספק ממשק ויזואלי לבניית שאילתות אלה.</p>
-    <p><i>הערה: דורש בניית אינדקס מחדש. בנו מחדש מההגדרות כדי להשתמש בתכונה זו.</i></p>
-    <hr>
-    <h3>סינון מתקדם</h3>
-    <p>השתמשו בפאנל <b>סינון מתקדם</b> כדי לצמצם תוצאות חיפוש לפי מאפייני כתב יד: תחום, מחבר, יצירה, טווח תאריכים וסוג חומר. מסננים פעילים מופיעים כצ'יפים ניתנים להסרה מעל התוצאות.</p>
-    </div>""",
-
-    # --- HTML Help Content (Composition) ---
-    "COMP_HELP_HTML": """<div dir='rtl'><h3>חיפוש מקבילות</h3>
-    <p>מוצא מקבילות בין טקסט המקור לגניזה.</p>
-    <ul>
-    <li><b>מקטע (Chunk):</b> מספר מילים בכל יחידת חיפוש (מומלץ 5-7).</li>
-    <li><b>תדירות מקס':</b> סנן ביטויים המופיעים מעל X פעמים.</li>
-    <li><b>סינון >:</b> קבץ תוצאות אם כותרת מופיעה בתדירות גבוהה (העבר לנספח).</li>
-    </ul></div>""",
-
-    # --- HTML Help Content (Browse) ---
-    "BROWSE_HELP_HTML": """<div dir='rtl'><h3>עיון בכתב יד</h3>
-    <ul>
-    <li><b>מספר מערכת:</b> הזן מזהה מערכת כדי לטעון כתב יד.</li>
-    <li><b>תצוגה:</b> דפדוף עמוד-עמוד או צפייה רציפה בכל הטקסט.</li>
-    <li><b>שמור:</b> ייצוא כתב היד לקובץ טקסט.</li>
-    </ul></div>""",
-
-    # --- HTML Help Content (Settings) ---
-    "SETTINGS_HELP_HTML": """<div dir='rtl'><h3>הגדרות ואינדקס</h3>
-    <ul>
-    <li><b>בנה אינדקס:</b> נדרש להרצה הראשונה או לאחר עדכון הקורפוס. נדרש גם לחיפוש לפי גבולות שורה.</li>
-    <li><b>הצג תרגומים:</b> הפעלת תרגומים עברית/אנגלית לנתוני קטלוג, כותרות ותיאורים (באמצעות תרגום דיקטה).</li>
-    <li><b>אודות:</b> מידע על הגרסה והקרדיטים.</li>
-    </ul></div>""",
     "Browse Help": "עיון בכתב יד - עזרה",
     "Settings Help": "הגדרות - עזרה",
     
@@ -1177,7 +1127,7 @@ TRANSLATIONS = {
     "No corrections yet": "אין תיקונים עדיין",
 
     # ==================== Discoveries ====================
-    "Discoveries Center": "מרכז חידושים",
+    "Discoveries Center": "מרכז התגליות",
     "Share Discovery": "שתף תגלית",
     "Discoveries": "תגליות",
     "Period:": "תקופה:",
@@ -1260,7 +1210,7 @@ TRANSLATIONS = {
 
     # ==================== Community Hub ====================
     "Community Hub": "מרכז הקהילה",
-    "Open Discoveries Center": "פתח את מרכז החידושים",
+    "Open Discoveries Center": "פתח את מרכז התגליות",
     "View community discoveries, questions, and share your own findings.": "צפה בחידושי הקהילה, שאלות, ושתף את הממצאים שלך.",
     "Browse All Corrections": "עיין בכל התיקונים",
     "View corrections from all contributors.": "צפה בתיקונים מכל התורמים.",
@@ -2935,7 +2885,7 @@ TRANSLATIONS = {
     "Clear History": "ניקוי היסטוריה",
     "Clear all search history?": "לנקות את כל היסטוריית החיפוש?",
     "Resume Search": "חידוש חיפוש",
-    "A composition search was interrupted last time. Resume from where it stopped?": "חיפוש מקבילות הופסק בפעם הקודמת. לחדש מהמקום שבו הופסק?",
+    "A composition search was interrupted last time. Resume from where it stopped?": "חיפוש חיבורים הופסק בפעם הקודמת. לחדש מהמקום שבו הופסק?",
     "History Limit:": "מגבלת היסטוריה:",
     "Maximum search history entries per type": "מספר מרבי של רשומות היסטוריה לכל סוג חיפוש",
     "Last Searches": "חיפושים אחרונים",
@@ -3463,9 +3413,9 @@ TRANSLATIONS = {
     "Folder already covered": "תיקייה כבר מכוסה",
     "Already registered": "כבר רשום",
     "This folder is already registered.": "תיקייה זו כבר רשומה.",
-    "My Library Error": "שגיאה בספרייה שלי",
+    "My Library Error": "שגיאה בספרייה המקומית",
     "Remove folder": "הסר תיקייה",
-    "Remove '{}' from My Library?\n\nAll indexed files from this folder will be removed from search results.": "להסיר את '{}' מהספרייה שלי?\n\nכל הקבצים שאינדוקסו בתיקייה זו יוסרו מתוצאות החיפוש.",
+    "Remove '{}' from My Library?\n\nAll indexed files from this folder will be removed from search results.": "להסיר את '{}' מהספרייה המקומית?\n\nכל הקבצים שאינדוקסו בתיקייה זו יוסרו מתוצאות החיפוש.",
     "Remove failed": "ההסרה נכשלה",
     "Add folder — pre-scan": "הוסף תיקייה — סריקה מוקדמת",
     "Refresh — pre-scan": "רענן — סריקה מוקדמת",
@@ -3505,9 +3455,9 @@ TRANSLATIONS = {
     # Phase 97.2 R97.2-E — Reset My Library bilingual strings (registered
     # for tr() callers; the confirm dialog body uses inline EN/HE branching
     # per CURRENT_LANG since the QLineEdit accepts both literal tokens).
-    "Reset My Library": "אפס ספריה שלי",
+    "Reset My Library": "אפס את הספרייה המקומית",
     "Stop or resolve the active scan first": "עצור או פתור את הסריקה הפעילה תחילה",
-    "Delete all LOCAL index data and start fresh": "מחק את כל המידע של ספריה שלי והתחל מחדש",
+    "Delete all LOCAL index data and start fresh": "מחק את כל המידע של הספרייה המקומית והתחל מחדש",
     # 2026-05-28 — "Re-index All" forces re-extraction of every committed file
     # to pick up extractor improvements (e.g. RTL word-order + intra-block
     # newline collapse fixes shipped in Phase 101). Goes through the normal
@@ -4093,7 +4043,7 @@ TRANSLATIONS.update({
     "Mark maybe":            "סמן אולי",   # סמן אולי
     "Mark no":               "סמן לא",     # סמן לא
     "Compare":               "השווה",      # השווה
-    "Re-anchor":             "עגון מחדש",   # עגון מחדש
+    "Re-anchor":             "עגן מחדש",   # עגן מחדש
     "Compare side-by-side with anchor":
         "השווה זה לצד עם העוגן",
     "Set this candidate as the new anchor":
@@ -4250,7 +4200,7 @@ TRANSLATIONS.update({
     "🧩 Puzzle":                  "🧩 פאזל",
     "📋 Add to List":             "📋 הוסף לרשימה",
     "🔗 Add as Join":             "🔗 הוסף כצירוף",
-    "⚓ Re-anchor":               "⚓ עגון מחדש",
+    "⚓ Re-anchor":               "⚓ עגן מחדש",
 
     # --- Pane placeholders ---
     "…":                          "…",
@@ -5042,7 +4992,7 @@ TRANSLATIONS.update({
     "Resume": "המשך",
     "Pausing...": "משהה...",
     "Paused": "מושהה",
-    "Searching My Library...": "מחפש בספרייה שלי...",
+    "Searching My Library...": "מחפש בספרייה המקומית...",
     "Pause — the search stops at the next checkpoint and keeps what it found":
         "השהיית החיפוש — הוא ייעצר בנקודת הביקורת הבאה והתוצאות שנמצאו יישמרו",
     "Resume the search from where it paused":
@@ -5243,7 +5193,7 @@ TRANSLATIONS.update({
 # either surface reworders a shared string on its own).
 TRANSLATIONS.update({
     'Build / Rebuild Letter-Level Index':
-        'בניית / בנייה מחדש של אינדקס לחיפוש ברמת האות',
+        'בנייה / בנייה מחדש של אינדקס לחיפוש ברמת האות',
     'Builds the index used by letter-level search, from the transcriptions already on this computer. Needs about 11 GB free while it runs; the finished index is about 3.5 GB.':
         'בונה את האינדקס המשמש לחיפוש ברמת האות, מתוך התעתיקים שכבר נמצאים במחשב הזה. דורש כ‑11 גיגהבייט פנויים בזמן הריצה; האינדקס המוגמר תופס כ‑3.5 גיגהבייט.',
     'Build letter-level index':
@@ -5393,7 +5343,7 @@ TRANSLATIONS.update({
 # against the Genizah corpus in one click.
 TRANSLATIONS.update({
     'No results in My Library. This search looked only at your local files.':
-        'אין תוצאות בספרייה שלי. החיפוש הזה בדק רק את הקבצים המקומיים שלך.',
+        'אין תוצאות בספרייה המקומית. החיפוש הזה בדק רק את הקבצים המקומיים שלך.',
     'Search the Genizah corpus instead':
         'לחפש במאגר הגניזה במקום',
 })
@@ -5556,8 +5506,7 @@ TRANSLATIONS.update({
     "Condition {}: at most {} versions.": "תנאי {}: לכל היותר {} נוסחים.",
     "This would run {} searches; the limit is {}. Remove a witness, a "
     "condition or a version.":
-        "החיפוש היה מריץ {} חיפושים, והמגבלה היא {}. הסר עד נוסח, תנאי או נוסח "
-        "של תנאי.",
+        'החיפוש יריץ {} חיפושים, והמגבלה היא {}. הסר אחד מהעדים, תנאי או נוסח.',
     "Condition {}, version {}: {} letters is too short for letter-level "
     "search.":
         "תנאי {}, נוסח {}: {} אותיות הן מעט מדי לחיפוש ברמת האות.",
@@ -5607,12 +5556,12 @@ TRANSLATIONS.update({
     'stopped': 'נעצר',
     'search failed': 'החיפוש נכשל',
     'not searched': 'לא נבדק',
-    'page not identified': 'הדף לא זוהה',
+    'page not identified': 'העמוד לא זוהה',
     'Removed by a condition group': 'הוסרו בגלל תנאי',
     'Not fully checked group': 'לא נבדקו עד הסוף',
-    '{} pages without {}': '{} דפים בלי {}',
-    '{} pages removed': '{} דפים הוסרו',
-    '{} pages not fully checked': '{} דפים לא נבדקו עד הסוף',
+    '{} pages without {}': '{} עמודים בלי {}',
+    '{} pages removed': '{} עמודים הוסרו',
+    '{} pages not fully checked': '{} עמודים לא נבדקו עד הסוף',
 })
 
 # Composition Search conditions, step 6 (persistence and bypass paths).
@@ -5628,8 +5577,8 @@ TRANSLATIONS.update({
     '{} matched on this image.': '{} נמצא בתמונה זו.',
     'Main text: image {}': 'הטקסט הראשי: תמונה {}',
     '{}: found on image {}': '{}: נמצא בתמונה {}',
-    '{}: not found in the searchable pages': '{}: לא נמצא בדפים הניתנים לחיפוש',
-    '({} pages of this manuscript could not be searched)': '({} דפים של כתב היד הזה לא ניתנו לחיפוש)',
+    '{}: not found in the searchable pages': '{}: לא נמצא בעמודים הניתנים לחיפוש',
+    '({} pages of this manuscript could not be searched)': '(לא ניתן היה לחפש ב־{} עמודים של כתב היד הזה)',
     '{}: found on image {} (removed)': '{}: נמצא בתמונה {} (הוסר)',
     '{}: not fully checked': '{}: לא נבדק עד הסוף',
 })
@@ -5644,7 +5593,7 @@ TRANSLATIONS.update({
 TRANSLATIONS.update({
     'Version {}': 'נוסח {}',
     'Conditions changed. Search again to apply them.': 'התנאים השתנו. חפש שוב כדי להחיל אותם.',
-    '(image {} could not be searched)': '(תמונה {} לא ניתנה לחיפוש)',
+    '(image {} could not be searched)': '(לא ניתן היה לחפש בתמונה {})',
 })
 
 # Composition Search conditions: the "Filter texts" menu (owner decision
@@ -5671,9 +5620,9 @@ TRANSLATIONS.update({
 # Proposed wording (owner approval pending)
 TRANSLATIONS.update({
     "Paste the quoting work's passage as it is. A page is removed only "
-    "where at least 40 letters of it are not also in your main text.":
-        'הדבק את קטע החיבור המצטט כמות שהוא. דף יוסר רק אם יש בו לפחות 40 '
-        'אותיות מהחיבור שאינן גם בטקסט הראשי שלך.',
+    "where the quoting work has on it one unbroken stretch of at least "
+    "40 letters that are not also in your main text.":
+        'הדבק את קטע החיבור המצטט כמות שהוא. עמוד יוסר רק אם יש בו רצף אחד של 40 אותיות לפחות מהחיבור המצטט שאינן גם בטקסט הראשי שלך.',
     'Checking your own text ({}/{})': 'בודק את הטקסט שלך ({}/{})',
 })
 
@@ -5695,108 +5644,107 @@ TRANSLATIONS.update({
     "{} · {} letters": "{} · {} אותיות",
     "Load or paste the passage of the quoting work that discusses your "
     "main text (for example Rif Berakhot 1a-2b), not the whole book. A "
-    "page is removed only where at least 40 letters of it are not also "
-    "in your main text.":
-        'טען או הדבק את הקטע מהחיבור המצטט שעוסק בטקסט הראשי שלך (למשל רי"ף ברכות '
-        '1a-2b), ולא את כל הספר. דף יוסר רק אם יש בו לפחות 40 '
-        'אותיות מהחיבור שאינן גם בטקסט הראשי שלך.',
+    "page is removed only where the quoting work has on it one unbroken "
+    "stretch of at least 40 letters that are not also in your main "
+    "text.":
+        'טען או הדבק את הקטע מהחיבור המצטט שעוסק בטקסט הראשי שלך (למשל רי"ף ברכות 1a-2b), ולא את כל הספר. עמוד יוסר רק אם יש בו רצף אחד של 40 אותיות לפחות מהחיבור המצטט שאינן גם בטקסט הראשי שלך.',
 })
 
 # Letter-level search for My Library (desktop/passage_local.py).
 TRANSLATIONS.update({
     'Build / Rebuild Letter-Level Index for My Library':
-        'בניית / בנייה מחדש של אינדקס לחיפוש ברמת האות בספרייה שלי',
+        'בנייה / בנייה מחדש של אינדקס לחיפוש ברמת האות בספרייה המקומית',
     'Builds the index used by letter-level search in My Library, from the '
     'texts My Library has already extracted. It does not update by itself: '
     'rebuild it when My Library changes.':
-        'בונה את האינדקס שמשמש לחיפוש ברמת האות בספרייה שלי, מתוך הטקסטים '
-        'שכבר חולצו מהספרייה שלי. הוא אינו מתעדכן מעצמו: יש לבנות אותו מחדש '
-        'כשהספרייה שלי משתנה.',
+        'בונה את האינדקס שמשמש לחיפוש ברמת האות בספרייה המקומית, מתוך הטקסטים '
+        'שכבר חולצו מהספרייה המקומית. הוא אינו מתעדכן מעצמו: יש לבנות אותו מחדש '
+        'כשהספרייה המקומית משתנה.',
     'Build letter-level index for My Library':
-        'בניית אינדקס לחיפוש ברמת האות בספרייה שלי',
+        'בניית אינדקס לחיפוש ברמת האות בספרייה המקומית',
     'Build letter-level index for My Library?':
-        'לבנות אינדקס לחיפוש ברמת האות בספרייה שלי?',
+        'לבנות אינדקס לחיפוש ברמת האות בספרייה המקומית?',
     'Build the letter-level index for My Library from {} indexed pages?\n\n'
     'This needs up to about {} of free disk space while it runs (the '
     'finished index is smaller) and can take an hour or more on a large '
     'library. The application stays usable meanwhile.\n\nThe index does not '
     'update by itself: when My Library changes, you will be told to rebuild '
     'it.':
-        'לבנות את האינדקס לחיפוש ברמת האות בספרייה שלי מתוך {} עמודים באינדקס?\n\n'
+        'לבנות את האינדקס לחיפוש ברמת האות בספרייה המקומית מתוך {} עמודים באינדקס?\n\n'
         'הבנייה דורשת עד כ-{} פנויים בדיסק בזמן הריצה (האינדקס הסופי קטן יותר), '
         'ובספרייה גדולה היא עשויה להימשך שעה ויותר. התוכנה נשארת זמינה לעבודה בינתיים.\n\n'
-        'האינדקס אינו מתעדכן מעצמו: כשהספרייה שלי משתנה, תוצג הודעה לבנות אותו מחדש.',
+        'האינדקס אינו מתעדכן מעצמו: כשהספרייה המקומית משתנה, תוצג הודעה לבנות אותו מחדש.',
     'Build the letter-level index for My Library from {} indexed pages?\n\n'
     'This can take an hour or more on a large library and needs free disk '
     'space while it runs. The application stays usable meanwhile.\n\nThe '
     'index does not update by itself: when My Library changes, you will be '
     'told to rebuild it.':
-        'לבנות את האינדקס לחיפוש ברמת האות בספרייה שלי מתוך {} עמודים באינדקס?\n\n'
+        'לבנות את האינדקס לחיפוש ברמת האות בספרייה המקומית מתוך {} עמודים באינדקס?\n\n'
         'בספרייה גדולה הבנייה עשויה להימשך שעה ויותר, והיא דורשת מקום פנוי בדיסק '
         'בזמן הריצה. התוכנה נשארת זמינה לעבודה בינתיים.\n\n'
-        'האינדקס אינו מתעדכן מעצמו: כשהספרייה שלי משתנה, תוצג הודעה לבנות אותו מחדש.',
+        'האינדקס אינו מתעדכן מעצמו: כשהספרייה המקומית משתנה, תוצג הודעה לבנות אותו מחדש.',
     'Building the letter-level index for My Library needs about {} free on '
     'this drive, and there is about {}. Free some space and try again.':
-        'בניית האינדקס לחיפוש ברמת האות בספרייה שלי דורשת כ‑{} פנויים בכונן הזה, '
-        'וישנם כ‑{}. פנו מקום ונסו שוב.',
+        'בניית האינדקס לחיפוש ברמת האות בספרייה המקומית דורשת כ‑{} פנויים בכונן הזה, '
+        'וישנם כ‑{}. פנה מקום ונסה שוב.',
     'Building the My Library letter-level index...':
-        'בונה את האינדקס לחיפוש ברמת האות בספרייה שלי...',
+        'בונה את האינדקס לחיפוש ברמת האות בספרייה המקומית...',
     'Letter-level search in My Library needs its own index, built from the '
     'texts My Library has already extracted. The index does not update by '
     'itself: when My Library changes, you will be told to rebuild it.\n\nFor '
     'a large library this takes up to an hour or more and needs a lot of free '
     'disk space while it runs; you will see the figures before it starts. You '
     'can always build it later from Settings.':
-        'חיפוש ברמת האות בספרייה שלי צריך אינדקס משלו, שנבנה מהטקסטים שכבר חולצו '
-        'מהספרייה שלי. האינדקס אינו מתעדכן מעצמו: כשהספרייה שלי משתנה, תוצג הודעה '
+        'חיפוש ברמת האות בספרייה המקומית צריך אינדקס משלו, שנבנה מהטקסטים שכבר חולצו '
+        'מהספרייה המקומית. האינדקס אינו מתעדכן מעצמו: כשהספרייה המקומית משתנה, תוצג הודעה '
         'לבנות אותו מחדש.\n\n'
         'בספרייה גדולה הבנייה עשויה להימשך שעה ויותר ודורשת נפח דיסק פנוי רב בזמן '
         'הריצה; הנתונים יוצגו לפני תחילתה. תמיד אפשר לבנות אותו מאוחר יותר מההגדרות.',
     'My Library has changed since its letter-level index was built. Rebuild '
     'it from Settings to include the changes.':
-        'הספרייה שלי השתנתה מאז שנבנה האינדקס לחיפוש ברמת האות. בנה אותו מחדש '
+        'הספרייה המקומית השתנתה מאז שנבנה האינדקס לחיפוש ברמת האות. בנה אותו מחדש '
         'מההגדרות כדי לכלול את השינויים.',
     'My Library is empty':
-        'הספרייה שלי ריקה',
+        'הספרייה המקומית ריקה',
     'My Library is not loaded. Letter-level search for My Library needs it '
     'to load the text of its results.':
-        'הספרייה שלי לא נטענה. חיפוש ברמת האות בספרייה שלי צריך אותה כדי לטעון '
+        'הספרייה המקומית לא נטענה. חיפוש ברמת האות בספרייה המקומית צריך אותה כדי לטעון '
         'את הטקסט של התוצאות.',
     'My Library letter-level index':
-        'אינדקס חיפוש ברמת האות - הספרייה שלי',
+        'אינדקס חיפוש ברמת האות - הספרייה המקומית',
     'My Library letter-level index build cancelled. Your existing index was '
     'not changed.':
-        'בניית האינדקס לחיפוש ברמת האות בספרייה שלי בוטלה. האינדקס הקיים לא השתנה.',
+        'בניית האינדקס לחיפוש ברמת האות בספרייה המקומית בוטלה. האינדקס הקיים לא השתנה.',
     'Reading My Library pages: {}% ({} pages so far)':
-        'קורא את עמודי הספרייה שלי: {}% ({} עמודים עד כה)',
+        'קורא את עמודי הספרייה המקומית: {}% ({} עמודים עד כה)',
     'All pages have been read. Arranging the index; this stage shows no '
     'percentage and can take a while on a large library.':
-        'כל העמודים נקראו. כעת מסודר האינדקס; בשלב זה אין אחוזי התקדמות, '
+        'כל העמודים נקראו. כעת מתבצע סידור האינדקס; בשלב זה אין אחוזי התקדמות, '
         'ובספרייה גדולה הוא עשוי להימשך זמן מה.',
     'Reading the My Library catalogue...':
-        'קורא את רשימת הקבצים של הספרייה שלי...',
+        'קורא את רשימת הקבצים של הספרייה המקומית...',
     'The My Library letter-level index could not be replaced. Reloading the '
     'existing index.':
-        'לא ניתן היה להחליף את האינדקס לחיפוש ברמת האות בספרייה שלי. טוען מחדש '
+        'לא ניתן היה להחליף את האינדקס לחיפוש ברמת האות בספרייה המקומית. טוען מחדש '
         'את האינדקס הקיים.',
     'The My Library letter-level index could not be replaced. The previous '
     'index is still in use.':
-        'לא ניתן היה להחליף את האינדקס לחיפוש ברמת האות בספרייה שלי. האינדקס '
+        'לא ניתן היה להחליף את האינדקס לחיפוש ברמת האות בספרייה המקומית. האינדקס '
         'הקודם עדיין בשימוש.',
     'The My Library letter-level index is already being built.':
-        'האינדקס לחיפוש ברמת האות בספרייה שלי כבר נבנה כעת.',
+        'בניית האינדקס לחיפוש ברמת האות בספרייה המקומית כבר מתבצעת.',
     'The My Library letter-level index is ready.':
-        'האינדקס לחיפוש ברמת האות בספרייה שלי מוכן.',
+        'האינדקס לחיפוש ברמת האות בספרייה המקומית מוכן.',
     'The letter-level index for My Library has not been built yet. You can '
     'build it from Settings.':
-        'האינדקס לחיפוש ברמת האות בספרייה שלי עדיין לא נבנה. אפשר לבנות אותו '
+        'האינדקס לחיפוש ברמת האות בספרייה המקומית עדיין לא נבנה. אפשר לבנות אותו '
         'מההגדרות.',
     'There are no indexed My Library pages to build a letter-level index '
     'from. Add folders to My Library and index them first.':
-        'אין בספרייה שלי עמודים באינדקס שמהם אפשר לבנות אינדקס לחיפוש ברמת האות. '
-        'הוסף תיקיות לספרייה שלי ובנה להן אינדקס תחילה.',
+        'אין בספרייה המקומית עמודים באינדקס שמהם אפשר לבנות אינדקס לחיפוש ברמת האות. '
+        'הוסף תיקיות לספרייה המקומית ובנה להן אינדקס תחילה.',
     'the My Library letter-level index is busy':
-        'האינדקס לחיפוש ברמת האות בספרייה שלי עסוק',
+        'האינדקס לחיפוש ברמת האות בספרייה המקומית עסוק',
     # Conditions are Genizah-only (2026-10-16). Proposed wording; the owner
     # approves it before release.
     'Conditions work only when the corpus is Genizah. Switch the corpus to '
@@ -5806,5 +5754,17 @@ TRANSLATIONS.update({
     'Conditions work only when the corpus is Genizah.':
         'תנאים פועלים רק כשהקורפוס הוא גניזה.',
     'Measuring My Library for its letter-level index...':
-        'מודד את הספרייה שלי לקראת בניית האינדקס לחיפוש ברמת האות...',
+        'מודד את הספרייה המקומית לקראת בניית האינדקס לחיפוש ברמת האות...',
+})
+
+# Help consistency pass (owner, 2026-10-18): the desktop Composition
+# history menu names the tab, and the notice HelpDialog shows when Help.html
+# cannot be loaded (the old built-in help texts were removed).
+TRANSLATIONS.update({
+    'No Composition Search history':
+        'אין היסטוריית חיפוש חיבורים',
+    'The Help file could not be loaded.':
+        'לא ניתן היה לטעון את קובץ העזרה.',
+    "Reinstall the application, or read the Help at <a href='https://genizahsearch.com/help'>genizahsearch.com/help</a>.":
+        "התקן מחדש את התוכנה, או קרא את העזרה באתר <a href='https://genizahsearch.com/help'>genizahsearch.com/help</a>.",
 })

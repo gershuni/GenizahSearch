@@ -813,7 +813,7 @@ def _create_english_content():
                 (Daniel Stökl Ben Ezra, Avi Shmidman, Nachum Dershowitz, Judith Olszowy-Schlanger, and team).
                 Thanks to Prof. Moshe Koppel and <a href="https://dicta.org.il/" target="_blank">Dicta</a> for their support,
                 and to Avi Shmidman, Josh Guedalia, Elisha Rosenzweig, Ephraim Meiri, Elazar Gershuni, Itai Kagan, Elnatan Chen, and Adiel Breuer.
-                Searching in local files ("My Library" feature) was inspired by Yehuda Seewald GenizahLocal prototype.
+                Searching in local files ("My Library" feature) was inspired by Yehuda Seewald's GenizahLocal prototype.
             </p>
             <p>
                 Links:

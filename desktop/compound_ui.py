@@ -123,9 +123,9 @@ class ConditionDialog(QDialog):
         lay.addWidget(self.lbl_info)
 
         self.lbl_help = QLabel(tr(
-            "Paste the quoting work's passage as it is. A page is removed "
-            "only where at least 40 letters of it are not also in your main "
-            "text."))
+            "Paste the quoting work's passage as it is. A page is removed only "
+            "where the quoting work has on it one unbroken stretch of at least "
+            "40 letters that are not also in your main text."))
         self.lbl_help.setWordWrap(True)
         self.lbl_help.setStyleSheet("color: #7f8c8d; font-size: 11px;")
         lay.addWidget(self.lbl_help)

@@ -2277,8 +2277,8 @@ class MyLibraryTab(QWidget):
         """
         dlg = QDialog(self)
         if CURRENT_LANG == "he":
-            dlg.setWindowTitle("אפס ספריה שלי")
-            header = "אזהרה: פעולה זו תמחק את כל המידע של 'ספריה שלי'"
+            dlg.setWindowTitle("אפס את הספרייה המקומית")
+            header = "אזהרה: פעולה זו תמחק את כל המידע של הספרייה המקומית"
             explain = (
                 "ההגדרה תתאפס לחלוטין. קבצי המקור שלך לא יושפעו. "
                 "הקלד אפס כדי להפעיל את כפתור האיפוס."
@@ -2348,7 +2348,7 @@ class MyLibraryTab(QWidget):
         if self._indexer is None:
             return
         label = "מאפס…" if CURRENT_LANG == "he" else "Resetting…"
-        title = "אפס ספריה שלי" if CURRENT_LANG == "he" else "Reset My Library"
+        title = "אפס את הספרייה המקומית" if CURRENT_LANG == "he" else "Reset My Library"
         dlg = QProgressDialog(label, "", 0, 0, self)
         dlg.setWindowTitle(title)
         dlg.setCancelButton(None)

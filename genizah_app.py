@@ -16825,54 +16825,19 @@ class GenizahGUI(QMainWindow):
 
     # --- HELP TEXTS ---
     def open_help_center(self, anchor=None):
-        """Open the bundled Help.html with optional anchor scrolling and fallback content."""
+        """Open the bundled Help.html with optional anchor scrolling. If it
+        cannot be loaded, HelpDialog shows a short translated notice with the
+        website's Help link (the old built-in help texts were months out of
+        date and were removed, owner 2026-10-18)."""
         help_path = Config.HELP_FILE
         dlg = HelpDialog(
             self,
             tr("Genizah Help"),
             source_path=help_path,
             anchor=anchor,
-            fallback_html=self._build_help_fallback_html(),
             lang=CURRENT_LANG,
         )
         dlg.exec()
-
-    def get_search_help_text(self):
-        if CURRENT_LANG == 'he': return tr("SEARCH_HELP_HTML")
-        return """<h3>Search Modes</h3><ul><li><b>Exact:</b> Only finds exact matches.</li><li><b>Variants (?):</b> Basic OCR errors.</li><li><b>Extended (??):</b> More variants.</li><li><b>Maximum (???):</b> Aggressive swapping (Use caution).</li><li><b>Fuzzy (~):</b> Near spellings: whole words one letter away (two in words of 5+ letters) &mdash; a letter added, dropped or changed, or two neighbours swapped. Prefixed forms are included (ושלום for שלום).</li><li><b>Regex:</b> Advanced patterns.</li><li><b>Title:</b> Search in composition titles (metadata).</li><li><b>Shelfmark:</b> Search for shelfmarks (metadata).</li><li><b>Responsa (R):</b> Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Use the Query Builder for visual construction.</li></ul><hr><b>Gap:</b> Max distance between words (irrelevant for Title/Shelfmark).<hr><h3>Line &amp; Text Position Search</h3><p>Use the <b>position dropdown</b> next to the search bar to constrain where matches appear: Start of text, End of text, Line starts, or Line ends. This is useful for <b>detecting joins</b> between fragments &mdash; if you know how a manuscript ends, search for those words at &ldquo;End of text&rdquo; to find potential continuations.</p><p>In <b>Responsa mode</b>, position constraints can be applied per word using <code>|_</code> (start of line) and <code>_|</code> (end of line). Combined with line-break syntax (<code>|</code>), you can build multi-line positional queries &mdash; for example, find specific words at the end of one line and other words at the beginning of a line 4 lines later. The <b>Tabular Query Builder</b> provides a visual interface for constructing these queries.</p><p><i>Note: Requires a rebuilt index. Rebuild from Settings to use this feature.</i></p><hr><h3>Advanced Filters</h3><p>Use the <b>Advanced Filters</b> panel to narrow search results by manuscript properties: domain, author, work, date range, and material type. Active filters appear as removable chips above the results.</p>"""
-
-    def get_comp_help_text(self):
-        if CURRENT_LANG == 'he': return tr("COMP_HELP_HTML")
-        return """<h3>Composition Search</h3><p>Finds parallels between a source text and the Genizah.</p><ul><li><b>Chunk:</b> Words per search block (5-7 recommended).</li><li><b>Max Freq:</b> Filter out common phrases.</li><li><b>Filter >:</b> Group results if a title appears frequently (move to Appendix).</li></ul>"""
-
-    def get_browse_help_text(self):
-        if CURRENT_LANG == 'he': return tr("BROWSE_HELP_HTML")
-        return """<h3>Browse Manuscripts</h3><ul><li><b>System ID:</b> Enter an ID to load a manuscript.</li><li><b>View All:</b> Switch to continuous view of the full text.</li><li><b>Save:</b> Export the manuscript text to a file.</li></ul>"""
-
-    def get_settings_help_text(self):
-        if CURRENT_LANG == 'he': return tr("SETTINGS_HELP_HTML")
-        return """<h3>Settings & Index</h3><ul><li><b>Build/Rebuild Index:</b> Required on first run or after corpus updates. Also required for line-boundary search.</li><li><b>Show Translations:</b> Toggle Hebrew/English translations for catalog data, titles, and descriptions (powered by Dicta Translation).</li><li><b>About:</b> View version, credits, and citation details.</li></ul>"""
-
-    def _build_help_fallback_html(self):
-        sections = [
-            ("search", tr("Search Help")),
-            self.get_search_help_text(),
-            ("composition", tr("Composition Help")),
-            self.get_comp_help_text(),
-            ("browse", tr("Browse Help")),
-            self.get_browse_help_text(),
-            ("settings", tr("Settings Help")),
-            self.get_settings_help_text(),
-        ]
-        html_parts = ["<div style='font-family: Arial; font-size: 13px;'>"]
-        for i in range(0, len(sections), 2):
-            anchor, heading = sections[i]
-            body = sections[i + 1]
-            html_parts.append(f"<h2 id='{anchor}'>{heading}</h2>")
-            html_parts.append(body)
-            html_parts.append("<hr>")
-        html_parts.append("</div>")
-        return "".join(html_parts)
 
     def _sanitize_filename(self, text, fallback):
         clean = re.sub(r"[^\w\u0590-\u05FF\s-]", "", text or "")
@@ -33137,7 +33102,7 @@ class GenizahGUI(QMainWindow):
         self.comp_history_menu.clear()
         entries = get_history('composition')
         if not entries:
-            self.comp_history_menu.addAction(tr("No composition history")).setEnabled(False)
+            self.comp_history_menu.addAction(tr("No Composition Search history")).setEnabled(False)
             return
         for i, entry in enumerate(entries):
             self._add_history_menu_item(self.comp_history_menu, 'composition', i, entry)

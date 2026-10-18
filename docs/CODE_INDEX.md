@@ -451,12 +451,7 @@ desktop.Y.X` identity holds via the facades.
     - Method `on_telemetry_reask_learn_more` (Line 16695) — Open the full bilingual privacy disclosure (same as first-run Learn more).
     - Method `on_telemetry_reask_never` (Line 16703) — User clicked Don't ask again — persist a hard, permanent opt-out.
     - Method `on_telemetry_reask_dismissed` (Line 16712) — User dismissed the bar with ✕ — ignored this time (count already recorded).
-    - Method `open_help_center` (Line 16720) — Open the bundled Help.html with optional anchor scrolling and fallback content.
-    - Method `get_search_help_text` (Line 16733)
-    - Method `get_comp_help_text` (Line 16737)
-    - Method `get_browse_help_text` (Line 16741)
-    - Method `get_settings_help_text` (Line 16745)
-    - Method `_build_help_fallback_html` (Line 16749)
+    - Method `open_help_center` (Line 16720) — Open the bundled Help.html with optional anchor scrolling; HelpDialog shows a translated notice with the website's Help link if it cannot be loaded (the old built-in help texts were removed 2026-10-18).
     - Method `_sanitize_filename` (Line 16770)
     - Method `_get_default_save_folder` (Line 16775) — Get the default folder for saving reports. Checks last used location first.
     - Method `_get_unique_filepath` (Line 16816) — If file exists, add (1), (2), etc. until we find a unique name.

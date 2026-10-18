@@ -113,10 +113,11 @@ class QuotingTextsDialog(QDialog):
         lay = QVBoxLayout(self)
 
         self.lbl_help = QLabel(tr(
-            "Load or paste the passage of the quoting work that discusses "
-            "your main text (for example Rif Berakhot 1a-2b), not the whole "
-            "book. A page is removed only where at least 40 letters of it "
-            "are not also in your main text."))
+            "Load or paste the passage of the quoting work that discusses your "
+            "main text (for example Rif Berakhot 1a-2b), not the whole book. A "
+            "page is removed only where the quoting work has on it one unbroken "
+            "stretch of at least 40 letters that are not also in your main "
+            "text."))
         self.lbl_help.setWordWrap(True)
         self.lbl_help.setStyleSheet("color: #7f8c8d; font-size: 11px;")
         lay.addWidget(self.lbl_help)

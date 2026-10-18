@@ -22,6 +22,16 @@ Talmud's own manuscripts; "Quoting texts..." now defaults to "On the same image"
 dialog, with the Sefaria library browser under "Load from Sefaria..." (pick a book, then the
 passage you want) alongside custom text and files -- editing it again shows each text's own name
 rather than "Version 1", "Version 2".
+Help and wording pass (owner, 2026-10-18): Help.html was audited against the program in both
+languages and about 50 places brought in line with what the screen shows (tab and button names
+such as "Browse by Shelfmark" / "Focus Search" / "Add to View", the Responsa mode's Hebrew name,
+the Reading Desk's Hebrew name, stale descriptions of the PGP panel, the Discoveries Center, the
+publish dialog and the XLSX export), plus sections for the Filter texts menu and letter-level
+search in My Library. Hebrew running text now says "הספרייה המקומית" (the tab keeps "הספרייה
+שלי"); "בנייה /" on the three index-building buttons; "מרכז התגליות", "עגן מחדש", "ריווח גמיש",
+and "חיפוש חיבורים" in the resume prompt. The old built-in help texts, shown only when Help.html
+was missing and months out of date, were removed in favour of a short notice that links to the
+website's Help.
 Plan and decisions: `docs/plans/COMPOSITION_CONDITIONS_PLAN.md`. Not released.
 
 ---
