@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-12 (v9.6.2 release, both) -- **Faster Extended and Maximum on the desktop; GenizahSearch in ChatGPT.** PR #395 merged (`342746a7`): engine-built gap-0 patterns match with stdlib `re` in process (`shared/search_regex.py::compile_generated`; eligibility, cost model and the shared-character cap in `shared/search_engine.py::build_regex_pattern`; plan `docs/plans/DESKTOP_NATIVE_MATCHING_PLAN.md`), about 60x a page with identical results on the real index (Extended two words: 13,770 rows both routes, 62.5 s against 293.8 s); `MAX_WORD_GAP = 10` for Exact/Variants/Fuzzy at `execute_search` entry (owner: Responsa and Regex unlimited; re's repeat ceiling everywhere), API/MCP 400 at the door, the job route answers a model-validator rejection with its code instead of a 500; PR #396 hides the letter-level Variant slider. Codex GitHub rounds 1-4: 2/1/2/1 P2s, all in the gap-ceiling corner, folded in; round 5 nothing major. The ChatGPT app is published: `AI_CHATGPT_PLUGIN_URL` goes into prod `.env` with this deploy. Pre-flight: bounded suite 15,393 passed, Qt lane 61/61, render-smoke 657 passed (the masking sweep needs the owner's pattern file; CI ran it green).
+> **Last Updated:** 2026-10-18 (branch `fix/settings-telemetry-optin`, not pushed) -- **Turning telemetry on in Settings now starts that session's telemetry.** The confirm handler in `desktop/settings_dialogs.py::SettingsDialog._build_general_tab` called `self._run_startup_telemetry_coordinator()` on the dialog; the method lives on the main window (`GenizahGUI`), so consent was saved and then AttributeError, and identify / `desktop_session_start` never fired for the session. Logged `❌ Open` and fixed the same day (entry in the archive); two new tests in `tests/test_telemetry_consent_ux.py`, red on the old code.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
@@ -101,6 +101,7 @@ Move to "Completed Issues" section at bottom with date
 > 2026-10-14 (step 1 of that plan): P2 -1 (the grouping row, fixed on feat/composition-conditions and archived) -- 211.
 > 2026-10-14 (the branch's local GUI run): P3 +1 (a GUI test that fails under a Hebrew UI, pre-existing) -- 212.
 > 2026-10-14 (Codex review of the Filter texts menu): P3 +1 (the Quoted texts dialog too wide at 300%, pre-existing) -- 213.
+> 2026-10-18 (Settings telemetry opt-in): P2 +1 -1 (found and fixed the same day, archived) -- 213.
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 
