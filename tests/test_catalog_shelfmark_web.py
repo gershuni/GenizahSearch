@@ -28,6 +28,15 @@ from tests.test_web_variant_settings_per_visitor import _element, run, server  #
 ONE, TWO = '990000000000000011', '990000000000000012'
 
 
+@pytest.fixture(autouse=True)
+def _own_wait_pool(monkeypatch):
+    """The app lifespan shuts the research wait pool down on exit. Without this, a pool an
+    earlier test made is left closed, and every later /api test in the process answers 500
+    ("cannot schedule new futures after shutdown"); this file sorts before them."""
+    from web import research_jobs
+    monkeypatch.setattr(research_jobs, '_wait_executor', None)
+
+
 def _manuscripts():
     return [SimpleNamespace(sys_id=ONE, shelfmark='Moss. VIII,402.1', title='', library_code='Mosseri'),
             SimpleNamespace(sys_id=TWO, shelfmark='Moss. VIII,402.2', title='', library_code='Mosseri')]
