@@ -389,7 +389,10 @@ class HelpDialog(QDialog):
         if fallback_html:
             self.text.setHtml(fallback_html)
         else:
-            notice = "<p style='color:#c0392b;'><b>Help file is missing or could not be loaded.</b></p>"
+            notice = "<p style='color:#c0392b;'><b>{}</b></p><p>{}</p>".format(
+                tr("The Help file could not be loaded."),
+                tr("Reinstall the application, or read the Help at "
+                   "<a href='https://genizahsearch.com/help'>genizahsearch.com/help</a>."))
             self.text.setHtml(notice)
         if anchor:
             QTimer.singleShot(0, lambda: self.text.scrollToAnchor(anchor))
@@ -1357,6 +1360,24 @@ class SettingsDialog(QDialog):
         btn_row3.addStretch()
         layout.addLayout(btn_row3)
         layout.addSpacing(4)
+        # The My Library letter-level index: same gate as the button above
+        # (disabled at creation, enabled once startup completes). Its own
+        # row: beside the button above, the Hebrew labels were cut off.
+        btn_row4 = QHBoxLayout()
+        self.main_win.btn_build_local_passage_index = QPushButton(
+            tr("Build / Rebuild Letter-Level Index for My Library"))
+        self.main_win.btn_build_local_passage_index.setToolTip(tr(
+            "Builds the index used by letter-level search in My Library, "
+            "from the texts My Library has already extracted. It does not "
+            "update by itself: rebuild it when My Library changes."))
+        self.main_win.btn_build_local_passage_index.clicked.connect(
+            lambda: self.main_win.run_local_passage_index_build())
+        self.main_win.btn_build_local_passage_index.setEnabled(
+            bool(getattr(self.main_win, 'startup_complete', False)))
+        btn_row4.addWidget(self.main_win.btn_build_local_passage_index)
+        btn_row4.addStretch()
+        layout.addLayout(btn_row4)
+        layout.addSpacing(4)
 
         self.main_win.index_progress = QProgressBar()
         self.main_win.index_progress.setVisible(False)
@@ -1485,7 +1506,7 @@ class SettingsDialog(QDialog):
             <p>Thanks also to Avi Shmidman, Josh Guedalia, Elisha Rosenzweig, Ephraim Meiri,
             Elazar Gershuni, Itai Kagan, Elnatan Chen, and Adiel Breuer
             for their advice and support.</p>
-            <p>Searching in local files ("My Library" feature) was inspired by Yehuda Seewald GenizahLocal prototype.</p>
+            <p>Searching in local files ("My Library" feature) was inspired by Yehuda Seewald's GenizahLocal prototype.</p>
             <h3>Local Index Cache Privacy</h3>
             <p>Your indexed document text is stored in <code>local_index.sqlite3</code> inside your LOCAL index folder.
             The text is compressed with <b>zstd</b> (compression, not encryption).

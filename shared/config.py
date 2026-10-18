@@ -124,6 +124,10 @@ class Config:
     # portable-mode inheritance).
     LOCAL_INDEX_DIR = os.path.join(INDEX_DIR, "LocalIndex")
     LOCAL_LAB_INDEX_DIR = os.path.join(INDEX_DIR, "LocalLabIndex")
+    # The My Library letter-level index. Its own directory, never inside
+    # LocalIndex: it is built FROM the LOCAL sidecar, read-only, and the two
+    # are replaced on independent schedules.
+    LOCAL_PASSAGE_INDEX_DIR = os.path.join(INDEX_DIR, "passage_index_local")
 
     # 6. Bundled Internal Resources (Packaged inside the EXE/_internal)
     LIBRARIES_CSV = os.path.join(INTERNAL_DIR, "libraries.csv")

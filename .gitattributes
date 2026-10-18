@@ -19,6 +19,12 @@ scripts/discovery_identification_eligibility.json text eol=lf
 # this a Windows checkout shows it as modified on every regeneration.
 tests/fixtures/mishneh_torah_container_probe_children.json text eol=lf
 
+# The translations file is edited by scripts. On a CRLF checkout, a script that
+# wrote "\r\n" in text mode left "\r\r\n" line ends; git then judged the file
+# not-text, skipped autocrlf, and committed CRLF on all 5,600 lines (2026-10-14,
+# feat/composition-conditions). LF in the tree and in the repo, always.
+shared/genizah_translations.py text eol=lf
+
 # The API documentation contract checks CRLF on every platform.
 docs/SEARCH_API.md text eol=crlf
 

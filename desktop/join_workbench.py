@@ -4246,8 +4246,10 @@ if _QT_AVAILABLE:
                     search_query=q_preview or "",
                     search_mode=mode_info,
                 )
-                with open(path, "wb") as f:
-                    f.write(content)
+                from desktop.export_save import save_export, write_bytes
+                path = save_export(self, path, lambda p: write_bytes(p, content))
+                if not path:
+                    return
                 QMessageBox.information(
                     self, tr("Export"),
                     tr("Saved:") + f"\n{path}\n\n{len(results)} " + tr("candidates"),

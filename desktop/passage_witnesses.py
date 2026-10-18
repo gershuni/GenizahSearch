@@ -53,6 +53,18 @@ from shared.passage_witness_source import WITNESS_CAP, WITNESS_SEED_ID
 # wait; do not refuse work the machine is perfectly able to do.
 DESKTOP_WITNESS_CAP = WITNESS_CAP
 
+# How many manuscripts a desktop letter-level search keeps: 0, NO limit, for
+# every run -- one text, several witnesses, with conditions, and All -- by
+# owner ruling 2026-10-17, as the web page has been since 2026-08-23. The 200
+# the searcher and `fuse_and_cap` default to is the public API's group cap. On
+# the desktop it cut 6 of 11 common texts and said nothing: Birkat Hamazon
+# found 867 manuscripts and kept 200, only 88 of them in Main once duplicate
+# photographs were moved aside. Uncapped costs about a second more per search,
+# and the results tree and Word/Excel exports already take chunk results,
+# which were never capped. 0, not None: None means "the helper's default",
+# which is that 200.
+DESKTOP_GROUP_CAP = 0
+
 # Status values a witness can hold. `stale` is not an error: it means the
 # witness was gathered for a DIFFERENT source text, and a witness of one work
 # is noise in another.
@@ -459,6 +471,7 @@ def fuse_and_cap(state: WitnessSet, cap: int = None):
     from shared.parallels_service import (
         PARALLELS_GROUP_CAP, _cap_main_results_by_group)
     from shared.passage_parallels import _RegexSysIdParser
+    from shared.sys_id_patterns import ANY_SYS_ID_RE
 
     fused = fuse_all(state)
     if fused is None:
@@ -472,7 +485,12 @@ def fuse_and_cap(state: WitnessSet, cap: int = None):
     # short-circuit deliberately leaves rows untouched, and ordering that by a
     # key none of them has would collapse the page into one tie.
     order_key = 'fusion_score' if searched_count(state) > 1 else None
-    parser = _RegexSysIdParser()
+    # Grouped by each row's own sys_id in EITHER namespace: under My Library
+    # or All the fused list holds My Library rows too, and the corpus pattern
+    # put every one of them into a single 'unknown' group -- one cap slot for
+    # the whole library. Every row's header begins with its own id, so the
+    # digit-anchored ANY pattern reads a Genizah row exactly as before.
+    parser = _RegexSysIdParser(ANY_SYS_ID_RE)
     capped_main, truncated = _cap_main_results_by_group(
         main, parser, cap=limit, order_key=order_key)
     # Both buckets, by the same function and the same cap, so rendered rows

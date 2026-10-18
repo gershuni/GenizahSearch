@@ -57,6 +57,8 @@ def _window(mode_index):
         btn_comp_recursive=_Widget(),
         _set_passage_options_visible=lambda _on: None,
         _set_boundary_row_visible=lambda _on: None,
+        # Freezes the Composition conditions strip; no strip in this stub.
+        _refresh_comp_conditions_available=lambda: None,
     )
     w.comp_variant_slider_container.visible = (mode_index == 1)
     return w

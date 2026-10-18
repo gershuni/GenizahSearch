@@ -33,11 +33,24 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 @pytest.fixture(autouse=True)
 def _reset_module_globals():
-    """`_state` and `_freshness` are module globals -- every test starts and
-    ends with a clean slate so results never leak across tests."""
-    pl.close_passage_state()
+    """Each slot's state and freshness are module-level (`pl._SLOTS`) --
+    every test starts and ends with a clean slate in BOTH slots so results
+    never leak across tests. The Genizah close is the bare call it always
+    was: a test that replaces `close_passage_state` with a no-argument
+    tracker sees exactly that call at teardown."""
+    def _close_both():
+        pl.close_passage_state()
+        if pl.passage_available(pl.SLOT_LOCAL):
+            pl.close_passage_state(slot=pl.SLOT_LOCAL)
+    _close_both()
     yield
-    pl.close_passage_state()
+    _close_both()
+
+
+def _genizah_slot():
+    """The Genizah slot's private state, which several tests below inspect
+    (or, for the lease-lock race, replace) directly."""
+    return pl._SLOTS[pl.SLOT_GENIZAH]
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +171,7 @@ def test_install_passage_state_same_object_is_a_noop(tmp_path):
     its own handles out from under it."""
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
-    state = pl._state
+    state = _genizah_slot().state
     pl.install_passage_state(state)
     assert open_index(c.live_dir) is not None, (
         're-installing the same state must not close its own handles')
@@ -399,7 +412,7 @@ def test_install_passage_state_refuses_to_replace_a_state_with_a_search_in_fligh
     _shrink_lease_window(monkeypatch)
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
-    outgoing_index = pl._state.index
+    outgoing_index = _genizah_slot().state.index
 
     other = str(tmp_path / 'other')
     shutil.copytree(c.live_dir, other)
@@ -419,7 +432,7 @@ def test_install_passage_state_refuses_to_replace_a_state_with_a_search_in_fligh
     try:
         assert pl.install_passage_state(
             pl.PassageState(index=idx2, live_dir=other)) is False
-        assert pl._state.index is outgoing_index, (
+        assert _genizah_slot().state.index is outgoing_index, (
             'a refused install must leave the ORIGINAL state installed, '
             'not the new one half-swapped in')
     finally:
@@ -480,7 +493,7 @@ def test_captured_bound_method_picks_up_a_replaced_index_later(tmp_path):
     calls must not leave the second call reaching for the first one."""
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
-    first_index = pl._state.index
+    first_index = _genizah_slot().state.index
     text = c.records[0][1][:30]
 
     bound = pl.get_passage_searcher(_NullTextFetcher()).search_composition_logic
@@ -488,7 +501,7 @@ def test_captured_bound_method_picks_up_a_replaced_index_later(tmp_path):
 
     res2 = c.build()  # rebuild + swap -- installs a DIFFERENT index object
     assert res2.status == 'installed'
-    assert pl._state.index is not first_index
+    assert _genizah_slot().state.index is not first_index
 
     result = bound(text)  # same captured method, called again
     assert isinstance(result, dict)
@@ -530,7 +543,7 @@ def test_adapter_search_result_matches_calling_the_searcher_directly(
         _NullTextFetcher()).search_composition_logic(text)
 
     direct_searcher = PassageSearcher(
-        index=pl._state.index, text_fetcher=_NullTextFetcher(),
+        index=_genizah_slot().state.index, text_fetcher=_NullTextFetcher(),
         policy=pl.compose(pl._DEFAULT_WIDTH, pl.DEFAULT_LENGTH, pl.DEFAULT_DEPTH))
     direct = direct_searcher.search_composition_logic(text)
 
@@ -709,10 +722,10 @@ def test_search_state_check_and_reader_increment_are_atomic_real_threads(
     assert c.build().status == 'installed'
     text = c.records[0][1][:10]
 
-    original_lock = pl._lease_lock
+    original_lock = _genizah_slot().lease_lock
     released = threading.Event()
     resume = threading.Event()
-    pl._lease_lock = _PausingLock(original_lock, released, resume)
+    _genizah_slot().lease_lock = _PausingLock(original_lock, released, resume)
 
     outcome = {}
     adapter = pl.get_passage_searcher(_NullTextFetcher())
@@ -770,9 +783,9 @@ def test_search_state_check_and_reader_increment_are_atomic_real_threads(
         for t in (acquirer, closer):
             if t is not None and t.is_alive():
                 t.join(timeout=5)
-        pl._lease_lock = original_lock
-        pl._outstanding_leases = 0
-        pl._draining = False
+        _genizah_slot().lease_lock = original_lock
+        _genizah_slot().outstanding_leases = 0
+        _genizah_slot().draining = False
         pl.close_passage_state()  # no-op if already closed; else real cleanup
 
 
@@ -1079,7 +1092,7 @@ def test_success_path_result_survives_close_no_memmap_backed_values(tmp_path):
 def _open_a_free_index(tmp_path):
     """A standalone, real PassageIndex nothing else owns: built and opened
     via `execute_build`, which -- unlike `_Corpus.build()` -- never installs
-    into `pl._state` (see its own docstring: "does NOT call
+    into `_genizah_slot().state` (see its own docstring: "does NOT call
     install_passage_state on success"). These tests want a PassageIndex the
     autouse `_reset_module_globals` fixture's own close_passage_state()
     calls never touch, so PassageIndex.close() itself is what each
@@ -1293,7 +1306,7 @@ def test_retaining_log_handler_never_reaches_the_index_after_close(
     # hit in test_success_path_result_survives_close_no_memmap_backed_values
     # -- _render_highlights's exc_info branch only fires for an ACTUAL hit.
     text = c.records[0][1][:60]
-    smuggled_idx = pl._state.index  # deliberately smuggled, BEFORE close
+    smuggled_idx = _genizah_slot().state.index  # deliberately smuggled, BEFORE close
 
     handler = _RetainingHandler()
     passage_parallels.logger.addHandler(handler)
@@ -2746,7 +2759,7 @@ def test_lock_released_on_a_thread_start_style_failure(tmp_path, monkeypatch):
     WHOLE run, not only the paths this module explicitly names."""
     c = _Corpus(tmp_path)
 
-    def _explode(root, corpus_path):
+    def _explode(root, corpus_path, needed_bytes=None):
         raise RuntimeError('synthetic thread-start failure')
 
     monkeypatch.setattr(pl, 'prepare_staging', _explode)
@@ -3334,7 +3347,7 @@ def test_a_late_release_from_a_timed_out_seam_cannot_close_a_newer_index(
     res_b = c.build()
     assert res_b.status == 'installed', res_b.status
     assert pl.passage_available()
-    installed = pl._state.index
+    installed = _genizah_slot().state.index
 
     # Only now does A's abandoned seam get to run its close.
     gate.set()
@@ -3348,7 +3361,7 @@ def test_a_late_release_from_a_timed_out_seam_cannot_close_a_newer_index(
         'generation it was authorised against is long gone')
     assert pl.passage_available(), (
         "build A's abandoned seam closed build B's index")
-    assert pl._state.index is installed, 'the installed index was replaced'
+    assert _genizah_slot().state.index is installed, 'the installed index was replaced'
 
 
 def test_a_cancel_racing_the_rebuild_never_renames_the_live_index_aside(
@@ -3435,7 +3448,7 @@ def test_reinstalling_the_same_state_leaves_a_pending_release_valid(tmp_path):
     review round 8, finding 1)."""
     c = _Corpus(tmp_path)
     assert c.build().status == 'installed'
-    state = pl._state
+    state = _genizah_slot().state
     assert state is not None
     issued = pl.current_state_generation()
 

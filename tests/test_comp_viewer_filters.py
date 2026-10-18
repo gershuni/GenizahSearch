@@ -169,7 +169,9 @@ def _gui_stub(qt):
                  "_comp_ms_sys_id", "_comp_viewer_entry", "on_comp_item_double_clicked",
                  "_comp_filter_summary", "_apply_comp_domain_exclusions",
                  "on_comp_tree_item_expanded", "_comp_shelf_cells",
-                 "_comp_shelf_cells_uncached"):
+                 "_comp_shelf_cells_uncached",
+                 # Composition Search conditions: {} for an ordinary result.
+                 "_compound_viewer_fields"):
         setattr(s, name, MethodType(getattr(GenizahGUI, name), s))
     s._comp_item_is_local = GenizahGUI._comp_item_is_local
     s._comp_preview_source_text = GenizahGUI._comp_preview_source_text

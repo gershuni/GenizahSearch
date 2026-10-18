@@ -5322,14 +5322,20 @@ class SearchEngine:
             # Use page results if available, otherwise fall back to continuous
             pages = page_results if page_results else continuous_results
 
-            # Deduplicate pages by p_num within this group.
-            # Same page can appear multiple times from V0.7 and V0.8.
+            # Deduplicate pages within this group: the same page can arrive
+            # from V0.7 and V0.8. The key is the page's full identity, (sys_id,
+            # image set, page number) -- both transcription files carry all
+            # three. Keying on the page number alone collapsed different images
+            # that share it: the same P in two image sets (IEs) of one
+            # manuscript, or in two catalogue records grouped into one Part.
             p_num_best = {}
             for p in pages:
-                _, p_num = self.meta_mgr.parse_header_smart(p['raw_header'])
+                page_sid, p_num = self.meta_mgr.parse_header_smart(p['raw_header'])
                 if p_num and p_num != "Unknown":
-                    if p_num not in p_num_best or p['score'] > p_num_best[p_num]['score']:
-                        p_num_best[p_num] = p
+                    ie_id = self.meta_mgr.parse_full_id_components(p['raw_header'])['ie_id']
+                    key = (page_sid, ie_id, p_num)
+                    if key not in p_num_best or p['score'] > p_num_best[key]['score']:
+                        p_num_best[key] = p
                 else:
                     # Pages without valid p_num: use uid as fallback key
                     uid_key = f"_uid_{p.get('uid', id(p))}"

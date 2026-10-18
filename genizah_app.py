@@ -50,7 +50,7 @@ if _CORE_IMPORT_ERROR:
 from shared.responsa import _MAX_GAP_TOKEN
 from shared.search_engine import PHASE_LOCAL_SEARCH, MAX_WORD_GAP, _validate_word_gap
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
-from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished, _retire_worker
+from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, MultiWitnessCompositionThread, CompoundCompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, FilterCountWorker, RefinementReplayThread, ChainCompletionThread, _keep_until_finished, _retire_worker
 from desktop.widgets import (
     text_has_pattern_markers,
     ActionsHoverWidget, _format_add_to_list_label,
@@ -65,6 +65,7 @@ from desktop.single_instance import (
     acquire_instance_lock, relaunch_if_requested, relaunch_looks_possible, request_restart, restarted_from,
 )
 from desktop.qthread_exit import settle_running_threads
+from desktop.qt_translations import install_qt_translations
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
 from desktop.widgets.line_number_text_edit import (
@@ -92,9 +93,11 @@ from desktop.ui_widgets import (ShelfmarkTableWidgetItem, CheckBoxHeader, Hidden
                                 ListsTreeWidget, ElidingLabel)
 from desktop.settings_dialogs import SettingsDialog, SearchSettingsDialog, HelpDialog, TabularQueryBuilderDialog, LabScoringDialog
 from desktop import passage_lifecycle  # Phase 146: letter-level (passage) search
+from desktop import passage_local  # letter-level search for My Library
 from desktop import passage_witnesses  # multi-witness state machine (pure)
 from shared import passage_witness_source  # witness resolution (pure, shared with web)
 from shared import passage_fusion  # RRF fusion (pure, shared with web + API)
+from shared import compound_query  # Composition Search conditions (pure)
 from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog, TelemetryConsentBar, WHATS_NEW_CONTENT_VERSION  # Phase 127 update_ui; SEED-031 re-ask bar
 from desktop.filter_text_dialog import FilterTextDialog
 from desktop.column_filter_dialog import ColumnFilterDialog  # moved 2026-09-19; alias stub at the root
@@ -1405,6 +1408,20 @@ def _telemetry_result_bucket(count: int) -> str:
     return '100+'
 
 
+def _snapshot_has_compound_rows(*lists):
+    """True when any saved row, or any page of a saved manuscript row, was
+    judged by Composition Search conditions (or is a condition's evidence)."""
+    for rows in lists:
+        for item in rows or ():
+            if not isinstance(item, dict):
+                continue
+            for rec in [item] + list(item.get('pages') or []):
+                if isinstance(rec, dict) and (
+                        'compound' in rec or rec.get('is_condition_evidence')):
+                    return True
+    return False
+
+
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
     browse_thumb_resolved = pyqtSignal(str, object)
@@ -1414,6 +1431,9 @@ class GenizahGUI(QMainWindow):
     # the answer, so the worker never renames anything until the UI thread
     # has actually let go.
     _passage_release_requested = pyqtSignal(int)
+    # The same handoff for the My Library letter-level index, which has its
+    # own lifecycle instance and so its own release.
+    _local_passage_release_requested = pyqtSignal(int)
     # (saved, reason) from ListsManager's save hooks, which run on whichever
     # thread saved. The window saves on the UI thread (list sync applies its
     # results there too), but connected queued the slot runs on the UI thread
@@ -1525,6 +1545,13 @@ class GenizahGUI(QMainWindow):
         self.excluded_shelfmarks = set()
         self.exclusion_sources: list = []  # list of ExclusionSource objects (Phase 56)
         self.comp_excluded_raw_entries = []
+        # Composition Search conditions (docs/plans/COMPOSITION_CONDITIONS_PLAN.md):
+        # the editable list, and what the last compound run delivered.
+        self.comp_conditions = []          # [compound_query.Condition]
+        self._comp_compound = None         # the last run's 'compound' payload
+        self._comp_active_run_id = None    # the run whose results may land
+        self.comp_cond_removed = []        # manuscripts a condition removed
+        self.comp_cond_unresolved = []     # manuscripts not fully checked
         self.comp_excluded_sys_ids = set()
         self.comp_excluded_shelfmarks = set()
         self.comp_exclusion_sources: list = []
@@ -1867,6 +1894,9 @@ class GenizahGUI(QMainWindow):
             # restart. Started here rather than inside StartupThread so its
             # finished_signal signature stays as every other slot expects.
             self._start_passage_load()
+            if hasattr(self, 'btn_build_local_passage_index'):
+                self.btn_build_local_passage_index.setEnabled(True)
+            self._start_local_passage_load()
             # The gate can only now say "not built" instead of "still
             # starting up", so re-run it once startup is genuinely done.
             if hasattr(self, 'comp_method_combo'):
@@ -6394,7 +6424,14 @@ class GenizahGUI(QMainWindow):
         btn_exclude = QPushButton(tr("Exclude Manuscripts"))
         btn_exclude.clicked.connect(
             lambda: self.open_exclude_dialog('composition'))
-        btn_filter_text = QPushButton(tr("Filter Text")); btn_filter_text.clicked.connect(self.open_filter_dialog)
+        # "Filter texts" menu (owner, 2026-10-14): replaces the old "Filter
+        # Text" button AND the conditions strip's own "+ Add condition" with
+        # one entry point of three items; see _build_comp_filter_menu. The
+        # menu's own aboutToShow handler reads self.comp_conditions_strip,
+        # created further down in this method -- fine, since the menu cannot
+        # be shown before the tab finishes building.
+        self.btn_comp_filter_texts = QPushButton(tr("Filter texts"))
+        self.btn_comp_filter_texts.setMenu(self._build_comp_filter_menu())
         self.lbl_exclude_status = QLabel("")
         self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
         self.lbl_comp_status = QLabel("")
@@ -6430,7 +6467,7 @@ class GenizahGUI(QMainWindow):
         self.comp_title_actions = FlowWidget(margin=0)
         _title_flow = self.comp_title_actions.flow
         _title_flow.addWidget(self.btn_comp_pre_search_filters)
-        _title_flow.addWidget(btn_exclude); _title_flow.addWidget(btn_filter_text)
+        _title_flow.addWidget(btn_exclude); _title_flow.addWidget(self.btn_comp_filter_texts)
         _title_flow.addWidget(self.btn_comp_domain_filter)
         _title_flow.addWidget(self.lbl_comp_domain_filter)
         _title_flow.addWidget(self.lbl_exclude_status)
@@ -6460,6 +6497,15 @@ class GenizahGUI(QMainWindow):
         self.comp_text_area = QPlainTextEdit(); self.comp_text_area.setPlaceholderText(tr("Paste source text..."))
         if CURRENT_LANG == 'he': self.comp_text_area.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         in_l.addWidget(self.comp_text_area)
+
+        # Composition Search conditions, under the main text (owner,
+        # 2026-10-14; docs/plans/COMPOSITION_CONDITIONS_PLAN.md).
+        from desktop.compound_ui import ConditionsStrip
+        self.comp_conditions_strip = ConditionsStrip(
+            self, floor=self._comp_condition_floor,
+            main_searches=lambda: 1 + len(self._comp_witness_state().entries))
+        self.comp_conditions_strip.changed.connect(self._on_comp_conditions_changed)
+        in_l.addWidget(self.comp_conditions_strip)
 
         # Single Row for Controls
         # Wraps like the Search tab's row 2 (see search_row2).
@@ -16779,54 +16825,19 @@ class GenizahGUI(QMainWindow):
 
     # --- HELP TEXTS ---
     def open_help_center(self, anchor=None):
-        """Open the bundled Help.html with optional anchor scrolling and fallback content."""
+        """Open the bundled Help.html with optional anchor scrolling. If it
+        cannot be loaded, HelpDialog shows a short translated notice with the
+        website's Help link (the old built-in help texts were months out of
+        date and were removed, owner 2026-10-18)."""
         help_path = Config.HELP_FILE
         dlg = HelpDialog(
             self,
             tr("Genizah Help"),
             source_path=help_path,
             anchor=anchor,
-            fallback_html=self._build_help_fallback_html(),
             lang=CURRENT_LANG,
         )
         dlg.exec()
-
-    def get_search_help_text(self):
-        if CURRENT_LANG == 'he': return tr("SEARCH_HELP_HTML")
-        return """<h3>Search Modes</h3><ul><li><b>Exact:</b> Only finds exact matches.</li><li><b>Variants (?):</b> Basic OCR errors.</li><li><b>Extended (??):</b> More variants.</li><li><b>Maximum (???):</b> Aggressive swapping (Use caution).</li><li><b>Fuzzy (~):</b> Near spellings: whole words one letter away (two in words of 5+ letters) &mdash; a letter added, dropped or changed, or two neighbours swapped. Prefixed forms are included (ושלום for שלום).</li><li><b>Regex:</b> Advanced patterns.</li><li><b>Title:</b> Search in composition titles (metadata).</li><li><b>Shelfmark:</b> Search for shelfmarks (metadata).</li><li><b>Responsa (R):</b> Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Use the Query Builder for visual construction.</li></ul><hr><b>Gap:</b> Max distance between words (irrelevant for Title/Shelfmark).<hr><h3>Line &amp; Text Position Search</h3><p>Use the <b>position dropdown</b> next to the search bar to constrain where matches appear: Start of text, End of text, Line starts, or Line ends. This is useful for <b>detecting joins</b> between fragments &mdash; if you know how a manuscript ends, search for those words at &ldquo;End of text&rdquo; to find potential continuations.</p><p>In <b>Responsa mode</b>, position constraints can be applied per word using <code>|_</code> (start of line) and <code>_|</code> (end of line). Combined with line-break syntax (<code>|</code>), you can build multi-line positional queries &mdash; for example, find specific words at the end of one line and other words at the beginning of a line 4 lines later. The <b>Tabular Query Builder</b> provides a visual interface for constructing these queries.</p><p><i>Note: Requires a rebuilt index. Rebuild from Settings to use this feature.</i></p><hr><h3>Advanced Filters</h3><p>Use the <b>Advanced Filters</b> panel to narrow search results by manuscript properties: domain, author, work, date range, and material type. Active filters appear as removable chips above the results.</p>"""
-
-    def get_comp_help_text(self):
-        if CURRENT_LANG == 'he': return tr("COMP_HELP_HTML")
-        return """<h3>Composition Search</h3><p>Finds parallels between a source text and the Genizah.</p><ul><li><b>Chunk:</b> Words per search block (5-7 recommended).</li><li><b>Max Freq:</b> Filter out common phrases.</li><li><b>Filter >:</b> Group results if a title appears frequently (move to Appendix).</li></ul>"""
-
-    def get_browse_help_text(self):
-        if CURRENT_LANG == 'he': return tr("BROWSE_HELP_HTML")
-        return """<h3>Browse Manuscripts</h3><ul><li><b>System ID:</b> Enter an ID to load a manuscript.</li><li><b>View All:</b> Switch to continuous view of the full text.</li><li><b>Save:</b> Export the manuscript text to a file.</li></ul>"""
-
-    def get_settings_help_text(self):
-        if CURRENT_LANG == 'he': return tr("SETTINGS_HELP_HTML")
-        return """<h3>Settings & Index</h3><ul><li><b>Build/Rebuild Index:</b> Required on first run or after corpus updates. Also required for line-boundary search.</li><li><b>Show Translations:</b> Toggle Hebrew/English translations for catalog data, titles, and descriptions (powered by Dicta Translation).</li><li><b>About:</b> View version, credits, and citation details.</li></ul>"""
-
-    def _build_help_fallback_html(self):
-        sections = [
-            ("search", tr("Search Help")),
-            self.get_search_help_text(),
-            ("composition", tr("Composition Help")),
-            self.get_comp_help_text(),
-            ("browse", tr("Browse Help")),
-            self.get_browse_help_text(),
-            ("settings", tr("Settings Help")),
-            self.get_settings_help_text(),
-        ]
-        html_parts = ["<div style='font-family: Arial; font-size: 13px;'>"]
-        for i in range(0, len(sections), 2):
-            anchor, heading = sections[i]
-            body = sections[i + 1]
-            html_parts.append(f"<h2 id='{anchor}'>{heading}</h2>")
-            html_parts.append(body)
-            html_parts.append("<hr>")
-        html_parts.append("</div>")
-        return "".join(html_parts)
 
     def _sanitize_filename(self, text, fallback):
         clean = re.sub(r"[^\w\u0590-\u05FF\s-]", "", text or "")
@@ -16907,25 +16918,20 @@ class GenizahGUI(QMainWindow):
         return self._get_unique_filepath(filepath)
 
     def _get_credit_header(self, local_only=False):
-        sep_line = "================================================================================\n"
-        # EXPUX-03: a LOCAL-only export omits the MiDRASH/Zenodo data-source
-        # attribution (meaningless for a user's own local documents); keep the
-        # app-name line + separator.
-        if local_only:
-            return "Generated by Dicta Genizah Search Pro\n" + sep_line + "\n"
+        """The credit block heading the desktop's Word, text and CSV exports
+        and the Composition Search workbook: the same lines as the search
+        workbook's Credits and Info sheet (`shared.export_dossier.
+        credits_lines`), so every export carries the full MiDRASH citation,
+        untranslated. It was a short hand-typed copy that had drifted from
+        that one (owner, 2026-10-17).
 
-        english_text = (
-            "Generated by Dicta Genizah Search Pro\n"
-            "Data Source: MiDRASH Automatic Transcriptions (Stoekl Ben Ezra et al., 2025)\n"
-            "Dataset available at: https://doi.org/10.5281/zenodo.17734473\n"
-            + sep_line
-        )
-
-        final_text = english_text
-        if CURRENT_LANG == 'he':
-            final_text = tr("REPORT_CREDIT_TXT")
-
-        return final_text + "\n"
+        EXPUX-03: a LOCAL-only export omits the MiDRASH lines (meaningless for
+        a user's own documents) and keeps the app and creator lines."""
+        from shared.export_dossier import credits_lines
+        from shared.export_utils import DESKTOP_APP_NAME
+        lines = credits_lines('he' if CURRENT_LANG == 'he' else 'en',
+                              local_only=local_only, app_name=DESKTOP_APP_NAME)
+        return "\n".join(lines) + "\n" + "=" * 80 + "\n\n"
 
     def _show_export_saved_dialog(self, path):
         """EXPUX-01: 'export complete' dialog with Open File / Open Folder.
@@ -17474,10 +17480,9 @@ class GenizahGUI(QMainWindow):
         self._apply_default_comp_method()
         self._revalidate_comp_method()
         # A snapshot held back by the startup race is judged HERE, where
-        # "not built" finally means what it says.
-        deferred = self.__dict__.pop('_deferred_comp_snapshot', None)
-        if deferred is not None:
-            self._display_restored_comp_snapshot(deferred)
+        # "not built" finally means what it says -- unless it also waits for
+        # the My Library index, whose load then judges it.
+        self._judge_deferred_comp_snapshot()
         # Only now is "there is no index" a fact rather than "not loaded
         # yet" -- offering before this point would fire on every launch,
         # including the ones where an index was about to appear.
@@ -17740,6 +17745,13 @@ class GenizahGUI(QMainWindow):
         if status == 'installed':
             self.status_label.setText(
                 tr("The letter-level index is ready."))
+        elif status == 'cancelled':
+            # A cancel that landed after the live index was released comes
+            # here WITH the index recovery reopened (it was just installed
+            # above); a bare cancellation never reaches this handler.
+            self.status_label.setText(tr(
+                "Letter-level index build cancelled. Your existing index was "
+                "not changed."))
         elif status == 'release_timed_out':
             # The ONE status that does not leave a working index behind.
             # The seam never answered inside its bound, so the release was
@@ -17784,11 +17796,433 @@ class GenizahGUI(QMainWindow):
                "been written to the log. Your existing index was not "
                "changed."))
 
+    # ------------------------------------------------------------------
+    # Letter-level search for My Library: load, freshness, build. The same
+    # protocol as the Genizah index above, on the lifecycle's second slot
+    # (`passage_lifecycle.SLOT_LOCAL`; My Library specifics in
+    # `desktop/passage_local.py`). The LOCAL index and its SQLite sidecar are
+    # only ever READ here.
+    # ------------------------------------------------------------------
+
+    def _start_local_passage_load(self):
+        try:
+            from desktop.passage_workers import PassageLoadThread
+            self.local_passage_load_thread = PassageLoadThread(
+                passage_local.local_passage_root())
+            self.local_passage_load_thread.loaded_signal.connect(
+                self._on_local_passage_loaded)
+            self._local_passage_load_in_flight = True
+            self.local_passage_load_thread.start()
+        except Exception:                                    # noqa: BLE001
+            self._local_passage_load_in_flight = False
+            logger.exception('could not start the My Library letter-level '
+                             'index load')
+
+    def _on_local_passage_loaded(self, result):
+        self._local_passage_load_in_flight = False
+        if getattr(self, '_close_pending', False):
+            return
+        index = getattr(result, 'index', None)
+        status = getattr(result, 'status', 'unavailable')
+        if index is not None:
+            passage_lifecycle.install_passage_state(
+                passage_lifecycle.PassageState(
+                    index=index, live_dir=getattr(result, 'live_dir', '')),
+                slot=passage_lifecycle.SLOT_LOCAL)
+        logger.info('My Library letter-level index at startup: %s', status)
+        self._honour_deferred_comp_method()
+        self._revalidate_comp_method()
+        self._judge_deferred_comp_snapshot()
+        if index is not None:
+            self._start_local_freshness_check()
+
+    def _start_local_freshness_check(self):
+        # Never during a close: a check reads the whole library, and the
+        # close waits for every running My Library worker -- a check started
+        # by the close's own cancellation of a build would hold it up.
+        if getattr(self, '_close_pending', False):
+            return
+        th = getattr(self, 'local_passage_freshness_thread', None)
+        if th is not None and th.isRunning():
+            # The check already running may have read the library before
+            # the change that asked for this one: its answer is not shown,
+            # and a fresh check starts once that thread has really FINISHED
+            # (`_on_local_freshness_thread_finished`). Restarting from the
+            # answer instead lost the request: the answer arrives while the
+            # thread still reports isRunning().
+            self._local_freshness_recheck = True
+            return
+        live_dir = passage_lifecycle.installed_live_dir(
+            passage_lifecycle.SLOT_LOCAL)
+        if not live_dir:
+            return
+        try:
+            from desktop.passage_workers import LocalPassageFreshnessThread
+            self.local_passage_freshness_thread = LocalPassageFreshnessThread(
+                live_dir)
+            self.local_passage_freshness_thread.result_signal.connect(
+                self._on_local_freshness)
+            self.local_passage_freshness_thread.finished.connect(
+                self._on_local_freshness_thread_finished)
+            self.local_passage_freshness_thread.start()
+        except Exception:                                    # noqa: BLE001
+            logger.exception('could not start the My Library freshness check')
+
+    def _on_local_freshness_thread_finished(self):
+        """The check's thread has exited: run the check a change asked for
+        while it was busy."""
+        if getattr(self, '_close_pending', False):
+            return
+        if getattr(self, '_local_freshness_recheck', False):
+            self._local_freshness_recheck = False
+            self._start_local_freshness_check()
+
+    def _on_local_freshness(self, result):
+        logger.info('My Library letter-level index freshness: %s',
+                    result or 'n/a')
+        if getattr(self, '_close_pending', False):
+            return
+        if getattr(self, '_local_freshness_recheck', False):
+            # Read before a later change; the re-check answers instead.
+            return
+        if result == passage_lifecycle.STALE:
+            self.status_label.setText(tr(
+                "My Library has changed since its letter-level index was "
+                "built. Rebuild it from Settings to include the changes."))
+
+    def _on_my_library_changed(self):
+        """MyLibraryTab: a scan finished or a folder was removed. Re-check
+        the My Library letter-level index and say so if it is now out of
+        date. A notice only -- rebuilding stays the user's choice (owner,
+        2026-10-16). With no index installed there is nothing to check; with
+        a build in flight, the build's end -- installed, cancelled or failed
+        -- runs the check."""
+        if getattr(self, '_close_pending', False):
+            return
+        if getattr(self, '_local_passage_build_in_flight', False):
+            return
+        self._start_local_freshness_check()
+
+    def _maybe_offer_local_passage_build(self):
+        """Asked only on an explicit choice of letter-level search with the
+        My Library or All scope -- never at startup: a library build is long
+        and large, and the user may never want it."""
+        if getattr(self, '_close_pending', False):
+            return
+        if getattr(self, '_local_passage_build_in_flight', False):
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("Build letter-level index for My Library?"))
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(tr(
+            "Letter-level search in My Library needs its own index, built "
+            "from the texts My Library has already extracted. The index does "
+            "not update by itself: when My Library changes, you will be told "
+            "to rebuild it.\n\n"
+            "For a large library this takes up to an hour or more and needs "
+            "a lot of free disk space while it runs; you will see the "
+            "figures before it starts. You can always build it later from "
+            "Settings."))
+        btn_build = box.addButton(tr("Build now"),
+                                  QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(tr("Ask me later"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(btn_build)
+        box.exec()
+        if box.clickedButton() is btn_build:
+            self.run_local_passage_index_build()
+
+    def _local_passage_release_seam(self, expect_generation):
+        """Worker-thread side of the release handoff; see
+        `_passage_release_seam`, which this mirrors for the second
+        lifecycle instance."""
+        import threading as _threading
+        done = _threading.Event()
+        holder = {}
+
+        def _record(value):
+            holder['value'] = value
+            done.set()
+
+        self._local_passage_release_result = _record
+        self._local_passage_release_requested.emit(int(expect_generation))
+        done.wait()
+        return holder.get('value')
+
+    def _on_local_passage_release_requested(self, expect_generation):
+        result = None
+        try:
+            result = passage_lifecycle.close_passage_state(
+                int(expect_generation), slot=passage_lifecycle.SLOT_LOCAL)
+        except Exception:                                    # noqa: BLE001
+            logger.exception('My Library passage release seam failed')
+            result = False
+        finally:
+            recorder = getattr(self, '_local_passage_release_result', None)
+            if recorder is not None:
+                recorder(result)
+
+    def run_local_passage_index_build(self, confirm=True):
+        """Build the My Library letter-level index from the texts the LOCAL
+        indexer has already extracted (read-only)."""
+        if getattr(self, '_close_pending', False):
+            # The window is closing (it can stay up while the close waits for
+            # a worker): a build started now would be one more worker for the
+            # close to wait on.
+            return
+        if not getattr(self, 'startup_complete', False):
+            QMessageBox.information(
+                self, tr("Please wait"),
+                tr("The application is still starting up. Try again in a "
+                   "moment."))
+            return
+        if getattr(self, '_local_passage_build_in_flight', False):
+            QMessageBox.information(
+                self, tr("Already running"),
+                tr("The My Library letter-level index is already being "
+                   "built."))
+            return
+        th = getattr(self, 'local_passage_preflight_thread', None)
+        if th is not None and th.isRunning():
+            return          # already measuring; its answer opens the dialog
+        # Counting and sizing read the whole page table -- seconds on a large
+        # library -- so they run on a worker, and the dialog opens from its
+        # answer (`_on_local_passage_preflight`).
+        db_path = passage_local.local_db_path()
+        try:
+            from desktop.passage_workers import LocalPassagePreflightThread
+            self.local_passage_preflight_thread = LocalPassagePreflightThread(
+                db_path)
+            self.local_passage_preflight_thread.result_signal.connect(
+                lambda n_pages, needed, _db=db_path, _confirm=confirm:
+                self._on_local_passage_preflight(_db, n_pages, needed,
+                                                 _confirm))
+            self.local_passage_preflight_thread.start()
+        except Exception:                                    # noqa: BLE001
+            logger.exception('could not start the My Library build preflight')
+            return
+        self.status_label.setText(tr(
+            "Measuring My Library for its letter-level index..."))
+
+    def _on_local_passage_preflight(self, db_path, n_pages, needed, confirm):
+        """The rest of `run_local_passage_index_build`, on the UI thread,
+        once the worker has counted the pages (`n_pages`) and sized the build
+        (`needed` bytes; 0 when the estimate failed, which skips the disk
+        check rather than refusing)."""
+        if getattr(self, '_close_pending', False):
+            return
+        if getattr(self, '_local_passage_build_in_flight', False):
+            return
+        self.status_label.setText('')      # the "Measuring..." line above
+        n_pages = int(n_pages or 0)
+        needed = int(needed or 0)
+        if not n_pages:
+            QMessageBox.information(
+                self, tr("My Library is empty"),
+                tr("There are no indexed My Library pages to build a "
+                   "letter-level index from. Add folders to My Library "
+                   "and index them first."))
+            return
+
+        import shutil as _shutil
+        root = passage_local.local_passage_root()
+        try:
+            os.makedirs(root, exist_ok=True)
+            available = _shutil.disk_usage(root).free
+            staging = os.path.join(root, passage_lifecycle.STAGING_DIRNAME)
+            if os.path.isdir(staging):
+                for dirpath, _dirs, files in os.walk(staging):
+                    for f in files:
+                        try:
+                            available += os.path.getsize(
+                                os.path.join(dirpath, f))
+                        except OSError:
+                            pass
+        except Exception:                                    # noqa: BLE001
+            logger.exception('My Library build free-space check failed')
+            available = None
+        if available is not None and needed and available < needed:
+            QMessageBox.warning(
+                self, tr("Not enough disk space"),
+                tr("Building the letter-level index for My Library needs "
+                   "about {} free on this drive, and there is about {}. Free "
+                   "some space and try again.").format(
+                       passage_local.disk_size_label(needed),
+                       passage_local.disk_size_label(available)))
+            return
+        if confirm:
+            if needed:
+                text = tr(
+                    "Build the letter-level index for My Library from {} "
+                    "indexed pages?\n\nThis needs up to about {} of free disk "
+                    "space while it runs (the finished index is smaller) and "
+                    "can take an hour or more on a large library. The "
+                    "application stays usable meanwhile.\n\nThe index does "
+                    "not update by itself: when My Library changes, you will "
+                    "be told to rebuild it.").format(
+                        '{:,}'.format(n_pages),
+                        passage_local.disk_size_label(needed))
+            else:
+                # The size estimate failed: no figure rather than "0 MB".
+                text = tr(
+                    "Build the letter-level index for My Library from {} "
+                    "indexed pages?\n\nThis can take an hour or more on a "
+                    "large library and needs free disk space while it runs. "
+                    "The application stays usable meanwhile.\n\nThe index "
+                    "does not update by itself: when My Library changes, you "
+                    "will be told to rebuild it.").format(
+                        '{:,}'.format(n_pages))
+            answer = QMessageBox.question(
+                self, tr("Build letter-level index for My Library"), text,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self._local_passage_build_in_flight = True
+        self._revalidate_comp_method()
+        self._start_local_passage_build_worker(db_path)
+
+    def _start_local_passage_build_worker(self, db_path):
+        from desktop.passage_workers import LocalPassageBuildThread
+
+        self._local_passage_progress = QProgressDialog(
+            tr("Building the My Library letter-level index..."), tr("Cancel"),
+            0, 100, self)
+        self._local_passage_progress.setWindowTitle(
+            tr("My Library letter-level index"))
+        self._local_passage_progress.setWindowModality(
+            Qt.WindowModality.NonModal)
+        self._local_passage_progress.setMinimumDuration(0)
+        self._local_passage_progress.setAutoClose(False)
+        self._local_passage_progress.setAutoReset(False)
+
+        self.local_passage_build_thread = LocalPassageBuildThread(
+            passage_local.local_passage_root(), db_path,
+            self._local_passage_release_seam, parent=None)
+        try:
+            self._local_passage_release_requested.disconnect()
+        except TypeError:
+            pass
+        self._local_passage_release_requested.connect(
+            self._on_local_passage_release_requested)
+        self._local_passage_progress.canceled.connect(
+            self.local_passage_build_thread.request_cancel)
+        self.local_passage_build_thread.progress_signal.connect(
+            self._on_local_passage_build_progress)
+        self.local_passage_build_thread.finished_signal.connect(
+            self._on_local_passage_build_finished)
+        self.local_passage_build_thread.cancelled_signal.connect(
+            self._on_local_passage_build_cancelled)
+        self.local_passage_build_thread.error_signal.connect(
+            self._on_local_passage_build_error)
+        self.local_passage_build_thread.start()
+        self._local_passage_progress.show()
+
+    def _on_local_passage_build_progress(self, phase, done, total, records=0):
+        dlg = getattr(self, '_local_passage_progress', None)
+        if dlg is None:
+            return
+        if phase == 'signature':
+            dlg.setRange(0, 0)
+            dlg.setLabelText(tr("Reading the My Library catalogue..."))
+        elif phase == 'read':
+            dlg.setRange(0, 100)
+            dlg.setValue(done)
+            dlg.setLabelText(
+                tr("Reading My Library pages: {}% ({} pages so far)")
+                .format(done, '{:,}'.format(records)))
+        elif phase == 'arrange':
+            dlg.setRange(0, 0)
+            dlg.setLabelText(tr(
+                "All pages have been read. Arranging the index; this stage "
+                "shows no percentage and can take a while on a large "
+                "library."))
+        elif total:
+            dlg.setRange(0, total)
+            dlg.setValue(done)
+            dlg.setLabelText(tr("Building index: part {} of {}")
+                             .format(done, total))
+
+    def _finish_local_passage_build(self):
+        self._local_passage_build_in_flight = False
+        dlg = getattr(self, '_local_passage_progress', None)
+        if dlg is not None:
+            dlg.close()
+            self._local_passage_progress = None
+        try:
+            self._local_passage_release_requested.disconnect(
+                self._on_local_passage_release_requested)
+        except TypeError:
+            pass
+        self._revalidate_comp_method()
+
+    def _on_local_passage_build_finished(self, result):
+        if getattr(self, '_close_pending', False):
+            self._finish_local_passage_build()
+            return
+        index = getattr(result, 'index', None)
+        live_dir = getattr(result, 'live_dir', '')
+        status = getattr(result, 'status', '')
+        self._finish_local_passage_build()
+        if index is not None:
+            passage_lifecycle.install_passage_state(
+                passage_lifecycle.PassageState(index=index,
+                                               live_dir=live_dir),
+                slot=passage_lifecycle.SLOT_LOCAL)
+        self._honour_deferred_comp_method()
+        self._revalidate_comp_method()
+        if status == 'installed':
+            self.status_label.setText(
+                tr("The My Library letter-level index is ready."))
+        elif status == 'cancelled':
+            # A cancel after the live index was released, carrying the index
+            # recovery reopened (installed above).
+            self.status_label.setText(tr(
+                "My Library letter-level index build cancelled. Your existing "
+                "index was not changed."))
+        elif status == 'release_timed_out':
+            logger.warning('My Library passage build ended as %r; reloading',
+                           status)
+            self.status_label.setText(tr(
+                "The My Library letter-level index could not be replaced. "
+                "Reloading the existing index."))
+            # The reload checks freshness when it installs.
+            self._start_local_passage_load()
+            return
+        else:
+            logger.warning('My Library passage build ended as %r', status)
+            self.status_label.setText(tr(
+                "The My Library letter-level index could not be replaced. "
+                "The previous index is still in use."))
+        # Whatever index is installed now, a scan during the build may have
+        # left it out of date: the change notices were held while it ran.
+        self._start_local_freshness_check()
+
+    def _on_local_passage_build_cancelled(self):
+        self._finish_local_passage_build()
+        self.status_label.setText(tr(
+            "My Library letter-level index build cancelled. Your existing "
+            "index was not changed."))
+        # The previous index is still installed; a scan during the build may
+        # have changed the library under it.
+        self._start_local_freshness_check()
+
+    def _on_local_passage_build_error(self, message):
+        logger.error('My Library passage index build failed: %s', message)
+        self._finish_local_passage_build()
+        QMessageBox.warning(
+            self, tr("Build failed"),
+            tr("The letter-level index could not be built. Details have "
+               "been written to the log. Your existing index was not "
+               "changed."))
+        self._start_local_freshness_check()
+
     def run_passage_index_build(self, confirm=True):
         """Build the letter-level index from the transcriptions already on
         this computer. Ordering matters: no corpus at all is a different
         problem with a different answer (fetch it), so that is checked before
         anything is promised about disk or time."""
+        if getattr(self, '_close_pending', False):
+            # Closing: no new build for the close to wait on (as above).
+            return
         if not getattr(self, 'startup_complete', False):
             QMessageBox.information(
                 self, tr("Please wait"),
@@ -17997,7 +18431,8 @@ class GenizahGUI(QMainWindow):
                 # Remember the intent so `_on_passage_loaded` can honour it,
                 # rather than silently losing the user's method on every
                 # launch.
-                if reason == passage_lifecycle.REASON_NOT_BUILT:
+                if reason in (passage_lifecycle.REASON_NOT_BUILT,
+                              passage_local.REASON_LOCAL_NOT_BUILT):
                     self._comp_method_deferred = 'passage'
                 self._revert_comp_method_to_chunk(reason)
             else:
@@ -18023,7 +18458,13 @@ class GenizahGUI(QMainWindow):
         MIGRATION: a snapshot with no provenance at all is pre-v9, which is
         chunk by definition -- it is always valid, and no legacy session is
         ever discarded for lacking fields that did not exist when it was
-        written."""
+        written.
+
+        Rows judged by CONDITIONS are never valid here, whatever else the
+        snapshot says: their outcomes cannot be re-verified from it."""
+        if comp.get('compound_results_withheld') or _snapshot_has_compound_rows(
+                comp.get('results'), comp.get('filtered_results')):
+            return False
         method = comp.get('last_result_method')
         if method is None:
             return True
@@ -18049,10 +18490,31 @@ class GenizahGUI(QMainWindow):
         loaded yet", not "impossible". Judging anyway discarded the user's
         rows on every single launch.
         """
-        return bool(
-            (comp.get('results') or comp.get('filtered_results'))
-            and comp.get('last_result_method') == 'passage'
-            and getattr(self, '_passage_load_in_flight', False))
+        if not ((comp.get('results') or comp.get('filtered_results'))
+                and comp.get('last_result_method') == 'passage'):
+            return False
+        if getattr(self, '_passage_load_in_flight', False):
+            return True
+        # The My Library index loads on its own worker; rows from a My
+        # Library or All search wait for it the same way.
+        scope = comp.get('last_result_scope') or 'genizah'
+        return bool(scope in ('local', 'all') and getattr(
+            self, '_local_passage_load_in_flight', False))
+
+    def _judge_deferred_comp_snapshot(self):
+        """Display a snapshot the startup race held back, once nothing it
+        depends on is still loading. Called from both index loads -- the
+        Genizah one and the My Library one, whichever answers last.
+
+        A search started since launch wins: its answer is the one on screen,
+        and a restored older one must not replace it. The snapshot is then
+        dropped, not kept for later."""
+        deferred = self.__dict__.get('_deferred_comp_snapshot')
+        if deferred is None or self._passage_snapshot_must_wait(deferred):
+            return
+        self.__dict__.pop('_deferred_comp_snapshot', None)
+        if getattr(self, '_comp_active_run_id', None) is None:
+            self._display_restored_comp_snapshot(deferred)
 
     def _display_restored_comp_snapshot(self, comp):
         """Re-display a saved composition result set, re-establishing the
@@ -18063,6 +18525,7 @@ class GenizahGUI(QMainWindow):
             return False
         if not self._restored_provenance_is_valid(comp):
             return False
+        self._clear_compound_results()
         self._clear_comp_chunk_notice()
         self.comp_raw_items = comp.get('results', [])
         self.comp_raw_filtered = comp.get('filtered_results', [])
@@ -18155,6 +18618,7 @@ class GenizahGUI(QMainWindow):
             _wits = getattr(self, '_comp_last_result_witnesses', None) or []
             if _wits:
                 lines.append(tr("Witnesses") + ": " + str(len(_wits) + 1))
+            lines.extend(self._comp_export_condition_lines())
             return lines
 
         stamp = getattr(self, '_comp_last_result_chunk', None) or {}
@@ -18196,7 +18660,8 @@ class GenizahGUI(QMainWindow):
         """
         thread = getattr(self, 'comp_thread', None)
         return bool(self._passage_scan_in_flight()
-                    and isinstance(thread, MultiWitnessCompositionThread))
+                    and isinstance(thread, (MultiWitnessCompositionThread,
+                                            CompoundCompositionThread)))
 
     def _refuse_stop_during_passage_scan(self):
         """The one guarded stop helper. `PassageSearcher` has no mid-search
@@ -18213,6 +18678,18 @@ class GenizahGUI(QMainWindow):
         """
         if not self._passage_scan_in_flight():
             return False
+        if isinstance(getattr(self, 'comp_thread', None),
+                      CompoundCompositionThread):
+            # A search with conditions checks Stop inside every step, so it
+            # stops promptly; whatever it did not get to is shown as not
+            # fully checked, never as clean.
+            if hasattr(self, 'lbl_comp_status'):
+                self.lbl_comp_status.setText(tr(
+                    "Stopping. Results found so far are kept; conditions "
+                    "not yet searched are marked as not fully checked."))
+                self.lbl_comp_status.setStyleSheet(
+                    "color: #e67e22; font-weight: bold;")
+            return False
         if self._passage_batch_in_flight():
             if hasattr(self, 'lbl_comp_status'):
                 self.lbl_comp_status.setText(tr(
@@ -18228,6 +18705,588 @@ class GenizahGUI(QMainWindow):
             self.lbl_comp_status.setStyleSheet(
                 "color: #e67e22; font-weight: bold;")
         return True
+
+    # --- Composition Search conditions ------------------------------------
+    # The model and the judgement are shared/compound_query.py (pure); the
+    # worker is desktop/gui_threads.py::CompoundCompositionThread.
+
+    def _comp_compound_gate(self, txt, method, is_lab, scope, width, length,
+                            depth):
+        """Decide whether this run's conditions can be honoured, BY THE METHOD
+        THAT WILL ACTUALLY RUN -- `run_composition` calls this after the
+        dispatch-time re-validation, which may have demoted letter-level to
+        chunk. Returns `(conditions, main_list, fingerprint)` -- three empties
+        when there are no conditions -- or None after telling the user why
+        the search cannot run. Any method other than letter-level refuses
+        rather than ignore a condition (fail closed)."""
+        conditions = list(getattr(self, 'comp_conditions', None) or [])
+        if not conditions:
+            return [], [], ''
+        if is_lab or method != 'passage':
+            QMessageBox.warning(self, tr("Conditions"), tr(
+                "Conditions work only with letter-level search. Switch "
+                "the method to letter-level, or remove the conditions."))
+            return None
+        if scope != 'genizah':
+            # A condition selects pages by their Genizah page keys
+            # (shared/passage_pages.py), which no My Library record has: run
+            # under My Library or All it would silently select nothing there.
+            QMessageBox.warning(self, tr("Conditions"), tr(
+                "Conditions work only when the corpus is Genizah. Switch the "
+                "corpus to Genizah, or remove the conditions."))
+            return None
+        from shared.passage_policy import compose as _passage_compose
+        main_list = self._comp_compound_main_list(txt)
+        floor = _passage_compose(width, length, depth).min_span
+        problems = compound_query.validate(conditions, len(main_list), floor)
+        if problems:
+            QMessageBox.warning(self, tr("Conditions"),
+                                self._compound_problem_text(problems[0]))
+            return None
+        restrict = getattr(self, 'pre_search_restrict_sys_ids', None)
+        fingerprint = compound_query.fingerprint(
+            [t for _w, _l, t in main_list], conditions, {
+                'scope': scope, 'width': width, 'length': length,
+                'depth': depth,
+                'filter_text': self._get_filter_text() or '',
+                'restrict': sorted(restrict) if restrict else None,
+                'generation': passage_lifecycle.current_state_generation(),
+            })
+        return conditions, main_list, fingerprint
+
+    def _comp_compound_main_list(self, seed_text):
+        """`[(witness_id, label, text)]`: the main text and every usable
+        witness. A compound run searches ALL of them every time -- it never
+        reuses cached rows (their completeness was never recorded)."""
+        out = [(passage_witnesses.WITNESS_SEED_ID, tr("Your text"), seed_text)]
+        state = self._comp_witness_state()
+        if state.entries:
+            # Witnesses gathered for ANOTHER main text are marked stale FIRST,
+            # exactly as the ordinary dispatch does -- this list is taken before
+            # that code runs, and a stale witness would search another work.
+            if passage_witnesses.mark_stale_against(state, seed_text):
+                self._refresh_witness_panel()
+            self._rehydrate_witness_texts()
+        # Only witnesses gathered for THIS main text. A compound run reuses no
+        # rows, so a witness already searched for another text (status
+        # 'searched', which mark_stale_against leaves alone) is excluded too.
+        digest = passage_witnesses.witness_text_key(seed_text)
+        for entry in state.entries:
+            if entry.status == passage_witnesses.STATUS_STALE:
+                continue
+            if entry.seed_digest != digest:
+                continue
+            if not (entry.text or '').strip():
+                continue
+            out.append((entry.id, entry.label, entry.text))
+        return out
+
+    def _compound_problem_text(self, problem):
+        """A `compound_query.Problem` as a sentence for the user."""
+        n = (problem.condition + 1) if problem.condition is not None else 0
+        v = (problem.version + 1) if problem.version is not None else 0
+        texts = {
+            'too_many_conditions': tr("At most {} conditions.").format(
+                compound_query.MAX_CONDITIONS),
+            'too_many_versions': tr("Condition {}: at most {} versions.").format(
+                n, compound_query.MAX_VERSIONS),
+            'too_many_searches': tr(
+                "This would run {} searches; the limit is {}. Remove a "
+                "witness, a condition or a version.").format(
+                    problem.detail, compound_query.MAX_SEARCHES),
+            'version_too_short': tr(
+                "Condition {}, version {}: {} letters is too short for "
+                "letter-level search.").format(n, v, problem.detail),
+            'version_too_long': tr(
+                "Condition {}, version {}: {} letters is too long (the limit "
+                "is {}).").format(n, v, problem.detail,
+                                  compound_query.MAX_VERSION_LETTERS),
+            'no_text': tr("Condition {} has no text.").format(n),
+        }
+        return texts.get(problem.code, tr("Condition {} is not valid.").format(n))
+
+    def _condition_label(self, index):
+        """A condition's label as dispatched, or "Condition N"."""
+        conds = (self._comp_compound or {}).get('conditions') or []
+        label = ''
+        if 0 <= index < len(conds):
+            label = (conds[index] or {}).get('label') or ''
+        return label or tr("Condition {}").format(index + 1)
+
+    def _attach_compound_evidence(self, rows, evidence, judged=()):
+        """Rows plus, for each, the condition pages that are its evidence
+        (rendered by the worker), so a manuscript shows WHERE a condition
+        matched. An evidence page that is already one of the rows is not
+        added twice; it is tagged instead. Evidence pages carry score 0 so
+        they never outrank, or replace, a main-text page in grouping."""
+        out = [dict(r) for r in rows or []]
+        present = {r.get('raw_header'): r for r in out}
+        judged = set(judged)
+        for row in out:
+            ev = evidence.get(row.get('raw_header'))
+            if ev is None:
+                continue
+            # This main-text page is also where a condition matched (the
+            # worker sends only evidence some judged page points to, from any
+            # group): show both texts' matches, and say which conditions.
+            mine = row.setdefault('compound_evidence', [])
+            for t in ev.get('compound_evidence') or []:
+                if t not in mine:
+                    mine.append(t)
+            row['highlight_pattern'] = compound_query.merge_patterns(
+                row.get('highlight_pattern'), ev.get('highlight_pattern'))
+        for row in list(out):
+            for ev_ids in ((row.get('compound') or {}).get('evidence') or []):
+                for rid in ev_ids:
+                    ev = evidence.get(rid)
+                    if ev is None:
+                        continue
+                    tags = list(ev.get('compound_evidence') or [])
+                    if rid in present:
+                        # Already here: a main-text row (merged above) or an
+                        # evidence copy another row of this list added.
+                        target = present[rid]
+                        mine = target.setdefault('compound_evidence', [])
+                        for t in tags:
+                            if t not in mine:
+                                mine.append(t)
+                        continue
+                    if rid in judged:
+                        # The page is a main-text result in ANOTHER group, with
+                        # its own judgement; a second, unjudged copy here
+                        # would be the one the viewer opens.
+                        continue
+                    added = dict(ev, score=0.0, final_score=0.0,
+                                 evidence_score=float(ev.get('score') or 0.0),
+                                 is_condition_evidence=True)
+                    out.append(added)
+                    present[rid] = added
+        return out
+
+    def _compound_evidence_labels(self, item):
+        tags = item.get('compound_evidence') or []
+        names = []
+        for t in tags:
+            name = self._condition_label(int(t.get('condition', 0)))
+            if name not in names:
+                names.append(name)
+        return ", ".join(names)
+
+    def _compound_item_reason(self, ms_item, kind):
+        """Why a manuscript is in Removed / Not fully checked, from its pages'
+        stored outcomes: the conditions involved, and for an unresolved one
+        what cut its search."""
+        reason_text = {
+            compound_query.CUT_CANDIDATES: tr("search limit reached"),
+            compound_query.CUT_VERIFY: tr("search limit reached"),
+            compound_query.CUT_BELOW_FLOOR: tr("text too short"),
+            compound_query.CUT_STOPPED: tr("stopped"),
+            compound_query.CUT_FAILED: tr("search failed"),
+            compound_query.CUT_NOT_RUN: tr("not searched"),
+            compound_query.CUT_UNIDENTIFIED: tr("page not identified"),
+        }
+        want = (compound_query.REMOVED if kind == 'removed'
+                else compound_query.UNRESOLVED)
+        parts = []
+        for page in [ms_item] + list(ms_item.get('pages') or []):
+            oc = page.get('compound') or {}
+            for i, state in enumerate(oc.get('states') or []):
+                if state != want:
+                    continue
+                name = self._condition_label(i)
+                if kind == 'unresolved':
+                    why = reason_text.get((oc.get('reasons') or [''] * (i + 1))[i], '')
+                    name = f"{name} ({why})" if why else name
+                if name not in parts:
+                    parts.append(name)
+        return ", ".join(parts)
+
+    def _add_compound_groups(self, removed, unresolved, add_node, make_checkable):
+        """The two collapsed condition groups after Excluded, each split by
+        reason, and their ViewGroups so the viewer agrees with the tree."""
+        for kind, items, title, color, category in (
+                ('removed', removed, tr("Removed by a condition ({})"),
+                 QColor('#c0392b'), _cvf.CATEGORY_REMOVED),
+                ('unresolved', unresolved, tr("Not fully checked ({})"),
+                 QColor('#8e44ad'), _cvf.CATEGORY_UNRESOLVED)):
+            if not items:
+                continue
+            root = QTreeWidgetItem(self.comp_tree, [title.format(len(items))])
+            root.setData(0, Qt.ItemDataRole.UserRole + 100,
+                         "ROOT_COND_REMOVED" if kind == 'removed' else "ROOT_COND_UNRESOLVED")
+            root.setForeground(0, color)
+            root.setExpanded(False)
+            make_checkable(root)
+            by_reason = {}
+            for item in items:
+                by_reason.setdefault(self._compound_item_reason(item, kind), []).append(item)
+            for reason, r_items in sorted(by_reason.items()):
+                ordered = self._sort_comp_items(r_items)
+                self._comp_view_groups.append(_cvf.ViewGroup(
+                    category, tuple(ordered), subgroup=reason))
+                node = QTreeWidgetItem(root, [f"{reason} ({len(r_items)})", "", "", ""])
+                node.setData(0, Qt.ItemDataRole.UserRole + 100,
+                             "ROOT_COND_REASON")
+                node.setForeground(0, color)
+                node.setExpanded(False)
+                make_checkable(node)
+                for item in ordered:
+                    add_node(node, item)
+
+    def _compound_summary_text(self):
+        """The summary line's condition part: pages each "must appear"
+        condition dropped, and the sizes of the two groups."""
+        c = getattr(self, '_comp_compound', None)
+        if not c:
+            return ''
+        parts = []
+        for i, n in enumerate(c.get('failed_counts') or []):
+            if n:
+                parts.append(tr("{} pages without {}").format(n, self._condition_label(i)))
+        if c.get('removed'):
+            parts.append(tr("{} pages removed").format(len(c['removed'])))
+        if c.get('unresolved'):
+            parts.append(tr("{} pages not fully checked").format(len(c['unresolved'])))
+        return ", ".join(parts)
+
+    def _comp_condition_floor(self):
+        """The active letter-level length floor, for the dialog's warnings."""
+        from shared.passage_policy import compose as _passage_compose
+        try:
+            return _passage_compose(self._comp_passage_axis('width'),
+                                    self._comp_passage_axis('length'),
+                                    self._comp_passage_axis('depth')).min_span
+        except Exception:
+            return 40
+
+    def _on_comp_conditions_changed(self, conditions):
+        self.comp_conditions = list(conditions)
+        if self._has_comp_results() and hasattr(self, 'lbl_comp_status'):
+            self.lbl_comp_status.setText(tr(
+                "Conditions changed. Search again to apply them."))
+        if self.comp_conditions:
+            # An auto-expand round armed before the first condition would
+            # otherwise still fire.
+            self._stop_auto_expand('')
+        self._schedule_session_save()
+
+    def _restore_comp_conditions(self, raw):
+        """Replace the conditions with a saved list (session or history).
+        Strict: anything malformed clears them all and says so -- a restored
+        query is never half-applied. `None`/absent means "no conditions"."""
+        conditions = []
+        try:
+            for d in raw or []:
+                conditions.append(compound_query.Condition.from_dict(d))
+        except ValueError as exc:
+            logger.warning('compound: saved conditions dropped: %s', exc)
+            conditions = []
+            if hasattr(self, 'lbl_comp_status'):
+                self.lbl_comp_status.setText(tr(
+                    "The saved conditions could not be read and were cleared."))
+        self.comp_conditions = conditions
+        strip = getattr(self, 'comp_conditions_strip', None)
+        if strip is not None:
+            strip.set_conditions(conditions)
+
+    def _refresh_comp_conditions_available(self):
+        """Conditions run only in letter-level mode, on the Genizah corpus;
+        elsewhere the strip shows them, frozen, with the reason."""
+        strip = getattr(self, 'comp_conditions_strip', None)
+        if strip is None:
+            return
+        lab = bool(getattr(self, 'btn_lab_mode_toggle_comp', None)
+                   and self.btn_lab_mode_toggle_comp.isChecked())
+        if self._comp_method() != 'passage' or lab:
+            strip.set_available(False, tr(
+                "Conditions work only with letter-level search."))
+            return
+        combo = getattr(self, 'comp_corpus_scope_combo', None)
+        scope = ((combo.currentData() if combo is not None else None)
+                 or getattr(self, '_comp_corpus_scope', 'genizah'))
+        if scope != 'genizah':
+            strip.set_available(False, tr(
+                "Conditions work only when the corpus is Genizah."))
+            return
+        strip.set_available(True, '')
+
+    # -- "Filter texts" menu (owner, 2026-10-14) ------------------------------
+    # One button, one menu, three fixed-requirement entry points, replacing
+    # the old "Filter Text" button and the conditions strip's own
+    # "+ Add condition". docs/plans/COMPOSITION_CONDITIONS_PLAN.md section 12.
+
+    def _build_comp_filter_menu(self):
+        """Build the menu once; `_refresh_comp_filter_menu` (on aboutToShow)
+        keeps its text, tooltips and enabled state current."""
+        menu = QMenu(self)
+        if CURRENT_LANG == 'he':
+            menu.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        menu.setToolTipsVisible(True)
+
+        self.act_comp_quoted_texts = menu.addAction(tr("Quoted texts..."))
+        self.act_comp_quoted_texts.setToolTip(
+            tr("For example, Bible verses quoted in the Talmud"))
+        self.act_comp_quoted_texts.triggered.connect(self.open_filter_dialog)
+
+        self.act_comp_quoting_texts = menu.addAction(tr("Quoting texts..."))
+        self.act_comp_quoting_texts.triggered.connect(
+            lambda _checked=False: self.comp_conditions_strip.open_quoting_texts())
+
+        self.act_comp_add_condition = menu.addAction(tr("Add condition..."))
+        self.act_comp_add_condition.triggered.connect(
+            lambda _checked=False: self._comp_add_condition(compound_query.REQ_MUST))
+
+        menu.aboutToShow.connect(self._refresh_comp_filter_menu)
+        return menu
+
+    def _comp_add_condition(self, requirement):
+        """"Add condition..." triggered: open the add dialog (ConditionDialog
+        for REQ_MUST) through the strip, which owns the 4-condition cap.
+        "Quoting texts..." has its own entry point since 2026-10-15,
+        `ConditionsStrip.open_quoting_texts` -- it edits the first existing
+        must_not row instead of always adding one."""
+        self.comp_conditions_strip.add_condition(requirement)
+
+    def _refresh_comp_filter_menu(self):
+        """On aboutToShow: item 1 shows how many quoted sources are active;
+        items 2 and 3 are disabled at the cap or outside letter-level, with
+        the reason replacing the example in their tooltip."""
+        self._refresh_comp_conditions_available()
+        n_quoted = len([ref for ref in getattr(self, 'filter_enabled_sources', set())
+                       if ref in getattr(self, 'filter_sources', {})])
+        self.act_comp_quoted_texts.setText(
+            tr("Quoted texts... ({})").format(n_quoted) if n_quoted
+            else tr("Quoted texts..."))
+
+        strip = self.comp_conditions_strip
+        reason = strip.add_disabled_reason()
+        can_add = not reason
+        quoting_reason = strip.quoting_texts_disabled_reason()
+        self.act_comp_quoting_texts.setEnabled(not quoting_reason)
+        self.act_comp_quoting_texts.setToolTip(
+            quoting_reason or tr("For example, the Rif quoting the Talmud"))
+        self.act_comp_add_condition.setEnabled(can_add)
+        self.act_comp_add_condition.setToolTip(
+            reason or tr(
+                "For example, show only results where an adjacent image "
+                "(before or after) includes a certain text"))
+
+    @staticmethod
+    def _compound_key_str(header):
+        key = compound_query.parse_page_key(header)
+        return f"{key.sys_id}|{key.ie}|{key.p}" if key else ''
+
+    def _compound_viewer_fields(self, ms_item):
+        """For a manuscript from a search with conditions: the highlight of
+        each of its result images (by image identity) and the line the viewer's
+        evidence strip shows for each. Empty for any other result."""
+        pages = list(ms_item.get('pages') or [])
+        if not any('compound' in p or p.get('is_condition_evidence') for p in pages):
+            return {}
+        patterns, notes = {}, {}
+        for page in pages:
+            key = self._compound_key_str(page.get('raw_header'))
+            if not key:
+                continue
+            patterns[key] = page.get('highlight_pattern') or ''
+            notes[key] = self._compound_page_note(page)
+        return {'compound_page_patterns': patterns, 'compound_page_notes': notes}
+
+    def _compound_page_note(self, page):
+        """One line: what the main text and each condition established for
+        this image."""
+        if page.get('is_condition_evidence') and 'compound' not in page:
+            return tr("{} matched on this image.").format(
+                self._compound_evidence_labels(page))
+        oc = page.get('compound') or {}
+        key = compound_query.parse_page_key(page.get('raw_header'))
+        parts = [tr("Main text: image {}").format(key.p if key else '?')]
+        conds = (self._comp_compound or {}).get('conditions') or []
+        unsearchable = self._unsearchable_pages(key.sys_id) if key else 0
+        for i, state in enumerate(oc.get('states') or []):
+            name = self._condition_label(i)
+            where = (conds[i] or {}).get('where') if i < len(conds) else ''
+            evidence = (oc.get('evidence') or [[]] * (i + 1))[i]
+            images = sorted({k.p for k in (compound_query.parse_page_key(r)
+                                          for r in evidence) if k})
+            on = ", ".join(str(p) for p in images)
+            if state == compound_query.SATISFIED and images:
+                parts.append(tr("{}: found on image {}").format(name, on))
+            elif state == compound_query.SATISFIED:
+                text = tr("{}: not found in the searchable pages").format(name)
+                if where == compound_query.WHERE_MANUSCRIPT and unsearchable:
+                    text += " " + tr("({} pages of this manuscript could not be searched)"
+                                     ).format(unsearchable)
+                elif where == compound_query.WHERE_ADJACENT and key:
+                    missing = ((self._comp_compound or {}).get('neighbours_left_out') or {}
+                               ).get(f"{key.sys_id}|{key.ie}|{key.p}")
+                    if missing:
+                        text += " " + tr("(image {} could not be searched)").format(
+                            ", ".join(str(p) for p in missing))
+                parts.append(text)
+            elif state == compound_query.REMOVED:
+                parts.append(tr("{}: found on image {} (removed)").format(name, on))
+            elif state == compound_query.UNRESOLVED:
+                parts.append(tr("{}: not fully checked").format(name))
+        return " \u00b7 ".join(parts)
+
+    def _unsearchable_pages(self, sys_id):
+        """How many of a manuscript's pages the letter-level index left out
+        (owner ruling 2026-10-14: absence means absence from the searchable
+        pages, and the count is shown) -- in the build the RUN was judged on,
+        as the worker recorded it, never the index installed now."""
+        return int(((self._comp_compound or {}).get('unsearchable') or {}).get(sys_id, 0))
+
+    def _compound_export_buckets(self, has_selection):
+        """(removed, unresolved) manuscripts for an export: the checked rows
+        under the two condition groups, or everything the tree shows in them."""
+        if not has_selection:
+            return (list(getattr(self, '_comp_shown_cond_removed', None) or []),
+                    list(getattr(self, '_comp_shown_cond_unresolved', None) or []))
+        removed, unresolved = [], []
+        root = self.comp_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            node = root.child(i)
+            kind = node.data(0, Qt.ItemDataRole.UserRole + 100)
+            if kind not in ("ROOT_COND_REMOVED", "ROOT_COND_UNRESOLVED"):
+                continue
+            out = removed if kind == "ROOT_COND_REMOVED" else unresolved
+            out.extend(self._checked_items_under(node))
+        return removed, unresolved
+
+    def _checked_items_under(self, node):
+        """Checked manuscript rows under `node` (any depth); a partly checked
+        one keeps only its checked pages."""
+        import copy
+        found = []
+        for k in range(node.childCount()):
+            child = node.child(k)
+            data = child.data(0, Qt.ItemDataRole.UserRole)
+            if not isinstance(data, dict) or not data:
+                found.extend(self._checked_items_under(child))
+                continue
+            state = child.checkState(0)
+            if state == Qt.CheckState.Checked:
+                found.append(data)
+            elif state == Qt.CheckState.PartiallyChecked:
+                item = copy.copy(data)
+                item['pages'] = [child.child(j).data(0, Qt.ItemDataRole.UserRole)
+                                 for j in range(child.childCount())
+                                 if child.child(j).checkState(0) == Qt.CheckState.Checked]
+                if item['pages']:
+                    found.append(item)
+        return found
+
+    @staticmethod
+    def _compound_category_of(ms_item):
+        for page in [ms_item] + list(ms_item.get('pages') or []):
+            cat = (page.get('compound') or {}).get('category')
+            if cat:
+                return cat
+        return None
+
+    def _split_by_compound_category(self, items):
+        """(kept, removed, unresolved): rows judged removed or not fully
+        checked are taken out of whatever bucket carried them."""
+        kept, removed, unresolved = [], [], []
+        for item in items or []:
+            cat = self._compound_category_of(item)
+            if cat == compound_query.CAT_REMOVED:
+                removed.append(item)
+            elif cat == compound_query.CAT_UNRESOLVED:
+                unresolved.append(item)
+            else:
+                kept.append(item)
+        return kept, removed, unresolved
+
+    def _clear_compound_results(self):
+        """Forget the last search-with-conditions result (its groups and
+        payload) before showing one that has none."""
+        self._comp_compound = None
+        self.comp_cond_removed = []
+        self.comp_cond_unresolved = []
+        self._comp_shown_cond_removed = []
+        self._comp_shown_cond_unresolved = []
+
+    def _on_grouping_for_run(self, run_id, *results, handler=None):
+        """Grouping results -- and grouping errors -- land only for the run
+        they grouped."""
+        if run_id != getattr(self, '_comp_active_run_id', None):
+            logger.info('composition: dropped grouping of run %s (active %s)',
+                        run_id, getattr(self, '_comp_active_run_id', None))
+            return
+        (handler or self.on_comp_finished)(*results)
+
+    def _comp_export_condition_lines(self):
+        """The conditions a run was DISPATCHED with, in full, for the
+        report's settings block: requirement, place, name and every version."""
+        from desktop.compound_ui import condition_summary
+        lines = []
+        for i, d in enumerate(getattr(self, '_comp_last_result_conditions', None) or []):
+            try:
+                cond = compound_query.Condition.from_dict(d)
+            except ValueError:
+                continue
+            lines.append(tr("Condition {}").format(i + 1) + ": " + condition_summary(cond))
+            for vi, text in enumerate(cond.versions, start=1):
+                lines.append("  " + tr("Version {}").format(vi) + ": " + text)
+        return lines
+
+    def _merge_comp_known(self, new_known):
+        """Add manually excluded manuscripts to `comp_known`, one item per
+        manuscript or Part. The same manuscript arriving from another group
+        (one page in Main, one removed by a condition) keeps BOTH pages, each
+        with its own stored outcome."""
+        if not hasattr(self, 'comp_known'):
+            self.comp_known = []
+        if new_known:
+            by_key = {}
+            for item in self.comp_known:
+                if item.get('type') == 'part':
+                    by_key[f"PART:{item.get('part_id')}"] = item
+                else:
+                    by_key[item.get('sys_id')] = item
+            for item in new_known:
+                if item.get('type') == 'part':
+                    key = f"PART:{item.get('part_id')}"
+                else:
+                    key = item.get('sys_id')
+                if key and key not in by_key:
+                    self.comp_known.append(item)
+                    by_key[key] = item
+                elif key:
+                    # The same manuscript from another group (e.g. one page in
+                    # Main and one removed by a condition): keep BOTH pages,
+                    # each with its own stored outcome.
+                    kept = by_key[key]
+                    seen = {p.get('raw_header') for p in kept.get('pages') or []}
+                    extra = [p for p in item.get('pages') or []
+                             if p.get('raw_header') not in seen]
+                    if extra:
+                        merged = dict(kept, pages=list(kept.get('pages') or []) + extra)
+                        pos = next(i for i, it in enumerate(self.comp_known)
+                                   if it is kept)
+                        self.comp_known[pos] = merged
+                        by_key[key] = merged
+
+    def _comp_compound_has_rows(self):
+        c = getattr(self, '_comp_compound', None)
+        return bool(c and (c.get('removed') or c.get('unresolved')))
+
+    def _on_compound_step(self, step, total, kind, label):
+        if not hasattr(self, 'lbl_comp_status'):
+            return
+        if kind == 'main':
+            text = tr("Searching the main text ({}/{})").format(step, total)
+        elif kind == 'protection':
+            # "Own text" (owner, 2026-10-14): `label` here is the scope
+            # (same_image/adjacent_image/manuscript), not a condition name --
+            # a status line of its own rather than showing that raw value.
+            text = tr("Checking your own text ({}/{})").format(step, total)
+        else:
+            text = tr("Searching condition {} ({}/{})").format(label, step, total)
+        self.lbl_comp_status.setText(text)
+        self.lbl_comp_status.setStyleSheet("")
 
     # --- multi-witness letter-level search ---------------------------------
     # The state machine itself is `desktop/passage_witnesses.py` -- pure and
@@ -18411,19 +19470,54 @@ class GenizahGUI(QMainWindow):
         uids = self._collect_checked_comp_page_uids()
         if not uids:
             return []
+        # Either namespace: a checked My Library result is promoted too
+        # (owner, 2026-10-16), not silently skipped.
         wanted, seen = [], set()
+        sid_by_uid = {}
         for row in rows:
-            sid = passage_witness_source.witness_sys_id(row)
-            if not sid or sid in seen:
+            sid = passage_local.row_sys_id(row)
+            if not sid:
+                continue
+            if row.get('uid'):
+                sid_by_uid.setdefault(str(row['uid']), sid)
+            if sid in seen:
                 continue
             seen.add(sid)
             wanted.append(sid)
+        # A checked page is identified by its uid, which for a Genizah page is
+        # `IE.._P.._FL..` -- it holds NO sys_id, so reading one out of it
+        # found nothing and a checked Genizah result was never promoted. The
+        # rows know which sys_id each uid belongs to; a My Library uid
+        # (`LOCAL_{sys_id}_P{n}`) also carries it, the fallback for a uid no
+        # row lists.
         checked = set()
         for uid in uids:
-            m = passage_witness_source.WITNESS_SYS_ID_RE.search(str(uid))
-            if m:
-                checked.add(m.group(1))
+            sid = sid_by_uid.get(str(uid))
+            if not sid and str(uid).startswith('LOCAL_'):
+                sid = passage_local.uid_sys_id(uid)
+            if sid:
+                checked.add(sid)
         return [s for s in wanted if s in checked]
+
+    def _witness_label(self, sys_id, rows=()):
+        """What the Witnesses panel calls a promoted result: the shelfmark of
+        a Genizah manuscript, the file name of a My Library one, the bare id
+        when neither can be found."""
+        if passage_local.is_local_sys_id(sys_id):
+            for row in rows or ():
+                if (passage_local.row_sys_id(row) == sys_id
+                        and row.get('shelfmark')):
+                    return row['shelfmark']
+            try:
+                path = self._lookup_local_filepath(sys_id)
+            except Exception:                                # noqa: BLE001
+                path = None
+            return os.path.basename(path) if path else sys_id
+        try:
+            shelf, _title = self.meta_mgr.get_meta_for_id(sys_id)
+            return shelf or sys_id
+        except Exception:                                    # noqa: BLE001
+            return sys_id
 
     def _promote_sys_ids(self, sys_ids, rows):
         """Turn manuscripts into witnesses and search them.
@@ -18440,23 +19534,22 @@ class GenizahGUI(QMainWindow):
         sys_ids = [s for s in sys_ids if s not in already]
         if not sys_ids:
             return 0
-        headers = passage_witness_source.witness_headers_for(sys_ids, rows)
+        # Pages of either index, each read from its own (a My Library page
+        # through the LOCAL index).
+        fetcher = passage_local.WitnessTextFetcher(self.searcher)
+        headers = passage_witness_source.witness_headers_for(
+            sys_ids, rows, sys_id_of=passage_local.row_sys_id)
         texts, failed = passage_witness_source.collect_witness_texts(
             sys_ids, rows,
-            fetch_header=self.searcher.get_full_text_by_header,
-            fetch_manuscript=self.searcher.get_full_manuscript,
+            fetch_header=fetcher.get_full_text_by_header,
+            fetch_manuscript=fetcher.get_full_manuscript,
             headers_by_sid=headers)
         added = 0
         for sid in sys_ids:
             text = texts.get(sid)
             if not text:
                 continue
-            label = sid
-            try:
-                shelf, _title = self.meta_mgr.get_meta_for_id(sid)
-                label = shelf or sid
-            except Exception:
-                pass
+            label = self._witness_label(sid, rows)
             report = passage_witnesses.add_texts(
                 self._comp_witness_state(), [text], self._comp_seed_text(),
                 tr("Pasted text"), label=label, kind='manuscript',
@@ -18465,13 +19558,7 @@ class GenizahGUI(QMainWindow):
         if failed:
             # ONE line naming what failed, not N identical messages saying
             # nothing.
-            names = []
-            for sid in failed[:5]:
-                try:
-                    shelf, _t = self.meta_mgr.get_meta_for_id(sid)
-                except Exception:
-                    shelf = None
-                names.append(shelf or sid)
+            names = [self._witness_label(sid, rows) for sid in failed[:5]]
             more = f' (+{len(failed) - 5})' if len(failed) > 5 else ''
             self._witness_notify(tr(
                 "Could not load text for {n} manuscripts: {names}").format(
@@ -18517,6 +19604,12 @@ class GenizahGUI(QMainWindow):
     def _run_auto_expand(self):
         if self.is_comp_running or getattr(self, '_auto_expand_left', 0):
             return
+        if getattr(self, 'comp_conditions', None):
+            # Promotion picks witnesses from the main text's own ranked list;
+            # mixing it with conditions is not supported in this release.
+            self._witness_notify(tr(
+                "Auto-expand is not available while conditions are set."))
+            return
         if not self._has_comp_results():
             self._witness_notify(tr("Run a letter-level search first."))
             return
@@ -18534,6 +19627,10 @@ class GenizahGUI(QMainWindow):
         """
         left = getattr(self, '_auto_expand_left', 0)
         if left <= 0:
+            return
+        if getattr(self, 'comp_conditions', None):
+            self._stop_auto_expand(tr(
+                "Auto-expand is not available while conditions are set."))
             return
         # The method combo is re-enabled by `on_comp_scan_finished` BEFORE
         # `start_grouping` marks the UI busy, so a user can switch to chunk
@@ -18555,7 +19652,8 @@ class GenizahGUI(QMainWindow):
         already = {e.sys_id for e in state.entries if e.sys_id}
         candidates = []
         for row in rows:
-            sid = passage_witness_source.witness_sys_id(row)
+            # Either namespace: My Library results are candidates too.
+            sid = passage_local.row_sys_id(row)
             if not sid or sid in already or sid in candidates:
                 continue
             candidates.append(sid)
@@ -19067,15 +20165,17 @@ class GenizahGUI(QMainWindow):
         # The headers the PROMOTION used, where the snapshot preserved them.
         # Re-deriving them from whatever rows are on screen now rebuilds a
         # DIFFERENT witness under the same label.
-        derived = passage_witness_source.witness_headers_for(sys_ids, rows)
+        derived = passage_witness_source.witness_headers_for(
+            sys_ids, rows, sys_id_of=passage_local.row_sys_id)
         headers = {e.sys_id: (list(e.headers or [])
                               or derived.get(e.sys_id) or [])
                    for e in stale}
+        fetcher = passage_local.WitnessTextFetcher(self.searcher)
         try:
             texts, failed = passage_witness_source.collect_witness_texts(
                 sys_ids, rows,
-                fetch_header=self.searcher.get_full_text_by_header,
-                fetch_manuscript=self.searcher.get_full_manuscript,
+                fetch_header=fetcher.get_full_text_by_header,
+                fetch_manuscript=fetcher.get_full_manuscript,
                 headers_by_sid=headers)
         except Exception:
             logger.exception('witness rehydrate failed')
@@ -19180,14 +20280,27 @@ class GenizahGUI(QMainWindow):
         """
         can_restrip = bool(self._comp_witness_state().rows)
         self._refresh_witness_panel()
-        if not can_restrip and self._has_comp_results():
+        if (getattr(self, '_comp_compound', None) is not None
+                or getattr(self, 'comp_conditions', None)):
+            # Results of a search with conditions are judged as a whole, and
+            # with conditions SET the next answer must be judged too;
+            # re-fusing cached rows would publish pages nobody judged.
+            if self._has_comp_results():
+                self._witness_notify(tr(
+                    "Witness removed. The results on screen were found with "
+                    "the previous witness list \u2014 run the search again to "
+                    "update them."))
+        elif not can_restrip and self._has_comp_results():
             self._witness_notify(tr(
                 "Witness removed. The results on screen were found with the "
                 "previous witness list — run the search again to update "
                 "them."))
         else:
             state = self._comp_witness_state()
-            fused = passage_witnesses.fuse_and_cap(state)
+            # The same limit as a search: none. Re-fused at the helper's
+            # default, a removal cut a full list back to 200 manuscripts.
+            fused = passage_witnesses.fuse_and_cap(
+                state, cap=passage_witnesses.DESKTOP_GROUP_CAP)
             if fused is not None:
                 main, filtered, _truncated = fused
                 # This is a re-publish, so it carries the same provenance a
@@ -19361,13 +20474,18 @@ class GenizahGUI(QMainWindow):
         list, after these rows exist, so it cannot change them.
         """
         restrict = getattr(self, 'pre_search_restrict_sys_ids', None)
+        # The generation of each index THIS scope searches, and only those:
+        # a Genizah rebuild must not throw away a My Library run's rows, nor
+        # the reverse (`scope_pins` gives None for an index not searched).
+        pins = passage_local.scope_pins(scope)
         return (
             passage_witnesses.witness_text_key(seed_text),
             self._get_filter_text() or '',
             int(self.spin_filter.value()),
             tuple(sorted(restrict)) if restrict else None,
             scope, width, length, depth,
-            passage_lifecycle.current_state_generation(),
+            pins['pinned_generation'],
+            pins['pinned_local_generation'],
         )
 
     def _comp_witness_prior_rows(self):
@@ -19379,6 +20497,37 @@ class GenizahGUI(QMainWindow):
         """
         state = self._comp_witness_state()
         return dict(state.rows), dict(state.filtered)
+
+    def _absorb_compound_main_steps(self, steps):
+        """A compound run searches every main witness itself. One whose search
+        FAILED found nothing, so the pages only it would have found are
+        missing (PR #399 review): mark it Failed in the Witnesses panel, with
+        Retry, as an ordinary multi-witness search does, and keep it out of
+        the provenance exports and history read -- that names what produced
+        these rows. Called on the UI thread; status is state."""
+        main = {s.get('id'): s for s in steps if s.get('kind') == 'main'}
+        searched = {wid for wid, s in main.items()
+                    if s.get('status') in ('searched', 'stopped')}
+        self._comp_last_result_witnesses = [
+            row for row in (getattr(self, '_comp_last_result_witnesses', None)
+                            or [])
+            if row.get('id') in searched]
+        failed = {wid: s for wid, s in main.items()
+                  if s.get('status') == 'failed'}
+        if not failed:
+            return
+        for entry in self._comp_witness_state().entries:
+            step = failed.get(entry.id)
+            if step is None:
+                continue
+            entry.status = passage_witnesses.STATUS_FAILED
+            entry.hits = 0
+            entry.error = (
+                tr("Could not load text for this manuscript.")
+                if step.get('reason') == 'empty_text'
+                else tr("The letter-level search could not be completed. "
+                        "Details have been written to the log."))
+        self._refresh_witness_panel()
 
     def _absorb_witness_result(self, result):
         """Fold a finished batch's per-witness rows back into the WitnessSet.
@@ -19650,13 +20799,45 @@ class GenizahGUI(QMainWindow):
             if not scope:
                 scope = getattr(self, '_comp_corpus_scope', 'genizah')
         lab_btn = getattr(self, 'btn_lab_mode_toggle_comp', None)
-        return passage_lifecycle.passage_disabled_reason(
-            passage_ready=passage_lifecycle.passage_available(),
-            corpus_scope=scope,
-            lab_mode_on=bool(lab_btn is not None and lab_btn.isChecked()),
-            build_in_flight=bool(
-                getattr(self, '_passage_build_in_flight', False)),
-            main_index_ready=main_index_ready)
+        lab_on = bool(lab_btn is not None and lab_btn.isChecked())
+        genizah_build = bool(getattr(self, '_passage_build_in_flight', False))
+        local_build = bool(
+            getattr(self, '_local_passage_build_in_flight', False))
+        if scope not in ('local', 'all'):
+            return passage_lifecycle.passage_disabled_reason(
+                passage_ready=passage_lifecycle.passage_available(),
+                corpus_scope=scope,
+                lab_mode_on=lab_on,
+                build_in_flight=genizah_build,
+                main_index_ready=main_index_ready)
+        # My Library / All: the Genizah gate's scope-independent reasons
+        # first (Lab Mode, a build in flight), asked with the Genizah side's
+        # readiness only where this scope actually searches it; then the My
+        # Library index and the LOCAL index its rows are read from.
+        searches_genizah = scope == 'all'
+        reason = passage_lifecycle.passage_disabled_reason(
+            passage_ready=(passage_lifecycle.passage_available()
+                           if searches_genizah else True),
+            corpus_scope='genizah',
+            lab_mode_on=lab_on,
+            build_in_flight=local_build or (searches_genizah and genizah_build),
+            main_index_ready=main_index_ready if searches_genizah else True)
+        if reason is not None:
+            return reason
+        # The LOCAL Tantivy index the rows' text is read from -- with the same
+        # readiness test the chunk path applies before it searches LOCAL
+        # (`search_composition_logic`): present, and the tab not mid-rebuild.
+        tab_ref = getattr(engine, '_my_library_tab_ref', None)
+        tab = tab_ref() if callable(tab_ref) else None
+        local_index_ready = (
+            engine is not None
+            and getattr(engine, 'local_index', None) is not None
+            and getattr(engine, 'local_searcher', None) is not None
+            and bool(getattr(tab, 'is_searchable', True)
+                     if tab is not None else True))
+        return passage_local.local_disabled_reason(
+            local_ready=passage_local.local_passage_available(),
+            local_index_ready=local_index_ready)
 
     def _passage_reason_text(self, key):
         """Reason KEY -> translated sentence. The pure function returns keys
@@ -19679,6 +20860,12 @@ class GenizahGUI(QMainWindow):
             passage_lifecycle.REASON_MAIN_INDEX_MISSING: tr(
                 "The main index is not ready yet. Letter-level search needs "
                 "it to load the text of its results."),
+            passage_local.REASON_LOCAL_NOT_BUILT: tr(
+                "The letter-level index for My Library has not been built "
+                "yet. You can build it from Settings."),
+            passage_local.REASON_LOCAL_INDEX_MISSING: tr(
+                "My Library is not loaded. Letter-level search for My "
+                "Library needs it to load the text of its results."),
         }
         return texts.get(key, "")
 
@@ -19744,6 +20931,7 @@ class GenizahGUI(QMainWindow):
         function), so switching letter-level off never leaves them disabled
         with nothing left to re-enable them until Lab Mode is toggled by
         hand."""
+        self._refresh_comp_conditions_available()
         if on and not hasattr(self, '_passage_cached_chunk_state'):
             cache = {}
             for name, kind, _forced in self._PASSAGE_FORCED_CONTROLS:
@@ -19870,6 +21058,8 @@ class GenizahGUI(QMainWindow):
                     or getattr(self, '_passage_build_in_flight', False))
         lab_on = bool(lab_btn is not None and lab_btn.isChecked())
         combo.setEnabled(not busy and not lab_on)
+        # Every change of method or Lab passes through here.
+        self._refresh_comp_conditions_available()
 
     def _revert_comp_method_to_chunk(self, reason_key):
         """Snap the selection back without re-entering this handler."""
@@ -19907,6 +21097,13 @@ class GenizahGUI(QMainWindow):
             self._save_session()
             return
         reason = self._passage_disabled_reason_now()
+        if reason == passage_local.REASON_LOCAL_NOT_BUILT:
+            # Same shape as the Genizah case below: keep the intent, demote,
+            # and offer the build that would make the choice possible.
+            self._comp_method_deferred = 'passage'
+            self._revert_comp_method_to_chunk(reason)
+            self._maybe_offer_local_passage_build()
+            return
         if reason is not None:
             if reason == passage_lifecycle.REASON_NOT_BUILT:
                 # Remember the intent BEFORE demoting it. The build is about
@@ -20883,10 +22080,12 @@ class GenizahGUI(QMainWindow):
         if combo is None:
             return
         self._comp_corpus_scope = combo.currentData() or 'genizah'
-        # Phase 146: local/all have no letter-level index -- re-run the
-        # gate so a scope change demotes the method instead of leaving
-        # a selection that dispatch would silently override.
+        # Re-run the gate so a scope change demotes the method when the
+        # scope's letter-level index is not ready, instead of leaving a
+        # selection that dispatch would silently override.
         self._revalidate_comp_method()
+        # Conditions are Genizah-only, so their availability follows scope.
+        self._refresh_comp_conditions_available()
         self._save_session()
 
     def _deliver_unless_discarded(self, attr, generation, slot, *args):
@@ -24826,6 +26025,9 @@ class GenizahGUI(QMainWindow):
                 add_item(item)
         for item in sel_known:
             add_item(item)
+        _removed, _unresolved = self._compound_export_buckets(True)
+        for item in _removed + _unresolved:
+            add_item(item)
 
         return selected
 
@@ -25702,27 +26904,12 @@ class GenizahGUI(QMainWindow):
                 run.font.bold = True
 
     def _set_paragraph_rtl(self, paragraph):
-        from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-        from docx.oxml import OxmlElement
-        from docx.oxml.ns import qn
-        paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
-        paragraph.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
-        ppr = paragraph._p.get_or_add_pPr()
-        bidi = ppr.find(qn("w:bidi"))
-        if bidi is None:
-            bidi = OxmlElement("w:bidi")
-            ppr.append(bidi)
-        bidi.set(qn("w:val"), "1")
+        from shared.docx_export import _set_paragraph_rtl
+        _set_paragraph_rtl(paragraph)
 
     def _set_table_rtl(self, table):
-        from docx.oxml import OxmlElement
-        from docx.oxml.ns import qn
-        tbl_pr = table._tbl.tblPr
-        bidi_visual = tbl_pr.find(qn("w:bidiVisual"))
-        if bidi_visual is None:
-            bidi_visual = OxmlElement("w:bidiVisual")
-            tbl_pr.append(bidi_visual)
-        bidi_visual.set(qn("w:val"), "1")
+        from shared.docx_export import _set_table_rtl
+        _set_table_rtl(table)
 
     def _set_table_width_pct(self, table, pct=100):
         from docx.oxml import OxmlElement
@@ -26049,10 +27236,11 @@ class GenizahGUI(QMainWindow):
                     # EXPUX-03: omit MiDRASH credit on Credits sheet when LOCAL-only.
                     local_only=_local_only_export,
                 )
-                with open(path, 'wb') as f:
-                    f.write(content)
-                self._save_last_folder(path)
-                self._show_export_saved_dialog(path)
+                from desktop.export_save import save_export, write_bytes
+                path = save_export(self, path, lambda p: write_bytes(p, content))
+                if path:
+                    self._save_last_folder(path)
+                    self._show_export_saved_dialog(path)
 
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save XLSX:\n{str(e)}")
@@ -26069,7 +27257,11 @@ class GenizahGUI(QMainWindow):
                     csv_headers = headers + [_fp_label, _pg_label]
                 else:
                     csv_headers = headers
-                with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+                from contextlib import nullcontext
+                from desktop.export_save import save_export, write_text
+                # Built in memory, then written by save_export: a file open in
+                # Excel is retried or renamed, never a half-written export.
+                with nullcontext(io.StringIO()) as f:
                     f.write(credit_text)
                     f.write("\n" + search_info_text + "\n")
                     writer = csv.writer(f)
@@ -26092,8 +27284,11 @@ class GenizahGUI(QMainWindow):
                             # (page label per D-02, no double-prefix).
                             clean_row = clean_row + _csv_extra_cols(r, _export_filepath)
                         writer.writerow(clean_row)
-                self._save_last_folder(path)
-                self._show_export_saved_dialog(path)
+                path = save_export(self, path, lambda p: write_text(
+                    p, f.getvalue(), 'utf-8-sig', newline=''))
+                if path:
+                    self._save_last_folder(path)
+                    self._show_export_saved_dialog(path)
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{str(e)}")
 
@@ -26101,8 +27296,7 @@ class GenizahGUI(QMainWindow):
         elif fmt == 'docx':
             try:
                 from docx import Document
-                from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
-                from shared.docx_export import write_docx_result_block
+                from shared.docx_export import set_document_rtl, write_docx_result_block
                 doc = Document()
                 # Credits + search-metadata header (unchanged).
                 for line in credit_text.split('\n'):
@@ -26127,20 +27321,24 @@ class GenizahGUI(QMainWindow):
                     write_docx_result_block(doc, r, filepath=fp, lang=CURRENT_LANG, full_text=_full_text_for_export(r))
 
                 if CURRENT_LANG == "he":
-                    doc.styles["Normal"].paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
-                    for p in doc.paragraphs:
-                        self._set_paragraph_rtl(p)
+                    # No right alignment on the Normal style: Word reads it
+                    # on a right-to-left paragraph as flush LEFT.
+                    set_document_rtl(doc)
 
-                doc.save(path)
-                self._save_last_folder(path)
-                self._show_export_saved_dialog(path)
+                from desktop.export_save import save_export
+                path = save_export(self, path, doc.save)
+                if path:
+                    self._save_last_folder(path)
+                    self._show_export_saved_dialog(path)
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save DOCX:\n{str(e)}")
 
         # --- TXT ---
         else:
             try:
-                with open(path, 'w', encoding='utf-8') as f:
+                from contextlib import nullcontext
+                from desktop.export_save import save_export, write_text
+                with nullcontext(io.StringIO()) as f:
                     f.write(credit_text)
                     f.write("\n" + search_info_text + "\n\n")
                     for r in results_to_export:
@@ -26157,8 +27355,10 @@ class GenizahGUI(QMainWindow):
                             # passage when full_text is available; falls back to the
                             # byte-identical pre-v7.17 single-line snippet otherwise.
                             f.write(_format_txt_genizah_block(r, full_text=_full_text_for_export(r)) + "\n\n")
-                self._save_last_folder(path)
-                self._show_export_saved_dialog(path)
+                path = save_export(self, path, lambda p: write_text(p, f.getvalue(), 'utf-8'))
+                if path:
+                    self._save_last_folder(path)
+                    self._show_export_saved_dialog(path)
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{str(e)}")
 
@@ -26179,11 +27379,21 @@ class GenizahGUI(QMainWindow):
             c_filt_appx = self.comp_filtered_appendix
             c_known = self.comp_known
 
+        # Composition Search conditions: the two groups, from the checked rows
+        # or the whole shown list -- and any row judged removed / not fully
+        # checked is filed by its STORED outcome, wherever the tree put it
+        # (the flat view's selection returns every row as Main).
+        c_removed, c_unres = self._compound_export_buckets(has_selection)
+        c_main, _rm, _ur = self._split_by_compound_category(c_main)
+        c_removed, c_unres = c_removed + _rm, c_unres + _ur
+        c_filt, _rm, _ur = self._split_by_compound_category(c_filt)
+        c_removed, c_unres = c_removed + _rm, c_unres + _ur
+
         all_filtered = c_filt[:]
         for v in c_filt_appx.values():
             all_filtered.extend(v)
 
-        if not (c_main or c_appx or c_known or all_filtered):
+        if not (c_main or c_appx or c_known or all_filtered or c_removed or c_unres):
             QMessageBox.warning(self, tr("Save"), tr("No composition data to export."))
             return
 
@@ -26204,6 +27414,8 @@ class GenizahGUI(QMainWindow):
         collect_ids(c_main)
         for group_items in c_appx.values(): collect_ids(group_items)
         collect_ids(c_known)
+        collect_ids(c_removed)
+        collect_ids(c_unres)
         collect_ids(all_filtered)
 
         unique_ids = list(set(all_ids))
@@ -26288,7 +27500,10 @@ class GenizahGUI(QMainWindow):
         # Phase 110 (5a): a LOCAL-only comp export omits the MiDRASH/Stökl/Zenodo
         # data-source credits (meaningless for the user's own documents).
         credit_text = self._get_credit_header(local_only=_local_only_comp_export)
-        query_text = self.comp_text_area.toPlainText().strip()
+        # The DISPATCHED text: editing the box after a search must not relabel
+        # its results. A restored session has no stamp and falls back as before.
+        query_text = (getattr(self, '_comp_last_result_text', None)
+                      or self.comp_text_area.toPlainText()).strip()
         # Phase 146: describes the RUN behind these rows, not the
         # controls as they stand now -- see `_comp_export_settings_lines`.
         comp_settings_lines = self._comp_export_settings_lines()
@@ -26298,6 +27513,17 @@ class GenizahGUI(QMainWindow):
         # run with no witnesses would be a column that means nothing.
         _comp_wit_total = self._comp_witness_total()
         _comp_wit_col = _comp_wit_total > 1
+
+        _comp_cond_col = getattr(self, '_comp_compound', None) is not None
+
+        def _cond_cell(page):
+            """What each condition established for this page, or [] when the
+            export is not of a search with conditions."""
+            if not _comp_cond_col:
+                return []
+            if not (page.get('compound') or page.get('is_condition_evidence')):
+                return ['']
+            return [self._compound_page_note(page)]
 
         def _wit_cell(item):
             """'3 of 17' for one manuscript, or [] when the column is off.
@@ -26453,7 +27679,7 @@ class GenizahGUI(QMainWindow):
                                 f"{ms_score} (P:{page.get('score',0)})",
                                 src_clean,
                                 ms_clean
-                             ] + _wit_cell(ms_item))
+                             ] + _wit_cell(ms_item) + _cond_cell(page))
                     elif item_type == 'manuscript':
                         sid = ms_item['sys_id']
                         shelf, title = self.meta_mgr.get_meta_for_id(sid)
@@ -26483,7 +27709,7 @@ class GenizahGUI(QMainWindow):
                                 f"{ms_score} (P:{page.get('score',0)})",
                                 src_clean,
                                 ms_clean
-                             ] + _wit_cell(ms_item))
+                             ] + _wit_cell(ms_item) + _cond_cell(page))
                     else:
                         # Fallback
                         sid, p_num, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
@@ -26504,14 +27730,14 @@ class GenizahGUI(QMainWindow):
                             str(ms_item.get('score', 0)),
                             src_clean,
                             ms_clean
-                        ] + _wit_cell(ms_item))
+                        ] + _wit_cell(ms_item) + _cond_cell(ms_item))
 
             if self.chk_comp_flat.isChecked():
                 all_items = self._collect_comp_items(
                     c_main, c_appx,
                     c_filt, c_filt_appx,
                     c_known
-                )
+                ) + list(c_removed) + list(c_unres)
                 flat_items = self._sort_comp_items(all_items)
                 add_rows(flat_items, tr("All Results"))
             else:
@@ -26522,6 +27748,8 @@ class GenizahGUI(QMainWindow):
                 for sig, items in sorted(c_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
                     add_rows(items, tr("Filtered Appendix"), sig)
                 add_rows(c_known, tr("Excluded Manuscripts"))
+                add_rows(c_removed, tr("Removed by a condition"))
+                add_rows(c_unres, tr("Not fully checked"))
 
             # --- XLSX ---
             if fmt == 'xlsx':
@@ -26609,7 +27837,8 @@ class GenizahGUI(QMainWindow):
                         tr("Score"),
                         tr("Source Context"),
                         tr("Manuscript Text"),
-                    ] + ([tr("Witnesses")] if _comp_wit_col else [])
+                    ] + ([tr("Witnesses")] if _comp_wit_col else []) + (
+                        [tr("Conditions")] if _comp_cond_col else [])
 
                     # Raw Data sheet (flat)
                     raw_row = _write_credit_block(ws_raw, 1)
@@ -26692,7 +27921,8 @@ class GenizahGUI(QMainWindow):
                                             f"{ms_score} (P:{page.get('score',0)})",
                                             src_clean,
                                             ms_clean
-                                        ])
+                                        ] + ([''] if (_comp_wit_col and _comp_cond_col) else [])
+                                          + _cond_cell(page))
                                 elif item_type == 'manuscript':
                                     sid = ms_item['sys_id']
                                     shelf, title = self.meta_mgr.get_meta_for_id(sid)
@@ -26719,7 +27949,8 @@ class GenizahGUI(QMainWindow):
                                             f"{ms_score} (P:{page.get('score',0)})",
                                             src_clean,
                                             ms_clean
-                                        ])
+                                        ] + ([''] if (_comp_wit_col and _comp_cond_col) else [])
+                                          + _cond_cell(page))
                                 else:
                                     sid, p_num, shelf, title = self._get_meta_for_header(ms_item.get('raw_header', ''))
                                     # Get library info
@@ -26772,6 +28003,12 @@ class GenizahGUI(QMainWindow):
                         add_report_section(tr("Appendix - Grouped"), [], groups=sorted(c_appx.items(), key=lambda x: len(x[1]), reverse=True), outline_level=1)
                         add_report_section(tr("Filtered"), self._sort_comp_items(c_filt), groups=sorted(c_filt_appx.items(), key=lambda x: len(x[1]), reverse=True), outline_level=1)
                         add_report_section(tr("Excluded"), self._sort_comp_items(c_known), outline_level=1)
+                        if c_removed:
+                            add_report_section(tr("Removed by a condition"),
+                                               self._sort_comp_items(c_removed), outline_level=1)
+                        if c_unres:
+                            add_report_section(tr("Not fully checked"),
+                                               self._sort_comp_items(c_unres), outline_level=1)
 
                     ws_report.sheet_properties.outlinePr.summaryBelow = True
 
@@ -26859,9 +28096,11 @@ class GenizahGUI(QMainWindow):
                                 wb.remove(_empty_ws)
                         wb.active = wb.index(ws_local)
 
-                    wb.save(path)
-                    self._save_last_folder(path)
-                    self._show_export_saved_dialog(path)
+                    from desktop.export_save import save_export
+                    path = save_export(self, path, wb.save)
+                    if path:
+                        self._save_last_folder(path)
+                        self._show_export_saved_dialog(path)
                 except Exception as e:
                     QMessageBox.critical(self, tr("Error"), f"Failed to save XLSX:\n{e}")
 
@@ -26879,14 +28118,23 @@ class GenizahGUI(QMainWindow):
                         tr("Score"),
                         tr("Source Context"),
                         tr("Manuscript Text"),
-                    ] + ([tr("Witnesses")] if _comp_wit_col else [])
+                    ] + ([tr("Witnesses")] if _comp_wit_col else []) + (
+                        [tr("Conditions")] if _comp_cond_col else [])
                     from shared.export_dossier import (
                         local_documents_header_row as _local_hdr,
                         sheet_titles as _sheet_titles,
                     )
-                    with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+                    from contextlib import nullcontext
+                    from desktop.export_save import save_export, write_text
+                    with nullcontext(io.StringIO()) as f:
                         f.write(credit_text)
                         writer = csv.writer(f)
+                        if _comp_cond_col:
+                            # A search with conditions: what was searched,
+                            # dispatched, so the rows can be traced to it.
+                            writer.writerow([tr('Search Text'), query_text])
+                            for line in self._comp_export_condition_lines():
+                                writer.writerow([line])
                         writer.writerow([])
                         # Phase 110 (5b): a LOCAL-only export does NOT emit the
                         # 10-column Genizah header/table at all — the Local
@@ -26907,8 +28155,11 @@ class GenizahGUI(QMainWindow):
                             writer.writerow(_local_hdr(CURRENT_LANG))
                             for row in local_table_rows:
                                 writer.writerow([str(val).replace('*', '') for val in row])
-                    self._save_last_folder(path)
-                    self._show_export_saved_dialog(path)
+                    path = save_export(self, path, lambda p: write_text(
+                        p, f.getvalue(), 'utf-8-sig', newline=''))
+                    if path:
+                        self._save_last_folder(path)
+                        self._show_export_saved_dialog(path)
                 except Exception as e:
                     QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{e}")
 
@@ -26917,7 +28168,7 @@ class GenizahGUI(QMainWindow):
                 try:
                     from docx import Document
                     from docx.enum.section import WD_ORIENTATION
-                    from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+                    from shared.docx_export import set_document_rtl
                     doc = Document()
                     section = doc.sections[-1]
                     new_width, new_height = section.page_height, section.page_width
@@ -26952,6 +28203,11 @@ class GenizahGUI(QMainWindow):
                             f"{tr('Filtered by Text (Manuscripts)')}: {filtered_total}",
                             f"{tr('Excluded Manuscripts')}: {known_count}",
                         ]
+                    if c_removed or c_unres:
+                        stats_lines += [
+                            f"{tr('Removed by a condition')}: {len(c_removed)}",
+                            f"{tr('Not fully checked')}: {len(c_unres)}",
+                        ]
                     for line in stats_lines:
                         doc.add_paragraph(line)
                     if not _local_only_comp_export:
@@ -26975,7 +28231,8 @@ class GenizahGUI(QMainWindow):
                             tr("Score"),
                             tr("Source Context"),
                             tr("Manuscript Text"),
-                        ] + ([tr("Witnesses")] if _comp_wit_col else [])
+                        ] + ([tr("Witnesses")] if _comp_wit_col else []) + (
+                        [tr("Conditions")] if _comp_cond_col else [])
                         table = doc.add_table(rows=1, cols=len(headers))
                         table.autofit = False
                         self._set_table_width_pct(table, 100)
@@ -27077,25 +28334,15 @@ class GenizahGUI(QMainWindow):
                             doc.add_paragraph(tr("None"))
 
                     if CURRENT_LANG == "he":
-                        doc.styles["Normal"].paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
-                        for p in doc.paragraphs:
-                            self._set_paragraph_rtl(p)
-                        if table is not None:
-                            self._set_table_rtl(table)
-                            for row in table.rows:
-                                for cell in row.cells:
-                                    for p in cell.paragraphs:
-                                        self._set_paragraph_rtl(p)
-                        if excluded_table is not None:
-                            self._set_table_rtl(excluded_table)
-                            for row in excluded_table.rows:
-                                for cell in row.cells:
-                                    for p in cell.paragraphs:
-                                        self._set_paragraph_rtl(p)
+                        # No right alignment on the Normal style: Word reads
+                        # it on a right-to-left paragraph as flush LEFT.
+                        set_document_rtl(doc, tables=(table, excluded_table))
 
-                    doc.save(path)
-                    self._save_last_folder(path)
-                    self._show_export_saved_dialog(path)
+                    from desktop.export_save import save_export
+                    path = save_export(self, path, doc.save)
+                    if path:
+                        self._save_last_folder(path)
+                        self._show_export_saved_dialog(path)
                 except Exception as e:
                     QMessageBox.critical(self, tr("Error"), f"Failed to save DOCX:\n{e}")
 
@@ -27171,15 +28418,27 @@ class GenizahGUI(QMainWindow):
                 summary_lines = [
                     sep, tr("COMPOSITION REPORT SUMMARY"), sep,
                     f"Title: {comp_title}",
+                    f"{tr('Search Text')}: {query_text}",
+                    *(self._comp_export_condition_lines() if _comp_cond_col else []),
                     f"{_found_label}: {total_count}"
                 ]
                 detail_lines = [sep, tr("ALL RESULTS"), sep]
 
+                def _fmt_entry(ms_item):
+                    lines = _fmt_ms_entry(ms_item)
+                    if _comp_cond_col:
+                        for page in ms_item.get('pages') or [ms_item]:
+                            if page.get('compound') or page.get('is_condition_evidence'):
+                                lines.append(tr("Conditions") + ": "
+                                             + self._compound_page_note(page))
+                    return lines
+
                 if self.chk_comp_flat.isChecked():
                     flat_items = self._sort_comp_items(
                         self._collect_comp_items(c_main, c_appx, c_filt, c_filt_appx, c_known)
+                        + list(c_removed) + list(c_unres)
                     )
-                    for item in flat_items: detail_lines.extend(_fmt_ms_entry(item))
+                    for item in flat_items: detail_lines.extend(_fmt_entry(item))
                 else:
                     if _local_only_comp_export:
                         summary_lines.extend([
@@ -27197,31 +28456,40 @@ class GenizahGUI(QMainWindow):
                             f"{tr('Excluded Manuscripts')}: {known_count}"
                         ])
                         detail_lines = [sep, tr("MAIN MANUSCRIPTS"), sep]
-                    for item in c_main: detail_lines.extend(_fmt_ms_entry(item))
+                    for item in c_main: detail_lines.extend(_fmt_entry(item))
                     if c_appx:
                         detail_lines.extend([sep, tr("MAIN APPENDIX") + " (Grouped)", sep])
                         for sig, items in sorted(c_appx.items(), key=lambda x: len(x[1]), reverse=True):
                             detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
-                            for item in items: detail_lines.extend(_fmt_ms_entry(item))
+                            for item in items: detail_lines.extend(_fmt_entry(item))
                     if c_filt:
                         detail_lines.extend([sep, tr("FILTERED"), sep])
-                        for item in c_filt: detail_lines.extend(_fmt_ms_entry(item))
+                        for item in c_filt: detail_lines.extend(_fmt_entry(item))
                     if c_filt_appx:
                         detail_lines.extend([sep, tr("FILTERED APPENDIX") + " (Grouped)", sep])
                         for sig, items in sorted(c_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
                             detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
-                            for item in items: detail_lines.extend(_fmt_ms_entry(item))
+                            for item in items: detail_lines.extend(_fmt_entry(item))
                     if c_known:
                         _excl_heading = tr("EXCLUDED DOCUMENTS") if _local_only_comp_export else tr("EXCLUDED MANUSCRIPTS")
                         detail_lines.extend([sep, _excl_heading, sep])
-                        for item in c_known: detail_lines.extend(_fmt_ms_entry(item))
+                        for item in c_known: detail_lines.extend(_fmt_entry(item))
+                    if c_removed:
+                        summary_lines.append(f"{tr('Removed by a condition')}: {len(c_removed)}")
+                        detail_lines.extend([sep, tr("Removed by a condition"), sep])
+                        for item in c_removed: detail_lines.extend(_fmt_entry(item))
+                    if c_unres:
+                        summary_lines.append(f"{tr('Not fully checked')}: {len(c_unres)}")
+                        detail_lines.extend([sep, tr("Not fully checked"), sep])
+                        for item in c_unres: detail_lines.extend(_fmt_entry(item))
 
-                with open(path, 'w', encoding='utf-8') as f:
-                    f.write(credit_text)
-                    all_lines = summary_lines + detail_lines
-                    f.write("\n".join(all_lines).strip() + "\n")
-                self._save_last_folder(path)
-                self._show_export_saved_dialog(path)
+                from desktop.export_save import save_export, write_text
+                _txt_out = (credit_text
+                            + "\n".join(summary_lines + detail_lines).strip() + "\n")
+                path = save_export(self, path, lambda p: write_text(p, _txt_out, 'utf-8'))
+                if path:
+                    self._save_last_folder(path)
+                    self._show_export_saved_dialog(path)
 
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{e}")
@@ -27962,6 +29230,12 @@ class GenizahGUI(QMainWindow):
         self._comp_last_result_witness_total = 0
         self._comp_last_fused_rows = []
         self._comp_last_fused_filtered = []
+        self.comp_conditions = []
+        self._comp_compound = None
+        self.comp_cond_removed = []
+        self.comp_cond_unresolved = []
+        if getattr(self, 'comp_conditions_strip', None) is not None:
+            self.comp_conditions_strip.set_conditions([])
         self._auto_expand_left = 0
         self._auto_expand_armed = False
         self._witness_notify('')
@@ -28207,6 +29481,24 @@ class GenizahGUI(QMainWindow):
         _comp_passage_length = self._comp_passage_axis('length')
         _comp_passage_depth = self._comp_passage_axis('depth')
 
+        # Conditions are checked HERE -- after the method above was
+        # re-validated and possibly demoted to chunk -- because only the
+        # method that will actually run decides whether they can be honoured.
+        # Any other method refuses to run rather than ignore a condition.
+        _comp_gate = self._comp_compound_gate(
+            txt, _comp_dispatch_method, _comp_is_lab, _comp_scope,
+            _comp_passage_width, _comp_passage_length, _comp_passage_depth)
+        if _comp_gate is None:
+            self.reset_comp_ui()
+            return
+        _comp_conditions, _comp_main_list, _comp_fingerprint = _comp_gate
+        self._comp_active_run_id = _comp_run_id
+        # PROVENANCE: the text and the conditions this run was dispatched
+        # with -- exports name these, never the live boxes.
+        self._comp_last_result_text = txt
+        self._comp_last_result_conditions = [c.to_dict() for c in _comp_conditions]
+        self._comp_last_result_fingerprint = _comp_fingerprint
+
         self._current_comp_search_run = {
             'mode': _comp_mode_enum,
             'corpus': _comp_scope,
@@ -28305,19 +29597,20 @@ class GenizahGUI(QMainWindow):
             _comp_multi = (_comp_dispatch_method == 'passage'
                            and self._comp_has_witnesses())
             if _comp_dispatch_method == 'passage':
-                # render_cap=0 -- UNCAPPED -- for a batch, because the cap
-                # has to be applied ONCE to the FUSED list. Capping each
-                # witness first fuses N already-truncated lists and drops
-                # every contributor past rank 200 in its own witness, which
-                # is exactly where a rare witness of a widely-copied work
-                # sits. A single search passes None and keeps the v9.0.0
-                # default byte for byte.
-                _comp_searcher = passage_lifecycle.get_passage_searcher(
+                # No manuscript limit on ANY desktop letter-level run
+                # (`passage_witnesses.DESKTOP_GROUP_CAP`, owner 2026-10-17):
+                # a single search, each witness of a batch, the fused list,
+                # the judged list of a run with conditions, and the All merge
+                # (`ScopedPassageSearcher` caps that with this same value).
+                # A single search used to keep the API's 200 and say nothing.
+                # Routed by scope: Genizah, My Library, or both. A Genizah
+                # run goes through `get_passage_searcher` exactly as before.
+                _comp_searcher = passage_local.ScopedPassageSearcher(
                     self.searcher,
                     _comp_passage_width,
                     _comp_passage_length,
                     _comp_passage_depth,
-                    render_cap=0 if _comp_multi else None)
+                    render_cap=passage_witnesses.DESKTOP_GROUP_CAP)
                 _comp_mode_arg = 'literal'
                 _comp_boundary_mode = 'full'
                 _comp_min_boundary = 1
@@ -28362,7 +29655,25 @@ class GenizahGUI(QMainWindow):
                     passage_witnesses.contributing_snapshot(
                         self._comp_witness_state()))
 
-            if _comp_multi:
+            if _comp_conditions:
+                self.comp_thread = CompoundCompositionThread(
+                    _comp_searcher,
+                    _comp_main_list,
+                    _comp_conditions,
+                    filter_text=self._get_filter_text(),
+                    restrict_sys_ids=getattr(
+                        self, 'pre_search_restrict_sys_ids', None),
+                    corpus_scope=_comp_scope,
+                    run_id=_comp_run_id,
+                    pinned_generation=(
+                        passage_lifecycle.current_state_generation()),
+                    group_cap=passage_witnesses.DESKTOP_GROUP_CAP,
+                    fingerprint=_comp_fingerprint)
+                self.comp_thread.scan_finished_signal.connect(
+                    _comp_live(self.on_comp_scan_finished))
+                self.comp_thread.step_signal.connect(
+                    _comp_live(self._on_compound_step))
+            elif _comp_multi:
                 # Restored manuscript witnesses carry no text; put it
                 # back BEFORE the dispatch list is built, or they are
                 # silently left out of the search.
@@ -28379,9 +29690,10 @@ class GenizahGUI(QMainWindow):
                     run_id=_comp_run_id,
                     # Pinned HERE, on the UI thread, before the worker can
                     # take its first lease: a swap between this line and the
-                    # first search would otherwise go unnoticed.
-                    pinned_generation=(
-                        passage_lifecycle.current_state_generation()),
+                    # first search would otherwise go unnoticed. One pin per
+                    # index the scope searches.
+                    **passage_local.scope_pins(_comp_scope),
+                    group_cap=passage_witnesses.DESKTOP_GROUP_CAP,
                     roster=self._comp_witness_roster(),
                     prior_rows=_prior_rows,
                     prior_filtered=_prior_filtered)
@@ -28554,6 +29866,16 @@ class GenizahGUI(QMainWindow):
         QMessageBox.critical(self, tr("Error"), str(err))
         
     def on_comp_scan_finished(self, result_obj):
+        _compound = (result_obj.get('compound')
+                     if isinstance(result_obj, dict) else None)
+        if (_compound is not None
+                and _compound.get('run_id') != self._comp_active_run_id):
+            # A finished run's queued result arriving after a newer run
+            # started: never shown as the newer run's answer.
+            logger.info('compound: dropped a result from run %s (active %s)',
+                        _compound.get('run_id'), self._comp_active_run_id)
+            return
+        self._comp_compound = _compound
         self.is_comp_running = False
         self.reset_comp_ui()
         if getattr(self, '_close_pending', False):
@@ -28562,6 +29884,8 @@ class GenizahGUI(QMainWindow):
             # worker to wait for, one the user never asked for.
             self._stop_auto_expand('')
             return
+        if _compound is not None:
+            self._absorb_compound_main_steps(_compound.get('steps') or [])
 
         # Chunk and Lab runs report when the text did not fit the settings;
         # a letter-level result carries no notices and clears the line.
@@ -28671,6 +29995,21 @@ class GenizahGUI(QMainWindow):
             items = result_obj or []
             filtered_items = []
 
+        removed_raw, unresolved_raw = [], []
+        if self._comp_compound:
+            _evidence = self._comp_compound.get('evidence') or {}
+            _judged = {r.get('raw_header') for r in (
+                list(items) + list(filtered_items)
+                + list(self._comp_compound.get('removed') or [])
+                + list(self._comp_compound.get('unresolved') or []))}
+            items = self._attach_compound_evidence(items, _evidence, _judged)
+            filtered_items = self._attach_compound_evidence(
+                filtered_items, _evidence, _judged)
+            removed_raw = self._attach_compound_evidence(
+                self._comp_compound.get('removed') or [], _evidence, _judged)
+            unresolved_raw = self._attach_compound_evidence(
+                self._comp_compound.get('unresolved') or [], _evidence, _judged)
+
         result_count = len(items) + len(filtered_items)
         # Phase 110 UAT (Issue 1): batch-prime LOCAL filepaths for the comp hits
         # BEFORE grouping/rendering, so the comp tree + ResultDialog can render
@@ -28705,6 +30044,9 @@ class GenizahGUI(QMainWindow):
             self.comp_summary_text = (
                 f"{tr('Completed in')} {elapsed_str} \u2014 {chunks_part}{pages_part}"
             )
+        _cond_summary = self._compound_summary_text()
+        if _cond_summary:
+            self.comp_summary_text += f" \u2014 {_cond_summary}"
         self.comp_progress.setFormat(self.comp_summary_text)
 
         # Toast notification when app is not focused
@@ -28724,13 +30066,16 @@ class GenizahGUI(QMainWindow):
         manuscripts = self.searcher.group_pages_by_manuscript(items)
         filtered_manuscripts = self.searcher.group_pages_by_manuscript(filtered_items)
         known_manuscripts = self.searcher.group_pages_by_manuscript(known_raw)
+        self.comp_cond_removed = self.searcher.group_pages_by_manuscript(removed_raw)
+        self.comp_cond_unresolved = self.searcher.group_pages_by_manuscript(unresolved_raw)
 
         self.comp_raw_items = manuscripts
         self.comp_raw_filtered = filtered_manuscripts
         
         self.comp_known = known_manuscripts 
 
-        if not manuscripts and not filtered_manuscripts and not known_manuscripts:
+        if (not manuscripts and not filtered_manuscripts and not known_manuscripts
+                and not self._comp_compound_has_rows()):
             QMessageBox.information(self, tr("No Results"), tr("No composition matches found."))
             self.pending_recursive_search = False
             # No render follows, so the armed round would never fire and the
@@ -28791,8 +30136,12 @@ class GenizahGUI(QMainWindow):
         _comp_live = partial(self._discardable, '_comp_new_generation')
         self.group_thread.status_signal.connect(
             _comp_live(lambda s: self.comp_progress.setFormat(s)))
-        self.group_thread.finished_signal.connect(_comp_live(self.on_comp_finished))
-        self.group_thread.error_signal.connect(_comp_live(self.on_grouping_error))
+        _grouping_run = getattr(self, '_comp_active_run_id', None)
+        self.group_thread.finished_signal.connect(_comp_live(
+            lambda *a, rid=_grouping_run: self._on_grouping_for_run(rid, *a)))
+        self.group_thread.error_signal.connect(_comp_live(
+            lambda *a, rid=_grouping_run: self._on_grouping_for_run(
+                rid, *a, handler=self.on_grouping_error)))
         self.group_thread.start()
 
     def on_grouping_error(self, err):
@@ -29027,6 +30376,9 @@ class GenizahGUI(QMainWindow):
 
     def _format_score_with_boundary(self, item):
         """Format score string with boundary indicator if applicable."""
+        if item.get('is_condition_evidence'):
+            # A page shown because a CONDITION matched it, not the main text.
+            return "\u25c6 " + self._compound_evidence_labels(item)
         score = int(item.get('score', 0))
         has_boundary = item.get('has_boundary_matches', False)
         boundary_count = item.get('boundary_match_count', 0)
@@ -29246,26 +30598,19 @@ class GenizahGUI(QMainWindow):
 
         clean_main, clean_appx, known_main = self._apply_manual_exclusions(main_res, main_appx)
         clean_filt, clean_filt_appx, known_filt = self._apply_manual_exclusions(filt_res, filt_appx)
+        cond_removed, _unused, known_rem = self._apply_manual_exclusions(
+            list(getattr(self, 'comp_cond_removed', None) or []), {})
+        cond_unres, _unused, known_unr = self._apply_manual_exclusions(
+            list(getattr(self, 'comp_cond_unresolved', None) or []), {})
+        # What the tree shows (after Exclude Manuscripts); exports read these.
+        self._comp_shown_cond_removed = list(cond_removed)
+        self._comp_shown_cond_unresolved = list(cond_unres)
 
         if not hasattr(self, 'comp_known'): self.comp_known = []
 
         # Deduplicate by sys_id/part_id to avoid duplicate entries
-        new_known = known_main + known_filt
-        if new_known:
-            existing_ids = set()
-            for item in self.comp_known:
-                if item.get('type') == 'part':
-                    existing_ids.add(f"PART:{item.get('part_id')}")
-                else:
-                    existing_ids.add(item.get('sys_id'))
-            for item in new_known:
-                if item.get('type') == 'part':
-                    key = f"PART:{item.get('part_id')}"
-                else:
-                    key = item.get('sys_id')
-                if key and key not in existing_ids:
-                    self.comp_known.append(item)
-                    existing_ids.add(key)
+        new_known = known_main + known_filt + known_rem + known_unr
+        self._merge_comp_known(new_known)
 
         self.comp_main = clean_main
         self.comp_appendix = clean_appx
@@ -29493,7 +30838,7 @@ class GenizahGUI(QMainWindow):
         if self.chk_comp_flat.isChecked():
             all_flat = self._collect_comp_items(
                 clean_main, clean_appx, clean_filt, clean_filt_appx, self.comp_known
-            )
+            ) + list(cond_removed) + list(cond_unres)
             sorted_flat = self._sort_comp_items(all_flat)
             visible_flat = sorted_flat
             self._comp_view_groups = [_cvf.ViewGroup(_cvf.CATEGORY_ALL, tuple(visible_flat))]
@@ -29501,7 +30846,7 @@ class GenizahGUI(QMainWindow):
             # marked on its own; without it a working Filter Text looked inert.
             self._comp_flat_markers = self._comp_flat_marker_map(
                 list(clean_filt) + [it for v in clean_filt_appx.values() for it in v],
-                self.comp_known)
+                self.comp_known, removed=cond_removed, unresolved=cond_unres)
 
             root = QTreeWidgetItem(self.comp_tree, [self._comp_flat_root_label(
                 len(visible_flat), self._comp_flat_markers)])
@@ -29628,6 +30973,10 @@ class GenizahGUI(QMainWindow):
                     _cvf.ViewGroup(_cvf.CATEGORY_EXCLUDED, tuple(_sorted_known)))
                 for item in _sorted_known:
                     add_manuscript_node(root_known, item)
+
+            # 5-6. Composition conditions: removed, and not fully checked
+            self._add_compound_groups(cond_removed, cond_unres, add_manuscript_node,
+                                      make_checkable)
 
             # Start batched loading for Main Results (deferred to prevent freeze)
             if root_main and visible_sorted_main:
@@ -29818,7 +31167,8 @@ class GenizahGUI(QMainWindow):
             self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'), defer_widgets=defer_widgets)
             return node
 
-    def _comp_flat_marker_map(self, filtered_items, excluded_items):
+    def _comp_flat_marker_map(self, filtered_items, excluded_items,
+                              removed=(), unresolved=()):
         """Rows the flat view must mark: {id(item): (item, kind, reason)}.
 
         The flat view ("Sort by shelfmark only") merges every group into one list,
@@ -29831,6 +31181,11 @@ class GenizahGUI(QMainWindow):
             markers[id(item)] = (item, 'excluded', '')
         for item in filtered_items or ():
             markers[id(item)] = (item, 'filtered', self._get_filter_reason(item))
+        for item in removed or ():
+            markers[id(item)] = (item, 'removed', self._compound_item_reason(item, 'removed'))
+        for item in unresolved or ():
+            markers[id(item)] = (item, 'unresolved',
+                                 self._compound_item_reason(item, 'unresolved'))
         return markers
 
     def _comp_flat_root_label(self, total, markers):
@@ -29838,11 +31193,17 @@ class GenizahGUI(QMainWindow):
         label = tr("All Results ({})").format(total)
         n_filt = sum(1 for e in markers.values() if e[1] == 'filtered')
         n_excl = sum(1 for e in markers.values() if e[1] == 'excluded')
+        n_rem = sum(1 for e in markers.values() if e[1] == 'removed')
+        n_unr = sum(1 for e in markers.values() if e[1] == 'unresolved')
         parts = []
         if n_filt:
             parts.append(tr("{} filtered").format(n_filt))
         if n_excl:
             parts.append(tr("{} excluded").format(n_excl))
+        if n_rem:
+            parts.append(tr("{} removed by a condition").format(n_rem))
+        if n_unr:
+            parts.append(tr("{} not fully checked").format(n_unr))
         if parts:
             label += " — " + ", ".join(parts)
         return label
@@ -29856,6 +31217,14 @@ class GenizahGUI(QMainWindow):
             color = QColor('#f39c12')  # the Filtered group header's amber
             tip = tr("Filtered result: {}").format(reason) if reason else tr("Filtered result")
             node.setText(0, "⊘ " + node.text(0))
+        elif kind == 'removed':
+            color = QColor('#c0392b')  # the Removed-by-a-condition header's red
+            tip = tr("Removed by a condition: {}").format(reason)
+            node.setText(0, "✕ " + node.text(0))
+        elif kind == 'unresolved':
+            color = QColor('#8e44ad')  # the Not-fully-checked header's purple
+            tip = tr("Not fully checked: {}").format(reason)
+            node.setText(0, "? " + node.text(0))
         else:
             color = QColor(Qt.GlobalColor.darkGray)  # the Excluded group header's gray
             tip = tr("Excluded from the results by you")
@@ -30353,6 +31722,8 @@ class GenizahGUI(QMainWindow):
 
     def _has_comp_results(self):
         if self.comp_main or self.comp_appendix or self.comp_known:
+            return True
+        if self._comp_compound_has_rows():
             return True
         if self.comp_filtered_main or self.comp_filtered_appendix:
             return True
@@ -31764,7 +33135,7 @@ class GenizahGUI(QMainWindow):
         self.comp_history_menu.clear()
         entries = get_history('composition')
         if not entries:
-            self.comp_history_menu.addAction(tr("No composition history")).setEnabled(False)
+            self.comp_history_menu.addAction(tr("No Composition Search history")).setEnabled(False)
             return
         for i, entry in enumerate(entries):
             self._add_history_menu_item(self.comp_history_menu, 'composition', i, entry)
@@ -32096,6 +33467,9 @@ class GenizahGUI(QMainWindow):
             # `absent_method` left at its default: a history entry with no
             # method is pre-v9, which is chunk by definition.
             self._restore_comp_passage_preferences(params or {})
+            # Replaces the current conditions -- and clears them for an entry
+            # that had none (every entry older than conditions).
+            self._restore_comp_conditions((params or {}).get('comp_conditions'))
             # Restore pre-search filters. #17: a COPY (assigning the entry
             # itself let a later chip removal edit the saved history), without
             # a measurement bound the open catalog is known not to have.
@@ -32127,8 +33501,12 @@ class GenizahGUI(QMainWindow):
 
         results = state.get('results', [])
         filtered = state.get('filtered_results', [])
+        if (results or filtered) and _snapshot_has_compound_rows(results, filtered):
+            # Rows judged by conditions are never re-shown from a snapshot.
+            results, filtered = [], []
         if results or filtered:
             # Legacy entry with a stored snapshot — restore instantly.
+            self._clear_compound_results()
             self.comp_raw_items = results
             self.comp_raw_filtered = filtered
             self.comp_has_grouped_results = False
@@ -32254,6 +33632,11 @@ class GenizahGUI(QMainWindow):
                 # the restore side needs no second implementation.
                 'comp_witnesses': getattr(
                     self, '_comp_last_result_witnesses', None) or [],
+                # The conditions this run was DISPATCHED with: part of the
+                # search's identity, so two runs that differ only in their
+                # conditions are two entries, and a re-run applies exactly them.
+                'comp_conditions': list(getattr(
+                    self, '_comp_last_result_conditions', None) or []),
             },
             'pre_search_filters': dict(getattr(self, 'pre_search_filters', {})),
             # NOTE: result snapshots intentionally NOT stored (see
@@ -32483,8 +33866,16 @@ class GenizahGUI(QMainWindow):
                         self, '_comp_last_result_length', None),
                     'last_result_depth': getattr(
                         self, '_comp_last_result_depth', None),
-                    'results': getattr(self, 'comp_raw_items', [])[:5000],
-                    'filtered_results': getattr(self, 'comp_raw_filtered', [])[:5000],
+                    # Results of a search with CONDITIONS are not kept: their
+                    # judgement cannot be re-verified from a capped snapshot,
+                    # and a re-run takes seconds (docs/plans/
+                    # COMPOSITION_CONDITIONS_PLAN.md section 4).
+                    'results': ([] if getattr(self, '_comp_compound', None) is not None
+                                else getattr(self, 'comp_raw_items', [])[:5000]),
+                    'filtered_results': ([] if getattr(self, '_comp_compound', None) is not None
+                                         else getattr(self, 'comp_raw_filtered', [])[:5000]),
+                    'compound_results_withheld': getattr(self, '_comp_compound', None) is not None,
+                    'conditions': [c.to_dict() for c in getattr(self, 'comp_conditions', None) or []],
                     'domain_exclusions': sorted(getattr(self, '_comp_domain_exclusions', set())),
                     'printed_filter': getattr(self, '_comp_printed_filter_state', 'all'),
                     'local_filter_composition': getattr(self, '_local_filter_state_composition', 'all'),
@@ -32761,6 +34152,11 @@ class GenizahGUI(QMainWindow):
             # `absent_method=None`: a session with no stored method has no
             # preference to honour, so the letter-level default stands.
             self._restore_comp_passage_preferences(comp, absent_method=None)
+            self._restore_comp_conditions(comp.get('conditions'))
+            if comp.get('compound_results_withheld') and hasattr(self, 'lbl_comp_status'):
+                self.lbl_comp_status.setText(tr(
+                    "Results of a search with conditions are not kept between "
+                    "sessions. Search again to see them."))
 
             # Exclude Manuscripts, composition surface. Sessions written
             # before the 2026-09-03 split stored ONE shared list; those
@@ -33090,6 +34486,13 @@ class GenizahGUI(QMainWindow):
         th = getattr(self, 'passage_load_thread', None)
         if th is not None and th.isRunning():
             reasons.append(tr("the letter-level index is being opened"))
+        for attr in ('local_passage_build_thread', 'local_passage_load_thread',
+                     'local_passage_freshness_thread',
+                     'local_passage_preflight_thread'):
+            th = getattr(self, attr, None)
+            if th is not None and th.isRunning():
+                reasons.append(tr("the My Library letter-level index is busy"))
+                break
         if self._passage_scan_in_flight():
             reasons.append(tr("a letter-level search is running"))
         return reasons
@@ -33112,6 +34515,12 @@ class GenizahGUI(QMainWindow):
         # anything mid-search.
         if self._passage_batch_in_flight():
             self.comp_thread.request_cancel()
+        # A My Library build can run for an hour; a committed close cancels
+        # it (cooperatively -- the swap protocol leaves the previous index
+        # untouched) instead of waiting it out.
+        th = getattr(self, 'local_passage_build_thread', None)
+        if th is not None and th.isRunning():
+            th.request_cancel()
         event.ignore()
         if not getattr(self, '_close_pending', False):
             self._close_pending = True
@@ -33565,6 +34974,8 @@ class GenizahGUI(QMainWindow):
         _cvf.CATEGORY_APPENDIX: "Appendix group",
         _cvf.CATEGORY_FILTERED: "Filtered group",
         _cvf.CATEGORY_EXCLUDED: "Excluded group",
+        _cvf.CATEGORY_REMOVED: "Removed by a condition group",
+        _cvf.CATEGORY_UNRESOLVED: "Not fully checked group",
         _cvf.CATEGORY_ALL: "All results group",
     }
 
@@ -33583,7 +34994,9 @@ class GenizahGUI(QMainWindow):
             title = ''
             _src_lbl = 'LOCAL'
         subgroup = group.subgroup
+        compound_fields = self._compound_viewer_fields(ms_item)
         return {
+            **compound_fields,
             'uid': page.get('uid', sid),
             'raw_header': raw_h,
             'text': page.get('text', ''),
@@ -33623,11 +35036,25 @@ class GenizahGUI(QMainWindow):
         state, host = self._comp_filter_state()
         flat_list = []
         keys = []
+        ids = []
         for group, ms_item, page in _cvf.viewer_pages(groups, state, host):
             flat_list.append(self._comp_viewer_entry(group, ms_item, page))
             keys.append(_cvf.page_key(page))
+            ids.append(id(page))
         if not flat_list:
             return
+        # Composition Search conditions: ONE map of every judged image for the
+        # whole list, so paging into another manuscript of the result still
+        # finds that image's highlight and line.
+        _all_patterns, _all_notes = {}, {}
+        for _entry in flat_list:
+            _all_patterns.update(_entry.get('compound_page_patterns') or {})
+            _all_notes.update(_entry.get('compound_page_notes') or {})
+        if _all_notes:
+            for _entry in flat_list:
+                if 'compound_page_notes' in _entry:
+                    _entry['compound_page_patterns'] = _all_patterns
+                    _entry['compound_page_notes'] = _all_notes
 
         # The clicked target: the clicked page itself, or -- for a manuscript row --
         # its first page that the filters keep (never a hidden first child).
@@ -33638,7 +35065,10 @@ class GenizahGUI(QMainWindow):
             wanted = [_cvf.page_key(data)]
         else:
             wanted = [_cvf.page_key(p) for p in _cvf.eligible_pages(data, state, host)]
-        target_index = next((keys.index(k) for k in wanted if k in keys), -1)
+        # The clicked row ITSELF when it is in the list (the same page can sit
+        # in two groups); by page key otherwise.
+        target_index = (ids.index(id(data)) if is_page_row and id(data) in ids
+                        else next((keys.index(k) for k in wanted if k in keys), -1))
         if target_index == -1:
             # The clicked row is not in the filtered list. Never silently open an
             # unrelated result instead.
@@ -33925,7 +35355,10 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    
+    # Qt's own buttons (the Yes / No of every QMessageBox.question) in
+    # Hebrew; before any dialog, including the "already open" one below.
+    _qt_translator = install_qt_translations(app, CURRENT_LANG)
+
     icon_path = resource_path("icon.ico")
     
     if os.path.exists(icon_path):
