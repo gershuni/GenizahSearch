@@ -269,13 +269,17 @@ def named_library_exact(stripped, key_hits, bridged, whole_hits, whole_query, co
             whole.append(h if shown == h['shelfmark'] else {**h, 'shelfmark': shown})
     key, want = zkey(stripped), numbers(stripped)
     t1_key = normalize_shelfmark(stripped)
+    whole_ids = {h['sys_id'] for h in whole}
     out, carried = [], False
     for h in key_hits:
         if not in_libraries(h['sys_id'], codes, csv_bank, key, want, cached_variants):
             continue
         # A kept key hit shows a variant with the typed integers when the one the index kept
         # lacks them (`123` behind `12 3`); otherwise as today, so the shortest form still wins.
+        # With no such variant, a whole-input match of the same record stands for it instead.
         shown = _carrying_variant(h, t1_key, want, csv_bank, cached_variants, '.' not in t1_key)
+        if shown is None and h['sys_id'] in whole_ids:
+            continue
         carried = carried or shown is not None
         out.append(h if shown in (None, h['shelfmark']) else {**h, 'shelfmark': shown})
     bridge_in = bool(bridged) and in_libraries(bridged['sys_id'], codes, csv_bank, key, want, cached_variants)
