@@ -415,6 +415,16 @@ def test_a_key_hit_in_the_named_library_shows_a_variant_with_the_typed_integers(
         assert (got['sys_id'], got['selected_shelfmark']) == ('GREC', shown)
 
 
+def test_a_bridge_form_without_the_integers_gives_way_to_the_whole_match(monkeypatch):
+    """The key hit `T-S 12 3` gives way to the record's whole-input match; the bridge must not
+    bring the same record back under its canonical `T-S 12 3` (PR #402, Codex round 5)."""
+    mm = _manager({'CULR': ('CUL', ['T-S 12 3', 'CUL T-S 123'])})       # csv shelfmark 'T-S 12 3'
+    monkeypatch.setattr(bridge, 'lookup_cudl', lambda text: {'sys_id': 'CULR'} if text == 'T-S 123' else None)
+    for resolve in (mm.resolve_system_by_shelfmark, mm.resolve_catalog_form):
+        got = resolve('CUL T-S 123')
+        assert (got['sys_id'], got['selected_shelfmark']) == ('CULR', 'CUL T-S 123')
+
+
 def test_the_whole_input_key_reaches_a_record_that_stores_the_padded_input():
     """Like every T2 key, `w` is zero-insensitive on both sides: a record that stores exactly
     the typed padded text is offered (14 such inputs on the real corpus; PR #402, Codex round 2

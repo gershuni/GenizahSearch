@@ -228,7 +228,8 @@ here runs), so they say nothing about cache-only variants; those are pinned by s
    a T1 whole-input match or a T2 option showing the variant the index kept (two); `w` kept off
    the zero-insensitive stored side; `w`'s record-wide check on plain stored keys; a kept key hit
    showing the variant the index kept; a non-carrying key hit kept beside its record's
-   whole-input match (33 in all, each red).
+   whole-input match; a non-carrying bridge form brought back beside the whole match (34 in all,
+   each red).
 7. **Performance** (Codex round 2, on rev. 3): warm resolver median/p95 for prefixed inputs
    82/130 ms before, 83/128 ms after -- no change per request (the web resolves per request); the
    2M-input batch 162 -> 224 s (+38%), from per-candidate provenance; rev. 4 caches the parse per
@@ -256,6 +257,14 @@ whole-input key keeps the `Ms.`). None changes from today; the GOLDEN rows that 
 
 ## Revision log
 
+- **PR #402 Codex review round 5 (GitHub, 1 finding, P2).** After round 4 skipped a
+  non-carrying key hit, the CUDL bridge could bring the same record back under its canonical
+  form (`CUL T-S 123` for a record storing `T-S 12 3` and `CUL T-S 123`, bridged from
+  `T-S 123`), which `_dedup` preferred as shorter. The bridge entry is now left out when its form
+  lacks the typed integers and a whole-input match already carries the record; otherwise it is
+  added as today. Test `test_a_bridge_form_without_the_integers_gives_way_to_the_whole_match`;
+  mutation 34. No answer or shown shelfmark changes on today's corpus. Per-round counts on
+  GitHub: 1, 2, 1, 1, 1.
 - **PR #402 Codex review round 4 (GitHub, 1 finding, P2).** A record storing only `12 3` and
   `GASTER 123` still showed `12 3`: no variant on T1's key carries (123,), so the key hit kept
   its form and outran the whole-input match. Now a kept key hit with no carrying variant gives

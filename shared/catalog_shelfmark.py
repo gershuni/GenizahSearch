@@ -285,7 +285,10 @@ def named_library_exact(stripped, key_hits, bridged, whole_hits, whole_query, co
     bridge_in = bool(bridged) and in_libraries(bridged['sys_id'], codes, csv_bank, key, want, cached_variants)
     if not (whole or bridge_in or carried):
         return []
-    if bridge_in and not any(h['sys_id'] == bridged['sys_id'] for h in out):
+    # The bridge entry as today, except that a bridge form without the typed integers does not
+    # stand for a record a whole-input match already carries (`T-S 12 3` for `CUL T-S 123`).
+    if bridge_in and not any(h['sys_id'] == bridged['sys_id'] for h in out) and not (
+            bridged['sys_id'] in whole_ids and numbers(bridged['shelfmark']) != want):
         out.insert(0, bridged)
     out.extend(whole)
     return out
