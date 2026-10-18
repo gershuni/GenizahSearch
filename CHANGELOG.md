@@ -4,6 +4,10 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased] -- Visual Similarity: thumbnails, and filters that apply (web, branch `claude/pensive-goldberg-g1qu2a`)
+
+The browse page's Visual Similarity window can show its look-alikes as a grid of low-resolution thumbnails (List / Thumbnails switch, remembered for the visitor), so a filtered set can be scanned by eye before opening any of it; the image opens the fragment in a new tab. Its Sort, Library and Domain choices had never applied (the list stayed unfiltered and unsorted, with an error logged on each change); they now do, in both views. From a researcher's request (owner, 2026-10-18).
+
 ## [Unreleased] -- Composition Search conditions (desktop, branch `feat/composition-conditions`)
 
 Letter-level Composition Search takes up to four extra texts, each "must appear" or "must not
