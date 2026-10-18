@@ -763,3 +763,101 @@ def test_settings_checkbox_refreshes_on_open(monkeypatch):
     assert sd.chk_telemetry.isChecked() is True, (
         "chk_telemetry must be refreshed to True after first-run opt-in (REVIEWS HIGH-3)"
     )
+
+
+# ===========================================================================
+# Mid-session opt-in from Settings runs the MAIN WINDOW's coordinator (D-13)
+# ===========================================================================
+
+def _confirm_settings_opt_in(monkeypatch, main_win):
+    """Build SettingsDialog's General tab on `main_win`, confirm an opt-in.
+
+    Returns (calls, slot_errors): `calls` records set_consent and coordinator
+    calls in order. The checkbox handler runs as a Qt slot, so an exception in
+    it never reaches the test -- PyQt hands it to sys.excepthook and carries
+    on. `slot_errors` records those, which is how a raise is seen at all.
+    """
+    import sys
+    import desktop.telemetry as tel
+    import desktop.settings_dialogs
+    from PyQt6.QtWidgets import QDialog, QApplication, QMessageBox
+    from PyQt6.QtGui import QPalette
+
+    calls: list = []
+    slot_errors: list = []
+    monkeypatch.setattr(tel, 'set_consent', lambda v: calls.append(('set_consent', v)))
+    monkeypatch.setattr(sys, 'excepthook', lambda *exc: slot_errors.append(exc[1]))
+    fake_cfg: dict = {}
+    monkeypatch.setattr(desktop.settings_dialogs, 'load_app_config', lambda: dict(fake_cfg))
+    monkeypatch.setattr(desktop.settings_dialogs, 'save_app_config', lambda d: fake_cfg.update(d))
+
+    def _fake_exec_yes(box_self):
+        box_self.button(QMessageBox.StandardButton.Yes).click()
+        return QMessageBox.StandardButton.Yes.value
+    monkeypatch.setattr(QMessageBox, 'exec', _fake_exec_yes)
+
+    main_win._calls = calls
+    sd = desktop.settings_dialogs.SettingsDialog.__new__(desktop.settings_dialogs.SettingsDialog)
+    QDialog.__init__(sd)
+    sd.main_win = main_win
+    pal = QApplication.palette()
+    sd._is_dark = pal.color(QPalette.ColorRole.Window).lightness() < 128
+    sd._text = pal.color(QPalette.ColorRole.Text).name()
+    sd._base = pal.color(QPalette.ColorRole.Base).name()
+    sd._muted = '#888' if sd._is_dark else '#666'
+    sd._border = '#555' if sd._is_dark else '#d0d0d0'
+    sd._combo_w = 140
+    sd._cit_bg = '#1e2a36' if sd._is_dark else '#eef3f8'
+    sd._cit_border = '#2c3e50' if sd._is_dark else '#c8d6e0'
+    _page = sd._build_general_tab()  # keep page alive to prevent GC of child widgets
+
+    assert sd.chk_telemetry.isChecked() is False, "Precondition: starts unchecked"
+    sd.chk_telemetry.setChecked(True)
+    QApplication.processEvents()
+    del _page
+    return calls, slot_errors
+
+
+class _StubMainWin:
+    """Main-window stand-in: every attribute SettingsDialog touches is a no-op."""
+
+    def __getattr__(self, name):
+        return lambda *a, **kw: None
+
+
+def test_settings_opt_in_runs_main_window_coordinator(monkeypatch):
+    """D-13/HIGH-4: confirming an opt-in in Settings saves consent, THEN runs
+    GenizahGUI._run_startup_telemetry_coordinator exactly once.
+
+    The coordinator lives on the main window, not on SettingsDialog; calling it
+    on the dialog raised AttributeError after consent was already saved, so
+    identify/session_start never fired for that session.
+    """
+    _skip_if_no_qt()
+
+    class _MainWin(_StubMainWin):
+        def _run_startup_telemetry_coordinator(self):
+            self._calls.append('coordinator')
+
+    calls, slot_errors = _confirm_settings_opt_in(monkeypatch, _MainWin())
+
+    assert slot_errors == [], f"opt-in handler raised: {slot_errors!r}"
+    assert calls == [('set_consent', True), 'coordinator'], (
+        f"consent must be saved, then the main window's coordinator run once; got {calls}"
+    )
+
+
+def test_settings_opt_in_without_coordinator_does_not_raise(monkeypatch):
+    """A parent with no coordinator (no main window) still saves consent cleanly."""
+    _skip_if_no_qt()
+
+    class _MainWinWithoutCoordinator(_StubMainWin):
+        def __getattr__(self, name):
+            if name == '_run_startup_telemetry_coordinator':
+                raise AttributeError(name)
+            return super().__getattr__(name)
+
+    calls, slot_errors = _confirm_settings_opt_in(monkeypatch, _MainWinWithoutCoordinator())
+
+    assert slot_errors == [], f"opt-in handler raised: {slot_errors!r}"
+    assert calls == [('set_consent', True)], f"consent must still be saved; got {calls}"
