@@ -19,8 +19,8 @@ Sciences, Ms. 06`) now finds its record on every shelfmark input of both apps: S
 (also `/api/search` and MCP), the exclusion lists, the Fragment Puzzle, Joins, Share a Discovery,
 the reading desk and the Joins Lab load box. One fallback (`shared/catalog_shelfmark.py`) runs
 only after the resolver found no exact match, so every shelfmark that resolved before still
-resolves to the same record (1,219 recorded inputs), and a library named in the input is never
-answered with another library's record. Where a form fits more than one record, a picker asks
+resolves to the same record (1,219 recorded inputs), and the fallback keeps to a library named in
+the input. Where a form fits more than one record, a picker asks
 instead of silently taking the first, and Cancel adds nothing; an ambiguous exclusion line stays
 unresolved, and the Joins Lab `?shelfmark=` link still loads the first match. Autocomplete is
 unchanged. Plan: `docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md`.
