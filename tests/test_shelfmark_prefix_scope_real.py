@@ -4,9 +4,10 @@ libraries.csv is tracked, so these run in CI; they skip only when the corpus is 
 (< 100,000 rows). The CUDL collision report goes to a temporary directory and the per-user
 NLI cache is not used (tests/shelfmark_corpus.py).
 
-The population gate is `slow`: CI's main job checks every 20th input, the must-be-zero
-counts and that slice's class counts; `pytest -m slow` or GENIZAH_SHELFMARK_FULL=1 checks all
-~1.96M inputs and the class counts measured for the plan.
+The population gate checks every 20th input, the must-be-zero counts and that slice's class
+counts in CI's main job; GENIZAH_SHELFMARK_FULL=1 checks all ~1.96M inputs and the class counts
+measured for the plan. That takes about an hour, so `pytest -m slow` does not turn it on (CI's
+slow job has 30 minutes for every slow test) and the gate carries no `slow` marker.
 """
 import collections
 import os
@@ -86,7 +87,7 @@ def _ids(r):
 
 
 def _full(request):
-    return os.environ.get('GENIZAH_SHELFMARK_FULL') == '1' or (request.config.option.markexpr or '').strip() == 'slow'
+    return os.environ.get('GENIZAH_SHELFMARK_FULL') == '1'
 
 
 def test_golden_prefixed_inputs(mm):
@@ -298,7 +299,6 @@ def _shown(answer):
     return {o['sys_id']: o['shelfmark'] for o in answer['options']}
 
 
-@pytest.mark.slow
 def test_prefix_rule_population_gate(mm, tables, populations, request):
     """Against the same code with prefix_rule=False (before the rule; byte-identical to the
     pristine base over every input, plan section 6), full responses: nothing changes for an input

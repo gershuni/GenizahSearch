@@ -198,7 +198,9 @@ here runs), so they say nothing about cache-only variants; those are pinned by s
    unscoped restatement, and resolver == single == batch.
 2. **Real-data golden** `tests/test_shelfmark_prefix_scope_real.py` and the changed rows of
    `test_catalog_shelfmark_real.py::GOLDEN`, each listed with its reason.
-3. **Population gate** (real data, `slow`): P1-P6, full responses of `resolve_many` against the
+3. **Population gate** (real data; every 20th input in CI's main job, all inputs only with
+   `GENIZAH_SHELFMARK_FULL=1` -- about an hour, past the 30 minutes of CI's `-m slow` job, which
+   PR #402's first CI run hit): P1-P6, full responses of `resolve_many` against the
    same code with `prefix_rule=False` -- measured byte-identical to the pristine PR #400 code over
    all 2,022,705 distinct inputs, so the "before" is faithful. Asserted: no change at all for an
    input whose prefix names no library or for a head form's T2 answer; exactness unchanged; an
