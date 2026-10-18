@@ -76,13 +76,21 @@ GOLDEN = {
     'The National Library of France, Ms. Heb 01489.08': ([BNF_1489], 1, 'direct'),
     'Bibliothèque nationale de France Heb 01489.08': ([BNF_1489], 1, 'direct'),
     # Today's answer for the unpadded input (a stub stores the short form).
-    'The Bodleian Libraries, University of Oxford Arch. O.d. 08.028': (['990053385720205171'], 1, 'direct'),
-    'GASTER 0967.03': NONE,
+    # ... and, since the library-prefix rule's whole-input key, also the full record that stores
+    # `The Bodleian Libraries, University of Oxford Arch. O.d. 8.28` (MS. Heb. d. 32/28), as the
+    # unpadded form now offers both (docs/plans/SHELFMARK_PREFIX_SCOPE_PLAN.md).
+    'The Bodleian Libraries, University of Oxford Arch. O.d. 08.028': (['990053385720205171', '990053403010205171'], 2, 'direct'),
+    # A library prefix keeps its library (docs/plans/SHELFMARK_PREFIX_SCOPE_PLAN.md; was NONE:
+    # code Gaster holds no record): the BL stub that stores `GASTER 967.3` and the full BL record
+    # that stores `Gaster, Moses Collection Ms. 967.3` (Or. 10783.3), as for `GASTER 1201.17`.
+    'GASTER 0967.03': (['990053535600205171', '990053541520205171'], 2, 'direct'),
     # Exact today, unchanged.
     'F 01': (['990053942430205171'], 1, 'exact'),
-    'GASTER 1201.17': (['990053540570205171'], 1, 'exact'),
     'T-S 12.123': (['990051334060205171'], 1, 'exact'),
-    'Halper 381': (['990001961980205171'], 1, 'exact'),
+    # Changed by the prefix rule. Both BL records carry Gaster 1201.17 (was the first only);
+    # the two Katz records that carry Halper 381 (was HAS `381`, another manuscript).
+    'GASTER 1201.17': (['990053540570205171', '990053541630205171'], 2, 'exact'),
+    'Halper 381': (['990053958370205171', '990053958360205171'], 2, 'exact'),
     'T-S AS 31.1': (['990051828880205171'], 1, 'exact'),
     'T-S AS 3.11': (['990051762290205171'], 1, 'exact'),
     'Or. 10578R.98': (['990053532080205171'], 1, 'exact'),
@@ -217,12 +225,16 @@ def test_adversarial_catalogue_forms(mm, tables, request):
         part = cases[start:start + chunk]
         queries = list(dict.fromkeys(q for _, q, _ in part))
         everything = mm.resolve_catalog_forms(queries, limit=10 ** 9)
-        padded = [q for q in queries if cs.zs(q) != q and everything[q]['tier'] != 'exact']
+        # The population is the inputs T1 did NOT answer exactly before its prefix rule
+        # (docs/plans/SHELFMARK_PREFIX_SCOPE_PLAN.md): an input that rule now answers exactly
+        # is judged by that answer, so it cannot leave the gate and lower the floors' meaning.
+        before_rule = cs.t1_exact_entries(queries, tables, mm.csv_bank, scoped=False)
+        padded = [q for q in queries if cs.zs(q) != q and not before_rule[q]]
         unpadded = cs.t1_exact_entries([cs.zs(q) for q in padded], tables, mm.csv_bank)
         for kind, q, sid in part:
             a = everything[q]
-            if a['tier'] == 'exact':
-                continue                     # T1 answers it today; T2 never runs
+            if before_rule[q]:
+                continue                     # T1 answered it before the prefix rule; T2 never ran
             got = set(_ids(a))
             status = ('correct' if got == {sid} else 'contains' if sid in got else
                       'wrong_unique' if len(got) == 1 else 'without_target' if got else 'empty')

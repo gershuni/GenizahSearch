@@ -17,6 +17,10 @@ GENIZAH_SHELFMARK_FULL=1 checks all 1,219.
 The fixture is tied to the libraries.csv it was built from (sha256 in its header).
 After a data refresh, regenerate it on purpose with the script; from this PR on it
 records the combined resolver.
+
+Regenerated on purpose for the library-prefix rule (docs/plans/SHELFMARK_PREFIX_SCOPE_PLAN.md):
+only inputs whose prefix names a library changed, each reviewed with
+scripts/diff_shelfmark_resolve_baseline.py against the previous fixture.
 """
 import hashlib
 import json

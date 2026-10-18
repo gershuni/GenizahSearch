@@ -2250,8 +2250,11 @@ reads shelfmarks as the NLI catalogue writes them (`Cambridge University Library
 - **Function** `looks_like_catalogue_form` — cheap gate (`Ms.` token or zero-padded number) so an ordinary empty search builds no index.
 - **Function** `head_codes` / `alias_codes` — authoritative `LIBRARY_CODES` codes for an institution head / prefix (case-equivalent `BnF`/`BNF`); never frequency.
 - **Class** `CatalogTables` — heads (from raw call numbers, >= 3 uses), their codes, the stored-side zero table; keeps a reference to its index.
-- **Function** `t1_exact_entries` — the resolver's exact candidates for many inputs (pinned to master-main's answers by `tests/test_catalog_shelfmark_real.py`).
-- **Function** `resolve_many` — exact stage + union of candidates (D0 unpadded exact within the institution, long form, Mosseri `Moss.` form, rest within the institution, whole input when none named; Mosseri parent only if empty), one pass for many inputs.
+- **Function** `prefix_codes` / `named_prefix` — the codes a removed library prefix names (exactly a `LIBRARY_CODES` code or name), shared by the resolver's prefix rule and T2 (plan `docs/plans/SHELFMARK_PREFIX_SCOPE_PLAN.md`).
+- **Function** `in_libraries` — whether a record lies in a named library for the shelfmark looked up: its code, collection provenance per shelfmark (a stored `<head> Ms. <this shelfmark>`, from its call numbers or the NLI-cache strings the index carries (`MetadataManager._get_shelfmark_index` returns a `_ShelfmarkIndex` with `cached_variants`), `Ms.` in any case, zeros ignored), or no csv row.
+- **Function** `named_library_exact` — the resolver's exact answer when a prefix named a library and T1 answers exactly: today's exact candidates outside the named library removed, plus the records storing the whole input; empty (= today's answer) when nothing kept carries the numbers. Called by `resolve_system_by_shelfmark` and the restated T1 below.
+- **Function** `t1_exact_entries` — the resolver's exact candidates for many inputs, with the prefix rule (`scoped=False`: without it); pinned to the baseline by `tests/test_catalog_shelfmark_real.py`.
+- **Function** `resolve_many` — exact stage + union of candidates (D0 unpadded exact within the institution, long form, Mosseri `Moss.` form, rest within the institution, the whole input for a named alias, whole input when none named; Mosseri parent only if empty), one pass for many inputs. `prefix_rule=False` answers as before the library-prefix rule (the real-data gate's comparison).
 
 ## shared/text_normalize.py
 
@@ -2323,7 +2326,7 @@ reads shelfmarks as the NLI catalogue writes them (`Cambridge University Library
     - Method `_normalize_shelfmark` (Line 1767) — Normalize shelfmarks using the canonical module-level function.
     - Method `_iter_shelfmark_sources` (Line 1771) — Yield shelfmark candidates from CSV bank and cached metadata.
     - Method `_get_shelfmark_index` (Line 1789) — Build or return cached pre-normalized shelfmark index.
-    - Method `resolve_system_by_shelfmark` (Line 1822) — Resolve a system ID by shelfmark, ignoring dots/slashes/spaces. When nothing matches exactly, falls back to catalogue forms (`shared/catalog_shelfmark.py`) before substring options.
+    - Method `resolve_system_by_shelfmark` (Line 1822) — Resolve a system ID by shelfmark, ignoring dots/slashes/spaces. A prefix naming a library keeps it (`catalog_shelfmark.named_library_exact`). When nothing matches exactly, falls back to catalogue forms (`shared/catalog_shelfmark.py`) before substring options.
     - Method `resolve_catalog_form` / `resolve_catalog_forms` — exact-or-catalogue-form answer for one / many inputs (one index pass), never substring options; `{sys_id, options, selected_shelfmark, total, tier}`. Used by `search_by_meta`'s empty-result fallback and exclusion lists.
     - Method `_get_catalog_tables` — catalogue-form tables tied to the index list object (`is`, never `id()`).
     - Method `get_display_data` (Line 1924)
