@@ -575,3 +575,20 @@ def test_a_failed_witness_is_marked_failed_and_left_out_of_the_provenance():
     assert _Win.refreshed == 1
     assert 'self._absorb_compound_main_steps(' in inspect.getsource(
         APP.on_comp_scan_finished)
+def test_a_compound_result_reports_how_many_witnesses_were_searched():
+    """Codex, PR #399 (P2): the window reads `witnesses_searched` to keep
+    the fused order and the witness column. The compound payload omitted it,
+    so a run with conditions and witnesses read as zero contributors. A
+    witness that failed is not counted."""
+    import tests.test_compound_worker as tw
+    c = Condition(cq.REQ_MUST, cq.WHERE_SAME_IMAGE, ('c',))
+    s = tw._Searcher(main={tw.MAIN: tw._rows(tw.P1), 'ok text': tw._rows(tw.P2)},
+                     raises={'bad text': RuntimeError('x')})
+    w = tw._worker([(tw.SEED, '', tw.MAIN), ('w1', 'W1', 'bad text'),
+                    ('w2', 'W2', 'ok text')], [c], s)
+    w.run()
+    assert tw._result(w)['witnesses_searched'] == 2
+    w = tw._worker([(tw.SEED, '', tw.MAIN)], [c], tw._Searcher(
+        main={tw.MAIN: tw._rows(tw.P1)}))
+    w.run()
+    assert tw._result(w)['witnesses_searched'] == 1

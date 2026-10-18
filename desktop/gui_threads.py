@@ -1136,6 +1136,10 @@ class CompoundCompositionThread(PausableSearchMixin, QThread):
                 'truncated_to_200': bool(routed.main_truncated
                                          or routed.filtered_truncated),
                 'partial': partial,
+                # As the multi-witness worker reports it: without it the
+                # window read zero contributors, re-sorted the fused rows by
+                # raw score and hid the witness column (PR #399 review).
+                'witnesses_searched': searched_main,
                 'compound': {
                     'fingerprint': self.fingerprint,
                     'conditions': [c.to_dict() for c in self.conditions],
