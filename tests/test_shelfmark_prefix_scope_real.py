@@ -4,9 +4,9 @@ libraries.csv is tracked, so these run in CI; they skip only when the corpus is 
 (< 100,000 rows). The CUDL collision report goes to a temporary directory and the per-user
 NLI cache is not used (tests/shelfmark_corpus.py).
 
-The population gate is `slow`: CI's main job checks every 20th input and the must-be-zero
-counts; `pytest -m slow` or GENIZAH_SHELFMARK_FULL=1 checks all ~1.96M inputs and the class
-counts measured for the plan.
+The population gate is `slow`: CI's main job checks every 20th input, the must-be-zero
+counts and that slice's class counts; `pytest -m slow` or GENIZAH_SHELFMARK_FULL=1 checks all
+~1.96M inputs and the class counts measured for the plan.
 """
 import collections
 import os
@@ -205,7 +205,9 @@ def _classify(old, new, source, lib):
 
 
 # Measured for the plan (section 4), same classes as this gate: full runs must reach each
-# count minus 0.5%; CI's every-20th run must reach 80% of a twentieth of it.
+# count minus 0.5%. The every-20th run takes a fixed slice whose classes are not spread evenly
+# (it holds 65% of a twentieth of P4's narrowed_to_source), so SLICE_FLOORS are that slice's own
+# counts, measured on the same code, under the same rule.
 FLOORS = {
     ('P1', 'narrowed_to_source'): 757, ('P1', 'narrowed'): 251, ('P1', 'added_kept'): 2_177,
     ('P1', 'replaced_other_library'): 41, ('P1', 't2 grew'): 8_255,
@@ -215,6 +217,16 @@ FLOORS = {
     ('P4', 'narrowed_to_source'): 710, ('P4', 'narrowed'): 251,
     ('P5', 'narrowed_to_source'): 335, ('P5', 'narrowed'): 262,
     ('P6', 'narrowed_to_source'): 1_111, ('P6', 'narrowed'): 326,
+}
+SLICE_FLOORS = {
+    ('P1', 'narrowed_to_source'): 43, ('P1', 'narrowed'): 11, ('P1', 'added_kept'): 111,
+    ('P1', 'replaced_other_library'): 2, ('P1', 't2 grew'): 376,
+    ('P2code', 'narrowed_to_source'): 86, ('P2code', 'narrowed'): 83,
+    ('P2name', 'narrowed_to_source'): 101, ('P2name', 'narrowed'): 84, ('P2name', 'widened'): 5,
+    ('P3', 'narrowed_to_source'): 81, ('P3', 'narrowed'): 74,
+    ('P4', 'narrowed_to_source'): 23, ('P4', 'narrowed'): 11,
+    ('P5', 'narrowed_to_source'): 13, ('P5', 'narrowed'): 13,
+    ('P6', 'narrowed_to_source'): 55, ('P6', 'narrowed'): 11,
 }
 # P5 pairs an alias with ANOTHER record's number, so its source is not always the intended
 # record. These eight lose it to the records that store `Adler, Elkan Nathan Ms. N` (the source
@@ -366,9 +378,8 @@ def test_prefix_rule_population_gate(mm, tables, populations, request):
     print(sorted(counts.items()))
     assert not problems, problems[:20]
     assert sum(n for (p, _), n in counts.items() if p == 'P1') >= (261_000 if full else 13_000)
-    for key, want in FLOORS.items():
-        floor = want * 0.995 if full else want / 20 * 0.8
-        assert counts[key] >= floor, (key, counts[key], floor)
+    for key, want in (FLOORS if full else SLICE_FLOORS).items():
+        assert counts[key] >= want * 0.995, (key, counts[key], want)
 
 
 def test_resolver_and_batch_agree_on_prefixed_inputs(mm, populations, request):

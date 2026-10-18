@@ -204,7 +204,9 @@ here runs), so they say nothing about cache-only variants; those are pinned by s
    only records that store the whole input; a T2 answer only grows, by records of the library or
    that store the input; no shown shelfmark changes for a record in both answers; no lost source
    outside P5's eight listed cases; class floors (full: measured minus 0.5%; CI's every-20th run:
-   80% of a twentieth). With scoping disabled the floors fail.
+   that slice's own measured counts minus 0.5% -- the first rule, 80% of a twentieth, failed on
+   the slice because its classes are not spread evenly, e.g. 23 of P4's expected 35.5). With
+   scoping disabled the floors fail.
 4. **Adversarial gate**: R0 keeps its population as it was; it now says so by skipping the inputs
    the *unscoped* T1 answers exactly (rev. 1, which made inputs exact, would have moved 40,904
    comma and 5,707 no-comma cases out of it), same floors.
