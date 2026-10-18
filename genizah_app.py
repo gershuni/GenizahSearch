@@ -20498,6 +20498,37 @@ class GenizahGUI(QMainWindow):
         state = self._comp_witness_state()
         return dict(state.rows), dict(state.filtered)
 
+    def _absorb_compound_main_steps(self, steps):
+        """A compound run searches every main witness itself. One whose search
+        FAILED found nothing, so the pages only it would have found are
+        missing (PR #399 review): mark it Failed in the Witnesses panel, with
+        Retry, as an ordinary multi-witness search does, and keep it out of
+        the provenance exports and history read -- that names what produced
+        these rows. Called on the UI thread; status is state."""
+        main = {s.get('id'): s for s in steps if s.get('kind') == 'main'}
+        searched = {wid for wid, s in main.items()
+                    if s.get('status') in ('searched', 'stopped')}
+        self._comp_last_result_witnesses = [
+            row for row in (getattr(self, '_comp_last_result_witnesses', None)
+                            or [])
+            if row.get('id') in searched]
+        failed = {wid: s for wid, s in main.items()
+                  if s.get('status') == 'failed'}
+        if not failed:
+            return
+        for entry in self._comp_witness_state().entries:
+            step = failed.get(entry.id)
+            if step is None:
+                continue
+            entry.status = passage_witnesses.STATUS_FAILED
+            entry.hits = 0
+            entry.error = (
+                tr("Could not load text for this manuscript.")
+                if step.get('reason') == 'empty_text'
+                else tr("The letter-level search could not be completed. "
+                        "Details have been written to the log."))
+        self._refresh_witness_panel()
+
     def _absorb_witness_result(self, result):
         """Fold a finished batch's per-witness rows back into the WitnessSet.
 
@@ -29853,6 +29884,8 @@ class GenizahGUI(QMainWindow):
             # worker to wait for, one the user never asked for.
             self._stop_auto_expand('')
             return
+        if _compound is not None:
+            self._absorb_compound_main_steps(_compound.get('steps') or [])
 
         # Chunk and Lab runs report when the text did not fit the settings;
         # a letter-level result carries no notices and clears the line.

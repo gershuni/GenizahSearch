@@ -529,3 +529,49 @@ def test_csv_and_txt_record_the_dispatched_text_and_conditions(tmp_path, monkeyp
     text = out.read_text(encoding='utf-8-sig')
     assert 'the dispatched text' in text and 'edited after the search' not in text
     assert tr("Condition {}").format(1) in text and 'the forbidden text' in text
+# -- PR #399 review: a main witness that failed is said, not hidden ---------------------
+
+def test_a_failed_witness_is_marked_failed_and_left_out_of_the_provenance():
+    """Codex, PR #399 (P2): a non-seed main witness whose search raised was
+    recorded only in the run's steps. The run looked complete, the pages
+    only it would have found were silently missing, and exports and history
+    still named it. Now the window marks it Failed in the Witnesses panel
+    (Retry) and drops it from the provenance."""
+    import tests.test_compound_worker as tw
+    from genizah_app import tr
+    c = Condition(cq.REQ_MUST, cq.WHERE_SAME_IMAGE, ('c',))
+    s = tw._Searcher(main={tw.MAIN: tw._rows(tw.P1), 'ok text': tw._rows(tw.P2)},
+                     raises={'bad text': RuntimeError('x')})
+    w = tw._worker([(tw.SEED, '', tw.MAIN), ('w1', 'W1', 'bad text'),
+                    ('w2', 'W2', 'ok text')], [c], s)
+    w.run()
+    steps = tw._result(w)['compound']['steps']
+
+    state = pw.WitnessSet(entries=[
+        pw.WitnessEntry(id='w1', label='W1', text='bad text'),
+        pw.WitnessEntry(id='w2', label='W2', text='ok text'),
+        pw.WitnessEntry(id='w3', label='W3', text=''),        # never dispatched
+    ])
+
+    class _Win:
+        _absorb_compound_main_steps = APP._absorb_compound_main_steps
+        refreshed = 0
+
+        def _comp_witness_state(self):
+            return state
+
+        def _refresh_witness_panel(self):
+            _Win.refreshed += 1
+
+    win = _Win()
+    win._comp_last_result_witnesses = [{'id': 'w1'}, {'id': 'w2'}, {'id': 'w3'}]
+    win._absorb_compound_main_steps(steps)
+    assert [r['id'] for r in win._comp_last_result_witnesses] == ['w2']
+    by_id = {e.id: e for e in state.entries}
+    assert by_id['w1'].status == pw.STATUS_FAILED and by_id['w1'].error == tr(
+        "The letter-level search could not be completed. "
+        "Details have been written to the log.")
+    assert by_id['w2'].status == pw.STATUS_PENDING
+    assert _Win.refreshed == 1
+    assert 'self._absorb_compound_main_steps(' in inspect.getsource(
+        APP.on_comp_scan_finished)
