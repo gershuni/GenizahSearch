@@ -1092,6 +1092,8 @@ Moved verbatim by `scripts/archive_closed_issues.py`. Nothing was edited or dele
 
 Moved verbatim from the top of the tracker on 2026-09-18 (the 2026-09-06 split did the same for the headers before them).
 
+> Previous: 2026-10-18 (branch `claude/pensive-goldberg-g1qu2a`, not merged; merged later that day as PR #401) -- **The Visual Similarity window's Sort, Library and Domain choices now apply, and it has a Thumbnails view.** Its three selects registered raw `update:model-value` listeners whose handlers read `e.value`, which NiceGUI's `GenericEventArguments` does not have, so every change raised and the list stayed unfiltered and unsorted. Logged `❌ Open` and fixed the same day (entry in the archive). The new List / Thumbnails switch shows each filtered look-alike's low-resolution first image (owner request, from a researcher's report). New `tests/render_smoke/test_visual_similarity_dialog_render_smoke.py`, red on the old code. Merged with master-main after PR #400 (catalogue-form shelfmarks, header archived). P3 +1: the domain names are English in the Hebrew UI and each look-alike keeps only its first domain.
+
 > Previous: 2026-10-18 (catalogue-form shelfmarks, branch `feat/catalogue-shelfmark-forms`, PR #400) -- **Shelfmarks as the NLI catalogue writes them** (`Cambridge University Library, Ms. T-S K 08.026`, `Mosseri, Jacques, Ms. VIII.402`) now resolve on every shelfmark input of both apps, through one fallback (`shared/catalog_shelfmark.py`) that runs only when the resolver found no exact match; pickers replace the web's silent first match. Plan `docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md` (Codex plan rounds 10/5/4/3 findings, SHIP WITH FIXES; implementation rounds 4/1, all fixed). Gates: completer pin, master-main baseline (1,219 inputs), adversarial ~760,000 inputs (0 new wrong records), 17+ mutations caught; local suite 15,384 passed (2 registry checks wait for the new files to be tracked). Four pre-existing resolver behaviours logged in P3.
 
 > Previous: 2026-10-18 (branch `fix/settings-telemetry-optin`, not pushed) -- **Turning telemetry on in Settings now starts that session's telemetry.** The confirm handler in `desktop/settings_dialogs.py::SettingsDialog._build_general_tab` called `self._run_startup_telemetry_coordinator()` on the dialog; the method lives on the main window (`GenizahGUI`), so consent was saved and then AttributeError, and identify / `desktop_session_start` never fired for the session. Logged `❌ Open` and fixed the same day (entry in the archive); two new tests in `tests/test_telemetry_consent_ux.py`, red on the old code.
@@ -1488,6 +1490,32 @@ Moved verbatim from the tracker's Quick Summary on 2026-10-06, when the tracker 
 > 2026-09-29 (web Fragment Puzzle per-visitor saved joins): P2 +1, P3 +4 -- P2 42, P3 78, total 158.
 > 2026-09-29 (desktop exit abort with a running QThread in a hidden window): P2 +1 -- P2 43, total 159. Fixed and archived the same day: P2 -1 -- P2 42, total 158.
 > 2026-10-05 (recheck of every open entry): P2 -5 (three fixed, two superseded) +1 (anonymous discoveries show the author) -- 43; P3 -2 (both closed) +1 (the paused-search row moved in from §4.5, where it was not counted) -- 87; Documentation -2 +1 (`docs/SEARCH_API.md`) -- 1; Code Quality Debt -1 (the superseded auth timeouts) -- 16; Untested Areas -1 -- 4; Deferred unchanged -- 7 (D-F12 stays open: likely fixed, not re-timed; Codex review of PR #379). The closed toolbar row under §4.5 was not counted either, so §4.5 stays 5. Total 165. The v9.0.0 section (not counted here): one bullet closed as superseded, three rewritten.
+
+### Quick Summary count notes, 2026-10-06 to 2026-10-12
+
+Moved verbatim from the tracker's Quick Summary on 2026-10-18, when the tracker reached 99% of its size ceiling.
+
+> 2026-10-06 (local checks + sweep items): Deferred -1 (D-F12 fixed); P3 -1 (the 90-minute chunk hang merged into the findings-page hang row) +12; P2 +5; Documentation +1; Code Quality Debt +4 -- 186.
+> 2026-10-06 (#13 and #17 fixed): P2 -2; P3 +2 -- 186.
+> 2026-10-06 (regex prefilter): P2 #9 rewritten to its website half (still 1); P3 +3 -- 189.
+> 2026-10-06 (website "N+" and search-within completion): P2 -1 (#9 closed) -- 188.
+> 2026-10-06 (regex review fixes): P3 +1 (My Library hint on a cut-off empty search) -- 189.
+> 2026-10-06 (website cut-off review fixes, 3-minute limit): P3 +1 (desktop Excel count) -- 190.
+> 2026-10-06 (#14 Num Changes per level): P2 -1 (#14 closed) +1 (website search time limit, ruling K-24) -- 190.
+> 2026-10-07 (review rounds 1-2): P2 -1 (website time limit, fixed on fix/web-search-cutoff); P3 +2 (Joins pair count; Variants verifier) -- 191.
+> 2026-10-07 (time-limit review round 2): P3 +1 (letter-level stop shown badly on /parallels) -- 192.
+> 2026-10-07 (full suites): P3 +1 (a test-order failure of the library-mode API tests, pre-existing) -- 193.
+> 2026-10-07 (GitHub review round 3): P3 +1 (a level click during a running desktop search, pre-existing) -- 194.
+> 2026-10-07 (GitHub review round 4): P3 -1 (that level click, fixed on fix/variant-changes-per-preset) -- 193.
+> 2026-10-07 (GitHub review round 5): P3 +2 (stopped-search rows not saved for a reload; Num Changes shown for the saved mode after a link) -- 195.
+> 2026-10-07 (the cut-off PR merged into the composition branch): #13/#17 and #9 counted -- 191.
+> 2026-10-07 (the composition PR merged into this branch): both counted -- 195.
+> 2026-10-07 (post-release fixes): P2 +1 (restart reload loops); P3 +3 (realip snippet to install; IPv6 /64 keys; app bound to 0.0.0.0:8081); Untested +1 (Joins Lab time limit on the page) -- 200.
+> 2026-10-07 (live check): P2 +1 (/catalog-browse first load shows no results) -- 201.
+> 2026-10-07 (Codex rounds on the post-release fixes): P3 +2 (search-within completion window; puzzle Delete success on failure) -- 203.
+> 2026-10-11 (Extended/Maximum time limit): P3 +1 (Windows `regex` matching of Extended/Maximum), and +1 recounted (the P3 table already held 118 rows against the 117 shown), +1 (`\B` regex tests time out after other search tests) -- 206.
+> 2026-10-12 (desktop native matching docs): P3 +5 (viewer MULTILINE and DOTALL recompiles; web full-text highlighting budget; viewer runs a scholar's Regex through `re` unbounded; characters shared by the inserter and separator classes; a per-call timeout aborts the desktop search). The archived `test_only_supervised_worker` flake row carried no ❌ marker, so it was never in the count (P3 +0 for it); the Variants set-based verifier row got a note, not a new row -- 211.
+> 2026-10-12 (v9.6.2 release, both): the regex-slowness row gets its release note; P3 -1 (the FJMS enrichment DB deploy step, release-gated since 2026-04-22, verified done on the server and archived) -- 210.
 
 ### Full text of the entries condensed in the tracker on 2026-10-06
 

@@ -4,11 +4,54 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-## [Unreleased] -- Visual Similarity: thumbnails, and filters that apply (web, branch `claude/pensive-goldberg-g1qu2a`)
+Everything under `[Unreleased]` is merged to master-main (2026-10-18). None of it is released, and
+the website changes are not deployed.
+
+## [Unreleased] -- Visual Similarity: thumbnails, and filters that apply (web, PR #401)
 
 The browse page's Visual Similarity window can show its look-alikes as a grid of low-resolution thumbnails (List / Thumbnails switch, remembered for the visitor), so a filtered set can be scanned by eye before opening any of it; the image opens the fragment in a new tab. Its Sort, Library and Domain choices had never applied (the list stayed unfiltered and unsorted, with an error logged on each change); they now do, in both views. From a researcher's request (owner, 2026-10-18).
 
-## [Unreleased] -- Composition Search conditions (desktop, branch `feat/composition-conditions`)
+## [Unreleased] -- Shelfmarks as the NLI catalogue writes them (both, PR #400)
+
+A shelfmark typed or pasted the way the NLI catalogue writes it (`Cambridge University Library,
+Ms. T-S K 08.026`, `Mosseri, Jacques, Ms. VIII.402`, `Library of the Hungarian Academy of
+Sciences, Ms. 06`) now finds its record on every shelfmark input of both apps: Shelfmark search
+(also `/api/search` and MCP), the exclusion lists, the Fragment Puzzle, Joins, Share a Discovery,
+the reading desk and the Joins Lab load box. One fallback (`shared/catalog_shelfmark.py`) runs
+only after the resolver found no exact match, so every shelfmark that resolved before still
+resolves to the same record (1,219 recorded inputs), and a library named in the input is never
+answered with another library's record. Where a form fits more than one record, a picker asks
+instead of silently taking the first, and Cancel adds nothing; an ambiguous exclusion line stays
+unresolved, and the Joins Lab `?shelfmark=` link still loads the first match. Autocomplete is
+unchanged. Plan: `docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md`.
+
+## [Unreleased] -- Settings: turning telemetry on starts it (desktop, PR #398)
+
+Turning telemetry on in Settings saved the consent and then failed silently, so the app sent
+nothing for the rest of that session. The Settings dialog now runs the main window's startup
+telemetry step.
+
+## [Unreleased] -- Letter-level search for My Library (desktop, PR #397, merged through PR #399)
+
+Letter-level Composition Search now works on My Library too, not only on the Genizah corpus,
+from a patch by Yehudah Seewald. My Library gets its own letter-level index, built in the
+background from the texts it has already extracted: Settings has "Build / Rebuild Letter-Level
+Index for My Library", which shows the page count and disk space first, then progress and Cancel
+(a 3,401-record library took 3.6 s and 143 MB). Composition Search can search Genizah, My Library
+or All; All merges the two lists by score. My Library rows show Src `LOCAL` with the file name and
+page, the viewer highlights the match, Word exports carry page labels, and the rows can be
+promoted to witnesses, in auto-expand and Recursive search too. After a scan that changes My
+Library, a notice says the index needs rebuilding; it never rebuilds by itself. Owner rulings
+(2026-10-16): the Genizah page checks (the 80-letter floor, target sheets, library stamps) are off
+for My Library builds, Genizah-side restrictions such as the library filter do not apply to its
+rows, and conditions stay Genizah-only (the search asks you to switch to Genizah or remove them).
+Duplicate-photograph demotion is also off for My Library rows, since a library often holds
+near-identical pages. Fixed on the way: promoting checked Genizah results to witnesses added
+nothing, and a cancelled Genizah index build that had already finished threw its index away.
+Qt's own buttons and menus (Yes / No / OK / Cancel, the text-field menu) are now Hebrew in the
+Hebrew UI.
+
+## [Unreleased] -- Composition Search conditions (desktop, with website Help and Word exports; PR #399)
 
 Letter-level Composition Search takes up to four extra texts, each "must appear" or "must not
 appear" on the same image, an adjacent image, or anywhere in the same manuscript, so a search can
@@ -43,7 +86,15 @@ History, Joins Lab, Reading Desk, Fragment Puzzle, Lists, Witnesses and others).
 the website's Hebrew help showed the Fragment Puzzle sections even when the puzzle is off, the Joins
 Lab "Triage state" filter showed its choices in English, and "חפש רק ב..." / "טוען קטע..." had their
 dots on the wrong side. The desktop Joins Lab size warning now says "אי-התאמת גודל", as the website does.
-Plan and decisions: `docs/plans/COMPOSITION_CONDITIONS_PLAN.md`. Not released.
+Also in this PR: a desktop letter-level search keeps every manuscript it finds (it kept at most
+200, the public API's cap, and never said so -- Birkat Hamazon found 867 and kept 200). Among
+duplicate photographs, a record's own photograph is now kept over a copy on a shared microfilm
+reel (three RNL reels are attached to every box record on them); the website's passage method
+gets this with its next deploy. Hebrew Word exports sit flush right on the desktop and the website
+(Word read the old right alignment of a right-to-left paragraph as flush left), the desktop's carry
+the full MiDRASH citation, and desktop exports ask when the file is open in Word or Excel.
+Plan and decisions: `docs/plans/COMPOSITION_CONDITIONS_PLAN.md`. The pre-release checklist is in
+the PR #399 description.
 
 ---
 
