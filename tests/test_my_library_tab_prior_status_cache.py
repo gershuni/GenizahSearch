@@ -219,6 +219,38 @@ def test_cache_invalidated_on_reset(tmp_path, monkeypatch):
         _close_tab(tab)
 
 
+def test_reset_tells_the_window_my_library_changed(tmp_path, monkeypatch):
+    """PR #399 review (Codex): a reset changes My Library like a scan or a
+    folder removal, so the window must re-check its letter-level index and
+    say it is out of date. A reset that failed reports nothing."""
+    from shared.local_indexer import LocalIndexerError
+    import desktop.my_library_tab as mlt
+
+    class _Window:
+        changes = 0
+
+        def _on_my_library_changed(self):
+            _Window.changes += 1
+
+    tab = _make_tab(tmp_path, monkeypatch)
+    try:
+        tab._parent_window = _Window()
+        monkeypatch.setattr(tab._indexer, "reset_my_library",
+                            lambda close_cb, reload_cb: None)
+        tab._perform_reset()
+        assert _Window.changes == 1
+
+        def _failing_reset(close_cb, reload_cb):
+            raise LocalIndexerError("rename failed")
+        monkeypatch.setattr(tab._indexer, "reset_my_library", _failing_reset)
+        monkeypatch.setattr(mlt.QMessageBox, "critical",
+                            staticmethod(lambda *a, **k: None))
+        tab._perform_reset()
+        assert _Window.changes == 1
+    finally:
+        _close_tab(tab)
+
+
 # ---------------------------------------------------------------------------
 # Test 4 — populate_for_folder does not query the DB on click path
 # ---------------------------------------------------------------------------

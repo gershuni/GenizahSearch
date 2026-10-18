@@ -2394,6 +2394,8 @@ class MyLibraryTab(QWidget):
             except Exception:
                 pass
             self._update_reset_button_state()
+            # The letter-level index of My Library is now out of date.
+            self._notify_library_changed()
         except LocalIndexerError as exc:
             dlg.close()
             err_msg = (
