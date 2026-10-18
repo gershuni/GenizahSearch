@@ -100,6 +100,7 @@ EXTRACTED_MODULES = [
     "shared/passage_fusion.py",
     "shared/passage_hygiene.py",
     "shared/passage_index.py",
+    "shared/passage_local_corpus.py",
     "shared/passage_normalize.py",
     "shared/passage_pages.py",
     "shared/passage_parallels.py",

@@ -19,7 +19,6 @@ import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
 
 from docx import Document
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt
@@ -27,6 +26,7 @@ from docx.shared import Pt
 
 # Imported early: `CREDITS_TEXT` below spreads it at module scope, above the
 # bulk `shared_export_utils` import further down.
+from shared.docx_export import _set_paragraph_rtl, has_latin
 from shared.export_utils import MIDRASH_CREDIT_LINES
 from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 
@@ -246,19 +246,22 @@ def _resolve_result_display(result: Dict[str, Any], meta_mgr) -> tuple:
 # ============================================================================
 
 def set_paragraph_rtl(paragraph):
-    """Set RTL direction and right alignment for a paragraph containing Hebrew text."""
-    paragraph.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
-    paragraph.paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
-    ppr = paragraph._p.get_or_add_pPr()
-    bidi = ppr.find(qn("w:bidi"))
-    if bidi is None:
-        bidi = OxmlElement("w:bidi")
-        ppr.append(bidi)
-    bidi.set(qn("w:val"), "1")
+    """A paragraph with Hebrew in it reads right to left from the RIGHT
+    margin; a Latin-only one stays left to right on the left, as in the rest
+    of this English document (`shared.docx_export._set_paragraph_rtl`).
+
+    This used to align right and then append `w:bidi`. Word reads a
+    right-to-left paragraph aligned "right" as flush LEFT, so every Hebrew
+    paragraph of every website Word export sat on the left margin (rendered
+    through Word, 2026-10-17)."""
+    _set_paragraph_rtl(paragraph, align_latin_right=False)
 
 
 def set_run_rtl_font(run, font_size: Optional[int] = None):
-    """Set Hebrew-compatible font for a run and mark it as RTL."""
+    """Set Hebrew-compatible font for a run, and mark it right-to-left when
+    it has no Latin letters. A run mixing a Hebrew library name with a Latin
+    shelfmark, marked right-to-left, scrambled the result header in Word
+    ("- Score: 120T-S 12.345"); the paragraph's direction orders it."""
     run.font.name = HEBREW_FONT_NAME
     r = run._r
     rPr = r.get_or_add_rPr()
@@ -272,9 +275,12 @@ def set_run_rtl_font(run, font_size: Optional[int] = None):
     cs_font.set(qn("w:ascii"), HEBREW_FONT_NAME)
     cs_font.set(qn("w:hAnsi"), HEBREW_FONT_NAME)
 
-    # Mark as RTL text
+    # Mark as RTL text -- Hebrew only, see the docstring.
     rtl = rPr.find(qn("w:rtl"))
-    if rtl is None:
+    if has_latin(run.text):
+        if rtl is not None:
+            rPr.remove(rtl)
+    elif rtl is None:
         rtl = OxmlElement("w:rtl")
         rPr.append(rtl)
 

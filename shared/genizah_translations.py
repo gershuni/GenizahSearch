@@ -4456,6 +4456,13 @@ TRANSLATIONS.update({
     "Export failed. Check your connection and try again.":
                                             "הייצוא נכשל. בדוק את החיבור לאינטרנט ונסה שוב.",
     "Retry":                                "נסה שוב",
+    # --- Saving over a file open in Word / Excel (desktop/export_save.py) ---
+    "File in use":                          "הקובץ בשימוש",
+    'Could not save "{name}". It may be open in another program, such as Word or Excel.':
+        'לא ניתן לשמור את "{name}". ייתכן שהקובץ פתוח בתוכנה אחרת, כגון Word או Excel.',
+    "Close it and choose Retry, or save it under another name.":
+        'סגור אותו ובחר "נסה שוב", או שמור אותו בשם אחר.',
+    "Save under another name":              "שמור בשם אחר",
     "Collapse":                             "כווץ",
     "No candidates to export":              "אין מועמדים לייצוא",
     # --- Export column headers ---
@@ -5693,4 +5700,111 @@ TRANSLATIONS.update({
         'טען או הדבק את הקטע מהחיבור המצטט שעוסק בטקסט הראשי שלך (למשל רי"ף ברכות '
         '1a-2b), ולא את כל הספר. דף יוסר רק אם יש בו לפחות 40 '
         'אותיות מהחיבור שאינן גם בטקסט הראשי שלך.',
+})
+
+# Letter-level search for My Library (desktop/passage_local.py).
+TRANSLATIONS.update({
+    'Build / Rebuild Letter-Level Index for My Library':
+        'בניית / בנייה מחדש של אינדקס לחיפוש ברמת האות בספרייה שלי',
+    'Builds the index used by letter-level search in My Library, from the '
+    'texts My Library has already extracted. It does not update by itself: '
+    'rebuild it when My Library changes.':
+        'בונה את האינדקס שמשמש לחיפוש ברמת האות בספרייה שלי, מתוך הטקסטים '
+        'שכבר חולצו מהספרייה שלי. הוא אינו מתעדכן מעצמו: יש לבנות אותו מחדש '
+        'כשהספרייה שלי משתנה.',
+    'Build letter-level index for My Library':
+        'בניית אינדקס לחיפוש ברמת האות בספרייה שלי',
+    'Build letter-level index for My Library?':
+        'לבנות אינדקס לחיפוש ברמת האות בספרייה שלי?',
+    'Build the letter-level index for My Library from {} indexed pages?\n\n'
+    'This needs up to about {} of free disk space while it runs (the '
+    'finished index is smaller) and can take an hour or more on a large '
+    'library. The application stays usable meanwhile.\n\nThe index does not '
+    'update by itself: when My Library changes, you will be told to rebuild '
+    'it.':
+        'לבנות את האינדקס לחיפוש ברמת האות בספרייה שלי מתוך {} עמודים באינדקס?\n\n'
+        'הבנייה דורשת עד כ-{} פנויים בדיסק בזמן הריצה (האינדקס הסופי קטן יותר), '
+        'ובספרייה גדולה היא עשויה להימשך שעה ויותר. התוכנה נשארת זמינה לעבודה בינתיים.\n\n'
+        'האינדקס אינו מתעדכן מעצמו: כשהספרייה שלי משתנה, תוצג הודעה לבנות אותו מחדש.',
+    'Build the letter-level index for My Library from {} indexed pages?\n\n'
+    'This can take an hour or more on a large library and needs free disk '
+    'space while it runs. The application stays usable meanwhile.\n\nThe '
+    'index does not update by itself: when My Library changes, you will be '
+    'told to rebuild it.':
+        'לבנות את האינדקס לחיפוש ברמת האות בספרייה שלי מתוך {} עמודים באינדקס?\n\n'
+        'בספרייה גדולה הבנייה עשויה להימשך שעה ויותר, והיא דורשת מקום פנוי בדיסק '
+        'בזמן הריצה. התוכנה נשארת זמינה לעבודה בינתיים.\n\n'
+        'האינדקס אינו מתעדכן מעצמו: כשהספרייה שלי משתנה, תוצג הודעה לבנות אותו מחדש.',
+    'Building the letter-level index for My Library needs about {} free on '
+    'this drive, and there is about {}. Free some space and try again.':
+        'בניית האינדקס לחיפוש ברמת האות בספרייה שלי דורשת כ‑{} פנויים בכונן הזה, '
+        'וישנם כ‑{}. פנו מקום ונסו שוב.',
+    'Building the My Library letter-level index...':
+        'בונה את האינדקס לחיפוש ברמת האות בספרייה שלי...',
+    'Letter-level search in My Library needs its own index, built from the '
+    'texts My Library has already extracted. The index does not update by '
+    'itself: when My Library changes, you will be told to rebuild it.\n\nFor '
+    'a large library this takes up to an hour or more and needs a lot of free '
+    'disk space while it runs; you will see the figures before it starts. You '
+    'can always build it later from Settings.':
+        'חיפוש ברמת האות בספרייה שלי צריך אינדקס משלו, שנבנה מהטקסטים שכבר חולצו '
+        'מהספרייה שלי. האינדקס אינו מתעדכן מעצמו: כשהספרייה שלי משתנה, תוצג הודעה '
+        'לבנות אותו מחדש.\n\n'
+        'בספרייה גדולה הבנייה עשויה להימשך שעה ויותר ודורשת נפח דיסק פנוי רב בזמן '
+        'הריצה; הנתונים יוצגו לפני תחילתה. תמיד אפשר לבנות אותו מאוחר יותר מההגדרות.',
+    'My Library has changed since its letter-level index was built. Rebuild '
+    'it from Settings to include the changes.':
+        'הספרייה שלי השתנתה מאז שנבנה האינדקס לחיפוש ברמת האות. בנה אותו מחדש '
+        'מההגדרות כדי לכלול את השינויים.',
+    'My Library is empty':
+        'הספרייה שלי ריקה',
+    'My Library is not loaded. Letter-level search for My Library needs it '
+    'to load the text of its results.':
+        'הספרייה שלי לא נטענה. חיפוש ברמת האות בספרייה שלי צריך אותה כדי לטעון '
+        'את הטקסט של התוצאות.',
+    'My Library letter-level index':
+        'אינדקס חיפוש ברמת האות - הספרייה שלי',
+    'My Library letter-level index build cancelled. Your existing index was '
+    'not changed.':
+        'בניית האינדקס לחיפוש ברמת האות בספרייה שלי בוטלה. האינדקס הקיים לא השתנה.',
+    'Reading My Library pages: {}% ({} pages so far)':
+        'קורא את עמודי הספרייה שלי: {}% ({} עמודים עד כה)',
+    'All pages have been read. Arranging the index; this stage shows no '
+    'percentage and can take a while on a large library.':
+        'כל העמודים נקראו. כעת מסודר האינדקס; בשלב זה אין אחוזי התקדמות, '
+        'ובספרייה גדולה הוא עשוי להימשך זמן מה.',
+    'Reading the My Library catalogue...':
+        'קורא את רשימת הקבצים של הספרייה שלי...',
+    'The My Library letter-level index could not be replaced. Reloading the '
+    'existing index.':
+        'לא ניתן היה להחליף את האינדקס לחיפוש ברמת האות בספרייה שלי. טוען מחדש '
+        'את האינדקס הקיים.',
+    'The My Library letter-level index could not be replaced. The previous '
+    'index is still in use.':
+        'לא ניתן היה להחליף את האינדקס לחיפוש ברמת האות בספרייה שלי. האינדקס '
+        'הקודם עדיין בשימוש.',
+    'The My Library letter-level index is already being built.':
+        'האינדקס לחיפוש ברמת האות בספרייה שלי כבר נבנה כעת.',
+    'The My Library letter-level index is ready.':
+        'האינדקס לחיפוש ברמת האות בספרייה שלי מוכן.',
+    'The letter-level index for My Library has not been built yet. You can '
+    'build it from Settings.':
+        'האינדקס לחיפוש ברמת האות בספרייה שלי עדיין לא נבנה. אפשר לבנות אותו '
+        'מההגדרות.',
+    'There are no indexed My Library pages to build a letter-level index '
+    'from. Add folders to My Library and index them first.':
+        'אין בספרייה שלי עמודים באינדקס שמהם אפשר לבנות אינדקס לחיפוש ברמת האות. '
+        'הוסף תיקיות לספרייה שלי ובנה להן אינדקס תחילה.',
+    'the My Library letter-level index is busy':
+        'האינדקס לחיפוש ברמת האות בספרייה שלי עסוק',
+    # Conditions are Genizah-only (2026-10-16). Proposed wording; the owner
+    # approves it before release.
+    'Conditions work only when the corpus is Genizah. Switch the corpus to '
+    'Genizah, or remove the conditions.':
+        'תנאים פועלים רק כשהקורפוס הוא גניזה. החלף את הקורפוס לגניזה, '
+        'או הסר את התנאים.',
+    'Conditions work only when the corpus is Genizah.':
+        'תנאים פועלים רק כשהקורפוס הוא גניזה.',
+    'Measuring My Library for its letter-level index...':
+        'מודד את הספרייה שלי לקראת בניית האינדקס לחיפוש ברמת האות...',
 })

@@ -976,6 +976,124 @@ def test_duplicate_photography_is_demoted_not_deleted(dup_corpus):
     )
 
 
+@pytest.fixture(scope='module')
+def reel_corpus(tmp_path_factory):
+    """One page, photographed twice (the RNL reel case, 2026-10-17):
+
+      reel1..reel3 -- the page on a microfilm reel that is attached to three
+                      box records: three sys_ids, ONE image set, IE88000000.
+      own          -- the box's own photograph (its own image set, same
+                      text, as the measured RNL cases were). Its id sorts
+                      after the reel copies, so with equal scores it comes
+                      after them -- where the pass used to demote it.
+      other_a/b    -- a second page photographed twice, each photograph its
+                      own record's: nothing shared, so the first in score
+                      order stays, as it always did.
+      lone1..3     -- a third page that exists ONLY on a reel (three records,
+                      one image set, no own photograph): every copy is
+                      shared, so again the first in score order stays.
+
+    A worn copy does not score lower -- the score is the query span the
+    match covers -- so the order is set by the ids, and each test checks it
+    with the pass switched off before relying on it.
+    """
+    d = str(tmp_path_factory.mktemp('ppar_reel'))
+    page = '\n'.join(_lines(6, salt=53))
+    other = '\n'.join(_lines(6, salt=59))
+    lone = '\n'.join(_lines(6, salt=61))
+    ids = {'reel1': f"99{11:08d}_IE{88_000_000}_P{241:06d}_FL5",
+           'reel2': f"99{12:08d}_IE{88_000_000}_P{241:06d}_FL5",
+           'reel3': f"99{13:08d}_IE{88_000_000}_P{241:06d}_FL5",
+           'own': f"99{14:08d}_IE{88_000_100}_P{1:06d}_FL6",
+           'other_a': f"99{21:08d}_IE{88_000_200}_P{1:06d}_FL7",
+           'other_b': f"99{22:08d}_IE{88_000_300}_P{1:06d}_FL8",
+           'lone1': f"99{31:08d}_IE{88_000_400}_P{7:06d}_FL9",
+           'lone2': f"99{32:08d}_IE{88_000_400}_P{7:06d}_FL9",
+           'lone3': f"99{33:08d}_IE{88_000_400}_P{7:06d}_FL9"}
+    originals = {ids['reel1']: page, ids['reel2']: page, ids['reel3']: page,
+                 ids['own']: page, ids['other_a']: other,
+                 ids['other_b']: other, ids['lone1']: lone,
+                 ids['lone2']: lone, ids['lone3']: lone}
+    build_index(sorted(originals.items()), d, partitions=2,
+                apply_hygiene=False)
+    idx = open_index(d)
+    assert idx is not None
+    first3 = (lambda t: '\n'.join(t.split('\n')[:3]))
+    return idx, originals, first3(page), first3(other), first3(lone), ids
+
+
+def _by_header(result):
+    return {r['raw_header']: r for r in result['main'] + result['filtered']}
+
+
+def _order_without_the_pass(idx, originals, query):
+    """The searcher's own order, which is what the pass walks."""
+    off = PassageSearcher(index=idx, text_fetcher=_FakeTextFetcher(originals),
+                          demote_duplicate_photography=False)
+    return [r['raw_header'] for r in
+            off.search_composition_logic(full_text=query)['main']]
+
+
+def test_a_records_own_photograph_outranks_a_copy_on_a_shared_reel(reel_corpus):
+    """The kept copy decides the shelfmark the reader sees. A reel page is
+    one photograph listed under every box on the reel, so keeping a reel copy
+    by score order shows a shelfmark that is usually wrong -- and demoted the
+    box's own photograph, the one row whose shelfmark is certain."""
+    idx, originals, query, _other, _lone, ids = reel_corpus
+    reels = {ids['reel1'], ids['reel2'], ids['reel3']}
+    order = _order_without_the_pass(idx, originals, query)
+    # The scenario the fix is for: a reel copy comes first, so score order
+    # alone keeps it and demotes the own photograph.
+    assert set(order) >= reels | {ids['own']} and order[0] in reels, order
+
+    s = PassageSearcher(index=idx, text_fetcher=_FakeTextFetcher(originals))
+    result = s.search_composition_logic(full_text=query)
+    main_ids = {r['raw_header'] for r in result['main']}
+    assert ids['own'] in main_ids, (
+        f"the box's own photograph was demoted; main = {sorted(main_ids)}")
+    assert not reels & main_ids, (
+        f'a reel copy stayed in main: {sorted(reels & main_ids)}')
+    demoted = {r['raw_header'] for r in result['filtered']
+               if r.get('filter_reason') == 'duplicate_photography'}
+    assert demoted == reels
+    assert result['duplicate_photography_demoted'] == 3
+
+
+def test_two_own_photographs_still_keep_the_first_in_score_order(reel_corpus):
+    """Nothing shared: the rule is the one it always was."""
+    idx, originals, _query, other, _lone, ids = reel_corpus
+    first, second = _order_without_the_pass(idx, originals, other)
+    assert {first, second} == {ids['other_a'], ids['other_b']}
+    s = PassageSearcher(index=idx, text_fetcher=_FakeTextFetcher(originals))
+    result = s.search_composition_logic(full_text=other)
+    assert [r['raw_header'] for r in result['main']] == [first]
+    assert _by_header(result)[second]['filter_reason'] == 'duplicate_photography'
+
+
+def test_copies_that_are_all_shared_keep_the_first_in_score_order(reel_corpus):
+    """A page with no own photograph: nothing to prefer, so the score
+    decides. A later copy on the same shared image must not displace the
+    first one."""
+    idx, originals, _query, _other, lone, ids = reel_corpus
+    order = _order_without_the_pass(idx, originals, lone)
+    assert set(order) == {ids['lone1'], ids['lone2'], ids['lone3']}, order
+    s = PassageSearcher(index=idx, text_fetcher=_FakeTextFetcher(originals))
+    result = s.search_composition_logic(full_text=lone)
+    assert [r['raw_header'] for r in result['main']] == order[:1]
+    assert result['duplicate_photography_demoted'] == 2
+
+
+def test_shared_image_sets_are_read_from_the_rows():
+    from shared.passage_parallels import _shared_image_sets
+    rows = [{'raw_header': '9900000011_IE5_P000241_FL1'},
+            {'raw_header': '9900000012_IE5_P000241_FL1'},
+            {'raw_header': '9900000012_IE6_P000001_FL2'},
+            {'raw_header': '9900000013_IE7_P000001_FL3'},
+            {'raw_header': '9900000013_IE7_P000002_FL4'}]
+    # IE5: two records. IE6: one. IE7: one record, two pages -- not shared.
+    assert _shared_image_sets(rows) == {'IE5'}
+
+
 # ---------------------------------------------------------------------------
 # Owner ruling 2026-08-23: the web GUI searches at widest-40 (ds=1.8).
 # ---------------------------------------------------------------------------

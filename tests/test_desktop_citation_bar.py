@@ -171,12 +171,11 @@ def test_the_hardcoded_citation_is_gone_from_the_app_module():
     tab is genuinely about MiDRASH, and citing it there is correct.
 
     SCOPED TO THE BAR. `_get_credit_header` -- the credit on desktop's DOCX/TXT
-    exports -- still holds its own hardcoded MiDRASH text, and that copy has
-    already drifted from the canonical `shared/export_utils.MIDRASH_CREDIT_LINES`
-    it mirrors ("Dataset available at:" for "Dataset:", and the full author line
-    dropped). That is a real, separate gap on a surface this change did not
-    touch, and it is named here so a later reader does not mistake it for
-    something this test failed to notice.
+    exports -- held its own hardcoded MiDRASH text that had drifted from
+    `shared/export_utils.MIDRASH_CREDIT_LINES` ("Dataset available at:" for
+    "Dataset:", and the full author line dropped). Closed 2026-10-17: it now
+    reads `shared.export_dossier.credits_lines`
+    (tests/test_desktop_export_rtl_and_credits.py).
     """
     src = APP.read_text(encoding='utf-8')
     bar = src[src.index('def _create_citation_bar'):

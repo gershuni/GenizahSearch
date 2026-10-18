@@ -50,6 +50,8 @@ DESKTOP_MODULES = [
     # Registered 2026-09-18 (repo-structure Round 1): these five had no guard before the
     # registry-completeness test below existed.
     "desktop/passage_lifecycle.py",
+    # Letter-level search for My Library (2026-10-16).
+    "desktop/passage_local.py",
     "desktop/passage_witnesses.py",
     "desktop/passage_workers.py",
     "desktop/widgets/__init__.py",
@@ -83,6 +85,10 @@ DESKTOP_MODULES = [
     # 2026-10-15: the "Quoting texts..." dialog, kept out of compound_ui.py so
     # that pure-widgets module stays free of network code.
     "desktop/quoting_texts_dialog.py",
+    # 2026-10-17: Qt's own Hebrew strings (Yes / No / OK / Cancel buttons).
+    "desktop/qt_translations.py",
+    # 2026-10-17: export saves that ask when the file is open in Word or Excel.
+    "desktop/export_save.py",
 ]
 
 # Compound statement types whose bodies run at import time
