@@ -4056,7 +4056,7 @@ TRANSLATIONS.update({
     # --- CandidateCard dimension/material labels ---
     "⚠ size mismatch":  "⚠ אי-התאמת גודל",  # same words as the website (owner, 2026-10-18)
     "Size may not match anchor":
-        "הגודל עשוי לא התאים לעוגן",
+        "ייתכן שהגודל אינו תואם לעוגן",
 
     # --- CandidateCard action row ---
     "Browse":                "עיין",             # עיין
