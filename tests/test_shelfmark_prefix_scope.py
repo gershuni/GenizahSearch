@@ -400,6 +400,17 @@ def test_a_whole_input_match_shows_the_variant_that_matched(variants):
     assert {o['sys_id']: o['shelfmark'] for o in got['options']} == {'FULL': 'GASTER 123', 'STUB': 'GASTER 123'}
 
 
+@pytest.mark.parametrize('variants', [['12 3', '123', 'GASTER 123'], ['123', '12 3', 'GASTER 123']])
+def test_a_key_hit_in_the_named_library_shows_a_variant_with_the_typed_integers(variants):
+    """`12 3` and `123` share a key and the index keeps one; the record is both a key hit and a
+    whole-input match, and the shortest form shown must be `123`, not `12 3` (PR #402, Codex
+    round 3). The shortest form still wins when it has the integers (Manchester test above)."""
+    mm = _manager({'GREC': ('Gaster', variants)})
+    for resolve in (mm.resolve_system_by_shelfmark, mm.resolve_catalog_form):
+        got = resolve('GASTER 123')
+        assert (got['sys_id'], got['selected_shelfmark']) == ('GREC', '123')
+
+
 def test_the_whole_input_key_reaches_a_record_that_stores_the_padded_input():
     """Like every T2 key, `w` is zero-insensitive on both sides: a record that stores exactly
     the typed padded text is offered (14 such inputs on the real corpus; PR #402, Codex round 2

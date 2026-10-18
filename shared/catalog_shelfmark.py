@@ -268,11 +268,18 @@ def named_library_exact(stripped, key_hits, bridged, whole_hits, whole_query, co
         if shown is not None:
             whole.append(h if shown == h['shelfmark'] else {**h, 'shelfmark': shown})
     key, want = zkey(stripped), numbers(stripped)
-    out = [h for h in key_hits if in_libraries(h['sys_id'], codes, csv_bank, key, want, cached_variants)]
-    bridge_in = bool(bridged) and in_libraries(bridged['sys_id'], codes, csv_bank, key, want, cached_variants)
     t1_key = normalize_shelfmark(stripped)
-    if not (whole or bridge_in or any(_carries(h, t1_key, want, csv_bank, cached_variants, '.' not in t1_key)
-                                      for h in out)):
+    out, carried = [], False
+    for h in key_hits:
+        if not in_libraries(h['sys_id'], codes, csv_bank, key, want, cached_variants):
+            continue
+        # A kept key hit shows a variant with the typed integers when the one the index kept
+        # lacks them (`123` behind `12 3`); otherwise as today, so the shortest form still wins.
+        shown = _carrying_variant(h, t1_key, want, csv_bank, cached_variants, '.' not in t1_key)
+        carried = carried or shown is not None
+        out.append(h if shown in (None, h['shelfmark']) else {**h, 'shelfmark': shown})
+    bridge_in = bool(bridged) and in_libraries(bridged['sys_id'], codes, csv_bank, key, want, cached_variants)
+    if not (whole or bridge_in or carried):
         return []
     if bridge_in and not any(h['sys_id'] == bridged['sys_id'] for h in out):
         out.insert(0, bridged)

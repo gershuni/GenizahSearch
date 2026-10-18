@@ -226,8 +226,8 @@ here runs), so they say nothing about cache-only variants; those are pinned by s
    cache instead of the snapshot the index carries; index entries built from the live cache
    instead of the frozen copy; T2's whole-input key checking only the variant the index kept;
    a T1 whole-input match or a T2 option showing the variant the index kept (two); `w` kept off
-   the zero-insensitive stored side; `w`'s record-wide check on plain stored keys (31 in all,
-   each red).
+   the zero-insensitive stored side; `w`'s record-wide check on plain stored keys; a kept key hit
+   showing the variant the index kept (32 in all, each red).
 7. **Performance** (Codex round 2, on rev. 3): warm resolver median/p95 for prefixed inputs
    82/130 ms before, 83/128 ms after -- no change per request (the web resolves per request); the
    2M-input batch 162 -> 224 s (+38%), from per-candidate provenance; rev. 4 caches the parse per
@@ -255,6 +255,16 @@ whole-input key keeps the `Ms.`). None changes from today; the GOLDEN rows that 
 
 ## Revision log
 
+- **PR #402 Codex review round 3 (GitHub, 1 finding, P2).** A record that stores `12 3`, `123`
+  and `GASTER 123` is both a key hit (the index kept `12 3`) and a whole-input match; the
+  resolver keeps the shortest form, so `GASTER 123` showed `12 3`. Codex suggested replacing
+  the key hit with the whole match; that would also replace short forms that DO carry the
+  integers (`Ms. P 45` by the long Manchester form). Instead a kept key hit shows a variant with
+  the typed integers when the one the index kept lacks them (`_carrying_variant` on T1's key),
+  and is unchanged otherwise. Test
+  `test_a_key_hit_in_the_named_library_shows_a_variant_with_the_typed_integers`; mutation 32.
+  No answer or shown shelfmark changes on today's corpus (2,022,705 full responses identical).
+  Per-round counts on GitHub: 1, 2, 1.
 - **PR #402 Codex review round 2 (GitHub, 2 findings, P2).** Finding 2 (fixed): after the
   record-wide check, the option still showed the variant the index kept (`GASTER 12 3` for
   `GASTER 0123`); `_carrying_variant` returns the variant that matched, and T1's whole-input
