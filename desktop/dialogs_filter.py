@@ -28,6 +28,11 @@ class ExcludeDialog(QDialog):
 
         self._syncing = False
         self._shelf_to_sys = shelf_map
+        # Catalogue-form answers for lines the shelf map misses ({line: sys_id or None}),
+        # fetched off the UI thread by CatalogFormsThread before Resolve or Apply uses them.
+        self._catalog_cache = {}
+        self._catalog_thread = None
+        self._catalog_abandoned = False
         self._last_edited = None
         self._full_titles = []
         self._display_titles = []
@@ -119,6 +124,7 @@ class ExcludeDialog(QDialog):
         btn_resolve = QPushButton(tr("Resolve Shelfmarks"))
         btn_resolve.setToolTip(tr("Resolve entered shelfmarks and show per-row status report"))
         btn_resolve.clicked.connect(self._resolve_and_show_report)
+        self._btn_resolve = btn_resolve
         file_row.addWidget(btn_resolve)
         file_row.addStretch()
         tab1_layout.addLayout(file_row)
@@ -164,6 +170,7 @@ class ExcludeDialog(QDialog):
         btn_row.addStretch()
         btn_apply = QPushButton(tr("Apply"))
         btn_apply.clicked.connect(self.accept)
+        self._btn_apply = btn_apply
         btn_cancel = QPushButton(tr("Cancel"))
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
@@ -223,7 +230,17 @@ class ExcludeDialog(QDialog):
         self._tab_widget.setCurrentIndex(0)
 
     def _resolve_and_show_report(self):
-        """Resolve shelfmarks from the text areas and show resolution report table."""
+        """Resolve shelfmarks from the text areas and show the resolution report.
+
+        Lines the shelf map misses are looked up as catalogue forms first, in a worker
+        (a cold first lookup builds the shelfmark index); the report follows."""
+        shelf_lines = [l.strip() for l in self.shelf_text_area.toPlainText().splitlines() if l.strip()]
+        if not shelf_lines:
+            self._report_label.setText(tr("No shelfmarks to resolve"))
+            return
+        self._with_catalog_lookup(shelf_lines, self._show_report, skip_sys_ids=False)
+
+    def _show_report(self):
         from PyQt6.QtWidgets import QTableWidgetItem
         shelf_lines = [l.strip() for l in self.shelf_text_area.toPlainText().splitlines() if l.strip()]
         if not shelf_lines:
@@ -233,7 +250,8 @@ class ExcludeDialog(QDialog):
         if not self._shelf_to_sys:
             self._report_label.setText(tr("Shelf map not available"))
             return
-        ids, unresolved, entries = resolve_shelfmarks(shelf_lines, self._shelf_to_sys)
+        ids, unresolved, entries = resolve_shelfmarks(
+            shelf_lines, self._shelf_to_sys, fallback=self._catalog_fallback())
         self._resolved_entries = entries
         self._resolved_ids = ids
         self._resolved_unresolved = unresolved
@@ -282,6 +300,7 @@ class ExcludeDialog(QDialog):
                 if entries_text.strip():
                     entries = [e.strip() for e in entries_text.splitlines() if e.strip()]
                     sys_ids = set()
+                    misses = []
                     for e in entries:
                         cleaned = re.sub(r"\s+", "", e)
                         digits_only = re.sub(r"\D", "", cleaned)
@@ -293,6 +312,12 @@ class ExcludeDialog(QDialog):
                             sid = self._shelf_to_sys.get(norm) if self._shelf_to_sys else None
                             if sid:
                                 sys_ids.add(sid)
+                            else:
+                                misses.append(e)
+                    # Lines the map missed: one catalogue-form batch (single records only).
+                    fallback = self._catalog_fallback()
+                    if misses and fallback is not None:
+                        sys_ids.update(fallback(list(dict.fromkeys(misses))).values())
                     if sys_ids:
                         sources.append(ExclusionSource(
                             label=self._loaded_filename or tr('Manual entry'),
@@ -449,6 +474,93 @@ class ExcludeDialog(QDialog):
         norm = self._normalize_shelfmark(shelf)
         if norm and norm not in self._shelf_to_sys:
             self._shelf_to_sys[norm] = sys_id
+
+    def _catalog_fallback(self):
+        """Catalogue-form lookup for the lines the shelf map misses (exclusion_service.catalog_fallback).
+
+        Used on Resolve and on Apply, never by the per-keystroke sync below. CACHE ONLY: the
+        answers are fetched off the UI thread by _with_catalog_lookup first, and a line that was
+        not fetched counts as not found here -- this never looks anything up on the UI thread.
+        (The shared helper exclusion_service.catalog_fallback is the non-UI version.)"""
+        if self.meta_mgr is None or not hasattr(self.meta_mgr, 'resolve_catalog_forms'):
+            return None
+
+        def _cached(lines):
+            return {line: self._catalog_cache[line] for line in lines if self._catalog_cache.get(line)}
+        return _cached
+
+    def _catalog_misses(self, lines, skip_sys_ids=True):
+        """Lines that need a catalogue-form lookup: not in the shelf map, not cached, and (for
+        Apply, which reads digit-only lines as sys_ids) not digit-only. Resolve sends every
+        line the map misses to the fallback, digit-only ones included, so it passes False."""
+        self._ensure_shelf_map()
+        out = []
+        for line in lines:
+            text = (line or '').strip()
+            if not text or text in self._catalog_cache:
+                continue
+            if skip_sys_ids and re.sub(r"\s+", "", text).isdigit():
+                continue
+            if self._shelf_to_sys and self._shelf_to_sys.get(normalize_shelfmark(text)):
+                continue
+            out.append(text)
+        return list(dict.fromkeys(out))
+
+    def _with_catalog_lookup(self, lines, then, skip_sys_ids=True):
+        """Run `then()` once every catalogue-form line among `lines` has its answer cached.
+
+        Without lookups to make it runs at once; otherwise a CatalogFormsThread fetches them
+        and `then()` runs when it answers -- unless the dialog was cancelled meanwhile. The
+        text boxes are read-only while it runs, so `then()` sees the lines that were fetched."""
+        misses = (self._catalog_misses(lines, skip_sys_ids)
+                  if self._catalog_fallback() is not None else [])
+        if not misses:
+            then()
+            return
+        if self._catalog_thread is not None:
+            return  # a lookup is running; Resolve/Apply are disabled until it answers
+        from desktop.gui_threads import CatalogFormsThread, _keep_until_finished
+        thread = CatalogFormsThread(self.meta_mgr, misses)
+        thread.done.connect(lambda answers, t=then: self._on_catalog_done(answers, t))
+        self._catalog_thread = thread        # held until it answers (cleared in the slot)
+        self._set_catalog_busy(True)
+        thread.start()
+        _keep_until_finished(thread)         # and past a dialog that closes meanwhile
+
+    def _on_catalog_done(self, answers, then):
+        try:
+            from PyQt6 import sip
+            if sip.isdeleted(self):
+                return
+        except ImportError:
+            pass
+        self._catalog_thread = None
+        self._catalog_cache.update(answers)
+        self._set_catalog_busy(False)
+        if not self._catalog_abandoned:
+            then()
+
+    def _set_catalog_busy(self, busy):
+        self._btn_apply.setEnabled(not busy)
+        self._btn_resolve.setEnabled(not busy)
+        self.shelf_text_area.setReadOnly(busy)
+        self.sys_text_area.setReadOnly(busy)
+        if busy:
+            self._report_label.setText(tr("Searching..."))
+
+    def accept(self):
+        """Apply. Lines the shelf map misses are looked up as catalogue forms first, off the
+        UI thread; the dialog closes when the answers are in (get_exclusion_sources reads them)."""
+        if self._tab_widget.currentIndex() == 0 and not self._resolved_ids:
+            lines = [l.strip() for l in self.get_entries_text().splitlines() if l.strip()]
+            if self._catalog_fallback() is not None and self._catalog_misses(lines):
+                self._with_catalog_lookup(lines, lambda: super(ExcludeDialog, self).accept())
+                return
+        super().accept()
+
+    def reject(self):
+        self._catalog_abandoned = True   # a lookup still running must not apply anything
+        super().reject()
 
     def _resolve_sys_from_shelves(self, shelf_lines):
         self._ensure_shelf_map()

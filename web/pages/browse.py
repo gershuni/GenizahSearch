@@ -83,6 +83,8 @@ from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.supabase_client import create_correction, update_correction, get_corrections
 from web.components.typography import h1, h2, h3
 from web.components.joins_panel import peek_connected_fragments, load_connected_fragments_into
+from web.components.shelfmark_picker import items_from_manuscripts, open_shelfmark_picker
+from web import io_bound_result
 from web.pages.browse_state import (
     BrowseState, persist_browse_snapshot, clear_browse_snapshot, restore_browse_snapshot,
 )
@@ -95,6 +97,30 @@ from web.pages.browse_enrichment import (
     update_discovery_panel_section,
     populate_bib_catalog_buttons,
 )
+
+
+async def add_to_reading_desk_by_shelfmark(service, query, container, add_entry):
+    """The reading desk's "Add by shelfmark" (catalogue-shelfmark plan, row H).
+
+    The lookup runs off the event loop. One match calls ``add_entry(sys_id, shelfmark)``;
+    several open the picker in ``container`` (this used to add the first silently), and
+    ``add_entry`` runs only if the user picks one -- closing the picker adds nothing. Returns
+    True when something was found, False otherwise -- including a lookup with no answer
+    (cancelled, or the app is stopping), which is not "not found" and says nothing.
+    """
+    found = await io_bound_result.io_bound(service.search_by_shelfmark, query, 50)
+    if found is io_bound_result.INTERRUPTED:
+        return False
+    results, _exact_match = found
+    if not results:
+        ui.notify(f'{tr("No manuscript found")}: {query}', type='warning')
+        return False
+    if len(results) == 1:
+        add_entry(results[0].sys_id, results[0].shelfmark or query)
+        return True
+    open_shelfmark_picker(container, items_from_manuscripts(results),
+                          lambda item: add_entry(item['sys_id'], item['shelfmark'] or query), query)
+    return True
 
 
 # ============================================================================
@@ -2993,21 +3019,25 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     _persist_reading_desk_state()
                     update_content()
 
-                def toolbar_add_by_shelfmark(shelfmark_text):
-                    """Add a manuscript to the reading desk by shelfmark search."""
+                async def toolbar_add_by_shelfmark(shelfmark_text, on_added=None):
+                    """Add a manuscript to the reading desk by shelfmark search.
+
+                    The lookup runs off the event loop. One match adds it; several open the
+                    picker (this used to add the first silently). `on_added` runs after an
+                    actual add -- not when the picker is closed -- so the box keeps the text
+                    of a cancelled choice.
+                    """
                     if not shelfmark_text or not shelfmark_text.strip():
-                        return
+                        return False
                     query = shelfmark_text.strip()
+
+                    def _add(sys_id, shelfmark):
+                        _add_sys_id_to_reading_desk(sys_id, shelfmark)
+                        if on_added is not None:
+                            on_added()
                     try:
-                        results, exact_match = service.search_by_shelfmark(query, limit=5)
-                        if not results:
-                            ui.notify(f'{tr("No manuscript found")}: {query}', type='warning')
-                            return
-                        # Use first/exact match
-                        result = results[0]
-                        found_sid = result.sys_id
-                        found_sm = result.shelfmark or query
-                        _add_sys_id_to_reading_desk(found_sid, found_sm)
+                        return await add_to_reading_desk_by_shelfmark(
+                            service, query, content_container, _add)
                     except RuntimeError:
                         # Stale slot reference after UI rebuild -- silently ignore
                         pass
@@ -3226,9 +3256,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             placeholder=tr('Add by shelfmark...'),
                         ).props('dense outlined clearable color=green').classes('flex-1').style('max-width: 300px;')
 
-                        def rd_toolbar_add():
-                            toolbar_add_by_shelfmark(rd_shelfmark_input.value)
-                            rd_shelfmark_input.value = ''
+                        async def rd_toolbar_add():
+                            # Awaited: toolbar_add_by_shelfmark is async (Enter and Add both
+                            # come here). The box is cleared only once a record is added.
+                            def _clear():
+                                try:
+                                    rd_shelfmark_input.value = ''
+                                except RuntimeError:
+                                    pass  # the toolbar was rebuilt meanwhile
+                            await toolbar_add_by_shelfmark(rd_shelfmark_input.value, on_added=_clear)
 
                         rd_shelfmark_input.on('keydown.enter', rd_toolbar_add)
 

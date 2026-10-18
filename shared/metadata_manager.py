@@ -1858,6 +1858,21 @@ class MetadataManager:
             except Exception as e:
                 LOGGER.debug("Bridge fallback failed for query %r: %s", query, e)
 
+        # Catalogue-form fallback (docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md, row B): only
+        # for a catalogue-shaped query that found nothing, so an ordinary empty search never
+        # builds the shelfmark index (a research worker would pay seconds and ~160 MiB for it).
+        # Exact or catalogue-form records only, never substring options.
+        if field == 'shelfmark' and not results:
+            from shared.catalog_shelfmark import looks_like_catalogue_form
+            if looks_like_catalogue_form(query):
+                try:
+                    answer = self.resolve_catalog_form(query, limit=500)
+                    if answer['sys_id']:
+                        results.add(answer['sys_id'])
+                    results.update(o['sys_id'] for o in answer['options'])
+                except Exception:
+                    LOGGER.warning("Catalogue-form search fallback failed for %r", query, exc_info=True)
+
         return list(results)
 
     # ---------------- Shelfmark Resolution Helpers ----------------
@@ -1922,6 +1937,7 @@ class MetadataManager:
         Returns a dict: {'sys_id': ..., 'options': [...], 'selected_shelfmark': ...}
         """
         result = {'sys_id': None, 'options': [], 'selected_shelfmark': None}
+        original_query = query  # the catalogue-form fallback below needs the unstripped text
 
         # Strip known library prefix (code, full name, or common abbreviation)
         if query:
@@ -1947,7 +1963,8 @@ class MetadataManager:
         query_has_dots = '.' in norm_query
         norm_query_no_dots = norm_query.replace('.', '') if not query_has_dots else None
 
-        for sys_id, shelf, title, norm_shelf, norm_shelf_no_dots in self._get_shelfmark_index():
+        index = self._get_shelfmark_index()
+        for sys_id, shelf, title, norm_shelf, norm_shelf_no_dots in index:
             entry = {'sys_id': sys_id, 'shelfmark': shelf, 'title': title}
 
             # Standard matching (preserves dots — "tsas31.1" != "tsas3.11")
@@ -2014,9 +2031,62 @@ class MetadataManager:
             result['options'] = exact_matches[:limit]
             return result
 
+        # Catalogue-form fallback (docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md). Reached only
+        # when nothing above matched exactly, so it never changes an exact answer; it may
+        # replace substring options with the records a catalogue form names.
+        catalog = self._resolve_catalog_t2(index, original_query, limit)
+        if catalog is not None:
+            return catalog
+
         partial_matches.sort(key=shelf_sort_key)
         result['options'] = partial_matches[:limit]
         return result
+
+    def _get_catalog_tables(self, index):
+        """Catalogue-form tables for THIS index list, rebuilt whenever the list object changes
+        (`is`, never `id()`: Python reuses the ids of freed lists). One assignment publishes
+        them; two threads building at once produce the same tables."""
+        tables = getattr(self, '_catalog_tables', None)
+        if tables is None or tables.index is not index:
+            from shared.catalog_shelfmark import CatalogTables
+            tables = CatalogTables(index, self.csv_bank)
+            self._catalog_tables = tables
+        return tables
+
+    def _resolve_catalog_t2(self, index, query, limit):
+        """The T2 answer for `query` as a resolve_system_by_shelfmark result, or None."""
+        if not query or not index:
+            return None
+        try:
+            from shared.catalog_shelfmark import resolve_many
+            tables = self._get_catalog_tables(index)
+            answer = resolve_many([query], tables, self.csv_bank, limit=limit, with_exact=False)[query]
+        except Exception:
+            # A defect here must not take today's substring answer away.
+            LOGGER.warning("Catalogue-form shelfmark fallback failed for %r", query, exc_info=True)
+            return None
+        if not answer['total']:
+            return None
+        return {'sys_id': answer['sys_id'], 'options': answer['options'],
+                'selected_shelfmark': answer['selected_shelfmark']}
+
+    def resolve_catalog_form(self, query, limit=100):
+        """Exact-or-catalogue answer for one input, never substring options.
+
+        What resolve_system_by_shelfmark answers exactly, else the catalogue-form fallback.
+        Returns {'sys_id', 'options', 'selected_shelfmark', 'total', 'tier'}; `total` is the
+        count before the `limit` cut, so a caller can tell one record from one of several.
+        """
+        return self.resolve_catalog_forms([query], limit=limit)[query]
+
+    def resolve_catalog_forms(self, queries, limit=100):
+        """resolve_catalog_form for many inputs with one pass over the index."""
+        from shared.catalog_shelfmark import resolve_many
+        index = self._get_shelfmark_index()
+        if not index:
+            return {q: {'sys_id': None, 'options': [], 'selected_shelfmark': None, 'total': 0, 'tier': None}
+                    for q in queries}
+        return resolve_many(list(queries), self._get_catalog_tables(index), self.csv_bank, limit=limit)
 
     def get_display_data(self, full_header, src_label):
         sys_id, p_num = self.parse_header_smart(full_header)

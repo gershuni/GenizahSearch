@@ -2364,10 +2364,19 @@ class CreateDiscoveryDialog(QDialog):
         if self.meta_mgr:
             try:
                 result = self.meta_mgr.resolve_system_by_shelfmark(shelfmark)
-                if result:
-                    sys_id = result.get('sys_id')
             except Exception:
-                pass  # If resolution fails, just use None
+                result = None  # If resolution fails, just use None
+            if result and result.get('sys_id'):
+                sys_id = result.get('sys_id')
+            elif result and result.get('options'):
+                # Several records: ask (it used to add the entry unresolved). The entry
+                # keeps the PICKED record's shelfmark, so two parts of one unit typed the
+                # same way stay two entries. Cancel adds nothing and keeps the typed text.
+                from desktop.shelfmark_picker import pick_shelfmark_option
+                choice = pick_shelfmark_option(self, result['options'])
+                if choice is None:
+                    return
+                sys_id, shelfmark = choice['sys_id'], choice['shelfmark']
 
         self._add_shelfmark_entry(shelfmark, page, sys_id)
 
@@ -2380,9 +2389,12 @@ class CreateDiscoveryDialog(QDialog):
         if not shelfmark:
             return
 
-        # Check for duplicates
+        # Check for duplicates on the same page: the same record when it is resolved (records
+        # can share a shelfmark: 110 Gaster records read "Ms. 1358"), else the same text
         for existing in self.shelfmarks_list:
-            if existing[0] == shelfmark and existing[1] == page:
+            if existing[1] != page:
+                continue
+            if (existing[2] == sys_id) if sys_id else (existing[0] == shelfmark):
                 return  # Already in list
 
         self.shelfmarks_list.append((shelfmark, page, sys_id))
@@ -4521,6 +4533,56 @@ class JoinsDialog(QDialog):
                         doc_id_b = sys_id
                         break
 
+        # Still unresolved: ask the shared resolver (catalogue forms included) off the UI
+        # thread, then finish in _on_frag_b_resolved. Matches above are unchanged.
+        if not doc_id_b and self.meta_mgr and hasattr(self.meta_mgr, 'resolve_system_by_shelfmark'):
+            self._resolve_frag_b_then_create(frag_a, frag_b, rel_type, notes, doc_id_a)
+            return
+
+        self._finish_create_join(frag_a, frag_b, rel_type, notes, doc_id_a, doc_id_b)
+
+    def _resolve_frag_b_then_create(self, frag_a, frag_b, rel_type, notes, doc_id_a):
+        from desktop.gui_threads import ShelfmarkResolveThread, _keep_until_finished
+        thread = ShelfmarkResolveThread(self.meta_mgr, frag_b)
+        args = (frag_a, frag_b, rel_type, notes, doc_id_a)
+        thread.resolved.connect(lambda result, a=args: self._on_frag_b_resolved(a, result))
+        thread.failed.connect(lambda _err, a=args: self._on_frag_b_resolved(a, None))
+        # Held by the dialog until its answer arrives (cleared in _on_frag_b_resolved, which
+        # breaks the dialog -> thread -> slot -> dialog cycle), and by the module keeper once
+        # RUNNING -- the keeper releases a thread that is not running yet, so start() first.
+        self._frag_b_pending = thread
+        self.btn_create.setEnabled(False)
+        thread.start()
+        _keep_until_finished(thread)
+
+    def _on_frag_b_resolved(self, args, result):
+        """One record: join with it. Several: the picker; cancel creates nothing. None
+        (or a failed lookup): create the join by shelfmark only, as before."""
+        try:
+            from PyQt6 import sip
+            if sip.isdeleted(self):
+                return
+        except ImportError:
+            pass
+        self._frag_b_pending = None
+        self.btn_create.setEnabled(True)
+        if not self.isVisible():
+            return  # closed while the lookup ran
+        frag_a, frag_b, rel_type, notes, doc_id_a = args
+        doc_id_b = None
+        result = result or {}
+        if result.get('sys_id'):
+            doc_id_b = result['sys_id']
+            frag_b = result.get('selected_shelfmark') or frag_b
+        elif result.get('options'):
+            from desktop.shelfmark_picker import pick_shelfmark_option
+            choice = pick_shelfmark_option(self, result['options'])
+            if choice is None:
+                return
+            doc_id_b, frag_b = choice['sys_id'], choice['shelfmark']
+        self._finish_create_join(frag_a, frag_b, rel_type, notes, doc_id_a, doc_id_b)
+
+    def _finish_create_join(self, frag_a, frag_b, rel_type, notes, doc_id_a, doc_id_b):
         # Try to create via API first
         join, msg = self.client.create_join(frag_a, frag_b, rel_type, notes, document_id_a=doc_id_a, document_id_b=doc_id_b)
         if join:
