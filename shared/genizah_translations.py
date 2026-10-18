@@ -5773,3 +5773,8 @@ TRANSLATIONS.update({
 TRANSLATIONS.update({
     'Not triaged': 'לא מוין',
 })
+
+# Web visual-similarity window: the List / Thumbnails view switch (2026-10-18).
+TRANSLATIONS.update({
+    'Thumbnails': 'תמונות ממוזערות',
+})

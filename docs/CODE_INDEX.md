@@ -1147,13 +1147,17 @@ desktop.Y.X` identity holds via the facades.
 
 ## web/components/visual_similarity_dialog.py
 
-- **Function** `_pick_preview_image_url` (Line 31) — Choose the same best-effort preview source family as the browse page.
-- **Function** `_resolve_preview_image_url_sync` (Line 62) — Populate browse metadata on demand, then pick the preview image URL.
-- **Function** `_fetch_original_info` (Line 90) — Fetch image URL and text snippet for the original manuscript.
-- **Function** `_fetch_preview_image_url` (Line 129) — Resolve the best preview image URL without blocking the UI event loop.
-- **Function** `_fetch_suggestion_text` (Line 137) — Fetch text snippet for a suggestion manuscript.
-- **Function** `show_visual_similarity_dialog` (Line 155) — Show visual similarity suggestions dialog for a manuscript.
-- **Function** `_render_suggestion_row` (Line 433) — Render a single suggestion row with expandable detail section.
+- **Function** `_normalize_view` (Line 39) — 'grid' for the thumbnail view; anything else is the list (the default).
+- **Function** `_suggestion_thumbnail_url` (Line 44) — Low-resolution first-image URL for a suggestion's thumbnail card.
+- **Function** `_pick_preview_image_url` (Line 60) — Choose the same best-effort preview source family as the browse page.
+- **Function** `_resolve_preview_image_url_sync` (Line 95) — Populate browse metadata on demand, then pick the preview image URL.
+- **Function** `_fetch_original_info` (Line 123) — Fetch image URL and text snippet for the original manuscript.
+- **Function** `_fetch_preview_image_url` (Line 163) — Resolve the best preview image URL without blocking the UI event loop.
+- **Function** `_fetch_suggestion_text` (Line 171) — Fetch text snippet for a suggestion manuscript.
+- **Function** `show_visual_similarity_dialog` (Line 189) — Show visual similarity suggestions dialog for a manuscript.
+- **Function** `_render_suggestion_row` (Line 499) — Render a single suggestion row with expandable detail section.
+- **Function** `_render_suggestion_actions` (Line 676) — Render the Browse / Puzzle / List / Join buttons for one suggestion.
+- **Function** `_render_suggestion_card` (Line 746) — Render one suggestion as a thumbnail card (the grid view).
 
 ## web/main.py
 
