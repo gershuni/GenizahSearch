@@ -4,8 +4,8 @@ Status: rev. 8 (2026-10-18): Codex rounds 1 (plan, 9 findings), 2 (plan + code, 
 5 (3) and 6 (2), each DO NOT SHIP, folded in -- see the revision log. Per the owner's review budget
 (the count fell 9-5-4-3-3-2, the last three rounds synthetic only), round 7 is for information:
 what it finds is verified and logged in `docs/OPEN_ISSUES.md`. Implemented on
-`feat/shelfmark-prefix-scope`, on top of PR #400's head `edb3ea61` (`feat/catalogue-shelfmark-forms`),
-not committed. Builds on `docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md`, whose helpers it reuses.
+`feat/shelfmark-prefix-scope` (`044e0885`, on top of PR #400's head `edb3ea61`), merged with
+master-main after #400 and #401; not pushed, no PR yet. Builds on `docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md`, whose helpers it reuses.
 
 ## 1. Problem (open issue, P3, logged 2026-10-18)
 
