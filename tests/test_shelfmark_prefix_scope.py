@@ -374,6 +374,7 @@ def test_the_numeric_check_sees_every_variant_not_only_the_one_the_index_kept(va
     (['GASTER 12 3', 'GASTER 123'], None),
     (['GASTER 123', 'GASTER 12 3'], None),
     ([], {'shelfmark': 'GASTER 12 3', 'shelfmark_alt': 'GASTER 123', 'title': ''}),
+    (['GASTER 01 23', 'GASTER 0123'], None),            # padded variants: zero-insensitive keys
 ])
 def test_the_whole_input_t2_key_sees_every_variant(variants, cached):
     """A padded input reaches T2's whole-input key; the record that also stores `GASTER 123`
@@ -383,6 +384,31 @@ def test_the_whole_input_t2_key_sees_every_variant(variants, cached):
     got = mm.resolve_catalog_form('GASTER 0123')
     assert sorted(ids(got)) == ['FULL', 'STUB'] and got['tier'] == 'direct'
     assert sorted(ids(mm.resolve_system_by_shelfmark('GASTER 0123'))) == ['FULL', 'STUB']
+
+
+@pytest.mark.parametrize('variants', [['GASTER 12 3', 'GASTER 123'], ['GASTER 123', 'GASTER 12 3']])
+def test_a_whole_input_match_shows_the_variant_that_matched(variants):
+    """The record-wide check accepts `GASTER 123`; the option must show it, not the `GASTER 12 3`
+    the index kept, in T1 and in T2 (PR #402, Codex round 2)."""
+    mm = _manager({'FULL': ('BL', variants), 'HAS123': ('HAS', ['123'])})
+    for resolve in (mm.resolve_system_by_shelfmark, mm.resolve_catalog_form):
+        got = resolve('GASTER 123')                                  # T1: the whole input
+        assert (got['sys_id'], got['selected_shelfmark']) == ('FULL', 'GASTER 123')
+    mm = _manager({'FULL': ('BL', variants), 'STUB': ('BL', ['GASTER 123'])})
+    got = mm.resolve_catalog_form('GASTER 0123')                     # T2: the `w` key
+    assert got['tier'] == 'direct'
+    assert {o['sys_id']: o['shelfmark'] for o in got['options']} == {'FULL': 'GASTER 123', 'STUB': 'GASTER 123'}
+
+
+def test_the_whole_input_key_reaches_a_record_that_stores_the_padded_input():
+    """Like every T2 key, `w` is zero-insensitive on both sides: a record that stores exactly
+    the typed padded text is offered (14 such inputs on the real corpus; PR #402, Codex round 2
+    asked to drop this and is declined)."""
+    text = 'The Jewish Theological Seminary of America Acc. 04362'
+    mm = _manager({'JTSACC': ('JTS', [text]), 'HAS4362': ('HAS', ['Acc. 4362'])})
+    got = mm.resolve_catalog_form(text)
+    assert ids(got) == ['JTSACC'] and got['tier'] == 'direct'
+    assert ids(mm.resolve_system_by_shelfmark(text)) == ['JTSACC']
 
 
 def test_no_dotless_rule_for_the_whole_input():

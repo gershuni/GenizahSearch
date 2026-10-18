@@ -57,6 +57,9 @@ GOLDEN = {
     # T2 names the library of the record that stores the whole input: the padded form reaches
     # both BL records, as `GASTER 1201.17` does.
     'GASTER 01201.017': (['990053540570205171', '990053541630205171'], 'direct'),
+    # The record stores exactly this padded text; only the whole-input key's zero-insensitive
+    # stored side reaches it (one of 14 such inputs; PR #402, Codex round 2, finding 1 declined).
+    'The Jewish Theological Seminary of America Acc. 04362': (['990000954350205171'], 'direct'),
 }
 
 

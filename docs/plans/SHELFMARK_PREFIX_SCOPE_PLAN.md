@@ -76,8 +76,11 @@ conflation as the only answer.
 
 **R4. One rule everywhere.** `resolve_system_by_shelfmark` and the restated T1 call the same
 `named_library_exact`. T2's alias institution uses `in_libraries` (provenance on zero-insensitive
-keys); T2 gains the whole-input key `w` = `zkey(q)` (any library, numeric check), so `Halper 077`
-and `GASTER 01201.017` reach what `Halper 77` and `GASTER 1201.17` reach.
+keys); T2 gains the whole-input key `w` = `zkey(q)` (any library, numeric check against every
+stored variant of the record), so `Halper 077` and `GASTER 01201.017` reach what `Halper 77` and
+`GASTER 1201.17` reach. Like every T2 key, `w` is zero-insensitive on BOTH sides: it also reaches a
+record that stores the typed padded text itself (`The Jewish Theological Seminary of America
+Acc. 04362`; 14 such inputs on today's corpus), which a stored side on plain keys would lose.
 
 Not changed: `normalize_shelfmark` (SHA-pinned), `_strip_library_prefix` and its aliases,
 `lookup_cudl`, substring matching, `search_by_meta`, inputs whose prefix names no library or that
@@ -221,8 +224,10 @@ here runs), so they say nothing about cache-only variants; those are pinned by s
    reading `Ms.` case-sensitively; provenance on plain keys; the query head split case-sensitive;
    the `prefix_rule` switch ignored; provenance ignoring the NLI cache; provenance reading the live
    cache instead of the snapshot the index carries; index entries built from the live cache
-   instead of the frozen copy; T2's whole-input key checking only the variant the index kept
-   (27 in all, each red).
+   instead of the frozen copy; T2's whole-input key checking only the variant the index kept;
+   a T1 whole-input match or a T2 option showing the variant the index kept (two); `w` kept off
+   the zero-insensitive stored side; `w`'s record-wide check on plain stored keys (31 in all,
+   each red).
 7. **Performance** (Codex round 2, on rev. 3): warm resolver median/p95 for prefixed inputs
    82/130 ms before, 83/128 ms after -- no change per request (the web resolves per request); the
    2M-input batch 162 -> 224 s (+38%), from per-candidate provenance; rev. 4 caches the parse per
@@ -250,6 +255,15 @@ whole-input key keeps the `Ms.`). None changes from today; the GOLDEN rows that 
 
 ## Revision log
 
+- **PR #402 Codex review round 2 (GitHub, 2 findings, P2).** Finding 2 (fixed): after the
+  record-wide check, the option still showed the variant the index kept (`GASTER 12 3` for
+  `GASTER 0123`); `_carrying_variant` returns the variant that matched, and T1's whole-input
+  matches and T2's `w` options show it (test `test_a_whole_input_match_shows_the_variant_that_matched`,
+  mutations 28-29). Finding 1 (declined, measured): keep `w` off the zero-insensitive stored side
+  and compare stored variants on plain keys. Applied to every input, it turns 14 inputs that are
+  exactly a record's stored text (`The Jewish Theological Seminary of America Acc. 04362` ->
+  `990000954350205171`, and 13 more `... Acc. 0NNNN`) into not found, and changes nothing else;
+  pinned by a GOLDEN row, a synthetic test and mutations 30-31.
 - **PR #402 Codex review (GitHub, 1 finding, P2).** T2's whole-input key `w` compared the typed
   numbers with the one variant the index kept per (record, key), so `GASTER 0123` missed a record
   storing `GASTER 12 3` before `GASTER 123` -- the round-6 defect, in T2. `w` candidates now use

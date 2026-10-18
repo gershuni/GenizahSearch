@@ -217,18 +217,24 @@ def _record_variants(sys_id, csv_bank, cached_variants):
     return out
 
 
-def _carries(hit, key, want, csv_bank, cached_variants, dotless=False, zeros=False):
-    """Whether the record stores a variant with normalized key ``key`` (or, for a dotless key,
-    that key once dots are dropped; with ``zeros``, zero-insensitive keys) and the integers
-    ``want``. The index keeps one variant per (record, key), so checking only that one could
-    miss `GASTER 123` behind `GASTER 12 3`."""
+def _carrying_variant(hit, key, want, csv_bank, cached_variants, dotless=False, zeros=False):
+    """The record's stored form with normalized key ``key`` (or, for a dotless key, that key
+    once dots are dropped; with ``zeros``, zero-insensitive keys) and the integers ``want``:
+    the hit's own shelfmark when it has them, else the first such variant; None if there is
+    none. The index keeps one variant per (record, key), so checking only that one could miss
+    `GASTER 123` behind `GASTER 12 3` -- and the option must then show `GASTER 123`."""
     if numbers(hit['shelfmark']) == want:
-        return True
+        return hit['shelfmark']
     for variant in _record_variants(hit['sys_id'], csv_bank, cached_variants):
         norm = zkey(variant) if zeros else normalize_shelfmark(variant)
         if (norm == key or (dotless and norm.replace('.', '') == key)) and numbers(variant) == want:
-            return True
-    return False
+            return variant
+    return None
+
+
+def _carries(hit, key, want, csv_bank, cached_variants, dotless=False, zeros=False):
+    """Whether the record stores such a form (``_carrying_variant``)."""
+    return _carrying_variant(hit, key, want, csv_bank, cached_variants, dotless, zeros) is not None
 
 
 def named_library_exact(stripped, key_hits, bridged, whole_hits, whole_query, codes, csv_bank, cached_variants=None):
@@ -256,7 +262,11 @@ def named_library_exact(stripped, key_hits, bridged, whole_hits, whole_query, co
     """
     want_whole = numbers(whole_query)
     whole_key = normalize_shelfmark(whole_query)
-    whole = [h for h in whole_hits if _carries(h, whole_key, want_whole, csv_bank, cached_variants)]
+    whole = []
+    for h in whole_hits:
+        shown = _carrying_variant(h, whole_key, want_whole, csv_bank, cached_variants)
+        if shown is not None:
+            whole.append(h if shown == h['shelfmark'] else {**h, 'shelfmark': shown})
     key, want = zkey(stripped), numbers(stripped)
     out = [h for h in key_hits if in_libraries(h['sys_id'], codes, csv_bank, key, want, cached_variants)]
     bridge_in = bool(bridged) and in_libraries(bridged['sys_id'], codes, csv_bank, key, want, cached_variants)
@@ -444,9 +454,11 @@ def _plan(query, tables, with_exact, prefix_rule=True):
     if named:
         plan.keys.append((zkey(rest), rest, 'r', True))
         if prefix_rule and plan.institution[0] == 'alias' and rest:
-            # The whole input, any library: what T1's prefix rule reaches for the unpadded
-            # form (`Halper 077` -> the record that stores `Halper 77`). Never for a bare
-            # library name, which T1 answers with nothing.
+            # The whole input, any library: records that store it up to leading zeros, with
+            # its integers -- zero-insensitive on both sides like every T2 key (`Halper 077`
+            # -> the record that stores `Halper 77`; `... Acc. 04362` -> the record that
+            # stores exactly that). Never for a bare library name, which T1 answers with
+            # nothing.
             plan.keys.append((zkey(q), q, 'w', False))
     elif sq:
         plan.keys.append((zkey(sq), sq, 'c', False))
@@ -599,24 +611,30 @@ def resolve_many(queries, tables, csv_bank, limit=100, with_exact=True, prefix_r
         def keep(e_sys_id, needs):
             return not needs or _belongs(e_sys_id, institution, csv_bank, alias_rest, prefix_rule, cached_variants)
 
-        def fits(e, form, tier):
+        def shown(e, form, tier):
+            """The stored form to offer for index entry ``e`` matched on a key of ``form``."""
             if numbers(e[1]) == numbers(form):
-                return True
-            # The whole-input key looks at every stored variant, as T1's prefix rule does:
-            # the index may have kept `GASTER 12 3` for a record that also stores `GASTER 123`.
-            return tier == 'w' and _carries(_entry(e), zkey(form), numbers(form), csv_bank,
-                                            cached_variants, zeros=True)
+                return e[1]
+            if tier != 'w':
+                return None
+            # The whole-input key looks at every stored variant, as T1's prefix rule does: the
+            # index may have kept `GASTER 12 3` for a record that also stores `GASTER 123`,
+            # which is then the form offered.
+            return _carrying_variant(_entry(e), zkey(form), numbers(form), csv_bank, cached_variants, zeros=True)
+
+        def offer(e, form, tier, needs):
+            s = shown(e, form, tier)
+            if s is not None and keep(e[0], needs):
+                cands.append({'sys_id': e[0], 'shelfmark': s, 'title': e[2]})
 
         for e, form, needs, tier in found.get(query, ()):
-            if fits(e, form, tier) and keep(e[0], needs):
-                cands.append(_entry(e))
+            offer(e, form, tier, needs)
         for e in nodot_found.get(query, ()):
             if numbers(e[1]) == want and keep(e[0], institution is not None):
                 cands.append(_entry(e))
         for key, form, tier, needs in plan.keys:
             for e in tables.zero_side.get(key, ()):
-                if fits(e, form, tier) and keep(e[0], needs):
-                    cands.append(_entry(e))
+                offer(e, form, tier, needs)
         if plan.bridge_text:
             bridged = _bridge_entry(plan.bridge_text, csv_bank)
             if bridged and numbers(bridged['shelfmark']) == want and keep(bridged['sys_id'], institution is not None):
