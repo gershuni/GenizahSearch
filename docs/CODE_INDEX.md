@@ -1114,6 +1114,7 @@ desktop.Y.X` identity holds via the facades.
 - **Class** `PuzzleImageLoaderThread` (Line 1583) — Load and process a fragment image in the background via PuzzleImageService.
     - Method `__init__` (Line 1588)
     - Method `run` (Line 1598)
+- **Class** `ShelfmarkResolveThread` — runs `resolve_system_by_shelfmark` off the UI thread for the Puzzle add box and the Joins dialog's fragment B (a cold first lookup builds the index).
 - **Class** `PuzzleMetaLoaderThread` (Line 1615) — Resolve images_nli (with fl_ids) for a sys_id in the background.
     - Method `__init__` (Line 1625)
     - Method `run` (Line 1631)
@@ -1121,6 +1122,11 @@ desktop.Y.X` identity holds via the facades.
 - **Class** `FilterCountWorker` (Line 1737) — Background worker to compute manuscript count for pre-search filters.
     - Method `__init__` (Line 1741)
     - Method `run` (Line 1751)
+
+## web/components/shelfmark_picker.py
+
+- **Function** `open_shelfmark_picker(container, items, on_pick, query)` — "Select Manuscript" dialog for a shelfmark naming several records (reading desk, Joins Lab load box, Fragment Puzzle); entered in an explicit container; close = cancel.
+- **Function** `items_from_manuscripts` / `items_from_options` — plain picker items from `ManuscriptInfo` rows / resolver options.
 
 ## web/components/translate_button.py
 
@@ -1467,6 +1473,10 @@ Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /
     - Method `closeEvent` (Line 2780)
     - Method `open_catalog` (Line 2808)
     - Method `open_viewer` (Line 2811)
+
+## desktop/shelfmark_picker.py
+
+- **Function** `pick_shelfmark_option(parent, options)` — the numbered "Multiple shelfmarks found" picker (from `browse_load`), shared by the Puzzle add box, the Joins dialog's fragment B and Share a Discovery; `None` = cancelled.
 
 ## desktop/dialogs_filter.py
 
@@ -2230,6 +2240,19 @@ moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `deskt
 - **Function** `_repair_missing_ie_pages` (Line 316) — Repair browse_map for multi-IE manuscripts where pages from non-primary IEs
 - **Function** `dedupe_browse_map` (Line 448) — Deduplicate browse_map pages and tag each page with its IE.
 
+## shared/catalog_shelfmark.py
+
+Catalogue-form shelfmarks (plan `docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md`): the fallback ("T2") that
+reads shelfmarks as the NLI catalogue writes them (`Cambridge University Library, Ms. T-S K 08.026`,
+`Mosseri, Jacques, Ms. VIII.402`), run only when the resolver found no exact match.
+
+- **Function** `zs` / `zkey` / `numbers` — leading zeros stripped on the raw text, then normalized; integers for the numeric check.
+- **Function** `looks_like_catalogue_form` — cheap gate (`Ms.` token or zero-padded number) so an ordinary empty search builds no index.
+- **Function** `head_codes` / `alias_codes` — authoritative `LIBRARY_CODES` codes for an institution head / prefix (case-equivalent `BnF`/`BNF`); never frequency.
+- **Class** `CatalogTables` — heads (from raw call numbers, >= 3 uses), their codes, the stored-side zero table; keeps a reference to its index.
+- **Function** `t1_exact_entries` — the resolver's exact candidates for many inputs (pinned to master-main's answers by `tests/test_catalog_shelfmark_real.py`).
+- **Function** `resolve_many` — exact stage + union of candidates (D0 unpadded exact within the institution, long form, Mosseri `Moss.` form, rest within the institution, whole input when none named; Mosseri parent only if empty), one pass for many inputs.
+
 ## shared/text_normalize.py
 
 - **Function** `strip_nikud` (Line 17) — Remove Hebrew vowel marks (nikud) and cantillation marks from text.
@@ -2300,7 +2323,9 @@ moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `deskt
     - Method `_normalize_shelfmark` (Line 1767) — Normalize shelfmarks using the canonical module-level function.
     - Method `_iter_shelfmark_sources` (Line 1771) — Yield shelfmark candidates from CSV bank and cached metadata.
     - Method `_get_shelfmark_index` (Line 1789) — Build or return cached pre-normalized shelfmark index.
-    - Method `resolve_system_by_shelfmark` (Line 1822) — Resolve a system ID by shelfmark, ignoring dots/slashes/spaces.
+    - Method `resolve_system_by_shelfmark` (Line 1822) — Resolve a system ID by shelfmark, ignoring dots/slashes/spaces. When nothing matches exactly, falls back to catalogue forms (`shared/catalog_shelfmark.py`) before substring options.
+    - Method `resolve_catalog_form` / `resolve_catalog_forms` — exact-or-catalogue-form answer for one / many inputs (one index pass), never substring options; `{sys_id, options, selected_shelfmark, total, tier}`. Used by `search_by_meta`'s empty-result fallback and exclusion lists.
+    - Method `_get_catalog_tables` — catalogue-form tables tied to the index list object (`is`, never `id()`).
     - Method `get_display_data` (Line 1924)
 
 ## shared/indexer.py

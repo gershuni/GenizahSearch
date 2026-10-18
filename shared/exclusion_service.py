@@ -116,8 +116,15 @@ def build_shelf_map(csv_bank: dict) -> dict[str, str]:
 def resolve_shelfmarks(
     raw_lines: list[str],
     shelf_map: dict[str, str],
+    fallback=None,
 ) -> tuple[set[str], list[str], list[ResolvedEntry]]:
     """Resolve raw shelfmark strings to sys_ids via the shelf_map.
+
+    ``fallback`` (optional) is called ONCE with every line the map missed and returns
+    ``{line: sys_id}`` for the lines it resolves to a single record -- normally
+    ``catalog_fallback(meta_mgr)``, the shared resolver's exact-or-catalogue-form answer
+    (docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md, row F). Lines the map finds are never
+    sent to it, so nothing found today changes.
 
     Returns:
         (resolved_sys_ids, unresolved_lines, resolved_entries)
@@ -127,9 +134,17 @@ def resolve_shelfmarks(
     entries: list[ResolvedEntry] = []
     seen_ids: set[str] = set()
 
+    rescued: dict[str, str] = {}
+    if fallback is not None:
+        misses = [raw for raw in raw_lines if shelf_map.get(normalize_shelfmark(raw)) is None]
+        if misses:
+            rescued = fallback(list(dict.fromkeys(misses))) or {}
+
     for raw in raw_lines:
         norm = normalize_shelfmark(raw)
         sys_id = shelf_map.get(norm)
+        if sys_id is None:
+            sys_id = rescued.get(raw)
 
         if sys_id is None:
             unresolved.append(raw)
@@ -142,6 +157,18 @@ def resolve_shelfmarks(
             entries.append(ResolvedEntry(raw, norm, sys_id, 'found'))
 
     return resolved_ids, unresolved, entries
+
+
+def catalog_fallback(meta_mgr):
+    """A ``resolve_shelfmarks`` fallback over ``MetadataManager.resolve_catalog_forms``.
+
+    One index pass for all the lines the map missed. Only a single-record answer counts:
+    a catalogue form naming several fragments (a Mosseri unit with parts) stays not found.
+    """
+    def _fallback(lines):
+        answers = meta_mgr.resolve_catalog_forms(lines)
+        return {line: a['sys_id'] for line, a in answers.items() if a.get('sys_id')}
+    return _fallback
 
 
 def compute_excluded_ids(sources: list[ExclusionSource]) -> set[str]:

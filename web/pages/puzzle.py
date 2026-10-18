@@ -14,6 +14,7 @@ import json
 
 from nicegui import ui, app, run
 from web import io_bound_result
+from web.components.shelfmark_picker import items_from_options, open_shelfmark_picker
 from web.translations import tr, get_language
 from web.state import state
 from web.safe_storage import safe_user_pop
@@ -3015,7 +3016,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             notes_input.on('blur', lambda: schedule_auto_save() if doc_state['current_doc_id'] else None)
 
     # ── Main container ──
-    with ui.column().classes('puzzle-container w-full'):
+    with ui.column().classes('puzzle-container w-full') as puzzle_main:
 
         # ── Toolbar Row 1: Add fragments + actions ──
         with ui.row().classes('puzzle-toolbar items-center gap-1'):
@@ -3036,10 +3037,27 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     ui.notify(tr('Shelfmark not found'), type='warning')
                     return
 
-                result = await run.io_bound(
+                result = await io_bound_result.io_bound(
                     state.meta_mgr.resolve_system_by_shelfmark, text
                 )
-                sys_id = result.get('sys_id') if result else None
+                if result is io_bound_result.INTERRUPTED:
+                    return  # no answer (cancelled, or the app is stopping): not "not found"
+                result = result or {}
+                sys_id = result.get('sys_id')
+                options = result.get('options') or []
+                if not sys_id and len(options) == 1:
+                    sys_id, result = options[0]['sys_id'], {'selected_shelfmark': options[0]['shelfmark']}
+                if not sys_id and options:
+                    # Several records (this used to say "not found"): ask.
+                    async def _add_picked(item):
+                        shelfmark_input.value = ''
+                        await _add_fragment_by_sys_id(
+                            item['sys_id'], item['shelfmark'] or text, puzzle_meta,
+                            pending_fragment_meta, threshold_slider
+                        )
+                    open_shelfmark_picker(puzzle_main, items_from_options(options, state.meta_mgr),
+                                          _add_picked, text)
+                    return
                 if not sys_id:
                     ui.notify(tr('Shelfmark not found'), type='warning')
                     return

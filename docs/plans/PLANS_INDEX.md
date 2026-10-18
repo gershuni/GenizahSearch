@@ -8,6 +8,7 @@
 
 | Plan | Status | Description |
 |------|--------|-------------|
+| [CATALOGUE_SHELFMARK_FORMS_PLAN.md](CATALOGUE_SHELFMARK_FORMS_PLAN.md) | Implemented on `feat/catalogue-shelfmark-forms` (2026-10-18); PR pending | Accept shelfmarks as the NLI catalogue writes them (`Cambridge University Library, Ms. T-S K 08.026`, `Mosseri, Jacques, Ms. VIII.402`) on every shelfmark input, with pickers where the web takes the first match today; autocomplete untouched |
 | [AI_LISTINGS_LAUNCH_PLAN.md](AI_LISTINGS_LAUNCH_PLAN.md) | Plan (2026-10-11); owner decisions pending | The `/ai` page, homepage strip and `/chatgpt` switched to the ChatGPT plugin and Claude connector per listing, by configuration, with an announcement |
 | [MCP_CHUNK_AND_VARIANT_LEVELS_PLAN.md](MCP_CHUNK_AND_VARIANT_LEVELS_PLAN.md) | Rev 3 (2026-10-11): built; Maximum and chunk levels held by measurement | Chunk parallels in the MCP server (`find_chunk_parallels`) and the website's Extended/Maximum variant levels in MCP and the public API |
 | [MCP_SERVER_PLAN.md](MCP_SERVER_PLAN.md) | Codex SHIP (rev. 5, 2026-10-08); owner decisions recorded 2026-10-09; spike next | Public MCP server at `/mcp` over the `/api/chatgpt` facade, replacing the GenizahSearch GPT before OpenAI retires GPTs on 2026-12-11; ChatGPT plugin + Claude connector listings |

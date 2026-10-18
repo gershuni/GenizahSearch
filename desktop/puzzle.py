@@ -22,7 +22,8 @@ from PyQt6.QtGui import (
 from PyQt6 import sip
 
 from genizah_core import get_logger, normalize_shelfmark, tr
-from desktop.gui_threads import PuzzleImageLoaderThread, PuzzleMetaLoaderThread
+from desktop.gui_threads import PuzzleImageLoaderThread, PuzzleMetaLoaderThread, ShelfmarkResolveThread
+from desktop.shelfmark_picker import pick_shelfmark_option
 
 logger = get_logger(__name__)
 
@@ -1274,9 +1275,63 @@ class PuzzleCanvasWindow(QMainWindow):
         shelf_to_sys = getattr(self.app, '_shelf_to_sys', None)
         sys_id = shelf_to_sys.get(norm) if shelf_to_sys else None
         if not sys_id:
-            self.statusBar().showMessage(tr("Shelfmark not found"), 3000)
+            # Not in the quick map (one shortest shelfmark per record): ask the shared
+            # resolver, which also reads catalogue forms, off the UI thread.
+            self._start_shelfmark_resolve(text)
             return
+        self._add_resolved_shelfmark(sys_id, text)
 
+    def _start_shelfmark_resolve(self, text):
+        """Resolve `text` with MetadataManager.resolve_system_by_shelfmark in a worker.
+
+        The canvas generation is captured NOW (as _start_meta_resolve does), so New or
+        opening a join while the lookup runs drops its answer instead of adding the old
+        request to the new canvas."""
+        gen = self._canvas_gen
+        thread = ShelfmarkResolveThread(self.app.meta_mgr, text)
+        thread.resolved.connect(partial(self._on_shelfmark_resolved, gen, text))
+        thread.failed.connect(partial(self._on_shelfmark_resolve_failed, gen))
+        self._meta_threads.append(thread)
+        self._set_shelfmark_lookup_busy(True)
+        self.statusBar().showMessage(tr("Searching..."), 5000)
+        thread.start()
+
+    def _set_shelfmark_lookup_busy(self, busy):
+        self.shelfmark_input.setEnabled(not busy)
+        self.btn_add.setEnabled(not busy)
+
+    def _on_shelfmark_resolved(self, gen, text, result):
+        """Worker answer: one record adds it, several open the picker, none says so."""
+        if sip.isdeleted(self):
+            return
+        self._set_shelfmark_lookup_busy(False)
+        if gen != self._canvas_gen:
+            logger.debug("Puzzle: dropped a shelfmark lookup for %r made for a replaced canvas", text)
+            return
+        result = result or {}
+        sys_id = result.get('sys_id')
+        picked = result.get('selected_shelfmark')
+        if not sys_id:
+            options = result.get('options') or []
+            if not options:
+                self.statusBar().showMessage(tr("Shelfmark not found"), 3000)
+                return
+            choice = pick_shelfmark_option(self, options)
+            if choice is None or sip.isdeleted(self) or gen != self._canvas_gen:
+                return  # cancelled, or the canvas was replaced while the picker was open
+            sys_id, picked = choice['sys_id'], choice['shelfmark']
+        self._add_resolved_shelfmark(sys_id, picked or text)
+
+    def _on_shelfmark_resolve_failed(self, gen, error):
+        if sip.isdeleted(self):
+            return
+        self._set_shelfmark_lookup_busy(False)
+        if gen != self._canvas_gen:
+            return
+        self.statusBar().showMessage(tr("Shelfmark not found"), 3000)
+
+    def _add_resolved_shelfmark(self, sys_id, text):
+        """Add the first folio of `sys_id` (typed or picked as `text`) to the canvas."""
         shelfmark, _ = self.app.meta_mgr.get_meta_for_id(sys_id)
         if not shelfmark or shelfmark == "Unknown":
             shelfmark = text
