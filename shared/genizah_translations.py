@@ -4054,7 +4054,7 @@ TRANSLATIONS.update({
     "  ⇄ other side":   "  ⇄ צד שני",   # ⇄ צד שני
 
     # --- CandidateCard dimension/material labels ---
-    "⚠ size mismatch":  "⚠ פער בגודל",  # ⚠ פער בגודל
+    "⚠ size mismatch":  "⚠ אי-התאמת גודל",  # same words as the website (owner, 2026-10-18)
     "Size may not match anchor":
         "הגודל עשוי לא התאים לעוגן",
 

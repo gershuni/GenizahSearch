@@ -38,7 +38,7 @@ way (about 40 places: page names as the menu shows them, the "Search only in..."
 History, Joins Lab, Reading Desk, Fragment Puzzle, Lists, Witnesses and others). Fixed on the way:
 the website's Hebrew help showed the Fragment Puzzle sections even when the puzzle is off, the Joins
 Lab "Triage state" filter showed its choices in English, and "חפש רק ב..." / "טוען קטע..." had their
-dots on the wrong side.
+dots on the wrong side. The desktop Joins Lab size warning now says "אי-התאמת גודל", as the website does.
 Plan and decisions: `docs/plans/COMPOSITION_CONDITIONS_PLAN.md`. Not released.
 
 ---
