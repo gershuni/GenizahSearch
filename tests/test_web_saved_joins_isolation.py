@@ -390,6 +390,16 @@ def _texts(user):
     return out
 
 
+async def _wait_for_text(user, text, timeout=20.0):
+    """Poll until `text` is on the page. The ?doc= step waits for the restore,
+    which has no time cap, so a slow CI runner can outrun any fixed sleep."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while text not in _texts(user) and loop.time() < deadline:
+        await asyncio.sleep(0.1)
+    return text in _texts(user)
+
+
 async def _open_drawer(user):
     from nicegui import ui
     from nicegui.testing.user_interaction import UserInteraction
@@ -484,11 +494,12 @@ def test_page_shows_and_saves_only_the_visitors_own_joins(shared_svc, published)
         before = _row(shared_svc._db_path)
         await b.open('/puzzle?doc=doc-browser-a')
         await asyncio.sleep(3.2)   # the page loads ?doc= after its start-up delay
+        if published:
+            # B got the published version, as an unsaved canvas. Polled, not
+            # read once: 3.2 s was too short on a Windows CI runner (PR #399).
+            assert await _wait_for_text(b, 'A published')
         assert 'A private' not in _texts(b)
         assert 'notes of browser a' not in _texts(b)
-        if published:
-            # B got the published version, as an unsaved canvas.
-            assert 'A published' in _texts(b)
         saved = await _save_canvas(b)
         ids = {d['id'] for d in shared_svc.list_documents()}
         if published:
