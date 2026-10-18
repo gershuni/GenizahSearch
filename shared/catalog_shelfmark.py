@@ -29,9 +29,16 @@ Library codes come only from ``LIBRARY_CODES`` (a name or first-word match), nev
 how often a head appears: three Sassoon variants stored under ``CUL`` must not admit
 every Cambridge record.
 
+T1 itself keeps a library its prefix names (``docs/plans/SHELFMARK_PREFIX_SCOPE_PLAN.md``):
+``prefix_codes`` says which codes a removed prefix names and ``named_library_exact`` turns
+T1's exact candidates into that library's records plus the records that store the whole
+input. ``MetadataManager.resolve_system_by_shelfmark`` and the restated T1 below both call
+them, so ``resolve_catalog_form(s)`` and the resolver cannot disagree.
+
 Pure module: no Qt, no NiceGUI, no I/O. ``MetadataManager`` owns the index and the
 tables' lifetime.
 """
+import functools
 import re
 from collections import Counter, defaultdict
 
@@ -128,6 +135,140 @@ def head_codes(head):
     return frozenset(out)
 
 
+def prefix_codes(query, stripped, codes_by_alias=None):
+    """Codes named by the prefix ``_strip_library_prefix`` removed from ``query``, or empty.
+
+    ``stripped`` is ``_strip_library_prefix(query)``. The removed text must be exactly a
+    ``LIBRARY_CODES`` code or name (``alias_codes``); any other alias (``cambridge``,
+    ``bodleian``, ...) names no library. Empty too when nothing is left to look up (a bare
+    library name: T1 answers it with nothing, so T2 must as well). T1's prefix rule and T2's
+    alias institution both use this, so they never disagree about what was named.
+    """
+    if not query or stripped == query or not normalize_shelfmark(stripped):
+        return frozenset()
+    prefix = query[:len(query) - len(stripped)].rstrip(_PREFIX_TRIM).strip().lower()
+    table = alias_codes() if codes_by_alias is None else codes_by_alias
+    return table.get(prefix, frozenset())
+
+
+def named_prefix(query, stripped, codes_by_alias=None):
+    """``(codes, whole key, whole input)`` when ``query``'s prefix names a library, else
+    ``(frozenset(), None, None)``. ``query`` is the trimmed input, ``stripped`` its stripped form."""
+    codes = prefix_codes(query, stripped, codes_by_alias)
+    if not codes:
+        return frozenset(), None, None
+    return codes, normalize_shelfmark(query) or None, query
+
+
+@functools.lru_cache(maxsize=1 << 17)
+def _provenance(variants):
+    """``(codes, zkey(rest), numbers(rest))`` for each stored ``<head> Ms. <rest>`` whose head
+    names library codes. ``variants`` is a record's call numbers as a tuple (cache key); the
+    ``Ms.`` token is read in any case, as in queries."""
+    out = []
+    for variant in variants:
+        m = QUERY_HEAD_RE.match(variant)
+        if m:
+            head = m.group('head').strip().rstrip(',').strip().lower()
+            codes = head_codes(head) if head else frozenset()
+            if codes:
+                rest = m.group('rest')
+                out.append((codes, zkey(rest), numbers(rest)))
+    return tuple(out)
+
+
+def in_libraries(sys_id, codes, csv_bank, key=None, want=None, cached_variants=None):
+    """Whether a record lies in one of ``codes`` for the shelfmark being looked up.
+
+    Yes when its library code is one of them; when nothing says where it is (a record known
+    only from the NLI cache: unknown is not outside); or -- collection provenance -- when it
+    stores ``<head> Ms. <rest>`` with a head naming one of the codes, ``zkey(rest) == key`` and
+    ``numbers(rest) == want`` (``key`` = ``zkey`` of what is looked up, so a zero-padded stored
+    form still counts). Provenance is per shelfmark: the JTS record that stores ``Adler, Elkan
+    Nathan Ms. 222`` is Adler 222, while the JTS record stored ``Adler ... Ms. 1873`` and
+    ``Ms. 1512`` is not Adler 1512, nor is the Sassoon 222 record Adler 222. The stored forms are
+    the record's call numbers plus ``cached_variants[sys_id]``: the NLI-cache ``shelfmark``/
+    ``shelfmark_alt`` strings the shelfmark index was built from (``MetadataManager`` snapshots
+    them with the index, so a later cache eviction or bad value cannot change the answer).
+    """
+    data = csv_bank.get(sys_id)
+    if not data:
+        return True
+    if data.get('library_code') in codes:
+        return True
+    if key is None:
+        return False
+    variants = tuple(data.get('call_numbers_raw') or ())
+    if cached_variants:
+        variants += cached_variants.get(sys_id, ())
+    for head_set, rest_key, rest_numbers in _provenance(variants):
+        if rest_key == key and rest_numbers == want and head_set & codes:
+            return True
+    return False
+
+
+def _record_variants(sys_id, csv_bank, cached_variants):
+    """Every stored form of a record the index was built from: its call numbers (or shelfmark)
+    and its cached NLI strings."""
+    data = csv_bank.get(sys_id) or {}
+    out = tuple(data.get('call_numbers_raw') or ((data['shelfmark'],) if data.get('shelfmark') else ()))
+    if cached_variants:
+        out += cached_variants.get(sys_id, ())
+    return out
+
+
+def _carries(hit, key, want, csv_bank, cached_variants, dotless=False):
+    """Whether the record stores a variant with normalized key ``key`` (or, for a dotless key,
+    that key once dots are dropped) and the integers ``want``. The index keeps one variant per
+    (record, key), so checking only that one could miss `GASTER 123` behind `GASTER 12 3`."""
+    if numbers(hit['shelfmark']) == want:
+        return True
+    for variant in _record_variants(hit['sys_id'], csv_bank, cached_variants):
+        norm = normalize_shelfmark(variant)
+        if (norm == key or (dotless and norm.replace('.', '') == key)) and numbers(variant) == want:
+            return True
+    return False
+
+
+def named_library_exact(stripped, key_hits, bridged, whole_hits, whole_query, codes, csv_bank, cached_variants=None):
+    """T1's exact candidates for an input whose prefix named ``codes`` and that T1 answers
+    exactly; ``[]`` = keep today's answer.
+
+    ``key_hits`` are today's exact entries for ``stripped`` (key or dotless key), ``bridged``
+    today's bridge entry or None, ``whole_hits`` the entries whose key equals the whole
+    input's. The answer, in this order: the bridge entry if its record is in a named library
+    and no kept key hit has it (as today, so the shelfmark shown does not change); the key
+    hits in a named library; the whole hits with ``whole_query``'s integers, in any library
+    (they store what was typed). So scoping removes only other libraries' records.
+
+    Membership is ``in_libraries``: code, provenance per shelfmark, or unknown library.
+    Provenance matters most where a code holds no record: ``Gaster`` has none (the Gaster
+    texts are coded BL/Manchester), and the full BL record of ``GASTER 1201.17`` is kept
+    because it stores ``Gaster, Moses Collection Ms. 1201.17`` -- without that the stored
+    ``GASTER 1201.17`` stub would replace it. The library of a whole hit is NOT named as a
+    whole: Katz holds Halper 275 and also Penn ``Ms. 275``, another manuscript.
+
+    ``[]`` too when nothing kept genuinely carries the numbers -- no whole hit, no in-library
+    bridge hit, no key hit with ``stripped``'s integers -- so a list never shrinks to a
+    dotless-rule match alone (`Westminster College Ms. L-G Glass 12` must not become the
+    Westminster record stored `L-G Glass.1.2`).
+    """
+    want_whole = numbers(whole_query)
+    whole_key = normalize_shelfmark(whole_query)
+    whole = [h for h in whole_hits if _carries(h, whole_key, want_whole, csv_bank, cached_variants)]
+    key, want = zkey(stripped), numbers(stripped)
+    out = [h for h in key_hits if in_libraries(h['sys_id'], codes, csv_bank, key, want, cached_variants)]
+    bridge_in = bool(bridged) and in_libraries(bridged['sys_id'], codes, csv_bank, key, want, cached_variants)
+    t1_key = normalize_shelfmark(stripped)
+    if not (whole or bridge_in or any(_carries(h, t1_key, want, csv_bank, cached_variants, '.' not in t1_key)
+                                      for h in out)):
+        return []
+    if bridge_in and not any(h['sys_id'] == bridged['sys_id'] for h in out):
+        out.insert(0, bridged)
+    out.extend(whole)
+    return out
+
+
 class CatalogTables:
     """Lookup tables for ONE shelfmark index list.
 
@@ -183,11 +324,14 @@ def _bridge(text):
         return None
 
 
+_NOT_NAMED = (frozenset(), None, None)
+
+
 class _Plan:
     """The keys one query looks up. ``exact_*`` = T1's own exact conditions on the input."""
 
     __slots__ = ('query', 'keys', 'nodot', 'bridge_text', 'exact_key', 'exact_nodot', 'exact_bridge',
-                 'institution', 'parent_key', 'parent_form', 'no_t2')
+                 'exact_named', 'institution', 'parent_key', 'parent_form', 'no_t2')
 
     def __init__(self, query):
         self.query = query
@@ -195,6 +339,7 @@ class _Plan:
         self.nodot = None         # D0 dotless key
         self.bridge_text = None   # D0 bridge text
         self.exact_key = self.exact_nodot = self.exact_bridge = None
+        self.exact_named = _NOT_NAMED   # named_prefix() of the input, for T1's prefix rule
         self.institution = None   # (kind, head or None, codes) when one is named
         self.parent_key = self.parent_form = None
         self.no_t2 = False
@@ -213,35 +358,54 @@ def _t1_exact_keys(text, stripped=None):
     return key, (key if '.' not in key else None), stripped
 
 
-def t1_exact_entries(queries, tables, csv_bank):
-    """T1's exact candidates for each query, before deduplication, the numeric check or the
-    institution filter: index entries with an equal normalized key, or an equal dotless key
-    for a dotless query, plus the bridge hit. Tests pin this to T1's own exact answers."""
-    by_key, by_nodot, out = defaultdict(list), defaultdict(list), {}
-    keys = {}
+def t1_exact_entries(queries, tables, csv_bank, scoped=True, cached_variants=None):
+    """T1's exact candidates for each query, before deduplication and before T2's numeric
+    check or institution filter: index entries with an equal normalized key, or an equal
+    dotless key for a dotless query, plus the bridge hit -- narrowed by T1's prefix rule
+    (``named_library_exact``) when the input's prefix names a library. ``scoped=False`` gives
+    the candidates without the prefix rule (what T1 answered before it). Tests pin this to
+    T1's own exact answers."""
+    by_key, by_nodot, by_whole, out, whole = (defaultdict(list), defaultdict(list), defaultdict(list),
+                                              {}, defaultdict(list))
+    keys, named = {}, {}
     for query in queries:
-        keys[query] = _t1_exact_keys(query or '')
+        text = (query or '').strip()
+        stripped = _strip_library_prefix(text)
+        keys[query] = _t1_exact_keys(text, stripped)
         key, nodot, _ = keys[query]
+        named[query] = named_prefix(text, stripped, tables.codes_by_alias) if scoped and key else _NOT_NAMED
         out[query] = []
         if key:
             by_key[key].append(query)
         if nodot:
             by_nodot[nodot].append(query)
+        if named[query][1]:
+            by_whole[named[query][1]].append(query)
     for e in tables.index:
         for query in by_key.get(e[3], ()):
             out[query].append(_entry(e))
         if by_nodot:
             for query in by_nodot.get(e[4], ()):
                 out[query].append(_entry(e))
+        if by_whole:
+            for query in by_whole.get(e[3], ()):
+                whole[query].append(_entry(e))
     for query, (key, _nodot, bridge_text) in keys.items():
         if key:
+            key_hits = out[query]
             bridged = _bridge_entry(bridge_text, csv_bank)
-            if bridged and not any(h['sys_id'] == bridged['sys_id'] for h in out[query]):
-                out[query].insert(0, bridged)
+            hits = list(key_hits)
+            if bridged and not any(h['sys_id'] == bridged['sys_id'] for h in hits):
+                hits.insert(0, bridged)
+            codes, _whole_key, whole_query = named[query]
+            if codes and hits:
+                hits = named_library_exact(bridge_text, key_hits, bridged, whole[query], whole_query,
+                                           codes, csv_bank, cached_variants) or hits
+            out[query] = hits
     return out
 
 
-def _plan(query, tables, with_exact):
+def _plan(query, tables, with_exact, prefix_rule=True):
     q = (query or '').strip()
     plan = _Plan(q)
     if not q:
@@ -250,13 +414,14 @@ def _plan(query, tables, with_exact):
     sq = _strip_library_prefix(q)
     if with_exact:
         plan.exact_key, plan.exact_nodot, plan.exact_bridge = _t1_exact_keys(q, sq)
+        if plan.exact_key and prefix_rule:
+            plan.exact_named = named_prefix(q, sq, tables.codes_by_alias)
     split = tables.split(q)
     if split:
         name, rest = split
         plan.institution = ('head', name, tables.codes_by_head.get(name, frozenset()))
     elif sq != q:
-        prefix = q[:len(q) - len(sq)].rstrip(_PREFIX_TRIM).strip().lower()
-        codes = tables.codes_by_alias.get(prefix)
+        codes = prefix_codes(q, sq, tables.codes_by_alias)
         if not codes:
             plan.no_t2 = True     # an alias that names no single library: keep today's answer
             return plan
@@ -277,14 +442,24 @@ def _plan(query, tables, with_exact):
             plan.parent_key, plan.parent_form = zkey(short), short
     if named:
         plan.keys.append((zkey(rest), rest, 'r', True))
+        if prefix_rule and plan.institution[0] == 'alias' and rest:
+            # The whole input, any library: what T1's prefix rule reaches for the unpadded
+            # form (`Halper 077` -> the record that stores `Halper 77`). Never for a bare
+            # library name, which T1 answers with nothing.
+            plan.keys.append((zkey(q), q, 'w', False))
     elif sq:
         plan.keys.append((zkey(sq), sq, 'c', False))
     plan.keys = [k for k in plan.keys if k[0]]
     return plan
 
 
-def _belongs(sys_id, institution, csv_bank):
+def _belongs(sys_id, institution, csv_bank, rest=None, prefix_rule=True, cached_variants=None):
     kind, head, codes = institution
+    if kind == 'alias' and prefix_rule:
+        # The same membership as T1's prefix rule; provenance compared on zero-insensitive keys.
+        if rest is None:
+            return in_libraries(sys_id, codes, csv_bank)
+        return in_libraries(sys_id, codes, csv_bank, zkey(rest), numbers(rest), cached_variants)
     data = csv_bank.get(sys_id) or {}
     if data.get('library_code') in codes:
         return True
@@ -328,35 +503,41 @@ def _bridge_entry(text, csv_bank):
     return None
 
 
-def resolve_many(queries, tables, csv_bank, limit=100, with_exact=True):
+def resolve_many(queries, tables, csv_bank, limit=100, with_exact=True, prefix_rule=True, cached_variants=None):
     """Resolve many inputs with one pass over ``tables.index`` (two if a Mosseri parent is needed).
 
     ``with_exact=True`` first applies T1's exact conditions to the input itself and returns
     that answer when there is one (what ``resolve_system_by_shelfmark`` would answer
     exactly); otherwise, and always when ``with_exact=False``, it returns T2's answer.
     Returns ``{query: {'sys_id', 'options', 'selected_shelfmark', 'total', 'tier'}}``;
-    ``tier`` is ``'exact'``, ``'direct'``, ``'parent'`` or None.
+    ``tier`` is ``'exact'``, ``'direct'``, ``'parent'`` or None. ``prefix_rule=False`` answers as
+    before the library-prefix rule (no scoping, no ``w`` key, code-only alias membership) -- the
+    real-data gate compares the two in one process.
     """
     plans = {}
     for query in queries:
         if query not in plans:
-            plans[query] = _plan(query, tables, with_exact)
+            plans[query] = _plan(query, tables, with_exact, prefix_rule)
     by_key = defaultdict(list)
     by_nodot = defaultdict(list)
     exact_key = defaultdict(list)
     exact_nodot = defaultdict(list)
+    exact_whole = defaultdict(list)
     for query, plan in plans.items():
         if plan.exact_key:
             exact_key[plan.exact_key].append(query)
             if plan.exact_nodot:
                 exact_nodot[plan.exact_nodot].append(query)
+            if plan.exact_named[1]:
+                exact_whole[plan.exact_named[1]].append(query)
         if plan.no_t2:
             continue
         for key, form, tier, needs in plan.keys:
-            by_key[key].append((query, form, needs))
+            by_key[key].append((query, form, needs, tier))
         if plan.nodot:
             by_nodot[plan.nodot].append(query)
     exact_found = defaultdict(list)
+    whole_found = defaultdict(list)
     found = defaultdict(list)       # query -> [(entry tuple, query form or None, needs institution)]
     nodot_found = defaultdict(list)
     # Independent checks (not elif): an entry can match one query's key and another
@@ -372,10 +553,15 @@ def resolve_many(queries, tables, csv_bank, limit=100, with_exact=True):
             if hit:
                 for query in hit:
                     exact_found[query].append(e)
+        if exact_whole:
+            hit = exact_whole.get(norm)
+            if hit:
+                for query in hit:
+                    whole_found[query].append(e)
         hit = by_key.get(norm)
         if hit:
-            for query, form, needs in hit:
-                found[query].append((e, form, needs))
+            for query, form, needs, tier in hit:
+                found[query].append((e, form, needs, tier))
         if by_nodot:
             hit = by_nodot.get(e[4])
             if hit:
@@ -386,10 +572,16 @@ def resolve_many(queries, tables, csv_bank, limit=100, with_exact=True):
     need_parent = {}
     for query, plan in plans.items():
         if plan.exact_key:
-            hits = [_entry(e) for e in exact_found.get(query, ())]
+            key_hits = [_entry(e) for e in exact_found.get(query, ())]
             bridged = _bridge_entry(plan.exact_bridge, csv_bank)
+            hits = list(key_hits)
             if bridged and not any(h['sys_id'] == bridged['sys_id'] for h in hits):
                 hits.insert(0, bridged)
+            codes, _whole_key, whole_query = plan.exact_named
+            if codes and hits:
+                hits = named_library_exact(plan.exact_bridge, key_hits, bridged,
+                                           [_entry(e) for e in whole_found.get(query, ())],
+                                           whole_query, codes, csv_bank, cached_variants) or hits
             if hits:
                 results[query] = _response(_dedup(hits), limit, 'exact')
                 continue
@@ -398,15 +590,19 @@ def resolve_many(queries, tables, csv_bank, limit=100, with_exact=True):
             continue
         cands = []
         want = numbers(plan.query)
+        institution = plan.institution
+
+        alias_rest = plan.query[len(plan.query) - len(_strip_library_prefix(plan.query)):] if (
+            institution and institution[0] == 'alias') else None
 
         def keep(e_sys_id, needs):
-            return not needs or _belongs(e_sys_id, plan.institution, csv_bank)
+            return not needs or _belongs(e_sys_id, institution, csv_bank, alias_rest, prefix_rule, cached_variants)
 
-        for e, form, needs in found.get(query, ()):
+        for e, form, needs, tier in found.get(query, ()):
             if numbers(e[1]) == numbers(form) and keep(e[0], needs):
                 cands.append(_entry(e))
         for e in nodot_found.get(query, ()):
-            if numbers(e[1]) == want and keep(e[0], plan.institution is not None):
+            if numbers(e[1]) == want and keep(e[0], institution is not None):
                 cands.append(_entry(e))
         for key, form, tier, needs in plan.keys:
             for e in tables.zero_side.get(key, ()):
@@ -414,7 +610,7 @@ def resolve_many(queries, tables, csv_bank, limit=100, with_exact=True):
                     cands.append(_entry(e))
         if plan.bridge_text:
             bridged = _bridge_entry(plan.bridge_text, csv_bank)
-            if bridged and numbers(bridged['shelfmark']) == want and keep(bridged['sys_id'], plan.institution is not None):
+            if bridged and numbers(bridged['shelfmark']) == want and keep(bridged['sys_id'], institution is not None):
                 cands.append(bridged)
         if cands:
             results[query] = _response(_dedup(cands), limit, 'direct')

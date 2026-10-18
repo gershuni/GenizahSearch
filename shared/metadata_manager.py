@@ -262,6 +262,12 @@ class _RefusedHopResponse:
         pass
 
 
+class _ShelfmarkIndex(list):
+    """MetadataManager's shelfmark index, carrying the NLI-cache strings it was built from."""
+
+    __slots__ = ('cached_variants',)
+
+
 class MetadataManager:
     def _make_session(self):
         return requests.Session()
@@ -1880,8 +1886,20 @@ class MetadataManager:
         """Normalize shelfmarks using the canonical module-level function."""
         return normalize_shelfmark(shelfmark)
 
-    def _iter_shelfmark_sources(self):
-        """Yield shelfmark candidates from CSV bank and cached metadata."""
+    def _cached_shelfmarks(self):
+        """A frozen copy of the NLI cache's shelfmark strings: {sys_id: ((shelfmark, alt...), title)}.
+
+        Only strings: a bad cached value never reaches the index or provenance."""
+        frozen = {}
+        for sys_id, data in list(self.nli_cache.items()):
+            found = tuple(v for v in (data.get('shelfmark'), data.get('shelfmark_alt')) if isinstance(v, str) and v)
+            if found:
+                frozen[sys_id] = (found, data.get('title', ''))
+        return frozen
+
+    def _iter_shelfmark_sources(self, cached=None):
+        """Yield shelfmark candidates from CSV bank and cached metadata (``cached``: a
+        ``_cached_shelfmarks()`` copy; the live cache when None)."""
         # CSV bank
         for sys_id, data in self.csv_bank.items():
             title = data.get('title', '')
@@ -1890,19 +1908,19 @@ class MetadataManager:
                 if shelf:
                     yield sys_id, shelf, title
         # NLI cache (may contain enriched shelfmarks)
-        for sys_id, data in self.nli_cache.items():
-            shelf = data.get('shelfmark', '')
-            alt = data.get('shelfmark_alt', '')
-            title = data.get('title', '')
-            for candidate in [shelf, alt]:
-                if candidate:
-                    yield sys_id, candidate, title
+        for sys_id, (candidates, title) in (cached if cached is not None else self._cached_shelfmarks()).items():
+            for candidate in candidates:
+                yield sys_id, candidate, title
 
     def _get_shelfmark_index(self):
         """Build or return cached pre-normalized shelfmark index.
 
-        Returns list of (sys_id, shelfmark, title, norm_shelf, norm_shelf_no_dots) tuples,
-        already deduplicated by (sys_id, norm_shelf).
+        Returns a list (``_ShelfmarkIndex``) of (sys_id, shelfmark, title, norm_shelf,
+        norm_shelf_no_dots) tuples, already deduplicated by (sys_id, norm_shelf). Its
+        ``cached_variants`` are the NLI-cache strings it was built from: the index entries and the
+        collection provenance (``catalog_shelfmark.in_libraries``) come from one frozen copy and are
+        published by one assignment, so a cache eviction or a concurrent rebuild can never pair
+        these entries with other provenance (docs/plans/SHELFMARK_PREFIX_SCOPE_PLAN.md).
         """
         if hasattr(self, '_shelfmark_index') and self._shelfmark_index is not None:
             # The web app loads libraries.csv in a background thread. If shelfmark search runs
@@ -1919,9 +1937,11 @@ class MetadataManager:
         if self._shelfmark_index is not None:
             return self._shelfmark_index
 
-        index = []
+        cached = self._cached_shelfmarks()
+        index = _ShelfmarkIndex()
+        index.cached_variants = {sys_id: candidates for sys_id, (candidates, _title) in cached.items()}
         seen = set()
-        for sys_id, shelf, title in self._iter_shelfmark_sources():
+        for sys_id, shelf, title in self._iter_shelfmark_sources(cached):
             norm_shelf = normalize_shelfmark(shelf)
             if not norm_shelf or (sys_id, norm_shelf) in seen:
                 continue
@@ -1938,12 +1958,17 @@ class MetadataManager:
         """
         result = {'sys_id': None, 'options': [], 'selected_shelfmark': None}
         original_query = query  # the catalogue-form fallback below needs the unstripped text
+        named_codes, whole_key, whole_query = frozenset(), None, None
 
         # Strip known library prefix (code, full name, or common abbreviation)
         if query:
             q = query.strip()
-            q = _strip_library_prefix(q)
-            query = q
+            stripped = _strip_library_prefix(q)
+            if stripped != q:
+                # A prefix that names a library keeps it (docs/plans/SHELFMARK_PREFIX_SCOPE_PLAN.md).
+                from shared.catalog_shelfmark import named_prefix
+                named_codes, whole_key, whole_query = named_prefix(q, stripped)
+            query = stripped
 
         norm_query = self._normalize_shelfmark(query)
         if not norm_query:
@@ -1963,6 +1988,7 @@ class MetadataManager:
         query_has_dots = '.' in norm_query
         norm_query_no_dots = norm_query.replace('.', '') if not query_has_dots else None
 
+        whole_matches = []   # entries storing the whole prefixed input, when the prefix names a library
         index = self._get_shelfmark_index()
         for sys_id, shelf, title, norm_shelf, norm_shelf_no_dots in index:
             entry = {'sys_id': sys_id, 'shelfmark': shelf, 'title': title}
@@ -1975,6 +2001,9 @@ class MetadataManager:
             elif norm_query_no_dots and norm_shelf_no_dots == norm_query_no_dots:
                 # Dot-agnostic match only for dotless queries (e.g. "19234" == "19.234")
                 exact_matches.append(entry)
+            if whole_key and norm_shelf == whole_key:
+                whole_matches.append(entry)
+        key_matches = list(exact_matches)
 
         # Phase 84 follow-up: bridge resolution as exact match. The legacy
         # normalize_shelfmark() does NOT collapse CUDL leading zeros or merge
@@ -1995,20 +2024,29 @@ class MetadataManager:
         except Exception:
             bridge_hit = None
 
+        bridge_entry = None
         if bridge_hit and bridge_hit.get('sys_id'):
             _bsid = bridge_hit['sys_id']
+            _bdata = self.csv_bank.get(_bsid, {})
+            bridge_entry = {
+                'sys_id': _bsid,
+                'shelfmark': _bdata.get('shelfmark') or bridge_hit.get('shelfmark', '') or '',
+                'title': _bdata.get('title', ''),
+            }
             if not any(e.get('sys_id') == _bsid for e in exact_matches):
-                _bdata = self.csv_bank.get(_bsid, {})
-                _bshelf = _bdata.get('shelfmark') or bridge_hit.get('shelfmark', '') or ''
-                _btitle = _bdata.get('title', '')
                 # Insert at front so the dedup-then-single-exact path returns
                 # this row as the resolved sys_id when no canonical exact match
                 # exists.
-                exact_matches.insert(0, {
-                    'sys_id': _bsid,
-                    'shelfmark': _bshelf,
-                    'title': _btitle,
-                })
+                exact_matches.insert(0, bridge_entry)
+
+        # A prefix that names a library, on an input answered exactly: that library's exact
+        # matches plus the records storing the whole input; none of either -> today's answer
+        # (catalog_shelfmark.named_library_exact). Inputs with no exact match go to T2 as before.
+        if named_codes and exact_matches:
+            from shared.catalog_shelfmark import named_library_exact
+            exact_matches = named_library_exact(
+                query, key_matches, bridge_entry, whole_matches, whole_query, named_codes, self.csv_bank,
+                getattr(index, 'cached_variants', None)) or exact_matches
 
         # Deduplicate exact matches by sys_id (e.g. "T-S AS 31.1" and "Ms. T-S AS 31.1"
         # are the same manuscript). Keep the shortest shelfmark as most user-friendly.
@@ -2060,7 +2098,8 @@ class MetadataManager:
         try:
             from shared.catalog_shelfmark import resolve_many
             tables = self._get_catalog_tables(index)
-            answer = resolve_many([query], tables, self.csv_bank, limit=limit, with_exact=False)[query]
+            answer = resolve_many([query], tables, self.csv_bank, limit=limit, with_exact=False,
+                                  cached_variants=getattr(index, 'cached_variants', None))[query]
         except Exception:
             # A defect here must not take today's substring answer away.
             LOGGER.warning("Catalogue-form shelfmark fallback failed for %r", query, exc_info=True)
@@ -2086,7 +2125,8 @@ class MetadataManager:
         if not index:
             return {q: {'sys_id': None, 'options': [], 'selected_shelfmark': None, 'total': 0, 'tier': None}
                     for q in queries}
-        return resolve_many(list(queries), self._get_catalog_tables(index), self.csv_bank, limit=limit)
+        return resolve_many(list(queries), self._get_catalog_tables(index), self.csv_bank, limit=limit,
+                            cached_variants=getattr(index, 'cached_variants', None))
 
     def get_display_data(self, full_header, src_label):
         sys_id, p_num = self.parse_header_smart(full_header)
