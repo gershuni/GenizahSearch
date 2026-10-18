@@ -1261,9 +1261,13 @@ class SettingsDialog(QDialog):
                 _tel_set_consent(new_val)  # D-08: sole write path
                 # D-13/HIGH-4: mid-session opt-in — re-run coordinator so
                 # identify fires for the logged-in user and session_start fires
-                # (once) before any subsequent usage event.
+                # (once) before any subsequent usage event. The coordinator
+                # lives on the main window (GenizahGUI), not on this dialog.
                 if new_val:
-                    self._run_startup_telemetry_coordinator()
+                    mw = getattr(self, 'main_win', None)
+                    fn = getattr(mw, '_run_startup_telemetry_coordinator', None)
+                    if callable(fn):
+                        fn()
             else:
                 # D-07a: revert visual, do NOT call set_consent
                 self.chk_telemetry.blockSignals(True)
