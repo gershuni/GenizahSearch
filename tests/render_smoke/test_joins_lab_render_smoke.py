@@ -2392,6 +2392,11 @@ def test_sort_and_filter_by_library_and_domain(joins_lab_smoke_runner):
                 assert list(lib_sel.options.values()) == ['CUL (1)', 'JTS (1)']
                 assert list(dom_sel.options.values()) == ['Bible (1)', 'Liturgy (1)']
                 assert dom_sel.enabled
+                # Full width: without it Quasar collapses each select to its arrow
+                # and hides the label (seen in a browser, 2026-10-19).
+                dialog_selects = list(ElementFilter(kind=ui.select).within(kind=ui.dialog))
+                assert len(dialog_selects) == 4                # material, library, domain, triage
+                assert all('w-full' in sel._classes for sel in dialog_selects)
                 dom_sel.value = ['Bible']
                 apply_btn = next(b for b in ElementFilter(kind=ui.button)
                                  if b.visible and b._props.get('label') == 'Apply')
