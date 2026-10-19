@@ -1074,7 +1074,7 @@ def open_filter_dialog(
             value=list(filter_state.get("materials") or []),
             label=tr("Material"),
             multiple=True,
-        ).props("dense outlined use-chips")
+        ).props("dense outlined use-chips").classes("w-full")
         if not enrichment_ready:
             mat_sel.disable()
 
@@ -1088,13 +1088,13 @@ def open_filter_dialog(
             value=[v for v in (filter_state.get("libraries") or []) if v in lib_opts],
             label=tr("Library"),
             multiple=True,
-        ).props("dense outlined use-chips").mark("joins-filter-library")
+        ).props("dense outlined use-chips").classes("w-full").mark("joins-filter-library")
         dom_sel = ui.select(
             options=dom_opts,
             value=[v for v in (filter_state.get("domains") or []) if v in dom_opts],
             label=tr("Domain"),
             multiple=True,
-        ).props("dense outlined use-chips").mark("joins-filter-domain")
+        ).props("dense outlined use-chips").classes("w-full").mark("joins-filter-domain")
         if not lib_opts:
             lib_sel.disable()
         if not enrichment_ready or not dom_opts:
@@ -1117,13 +1117,13 @@ def open_filter_dialog(
             value=list(filter_state.get("triage_states") or []),
             label=tr("Triage state"),
             multiple=True,
-        ).props("dense outlined use-chips")
+        ).props("dense outlined use-chips").classes("w-full")
 
         # 5. Text filter (D-14 discretion — included per UI-SPEC)
         text_inp = ui.input(
             placeholder=tr("Filter by shelfmark…"),
             value=filter_state.get("text_q", ""),
-        ).props("dense outlined")
+        ).props("dense outlined").classes("w-full")
 
         with ui.row().classes("justify-end gap-2 mt-2"):
             def _do_reset():
