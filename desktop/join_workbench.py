@@ -4,7 +4,7 @@
 This module holds the pure helpers (Plan 01) and the JoinWorkbenchWindow shell (Plan 02).
 Pure helpers are import-safe without a QApplication so they can be unit-tested headlessly.
 """
-from genizah_core import CURRENT_LANG, get_logger, tr  # noqa: F401
+from genizah_core import CURRENT_LANG, get_logger, load_app_config, save_app_config, tr  # noqa: F401
 from html import escape as _html_escape
 
 from shared.fragment_details import domain_labels, fetch_fragment_details, info_line
@@ -34,6 +34,9 @@ __all__ = [
     # Plan 02 pure helpers (testable headlessly)
     "_clamp_zoom",
     "_image_url_for_idx",
+    "CARD_SIZES",
+    "CARD_SIZE_CONFIG_KEY",
+    "normalize_card_size",
     "normalize_join_source",
     "_other_member_of",
     "build_known_join_rows",
@@ -250,6 +253,39 @@ def _image_url_for_idx(images, idx, width=2000):
     if not images or idx < 0 or idx >= len(images):
         return ""
     return iiif_full((images[idx] or {}).get("url"), width)
+
+
+# Grid card size (S/M/L, as on the website's Joins Lab), kept in config.pkl.
+# key -> (card width, thumbnail width, thumbnail height, cards per row). Medium is the
+# size the grid always had; Small fits five cards in about the width of Medium's four.
+# Its action row is six 28 px buttons (178 px) plus the frame and margins: 190 px on
+# Linux, a few more on Windows, so Small is 200 and a card never goes narrower than its
+# rows need (the end of CandidateCard.__init__).
+CARD_SIZE_CONFIG_KEY = "joins_lab_card_size"
+CARD_SIZES = {
+    "s": (200, 188, 100, 5),
+    "m": (232, 220, 130, 4),
+    "l": (312, 300, 240, 3),
+}
+
+
+def normalize_card_size(value) -> str:
+    """'s', 'm' or 'l'; anything else is Medium (the default, the size before)."""
+    return value if isinstance(value, str) and value in CARD_SIZES else "m"
+
+
+def _load_card_size() -> str:
+    try:
+        return normalize_card_size(load_app_config().get(CARD_SIZE_CONFIG_KEY))
+    except Exception:
+        return "m"
+
+
+def _save_card_size(size: str) -> None:
+    try:
+        save_app_config({CARD_SIZE_CONFIG_KEY: size})
+    except Exception:
+        logger.warning("Could not save the Joins Lab card size", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -2032,7 +2068,8 @@ if _QT_AVAILABLE:
             self.global_idx = global_idx
             self.sid = c.sys_id         # read Candidate attribute directly (RR-2)
             self._ckey = pane._candidate_key(c)  # stable key for selection set
-            self.setFixedWidth(232)
+            card_w, thumb_w, thumb_h, _cols = CARD_SIZES[pane.card_size]
+            self.setFixedWidth(card_w)
             self.setFrameShape(QFrame.Shape.Box)
             self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             self.customContextMenuRequested.connect(self._ctx_menu)
@@ -2059,7 +2096,7 @@ if _QT_AVAILABLE:
 
             # 1. Thumbnail image label
             self.img = QLabel(tr("loading…"))
-            self.img.setFixedSize(220, 130)
+            self.img.setFixedSize(thumb_w, thumb_h)
             self.img.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.img.setStyleSheet("background:#e2e8f0;color:#64748b;")
             lay.addWidget(self.img)
@@ -2265,6 +2302,9 @@ if _QT_AVAILABLE:
 
             lay.addLayout(arow)
 
+            # Fonts and styles differ by platform: never narrower than the rows need.
+            self.setFixedWidth(max(card_w, self.minimumSizeHint().width()))
+
         def mouseDoubleClickEvent(self, event):
             """Feature 2: double-click opens Compare (skip if on checkbox/buttons)."""
             child = self.childAt(event.position().toPoint())
@@ -2342,7 +2382,7 @@ if _QT_AVAILABLE:
                 if pix and not pix.isNull():
                     self.img.setText("")
                     self.img.setPixmap(pix.scaled(
-                        220, 130,
+                        self.img.width(), self.img.height(),
                         Qt.AspectRatioMode.KeepAspectRatio,
                         Qt.TransformationMode.SmoothTransformation,
                     ))
@@ -2512,7 +2552,6 @@ if _QT_AVAILABLE:
     # Plan 03 — JoinCandidatePane (QWidget) — right-pane candidate hunt surface
     # -------------------------------------------------------------------------
 
-    _GRID_COLS = 4
     _PER_PAGE = 20
 
     class JoinCandidatePane(QWidget):
@@ -2541,6 +2580,7 @@ if _QT_AVAILABLE:
             self.cards: dict = {}     # {global_idx: CandidateCard}
             self._page = 0            # current grid/table page (0-based)
             self.view_mode = "grid"   # 'grid' | 'table'
+            self.card_size = _load_card_size()   # 's' | 'm' | 'l' (grid cards)
             self._resolver = None     # ThumbResolver (current page)
             self._cross_worker = None
             self._cross_gen = 0               # bumped by _retire_cross_worker (latest-wins)
@@ -2685,6 +2725,16 @@ if _QT_AVAILABLE:
             self.view_btn = QPushButton(tr("Table view"))
             self.view_btn.clicked.connect(self.toggle_view)
             res_toolbar.addWidget(self.view_btn)
+
+            # Grid card size (S/M/L); grid view only, remembered in config.pkl
+            self.card_size_combo = QComboBox()
+            self.card_size_combo.setToolTip(tr("Card size"))
+            self.card_size_combo.setAccessibleName(tr("Card size"))
+            for key, label in (("s", tr("Small")), ("m", tr("Medium")), ("l", tr("Large"))):
+                self.card_size_combo.addItem(label, key)
+            self.card_size_combo.setCurrentIndex(self.card_size_combo.findData(self.card_size))
+            self.card_size_combo.currentIndexChanged.connect(self._on_card_size_changed)
+            res_toolbar.addWidget(self.card_size_combo)
 
             self.btn_browse_results = QPushButton(tr("Browse results ▶"))
             self.btn_browse_results.setToolTip(tr("Open Browse results compare window"))
@@ -3594,6 +3644,7 @@ if _QT_AVAILABLE:
 
             start = self._page * _PER_PAGE
             page_cands = self.wb.filtered[start:start + _PER_PAGE]
+            cols = CARD_SIZES[self.card_size][3]
             items_for_thumbs = []
             for i, c in enumerate(page_cands):
                 gidx = start + i
@@ -3601,7 +3652,7 @@ if _QT_AVAILABLE:
                 card = CandidateCard(self, c, gidx, enrich)
                 self.cards[gidx] = card
                 card.load_vs_text()   # G-02: page-lazy VS card text fetch (no-op for non-VS / already-texted)
-                self.grid_layout.addWidget(card, i // _GRID_COLS, i % _GRID_COLS)
+                self.grid_layout.addWidget(card, i // cols, i % cols)
                 items_for_thumbs.append((gidx, c.sys_id))
 
             # Start ThumbResolver for this page
@@ -3815,10 +3866,21 @@ if _QT_AVAILABLE:
                 )
                 self.grid_scroll.setVisible(self.view_mode == "grid")
                 self.table.setVisible(self.view_mode == "table")
+                self.card_size_combo.setVisible(self.view_mode == "grid")
             except RuntimeError:
                 pass
             self.wb._cancel_images()
             self.render_results()
+
+        def _on_card_size_changed(self, _index: int):
+            """Redraw the grid page at the chosen card size and remember it."""
+            size = normalize_card_size(self.card_size_combo.currentData())
+            if size == self.card_size:
+                return
+            self.card_size = size
+            _save_card_size(size)
+            if self.view_mode == "grid":
+                self.render_results()
 
         def _clear_lab(self):
             """Clear anchor, builders, candidates, triage, selection, filter (Feature 5).
@@ -6026,10 +6088,10 @@ if _QT_AVAILABLE:
                                 lbl.setText("")
                                 op(pix)
                             elif tgt == "card":
-                                # Card set_pixmap scales to 220x130
+                                # Scaled to the card's thumbnail box (its S/M/L size)
                                 lbl.setText("")
                                 lbl.setPixmap(pix.scaled(
-                                    220, 130,
+                                    lbl.width(), lbl.height(),
                                     Qt.AspectRatioMode.KeepAspectRatio,
                                     Qt.TransformationMode.SmoothTransformation,
                                 ))

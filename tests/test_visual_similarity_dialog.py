@@ -155,3 +155,12 @@ def test_library_options_count_each_library_in_code_order():
     assert list(_library_options(suggestions).items()) == [
         ("CUL", "CUL (2)"), ("JTS", "JTS (1)"),
     ]
+
+
+def test_thumb_size_defaults_to_small():
+    from web.components.visual_similarity_dialog import _THUMB_SIZES, _normalize_thumb_size
+    assert _normalize_thumb_size('l') == 'l'
+    assert _normalize_thumb_size(None) == 's'
+    assert _normalize_thumb_size('xl') == 's'
+    assert _normalize_thumb_size({'l': 1}) == 's'   # a mangled stored value, not a crash
+    assert _THUMB_SIZES['l'] <= 300, "thumbnails are fetched 300 px wide"

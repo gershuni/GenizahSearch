@@ -34,12 +34,28 @@ _PAGE_SIZE = 20
 _PREVIEW_IMAGE_WIDTH = 600
 # The visitor's last choice between the list and the thumbnail grid.
 _VIEW_STORAGE_KEY = 'vs_dialog_view'
-_THUMB_HEIGHT_PX = 170
+
+# Thumbnail size in the grid (owner, 2026-10-19): the grid column's minimum width
+# and the image height, in px. Thumbnails are fetched 300 px wide, so Large still
+# needs no bigger image. Remembered per visitor, like the view.
+_THUMB_SIZE_STORAGE_KEY = 'vs_dialog_thumb_size'
+_THUMB_SIZES = {'s': 170, 'm': 230, 'l': 300}
+
+# The Original pane, normal and enlarged (owner): its width and its image's
+# maximum height. Enlarged trades thumbnails per row for a bigger original;
+# min(..., 45vw) keeps it from swallowing a narrow screen.
+_ORIGINAL_LARGE_STORAGE_KEY = 'vs_dialog_original_large'
+_ORIGINAL_PANE = {False: ('260px', '200px'), True: ('min(450px, 45vw)', '50vh')}
 
 
 def _normalize_view(value) -> str:
     """'grid' for the thumbnail view; anything else is the list (the default)."""
     return 'grid' if value == 'grid' else 'list'
+
+
+def _normalize_thumb_size(value) -> str:
+    """'s', 'm' or 'l'; anything else is Small (the default, the size before)."""
+    return value if isinstance(value, str) and value in _THUMB_SIZES else 's'
 
 
 def _domain_label(s: dict, is_heb: bool) -> str:
@@ -328,6 +344,8 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                 'domains': [],
                 'visible_count': _PAGE_SIZE,
                 'view': _normalize_view(safe_user_get(_VIEW_STORAGE_KEY)),
+                'thumb': _normalize_thumb_size(safe_user_get(_THUMB_SIZE_STORAGE_KEY)),
+                'orig_large': safe_user_get(_ORIGINAL_LARGE_STORAGE_KEY) is True,
             }
 
             with ui.row().classes('w-full items-center gap-2 px-4 pt-2 pb-1 flex-wrap'):
@@ -356,15 +374,33 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                     value=filter_state['view'],
                 ).props('dense no-caps toggle-color=deep-orange')
 
+                # Thumbnail size: only the grid has thumbnails to size.
+                size_toggle = ui.toggle(
+                    {'s': tr('Small'), 'm': tr('Medium'), 'l': tr('Large')},
+                    value=filter_state['thumb'],
+                ).props('dense no-caps toggle-color=deep-orange').mark(
+                    'vs-thumb-size'
+                ).tooltip(tr('Thumbnail size'))
+                size_toggle.set_visibility(filter_state['view'] == 'grid')
+
+                orig_size_btn = ui.button(
+                    icon='zoom_in_map' if filter_state['orig_large'] else 'zoom_out_map',
+                ).props(
+                    f'flat dense round aria-label="{tr("Larger or smaller original")}"'
+                ).mark('vs-original-size').tooltip(tr('Larger or smaller original'))
+
             # Main content: side pane (left) + suggestion list (right)
             with ui.element('div').classes('w-full').style(
                 'flex: 1 1 0; overflow: hidden; display: flex; flex-direction: row; min-height: 0;'
             ):
                 # ── Left pane: Original manuscript ──
-                with ui.scroll_area().classes('shrink-0').style(
-                    'width: 260px; '
+                orig_pane_width, orig_image_height = _ORIGINAL_PANE[filter_state['orig_large']]
+                orig_pane = ui.scroll_area().classes('shrink-0').mark('vs-original-pane').style(
+                    f'width: {orig_pane_width}; '
                     'border-right: 2px solid var(--border-light, #e5e7eb);'
-                ), ui.column().classes('gap-2 p-3'):
+                )
+                orig_image_ref: dict = {'el': None}
+                with orig_pane, ui.column().classes('gap-2 p-3'):
                     ui.label(tr('Original')).classes('text-xs font-bold uppercase').style(
                         'color: #e65100; letter-spacing: 0.05em;'
                     )
@@ -385,8 +421,10 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                         orig_img_container.clear()
                         with orig_img_container:
                             if info.get('image_url'):
-                                ui.image(info['image_url']).classes(
-                                    'w-full max-h-[200px] object-contain rounded'
+                                orig_image_ref['el'] = ui.image(info['image_url']).classes(
+                                    'w-full object-contain rounded'
+                                ).style(
+                                    f"max-height: {_ORIGINAL_PANE[filter_state['orig_large']][1]};"
                                 )
                             else:
                                 ui.icon('hide_image').classes('text-2xl').style('color: var(--text-muted);')
@@ -450,9 +488,10 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                         return
 
                     if filter_state['view'] == 'grid':
-                        with ui.element('div').classes('w-full p-3').style(
+                        thumb_px = _THUMB_SIZES[filter_state['thumb']]
+                        with ui.element('div').classes('w-full p-3').mark('vs-thumb-grid').style(
                             'display: grid; gap: 12px; '
-                            'grid-template-columns: repeat(auto-fill, minmax(min(170px, 100%), 1fr));'
+                            f'grid-template-columns: repeat(auto-fill, minmax(min({thumb_px}px, 100%), 1fr));'
                         ):
                             for s in display:
                                 _render_suggestion_card(
@@ -461,6 +500,7 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                                     is_heb,
                                     original_sys_id=sys_id,
                                     original_shelfmark=shelfmark,
+                                    thumb_px=thumb_px,
                                 )
                     else:
                         for s in display:
@@ -517,9 +557,31 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
             def _on_view_change(e):
                 filter_state['view'] = _normalize_view(e.value)
                 safe_user_set(_VIEW_STORAGE_KEY, filter_state['view'])
+                size_toggle.set_visibility(filter_state['view'] == 'grid')
                 _render_rows()
 
             view_toggle.on_value_change(_on_view_change)
+
+            def _on_thumb_size_change(e):
+                filter_state['thumb'] = _normalize_thumb_size(e.value)
+                safe_user_set(_THUMB_SIZE_STORAGE_KEY, filter_state['thumb'])
+                _render_rows()
+
+            size_toggle.on_value_change(_on_thumb_size_change)
+
+            def _on_original_size_click():
+                """Enlarge the Original pane (fewer thumbnails per row) or shrink it back."""
+                filter_state['orig_large'] = not filter_state['orig_large']
+                safe_user_set(_ORIGINAL_LARGE_STORAGE_KEY, filter_state['orig_large'])
+                width, image_height = _ORIGINAL_PANE[filter_state['orig_large']]
+                orig_pane.style(f'width: {width};')
+                if orig_image_ref['el'] is not None:
+                    orig_image_ref['el'].style(f'max-height: {image_height};')
+                orig_size_btn.props(
+                    f"icon={'zoom_in_map' if filter_state['orig_large'] else 'zoom_out_map'}"
+                )
+
+            orig_size_btn.on_click(_on_original_size_click)
 
             # Initial render
             _render_rows()
@@ -796,17 +858,19 @@ def _render_suggestion_card(
     is_heb,
     original_sys_id=None,
     original_shelfmark=None,
+    thumb_px=_THUMB_SIZES['s'],
 ):
     """Render one suggestion as a thumbnail card (the grid view).
 
     The image opens the fragment in a new tab, so the filtered grid stays open
-    while the visitor looks at a candidate.
+    while the visitor looks at a candidate. *thumb_px* is the image height (the
+    visitor's Small / Medium / Large).
     """
     alma_id = s['alma_id']
     browse_url = f'/browse?sys_id={alma_id}'
     thumb_url = _suggestion_thumbnail_url(s)
     thumb_style = (
-        f'width: 100%; height: {_THUMB_HEIGHT_PX}px; '
+        f'width: 100%; height: {thumb_px}px; '
         'background: var(--bg-tertiary, #f3f4f6);'
     )
 

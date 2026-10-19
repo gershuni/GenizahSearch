@@ -74,12 +74,30 @@ _PLACEHOLDER_STYLE = (
     "flex-shrink:0;"
 )
 
-_PLACEHOLDER_STYLE_160 = (
-    "width:100%; height:160px; background:var(--bg-tertiary); "
-    "border-radius:8px 8px 0 0; display:flex; align-items:center; "
-    "justify-content:center; color:var(--text-muted); font-size:48px; "
-    "flex-shrink:0;"
-)
+def _placeholder_style(height_px: int) -> str:
+    """The no-image box of a card thumbnail *height_px* tall."""
+    return (
+        f"width:100%; height:{height_px}px; background:var(--bg-tertiary); "
+        "border-radius:8px 8px 0 0; display:flex; align-items:center; "
+        "justify-content:center; color:var(--text-muted); font-size:48px; "
+        "flex-shrink:0;"
+    )
+
+
+# Card size in the grid (owner, 2026-10-19), remembered per visitor by the page:
+# the grid's column classes, the thumbnail height, and the width the thumbnail is
+# fetched at (Large cards are wide enough to need more than 300 px). Medium is
+# the grid as it always was.
+CARD_SIZES = {
+    's': ("grid-cols-1 sm:grid-cols-2 lg:grid-cols-4", 140, 300),
+    'm': ("grid-cols-1 sm:grid-cols-2 lg:grid-cols-3", 160, 300),
+    'l': ("grid-cols-1 lg:grid-cols-2", 240, 600),
+}
+
+
+def normalize_card_size(value) -> str:
+    """'s', 'm' or 'l'; anything else is Medium (the default, the size before)."""
+    return value if isinstance(value, str) and value in CARD_SIZES else 'm'
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +422,7 @@ def build_thumbnail_url(
     page: Optional[int],
     shelfmark: str = "",
     library_code: str = "",
+    width: int = 300,
 ) -> Optional[str]:
     """Derive a proxy thumbnail URL for a candidate.
 
@@ -459,8 +478,8 @@ def build_thumbnail_url(
         # Canonical library→proxy table (same one /api/browse uses, search_serializer).
         from shared.search_serializer import _BROWSE_PROXY_BY_LIBRARY, _BROWSE_DEFAULT_PROXY
         base, _provider = _BROWSE_PROXY_BY_LIBRARY.get(library_code, _BROWSE_DEFAULT_PROXY)
-        return f"{base}/{sys_id}?page={page_idx}&width=300"
-    return f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}&width=300"
+        return f"{base}/{sys_id}?page={page_idx}&width={width}"
+    return f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}&width={width}"
 
 
 def build_browse_url(cand) -> str:
@@ -605,8 +624,13 @@ def _create_candidate_card(
     on_card_select: Optional[Callable] = None,
     on_triage_change: Optional[Callable] = None,
     selected: bool = False,
+    thumb_px: int = 160,
+    thumb_width: int = 300,
 ) -> None:
     """Render a single candidate card (Phase 119 D-09/D-11/D-07, Phase 120 D-07/ACT-01).
+
+    *thumb_px* is the thumbnail height and *thumb_width* the width it is fetched
+    at (the visitor's card size, CARD_SIZES; Medium is 160 / 300).
 
     Card layout (reading order):
         ┌──────────────────────────────────────────┐
@@ -641,7 +665,9 @@ def _create_candidate_card(
         cand.page,
         shelfmark=cand.shelfmark,
         library_code=cand.library_code,
+        width=thumb_width,
     )
+    placeholder_style = _placeholder_style(thumb_px)
 
     # Derive current verdict for initial render (IN-01: both branches are identical)
     current_verdict = triage.get(cand.sys_id) if triage else None
@@ -673,7 +699,7 @@ def _create_candidate_card(
             # NO direct-IIIF fallback).  T-117-07 / T-119-04 boundary.
             # G4: click opens Compare for this candidate; cursor:pointer signals clickability.
             img_el = ui.image(thumb_url).style(
-                "width:100%; height:160px; object-fit:cover;"
+                f"width:100%; height:{thumb_px}px; object-fit:cover;"
                 "border-radius:8px 8px 0 0; flex-shrink:0; display:block; cursor:pointer;"
             )
             img_el.on("click", _make_compare_handler())
@@ -685,7 +711,7 @@ def _create_candidate_card(
                     " e.target.style.display='none';"
                     " const ph=document.createElement('div');"
                     " ph.innerHTML='&#128196;';"
-                    " ph.setAttribute('style','" + _PLACEHOLDER_STYLE_160.replace("'", "\\'") + "');"
+                    " ph.setAttribute('style','" + placeholder_style.replace("'", "\\'") + "');"
                     " e.target.parentNode.insertBefore(ph,e.target);"
                     "}"
                 ),
@@ -695,7 +721,7 @@ def _create_candidate_card(
             # G4: placeholder is also clickable → opens Compare.
             (
                 ui.element("div")
-                .style(_PLACEHOLDER_STYLE_160 + " cursor:pointer;")
+                .style(placeholder_style + " cursor:pointer;")
                 .html("&#128196;")
                 .on("click", _make_compare_handler())
             )
@@ -1270,6 +1296,8 @@ def create_candidate_grid(
     # WITHOUT this the grid mutates the triage dict locally but never persists, so
     # Y/?/X verdicts are lost on a session restore.
     on_triage_change: Optional[Callable] = None,
+    # 2026-10-19: the visitor's card size, a CARD_SIZES key (Medium by default).
+    card_size: str = 'm',
 ) -> ui.element:
     """Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
@@ -1331,8 +1359,12 @@ def create_candidate_grid(
                         on_click=on_filter_open,
                     ).props('flat dense round').tooltip(tr('Filter candidates'))
 
-            # Responsive grid (D-09): 1 col <640px, 2 col 640–1023px, 3 col ≥1024px.
-            with ui.grid().classes("w-full gap-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"):
+            # Responsive grid (D-09). Medium: 1 col <640px, 2 col 640–1023px, 3 col
+            # ≥1024px; Small fits 4 at ≥1024px, Large 2 (CARD_SIZES).
+            cols_classes, thumb_px, thumb_width = CARD_SIZES[normalize_card_size(card_size)]
+            with ui.grid().classes(f"w-full gap-2 grid {cols_classes}").mark(
+                "joins-candidate-grid"
+            ):
                 _sel_set = selected_sys_ids if selected_sys_ids is not None else set()
                 for cand in page_slice:
                     _create_candidate_card(
@@ -1349,6 +1381,8 @@ def create_candidate_grid(
                         on_card_select=on_card_select,
                         on_triage_change=on_triage_change,
                         selected=cand.sys_id in _sel_set,
+                        thumb_px=thumb_px,
+                        thumb_width=thumb_width,
                     )
 
             # Pagination controls (D-08): ‹ Prev | Page N of M | Next ›
