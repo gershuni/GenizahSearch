@@ -12,10 +12,13 @@ on:
 # number covers it. Every master-main push gets a group of its own (run_id),
 # not a shared one: a shared group with cancel-in-progress false still holds a
 # second push PENDING behind the first and cancels that pending run when a
-# third arrives. master-main runs are never queued or cancelled.
+# third arrives. master-main runs are never queued or cancelled. A re-run
+# (run_attempt > 1) keeps its old commit's PR number, so it waits behind the
+# PR's current run instead of cancelling it: re-running a stale run must not
+# take away the newest commit's result.
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('{0}-pr-{1}', github.workflow, github.event.pull_request.number) || format('{0}-run-{1}', github.workflow, github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.run_attempt == 1 }}
 
 jobs:
   lint-and-docs:
