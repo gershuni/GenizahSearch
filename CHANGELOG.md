@@ -18,6 +18,27 @@ and material data already fetched for the candidates.
   several at once; desktop: one, like Material).
 - **Cards** show the domain (website) or "library · domain" (desktop).
 
+## [Unreleased] -- Joins Lab: a link that reopens the screen (web, branch `feat/joins-lab-share-link`)
+
+- **Copy Link** in the Joins Lab toolbar, and in the Compare window's header, copies an address
+  that reopens the same screen for anyone. The address carries:
+  - the fragment and its page;
+  - the search (both sides, the type, Variants and the options);
+  - Visual Similarity, the filter, Grid or Table, and the page of results;
+  - the pair, when Compare is open.
+- **Opening a link runs the search again** and shows that screen. If the same tab already holds
+  that search for that fragment, as after Back from the puzzle or a reload, the results come back
+  at once without running it.
+- **The address bar follows the screen** as you work, without adding entries to the browser
+  history.
+- **Marks** go into a link only when "Include my marks" is ticked (off by default).
+  - The recipient sees the sender's marks for that visit only, with a note saying so. They are
+    never saved.
+  - The recipient's own marks for that fragment stay theirs and take precedence.
+- A link whose screen cannot be read still opens its fragment, with a note saying so. A link is
+  checked, capped and size-limited before anything in it is used (`web/joins_lab_link.py`).
+- Decision record: `docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md` (PR 2).
+
 ## [Unreleased] -- Joins Lab: Browse in a new tab, and a fuller Compare window (web + desktop, branch `feat/joins-lab-links-compare`)
 
 - **Web Joins Lab:**

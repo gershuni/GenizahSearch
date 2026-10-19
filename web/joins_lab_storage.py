@@ -30,6 +30,7 @@ Schema (extended in Phase 120; same ``schema_version: 1`` as Phase 117):
         'other_side_enabled': bool,
         'other_side_rows': list,        # same shape as builder_rows; max 20 lines
         'other_side_combine': str,      # 'narrow' | 'widen'
+        'other_side_text_position': str,  # the other side's own position (as text_position)
         'triage': dict,                 # {sys_id: 'yes'|'maybe'|'no'} max 500 entries
         'active_filter': dict,          # compact filter discriminants only (< 4 KB)
         'view_mode': str,               # 'grid' | 'table'
@@ -240,6 +241,7 @@ def write_full_state(
     other_side_enabled: bool = False,
     other_side_rows: Optional[list] = None,
     other_side_combine: str = 'narrow',
+    other_side_text_position: str = 'anywhere',
     triage: Optional[dict] = None,
     active_filter: Optional[dict] = None,
     view_mode: str = 'grid',
@@ -283,6 +285,8 @@ def write_full_state(
         'other_side_enabled': bool(other_side_enabled),
         'other_side_rows': _cap_rows(other_side_rows),
         'other_side_combine': other_side_combine if isinstance(other_side_combine, str) else 'narrow',
+        'other_side_text_position': (other_side_text_position
+                                     if isinstance(other_side_text_position, str) else 'anywhere'),
         'triage': _cap_triage(triage),
         'active_filter': active_filter if isinstance(active_filter, dict) else {},
         'view_mode': view_mode if isinstance(view_mode, str) else 'grid',
