@@ -25,6 +25,10 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
   - On the desktop, the anchor's info line was empty.
 - Decisions for this and the next five PRs: `docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md`.
 
+## [Unreleased] -- The homepage search box opens shelfmarks and system IDs (web, branch `claude/fervent-curie-oip2lk`)
+
+The search box on the homepage now goes where the input belongs: Hebrew or Arabic text runs a full-text search as before, a system ID (all digits, starting 99) opens that manuscript, and anything else is looked up as a shelfmark by the Browse page, with its usual answers (the manuscript, a "Select Manuscript" list, or "No manuscript found" with the shelfmark left in the box to correct). The placeholder now reads "Text, shelfmark or system ID", short enough to fit the box on a phone. Routing: `web/home_query.py::home_query_target`. From the owner (2026-10-19).
+
 ## [9.7.0] - 2026-10-19 — Conditions in Composition Search, and letter-level search in My Library
 
 Composition Search's letter-level method takes conditions; letter-level search works in My

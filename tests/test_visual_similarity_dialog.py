@@ -1,5 +1,8 @@
 from shared.genizah_translations import TRANSLATIONS
 from web.components.visual_similarity_dialog import (
+    _domain_label,
+    _domain_options,
+    _library_options,
     _normalize_view,
     _pick_preview_image_url,
     _suggestion_thumbnail_url,
@@ -110,3 +113,45 @@ def test_pick_preview_image_url_builds_direct_oxford_image_without_thumb():
     )
 
     assert out == "https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_e_93_58a.jpg"
+
+
+def test_domain_label_is_hebrew_only_in_the_hebrew_ui():
+    s = {"domain": "Derashot", "domain_heb": "דרשות"}
+
+    assert _domain_label(s, is_heb=True) == "דרשות"
+    assert _domain_label(s, is_heb=False) == "Derashot"
+
+
+def test_domain_label_falls_back_to_english_without_a_hebrew_name():
+    assert _domain_label({"domain": "Derashot", "domain_heb": ""}, is_heb=True) == "Derashot"
+    assert _domain_label({"domain": "--"}, is_heb=True) == "--"
+
+
+def test_domain_options_count_each_domain_and_skip_unclassified():
+    suggestions = [
+        {"domain": "Liturgy", "domain_heb": "תפילה"},
+        {"domain": "Derashot", "domain_heb": "דרשות"},
+        {"domain": "Liturgy", "domain_heb": "תפילה"},
+        {"domain": "--", "domain_heb": ""},
+    ]
+
+    assert list(_domain_options(suggestions, is_heb=False).items()) == [
+        ("Derashot", "Derashot (1)"), ("Liturgy", "Liturgy (2)"),
+    ]
+    assert list(_domain_options(suggestions, is_heb=True).items()) == [
+        ("Derashot", "דרשות (1)"), ("Liturgy", "תפילה (2)"),
+    ]
+
+
+def test_library_options_count_each_library_in_code_order():
+    suggestions = [
+        {"library_code": "JTS"},
+        {"library_code": "CUL"},
+        {"library_code": "CUL"},
+        {"library_code": ""},
+        {},
+    ]
+
+    assert list(_library_options(suggestions).items()) == [
+        ("CUL", "CUL (2)"), ("JTS", "JTS (1)"),
+    ]

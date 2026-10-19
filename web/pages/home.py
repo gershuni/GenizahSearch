@@ -22,6 +22,7 @@ from web.components.typography import h1, h2, h3
 from web.atlas_assets import atlas_preview_available
 from web.discovery_assets import discovery_available
 from web.analytics import posthog_capture
+from web.home_query import home_query_target
 
 logger = logging.getLogger(__name__)
 
@@ -141,23 +142,25 @@ def create_page():
                     'max-width: 600px; width: 100%;'
                 ):
                     def _navigate_search():
-                        val = hero_search.value or ''
-                        if val.strip():
-                            ui.navigate.to(f'/search?q={val}')
+                        target = home_query_target(hero_search.value)
+                        if target:
+                            ui.navigate.to(target)
 
-                    # NOT "Search manuscripts..." (owner, 2026-09-04: "הכיתוב
-                    # search manuscripts מבלבל"). That phrasing reads as "search
-                    # FOR manuscripts", so a first-time reader types a shelfmark
-                    # — and this box does not do that: it runs a full-text query
-                    # over the MiDRASH transcriptions and hands the string to
-                    # `/search?q=`. The wording now names the input (a word or a
-                    # phrase) and the target (the manuscripts), which is what the
-                    # `/search` page's own box has always said.
+                    # One box, three destinations (owner, 2026-10-19): Hebrew
+                    # or Arabic text runs a full-text search, a sys_id opens
+                    # that manuscript, anything else is looked up as a
+                    # shelfmark by /browse. The routing is
+                    # `web/home_query.py::home_query_target`. (On 2026-09-04
+                    # "Search manuscripts..." was dropped because readers typed
+                    # shelfmarks into what was then a text-only box; now the
+                    # box takes them.) The placeholder names all three inputs
+                    # and fits the box on a 360px phone; a longer one was cut
+                    # off even on desktop.
                     hero_search = ui.input(
-                        placeholder=tr('Type a word or phrase to search the manuscripts...')
+                        placeholder=tr('Text, shelfmark or system ID')
                     ).classes('flex-grow hero-search-input').props('outlined rounded dense').style(
                         'font-size: 1.1rem;'
-                    ).on('keydown.enter', lambda: _navigate_search())
+                    ).on('keydown.enter', lambda: _navigate_search()).mark('home-hero-search')
                     ui.button(
                         icon='search',
                         on_click=lambda: _navigate_search()
