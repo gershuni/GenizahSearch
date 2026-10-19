@@ -2547,3 +2547,57 @@ def test_compare_links_follow_the_folio_shown(joins_lab_smoke_runner):
             assert (STUB_ANCHOR_SID, 7) in calls
 
     joins_lab_smoke_runner(driver)
+
+
+def test_compare_folio_turned_before_the_details_load_is_the_one_fetched(joins_lab_smoke_runner):
+    """A folio turned while Compare is still loading (the original turned while the
+    candidate pane loads; the candidate turned as soon as it drew) is the folio whose
+    details the loader fetches, not the page the pane opened on."""
+    from unittest.mock import patch
+
+    from nicegui import ElementFilter, ui
+
+    calls = []
+
+    def _details(sys_id, page=None, *, meta_mgr=None):
+        calls.append((sys_id, page))
+        return {'links': [{'key': 'pgp', 'label': 'PGP',
+                           'url': f'https://pgp.example/{sys_id}/{page}'}]}
+
+    def _pgp_hrefs(user, sys_id):
+        with user._client:
+            return [e._props.get('href', '') for e in ElementFilter(kind=ui.link)
+                    if f'pgp.example/{sys_id}/' in (e._props.get('href') or '')]
+
+    async def driver(user):
+        with patch('web.pages.joins_lab.fetch_fragment_details', side_effect=_details):
+            await user.open('/joins-lab')
+            await _load_anchor_and_search(user)
+            with user._client:
+                img_els = [e for e in ElementFilter(kind=ui.image) if e.visible]
+            _click_element(user, img_els[0])
+            await asyncio.sleep(0.5)
+            with user._client:
+                dialog = [d for d in ElementFilter(kind=ui.dialog)
+                          if d._props.get('model-value') and hasattr(d, '_on_show')][-1]
+
+            anchor_viewer = dialog._anchor_viewer_ref[0]
+            cand_viewer = dialog._cand_viewer_ref[0]
+            cand_sid = cand_viewer._sys_id
+            draw_candidate = cand_viewer.update_content
+
+            async def _candidate_loads(*a, **k):
+                await anchor_viewer._on_page_loaded(7)    # original turned meanwhile
+                await draw_candidate(*a, **k)
+                await cand_viewer._on_page_loaded(5)      # candidate turned once drawn
+
+            cand_viewer.update_content = _candidate_loads
+            with user._client:
+                await dialog._on_show()
+
+            assert (STUB_ANCHOR_SID, 7) in calls and (cand_sid, 5) in calls, calls
+            assert _pgp_hrefs(user, STUB_ANCHOR_SID) == [
+                f'https://pgp.example/{STUB_ANCHOR_SID}/7']
+            assert _pgp_hrefs(user, cand_sid) == [f'https://pgp.example/{cand_sid}/5']
+
+    joins_lab_smoke_runner(driver)

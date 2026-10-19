@@ -402,6 +402,10 @@ def create_compare_modal(
     # picks the PGP document, so a folio change in a pane's viewer fetches them again
     # (_on_*_page_loaded), and a result for a page no longer wanted is dropped.
     _details_page: dict = {"anchor": None, "candidate": None}
+    # The folio each pane's viewer last drew (None = not yet). A folio turned before
+    # the details loader starts (the anchor can be turned while the candidate pane is
+    # still loading) is what that loader fetches, not the page the pane opened on.
+    _shown_page: dict = {"anchor": None, "candidate": None}
 
     # D-08: candidate shelfmark+browse row ref — cleared+rebuilt in _fill_candidate
     # so the Browse URL stays in sync each time the candidate flips.
@@ -585,6 +589,7 @@ def create_compare_modal(
         # R2-6: suppress_shelfmark_header=True — Compare's green subtitle is the only shelfmark.
         # R2-3: image_max_height="40vh" — caps image so transcription is also visible.
         _details_page["candidate"] = None
+        _shown_page["candidate"] = None
         if _cand_viewer_container_ref:
             container = _cand_viewer_container_ref[0]
             container.clear()
@@ -668,7 +673,7 @@ def create_compare_modal(
             return  # SEED-008: NiceGUI client disconnected
 
     async def _fill_anchor_meta() -> None:
-        page = _details_page["anchor"] = anchor_cand.page or 1
+        page = _details_page["anchor"] = _shown_page["anchor"] or anchor_cand.page or 1
         meta, details = await _fetch_pane_meta(anchor_cand.sys_id, page)
         # A None (cancelled, or the app is stopping) is no metadata: that pane's
         # info row stays empty rather than claiming "no catalog".
@@ -704,7 +709,7 @@ def create_compare_modal(
         try:
             my_gen = _cand_load_gen["n"]
             cand = _state["current_candidate"]
-            page = _details_page["candidate"] = cand.page or 1
+            page = _details_page["candidate"] = _shown_page["candidate"] or cand.page or 1
             meta, details = await _fetch_pane_meta(cand.sys_id, page)
             if my_gen != _cand_load_gen["n"]:
                 return
@@ -744,16 +749,19 @@ def create_compare_modal(
 
     async def _on_anchor_page_loaded(page: int) -> None:
         """AnchorViewer hook: the anchor pane drew *page*; keep its links with it."""
+        _shown_page["anchor"] = page
         if details_fetcher is None or _details_page["anchor"] in (None, page):
-            return  # details not loaded yet (the show-loader fetches them), or same page
+            return  # details not loaded yet (the show-loader fetches *page*), or same page
         await _refetch_details("anchor", anchor_cand.sys_id, page, _anchor_details_ref,
                                getattr(anchor_cand, "library_code", "") or "")
 
     def _make_cand_page_hook(cand: Candidate) -> Callable:
         """AnchorViewer hook for one candidate's viewer (ignored once another is shown)."""
         async def _hook(page: int) -> None:
-            if (details_fetcher is None or _state.get("current_candidate") is not cand
-                    or _details_page["candidate"] in (None, page)):
+            if _state.get("current_candidate") is not cand:
+                return
+            _shown_page["candidate"] = page
+            if details_fetcher is None or _details_page["candidate"] in (None, page):
                 return
             await _refetch_details("candidate", cand.sys_id, page, _cand_details_ref,
                                    getattr(cand, "library_code", "") or "")
