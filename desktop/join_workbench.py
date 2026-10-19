@@ -254,11 +254,12 @@ def _image_url_for_idx(images, idx, width=2000):
 # Grid card size (S/M/L, as on the website's Joins Lab), kept in config.pkl.
 # key -> (card width, thumbnail width, thumbnail height, cards per row). Medium is the
 # size the grid always had; Small fits five cards in about the width of Medium's four.
-# A card is no narrower than 190 px: its action row is six 28 px buttons (178 px) plus
-# the frame and margins.
+# Its action row is six 28 px buttons (178 px) plus the frame and margins: 190 px on
+# Linux, a few more on Windows, so Small is 200 and a card never goes narrower than its
+# rows need (the end of CandidateCard.__init__).
 CARD_SIZE_CONFIG_KEY = "joins_lab_card_size"
 CARD_SIZES = {
-    "s": (196, 184, 100, 5),
+    "s": (200, 188, 100, 5),
     "m": (232, 220, 130, 4),
     "l": (312, 300, 240, 3),
 }
@@ -2270,6 +2271,9 @@ if _QT_AVAILABLE:
                 lay.addWidget(pick_btn)
 
             lay.addLayout(arow)
+
+            # Fonts and styles differ by platform: never narrower than the rows need.
+            self.setFixedWidth(max(card_w, self.minimumSizeHint().width()))
 
         def mouseDoubleClickEvent(self, event):
             """Feature 2: double-click opens Compare (skip if on checkbox/buttons)."""

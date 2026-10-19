@@ -93,7 +93,7 @@ def test_choosing_a_size_redraws_the_page_and_is_remembered(config):
     pane.card_size_combo.setCurrentIndex(pane.card_size_combo.findData("s"))
     assert pane.card_size == "s"
     assert config["joins_lab_card_size"] == "s"
-    assert pane.cards[0].width() == 196
+    assert pane.cards[0].width() == 200
     assert _columns(pane) == {0, 1, 2, 3, 4}
 
 
@@ -102,7 +102,24 @@ def test_every_size_holds_the_card_rows(config, size):
     """The action row's six fixed buttons must fit inside the card at every size."""
     config["joins_lab_card_size"] = size
     card = _pane(1).cards[0]
+    assert card.width() == jw_card_sizes()[size][0]       # the preset, not the clamp
     assert card.layout().minimumSize().width() <= card.contentsRect().width()
+
+
+def test_a_card_never_goes_narrower_than_its_rows(config, monkeypatch):
+    """Fonts and styles differ by platform (Windows needed 2 px more than Linux at the
+    first Small size), so a too-narrow preset widens the card instead of clipping."""
+    import desktop.join_workbench as jw
+    monkeypatch.setitem(jw.CARD_SIZES, "s", (150, 140, 100, 5))
+    config["joins_lab_card_size"] = "s"
+    card = _pane(1).cards[0]
+    assert card.width() > 150
+    assert card.layout().minimumSize().width() <= card.contentsRect().width()
+
+
+def jw_card_sizes():
+    import desktop.join_workbench as jw
+    return jw.CARD_SIZES
 
 
 def test_the_size_control_is_for_the_grid_only(config):
