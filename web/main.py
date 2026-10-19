@@ -2700,6 +2700,7 @@ def joins_lab_page_route(
     fl_id: str = None,
     page: int = None,
     volume_ie: str = None,
+    state: str = None,
 ):
     """Joins Lab vertical spine page route.
 
@@ -2713,9 +2714,16 @@ def joins_lab_page_route(
       - page:       Optional 1-based page/image number hint — forwarded to AnchorViewer.
       - volume_ie:  Optional volume IE identifier for multi-volume manuscripts.
 
-    Builder/candidate/triage state is NEVER in the URL — it is device-local
-    (safe_storage, keyed by NiceGUI session cookie).  Only the anchor identity
-    is carried in the URL.
+      - state:      Optional shared-link screen (web/joins_lab_link.py, owner
+                    decision 2026-10-19): the builder inputs, options, Visual
+                    Similarity, filter, view, grid page, the Compare pair and,
+                    only when the sender chose to include them, the sender's
+                    marks. The page re-runs the search from it, and keeps the
+                    address bar on the current screen (marks left out).
+
+    Results and images are never in the URL. The visitor's own working state
+    stays device-local (safe_storage, keyed by NiceGUI session cookie); marks
+    that come with a link are shown for that visit and never saved.
     """
     safe_user_set('current_page', '/joins-lab')
     ui.add_head_html(ANALYTICS_SCRIPT)
@@ -2731,6 +2739,7 @@ def joins_lab_page_route(
             initial_fl_id=fl_id,
             initial_page=page,
             initial_volume_ie=volume_ie,
+            initial_share_state=state,
         )
 
 

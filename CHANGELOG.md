@@ -8,6 +8,27 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 The website's Browse page buttons that were text only now carry an icon: Go (`search` on the shelfmark box, an arrow that points the reading direction beside the page number), Submit (`send`, mirrored in Hebrew), the image-source chips (`image` where the chip switches the images shown, `open_in_new` where it opens the library's viewer), the External link row (`open_in_new` after each link), and the Bib. FJMS / Bib. Ktiv (`menu_book`), Catalog rec. (`info_outline`), Measurements (`straighten`) and Visual Similarity (`compare`) chips. On a phone (below 600px) no row gets wider: Go and Submit show the icon alone and keep their name for screen readers, and the chips and links show the text alone. A chip that opens a library's viewer now carries the icon itself, so the separate icon-only button beside it is gone, and the ones that remain have an accessible name. The desktop app is unchanged. From the owner (2026-10-19); test `tests/render_smoke/test_browse_button_icons_render_smoke.py`.
 
+## [Unreleased] -- Joins Lab: a link that reopens the screen (web, branch `feat/joins-lab-share-link`)
+
+- **Copy Link** in the Joins Lab toolbar, and in the Compare window's header, copies an address
+  that reopens the same screen for anyone. The address carries:
+  - the fragment and its page;
+  - the search (both sides, the type, Variants and the options);
+  - Visual Similarity, the filter, Grid or Table, and the page of results;
+  - the pair, when Compare is open.
+- **Opening a link runs the search again** and shows that screen. If the same tab already holds
+  that search for that fragment, as after Back from the puzzle or a reload, the results come back
+  at once without running it.
+- **The address bar follows the screen** as you work, without adding entries to the browser
+  history.
+- **Marks** go into a link only when "Include my marks" is ticked (off by default).
+  - The recipient sees the sender's marks for that visit only, with a note saying so. They are
+    never saved.
+  - The recipient's own marks for that fragment stay theirs and take precedence.
+- A link whose screen cannot be read still opens its fragment, with a note saying so. A link is
+  checked, capped and size-limited before anything in it is used (`web/joins_lab_link.py`).
+- Decision record: `docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md` (PR 2).
+
 ## [Unreleased] -- Joins Lab: Browse in a new tab, and a fuller Compare window (web + desktop, branch `feat/joins-lab-links-compare`)
 
 - **Web Joins Lab:**
