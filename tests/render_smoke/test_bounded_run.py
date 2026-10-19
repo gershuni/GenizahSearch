@@ -98,6 +98,47 @@ def test_run_bounded_reports_a_timeout_even_when_the_coroutine_stops_on_cancel()
         run_bounded(stalls_here(), timeout=0.3, teardown_timeout=_TEARDOWN)
 
 
+def test_a_permit_held_by_an_in_flight_worker_is_released_before_the_loop_closes():
+    """web/bounded_io.py releases its permit when the worker's future completes,
+    and that future completes through the loop. A read still in flight when a
+    test's loop closed left a module-level semaphore taken for the rest of the
+    process, so the next findings render waited at acquire() -- under plain
+    asyncio.run() too."""
+    from web.bounded_io import bounded_io_bound
+
+    semaphore = asyncio.Semaphore(1)
+
+    async def first():
+        asyncio.get_running_loop().create_task(
+            bounded_io_bound(semaphore, time.sleep, 0.5))
+        await asyncio.sleep(0.05)  # the read is in flight when the test ends
+
+    run_bounded(first(), teardown_timeout=5)
+    assert not semaphore.locked()
+
+    async def second():
+        await asyncio.wait_for(semaphore.acquire(), 2)
+        semaphore.release()
+
+    run_bounded(second(), teardown_timeout=_TEARDOWN)
+
+
+def test_a_worker_past_the_budget_still_releases_its_permit():
+    from web.bounded_io import bounded_io_bound
+
+    semaphore = asyncio.Semaphore(1)
+
+    async def first():
+        asyncio.get_running_loop().create_task(
+            bounded_io_bound(semaphore, time.sleep, 15))
+        await asyncio.sleep(0.05)
+
+    started = time.monotonic()
+    run_bounded(first(), teardown_timeout=_TEARDOWN)
+    assert time.monotonic() - started < _PROMPT
+    assert not semaphore.locked()
+
+
 def test_run_bounded_warns_but_passes_when_only_a_leftover_is_stuck():
     async def main():
         asyncio.get_running_loop().create_task(_swallows_cancel_then_waits())

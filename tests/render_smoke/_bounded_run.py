@@ -68,13 +68,48 @@ async def _wait_bounded(task: asyncio.Task, timeout: float) -> tuple[bool, str]:
     return bool(done), expired_at
 
 
-def _cleanup_loop(loop: asyncio.AbstractEventLoop, teardown_timeout: float) -> list:
+def _record_executor_futures(loop: asyncio.AbstractEventLoop) -> set:
+    """Make ``loop`` remember every ``run_in_executor`` future it hands out
+    until that future is done; return the live set.
+
+    A worker's result reaches its asyncio future through the LOOP
+    (``call_soon_threadsafe``). If the loop closes first, the future never
+    completes and its done-callbacks never run. ``web/bounded_io.py`` releases
+    its permit from exactly such a callback, on module-level semaphores that
+    outlive the loop (``web.discovery._SUPPRESSION_SEMAPHORE`` and four
+    others), so one Supabase read still in flight when a test ended left the
+    permit taken for the rest of the process and the next findings render
+    waited at ``acquire()`` until its bound -- under plain ``asyncio.run()``
+    as well, which is the "test_findings_page.py hangs a runner chunk now and
+    then" tracker row. _cleanup_loop waits for these futures with the loop
+    still running.
+    """
+    inflight: set = set()
+    original = loop.run_in_executor
+
+    def run_in_executor(executor, func, *args):
+        future = original(executor, func, *args)
+        inflight.add(future)
+        future.add_done_callback(inflight.discard)
+        return future
+
+    loop.run_in_executor = run_in_executor  # type: ignore[method-assign]
+    return inflight
+
+
+def _cleanup_loop(loop: asyncio.AbstractEventLoop, teardown_timeout: float,
+                  inflight: set = frozenset()) -> list:
     """Cancel what is left on ``loop`` and wait for it, bounded. Return the
     tasks that did not finish (they are abandoned with the loop).
 
     Cancelling repeats until the loop is empty, because finishing one task
     can start another: NiceGUI's ``create_lazy`` starts the queued
     user-storage write from the done-callback of the one before it.
+
+    Executor futures in ``inflight`` are waited for, not cancelled, so they
+    complete normally and their done-callbacks run on this loop (see
+    _record_executor_futures). One still running when the budget is spent is
+    cancelled, which runs those callbacks too; its worker thread is abandoned.
     """
     deadline = loop.time() + teardown_timeout
     cancelled: set = set()
@@ -83,7 +118,8 @@ def _cleanup_loop(loop: asyncio.AbstractEventLoop, teardown_timeout: float) -> l
     while True:
         pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
         seen.update(pending)
-        if not pending:
+        workers = [f for f in inflight if not f.done()]
+        if not pending and not workers:
             break
         for task in pending:
             if task not in cancelled:
@@ -92,8 +128,11 @@ def _cleanup_loop(loop: asyncio.AbstractEventLoop, teardown_timeout: float) -> l
         remaining = deadline - loop.time()
         if remaining <= 0:
             stuck = pending
+            for future in workers:
+                future.cancel()  # runs its done-callbacks, e.g. a permit release
+            loop.run_until_complete(asyncio.sleep(0))
             break
-        loop.run_until_complete(asyncio.wait(pending, timeout=remaining))
+        loop.run_until_complete(asyncio.wait(pending + workers, timeout=remaining))
     for task in seen:
         if task.done() and not task.cancelled():
             task.exception()  # mark retrieved: no "never retrieved" noise
@@ -145,12 +184,13 @@ def run_bounded(
     loop = asyncio.new_event_loop()
     executor = ThreadPoolExecutor(thread_name_prefix='render-smoke')
     loop.set_default_executor(executor)
+    inflight = _record_executor_futures(loop)
     stuck: list = []
     try:
         asyncio.set_event_loop(loop)
         main = loop.create_task(coro, name='render-smoke main')
         finished, expired_at = loop.run_until_complete(_wait_bounded(main, timeout))
-        stuck = _cleanup_loop(loop, teardown_timeout)
+        stuck = _cleanup_loop(loop, teardown_timeout, inflight)
         if expired_at:
             raise TimeoutError(
                 f'render-smoke: coroutine did not finish within {timeout:.0f} s'
