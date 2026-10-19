@@ -18,6 +18,10 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 - The website's stored size is read defensively: a value that is not one of the three sizes is
   the default, never an error.
 
+## [Unreleased] -- Fragment images can be kept by Cloudflare and browsers (web, branch `feat/cacheable-image-routes`)
+
+The six library image routes (`/api/nli_image`, `/api/nli_image_by_sysid`, `/api/cambridge_image`, `/api/manchester_image`, `/api/jts_image`, `/api/oxford_image`) no longer set the session cookie: none of them reads the session, user storage or sign-in, so the answer is the same for every visitor (`web/framework_patches.py::_is_public_image_route`, an anchored path pattern; the puzzle routes are not in it). Image bytes are now kept a week (`Cache-Control: public, max-age=604800`, the owner's choice, new `IMAGE_HTTP_MAX_AGE`; was 600 s); a 404, "no image", error or the Oxford redirect is `no-store`; the synthetic sys_id 204 is unchanged (`web/api.py::_image_cache_headers`). The in-memory image cache holds 2048 entries (was 512) under the same 256 MB byte cap. Cloudflare keeps them only once a Cache Rule makes these paths eligible (they have no file extension). Step (a) of PR 6 of the Joins Lab / Visual Similarity plan; the disk store, step (b), waits on the owner. Pages, other `/api/*` routes and auth still set the cookie.
+
 ## [Unreleased] -- Joins Lab: a link that reopens the screen (web, branch `feat/joins-lab-share-link`)
 
 - **Copy Link** in the Joins Lab toolbar, and in the Compare window's header, copies an address
