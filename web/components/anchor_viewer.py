@@ -29,6 +29,7 @@ Phase 119 Compare readiness: the head HTML (``_VIEWER_HEAD``) is injected
 from __future__ import annotations
 
 import html as _html_module
+import inspect
 import logging
 import re
 from typing import Any, Callable, Optional
@@ -355,6 +356,7 @@ class AnchorViewer:
         image_max_height: Optional[str] = None,
         active_source: str = 'nli',
         source_user_override: bool = False,
+        on_page_loaded: Optional[Callable[[int], Any]] = None,
     ) -> None:
         self._sys_id = sys_id
         self._fl_id = fl_id
@@ -372,6 +374,10 @@ class AnchorViewer:
         # image-container max-height so both image + transcription fit in Compare.
         # Default None — non-Compare callers get the global 72vh CSS rule unchanged.
         self._image_max_height: Optional[str] = image_max_height
+        # Optional hook (Compare): called -- and awaited, if it returns an awaitable --
+        # with the page number each time a folio has been drawn, so the caller can keep
+        # page-dependent details (the PGP link) with the folio shown. Default None.
+        self._on_page_loaded: Optional[Callable[[int], Any]] = on_page_loaded
 
         # Inject real defaults lazily so the module can be imported without
         # a live AppState (test safety).
@@ -970,6 +976,14 @@ class AnchorViewer:
             font_size="1.4rem",
         )
         self._transcription_html.set_content(html_text)
+
+        if self._on_page_loaded is not None and page.p_num:
+            try:
+                result = self._on_page_loaded(int(page.p_num))
+                if inspect.isawaitable(result):
+                    await result
+            except Exception as e:  # a caller's hook must never break the viewer
+                logger.debug("AnchorViewer: on_page_loaded hook failed: %s", e)
 
     # ──────────────────────────────────────────────────────────────────────────
     # State display helpers

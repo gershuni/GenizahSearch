@@ -109,7 +109,7 @@ def test_copy_button_copies_the_plain_shelfmark(app):
 
 
 def test_stale_details_are_dropped(app, monkeypatch):
-    """A details result for a fragment the pane no longer shows is ignored."""
+    """A details result for a (sys_id, page) the pane no longer shows is ignored."""
     emitted = {}
 
     class _Signal:
@@ -135,17 +135,41 @@ def test_stale_details_are_dropped(app, monkeypatch):
     s._reap_pane_text_worker = lambda wid: None
     pane = _pane(app, s)
     pane["sys_id"] = CAND_SID
+    pane["page"] = 3
     pane["info_base"] = ("CUL", None, None, "")
     jw.CompareDialog._load_pane_details(s, pane)
     worker = emitted["worker"]
 
     pane["sys_id"] = "990000000030205171"            # the user moved to the next candidate
     for slot in worker.done.slots:
-        slot(CAND_SID, {"dating": "STALE", "links": []})
+        slot(CAND_SID, 3, {"dating": "STALE", "links": []})
     assert pane["details"] is None and "STALE" not in pane["info_lbl"].text()
 
     pane["sys_id"] = CAND_SID
+    pane["page"] = 4                                  # ...or to another folio of the same one
     for slot in worker.done.slots:
-        slot(CAND_SID, {"dating": "1100", "links": []})
+        slot(CAND_SID, 3, {"dating": "STALE", "links": []})
+    assert pane["details"] is None
+
+    pane["page"] = 3
+    for slot in worker.done.slots:
+        slot(CAND_SID, 3, {"dating": "1100", "links": []})
     assert pane["details"] == {"dating": "1100", "links": []}
     assert "1100" in pane["info_lbl"].text()
+
+
+def test_folio_step_reloads_the_details_for_the_new_page(app):
+    """The page picks the PGP document, so a folio step fetches the details again."""
+    loaded = []
+    s = _stub(loaded)
+    s.idx = 0
+    pane = _pane(app, s)
+    pane["sys_id"] = CAND_SID
+    pane["page"] = 1
+    pane["details"] = {"links": [{"key": "pgp", "label": "PGP", "url": "https://pgp.example/recto"}]}
+    s._render_pane_info = lambda pd: loaded.append(("render", pd["page"]))
+    s._load_pane_details = lambda pd: loaded.append(("details", pd["page"]))
+
+    jw.CompareDialog._pane_folio_step(s, pane, +1)
+
+    assert ("details", 2) in loaded

@@ -697,12 +697,13 @@ if _QT_AVAILABLE:
 
         Library, title, domains, date and external links, from
         shared.fragment_details (local SQLite reads -- the same rule as the web
-        Compare window). Signal: done(str sys_id, dict details); the dialog drops a
-        result whose sys_id is no longer the pane's.
+        Compare window). Signal: done(str sys_id, int page, dict details); the
+        dialog drops a result whose (sys_id, page) is no longer the pane's -- the
+        page picks the PGP document, and two candidates can share a sys_id.
         """
-        done = pyqtSignal(str, dict)
+        done = pyqtSignal(str, int, dict)
 
-        def __init__(self, wb, sid: str, p):
+        def __init__(self, wb, sid: str, p: int):
             super().__init__()
             self.wb = wb
             self.sid = sid
@@ -715,7 +716,7 @@ if _QT_AVAILABLE:
                 )
             except Exception:
                 details = {}
-            self.done.emit(self.sid, details or {})
+            self.done.emit(self.sid, self.p, details or {})
 
     class _KnownJoinsLoadWorker(QThread):
         """Off-UI-thread FOUR-source known-joins loader.
@@ -4991,18 +4992,20 @@ if _QT_AVAILABLE:
 
         def _load_pane_details(self, pane: dict):
             """Fetch a pane's details on a _PaneDetailsWorker; drop a result for a
-            fragment the pane no longer shows (the candidate may have moved on)."""
+            (sys_id, page) the pane no longer shows -- the candidate may have moved
+            on, or the folio changed (the page picks the PGP document)."""
             sid = pane.get("sys_id")
             if not sid:
                 return
+            page = int(pane.get("page") or 1)
             try:
-                def _on_details(wsid: str, details: dict, pd=pane) -> None:
-                    if pd.get("sys_id") != wsid:
+                def _on_details(wsid: str, wpage: int, details: dict, pd=pane) -> None:
+                    if pd.get("sys_id") != wsid or int(pd.get("page") or 1) != wpage:
                         return
                     pd["details"] = details
                     self._render_pane_info(pd)
 
-                worker = _PaneDetailsWorker(self.wb, sid, pane.get("page"))
+                worker = _PaneDetailsWorker(self.wb, sid, page)
                 worker.done.connect(_on_details)
                 # Same retention, reaping and closeEvent wait as the page-text workers
                 # (WR-01): one list, so closeEvent covers both kinds.
@@ -5095,7 +5098,10 @@ if _QT_AVAILABLE:
             # the initial fill (page-scoped text + client-side zoom).
             self._load_pane_page_text(pane, highlight)
             self._load_pane_image(pane, pane["sys_id"], new_page)
-            self._render_pane_info(pane)   # the genizahsearch.com link follows the folio
+            # The genizahsearch.com link follows the folio at once; the details are
+            # fetched again for the new page, which picks the PGP document.
+            self._render_pane_info(pane)
+            self._load_pane_details(pane)
 
     # -------------------------------------------------------------------------
     # JoinWorkbenchWindow — the main modeless QDialog shell (Plan 02, JWB-01).

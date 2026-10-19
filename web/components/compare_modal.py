@@ -398,6 +398,10 @@ def create_compare_modal(
     _anchor_details_ref: list = []    # [column_element]
     _cand_details_ref: list = []      # [column_element]
     _anchor_title_row_ref: list = []  # [row_element]
+    # The page each pane's details were last fetched for (None = not yet). The page
+    # picks the PGP document, so a folio change in a pane's viewer fetches them again
+    # (_on_*_page_loaded), and a result for a page no longer wanted is dropped.
+    _details_page: dict = {"anchor": None, "candidate": None}
 
     # D-08: candidate shelfmark+browse row ref — cleared+rebuilt in _fill_candidate
     # so the Browse URL stays in sync each time the candidate flips.
@@ -580,6 +584,7 @@ def create_compare_modal(
         # Store it in _cand_viewer_ref so _load_candidate_pane can await update_content.
         # R2-6: suppress_shelfmark_header=True — Compare's green subtitle is the only shelfmark.
         # R2-3: image_max_height="40vh" — caps image so transcription is also visible.
+        _details_page["candidate"] = None
         if _cand_viewer_container_ref:
             container = _cand_viewer_container_ref[0]
             container.clear()
@@ -591,6 +596,7 @@ def create_compare_modal(
                     highlight_pattern=getattr(cand, "highlight_pattern", None),
                     suppress_shelfmark_header=True,
                     image_max_height="40vh",
+                    on_page_loaded=_make_cand_page_hook(cand),
                 )
             # Replace the stored viewer ref
             if _cand_viewer_ref:
@@ -656,7 +662,8 @@ def create_compare_modal(
 
     async def _load_anchor_meta() -> None:
         """Fill the anchor pane's FJMS/PGP buttons, info line, links and title."""
-        meta, details = await _fetch_pane_meta(anchor_cand.sys_id, anchor_cand.page)
+        page = _details_page["anchor"] = anchor_cand.page or 1
+        meta, details = await _fetch_pane_meta(anchor_cand.sys_id, page)
         # A None (cancelled, or the app is stopping) is no metadata: that pane's
         # info row stays empty rather than claiming "no catalog".
         if _anchor_info_row_ref and meta is not None:
@@ -666,7 +673,7 @@ def create_compare_modal(
                 anchor_cand.shelfmark or "?",
                 meta,
             )
-        if details is None:
+        if details is None or _details_page["anchor"] != page:
             return
         if _anchor_details_ref:
             _render_pane_details(
@@ -691,7 +698,8 @@ def create_compare_modal(
         try:
             my_gen = _cand_load_gen["n"]
             cand = _state["current_candidate"]
-            meta, details = await _fetch_pane_meta(cand.sys_id, cand.page)
+            page = _details_page["candidate"] = cand.page or 1
+            meta, details = await _fetch_pane_meta(cand.sys_id, page)
             if my_gen != _cand_load_gen["n"]:
                 return
             if _cand_info_row_ref and meta is not None:
@@ -701,7 +709,7 @@ def create_compare_modal(
                     cand.shelfmark or "?",
                     meta,
                 )
-            if details is not None and _cand_details_ref:
+            if details is not None and _cand_details_ref and _details_page["candidate"] == page:
                 _render_pane_details(
                     _cand_details_ref[0],
                     getattr(cand, "library_code", "") or "",
@@ -710,6 +718,40 @@ def create_compare_modal(
                 )
         except RuntimeError:
             return  # SEED-008: NiceGUI client disconnected
+
+    async def _refetch_details(which: str, sys_id: str, page: int, container_ref: list,
+                               library_code: str) -> None:
+        """Fetch one pane's details again for *page* after its viewer changed folio.
+
+        The page picks the PGP document. Dropped if another page was asked for while
+        the fetch ran.
+        """
+        _details_page[which] = page
+        try:
+            details = await run.io_bound(details_fetcher, sys_id, page)
+            if details is None or _details_page[which] != page or not container_ref:
+                return
+            _render_pane_details(container_ref[0], library_code,
+                                 enrichment.get(sys_id), details)
+        except RuntimeError:
+            return  # SEED-008: NiceGUI client disconnected
+
+    async def _on_anchor_page_loaded(page: int) -> None:
+        """AnchorViewer hook: the anchor pane drew *page*; keep its links with it."""
+        if details_fetcher is None or _details_page["anchor"] in (None, page):
+            return  # details not loaded yet (the show-loader fetches them), or same page
+        await _refetch_details("anchor", anchor_cand.sys_id, page, _anchor_details_ref,
+                               getattr(anchor_cand, "library_code", "") or "")
+
+    def _make_cand_page_hook(cand: Candidate) -> Callable:
+        """AnchorViewer hook for one candidate's viewer (ignored once another is shown)."""
+        async def _hook(page: int) -> None:
+            if (details_fetcher is None or _state.get("current_candidate") is not cand
+                    or _details_page["candidate"] in (None, page)):
+                return
+            await _refetch_details("candidate", cand.sys_id, page, _cand_details_ref,
+                                   getattr(cand, "library_code", "") or "")
+        return _hook
 
     async def _step(delta: int) -> None:
         """Advance/retreat through filtered_candidates (parity desktop step(delta):3741).
@@ -912,6 +954,7 @@ def create_compare_modal(
                             highlight_pattern=getattr(anchor_cand, "highlight_pattern", None),
                             suppress_shelfmark_header=True,
                             image_max_height="40vh",
+                            on_page_loaded=_on_anchor_page_loaded,
                         )
                         _anchor_viewer_ref.append(anchor_viewer)
 
@@ -1234,6 +1277,9 @@ def create_compare_modal(
     # A test can call _on_show directly via asyncio.run with stub viewers.
     dialog._on_show = _on_show  # type: ignore[attr-defined]
     dialog._load_candidate_pane = _load_candidate_pane  # type: ignore[attr-defined]
+    # The pane viewers, so a test can fire their on_page_loaded hooks (folio change).
+    dialog._anchor_viewer_ref = _anchor_viewer_ref  # type: ignore[attr-defined]
+    dialog._cand_viewer_ref = _cand_viewer_ref  # type: ignore[attr-defined]
 
     # Populate the candidate pane with the initial candidate
     _fill_candidate(initial_candidate)

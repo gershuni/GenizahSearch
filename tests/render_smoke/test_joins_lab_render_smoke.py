@@ -2489,3 +2489,50 @@ def test_compare_info_buttons_follow_the_shown_candidate(joins_lab_smoke_runner)
             assert len(set(seen)) == 2, f"Next did not change the candidate: {seen}"
 
     joins_lab_smoke_runner(driver)
+
+
+def test_compare_links_follow_the_folio_shown(joins_lab_smoke_runner):
+    """A folio change in a Compare pane fetches that pane's details again for the new
+    page (the page picks the PGP document); the same page fetches nothing."""
+    from unittest.mock import patch
+
+    calls = []
+
+    def _details(sys_id, page=None, *, meta_mgr=None):
+        calls.append((sys_id, page))
+        return {'links': [{'key': 'pgp', 'label': 'PGP',
+                           'url': f'https://pgp.example/{sys_id}/{page}'}]}
+
+    def _pgp_hrefs(user, marker):
+        from nicegui import ElementFilter, ui
+        with user._client:
+            return [e._props.get('href', '') for e in
+                    ElementFilter(kind=ui.link).within(marker=marker)
+                    if 'pgp.example' in (e._props.get('href') or '')]
+
+    async def driver(user):
+        with patch('web.pages.joins_lab.fetch_fragment_details', side_effect=_details):
+            await user.open('/joins-lab')
+            await _load_anchor_and_search(user)
+            dialog = await _open_compare_from_first_image(user)
+
+            cand_viewer = dialog._cand_viewer_ref[0]
+            cand_sid = cand_viewer._sys_id
+            first = _pgp_hrefs(user, 'compare-candidate-pane')
+            assert len(first) == 1 and not first[0].endswith('/9')
+
+            with user._client:
+                await cand_viewer._on_page_loaded(9)          # the pane moved to folio 9
+            assert _pgp_hrefs(user, 'compare-candidate-pane') == [
+                f'https://pgp.example/{cand_sid}/9']
+
+            n = len(calls)
+            with user._client:
+                await cand_viewer._on_page_loaded(9)          # same folio again
+            assert len(calls) == n, "the same folio must not fetch again"
+
+            with user._client:
+                await dialog._anchor_viewer_ref[0]._on_page_loaded(7)
+            assert (STUB_ANCHOR_SID, 7) in calls
+
+    joins_lab_smoke_runner(driver)
