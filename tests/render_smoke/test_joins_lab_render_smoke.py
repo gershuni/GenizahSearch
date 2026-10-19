@@ -2486,3 +2486,41 @@ def test_returning_to_the_address_bar_url_restores_without_a_rerun(joins_lab_smo
         assert _count_visible_cards(user) >= 1, "the results did not come back"
 
     joins_lab_smoke_runner(driver)
+
+
+def test_a_screen_too_long_for_a_link_copies_the_fragment_and_says_so(joins_lab_smoke_runner):
+    """When the screen does not fit in a link, Copy Link copies the fragment's link
+    with a warning, and the address bar falls back to /joins-lab (a reload then
+    restores the saved session) -- never an unreadable link."""
+    import contextlib
+    import re
+    from unittest.mock import patch
+
+    copied: list = []
+
+    async def _capture(text, **_kw):
+        copied.append(text)
+        return True
+
+    async def driver(user):
+        user.javascript_rules[re.compile(r'window\.location\.origin')] = (
+            lambda _m: 'https://lab.example')
+        with contextlib.ExitStack() as stack:
+            bar = _record_address_bar(stack)
+            stack.enter_context(patch('web.joins_lab_link.MAX_TOKEN_CHARS', 20))
+            stack.enter_context(
+                patch('web.pages.joins_lab.copy_text_to_clipboard', side_effect=_capture))
+            await user.open('/joins-lab')
+            await _load_anchor_and_search(user)
+            from nicegui import ElementFilter, ui
+            with user._client:
+                btn = [b for b in ElementFilter(kind=ui.button, marker='joins-copy-link')][0]
+            _click_element(user, btn)
+            await asyncio.sleep(0.3)
+
+        assert copied == [f'https://lab.example/joins-lab?sys_id={STUB_ANCHOR_SID}'], copied
+        assert user.notify.contains('too long for a link') or user.notify.contains(
+            'ארוך מדי לקישור')
+        assert bar and bar[-1] == '/joins-lab', bar[-3:]
+
+    joins_lab_smoke_runner(driver)

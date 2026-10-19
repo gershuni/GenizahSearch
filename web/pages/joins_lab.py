@@ -78,8 +78,8 @@ from shared.export_utils import GENIZAHSEARCH_URL
 from web import io_bound_result
 from web.clipboard import copy_text_to_clipboard
 from web.joins_lab_link import (
-    MAX_LINK_MARKS, build_share_url, clean_share_state, decode_share_state, same_inputs,
-    share_inputs_from_full_state,
+    MAX_LINK_MARKS, LinkTooLong, build_share_url, clean_share_state, decode_share_state,
+    same_inputs, share_inputs_from_full_state,
 )
 from web.auth_state import GlobalAuthState, create_login_dialog
 from web.components.anchor_viewer import AnchorViewer, inject_viewer_assets
@@ -4001,8 +4001,12 @@ def create_joins_lab_page(
             state['m'] = dict(ordered[:MAX_LINK_MARKS])
         return state
 
-    def _share_url(include_marks: bool = False) -> str:
-        """The relative /joins-lab link for the current screen ('' with no anchor)."""
+    def _share_url(include_marks: bool = False, *, with_state: bool = True) -> str:
+        """The relative /joins-lab link for the current screen ('' with no anchor).
+
+        Raises LinkTooLong when the screen does not fit in a link; with_state=False
+        gives the anchor-only link, which always fits.
+        """
         sid = _anchor_state.get('sys_id') or ''
         if not sid:
             return ''
@@ -4011,7 +4015,7 @@ def create_joins_lab_page(
             page=_anchor_state.get('page'),
             fl_id=_anchor_state.get('fl_id'),
             volume_ie=_anchor_state.get('volume_ie'),
-            state=_share_state(include_marks),
+            state=_share_state(include_marks) if with_state else None,
         )
 
     def _sync_address_bar() -> None:
@@ -4021,6 +4025,10 @@ def create_joins_lab_page(
             return  # a shared link is still being opened: keep its URL until then
         try:
             url = _share_url()
+        except LinkTooLong:
+            # Too long for a link: the bare path, so a reload restores this
+            # visitor's saved session as it always did (not an unreadable link).
+            url = '/joins-lab'
         except Exception:
             logger.debug('joins-lab: could not build the screen URL', exc_info=True)
             return
@@ -4035,7 +4043,21 @@ def create_joins_lab_page(
     async def _copy_share_link() -> None:
         """Copy a link to this screen; the sender's marks only when the box is ticked."""
         cb = _include_marks_ref.get('el')
-        rel = _share_url(include_marks=bool(cb is not None and cb.value))
+        want_marks = bool(cb is not None and cb.value)
+        warning = None
+        try:
+            rel = _share_url(include_marks=want_marks)
+        except LinkTooLong:
+            rel = None
+            if want_marks:
+                try:
+                    rel = _share_url(include_marks=False)
+                    warning = tr('Too many marks for a link: the link leaves them out')
+                except LinkTooLong:
+                    rel = None
+            if rel is None:
+                rel = _share_url(with_state=False)
+                warning = tr('This search is too long for a link: the link opens the fragment only')
         if not rel:
             ui.notify(tr('Load an anchor first'), type='warning')
             return
@@ -4048,6 +4070,8 @@ def create_joins_lab_page(
             origin = GENIZAHSEARCH_URL
         with client:
             await copy_text_to_clipboard(origin + rel, success_message=tr('Link copied!'))
+            if warning:
+                ui.notify(warning, type='warning', timeout=8000)
 
     def _apply_inputs(inp: dict) -> None:
         """Set the builders, options, filter and view from a cleaned share-shaped

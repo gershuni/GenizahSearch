@@ -218,11 +218,26 @@ def same_inputs(a: dict, b: dict) -> bool:
 # Token <-> state
 # ---------------------------------------------------------------------------
 
+class LinkTooLong(ValueError):
+    """The screen does not fit in a link that ``decode_share_state`` reads back."""
+
+
 def encode_share_state(state: dict) -> str:
-    """The ``state`` parameter for *state* (cleaned first, so it decodes to the same)."""
+    """The ``state`` parameter for *state* (cleaned first, so it decodes to the same).
+
+    Raises LinkTooLong rather than return a token the decoder would refuse (over
+    MAX_TOKEN_CHARS, or inflating past MAX_DECODED_BYTES): a builder at its caps
+    can do that, and a copied link that opens as "could not be read" is worse
+    than saying so when it is copied.
+    """
     payload = {"v": SHARE_VERSION, **clean_share_state(state)}
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    return base64.urlsafe_b64encode(zlib.compress(raw, 9)).decode("ascii").rstrip("=")
+    if len(raw) > MAX_DECODED_BYTES:
+        raise LinkTooLong(f"{len(raw)} bytes before compression")
+    token = base64.urlsafe_b64encode(zlib.compress(raw, 9)).decode("ascii").rstrip("=")
+    if len(token) > MAX_TOKEN_CHARS:
+        raise LinkTooLong(f"{len(token)} characters")
+    return token
 
 
 def decode_share_state(token: Any) -> Optional[dict]:
@@ -252,7 +267,10 @@ def build_share_url(
     state: Optional[dict] = None,
     base: str = "/joins-lab",
 ) -> str:
-    """``/joins-lab?sys_id=...&page=...&state=...`` (relative unless *base* is absolute)."""
+    """``/joins-lab?sys_id=...&page=...&state=...`` (relative unless *base* is absolute).
+
+    Raises LinkTooLong when *state* does not fit (see encode_share_state).
+    """
     params: dict = {"sys_id": sys_id}
     if page:
         params["page"] = int(page)

@@ -152,3 +152,38 @@ def test_same_inputs_ignores_view_page_and_marks():
     assert jl.same_inputs(a, b)
     c = jl.clean_share_state({**FULL, "vs": False})
     assert not jl.same_inputs(a, c)
+
+
+def _huge_builder():
+    """A builder at its caps: 20 lines x 50 words x 200 random letters."""
+    import random
+    rng = random.Random(7)
+    letters = "אבגדהוזחטיכלמנסעפצקרשת"
+    return {"b": {"rows": [
+        {"words": [{"term": "".join(rng.choice(letters) for _ in range(200)),
+                    "mods": {}, "gap_to_next_word": 0} for _ in range(50)],
+         "line_start": False, "line_end": False, "gap_to_next_line": 0}
+        for _ in range(20)
+    ]}}
+
+
+def test_a_screen_too_big_for_a_link_is_refused_not_broken():
+    """encode never returns a token the decoder would refuse (Codex P2 on #408)."""
+    with pytest.raises(jl.LinkTooLong):
+        jl.encode_share_state(_huge_builder())
+    with pytest.raises(jl.LinkTooLong):
+        jl.build_share_url(ANCHOR, state=_huge_builder())
+    assert jl.build_share_url(ANCHOR) == f"/joins-lab?sys_id={ANCHOR}"
+
+
+@pytest.mark.parametrize("lines", [1, 5, 10, 15, 20])
+def test_every_token_encode_returns_decodes(lines):
+    state = _huge_builder()
+    state["b"]["rows"] = state["b"]["rows"][:lines]
+    for row in state["b"]["rows"]:
+        row["words"] = row["words"][:10]
+    try:
+        token = jl.encode_share_state(state)
+    except jl.LinkTooLong:
+        return
+    assert jl.decode_share_state(token) == jl.clean_share_state(state)
