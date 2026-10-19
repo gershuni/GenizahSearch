@@ -2560,6 +2560,7 @@ def create_joins_lab_page(
         # Phase 119: D-11 triage resets on re-anchor; D-06 VS invalidates (D-11)
         _triage.clear()
         _link_marks.clear()   # a shared link's marks belong to the screen it opened
+        _compare_open['key'] = None   # a new anchor: no Compare pair in the URL
         _raw_text_candidates.clear()  # G2: clear RAW baseline on re-anchor
         # D-10: bump prefetch generation + clear stale cache on re-anchor.
         # Any in-flight _prefetch_one coroutines will see the new generation
