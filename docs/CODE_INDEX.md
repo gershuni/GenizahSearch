@@ -1184,18 +1184,21 @@ desktop.Y.X` identity holds via the facades.
 - **Function** `candidate_domain_label` (Line 340) — The candidate's domain as the visitor reads it ('' when it has none).
 - **Function** `library_options` (Line 346) — Library filter options: library code -> "code (count)", in code order.
 - **Function** `domain_options` (Line 352) — Domain filter options: English domain -> "label (count)", in label order.
-- **Function** `get_table_columns` (Line 365) — Return the 8-column table column definitions (D-10, CND-03).
-- **Function** `get_table_config` (Line 383) — Return table configuration dict (used by tests to assert multi-select etc.).
-- **Function** `_make_table_rows` (Line 395) — Build row dicts for the ui.table from a candidate list.
-- **Function** `build_thumbnail_url` (Line 469) — Derive a proxy thumbnail URL for a candidate.
-- **Function** `build_browse_url` (Line 534) — Build the /browse deep-link URL for a candidate.
-- **Function** `_truncate_title` (Line 545) — Truncate a title to max_chars and append '...' if needed.
-- **Function** `cap_candidates` (Line 554) — Decide how many candidate cards to render (WebSocket-safety cap).
-- **Function** `_make_restyle_fn` (Line 584) — Return a render-scoped restyle callable that operates on ``card_refs``.
-- **Function** `_create_candidate_card` (Line 661) — Render a single candidate card (Phase 119 D-09/D-11/D-07, Phase 120 D-07/ACT-01).
-- **Function** `open_filter_dialog` (Line 1046) — Open the candidate filter dialog (D-14, CND-06).
-- **Function** `create_candidate_table` (Line 1166) — Render the multi-select sortable table view of candidates (D-10, CND-03).
-- **Function** `create_candidate_grid` (Line 1362) — Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
+- **Function** `more_filters_count` (Line 361) — How many of the "More filters…" dialog's filters are on.
+- **Function** `get_table_columns` (Line 380) — Return the 8-column table column definitions (D-10, CND-03).
+- **Function** `get_table_config` (Line 398) — Return table configuration dict (used by tests to assert multi-select etc.).
+- **Function** `_make_table_rows` (Line 410) — Build row dicts for the ui.table from a candidate list.
+- **Function** `build_thumbnail_url` (Line 484) — Derive a proxy thumbnail URL for a candidate.
+- **Function** `build_browse_url` (Line 549) — Build the /browse deep-link URL for a candidate.
+- **Function** `_truncate_title` (Line 560) — Truncate a title to max_chars and append '...' if needed.
+- **Function** `cap_candidates` (Line 569) — Decide how many candidate cards to render (WebSocket-safety cap).
+- **Function** `_make_restyle_fn` (Line 599) — Return a render-scoped restyle callable that operates on ``card_refs``.
+- **Function** `_create_candidate_card` (Line 676) — Render a single candidate card (Phase 119 D-09/D-11/D-07, Phase 120 D-07/ACT-01).
+- **Function** `open_filter_dialog` (Line 1061) — Open the "More filters…" dialog (D-14, CND-06).
+- **Function** `create_candidate_table` (Line 1152) — Render the multi-select sortable table view of candidates (D-10, CND-03).
+- **Function** `_facet_select` (Line 1344) — One toolbar filter, Library or Domain: several values, each with its count.
+- **Function** `_grid_header` (Line 1398) — The row above the cards: the count, then Library, Domain, Sort and More filters…
+- **Function** `create_candidate_grid` (Line 1441) — Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
 ## web/main.py
 
