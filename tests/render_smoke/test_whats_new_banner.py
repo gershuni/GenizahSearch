@@ -41,7 +41,6 @@ while testing nothing.
 
 from __future__ import annotations
 
-import asyncio
 import os
 from contextlib import AsyncExitStack, asynccontextmanager
 from unittest.mock import patch
@@ -52,6 +51,7 @@ from nicegui.context import context as nicegui_context
 from nicegui.testing.general import prepare_simulation
 from nicegui.testing.user import User
 from nicegui.ui_run import set_storage_secret
+from tests.render_smoke._bounded_run import run_user_driver
 
 
 @asynccontextmanager
@@ -87,12 +87,8 @@ async def _user(lang: str, *, passage_on: bool):
 def _run(driver, *, lang='en', passage_on=True):
     saved_slots = list(nicegui_context.slot_stack)
 
-    async def invoke():
-        async with _user(lang, passage_on=passage_on) as user:
-            await driver(user)
-
     try:
-        asyncio.run(invoke())
+        run_user_driver(lambda: _user(lang, passage_on=passage_on), driver)
     finally:
         nicegui_context.slot_stack.clear()
         nicegui_context.slot_stack.extend(saved_slots)

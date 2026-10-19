@@ -20,7 +20,6 @@ page open WITH a notice (owner ruling), and kept when there is no catalog.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -32,6 +31,7 @@ from nicegui.context import context as nicegui_context
 from nicegui.testing.general import prepare_simulation
 from nicegui.testing.user import User
 from nicegui.ui_run import set_storage_secret
+from tests.render_smoke._bounded_run import run_bounded
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fjms_filter_sidecar import build_sidecar  # noqa: E402
@@ -99,7 +99,7 @@ def _open_search(monkeypatch, svc, saved=None):
             notices.extend(user.notify.messages)
 
     try:
-        asyncio.run(run())
+        run_bounded(run())
     finally:
         nicegui_context.slot_stack.clear()
         nicegui_context.slot_stack.extend(saved_slots)

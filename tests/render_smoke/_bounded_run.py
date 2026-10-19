@@ -1,0 +1,207 @@
+# -*- coding: utf-8 -*-
+"""Bounded replacement for ``asyncio.run()`` in the render-smoke harness.
+
+Why this exists (PR #410, windows-latest): a render-smoke test printed ``F``
+and then the job sat ~29 minutes until it was cancelled, never printing the
+failure. ``asyncio.run()`` ends by cancelling every task still on the loop
+and gathering them WITHOUT a timeout (``asyncio.runners._cancel_all_tasks``).
+A page leaves such tasks behind -- the browse page's notes/joins/version
+loaders, ``run.io_bound`` workers -- and NiceGUI's ``run._run`` swallows the
+``CancelledError`` (``except asyncio.CancelledError: pass``) and returns
+``None``, so a cancelled loader carries on and can await again. One such task
+holds the process forever; whether it does is timing, so it shows on slow
+Windows runners and not on Linux.
+
+``run_bounded(coro)`` runs the coroutine on a fresh loop like ``asyncio.run``
+but every wait on the way out is bounded: leftover tasks are cancelled and
+waited for at most ``teardown_timeout`` seconds, then abandoned (named in a
+warning, or in a note on the test's own exception). The coroutine's own
+outcome -- its exception above all -- is always what the caller sees.
+
+``run_user_driver(context_factory, driver)`` is the User-simulation form:
+the driver runs under ``driver_timeout``, and if it raises, that exception is
+raised once the context's teardown has had ``teardown_timeout`` seconds,
+whether or not the teardown finished.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import io
+import warnings
+from typing import Any, AsyncContextManager, Awaitable, Callable, Coroutine
+
+# Generous: the slowest driver in this package runs in well under 30 s on CI.
+DRIVER_TIMEOUT = 180.0
+# NiceGUI's own background_tasks.teardown() waits 2 s per round; a clean
+# teardown is far faster than this.
+TEARDOWN_TIMEOUT = 15.0
+# How long a cancelled task gets to finish before it is abandoned.
+_CANCEL_GRACE = 2.0
+
+
+def _describe(tasks) -> str:
+    parts = []
+    for task in tasks:
+        buf = io.StringIO()
+        task.print_stack(limit=8, file=buf)
+        parts.append(f'{task.get_name()}:\n{buf.getvalue().rstrip()}')
+    return '\n'.join(parts)
+
+
+async def _wait_bounded(task: asyncio.Task, timeout: float) -> bool:
+    """Wait for ``task`` at most ``timeout`` s; on expiry cancel it and give it
+    ``_CANCEL_GRACE`` s more. Return True iff it finished. Never raises."""
+    done, _ = await asyncio.wait({task}, timeout=timeout)
+    if done:
+        return True
+    task.cancel()
+    done, _ = await asyncio.wait({task}, timeout=_CANCEL_GRACE)
+    return bool(done)
+
+
+def _cleanup_loop(loop: asyncio.AbstractEventLoop, teardown_timeout: float) -> list:
+    """Cancel what is left on ``loop`` and wait for it, bounded. Return the
+    tasks that did not finish (they are abandoned with the loop)."""
+    pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+    stuck: list = []
+    if pending:
+        for task in pending:
+            task.cancel()
+        _, not_done = loop.run_until_complete(
+            asyncio.wait(pending, timeout=teardown_timeout)
+        )
+        stuck = list(not_done)
+        for task in pending:
+            if task.done() and not task.cancelled():
+                task.exception()  # mark retrieved: no "never retrieved" noise
+    for closer in (loop.shutdown_asyncgens, loop.shutdown_default_executor):
+        try:
+            loop.run_until_complete(asyncio.wait_for(closer(), _CANCEL_GRACE))
+        except (asyncio.TimeoutError, RuntimeError):
+            pass
+    return stuck
+
+
+def run_bounded(
+    coro: Coroutine[Any, Any, Any],
+    *,
+    timeout: float | None = None,
+    teardown_timeout: float = TEARDOWN_TIMEOUT,
+) -> Any:
+    """``asyncio.run(coro)`` with every wait bounded (see module docstring).
+
+    ``timeout`` bounds ``coro`` itself (default: driver + teardown budget).
+    """
+    if timeout is None:
+        timeout = DRIVER_TIMEOUT + teardown_timeout
+    loop = asyncio.new_event_loop()
+    stuck: list = []
+    try:
+        asyncio.set_event_loop(loop)
+        main = loop.create_task(coro, name='render-smoke main')
+        finished = loop.run_until_complete(_wait_bounded(main, timeout))
+        stuck = _cleanup_loop(loop, teardown_timeout)
+        if not finished:
+            raise TimeoutError(
+                f'render-smoke: coroutine did not finish within {timeout:.0f} s '
+                f'(and did not stop when cancelled):\n{_describe([main])}'
+            )
+        if main.cancelled():
+            raise asyncio.CancelledError()
+        exc = main.exception()
+        if exc is not None:
+            if stuck:
+                exc.add_note(
+                    f'render-smoke: {len(stuck)} leftover task(s) did not stop within '
+                    f'{teardown_timeout:.0f} s of cancellation and were abandoned:\n'
+                    f'{_describe(stuck)}'
+                )
+            raise exc
+        if stuck:
+            warnings.warn(
+                f'render-smoke: {len(stuck)} leftover task(s) did not stop within '
+                f'{teardown_timeout:.0f} s of cancellation and were abandoned:\n'
+                f'{_describe(stuck)}',
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        return main.result()
+    finally:
+        asyncio.set_event_loop(None)
+        loop.close()
+
+
+def run_user_driver(
+    context_factory: Callable[[], AsyncContextManager[Any]],
+    driver: Callable[[Any], Awaitable[Any]],
+    *,
+    driver_timeout: float = DRIVER_TIMEOUT,
+    teardown_timeout: float = TEARDOWN_TIMEOUT,
+) -> None:
+    """Enter ``context_factory()``, run ``driver(user)`` inside it, leave it --
+    with the driver bounded by ``driver_timeout`` and everything after the
+    driver (context exit + loop cleanup) bounded by ``teardown_timeout``.
+
+    The driver's own exception wins: it is raised even if the teardown that
+    follows it hangs or raises.
+    """
+    outcome: dict[str, BaseException] = {}
+
+    async def _main() -> None:
+        driver_done = asyncio.Event()
+
+        async def _body() -> None:
+            async with context_factory() as user:
+                task = asyncio.ensure_future(driver(user))
+                try:
+                    if not await _wait_bounded(task, driver_timeout) or task.cancelled():
+                        outcome['error'] = TimeoutError(
+                            f'render-smoke: driver did not finish within '
+                            f'{driver_timeout:.0f} s:\n{_describe([task])}'
+                        )
+                    elif task.exception() is not None:
+                        outcome['error'] = task.exception()
+                finally:
+                    driver_done.set()
+                if 'error' in outcome:
+                    raise outcome['error']
+
+        body = asyncio.ensure_future(_body())
+        waiter = asyncio.ensure_future(driver_done.wait())
+        await asyncio.wait({body, waiter}, return_when=asyncio.FIRST_COMPLETED)
+        waiter.cancel()
+        if not body.done() and not await _wait_bounded(body, teardown_timeout):
+            if 'error' not in outcome:
+                raise TimeoutError(
+                    f'render-smoke: teardown did not finish within '
+                    f'{teardown_timeout:.0f} s:\n{_describe([body])}'
+                )
+            outcome['error'].add_note(
+                f'render-smoke: teardown did not finish within {teardown_timeout:.0f} s '
+                f'after this failure and was abandoned.'
+            )
+        if body.done() and not body.cancelled():
+            exc = body.exception()
+            if exc is not None and exc is not outcome.get('error'):
+                if 'error' in outcome:
+                    # The teardown raised too; the driver's failure is the story.
+                    outcome['error'].add_note(f'render-smoke: teardown also raised {exc!r}')
+                else:
+                    raise exc
+        if 'error' in outcome:
+            raise outcome['error']  # via run_bounded, which notes stuck leftovers
+
+    try:
+        run_bounded(
+            _main(),
+            # Setup + driver + teardown, plus slack for the cancel grace periods.
+            timeout=driver_timeout + teardown_timeout + 4 * _CANCEL_GRACE + 60.0,
+            teardown_timeout=teardown_timeout,
+        )
+    except BaseException as exc:
+        error = outcome.get('error')
+        if error is None or exc is error:
+            raise
+        error.add_note(f'render-smoke: then the run failed with {exc!r}')
+        raise error from None

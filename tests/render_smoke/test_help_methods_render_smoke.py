@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import html
 import os
 from contextlib import ExitStack, asynccontextmanager
@@ -24,6 +23,7 @@ from tests.render_smoke.discovery_honesty_gate import (
     assert_discovery_honesty,
     assert_surface_honesty,
 )
+from tests.render_smoke._bounded_run import run_bounded
 
 
 @asynccontextmanager
@@ -84,7 +84,7 @@ def _run(lang, driver, *, discovery_on=True, atlas_on=True):
             await driver(user)
 
     try:
-        asyncio.run(invoke())
+        run_bounded(invoke())
     finally:
         nicegui_context.slot_stack.clear()
         nicegui_context.slot_stack.extend(saved_slots)

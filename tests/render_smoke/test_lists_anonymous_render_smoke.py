@@ -8,7 +8,6 @@ records every attribute access; the page must not touch it at all.
 
 from __future__ import annotations
 
-import asyncio
 import os
 from contextlib import asynccontextmanager
 from unittest.mock import MagicMock, patch
@@ -22,6 +21,7 @@ from nicegui.testing.user import User
 from nicegui.ui_run import set_storage_secret
 from shared.genizah_translations import TRANSLATIONS
 from web.state import state
+from tests.render_smoke._bounded_run import run_user_driver
 
 
 class _Tripwire:
@@ -63,12 +63,8 @@ async def _start_user(lang: str):
 def _run(lang, driver):
     saved_slots = list(nicegui_context.slot_stack)
 
-    async def invoke():
-        async with _start_user(lang) as user:
-            await driver(user)
-
     try:
-        asyncio.run(invoke())
+        run_user_driver(lambda: _start_user(lang), driver)
     finally:
         nicegui_context.slot_stack.clear()
         nicegui_context.slot_stack.extend(saved_slots)

@@ -32,6 +32,7 @@ from nicegui.testing.general import prepare_simulation
 from nicegui.testing.user import User
 from nicegui.testing.user_download import UserDownload
 from nicegui.ui_run import set_storage_secret
+from tests.render_smoke._bounded_run import run_user_driver
 
 FL = '45678901'
 KEY = '990000000000001,1r'
@@ -91,12 +92,8 @@ async def _puzzle_user():
 def _run(driver):
     saved_slots = list(nicegui_context.slot_stack)
 
-    async def invoke():
-        async with _puzzle_user() as user:
-            await driver(user)
-
     try:
-        asyncio.run(invoke())
+        run_user_driver(_puzzle_user, driver)
     finally:
         nicegui_context.slot_stack.clear()
         nicegui_context.slot_stack.extend(saved_slots)

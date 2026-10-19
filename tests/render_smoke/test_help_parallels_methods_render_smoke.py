@@ -18,7 +18,6 @@ NiceGUI's in-process User with the two predicates patched, in both languages.
 """
 from __future__ import annotations
 
-import asyncio
 import os
 from contextlib import ExitStack, asynccontextmanager
 from unittest.mock import AsyncMock, patch
@@ -32,6 +31,7 @@ from nicegui.context import context as nicegui_context
 from nicegui.testing.general import prepare_simulation
 from nicegui.testing.user import User
 from nicegui.ui_run import set_storage_secret
+from tests.render_smoke._bounded_run import run_bounded
 
 
 @asynccontextmanager
@@ -96,7 +96,7 @@ def _page_text(lang: str, *, passage_on: bool, multi_on: bool) -> str:
                             collected.append(value)
 
     try:
-        asyncio.run(invoke())
+        run_bounded(invoke())
     finally:
         nicegui_context.slot_stack.clear()
         nicegui_context.slot_stack.extend(saved_slots)
@@ -182,7 +182,7 @@ def _puzzle_cards_visible(lang: str, *, puzzle_on: bool) -> dict:
                         seen[name] = visible
 
     try:
-        asyncio.run(invoke())
+        run_bounded(invoke())
     finally:
         nicegui_context.slot_stack.clear()
         nicegui_context.slot_stack.extend(saved_slots)

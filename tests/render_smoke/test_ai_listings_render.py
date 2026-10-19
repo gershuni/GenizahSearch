@@ -12,7 +12,6 @@ settings (web/ai_listings.py). Pinned here, by rendering the real pages:
 """
 from __future__ import annotations
 
-import asyncio
 import os
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import date
@@ -27,6 +26,7 @@ from nicegui.testing.user import User
 from nicegui.ui_run import set_storage_secret
 
 import web.ai_listings as listings
+from tests.render_smoke._bounded_run import run_bounded
 
 PLUGIN = 'https://chatgpt.com/apps/genizahsearch'
 CONNECTOR = 'https://claude.ai/directory/genizahsearch'
@@ -75,7 +75,7 @@ def _run(driver, lang='en'):
             return await driver(user, client)
 
     try:
-        return asyncio.run(invoke())
+        return run_bounded(invoke())
     finally:
         nicegui_context.slot_stack.clear()
         nicegui_context.slot_stack.extend(saved_slots)

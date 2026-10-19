@@ -101,6 +101,7 @@ from tests.render_smoke.discovery_honesty_gate import (
     find_envelope_violations,
 )
 from web.translations import set_language
+from tests.render_smoke._bounded_run import run_bounded
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 COMPONENT_PATH = "web/components/findings_rows.py"
@@ -486,7 +487,7 @@ def _client_render(paint):
                     await result
         holder["client"] = client
 
-    asyncio.run(_run())
+    run_bounded(_run())
     return holder["client"]
 
 
@@ -645,7 +646,7 @@ def _render_and_press(paint, markers, *, index: int = 0):
                         holder["presses"] += 1
         holder["client"] = client
 
-    asyncio.run(_run())
+    run_bounded(_run())
     return holder["client"], holder["presses"]
 
 
@@ -688,7 +689,7 @@ def render_and_click(paint, marker: str, *, index: int = 0):
                         await outcome
         holder["client"] = client
 
-    asyncio.run(_run())
+    run_bounded(_run())
     return holder["client"]
 
 
@@ -3726,7 +3727,7 @@ def test_an_UNSUPPORTED_axis_never_reaches_the_service_as_a_dropped_keyword():
         fr.EXPANSION_KEY_BY_UNIT[FINDINGS_UNIT_MANUSCRIPT] = (
             "sys_id", fictional_axis)
         fp.get_findings_enveloped = _spy
-        envelope = asyncio.run(fp._fetch_children(state, row))
+        envelope = run_bounded(fp._fetch_children(state, row))
     finally:
         fr.EXPANSION_KEY_BY_UNIT.clear()
         fr.EXPANSION_KEY_BY_UNIT.update(original_table)
@@ -3829,7 +3830,7 @@ def test_every_click_handler_this_surface_binds_can_actually_BE_clicked():
                             pressed += 1
                 return pressed
 
-    pressed = asyncio.run(_drive())
+    pressed = run_bounded(_drive())
     # The expander, its show-more (which only exists once opened) and the child
     # leaf's preview toggle -- so a real press count, not zero dressed as a pass.
     assert pressed >= 3, (

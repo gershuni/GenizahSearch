@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-19 (`feat/joins-lab-links-compare`, PR 1 of `docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md`) -- four Joins Lab / Compare defects found and fixed the same day, all archived: the white Browse icons in the web Compare window, its FJMS/PGP buttons that stayed on the first candidate, the candidate-card and Known Joins Browse icons that replaced the Lab, and the desktop Compare anchor line that was empty. No count change -- 221.
+> **Last Updated:** 2026-10-19 (`claude/blissful-goldberg-mn4em0`) -- a failing NiceGUI render-smoke test now fails in seconds instead of hanging its lane (PR #410's 29-minute windows-latest hang): the harness no longer uses `asyncio.run()`, whose exit waited without limit on page tasks that swallow cancellation. The "A render-smoke file can hang a test lane" row is fixed and archived. P3 -1 -- 220.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
@@ -64,14 +64,14 @@ Move to "Completed Issues" section at bottom with date
 |----------|------|
 | P1 Critical Bugs | 0 |
 | P2 Medium Bugs | 46 |
-| P3 Low Priority | 135 |
+| P3 Low Priority | 134 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 20 |
 | Untested Areas | 5 |
 | Deferred to v7.15+ | 6 |
 | 2026-05-29 audit follow-up | 2 |
 | FGP integration (§4.5) | 5 |
-| **Total open** | **221** |
+| **Total open** | **220** |
 
 > Counts here exclude closed items (recomputed 2026-08-14 by counting rows carrying ❌/⏸/⏳); closed history lives in docs/archive/OPEN_ISSUES_ARCHIVE.md.
 > Count notes from 2026-09-25 to 2026-10-05 moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-06.
@@ -91,6 +91,7 @@ Move to "Completed Issues" section at bottom with date
 > 2026-10-19 (Visual Similarity domain names and counts): P3 row narrowed (Hebrew domain names fixed, archived; first-domain-only stays open), no row opened or closed -- 221.
 > 2026-10-19 (tracker trim): 49 rows condensed, full text archived; no row opened or closed -- 221.
 > 2026-10-19 (Joins Lab links + Compare window, `feat/joins-lab-links-compare`): P2 +2 -2 (white Browse icons in the web Compare window; its FJMS/PGP buttons stuck on the first candidate), P3 +2 -2 (card / Known Joins Browse icons replaced the Lab; desktop Compare anchor line empty) -- all found and fixed the same day, archived -- 221.
+> 2026-10-19 (render-smoke hang on failure, `claude/blissful-goldberg-mn4em0`): P3 -1 ("A render-smoke file can hang a test lane", fixed, archived) -- 220.
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 
@@ -235,7 +236,6 @@ Move to "Completed Issues" section at bottom with date
 | **Puzzle: Manchester fragments often show without background removal** | `web/api.py` (`manchester_image`, `_fetch_provider_image`, `puzzle_ext_image`), `web/pages/puzzle.py::_loadImageWithFallbacks` | ❌ Open (2026-09-29) | Manchester renders derivatives on demand and often takes over 30 s; `_fetch_provider_image` always asks for 2000 px with a 30 s timeout, so `/api/puzzle_ext_image` answers 500 and the page shows the raw image without background removal. Options (owner; a smaller fetch lowers quality): pass the canvas size through, a longer Manchester timeout, one retry. Also: the `except` branch caches an unprocessed image under the processed name, and cache files are never replaced. Full text archived 2026-10-19. |
 | **Web puzzle PNG export bytes stay in the client's message history** | `web/pages/puzzle.py::export_png` | ❌ Open (2026-09-29) | `ui.download(bytes)` keeps a ~9 MB 3000-px export in NiceGUI's per-client history until the client is pruned; repeated exports add up. Alternative: a private temp file served with `Cache-Control: private, no-store`. |
 | **Two helpers compute the signed-out browser key** | `web/saved_joins.py`, `web/puzzle_image_access.py` | ❌ Open (2026-09-29) | One uses user storage's `_session_uuid`, the other the NiceGUI browser id; both follow the same cookie, so they agree in practice. Merge into one helper. |
-| **A render-smoke file can hang a test lane** | `tests/render_smoke/test_puzzle_export_render_smoke.py`, `pytest.ini` | ❌ Open (2026-09-29) | Seen once: a then-failing run hung until the 600 s wall clock; later runs failed in ~8 s. The repo sets no pytest timeout, so a hang would block its CI lane. |
 | **Fragment Puzzle follow-ups after the 2026-09-27 work-loss fix** | `desktop/puzzle.py`, `desktop/corrections_ui.py`, `web/pages/puzzle.py` | ❌ Open (2026-09-27) | Twelve items, (a)-(l): a fragment whose image failed is kept but invisible and unremovable; a failed folio or threshold reload keeps the old image; some prompts still show English buttons in Hebrew; `generate_thumbnail` runs on the UI thread; the close waits 2 s per loader in turn; z-order is not stored; 'Open in Puzzle' from Discoveries or Joins closes its dialog after Cancel; a Windows logoff is blocked by the prompt; the web autosave may ignore a failed save; two deferred-close edge cases; and an in-flight `_start_meta_resolve` lookup is not counted as pending work. Full text archived 2026-10-19. |
 | **Joins Lab and main-window threads not covered by the 2026-09-27 lifetime fix** | `genizah_app.py`, `desktop/join_workbench.py`, `desktop/image_loader.py`, `desktop/viewers.py` | ❌ Open (2026-09-27) | (a) seven main-window QThread holders are still replaced without being kept alive; (b) retention callbacks outside the Lab keep workers alive until the cycle collector runs; (c) CompareDialog folio stepping and card flips have the late-result race (display only); (d) `ImageLoaderThread` writes the disk cache in place, so a truncated JPEG can be accepted; (e) closing the Lab does not stop its workers; (f) quit time is unbounded overall. Full text archived 2026-10-19. |
 | **Desktop discovery authors cannot edit or delete their own discovery** | `desktop/supabase_corrections_client.py::_parse_discovery`, `desktop/corrections_ui.py` (`is_author`) | ❌ Open (2026-09-25) | `_parse_discovery` never sets `author_id`, so `is_author` is always False for non-admins; `User.id` is also `hash(uuid) % 10**9`, which is not stable across runs. Compare UUIDs. |

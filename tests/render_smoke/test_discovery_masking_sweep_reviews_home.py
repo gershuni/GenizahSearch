@@ -56,6 +56,7 @@ import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
+from tests.render_smoke._bounded_run import run_bounded
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -256,7 +257,7 @@ def _render_reviews_surface(seed: Optional[str] = None) -> Dict[str, Any]:
         holder["client"] = client
 
     try:
-        asyncio.run(_run())
+        run_bounded(_run())
     finally:
         patch.undo()
 
@@ -367,7 +368,7 @@ def _review_outbound_write(seed: Optional[str] = None) -> List[str]:
     # the same NiceGUI `run` module object it used to import itself.
     patch.setattr(ir.io_bound_result.run, "io_bound", _direct)
     try:
-        asyncio.run(_run())
+        run_bounded(_run())
     finally:
         patch.undo()
     return captured
@@ -449,7 +450,7 @@ def _render_home_surface(seed: Optional[str] = None,
     import web.discovery as wd
     patch.setattr(wd, "get_launch_stats_enveloped", _launch)
     try:
-        asyncio.run(_run())
+        run_bounded(_run())
     finally:
         patch.undo()
 
