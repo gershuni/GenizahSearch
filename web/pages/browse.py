@@ -394,6 +394,21 @@ VIEWER_STYLES = '''
         }
     }
 
+    /* Buttons and links with an icon beside their text (owner, 2026-10-19).
+       No row may get wider on a phone, so below 600px one of the two goes:
+       .browse-icon-collapse keeps the icon and hides the text (the button keeps
+       its name through aria-label; Quasar's `.block` is a layered
+       `display: block !important`, so the text is shrunk, not undisplayed); .browse-icon-wide keeps the text, which is
+       what tells those controls apart, and hides the icon. */
+    @media (max-width: 599px) {
+        .browse-icon-collapse .q-btn__content > .block { font-size: 0; width: 0; overflow: hidden; }
+        .browse-icon-collapse .q-btn__content > .q-icon { margin: 0; }
+        .browse-icon-collapse.px-6 { padding-left: 16px !important; padding-right: 16px !important; }
+        .browse-icon-wide .q-icon { display: none; }
+    }
+    /* Icons that point "forward" (send) face the other way in the Hebrew UI. */
+    [dir="rtl"] .browse-icon-flip-rtl .q-icon { transform: scaleX(-1); }
+
     @media (max-width: 480px) {
         .metadata-header {
             padding: 12px 16px;
@@ -559,6 +574,43 @@ def _document_transcription_html(full_text: str) -> str:
         'color: var(--text-primary);'
         f'">{html_module.escape(full_text or "")}</div>'
     )
+
+
+def _source_chip(label: str, on_click, style: str, tooltip: str, *, opens_external: bool):
+    """One viewer-source chip ("NLI", "Cambridge", ...) on the folio toolbar.
+
+    A chip that opens the library's own viewer in a new tab carries
+    ``open_in_new`` after its name, and so needs no separate icon button. A chip
+    that switches the images shown here carries ``image``, on wide screens
+    only: the library's name is what tells the chips apart.
+    """
+    btn = ui.button(label, on_click=on_click).props(
+        'flat dense size=sm no-caps'
+    ).classes('text-xs px-2 py-0').style(style).tooltip(tooltip)
+    if opens_external:
+        btn.props('icon-right=open_in_new')
+    else:
+        btn.props('icon=image').classes('browse-icon-wide')
+    return btn
+
+
+def _source_external_button(on_click, color: str, tooltip: str):
+    """The icon-only "open in the library's viewer" button beside a switching chip."""
+    btn = ui.button(icon='open_in_new', on_click=on_click).props(
+        'flat round dense size=xs'
+    ).style(f'min-width: 20px; min-height: 20px; color: {color}; opacity: 0.8;').tooltip(tooltip)
+    btn.props['aria-label'] = tooltip  # set directly: a translation may hold a quote
+    return btn
+
+
+def _external_link(text: str, url: str):
+    """A link in the metadata panel's "External link" row: its text, then ``open_in_new``."""
+    with ui.link(target=url, new_tab=True).classes(
+        'text-sm inline-flex items-center gap-1 browse-icon-wide'
+    ).style('color: var(--primary-600);') as link:
+        ui.label(text)
+        ui.icon('open_in_new', size='14px')
+    return link
 
 
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None, initial_shelfmark: Optional[str] = None, initial_volume_ie: Optional[str] = None, embedded: bool = False, open_computed: bool = False):
@@ -2287,29 +2339,29 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         # NLI Ktiv — Phase 85 D-06: hidden for synthetic sys_ids
                         if not is_synthetic_sys_id(page.sys_id):
                             ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{page.sys_id}"
-                            ui.link('NLI Ktiv', ktiv_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
+                            _external_link('NLI Ktiv', ktiv_url)
 
                         # Oxford Bodleian
                         if page.is_oxford and page.external_url:
-                            ui.link('Oxford Bodleian', page.external_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
+                            _external_link('Oxford Bodleian', page.external_url)
 
                         # Cambridge CUDL
                         if page.is_cambridge and page.external_url:
-                            ui.link('Cambridge CUDL', page.external_url, new_tab=True).classes('text-sm').style('color: var(--primary-600);')
+                            _external_link('Cambridge CUDL', page.external_url)
 
                         # Princeton Geniza Project
                         if state.pgp_metadata and state.pgp_metadata.get('pgp_url'):
-                            ui.link('Princeton Geniza Project', state.pgp_metadata['pgp_url'], new_tab=True).classes('text-sm').style('color: var(--primary-600);')
+                            _external_link('Princeton Geniza Project', state.pgp_metadata['pgp_url'])
 
                         # Library digital collection (from NLI crossref)
                         if page.library_viewer_url and page.library_viewer_url.get('url'):
                             lib_url = page.library_viewer_url
                             # Only show if not already covered by Oxford/Cambridge links above
                             if not (page.is_oxford and page.external_url) and not (page.is_cambridge and page.external_url):
-                                ui.link(
+                                _external_link(
                                     lib_url.get('label', tr('View in Library Catalog')),
-                                    lib_url['url'], new_tab=True
-                                ).classes('text-sm').style('color: var(--primary-600);')
+                                    lib_url['url'],
+                                )
 
                     # === PGP Metadata Section ===
                     if state.pgp_metadata:
@@ -4039,18 +4091,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     'border: 1.5px solid #4caf50; border-radius: 12px; min-height: 22px; color: #4caf50; font-weight: 600;'
                                 )
                                 if _both_sources:
-                                    ui.button('NLI', on_click=switch_to_nli).props(
-                                        'flat dense size=sm no-caps'
-                                    ).classes('text-xs px-2 py-0').style(nli_style).tooltip(
-                                        tr('View NLI images') if not _is_nli_active else tr('Viewing NLI images')
+                                    _source_chip(
+                                        'NLI', switch_to_nli, nli_style,
+                                        tr('View NLI images') if not _is_nli_active else tr('Viewing NLI images'),
+                                        opens_external=False,
                                     )
+                                    _source_external_button(open_nli_viewer, '#4caf50', tr('Open in NLI KTIV'))
                                 else:
-                                    ui.button('NLI', on_click=open_nli_viewer).props(
-                                        'flat dense size=sm no-caps'
-                                    ).classes('text-xs px-2 py-0').style(nli_style).tooltip(tr('Open in NLI KTIV'))
-                                ui.button(icon='open_in_new', on_click=open_nli_viewer).props(
-                                    'flat round dense size=xs'
-                                ).style('min-width: 20px; min-height: 20px; color: #4caf50; opacity: 0.8;').tooltip(tr('Open in NLI KTIV'))
+                                    _source_chip('NLI', open_nli_viewer, nli_style, tr('Open in NLI KTIV'), opens_external=True)
 
                             if _has_cambridge:
                                 cudl_url = page.external_url or ''
@@ -4072,19 +4120,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         if _is_cambridge_active else
                                         'border: 1.5px solid #2196f3; border-radius: 12px; min-height: 22px; color: #2196f3; font-weight: 600;'
                                     )
+                                    _open_cudl = lambda u=cudl_url: ui.run_javascript(f'window.open("{u}", "_blank")')  # noqa: E731
                                     if _both_sources:
-                                        ui.button('Cambridge', on_click=switch_to_cambridge).props(
-                                            'flat dense size=sm no-caps'
-                                        ).classes('text-xs px-2 py-0').style(cudl_style).tooltip(
-                                            tr('View Cambridge images') if not _is_cambridge_active else tr('Viewing Cambridge images')
+                                        _source_chip(
+                                            'Cambridge', switch_to_cambridge, cudl_style,
+                                            tr('View Cambridge images') if not _is_cambridge_active else tr('Viewing Cambridge images'),
+                                            opens_external=False,
                                         )
+                                        _source_external_button(_open_cudl, '#2196f3', tr('Open in Cambridge Digital Library'))
                                     else:
-                                        ui.button('Cambridge', on_click=lambda u=cudl_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
-                                            'flat dense size=sm no-caps'
-                                        ).classes('text-xs px-2 py-0').style(cudl_style).tooltip(tr('Open in Cambridge Digital Library'))
-                                    ui.button(icon='open_in_new', on_click=lambda u=cudl_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
-                                        'flat round dense size=xs'
-                                    ).style('min-width: 20px; min-height: 20px; color: #2196f3; opacity: 0.8;').tooltip(tr('Open in Cambridge Digital Library'))
+                                        _source_chip('Cambridge', _open_cudl, cudl_style, tr('Open in Cambridge Digital Library'), opens_external=True)
 
                             if _has_manchester:
                                 manchester_color = '#e91e63'
@@ -4094,22 +4139,20 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     f'border: 1.5px solid {manchester_color}; border-radius: 12px; min-height: 22px; color: {manchester_color}; font-weight: 600;'
                                 )
                                 if _has_nli and _has_manchester_images:
-                                    ui.button('Manchester', on_click=switch_to_manchester).props(
-                                        'flat dense size=sm no-caps'
-                                    ).classes('text-xs px-2 py-0').style(man_style).tooltip(
-                                        tr('View Manchester images') if not _is_manchester_active else tr('Viewing Manchester images')
+                                    _source_chip(
+                                        'Manchester', switch_to_manchester, man_style,
+                                        tr('View Manchester images') if not _is_manchester_active else tr('Viewing Manchester images'),
+                                        opens_external=False,
                                     )
                                 # External link to LUNA detail page
                                 lib_viewer = page.library_viewer_url or {}
                                 luna_url = lib_viewer.get('url', '')
                                 if luna_url:
+                                    _open_luna = lambda u=luna_url: ui.run_javascript(f'window.open("{u}", "_blank")')  # noqa: E731
                                     if not (_has_nli and _has_manchester_images):
-                                        ui.button('Manchester', on_click=lambda u=luna_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
-                                            'flat dense size=sm no-caps'
-                                        ).classes('text-xs px-2 py-0').style(man_style).tooltip(tr('Open in Manchester LUNA'))
-                                    ui.button(icon='open_in_new', on_click=lambda u=luna_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
-                                        'flat round dense size=xs'
-                                    ).style(f'min-width: 20px; min-height: 20px; color: {manchester_color}; opacity: 0.8;').tooltip(tr('Open in Manchester LUNA'))
+                                        _source_chip('Manchester', _open_luna, man_style, tr('Open in Manchester LUNA'), opens_external=True)
+                                    else:
+                                        _source_external_button(_open_luna, manchester_color, tr('Open in Manchester LUNA'))
 
                             if _has_jts:
                                 jts_color = '#ff9800'
@@ -4119,22 +4162,20 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     f'border: 1.5px solid {jts_color}; border-radius: 12px; min-height: 22px; color: {jts_color}; font-weight: 600;'
                                 )
                                 if _has_nli and _has_jts_images:
-                                    ui.button('JTS', on_click=switch_to_jts).props(
-                                        'flat dense size=sm no-caps'
-                                    ).classes('text-xs px-2 py-0').style(jts_style).tooltip(
-                                        tr('View JTS images') if not _is_jts_active else tr('Viewing JTS images')
+                                    _source_chip(
+                                        'JTS', switch_to_jts, jts_style,
+                                        tr('View JTS images') if not _is_jts_active else tr('Viewing JTS images'),
+                                        opens_external=False,
                                     )
                                 # External link to DPUL catalog page
                                 lib_viewer_jts = page.library_viewer_url or {}
                                 dpul_url = lib_viewer_jts.get('url', '')
                                 if dpul_url:
+                                    _open_dpul = lambda u=dpul_url: ui.run_javascript(f'window.open("{u}", "_blank")')  # noqa: E731
                                     if not (_has_nli and _has_jts_images):
-                                        ui.button('JTS', on_click=lambda u=dpul_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
-                                            'flat dense size=sm no-caps'
-                                        ).classes('text-xs px-2 py-0').style(jts_style).tooltip(tr('Open in Princeton Digital Library'))
-                                    ui.button(icon='open_in_new', on_click=lambda u=dpul_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
-                                        'flat round dense size=xs'
-                                    ).style(f'min-width: 20px; min-height: 20px; color: {jts_color}; opacity: 0.8;').tooltip(tr('Open in Princeton Digital Library'))
+                                        _source_chip('JTS', _open_dpul, jts_style, tr('Open in Princeton Digital Library'), opens_external=True)
+                                    else:
+                                        _source_external_button(_open_dpul, jts_color, tr('Open in Princeton Digital Library'))
 
                             if page.is_oxford:
                                 oxford_color = '#8e44ad'
@@ -4144,20 +4185,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     f'border: 1.5px solid {oxford_color}; border-radius: 12px; min-height: 22px; color: {oxford_color}; font-weight: 600;'
                                 )
                                 if _has_nli and _has_oxford_images:
-                                    ui.button('Oxford', on_click=switch_to_oxford).props(
-                                        'flat dense size=sm no-caps'
-                                    ).classes('text-xs px-2 py-0').style(ox_style).tooltip(
-                                        tr('View Oxford images') if not _is_oxford_active else tr('Viewing Oxford images')
+                                    _source_chip(
+                                        'Oxford', switch_to_oxford, ox_style,
+                                        tr('View Oxford images') if not _is_oxford_active else tr('Viewing Oxford images'),
+                                        opens_external=False,
                                     )
                                 # External link to Bodleian detail page
                                 if page.external_url:
+                                    _open_bodleian = lambda u=page.external_url: ui.run_javascript(f'window.open("{u}", "_blank")')  # noqa: E731
                                     if not (_has_nli and _has_oxford_images):
-                                        ui.button('Oxford', on_click=lambda u=page.external_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
-                                            'flat dense size=sm no-caps'
-                                        ).classes('text-xs px-2 py-0').style(ox_style).tooltip(tr('Open in Bodleian Libraries'))
-                                    ui.button(icon='open_in_new', on_click=lambda u=page.external_url: ui.run_javascript(f'window.open("{u}", "_blank")')).props(
-                                        'flat round dense size=xs'
-                                    ).style(f'min-width: 20px; min-height: 20px; color: {oxford_color}; opacity: 0.8;').tooltip(tr('Open in Bodleian Libraries'))
+                                        _source_chip('Oxford', _open_bodleian, ox_style, tr('Open in Bodleian Libraries'), opens_external=True)
+                                    else:
+                                        _source_external_button(_open_bodleian, oxford_color, tr('Open in Bodleian Libraries'))
 
                             # === Bibliography & Catalog Buttons (inline, deferred) ===
                             bib_catalog_el = ui.element('span').classes('inline-flex items-center gap-1')
@@ -4242,7 +4281,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         val = 1
                                     await go_to_page(val)
 
-                                ui.button(tr('Go'), on_click=handle_go_click).props('flat dense color=green size=sm')
+                                ui.button(
+                                    tr('Go'), icon='arrow_back' if is_rtl() else 'arrow_forward', on_click=handle_go_click,
+                                ).props(f'flat dense color=green size=sm aria-label="{tr("Go")}"').classes('browse-icon-collapse')
 
                             ui.label(f"/ {page.total_pages}").classes('text-xs').style('color: var(--text-secondary);')
 
@@ -4722,7 +4763,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.button(icon='fullscreen', on_click=toggle_fullscreen_edit).props('flat round dense').tooltip(tr('Fullscreen Edit'))
                                     ui.button(tr('Cancel'), icon='close', on_click=cancel_edit).props('flat dense color=grey')
                                     ui.button(tr('Save Draft'), icon='save', on_click=handle_save_draft).props('flat dense color=primary')
-                                    ui.button(tr('Submit'), on_click=handle_submit_correction).props('unelevated dense color=green')
+                                    ui.button(tr('Submit'), icon='send', on_click=handle_submit_correction).props(
+                                        f'unelevated dense color=green aria-label="{tr("Submit")}"'
+                                    ).classes('browse-icon-collapse browse-icon-flip-rtl')
 
                             # Error Message Display
                             if state.error_message:
@@ -5027,7 +5070,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             with ui.row().classes('items-center gap-2'):
                                 # Save/Submit/Exit controls only
                                 ui.button(tr('Save Draft'), icon='save', on_click=handle_save_draft).props('flat dense color=primary')
-                                ui.button(tr('Submit'), on_click=handle_submit_correction).props('unelevated dense color=green')
+                                ui.button(tr('Submit'), icon='send', on_click=handle_submit_correction).props(
+                                    f'unelevated dense color=green aria-label="{tr("Submit")}"'
+                                ).classes('browse-icon-collapse browse-icon-flip-rtl')
                                 ui.button(icon='fullscreen_exit', on_click=toggle_fullscreen_edit).props('flat round dense data-action="exit-fullscreen-edit"').tooltip(tr('Exit Fullscreen'))
 
                         # Content area: Image + Splitter + Text
@@ -5330,8 +5375,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # Go button
                 ui.button(
                     tr('Go'),
+                    icon='search',
                     on_click=do_search
-                ).props('color=green').classes('px-6')
+                ).props(f'color=green aria-label="{tr("Go")}"').classes('px-6 browse-icon-collapse')
 
             # Error notice area (below search bar)
             search_error_container = ui.row().classes('w-full mt-2 items-center')

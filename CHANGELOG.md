@@ -4,6 +4,10 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased] -- Icons on the Browse page's buttons (web, branch `feat/browse-button-icons`)
+
+The website's Browse page buttons that were text only now carry an icon: Go (`search` on the shelfmark box, an arrow that points the reading direction beside the page number), Submit (`send`, mirrored in Hebrew), the image-source chips (`image` where the chip switches the images shown, `open_in_new` where it opens the library's viewer), the External link row (`open_in_new` after each link), and the Bib. FJMS / Bib. Ktiv (`menu_book`), Catalog rec. (`info_outline`), Measurements (`straighten`) and Visual Similarity (`compare`) chips. On a phone (below 600px) no row gets wider: Go and Submit show the icon alone and keep their name for screen readers, and the chips and links show the text alone. A chip that opens a library's viewer now carries the icon itself, so the separate icon-only button beside it is gone, and the ones that remain have an accessible name. The desktop app is unchanged. From the owner (2026-10-19); test `tests/render_smoke/test_browse_button_icons_render_smoke.py`.
+
 ## [Unreleased] -- The homepage search box opens shelfmarks and system IDs (web, branch `claude/fervent-curie-oip2lk`)
 
 The search box on the homepage now goes where the input belongs: Hebrew or Arabic text runs a full-text search as before, a system ID (all digits, starting 99) opens that manuscript, and anything else is looked up as a shelfmark by the Browse page, with its usual answers (the manuscript, a "Select Manuscript" list, or "No manuscript found" with the shelfmark left in the box to correct). The placeholder now reads "Text, shelfmark or system ID", short enough to fit the box on a phone. Routing: `web/home_query.py::home_query_target`. From the owner (2026-10-19).
