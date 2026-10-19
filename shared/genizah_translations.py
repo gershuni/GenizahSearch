@@ -1456,8 +1456,10 @@ TRANSLATIONS = {
     # 2026-09-04). Both the English and the Hebrew read as "search FOR a
     # manuscript", so readers typed shelfmarks into a full-text box. The old key
     # stays registered because tests/e2e/conftest.py still builds a stub page
-    # with that placeholder.
-    "Type a word or phrase to search the manuscripts...": "הקלידו מילה או ביטוי לחיפוש בכתבי היד...",
+    # with that placeholder. Since 2026-10-19 the box also opens a shelfmark or
+    # sys_id (routing in web/home_query.py), so the placeholder names all three
+    # inputs -- in few enough words to fit the box on a 360px phone (measured).
+    "Text, shelfmark or system ID": "טקסט, מספר מדף או מספר מערכת",
     "Search mode": "מצב חיפוש",
     "results found": "תוצאות נמצאו",
     "Advanced options": "אפשרויות מתקדמות",

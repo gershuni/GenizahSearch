@@ -1147,17 +1147,21 @@ desktop.Y.X` identity holds via the facades.
 
 ## web/components/visual_similarity_dialog.py
 
-- **Function** `_normalize_view` (Line 39) — 'grid' for the thumbnail view; anything else is the list (the default).
-- **Function** `_suggestion_thumbnail_url` (Line 44) — Low-resolution first-image URL for a suggestion's thumbnail card.
-- **Function** `_pick_preview_image_url` (Line 60) — Choose the same best-effort preview source family as the browse page.
-- **Function** `_resolve_preview_image_url_sync` (Line 95) — Populate browse metadata on demand, then pick the preview image URL.
-- **Function** `_fetch_original_info` (Line 123) — Fetch image URL and text snippet for the original manuscript.
-- **Function** `_fetch_preview_image_url` (Line 163) — Resolve the best preview image URL without blocking the UI event loop.
-- **Function** `_fetch_suggestion_text` (Line 171) — Fetch text snippet for a suggestion manuscript.
-- **Function** `show_visual_similarity_dialog` (Line 189) — Show visual similarity suggestions dialog for a manuscript.
-- **Function** `_render_suggestion_row` (Line 499) — Render a single suggestion row with expandable detail section.
-- **Function** `_render_suggestion_actions` (Line 676) — Render the Browse / Puzzle / List / Join buttons for one suggestion.
-- **Function** `_render_suggestion_card` (Line 746) — Render one suggestion as a thumbnail card (the grid view).
+- **Function** `_normalize_view` (Line 40) — 'grid' for the thumbnail view; anything else is the list (the default).
+- **Function** `_domain_label` (Line 45) — The suggestion's domain as the visitor reads it: Hebrew in the Hebrew UI.
+- **Function** `_counted_options` (Line 56) — Filter options from (value, label) pairs: value -> "label (count)", in label order.
+- **Function** `_domain_options` (Line 73) — Domain filter options: English domain -> "label (count)", in label order.
+- **Function** `_library_options` (Line 81) — Library filter options: library code -> "code (count)", in code order.
+- **Function** `_suggestion_thumbnail_url` (Line 89) — Low-resolution first-image URL for a suggestion's thumbnail card.
+- **Function** `_pick_preview_image_url` (Line 105) — Choose the same best-effort preview source family as the browse page.
+- **Function** `_resolve_preview_image_url_sync` (Line 140) — Populate browse metadata on demand, then pick the preview image URL.
+- **Function** `_fetch_original_info` (Line 168) — Fetch image URL and text snippet for the original manuscript.
+- **Function** `_fetch_preview_image_url` (Line 208) — Resolve the best preview image URL without blocking the UI event loop.
+- **Function** `_fetch_suggestion_text` (Line 216) — Fetch text snippet for a suggestion manuscript.
+- **Function** `show_visual_similarity_dialog` (Line 234) — Show visual similarity suggestions dialog for a manuscript.
+- **Function** `_render_suggestion_row` (Line 546) — Render a single suggestion row with expandable detail section.
+- **Function** `_render_suggestion_actions` (Line 723) — Render the Browse / Puzzle / List / Join buttons for one suggestion.
+- **Function** `_render_suggestion_card` (Line 793) — Render one suggestion as a thumbnail card (the grid view).
 
 ## web/main.py
 
@@ -1843,6 +1847,11 @@ Variant and Lab preferences of one website visitor, kept in that visitor's stora
 - **Function** `load_enrichment` (Line 66) — Phase B: Load PGP + FJMS enrichment data in background.
 - **Function** `update_enrichment_sections` (Line 404) — Update enrichment placeholder containers after Phase B completes.
 - **Function** `populate_bib_catalog_buttons` (Line 464) — Populate bibliography and catalog buttons in the page navigation pane.
+
+## web/home_query.py
+
+- **Function** `has_hebrew_or_arabic_letter` (Line 34) — True when ``text`` holds at least one Hebrew or Arabic LETTER.
+- **Function** `home_query_target` (Line 46) — The URL the homepage box navigates to for ``text``, or None if blank.
 
 ## web/search_bootstrap.py
 
