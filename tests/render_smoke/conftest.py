@@ -63,6 +63,8 @@ from nicegui.testing.user import User
 from nicegui.ui_run import set_storage_secret
 from web.state import state as _web_state
 
+from tests.render_smoke._bounded_run import run_user_driver
+
 
 # ---------------------------------------------------------------------------
 # Deterministic stub search result dicts
@@ -297,16 +299,17 @@ def run_joins_lab_smoke(
     # can modify it, and we must restore it so subsequent tests see clean state.
     saved_slot_stack = list(_nicegui_context.slot_stack)
 
-    async def _run():
-        async with _joins_lab_user_context(
-            mock_search_results=mock_search_results,
-            mock_vs_raw=mock_vs_raw,
-        ) as user:
-            coro = driver(user)
-            await coro
-
     try:
-        asyncio.run(_run())
+        # Not asyncio.run(): its exit waits unboundedly on tasks the page left
+        # behind, which turned a failed assertion into a 29-minute hang on
+        # windows-latest (PR #410). See tests/render_smoke/_bounded_run.py.
+        run_user_driver(
+            lambda: _joins_lab_user_context(
+                mock_search_results=mock_search_results,
+                mock_vs_raw=mock_vs_raw,
+            ),
+            driver,
+        )
     finally:
         # Restore NiceGUI global slot_stack to prevent test contamination.
         # The User simulation may leave it empty (all slots popped) or dirty;

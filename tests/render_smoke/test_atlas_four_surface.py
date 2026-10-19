@@ -41,7 +41,6 @@ job), so a tiny fabricated payload is sufficient to prove 200-vs-404 gating.
 """
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import os
@@ -61,6 +60,7 @@ from nicegui.context import context as _nicegui_context
 from nicegui.testing.general import prepare_simulation
 from nicegui.testing.user import User
 from nicegui.ui_run import set_storage_secret
+from tests.render_smoke._bounded_run import run_bounded
 
 
 _TEASER_MARKER = "atlas-teaser-card"
@@ -157,7 +157,7 @@ def _run(driver: Callable, lang: str = "en") -> None:
             await driver(user, client)
 
     try:
-        asyncio.run(_main())
+        run_bounded(_main())
     finally:
         _nicegui_context.slot_stack.clear()
         _nicegui_context.slot_stack.extend(saved_slot_stack)

@@ -37,6 +37,7 @@ from nicegui.testing.general import prepare_simulation
 from nicegui.testing.user import User
 from nicegui.testing.user_interaction import UserInteraction
 from nicegui.ui_run import set_storage_secret
+from tests.render_smoke._bounded_run import run_bounded
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fjms_filter_sidecar import FailingFinalExecute, build_sidecar  # noqa: E402
@@ -121,7 +122,7 @@ async def _user(engine, saved: dict):
 def _run(coro_fn):
     saved_slots = list(nicegui_context.slot_stack)
     try:
-        asyncio.run(coro_fn())
+        run_bounded(coro_fn())
     finally:
         nicegui_context.slot_stack.clear()
         nicegui_context.slot_stack.extend(saved_slots)

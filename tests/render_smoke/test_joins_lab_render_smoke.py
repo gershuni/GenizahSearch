@@ -39,6 +39,7 @@ F-A2 (no engine init): conftest.py clears ``core.app._startup_handlers`` and
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
@@ -2090,6 +2091,41 @@ def test_round5_results_restore_on_reopen(joins_lab_smoke_runner):
     joins_lab_smoke_runner(driver)
 
 
+def _filled_triage_glyph_backgrounds(user) -> list:
+    """Backgrounds of visible triage glyph buttons drawn in their ACTIVE style."""
+    from nicegui import ElementFilter, ui
+    from shared.joins_lab import TRIAGE_ICONS
+    glyphs = {v["glyph"] for v in TRIAGE_ICONS.values()}
+    with user._client:
+        filled = []
+        for b in ElementFilter(kind=ui.button):
+            if not b.visible or b._props.get('label', '') not in glyphs:
+                continue
+            bg = (getattr(b, '_style', {}) or {}).get('background', '')
+            if bg and bg not in ('transparent', 'inherit'):
+                filled.append(bg)
+    return filled
+
+
+def _saved_triage(user) -> dict:
+    """The triage verdicts persisted to this visitor's storage (empty if none)."""
+    from web.joins_lab_storage import read_full_state
+    with user._client:
+        return (read_full_state() or {}).get('triage') or {}
+
+
+async def _wait_until(predicate, timeout: float = 15.0):
+    """Poll *predicate* until it returns something truthy or *timeout* passes;
+    return its last value. Replaces fixed sleeps, which a slow Windows runner
+    can outlast (PR #410)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        value = predicate()
+        if value or time.monotonic() >= deadline:
+            return value
+        await asyncio.sleep(0.05)
+
+
 def test_round5_triage_restored_on_reopen(joins_lab_smoke_runner):
     """Round-5 UAT: Y/?/X triage verdicts must survive a re-open of /joins-lab.
 
@@ -2105,27 +2141,20 @@ def test_round5_triage_restored_on_reopen(joins_lab_smoke_runner):
         yes_btns = _find_yes_triage_buttons(user)
         assert yes_btns, "precondition: no ✓ triage buttons on the rendered cards."
         _click_element(user, yes_btns[0])
-        await asyncio.sleep(0.2)
+        saved = await _wait_until(lambda: _saved_triage(user))
+        assert saved, (
+            "precondition: the ✓ verdict was never written to storage, so the "
+            "re-open below could not restore it."
+        )
 
         # Re-open (returning from /puzzle or /browse).
         await user.open('/joins-lab')
-        await asyncio.sleep(1.4)
-
-        from nicegui import ElementFilter, ui
-        from shared.joins_lab import TRIAGE_ICONS
-        glyphs = {v["glyph"] for v in TRIAGE_ICONS.values()}
-        with user._client:
-            filled = []
-            for b in ElementFilter(kind=ui.button):
-                if not b.visible or b._props.get('label', '') not in glyphs:
-                    continue
-                bg = (getattr(b, '_style', {}) or {}).get('background', '')
-                if bg and bg not in ('transparent', 'inherit'):
-                    filled.append(bg)
+        filled = await _wait_until(lambda: _filled_triage_glyph_backgrounds(user))
         assert filled, (
             "Round-5 FAIL: triage verdict NOT restored on re-open — no triage "
             "glyph button came back in its active (filled) style. The persisted "
-            "verdict must be re-attached to _triage before the restore render."
+            f"verdict ({saved!r}) must be re-attached to _triage before the "
+            "restore render."
         )
 
     joins_lab_smoke_runner(driver)
@@ -2144,17 +2173,22 @@ def test_round5_search_type_restored_on_reopen(joins_lab_smoke_runner):
         await _load_anchor_and_search(user)
 
         await user.open('/joins-lab')
-        await asyncio.sleep(1.4)
 
         from nicegui import ElementFilter, ui
         # The Responsa-style segmented button — match EN or HE label.
         resp_labels = {'Responsa-style', 'בסגנון השו״ת'}
-        with user._client:
-            resp_btns = [
-                b for b in ElementFilter(kind=ui.button)
-                if b._props.get('label', '') in resp_labels
-            ]
-            active = [b for b in resp_btns if b._props.get('color') == 'primary']
+
+        def _resp_buttons():
+            with user._client:
+                return [
+                    b for b in ElementFilter(kind=ui.button)
+                    if b._props.get('label', '') in resp_labels
+                ]
+
+        active = await _wait_until(
+            lambda: [b for b in _resp_buttons() if b._props.get('color') == 'primary']
+        )
+        resp_btns = _resp_buttons()
         assert resp_btns, "precondition: no Responsa-style type button found."
         assert active, (
             "Round-5 FAIL: search type NOT restored — 'Responsa-style' is not the "

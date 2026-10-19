@@ -78,6 +78,7 @@ import types
 from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Set, Tuple
 
 import pytest
+from tests.render_smoke._bounded_run import run_bounded
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -786,7 +787,7 @@ def _render_findings_page(*, lang: str, findings: Any, facets: Any = None,
         holder["client"] = client
 
     try:
-        asyncio.run(_run())
+        run_bounded(_run())
     finally:
         patch.undo()
         tf.set_language("he")
@@ -811,7 +812,7 @@ def _render_component(paint) -> Any:
                 await _drive_value_change_handlers(client)
         holder["client"] = client
 
-    asyncio.run(_run())
+    run_bounded(_run())
     return holder["client"]
 
 
@@ -1767,7 +1768,7 @@ def _forced_log_lines(seed: Optional[str] = None) -> List[Tuple[str, str]]:
         patch.setattr(wd, "discovery_available", lambda: True)
         patch.setattr(wd._service, "get_claims_for_page_enveloped_async", _overload)
         page_id = seed or "990000000000000944_IE1_P000002_FL3"
-        envelope = asyncio.run(wd.get_claims_for_page_enveloped(page_id))
+        envelope = run_bounded(wd.get_claims_for_page_enveloped(page_id))
         records.append(("log/claims-overload-envelope", json.dumps(
             envelope, ensure_ascii=False, default=str)))
     finally:
