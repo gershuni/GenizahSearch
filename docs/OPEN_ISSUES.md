@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-19 (v9.7.0 RELEASED, both: tag `v9.7.0` on `7ab6c1b3`) -- **PRs #397-#402 shipped.** CI green on all 10 jobs; the website runs `7ab6c1b3` (API reports 9.7.0); the GitHub Release is published as `latest` with the installer (sha256 verified). The owner hand-tested the conditions in the installed exe. Still open on the conditions feature row: the user's two G8 cases (his texts not received) and the power user's answer on "same image" vs "whole manuscript". **Same day, the tracker was trimmed** from 177,878 to 154,790 bytes (99% -> 86% of the ceiling): 49 long open rows keep their headline, location and status but have short notes, and their full text is verbatim in the archive ("Full text of the entries condensed in the tracker on 2026-10-19"). **Also merged the same day:** PR #404 (Visual Similarity: Hebrew domain names, counts on the Domain and Library filters; its row narrowed to first-domain-only and phone width) and PR #406 (homepage search box opens shelfmarks and system IDs). No count change -- 221.
+> **Last Updated:** 2026-10-19 (`feat/joins-lab-links-compare`, PR 1 of `docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md`) -- four Joins Lab / Compare defects found and fixed the same day, all archived: the white Browse icons in the web Compare window, its FJMS/PGP buttons that stayed on the first candidate, the candidate-card and Known Joins Browse icons that replaced the Lab, and the desktop Compare anchor line that was empty. No count change -- 221.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
@@ -90,6 +90,7 @@ Move to "Completed Issues" section at bottom with date
 > 2026-10-19 (9.7.0 release prepared): #402 merged, Hebrew approved; no row opened or closed -- 221.
 > 2026-10-19 (Visual Similarity domain names and counts): P3 row narrowed (Hebrew domain names fixed, archived; first-domain-only stays open), no row opened or closed -- 221.
 > 2026-10-19 (tracker trim): 49 rows condensed, full text archived; no row opened or closed -- 221.
+> 2026-10-19 (Joins Lab links + Compare window, `feat/joins-lab-links-compare`): P2 +2 -2 (white Browse icons in the web Compare window; its FJMS/PGP buttons stuck on the first candidate), P3 +2 -2 (card / Known Joins Browse icons replaced the Lab; desktop Compare anchor line empty) -- all found and fixed the same day, archived -- 221.
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 

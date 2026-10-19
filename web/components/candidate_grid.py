@@ -33,7 +33,6 @@ MULTITENANT (T-117-03 / T-119-07):
 """
 from __future__ import annotations
 
-import json
 import math
 from typing import Optional, Callable
 
@@ -898,35 +897,16 @@ def _create_candidate_card(
 
                 # ── right cluster: browse + compare icon-only buttons (R2-9) ─
                 with ui.row().classes("gap-1 items-center"):
-                    # Browse icon button — navigates to /browse deep-link.
-                    # T-119-R9: json.dumps-escaped JS literal (no server-side stop_propagation).
-                    if on_browse_click:
-                        # Test-hook branch: client-side navigation via js_handler.
+                    # Browse icon — a real link that opens /browse in a new tab, so
+                    # the Lab is never replaced and Ctrl/middle-click and the browser's
+                    # "Open in new tab" work too. It was a button that set
+                    # window.location.href, which replaced the Lab and ignored Ctrl+click.
+                    with ui.link(target=browse_url, new_tab=True).classes("no-underline"):
                         (
                             ui.button(icon="menu_book")
-                            .props("flat dense")
+                            .props(f'flat dense aria-label="{tr("View in Browse")}"')
                             .style("min-height:44px;")
                             .tooltip(tr("View in Browse"))
-                            .on(
-                                "click",
-                                js_handler=(
-                                    f"() => {{ window.location.href={json.dumps(browse_url)}; }}"
-                                ),
-                            )
-                        )
-                    else:
-                        # Normal branch: plain client-side navigation.
-                        (
-                            ui.button(icon="menu_book")
-                            .props("flat dense")
-                            .style("min-height:44px;")
-                            .tooltip(tr("View in Browse"))
-                            .on(
-                                "click",
-                                js_handler=(
-                                    f"() => {{ window.location.href={json.dumps(browse_url)}; }}"
-                                ),
-                            )
                         )
 
                     # Compare icon button (Phase 119 CND-04, D-02, R2-9)

@@ -266,3 +266,15 @@ def test_community_member_appears_in_lab_group(monkeypatch):
         "Expected at least one join with sources=['community'] on the confirmed_only=True "
         "Lab path. Plan 02 wires the community merge into fetch_connected_fragments."
     )
+
+
+def test_member_browse_url_quotes_the_shelfmark():
+    """A known-join member opens in Browse by shelfmark, quoted for the URL.
+
+    The row renders this URL as a link to a new tab (it used to navigate the
+    Lab's own tab).
+    """
+    from web.components.known_joins_group import member_browse_url
+
+    assert member_browse_url('T-S 12.123') == '/browse?shelfmark=T-S%2012.123'
+    assert member_browse_url('Or. 5554A/14') == '/browse?shelfmark=Or.%205554A%2F14'

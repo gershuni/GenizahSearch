@@ -668,6 +668,43 @@ class TestFolioBoundary:
             for c in ctxs:
                 c.stop()
 
+    def test_on_page_loaded_hook_follows_folio_navigation(self):
+        """Compare keeps page-dependent details (the PGP link) with the folio shown:
+        the optional hook is called, and awaited, with each folio drawn; a failing
+        hook never breaks the viewer."""
+        import asyncio
+        pages = [1, 2, 3]
+
+        def resolver(sid, *, p_num=None, direction=0, volume_ie=None, **kw):
+            idx = pages.index(p_num) if p_num in pages else 0
+            new_idx = idx + direction
+            if new_idx < 0 or new_idx >= len(pages):
+                return None
+            return _make_page(p_num=pages[new_idx], total_pages=3, current_idx=new_idx + 1)
+
+        seen = []
+
+        async def hook(p):
+            seen.append(p)
+
+        v, mock_ui, ctxs = self._viewer_with_async_run(resolver)
+        try:
+            v._on_page_loaded = hook
+            asyncio.run(v.update_content(p_num=None))
+            asyncio.run(v.update_content(direction=+1))
+            asyncio.run(v.update_content(direction=+1))
+            asyncio.run(v.update_content(direction=+1))   # boundary: nothing drawn
+            assert seen == [1, 2, 3]
+
+            def broken(_p):
+                raise ValueError("caller bug")
+            v._on_page_loaded = broken
+            asyncio.run(v.update_content(direction=-1))
+            assert v._p_num == 2
+        finally:
+            for c in ctxs:
+                c.stop()
+
     def test_rotation_reset_on_folio_change(self):
         """SEED-017 (#10): rotation resets to 0 on folio navigation (mirrors zoom).
 
