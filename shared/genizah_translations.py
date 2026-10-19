@@ -4106,6 +4106,8 @@ TRANSLATIONS.update({
     "Filter by shelfmark, text, or title…":
         "סנן לפי מספר מדף, טקסט או כותר…",
     "any material":          "כל חומר",
+    "any library":           "כל ספרייה",
+    "any domain":            "כל תחום",
     "Has dimensions":        "יש מידות",
     "all triage":            "כל סיווג",
     "Y — kept":         "Y — נשמר",

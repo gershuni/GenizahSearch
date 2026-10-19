@@ -1166,33 +1166,36 @@ desktop.Y.X` identity holds via the facades.
 
 ## web/components/candidate_grid.py
 
-- **Function** `_placeholder_style` (Line 78) — The no-image box of a card thumbnail *height_px* tall.
-- **Function** `normalize_card_size` (Line 99) — 's', 'm' or 'l'; anything else is Medium (the default, the size before).
-- **Function** `paginate` (Line 108) — Paginate a list of candidates.
-- **Function** `_paginate` (Line 138) — Internal alias for paginate() using the module-level _PAGE_SIZE.
-- **Function** `is_size_mismatch` (Line 147) — Return True if candidate width differs from anchor width by more than threshold×.
-- **Class** `TriageState` (Line 183) — In-memory triage state keyed by sys_id.
-    - Method `__init__` (Line 195)
-    - Method `set` (Line 201) — Set verdict for a sys_id. Raises ValueError for invalid verdicts.
-    - Method `set_bulk` (Line 209) — Set the same verdict for multiple sys_ids. Raises ValueError for invalid verdicts.
-    - Method `get` (Line 218) — Return the verdict for sys_id, or None if not triaged.
-    - Method `reset` (Line 222) — Clear all triage verdicts (called on re-anchor / new search).
-    - Method `__len__` (Line 226)
-    - Method `__contains__` (Line 229)
-- **Function** `make_triage_state` (Line 233) — Factory for a fresh in-memory triage state object (D-11).
-- **Function** `compute_filtered` (Line 242) — Apply filter_state predicates to all_candidates and return the filtered list.
-- **Function** `get_table_columns` (Line 320) — Return the 8-column table column definitions (D-10, CND-03).
-- **Function** `get_table_config` (Line 338) — Return table configuration dict (used by tests to assert multi-select etc.).
-- **Function** `_make_table_rows` (Line 350) — Build row dicts for the ui.table from a candidate list.
-- **Function** `build_thumbnail_url` (Line 421) — Derive a proxy thumbnail URL for a candidate.
-- **Function** `build_browse_url` (Line 486) — Build the /browse deep-link URL for a candidate.
-- **Function** `_truncate_title` (Line 497) — Truncate a title to max_chars and append '...' if needed.
-- **Function** `cap_candidates` (Line 506) — Decide how many candidate cards to render (WebSocket-safety cap).
-- **Function** `_make_restyle_fn` (Line 536) — Return a render-scoped restyle callable that operates on ``card_refs``.
-- **Function** `_create_candidate_card` (Line 613) — Render a single candidate card (Phase 119 D-09/D-11/D-07, Phase 120 D-07/ACT-01).
-- **Function** `open_filter_dialog` (Line 1008) — Open the candidate filter dialog (D-14, CND-06).
-- **Function** `create_candidate_table` (Line 1096) — Render the multi-select sortable table view of candidates (D-10, CND-03).
-- **Function** `create_candidate_grid` (Line 1291) — Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
+- **Function** `_placeholder_style` (Line 79) — The no-image box of a card thumbnail *height_px* tall.
+- **Function** `normalize_card_size` (Line 100) — 's', 'm' or 'l'; anything else is Medium (the default, the size before).
+- **Function** `paginate` (Line 109) — Paginate a list of candidates.
+- **Function** `_paginate` (Line 139) — Internal alias for paginate() using the module-level _PAGE_SIZE.
+- **Function** `is_size_mismatch` (Line 148) — Return True if candidate width differs from anchor width by more than threshold×.
+- **Class** `TriageState` (Line 184) — In-memory triage state keyed by sys_id.
+    - Method `__init__` (Line 196)
+    - Method `set` (Line 202) — Set verdict for a sys_id. Raises ValueError for invalid verdicts.
+    - Method `set_bulk` (Line 210) — Set the same verdict for multiple sys_ids. Raises ValueError for invalid verdicts.
+    - Method `get` (Line 219) — Return the verdict for sys_id, or None if not triaged.
+    - Method `reset` (Line 223) — Clear all triage verdicts (called on re-anchor / new search).
+    - Method `__len__` (Line 227)
+    - Method `__contains__` (Line 230)
+- **Function** `make_triage_state` (Line 234) — Factory for a fresh in-memory triage state object (D-11).
+- **Function** `compute_filtered` (Line 243) — Apply filter_state predicates to all_candidates and return the filtered list.
+- **Function** `candidate_domain_label` (Line 340) — The candidate's domain as the visitor reads it ('' when it has none).
+- **Function** `library_options` (Line 346) — Library filter options: library code -> "code (count)", in code order.
+- **Function** `domain_options` (Line 352) — Domain filter options: English domain -> "label (count)", in label order.
+- **Function** `get_table_columns` (Line 365) — Return the 8-column table column definitions (D-10, CND-03).
+- **Function** `get_table_config` (Line 383) — Return table configuration dict (used by tests to assert multi-select etc.).
+- **Function** `_make_table_rows` (Line 395) — Build row dicts for the ui.table from a candidate list.
+- **Function** `build_thumbnail_url` (Line 469) — Derive a proxy thumbnail URL for a candidate.
+- **Function** `build_browse_url` (Line 534) — Build the /browse deep-link URL for a candidate.
+- **Function** `_truncate_title` (Line 545) — Truncate a title to max_chars and append '...' if needed.
+- **Function** `cap_candidates` (Line 554) — Decide how many candidate cards to render (WebSocket-safety cap).
+- **Function** `_make_restyle_fn` (Line 584) — Return a render-scoped restyle callable that operates on ``card_refs``.
+- **Function** `_create_candidate_card` (Line 661) — Render a single candidate card (Phase 119 D-09/D-11/D-07, Phase 120 D-07/ACT-01).
+- **Function** `open_filter_dialog` (Line 1046) — Open the candidate filter dialog (D-14, CND-06).
+- **Function** `create_candidate_table` (Line 1166) — Render the multi-select sortable table view of candidates (D-10, CND-03).
+- **Function** `create_candidate_grid` (Line 1362) — Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
 ## web/main.py
 
@@ -1992,6 +1995,44 @@ moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `deskt
     - Method `create_join_local` (Line 469) — Create a join locally and queue for server sync.
     - Method `delete_join_local` (Line 511) — Delete a join locally and queue for server sync.
     - Method `get_all_shelfmarks_with_joins` (Line 542) — Get list of all shelfmarks that have joins (for autocomplete).
+
+## shared/joins_lab.py
+
+- **Class** `BuilderRow` (Line 30) — One row in the Joins Lab line-by-line query builder.
+- **Class** `SideQuery` (Line 48) — A complete query specification for one side of a join search.
+    - Method `__post_init__` (Line 68)
+- **Class** `Candidate` (Line 77) — A normalized search result candidate for the Joins Lab.
+    - Property `key` (Line 126) — Canonical per-image dedup key: (sys_id, page).
+- **Class** `MergeResult` (Line 142) — Result of a text/VS candidate merge operation (Plan 02).
+- **Class** `SearchExecutor` (Line 160) — Narrow adapter Protocol over the search engine.
+    - Method `execute_search` (Line 172)
+    - Method `get_browse_page` (Line 186)
+    - Method `get_meta_for_id` (Line 198)
+    - Method `get_library_for_id` (Line 201)
+- **Function** `_to_int` (Line 208) — Coerce v to int; return None on any conversion failure.
+- **Function** `_r_sid` (Line 216) — Extract sys_id from a result dict (sketch L61 accessor).
+- **Function** `_r_shelf` (Line 221) — Extract shelfmark from a result dict (sketch L65 accessor).
+- **Function** `_r_title` (Line 227) — Extract title from a result dict (sketch L68 accessor).
+- **Function** `_r_lib` (Line 232) — Extract library_code from a result dict (sketch L73 accessor).
+- **Function** `page_of` (Line 238) — Best-effort 1-based page/image number for a result dict.
+- **Function** `normalize_candidate` (Line 258) — Normalize a raw engine result dict to a Candidate.
+- **Function** `resolve_other_side_pages` (Line 294) — Return the set of neighbor page numbers that form the 'other side' of a leaf.
+- **Function** `cross_side_membership` (Line 317) — Pure AND/OR set logic for cross-side filtering (transplanted from sketch L400-428).
+- **Function** `apply_cross_side` (Line 355) — I/O-bound orchestrator for cross-side AND/OR membership (SC#2).
+- **Function** `dedup_candidates` (Line 515) — Deduplicate raw result dicts to one Candidate per (sys_id, page).
+- **Function** `merge_candidates` (Line 557) — Merge text and VS candidate lists into a stable, provenance-tagged ordering.
+- **Function** `detect_self_match` (Line 611) — Report whether the anchor's own sys_id appears in a fetched result list.
+- **Function** `badge_and_tooltip` (Line 649) — Return (icon_name | None, tooltip_text) for a candidate badge.
+- **Function** `_match_line` (Line 672) — Return the index of the first line whose content matches the pattern.
+- **Function** `htmlify` (Line 706) — Escape corpus text to HTML, optionally highlighting pattern matches.
+- **Function** `snippet_html` (Line 736) — HTML snippet centered on the first regex match.
+- **Function** `snippet_plain` (Line 758) — Plain-text snippet centered on the first regex match, for table cells.
+- **Function** `compose` (Line 781) — Compose a SideQuery into the engine's line-break query syntax.
+- **Function** `normalize_order` (Line 867) — 'library' or 'domain'; anything else is 'rank' (the order the search gave).
+- **Function** `primary_domain` (Line 872) — A fragment's domain as the Visual Similarity window shows it.
+- **Function** `domain_label` (Line 884) — The domain as the user reads it (Hebrew in the Hebrew UI, when it has one).
+- **Function** `counted_options` (Line 895) — [(value, label, count)] for each distinct value, in label order.
+- **Function** `order_candidates` (Line 910) — The candidates in the search's order, or grouped by library or by domain.
 
 ## shared/atomic_io.py
 

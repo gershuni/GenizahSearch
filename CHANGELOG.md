@@ -4,6 +4,20 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased] -- Joins Lab: sort and filter by library and domain (web + desktop, branch `feat/joins-lab-library-domain`)
+
+As in the website's Visual Similarity window. A fragment's domain is the first of its
+domains in the FJMS data, shown in Hebrew in the Hebrew interface; it comes with the size
+and material data already fetched for the candidates.
+
+- **Sort:** the search's order (Rank), or grouped by Library or by Domain. Within a group the
+  search's order is kept, and candidates with no library or domain come last. Website: beside
+  the Filter button above the grid, also followed by the table. Desktop: next to "Table view",
+  for both views, and kept in the Lab session.
+- **Filter:** Library and Domain in the Filter dialog, each option with its count (website:
+  several at once; desktop: one, like Material).
+- **Cards** show the domain (website) or "library · domain" (desktop).
+
 ## [Unreleased] -- Image sizes in Visual Similarity and the Joins Lab (web + desktop, branch `feat/image-size-controls`)
 
 - **Website, Visual Similarity window:** the thumbnail view has Small / Medium / Large

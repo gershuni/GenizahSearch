@@ -9,6 +9,9 @@ from html import escape as _html_escape
 
 from shared.fragment_details import domain_labels, fetch_fragment_details, info_line
 from shared.joins_lab import htmlify, page_of, snippet_html, snippet_plain  # D-18: reuse Phase 106
+from shared.joins_lab import (
+    counted_options, domain_label, normalize_order, order_candidates, primary_domain,
+)
 from shared.web_links import web_browse_url
 from desktop.variant_run_settings import basic_changes_searcher
 
@@ -1995,6 +1998,12 @@ if _QT_AVAILABLE:
                 meas = self.fjms_svc.get_measurement_summaries_batch(sys_ids)  # RR-6
             except Exception as exc:
                 logger.warning("_EnrichWorker.get_measurement_summaries_batch: %s", exc)
+            # Domains for the Library/Domain filter and Sort, in the same batch pass
+            doms = {}
+            try:
+                doms = self.fjms_svc.get_domains_for_sys_ids(sys_ids) or {}
+            except Exception as exc:
+                logger.warning("_EnrichWorker.get_domains_for_sys_ids: %s", exc)
 
             out = {}   # keyed by (sys_id, page) == c.key (RR-2)
             for c in self.candidates:
@@ -2030,6 +2039,7 @@ if _QT_AVAILABLE:
                     "snippet_html": snip_h,
                     "snippet_plain": snip_p,
                     "mismatch": mismatch,
+                    **primary_domain(doms.get(c.sys_id)),   # domain, domain_heb
                 }
             self.enriched.emit(out)
 
@@ -2158,6 +2168,16 @@ if _QT_AVAILABLE:
                 if m.get("mismatch"):
                     dim_lbl.setToolTip(tr("Size may not match anchor"))
                 lay.addWidget(dim_lbl)
+
+            # 3b. Library · domain (what the Library/Domain filter and Sort group by)
+            facets = [p for p in (
+                c.library_code,
+                domain_label(m.get("domain"), m.get("domain_heb"), CURRENT_LANG == "he"),
+            ) if p]
+            if facets:
+                facet_lbl = QLabel("  ·  ".join(facets))
+                facet_lbl.setStyleSheet(f"font-size:10px;color:{_DIM_COLOR};")
+                lay.addWidget(facet_lbl)
 
             # 4. Snippet (pre-fetched HTML)
             # Feature 1: save as self.snip so folio-flip can update the text.
@@ -2698,6 +2718,13 @@ if _QT_AVAILABLE:
             self.mat_filter = QComboBox()
             self.mat_filter.addItem(tr("any material"))
 
+            # Library / Domain: userData is the library code / English domain ("" = any);
+            # options with counts come with each result set (_refresh_facet_filters).
+            self.lib_filter = QComboBox()
+            self.lib_filter.addItem(tr("any library"), "")
+            self.dom_filter = QComboBox()
+            self.dom_filter.addItem(tr("any domain"), "")
+
             self.dim_chk = QCheckBox(tr("Has dimensions"))
 
             self.tri_filter = QComboBox()
@@ -2726,6 +2753,15 @@ if _QT_AVAILABLE:
             self.view_btn.clicked.connect(self.toggle_view)
             res_toolbar.addWidget(self.view_btn)
 
+            # Sort: the search's order, or grouped by library or domain (both views)
+            self.order_combo = QComboBox()
+            self.order_combo.setToolTip(tr("Sort"))
+            self.order_combo.setAccessibleName(tr("Sort"))
+            for key, label in (("rank", tr("Rank")), ("library", tr("Library")),
+                               ("domain", tr("Domain"))):
+                self.order_combo.addItem(label, key)
+            self.order_combo.currentIndexChanged.connect(self._on_order_changed)
+            res_toolbar.addWidget(self.order_combo)
             # Grid card size (S/M/L); grid view only, remembered in config.pkl
             self.card_size_combo = QComboBox()
             self.card_size_combo.setToolTip(tr("Card size"))
@@ -3503,6 +3539,7 @@ if _QT_AVAILABLE:
                 # G-03: empty intersection renders an empty state here (apply_filters sets the
                 # 'no matches' label) — never a perpetual spinner. No fjms service OR empty results.
                 self._enrich = {}
+                self._refresh_facet_filters()
                 self.apply_filters()
 
         def _on_enriched(self, enrich: dict):
@@ -3536,6 +3573,42 @@ if _QT_AVAILABLE:
                 self.mat_filter.blockSignals(False)
             except RuntimeError:
                 pass
+            self._refresh_facet_filters()
+            self.apply_filters()
+
+        def _domain_of(self, c) -> str:
+            """The candidate's domain as the user reads it ('' when it has none)."""
+            m = self._enrich.get(c.key) or {}
+            return domain_label(m.get("domain"), m.get("domain_heb"), CURRENT_LANG == "he")
+
+        def _refresh_facet_filters(self):
+            """Library and Domain options, each "label (count)", for the current results.
+            A choice still on offer is kept; one that is not falls back to any."""
+            libs = counted_options((c.library_code, c.library_code) for c in self.results)
+            doms = counted_options(
+                ((self._enrich.get(c.key) or {}).get("domain"), self._domain_of(c))
+                for c in self.results
+            )
+            for combo, any_label, options in (
+                (self.lib_filter, tr("any library"), libs),
+                (self.dom_filter, tr("any domain"), doms),
+            ):
+                try:
+                    current = combo.currentData() or ""
+                    combo.blockSignals(True)
+                    combo.clear()
+                    combo.addItem(any_label, "")
+                    for value, label, n in options:
+                        combo.addItem(f"{label} ({n})", value)
+                    idx = combo.findData(current)
+                    combo.setCurrentIndex(idx if idx >= 0 else 0)
+                    combo.blockSignals(False)
+                except RuntimeError:
+                    pass
+
+        def _on_order_changed(self, _index: int):
+            """Sort changed: back to the first page, in the new order."""
+            self._page = 0
             self.apply_filters()
 
         def apply_filters(self):
@@ -3548,6 +3621,8 @@ if _QT_AVAILABLE:
                 if mat_q is None:
                     mat_q = ""   # userData not set (legacy path)
             mat_any = (not mat_q)  # userData=="" means "any material"
+            lib_q = self.lib_filter.currentData() or ""
+            dom_q = self.dom_filter.currentData() or ""
             need_dims = self.dim_chk.isChecked()
             tri_q_idx = self.tri_filter.currentIndex()
             # tri_q_idx: 0=all, 1=Y, 2=?, 3=N, 4=untriaged
@@ -3571,6 +3646,11 @@ if _QT_AVAILABLE:
                 if not mat_any:
                     if (m.get("material") or "") != mat_q:
                         continue
+                # Library / Domain filters (the domain is the fragment's first one)
+                if lib_q and c.library_code != lib_q:
+                    continue
+                if dom_q and (m.get("domain") or "") != dom_q:
+                    continue
                 # Has-dimensions filter
                 if need_dims and not (m.get("width_cm") and m.get("height_cm")):
                     continue
@@ -3589,6 +3669,7 @@ if _QT_AVAILABLE:
                         continue
                 filtered.append(c)
 
+            filtered = order_candidates(filtered, self.order_combo.currentData(), self._domain_of)
             self.wb.filtered = filtered
 
             # Prune selection to current filtered universe (adapted_decision 6)
@@ -3950,6 +4031,14 @@ if _QT_AVAILABLE:
                 self.filter_in.clear()
                 self.mat_filter.setCurrentIndex(0)
                 self.tri_filter.setCurrentIndex(0)
+                # Library / Domain back to any (their options go with the results),
+                # and Sort back to the search's order.
+                self.lib_filter.setCurrentIndex(0)
+                self.dom_filter.setCurrentIndex(0)
+                self._refresh_facet_filters()
+                self.order_combo.blockSignals(True)
+                self.order_combo.setCurrentIndex(0)
+                self.order_combo.blockSignals(False)
             except RuntimeError:
                 pass
 
@@ -4118,6 +4207,22 @@ if _QT_AVAILABLE:
             mat_row.addWidget(dlg_mat, 1)
             lay.addLayout(mat_row)
 
+            # Library / Domain: copies of the hidden combos (userData = the filter value)
+            def _mirror(src: QComboBox) -> QComboBox:
+                dst = QComboBox()
+                for i in range(src.count()):
+                    dst.addItem(src.itemText(i), src.itemData(i))
+                dst.setCurrentIndex(max(0, src.currentIndex()))
+                return dst
+
+            dlg_lib = _mirror(self.lib_filter)
+            dlg_dom = _mirror(self.dom_filter)
+            for label, combo in ((tr("Library"), dlg_lib), (tr("Domain"), dlg_dom)):
+                row = QHBoxLayout()
+                row.addWidget(QLabel(label + ":"))
+                row.addWidget(combo, 1)
+                lay.addLayout(row)
+
             dlg_dim = QCheckBox(tr("Has dimensions"))
             dlg_dim.setChecked(self.dim_chk.isChecked())
             lay.addWidget(dlg_dim)
@@ -4191,6 +4296,8 @@ if _QT_AVAILABLE:
             def _on_reset():
                 dlg_filter_in.setText("")
                 dlg_mat.setCurrentIndex(0)
+                dlg_lib.setCurrentIndex(0)
+                dlg_dom.setCurrentIndex(0)
                 dlg_dim.setChecked(False)
                 dlg_tri.setCurrentIndex(0)
                 dlg_size_chk.setChecked(False)
@@ -4212,6 +4319,9 @@ if _QT_AVAILABLE:
                 if not synced:
                     self.mat_filter.setCurrentIndex(0)
                 self.mat_filter.blockSignals(False)
+                # The mirrors hold the same items, so the index carries over
+                self.lib_filter.setCurrentIndex(dlg_lib.currentIndex())
+                self.dom_filter.setCurrentIndex(dlg_dom.currentIndex())
                 self.dim_chk.setChecked(dlg_dim.isChecked())
                 self.tri_filter.setCurrentIndex(dlg_tri.currentIndex())
                 self.size_btn.setChecked(dlg_size_chk.isChecked())
@@ -6185,6 +6295,7 @@ if _QT_AVAILABLE:
             mat_filter_idx = 0
             tri_filter_idx = 0
             view_mode = "grid"
+            order = "rank"
             if pane is not None:
                 try:
                     other_enabled = pane.other_enable.isChecked()
@@ -6193,6 +6304,7 @@ if _QT_AVAILABLE:
                     mat_filter_idx = pane.mat_filter.currentIndex()
                     tri_filter_idx = pane.tri_filter.currentIndex()
                     view_mode = pane.view_mode
+                    order = normalize_order(pane.order_combo.currentData())
                 except RuntimeError:
                     pass
 
@@ -6208,6 +6320,7 @@ if _QT_AVAILABLE:
                 "mat_filter_idx": mat_filter_idx,
                 "tri_filter_idx": tri_filter_idx,
                 "view_mode": view_mode,
+                "order": order,
             }
 
         def restore_state(self, state: dict):
@@ -6276,6 +6389,10 @@ if _QT_AVAILABLE:
                 tri_filter_idx = int(state.get("tri_filter_idx", 0))
                 if 0 <= tri_filter_idx < pane.tri_filter.count():
                     pane.tri_filter.setCurrentIndex(tri_filter_idx)
+                pane.order_combo.blockSignals(True)
+                pane.order_combo.setCurrentIndex(
+                    max(0, pane.order_combo.findData(normalize_order(state.get("order")))))
+                pane.order_combo.blockSignals(False)
                 view_mode = state.get("view_mode") or "grid"
                 if view_mode != pane.view_mode:
                     pane.toggle_view()
