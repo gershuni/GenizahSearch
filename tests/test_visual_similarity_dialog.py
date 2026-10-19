@@ -2,6 +2,7 @@ from shared.genizah_translations import TRANSLATIONS
 from web.components.visual_similarity_dialog import (
     _domain_label,
     _domain_options,
+    _library_options,
     _normalize_view,
     _pick_preview_image_url,
     _suggestion_thumbnail_url,
@@ -139,4 +140,18 @@ def test_domain_options_count_each_domain_and_skip_unclassified():
     ]
     assert list(_domain_options(suggestions, is_heb=True).items()) == [
         ("Derashot", "דרשות (1)"), ("Liturgy", "תפילה (2)"),
+    ]
+
+
+def test_library_options_count_each_library_in_code_order():
+    suggestions = [
+        {"library_code": "JTS"},
+        {"library_code": "CUL"},
+        {"library_code": "CUL"},
+        {"library_code": ""},
+        {},
+    ]
+
+    assert list(_library_options(suggestions).items()) == [
+        ("CUL", "CUL (2)"), ("JTS", "JTS (1)"),
     ]

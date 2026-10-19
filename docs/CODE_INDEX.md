@@ -1149,17 +1149,19 @@ desktop.Y.X` identity holds via the facades.
 
 - **Function** `_normalize_view` (Line 40) — 'grid' for the thumbnail view; anything else is the list (the default).
 - **Function** `_domain_label` (Line 45) — The suggestion's domain as the visitor reads it: Hebrew in the Hebrew UI.
-- **Function** `_domain_options` (Line 56) — Domain filter options: English domain -> "label (count)", in label order.
-- **Function** `_suggestion_thumbnail_url` (Line 76) — Low-resolution first-image URL for a suggestion's thumbnail card.
-- **Function** `_pick_preview_image_url` (Line 92) — Choose the same best-effort preview source family as the browse page.
-- **Function** `_resolve_preview_image_url_sync` (Line 127) — Populate browse metadata on demand, then pick the preview image URL.
-- **Function** `_fetch_original_info` (Line 155) — Fetch image URL and text snippet for the original manuscript.
-- **Function** `_fetch_preview_image_url` (Line 195) — Resolve the best preview image URL without blocking the UI event loop.
-- **Function** `_fetch_suggestion_text` (Line 203) — Fetch text snippet for a suggestion manuscript.
-- **Function** `show_visual_similarity_dialog` (Line 221) — Show visual similarity suggestions dialog for a manuscript.
-- **Function** `_render_suggestion_row` (Line 533) — Render a single suggestion row with expandable detail section.
-- **Function** `_render_suggestion_actions` (Line 710) — Render the Browse / Puzzle / List / Join buttons for one suggestion.
-- **Function** `_render_suggestion_card` (Line 780) — Render one suggestion as a thumbnail card (the grid view).
+- **Function** `_counted_options` (Line 56) — Filter options from (value, label) pairs: value -> "label (count)", in label order.
+- **Function** `_domain_options` (Line 73) — Domain filter options: English domain -> "label (count)", in label order.
+- **Function** `_library_options` (Line 81) — Library filter options: library code -> "code (count)", in code order.
+- **Function** `_suggestion_thumbnail_url` (Line 89) — Low-resolution first-image URL for a suggestion's thumbnail card.
+- **Function** `_pick_preview_image_url` (Line 105) — Choose the same best-effort preview source family as the browse page.
+- **Function** `_resolve_preview_image_url_sync` (Line 140) — Populate browse metadata on demand, then pick the preview image URL.
+- **Function** `_fetch_original_info` (Line 168) — Fetch image URL and text snippet for the original manuscript.
+- **Function** `_fetch_preview_image_url` (Line 208) — Resolve the best preview image URL without blocking the UI event loop.
+- **Function** `_fetch_suggestion_text` (Line 216) — Fetch text snippet for a suggestion manuscript.
+- **Function** `show_visual_similarity_dialog` (Line 234) — Show visual similarity suggestions dialog for a manuscript.
+- **Function** `_render_suggestion_row` (Line 546) — Render a single suggestion row with expandable detail section.
+- **Function** `_render_suggestion_actions` (Line 723) — Render the Browse / Puzzle / List / Join buttons for one suggestion.
+- **Function** `_render_suggestion_card` (Line 793) — Render one suggestion as a thumbnail card (the grid view).
 
 ## web/main.py
 

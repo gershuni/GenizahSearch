@@ -9,8 +9,8 @@ Pinned here by driving the real dialog through the client's own events:
 2. The Thumbnails view shows one low-resolution image per filtered suggestion,
    from the same proxy URL the Joins Lab grid uses.
 3. The List / Thumbnails choice is remembered for the visitor's next window.
-4. Each domain option says how many suggestions carry it, and the Hebrew UI
-   shows the Hebrew domain names (they were English in both UIs).
+4. Each domain and library option says how many suggestions carry it, and
+   the Hebrew UI shows the Hebrew domain names (they were English in both UIs).
 """
 from __future__ import annotations
 
@@ -137,12 +137,24 @@ def _domain_select(user):
     return select
 
 
-def _choose_domain(user, domain):
-    """Pick a domain the way the browser does: Quasar emits the chosen options."""
-    select = _domain_select(user)
-    index = list(select.options).index(domain)
+def _library_select(user):
+    """The Library select: the only one whose option values are the library codes."""
+    [select] = [
+        s for s in user.find(ui.select).elements
+        if set(s.options) == {'CUL', 'JTS', 'Mosseri'}
+    ]
+    return select
+
+
+def _choose(user, select, value):
+    """Pick an option the way the browser does: Quasar emits the chosen options."""
+    index = list(select.options).index(value)
     UserInteraction(user, {select}, None).trigger(
-        'update:modelValue', [{'value': index, 'label': select.options[domain]}])
+        'update:modelValue', [{'value': index, 'label': select.options[value]}])
+
+
+def _choose_domain(user, domain):
+    _choose(user, _domain_select(user), domain)
 
 
 def _choose_view(user, view):
@@ -215,6 +227,23 @@ def test_each_domain_option_counts_its_suggestions():
         assert list(_domain_select(user).options.items()) == [
             ('Bible', 'Bible (2)'), ('Liturgy', 'Liturgy (1)'), ('Poetry', 'Poetry (1)'),
         ]
+
+    _run(driver)
+
+
+def test_each_library_option_counts_its_suggestions_and_still_filters():
+    async def driver(user):
+        await user.open(PAGE)
+        assert list(_library_select(user).options.items()) == [
+            ('CUL', 'CUL (2)'), ('JTS', 'JTS (1)'), ('Mosseri', 'Mosseri (1)'),
+        ]
+
+        _choose(user, _library_select(user), 'CUL')
+
+        await user.should_see('T-S Alpha')
+        await user.should_see('T-S Gamma')
+        await user.should_not_see('ENA Beta')
+        await user.should_not_see('Mosseri Delta')
 
     _run(driver)
 

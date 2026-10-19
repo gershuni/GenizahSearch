@@ -53,24 +53,37 @@ def _domain_label(s: dict, is_heb: bool) -> str:
     return s.get('domain', '--')
 
 
-def _domain_options(suggestions: list, is_heb: bool) -> dict:
-    """Domain filter options: English domain -> "label (count)", in label order.
+def _counted_options(pairs) -> dict:
+    """Filter options from (value, label) pairs: value -> "label (count)", in label order.
 
-    The count is how many of the loaded suggestions carry that domain, before
-    any filter is applied.
+    The count is how many of the pairs carry that value: for the dialog, how
+    many of the loaded suggestions, before any filter is applied.
     """
     counts = Counter()
     labels = {}
-    for s in suggestions:
-        domain = s.get('domain')
-        if not domain or domain == '--':
-            continue
-        counts[domain] += 1
-        labels.setdefault(domain, _domain_label(s, is_heb))
+    for value, label in pairs:
+        counts[value] += 1
+        labels.setdefault(value, label)
     return {
-        domain: f'{labels[domain]} ({counts[domain]})'
-        for domain in sorted(counts, key=lambda d: labels[d])
+        value: f'{labels[value]} ({counts[value]})'
+        for value in sorted(counts, key=lambda v: labels[v])
     }
+
+
+def _domain_options(suggestions: list, is_heb: bool) -> dict:
+    """Domain filter options: English domain -> "label (count)", in label order."""
+    return _counted_options(
+        (s['domain'], _domain_label(s, is_heb))
+        for s in suggestions if s.get('domain') and s['domain'] != '--'
+    )
+
+
+def _library_options(suggestions: list) -> dict:
+    """Library filter options: library code -> "code (count)", in code order."""
+    return _counted_options(
+        (s['library_code'], s['library_code'])
+        for s in suggestions if s.get('library_code')
+    )
 
 
 def _suggestion_thumbnail_url(s: dict) -> str | None:
@@ -299,7 +312,7 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
             )
 
             # Extract unique libraries and domains for filter options
-            all_libraries = sorted({s['library_code'] for s in data if s.get('library_code')})
+            all_libraries = _library_options(data)
             all_domains = _domain_options(data, is_heb)
 
             # Sort and filter controls

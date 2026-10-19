@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-19 (branch `claude/festive-davinci-9t9jva`, not merged) -- **The Visual Similarity window shows domain names in Hebrew in the Hebrew UI, and each Domain option says how many look-alikes carry it** (`Derashot (12)`; counted over the loaded look-alikes, before any filter). The domain lookup already returned `domain_heb`; the window dropped it. The English name stays the filter key and the fallback when a domain has no Hebrew name. Its tracker row narrowed to first-domain-only and phone width; no count change -- 221.
+> **Last Updated:** 2026-10-19 (branch `claude/festive-davinci-9t9jva`, not merged) -- **The Visual Similarity window shows domain names in Hebrew in the Hebrew UI, and each Domain and Library option says how many look-alikes carry it** (`Derashot (12)`, `CUL (40)`; counted over the loaded look-alikes, before any filter). The domain lookup already returned `domain_heb`; the window dropped it. The English name stays the filter key and the fallback when a domain has no Hebrew name. Its tracker row narrowed to first-domain-only and phone width; no count change -- 221.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
