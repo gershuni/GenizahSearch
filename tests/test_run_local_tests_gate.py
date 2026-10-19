@@ -403,6 +403,17 @@ def test_ci_runs_every_shard_of_the_split_it_names():
     assert sorted(int(x) for x in listed.group(1).split(",")) == list(range(1, n + 1))
 
 
+def test_the_combined_tests_check_skips_a_cancelled_run():
+    """`tests-all` must not run when a newer push cancels the run (`always()` did,
+    and reported a red "tests" on the superseded commit), and must need the shards."""
+    with open(CI_YML, encoding="utf-8") as fh:
+        ci = fh.read()
+    job = ci[ci.index("\n  tests-all:\n"):]
+    job = job[:job.index("\n\n")]
+    assert "if: ${{ !cancelled() }}" in job and "always()" not in job
+    assert "needs: tests" in job
+
+
 @pytest.mark.parametrize("n", [1, 2, 3, 4])
 def test_the_shards_split_the_plan_exactly(n):
     """N jobs, one share each, run every chunk of the plan exactly once."""

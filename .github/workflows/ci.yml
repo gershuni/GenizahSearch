@@ -109,10 +109,12 @@ jobs:
 
   # One result for the sharded job above, for anything that wants a single
   # "tests" check (a required status, a glance at the PR). Fails if any shard
-  # failed or was cancelled.
+  # failed or timed out. `!cancelled()`, not `always()`: a newer push cancels
+  # this run, and `always()` then reported the cancellation as a red "tests"
+  # on the superseded commit (seen on this PR's first push).
   tests-all:
     name: tests
-    if: always()
+    if: ${{ !cancelled() }}
     needs: tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
