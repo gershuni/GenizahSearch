@@ -204,6 +204,7 @@ def create_compare_modal(
     on_candidate_change: Optional[Callable] = None,
     on_add_as_join: Optional[Callable] = None,
     on_add_to_puzzle: Optional[Callable] = None,
+    on_copy_link: Optional[Callable] = None,
 ) -> ui.dialog:
     """Full-screen two-pane Compare modal (CMP-01 / CMP-02 / CMP-03 / VSM-02).
 
@@ -240,6 +241,10 @@ def create_compare_modal(
                              the modal header (Round-4 Issue 7).  Stages the anchor + the
                              CURRENTLY-shown candidate into the Fragment Puzzle.  When None
                              the button is not rendered.
+        on_copy_link:        Optional callback (sync or async, no arguments) for the
+                             header's "Copy Link" button: the Joins Lab copies a link to
+                             this screen, Compare pair included.  When None the button is
+                             not rendered.
 
     Returns:
         The ui.dialog() instance (caller opens it with dialog.open()).
@@ -646,6 +651,16 @@ def create_compare_modal(
                         .props("flat color=primary")
                         .mark("compare-add-to-puzzle")
                         .tooltip(tr("Add anchor + this candidate to the Fragment Puzzle"))
+                    )
+
+                # Copy a link to this screen with this pair open (the Lab builds it).
+                if on_copy_link is not None:
+                    (
+                        ui.button(icon="link", on_click=on_copy_link)
+                        .props(f'flat dense round aria-label="{tr("Copy Link")}"')
+                        .classes("text-white")
+                        .mark("compare-copy-link")
+                        .tooltip(tr("Copy Link"))
                     )
 
                 ui.button(icon="close", on_click=_handle_close).props(

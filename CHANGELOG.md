@@ -4,6 +4,27 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased] -- Joins Lab: a link that reopens the screen (web, branch `feat/joins-lab-share-link`)
+
+- **Copy Link** in the Joins Lab toolbar, and in the Compare window's header, copies an address
+  that reopens the same screen for anyone. The address carries:
+  - the fragment and its page;
+  - the search (both sides, the type, Variants and the options);
+  - Visual Similarity, the filter, Grid or Table, and the page of results;
+  - the pair, when Compare is open.
+- **Opening a link runs the search again** and shows that screen. If the same tab already holds
+  that search for that fragment, as after Back from the puzzle or a reload, the results come back
+  at once without running it.
+- **The address bar follows the screen** as you work, without adding entries to the browser
+  history.
+- **Marks** go into a link only when "Include my marks" is ticked (off by default).
+  - The recipient sees the sender's marks for that visit only, with a note saying so. They are
+    never saved.
+  - The recipient's own marks for that fragment stay theirs and take precedence.
+- A link whose screen cannot be read still opens its fragment, with a note saying so. A link is
+  checked, capped and size-limited before anything in it is used (`web/joins_lab_link.py`).
+- Decision record: `docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md` (PR 2).
+
 ## [Unreleased] -- The homepage search box opens shelfmarks and system IDs (web, branch `claude/fervent-curie-oip2lk`)
 
 The search box on the homepage now goes where the input belongs: Hebrew or Arabic text runs a full-text search as before, a system ID (all digits, starting 99) opens that manuscript, and anything else is looked up as a shelfmark by the Browse page, with its usual answers (the manuscript, a "Select Manuscript" list, or "No manuscript found" with the shelfmark left in the box to correct). The placeholder now reads "Text, shelfmark or system ID", short enough to fit the box on a phone. Routing: `web/home_query.py::home_query_target`. From the owner (2026-10-19).
