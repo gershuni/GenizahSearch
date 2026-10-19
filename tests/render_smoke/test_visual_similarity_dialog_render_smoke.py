@@ -9,6 +9,8 @@ Pinned here by driving the real dialog through the client's own events:
 2. The Thumbnails view shows one low-resolution image per filtered suggestion,
    from the same proxy URL the Joins Lab grid uses.
 3. The List / Thumbnails choice is remembered for the visitor's next window.
+4. Each domain option says how many suggestions carry it, and the Hebrew UI
+   shows the Hebrew domain names (they were English in both UIs).
 """
 from __future__ import annotations
 
@@ -37,8 +39,10 @@ SUGGESTIONS = {
     '990000000000101': ('T-S Alpha', 'CUL', 'Bible'),
     '990000000000102': ('ENA Beta', 'JTS', 'Liturgy'),
     '990000000000103': ('T-S Gamma', 'CUL', 'Bible'),
-    '990000000000104': ('Mosseri Delta', 'Mosseri', 'Liturgy'),
+    '990000000000104': ('Mosseri Delta', 'Mosseri', 'Poetry'),
 }
+# Poetry has no Hebrew name here, so the Hebrew UI falls back to the English one.
+DOMAIN_HEB = {'Bible': 'מקרא', 'Liturgy': 'תפילה'}
 
 
 class _StubVisualSimilarity:
@@ -56,7 +60,8 @@ class _StubFjms:
     def get_domains_for_sys_ids(self, sys_ids):
         return {
             sid: [{
-                'domain': SUGGESTIONS[sid][2], 'domain_heb': '',
+                'domain': SUGGESTIONS[sid][2],
+                'domain_heb': DOMAIN_HEB.get(SUGGESTIONS[sid][2], ''),
                 'parent_domain': '', 'parent_domain_heb': '',
             }]
             for sid in sys_ids if sid in SUGGESTIONS
@@ -107,12 +112,14 @@ async def _user():
         core.app._startup_handlers.extend(saved_handlers)
 
 
-def _run(driver):
+def _run(driver, lang='en'):
     saved_slots = list(nicegui_context.slot_stack)
 
     async def invoke():
-        async with _user() as user:
-            return await driver(user)
+        # The UI language is a process-wide default ('he'), so pin it per test.
+        with patch.object(vsd, 'get_language', return_value=lang):
+            async with _user() as user:
+                return await driver(user)
 
     try:
         return asyncio.run(invoke())
@@ -122,17 +129,20 @@ def _run(driver):
 
 
 def _domain_select(user):
-    """The Domain select: the only one whose options are the domain names."""
-    [select] = [s for s in user.find(ui.select).elements if s.options == ['Bible', 'Liturgy']]
+    """The Domain select: the only one whose option values are the domain names."""
+    [select] = [
+        s for s in user.find(ui.select).elements
+        if set(s.options) == {'Bible', 'Liturgy', 'Poetry'}
+    ]
     return select
 
 
 def _choose_domain(user, domain):
     """Pick a domain the way the browser does: Quasar emits the chosen options."""
     select = _domain_select(user)
-    index = select.options.index(domain)
+    index = list(select.options).index(domain)
     UserInteraction(user, {select}, None).trigger(
-        'update:modelValue', [{'value': index, 'label': domain}])
+        'update:modelValue', [{'value': index, 'label': select.options[domain]}])
 
 
 def _choose_view(user, view):
@@ -197,3 +207,35 @@ def test_the_view_choice_is_remembered_for_the_next_window():
         assert _thumbnail_sources(user) == {_thumbnail(sid) for sid in SUGGESTIONS}
 
     _run(driver)
+
+
+def test_each_domain_option_counts_its_suggestions():
+    async def driver(user):
+        await user.open(PAGE)
+        assert list(_domain_select(user).options.items()) == [
+            ('Bible', 'Bible (2)'), ('Liturgy', 'Liturgy (1)'), ('Poetry', 'Poetry (1)'),
+        ]
+
+    _run(driver)
+
+
+def test_the_hebrew_ui_shows_hebrew_domain_names():
+    async def driver(user):
+        await user.open(PAGE)
+        # In label order; a domain with no Hebrew name keeps its English one.
+        assert list(_domain_select(user).options.items()) == [
+            ('Poetry', 'Poetry (1)'), ('Bible', 'מקרא (2)'), ('Liturgy', 'תפילה (1)'),
+        ]
+        await user.should_see('תפילה')
+        await user.should_not_see('Liturgy')
+
+        _choose_view(user, 'grid')
+        await user.should_see('תפילה')
+        await user.should_not_see('Liturgy')
+
+        # The filter still works by the domain itself, not by its label.
+        _choose_domain(user, 'Bible')
+        await user.should_see('T-S Alpha')
+        await user.should_not_see('ENA Beta')
+
+    _run(driver, lang='he')
