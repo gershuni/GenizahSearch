@@ -21,7 +21,6 @@ cleared so the real SearchEngine is never constructed.
 """
 from __future__ import annotations
 
-import asyncio
 import os
 from contextlib import asynccontextmanager
 from unittest.mock import patch
@@ -36,6 +35,7 @@ from nicegui.ui_run import set_storage_secret
 import web.main  # noqa: F401  -- registers /parallels on core.app at import
 from web.state import state as _web_state
 from web.translations import tr
+from tests.render_smoke._bounded_run import run_user_driver
 
 
 @asynccontextmanager
@@ -68,12 +68,8 @@ async def _parallels_user(passage_ready: bool):
 def _run(driver, passage_ready: bool = True) -> None:
     saved_slot_stack = list(_nicegui_context.slot_stack)
 
-    async def _go():
-        async with _parallels_user(passage_ready) as user:
-            await driver(user)
-
     try:
-        asyncio.run(_go())
+        run_user_driver(lambda: _parallels_user(passage_ready), driver)
     finally:
         _nicegui_context.slot_stack.clear()
         _nicegui_context.slot_stack.extend(saved_slot_stack)

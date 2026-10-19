@@ -93,6 +93,7 @@ from tests.render_smoke.discovery_honesty_gate import (
     find_envelope_violations,
     value_rule_flags,
 )
+from tests.render_smoke._bounded_run import run_bounded
 
 GATE_PATH = 'tests/render_smoke/discovery_honesty_gate.py'
 HELP_PATH = 'web/pages/help.py'
@@ -869,7 +870,7 @@ def render_panel(model, page_id: str = '990000000000000944_IE1_P000002_FL3'):
                 dp.render_discovery_panel_body(model, on_retry=_retry, page_id=page_id)
         holder['client'] = client
 
-    asyncio.run(_run())
+    run_bounded(_run())
     return holder['client']
 
 
@@ -1003,7 +1004,7 @@ def _render_entry_control(model, *, highlight_new=False):
                     model, on_toggle=_noop, highlight_new=highlight_new)
         holder['client'] = client
 
-    asyncio.run(_run())
+    run_bounded(_run())
     return holder['client']
 
 
@@ -1186,7 +1187,7 @@ def _render_expansion_rows(items, lang='en', catalogue_title=None,
                     catalogue_identity=catalogue_identity)
         holder['client'] = client
 
-    asyncio.run(_run())
+    run_bounded(_run())
     return holder['client']
 
 
@@ -1887,7 +1888,7 @@ def _render_help(lang: str):
                 _os.environ.pop('NICEGUI_USER_SIMULATION', None)
 
     try:
-        asyncio.run(_run())
+        run_bounded(_run())
     finally:
         core.app._startup_handlers.clear()
         core.app._startup_handlers.extend(saved_handlers)
@@ -2227,7 +2228,7 @@ def _render_capture(paint, *, drive: bool = True) -> str:
                     await _drive_click_handlers(client)
         holder['client'] = client
 
-    asyncio.run(_run())
+    run_bounded(_run())
     parts: List[str] = []
     client = holder['client']
     try:

@@ -14,7 +14,6 @@ Pinned here by driving the real dialog through the client's own events:
 """
 from __future__ import annotations
 
-import asyncio
 import os
 from contextlib import AsyncExitStack, asynccontextmanager
 from types import SimpleNamespace
@@ -30,6 +29,7 @@ from nicegui.ui_run import set_storage_secret
 
 from web.components import visual_similarity_dialog as vsd
 from web.state import state as web_state
+from tests.render_smoke._bounded_run import run_bounded
 
 PAGE = '/_render_smoke/visual-similarity'
 ORIGINAL_SID, ORIGINAL_SHELFMARK = '990000000000100', 'T-S Original'
@@ -122,7 +122,7 @@ def _run(driver, lang='en'):
                 return await driver(user)
 
     try:
-        return asyncio.run(invoke())
+        return run_bounded(invoke())
     finally:
         nicegui_context.slot_stack.clear()
         nicegui_context.slot_stack.extend(saved_slots)

@@ -45,6 +45,7 @@ from nicegui.context import context as _nicegui_context
 from nicegui.testing.general import prepare_simulation
 from nicegui.testing.user import User
 from nicegui.ui_run import set_storage_secret
+from tests.render_smoke._bounded_run import run_user_driver
 
 
 # ---------------------------------------------------------------------------
@@ -89,12 +90,8 @@ def _run_atlas_smoke(driver: Callable[[User], 'asyncio.Future'], lang: str = 'he
     NiceGUI global slot_stack afterward (test isolation)."""
     saved_slot_stack = list(_nicegui_context.slot_stack)
 
-    async def _run():
-        async with _atlas_user_context(lang=lang) as user:
-            await driver(user)
-
     try:
-        asyncio.run(_run())
+        run_user_driver(lambda: _atlas_user_context(lang=lang), driver)
     finally:
         _nicegui_context.slot_stack.clear()
         _nicegui_context.slot_stack.extend(saved_slot_stack)

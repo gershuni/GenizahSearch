@@ -10,7 +10,6 @@ the visitor must see the sentence that says the text was searched as one chunk.
 """
 from __future__ import annotations
 
-import asyncio
 import os
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -27,6 +26,7 @@ import web.main  # noqa: F401  -- registers /parallels on core.app at import
 from shared.composition_windows import chunk_notice_message
 from web import research_jobs
 from web.state import state as _web_state
+from tests.render_smoke._bounded_run import run_bounded
 
 NOTICE = {'code': 'text_shorter_than_chunk_size', 'words': 3,
           'chunk_size': 5, 'effective_chunk_size': 3}
@@ -97,7 +97,7 @@ def test_short_text_chunk_search_tells_the_visitor_it_ran_as_one_chunk():
             await user.should_see(message, retries=100)
 
     try:
-        asyncio.run(_go())
+        run_bounded(_go())
     finally:
         _nicegui_context.slot_stack.clear()
         _nicegui_context.slot_stack.extend(saved_slot_stack)
