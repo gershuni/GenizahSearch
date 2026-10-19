@@ -2284,3 +2284,47 @@ def test_rtl_flex_row_reverse_pagination_and_compare(joins_lab_smoke_runner):
     # Pass 25 stub results so total_pages = 2 (> _PAGE_SIZE = 24), which causes
     # the pagination row to render (candidate_grid.py:1349: `if total_pages > 1`).
     joins_lab_smoke_runner(driver, mock_search_results=_make_stub_results(25))
+
+
+# ---------------------------------------------------------------------------
+# Card size (2026-10-19, PR 3 of docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md)
+# ---------------------------------------------------------------------------
+
+def test_card_size_resizes_the_grid_and_is_remembered(joins_lab_smoke_runner):
+    """Small / Medium / Large set the grid's columns, the thumbnail height and the
+    width it is fetched at; Medium is the grid as it was; the choice stays."""
+    from nicegui import ElementFilter, ui
+    from nicegui.testing.user_interaction import UserInteraction
+
+    def _grid_state(user):
+        with user._client:
+            [grid] = list(ElementFilter(kind=ui.grid, marker='joins-candidate-grid'))
+            images = [e for e in ElementFilter(kind=ui.image) if e.visible]
+        heights = {img._style.get('height') for img in images}
+        widths = {img.props.get('src', '').rsplit('width=', 1)[-1] for img in images}
+        return grid._classes, heights, widths
+
+    def _size_toggle(user):
+        with user._client:
+            [toggle] = list(ElementFilter(kind=ui.toggle, marker='joins-card-size'))
+        return toggle
+
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        classes, heights, widths = _grid_state(user)
+        assert 'lg:grid-cols-3' in classes and heights == {'160px'} and widths == {'300'}
+
+        toggle = _size_toggle(user)
+        UserInteraction(user, {toggle}, None).trigger(
+            'update:modelValue', list(toggle.options).index('l'))
+        await asyncio.sleep(0.2)
+        classes, heights, widths = _grid_state(user)
+        assert 'lg:grid-cols-2' in classes and heights == {'240px'} and widths == {'600'}
+
+        await user.open('/joins-lab')
+        await asyncio.sleep(1.0)
+        assert _size_toggle(user).value == 'l'
+
+    joins_lab_smoke_runner(driver)

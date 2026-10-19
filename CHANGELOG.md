@@ -4,6 +4,20 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased] -- Image sizes in Visual Similarity and the Joins Lab (web + desktop, branch `feat/image-size-controls`)
+
+- **Website, Visual Similarity window:** the thumbnail view has Small / Medium / Large
+  thumbnails (Small is the size they had), and a button beside the original enlarges its image
+  to about half the window and back. Both choices are remembered for the visitor.
+- **Website, Joins Lab:** the grid view has a card size, Small / Medium / Large. Medium is the
+  grid as it was; Small puts four cards in a row on a wide screen, Large two, with taller
+  thumbnails fetched at 600 px. Remembered for the visitor.
+- **Desktop, Joins Lab:** the same three card sizes in the grid view, next to "Table view":
+  five cards in a row, four (as before), or three with larger thumbnails. Remembered in the
+  app's settings.
+- The website's stored size is read defensively: a value that is not one of the three sizes is
+  the default, never an error.
+
 ## [Unreleased] -- The homepage search box opens shelfmarks and system IDs (web, branch `claude/fervent-curie-oip2lk`)
 
 The search box on the homepage now goes where the input belongs: Hebrew or Arabic text runs a full-text search as before, a system ID (all digits, starting 99) opens that manuscript, and anything else is looked up as a shelfmark by the Browse page, with its usual answers (the manuscript, a "Select Manuscript" list, or "No manuscript found" with the shelfmark left in the box to correct). The placeholder now reads "Text, shelfmark or system ID", short enough to fit the box on a phone. Routing: `web/home_query.py::home_query_target`. From the owner (2026-10-19).
