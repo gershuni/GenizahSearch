@@ -5408,6 +5408,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         elif action == 'shelfmark':
             # Shelfmark passed via URL param - auto-search on load.
             state.shelfmark_query = bootstrap['shelfmark']
+            # Show it in the box (the homepage box sends readers here), so a
+            # "No manuscript found" can be corrected in place.
+            search_input.value = state.shelfmark_query
             # Cat-2: bootstrap deferred init.
             asyncio.ensure_future(search_shelfmark())
         elif action == 'restore_position':

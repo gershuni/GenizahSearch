@@ -1844,6 +1844,11 @@ Variant and Lab preferences of one website visitor, kept in that visitor's stora
 - **Function** `update_enrichment_sections` (Line 404) — Update enrichment placeholder containers after Phase B completes.
 - **Function** `populate_bib_catalog_buttons` (Line 464) — Populate bibliography and catalog buttons in the page navigation pane.
 
+## web/home_query.py
+
+- **Function** `has_hebrew_or_arabic_letter` (Line 34) — True when ``text`` holds at least one Hebrew or Arabic LETTER.
+- **Function** `home_query_target` (Line 46) — The URL the homepage box navigates to for ``text``, or None if blank.
+
 ## web/search_bootstrap.py
 
 - **Function** `resolve_search_bootstrap` (Line 22) — Resolve whether persisted search UI state should be reused for this request.
