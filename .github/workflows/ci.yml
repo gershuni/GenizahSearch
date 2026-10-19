@@ -47,11 +47,15 @@ jobs:
       - run: python scripts/check_docs.py
 
   tests:
-    # 90, not 60: the Windows lane runs 15,300 tests in one process in about 41
-    # min on a good runner and was cancelled at 60 twice at 97-99% (2026-10-12
-    # merge of #395, 2026-10-13 release v9.6.2) -- shared Windows runners vary
-    # by half; the Ubuntu lane takes about 23 min.
-    timeout-minutes: 90
+    # Three shards per OS (2026-10-19). As ONE process the Windows lane took
+    # 41-52 min for 15,300 tests (it needed a 90-min timeout after being
+    # cancelled at 60 twice at 97-99%) and Ubuntu ~25 -- the wall time of every
+    # PR, paid again on each push. Each shard runs its share of
+    # scripts/run_local_tests.py's balanced chunks (`--shard K/N`), each chunk a
+    # fresh process: the same selection, the same chunks the owner's local runs
+    # use. 45 = ~3x a shard's expected time, with the old Windows variance.
+    timeout-minutes: 45
+    name: tests (${{ matrix.os }}, ${{ matrix.python-version }}, shard ${{ matrix.shard }}/3)
     needs: lint-and-docs
     env:
       # PyQt6 tests (e.g. desktop-telemetry consent dialogs) construct a real
@@ -67,11 +71,11 @@ jobs:
       # Windows behaviour stayed unknown). Report each OS independently.
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            python-version: '3.11'
-          - os: windows-latest
-            python-version: '3.11'
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.11']
+        # tests/test_run_local_tests_gate.py checks this list is 1..N for the
+        # N in `--shard ${{ matrix.shard }}/N` below.
+        shard: [1, 2, 3]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -99,7 +103,23 @@ jobs:
       # NOT installed in this job (the test module also self-skips via
       # pytest.importorskip as defense in depth). They run for real in the
       # dedicated `atlas-bake-tests` job below.
-      - run: pytest tests/ -m "not gui and not render_smoke and not atlas_bake"
+      # -j 2: two chunk processes at a time on the 4-vCPU runner (a chunk peaked
+      # at 5.6 GB locally; runners have 16 GB).
+      - run: python scripts/run_local_tests.py -m "not gui and not render_smoke and not atlas_bake" --shard ${{ matrix.shard }}/3 -j 2
+
+  # One result for the sharded job above, for anything that wants a single
+  # "tests" check (a required status, a glance at the PR). Fails if any shard
+  # failed or timed out. `!cancelled()`, not `always()`: a newer push cancels
+  # this run, and `always()` then reported the cancellation as a red "tests"
+  # on the superseded commit (seen on this PR's first push).
+  tests-all:
+    name: tests
+    if: ${{ !cancelled() }}
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: test "${{ needs.tests.result }}" = "success"
 
   # THE D-25 MASKING PATTERN SET IS PROVISIONED HERE, and this job is where the
   # discovery surfaces' masking scan runs (tests/render_smoke/

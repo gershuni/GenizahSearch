@@ -42,6 +42,16 @@ chunk print "All chunks passed." over a chunk that ran nothing.
     python scripts/run_local_tests.py -j 6            # more lanes
     python scripts/run_local_tests.py --record        # refresh the balance file
     python scripts/run_local_tests.py -m "not gui"    # a different selection
+    python scripts/run_local_tests.py --shard 2/3     # one CI job's share
+
+SHARDS (CI)
+-----------
+`--shard K/N` runs only the K-th of N shares of the same plan, the chunks dealt
+longest-first to the lightest share. Every job computes the identical plan from
+the same files and `tests/lane_durations.json`, so the N shares cover every
+chunk exactly once. CI runs the `tests` job as N such jobs per OS: one process
+over the whole suite took 41-52 min on windows-latest and ~25 on Ubuntu, and
+was the wall time of every PR.
 """
 from __future__ import annotations
 
@@ -285,6 +295,28 @@ def _plan(files, durs, lanes, max_files, isolated=()):
     return dedicated + keep
 
 
+def _parse_shard(spec):
+    """(K, N) from "K/N", 1 <= K <= N; anything else is a usage error."""
+    m = re.fullmatch(r"(\d+)/(\d+)", (spec or "").strip())
+    if not m or not 1 <= int(m.group(1)) <= int(m.group(2)):
+        raise SystemExit("--shard takes K/N with 1 <= K <= N, e.g. 2/3 (got %r)"
+                         % spec)
+    return int(m.group(1)), int(m.group(2))
+
+
+def _shard(plan, k, n):
+    """The K-th (1-based) of N shares of `plan`: chunks dealt longest-first,
+    each to the share with the least predicted work so far (ties: the lowest
+    share). Deterministic, so N jobs computing the same plan split it exactly."""
+    loads = [0.0] * n
+    shares = [[] for _ in range(n)]
+    for chunk, load in sorted(plan, key=lambda cl: -cl[1]):
+        i = min(range(n), key=lambda j: (loads[j], j))
+        shares[i].append((chunk, load))
+        loads[i] += load
+    return shares[k - 1]
+
+
 def _parse_counts(text):
     """(passed, failed, errors, skipped, deselected) from pytest's tail.
 
@@ -389,20 +421,32 @@ def main(argv=None) -> int:
                     help="rewrite tests/lane_durations.json from this run")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the plan and exit")
+    ap.add_argument("--shard", metavar="K/N",
+                    help="run only the K-th of N balanced shares of the chunks "
+                         "(CI runs one share per job)")
     args = ap.parse_args(argv)
+    shard = _parse_shard(args.shard) if args.shard else None
 
     files, skipped, isolated = _test_files(args.markers)
     durs = _durations()
     plan = _plan(files, durs, args.lanes, args.max_files, isolated)
     measured = sum(1 for f in files if f in durs)
+    whole = plan
+    if shard:
+        plan = _shard(plan, *shard)
 
     n_isolated = sum(len(g) for g in isolated)
     print("=" * 78)
     print(" %d test files -> %d chunks over %d lanes (<=%d files/chunk)"
-          % (len(files) + n_isolated, len(plan), args.lanes, args.max_files))
+          % (len(files) + n_isolated, len(whole), args.lanes, args.max_files))
     print(" balance data: %d/%d modules measured, %.1f min of known work"
           % (measured, len(files), sum(durs.get(f, 0) for f in files) / 60))
     print(" markers: %s" % args.markers)
+    if shard:
+        print(" shard %d/%d: %d of %d chunks, %d files, %.1f of %.1f min predicted"
+              % (shard[0], shard[1], len(plan), len(whole),
+                 sum(len(c) for c, _l in plan),
+                 sum(l for _c, l in plan) / 60, sum(l for _c, l in whole) / 60))
     if isolated:
         print(" isolated: %d file(s) under %s -- this marker expression DOES"
               % (n_isolated, ", ".join(sorted(

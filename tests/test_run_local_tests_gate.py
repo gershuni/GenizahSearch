@@ -378,14 +378,67 @@ def test_an_unanswerable_collection_probe_raises_instead_of_skipping():
 
 
 def test_the_default_markers_are_the_expression_ci_actually_uses():
-    """The runner's whole claim is CI equivalence. Read ci.yml, don't trust it."""
+    """The runner's whole claim is CI equivalence. Read ci.yml, don't trust it.
+    CI's `tests` job runs this runner itself, one shard per job."""
     with open(CI_YML, encoding="utf-8") as fh:
         ci = fh.read()
-    commands = re.findall(r"pytest tests/ -m \"([^\"]+)\"", ci)
-    assert commands, "could not find CI's `pytest tests/ -m \"...\"` command"
+    commands = re.findall(
+        r"(?:pytest tests/|scripts/run_local_tests\.py) -m \"([^\"]+)\"", ci)
+    assert commands, "could not find CI's test command and its -m expression"
     assert runner.DEFAULT_MARKERS in commands, (
         "DEFAULT_MARKERS=%r is not one of CI's marker expressions %r"
         % (runner.DEFAULT_MARKERS, commands))
+
+
+def test_ci_runs_every_shard_of_the_split_it_names():
+    """`--shard K/N` in ci.yml must come with a matrix listing 1..N, or a share
+    of the suite silently never runs."""
+    with open(CI_YML, encoding="utf-8") as fh:
+        ci = fh.read()
+    m = re.search(r"--shard \$\{\{ matrix\.shard \}\}/(\d+)", ci)
+    assert m, "ci.yml's tests job no longer runs `--shard ${{ matrix.shard }}/N`"
+    n = int(m.group(1))
+    listed = re.search(r"shard: \[([0-9, ]+)\]", ci)
+    assert listed, "ci.yml has no `shard: [...]` matrix"
+    assert sorted(int(x) for x in listed.group(1).split(",")) == list(range(1, n + 1))
+
+
+def test_the_combined_tests_check_skips_a_cancelled_run():
+    """`tests-all` must not run when a newer push cancels the run (`always()` did,
+    and reported a red "tests" on the superseded commit), and must need the shards."""
+    with open(CI_YML, encoding="utf-8") as fh:
+        ci = fh.read()
+    job = ci[ci.index("\n  tests-all:\n"):]
+    job = job[:job.index("\n\n")]
+    assert "if: ${{ !cancelled() }}" in job and "always()" not in job
+    assert "needs: tests" in job
+
+
+@pytest.mark.parametrize("n", [1, 2, 3, 4])
+def test_the_shards_split_the_plan_exactly(n):
+    """N jobs, one share each, run every chunk of the plan exactly once."""
+    included, _skipped, isolated = runner._test_files(runner.DEFAULT_MARKERS)
+    plan = runner._plan(included, runner._durations(), 2,
+                        runner.MAX_FILES_PER_CHUNK, isolated)
+    shares = [runner._shard(plan, k, n) for k in range(1, n + 1)]
+    dealt = [tuple(chunk) for share in shares for chunk, _load in share]
+    assert sorted(dealt) == sorted(tuple(chunk) for chunk, _load in plan)
+    assert all(shares), "a shard got no chunks"
+
+
+def test_the_shards_are_balanced_by_predicted_work():
+    included, _skipped, isolated = runner._test_files(runner.DEFAULT_MARKERS)
+    plan = runner._plan(included, runner._durations(), 2,
+                        runner.MAX_FILES_PER_CHUNK, isolated)
+    loads = [sum(load for _c, load in runner._shard(plan, k, 3)) for k in (1, 2, 3)]
+    heaviest_chunk = max(load for _c, load in plan)
+    assert max(loads) - min(loads) <= heaviest_chunk
+
+
+@pytest.mark.parametrize("spec", ["0/3", "4/3", "3", "a/b", "", "1/0"])
+def test_a_bad_shard_is_a_usage_error(spec):
+    with pytest.raises(SystemExit):
+        runner._parse_shard(spec)
 
 
 def test_the_plan_covers_every_included_file_exactly_once():
