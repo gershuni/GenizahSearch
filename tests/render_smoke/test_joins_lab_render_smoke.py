@@ -2316,6 +2316,88 @@ def test_rtl_flex_row_reverse_pagination_and_compare(joins_lab_smoke_runner):
 
 
 # ---------------------------------------------------------------------------
+# Shared link (2026-10-19, PR 2 of docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md)
+# ---------------------------------------------------------------------------
+
+_CAND_TEXT_SID = '990002222222222'   # STUB_CAND_TEXT: the first stub result, page 3
+
+
+def _link_row(*terms):
+    return {'words': [{'term': t, 'mods': {}, 'gap_to_next_word': 0} for t in terms],
+            'line_start': False, 'line_end': False, 'gap_to_next_line': 0}
+
+
+class _Sent:
+    """What ui.run_javascript returns, for a call nobody awaits."""
+    def __await__(self):
+        return iter(())
+
+
+def _record_address_bar(stack) -> list:
+    """Capture every history.replaceState URL the page sends (fire-and-forget
+    JavaScript never reaches the simulated client's javascript_rules)."""
+    import json
+    import re
+    from unittest.mock import patch
+
+    from nicegui import ui
+    seen: list = []
+    pattern = re.compile(r'history\.replaceState\(history\.state, "", (".*")\)')
+
+    def _fake(code, *args, **kwargs):
+        m = pattern.search(code)
+        if m:
+            seen.append(json.loads(m.group(1)))
+        return _Sent()
+
+    stack.enter_context(patch.object(ui, 'run_javascript', side_effect=_fake))
+    return seen
+
+
+def _state_of(url: str) -> dict:
+    from urllib.parse import parse_qs, urlparse
+    from web.joins_lab_link import SHARE_PARAM, decode_share_state
+    q = parse_qs(urlparse(url).query)
+    return decode_share_state(q[SHARE_PARAM][0]) if SHARE_PARAM in q else {}
+
+
+def test_a_link_opens_its_screen_and_its_marks_are_not_saved(joins_lab_smoke_runner):
+    """The link's query, view and marks come back; the marks are shown, not saved,
+    and the address bar keeps the screen without them."""
+    import contextlib
+
+    from web.joins_lab_link import encode_share_state
+    token = encode_share_state({
+        'b': {'rows': [_link_row('highlighted')], 'type': 'responsa'},
+        'view': 'table',
+        'm': {_CAND_TEXT_SID: 'yes'},
+    })
+
+    async def driver(user):
+        with contextlib.ExitStack() as stack:
+            bar = _record_address_bar(stack)
+            await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={token}')
+            await asyncio.sleep(1.5)
+
+        assert _find_table_elements(user), "the link's table view did not come back"
+        from nicegui import ElementFilter, ui
+        with user._client:
+            notes = [e.text for e in ElementFilter(kind=ui.label, marker='joins-link-marks-note')]
+        assert notes and '1' in notes[0], notes
+
+        from web.joins_lab_storage import read_full_state
+        with user._client:
+            stored = read_full_state() or {}
+        assert stored.get('anchor_sys_id') == STUB_ANCHOR_SID
+        assert _CAND_TEXT_SID not in (stored.get('triage') or {}), "a link's mark was saved"
+        rows = stored.get('builder_rows') or []
+        assert rows and rows[0]['words'][0]['term'] == 'highlighted'
+
+        assert bar, "the address bar never followed the screen"
+        last = _state_of(bar[-1])
+        assert last.get('view') == 'table' and 'm' not in last
+        assert last['b']['rows'][0]['words'][0]['term'] == 'highlighted'
+
 # Compare window: visible Browse icons, copy buttons, info line + links, and
 # FJMS/PGP buttons that follow the shown candidate (2026-10-19)
 # ---------------------------------------------------------------------------
@@ -2415,6 +2497,115 @@ def test_compare_browse_icons_visible_and_copy_buttons(joins_lab_smoke_runner):
     joins_lab_smoke_runner(driver)
 
 
+def test_a_link_keeps_the_other_sides_own_text_position(joins_lab_smoke_runner):
+    """The other side's Text Position is its own (the cross-side search uses it):
+    a link sets it on the other builder, the session saves it, and the address bar
+    carries it on -- it is not replaced by the anchor side's."""
+    import contextlib
+
+    from web.joins_lab_link import encode_share_state
+    token = encode_share_state({
+        'b': {'rows': [_link_row('highlighted')], 'type': 'responsa', 'pos': 'anywhere'},
+        'o': {'on': True, 'rows': [_link_row('other')], 'combine': 'AND', 'pos': 'line_end'},
+    })
+
+    async def driver(user):
+        with contextlib.ExitStack() as stack:
+            bar = _record_address_bar(stack)
+            await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={token}')
+            await asyncio.sleep(1.5)
+
+        from web.joins_lab_storage import read_full_state
+        with user._client:
+            stored = read_full_state() or {}
+        assert stored.get('other_side_enabled') is True
+        assert stored.get('text_position') == 'anywhere'
+        assert stored.get('other_side_text_position') == 'line_end', stored
+        assert bar, "the address bar never followed the screen"
+        assert _state_of(bar[-1])['o'].get('pos') == 'line_end'
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_a_link_reopens_its_compare_pair(joins_lab_smoke_runner):
+    """A link made with Compare open opens Compare on that pair again."""
+    from web.joins_lab_link import encode_share_state
+    token = encode_share_state({
+        'b': {'rows': [_link_row('highlighted')], 'type': 'responsa'},
+        'cmp': [_CAND_TEXT_SID, 3],
+    })
+
+    async def driver(user):
+        import contextlib
+        with contextlib.ExitStack() as stack:
+            bar = _record_address_bar(stack)
+            await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={token}')
+            await asyncio.sleep(1.5)
+        from nicegui import ElementFilter, ui
+        with user._client:
+            open_dialogs = [d for d in ElementFilter(kind=ui.dialog)
+                            if d._props.get('model-value') and hasattr(d, '_on_show')]
+        assert open_dialogs, f"Compare did not open from the link: {user.notify.messages}"
+        # The stub rows carry no page, so the pair falls back to the fragment's row.
+        assert _state_of(bar[-1]).get('cmp', [None])[0] == _CAND_TEXT_SID
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_an_unreadable_link_still_opens_its_fragment(joins_lab_smoke_runner):
+    """A broken state parameter says so and still loads the anchor it names."""
+    async def driver(user):
+        await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state=not-a-real-state')
+        await asyncio.sleep(1.0)
+        assert user.notify.contains('opening its fragment only') or user.notify.contains(
+            'נפתח רק הקטע שלו')
+        await user.should_see(marker='anchor-viewer-image-pane', retries=5)
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_copy_link_carries_marks_only_when_asked(joins_lab_smoke_runner):
+    """Copy Link copies a full address of this screen; marks only with the box ticked."""
+    import re
+    from unittest.mock import patch
+
+    copied: list = []
+
+    async def _capture(text, **_kw):
+        copied.append(text)
+        return True
+
+    async def driver(user):
+        user.javascript_rules[re.compile(r'window\.location\.origin')] = (
+            lambda _m: 'https://lab.example')
+        with patch('web.pages.joins_lab.copy_text_to_clipboard', side_effect=_capture):
+            await user.open('/joins-lab')
+            await _load_anchor_and_search(user)
+
+            glyphs = _find_triage_glyph_buttons(user)
+            assert glyphs, "no triage buttons to mark a candidate with"
+            _click_element(user, glyphs[0])          # ✓ on the first card
+            await asyncio.sleep(0.2)
+
+            from nicegui import ElementFilter, ui
+            with user._client:
+                btn = [b for b in ElementFilter(kind=ui.button, marker='joins-copy-link')][0]
+                box = [c for c in ElementFilter(kind=ui.checkbox,
+                                                marker='joins-link-include-marks')][0]
+            _click_element(user, btn)
+            await asyncio.sleep(0.3)
+            with user._client:
+                box.value = True
+            _click_element(user, btn)
+            await asyncio.sleep(0.3)
+
+        assert len(copied) == 2, copied
+        assert all(u.startswith('https://lab.example/joins-lab?sys_id=') for u in copied)
+        without, with_marks = _state_of(copied[0]), _state_of(copied[1])
+        assert 'm' not in without
+        assert with_marks.get('m') and set(with_marks['m'].values()) == {'yes'}
+        assert without['b']['rows'][0]['words'][0]['term'] == 'highlighted'
+
 def test_compare_info_line_and_links(joins_lab_smoke_runner):
     """Each Compare pane shows library · domain · date and its external links (new tab).
 
@@ -2451,6 +2642,75 @@ def test_compare_info_line_and_links(joins_lab_smoke_runner):
 
     joins_lab_smoke_runner(driver)
 
+
+def test_returning_to_the_address_bar_url_restores_without_a_rerun(joins_lab_smoke_runner):
+    """Back from the puzzle (or a reload) lands on the address bar's URL. When this
+    tab's snapshot holds that very search, the results come back at once, as they
+    did before the URL carried the screen -- the search is not run again."""
+    import contextlib
+    from unittest.mock import patch
+
+    from tests.render_smoke.conftest import STUB_RAW_TEXT, STUB_RAW_VS
+
+    runs: list = []
+
+    def _counting(*_a, **_kw):
+        runs.append(1)
+        return [dict(STUB_RAW_TEXT), dict(STUB_RAW_VS)]
+
+    async def driver(user):
+        with contextlib.ExitStack() as stack:
+            bar = _record_address_bar(stack)
+            await user.open('/joins-lab')
+            await _load_anchor_and_search(user)
+            await asyncio.sleep(0.5)
+        assert bar, "the address bar never followed the screen"
+        url = bar[-1]
+        assert '/joins-lab?sys_id=' in url
+
+        with patch('web.pages.joins_lab.WebSearchExecutor.execute_search', side_effect=_counting):
+            await user.open(url)
+            await asyncio.sleep(1.5)
+        assert runs == [], f"the search ran again {len(runs)} time(s)"
+        assert _count_visible_cards(user) >= 1, "the results did not come back"
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_a_screen_too_long_for_a_link_copies_the_fragment_and_says_so(joins_lab_smoke_runner):
+    """When the screen does not fit in a link, Copy Link copies the fragment's link
+    with a warning, and the address bar falls back to /joins-lab (a reload then
+    restores the saved session) -- never an unreadable link."""
+    import contextlib
+    import re
+    from unittest.mock import patch
+
+    copied: list = []
+
+    async def _capture(text, **_kw):
+        copied.append(text)
+        return True
+
+    async def driver(user):
+        user.javascript_rules[re.compile(r'window\.location\.origin')] = (
+            lambda _m: 'https://lab.example')
+        with contextlib.ExitStack() as stack:
+            bar = _record_address_bar(stack)
+            stack.enter_context(patch('web.joins_lab_link.MAX_TOKEN_CHARS', 20))
+            stack.enter_context(
+                patch('web.pages.joins_lab.copy_text_to_clipboard', side_effect=_capture))
+            await user.open('/joins-lab')
+            await _load_anchor_and_search(user)
+            from nicegui import ElementFilter, ui
+            with user._client:
+                btn = [b for b in ElementFilter(kind=ui.button, marker='joins-copy-link')][0]
+            _click_element(user, btn)
+            await asyncio.sleep(0.3)
+
+        assert copied == [f'https://lab.example/joins-lab?sys_id={STUB_ANCHOR_SID}'], copied
+        assert user.notify.contains('too long for a link') or user.notify.contains(
+            'ארוך מדי לקישור')
+        assert bar and bar[-1] == '/joins-lab', bar[-3:]
 
 def test_compare_info_buttons_follow_the_shown_candidate(joins_lab_smoke_runner):
     """After Next, the FJMS button row belongs to the candidate now shown.
