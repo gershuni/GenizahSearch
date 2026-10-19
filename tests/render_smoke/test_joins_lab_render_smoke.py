@@ -2530,6 +2530,59 @@ def test_a_saved_domain_filter_still_lets_its_candidates_in(joins_lab_smoke_runn
     joins_lab_smoke_runner(driver, mock_search_results=_lib_dom_results())
 
 
+def test_a_filter_kept_from_an_earlier_search_stays_visible_and_clearable(joins_lab_smoke_runner):
+    """A Library and a Domain filter kept from an earlier search may match none of
+    these results, which then carry no domains at all. Each still shows in its
+    toolbar list, with a zero count, and its clear button brings the cards back:
+    dropped from the list, it would keep the grid empty with nothing to undo
+    (Codex on #416; More filters' Reset leaves Library and Domain alone)."""
+    from unittest.mock import AsyncMock, patch
+
+    from nicegui import ElementFilter, ui
+
+    from web.joins_lab_storage import clear_results_snapshot, write_full_state
+
+    row = {"words": [{"term": "highlighted", "mods": {}, "gap_to_next_word": 0}],
+           "line_start": False, "line_end": False, "gap_to_next_line": 0}
+
+    async def driver(user):
+        with patch('web.pages.joins_lab._enrich_candidates', new_callable=AsyncMock,
+                   return_value={}):                 # no domains in these results
+            await user.open('/joins-lab')
+            await asyncio.sleep(1.5)                 # see the test above
+            with user._client:
+                clear_results_snapshot()
+                write_full_state(
+                    anchor_sys_id=STUB_ANCHOR_SID, builder_rows=[row],
+                    builder_mode='responsa',
+                    active_filter={'libraries': ['Oxford'], 'domains': ['Halakha'],
+                                   'order': 'rank'},
+                )
+            await user.open('/joins-lab')
+            await asyncio.sleep(1.5)
+            assert _card_domains(user) == []
+            with user._client:
+                assert list(ElementFilter(kind=ui.label, marker='joins-no-filter-match'))
+
+            lib_sel = _toolbar_select(user, 'joins-filter-library')
+            dom_sel = _toolbar_select(user, 'joins-filter-domain')
+            assert lib_sel.value == ['Oxford'] and lib_sel.options['Oxford'] == 'Oxford (0)'
+            assert dom_sel.value == ['Halakha'] and dom_sel.options == {'Halakha': 'Halakha (0)'}
+            assert lib_sel.enabled and dom_sel.enabled
+            assert dom_sel._props.get('display-value') == 'Halakha'
+
+            _set_select(user, 'joins-filter-domain', None)          # its clear button
+            await asyncio.sleep(0.3)
+            _set_select(user, 'joins-filter-library', None)
+            await asyncio.sleep(0.3)
+            with user._client:
+                assert not list(ElementFilter(kind=ui.label, marker='joins-no-filter-match'))
+                [grid] = list(ElementFilter(kind=ui.grid, marker='joins-candidate-grid'))
+                assert len(grid.default_slot.children) == 2      # both cards are back
+
+    joins_lab_smoke_runner(driver, mock_search_results=_lib_dom_results())
+
+
 # ---------------------------------------------------------------------------
 # Card size (2026-10-19, PR 3 of docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md)
 # ---------------------------------------------------------------------------

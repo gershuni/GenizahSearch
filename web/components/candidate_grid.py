@@ -1342,14 +1342,18 @@ def create_candidate_table(
 
 
 def _facet_select(filter_state: dict, key: str, options: dict, label: str,
-                  marker: str, enabled: bool, on_filter_change: Callable):
+                  marker: str, ready: bool, on_filter_change: Callable):
     """One toolbar filter, Library or Domain: several values, each with its count.
 
     A choice applies when the list closes, not on each click: applying re-renders
     the grid, this select included, which would shut the list after one pick. The
     clear button changes the value with the list shut, so that applies at once.
     """
-    current = [v for v in (filter_state.get(key) or []) if v in options]
+    current = list(filter_state.get(key) or [])
+    # A value that still filters but is in none of these results (a filter kept
+    # from an earlier search) stays listed with a zero count, so it can be seen
+    # and cleared; dropped from the list, it would empty the grid out of sight.
+    options = {**options, **{v: f"{v} (0)" for v in current if v not in options}}
     sel = ui.select(
         options=options, value=current, label=label, multiple=True, clearable=True,
     ).props("dense outlined options-dense").classes("w-40").mark(marker)
@@ -1363,7 +1367,7 @@ def _facet_select(filter_state: dict, key: str, options: dict, label: str,
             sel.props.pop("display-value", None)
 
     _show(current)
-    if not enabled:
+    if not (ready and options):
         sel.disable()
         return sel
 
@@ -1406,11 +1410,10 @@ def _grid_header(total: int, *, all_candidates: list, filter_state: dict,
                 lib_opts = library_options(all_candidates)
                 dom_opts = domain_options(all_candidates, enrichment, hebrew)
                 _facet_select(filter_state, "libraries", lib_opts, tr("Library"),
-                              "joins-filter-library", bool(lib_opts), on_filter_change)
+                              "joins-filter-library", True, on_filter_change)
                 # Domain comes with the enrichment, so it waits for it.
                 _facet_select(filter_state, "domains", dom_opts, tr("Domain"),
-                              "joins-filter-domain", enrichment_ready and bool(dom_opts),
-                              on_filter_change)
+                              "joins-filter-domain", enrichment_ready, on_filter_change)
             if on_order_change is not None:
                 order_sel = ui.select(
                     {"rank": tr("Rank"), "library": tr("Library"),

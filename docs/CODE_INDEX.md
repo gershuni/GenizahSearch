@@ -1197,8 +1197,8 @@ desktop.Y.X` identity holds via the facades.
 - **Function** `open_filter_dialog` (Line 1061) — Open the "More filters…" dialog (D-14, CND-06).
 - **Function** `create_candidate_table` (Line 1152) — Render the multi-select sortable table view of candidates (D-10, CND-03).
 - **Function** `_facet_select` (Line 1344) — One toolbar filter, Library or Domain: several values, each with its count.
-- **Function** `_grid_header` (Line 1394) — The row above the cards: the count, then Library, Domain, Sort and More filters…
-- **Function** `create_candidate_grid` (Line 1438) — Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
+- **Function** `_grid_header` (Line 1398) — The row above the cards: the count, then Library, Domain, Sort and More filters…
+- **Function** `create_candidate_grid` (Line 1441) — Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
 ## web/main.py
 
