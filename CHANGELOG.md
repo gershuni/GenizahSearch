@@ -4,6 +4,10 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased] -- Icons on the Browse page's buttons (web, branch `feat/browse-button-icons`)
+
+The website's Browse page buttons that were text only now carry an icon: Go (`search` on the shelfmark box, an arrow that points the reading direction beside the page number), Submit (`send`, mirrored in Hebrew), the image-source chips (`image` where the chip switches the images shown, `open_in_new` where it opens the library's viewer), the External link row (`open_in_new` after each link), and the Bib. FJMS / Bib. Ktiv (`menu_book`), Catalog rec. (`info_outline`), Measurements (`straighten`) and Visual Similarity (`compare`) chips. On a phone (below 600px) no row gets wider: Go and Submit show the icon alone and keep their name for screen readers, and the chips and links show the text alone. A chip that opens a library's viewer now carries the icon itself, so the separate icon-only button beside it is gone, and the ones that remain have an accessible name. The desktop app is unchanged. From the owner (2026-10-19); test `tests/render_smoke/test_browse_button_icons_render_smoke.py`.
+
 ## [Unreleased] -- Joins Lab: sort and filter by library and domain (web + desktop, branch `feat/joins-lab-library-domain`)
 
 As in the website's Visual Similarity window. A fragment's domain is the first of its

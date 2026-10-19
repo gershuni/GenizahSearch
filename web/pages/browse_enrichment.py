@@ -1124,8 +1124,9 @@ def populate_bib_catalog_buttons(container, state: BrowseState, page):
             )
             ui.button(
                 f'{tr("Bib. FJMS")} ({len(fjms_bib)})',
+                icon='menu_book',
                 on_click=fjms_dlg.open,
-            ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0').style(bib_chip_style)
+            ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0 browse-icon-wide').style(bib_chip_style)
         if marc_bib:
             nli_dlg = create_nli_bibliography_dialog(
                 marc_bib, page.sys_id,
@@ -1133,13 +1134,15 @@ def populate_bib_catalog_buttons(container, state: BrowseState, page):
             )
             ui.button(
                 f'{tr("Bib. Ktiv")} ({len(marc_bib)})',
+                icon='menu_book',
                 on_click=nli_dlg.open,
-            ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0').style(bib_chip_style)
+            ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0 browse-icon-wide').style(bib_chip_style)
         if catalog_source_count > 0:
             ui.button(
                 f'{tr("Catalog rec.")} ({catalog_source_count})',
+                icon='info_outline',
                 on_click=lambda s=page.sys_id, sm=page.shelfmark or '': show_catalog_dialog(s, sm),
-            ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0').style(catalog_chip_style)
+            ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0 browse-icon-wide').style(catalog_chip_style)
 
         # Measurements button (teal chip, distinct from catalog indigo and bib purple)
         if has_meas:
@@ -1148,8 +1151,9 @@ def populate_bib_catalog_buttons(container, state: BrowseState, page):
             _meas_side = 'recto' if page.p_num == 1 else 'verso'
             ui.button(
                 f'{tr("Measurements")}',
+                icon='straighten',
                 on_click=lambda s=page.sys_id, sm=page.shelfmark or '', side=_meas_side: show_measurements_dialog(s, sm, image_side=side),
-            ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0').style(measurements_chip_style)
+            ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0 browse-icon-wide').style(measurements_chip_style)
 
         # Phase 57: Visual Similarity chip (orange, distinct from other enrichment colors)
         has_vs = fjms_data.get('has_visual_suggestions', False)
@@ -1159,5 +1163,6 @@ def populate_bib_catalog_buttons(container, state: BrowseState, page):
             vs_count = fjms_data.get('visual_suggestion_count', 0)
             ui.button(
                 f'{tr("Visual Similarity")} ({vs_count})',
+                icon='compare',
                 on_click=lambda s=page.sys_id, sm=page.shelfmark or '': show_visual_similarity_dialog(s, sm),
-            ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0').style(vs_chip_style)
+            ).props('flat dense size=sm no-caps').classes('text-xs px-2 py-0 browse-icon-wide').style(vs_chip_style)
