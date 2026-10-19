@@ -662,6 +662,12 @@ def create_compare_modal(
 
     async def _load_anchor_meta() -> None:
         """Fill the anchor pane's FJMS/PGP buttons, info line, links and title."""
+        try:
+            await _fill_anchor_meta()
+        except RuntimeError:
+            return  # SEED-008: NiceGUI client disconnected
+
+    async def _fill_anchor_meta() -> None:
         page = _details_page["anchor"] = anchor_cand.page or 1
         meta, details = await _fetch_pane_meta(anchor_cand.sys_id, page)
         # A None (cancelled, or the app is stopping) is no metadata: that pane's
@@ -1199,8 +1205,15 @@ def create_compare_modal(
             # D-09/H3: off-loop per-pane metadata (FJMS/PGP buttons) and details
             # (info line, links, anchor title), both panes concurrently.  Each
             # fetcher is optional; with neither, nothing is fetched.
+            # Both loaders end on a client-gone RuntimeError themselves, so one pane
+            # can never cut the other short; return_exceptions keeps the show-loader
+            # waiting for both even if one fails some other way, then re-raises it.
             if metadata_prefetcher is not None or details_fetcher is not None:
-                await asyncio.gather(_load_anchor_meta(), _load_candidate_meta())
+                for outcome in await asyncio.gather(
+                    _load_anchor_meta(), _load_candidate_meta(), return_exceptions=True,
+                ):
+                    if isinstance(outcome, BaseException):
+                        raise outcome
         except RuntimeError:
             return  # SEED-008: NiceGUI client disconnected
 

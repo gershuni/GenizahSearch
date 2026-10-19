@@ -2371,6 +2371,17 @@ def _shown_candidate_sid(user) -> str:
     return ''
 
 
+async def _wait_for_shown_candidate(user, tries: int = 30) -> str:
+    """_shown_candidate_sid once the pane's details have arrived (they are fetched
+    off the event loop, so a slow runner can take a moment after a flip)."""
+    for _ in range(tries):
+        sid = _shown_candidate_sid(user)
+        if sid:
+            return sid
+        await asyncio.sleep(0.1)
+    return ''
+
+
 def test_compare_browse_icons_visible_and_copy_buttons(joins_lab_smoke_runner):
     """Both Browse icons in Compare are coloured, not white; each pane has a copy button.
 
@@ -2473,7 +2484,7 @@ def test_compare_info_buttons_follow_the_shown_candidate(joins_lab_smoke_runner)
             from nicegui import ElementFilter, ui
             seen = []
             for _ in range(2):
-                sid = _shown_candidate_sid(user)
+                sid = await _wait_for_shown_candidate(user)
                 assert sid, "the shown candidate's links did not render"
                 has_button = bool(_enabled_catalog_buttons(user))
                 assert has_button == (sid == with_catalog), (
