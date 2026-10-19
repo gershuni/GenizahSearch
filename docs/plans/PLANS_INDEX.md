@@ -1,6 +1,6 @@
 # GenizahSearch - Plans Index
 
-**Last Updated:** 2026-10-18
+**Last Updated:** 2026-10-19
 
 ---
 
@@ -8,6 +8,7 @@
 
 | Plan | Status | Description |
 |------|--------|-------------|
+| [JOINS_LAB_VS_IMPROVEMENTS_PLAN.md](JOINS_LAB_VS_IMPROVEMENTS_PLAN.md) | Decisions recorded 2026-10-19; PR 1 on `feat/joins-lab-links-compare`, PRs 2-6 not started | The owner's six Joins Lab / Visual Similarity ideas and a user's requests: Browse links in new tabs, a fuller Compare window, a share link, image sizes, sort and filters, Browse icons, thumbnail caching |
 | [SHELFMARK_PREFIX_SCOPE_PLAN.md](SHELFMARK_PREFIX_SCOPE_PLAN.md) | Implemented; merged as PR #402 (`a6b7202e`, 2026-10-18), ships in 9.7.0 | A library prefix keeps its library: `Halper 77` and `The University of Manchester Library, Ms. P 45` reach that library's records (and the records that store the typed text) instead of records numbered alike elsewhere |
 | [CATALOGUE_SHELFMARK_FORMS_PLAN.md](CATALOGUE_SHELFMARK_FORMS_PLAN.md) | Implemented; merged as PR #400 (`55ced1a1`, 2026-10-18), ships in 9.7.0 | Accept shelfmarks as the NLI catalogue writes them (`Cambridge University Library, Ms. T-S K 08.026`, `Mosseri, Jacques, Ms. VIII.402`) on every shelfmark input, with pickers where the web takes the first match today; autocomplete untouched |
 | [AI_LISTINGS_LAUNCH_PLAN.md](AI_LISTINGS_LAUNCH_PLAN.md) | Plan (2026-10-11); owner decisions pending | The `/ai` page, homepage strip and `/chatgpt` switched to the ChatGPT plugin and Claude connector per listing, by configuration, with an announcement |

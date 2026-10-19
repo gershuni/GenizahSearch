@@ -38,7 +38,9 @@ from typing import Optional, Callable
 
 from nicegui import run, ui
 
+from shared.fragment_details import domain_labels, info_line
 from shared.joins_lab import Candidate, TRIAGE_ICONS, badge_and_tooltip
+from web.clipboard import copy_text_to_clipboard
 from web.components.anchor_viewer import AnchorViewer
 from web.components.candidate_grid import build_browse_url, is_size_mismatch
 from web.translations import is_rtl, tr
@@ -189,6 +191,78 @@ def record_verdict(
 
 
 # ---------------------------------------------------------------------------
+# Per-pane details: copy button, info line and external links
+# ---------------------------------------------------------------------------
+
+def _render_copy_shelfmark_button(shelfmark: str) -> None:
+    """A small copy icon next to a pane's shelfmark."""
+    async def _copy() -> None:
+        await copy_text_to_clipboard(shelfmark, success_message=tr("Copied"))
+
+    (
+        ui.button(icon="content_copy", on_click=_copy)
+        .props(f'flat dense round size=sm aria-label="{tr("Copy Shelfmark")}"')
+        .style("color: var(--text-muted);")
+        .tooltip(tr("Copy Shelfmark"))
+    )
+
+
+def _render_title(row, title: str, marker: str) -> None:
+    """Redraw a pane's title row: the title (RTL, muted, two lines at most) or nothing."""
+    row.clear()
+    if title:
+        with row:
+            ui.label(title).classes("text-sm").mark(marker).style(
+                "color: var(--text-secondary); direction: rtl;"
+                " overflow: hidden; display: -webkit-box;"
+                " -webkit-line-clamp: 2; -webkit-box-orient: vertical;"
+            )
+
+
+def _render_pane_details(
+    container,
+    library_code: str,
+    measurements: Optional[dict],
+    details: Optional[dict],
+) -> None:
+    """Fill *container* with one info line and one row of external links.
+
+    Info line: library · domain · date · size · material (``shared.fragment_details``,
+    the same rule as the desktop Compare window). The library code and measurements
+    are known when the pane is drawn; *details* (domains, date, links) arrive later
+    from the details fetcher, and the container is redrawn then. Kept to two short
+    lines so the images stay high on the screen.
+    """
+    details = details or {}
+    m = measurements or {}
+    line = info_line(
+        library_code or details.get("library_code") or "",
+        domain_labels(details.get("domains") or [], hebrew=is_rtl()),
+        details.get("dating"),
+        m.get("width_cm"),
+        m.get("height_cm"),
+        m.get("material") or "",
+    )
+    container.clear()
+    with container:
+        if line:
+            ui.label(line).classes("text-xs").mark("compare-info-line").style(
+                "color: var(--text-secondary);"
+            )
+        links = details.get("links") or []
+        if links:
+            with ui.row().classes("items-center gap-x-3 gap-y-0 flex-wrap").mark(
+                "compare-links"
+            ):
+                for ln in links:
+                    link = ui.link(ln["label"], ln["url"], new_tab=True).classes(
+                        "text-xs"
+                    ).style("color: var(--primary-600);")
+                    if ln.get("key") == "pgp":
+                        link.tooltip(tr("Princeton Geniza Project"))
+
+
+# ---------------------------------------------------------------------------
 # Live NiceGUI modal factory
 # ---------------------------------------------------------------------------
 
@@ -205,6 +279,7 @@ def create_compare_modal(
     on_add_as_join: Optional[Callable] = None,
     on_add_to_puzzle: Optional[Callable] = None,
     on_copy_link: Optional[Callable] = None,
+    details_fetcher: Optional[Callable] = None,
 ) -> ui.dialog:
     """Full-screen two-pane Compare modal (CMP-01 / CMP-02 / CMP-03 / VSM-02).
 
@@ -245,6 +320,12 @@ def create_compare_modal(
                              header's "Copy Link" button: the Joins Lab copies a link to
                              this screen, Compare pair included.  When None the button is
                              not rendered.
+        details_fetcher:     Optional sync callable(sys_id, page) -> dict in the shape of
+                             ``shared.fragment_details.fetch_fragment_details`` (library,
+                             title, domains, date, external links).  Run off-loop for the
+                             anchor on open and for the candidate on open and on every
+                             flip; fills each pane's info line and links row.  When None
+                             the info line shows only the library and measurements.
 
     Returns:
         The ui.dialog() instance (caller opens it with dialog.open()).
@@ -316,6 +397,20 @@ def create_compare_modal(
     # Browse buttons and FJMS/PGP info buttons once metadata is prefetched.
     _anchor_info_row_ref: list = []   # [row_element] — anchor pane info row
     _cand_info_row_ref: list = []     # [row_element] — candidate pane info row
+
+    # Per-pane info line + external links (shared.fragment_details), and the anchor
+    # title slot, which is filled from the details when the caller passed no title.
+    _anchor_details_ref: list = []    # [column_element]
+    _cand_details_ref: list = []      # [column_element]
+    _anchor_title_row_ref: list = []  # [row_element]
+    # The page each pane's details were last fetched for (None = not yet). The page
+    # picks the PGP document, so a folio change in a pane's viewer fetches them again
+    # (_on_*_page_loaded), and a result for a page no longer wanted is dropped.
+    _details_page: dict = {"anchor": None, "candidate": None}
+    # The folio each pane's viewer last drew (None = not yet). A folio turned before
+    # the details loader starts (the anchor can be turned while the candidate pane is
+    # still loading) is what that loader fetches, not the page the pane opened on.
+    _shown_page: dict = {"anchor": None, "candidate": None}
 
     # D-08: candidate shelfmark+browse row ref — cleared+rebuilt in _fill_candidate
     # so the Browse URL stays in sync each time the candidate flips.
@@ -428,8 +523,11 @@ def create_compare_modal(
                     _cand_shelfmark_ref[0] = new_sm_label
                 else:
                     _cand_shelfmark_ref.append(new_sm_label)
+                _render_copy_shelfmark_button(cand.shelfmark or "")
                 # Browse button — js_handler opens in new tab (no Python navigate call;
-                # avoids server-side stop_propagation AST guard, T-119-09).
+                # avoids server-side stop_propagation AST guard, T-119-09).  Coloured
+                # like the shelfmark: it was white on the light pane, so it could be
+                # seen only in the dark theme.
                 _cand_browse_url = build_browse_url(cand)
                 (
                     ui.button(icon="open_in_new")
@@ -437,7 +535,7 @@ def create_compare_modal(
                         "flat dense round"
                         f' aria-label="{tr("Open candidate in Browse (new tab)")}"'
                     )
-                    .classes("text-white")
+                    .style("color: var(--primary-700);")
                     .tooltip(tr("Open candidate in Browse (new tab)"))
                     .on(
                         "click",
@@ -452,18 +550,8 @@ def create_compare_modal(
 
         # Round-4 Issue 3: candidate title — clear + rebuild on each flip.
         if _cand_title_row_ref:
-            title_row = _cand_title_row_ref[0]
-            title_row.clear()
-            _cand_title = getattr(cand, "title", None)
-            if _cand_title:
-                with title_row:
-                    ui.label(_cand_title).classes("text-sm").mark(
-                        "compare-candidate-title"
-                    ).style(
-                        "color: var(--text-secondary); direction: rtl;"
-                        " overflow: hidden; display: -webkit-box;"
-                        " -webkit-line-clamp: 2; -webkit-box-orient: vertical;"
-                    )
+            _render_title(_cand_title_row_ref[0], getattr(cand, "title", None) or "",
+                          "compare-candidate-title")
 
         # Badge row — rebuild (clear + repopulate)
         if _cand_badge_row_ref:
@@ -484,10 +572,29 @@ def create_compare_modal(
                     with ui.badge(tr("Size mismatch")).props("color=warning"):
                         ui.icon("warning").classes("text-xs q-ml-xs")
 
+        # The FJMS/PGP buttons belong to the previous candidate until
+        # _load_candidate_meta refills them: empty and hide the row now, so they can
+        # never open the wrong fragment's data (they used to stay on the first one).
+        if _cand_info_row_ref:
+            _cand_info_row_ref[0].clear()
+            _cand_info_row_ref[0].style("display:none;")
+
+        # Info line from what is known now (library, measurements); domains, date
+        # and links follow from _load_candidate_meta.
+        if _cand_details_ref:
+            _render_pane_details(
+                _cand_details_ref[0],
+                getattr(cand, "library_code", "") or "",
+                enrichment.get(cand.sys_id),
+                None,
+            )
+
         # Fresh AnchorViewer for candidate pane — independent from anchor pane (Pitfall 3).
         # Store it in _cand_viewer_ref so _load_candidate_pane can await update_content.
         # R2-6: suppress_shelfmark_header=True — Compare's green subtitle is the only shelfmark.
         # R2-3: image_max_height="40vh" — caps image so transcription is also visible.
+        _details_page["candidate"] = None
+        _shown_page["candidate"] = None
         if _cand_viewer_container_ref:
             container = _cand_viewer_container_ref[0]
             container.clear()
@@ -499,6 +606,7 @@ def create_compare_modal(
                     highlight_pattern=getattr(cand, "highlight_pattern", None),
                     suppress_shelfmark_header=True,
                     image_max_height="40vh",
+                    on_page_loaded=_make_cand_page_hook(cand),
                 )
             # Replace the stored viewer ref
             if _cand_viewer_ref:
@@ -546,6 +654,124 @@ def create_compare_modal(
             return
         # (If generation still matches, the load succeeded for the shown candidate.)
 
+    async def _fetch_pane_meta(sys_id: str, page: Optional[int]) -> tuple:
+        """(FJMS/PGP button metadata, details) for one pane, both fetched off-loop.
+
+        Either is None when its fetcher was not supplied or returned None.
+        """
+        async def _none() -> None:
+            return None
+
+        meta, details = await asyncio.gather(
+            run.io_bound(metadata_prefetcher, sys_id)
+            if metadata_prefetcher is not None else _none(),
+            run.io_bound(details_fetcher, sys_id, page)
+            if details_fetcher is not None else _none(),
+        )
+        return meta, details
+
+    async def _load_anchor_meta() -> None:
+        """Fill the anchor pane's FJMS/PGP buttons, info line, links and title."""
+        try:
+            await _fill_anchor_meta()
+        except RuntimeError:
+            return  # SEED-008: NiceGUI client disconnected
+
+    async def _fill_anchor_meta() -> None:
+        page = _details_page["anchor"] = _shown_page["anchor"] or anchor_cand.page or 1
+        meta, details = await _fetch_pane_meta(anchor_cand.sys_id, page)
+        # A None (cancelled, or the app is stopping) is no metadata: that pane's
+        # info row stays empty rather than claiming "no catalog".
+        if _anchor_info_row_ref and meta is not None:
+            _populate_pane_info_row(
+                _anchor_info_row_ref[0],
+                anchor_cand.sys_id,
+                anchor_cand.shelfmark or "?",
+                meta,
+            )
+        if details is None or _details_page["anchor"] != page:
+            return
+        if _anchor_details_ref:
+            _render_pane_details(
+                _anchor_details_ref[0],
+                getattr(anchor_cand, "library_code", "") or "",
+                enrichment.get(anchor_cand.sys_id),
+                details,
+            )
+        # The Lab passes no anchor title; show the catalogue title when there is one.
+        if _anchor_title_row_ref and not getattr(anchor_cand, "title", None):
+            _render_title(_anchor_title_row_ref[0], details.get("title") or "",
+                          "compare-anchor-title")
+
+    async def _load_candidate_meta() -> None:
+        """Fill the SHOWN candidate's FJMS/PGP buttons, info line and links.
+
+        Latest-wins like _load_candidate_pane: if the candidate changed while the
+        fetch ran, the result belongs to a candidate no longer shown and is dropped.
+        """
+        if metadata_prefetcher is None and details_fetcher is None:
+            return
+        try:
+            my_gen = _cand_load_gen["n"]
+            cand = _state["current_candidate"]
+            page = _details_page["candidate"] = _shown_page["candidate"] or cand.page or 1
+            meta, details = await _fetch_pane_meta(cand.sys_id, page)
+            if my_gen != _cand_load_gen["n"]:
+                return
+            if _cand_info_row_ref and meta is not None:
+                _populate_pane_info_row(
+                    _cand_info_row_ref[0],
+                    cand.sys_id,
+                    cand.shelfmark or "?",
+                    meta,
+                )
+            if details is not None and _cand_details_ref and _details_page["candidate"] == page:
+                _render_pane_details(
+                    _cand_details_ref[0],
+                    getattr(cand, "library_code", "") or "",
+                    enrichment.get(cand.sys_id),
+                    details,
+                )
+        except RuntimeError:
+            return  # SEED-008: NiceGUI client disconnected
+
+    async def _refetch_details(which: str, sys_id: str, page: int, container_ref: list,
+                               library_code: str) -> None:
+        """Fetch one pane's details again for *page* after its viewer changed folio.
+
+        The page picks the PGP document. Dropped if another page was asked for while
+        the fetch ran.
+        """
+        _details_page[which] = page
+        try:
+            details = await run.io_bound(details_fetcher, sys_id, page)
+            if details is None or _details_page[which] != page or not container_ref:
+                return
+            _render_pane_details(container_ref[0], library_code,
+                                 enrichment.get(sys_id), details)
+        except RuntimeError:
+            return  # SEED-008: NiceGUI client disconnected
+
+    async def _on_anchor_page_loaded(page: int) -> None:
+        """AnchorViewer hook: the anchor pane drew *page*; keep its links with it."""
+        _shown_page["anchor"] = page
+        if details_fetcher is None or _details_page["anchor"] in (None, page):
+            return  # details not loaded yet (the show-loader fetches *page*), or same page
+        await _refetch_details("anchor", anchor_cand.sys_id, page, _anchor_details_ref,
+                               getattr(anchor_cand, "library_code", "") or "")
+
+    def _make_cand_page_hook(cand: Candidate) -> Callable:
+        """AnchorViewer hook for one candidate's viewer (ignored once another is shown)."""
+        async def _hook(page: int) -> None:
+            if _state.get("current_candidate") is not cand:
+                return
+            _shown_page["candidate"] = page
+            if details_fetcher is None or _details_page["candidate"] in (None, page):
+                return
+            await _refetch_details("candidate", cand.sys_id, page, _cand_details_ref,
+                                   getattr(cand, "library_code", "") or "")
+        return _hook
+
     async def _step(delta: int) -> None:
         """Advance/retreat through filtered_candidates (parity desktop step(delta):3741).
 
@@ -558,6 +784,7 @@ def create_compare_modal(
         _update_counter()
         _update_nav_buttons()
         await _load_candidate_pane()
+        await _load_candidate_meta()
 
     async def _record_verdict(verdict: str) -> None:
         """Record verdict and AUTO-ADVANCE (D-03, parity _mark → wb.mark → triage:4202).
@@ -576,6 +803,7 @@ def create_compare_modal(
         _update_counter()
         _update_nav_buttons()
         await _load_candidate_pane()
+        await _load_candidate_meta()
 
     def _handle_close() -> None:
         """Handle modal close — invoke on_close callback if provided."""
@@ -694,7 +922,9 @@ def create_compare_modal(
                             ui.label(anchor_cand.shelfmark or "?").classes(
                                 "text-sm font-semibold"
                             ).style("color: var(--primary-700);")
-                            # Browse icon — opens anchor in /browse (new tab)
+                            _render_copy_shelfmark_button(anchor_cand.shelfmark or "")
+                            # Browse icon — opens anchor in /browse (new tab).  Coloured
+                            # like the shelfmark (it was white on the light pane).
                             _anchor_browse_url = build_browse_url(anchor_cand)
                             (
                                 ui.button(icon="open_in_new")
@@ -702,7 +932,7 @@ def create_compare_modal(
                                     "flat dense round"
                                     f' aria-label="{tr("Open anchor in Browse (new tab)")}"'
                                 )
-                                .classes("text-white")
+                                .style("color: var(--primary-700);")
                                 .tooltip(tr("Open anchor in Browse (new tab)"))
                                 .on(
                                     "click",
@@ -712,16 +942,23 @@ def create_compare_modal(
                                 )
                             )
 
-                        # Round-4 Issue 3: anchor title (RTL, muted) when present.
-                        _anchor_title = getattr(anchor_cand, "title", None)
-                        if _anchor_title:
-                            ui.label(_anchor_title).classes("text-sm").mark(
-                                "compare-anchor-title"
-                            ).style(
-                                "color: var(--text-secondary); direction: rtl;"
-                                " overflow: hidden; display: -webkit-box;"
-                                " -webkit-line-clamp: 2; -webkit-box-orient: vertical;"
-                            )
+                        # Round-4 Issue 3: anchor title (RTL, muted) when present;
+                        # otherwise filled from the details fetcher in _load_anchor_meta.
+                        anchor_title_row = ui.row().classes("w-full")
+                        _anchor_title_row_ref.append(anchor_title_row)
+                        _render_title(anchor_title_row,
+                                      getattr(anchor_cand, "title", None) or "",
+                                      "compare-anchor-title")
+
+                        # Info line + external links (filled in _load_anchor_meta).
+                        anchor_details = ui.column().classes("w-full gap-0")
+                        _anchor_details_ref.append(anchor_details)
+                        _render_pane_details(
+                            anchor_details,
+                            getattr(anchor_cand, "library_code", "") or "",
+                            enrichment.get(anchor_cand.sys_id),
+                            None,
+                        )
 
                         # D-09/H3: anchor pane info button row — MOVED UP into the
                         # header so the FJMS/PGP buttons stay visible at 100% zoom
@@ -746,6 +983,7 @@ def create_compare_modal(
                             highlight_pattern=getattr(anchor_cand, "highlight_pattern", None),
                             suppress_shelfmark_header=True,
                             image_max_height="40vh",
+                            on_page_loaded=_on_anchor_page_loaded,
                         )
                         _anchor_viewer_ref.append(anchor_viewer)
 
@@ -781,6 +1019,10 @@ def create_compare_modal(
                         # Cleared + rebuilt on each flip in _fill_candidate.
                         cand_title_row = ui.row().classes("w-full")
                         _cand_title_row_ref.append(cand_title_row)
+
+                        # Info line + external links — redrawn on each flip.
+                        cand_details = ui.column().classes("w-full gap-0")
+                        _cand_details_ref.append(cand_details)
 
                         cand_badge_row = ui.row().classes("gap-2 items-center flex-wrap")
                         _cand_badge_row_ref.append(cand_badge_row)
@@ -973,48 +1215,28 @@ def create_compare_modal(
     async def _on_show(_: object = None) -> None:
         """Async show handler — awaits both pane update_content calls (G5 fix).
 
-        D-09/H3: When metadata_prefetcher is provided, also fetches per-pane
-        bibliography + catalog detail off-loop (run.io_bound) and populates
-        FJMS/PGP info buttons in each pane.  SEED-008 guarded (entire body).
+        D-09/H3: When metadata_prefetcher / details_fetcher are provided, also
+        fetches per-pane bibliography + catalog detail and details (info line,
+        links, anchor title) off-loop (run.io_bound) and fills each pane.
+        SEED-008 guarded (entire body).
         """
         try:
             if _anchor_viewer_ref:
                 await _anchor_viewer_ref[0].update_content(p_num=anchor_cand.page or 1)
             await _load_candidate_pane()
 
-            # D-09/H3: off-loop per-pane metadata fetch (only if caller provided
-            # the prefetcher; the prefetcher must accept a sys_id and return a dict
-            # with keys 'fjms_bib' (list) and 'catalog_detail' (dict|None)).
-            if metadata_prefetcher is not None:
-                cand_current = _state.get("current_candidate")
-                if cand_current is None:
-                    cand_current = initial_candidate
-
-                # Fetch anchor + candidate metadata concurrently off-loop.
-                anchor_meta, cand_meta = await asyncio.gather(
-                    run.io_bound(metadata_prefetcher, anchor_cand.sys_id),
-                    run.io_bound(metadata_prefetcher, cand_current.sys_id),
-                )
-
-                # A None (cancelled, or the app is stopping) is no metadata: that
-                # pane's info row stays empty rather than claiming "no catalog".
-                # Populate anchor pane info row
-                if _anchor_info_row_ref and anchor_meta is not None:
-                    _populate_pane_info_row(
-                        _anchor_info_row_ref[0],
-                        anchor_cand.sys_id,
-                        anchor_cand.shelfmark or "?",
-                        anchor_meta,
-                    )
-
-                # Populate candidate pane info row
-                if _cand_info_row_ref and cand_meta is not None:
-                    _populate_pane_info_row(
-                        _cand_info_row_ref[0],
-                        cand_current.sys_id,
-                        cand_current.shelfmark or "?",
-                        cand_meta,
-                    )
+            # D-09/H3: off-loop per-pane metadata (FJMS/PGP buttons) and details
+            # (info line, links, anchor title), both panes concurrently.  Each
+            # fetcher is optional; with neither, nothing is fetched.
+            # Both loaders end on a client-gone RuntimeError themselves, so one pane
+            # can never cut the other short; return_exceptions keeps the show-loader
+            # waiting for both even if one fails some other way, then re-raises it.
+            if metadata_prefetcher is not None or details_fetcher is not None:
+                for outcome in await asyncio.gather(
+                    _load_anchor_meta(), _load_candidate_meta(), return_exceptions=True,
+                ):
+                    if isinstance(outcome, BaseException):
+                        raise outcome
         except RuntimeError:
             return  # SEED-008: NiceGUI client disconnected
 
@@ -1091,6 +1313,9 @@ def create_compare_modal(
     # A test can call _on_show directly via asyncio.run with stub viewers.
     dialog._on_show = _on_show  # type: ignore[attr-defined]
     dialog._load_candidate_pane = _load_candidate_pane  # type: ignore[attr-defined]
+    # The pane viewers, so a test can fire their on_page_loaded hooks (folio change).
+    dialog._anchor_viewer_ref = _anchor_viewer_ref  # type: ignore[attr-defined]
+    dialog._cand_viewer_ref = _cand_viewer_ref  # type: ignore[attr-defined]
 
     # Populate the candidate pane with the initial candidate
     _fill_candidate(initial_candidate)
