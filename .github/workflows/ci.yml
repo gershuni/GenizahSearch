@@ -5,6 +5,18 @@ on:
     branches: [master-main]
   pull_request:
 
+# A new push to a pull request cancels that PR's run still in progress: only
+# the newest commit's result decides anything, and PR #402 had seven full runs
+# in ~3 hours, an older one still running next to its replacement. A branch
+# push starts ONE run here (`push:` is limited to master-main), so the PR
+# number covers it. Every master-main push gets a group of its own (run_id),
+# not a shared one: a shared group with cancel-in-progress false still holds a
+# second push PENDING behind the first and cancels that pending run when a
+# third arrives. master-main runs are never queued or cancelled.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('{0}-pr-{1}', github.workflow, github.event.pull_request.number) || format('{0}-run-{1}', github.workflow, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint-and-docs:
     # Bounded so a hung runner fails in minutes instead of burning GitHub's
