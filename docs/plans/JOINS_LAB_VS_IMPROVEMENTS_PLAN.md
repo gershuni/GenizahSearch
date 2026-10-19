@@ -1,6 +1,8 @@
 # Joins Lab and Visual Similarity improvements — decisions and PR order
 
-**Status:** PR 1 implemented on `feat/joins-lab-links-compare` (2026-10-19); PRs 2-6 not started.
+**Status (2026-10-19):** PRs 1-5 and step (a) of PR 6 are merged into `master-main`, with two
+follow-ups to PR 4; none is released yet (the last release is 9.7.0). Left: PR 6 step (b), the
+Cloudflare Cache Rule that step (a) needs, and the open question below. See "Where it stands".
 **Source:** the owner's list of six ideas and a WhatsApp exchange with a user (Adiel Breuer),
 both 2026-10-19. Every decision below was made by the owner on 2026-10-19, one question at a time.
 
@@ -37,7 +39,40 @@ From the user (Joins Lab, website):
 | Thumbnails on the site (6, PR 6) | Step (a) now: the image proxy routes stop setting the session cookie so Cloudflare and browsers keep thumbnails (check each route does not use the session). Step (b), a size-capped disk store filled as images are viewed, waits for `df -h /` from the server and the owner's reading of NLI's terms of use |
 | Way of working | Small PRs in this order, one branch per PR from `master-main`: 1 Joins Lab links + Compare window; 2 share link; 3 image sizes (on top of PR #404, or after it merges); 4 sort and filters; 5 Browse icons; 6 thumbnail caching (a) |
 
-## PR 1 (this branch): Joins Lab links and the Compare window
+Two of these changed later the same day, again by the owner:
+
+- **Browse icons (PR 5):** on a phone (below 600 px) Go and Submit may show the icon alone, keeping
+  their name for screen readers, so that no row gets wider.
+- **Sort and filters (PR 4), website:** the Library and Domain filters left the Filter dialog, where
+  nobody found them, for the results toolbar next to Sort. The filter icon became a
+  "More filters…" button for the rest. The desktop is unchanged, as it has no room for this.
+
+## Where it stands (2026-10-19)
+
+| Plan PR | GitHub | What it did |
+|---|---|---|
+| 1 Links + Compare window | #407 | Browse links open a new tab; Compare shows each side's info line, links and a copy button, on the web and the desktop |
+| 2 Share link | #408 | The screen state in the address bar, "Copy link", marks opt-in and not saved |
+| 3 Image sizes | #411 | S/M/L thumbnails and "enlarge original" in Visual Similarity; S/M/L cards in both Joins Labs |
+| 4 Sort and filters | #412 | Sort by Rank / Library / Domain and Library / Domain filters with counts, web and desktop |
+| 4, follow-up | #415 | The web Filter dialog's lists take its full width (they showed only their arrow) |
+| 4, follow-up | #416 | Website: Library and Domain in the results toolbar, "More filters…" with a count of the filters on; a filter that leaves nothing keeps the toolbar |
+| 5 Browse icons | #410 | Icons on the Browse page's text buttons (website only) |
+| 6 Thumbnail caching (a) | #409 | The six image routes no longer set the session cookie; images are kept a week |
+
+Each PR's entry in `CHANGELOG.md` (or `changelog.d/`, until the release folds it in) gives the
+details.
+
+Left:
+
+- **PR 6 step (b)**, a size-capped disk store for images, still waits for `df -h /` from the
+  server and the owner's reading of NLI's terms of use.
+- **A Cloudflare Cache Rule for the six image routes**, once #409 is deployed. Their paths have
+  no file extension, so Cloudflare does not cache them until a rule makes them eligible.
+  Until then, the week-long `Cache-Control` helps browsers only.
+- **The open question below**, for Adiel.
+
+## PR 1: Joins Lab links and the Compare window (#407)
 
 - `web/components/candidate_grid.py`: the card's Browse icon (`menu_book`) is a `ui.link(new_tab=True)`.
   It was a button that set `window.location.href`, so a plain click and a Ctrl+click both
@@ -63,8 +98,11 @@ From the user (Joins Lab, website):
   - Bug fixed: the anchor's line read library and title from the top level of the result dict
     (`meta_brief`), but they live under `display`, so the line came out empty.
 
-Not checked in a browser or against real sidecars. The web tests drive the real dialog in
-NiceGUI's simulated client. The desktop pane was rendered offscreen with stub data.
+When PR 1 merged, nothing had been checked in a browser or against real sidecars. The web tests
+drive the real dialog in NiceGUI's simulated client, and the desktop pane was rendered offscreen
+with stub data. Later the same day, the web Joins Lab ran in headless Chromium with its search and
+data stubbed, and Compare showed each side's info line and its Ktiv and PGP links (#415). The real
+sidecars and the desktop window are still unchecked.
 
 ## Open question
 
