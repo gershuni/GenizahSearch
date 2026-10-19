@@ -88,6 +88,16 @@ def test_a_task_started_during_cleanup_is_cancelled_and_nicegui_forgets_the_loop
     assert 'storage-user-test' not in bt.lazy_coroutines_waiting
 
 
+def test_run_bounded_reports_a_timeout_even_when_the_coroutine_stops_on_cancel():
+    """A coroutine that runs past the bound and then stops when cancelled is a
+    TIMEOUT, with the place it was waiting -- not a bare CancelledError."""
+    async def stalls_here():
+        await asyncio.sleep(3600)
+
+    with pytest.raises(TimeoutError, match='stalls_here'):
+        run_bounded(stalls_here(), timeout=0.3, teardown_timeout=_TEARDOWN)
+
+
 def test_run_bounded_warns_but_passes_when_only_a_leftover_is_stuck():
     async def main():
         asyncio.get_running_loop().create_task(_swallows_cancel_then_waits())

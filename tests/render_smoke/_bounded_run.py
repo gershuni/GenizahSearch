@@ -50,15 +50,22 @@ def _describe(tasks) -> str:
     return '\n'.join(parts)
 
 
-async def _wait_bounded(task: asyncio.Task, timeout: float) -> bool:
+async def _wait_bounded(task: asyncio.Task, timeout: float) -> tuple[bool, str]:
     """Wait for ``task`` at most ``timeout`` s; on expiry cancel it and give it
-    ``_CANCEL_GRACE`` s more. Return True iff it finished. Never raises."""
+    ``_CANCEL_GRACE`` s more. Never raises.
+
+    Return ``(finished, expired_at)``: whether the task is done, and -- when
+    the timeout expired -- where it was waiting at that moment ('' if it
+    finished in time). A task that stops when cancelled has *finished*, but
+    it timed out, and the caller must say so rather than report the cancel.
+    """
     done, _ = await asyncio.wait({task}, timeout=timeout)
     if done:
-        return True
+        return True, ''
+    expired_at = _describe([task])
     task.cancel()
     done, _ = await asyncio.wait({task}, timeout=_CANCEL_GRACE)
-    return bool(done)
+    return bool(done), expired_at
 
 
 def _cleanup_loop(loop: asyncio.AbstractEventLoop, teardown_timeout: float) -> list:
@@ -142,12 +149,13 @@ def run_bounded(
     try:
         asyncio.set_event_loop(loop)
         main = loop.create_task(coro, name='render-smoke main')
-        finished = loop.run_until_complete(_wait_bounded(main, timeout))
+        finished, expired_at = loop.run_until_complete(_wait_bounded(main, timeout))
         stuck = _cleanup_loop(loop, teardown_timeout)
-        if not finished:
+        if expired_at:
             raise TimeoutError(
-                f'render-smoke: coroutine did not finish within {timeout:.0f} s '
-                f'(and did not stop when cancelled):\n{_describe([main])}'
+                f'render-smoke: coroutine did not finish within {timeout:.0f} s'
+                f'{"" if finished else " (and did not stop when cancelled)"}; '
+                f'it was waiting here:\n{expired_at}'
             )
         if main.cancelled():
             raise asyncio.CancelledError()
@@ -200,10 +208,12 @@ def run_user_driver(
             async with context_factory() as user:
                 task = asyncio.ensure_future(driver(user))
                 try:
-                    if not await _wait_bounded(task, driver_timeout) or task.cancelled():
+                    _finished, expired_at = await _wait_bounded(task, driver_timeout)
+                    if expired_at or task.cancelled():
                         outcome['error'] = TimeoutError(
                             f'render-smoke: driver did not finish within '
-                            f'{driver_timeout:.0f} s:\n{_describe([task])}'
+                            f'{driver_timeout:.0f} s; it was waiting here:\n'
+                            f'{expired_at or _describe([task])}'
                         )
                     elif task.exception() is not None:
                         outcome['error'] = task.exception()
@@ -216,7 +226,7 @@ def run_user_driver(
         waiter = asyncio.ensure_future(driver_done.wait())
         await asyncio.wait({body, waiter}, return_when=asyncio.FIRST_COMPLETED)
         waiter.cancel()
-        if not body.done() and not await _wait_bounded(body, teardown_timeout):
+        if not body.done() and not (await _wait_bounded(body, teardown_timeout))[0]:
             if 'error' not in outcome:
                 raise TimeoutError(
                     f'render-smoke: teardown did not finish within '
