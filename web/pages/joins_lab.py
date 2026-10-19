@@ -71,7 +71,7 @@ from shared.export_dossier import build_image_url_for_row
 from shared.fjms_service import get_fjms_service
 from shared.joins_lab import (
     BuilderRow, Candidate, SideQuery, apply_cross_side, compose, dedup_candidates,
-    detect_self_match, merge_candidates,
+    detect_self_match, merge_candidates, normalize_order, primary_domain,
 )
 from shared.visual_similarity_service import get_vs_service
 from web import io_bound_result
@@ -507,7 +507,14 @@ async def _enrich_candidates(sys_ids: list) -> dict:
         fjms_svc = get_fjms_service(thread_safe=True)
         if not fjms_svc.is_available():
             return {}
-        return fjms_svc.get_measurement_summaries_batch(sys_ids)
+        out = fjms_svc.get_measurement_summaries_batch(sys_ids) or {}
+        # The domain for the Library/Domain filter and order: the first of each
+        # fragment's domains, as the Visual Similarity window shows it.
+        for sid, domains in (fjms_svc.get_domains_for_sys_ids(sys_ids) or {}).items():
+            primary = primary_domain(domains)
+            if primary:
+                out.setdefault(sid, {}).update(primary)
+        return out
 
     try:
         return await run.io_bound(run_enrich_core)
@@ -584,6 +591,9 @@ def create_joins_lab_page(
         'exclude_mismatch': False,
         'triage_states': [],
         'text_q': '',
+        'libraries': [],              # library codes (empty = all)
+        'domains': [],                # English domains (empty = all)
+        'order': 'rank',              # 'rank' | 'library' | 'domain' (the Sort control)
     }
     _enrichment: dict = {}        # sys_id → {width_cm, height_cm, material, ...} (D-16)
     _enrichment_ready: dict = {'value': False}
@@ -1077,6 +1087,8 @@ def create_joins_lab_page(
             _triage_state_ref['restyle'] = restyle_fn
 
         sort_mode = 'vs_rank' if _vs_on['value'] else 'score'
+        if normalize_order(_filter_state.get('order')) != 'rank':
+            sort_mode = 'given'   # grouped by library/domain in compute_filtered
 
         # A2: branch on _view_mode to reach the table (not just the grid)
         if _view_mode['value'] == 'table':
@@ -1138,7 +1150,19 @@ def create_joins_lab_page(
                 # Round-5: persist triage verdicts so they survive a session restore
                 # (the grid mutates _triage locally; this is the persist hook).
                 on_triage_change=lambda *_a: _persist_state(),
+                order=_filter_state.get('order', 'rank'),
+                on_order_change=_on_order_change,
             )
+
+    def _on_order_change(order: str) -> None:
+        """The grid's Sort control: group by library or domain, or the search's order.
+        Kept with the filter state, so the table and a restored session follow it."""
+        if order == normalize_order(_filter_state.get('order')):
+            return
+        _filter_state['order'] = order
+        _current_page['value'] = 0
+        _re_render_candidates_surface()
+        _persist_state()
 
     def _on_page_change(page: int) -> None:
         """Page nav callback — changes page WITHOUT resetting triage (D-08)."""
@@ -1148,8 +1172,8 @@ def create_joins_lab_page(
     def _on_filter_open() -> None:
         """Open the filter dialog (D-14) with enrichment-ready gate (Pitfall 7)."""
         # CR-02: open_filter_dialog signature is (filter_state, enrichment,
-        # enrichment_ready, on_apply, on_reset).  The old call passed
-        # candidates=/anchor_sys_id= (unknown kwargs) and omitted on_reset.
+        # enrichment_ready, on_apply, on_reset, candidates).  candidates (the list
+        # before filtering) gives the Library/Domain options and their counts.
         # The on_apply contract is no-arg (filter_state is mutated in place by
         # the dialog's _do_apply before calling on_apply()).
 
@@ -1173,6 +1197,7 @@ def create_joins_lab_page(
             enrichment_ready=_enrichment_ready['value'],
             on_apply=_on_filter_apply,
             on_reset=_on_filter_reset,
+            candidates=list(_all_candidates),
         )
 
     # One WebSearchExecutor per page render (used for SEARCH only —

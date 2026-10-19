@@ -227,6 +227,7 @@ class TestOpenFilterDialogCallSiteContract:
         "enrichment_ready",
         "on_apply",
         "on_reset",
+        "candidates",
     })
 
     def test_caller_kwargs_are_subset_of_real_signature(self):
@@ -255,14 +256,13 @@ class TestOpenFilterDialogCallSiteContract:
             "open_filter_dialog must have an 'on_apply' parameter"
         )
 
-    def test_no_candidates_param(self):
-        """candidates= must NOT be in the real signature (was a spurious kwarg before fix)."""
+    def test_candidates_param_is_optional(self):
+        """candidates= was a spurious kwarg at CR-02 time; it is now a real one (the
+        list before filtering, for the Library/Domain options and their counts) and
+        stays optional, so a caller without it gets no Library/Domain filter."""
         from web.components.candidate_grid import open_filter_dialog
         sig = inspect.signature(open_filter_dialog)
-        assert "candidates" not in sig.parameters, (
-            "open_filter_dialog must NOT have a 'candidates' parameter — "
-            "the page was passing this spuriously (CR-02)"
-        )
+        assert sig.parameters["candidates"].default is None
 
     def test_no_anchor_sys_id_param(self):
         """anchor_sys_id= must NOT be in open_filter_dialog's signature."""

@@ -39,7 +39,9 @@ from typing import Optional, Callable
 
 from nicegui import ui
 
-from shared.joins_lab import TRIAGE_ICONS
+from shared.joins_lab import (
+    TRIAGE_ICONS, counted_options, domain_label, normalize_order, order_candidates,
+)
 from shared.synthetic_sys_id import is_synthetic_sys_id
 from web.services import is_oxford_manuscript, get_oxford_direct_image_url
 from web.translations import tr, get_language, is_rtl
@@ -227,10 +229,12 @@ def compute_filtered(
     enrichment: dict,
     triage: dict,
     anchor_sys_id: str,
+    hebrew: Optional[bool] = None,
 ) -> list:
     """Apply filter_state predicates to all_candidates and return the filtered list.
 
-    Pure function — no closures over module globals; headlessly testable.
+    Pure function — no closures over module globals; headlessly testable (pass
+    *hebrew*; None reads the visitor's UI language, used only to order by domain).
 
     Args:
         all_candidates: Full list of Candidate objects.
@@ -240,18 +244,25 @@ def compute_filtered(
                           - exclude_mismatch: bool — exclude size-mismatch candidates
                           - triage_states: list[str] — 'All'/'Not triaged'/'Yes'/'Maybe'/'No'
                           - text_q: str — case-insensitive substring on shelfmark+title
-        enrichment:     dict[sys_id → {width_cm, height_cm, material, ...}]
+                          - libraries: list[str] — include only these library codes
+                          - domains: list[str] — include only these (English) domains
+                          - order: 'rank' | 'library' | 'domain' — see below
+        enrichment:     dict[sys_id → {width_cm, height_cm, material, domain, ...}]
         triage:         dict[sys_id → 'yes'|'maybe'|'no'] (or TriageState)
         anchor_sys_id:  sys_id of the anchor fragment (for size-mismatch comparison)
 
     Returns:
-        Filtered list of Candidate objects (in the same order as all_candidates).
+        Filtered list of Candidate objects: in the order of all_candidates, or
+        grouped by library or by domain (shared.joins_lab.order_candidates; each
+        group keeps that order) when filter_state['order'] asks for it.
     """
     text_q = (filter_state.get("text_q") or "").strip().lower()
     materials = set(filter_state.get("materials") or [])
     has_dims = bool(filter_state.get("has_dims", False))
     exclude_mismatch = bool(filter_state.get("exclude_mismatch", False))
     triage_states = set(filter_state.get("triage_states") or [])
+    libraries = set(filter_state.get("libraries") or [])
+    domains = set(filter_state.get("domains") or [])
 
     # Look up anchor width for size-mismatch comparison
     anchor_w = enrichment.get(anchor_sys_id, {}).get("width_cm")
@@ -271,9 +282,17 @@ def compute_filtered(
             if text_q not in shelfmark_l and text_q not in title_l:
                 continue
 
+        # Library filter
+        if libraries and c.library_code not in libraries:
+            continue
+
         # Material filter
         m = enrichment.get(c.sys_id, {})
         if materials and m.get("material") not in materials:
+            continue
+
+        # Domain filter (the fragment's first domain, as shown on its card)
+        if domains and m.get("domain") not in domains:
             continue
 
         # Has-dims filter
@@ -292,7 +311,34 @@ def compute_filtered(
                 continue
 
         out.append(c)
+
+    order = normalize_order(filter_state.get("order"))
+    if order != "rank":
+        if hebrew is None:
+            hebrew = get_language() == "he"
+        out = order_candidates(out, order, lambda c: candidate_domain_label(c, enrichment, hebrew))
     return out
+
+
+def candidate_domain_label(cand, enrichment: dict, hebrew: bool) -> str:
+    """The candidate's domain as the visitor reads it ('' when it has none)."""
+    m = enrichment.get(cand.sys_id) or {}
+    return domain_label(m.get("domain"), m.get("domain_heb"), hebrew)
+
+
+def library_options(candidates: list) -> dict:
+    """Library filter options: library code -> "code (count)", in code order."""
+    return {v: f"{label} ({n})" for v, label, n in
+            counted_options((c.library_code, c.library_code) for c in candidates)}
+
+
+def domain_options(candidates: list, enrichment: dict, hebrew: bool) -> dict:
+    """Domain filter options: English domain -> "label (count)", in label order."""
+    pairs = []
+    for c in candidates:
+        m = enrichment.get(c.sys_id) or {}
+        pairs.append((m.get("domain"), domain_label(m.get("domain"), m.get("domain_heb"), hebrew)))
+    return {v: f"{label} ({n})" for v, label, n in counted_options(pairs)}
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +387,8 @@ def _make_table_rows(
         candidates:  List of Candidate objects.
         triage:      TriageState or dict[sys_id → verdict].
         enrichment:  dict[sys_id → {width_cm, height_cm, material, ...}].
-        sort_mode:   'score' (default, desc) or 'vs_rank' (asc when 👁 ON).
+        sort_mode:   'score' (default, desc), 'vs_rank' (asc when 👁 ON), or
+                     'given' (keep the candidates' order: grouped by library/domain).
 
     Returns:
         List of row dicts — each has all 8 column fields plus 'uid' for row identity.
@@ -391,7 +438,9 @@ def _make_table_rows(
         })
 
     # Sort
-    if sort_mode == "vs_rank":
+    if sort_mode == "given":
+        pass
+    elif sort_mode == "vs_rank":
         rows.sort(key=lambda r: r["vs_rank"])
     else:
         # Default: score descending
@@ -606,8 +655,12 @@ def _create_candidate_card(
     on_card_select: Optional[Callable] = None,
     on_triage_change: Optional[Callable] = None,
     selected: bool = False,
+    domain: str = "",
 ) -> None:
     """Render a single candidate card (Phase 119 D-09/D-11/D-07, Phase 120 D-07/ACT-01).
+
+    *domain* is the fragment's domain as the visitor reads it (a line under the
+    shelfmark; the grid's Domain filter and order use it).
 
     Card layout (reading order):
         ┌──────────────────────────────────────────┐
@@ -750,6 +803,11 @@ def _create_candidate_card(
                 ui.label(cand.shelfmark or "?").classes(
                     "text-sm font-semibold truncate"
                 )
+
+            if domain:
+                ui.label(domain).classes("text-xs truncate").style(
+                    "color: var(--text-secondary);"
+                ).mark("joins-card-domain")
 
             # Title (RTL, truncated, muted)
             if cand.title:
@@ -985,15 +1043,18 @@ def open_filter_dialog(
     enrichment_ready: bool,
     on_apply: Callable,
     on_reset: Callable,
+    candidates: Optional[list] = None,
 ) -> None:
     """Open the candidate filter dialog (D-14, CND-06).
 
     Args:
         filter_state:     Current filter state dict (mutated in place on Apply).
-        enrichment:       dict[sys_id → {material, width_cm, height_cm, ...}]
+        enrichment:       dict[sys_id → {material, width_cm, height_cm, domain, ...}]
         enrichment_ready: True when enrichment batch has completed.
         on_apply:         Called after Apply closes the dialog.
         on_reset:         Called after Reset closes the dialog.
+        candidates:       The candidates before filtering: the Library and Domain
+                          options and their counts (no Library/Domain filter without).
     """
     # Gather material options from enrichment (disabled until enrichment ready — Pitfall 7)
     mat_options = sorted({v.get("material") for v in enrichment.values() if v.get("material")})
@@ -1010,6 +1071,28 @@ def open_filter_dialog(
         ).props("dense outlined use-chips")
         if not enrichment_ready:
             mat_sel.disable()
+
+        # 1b. Library and Domain (multi-select with counts, as in the Visual
+        # Similarity window); Domain comes with the enrichment, so it waits for it.
+        hebrew = get_language() == "he"
+        lib_opts = library_options(candidates or [])
+        dom_opts = domain_options(candidates or [], enrichment, hebrew)
+        lib_sel = ui.select(
+            options=lib_opts,
+            value=[v for v in (filter_state.get("libraries") or []) if v in lib_opts],
+            label=tr("Library"),
+            multiple=True,
+        ).props("dense outlined use-chips").mark("joins-filter-library")
+        dom_sel = ui.select(
+            options=dom_opts,
+            value=[v for v in (filter_state.get("domains") or []) if v in dom_opts],
+            label=tr("Domain"),
+            multiple=True,
+        ).props("dense outlined use-chips").mark("joins-filter-domain")
+        if not lib_opts:
+            lib_sel.disable()
+        if not enrichment_ready or not dom_opts:
+            dom_sel.disable()
 
         # 2. Has dimensions
         dims_sw = ui.switch(tr("Has dimensions data"), value=bool(filter_state.get("has_dims", False)))
@@ -1044,6 +1127,8 @@ def open_filter_dialog(
                     "exclude_mismatch": False,
                     "triage_states": [],
                     "text_q": "",
+                    "libraries": [],
+                    "domains": [],
                 })
                 dlg.close()
                 on_reset()
@@ -1054,6 +1139,11 @@ def open_filter_dialog(
                 filter_state["exclude_mismatch"] = bool(mismatch_sw.value)
                 filter_state["triage_states"] = list(tri_sel.value or [])
                 filter_state["text_q"] = text_inp.value or ""
+                # A disabled select (no options yet) leaves its filter as it was.
+                if lib_sel.enabled:
+                    filter_state["libraries"] = list(lib_sel.value or [])
+                if dom_sel.enabled:
+                    filter_state["domains"] = list(dom_sel.value or [])
                 dlg.close()
                 on_apply()
 
@@ -1086,7 +1176,8 @@ def create_candidate_table(
         candidates:        Filtered (not paginated) list of Candidate objects.
         triage:            TriageState or dict[sys_id → verdict].
         enrichment:        dict[sys_id → {material, width_cm, height_cm, ...}]
-        sort_mode:         'score' (default, desc) or 'vs_rank' (asc when 👁 ON).
+        sort_mode:         'score' (default, desc), 'vs_rank' (asc when 👁 ON), or
+                           'given' (keep the candidates' order).
         on_compare:        Optional callback(cand) launched on row double-click.
         restyle_fn:        Optional render-scoped restyle callable from _make_restyle_fn().
                            When None, bulk-triage verdict changes are recorded in triage but
@@ -1290,6 +1381,10 @@ def create_candidate_grid(
     # WITHOUT this the grid mutates the triage dict locally but never persists, so
     # Y/?/X verdicts are lost on a session restore.
     on_triage_change: Optional[Callable] = None,
+    # The Sort control beside the Filter button: 'rank' | 'library' | 'domain'.
+    # The candidates arrive already in that order (compute_filtered).
+    order: str = "rank",
+    on_order_change: Optional[Callable] = None,
 ) -> ui.element:
     """Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
@@ -1307,6 +1402,9 @@ def create_candidate_grid(
         anchor_sys_id:    The anchor's sys_id — excluded from self-match display (D-13).
         on_page_change:   Callback(page: int) for Prev/Next pagination clicks (D-08).
         on_filter_open:   Callback() for the Filter button click (D-14).
+        order:            The order shown in the Sort control.
+        on_order_change:  Callback(order) when the visitor picks another order; no
+                          Sort control without it.
         on_restyle_ready: Optional callback(restyle_fn) invoked with the render-scoped
                           restyle function immediately after the grid is built (WR-01).
                           The page stores this so Compare verdicts can restyle grid cards.
@@ -1345,15 +1443,27 @@ def create_candidate_grid(
                 ui.label(f"{tr('Candidates')} ({total})").classes(
                     "text-base font-semibold"
                 )
-                if on_filter_open is not None:
-                    ui.button(
-                        icon='filter_list',
-                        on_click=on_filter_open,
-                    ).props('flat dense round').tooltip(tr('Filter candidates'))
+                with ui.row().classes("items-center gap-1"):
+                    if on_order_change is not None:
+                        order_sel = ui.select(
+                            {"rank": tr("Rank"), "library": tr("Library"),
+                             "domain": tr("Domain")},
+                            value=normalize_order(order),
+                            label=tr("Sort"),
+                        ).props("dense outlined").classes("w-28").mark("joins-order")
+                        order_sel.on_value_change(
+                            lambda e: on_order_change(normalize_order(e.value))
+                        )
+                    if on_filter_open is not None:
+                        ui.button(
+                            icon='filter_list',
+                            on_click=on_filter_open,
+                        ).props('flat dense round').tooltip(tr('Filter candidates'))
 
             # Responsive grid (D-09): 1 col <640px, 2 col 640–1023px, 3 col ≥1024px.
             with ui.grid().classes("w-full gap-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"):
                 _sel_set = selected_sys_ids if selected_sys_ids is not None else set()
+                _hebrew = get_language() == "he"
                 for cand in page_slice:
                     _create_candidate_card(
                         cand,
@@ -1369,6 +1479,7 @@ def create_candidate_grid(
                         on_card_select=on_card_select,
                         on_triage_change=on_triage_change,
                         selected=cand.sys_id in _sel_set,
+                        domain=candidate_domain_label(cand, enrichment, _hebrew),
                     )
 
             # Pagination controls (D-08): ‹ Prev | Page N of M | Next ›

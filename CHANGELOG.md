@@ -4,6 +4,20 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased] -- Joins Lab: sort and filter by library and domain (web + desktop, branch `feat/joins-lab-library-domain`)
+
+As in the website's Visual Similarity window. A fragment's domain is the first of its
+domains in the FJMS data, shown in Hebrew in the Hebrew interface; it comes with the size
+and material data already fetched for the candidates.
+
+- **Sort:** the search's order (Rank), or grouped by Library or by Domain. Within a group the
+  search's order is kept, and candidates with no library or domain come last. Website: beside
+  the Filter button above the grid, also followed by the table. Desktop: next to "Table view",
+  for both views, and kept in the Lab session.
+- **Filter:** Library and Domain in the Filter dialog, each option with its count (website:
+  several at once; desktop: one, like Material).
+- **Cards** show the domain (website) or "library · domain" (desktop).
+
 ## [Unreleased] -- The homepage search box opens shelfmarks and system IDs (web, branch `claude/fervent-curie-oip2lk`)
 
 The search box on the homepage now goes where the input belongs: Hebrew or Arabic text runs a full-text search as before, a system ID (all digits, starting 99) opens that manuscript, and anything else is looked up as a shelfmark by the Browse page, with its usual answers (the manuscript, a "Select Manuscript" list, or "No manuscript found" with the shelfmark left in the box to correct). The placeholder now reads "Text, shelfmark or system ID", short enough to fit the box on a phone. Routing: `web/home_query.py::home_query_target`. From the owner (2026-10-19).
