@@ -11,8 +11,10 @@ contract exactly as they should have, and failed the moment it changed.
 
 What is pinned now:
 
-1. It advertises the two letter-level features, each gated on its OWN
+1. It advertises the letter-level parallels search, gated on its OWN
    availability predicate — the flag ANDed with an index that actually loaded.
+   (v9.7.0, owner 2026-10-18: the multi-witness entry was dropped with the
+   release texts, and the ungated v9.7.0 entry comes first.)
 2. It can be EMPTY, and that is correct. The old list opened with `/start`,
    which is registered unconditionally, so the toast always had something to
    say; `web/main.py`'s own comment called the empty-list guard "not currently
@@ -53,20 +55,17 @@ from nicegui.ui_run import set_storage_secret
 
 
 @asynccontextmanager
-async def _user(lang: str, *, passage_on: bool, witnesses_on: bool):
+async def _user(lang: str, *, passage_on: bool):
     saved_handlers = list(core.app._startup_handlers)
     core.app._startup_handlers.clear()
     try:
         prepare_simulation()
         set_storage_secret('whats-new-render-smoke-secret', {})
         async with AsyncExitStack() as stack:
-            # `web.main` binds both predicates at import (`from ... import f`),
-            # so the toast reads THESE names, not the source module's.
+            # `web.main` binds the predicate at import (`from ... import f`),
+            # so the toast reads THIS name, not the source module's.
             stack.enter_context(
                 patch('web.main.passage_available', return_value=passage_on))
-            stack.enter_context(
-                patch('web.main.passage_multi_witness_available',
-                      return_value=witnesses_on))
             stack.enter_context(
                 patch('web.main._resolve_ui_language', return_value=lang))
             os.environ['NICEGUI_USER_SIMULATION'] = 'true'
@@ -85,12 +84,11 @@ async def _user(lang: str, *, passage_on: bool, witnesses_on: bool):
         core.app._startup_handlers.extend(saved_handlers)
 
 
-def _run(driver, *, lang='en', passage_on=True, witnesses_on=True):
+def _run(driver, *, lang='en', passage_on=True):
     saved_slots = list(nicegui_context.slot_stack)
 
     async def invoke():
-        async with _user(lang, passage_on=passage_on,
-                         witnesses_on=witnesses_on) as user:
+        async with _user(lang, passage_on=passage_on) as user:
             await driver(user)
 
     try:
@@ -132,18 +130,18 @@ def _texts(elements):
     )
 
 
-def test_toast_advertises_both_letter_level_features():
+def test_toast_advertises_the_new_entry_and_letter_level_parallels():
     async def driver(user):
         await user.open('/search')
         elements = _elements(user)
         assert _banner(elements) is not None
-        assert _parallels_hrefs(elements), 'the toast advertised nothing'
-        # Both entries lead to the same page, so their hrefs collapse to one
-        # value in a set. What distinguishes them is the NAME, so that is what
-        # this asserts.
+        assert _parallels_hrefs(elements), 'the toast advertised no parallels link'
         text = _texts(elements)
+        assert "shelfmarks in the NLI catalogue's style" in text      # v9.7.0
         assert 'Letter-level parallels search' in text
-        assert 'textual witnesses' in text
+        # Dropped with the v9.7.0 texts (owner, 2026-10-18).
+        assert 'textual witnesses' not in text
+        assert 'further improvements to search quality' not in text
 
     _run(driver)
 
@@ -170,16 +168,22 @@ def test_toast_shows_on_the_homepage_because_that_is_where_readers_arrive():
     _run(driver)
 
 
-def test_each_entry_is_gated_on_its_own_predicate():
+def test_the_parallels_entry_is_gated_on_its_own_predicate():
     """Advertising a clean-hidden feature would point a reader at a control the
-    page does not draw."""
-    async def witnesses_down(user):
+    page does not draw. Both halves, so the absence cannot pass on a page that
+    simply failed to render the entry at all."""
+    async def passage_up(user):
+        await user.open('/search')
+        assert 'Letter-level parallels search' in _texts(_elements(user))
+
+    async def passage_down(user):
         await user.open('/search')
         text = _texts(_elements(user))
-        assert 'Letter-level parallels search' in text
-        assert 'textual witnesses' not in text
+        assert "shelfmarks in the NLI catalogue's style" in text
+        assert 'Letter-level parallels search' not in text
 
-    _run(witnesses_down, passage_on=True, witnesses_on=False)
+    _run(passage_up, passage_on=True)
+    _run(passage_down, passage_on=False)
 
 
 def test_a_box_without_the_index_announces_only_what_it_actually_has():
@@ -211,18 +215,17 @@ def test_a_box_without_the_index_announces_only_what_it_actually_has():
         # v9.2.1: the always-available entry is the GPT / AI tools one.
         assert 'ChatGPT' in text, (
             'the toast does not name the always-available entry: %r' % text[:400])
-        # v9.6.0: the search entry is ungated too.
-        assert 'further improvements to search quality' in text, text[:400]
+        # v9.7.0: the new entry is ungated too.
+        assert "shelfmarks in the NLI catalogue's style" in text, text[:400]
         assert 'Letter-level' not in text, (
             'a GATED surface is advertised on a box whose index never opened')
-        assert 'textual witnesses' not in text
 
     # The GPT entry exists only before OpenAI retires GPTs and while no AI listing is
     # live (web/ai_listings.py): pin both, or this test fails on 2026-12-11.
     from datetime import date
     with (patch('web.ai_listings._today', return_value=date(2026, 11, 1)),
           patch.dict(os.environ, {'AI_CHATGPT_PLUGIN_URL': '', 'AI_CLAUDE_CONNECTOR_URL': ''})):
-        _run(driver, passage_on=False, witnesses_on=False)
+        _run(driver, passage_on=False)
 
 
 def test_toast_suppresses_itself_where_the_page_already_presents_this():
@@ -265,9 +268,9 @@ def test_toast_is_translated_rather_than_leaking_english_into_the_hebrew_ui():
         text = _texts(_elements(user))
         assert 'תכונות חדשות!' in text
         assert 'חיפוש מקבילות ברמת האות' in text
-        assert 'עדי נוסח' in text
-        assert 'ושיפורים נוספים באיכות החיפוש' in text     # v9.6.0
+        assert 'בסגנון קטלוג הספרייה הלאומית' in text      # v9.7.0
         assert 'Letter-level parallels search' not in text
+        assert "NLI catalogue's style" not in text
         assert 'New Features!' not in text
 
     _run(driver, lang='he')
@@ -366,4 +369,4 @@ def test_the_button_is_drawn_because_there_IS_something_to_announce():
         assert _by_class(elements, 'whats-new-dot'), (
             'the button has no unread dot, so a first-time reader has no cue')
 
-    _run(driver, passage_on=False, witnesses_on=False)
+    _run(driver, passage_on=False)

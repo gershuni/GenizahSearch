@@ -5,7 +5,7 @@ Status: rev. 8 (2026-10-18): Codex rounds 1 (plan, 9 findings), 2 (plan + code, 
 (the count fell 9-5-4-3-3-2, the last three rounds synthetic only), round 7 is for information:
 what it finds is verified and logged in `docs/OPEN_ISSUES.md`. Implemented on
 `feat/shelfmark-prefix-scope` (`044e0885`, on top of PR #400's head `edb3ea61`), merged with
-master-main after #400 and #401; PR #402 (not merged). Builds on `docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md`, whose helpers it reuses.
+master-main after #400 and #401; merged as PR #402 (`a6b7202e`, 2026-10-18). Builds on `docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md`, whose helpers it reuses.
 
 ## 1. Problem (open issue, P3, logged 2026-10-18)
 

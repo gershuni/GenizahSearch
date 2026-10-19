@@ -7,6 +7,19 @@ The authoritative release history is [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
+## What's New in Version 9.6.2? (the README's own text, 2026-10-12 to 2026-10-19)
+
+**Faster Extended and Maximum on the desktop** (installer 9.6.2), and GenizahSearch in ChatGPT:
+
+- **Desktop: Extended and Maximum searches run many times faster**, with the same results, and
+  Stop answers at once
+- **Desktop: the word gap is at most 10** in Exact, Variants and Fuzzy searches; Responsa-style and
+  Regex searches have no limit
+- **GenizahSearch in ChatGPT**: add the app from [genizahsearch.com/ai](https://genizahsearch.com/ai)
+  and ask about the manuscripts in your own words
+
+---
+
 ## What's New in Version 9.6.1? (the README's own text, 2026-10-11 to 2026-10-12)
 
 **Faster Extended and Maximum**, on the desktop (installer 9.6.1) and the website:

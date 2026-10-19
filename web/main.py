@@ -713,8 +713,7 @@ from web.atlas_assets import (
     atlas_manifest_etag,
 )
 from web.discovery_assets import load_discovery_state, discovery_available  # noqa: F401 -- discovery_available is the Phase 135+ gating predicate; no surface calls it yet in Phase 134 (NO discovery UI ships this phase), imported now so downstream plans wire it without touching this import block
-from web.passage_assets import (load_passage_state, passage_available,  # Phase 145: passage-matching parallels search
-                                passage_multi_witness_available)
+from web.passage_assets import load_passage_state, passage_available  # Phase 145: passage-matching parallels search
 from web.start_content import demo_url, load_start_content  # the /start page's own prepared parallels demo, reused by the What's New toast
 from web.ai_listings import (current as ai_listings_current, page_description as ai_page_description,  # the live AI listings
                              whats_new_suffix as ai_whats_new_suffix)  # (docs/plans/AI_LISTINGS_LAUNCH_PLAN.md)
@@ -737,7 +736,7 @@ from version import APP_VERSION
 # Names the CONTENT wave, not a release: the seen flag is stored per browser
 # as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
-WHATS_NEW_VERSION = "9.6.1-variants"
+WHATS_NEW_VERSION = "9.7.0-shelfmarks"
 # The What's New entry for each combination of live AI listings (web/ai_listings.py).
 AI_LAUNCH_WHATS_NEW = {
     ('ChatGPT', 'Claude'): "New: GenizahSearch in ChatGPT and Claude - ask about the manuscripts in your own words, from the AI tools page.",
@@ -1700,23 +1699,13 @@ def create_layout():
         pass
 
     _new_surfaces = []
-    # v9.6.1 (2026-10-11), ungated: Extended and Maximum are faster for every reader.
-    # Approved with the release texts. First, as the newest.
-    _new_surfaces.append(
-        (tr("New: Extended and Maximum variant searches are much faster"), '/search'))
-    # v9.6.0 (2026-10-07), ungated: the search changes reach every reader. The
-    # owner's own sentence; it replaces the 9.5.0 search entry.
-    _new_surfaces.append(
-        (tr("New: first results while the search runs, and further improvements "
-            "to search quality"), '/search'))
+    # v9.7.0 (2026-10-18): the 9.6.1 and 9.6.0 search entries and the
+    # multi-witness entry were dropped with the release texts (owner), so the
+    # list is the new entry (inserted first, below), the AI one and this one.
     if passage_available():
         _new_surfaces.append(
             (tr("Letter-level parallels search — faster and more precise"),
              _parallels_demo_target))
-    if passage_multi_witness_available():
-        _new_surfaces.append(
-            (tr("Get the most from the parallels search by entering several "
-                "textual witnesses"), _parallels_demo_target))
 
     # v9.2.0, and it is UNGATED -- the owner's decision, and the only honest
     # shape for it: the print view and the citation button are on for every
@@ -1746,6 +1735,10 @@ def create_layout():
         _new_surfaces.append(
             (tr("New: ask the Genizah in ChatGPT - the GenizahSearch GPT, a research "
                 "skill for other AI assistants, and the public API, from the AI tools page."), '/ai'))
+    # v9.7.0 (2026-10-18), ungated: the owner's own Hebrew. First, as the newest,
+    # so it goes in after the AI entry has taken position 0.
+    _new_surfaces.insert(0, (tr("New: support for shelfmarks in the NLI catalogue's style, "
+                                "and thumbnails in the visual join suggestions"), '/search'))
 
     _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
     # Each listing launch lights the unread dot again (whats_new_suffix).

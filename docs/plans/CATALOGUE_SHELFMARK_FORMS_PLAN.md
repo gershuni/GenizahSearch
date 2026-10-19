@@ -1,7 +1,7 @@
 # Catalogue-form shelfmarks: accept shelfmarks as the NLI catalogue writes them (step 1)
 
 **Status:** rev. 5, **implemented** on branch `feat/catalogue-shelfmark-forms` (2026-10-18), owner
-defaults for all four §9 questions; PR not yet opened. Codex round 4 (on rev. 4): SHIP WITH FIXES,
+defaults for all four §9 questions; merged as PR #400 (`55ced1a1`, 2026-10-18). Codex round 4 (on rev. 4): SHIP WITH FIXES,
 folded in. What the implementation measured and where it departs from the text is in §11.
 **Date:** 2026-10-18.
 **Origin:** a user asked whether genizahsearch can take a shelfmark "as it appears in the library

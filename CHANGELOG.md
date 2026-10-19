@@ -4,97 +4,91 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-Everything under `[Unreleased]` is merged to master-main (2026-10-18). None of it is released, and
-the website changes are not deployed.
+## [9.7.0] - 2026-10-19 — Conditions in Composition Search, and letter-level search in My Library
 
-## [Unreleased] -- Visual Similarity: thumbnails, and filters that apply (web, PR #401)
+Composition Search's letter-level method takes conditions; letter-level search works in My
+Library; shelfmarks as the NLI catalogue writes them are found everywhere; the website's Visual
+Similarity window shows thumbnails. Desktop: installer 9.7.0. PRs #397-#402.
 
-The browse page's Visual Similarity window can show its look-alikes as a grid of low-resolution thumbnails (List / Thumbnails switch, remembered for the visitor), so a filtered set can be scanned by eye before opening any of it; the image opens the fragment in a new tab. Its Sort, Library and Domain choices had never applied (the list stayed unfiltered and unsorted, with an error logged on each change); they now do, in both views. From a researcher's request (owner, 2026-10-18).
+### Desktop: conditions in Composition Search (PR #399)
 
-## [Unreleased] -- Shelfmarks as the NLI catalogue writes them (both, PR #400)
+- **Up to four extra texts**, each "must appear" or "must not appear", on the same image, on an
+  adjacent image, or anywhere in the same manuscript. A search can set aside the works that quote
+  it (Halakhot Gedolot and the Rif when searching the Talmud), ask for two texts on neighbouring
+  images, or ask for several texts in one manuscript. Conditions apply to the Genizah corpus.
+- **One "Filter texts" menu** — Quoted texts... / Quoting texts... / Add condition... — replaces
+  the "Filter Text" button. Quoting texts... has its own dialog, with the Sefaria library browser
+  under "Load from Sefaria..." (a book, then the passage), custom texts and files; it defaults to
+  "On the same image", and each text keeps its own name.
+- **Own text:** a quoting text removes a page only where it has at least 40 letters of its own
+  there that the main text does not also cover, so a work that cites the main text itself (the
+  Rif quoting the Talmud) leaves the main text's own manuscripts in place.
+- **Removed pages, and pages a condition could not fully check**, are shown in their own groups,
+  each with its reason; a page that was not fully checked is never counted as clean.
+- Results keep every page, also where two image sets of one manuscript share a page number.
+- Plan and decisions: `docs/plans/COMPOSITION_CONDITIONS_PLAN.md`.
 
-A shelfmark typed or pasted the way the NLI catalogue writes it (`Cambridge University Library,
-Ms. T-S K 08.026`, `Mosseri, Jacques, Ms. VIII.402`, `Library of the Hungarian Academy of
-Sciences, Ms. 06`) now finds its record on every shelfmark input of both apps: Shelfmark search
-(also `/api/search` and MCP), the exclusion lists, the Fragment Puzzle, Joins, Share a Discovery,
-the reading desk and the Joins Lab load box. One fallback (`shared/catalog_shelfmark.py`) runs
-only after the resolver found no exact match, so every shelfmark that resolved before still
-resolves to the same record (1,219 recorded inputs), and the fallback keeps to a library named in
-the input. Where a form fits more than one record, a picker asks
-instead of silently taking the first, and Cancel adds nothing; an ambiguous exclusion line stays
-unresolved, and the Joins Lab `?shelfmark=` link still loads the first match. Autocomplete is
-unchanged. Plan: `docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md`.
+### Desktop: letter-level search in My Library (PR #397)
 
-## [Unreleased] -- Settings: turning telemetry on starts it (desktop, PR #398)
+- Based on a prototype by Yehudah Seewald. My Library gets its own letter-level index, built in the
+  background from the texts it has already extracted: Settings > "Build / Rebuild Letter-Level
+  Index for My Library" shows the page count and disk space first, then progress and Cancel.
+- Composition Search can search **Genizah, My Library or All**; All merges the two lists by score.
+  My Library rows show Src `LOCAL` with the file name and page; the viewer highlights the match,
+  Word exports carry page labels, and the rows can be promoted to witnesses, in auto-expand and
+  Recursive search too.
+- After a scan that changes My Library, a notice says the index needs rebuilding; it never
+  rebuilds by itself.
+- Owner rulings (2026-10-16): the Genizah page checks (the 80-letter floor, target sheets, library
+  stamps) are off for My Library builds; Genizah-side restrictions such as the library filter do
+  not apply to its rows; conditions stay Genizah-only (the search asks you to switch to Genizah or
+  remove them). Duplicate-photograph demotion is off for My Library rows, since a library often
+  holds near-identical pages.
+- Fixed on the way: promoting checked Genizah results to witnesses; a cancelled Genizah index
+  build that had already finished keeps its index.
 
-Turning telemetry on in Settings saved the consent and then failed silently, so the app sent
-nothing for the rest of that session. The Settings dialog now runs the main window's startup
-telemetry step.
+### Both: shelfmarks as the NLI catalogue writes them (PRs #400, #402)
 
-## [Unreleased] -- Letter-level search for My Library (desktop, PR #397, merged through PR #399)
+- `Cambridge University Library, Ms. T-S K 08.026`, `Mosseri, Jacques, Ms. VIII.402` and
+  `Library of the Hungarian Academy of Sciences, Ms. 06` find their records on every shelfmark
+  input: Shelfmark search (also `/api/search` and MCP), the exclusion lists, the Fragment Puzzle,
+  Joins, Share a Discovery, the reading desk and the Joins Lab load box.
+- One fallback (`shared/catalog_shelfmark.py`) runs only after the resolver found no exact match,
+  so every shelfmark that resolved before resolves to the same record (1,219 recorded inputs), and
+  the fallback keeps to a library named in the input.
+- Where a form fits more than one record, a picker asks instead of taking the first; Cancel adds
+  nothing. An ambiguous exclusion line stays unresolved; the Joins Lab `?shelfmark=` link loads
+  the first match. Autocomplete is unchanged. Plan: `docs/plans/CATALOGUE_SHELFMARK_FORMS_PLAN.md`.
+- **A library named at the start of a shelfmark** (`Halper 77`, `The University of Manchester
+  Library, Ms. P 45`) now narrows the exact answer to that library's records, and adds records
+  that store the whole typed text; where nothing in that library carries the typed numbers, the
+  answer is the same as before. Shelfmarks without a library name are unchanged (PR #402; plan
+  `docs/plans/SHELFMARK_PREFIX_SCOPE_PLAN.md`).
 
-Letter-level Composition Search now works on My Library too, not only on the Genizah corpus,
-from a patch by Yehudah Seewald. My Library gets its own letter-level index, built in the
-background from the texts it has already extracted: Settings has "Build / Rebuild Letter-Level
-Index for My Library", which shows the page count and disk space first, then progress and Cancel
-(a 3,401-record library took 3.6 s and 143 MB). Composition Search can search Genizah, My Library
-or All; All merges the two lists by score. My Library rows show Src `LOCAL` with the file name and
-page, the viewer highlights the match, Word exports carry page labels, and the rows can be
-promoted to witnesses, in auto-expand and Recursive search too. After a scan that changes My
-Library, a notice says the index needs rebuilding; it never rebuilds by itself. Owner rulings
-(2026-10-16): the Genizah page checks (the 80-letter floor, target sheets, library stamps) are off
-for My Library builds, Genizah-side restrictions such as the library filter do not apply to its
-rows, and conditions stay Genizah-only (the search asks you to switch to Genizah or remove them).
-Duplicate-photograph demotion is also off for My Library rows, since a library often holds
-near-identical pages. Fixed on the way: promoting checked Genizah results to witnesses added
-nothing, and a cancelled Genizah index build that had already finished threw its index away.
-Qt's own buttons and menus (Yes / No / OK / Cancel, the text-field menu) are now Hebrew in the
-Hebrew UI.
+### Website: Visual Similarity (PR #401)
 
-## [Unreleased] -- Composition Search conditions (desktop, with website Help and Word exports; PR #399)
+- The browse page's Visual Similarity window can show its look-alikes as a grid of low-resolution
+  thumbnails (List / Thumbnails, remembered for the visitor); the image opens the fragment in a
+  new tab. Sort, Library and Domain now apply, in both views. From a researcher's request.
 
-Letter-level Composition Search takes up to four extra texts, each "must appear" or "must not
-appear" on the same image, an adjacent image, or anywhere in the same manuscript, so a search can
-drop the works that quote it (Halakhot Gedolot and the Rif when searching the Talmud), ask for two
-texts on neighbouring images, or ask for several texts in one manuscript. Pages a condition removed,
-and pages it could not fully check, are shown in their own groups with the reason. Also: results
-no longer lose a page that shares its number with another image set of the same manuscript.
-One "Filter texts" menu (Quoted texts / Quoting texts / Add condition) now replaces the old
-"Filter Text" button and the conditions strip's own "+ Add condition" (owner, 2026-10-14).
-A must_not condition now removes a page only where the quoting text contributes at least 40
-letters of its own that the main text does not also cover ("own text", owner, 2026-10-14) -- a
-quoting work that cites the main text itself (the Rif quoting the Talmud) no longer drops the
-Talmud's own manuscripts; "Quoting texts..." now defaults to "On the same image".
-"Quoting texts..." now opens its own dialog (owner, 2026-10-15), styled like the Quoted texts
-dialog, with the Sefaria library browser under "Load from Sefaria..." (pick a book, then the
-passage you want) alongside custom text and files -- editing it again shows each text's own name
-rather than "Version 1", "Version 2".
-Help and wording pass (owner, 2026-10-18): Help.html was audited against the program in both
-languages and about 50 places brought in line with what the screen shows (tab and button names
-such as "Browse by Shelfmark" / "Focus Search" / "Add to View", the Responsa mode's Hebrew name,
-the Reading Desk's Hebrew name, stale descriptions of the PGP panel, the Discoveries Center, the
-publish dialog and the XLSX export), plus sections for the Filter texts menu and letter-level
-search in My Library. Hebrew running text now says "הספרייה המקומית" (the tab keeps "הספרייה
-שלי"); "בנייה /" on the three index-building buttons; "מרכז התגליות", "עגן מחדש", "ריווח גמיש",
-and "חיפוש חיבורים" in the resume prompt. The old built-in help texts, shown only when Help.html
-was missing and months out of date, were removed in favour of a short notice that links to the
-website's Help.
-Help, second pass (owner, 2026-10-18): Help.html gains sections for Personal Lists and the
-Community tab, and Focus Search lists all its filters; the website's Help page was audited the same
-way (about 40 places: page names as the menu shows them, the "Search only in..." panel, Search
-History, Joins Lab, Reading Desk, Fragment Puzzle, Lists, Witnesses and others). Fixed on the way:
-the website's Hebrew help showed the Fragment Puzzle sections even when the puzzle is off, the Joins
-Lab "Triage state" filter showed its choices in English, and "חפש רק ב..." / "טוען קטע..." had their
-dots on the wrong side. The desktop Joins Lab size warning now says "אי-התאמת גודל", as the website does.
-Also in this PR: a desktop letter-level search keeps every manuscript it finds (it kept at most
-200, the public API's cap, and never said so -- Birkat Hamazon found 867 and kept 200). Among
-duplicate photographs, a record's own photograph is now kept over a copy on a shared microfilm
-reel (three RNL reels are attached to every box record on them); the website's passage method
-gets this with its next deploy. Hebrew Word exports sit flush right on the desktop and the website
-(Word read the old right alignment of a right-to-left paragraph as flush left), the desktop's carry
-the full MiDRASH citation, and desktop exports ask when the file is open in Word or Excel.
-Plan and decisions: `docs/plans/COMPOSITION_CONDITIONS_PLAN.md`. The pre-release checklist is in
-the PR #399 description.
+### Also
+
+- **Letter-level search (desktop)** lists every manuscript it finds, in single, batch, conditions
+  and All searches and after a witness is removed.
+- **Duplicate photographs:** among copies of one photograph, a record's own image set is kept
+  over a microfilm reel attached to many records (three RNL reels). The website's passage method
+  shares this.
+- **Hebrew Word exports** are flush right on the desktop and the website; the desktop's carry the
+  full MiDRASH citation, and desktop exports ask when the file is open in Word or Excel.
+- **Qt's own buttons and menus** (Yes / No / OK / Cancel, the text-field menu) are Hebrew in the
+  Hebrew UI.
+- **Help:** Help.html and the website's Help page were checked against the programs in both
+  languages (about 90 places), with new sections for Filter texts, letter-level search in My
+  Library, Personal Lists and the Community tab. Hebrew running text says "הספרייה המקומית" (the
+  tab keeps "הספרייה שלי"). Without Help.html the desktop now shows a short notice linking to the
+  website's Help. The website's Hebrew Help follows `WEB_PUZZLE_ENABLED`, and the Joins Lab
+  "Triage state" choices are in Hebrew.
+- **Settings:** turning telemetry on starts it in the same session (PR #398).
 
 ---
 

@@ -5495,7 +5495,7 @@ TRANSLATIONS.update({
 })
 
 # Composition Search conditions (docs/plans/COMPOSITION_CONDITIONS_PLAN.md).
-# Proposed wording; the owner approves it before release.
+# Wording approved by the owner (2026-10-18).
 TRANSLATIONS.update({
     "Conditions": "תנאים",
     "Conditions work only with letter-level search. Switch the method to "
@@ -5523,7 +5523,7 @@ TRANSLATIONS.update({
 })
 
 # Composition Search conditions, step 4 (strip, dialog, result groups).
-# Proposed wording; the owner approves it before release.
+# Wording approved by the owner (2026-10-18).
 TRANSLATIONS.update({
     'More conditions': 'תנאים נוספים',
     '+ Add condition': '+ הוסף תנאי',
@@ -5599,7 +5599,7 @@ TRANSLATIONS.update({
 # Composition Search conditions: the "Filter texts" menu (owner decision
 # 2026-10-14), replacing the old "Filter Text" button and the conditions
 # strip's own "+ Add condition" with three fixed-requirement entry points.
-# Proposed wording (owner approval pending)
+# Wording approved by the owner (2026-10-18).
 TRANSLATIONS.update({
     'Filter texts': 'סנן טקסטים',
     'Quoted texts...': 'מקורות מצוטטים...',
@@ -5617,7 +5617,7 @@ TRANSLATIONS.update({
 # "Own text" (owner, 2026-10-14): the must_not help line restates the new
 # rule, and the OLD key above ('For "must not appear", give the passages...')
 # is left in place, unreferenced, rather than removed or changed.
-# Proposed wording (owner approval pending)
+# Wording approved by the owner (2026-10-18).
 TRANSLATIONS.update({
     "Paste the quoting work's passage as it is. A page is removed only "
     "where the quoting work has on it one unbroken stretch of at least "
@@ -5630,7 +5630,7 @@ TRANSLATIONS.update({
 # Quoted texts dialog and reuses its Sefaria library browser under
 # "Load from Sefaria...". Reuses the existing "Add Custom Text",
 # "Load from files...", "Remove", "OK" and "Cancel" keys.
-# Proposed wording (owner approval pending)
+# Wording approved by the owner (2026-10-18).
 TRANSLATIONS.update({
     "Quoting texts": "חיבורים מצטטים",
     "Load from Sefaria...": "טען מספריא...",
@@ -5650,7 +5650,7 @@ TRANSLATIONS.update({
         'טען או הדבק את הקטע מהחיבור המצטט שעוסק בטקסט הראשי שלך (למשל רי"ף ברכות 1a-2b), ולא את כל הספר. עמוד יוסר רק אם יש בו רצף אחד של 40 אותיות לפחות מהחיבור המצטט שאינן גם בטקסט הראשי שלך.',
 })
 
-# Letter-level search for My Library (desktop/passage_local.py).
+# Letter-level search for My Library (desktop/passage_local.py). Wording approved by the owner (2026-10-18).
 TRANSLATIONS.update({
     'Build / Rebuild Letter-Level Index for My Library':
         'בנייה / בנייה מחדש של אינדקס לחיפוש ברמת האות בספרייה המקומית',
@@ -5745,8 +5745,8 @@ TRANSLATIONS.update({
         'הוסף תיקיות לספרייה המקומית ובנה להן אינדקס תחילה.',
     'the My Library letter-level index is busy':
         'האינדקס לחיפוש ברמת האות בספרייה המקומית עסוק',
-    # Conditions are Genizah-only (2026-10-16). Proposed wording; the owner
-    # approves it before release.
+    # Conditions are Genizah-only (2026-10-16). Wording approved by the
+    # owner (2026-10-18).
     'Conditions work only when the corpus is Genizah. Switch the corpus to '
     'Genizah, or remove the conditions.':
         'תנאים פועלים רק כשהקורפוס הוא גניזה. החלף את הקורפוס לגניזה, '
@@ -5777,4 +5777,20 @@ TRANSLATIONS.update({
 # Web visual-similarity window: the List / Thumbnails view switch (2026-10-18).
 TRANSLATIONS.update({
     'Thumbnails': 'תמונות ממוזערות',
+})
+
+# v9.7.0 desktop What's New bar and dialog, and the web What's New entry
+# (2026-10-18). Drafted for the release and approved; the bar, the second
+# bullet and the web entry are the owner's own Hebrew.
+TRANSLATIONS.update({
+    "New: more text filter options in Composition Search, and letter-level search in My Library":
+        'חדש: אפשרויות סינון טקסטים חדשות בחיפוש חיבורים, וחיפוש ברמת האות בספרייה המקומית',
+    'Conditions in Composition Search: from the new "Filter texts" menu, add up to four texts that must appear, or must not appear, on the same image, on an adjacent image or in the same manuscript — for example, set aside the works that quote your text, such as the Rif when you search the Talmud, or search only manuscripts that carry parallels to one text on one page and to another text on the other.':
+        'תנאים בחיפוש חיבורים: מהתפריט החדש "סנן טקסטים" אפשר להוסיף עד ארבעה טקסטים שחייבים להופיע, או שאסור שיופיעו, באותה תמונה, בתמונה סמוכה או באותו כתב יד — למשל, להוציא מהתוצאות חיבורים המצטטים את הטקסט שלך, כמו הרי"ף כשמחפשים בתלמוד, או לחפש רק כתבי יד שמכילים מקבילות לטקסט מסוים בעמוד אחד ולטקסט אחר בעמוד השני.',
+    "Fast letter-level search in My Library too: build the index once, and then you can search for compositions quickly in My Library as well (based on a prototype by Yehudah Seewald).":
+        'חיפוש מהיר ברמת האות גם בספרייה המקומית. בונים את האינדקס פעם אחת, ואז ניתן לחפש חיבורים במהירות גם בספרייה המקומית (נוצר על פי אב-טיפוס שיצר יהודה זייבלד).',
+    "Shelfmarks as the NLI catalogue writes them, such as \"Cambridge University Library, Ms. T-S K 08.026\", are found wherever you type or paste a shelfmark; when one fits several records, you choose from a list. A library name at the start, such as \"Halper 77\", leads to that library's record.":
+        'מספרי מדף כפי שהם כתובים בקטלוג הספרייה הלאומית, כמו "Cambridge University Library, Ms. T-S K 08.026", נמצאים בכל מקום שבו מקלידים או מדביקים מספר מדף; כשמספר מדף מתאים לכמה רשומות, בוחרים מתוך רשימה. שם ספרייה בתחילתו, כמו "Halper 77", מוביל לרשומה של אותה ספרייה.',
+    "New: support for shelfmarks in the NLI catalogue's style, and thumbnails in the visual join suggestions":
+        'חדש: תמיכה במספרי מדף בסגנון קטלוג הספרייה הלאומית, והצגת תמונות ממוזערות בהצעות צירופים חזותיים',
 })
