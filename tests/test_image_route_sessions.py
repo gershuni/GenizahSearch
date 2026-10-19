@@ -35,7 +35,7 @@ SYS = '990012345670205171'
 FL = '1234567'
 JPEG = b'\xff\xd8\xff\xe0' + b'\0' * 6000
 EXISTING_COOKIE = {'Cookie': 'session=an-existing-cookie-must-not-be-read-or-reissued'}
-LONG = 'public, max-age=86400'
+LONG = 'public, max-age=604800'
 
 IMAGE_ROUTES = [
     f'/api/nli_image/{FL}',
@@ -174,7 +174,7 @@ def test_the_synthetic_sys_id_204_is_unchanged(stack):
 def test_the_oxford_redirect_to_the_library_is_not_kept(monkeypatch):
     # The Oxford fallback hands the browser the library's own URL when the server
     # fetch fails; a passing failure must not be kept as the answer.
-    monkeypatch.setattr(api, 'IMAGE_HTTP_MAX_AGE', 86400)
+    monkeypatch.setattr(api, 'IMAGE_HTTP_MAX_AGE', 604800)
     route = api._image_cache_headers(lambda: RedirectResponse('https://example.org/i.jpg', 307))
     assert route().headers['cache-control'] == 'no-store'
     image = api._image_cache_headers(lambda: Response(JPEG, media_type='image/jpeg'))
@@ -197,5 +197,5 @@ def test_pages_other_apis_and_the_puzzle_routes_keep_their_sessions(stack, path)
     assert seen['session_in_scope'] == [(path, True)]
 
 
-def test_the_default_lifetime_is_a_day():
-    assert api.IMAGE_HTTP_MAX_AGE == 86400
+def test_the_default_lifetime_is_a_week():
+    assert api.IMAGE_HTTP_MAX_AGE == 604800

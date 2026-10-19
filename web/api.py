@@ -64,10 +64,10 @@ IMAGE_CACHE_MAX_BYTES = max(0, int(os.environ.get('IMAGE_CACHE_MAX_BYTES', str(2
 # 2048 since 2026-10-19 (was 512): ~100 images per library could not hold one Visual
 # Similarity grid. The byte cap is unchanged, so the memory ceiling is too.
 IMAGE_CACHE_MAX_ENTRIES = max(0, int(os.environ.get('IMAGE_CACHE_MAX_ENTRIES', '2048')))
-# Browser and Cloudflare lifetime of SUCCESSFUL image bytes from the library image proxies
-# (was a hard-coded 600). These routes set no session cookie (web/framework_patches.py
-# _is_public_image_route), so the response is the same for every visitor.
-IMAGE_HTTP_MAX_AGE = max(0, int(os.environ.get('IMAGE_HTTP_MAX_AGE', '86400')))
+# Browser and Cloudflare lifetime of SUCCESSFUL image bytes from the library image proxies:
+# a week (owner, 2026-10-19; was a hard-coded 600). These routes set no session cookie
+# (web/framework_patches.py _is_public_image_route), so the answer is the same for everyone.
+IMAGE_HTTP_MAX_AGE = max(0, int(os.environ.get('IMAGE_HTTP_MAX_AGE', '604800')))
 NLI_MEMORY_CACHE_MAX_ENTRIES = max(0, int(os.environ.get('NLI_MEMORY_CACHE_MAX_ENTRIES', '50000')))
 PUZZLE_RATE_LIMIT_BUCKET_TTL = max(60, int(os.environ.get('PUZZLE_RATE_LIMIT_BUCKET_TTL', '3600')))
 
