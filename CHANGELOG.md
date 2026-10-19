@@ -4,87 +4,92 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-## [Unreleased] -- Icons on the Browse page's buttons (web, branch `feat/browse-button-icons`)
+## [9.8.0] - 2026-10-19 — Joins Lab upgrades
 
-The website's Browse page buttons that were text only now carry an icon: Go (`search` on the shelfmark box, an arrow that points the reading direction beside the page number), Submit (`send`, mirrored in Hebrew), the image-source chips (`image` where the chip switches the images shown, `open_in_new` where it opens the library's viewer), the External link row (`open_in_new` after each link), and the Bib. FJMS / Bib. Ktiv (`menu_book`), Catalog rec. (`info_outline`), Measurements (`straighten`) and Visual Similarity (`compare`) chips. On a phone (below 600px) no row gets wider: Go and Submit show the icon alone and keep their name for screen readers, and the chips and links show the text alone. A chip that opens a library's viewer now carries the icon itself, so the separate icon-only button beside it is gone, and the ones that remain have an accessible name. The desktop app is unchanged. From the owner (2026-10-19); test `tests/render_smoke/test_browse_button_icons_render_smoke.py`.
+The Joins Lab sorts and filters by library and domain, has three card sizes, and a fuller
+Compare window, on the website and in the app. On the website a link reopens the Lab's screen
+and Browse opens in a new tab. The homepage search box opens shelfmarks and system IDs, the
+Browse page's buttons carry icons, and Visual Similarity has thumbnail sizes. Desktop: installer
+9.8.0. PRs #403-#416.
 
-## [Unreleased] -- Joins Lab: sort and filter by library and domain (web + desktop, branch `feat/joins-lab-library-domain`)
+### Joins Lab, website and desktop
 
-As in the website's Visual Similarity window. A fragment's domain is the first of its
-domains in the FJMS data, shown in Hebrew in the Hebrew interface; it comes with the size
-and material data already fetched for the candidates.
+- **Sort and filter by library and domain** (PRs #412, #416), as in the website's Visual
+  Similarity window. Sort keeps the search's order (Rank) or groups the candidates by Library or
+  by Domain; within a group the search's order is kept, and candidates with no library or domain
+  come last. A fragment's domain is the first of its domains in the FJMS data, in Hebrew in the
+  Hebrew interface. Cards show the domain (website) or "library · domain" (desktop).
+  - Website: Library and Domain sit in the results toolbar, next to Sort. Each list shows every
+    value in the results with its count and takes several values; a value kept from an earlier
+    search that the new results do not have stays listed with a count of 0, so it can be cleared.
+    The other filters are under "More filters…", which shows how many of them are on. When the
+    filters leave no candidates, the toolbar stays, with "No candidates match these filters.", so
+    they can be undone.
+  - Desktop: Sort is next to "Table view", for both views, and is kept in the Lab session.
+    Library and Domain are in the Filter dialog, one value each, like Material. Clear resets
+    Library, Domain and Sort.
+- **Card sizes** (PR #411): Small / Medium / Large in the grid view, remembered. Website: Medium
+  is the grid as it was; Small puts four cards in a row on a wide screen, Large two, with taller
+  thumbnails. Desktop: five, four (as before) or three cards in a row.
+- **A fuller Compare window** (PR #407). Each side has a copy button by the shelfmark; one short
+  line: library · domain · date · size · material; and links to Ktiv, the holding library's own
+  viewer, the Princeton Geniza Project and, on the desktop, genizahsearch.com. The details come
+  from local data only (`shared/fragment_details.py`, one rule for both apps).
+- **Fixed in Compare:** the FJMS/PGP buttons kept pointing at the first candidate after
+  Prev/Next; the anchor never showed its title; on the desktop the anchor's info line was empty;
+  on the website both Browse icons were white on a light background.
 
-- **Sort:** the search's order (Rank), or grouped by Library or by Domain. Within a group the
-  search's order is kept, and candidates with no library or domain come last. Website: beside
-  the Filter button above the grid, also followed by the table. Desktop: next to "Table view",
-  for both views, and kept in the Lab session.
-- **Filter:** Library and Domain in the Filter dialog, each option with its count (website:
-  several at once; desktop: one, like Material).
-- **Cards** show the domain (website) or "library · domain" (desktop).
+### Joins Lab, website
 
-## [Unreleased] -- Image sizes in Visual Similarity and the Joins Lab (web + desktop, branch `feat/image-size-controls`)
+- **Copy Link** (PR #408), in the toolbar and in the Compare window's header, copies an address
+  that reopens the same screen for anyone: the fragment and its page, the search (both sides, the
+  type, Variants and the options), Visual Similarity, the filter, Grid or Table, the page of
+  results, and the pair when Compare is open. Opening a link runs the search again; in a tab that
+  already holds that search, the results come back at once. The address bar follows the screen
+  without adding entries to the browser history.
+  - Marks go into a link only when "Include my marks" is ticked (off by default). The recipient
+    sees them for that visit only, with a note saying so, and they are never saved; the
+    recipient's own marks take precedence.
+  - A link is checked, capped and size-limited before anything in it is used
+    (`web/joins_lab_link.py`); one whose screen cannot be read still opens its fragment, with a
+    note.
+- **Browse in a new tab** (PR #407): the Browse icon on a candidate card and on a Known Joins row
+  is a real link that opens the fragment in a new tab, so the Lab stays as it was. Ctrl+click,
+  middle-click and "Open in new tab" work too.
+- The Filter dialog's lists take the dialog's width and show their names (PR #415).
+- Decisions: `docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md`.
 
-- **Website, Visual Similarity window:** the thumbnail view has Small / Medium / Large
-  thumbnails (Small is the size they had), and a button beside the original enlarges its image
-  to about half the window and back. Both choices are remembered for the visitor.
-- **Website, Joins Lab:** the grid view has a card size, Small / Medium / Large. Medium is the
-  grid as it was; Small puts four cards in a row on a wide screen, Large two, with taller
-  thumbnails fetched at 600 px. Remembered for the visitor.
-- **Desktop, Joins Lab:** the same three card sizes in the grid view, next to "Table view":
-  five cards in a row, four (as before), or three with larger thumbnails. Remembered in the
-  app's settings.
-- The website's stored size is read defensively: a value that is not one of the three sizes is
-  the default, never an error.
+### Website
 
-## [Unreleased] -- Fragment images can be kept by Cloudflare and browsers (web, branch `feat/cacheable-image-routes`)
+- **The homepage search box** (PR #406) goes where the input belongs: Hebrew or Arabic text runs
+  a full-text search as before, a system ID (all digits, starting 99) opens that manuscript, and
+  anything else is looked up as a shelfmark by the Browse page. The placeholder reads "Text,
+  shelfmark or system ID". Routing: `web/home_query.py::home_query_target`.
+- **Icons on the Browse page's buttons** (PR #410): Go, Submit, the image-source chips, the
+  external links, and the Bib. FJMS / Bib. Ktiv / Catalog rec. / Measurements / Visual Similarity
+  chips. On a phone no row gets wider: Go and Submit show the icon alone and keep their name for
+  screen readers, and the chips and links show the text alone. A chip that opens a library's
+  viewer carries the icon itself, so the separate icon-only button beside it is gone.
+- **Visual Similarity** (PRs #404, #411): Small / Medium / Large thumbnails, and a button that
+  enlarges the original to about half the window and back, both remembered for the visitor;
+  domain names in Hebrew in the Hebrew interface, and a count on each Library and Domain option.
+- **Fragment images can be cached** (PR #409): the six library image routes no longer set the
+  session cookie, and their images are kept a week (`Cache-Control: public, max-age=604800`, new
+  `IMAGE_HTTP_MAX_AGE`; was 600 s). A 404, "no image", an error or the Oxford redirect is
+  `no-store`. The in-memory image cache holds 2048 entries (was 512) under the same 256 MB cap.
+  Cloudflare keeps them only once a Cache Rule makes these paths eligible.
 
-The six library image routes (`/api/nli_image`, `/api/nli_image_by_sysid`, `/api/cambridge_image`, `/api/manchester_image`, `/api/jts_image`, `/api/oxford_image`) no longer set the session cookie: none of them reads the session, user storage or sign-in, so the answer is the same for every visitor (`web/framework_patches.py::_is_public_image_route`, an anchored path pattern; the puzzle routes are not in it). Image bytes are now kept a week (`Cache-Control: public, max-age=604800`, the owner's choice, new `IMAGE_HTTP_MAX_AGE`; was 600 s); a 404, "no image", error or the Oxford redirect is `no-store`; the synthetic sys_id 204 is unchanged (`web/api.py::_image_cache_headers`). The in-memory image cache holds 2048 entries (was 512) under the same 256 MB byte cap. Cloudflare keeps them only once a Cache Rule makes these paths eligible (they have no file extension). Step (a) of PR 6 of the Joins Lab / Visual Similarity plan; the disk store, step (b), waits on the owner. Pages, other `/api/*` routes and auth still set the cookie.
+### Internal
 
-## [Unreleased] -- Joins Lab: a link that reopens the screen (web, branch `feat/joins-lab-share-link`)
+- CI: the tests job runs as three shards per OS, with one combined `tests` check; superseded PR
+  runs are cancelled (PRs #403, #414).
+- Changelog entries go in `changelog.d/`, one file per PR, and `scripts/collect_changelog.py
+  --apply` folds them in at release (PR #414).
+- A failing render-smoke test now fails in seconds instead of hanging its lane (PR #413); the
+  Browse-icons render test no longer reads a local `nli_crossref.db`.
+- The issue tracker was trimmed (PR #405).
 
-- **Copy Link** in the Joins Lab toolbar, and in the Compare window's header, copies an address
-  that reopens the same screen for anyone. The address carries:
-  - the fragment and its page;
-  - the search (both sides, the type, Variants and the options);
-  - Visual Similarity, the filter, Grid or Table, and the page of results;
-  - the pair, when Compare is open.
-- **Opening a link runs the search again** and shows that screen. If the same tab already holds
-  that search for that fragment, as after Back from the puzzle or a reload, the results come back
-  at once without running it.
-- **The address bar follows the screen** as you work, without adding entries to the browser
-  history.
-- **Marks** go into a link only when "Include my marks" is ticked (off by default).
-  - The recipient sees the sender's marks for that visit only, with a note saying so. They are
-    never saved.
-  - The recipient's own marks for that fragment stay theirs and take precedence.
-- A link whose screen cannot be read still opens its fragment, with a note saying so. A link is
-  checked, capped and size-limited before anything in it is used (`web/joins_lab_link.py`).
-- Decision record: `docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md` (PR 2).
-
-## [Unreleased] -- Joins Lab: Browse in a new tab, and a fuller Compare window (web + desktop, branch `feat/joins-lab-links-compare`)
-
-- **Web Joins Lab:**
-  - The Browse icon on a candidate card and on a Known Joins row opens the fragment in a new tab,
-    so the Lab stays as it was.
-  - They are real links, so Ctrl+click, middle-click and "Open in new tab" work too. Before, a
-    click replaced the Lab, and so did Ctrl+click (a user's report).
-- **Compare window, web and desktop.** Each side now has:
-  - a copy button by the shelfmark;
-  - one short line: library · domain · date · size · material;
-  - a row of links: Ktiv, the holding library's own viewer, the Princeton Geniza Project, and
-    genizahsearch.com on the desktop.
-  The details come from local data only (`shared/fragment_details.py`, one rule for both apps).
-- **Fixed:**
-  - On the website, both Browse icons in Compare were white on a light background, visible only
-    in the dark theme.
-  - The FJMS/PGP buttons kept pointing at the first candidate after Prev/Next.
-  - The anchor never showed its title.
-  - On the desktop, the anchor's info line was empty.
-- Decisions for this and the next five PRs: `docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md`.
-
-## [Unreleased] -- The homepage search box opens shelfmarks and system IDs (web, branch `claude/fervent-curie-oip2lk`)
-
-The search box on the homepage now goes where the input belongs: Hebrew or Arabic text runs a full-text search as before, a system ID (all digits, starting 99) opens that manuscript, and anything else is looked up as a shelfmark by the Browse page, with its usual answers (the manuscript, a "Select Manuscript" list, or "No manuscript found" with the shelfmark left in the box to correct). The placeholder now reads "Text, shelfmark or system ID", short enough to fit the box on a phone. Routing: `web/home_query.py::home_query_target`. From the owner (2026-10-19).
+---
 
 ## [9.7.0] - 2026-10-19 — Conditions in Composition Search, and letter-level search in My Library
 

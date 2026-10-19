@@ -5823,3 +5823,19 @@ TRANSLATIONS.update({
     "New: support for shelfmarks in the NLI catalogue's style, and thumbnails in the visual join suggestions":
         'חדש: תמיכה במספרי מדף בסגנון קטלוג הספרייה הלאומית, והצגת תמונות ממוזערות בהצעות צירופים חזותיים',
 })
+
+# v9.8.0 desktop What's New bar and dialog, and the web What's New entry
+# (2026-10-19). Drafted for the release and approved; the web entry opens with
+# the owner's own Hebrew.
+TRANSLATIONS.update({
+    "New in the Joins Lab: sort and filter by library and domain, card sizes, and a fuller Compare window":
+        'חדש במעבדת הצירופים: מיון וסינון לפי ספרייה ותחום, גודל כרטיסים וחלון השוואה מלא יותר',
+    'Sort and filter the Joins Lab by library and domain: next to "Table view", keep the search\'s order or group the candidates by library or by domain; the Filter dialog adds Library and Domain, and each card shows its library and domain.':
+        'מיון וסינון במעבדת הצירופים לפי ספרייה ותחום: ליד "תצוגת טבלה" אפשר לשמור על סדר החיפוש או לקבץ את המועמדים לפי ספרייה או לפי תחום; בחלון הסינון נוספו ספרייה ותחום, וכל כרטיס מציג את הספרייה והתחום שלו.',
+    "Three card sizes in the grid view: five, four or three cards in a row, with larger thumbnails in the largest size. The app remembers your choice.":
+        'שלושה גדלים של כרטיסים בתצוגת הרשת: חמישה, ארבעה או שלושה כרטיסים בשורה, ובגודל הגדול התמונות גדולות יותר. התוכנה זוכרת את הבחירה.',
+    "A fuller Compare window: each side has a copy button by the shelfmark, one line with library, domain, date, size and material, and links to Ktiv, the holding library's viewer, the Princeton Geniza Project and genizahsearch.com.":
+        'חלון השוואה מלא יותר: בכל צד יש כפתור העתקה ליד מספר המדף, שורה אחת עם ספרייה, תחום, תאריך, גודל וחומר, וקישורים לכתיב, למציג של הספרייה שמחזיקה בקטע, לפרויקט הגניזה של פרינסטון ול-genizahsearch.com.',
+    "New in the Joins Lab and the Visual Similarity window: sort and filter by library and domain, image and card sizes, a link to share the screen, and a fuller Compare window":
+        'חדש במעבדת הצירופים ובחלונית הדמיון החזותי: מיון וסינון לפי ספרייה ותחום, בחירת גודל לתמונות ולכרטיסים, קישור לשיתוף המסך וחלון השוואה מלא יותר',
+})

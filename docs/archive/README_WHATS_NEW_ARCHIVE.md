@@ -7,6 +7,19 @@ The authoritative release history is [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
+## What's New in Version 9.7.0? (the README's own text, 2026-10-19)
+
+**Conditions in Composition Search, and letter-level search in My Library** (installer 9.7.0):
+
+- **Desktop: conditions in Composition Search** — texts that must appear, or must not appear, on
+  the same image, an adjacent image or in the same manuscript, from the new "Filter texts" menu
+- **Desktop: letter-level search in My Library**, alone or together with the Genizah
+- **Shelfmarks as the NLI catalogue writes them** are found on every shelfmark input, in the app
+  and on the website
+- **Website: Visual Similarity as thumbnails**, with its Sort, Library and Domain filters
+
+---
+
 ## What's New in Version 9.6.2? (the README's own text, 2026-10-12 to 2026-10-19)
 
 **Faster Extended and Maximum on the desktop** (installer 9.6.2), and GenizahSearch in ChatGPT:

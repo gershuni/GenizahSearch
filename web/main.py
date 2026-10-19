@@ -736,7 +736,7 @@ from version import APP_VERSION
 # Names the CONTENT wave, not a release: the seen flag is stored per browser
 # as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
-WHATS_NEW_VERSION = "9.7.0-shelfmarks"
+WHATS_NEW_VERSION = "9.8.0-joins-lab"
 # The What's New entry for each combination of live AI listings (web/ai_listings.py).
 AI_LAUNCH_WHATS_NEW = {
     ('ChatGPT', 'Claude'): "New: GenizahSearch in ChatGPT and Claude - ask about the manuscripts in your own words, from the AI tools page.",
@@ -1702,6 +1702,7 @@ def create_layout():
     # v9.7.0 (2026-10-18): the 9.6.1 and 9.6.0 search entries and the
     # multi-witness entry were dropped with the release texts (owner), so the
     # list is the new entry (inserted first, below), the AI one and this one.
+    # v9.8.0 (2026-10-19): the 9.8.0 entry goes in above the 9.7.0 one.
     if passage_available():
         _new_surfaces.append(
             (tr("Letter-level parallels search — faster and more precise"),
@@ -1739,6 +1740,12 @@ def create_layout():
     # so it goes in after the AI entry has taken position 0.
     _new_surfaces.insert(0, (tr("New: support for shelfmarks in the NLI catalogue's style, "
                                 "and thumbnails in the visual join suggestions"), '/search'))
+    # v9.8.0 (2026-10-19), ungated: opens with the owner's own Hebrew. First,
+    # with the 9.7.0 entry kept below it (owner). It leads to the Joins Lab:
+    # the Visual Similarity window is a dialog inside Browse, with no page.
+    _new_surfaces.insert(0, (tr("New in the Joins Lab and the Visual Similarity window: sort and "
+                                "filter by library and domain, image and card sizes, a link to "
+                                "share the screen, and a fuller Compare window"), '/joins-lab'))
 
     _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
     # Each listing launch lights the unread dot again (whats_new_suffix).

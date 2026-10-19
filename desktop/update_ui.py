@@ -99,7 +99,7 @@ class UpdateNotificationBar(QFrame):
 # keeps the value and shows nothing to whoever already read it (9.6.0, owner
 # 2026-10-07: no desktop What's New). Change it together with the bar and dialog
 # texts.
-WHATS_NEW_CONTENT_VERSION = "9.7.0"
+WHATS_NEW_CONTENT_VERSION = "9.8.0"
 
 
 class WhatsNewBar(QFrame):
@@ -173,7 +173,9 @@ class WhatsNewBar(QFrame):
         # v9.6.2: faster again -- the matcher changed, not the pattern -- so the bar
         # says so in one line; the dialog adds the word-gap limit (owner, 2026-10-12).
         # v9.7.0: the owner's own Hebrew sentence (2026-10-18).
-        self.lbl_msg.setText(tr("New: more text filter options in Composition Search, and letter-level search in My Library"))
+        # v9.8.0: the Joins Lab only -- the desktop half of the release
+        # (approved with the release texts, 2026-10-19).
+        self.lbl_msg.setText(tr("New in the Joins Lab: sort and filter by library and domain, card sizes, and a fuller Compare window"))
         self.show()
 
     def on_learn_more(self):
@@ -306,14 +308,13 @@ class WhatsNewDialog(QDialog):
         layout.addWidget(title)
 
         is_heb = CURRENT_LANG == 'he'
-        # v9.7.0 (2026-10-18). Three bullets: conditions, My Library letter-level
-        # (the owner's own Hebrew, with the credit), catalogue-form shelfmarks. The
-        # owner cut the fourth (smaller fixes); the rest is in the CHANGELOG, README
-        # and GitHub release.
+        # v9.8.0 (2026-10-19). Three bullets, the desktop's Joins Lab changes:
+        # library/domain sort and filter, card sizes, the fuller Compare window.
+        # The website-only changes are in the CHANGELOG, README and GitHub release.
         items = [
-            tr("Conditions in Composition Search: from the new \"Filter texts\" menu, add up to four texts that must appear, or must not appear, on the same image, on an adjacent image or in the same manuscript — for example, set aside the works that quote your text, such as the Rif when you search the Talmud, or search only manuscripts that carry parallels to one text on one page and to another text on the other."),
-            tr("Fast letter-level search in My Library too: build the index once, and then you can search for compositions quickly in My Library as well (based on a prototype by Yehudah Seewald)."),
-            tr("Shelfmarks as the NLI catalogue writes them, such as \"Cambridge University Library, Ms. T-S K 08.026\", are found wherever you type or paste a shelfmark; when one fits several records, you choose from a list. A library name at the start, such as \"Halper 77\", leads to that library's record."),
+            tr("Sort and filter the Joins Lab by library and domain: next to \"Table view\", keep the search's order or group the candidates by library or by domain; the Filter dialog adds Library and Domain, and each card shows its library and domain."),
+            tr("Three card sizes in the grid view: five, four or three cards in a row, with larger thumbnails in the largest size. The app remembers your choice."),
+            tr("A fuller Compare window: each side has a copy button by the shelfmark, one line with library, domain, date, size and material, and links to Ktiv, the holding library's viewer, the Princeton Geniza Project and genizahsearch.com."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

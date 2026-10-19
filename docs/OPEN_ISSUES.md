@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-19 (`claude/blissful-goldberg-mn4em0`) -- a failing NiceGUI render-smoke test now fails in seconds instead of hanging its lane (PR #410's 29-minute windows-latest hang): the harness no longer uses `asyncio.run()`, whose exit waited without limit on page tasks that swallow cancellation. The "A render-smoke file can hang a test lane" row is fixed and archived. P3 -1 -- 220.
+> **Last Updated:** 2026-10-19 (release v9.8.0, "Joins Lab upgrades", both) -- version bump and release texts only; no rows changed. 220 open.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
