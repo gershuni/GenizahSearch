@@ -8,8 +8,9 @@ Two files never conflict.
 - **Name:** `YYYY-MM-DD-<short-lowercase-slug>.md`, e.g.
   `2026-10-19-joins-lab-library-domain.md`.
 - **Content:** exactly the entry `CHANGELOG.md` would have held. The first line
-  is `## [Unreleased] -- <title> (<web|desktop|both>, branch `<branch>`)`, then
-  the body. `###` subsections are fine; a second `## ` heading is not.
+  is `## [Unreleased] -- <title> (<area>, branch `<branch>`)`, where `<area>` is
+  `web`, `desktop`, `web + desktop` or `ci`; then the body. `###` subsections
+  are fine; a second `## ` heading is not.
 - **Check:** `tests/test_changelog_fragments.py` validates every file here in CI.
 - **Release:** `python scripts/collect_changelog.py --apply` folds the fragments
   into `CHANGELOG.md` as `[Unreleased]` entries, newest first, and deletes them.

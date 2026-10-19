@@ -76,7 +76,22 @@ def test_no_fragments_is_a_no_op(tmp_path):
     assert log.read_text(encoding="utf-8") == CHANGELOG
 
 
+@pytest.mark.parametrize("heading", [
+    "## [Unreleased] -- A change (web, branch `a`)",
+    "## [Unreleased] -- A change (desktop, branch `fix/x`)",
+    "## [Unreleased] -- A change (web + desktop, branch `feat/x-y`)",
+    "## [Unreleased] -- A change (ci, branch `ci/x`)",
+])
+def test_every_area_the_readme_names_is_accepted(heading):
+    assert cc.HEADING_RE.match(heading)
+
+
 @pytest.mark.parametrize("name,text", [
+    ("2026-10-19-b.md", "## [Unreleased] -- No branch (web)\n\n- x\n"),
+    ("2026-10-19-b.md", "## [Unreleased] -- Bad area (CI, branch `x`)\n\n- x\n"),
+    ("2026-10-19-b.md", "## [Unreleased] -- Bad area (both, branch `x`)\n\n- x\n"),
+    ("2026-10-19-b.md", "## [Unreleased] -- No metadata at all\n\n- x\n"),
+    ("2026-10-19-b.md", "## [Unreleased] -- Unquoted (web, branch x)\n\n- x\n"),
     ("2026-10-19-b.md", "## [9.8.0] -- not an Unreleased entry\n\n- x\n"),
     ("2026-10-19-b.md", "## [Unreleased] -- heading only\n"),
     ("2026-10-19-b.md", ENTRY_B + "\n## [Unreleased] -- a second entry\n\n- y\n"),

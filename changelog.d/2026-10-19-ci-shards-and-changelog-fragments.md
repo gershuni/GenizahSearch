@@ -1,4 +1,4 @@
-## [Unreleased] -- Faster CI, and changelog entries that do not conflict (CI, branch `ci/changelog-fragments-split-tests`)
+## [Unreleased] -- Faster CI, and changelog entries that do not conflict (ci, branch `ci/changelog-fragments-split-tests`)
 
 - **The `tests` job runs as three shards per OS.** As one process it took 41-52 min on
   windows-latest and ~25 on Ubuntu, which was the wait on every PR and was paid again on every

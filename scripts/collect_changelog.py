@@ -8,8 +8,9 @@ restarted that PR's CI (2026-10-19: three merges, each restarting every open
 PR's ~50-minute run). Two fragments never conflict.
 
 A fragment is exactly the entry CHANGELOG.md would have held: its first line is
-``## [Unreleased] -- <title> (<web|desktop|both>, branch `<branch>`)``, then the
-body (``###`` subsections are fine, another ``## `` heading is not).
+``## [Unreleased] -- <title> (<area>, branch `<branch>`)`` with <area> one of
+web, desktop, web + desktop or ci, then the body (``###`` subsections are fine,
+another ``## `` heading is not).
 
     python scripts/collect_changelog.py           # show what would be folded in
     python scripts/collect_changelog.py --apply   # write CHANGELOG.md, delete the fragments
@@ -31,6 +32,12 @@ CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 
 NAME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*\.md$")
 HEADING = "## [Unreleased] -- "
+AREAS = ("web", "desktop", "web + desktop", "ci")
+# The whole first line, not just its start: a missing branch or an unknown area
+# would otherwise be folded into CHANGELOG.md and the fragment deleted.
+HEADING_RE = re.compile(
+    r"^## \[Unreleased\] -- \S.*\S \((%s), branch `[^`\s]+`\)$"
+    % "|".join(re.escape(a) for a in AREAS))
 
 
 def fragment_paths(fragment_dir: Path) -> list:
@@ -47,8 +54,9 @@ def problems(path: Path) -> list:
     lines = path.read_text(encoding="utf-8").strip().splitlines()
     if not lines:
         return found + ["is empty"]
-    if not lines[0].startswith(HEADING):
-        found.append("first line does not start with %r" % HEADING)
+    if not HEADING_RE.match(lines[0].rstrip()):
+        found.append("first line is not '%s<title> (<area>, branch `<branch>`)' "
+                     "with <area> one of %s" % (HEADING, ", ".join(AREAS)))
     if len(lines) < 2:
         found.append("has a heading but no body")
     if any(line.startswith("## ") for line in lines[1:]):
