@@ -116,14 +116,16 @@ repo-wide `addopts = -m "not slow"` default-exclude to `pyproject.toml`. That
 would silently exclude slow tests for every developer + CI invocation,
 changing behavior for tests unrelated to Phase 78.
 
-CI organisation: `.github/workflows/ci.yml` has seven jobs, six of which run
+CI organisation: `.github/workflows/ci.yml` has eight jobs, six of which run
 tests (job names as in the workflow file):
 
 - `lint-and-docs` -- `ruff check .` and `python scripts/check_docs.py`; no pytest.
-- `tests` -- `pytest tests/ -m "not gui and not render_smoke and not atlas_bake"`,
-  the same selection the runner splits locally. CI can afford it as one
-  process on a fresh runner; a developer machine cannot (see above). Slow
-  tests are NOT excluded here -- Concern #7 preservation.
+- `tests` -- `python scripts/run_local_tests.py -m "not gui and not render_smoke
+  and not atlas_bake" --shard K/3 -j 2`: the runner's own chunks, split into
+  three shards per OS, one job each (since 2026-10-19; as one process the
+  Windows lane took 41-52 min). Slow tests are NOT excluded here -- Concern #7
+  preservation.
+- `tests-all` (shown as `tests`) -- one pass/fail for all the shards.
 - `render-smoke-tests` -- `pytest tests/ -m render_smoke`, the NiceGUI lane.
 - `findings-browser-check` -- one named Playwright test in `tests/test_findings_page.py`.
 - `gui-tests` -- `python scripts/run_gui_tests.py`, the Qt lane.

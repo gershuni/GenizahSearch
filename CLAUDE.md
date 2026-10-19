@@ -236,7 +236,7 @@ the archive from scratch and would discard everything in it.
 | Supabase schema (tables, RLS) | `docs/guides/SUPABASE_GUIDE.md` |
 | Web app pages/components | `docs/CODE_INDEX.md` |
 | Environment variables | `CLAUDE.md`, `docs/guides/DEVELOPER_GUIDE.md` |
-| Major features | `CHANGELOG.md`, `README.md` |
+| Major features | a `changelog.d/` file, never `CHANGELOG.md` itself (see its README); `README.md` |
 | **App version** | Run `python scripts/bump_version.py X.Y.Z` |
 
 ### Version Bumping (REQUIRED for releases)
@@ -250,7 +250,7 @@ python scripts/bump_version.py 6.3.0 --dry-run # preview only
 **Files updated automatically:** `version.py` (source of truth), `version_info.txt` (Windows EXE metadata), `CompileScriptGenizah.iss` (Inno Setup), `README.md` (header line).
 
 **Manual steps after running the script:**
-1. `CHANGELOG.md` — add `## [X.Y.Z]` section with release notes
+1. `python scripts/collect_changelog.py --apply` (folds `changelog.d/` in), then `CHANGELOG.md` — add `## [X.Y.Z]` section
 2. `CLAUDE.md` "Recently Changed" — add one-line entry
 3. `README.md` "What's New" section — update feature description
 

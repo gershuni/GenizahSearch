@@ -62,6 +62,7 @@ This is a multi-round interactive process. Do NOT rush it.
 
 ### Step 2a: Gather material
 - Read `git log --oneline` since the last version tag
+- Run `python scripts/collect_changelog.py --apply` first: PRs write their entries as files in `changelog.d/`, and this folds them into `CHANGELOG.md` as `[Unreleased]` entries (and deletes the files)
 - Read recent entries in `CHANGELOG.md`
 - Identify the key user-facing changes (not internal refactors)
 
