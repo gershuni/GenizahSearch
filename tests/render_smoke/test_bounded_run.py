@@ -49,6 +49,20 @@ def test_run_bounded_raises_the_coroutine_error_despite_a_stuck_task():
     assert any('leftover task' in n for n in getattr(info.value, '__notes__', []))
 
 
+def test_run_bounded_does_not_wait_for_a_blocked_default_executor_worker():
+    """asyncio's shutdown_default_executor() joins its shutdown thread with no
+    timeout on 3.11, so a blocked worker would hold the run past every bound."""
+    async def main():
+        asyncio.get_running_loop().run_in_executor(None, time.sleep, 20)
+        await asyncio.sleep(0.05)
+        assert False, 'DELIBERATE driver failure'
+
+    started = time.monotonic()
+    with pytest.raises(AssertionError, match='DELIBERATE'):
+        run_bounded(main(), teardown_timeout=_TEARDOWN)
+    assert time.monotonic() - started < _PROMPT
+
+
 def test_run_bounded_warns_but_passes_when_only_a_leftover_is_stuck():
     async def main():
         asyncio.get_running_loop().create_task(_swallows_cancel_then_waits())

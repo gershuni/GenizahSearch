@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import io
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, AsyncContextManager, Awaitable, Callable, Coroutine
 
 # Generous: the slowest driver in this package runs in well under 30 s on CI.
@@ -75,11 +76,14 @@ def _cleanup_loop(loop: asyncio.AbstractEventLoop, teardown_timeout: float) -> l
         for task in pending:
             if task.done() and not task.cancelled():
                 task.exception()  # mark retrieved: no "never retrieved" noise
-    for closer in (loop.shutdown_asyncgens, loop.shutdown_default_executor):
-        try:
-            loop.run_until_complete(asyncio.wait_for(closer(), _CANCEL_GRACE))
-        except (asyncio.TimeoutError, RuntimeError):
-            pass
+    try:
+        loop.run_until_complete(asyncio.wait_for(loop.shutdown_asyncgens(), _CANCEL_GRACE))
+    except (asyncio.TimeoutError, RuntimeError):
+        pass
+    # Not loop.shutdown_default_executor(): on 3.11 it ends in an untimed
+    # thread.join(), so a blocked run_in_executor worker would hold the run
+    # past every bound here (Codex, PR #413). run_bounded installs its own
+    # default executor and shuts it down without waiting instead.
     return stuck
 
 
@@ -96,6 +100,8 @@ def run_bounded(
     if timeout is None:
         timeout = DRIVER_TIMEOUT + teardown_timeout
     loop = asyncio.new_event_loop()
+    executor = ThreadPoolExecutor(thread_name_prefix='render-smoke')
+    loop.set_default_executor(executor)
     stuck: list = []
     try:
         asyncio.set_event_loop(loop)
@@ -128,6 +134,8 @@ def run_bounded(
             )
         return main.result()
     finally:
+        # A worker still running is abandoned, not joined (see _cleanup_loop).
+        executor.shutdown(wait=False, cancel_futures=True)
         asyncio.set_event_loop(None)
         loop.close()
 
