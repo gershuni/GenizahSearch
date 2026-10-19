@@ -188,8 +188,15 @@ class TestRound5SourceContract:
         assert "single_text=ab_state.get('single_text'" in src, (
             'joins_lab.py must persist the builder single_text (round-5).'
         )
-        assert "'single_text': full_state.get('single_text'" in src, (
-            'joins_lab.py must restore single_text from storage, not hardcode "".'
+        # The stored blob goes through web/joins_lab_link.share_inputs_from_full_state
+        # (shared with the shared-link path) and _apply_inputs since 2026-10-19.
+        from web.joins_lab_link import share_inputs_from_full_state
+        assert share_inputs_from_full_state({'single_text': 'שלום'})['b']['text'] == 'שלום', (
+            'the stored single_text must come back, not be hardcoded "".'
+        )
+        assert "_apply_inputs(share_inputs_from_full_state(full_state))" in src
+        assert "'single_text': b.get('text'" in src, (
+            '_apply_inputs must hand the restored single_text to the builder.'
         )
 
     def test_table_does_not_render_duplicate_bulk_buttons(self):

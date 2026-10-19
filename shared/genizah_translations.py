@@ -4341,6 +4341,21 @@ TRANSLATIONS.update({
     # --- Restore indicator (joins_lab.py _bootstrap_anchor restore path) ---
     "Restoring your search…":    "משחזר את החיפוש שלך…",
     "(from last session)":             "(מהפעם הקודמת)",
+    # --- Joins Lab shared link (2026-10-19, PR 2 of JOINS_LAB_VS_IMPROVEMENTS_PLAN) ---
+    "(from a shared link)":            "(מקישור ששותף)",
+    "Copy a link that opens this screen": "העתקת קישור שפותח את המסך הזה",
+    "Include my marks":                "כולל הסימונים שלי",
+    "Load an anchor first":            "יש לטעון קודם קטע עוגן",
+    "Showing {n} marks from the shared link (not saved)":
+        "מוצגים {n} סימונים מהקישור ששותף (לא נשמרים)",
+    "The Compare candidate from the link is not in these results":
+        "המועמד להשוואה שבקישור אינו בתוצאות האלה",
+    "The link could not be read in full: opening its fragment only":
+        "לא ניתן היה לקרוא את הקישור במלואו: נפתח רק הקטע שלו",
+    "Too many marks for a link: the link leaves them out":
+        "יותר מדי סימונים לקישור: הקישור אינו כולל אותם",
+    "This search is too long for a link: the link opens the fragment only":
+        "החיפוש ארוך מדי לקישור: הקישור פותח רק את הקטע",
     # --- Clear/Reset control (joins_lab.py summary bar) ---
     "Reset":                           "איפוס",
     "Clear all Joins Lab state: anchor, builder, triage, filters":

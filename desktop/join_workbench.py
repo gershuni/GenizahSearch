@@ -5,7 +5,11 @@ This module holds the pure helpers (Plan 01) and the JoinWorkbenchWindow shell (
 Pure helpers are import-safe without a QApplication so they can be unit-tested headlessly.
 """
 from genizah_core import CURRENT_LANG, get_logger, tr  # noqa: F401
+from html import escape as _html_escape
+
+from shared.fragment_details import domain_labels, fetch_fragment_details, info_line
 from shared.joins_lab import htmlify, page_of, snippet_html, snippet_plain  # D-18: reuse Phase 106
+from shared.web_links import web_browse_url
 from desktop.variant_run_settings import basic_changes_searcher
 
 logger = get_logger(__name__)
@@ -589,7 +593,7 @@ def normalize_shelfmark_for_filename(shelf: str) -> str:
 
 try:
     from PyQt6.QtWidgets import (
-        QDialog, QFrame, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
+        QApplication, QDialog, QFrame, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
         QScrollArea, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTextBrowser,
         QWidget, QLineEdit, QInputDialog, QMessageBox,
         QCheckBox, QMenu, QComboBox, QListWidget, QListWidgetItem,
@@ -687,6 +691,32 @@ if _QT_AVAILABLE:
             except Exception:
                 txt = ""
             self.done.emit(self._gen, txt)
+
+    class _PaneDetailsWorker(QThread):
+        """Fetch one Compare pane's details off the UI thread.
+
+        Library, title, domains, date and external links, from
+        shared.fragment_details (local SQLite reads -- the same rule as the web
+        Compare window). Signal: done(str sys_id, int page, dict details); the
+        dialog drops a result whose (sys_id, page) is no longer the pane's -- the
+        page picks the PGP document, and two candidates can share a sys_id.
+        """
+        done = pyqtSignal(str, int, dict)
+
+        def __init__(self, wb, sid: str, p: int):
+            super().__init__()
+            self.wb = wb
+            self.sid = sid
+            self.p = p
+
+        def run(self):
+            try:
+                details = fetch_fragment_details(
+                    self.sid, self.p, meta_mgr=getattr(self.wb, "meta_mgr", None)
+                )
+            except Exception:
+                details = {}
+            self.done.emit(self.sid, self.p, details or {})
 
     class _KnownJoinsLoadWorker(QThread):
         """Off-UI-thread FOUR-source known-joins loader.
@@ -4478,27 +4508,48 @@ if _QT_AVAILABLE:
         def _pane(self) -> dict:
             """Factory: build one compare pane (VBoxLayout + widgets + folio + zoom).
 
-            Feature 3: adds dims_lbl (material/dimensions line) and zoom − / + controls.
-            Feature 7: folio glyphs RTL-corrected.
-            Returns dict with keys: box, shelf, meta, dims_lbl,
+            Feature 3: zoom − / + controls.  Feature 7: folio glyphs RTL-corrected.
+            2026-10-19: a copy button beside the shelfmark, one info line (library ·
+            domain · date · size · material, shared.fragment_details -- the web
+            Compare window's rule) and a links row (Ktiv, the library's viewer, PGP,
+            genizahsearch.com), kept to two short lines.
+            Returns dict with keys: box, shelf, meta, info_lbl, links_lbl,
             folio_prev, folio_lbl, folio_next, img, txt,
             sys_id (str), page (int), zoom (float), full_pix (QPixmap or None).
             """
             box = QVBoxLayout()
+            shelf_row = QHBoxLayout()
+            shelf_row.setSpacing(4)
             shelf = QLabel()
             shelf.setStyleSheet("font-weight:bold;font-size:13px;")
             shelf.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             shelf.setWordWrap(True)
+            copy_btn = QPushButton("📋")
+            copy_btn.setFixedSize(26, 22)
+            copy_btn.setToolTip(tr("Copy Shelfmark"))
+            copy_btn.setAccessibleName(tr("Copy Shelfmark"))
+            shelf_row.addWidget(shelf)
+            shelf_row.addWidget(copy_btn)
+            shelf_row.addStretch(1)
 
+            # Title (+ "other side matched" for a candidate)
             meta = QLabel()
             meta.setWordWrap(True)
             meta.setStyleSheet(f"font-size:11px;color:{_META_COLOR};")
 
-            # Feature 3: material/dimensions line
-            dims_lbl = QLabel()
-            dims_lbl.setWordWrap(True)
-            dims_lbl.setStyleSheet(f"font-size:10px;color:{_DIM_COLOR};")
-            dims_lbl.setVisible(False)
+            # Info line: library · domain · date · size · material
+            info_lbl = QLabel()
+            info_lbl.setWordWrap(True)
+            info_lbl.setStyleSheet(f"font-size:10px;color:{_DIM_COLOR};")
+            info_lbl.setVisible(False)
+
+            # External links, opened in the browser
+            links_lbl = QLabel()
+            links_lbl.setTextFormat(Qt.TextFormat.RichText)
+            links_lbl.setOpenExternalLinks(True)
+            links_lbl.setWordWrap(True)
+            links_lbl.setStyleSheet("font-size:10px;")
+            links_lbl.setVisible(False)
 
             # Per-pane folio browse + zoom row (Features 4+3)
             # Feature 7: glyphs point OUTWARD per language —
@@ -4582,9 +4633,10 @@ if _QT_AVAILABLE:
             # transcription right-aligns, matching the ResultDialog + the anchor pane.
             txt.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
-            box.addWidget(shelf)
+            box.addLayout(shelf_row)
             box.addWidget(meta)
-            box.addWidget(dims_lbl)
+            box.addWidget(info_lbl)
+            box.addWidget(links_lbl)
             box.addLayout(ctrl_row)
             box.addWidget(img_scroll, 1)
             box.addWidget(txt, 1)
@@ -4592,8 +4644,12 @@ if _QT_AVAILABLE:
             pane_dict = {
                 "box": box,
                 "shelf": shelf,
+                "shelf_plain": "",   # the shelfmark alone (shelf may carry badges)
                 "meta": meta,
-                "dims_lbl": dims_lbl,
+                "info_lbl": info_lbl,
+                "links_lbl": links_lbl,
+                "info_base": ("", None, None, ""),  # library, width, height, material
+                "details": None,     # last fetch_fragment_details result for this pane
                 "folio_prev": folio_prev,
                 "folio_lbl": folio_lbl,
                 "folio_next": folio_next,
@@ -4607,6 +4663,9 @@ if _QT_AVAILABLE:
                 "rotation": 0,  # SEED-017 (#10): degrees CW; reset on each fresh load
                 "full_pix": None,
             }
+            copy_btn.clicked.connect(
+                lambda _=False, pd=pane_dict: QApplication.clipboard().setText(pd.get("shelf_plain") or "")
+            )
             # Wire folio buttons — capture pane_dict by reference
             folio_prev.clicked.connect(lambda _=False, pd=pane_dict: self._pane_folio_step(pd, -1))
             folio_next.clicked.connect(lambda _=False, pd=pane_dict: self._pane_folio_step(pd, +1))
@@ -4795,11 +4854,20 @@ if _QT_AVAILABLE:
 
             The anchor is the Phase-107 pinned result dict — never a Candidate.
             """
+            shelf = r_shelf(res_dict)
             try:
-                pane["shelf"].setText(r_shelf(res_dict))
+                pane["shelf"].setText(shelf)
             except RuntimeError:
                 return
-            # Meta line: meta_brief
+            pane["shelf_plain"] = shelf
+            # Track pane identity for per-pane folio browse (Feature 4) BEFORE loading text/image.
+            p = page_of(res_dict)
+            pane["sys_id"] = r_sid(res_dict)
+            pane["page"] = max(1, p or 1)
+            try:
+                pane["folio_lbl"].setText(f"p.{pane['page']}")
+            except (RuntimeError, KeyError):
+                pass
             enrich = self.wb._candidate_pane._enrich if hasattr(
                 self.wb, "_candidate_pane"
             ) else {}
@@ -4811,32 +4879,22 @@ if _QT_AVAILABLE:
             width_cm = m.get("width_cm") or am.get("width_cm")
             height_cm = m.get("height_cm") or am.get("height_cm")
             material = m.get("material") or am.get("material")
+            # Title line. The result dict keeps library and title under "display"
+            # (r_lib / r_title); meta_brief read them from the top level, so this
+            # line used to come out empty for the anchor.
             try:
-                pane["meta"].setText(meta_brief(res_dict))
+                title = r_title(res_dict)
+                pane["meta"].setText(title[:120])
+                pane["meta"].setVisible(bool(title))
             except RuntimeError:
                 return
-            # Feature 3: material/dimensions line (separate label below meta)
-            dim_parts = []
-            if width_cm and height_cm:
-                dim_parts.append(f"{width_cm:.0f}×{height_cm:.0f} cm")
-            if material:
-                dim_parts.append(material_display(str(material)))  # Feature 9
-            try:
-                if dim_parts:
-                    pane["dims_lbl"].setText("  ·  ".join(dim_parts))
-                    pane["dims_lbl"].setVisible(True)
-                else:
-                    pane["dims_lbl"].setVisible(False)
-            except (RuntimeError, KeyError):
-                pass
-            # Track pane identity for per-pane folio browse (Feature 4) BEFORE loading text/image.
-            p = page_of(res_dict)
-            pane["sys_id"] = r_sid(res_dict)
-            pane["page"] = max(1, p or 1)
-            try:
-                pane["folio_lbl"].setText(f"p.{pane['page']}")
-            except (RuntimeError, KeyError):
-                pass
+            pane["info_base"] = (
+                r_lib(res_dict), width_cm, height_cm,
+                material_display(str(material)) if material else "",  # Feature 9
+            )
+            pane["details"] = None
+            self._render_pane_info(pane)
+            self._load_pane_details(pane)
             # Round-4 #2: the anchor pane had no text. Fetch the matched PAGE's transcription
             # (the same page shown in the image) on a background worker, like folio nav does.
             self._load_pane_page_text(pane, res_dict.get("highlight_pattern"))
@@ -4858,36 +4916,7 @@ if _QT_AVAILABLE:
                 pane["shelf"].setToolTip(eye_tip or "")   # G-06.2 "visual similarity" (cleared if none)
             except RuntimeError:
                 return
-            # Meta line: library · title + "other side matched"
-            lib_title = " · ".join(p for p in [c.library_code, c.title[:60]] if p)
-            meta_parts = [lib_title] if lib_title else []
-            if c.via_other_side:
-                meta_parts.append(tr("other side matched"))   # D-18 / R-06 label
-            enrich = self.wb._candidate_pane._enrich if hasattr(
-                self.wb, "_candidate_pane"
-            ) else {}
-            m = enrich.get(c.key) or {}   # c.key = (sys_id, page) per RR-2
-            width_cm = m.get("width_cm")
-            height_cm = m.get("height_cm")
-            material = m.get("material")
-            try:
-                pane["meta"].setText("   ·   ".join(b for b in meta_parts if b))
-            except RuntimeError:
-                return
-            # Feature 3: material/dimensions line (separate label)
-            dim_parts = []
-            if width_cm and height_cm:
-                dim_parts.append(f"{width_cm:.0f}×{height_cm:.0f} cm")
-            if material:
-                dim_parts.append(material_display(str(material)))  # Feature 9
-            try:
-                if dim_parts:
-                    pane["dims_lbl"].setText("  ·  ".join(dim_parts))
-                    pane["dims_lbl"].setVisible(True)
-                else:
-                    pane["dims_lbl"].setVisible(False)
-            except (RuntimeError, KeyError):
-                pass
+            pane["shelf_plain"] = c.shelfmark or ""
             # Track pane identity for per-pane folio browse (Feature 4) BEFORE loading text/image.
             # RR-12: c.page is Optional[int]; pane["page"] is clamped to ≥1.
             pane["sys_id"] = c.sys_id
@@ -4896,11 +4925,97 @@ if _QT_AVAILABLE:
                 pane["folio_lbl"].setText(f"p.{pane['page']}")
             except (RuntimeError, KeyError):
                 pass
+            # Title line + "other side matched"; the library moved to the info line.
+            meta_parts = [c.title[:60]] if c.title else []
+            if c.via_other_side:
+                meta_parts.append(tr("other side matched"))   # D-18 / R-06 label
+            enrich = self.wb._candidate_pane._enrich if hasattr(
+                self.wb, "_candidate_pane"
+            ) else {}
+            m = enrich.get(c.key) or {}   # c.key = (sys_id, page) per RR-2
+            material = m.get("material")
+            try:
+                pane["meta"].setText("   ·   ".join(b for b in meta_parts if b))
+                pane["meta"].setVisible(bool(meta_parts))
+            except RuntimeError:
+                return
+            pane["info_base"] = (
+                c.library_code, m.get("width_cm"), m.get("height_cm"),
+                material_display(str(material)) if material else "",  # Feature 9
+            )
+            pane["details"] = None
+            self._render_pane_info(pane)
+            self._load_pane_details(pane)
             # Round-4 #3: show the matched PAGE's transcription (the page shown in the image),
             # NOT c.full_text (the whole manuscript). Fetch page text on a background worker.
             self._load_pane_page_text(pane, c.highlight_pattern)
             # Image: matched page (RR-7). c.page may be None — pump/loader guard None.
             self._load_pane_image(pane, c.sys_id, c.page)
+
+        def _render_pane_info(self, pane: dict):
+            """Draw a pane's info line and links row from what is known so far.
+
+            The library and measurements come with the pane; domains, date, the
+            external links and (for the anchor) a missing title arrive later in
+            pane["details"] from _PaneDetailsWorker. The genizahsearch.com link is
+            known at once and follows the pane's folio.
+            """
+            details = pane.get("details") or {}
+            lib, width_cm, height_cm, material = pane.get("info_base") or ("", None, None, "")
+            line = info_line(
+                lib or details.get("library_code") or "",
+                domain_labels(details.get("domains") or [], hebrew=(CURRENT_LANG == "he")),
+                details.get("dating"),
+                width_cm,
+                height_cm,
+                material,
+            )
+            links = [(ln.get("label") or "", ln.get("url") or "")
+                     for ln in (details.get("links") or [])]
+            site = web_browse_url(pane.get("sys_id"), pane.get("page"))
+            if site:
+                links.append(("genizahsearch.com", site))
+            html_links = "  ·  ".join(
+                f'<a href="{_html_escape(url, quote=True)}">{_html_escape(label)}</a>'
+                for label, url in links if label and url
+            )
+            try:
+                pane["info_lbl"].setText(line)
+                pane["info_lbl"].setVisible(bool(line))
+                pane["links_lbl"].setText(html_links)
+                pane["links_lbl"].setVisible(bool(html_links))
+                if not pane["meta"].text() and details.get("title"):
+                    pane["meta"].setText(details["title"][:120])
+                    pane["meta"].setVisible(True)
+            except (RuntimeError, KeyError):
+                pass
+
+        def _load_pane_details(self, pane: dict):
+            """Fetch a pane's details on a _PaneDetailsWorker; drop a result for a
+            (sys_id, page) the pane no longer shows -- the candidate may have moved
+            on, or the folio changed (the page picks the PGP document)."""
+            sid = pane.get("sys_id")
+            if not sid:
+                return
+            page = int(pane.get("page") or 1)
+            try:
+                def _on_details(wsid: str, wpage: int, details: dict, pd=pane) -> None:
+                    if pd.get("sys_id") != wsid or int(pd.get("page") or 1) != wpage:
+                        return
+                    pd["details"] = details
+                    self._render_pane_info(pd)
+
+                worker = _PaneDetailsWorker(self.wb, sid, page)
+                worker.done.connect(_on_details)
+                # Same retention, reaping and closeEvent wait as the page-text workers
+                # (WR-01): one list, so closeEvent covers both kinds.
+                if not hasattr(self, "_pane_text_workers"):
+                    self._pane_text_workers = []
+                self._pane_text_workers.append(worker)
+                worker.finished.connect(lambda wid=id(worker): self._reap_pane_text_worker(wid))
+                worker.start()
+            except Exception:
+                pass
 
         def paint(self):
             """Refresh both panes, position label, and compare border (Feature 4)."""
@@ -4983,6 +5098,10 @@ if _QT_AVAILABLE:
             # the initial fill (page-scoped text + client-side zoom).
             self._load_pane_page_text(pane, highlight)
             self._load_pane_image(pane, pane["sys_id"], new_page)
+            # The genizahsearch.com link follows the folio at once; the details are
+            # fetched again for the new page, which picks the PGP document.
+            self._render_pane_info(pane)
+            self._load_pane_details(pane)
 
     # -------------------------------------------------------------------------
     # JoinWorkbenchWindow — the main modeless QDialog shell (Plan 02, JWB-01).

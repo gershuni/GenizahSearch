@@ -63,18 +63,24 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
-from urllib.parse import quote
 
 from nicegui import run, ui
 
 from shared.export_dossier import build_image_url_for_row
 from shared.fjms_service import get_fjms_service
+from shared.fragment_details import fetch_fragment_details
 from shared.joins_lab import (
     BuilderRow, Candidate, SideQuery, apply_cross_side, compose, dedup_candidates,
     detect_self_match, merge_candidates,
 )
 from shared.visual_similarity_service import get_vs_service
+from shared.export_utils import GENIZAHSEARCH_URL
 from web import io_bound_result
+from web.clipboard import copy_text_to_clipboard
+from web.joins_lab_link import (
+    MAX_LINK_MARKS, LinkTooLong, build_share_url, clean_share_state, decode_share_state,
+    same_inputs, share_inputs_from_full_state,
+)
 from web.auth_state import GlobalAuthState, create_login_dialog
 from web.components.anchor_viewer import AnchorViewer, inject_viewer_assets
 from web.components.candidate_grid import (
@@ -527,8 +533,14 @@ def create_joins_lab_page(
     initial_fl_id: Optional[str] = None,
     initial_page: Optional[int] = None,
     initial_volume_ie: Optional[str] = None,
+    initial_share_state: Optional[str] = None,
 ) -> None:
     """Render the /joins-lab page inside the existing create_layout() shell.
+
+    ``initial_share_state`` is the ``state`` URL parameter of a shared link
+    (``web/joins_lab_link.py``): with an anchor in the URL, the page opens that
+    screen -- inputs, Visual Similarity, filter, view, grid page, the Compare pair
+    and, when the sender included them, the sender's marks for this visit only.
 
     Entry points (FND-03, FND-08, D-13):
       - ``?sys_id=<N>``      — deep-link to a known anchor (URL wins, D-13).
@@ -629,6 +641,23 @@ def create_joins_lab_page(
     _prefetch_cache: dict = {}
     _prefetch_running: set = set()
     _prefetch_anchor_gen: dict = {'value': 0}
+
+    # Shared link (web/joins_lab_link.py, PR 2 of JOINS_LAB_VS_IMPROVEMENTS_PLAN).
+    # _link_state: the decoded `state` URL parameter (None: absent or unreadable).
+    # _link_marks: the marks a link brought -- shown for this visit, never saved:
+    #   _own_marks() leaves them out of what _persist_state writes.
+    # _compare_open: the (sys_id, page) the Compare window shows, for the URL.
+    # _link_replay: True while a link is being opened, so the address bar keeps
+    #   the link (marks included) until the screen is rebuilt.
+    _link_state: Optional[dict] = (
+        decode_share_state(initial_share_state) if initial_share_state else None
+    )
+    _link_marks: dict = {}
+    _compare_open: dict = {'key': None}
+    _link_replay: dict = {'active': False}
+    _address_bar: dict = {'url': ''}
+    _include_marks_ref: dict = {'el': None}
+    _link_marks_note_ref: dict = {'el': None}
 
     # Round-5 (PST): per-tab results-snapshot bridge.  Keeps the candidate result
     # set INTACT across an in-tab Browse / Add-to-Puzzle round-trip (the page is
@@ -822,6 +851,14 @@ def create_joins_lab_page(
             'source_names': source_names,
         }
 
+    def _details_fetcher_sync(sys_id: str, page: Optional[int]) -> dict:
+        """Compare pane details (library, title, domains, date, links), off-loop.
+
+        Local reads only (shared.fragment_details); compare_modal calls it via
+        run.io_bound on open and on every candidate flip.
+        """
+        return fetch_fragment_details(sys_id, page, meta_mgr=state.meta_mgr)
+
     def _prefetch_image_sync(sys_id: str) -> Optional[str]:
         """D-10/M3: Sync image resolver for off-loop prefetch via run.io_bound.
 
@@ -971,18 +1008,38 @@ def create_joins_lab_page(
             initial_idx = 0
         _schedule_image_prefetch(initial_idx)
 
+        # The URL names the pair Compare shows (shared link, PR 2): set on open,
+        # follow every flip, cleared on close.
+        cands_at_open = list(_filtered_candidates)
+        _compare_open['key'] = (cand.sys_id, cand.page)
+        _sync_address_bar()
+
+        def _on_compare_candidate_change(idx: int) -> None:
+            _schedule_image_prefetch(idx)
+            if 0 <= idx < len(cands_at_open):
+                shown = cands_at_open[idx]
+                _compare_open['key'] = (shown.sys_id, shown.page)
+                _sync_address_bar()
+
+        def _on_compare_close() -> None:
+            _compare_open['key'] = None
+            _sync_address_bar()
+
         modal = create_compare_modal(
             anchor_cand=anchor_cand,
             initial_candidate=cand,
-            filtered_candidates=list(_filtered_candidates),
+            filtered_candidates=cands_at_open,
             triage=_triage,
             on_verdict=_on_compare_verdict,
             enrichment=_enrichment,
             metadata_prefetcher=_metadata_prefetcher_sync,
-            on_candidate_change=_schedule_image_prefetch,
+            on_candidate_change=_on_compare_candidate_change,
+            on_close=_on_compare_close,
             on_add_as_join=_on_add_as_join_click,
             # Round-4 Issue 7: Add-to-Puzzle (anchor + current candidate) in header
             on_add_to_puzzle=_on_add_candidate_to_puzzle_click,
+            on_copy_link=_copy_share_link,
+            details_fetcher=_details_fetcher_sync,
         )
         modal.open()
 
@@ -1047,6 +1104,7 @@ def create_joins_lab_page(
         candidates_container.clear()
         with candidates_container:
             _render_candidates_surface()
+        _sync_address_bar()   # grid page, filter, VS and view all land here
 
     def _render_candidates_surface() -> None:
         """Render the candidate grid/table for the current page into candidates_container.
@@ -1503,9 +1561,9 @@ def create_joins_lab_page(
             ui.label(tr('Restoring your search…')).classes('text-sm').style(
                 'color: var(--text-secondary);'
             )
-            ui.label(tr('(from last session)')).classes('text-xs').style(
-                'color: var(--text-tertiary);'
-            )
+            _restore_indicator_ref['sub'] = ui.label(tr('(from last session)')).classes(
+                'text-xs'
+            ).style('color: var(--text-tertiary);')
 
         with ui.row().classes('gap-2 items-center flex-wrap'):
             search_btn = ui.button(tr('Run Search')).props('color=primary unelevated icon=search')
@@ -1602,6 +1660,26 @@ def create_joins_lab_page(
             with _export_btn:
                 ui.item(tr('CSV'), on_click=_on_export_csv)
                 ui.item(tr('Excel (XLSX)'), on_click=_on_export_xlsx)
+
+            # Shared link (PR 2): copies a link that reopens this screen. Marks go
+            # in only when "Include my marks" is ticked (off by default, owner).
+            async def _on_copy_link_click() -> None:
+                await _copy_share_link()
+
+            with ui.row().classes('gap-0 items-center no-wrap'):
+                ui.button(
+                    tr('Copy Link'), icon='link', on_click=_on_copy_link_click,
+                ).props('flat dense').mark('joins-copy-link').tooltip(
+                    tr('Copy a link that opens this screen')
+                )
+                # Not 'dense': the render tests tell the grid cards' selection
+                # boxes apart as the page's dense checkboxes.
+                _include_marks_ref['el'] = ui.checkbox(
+                    tr('Include my marks'), value=False,
+                ).props('size=sm').classes('text-xs').mark('joins-link-include-marks')
+            _link_marks_note_ref['el'] = ui.label('').classes('text-xs').mark(
+                'joins-link-marks-note'
+            ).style('color: var(--text-secondary); display: none;')
 
             # Round-5: SELECTION-scoped bulk actions — appear NEXT TO Export when
             # ≥1 candidate is selected (grid checkboxes OR table multi-select feed
@@ -2408,11 +2486,6 @@ def create_joins_lab_page(
                 """Re-anchor to a known-join member (D-16: does NOT clear builder state)."""
                 asyncio.ensure_future(load_anchor(member_sys_id, show_restored_toast=False))
 
-            def _on_open_browse(member_shelfmark: str) -> None:
-                """Open a known-join member in Browse (same tab)."""
-                sm_encoded = quote(member_shelfmark, safe='')
-                ui.navigate.to(f'/browse?shelfmark={sm_encoded}')
-
             # Phase-120 D-03: get current user_id for own-join detection.
             # None when anonymous — no remove button rendered.
             _user = GlobalAuthState.get_user() if GlobalAuthState.is_logged_in() else None
@@ -2425,7 +2498,6 @@ def create_joins_lab_page(
                     current_shelfmark=shelfmark,
                     current_sys_id=sys_id,
                     on_reanchor=_on_reanchor,
-                    on_open_browse=_on_open_browse,
                     on_remove_join=_on_remove_join_click,
                     current_user_id=_current_uid,
                 )
@@ -2490,6 +2562,8 @@ def create_joins_lab_page(
 
         # Phase 119: D-11 triage resets on re-anchor; D-06 VS invalidates (D-11)
         _triage.clear()
+        _link_marks.clear()   # a shared link's marks belong to the screen it opened
+        _compare_open['key'] = None   # a new anchor: no Compare pair in the URL
         _raw_text_candidates.clear()  # G2: clear RAW baseline on re-anchor
         # D-10: bump prefetch generation + clear stale cache on re-anchor.
         # Any in-flight _prefetch_one coroutines will see the new generation
@@ -2566,6 +2640,8 @@ def create_joins_lab_page(
         # D-12/L1: fire-and-forget VS-data probe — hide the VS toggle when the
         # anchor has zero look-alikes (not just disable — set_visibility(False)).
         asyncio.ensure_future(_probe_vs_data_and_update_toggle(sys_id, _my_anchor_gen))
+
+        _sync_address_bar()
 
     # -----------------------------------------------------------------------
     # Phase 120 D-12: VS toggle visibility probe
@@ -2828,6 +2904,7 @@ def create_joins_lab_page(
             _update_vs_status_label()
             # Round-5 (PST): VS toggle OFF — persist the new vs_on state.
             _persist_results_snapshot()
+            _sync_address_bar()
             return
 
         # Toggle ON — check if we need to fetch VS candidates
@@ -2844,6 +2921,7 @@ def create_joins_lab_page(
             _update_vs_status_label()
             # Round-5 (PST): VS toggle ON (cached) — persist the new vs_on state.
             _persist_results_snapshot()
+        _sync_address_bar()
 
     async def _on_load_btn_click() -> None:
         """Handle the Load Anchor button / Enter key in the smart box."""
@@ -3483,6 +3561,7 @@ def create_joins_lab_page(
                     _all_candidates.clear()
                     _all_candidates.extend(final_f1)
                     _triage.clear()
+                    _link_marks.clear()
                     _current_page['value'] = 0
                     anchor_sid_now = _anchor_state.get('sys_id') or ''
                     filtered_f1 = compute_filtered(final_f1, _filter_state, _enrichment, _triage, anchor_sid_now)
@@ -3810,6 +3889,7 @@ def create_joins_lab_page(
 
             # D-11: triage resets on new search; D-13: detect_self_match runs (silently)
             _triage.clear()
+            _link_marks.clear()
             # Round-5: a fresh result set invalidates the prior selection — clear
             # it (and the bulk bar) so stale sys_ids don't linger in _selected.
             _selected.clear()
@@ -3881,6 +3961,180 @@ def create_joins_lab_page(
     # (never inside run.io_bound — Pitfall 4).
     # -----------------------------------------------------------------------
 
+    # -----------------------------------------------------------------------
+    # Shared link: the screen as a URL (web/joins_lab_link.py, PR 2)
+    # -----------------------------------------------------------------------
+
+    def _own_marks() -> dict:
+        """The visitor's own marks. A mark a shared link brought, still unchanged,
+        is the sender's: shown for this visit, never saved or passed on."""
+        return {sid: v for sid, v in _triage.items() if _link_marks.get(sid) != v}
+
+    def _share_state(include_marks: bool = False) -> dict:
+        """The current screen in the link's shape (inputs, never results)."""
+        ab = anchor_builder['get_state']()
+        state: dict = {
+            'b': {
+                'rows': ab.get('lines_state', []),
+                'type': ab.get('search_type', 'responsa'),
+                'var': ab.get('variants_on', False),
+                'text': ab.get('single_text', ''),
+                'pos': anchor_builder['get_text_position'](),
+            },
+            'g': {'flex': _global_opts['flex_spacing'], 'bidir': _global_opts['bidirectional']},
+            'vs': _vs_on['value'],
+            'f': dict(_filter_state),
+            'view': _view_mode['value'],
+            'gp': _current_page['value'],
+        }
+        ob = _other_side.get('builder')
+        if _other_side['enabled'] and ob is not None:
+            state['o'] = {
+                'on': True,
+                'rows': ob['get_state']().get('lines_state', []),
+                'combine': _other_side.get('combine', 'AND'),
+                # The other side's OWN position: the cross-side search uses it.
+                'pos': ob['get_text_position'](),
+            }
+        if _compare_open['key'] is not None:
+            state['cmp'] = list(_compare_open['key'])
+        if include_marks:
+            mine = _own_marks()
+            # Decided marks first, so a cap drops "maybe" before "yes"/"no".
+            ordered = ([kv for kv in mine.items() if kv[1] != 'maybe']
+                       + [kv for kv in mine.items() if kv[1] == 'maybe'])
+            state['m'] = dict(ordered[:MAX_LINK_MARKS])
+        return state
+
+    def _share_url(include_marks: bool = False, *, with_state: bool = True) -> str:
+        """The relative /joins-lab link for the current screen ('' with no anchor).
+
+        Raises LinkTooLong when the screen does not fit in a link; with_state=False
+        gives the anchor-only link, which always fits.
+        """
+        sid = _anchor_state.get('sys_id') or ''
+        if not sid:
+            return ''
+        return build_share_url(
+            sid,
+            page=_anchor_state.get('page'),
+            fl_id=_anchor_state.get('fl_id'),
+            volume_ie=_anchor_state.get('volume_ie'),
+            state=_share_state(include_marks) if with_state else None,
+        )
+
+    def _sync_address_bar() -> None:
+        """Keep the address bar on the current screen, marks left out (owner), with
+        history.replaceState, so working in the Lab adds no history entries."""
+        if _link_replay['active']:
+            return  # a shared link is still being opened: keep its URL until then
+        try:
+            url = _share_url()
+        except LinkTooLong:
+            # Too long for a link: the bare path, so a reload restores this
+            # visitor's saved session as it always did (not an unreadable link).
+            url = '/joins-lab'
+        except Exception:
+            logger.debug('joins-lab: could not build the screen URL', exc_info=True)
+            return
+        if not url or url == _address_bar['url']:
+            return
+        _address_bar['url'] = url
+        try:
+            ui.run_javascript(f'history.replaceState(history.state, "", {json.dumps(url)})')
+        except Exception:
+            pass  # no client context (a background task) or the tab is gone
+
+    async def _copy_share_link() -> None:
+        """Copy a link to this screen; the sender's marks only when the box is ticked."""
+        cb = _include_marks_ref.get('el')
+        want_marks = bool(cb is not None and cb.value)
+        warning = None
+        try:
+            rel = _share_url(include_marks=want_marks)
+        except LinkTooLong:
+            rel = None
+            if want_marks:
+                try:
+                    rel = _share_url(include_marks=False)
+                    warning = tr('Too many marks for a link: the link leaves them out')
+                except LinkTooLong:
+                    rel = None
+            if rel is None:
+                rel = _share_url(with_state=False)
+                warning = tr('This search is too long for a link: the link opens the fragment only')
+        if not rel:
+            ui.notify(tr('Load an anchor first'), type='warning')
+            return
+        client = ui.context.client
+        try:
+            origin = await client.run_javascript('window.location.origin', timeout=3)
+        except Exception:
+            origin = None
+        if not isinstance(origin, str) or not origin.startswith('http'):
+            origin = GENIZAHSEARCH_URL
+        with client:
+            await copy_text_to_clipboard(origin + rel, success_message=tr('Link copied!'))
+            if warning:
+                ui.notify(warning, type='warning', timeout=8000)
+
+    def _apply_inputs(inp: dict) -> None:
+        """Set the builders, options, filter and view from a cleaned share-shaped
+        dict -- the stored session (share_inputs_from_full_state) or a link."""
+        b = inp.get('b') or {}
+        ab_state = {
+            'lines_state': b.get('rows', []),
+            'search_type': b.get('type', 'responsa'),
+            'variants_on': bool(b.get('var', False)),
+            'single_text': b.get('text', ''),
+            'text_position': b.get('pos', 'anywhere'),
+        }
+        anchor_builder['set_state'](ab_state)
+
+        g = inp.get('g') or {}
+        flex_val = bool(g.get('flex', False))
+        bidir_val = bool(g.get('bidir', False))
+        _global_opts['flex_spacing'] = flex_val
+        _global_opts['bidirectional'] = bidir_val
+        flex_cb.value = flex_val
+        bidir_cb.value = bidir_val
+
+        variants_val = ab_state['variants_on']
+        variants_cb.value = variants_val
+        anchor_builder['set_variants'](variants_val)
+
+        o = inp.get('o') or {}
+        if o.get('on'):
+            _other_side['enabled'] = True
+            other_side_cb.value = True
+            other_side_controls.set_visibility(True)
+            combine_val = o.get('combine', 'AND')
+            combine_select.value = combine_val
+            _other_side['combine'] = _coerce_combine_mode(combine_val)
+            _ob = _other_side.get('builder')
+            if _ob is not None:
+                _ob['set_state']({
+                    'lines_state': o.get('rows', []),
+                    'search_type': 'responsa',
+                    'variants_on': variants_val,
+                    'single_text': '',
+                    # Its own position; a session saved before that was stored
+                    # has none, and the side then takes the anchor's, as before.
+                    'text_position': o.get('pos', ab_state['text_position']),
+                })
+                _ob['set_variants'](variants_val)
+
+        f = inp.get('f')
+        if f and isinstance(f, dict):
+            _filter_state.update(f)
+
+        view = inp.get('view', 'grid')
+        _view_mode['value'] = view if view in ('grid', 'table') else 'grid'
+        if _view_mode['value'] == 'table':
+            view_toggle_btn.set_text(tr('Grid'))
+        else:
+            view_toggle_btn.set_text(tr('Table'))
+
     def _persist_state() -> None:
         """Gather the full joins_lab blob and write it via write_full_state.
 
@@ -3928,12 +4182,16 @@ def create_joins_lab_page(
             other_side_enabled=_other_side['enabled'],
             other_side_rows=ob_state.get('lines_state', []) if ob_state else [],
             other_side_combine=_other_side.get('combine', 'AND'),
-            # Triage (sys_id keyed verdicts — no result blobs or images, D-13)
-            triage=dict(_triage),
+            other_side_text_position=(ob['get_text_position']() if ob_state else 'anywhere'),
+            # Triage (sys_id keyed verdicts — no result blobs or images, D-13).
+            # Only the visitor's own: marks a shared link brought are not saved.
+            triage=_own_marks(),
             # Filter + view
             active_filter=dict(_filter_state),
             view_mode=_view_mode['value'],
         )
+        _show_link_marks_note()
+        _sync_address_bar()
 
     # Register persistence hooks on both builders (Task 1 B1 API)
     anchor_builder['on_change'](_persist_state)
@@ -3942,6 +4200,149 @@ def create_joins_lab_page(
     # -----------------------------------------------------------------------
     # Initial anchor resolution / restore (D-13: URL wins over storage)
     # -----------------------------------------------------------------------
+
+    def _restore_from_snapshot(snapshot: Optional[dict], anchor_sid: str,
+                               triage_to_attach: dict) -> bool:
+        """Restore the candidate set from the per-tab snapshot (instant, no re-run).
+
+        True when the snapshot was for *anchor_sid* and restored; False otherwise
+        (the caller then re-runs the search). *triage_to_attach* goes on before
+        the first render so verdict borders appear at once (D-15).
+        """
+        if not snapshot or snapshot.get('anchor_sys_id') != anchor_sid:
+            return False
+        try:
+            _raw_text_candidates.clear()
+            _raw_text_candidates.extend(
+                _candidate_from_dict(d)
+                for d in (snapshot.get('raw_text_candidates') or [])
+                if isinstance(d, dict)
+            )
+            _vs_candidates.clear()
+            _vs_candidates.extend(
+                _candidate_from_dict(d)
+                for d in (snapshot.get('vs_candidates') or [])
+                if isinstance(d, dict)
+            )
+            _vs_on['value'] = bool(snapshot.get('vs_on', False))
+            _vs_anchor_sid['value'] = snapshot.get('vs_anchor_sid')
+            snap_enrich = snapshot.get('enrichment')
+            _enrichment.clear()
+            if isinstance(snap_enrich, dict):
+                _enrichment.update(snap_enrich)
+            _enrichment_ready['value'] = bool(_enrichment)
+            # Sync the VS switch widget to the restored toggle state.
+            _vs_el = _vs_switch_ref.get('el')
+            if _vs_el is not None:
+                _vs_el.value = _vs_on['value']
+            if triage_to_attach:
+                _triage.update(triage_to_attach)
+            _current_page['value'] = 0
+            _re_render_candidates_surface()
+            # If enrichment wasn't captured (navigated away before it landed),
+            # fetch it now so dims/material populate.
+            if not _enrichment_ready['value'] and _filtered_candidates:
+                asyncio.ensure_future(
+                    _do_enrich_and_update(list(_filtered_candidates))
+                )
+            return True
+        except Exception:
+            logger.exception('joins-lab snapshot restore failed; re-running search')
+            return False
+
+    def _show_link_marks_note() -> None:
+        """Say that some marks on screen came with the link and are not saved."""
+        el = _link_marks_note_ref.get('el')
+        if el is None:
+            return
+        shown = sum(1 for sid, v in _link_marks.items() if _triage.get(sid) == v)
+        if shown:
+            el.set_text(tr('Showing {n} marks from the shared link (not saved)')
+                        .replace('{n}', str(shown)))
+            el.style('display: inline;')
+        else:
+            el.style('display: none;')
+
+    async def _open_from_link(sys_id: str, link: dict) -> None:
+        """Open the screen a shared link describes (owner decisions, PR 2).
+
+        Inputs are applied, then the search runs again -- unless this tab's
+        snapshot already holds the results of the same search for the same anchor
+        (a reload, or Back from the puzzle), which restores instantly as before.
+        Then Visual Similarity, the grid page and the Compare pair. The visitor's
+        own marks for this anchor stay theirs and win; the link's marks fill the
+        rest, for this visit only.
+        """
+        full_state = read_full_state()
+        snapshot = read_results_snapshot()
+        own_triage: dict = {}
+        stored_inputs: dict = {}
+        if full_state and full_state.get('anchor_sys_id') == sys_id:
+            own_triage = dict(full_state.get('triage') or {})
+            stored_inputs = share_inputs_from_full_state(full_state)
+            stored_inputs['vs'] = bool((snapshot or {}).get('vs_on', False)) or None
+            stored_inputs = clean_share_state(stored_inputs)
+
+        _link_replay['active'] = True
+        ind_el = _restore_indicator_ref.get('el')
+        sub_el = _restore_indicator_ref.get('sub')
+        if sub_el is not None:
+            sub_el.set_text(tr('(from a shared link)'))
+        if ind_el is not None:
+            ind_el.style('display: flex;')
+        try:
+            await load_anchor(
+                sys_id,
+                fl_id=initial_fl_id,
+                page=initial_page,
+                volume_ie=initial_volume_ie,
+            )
+            _apply_inputs(link)
+
+            reuse = bool(stored_inputs) and same_inputs(link, stored_inputs)
+            restored = reuse and _restore_from_snapshot(snapshot, sys_id, own_triage)
+            if not restored:
+                if not anchor_builder['is_empty']():
+                    await execute_joins_search()
+                if link.get('vs'):
+                    _vs_on['value'] = True
+                    await _do_vs_fetch_and_update(sys_id)
+                    _vs_el = _vs_switch_ref.get('el')
+                    if _vs_el is not None:
+                        _vs_el.value = True
+                _triage.update(own_triage)
+
+            # The link's marks fill in where the visitor has none of their own.
+            for sid, verdict in (link.get('m') or {}).items():
+                if sid not in _triage:
+                    _triage[sid] = verdict
+                    _link_marks[sid] = verdict
+
+            _current_page['value'] = int(link.get('gp') or 0)
+            _re_render_candidates_surface()
+            _show_link_marks_note()
+        finally:
+            _link_replay['active'] = False
+            if ind_el is not None:
+                ind_el.style('display: none;')
+            if sub_el is not None:
+                sub_el.set_text(tr('(from last session)'))
+
+        _persist_state()          # the visitor's own state from here on (no link marks)
+        _sync_address_bar()
+
+        cmp_key = link.get('cmp')
+        if cmp_key:
+            # The same fragment and page; else the fragment's first row here (a
+            # look-alike row has no page, and a re-run may list other pages).
+            same_sid = [c for c in _filtered_candidates if c.sys_id == cmp_key[0]]
+            target = next((c for c in same_sid if c.page == cmp_key[1]),
+                          same_sid[0] if same_sid else None)
+            if target is not None:
+                _open_compare(target)
+            else:
+                ui.notify(tr('The Compare candidate from the link is not in these results'),
+                          type='info', timeout=6000)
 
     async def _bootstrap_anchor() -> None:
         """Resolve and load the initial anchor (deferred off the page handler).
@@ -3964,20 +4365,31 @@ def create_joins_lab_page(
             # Cold start — show the empty state (already visible by default)
             return
 
+        if initial_share_state and _link_state is None:
+            # A link whose screen cannot be read still opens its fragment.
+            ui.notify(tr('The link could not be read in full: opening its fragment only'),
+                      type='warning', timeout=8000)
+
         if decision['source'] == 'url_sys_id':
-            await load_anchor(
-                decision['sys_id'],
-                fl_id=initial_fl_id,
-                page=initial_page,
-                volume_ie=initial_volume_ie,
-            )
+            if _link_state:
+                await _open_from_link(decision['sys_id'], _link_state)
+            else:
+                await load_anchor(
+                    decision['sys_id'],
+                    fl_id=initial_fl_id,
+                    page=initial_page,
+                    volume_ie=initial_volume_ie,
+                )
             # Phase-120 H4: replay pending add-as-join if present (url-anchor path)
             await _replay_pending_action()
 
         elif decision['source'] == 'url_shelfmark':
             # Shelfmark needs async resolution
             resolved = await resolve_anchor_input(decision['shelfmark'])
-            if resolved:
+            if resolved and _link_state:
+                await _open_from_link(resolved, _link_state)
+                await _replay_pending_action()
+            elif resolved:
                 await load_anchor(
                     resolved,
                     fl_id=initial_fl_id,
@@ -4009,66 +4421,9 @@ def create_joins_lab_page(
             )
 
             if full_state:
-                # Step 2: restore anchor builder state via B1 set_state
-                stored_ab = {
-                    'lines_state': full_state.get('builder_rows', []),
-                    'search_type': full_state.get('builder_mode', 'responsa'),
-                    'variants_on': full_state.get('variants_on', False),
-                    # Round-5: restore the single-line-mode query text (was hardcoded
-                    # empty, so single-line searches came back blank).
-                    'single_text': full_state.get('single_text', ''),
-                    'text_position': full_state.get('text_position', 'anywhere'),
-                }
-                # Infer variants_on from builder_mode if not stored explicitly
-                if 'variants_on' not in full_state:
-                    stored_ab['variants_on'] = full_state.get('builder_mode') == 'variants'
-                anchor_builder['set_state'](stored_ab)
-
-                # Step 3: restore global toggles
-                flex_val = bool(full_state.get('flex_spacing', False))
-                bidir_val = bool(full_state.get('bidirectional', False))
-                _global_opts['flex_spacing'] = flex_val
-                _global_opts['bidirectional'] = bidir_val
-                flex_cb.value = flex_val
-                bidir_cb.value = bidir_val
-
-                variants_val = stored_ab['variants_on']
-                variants_cb.value = variants_val
-                anchor_builder['set_variants'](variants_val)
-
-                # Step 4: restore other-side
-                other_enabled = bool(full_state.get('other_side_enabled', False))
-                if other_enabled:
-                    _other_side['enabled'] = True
-                    other_side_cb.value = True
-                    other_side_controls.set_visibility(True)
-                    combine_val = full_state.get('other_side_combine', 'AND')
-                    combine_select.value = combine_val
-                    _other_side['combine'] = _coerce_combine_mode(combine_val)
-                    _ob = _other_side.get('builder')
-                    if _ob is not None:
-                        stored_ob = {
-                            'lines_state': full_state.get('other_side_rows', []),
-                            'search_type': 'responsa',
-                            'variants_on': variants_val,
-                            'single_text': '',
-                            'text_position': full_state.get('text_position', 'anywhere'),
-                        }
-                        _ob['set_state'](stored_ob)
-                        _ob['set_variants'](variants_val)
-
-                # Step 5: restore filter state (before execute so display is correct)
-                stored_filter = full_state.get('active_filter')
-                if stored_filter and isinstance(stored_filter, dict):
-                    _filter_state.update(stored_filter)
-
-                # Step 6: restore view_mode
-                stored_view = full_state.get('view_mode', 'grid')
-                _view_mode['value'] = stored_view if stored_view in ('grid', 'table') else 'grid'
-                if _view_mode['value'] == 'table':
-                    view_toggle_btn.set_text(tr('Grid'))
-                else:
-                    view_toggle_btn.set_text(tr('Table'))
+                # Steps 2-6: builders, global toggles, other side, filter and view --
+                # one routine for a stored session and a shared link (_apply_inputs).
+                _apply_inputs(share_inputs_from_full_state(full_state))
 
                 # Step 7: capture persisted triage for re-attachment AFTER execute
                 stored_triage = dict(full_state.get('triage') or {})
@@ -4081,50 +4436,9 @@ def create_joins_lab_page(
             # mismatch, or a deserialise error).  This is what lets a Browse /
             # Add-to-Puzzle round-trip return with results intact instead of
             # vanishing for a slow fuzzy/variants re-run (round-5 PST).
-            restored_from_snapshot = False
-            if snapshot and snapshot.get('anchor_sys_id') == (decision['sys_id'] or ''):
-                try:
-                    _raw_text_candidates.clear()
-                    _raw_text_candidates.extend(
-                        _candidate_from_dict(d)
-                        for d in (snapshot.get('raw_text_candidates') or [])
-                        if isinstance(d, dict)
-                    )
-                    _vs_candidates.clear()
-                    _vs_candidates.extend(
-                        _candidate_from_dict(d)
-                        for d in (snapshot.get('vs_candidates') or [])
-                        if isinstance(d, dict)
-                    )
-                    _vs_on['value'] = bool(snapshot.get('vs_on', False))
-                    _vs_anchor_sid['value'] = snapshot.get('vs_anchor_sid')
-                    snap_enrich = snapshot.get('enrichment')
-                    _enrichment.clear()
-                    if isinstance(snap_enrich, dict):
-                        _enrichment.update(snap_enrich)
-                    _enrichment_ready['value'] = bool(_enrichment)
-                    # Sync the VS switch widget to the restored toggle state.
-                    _vs_el = _vs_switch_ref.get('el')
-                    if _vs_el is not None:
-                        _vs_el.value = _vs_on['value']
-                    # Re-attach persisted triage BEFORE the first render so verdict
-                    # borders appear immediately (D-15).
-                    if stored_triage:
-                        _triage.update(stored_triage)
-                    _current_page['value'] = 0
-                    _re_render_candidates_surface()
-                    restored_from_snapshot = True
-                    # If enrichment wasn't captured (navigated away before it
-                    # landed), fetch it now so dims/material populate.
-                    if not _enrichment_ready['value'] and _filtered_candidates:
-                        asyncio.ensure_future(
-                            _do_enrich_and_update(list(_filtered_candidates))
-                        )
-                except Exception:
-                    logger.exception(
-                        'joins-lab snapshot restore failed; re-running search'
-                    )
-                    restored_from_snapshot = False
+            restored_from_snapshot = _restore_from_snapshot(
+                snapshot, decision['sys_id'] or '', stored_triage,
+            )
 
             if not restored_from_snapshot:
                 # No usable snapshot — re-run the search (Stop NOT shown on the

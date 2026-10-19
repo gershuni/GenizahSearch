@@ -2603,6 +2603,60 @@ One-line rows that never force a window wider than its screen (2026-09-24, low-r
 
 `web_browse_url(sys_id, page, volume_ie)`: the genizahsearch.com address of the page on screen, for the desktop's "Open on the website" / "Copy link" buttons (Manuscript Viewer `btn_rd_open_web` / `btn_rd_copy_web`; Browse tab `btn_b_open_web` / `btn_b_copy_web`, enabled by `_sync_browse_cite_button`). The website's own locator (`/browse?sys_id=&page=&volume_ie=`, as `web/pages/browse.py` builds it); `None` for a My Library (`97`) document, `sys_id` only for a synthetic metadata-only record. `page` resolves through the same `get_browse_page(p_num=...)` on both apps.
 
+## web/joins_lab_link.py
+
+The Joins Lab screen as a link (owner, 2026-10-19). The anchor stays in the readable `sys_id` /
+`page` / `fl_id` / `volume_ie` parameters; the rest rides in one `state` parameter (compact JSON,
+zlib-compressed, base64url, `v: 1`).
+
+What `state` carries:
+- `b`: the anchor-side builder;
+- `g`: the global options;
+- `o`: the other side;
+- `vs`, `f`, `view`, and `gp` (the 0-based results page);
+- `cmp`: the Compare pair, `[sys_id, page]`;
+- `m`: the sender's marks, only on request, capped at 300.
+
+Functions:
+- `encode_share_state` / `decode_share_state`. Decode never raises. It caps the token at 12,000
+  characters and the decompressed size at 200 KB, drops unknown keys, and coerces or drops every
+  value. Builder rows go through `joins_lab_storage._cap_rows`.
+- `clean_share_state`.
+- `build_share_url`.
+- `share_inputs_from_full_state`: the stored session in link shape, so one `_apply_inputs` serves
+  both.
+- `same_inputs`.
+
+In `web/pages/joins_lab.py`:
+- `_share_state` / `_share_url`;
+- `_sync_address_bar`: `history.replaceState`, marks left out;
+- `_copy_share_link`, through `web/clipboard.py`;
+- `_apply_inputs`;
+- `_restore_from_snapshot`;
+- `_open_from_link`: reuses this tab's snapshot when the stored inputs equal the link's;
+- `_own_marks`: what is persisted; a link's unchanged marks are not.
+
+The route is `web/main.py::joins_lab_page_route(state=...)`. The Compare header's
+`on_copy_link` lives in `web/components/compare_modal.py`.
+
+## shared/fragment_details.py
+
+What the Joins Lab Compare window shows about a fragment besides its images, one rule for both apps:
+- `info_line(library, domains, dating, width_cm, height_cm, material)`: library · domain(s) · date ·
+  size · material, skipping what is unknown.
+- `domain_labels(domains, hebrew=)`: Hebrew names in the Hebrew UI, English where a domain has none.
+- `dims_text` and `ktiv_url`: `ktiv_url` is None for synthetic and My Library ids.
+- `fetch_fragment_details(sys_id, page, meta_mgr=)`: library code and title (libraries.csv through
+  `meta_mgr.csv_bank`), FJMS domains and copy date, and links in a fixed order: Ktiv, the library's
+  viewer (NLI crossref `get_library_viewer_url`, else the Oxford part's `direct_link`), then PGP
+  (`get_document_for_fragment`). It uses local reads only and never raises.
+
+Consumers:
+- Web: `web/components/compare_modal.py` `_render_pane_details`, fetched through the
+  `details_fetcher` that `web/pages/joins_lab.py::_details_fetcher_sync` passes.
+- Desktop: `desktop/join_workbench.py` `CompareDialog._render_pane_info`, with
+  `_PaneDetailsWorker` off the UI thread.
+
 ## desktop/column_chooser.py
 
 `ColumnChooser`: right-click a results header to show or hide columns; the choice is saved in the app config (`hidden_result_columns`, `hidden_comp_columns`). Every column shows until the user hides one (`default_hidden` exists but no caller uses it). `ColumnFitter` keeps every shown column inside the view's width (no sideways scrolling): the reading columns (Search: Snippet; Composition: Context + MS Context) take what the others leave, and when even their minimum does not fit the other columns shrink toward a floor. All columns stay Interactive -- not QHeaderView Stretch, whose neighbour drags resize the stretch column instead. A column widened by hand keeps its width; a reading column resized by hand pauses fitting until the header menu's "Fit columns to window". `CheckBoxHeader._on_resize_grip` (desktop/ui_widgets.py) lets a press on a resize grip reach Qt even on the checkbox and non-sortable columns, which could not be resized from their own edge before. Columns whose visibility the app derives from the data (Src, Witnesses) are not offered.

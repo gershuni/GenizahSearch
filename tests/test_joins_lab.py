@@ -1810,12 +1810,22 @@ class TestImagePrefetch:
         )
 
     def test_d10_schedule_image_prefetch_passed_to_compare_modal(self):
-        """D-10: joins_lab.py must pass on_candidate_change=_schedule_image_prefetch."""
+        """D-10: a Compare flip schedules the adjacent-image prefetch.
+
+        Since the shared link (2026-10-19) the callback is a small wrapper that
+        also records the shown pair for the URL; it must still call
+        _schedule_image_prefetch with the index it receives.
+        """
         import pathlib
         source = pathlib.Path("web/pages/joins_lab.py").read_text(encoding="utf-8")
-        assert "on_candidate_change=_schedule_image_prefetch" in source, (
-            "D-10: joins_lab.py must pass on_candidate_change=_schedule_image_prefetch "
+        assert "on_candidate_change=_on_compare_candidate_change" in source, (
+            "D-10: joins_lab.py must pass its compare candidate-change callback "
             "to create_compare_modal"
+        )
+        wrapper = source[source.index("def _on_compare_candidate_change("):]
+        wrapper = wrapper[:wrapper.index("\n\n")]
+        assert "_schedule_image_prefetch(idx)" in wrapper, (
+            "D-10: the candidate-change callback must schedule the image prefetch"
         )
 
 
