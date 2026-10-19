@@ -854,3 +854,72 @@ def compose(side: SideQuery) -> tuple:
             parts.append(f"[|{row.gap_to_next}]")
 
     return (" ".join(parts), ro, side.page_position)
+
+
+# ---------------------------------------------------------------------------
+# Library and domain: filter options and the list order (both Joins Labs, as in
+# the website's Visual Similarity window)
+# ---------------------------------------------------------------------------
+
+ORDERS = ("rank", "library", "domain")
+
+
+def normalize_order(value) -> str:
+    """'library' or 'domain'; anything else is 'rank' (the order the search gave)."""
+    return value if isinstance(value, str) and value in ORDERS else "rank"
+
+
+def primary_domain(domains) -> dict:
+    """A fragment's domain as the Visual Similarity window shows it.
+
+    The first of its rows from ``FjmsService.get_domains_for_sys_ids``, as
+    {'domain', 'domain_heb'}; {} when it has none.
+    """
+    for d in domains or []:
+        if isinstance(d, dict) and d.get("domain"):
+            return {"domain": d["domain"], "domain_heb": d.get("domain_heb") or ""}
+    return {}
+
+
+def domain_label(domain: Optional[str], domain_heb: Optional[str] = "",
+                 hebrew: bool = False) -> str:
+    """The domain as the user reads it (Hebrew in the Hebrew UI, when it has one).
+
+    The English ``domain`` stays the filter key.
+    """
+    if hebrew and domain_heb:
+        return domain_heb
+    return domain or ""
+
+
+def counted_options(pairs) -> list:
+    """[(value, label, count)] for each distinct value, in label order.
+
+    From one (value, label) pair per candidate; empty values are left out.
+    """
+    counts: dict = {}
+    labels: dict = {}
+    for value, label in pairs:
+        if not value:
+            continue
+        counts[value] = counts.get(value, 0) + 1
+        labels.setdefault(value, label or value)
+    return [(v, labels[v], counts[v]) for v in sorted(counts, key=lambda v: labels[v])]
+
+
+def order_candidates(candidates, order, domain_of) -> list:
+    """The candidates in the search's order, or grouped by library or by domain.
+
+    'rank' keeps the search's order; 'library' groups by library code and 'domain'
+    by ``domain_of(candidate)`` (the label shown). Stable, so each group keeps the
+    search's order, and a candidate with no library or domain comes last.
+    """
+    order = normalize_order(order)
+    if order == "library":
+        return sorted(candidates, key=lambda c: (not c.library_code, c.library_code or ""))
+    if order == "domain":
+        def _key(c):
+            label = domain_of(c) or ""
+            return (not label, label)
+        return sorted(candidates, key=_key)
+    return list(candidates)

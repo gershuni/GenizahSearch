@@ -71,7 +71,7 @@ from shared.fjms_service import get_fjms_service
 from shared.fragment_details import fetch_fragment_details
 from shared.joins_lab import (
     BuilderRow, Candidate, SideQuery, apply_cross_side, compose, dedup_candidates,
-    detect_self_match, merge_candidates,
+    detect_self_match, merge_candidates, normalize_order, primary_domain,
 )
 from shared.visual_similarity_service import get_vs_service
 from shared.export_utils import GENIZAHSEARCH_URL
@@ -84,7 +84,8 @@ from web.joins_lab_link import (
 from web.auth_state import GlobalAuthState, create_login_dialog
 from web.components.anchor_viewer import AnchorViewer, inject_viewer_assets
 from web.components.candidate_grid import (
-    compute_filtered, create_candidate_grid, create_candidate_table, open_filter_dialog,
+    compute_filtered, create_candidate_grid, create_candidate_table, normalize_card_size,
+    open_filter_dialog,
 )
 from web.components.compare_modal import create_compare_modal
 from web.components.shelfmark_picker import items_from_manuscripts, open_shelfmark_picker
@@ -102,7 +103,7 @@ from web.joins_lab_storage import (
     write_anchor,
     write_full_state,
 )
-from web.safe_storage import safe_user_pop, safe_user_set
+from web.safe_storage import safe_user_get, safe_user_pop, safe_user_set
 from web.services import get_service
 from web.state import state
 from web.supabase_client import (
@@ -136,6 +137,7 @@ Matches the interactive search tier.  Tune via this constant;
 Phase 118+ can expose it as an env knob if needed.
 """
 
+_CARD_SIZE_STORAGE_KEY = 'joins_lab_card_size'   # the visitor's grid card size (S/M/L)
 _PENDING_ACTION_TTL_SECONDS = 900  # 15 minutes — pending Add-as-Join expires after this
 """TTL for the 'joins_lab_pending' add-as-join descriptor stored before login.
 
@@ -513,7 +515,14 @@ async def _enrich_candidates(sys_ids: list) -> dict:
         fjms_svc = get_fjms_service(thread_safe=True)
         if not fjms_svc.is_available():
             return {}
-        return fjms_svc.get_measurement_summaries_batch(sys_ids)
+        out = fjms_svc.get_measurement_summaries_batch(sys_ids) or {}
+        # The domain for the Library/Domain filter and order: the first of each
+        # fragment's domains, as the Visual Similarity window shows it.
+        for sid, domains in (fjms_svc.get_domains_for_sys_ids(sys_ids) or {}).items():
+            primary = primary_domain(domains)
+            if primary:
+                out.setdefault(sid, {}).update(primary)
+        return out
 
     try:
         return await run.io_bound(run_enrich_core)
@@ -596,10 +605,16 @@ def create_joins_lab_page(
         'exclude_mismatch': False,
         'triage_states': [],
         'text_q': '',
+        'libraries': [],              # library codes (empty = all)
+        'domains': [],                # English domains (empty = all)
+        'order': 'rank',              # 'rank' | 'library' | 'domain' (the Sort control)
     }
     _enrichment: dict = {}        # sys_id → {width_cm, height_cm, material, ...} (D-16)
     _enrichment_ready: dict = {'value': False}
     _view_mode: dict = {'value': 'grid'}      # 'grid' | 'table'
+    # The visitor's card size in the grid (owner, 2026-10-19): Small / Medium /
+    # Large, remembered per visitor (candidate_grid.CARD_SIZES; Medium by default).
+    _card_size: dict = {'value': normalize_card_size(safe_user_get(_CARD_SIZE_STORAGE_KEY))}
     _current_page: dict = {'value': 0}        # 0-indexed page for pagination
     _raw_text_candidates: list = []           # G2: RAW text+cross-side baseline BEFORE any VS merge
     _all_candidates: list = []                # current DISPLAY set (post-merge, derived)
@@ -1044,7 +1059,7 @@ def create_joins_lab_page(
         modal.open()
 
     async def _do_enrich_and_update(candidates_snap: list) -> None:
-        """Fetch enrichment off-loop for all filtered candidates, then re-render.
+        """Fetch enrichment off-loop for all candidates (before filtering), then re-render.
 
         Fires after Step-9 renders the surface (Pitfall 7 — enrichment is async;
         material/dims columns populate once this completes). Updates _enrichment +
@@ -1135,6 +1150,8 @@ def create_joins_lab_page(
             _triage_state_ref['restyle'] = restyle_fn
 
         sort_mode = 'vs_rank' if _vs_on['value'] else 'score'
+        if normalize_order(_filter_state.get('order')) != 'rank':
+            sort_mode = 'given'   # grouped by library/domain in compute_filtered
 
         # A2: branch on _view_mode to reach the table (not just the grid)
         if _view_mode['value'] == 'table':
@@ -1178,6 +1195,7 @@ def create_joins_lab_page(
                 _filtered_candidates,
                 triage=_triage,
                 page=_current_page['value'],
+                card_size=_card_size['value'],
                 on_compare=_open_compare,
                 enrichment=_enrichment,
                 enrichment_ready=_enrichment_ready['value'],
@@ -1196,7 +1214,19 @@ def create_joins_lab_page(
                 # Round-5: persist triage verdicts so they survive a session restore
                 # (the grid mutates _triage locally; this is the persist hook).
                 on_triage_change=lambda *_a: _persist_state(),
+                order=_filter_state.get('order', 'rank'),
+                on_order_change=_on_order_change,
             )
+
+    def _on_order_change(order: str) -> None:
+        """The grid's Sort control: group by library or domain, or the search's order.
+        Kept with the filter state, so the table and a restored session follow it."""
+        if order == normalize_order(_filter_state.get('order')):
+            return
+        _filter_state['order'] = order
+        _current_page['value'] = 0
+        _re_render_candidates_surface()
+        _persist_state()
 
     def _on_page_change(page: int) -> None:
         """Page nav callback — changes page WITHOUT resetting triage (D-08)."""
@@ -1206,8 +1236,8 @@ def create_joins_lab_page(
     def _on_filter_open() -> None:
         """Open the filter dialog (D-14) with enrichment-ready gate (Pitfall 7)."""
         # CR-02: open_filter_dialog signature is (filter_state, enrichment,
-        # enrichment_ready, on_apply, on_reset).  The old call passed
-        # candidates=/anchor_sys_id= (unknown kwargs) and omitted on_reset.
+        # enrichment_ready, on_apply, on_reset, candidates).  candidates (the list
+        # before filtering) gives the Library/Domain options and their counts.
         # The on_apply contract is no-arg (filter_state is mutated in place by
         # the dialog's _do_apply before calling on_apply()).
 
@@ -1231,6 +1261,7 @@ def create_joins_lab_page(
             enrichment_ready=_enrichment_ready['value'],
             on_apply=_on_filter_apply,
             on_reset=_on_filter_reset,
+            candidates=list(_all_candidates),
         )
 
     # One WebSearchExecutor per page render (used for SEARCH only —
@@ -1614,6 +1645,7 @@ def create_joins_lab_page(
                 else:
                     _view_mode['value'] = 'grid'
                     view_toggle_btn.set_text(tr('Table'))
+                card_size_toggle.set_visibility(_view_mode['value'] == 'grid')
                 # Re-render without clearing _triage or resetting _current_page
                 _re_render_candidates_surface()
                 # PST-01: persist view mode change
@@ -1623,6 +1655,20 @@ def create_joins_lab_page(
                 tr('Switch between Grid and Table view')
             )
             view_toggle_btn.on('click', _on_view_toggle_click)
+
+            # Card size (owner, 2026-10-19): Small fits more cards per row, Large
+            # shows bigger thumbnails. Grid view only; remembered per visitor.
+            def _on_card_size_change(e) -> None:
+                _card_size['value'] = normalize_card_size(e.value)
+                safe_user_set(_CARD_SIZE_STORAGE_KEY, _card_size['value'])
+                _re_render_candidates_surface()
+
+            card_size_toggle = ui.toggle(
+                {'s': tr('Small'), 'm': tr('Medium'), 'l': tr('Large')},
+                value=_card_size['value'],
+            ).props('dense no-caps').mark('joins-card-size').tooltip(tr('Card size'))
+            card_size_toggle.set_visibility(_view_mode['value'] == 'grid')
+            card_size_toggle.on_value_change(_on_card_size_change)
 
             # Phase-120 ACT-03 D-06 R2-H2: Export — PERSISTENT toolbar control.
             # Operates on the FULL filtered/sorted candidate set (≤500), NOT the
@@ -3576,8 +3622,10 @@ def create_joins_lab_page(
                             ui.label(
                                 tr('No visual similarity data for this fragment')
                             ).style('color: var(--text-secondary);')
-                    # Fire enrichment off-loop for the full filtered set
-                    asyncio.ensure_future(_do_enrich_and_update(list(_filtered_candidates)))
+                    # Fire enrichment off-loop for ALL candidates, not only the filtered
+                    # ones: the filters read the enrichment (domain, material), so
+                    # a filter applied before it lands must not decide what gets it.
+                    asyncio.ensure_future(_do_enrich_and_update(list(_all_candidates)))
                 finally:
                     if _is_running['value'] and my_gen_f1 == _search_generation['value']:
                         _is_running['value'] = False
@@ -3920,8 +3968,11 @@ def create_joins_lab_page(
             # slow fuzzy/variants re-run.
             _persist_results_snapshot()
 
-            # Fire enrichment off-loop for the FULL filtered set (D-16, Pitfall 7)
-            asyncio.ensure_future(_do_enrich_and_update(list(_filtered_candidates)))
+            # Fire enrichment off-loop for ALL candidates (D-16, Pitfall 7) -- not
+            # the filtered set: a Domain or Material filter carried over from the
+            # session would drop every not-yet-enriched candidate, and they would
+            # never be enriched (or shown, or offered in the Filter dialog).
+            asyncio.ensure_future(_do_enrich_and_update(list(_all_candidates)))
 
             # If VS is ON but we haven't fetched VS candidates for this anchor yet, fetch now
             if _vs_on['value'] and _vs_anchor_sid['value'] != anchor_sid_step9:
@@ -4134,6 +4185,7 @@ def create_joins_lab_page(
             view_toggle_btn.set_text(tr('Grid'))
         else:
             view_toggle_btn.set_text(tr('Table'))
+        card_size_toggle.set_visibility(_view_mode['value'] == 'grid')
 
     def _persist_state() -> None:
         """Gather the full joins_lab blob and write it via write_full_state.
@@ -4241,9 +4293,9 @@ def create_joins_lab_page(
             _re_render_candidates_surface()
             # If enrichment wasn't captured (navigated away before it landed),
             # fetch it now so dims/material populate.
-            if not _enrichment_ready['value'] and _filtered_candidates:
+            if not _enrichment_ready['value'] and _all_candidates:
                 asyncio.ensure_future(
-                    _do_enrich_and_update(list(_filtered_candidates))
+                    _do_enrich_and_update(list(_all_candidates))
                 )
             return True
         except Exception:

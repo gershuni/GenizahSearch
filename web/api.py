@@ -1,4 +1,5 @@
 import logging
+import functools
 import json
 
 from nicegui import app
@@ -60,7 +61,13 @@ NLI_MAX_CONCURRENT_FETCHES = max(1, int(os.environ.get('NLI_MAX_CONCURRENT_FETCH
 NLI_SEMAPHORE_TIMEOUT = int(os.environ.get('NLI_SEMAPHORE_TIMEOUT', '1'))
 NLI_PERSISTENT_CACHE_FILE = os.path.join(Config.INDEX_DIR, 'nli_fl_ids_cache.json')
 IMAGE_CACHE_MAX_BYTES = max(0, int(os.environ.get('IMAGE_CACHE_MAX_BYTES', str(256 * 1024 * 1024))))
-IMAGE_CACHE_MAX_ENTRIES = max(0, int(os.environ.get('IMAGE_CACHE_MAX_ENTRIES', '512')))
+# 2048 since 2026-10-19 (was 512): ~100 images per library could not hold one Visual
+# Similarity grid. The byte cap is unchanged, so the memory ceiling is too.
+IMAGE_CACHE_MAX_ENTRIES = max(0, int(os.environ.get('IMAGE_CACHE_MAX_ENTRIES', '2048')))
+# Browser and Cloudflare lifetime of SUCCESSFUL image bytes from the library image proxies:
+# a week (owner, 2026-10-19; was a hard-coded 600). These routes set no session cookie
+# (web/framework_patches.py _is_public_image_route), so the answer is the same for everyone.
+IMAGE_HTTP_MAX_AGE = max(0, int(os.environ.get('IMAGE_HTTP_MAX_AGE', '604800')))
 NLI_MEMORY_CACHE_MAX_ENTRIES = max(0, int(os.environ.get('NLI_MEMORY_CACHE_MAX_ENTRIES', '50000')))
 PUZZLE_RATE_LIMIT_BUCKET_TTL = max(60, int(os.environ.get('PUZZLE_RATE_LIMIT_BUCKET_TTL', '3600')))
 
@@ -214,6 +221,29 @@ def _make_image_cache(name: str) -> _TTLMemoryCache:
     )
     _register_runtime_cache_stats(name, cache.stats)
     return cache
+
+
+def _image_cache_headers(route):
+    """Set the Cache-Control of a library image proxy's answer.
+
+    Image bytes (200, ``image/*``) are kept ``IMAGE_HTTP_MAX_AGE`` seconds. Everything
+    else -- a 404, "no image", an error, the Oxford redirect to the library -- is
+    ``no-store``, so a passing outage is never kept. A 204 (synthetic sys_id) is left
+    as it was.
+    """
+    @functools.wraps(route)
+    def _wrapped(*args, **kwargs):
+        response = route(*args, **kwargs)
+        if not isinstance(response, Response) or response.status_code == 204:
+            return response
+        is_image = response.headers.get('content-type', '').startswith('image/')
+        if response.status_code == 200 and is_image and IMAGE_HTTP_MAX_AGE:
+            response.headers['Cache-Control'] = f'public, max-age={IMAGE_HTTP_MAX_AGE}'
+        else:
+            response.headers['Cache-Control'] = 'no-store'
+        return response
+    return _wrapped
+
 
 # Allowed domains for image proxy (prevents SSRF attacks)
 ALLOWED_IMAGE_DOMAINS = [
@@ -926,6 +956,7 @@ def init_api_routes(app_override=None):
         return fl_ids
 
     @target_app.get('/api/nli_image/{fl_id}')
+    @_image_cache_headers
     def nli_image(fl_id: str):
         """
         Fetch NLI image by FL ID. Tries IIIF first (for valid IDs), then Rosetta.
@@ -1213,6 +1244,7 @@ def init_api_routes(app_override=None):
     _api_test_seam['_persist_positive_cache_snapshot'] = _persist_positive_cache_snapshot
 
     @target_app.get('/api/nli_image_by_sysid/{sys_id}')
+    @_image_cache_headers
     def nli_image_by_sysid(sys_id: str, page: int = 0, width: int = 2000, suffix: int = 1):
         """
         Fetch NLI image by System ID. Dynamically gets FL IDs from NLI IIIF manifest.
@@ -1234,7 +1266,6 @@ def init_api_routes(app_override=None):
         return Response(
             content=content,
             media_type=content_type,
-            headers={"Cache-Control": "public, max-age=600"},
         )
 
     # Oxford image cache: (sys_id, page, width) -> (content, content_type)
@@ -1280,6 +1311,7 @@ def init_api_routes(app_override=None):
         return images_ext
 
     @target_app.get('/api/cambridge_image/{sys_id}')
+    @_image_cache_headers
     def cambridge_image(sys_id: str, page: int = 0, width: int = 2000):
         """
         Fetch Cambridge IIIF image by System ID with folio+side matching.
@@ -1308,7 +1340,6 @@ def init_api_routes(app_override=None):
             """Resolver-version metadata on every response (success, fallback,
             legacy). ETag lets clients revalidate after a deploy."""
             return {
-                "Cache-Control": "public, max-age=600",
                 "ETag": f'"{sys_id}-p{page}-w{width}-{_CAMBRIDGE_ETAG_VERSION}"',
                 "X-Image-Resolver-Version": str(_CAMBRIDGE_CACHE_VERSION),
             }
@@ -1455,6 +1486,7 @@ def init_api_routes(app_override=None):
     _manchester_image_cache = _make_image_cache('image_manchester')
 
     @target_app.get('/api/manchester_image/{sys_id}')
+    @_image_cache_headers
     def manchester_image(sys_id: str, page: int = 0, width: int = 2000):
         """
         Fetch Manchester IIIF image by System ID.
@@ -1467,8 +1499,7 @@ def init_api_routes(app_override=None):
         cached_entry = _manchester_image_cache.get(cache_key)
         if cached_entry is not None:
             content, content_type = cached_entry
-            return Response(content=content, media_type=content_type,
-                          headers={"Cache-Control": "public, max-age=600"})
+            return Response(content=content, media_type=content_type)
 
         # Look up Manchester images from nli_cache (SEED-010: enrich-on-demand when cold).
         if not state.meta_mgr or not hasattr(state.meta_mgr, 'nli_cache'):
@@ -1502,8 +1533,7 @@ def init_api_routes(app_override=None):
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 content_type = resp.headers.get('Content-Type', 'image/jpeg')
                 _manchester_image_cache.set(cache_key, (resp.content, content_type))
-                return Response(content=resp.content, media_type=content_type,
-                              headers={"Cache-Control": "public, max-age=600"})
+                return Response(content=resp.content, media_type=content_type)
             else:
                 return Response(content=f"Failed to fetch Manchester image: {resp.status_code}", status_code=resp.status_code)
         except Exception as e:
@@ -1513,6 +1543,7 @@ def init_api_routes(app_override=None):
     _jts_image_cache = _make_image_cache('image_jts')
 
     @target_app.get('/api/jts_image/{sys_id}')
+    @_image_cache_headers
     def jts_image(sys_id: str, page: int = 0, width: int = 2000):
         """
         Fetch JTS/Princeton IIIF image by System ID.
@@ -1525,8 +1556,7 @@ def init_api_routes(app_override=None):
         cached_entry = _jts_image_cache.get(cache_key)
         if cached_entry is not None:
             content, content_type = cached_entry
-            return Response(content=content, media_type=content_type,
-                          headers={"Cache-Control": "public, max-age=600"})
+            return Response(content=content, media_type=content_type)
 
         # Look up JTS images from nli_cache (SEED-010: enrich-on-demand when cold).
         if not state.meta_mgr or not hasattr(state.meta_mgr, 'nli_cache'):
@@ -1560,8 +1590,7 @@ def init_api_routes(app_override=None):
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 content_type = resp.headers.get('Content-Type', 'image/jpeg')
                 _jts_image_cache.set(cache_key, (resp.content, content_type))
-                return Response(content=resp.content, media_type=content_type,
-                              headers={"Cache-Control": "public, max-age=600"})
+                return Response(content=resp.content, media_type=content_type)
             else:
                 return Response(content=f"Failed to fetch JTS image: {resp.status_code}", status_code=resp.status_code)
         except Exception as e:
@@ -1576,6 +1605,7 @@ def init_api_routes(app_override=None):
         return 0
 
     @target_app.get('/api/oxford_image/{sys_id}')
+    @_image_cache_headers
     def oxford_image(sys_id: str, page: int = 0, width: int = 2000):
         """
         Fetch Oxford image by System ID using CodicologicalManager.
@@ -1590,8 +1620,7 @@ def init_api_routes(app_override=None):
             content, content_type = cached_entry
             return Response(
                 content=content,
-                media_type=content_type,
-                headers={"Cache-Control": "public, max-age=600"}
+                media_type=content_type
             )
 
         if not state.meta_mgr or not state.meta_mgr.codico_mgr:
@@ -1683,8 +1712,7 @@ def init_api_routes(app_override=None):
                 _oxford_image_cache.set(cache_key, (resp.content, content_type))
                 return Response(
                     content=resp.content,
-                    media_type=content_type,
-                    headers={"Cache-Control": "public, max-age=600"}
+                    media_type=content_type
                 )
             else:
                 # Production fallback: if server-side fetch fails, let browser fetch directly.

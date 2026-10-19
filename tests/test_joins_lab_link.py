@@ -205,3 +205,17 @@ def test_every_token_encode_returns_decodes(lines):
     except jl.LinkTooLong:
         return
     assert jl.decode_share_state(token) == jl.clean_share_state(state)
+
+
+def test_library_domain_filters_and_the_sort_ride_in_the_link():
+    """PR 4: the Library/Domain filters and the grid's Sort are part of the screen.
+    A stored session goes through the same cleaner, so they survive a restore too;
+    a bad Sort is the search's order, a bad list item is dropped."""
+    f = {"libraries": ["CUL", 3, "JTS"], "domains": ["Bible"], "order": "domain"}
+    got = jl.decode_share_state(jl.encode_share_state({"f": f}))["f"]
+    assert got["libraries"] == ["CUL", "JTS"]
+    assert got["domains"] == ["Bible"]
+    assert got["order"] == "domain"
+    assert jl.clean_share_state({"f": {"order": "nonsense"}})["f"]["order"] == "rank"
+    stored = {"builder_rows": [_row("a")], "active_filter": f}
+    assert jl.share_inputs_from_full_state(stored)["f"]["domains"] == ["Bible"]

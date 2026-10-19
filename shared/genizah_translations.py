@@ -4106,6 +4106,8 @@ TRANSLATIONS.update({
     "Filter by shelfmark, text, or title…":
         "סנן לפי מספר מדף, טקסט או כותר…",
     "any material":          "כל חומר",
+    "any library":           "כל ספרייה",
+    "any domain":            "כל תחום",
     "Has dimensions":        "יש מידות",
     "all triage":            "כל סיווג",
     "Y — kept":         "Y — נשמר",
@@ -4341,6 +4343,13 @@ TRANSLATIONS.update({
     # --- Restore indicator (joins_lab.py _bootstrap_anchor restore path) ---
     "Restoring your search…":    "משחזר את החיפוש שלך…",
     "(from last session)":             "(מהפעם הקודמת)",
+    # --- Image sizes in Visual Similarity and the Joins Lab (2026-10-19, PR 3) ---
+    "Small":                           "קטן",
+    "Medium":                          "בינוני",
+    "Large":                           "גדול",
+    "Thumbnail size":                  "גודל התמונות הממוזערות",
+    "Larger or smaller original":      "הגדלה או הקטנה של המקור",
+    "Card size":                       "גודל הכרטיסים",
     # --- Joins Lab shared link (2026-10-19, PR 2 of JOINS_LAB_VS_IMPROVEMENTS_PLAN) ---
     "(from a shared link)":            "(מקישור ששותף)",
     "Copy a link that opens this screen": "העתקת קישור שפותח את המסך הזה",

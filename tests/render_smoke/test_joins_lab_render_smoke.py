@@ -126,7 +126,8 @@ def _click_element(user, element) -> None:
     """Fire the click event on a specific element (bypasses UserInteraction find)."""
     from nicegui import events
     with user._client:
-        for listener in element._event_listeners.values():
+        # A copy: a handler may add or drop listeners (a dialog's Apply closes it).
+        for listener in list(element._event_listeners.values()):
             if listener.element_id != element.id:
                 continue
             args = (
@@ -2313,6 +2314,189 @@ def test_rtl_flex_row_reverse_pagination_and_compare(joins_lab_smoke_runner):
     # Pass 25 stub results so total_pages = 2 (> _PAGE_SIZE = 24), which causes
     # the pagination row to render (candidate_grid.py:1349: `if total_pages > 1`).
     joins_lab_smoke_runner(driver, mock_search_results=_make_stub_results(25))
+
+
+# ---------------------------------------------------------------------------
+# PR 4: Library and Domain -- the grid's Sort control, the Filter dialog's two
+# selects, and the domain line on each card (as in the Visual Similarity window).
+# ---------------------------------------------------------------------------
+
+_LIB_DOM_SIDS = ('990002222222222', '990003333333333')
+_LIB_DOM_ENRICH = {
+    _LIB_DOM_SIDS[0]: {'domain': 'Liturgy', 'domain_heb': 'ליטורגיה'},
+    _LIB_DOM_SIDS[1]: {'domain': 'Bible', 'domain_heb': 'מקרא'},
+}
+
+
+def _lib_dom_results():
+    """The two stub hits, the second moved to JTS: one CUL Liturgy, one JTS Bible."""
+    import copy
+
+    from tests.render_smoke.conftest import STUB_RAW_TEXT, STUB_RAW_VS
+    text, vs = copy.deepcopy(STUB_RAW_TEXT), copy.deepcopy(STUB_RAW_VS)
+    vs['display']['library_code'] = 'JTS'
+    return [text, vs]
+
+
+def _card_domains(user) -> list:
+    from nicegui import ElementFilter, ui
+    with user._client:
+        return [e.text for e in ElementFilter(kind=ui.label, marker='joins-card-domain')
+                if e.visible]
+
+
+def _set_select(user, marker: str, value) -> None:
+    from nicegui import ElementFilter, ui
+    with user._client:
+        sel = next(iter(ElementFilter(kind=ui.select, marker=marker)))
+        sel.value = value
+
+
+def test_sort_and_filter_by_library_and_domain(joins_lab_smoke_runner):
+    """Cards show their domain; Sort groups them by domain or library (kept in the
+    saved session); the Filter dialog's Library and Domain selects carry counts and
+    narrow the grid."""
+    from unittest.mock import AsyncMock, patch
+
+    async def driver(user):
+        with patch('web.pages.joins_lab._enrich_candidates', new_callable=AsyncMock,
+                   return_value=dict(_LIB_DOM_ENRICH)):
+            await user.open('/joins-lab')
+            await _load_anchor_and_search(user)
+            await asyncio.sleep(0.5)
+
+            assert _card_domains(user) == ['Liturgy', 'Bible']      # the search's order
+
+            _set_select(user, 'joins-order', 'domain')
+            await asyncio.sleep(0.2)
+            assert _card_domains(user) == ['Bible', 'Liturgy']
+
+            from web.joins_lab_storage import read_full_state
+            with user._client:
+                stored = read_full_state() or {}
+            assert (stored.get('active_filter') or {}).get('order') == 'domain'
+
+            _set_select(user, 'joins-order', 'library')             # CUL before JTS
+            await asyncio.sleep(0.2)
+            assert _card_domains(user) == ['Liturgy', 'Bible']
+
+            from nicegui import ElementFilter, ui
+            with user._client:
+                filter_btn = next(b for b in ElementFilter(kind=ui.button)
+                                  if b._props.get('icon') == 'filter_list' and b.visible)
+            _click_element(user, filter_btn)
+            await asyncio.sleep(0.2)
+            with user._client:
+                lib_sel = next(iter(ElementFilter(kind=ui.select, marker='joins-filter-library')))
+                dom_sel = next(iter(ElementFilter(kind=ui.select, marker='joins-filter-domain')))
+                assert list(lib_sel.options.values()) == ['CUL (1)', 'JTS (1)']
+                assert list(dom_sel.options.values()) == ['Bible (1)', 'Liturgy (1)']
+                assert dom_sel.enabled
+                dom_sel.value = ['Bible']
+                apply_btn = next(b for b in ElementFilter(kind=ui.button)
+                                 if b.visible and b._props.get('label') == 'Apply')
+            _click_element(user, apply_btn)
+            await asyncio.sleep(0.3)
+            assert _card_domains(user) == ['Bible']
+
+    joins_lab_smoke_runner(driver, mock_search_results=_lib_dom_results())
+
+
+def test_a_saved_domain_filter_still_lets_its_candidates_in(joins_lab_smoke_runner):
+    """A session restored with a Domain filter on re-runs its search before any
+    candidate has a domain. The enrichment must cover every candidate, not just the
+    filtered ones: otherwise all of them are filtered out, none is enriched, and the
+    grid stays empty for good."""
+    from unittest.mock import AsyncMock, patch
+
+    from web.joins_lab_storage import clear_results_snapshot, write_full_state
+
+    row = {"words": [{"term": "highlighted", "mods": {}, "gap_to_next_word": 0}],
+           "line_start": False, "line_end": False, "gap_to_next_line": 0}
+
+    async def driver(user):
+        with patch('web.pages.joins_lab._enrich_candidates', new_callable=AsyncMock,
+                   return_value=dict(_LIB_DOM_ENRICH)):
+            await user.open('/joins-lab')
+            # Earlier tests in this file can leave a session for the same stub
+            # anchor; this first page restores it and saves its own state when its
+            # search ends. Let it finish before writing the session under test.
+            await asyncio.sleep(1.5)
+            with user._client:
+                clear_results_snapshot()             # no snapshot: the restore re-runs
+                write_full_state(
+                    anchor_sys_id=STUB_ANCHOR_SID, builder_rows=[row],
+                    builder_mode='responsa',
+                    active_filter={'domains': ['Bible'], 'order': 'rank'},
+                )
+            await user.open('/joins-lab')            # restore: re-runs the search
+            await asyncio.sleep(1.5)
+            assert _card_domains(user) == ['Bible']
+
+    joins_lab_smoke_runner(driver, mock_search_results=_lib_dom_results())
+
+
+# ---------------------------------------------------------------------------
+# Card size (2026-10-19, PR 3 of docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md)
+# ---------------------------------------------------------------------------
+
+def test_card_size_resizes_the_grid_and_is_remembered(joins_lab_smoke_runner):
+    """Small / Medium / Large set the grid's columns, the thumbnail height and the
+    width it is fetched at; Medium is the grid as it was; the choice stays."""
+    from nicegui import ElementFilter, ui
+    from nicegui.testing.user_interaction import UserInteraction
+
+    def _grid_state(user):
+        with user._client:
+            [grid] = list(ElementFilter(kind=ui.grid, marker='joins-candidate-grid'))
+            images = [e for e in ElementFilter(kind=ui.image) if e.visible]
+        heights = {img._style.get('height') for img in images}
+        widths = {img.props.get('src', '').rsplit('width=', 1)[-1] for img in images}
+        return grid._classes, heights, widths
+
+    def _size_toggle(user):
+        with user._client:
+            [toggle] = list(ElementFilter(kind=ui.toggle, marker='joins-card-size'))
+        return toggle
+
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        classes, heights, widths = _grid_state(user)
+        assert 'lg:grid-cols-3' in classes and heights == {'160px'} and widths == {'300'}
+
+        toggle = _size_toggle(user)
+        UserInteraction(user, {toggle}, None).trigger(
+            'update:modelValue', list(toggle.options).index('l'))
+        await asyncio.sleep(0.2)
+        classes, heights, widths = _grid_state(user)
+        assert 'lg:grid-cols-2' in classes and heights == {'240px'} and widths == {'600'}
+
+        await user.open('/joins-lab')
+        await asyncio.sleep(1.0)
+        assert _size_toggle(user).value == 'l'
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_card_size_is_hidden_when_a_link_opens_the_table(joins_lab_smoke_runner):
+    """The card size is a grid control: a link (or a stored session) that opens in
+    table view hides it, through the one routine both use (_apply_inputs)."""
+    from nicegui import ElementFilter, ui
+
+    from web.joins_lab_link import encode_share_state
+    token = encode_share_state({
+        'b': {'rows': [_link_row('highlighted')], 'type': 'responsa'}, 'view': 'table'})
+
+    async def driver(user):
+        await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={token}')
+        await asyncio.sleep(1.5)
+        with user._client:
+            [toggle] = list(ElementFilter(kind=ui.toggle, marker='joins-card-size'))
+            assert not toggle.visible
+
+    joins_lab_smoke_runner(driver)
 
 
 # ---------------------------------------------------------------------------
