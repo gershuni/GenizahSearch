@@ -4,6 +4,10 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased] -- Fragment images can be kept by Cloudflare and browsers (web, branch `feat/cacheable-image-routes`)
+
+The six library image routes (`/api/nli_image`, `/api/nli_image_by_sysid`, `/api/cambridge_image`, `/api/manchester_image`, `/api/jts_image`, `/api/oxford_image`) no longer set the session cookie: none of them reads the session, user storage or sign-in, so the answer is the same for every visitor (`web/framework_patches.py::_is_public_image_route`, an anchored path pattern; the puzzle routes are not in it). Image bytes are now kept a day (`Cache-Control: public, max-age=86400`, new `IMAGE_HTTP_MAX_AGE`; was 600 s); a 404, "no image", error or the Oxford redirect is `no-store`; the synthetic sys_id 204 is unchanged (`web/api.py::_image_cache_headers`). The in-memory image cache holds 2048 entries (was 512) under the same 256 MB byte cap. Cloudflare keeps them only once a Cache Rule makes these paths eligible (they have no file extension). Step (a) of PR 6 of the Joins Lab / Visual Similarity plan; the disk store, step (b), waits on the owner. Pages, other `/api/*` routes and auth still set the cookie.
+
 ## [Unreleased] -- The homepage search box opens shelfmarks and system IDs (web, branch `claude/fervent-curie-oip2lk`)
 
 The search box on the homepage now goes where the input belongs: Hebrew or Arabic text runs a full-text search as before, a system ID (all digits, starting 99) opens that manuscript, and anything else is looked up as a shelfmark by the Browse page, with its usual answers (the manuscript, a "Select Manuscript" list, or "No manuscript found" with the shelfmark left in the box to correct). The placeholder now reads "Text, shelfmark or system ID", short enough to fit the box on a phone. Routing: `web/home_query.py::home_query_target`. From the owner (2026-10-19).

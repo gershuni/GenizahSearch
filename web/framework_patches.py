@@ -82,8 +82,26 @@ def _is_session_free_path(path: str) -> bool:
     return path in _SESSION_FREE_PATHS
 
 
+# The public library image proxies in web/api.py (``init_api_routes``). Each answers from
+# its path and query alone -- no session, user storage, auth or per-visitor limit -- so
+# without a cookie Cloudflare and browsers can keep the image bytes (their Cache-Control
+# is set by ``_image_cache_headers`` there). One path segment after the route name, so a
+# longer route name never matches. NOT the puzzle routes: /api/puzzle_* serve a
+# signed-out upload only to its own browser. tests/test_image_route_sessions.py pins it.
+_PUBLIC_IMAGE_ROUTE_RE = re.compile(
+    r'^/api/(?:nli_image|nli_image_by_sysid|cambridge_image|manchester_image'
+    r'|jts_image|oxford_image)/[^/]+'
+)
+
+
+def _is_public_image_route(path: str) -> bool:
+    """Return whether ``path`` is one of the session-free library image proxies."""
+    return bool(_PUBLIC_IMAGE_ROUTE_RE.fullmatch(path))
+
+
 def _skips_session(path: str) -> bool:
-    return _is_public_cacheable_asset_path(path) or _is_session_free_path(path)
+    return (_is_public_cacheable_asset_path(path) or _is_session_free_path(path)
+            or _is_public_image_route(path))
 
 
 class _CacheSafeSessionMiddleware(_StarletteSessionMiddleware):
