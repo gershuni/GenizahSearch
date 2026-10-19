@@ -1147,21 +1147,55 @@ desktop.Y.X` identity holds via the facades.
 
 ## web/components/visual_similarity_dialog.py
 
-- **Function** `_normalize_view` (Line 40) — 'grid' for the thumbnail view; anything else is the list (the default).
-- **Function** `_domain_label` (Line 45) — The suggestion's domain as the visitor reads it: Hebrew in the Hebrew UI.
-- **Function** `_counted_options` (Line 56) — Filter options from (value, label) pairs: value -> "label (count)", in label order.
-- **Function** `_domain_options` (Line 73) — Domain filter options: English domain -> "label (count)", in label order.
-- **Function** `_library_options` (Line 81) — Library filter options: library code -> "code (count)", in code order.
-- **Function** `_suggestion_thumbnail_url` (Line 89) — Low-resolution first-image URL for a suggestion's thumbnail card.
-- **Function** `_pick_preview_image_url` (Line 105) — Choose the same best-effort preview source family as the browse page.
-- **Function** `_resolve_preview_image_url_sync` (Line 140) — Populate browse metadata on demand, then pick the preview image URL.
-- **Function** `_fetch_original_info` (Line 168) — Fetch image URL and text snippet for the original manuscript.
-- **Function** `_fetch_preview_image_url` (Line 208) — Resolve the best preview image URL without blocking the UI event loop.
-- **Function** `_fetch_suggestion_text` (Line 216) — Fetch text snippet for a suggestion manuscript.
-- **Function** `show_visual_similarity_dialog` (Line 234) — Show visual similarity suggestions dialog for a manuscript.
-- **Function** `_render_suggestion_row` (Line 546) — Render a single suggestion row with expandable detail section.
-- **Function** `_render_suggestion_actions` (Line 723) — Render the Browse / Puzzle / List / Join buttons for one suggestion.
-- **Function** `_render_suggestion_card` (Line 793) — Render one suggestion as a thumbnail card (the grid view).
+- **Function** `_normalize_view` (Line 51) — 'grid' for the thumbnail view; anything else is the list (the default).
+- **Function** `_normalize_thumb_size` (Line 56) — 's', 'm' or 'l'; anything else is Small (the default, the size before).
+- **Function** `_domain_label` (Line 61) — The suggestion's domain as the visitor reads it: Hebrew in the Hebrew UI.
+- **Function** `_counted_options` (Line 72) — Filter options from (value, label) pairs: value -> "label (count)", in label order.
+- **Function** `_domain_options` (Line 89) — Domain filter options: English domain -> "label (count)", in label order.
+- **Function** `_library_options` (Line 97) — Library filter options: library code -> "code (count)", in code order.
+- **Function** `_suggestion_thumbnail_url` (Line 105) — Low-resolution first-image URL for a suggestion's thumbnail card.
+- **Function** `_pick_preview_image_url` (Line 121) — Choose the same best-effort preview source family as the browse page.
+- **Function** `_resolve_preview_image_url_sync` (Line 156) — Populate browse metadata on demand, then pick the preview image URL.
+- **Function** `_fetch_original_info` (Line 184) — Fetch image URL and text snippet for the original manuscript.
+- **Function** `_fetch_preview_image_url` (Line 224) — Resolve the best preview image URL without blocking the UI event loop.
+- **Function** `_fetch_suggestion_text` (Line 232) — Fetch text snippet for a suggestion manuscript.
+- **Function** `show_visual_similarity_dialog` (Line 250) — Show visual similarity suggestions dialog for a manuscript.
+- **Function** `_render_suggestion_row` (Line 608) — Render a single suggestion row with expandable detail section.
+- **Function** `_render_suggestion_actions` (Line 785) — Render the Browse / Puzzle / List / Join buttons for one suggestion.
+- **Function** `_render_suggestion_card` (Line 855) — Render one suggestion as a thumbnail card (the grid view).
+
+## web/components/candidate_grid.py
+
+- **Function** `_placeholder_style` (Line 79) — The no-image box of a card thumbnail *height_px* tall.
+- **Function** `normalize_card_size` (Line 100) — 's', 'm' or 'l'; anything else is Medium (the default, the size before).
+- **Function** `paginate` (Line 109) — Paginate a list of candidates.
+- **Function** `_paginate` (Line 139) — Internal alias for paginate() using the module-level _PAGE_SIZE.
+- **Function** `is_size_mismatch` (Line 148) — Return True if candidate width differs from anchor width by more than threshold×.
+- **Class** `TriageState` (Line 184) — In-memory triage state keyed by sys_id.
+    - Method `__init__` (Line 196)
+    - Method `set` (Line 202) — Set verdict for a sys_id. Raises ValueError for invalid verdicts.
+    - Method `set_bulk` (Line 210) — Set the same verdict for multiple sys_ids. Raises ValueError for invalid verdicts.
+    - Method `get` (Line 219) — Return the verdict for sys_id, or None if not triaged.
+    - Method `reset` (Line 223) — Clear all triage verdicts (called on re-anchor / new search).
+    - Method `__len__` (Line 227)
+    - Method `__contains__` (Line 230)
+- **Function** `make_triage_state` (Line 234) — Factory for a fresh in-memory triage state object (D-11).
+- **Function** `compute_filtered` (Line 243) — Apply filter_state predicates to all_candidates and return the filtered list.
+- **Function** `candidate_domain_label` (Line 340) — The candidate's domain as the visitor reads it ('' when it has none).
+- **Function** `library_options` (Line 346) — Library filter options: library code -> "code (count)", in code order.
+- **Function** `domain_options` (Line 352) — Domain filter options: English domain -> "label (count)", in label order.
+- **Function** `get_table_columns` (Line 365) — Return the 8-column table column definitions (D-10, CND-03).
+- **Function** `get_table_config` (Line 383) — Return table configuration dict (used by tests to assert multi-select etc.).
+- **Function** `_make_table_rows` (Line 395) — Build row dicts for the ui.table from a candidate list.
+- **Function** `build_thumbnail_url` (Line 469) — Derive a proxy thumbnail URL for a candidate.
+- **Function** `build_browse_url` (Line 534) — Build the /browse deep-link URL for a candidate.
+- **Function** `_truncate_title` (Line 545) — Truncate a title to max_chars and append '...' if needed.
+- **Function** `cap_candidates` (Line 554) — Decide how many candidate cards to render (WebSocket-safety cap).
+- **Function** `_make_restyle_fn` (Line 584) — Return a render-scoped restyle callable that operates on ``card_refs``.
+- **Function** `_create_candidate_card` (Line 661) — Render a single candidate card (Phase 119 D-09/D-11/D-07, Phase 120 D-07/ACT-01).
+- **Function** `open_filter_dialog` (Line 1046) — Open the candidate filter dialog (D-14, CND-06).
+- **Function** `create_candidate_table` (Line 1166) — Render the multi-select sortable table view of candidates (D-10, CND-03).
+- **Function** `create_candidate_grid` (Line 1362) — Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
 ## web/main.py
 

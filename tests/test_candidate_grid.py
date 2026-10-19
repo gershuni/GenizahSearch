@@ -1200,3 +1200,17 @@ class TestSeed010BreakerAwareThumbnail:
         url = build_thumbnail_url(_NLI_SYS_ID, page=1, shelfmark="MS Heb. e.93/58", library_code="Oxford")
         assert "/api/nli_image_by_sysid" not in url
         assert "iiif.nli.org.il" not in url
+
+
+def test_card_sizes_keep_medium_as_the_grid_was():
+    from web.components.candidate_grid import CARD_SIZES, normalize_card_size
+    assert normalize_card_size(None) == 'm' and normalize_card_size('xl') == 'm'
+    assert normalize_card_size(['l']) == 'm'   # a mangled stored value, not a crash
+    assert CARD_SIZES['m'] == ("grid-cols-1 sm:grid-cols-2 lg:grid-cols-3", 160, 300)
+    assert CARD_SIZES['l'][1] > CARD_SIZES['m'][1] > CARD_SIZES['s'][1]
+
+
+def test_thumbnail_width_is_the_callers():
+    url = build_thumbnail_url(_NLI_SYS_ID, page=1, shelfmark="T-S 12.100",
+                              library_code="CUL", width=600)
+    assert url.endswith("&width=600")

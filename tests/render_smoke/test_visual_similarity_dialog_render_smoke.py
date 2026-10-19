@@ -157,11 +157,34 @@ def _choose_domain(user, domain):
     _choose(user, _domain_select(user), domain)
 
 
+def _toggle_with(user, options):
+    """The toggle whose option values are *options* (the window has more than one)."""
+    [toggle] = [t for t in user.find(ui.toggle).elements if set(t.options) == set(options)]
+    return toggle
+
+
 def _choose_view(user, view):
     """Pick List or Thumbnails the way the browser does: by option index."""
-    [toggle] = user.find(ui.toggle).elements
+    toggle = _toggle_with(user, {'list', 'grid'})
     UserInteraction(user, {toggle}, None).trigger(
         'update:modelValue', list(toggle.options).index(view))
+
+
+def _choose_thumb_size(user, size):
+    toggle = _toggle_with(user, {'s', 'm', 'l'})
+    UserInteraction(user, {toggle}, None).trigger(
+        'update:modelValue', list(toggle.options).index(size))
+
+
+def _image_heights(user):
+    return {
+        element._style.get('height')
+        for element in user.client.elements.values() if isinstance(element, ui.image)
+    }
+
+
+def _marked(user, marker):
+    return [e for e in user.client.elements.values() if marker in e._markers]
 
 
 def _thumbnail_sources(user):
@@ -268,3 +291,48 @@ def test_the_hebrew_ui_shows_hebrew_domain_names():
         await user.should_not_see('ENA Beta')
 
     _run(driver, lang='he')
+
+
+def test_the_thumbnail_size_resizes_the_grid_and_is_remembered():
+    """Small / Medium / Large set the grid's column width and the image height
+    (owner, 2026-10-19), only in the grid view, and stay for the next window."""
+    async def driver(user):
+        await user.open(PAGE)
+        [size_toggle] = _marked(user, 'vs-thumb-size')
+        assert not size_toggle.visible, "the list view has no thumbnails to size"
+
+        _choose_view(user, 'grid')
+        assert size_toggle.visible
+        assert _image_heights(user) == {'170px'}
+
+        _choose_thumb_size(user, 'l')
+        assert _image_heights(user) == {'300px'}
+        [grid] = _marked(user, 'vs-thumb-grid')
+        assert 'minmax(min(300px, 100%), 1fr)' in grid._style['grid-template-columns']
+
+        await user.open(PAGE)
+        assert _image_heights(user) == {'300px'}
+
+    _run(driver)
+
+
+def test_the_original_can_be_enlarged_and_it_is_remembered():
+    async def driver(user):
+        await user.open(PAGE)
+        [pane] = _marked(user, 'vs-original-pane')
+        [button] = _marked(user, 'vs-original-size')
+        assert pane._style['width'] == '260px'
+
+        UserInteraction(user, {button}, None).trigger('click')
+        assert pane._style['width'] == 'min(450px, 45vw)'
+        assert button.props['icon'] == 'zoom_in_map'
+
+        await user.open(PAGE)
+        [pane] = _marked(user, 'vs-original-pane')
+        assert pane._style['width'] == 'min(450px, 45vw)'
+
+        [button] = _marked(user, 'vs-original-size')
+        UserInteraction(user, {button}, None).trigger('click')
+        assert pane._style['width'] == '260px'
+
+    _run(driver)

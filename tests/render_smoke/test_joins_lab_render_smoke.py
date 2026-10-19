@@ -2437,6 +2437,69 @@ def test_a_saved_domain_filter_still_lets_its_candidates_in(joins_lab_smoke_runn
 
 
 # ---------------------------------------------------------------------------
+# Card size (2026-10-19, PR 3 of docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md)
+# ---------------------------------------------------------------------------
+
+def test_card_size_resizes_the_grid_and_is_remembered(joins_lab_smoke_runner):
+    """Small / Medium / Large set the grid's columns, the thumbnail height and the
+    width it is fetched at; Medium is the grid as it was; the choice stays."""
+    from nicegui import ElementFilter, ui
+    from nicegui.testing.user_interaction import UserInteraction
+
+    def _grid_state(user):
+        with user._client:
+            [grid] = list(ElementFilter(kind=ui.grid, marker='joins-candidate-grid'))
+            images = [e for e in ElementFilter(kind=ui.image) if e.visible]
+        heights = {img._style.get('height') for img in images}
+        widths = {img.props.get('src', '').rsplit('width=', 1)[-1] for img in images}
+        return grid._classes, heights, widths
+
+    def _size_toggle(user):
+        with user._client:
+            [toggle] = list(ElementFilter(kind=ui.toggle, marker='joins-card-size'))
+        return toggle
+
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        classes, heights, widths = _grid_state(user)
+        assert 'lg:grid-cols-3' in classes and heights == {'160px'} and widths == {'300'}
+
+        toggle = _size_toggle(user)
+        UserInteraction(user, {toggle}, None).trigger(
+            'update:modelValue', list(toggle.options).index('l'))
+        await asyncio.sleep(0.2)
+        classes, heights, widths = _grid_state(user)
+        assert 'lg:grid-cols-2' in classes and heights == {'240px'} and widths == {'600'}
+
+        await user.open('/joins-lab')
+        await asyncio.sleep(1.0)
+        assert _size_toggle(user).value == 'l'
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_card_size_is_hidden_when_a_link_opens_the_table(joins_lab_smoke_runner):
+    """The card size is a grid control: a link (or a stored session) that opens in
+    table view hides it, through the one routine both use (_apply_inputs)."""
+    from nicegui import ElementFilter, ui
+
+    from web.joins_lab_link import encode_share_state
+    token = encode_share_state({
+        'b': {'rows': [_link_row('highlighted')], 'type': 'responsa'}, 'view': 'table'})
+
+    async def driver(user):
+        await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={token}')
+        await asyncio.sleep(1.5)
+        with user._client:
+            [toggle] = list(ElementFilter(kind=ui.toggle, marker='joins-card-size'))
+            assert not toggle.visible
+
+    joins_lab_smoke_runner(driver)
+
+
+# ---------------------------------------------------------------------------
 # Shared link (2026-10-19, PR 2 of docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md)
 # ---------------------------------------------------------------------------
 

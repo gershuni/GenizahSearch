@@ -84,7 +84,8 @@ from web.joins_lab_link import (
 from web.auth_state import GlobalAuthState, create_login_dialog
 from web.components.anchor_viewer import AnchorViewer, inject_viewer_assets
 from web.components.candidate_grid import (
-    compute_filtered, create_candidate_grid, create_candidate_table, open_filter_dialog,
+    compute_filtered, create_candidate_grid, create_candidate_table, normalize_card_size,
+    open_filter_dialog,
 )
 from web.components.compare_modal import create_compare_modal
 from web.components.shelfmark_picker import items_from_manuscripts, open_shelfmark_picker
@@ -102,7 +103,7 @@ from web.joins_lab_storage import (
     write_anchor,
     write_full_state,
 )
-from web.safe_storage import safe_user_pop, safe_user_set
+from web.safe_storage import safe_user_get, safe_user_pop, safe_user_set
 from web.services import get_service
 from web.state import state
 from web.supabase_client import (
@@ -136,6 +137,7 @@ Matches the interactive search tier.  Tune via this constant;
 Phase 118+ can expose it as an env knob if needed.
 """
 
+_CARD_SIZE_STORAGE_KEY = 'joins_lab_card_size'   # the visitor's grid card size (S/M/L)
 _PENDING_ACTION_TTL_SECONDS = 900  # 15 minutes — pending Add-as-Join expires after this
 """TTL for the 'joins_lab_pending' add-as-join descriptor stored before login.
 
@@ -610,6 +612,9 @@ def create_joins_lab_page(
     _enrichment: dict = {}        # sys_id → {width_cm, height_cm, material, ...} (D-16)
     _enrichment_ready: dict = {'value': False}
     _view_mode: dict = {'value': 'grid'}      # 'grid' | 'table'
+    # The visitor's card size in the grid (owner, 2026-10-19): Small / Medium /
+    # Large, remembered per visitor (candidate_grid.CARD_SIZES; Medium by default).
+    _card_size: dict = {'value': normalize_card_size(safe_user_get(_CARD_SIZE_STORAGE_KEY))}
     _current_page: dict = {'value': 0}        # 0-indexed page for pagination
     _raw_text_candidates: list = []           # G2: RAW text+cross-side baseline BEFORE any VS merge
     _all_candidates: list = []                # current DISPLAY set (post-merge, derived)
@@ -1190,6 +1195,7 @@ def create_joins_lab_page(
                 _filtered_candidates,
                 triage=_triage,
                 page=_current_page['value'],
+                card_size=_card_size['value'],
                 on_compare=_open_compare,
                 enrichment=_enrichment,
                 enrichment_ready=_enrichment_ready['value'],
@@ -1639,6 +1645,7 @@ def create_joins_lab_page(
                 else:
                     _view_mode['value'] = 'grid'
                     view_toggle_btn.set_text(tr('Table'))
+                card_size_toggle.set_visibility(_view_mode['value'] == 'grid')
                 # Re-render without clearing _triage or resetting _current_page
                 _re_render_candidates_surface()
                 # PST-01: persist view mode change
@@ -1648,6 +1655,20 @@ def create_joins_lab_page(
                 tr('Switch between Grid and Table view')
             )
             view_toggle_btn.on('click', _on_view_toggle_click)
+
+            # Card size (owner, 2026-10-19): Small fits more cards per row, Large
+            # shows bigger thumbnails. Grid view only; remembered per visitor.
+            def _on_card_size_change(e) -> None:
+                _card_size['value'] = normalize_card_size(e.value)
+                safe_user_set(_CARD_SIZE_STORAGE_KEY, _card_size['value'])
+                _re_render_candidates_surface()
+
+            card_size_toggle = ui.toggle(
+                {'s': tr('Small'), 'm': tr('Medium'), 'l': tr('Large')},
+                value=_card_size['value'],
+            ).props('dense no-caps').mark('joins-card-size').tooltip(tr('Card size'))
+            card_size_toggle.set_visibility(_view_mode['value'] == 'grid')
+            card_size_toggle.on_value_change(_on_card_size_change)
 
             # Phase-120 ACT-03 D-06 R2-H2: Export — PERSISTENT toolbar control.
             # Operates on the FULL filtered/sorted candidate set (≤500), NOT the
@@ -4164,6 +4185,7 @@ def create_joins_lab_page(
             view_toggle_btn.set_text(tr('Grid'))
         else:
             view_toggle_btn.set_text(tr('Table'))
+        card_size_toggle.set_visibility(_view_mode['value'] == 'grid')
 
     def _persist_state() -> None:
         """Gather the full joins_lab blob and write it via write_full_state.
