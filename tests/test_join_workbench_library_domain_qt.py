@@ -161,3 +161,16 @@ def test_the_session_keeps_the_sort():
         assert pane.order_combo.currentData() == "rank"
     finally:
         win.close()
+
+
+def test_clear_resets_library_domain_and_sort():
+    """Clear resets the Lab: a Library/Domain choice or a Sort must not narrow or
+    group the next search."""
+    pane = _pane()
+    pane.lib_filter.setCurrentIndex(pane.lib_filter.findData("JTS"))
+    pane.dom_filter.setCurrentIndex(pane.dom_filter.findData("Bible"))
+    pane.order_combo.setCurrentIndex(pane.order_combo.findData("domain"))
+    pane._clear_lab()
+    assert pane.lib_filter.currentData() == "" and pane.lib_filter.count() == 1
+    assert pane.dom_filter.currentData() == "" and pane.dom_filter.count() == 1
+    assert pane.order_combo.currentData() == "rank"

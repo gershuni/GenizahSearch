@@ -3940,6 +3940,14 @@ if _QT_AVAILABLE:
                 self.filter_in.clear()
                 self.mat_filter.setCurrentIndex(0)
                 self.tri_filter.setCurrentIndex(0)
+                # Library / Domain back to any (their options go with the results),
+                # and Sort back to the search's order.
+                self.lib_filter.setCurrentIndex(0)
+                self.dom_filter.setCurrentIndex(0)
+                self._refresh_facet_filters()
+                self.order_combo.blockSignals(True)
+                self.order_combo.setCurrentIndex(0)
+                self.order_combo.blockSignals(False)
             except RuntimeError:
                 pass
 

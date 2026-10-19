@@ -997,7 +997,7 @@ def create_joins_lab_page(
         modal.open()
 
     async def _do_enrich_and_update(candidates_snap: list) -> None:
-        """Fetch enrichment off-loop for all filtered candidates, then re-render.
+        """Fetch enrichment off-loop for all candidates (before filtering), then re-render.
 
         Fires after Step-9 renders the surface (Pitfall 7 — enrichment is async;
         material/dims columns populate once this completes). Updates _enrichment +
@@ -3522,8 +3522,10 @@ def create_joins_lab_page(
                             ui.label(
                                 tr('No visual similarity data for this fragment')
                             ).style('color: var(--text-secondary);')
-                    # Fire enrichment off-loop for the full filtered set
-                    asyncio.ensure_future(_do_enrich_and_update(list(_filtered_candidates)))
+                    # Fire enrichment off-loop for ALL candidates, not only the filtered
+                    # ones: the filters read the enrichment (domain, material), so
+                    # a filter applied before it lands must not decide what gets it.
+                    asyncio.ensure_future(_do_enrich_and_update(list(_all_candidates)))
                 finally:
                     if _is_running['value'] and my_gen_f1 == _search_generation['value']:
                         _is_running['value'] = False
@@ -3865,8 +3867,11 @@ def create_joins_lab_page(
             # slow fuzzy/variants re-run.
             _persist_results_snapshot()
 
-            # Fire enrichment off-loop for the FULL filtered set (D-16, Pitfall 7)
-            asyncio.ensure_future(_do_enrich_and_update(list(_filtered_candidates)))
+            # Fire enrichment off-loop for ALL candidates (D-16, Pitfall 7) -- not
+            # the filtered set: a Domain or Material filter carried over from the
+            # session would drop every not-yet-enriched candidate, and they would
+            # never be enriched (or shown, or offered in the Filter dialog).
+            asyncio.ensure_future(_do_enrich_and_update(list(_all_candidates)))
 
             # If VS is ON but we haven't fetched VS candidates for this anchor yet, fetch now
             if _vs_on['value'] and _vs_anchor_sid['value'] != anchor_sid_step9:
@@ -4141,9 +4146,9 @@ def create_joins_lab_page(
                     restored_from_snapshot = True
                     # If enrichment wasn't captured (navigated away before it
                     # landed), fetch it now so dims/material populate.
-                    if not _enrichment_ready['value'] and _filtered_candidates:
+                    if not _enrichment_ready['value'] and _all_candidates:
                         asyncio.ensure_future(
-                            _do_enrich_and_update(list(_filtered_candidates))
+                            _do_enrich_and_update(list(_all_candidates))
                         )
                 except Exception:
                     logger.exception(

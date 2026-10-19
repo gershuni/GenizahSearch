@@ -2371,3 +2371,37 @@ def test_sort_and_filter_by_library_and_domain(joins_lab_smoke_runner):
             assert _card_domains(user) == ['Bible']
 
     joins_lab_smoke_runner(driver, mock_search_results=_lib_dom_results())
+
+
+def test_a_saved_domain_filter_still_lets_its_candidates_in(joins_lab_smoke_runner):
+    """A session restored with a Domain filter on re-runs its search before any
+    candidate has a domain. The enrichment must cover every candidate, not just the
+    filtered ones: otherwise all of them are filtered out, none is enriched, and the
+    grid stays empty for good."""
+    from unittest.mock import AsyncMock, patch
+
+    from web.joins_lab_storage import clear_results_snapshot, write_full_state
+
+    row = {"words": [{"term": "highlighted", "mods": {}, "gap_to_next_word": 0}],
+           "line_start": False, "line_end": False, "gap_to_next_line": 0}
+
+    async def driver(user):
+        with patch('web.pages.joins_lab._enrich_candidates', new_callable=AsyncMock,
+                   return_value=dict(_LIB_DOM_ENRICH)):
+            await user.open('/joins-lab')
+            # Earlier tests in this file can leave a session for the same stub
+            # anchor; this first page restores it and saves its own state when its
+            # search ends. Let it finish before writing the session under test.
+            await asyncio.sleep(1.5)
+            with user._client:
+                clear_results_snapshot()             # no snapshot: the restore re-runs
+                write_full_state(
+                    anchor_sys_id=STUB_ANCHOR_SID, builder_rows=[row],
+                    builder_mode='responsa',
+                    active_filter={'domains': ['Bible'], 'order': 'rank'},
+                )
+            await user.open('/joins-lab')            # restore: re-runs the search
+            await asyncio.sleep(1.5)
+            assert _card_domains(user) == ['Bible']
+
+    joins_lab_smoke_runner(driver, mock_search_results=_lib_dom_results())
