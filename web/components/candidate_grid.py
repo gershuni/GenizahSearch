@@ -1400,7 +1400,7 @@ def _grid_header(total: int, *, all_candidates: list, filter_state: dict,
         ui.label(f"{tr('Candidates')} ({total})").classes(
             "text-base font-semibold"
         )
-        with ui.row().classes("items-center gap-1 justify-end"):
+        with ui.row().classes("items-center gap-1"):
             if on_filter_change is not None:
                 hebrew = get_language() == "he"
                 lib_opts = library_options(all_candidates)

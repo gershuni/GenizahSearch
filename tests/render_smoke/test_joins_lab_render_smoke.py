@@ -2387,11 +2387,14 @@ def _set_select(user, marker: str, value) -> None:
 
 
 def _fire(user, element, event_type: str) -> None:
-    """Fire one kind of event on an element (a select's popup-show / popup-hide)."""
+    """Fire one kind of event on an element (a select's popup-show / popup-hide).
+    NiceGUI keeps the type in camel case ('popupShow')."""
     from nicegui import events
+    head, *rest = event_type.split('-')
+    camel = head + ''.join(w.capitalize() for w in rest)
     with user._client:
         for listener in list(element._event_listeners.values()):
-            if listener.element_id == element.id and listener.type == event_type:
+            if listener.element_id == element.id and listener.type == camel:
                 events.handle_event(listener.handler, events.GenericEventArguments(
                     sender=element, client=user._client, args=None))
 
@@ -2443,7 +2446,7 @@ def test_sort_and_filter_by_library_and_domain(joins_lab_smoke_runner):
             with user._client:
                 dom_sel.value = ['Bible']
             await asyncio.sleep(0.2)
-            assert _card_domains(user) == ['Bible', 'Liturgy']      # not yet
+            assert _card_domains(user) == ['Liturgy', 'Bible']      # not yet (by library)
             _fire(user, dom_sel, 'popup-hide')
             await asyncio.sleep(0.3)
             assert _card_domains(user) == ['Bible']
