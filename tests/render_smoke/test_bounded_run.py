@@ -63,6 +63,31 @@ def test_run_bounded_does_not_wait_for_a_blocked_default_executor_worker():
     assert time.monotonic() - started < _PROMPT
 
 
+def test_a_task_started_during_cleanup_is_cancelled_and_nicegui_forgets_the_loop(monkeypatch):
+    """NiceGUI's create_lazy starts the queued storage write from the previous
+    write's done-callback, i.e. AFTER the first cancel pass. It must still be
+    cancelled, and no task of the closed loop may stay in NiceGUI's
+    process-wide registries -- a later test's lifespan teardown would trip
+    over it ("Event loop is closed", or a gather() retried forever)."""
+    from nicegui import background_tasks as bt, core
+
+    async def write():
+        await asyncio.sleep(3600)
+
+    async def main():
+        monkeypatch.setattr(core, 'loop', asyncio.get_running_loop())
+        bt.create_lazy(write(), name='storage-user-test')
+        bt.create_lazy(write(), name='storage-user-test')  # queued behind the first
+        await asyncio.sleep(0)
+        return asyncio.get_running_loop()
+
+    loop = run_bounded(main(), teardown_timeout=_TEARDOWN)
+    left = [t for t in bt.running_tasks | set(bt.lazy_tasks_running.values())
+            if t.get_loop() is loop]
+    assert not left, left
+    assert 'storage-user-test' not in bt.lazy_coroutines_waiting
+
+
 def test_run_bounded_warns_but_passes_when_only_a_leftover_is_stuck():
     async def main():
         asyncio.get_running_loop().create_task(_swallows_cancel_then_waits())

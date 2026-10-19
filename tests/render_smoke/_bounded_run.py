@@ -63,19 +63,33 @@ async def _wait_bounded(task: asyncio.Task, timeout: float) -> bool:
 
 def _cleanup_loop(loop: asyncio.AbstractEventLoop, teardown_timeout: float) -> list:
     """Cancel what is left on ``loop`` and wait for it, bounded. Return the
-    tasks that did not finish (they are abandoned with the loop)."""
-    pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+    tasks that did not finish (they are abandoned with the loop).
+
+    Cancelling repeats until the loop is empty, because finishing one task
+    can start another: NiceGUI's ``create_lazy`` starts the queued
+    user-storage write from the done-callback of the one before it.
+    """
+    deadline = loop.time() + teardown_timeout
+    cancelled: set = set()
+    seen: set = set()
     stuck: list = []
-    if pending:
+    while True:
+        pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+        seen.update(pending)
+        if not pending:
+            break
         for task in pending:
-            task.cancel()
-        _, not_done = loop.run_until_complete(
-            asyncio.wait(pending, timeout=teardown_timeout)
-        )
-        stuck = list(not_done)
-        for task in pending:
-            if task.done() and not task.cancelled():
-                task.exception()  # mark retrieved: no "never retrieved" noise
+            if task not in cancelled:
+                task.cancel()
+                cancelled.add(task)
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            stuck = pending
+            break
+        loop.run_until_complete(asyncio.wait(pending, timeout=remaining))
+    for task in seen:
+        if task.done() and not task.cancelled():
+            task.exception()  # mark retrieved: no "never retrieved" noise
     try:
         loop.run_until_complete(asyncio.wait_for(loop.shutdown_asyncgens(), _CANCEL_GRACE))
     except (asyncio.TimeoutError, RuntimeError):
@@ -85,6 +99,28 @@ def _cleanup_loop(loop: asyncio.AbstractEventLoop, teardown_timeout: float) -> l
     # past every bound here (Codex, PR #413). run_bounded installs its own
     # default executor and shuts it down without waiting instead.
     return stuck
+
+
+def _forget_nicegui_tasks(loop: asyncio.AbstractEventLoop) -> None:
+    """Drop ``loop``'s tasks from NiceGUI's process-wide task registries.
+
+    ``background_tasks.running_tasks`` and ``lazy_tasks_running`` outlive the
+    loop. A task abandoned there makes every LATER lifespan teardown fail:
+    ``cancel()`` raises "Event loop is closed", or ``gather()`` raises because
+    the task belongs to another loop and ``teardown()`` retries it forever.
+    """
+    try:
+        from nicegui import background_tasks as bt
+    except ImportError:
+        return
+    for task in [t for t in bt.running_tasks if t.get_loop() is loop]:
+        bt.running_tasks.discard(task)
+    for name, task in list(bt.lazy_tasks_running.items()):
+        if task.get_loop() is loop:
+            bt.lazy_tasks_running.pop(name, None)
+            waiting = bt.lazy_coroutines_waiting.pop(name, None)
+            if waiting is not None:
+                waiting.close()
 
 
 def run_bounded(
@@ -134,6 +170,7 @@ def run_bounded(
             )
         return main.result()
     finally:
+        _forget_nicegui_tasks(loop)
         # A worker still running is abandoned, not joined (see _cleanup_loop).
         executor.shutdown(wait=False, cancel_futures=True)
         asyncio.set_event_loop(None)
