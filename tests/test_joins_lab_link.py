@@ -30,7 +30,7 @@ FULL = {
     "b": {"rows": [_row("קדוש", "ברוך")], "type": "responsa", "var": True,
           "text": "", "pos": "anywhere"},
     "g": {"flex": True, "bidir": False},
-    "o": {"on": True, "rows": [_row("שלום")], "combine": "OR"},
+    "o": {"on": True, "rows": [_row("שלום")], "combine": "OR", "pos": "end"},
     "vs": True,
     "f": {"materials": ["paper"], "has_dims": True, "exclude_mismatch": False,
           "triage_states": ["Yes"], "text_q": "T-S"},
@@ -144,6 +144,24 @@ def test_stored_session_in_link_shape():
     assert got["g"] == {"flex": False, "bidir": True}
     assert "o" not in got                                               # other side off
     assert got["f"]["has_dims"] is True
+
+
+def test_the_other_side_keeps_its_own_text_position():
+    """The cross-side search uses the other side's own position, so a link and a
+    stored session carry it; a bad one is dropped, and a blob saved before it was
+    stored has none (the restore then falls back to the anchor's, as before)."""
+    assert jl.decode_share_state(jl.encode_share_state(FULL))["o"]["pos"] == "end"
+    assert "pos" not in jl.clean_share_state(
+        {"o": {"on": True, "rows": [], "pos": "middle"}})["o"]
+    stored = {"builder_rows": [_row("a")], "text_position": "anywhere",
+              "other_side_enabled": True, "other_side_rows": [_row("b")],
+              "other_side_combine": "AND", "other_side_text_position": "line_end"}
+    assert jl.share_inputs_from_full_state(stored)["o"]["pos"] == "line_end"
+    del stored["other_side_text_position"]
+    assert "pos" not in jl.share_inputs_from_full_state(stored)["o"]
+    a = jl.clean_share_state(FULL)
+    b = jl.clean_share_state({**FULL, "o": {**FULL["o"], "pos": "start"}})
+    assert not jl.same_inputs(a, b), "another other-side position is another search"
 
 
 def test_same_inputs_ignores_view_page_and_marks():

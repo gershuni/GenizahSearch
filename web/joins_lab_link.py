@@ -15,7 +15,8 @@ What it carries:
   (responsa | exact | variants | fuzzy | regex), ``var`` (variants on),
   ``text`` (the single-line query), ``pos`` (text position)
 * ``g`` -- global options: ``flex``, ``bidir``
-* ``o`` -- the other side: ``on``, ``rows``, ``combine`` (AND | OR)
+* ``o`` -- the other side: ``on``, ``rows``, ``combine`` (AND | OR), ``pos`` (its
+  own text position; the cross-side search uses it, not the anchor side's)
 * ``vs`` -- Visual Similarity on
 * ``f`` -- the candidate filter (the filter dialog's keys)
 * ``view`` -- grid | table; ``gp`` -- the 0-based grid/table page
@@ -154,6 +155,8 @@ def clean_share_state(state: Any) -> dict:
             "rows": _clean_rows(o.get("rows")),
             "combine": o["combine"] if o.get("combine") in COMBINES else "AND",
         }
+        if o.get("pos") in TEXT_POSITIONS:
+            out["o"]["pos"] = o["pos"]
     if state.get("vs"):
         out["vs"] = True
     if "f" in state:
@@ -204,6 +207,9 @@ def share_inputs_from_full_state(full_state: Any) -> dict:
             "on": True,
             "rows": full_state.get("other_side_rows", []),
             "combine": full_state.get("other_side_combine", "AND"),
+            # Absent in a blob saved before it was stored: the restore then gives
+            # the other side the anchor's position, as it always had.
+            "pos": full_state.get("other_side_text_position"),
         }
     return clean_share_state(state)
 

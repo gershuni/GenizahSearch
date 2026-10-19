@@ -2372,6 +2372,36 @@ def test_a_link_opens_its_screen_and_its_marks_are_not_saved(joins_lab_smoke_run
     joins_lab_smoke_runner(driver)
 
 
+def test_a_link_keeps_the_other_sides_own_text_position(joins_lab_smoke_runner):
+    """The other side's Text Position is its own (the cross-side search uses it):
+    a link sets it on the other builder, the session saves it, and the address bar
+    carries it on -- it is not replaced by the anchor side's."""
+    import contextlib
+
+    from web.joins_lab_link import encode_share_state
+    token = encode_share_state({
+        'b': {'rows': [_link_row('highlighted')], 'type': 'responsa', 'pos': 'anywhere'},
+        'o': {'on': True, 'rows': [_link_row('other')], 'combine': 'AND', 'pos': 'line_end'},
+    })
+
+    async def driver(user):
+        with contextlib.ExitStack() as stack:
+            bar = _record_address_bar(stack)
+            await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={token}')
+            await asyncio.sleep(1.5)
+
+        from web.joins_lab_storage import read_full_state
+        with user._client:
+            stored = read_full_state() or {}
+        assert stored.get('other_side_enabled') is True
+        assert stored.get('text_position') == 'anywhere'
+        assert stored.get('other_side_text_position') == 'line_end', stored
+        assert bar, "the address bar never followed the screen"
+        assert _state_of(bar[-1])['o'].get('pos') == 'line_end'
+
+    joins_lab_smoke_runner(driver)
+
+
 def test_a_link_reopens_its_compare_pair(joins_lab_smoke_runner):
     """A link made with Compare open opens Compare on that pair again."""
     from web.joins_lab_link import encode_share_state

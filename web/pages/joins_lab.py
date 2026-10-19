@@ -3990,6 +3990,8 @@ def create_joins_lab_page(
                 'on': True,
                 'rows': ob['get_state']().get('lines_state', []),
                 'combine': _other_side.get('combine', 'AND'),
+                # The other side's OWN position: the cross-side search uses it.
+                'pos': ob['get_text_position'](),
             }
         if _compare_open['key'] is not None:
             state['cmp'] = list(_compare_open['key'])
@@ -4113,7 +4115,9 @@ def create_joins_lab_page(
                     'search_type': 'responsa',
                     'variants_on': variants_val,
                     'single_text': '',
-                    'text_position': ab_state['text_position'],
+                    # Its own position; a session saved before that was stored
+                    # has none, and the side then takes the anchor's, as before.
+                    'text_position': o.get('pos', ab_state['text_position']),
                 })
                 _ob['set_variants'](variants_val)
 
@@ -4175,6 +4179,7 @@ def create_joins_lab_page(
             other_side_enabled=_other_side['enabled'],
             other_side_rows=ob_state.get('lines_state', []) if ob_state else [],
             other_side_combine=_other_side.get('combine', 'AND'),
+            other_side_text_position=(ob['get_text_position']() if ob_state else 'anywhere'),
             # Triage (sys_id keyed verdicts — no result blobs or images, D-13).
             # Only the visitor's own: marks a shared link brought are not saved.
             triage=_own_marks(),
