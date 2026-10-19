@@ -1084,6 +1084,35 @@ def test_r2_9_browse_compare_icon_buttons_in_triage_row(joins_lab_smoke_runner):
     joins_lab_smoke_runner(driver)
 
 
+def test_card_browse_icon_is_a_new_tab_link(joins_lab_smoke_runner):
+    """The card's Browse icon is a real link to /browse that opens a new tab.
+
+    It used to be a button that set window.location.href: a plain click replaced
+    the Lab, and Ctrl+click (which a user tried, to keep the Lab) did the same.
+    """
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from nicegui import ElementFilter, ui
+
+        with user._client:
+            browse_btns = [
+                e for e in ElementFilter(kind=ui.button)
+                if e.visible and e._props.get('icon') == 'menu_book'
+            ]
+            assert browse_btns, "no Browse icon on the rendered cards"
+            for btn in browse_btns:
+                link = btn.parent_slot.parent
+                assert isinstance(link, ui.link), (
+                    "the Browse icon must sit inside a ui.link, not navigate by script"
+                )
+                assert link._props.get('href', '').startswith('/browse?sys_id=')
+                assert link._props.get('target') == '_blank'
+
+    joins_lab_smoke_runner(driver)
+
+
 # ---------------------------------------------------------------------------
 # Phase 120 Plan 02: SEED-008 / D-18 / D-11 render-smoke tests
 # ---------------------------------------------------------------------------
@@ -2284,3 +2313,179 @@ def test_rtl_flex_row_reverse_pagination_and_compare(joins_lab_smoke_runner):
     # Pass 25 stub results so total_pages = 2 (> _PAGE_SIZE = 24), which causes
     # the pagination row to render (candidate_grid.py:1349: `if total_pages > 1`).
     joins_lab_smoke_runner(driver, mock_search_results=_make_stub_results(25))
+
+
+# ---------------------------------------------------------------------------
+# Compare window: visible Browse icons, copy buttons, info line + links, and
+# FJMS/PGP buttons that follow the shown candidate (2026-10-19)
+# ---------------------------------------------------------------------------
+
+def _compare_details_stub(sys_id, page=None, *, meta_mgr=None):
+    """fetch_fragment_details stand-in: one domain, a date and two links per fragment."""
+    return {
+        'library_code': '',
+        'title': f'Catalogue title {sys_id}' if sys_id == STUB_ANCHOR_SID else '',
+        'domains': [{'domain': 'Liturgy', 'domain_heb': 'ליטורגיה'}],
+        'dating': '12th century',
+        'links': [
+            {'key': 'ktiv', 'label': 'Ktiv', 'url': f'https://ktiv.example/{sys_id}'},
+            {'key': 'pgp', 'label': 'PGP', 'url': f'https://pgp.example/{sys_id}'},
+        ],
+    }
+
+
+async def _open_compare_from_first_image(user):
+    """Open Compare on the first card and run its show-loader; return the dialog.
+
+    The simulated client never fires the dialog's client-side 'show' event, so
+    the loader is run through its test seam (dialog._on_show).
+    """
+    from nicegui import ElementFilter, ui
+    with user._client:
+        img_els = [e for e in ElementFilter(kind=ui.image) if e.visible]
+    assert img_els, "no candidate images to open Compare from"
+    _click_element(user, img_els[0])
+    await asyncio.sleep(0.5)
+    with user._client:
+        dialogs = [
+            d for d in ElementFilter(kind=ui.dialog)
+            if d._props.get('model-value') and hasattr(d, '_on_show')
+        ]
+    assert dialogs, "Compare did not open"
+    with user._client:
+        await dialogs[-1]._on_show()
+    return dialogs[-1]
+
+
+def _shown_candidate_sid(user) -> str:
+    """The sys_id of the candidate the Compare pane shows, read from its links."""
+    from nicegui import ElementFilter, ui
+    with user._client:
+        hrefs = [
+            e._props.get('href', '')
+            for e in ElementFilter(kind=ui.link).within(marker='compare-candidate-pane')
+        ]
+    for h in hrefs:
+        if h.startswith('https://ktiv.example/'):
+            return h.rsplit('/', 1)[1]
+    return ''
+
+
+def test_compare_browse_icons_visible_and_copy_buttons(joins_lab_smoke_runner):
+    """Both Browse icons in Compare are coloured, not white; each pane has a copy button.
+
+    The icons were white (.classes('text-white')) on the light pane background,
+    so they could be seen only in the dark theme.
+    """
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+        dialog = await _open_compare_from_first_image(user)
+
+        from nicegui import ElementFilter, ui
+        with user._client:
+            browse_icons = [
+                b for b in ElementFilter(kind=ui.button)
+                if b.visible and b._props.get('icon') == 'open_in_new'
+                and 'Browse (new tab)' in (b._props.get('aria-label') or '')
+                or (b.visible and b._props.get('icon') == 'open_in_new'
+                    and 'בדפדפן' in (b._props.get('aria-label') or ''))
+            ]
+            copy_btns = [
+                b for b in ElementFilter(kind=ui.button).within(instance=dialog)
+                if b._props.get('icon') == 'content_copy'
+            ]
+        assert len(browse_icons) == 2, f"expected anchor + candidate Browse icons, got {len(browse_icons)}"
+        for b in browse_icons:
+            assert 'text-white' not in b._classes
+            assert 'var(--primary-700)' in b._style.get('color', '')
+        assert len(copy_btns) == 2, "each Compare pane needs a copy-shelfmark button"
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_compare_info_line_and_links(joins_lab_smoke_runner):
+    """Each Compare pane shows library · domain · date and its external links (new tab).
+
+    The anchor, which the Lab passes without a title, gets the catalogue title.
+    """
+    from unittest.mock import patch
+
+    async def driver(user):
+        with patch('web.pages.joins_lab.fetch_fragment_details', side_effect=_compare_details_stub):
+            await user.open('/joins-lab')
+            await _load_anchor_and_search(user)
+            await _open_compare_from_first_image(user)
+
+            from nicegui import ElementFilter, ui
+            with user._client:
+                cand_lines = [
+                    e.text for e in ElementFilter(kind=ui.label, marker='compare-info-line')
+                    .within(marker='compare-candidate-pane')
+                ]
+                all_lines = [e.text for e in ElementFilter(kind=ui.label, marker='compare-info-line')]
+                links = [
+                    e for e in ElementFilter(kind=ui.link)
+                    if (e._props.get('href') or '').startswith('https://')
+                    and '.example/' in (e._props.get('href') or '')
+                ]
+                anchor_titles = [
+                    e.text for e in ElementFilter(kind=ui.label, marker='compare-anchor-title')
+                ]
+            assert cand_lines and cand_lines[0].startswith('CUL · '), cand_lines
+            assert all('12th century' in line for line in all_lines) and len(all_lines) == 2, all_lines
+            assert len(links) == 4, "Ktiv + PGP for each of the two panes"
+            assert all(e._props.get('target') == '_blank' for e in links)
+            assert anchor_titles == [f'Catalogue title {STUB_ANCHOR_SID}']
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_compare_info_buttons_follow_the_shown_candidate(joins_lab_smoke_runner):
+    """After Next, the FJMS button row belongs to the candidate now shown.
+
+    Before the fix the row was filled once, on open, so after a flip its buttons
+    still opened the first candidate's catalogue.
+    """
+    from unittest.mock import MagicMock, patch
+
+    with_catalog = '990002222222222'   # STUB_CAND_TEXT has a catalogue record; others do not
+    svc = MagicMock()
+    svc.get_bibliography.return_value = []
+    svc.get_catalog_detail.return_value = None
+    svc.get_source_names.side_effect = lambda sid: ['FJMS'] if sid == with_catalog else []
+
+    def _enabled_catalog_buttons(user):
+        from nicegui import ElementFilter, ui
+        with user._client:
+            return [
+                b for b in ElementFilter(kind=ui.button).within(marker='compare-candidate-pane')
+                if b._props.get('icon') == 'info_outline' and not b._props.get('disable')
+            ]
+
+    async def driver(user):
+        with patch('web.pages.joins_lab.fetch_fragment_details', side_effect=_compare_details_stub), \
+                patch('web.pages.joins_lab.get_fjms_service', return_value=svc):
+            await user.open('/joins-lab')
+            await _load_anchor_and_search(user)
+            await _open_compare_from_first_image(user)
+
+            from nicegui import ElementFilter, ui
+            seen = []
+            for _ in range(2):
+                sid = _shown_candidate_sid(user)
+                assert sid, "the shown candidate's links did not render"
+                has_button = bool(_enabled_catalog_buttons(user))
+                assert has_button == (sid == with_catalog), (
+                    f"candidate {sid}: FJMS Catalog button present={has_button}"
+                )
+                seen.append(sid)
+                with user._client:
+                    nxt = [b for b in ElementFilter(kind=ui.button)
+                           if b.visible and (b.text or '').strip() in ('Next ›', '‹ הבא')]
+                assert nxt, "no Next button in Compare"
+                _click_element(user, nxt[0])
+                await asyncio.sleep(0.8)
+            assert len(set(seen)) == 2, f"Next did not change the candidate: {seen}"
+
+    joins_lab_smoke_runner(driver)
