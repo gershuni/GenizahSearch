@@ -17,13 +17,15 @@ Phase-120 extensions:
 Exports
 -------
 render_known_joins_group(data, current_shelfmark, current_sys_id, on_reanchor,
-                         on_open_browse, on_remove_join=None, current_user_id=None)
+                         on_remove_join=None, current_user_id=None)
 badge_for_source(source) -> (label, css_color)
+member_browse_url(shelfmark) -> str
 """
 
 from __future__ import annotations
 
 from typing import Callable
+from urllib.parse import quote
 
 from nicegui import ui
 
@@ -59,12 +61,16 @@ def badge_for_source(source: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 
+def member_browse_url(shelfmark: str) -> str:
+    """The /browse URL that opens a known-join member, by its shelfmark."""
+    return f'/browse?shelfmark={quote(shelfmark, safe="")}'
+
+
 def render_known_joins_group(
     data: dict,
     current_shelfmark: str,
     current_sys_id: str,
     on_reanchor: Callable[[str, str], None],
-    on_open_browse: Callable[[str], None],
     on_remove_join: Callable[[int], None] | None = None,
     current_user_id: str | None = None,
 ) -> None:
@@ -91,8 +97,6 @@ def render_known_joins_group(
         current_sys_id: sys_id of the anchor (used to avoid re-anchoring to self).
         on_reanchor: Callback(sys_id: str, shelfmark: str) — called when the user
                      clicks the re-anchor pin icon on a member row.
-        on_open_browse: Callback(shelfmark: str) — called when the user clicks the
-                        open-in-browse icon on a member row.
         on_remove_join: Optional Callback(join_id: int) — called when the user
                         clicks the remove icon on their OWN join row. When None,
                         no remove button is rendered (backward-compatible).
@@ -168,7 +172,6 @@ def render_known_joins_group(
                         join_id=join_id,
                         is_mine=is_mine,
                         on_reanchor=on_reanchor,
-                        on_open_browse=on_open_browse,
                         on_remove_join=on_remove_join,
                     )
 
@@ -178,7 +181,6 @@ def _render_member_row(
     member_sys_id: str,
     sources: list[str],
     on_reanchor: Callable[[str, str], None],
-    on_open_browse: Callable[[str], None],
     join_id: int | None = None,
     is_mine: bool = False,
     on_remove_join: Callable[[int], None] | None = None,
@@ -220,12 +222,6 @@ def _render_member_row(
                 on_reanchor(sid, sm)
             return _do
 
-        # Open in browse
-        def _make_browse(sm: str = member_shelfmark) -> Callable:
-            def _do() -> None:
-                on_open_browse(sm)
-            return _do
-
         # CR-02: only render the re-anchor pin when a sys_id was resolved.
         # Community members whose shelfmark could not be mapped to a sys_id
         # have member_sys_id='' — re-anchoring to an empty sys_id would corrupt
@@ -238,12 +234,14 @@ def _render_member_row(
             ).props('flat dense').classes('text-gray-500').tooltip(
                 tr('Re-anchor to this fragment')
             )
-        ui.button(
-            icon='open_in_new',
-            on_click=_make_browse(),
-        ).props('flat dense').classes('text-gray-500').tooltip(
-            tr('View in Browse')
-        )
+        # Open in Browse: a real link to a new tab, so the Lab is never replaced
+        # and Ctrl/middle-click work too (it used to navigate this tab).
+        with ui.link(target=member_browse_url(member_shelfmark), new_tab=True).classes(
+            'no-underline'
+        ):
+            ui.button(icon='open_in_new').props(
+                f'flat dense aria-label="{tr("View in Browse")}"'
+            ).classes('text-gray-500').tooltip(tr('View in Browse'))
 
         # Phase-120 D-03: remove affordance — only on the user's OWN joins
         if is_mine and on_remove_join is not None and join_id is not None:
