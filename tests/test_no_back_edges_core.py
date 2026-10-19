@@ -143,6 +143,8 @@ EXTRACTED_MODULES = [
     "shared/composition_windows.py",
     # 2026-10-06: Regex mode's candidate query that cannot lose a match.
     "shared/regex_prefilter.py",
+    # 2026-10-19: the Joins Lab Compare window's info line and links (web + desktop).
+    "shared/fragment_details.py",
 ]
 
 # Compound statement types whose bodies run at import time

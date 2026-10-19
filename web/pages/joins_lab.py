@@ -63,12 +63,12 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
-from urllib.parse import quote
 
 from nicegui import run, ui
 
 from shared.export_dossier import build_image_url_for_row
 from shared.fjms_service import get_fjms_service
+from shared.fragment_details import fetch_fragment_details
 from shared.joins_lab import (
     BuilderRow, Candidate, SideQuery, apply_cross_side, compose, dedup_candidates,
     detect_self_match, merge_candidates, normalize_order, primary_domain,
@@ -832,6 +832,14 @@ def create_joins_lab_page(
             'source_names': source_names,
         }
 
+    def _details_fetcher_sync(sys_id: str, page: Optional[int]) -> dict:
+        """Compare pane details (library, title, domains, date, links), off-loop.
+
+        Local reads only (shared.fragment_details); compare_modal calls it via
+        run.io_bound on open and on every candidate flip.
+        """
+        return fetch_fragment_details(sys_id, page, meta_mgr=state.meta_mgr)
+
     def _prefetch_image_sync(sys_id: str) -> Optional[str]:
         """D-10/M3: Sync image resolver for off-loop prefetch via run.io_bound.
 
@@ -993,6 +1001,7 @@ def create_joins_lab_page(
             on_add_as_join=_on_add_as_join_click,
             # Round-4 Issue 7: Add-to-Puzzle (anchor + current candidate) in header
             on_add_to_puzzle=_on_add_candidate_to_puzzle_click,
+            details_fetcher=_details_fetcher_sync,
         )
         modal.open()
 
@@ -2433,11 +2442,6 @@ def create_joins_lab_page(
                 """Re-anchor to a known-join member (D-16: does NOT clear builder state)."""
                 asyncio.ensure_future(load_anchor(member_sys_id, show_restored_toast=False))
 
-            def _on_open_browse(member_shelfmark: str) -> None:
-                """Open a known-join member in Browse (same tab)."""
-                sm_encoded = quote(member_shelfmark, safe='')
-                ui.navigate.to(f'/browse?shelfmark={sm_encoded}')
-
             # Phase-120 D-03: get current user_id for own-join detection.
             # None when anonymous — no remove button rendered.
             _user = GlobalAuthState.get_user() if GlobalAuthState.is_logged_in() else None
@@ -2450,7 +2454,6 @@ def create_joins_lab_page(
                     current_shelfmark=shelfmark,
                     current_sys_id=sys_id,
                     on_reanchor=_on_reanchor,
-                    on_open_browse=_on_open_browse,
                     on_remove_join=_on_remove_join_click,
                     current_user_id=_current_uid,
                 )
