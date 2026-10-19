@@ -1131,7 +1131,9 @@ def create_joins_lab_page(
         'table', create_candidate_grid when 'grid'. Both share the same _triage dict
         and _open_compare handler (D-10: triage is never reset on view switch).
         """
-        if not _filtered_candidates:
+        # When the filters leave none, the grid still shows its toolbar so they can
+        # be undone (the table has no filter controls).
+        if not _filtered_candidates and (_view_mode['value'] == 'table' or not _all_candidates):
             ui.label(tr('No candidates found. Try different lines.')).style(
                 'color: var(--text-secondary);'
             )
@@ -1216,7 +1218,15 @@ def create_joins_lab_page(
                 on_triage_change=lambda *_a: _persist_state(),
                 order=_filter_state.get('order', 'rank'),
                 on_order_change=_on_order_change,
+                all_candidates=_all_candidates,
+                on_filter_change=_on_toolbar_filter_change,
             )
+
+    def _on_toolbar_filter_change() -> None:
+        """The toolbar's Library or Domain filter changed _filter_state in place."""
+        _current_page['value'] = 0
+        _re_render_candidates_surface()
+        _persist_state()
 
     def _on_order_change(order: str) -> None:
         """The grid's Sort control: group by library or domain, or the search's order.
@@ -1234,10 +1244,10 @@ def create_joins_lab_page(
         _re_render_candidates_surface()
 
     def _on_filter_open() -> None:
-        """Open the filter dialog (D-14) with enrichment-ready gate (Pitfall 7)."""
+        """Open the More filters… dialog (D-14) with enrichment-ready gate (Pitfall 7)."""
         # CR-02: open_filter_dialog signature is (filter_state, enrichment,
-        # enrichment_ready, on_apply, on_reset, candidates).  candidates (the list
-        # before filtering) gives the Library/Domain options and their counts.
+        # enrichment_ready, on_apply, on_reset).  Library and Domain are in the
+        # toolbar, not the dialog.
         # The on_apply contract is no-arg (filter_state is mutated in place by
         # the dialog's _do_apply before calling on_apply()).
 
@@ -1261,7 +1271,6 @@ def create_joins_lab_page(
             enrichment_ready=_enrichment_ready['value'],
             on_apply=_on_filter_apply,
             on_reset=_on_filter_reset,
-            candidates=list(_all_candidates),
         )
 
     # One WebSearchExecutor per page render (used for SEARCH only —
@@ -2909,9 +2918,10 @@ def create_joins_lab_page(
                 _filtered_candidates.clear()
                 _filtered_candidates.extend(filtered)
                 _current_page['value'] = 0
-                # Re-render
+                # Re-render. Candidates the filters hide all still get the grid, whose
+                # toolbar undoes them; the messages below are for no candidates.
                 candidates_container.clear()
-                if filtered:
+                if display:
                     with candidates_container:
                         _render_candidates_surface()
                 else:
@@ -3616,7 +3626,7 @@ def create_joins_lab_page(
                     candidates_container.clear()
                     search_status.style('display: none;')
                     with candidates_container:
-                        if _filtered_candidates:
+                        if _all_candidates:   # even if the filters hide them all
                             _render_candidates_surface()
                         else:
                             ui.label(

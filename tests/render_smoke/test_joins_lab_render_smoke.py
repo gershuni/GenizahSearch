@@ -2352,9 +2352,25 @@ def _set_select(user, marker: str, value) -> None:
         sel.value = value
 
 
+def _fire(user, element, event_type: str) -> None:
+    """Fire one kind of event on an element (a select's popup-show / popup-hide)."""
+    from nicegui import events
+    with user._client:
+        for listener in list(element._event_listeners.values()):
+            if listener.element_id == element.id and listener.type == event_type:
+                events.handle_event(listener.handler, events.GenericEventArguments(
+                    sender=element, client=user._client, args=None))
+
+
+def _toolbar_select(user, marker: str):
+    from nicegui import ElementFilter, ui
+    with user._client:
+        return next(iter(ElementFilter(kind=ui.select, marker=marker)))
+
+
 def test_sort_and_filter_by_library_and_domain(joins_lab_smoke_runner):
     """Cards show their domain; Sort groups them by domain or library (kept in the
-    saved session); the Filter dialog's Library and Domain selects carry counts and
+    saved session); the toolbar's Library and Domain selects carry counts and
     narrow the grid."""
     from unittest.mock import AsyncMock, patch
 
@@ -2380,29 +2396,65 @@ def test_sort_and_filter_by_library_and_domain(joins_lab_smoke_runner):
             await asyncio.sleep(0.2)
             assert _card_domains(user) == ['Liturgy', 'Bible']
 
+            # Library and Domain sit in the toolbar (owner, 2026-10-19: in the
+            # Filter dialog nobody found them).
+            lib_sel = _toolbar_select(user, 'joins-filter-library')
+            dom_sel = _toolbar_select(user, 'joins-filter-domain')
+            assert list(lib_sel.options.values()) == ['CUL (1)', 'JTS (1)']
+            assert list(dom_sel.options.values()) == ['Bible (1)', 'Liturgy (1)']
+            assert lib_sel.enabled and dom_sel.enabled
+
+            # Picks made with the list open apply when it closes.
+            _fire(user, dom_sel, 'popup-show')
+            with user._client:
+                dom_sel.value = ['Bible']
+            await asyncio.sleep(0.2)
+            assert _card_domains(user) == ['Bible', 'Liturgy']      # not yet
+            _fire(user, dom_sel, 'popup-hide')
+            await asyncio.sleep(0.3)
+            assert _card_domains(user) == ['Bible']
+            dom_sel = _toolbar_select(user, 'joins-filter-domain')  # re-rendered
+            assert dom_sel.value == ['Bible']
+            assert dom_sel._props.get('display-value') == 'Bible'   # the name, no count
+            with user._client:
+                stored = read_full_state() or {}
+            assert (stored.get('active_filter') or {}).get('domains') == ['Bible']
+
+            # A filter that leaves none keeps the toolbar, so it can be undone.
+            _set_select(user, 'joins-filter-library', ['CUL'])      # Bible is JTS
+            await asyncio.sleep(0.3)
+            assert _card_domains(user) == []
             from nicegui import ElementFilter, ui
             with user._client:
-                filter_btn = next(b for b in ElementFilter(kind=ui.button)
-                                  if b._props.get('icon') == 'filter_list' and b.visible)
-            _click_element(user, filter_btn)
+                assert list(ElementFilter(kind=ui.label, marker='joins-no-filter-match'))
+            _set_select(user, 'joins-filter-domain', None)          # its clear button
+            await asyncio.sleep(0.3)
+            assert _card_domains(user) == ['Liturgy']
+            _set_select(user, 'joins-filter-library', None)
+            await asyncio.sleep(0.3)
+            assert _card_domains(user) == ['Liturgy', 'Bible']
+
+            # The other filters are behind "More filters…", which counts the ones on.
+            with user._client:
+                more_btn = next(iter(ElementFilter(kind=ui.button, marker='joins-more-filters')))
+                assert more_btn.text == 'More filters…'
+            _click_element(user, more_btn)
             await asyncio.sleep(0.2)
             with user._client:
-                lib_sel = next(iter(ElementFilter(kind=ui.select, marker='joins-filter-library')))
-                dom_sel = next(iter(ElementFilter(kind=ui.select, marker='joins-filter-domain')))
-                assert list(lib_sel.options.values()) == ['CUL (1)', 'JTS (1)']
-                assert list(dom_sel.options.values()) == ['Bible (1)', 'Liturgy (1)']
-                assert dom_sel.enabled
                 # Full width: without it Quasar collapses each select to its arrow
                 # and hides the label (seen in a browser, 2026-10-19).
                 dialog_selects = list(ElementFilter(kind=ui.select).within(kind=ui.dialog))
-                assert len(dialog_selects) == 4                # material, library, domain, triage
+                assert len(dialog_selects) == 2                # material, triage
                 assert all('w-full' in sel._classes for sel in dialog_selects)
-                dom_sel.value = ['Bible']
+                text_in = next(i for i in ElementFilter(kind=ui.input).within(kind=ui.dialog))
+                text_in.value = 'T-S'
                 apply_btn = next(b for b in ElementFilter(kind=ui.button)
                                  if b.visible and b._props.get('label') == 'Apply')
             _click_element(user, apply_btn)
             await asyncio.sleep(0.3)
-            assert _card_domains(user) == ['Bible']
+            with user._client:
+                more_btn = next(iter(ElementFilter(kind=ui.button, marker='joins-more-filters')))
+                assert more_btn.text == 'More filters… (1)'
 
     joins_lab_smoke_runner(driver, mock_search_results=_lib_dom_results())
 

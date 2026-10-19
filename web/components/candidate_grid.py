@@ -358,6 +358,21 @@ def domain_options(candidates: list, enrichment: dict, hebrew: bool) -> dict:
     return {v: f"{label} ({n})" for v, label, n in counted_options(pairs)}
 
 
+def more_filters_count(filter_state: dict) -> int:
+    """How many of the "More filters…" dialog's filters are on.
+
+    Library and Domain are in the toolbar, where the visitor sees them, so they
+    do not count."""
+    triage_states = set(filter_state.get("triage_states") or [])
+    return sum((
+        bool(filter_state.get("materials")),
+        bool(filter_state.get("has_dims")),
+        bool(filter_state.get("exclude_mismatch")),
+        bool(triage_states) and "All" not in triage_states,
+        bool((filter_state.get("text_q") or "").strip()),
+    ))
+
+
 # ---------------------------------------------------------------------------
 # Table configuration (D-10, CND-03)
 # ---------------------------------------------------------------------------
@@ -1049,9 +1064,11 @@ def open_filter_dialog(
     enrichment_ready: bool,
     on_apply: Callable,
     on_reset: Callable,
-    candidates: Optional[list] = None,
 ) -> None:
-    """Open the candidate filter dialog (D-14, CND-06).
+    """Open the "More filters…" dialog (D-14, CND-06).
+
+    Library and Domain are not here: they sit in the results toolbar (owner,
+    2026-10-19: in the dialog nobody found them), and Reset leaves them as they are.
 
     Args:
         filter_state:     Current filter state dict (mutated in place on Apply).
@@ -1059,8 +1076,6 @@ def open_filter_dialog(
         enrichment_ready: True when enrichment batch has completed.
         on_apply:         Called after Apply closes the dialog.
         on_reset:         Called after Reset closes the dialog.
-        candidates:       The candidates before filtering: the Library and Domain
-                          options and their counts (no Library/Domain filter without).
     """
     # Gather material options from enrichment (disabled until enrichment ready — Pitfall 7)
     mat_options = sorted({v.get("material") for v in enrichment.values() if v.get("material")})
@@ -1077,28 +1092,6 @@ def open_filter_dialog(
         ).props("dense outlined use-chips").classes("w-full")
         if not enrichment_ready:
             mat_sel.disable()
-
-        # 1b. Library and Domain (multi-select with counts, as in the Visual
-        # Similarity window); Domain comes with the enrichment, so it waits for it.
-        hebrew = get_language() == "he"
-        lib_opts = library_options(candidates or [])
-        dom_opts = domain_options(candidates or [], enrichment, hebrew)
-        lib_sel = ui.select(
-            options=lib_opts,
-            value=[v for v in (filter_state.get("libraries") or []) if v in lib_opts],
-            label=tr("Library"),
-            multiple=True,
-        ).props("dense outlined use-chips").classes("w-full").mark("joins-filter-library")
-        dom_sel = ui.select(
-            options=dom_opts,
-            value=[v for v in (filter_state.get("domains") or []) if v in dom_opts],
-            label=tr("Domain"),
-            multiple=True,
-        ).props("dense outlined use-chips").classes("w-full").mark("joins-filter-domain")
-        if not lib_opts:
-            lib_sel.disable()
-        if not enrichment_ready or not dom_opts:
-            dom_sel.disable()
 
         # 2. Has dimensions
         dims_sw = ui.switch(tr("Has dimensions data"), value=bool(filter_state.get("has_dims", False)))
@@ -1133,8 +1126,6 @@ def open_filter_dialog(
                     "exclude_mismatch": False,
                     "triage_states": [],
                     "text_q": "",
-                    "libraries": [],
-                    "domains": [],
                 })
                 dlg.close()
                 on_reset()
@@ -1145,11 +1136,6 @@ def open_filter_dialog(
                 filter_state["exclude_mismatch"] = bool(mismatch_sw.value)
                 filter_state["triage_states"] = list(tri_sel.value or [])
                 filter_state["text_q"] = text_inp.value or ""
-                # A disabled select (no options yet) leaves its filter as it was.
-                if lib_sel.enabled:
-                    filter_state["libraries"] = list(lib_sel.value or [])
-                if dom_sel.enabled:
-                    filter_state["domains"] = list(dom_sel.value or [])
                 dlg.close()
                 on_apply()
 
@@ -1355,6 +1341,96 @@ def create_candidate_table(
     return outer
 
 
+def _facet_select(filter_state: dict, key: str, options: dict, label: str,
+                  marker: str, enabled: bool, on_filter_change: Callable):
+    """One toolbar filter, Library or Domain: several values, each with its count.
+
+    A choice applies when the list closes, not on each click: applying re-renders
+    the grid, this select included, which would shut the list after one pick. The
+    clear button changes the value with the list shut, so that applies at once.
+    """
+    current = [v for v in (filter_state.get(key) or []) if v in options]
+    sel = ui.select(
+        options=options, value=current, label=label, multiple=True, clearable=True,
+    ).props("dense outlined options-dense").classes("w-40").mark(marker)
+
+    def _show(values) -> None:
+        # The names alone ("CUL, JTS"), not each option's "CUL (12)". Set directly:
+        # a Hebrew domain may hold a quote.
+        if values:
+            sel.props["display-value"] = ", ".join(options[v].rsplit(" (", 1)[0] for v in values)
+        else:
+            sel.props.pop("display-value", None)
+
+    _show(current)
+    if not enabled:
+        sel.disable()
+        return sel
+
+    is_open = {"value": False}
+
+    def _commit() -> None:
+        values = list(sel.value or [])
+        if values != list(filter_state.get(key) or []):
+            filter_state[key] = values
+            on_filter_change()
+
+    def _on_value_change(_e) -> None:
+        _show(list(sel.value or []))
+        sel.update()
+        if not is_open["value"]:
+            _commit()
+
+    def _on_hide() -> None:
+        is_open["value"] = False
+        _commit()
+
+    sel.on("popup-show", lambda: is_open.update(value=True))
+    sel.on("popup-hide", _on_hide)
+    sel.on_value_change(_on_value_change)
+    return sel
+
+
+def _grid_header(total: int, *, all_candidates: list, filter_state: dict,
+                 enrichment: dict, enrichment_ready: bool, order: str,
+                 on_order_change: Optional[Callable], on_filter_change: Optional[Callable],
+                 on_filter_open: Optional[Callable]) -> None:
+    """The row above the cards: the count, then Library, Domain, Sort and More filters…"""
+    with ui.row().classes("w-full items-center justify-between"):
+        ui.label(f"{tr('Candidates')} ({total})").classes(
+            "text-base font-semibold"
+        )
+        with ui.row().classes("items-center gap-1 justify-end"):
+            if on_filter_change is not None:
+                hebrew = get_language() == "he"
+                lib_opts = library_options(all_candidates)
+                dom_opts = domain_options(all_candidates, enrichment, hebrew)
+                _facet_select(filter_state, "libraries", lib_opts, tr("Library"),
+                              "joins-filter-library", bool(lib_opts), on_filter_change)
+                # Domain comes with the enrichment, so it waits for it.
+                _facet_select(filter_state, "domains", dom_opts, tr("Domain"),
+                              "joins-filter-domain", enrichment_ready and bool(dom_opts),
+                              on_filter_change)
+            if on_order_change is not None:
+                order_sel = ui.select(
+                    {"rank": tr("Rank"), "library": tr("Library"),
+                     "domain": tr("Domain")},
+                    value=normalize_order(order),
+                    label=tr("Sort"),
+                ).props("dense outlined").classes("w-28").mark("joins-order")
+                order_sel.on_value_change(
+                    lambda e: on_order_change(normalize_order(e.value))
+                )
+            if on_filter_open is not None:
+                n = more_filters_count(filter_state)
+                ui.button(
+                    tr("More filters…") + (f" ({n})" if n else ""),
+                    on_click=on_filter_open,
+                ).props("flat dense no-caps").mark("joins-more-filters").tooltip(
+                    tr("Filter candidates")
+                )
+
+
 # ---------------------------------------------------------------------------
 # Public grid factory (Phase 119 — paginated, triage-aware, 160×160 thumbnails)
 # ---------------------------------------------------------------------------
@@ -1393,6 +1469,11 @@ def create_candidate_grid(
     on_order_change: Optional[Callable] = None,
     # 2026-10-19: the visitor's card size, a CARD_SIZES key (Medium by default).
     card_size: str = 'm',
+    # 2026-10-19: the Library and Domain filters in the toolbar. all_candidates is
+    # the list before filtering (their options and counts); on_filter_change() is
+    # called after one of them changed filter_state in place.
+    all_candidates: Optional[list] = None,
+    on_filter_change: Optional[Callable] = None,
 ) -> ui.element:
     """Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
@@ -1409,7 +1490,11 @@ def create_candidate_grid(
         filter_state:     Current filter dialog state dict (D-14).
         anchor_sys_id:    The anchor's sys_id — excluded from self-match display (D-13).
         on_page_change:   Callback(page: int) for Prev/Next pagination clicks (D-08).
-        on_filter_open:   Callback() for the Filter button click (D-14).
+        on_filter_open:   Callback() for the More filters… button (D-14).
+        all_candidates:   The candidates before filtering. With some, a filter that
+                          leaves none keeps the toolbar, so it can be undone.
+        on_filter_change: Callback() after the toolbar's Library or Domain filter
+                          changed filter_state; no such filters without it.
         order:            The order shown in the Sort control.
         on_order_change:  Callback(order) when the visitor picks another order; no
                           Sort control without it.
@@ -1438,35 +1523,29 @@ def create_candidate_grid(
     total = len(candidates)
     page_slice, current_page, total_pages = paginate(candidates, page)
 
+    header = dict(
+        all_candidates=list(all_candidates or []), filter_state=filter_state,
+        enrichment=enrichment, enrichment_ready=enrichment_ready, order=order,
+        on_order_change=on_order_change, on_filter_change=on_filter_change,
+        on_filter_open=on_filter_open,
+    )
+
     with ui.column().classes("w-full gap-2") as outer:
 
-        if not candidates:
+        if not candidates and all_candidates:
+            # The filters leave none: keep the toolbar, so they can be undone.
+            _grid_header(0, **header)
+            ui.label(tr("No candidates match these filters.")).classes("text-sm").style(
+                "color: var(--text-secondary);"
+            ).mark("joins-no-filter-match")
+        elif not candidates:
             # Empty state
             ui.label(
                 tr("No candidates found. Try different lines or broader terms.")
             ).classes("text-sm").style("color: var(--text-secondary);")
         else:
-            # Section header row: candidate count + Filter button (D-14)
-            with ui.row().classes("w-full items-center justify-between"):
-                ui.label(f"{tr('Candidates')} ({total})").classes(
-                    "text-base font-semibold"
-                )
-                with ui.row().classes("items-center gap-1"):
-                    if on_order_change is not None:
-                        order_sel = ui.select(
-                            {"rank": tr("Rank"), "library": tr("Library"),
-                             "domain": tr("Domain")},
-                            value=normalize_order(order),
-                            label=tr("Sort"),
-                        ).props("dense outlined").classes("w-28").mark("joins-order")
-                        order_sel.on_value_change(
-                            lambda e: on_order_change(normalize_order(e.value))
-                        )
-                    if on_filter_open is not None:
-                        ui.button(
-                            icon='filter_list',
-                            on_click=on_filter_open,
-                        ).props('flat dense round').tooltip(tr('Filter candidates'))
+            # Section header row: the count, the filters, Sort (D-14)
+            _grid_header(total, **header)
 
             # Responsive grid (D-09). Medium: 1 col <640px, 2 col 640–1023px, 3 col
             # ≥1024px; Small fits 4 at ≥1024px, Large 2 (CARD_SIZES).
