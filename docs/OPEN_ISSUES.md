@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-19 (master-main `a6b7202e` + the 9.7.0 release edits, not committed or tagged) -- **9.7.0 (both) is prepared: PRs #397-#402 are all merged, none released or deployed.** #402 (library-prefix scoping) merged 2026-10-18 as `a6b7202e`; `PLANS_INDEX.md` and both shelfmark plans now say merged. The owner approved the release texts and the Hebrew of the Composition Search conditions and My Library letter-level strings (2026-10-18); the conditions feature row now waits only on the owner's hand test, the user's two G8 cases, the power user's answer and the exe test. No count change -- 221.
+> **Last Updated:** 2026-10-19 (`feat/joins-lab-links-compare`, PR 1 of `docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md`) -- four Joins Lab / Compare defects found and fixed the same day, all archived: the white Browse icons in the web Compare window, its FJMS/PGP buttons that stayed on the first candidate, the candidate-card and Known Joins Browse icons that replaced the Lab, and the desktop Compare anchor line that was empty. No count change -- 221.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
@@ -88,6 +88,7 @@ Move to "Completed Issues" section at bottom with date
 > 2026-10-18 (library-prefix rule, `feat/shelfmark-prefix-scope`): P3 -1 (the library-prefix row, fixed, archived) +3 (three inherited resolver behaviours, pre-existing) -- 220.
 > 2026-10-18 (PR #402 Codex review): P3 +1 (T2's older keys check only the variant the index kept, pre-existing in #400) -- 221.
 > 2026-10-19 (9.7.0 release prepared): #402 merged, Hebrew approved; no row opened or closed -- 221.
+> 2026-10-19 (Joins Lab links + Compare window, `feat/joins-lab-links-compare`): P2 +2 -2 (white Browse icons in the web Compare window; its FJMS/PGP buttons stuck on the first candidate), P3 +2 -2 (card / Known Joins Browse icons replaced the Lab; desktop Compare anchor line empty) -- all found and fixed the same day, archived -- 221.
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 

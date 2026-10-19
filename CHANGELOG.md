@@ -4,6 +4,27 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased] -- Joins Lab: Browse in a new tab, and a fuller Compare window (web + desktop, branch `feat/joins-lab-links-compare`)
+
+- **Web Joins Lab:**
+  - The Browse icon on a candidate card and on a Known Joins row opens the fragment in a new tab,
+    so the Lab stays as it was.
+  - They are real links, so Ctrl+click, middle-click and "Open in new tab" work too. Before, a
+    click replaced the Lab, and so did Ctrl+click (a user's report).
+- **Compare window, web and desktop.** Each side now has:
+  - a copy button by the shelfmark;
+  - one short line: library · domain · date · size · material;
+  - a row of links: Ktiv, the holding library's own viewer, the Princeton Geniza Project, and
+    genizahsearch.com on the desktop.
+  The details come from local data only (`shared/fragment_details.py`, one rule for both apps).
+- **Fixed:**
+  - On the website, both Browse icons in Compare were white on a light background, visible only
+    in the dark theme.
+  - The FJMS/PGP buttons kept pointing at the first candidate after Prev/Next.
+  - The anchor never showed its title.
+  - On the desktop, the anchor's info line was empty.
+- Decisions for this and the next five PRs: `docs/plans/JOINS_LAB_VS_IMPROVEMENTS_PLAN.md`.
+
 ## [9.7.0] - 2026-10-19 — Conditions in Composition Search, and letter-level search in My Library
 
 Composition Search's letter-level method takes conditions; letter-level search works in My
