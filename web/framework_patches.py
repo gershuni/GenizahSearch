@@ -247,6 +247,59 @@ def _patch_html_lang_attribute() -> None:
         logger.warning('HTML lang patch failed: %s', e)
 
 
+# NiceGUI 3.15.0 indexes bindings by object, so removing an element's bindings
+# no longer walks the whole process (checked against the 3.14.0/3.15.0 wheels).
+_BINDING_REMOVE_FIXED_UPSTREAM = _V('3.15.0')
+_nicegui_binding_remove = None  # NiceGUI's own, kept by the patch (tests compare against it)
+
+
+def _remove_bindings_without_marker_scan(objects) -> None:
+    """``nicegui.binding.remove`` without its walk over every property marker.
+
+    NiceGUI 3.8 ends ``binding.remove`` with a loop over ``bindable_properties``,
+    which holds a marker for every bindable property of every live element on
+    every open page in the process. Each ``element.clear()`` paid for that walk,
+    so one page's cleanup got slower with every other tab open -- the
+    ``binding.remove`` under ``web/pages/browse.py`` ``clear()`` seen when open
+    tabs reloaded in a loop after a restart (tracker: "A website restart can set
+    off reload loops from open pages"). The markers are weak references and go
+    with their objects; NiceGUI 3.15 stopped deleting them here for that reason.
+    The binding links themselves are removed exactly as before.
+    """
+    from nicegui import binding
+
+    object_ids = set(map(id, objects))
+    if not object_ids:
+        return
+    binding.active_links[:] = [
+        (source_obj, source_name, target_obj, target_name, transform)
+        for source_obj, source_name, target_obj, target_name, transform in binding.active_links
+        if id(source_obj) not in object_ids and id(target_obj) not in object_ids
+    ]
+    for key, binding_list in list(binding.bindings.items()):
+        binding_list[:] = [
+            (source_obj, target_obj, target_name, transform)
+            for source_obj, target_obj, target_name, transform in binding_list
+            if id(source_obj) not in object_ids and id(target_obj) not in object_ids
+        ]
+        if not binding_list:
+            del binding.bindings[key]
+
+
+def _patch_binding_remove() -> None:
+    """Make element cleanup cost independent of how many pages are open."""
+    if _NV >= _BINDING_REMOVE_FIXED_UPSTREAM:
+        logger.debug('binding.remove patch skipped (NiceGUI %s has the upstream fix)', _NV)
+        return
+    from nicegui import binding
+
+    global _nicegui_binding_remove
+    if binding.remove is not _remove_bindings_without_marker_scan:
+        _nicegui_binding_remove = binding.remove
+    binding.remove = _remove_bindings_without_marker_scan
+    logger.debug('binding.remove patch applied (NiceGUI %s)', _NV)
+
+
 def apply_all_patches() -> None:
     """Apply all NiceGUI monkey-patches. Call once before ui.run().
 
@@ -257,6 +310,7 @@ def apply_all_patches() -> None:
         ('Static asset sessions', _patch_static_asset_session_middleware),
         ('ESM is_file', _patch_nicegui_esm_handler),
         ('HTML lang', _patch_html_lang_attribute),
+        ('binding.remove', _patch_binding_remove),
     ]:
         try:
             fn()

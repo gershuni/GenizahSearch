@@ -1270,6 +1270,25 @@ Partial entry: the filter-state → read paths only, not the whole surface.
 - **Function** `_patch_html_lang_attribute` (Line 63) — patch NiceGUI index.html to add `lang="he"` for Lighthouse a11y
 - **Function** `apply_all_patches` (Line 92) — apply all NiceGUI monkey-patches; call once before ui.run()
 - **Function** `_is_session_free_path` — `/mcp` and `/mcp/`: never read, create or reissue a session (not cacheable; 2026-10-09)
+- **Function** `_patch_binding_remove` — NiceGUI < 3.15: `binding.remove` drops binding links without walking every property marker in the process, so `element.clear()` no longer slows with each open tab (2026-10-20)
+
+## web/translations.py
+
+The web UI language, per visitor (2026-10-20; it was one value per process). Precedence is in the module comment.
+- **Function** `get_language` / `tr` / `is_rtl` — `using_language` block, else the page build and the tasks it started, else the page's client (event handlers), else the request (saved choice, else browser), else the process default
+- **Function** `set_language` — in a page: that page's language; in another task: that task's; outside any task: the process default
+- **Function** `using_language` — override for a block; task-local, so the block may await
+- **Function** `visitor_language` — the one rule: a saved `ui_language`, else the browser's `Accept-Language` (`web/main.py::_resolve_ui_language`, the Excel export)
+
+## web/pages/puzzle.py (saving a join)
+
+How the web Fragment Puzzle saves (2026-10-20). Checked in a real browser by `scripts/e2e_puzzle_autosave.py` (manual, Playwright) and in the harness by `tests/render_smoke/test_puzzle_autosave_render_smoke.py`.
+- **Function** `schedule_auto_save` — called only from edits; debounced 1.5 s, deferred to the end of a load; the task enters `page_client`
+- **Function** `_auto_save_now` — writes the open draft; never writes an empty canvas over a non-empty draft
+- **Function** `build_fragments_list(stored=)` — a fragment the canvas did not draw keeps the stored draft's copy, else the tab's kept position
+- **Function** `load_document(doc_id, restoring=)` — returns True when loaded; writes the loaded canvas into the tab; `restoring` = the tab's own draft, quietly
+- **Function** `_restore_tab_canvas` — reopens the tab's draft from its saved copy, else rebuilds the tab's canvas (positions and crops); skipped for `?doc=` unless that cannot be opened
+- **Function** `save_state` — every `STATE_SAVE_INTERVAL_S` and at the end of a load: positions and `getCropState()` into the tab
 
 ## web/ai_listings.py
 

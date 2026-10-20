@@ -671,6 +671,10 @@ def create_joins_lab_page(
     _compare_open: dict = {'key': None}
     _link_replay: dict = {'active': False}
     _address_bar: dict = {'url': ''}
+    # The address bar is also updated from background tasks (an anchor load,
+    # an enrichment pass), which have no page of their own: go through this
+    # page's client, not ui.run_javascript.
+    _address_bar_client = ui.context.client
     _include_marks_ref: dict = {'el': None}
     _link_marks_note_ref: dict = {'el': None}
 
@@ -2218,7 +2222,7 @@ def create_joins_lab_page(
                                     'w-full items-center justify-between gap-2 cursor-pointer'
                                 ).style(
                                     'padding:8px 0; border-bottom:1px solid var(--border-light);'
-                                ).on('click', lambda lst_pick=_pick_list: asyncio.ensure_future(lst_pick())):
+                                ).on('click', lambda lst_pick=_pick_list: lst_pick()):
                                     ui.label(list_name).classes('text-sm font-semibold')
                                     ui.label(f'({item_count})').classes('text-xs').style(
                                         'color:var(--text-muted);'
@@ -2356,7 +2360,8 @@ def create_joins_lab_page(
                                 ).style('color:var(--error);')
                                 ui.button(
                                     tr('Retry'),
-                                    on_click=lambda: asyncio.ensure_future(_export_candidates(fmt)),
+                                    # The coroutine itself, not ensure_future: see _on_export_csv.
+                                    on_click=lambda: _export_candidates(fmt),
                                 ).props('flat dense')
                                 ui.button(
                                     tr('Cancel'),
@@ -3282,7 +3287,7 @@ def create_joins_lab_page(
                                 ).style(
                                     'border-bottom:1px solid var(--border-light,#e2e8f0); '
                                     'min-height:44px;'
-                                ).on('click', lambda fn=_make_frag_click(): asyncio.ensure_future(fn())):
+                                ).on('click', lambda fn=_make_frag_click(): fn()):  # the coroutine: NiceGUI runs it in this page
                                     if library:
                                         ui.badge(library).classes(
                                             'text-xs'
@@ -4100,11 +4105,12 @@ def create_joins_lab_page(
             return
         if not url or url == _address_bar['url']:
             return
-        _address_bar['url'] = url
         try:
-            ui.run_javascript(f'history.replaceState(history.state, "", {json.dumps(url)})')
+            _address_bar_client.run_javascript(
+                f'history.replaceState(history.state, "", {json.dumps(url)})')
         except Exception:
-            pass  # no client context (a background task) or the tab is gone
+            return  # the tab is gone; a later sync of the same URL must not be skipped
+        _address_bar['url'] = url
 
     async def _copy_share_link() -> None:
         """Copy a link to this screen; the sender's marks only when the box is ticked."""

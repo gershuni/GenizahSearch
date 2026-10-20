@@ -987,9 +987,9 @@ def _saved_x(path):
 def test_another_visitors_canvas_events_never_change_the_owners_draft(shared_svc, published):
     """Canvas events on another browser's page never change the owner's row.
 
-    A guard rather than a regression test: web auto-save does not write at
-    this point (its task has no page slot; see the tracker), so this also
-    passes on older code. It pins the rule for when auto-save is enabled."""
+    Auto-save writes since 2026-10-20: A's own move is saved (asserted), and
+    B's page is then watched for longer than an auto-save takes, so a wrong
+    save by B could not land after the check."""
     detail = {
         'id': 'doc-browser-a', 'title': 'A published', 'notes': '',
         'fragments_json': {'fragments': [_fragment_dict()], 'join_type': 'physical'},
@@ -1018,7 +1018,11 @@ def test_another_visitors_canvas_events_never_change_the_owners_draft(shared_svc
         # A moves the fragment on its own canvas.
         state_a['990001,1r'] = {'x': 555, 'y': 666}
         _fire(a, 'puzzle-object-modified', {'key': '990001,1r'})
-        await asyncio.sleep(3.0)
+        for _ in range(100):                # A's own edit IS saved
+            if _saved_x(shared_svc._db_path) == [555.0]:
+                break
+            await asyncio.sleep(0.1)
+        assert _saved_x(shared_svc._db_path) == [555.0], 'the owner\'s own edit was not auto-saved'
         after_a = _row(shared_svc._db_path)
         assert after_a[0] == 'A private'
 
@@ -1031,9 +1035,11 @@ def test_another_visitors_canvas_events_never_change_the_owners_draft(shared_svc
         _fire(b, 'puzzle-add-result', {'key': '990001,1r', 'success': True})
         await asyncio.sleep(0.3)
         _fire(b, 'puzzle-object-modified', {'key': '990001,1r'})
-        await asyncio.sleep(3.0)
-
-        # A's row is exactly as it was before B's events.
+        # A's row stays exactly as it was before B's events, for longer than
+        # an auto-save takes (1.5 s debounce plus the save).
+        for _ in range(60):
+            assert _row(shared_svc._db_path) == after_a
+            await asyncio.sleep(0.1)
         assert _row(shared_svc._db_path) == after_a
         assert {d['id'] for d in shared_svc.list_documents()} == {'doc-browser-a'}
 

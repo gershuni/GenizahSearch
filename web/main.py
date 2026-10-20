@@ -700,7 +700,7 @@ logger = logging.getLogger(__name__)
 from web.state import state
 from web.api import init_api_routes
 from web.search_api import init_search_api
-from web.translations import tr, set_language, get_language, browser_language
+from web.translations import tr, set_language, get_language, visitor_language
 from web.citation_chip import render_citation_chip
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.atlas_assets import (
@@ -1531,21 +1531,17 @@ def _resolve_ui_language() -> str:
     """Return the persisted UI language so layout and bootstrap agree on first render.
 
     A visitor with no saved choice gets their browser's language: Hebrew if
-    the browser's first choice is Hebrew, English otherwise. Never fall back
-    to ``get_language()``: that is one process-wide value, last set by
-    whichever visitor's page rendered before this one, so falling back to it
-    showed every new visitor the previous visitor's language.
+    the browser's first choice is Hebrew, English otherwise -- the same rule
+    ``get_language()`` applies to a request (``translations.visitor_language``).
+    Until 2026-10-20 ``get_language()`` was one process-wide value, last set
+    by whichever visitor's page rendered before this one, and falling back to
+    it showed every new visitor the previous visitor's language.
 
     The page HTML therefore depends on ``Accept-Language`` as well as the
     session cookie. If page HTML is ever made cacheable (the Set-Cookie
     BYPASS issue), the cache must vary on it.
     """
-    saved_lang = safe_user_get('ui_language')
-
-    if saved_lang in ('he', 'en'):
-        return saved_lang
-
-    return browser_language()
+    return visitor_language(safe_user_get('ui_language'))
 
 
 # ============================================================================
@@ -1824,8 +1820,8 @@ def create_layout():
                 create_auth_buttons()
 
             # Language Toggle
-            # Switch from the language THIS page was rendered in. get_language()
-            # at click time is whatever the last visitor's render left behind.
+            # Switch from the language THIS page was rendered in, captured here
+            # (Codex review of #378: two open pages can differ).
             def toggle_lang():
                 new_lang = 'en' if resolved_lang == 'he' else 'he'
                 safe_user_set('ui_language', new_lang)

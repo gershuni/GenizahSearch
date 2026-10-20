@@ -20,8 +20,9 @@ def build_domain_options(lang: str) -> dict:
     """Build domain select options from FJMS hierarchy.
 
     Args:
-        lang: Language code ('he' or 'en'). Passed explicitly to avoid
-              calling get_language() inside run.io_bound() which is process-global.
+        lang: Language code ('he' or 'en'). Passed explicitly: inside
+              run.io_bound() no visitor is in context, so get_language() there
+              gives the process default.
     """
     from shared.fjms_service import get_fjms_service, qualify_domain_name
     fjms = get_fjms_service(thread_safe=True)

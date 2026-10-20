@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 # Fabric.js CDN (v6.4.3 stable)
 FABRIC_JS_CDN = '<script src="https://cdn.jsdelivr.net/npm/fabric@6.4.3/dist/index.min.js"></script>'
 
+# How often the canvas positions are kept in the tab, for a reload or a return to /puzzle.
+STATE_SAVE_INTERVAL_S = 30
+
 # ── JavaScript: window.puzzleCanvas global object ─────────────────
 
 PUZZLE_CANVAS_JS = '''
@@ -836,6 +839,7 @@ window.puzzleCanvas = {
                 return;
             }
 
+            var edited = false;
             switch(e.key) {
                 case 'Delete':
                 case 'Backspace':
@@ -847,6 +851,7 @@ window.puzzleCanvas = {
                         active.set('left', active.left - (e.shiftKey ? 10 : 1));
                         self.canvas.requestRenderAll();
                         e.preventDefault();
+                        edited = true;
                     }
                     break;
                 case 'ArrowRight':
@@ -854,6 +859,7 @@ window.puzzleCanvas = {
                         active.set('left', active.left + (e.shiftKey ? 10 : 1));
                         self.canvas.requestRenderAll();
                         e.preventDefault();
+                        edited = true;
                     }
                     break;
                 case 'ArrowUp':
@@ -861,6 +867,7 @@ window.puzzleCanvas = {
                         active.set('top', active.top - (e.shiftKey ? 10 : 1));
                         self.canvas.requestRenderAll();
                         e.preventDefault();
+                        edited = true;
                     }
                     break;
                 case 'ArrowDown':
@@ -868,20 +875,29 @@ window.puzzleCanvas = {
                         active.set('top', active.top + (e.shiftKey ? 10 : 1));
                         self.canvas.requestRenderAll();
                         e.preventDefault();
+                        edited = true;
                     }
                     break;
                 case 'r':
                     if (active && !e.ctrlKey && !e.metaKey) {
                         active.rotate((active.angle || 0) + 1);
                         self.canvas.requestRenderAll();
+                        edited = true;
                     }
                     break;
                 case 'R':
                     if (active && !e.ctrlKey && !e.metaKey) {
                         active.rotate((active.angle || 0) - 1);
                         self.canvas.requestRenderAll();
+                        edited = true;
                     }
                     break;
+            }
+            if (edited) {
+                // Fabric fires object:modified only for mouse edits; a saved
+                // draft auto-saves these too (Python debounces the burst).
+                if (typeof active.setCoords === 'function') active.setCoords();
+                self._emitEvent('puzzle-object-modified', { key: active._fragmentKey || null });
             }
         };
         document.addEventListener('keydown', this._keyboardHandler);
@@ -1402,9 +1418,11 @@ window.puzzleCanvas = {
      */
     cropConfirm: function() {
         if (!this._cropTarget) return;
+        var key = this._cropTarget._fragmentKey || null;
         this._cropTarget._originalWidth = null;
         this._cropTarget._originalHeight = null;
         this.toggleCropMode(false);
+        this._emitEvent('puzzle-object-modified', { key: key });
     },
 
     /**
@@ -1787,17 +1805,22 @@ window.puzzleCanvas = {
         var cropState = {};
         for (var key in this.fragments) {
             var obj = this.fragments[key];
-            if (obj._originalWidth && (
+            // cropConfirm clears _originalWidth, so a confirmed crop is
+            // measured against the full image (the element Fabric draws from).
+            var el = (typeof obj.getElement === 'function') ? obj.getElement() : null;
+            var fullW = obj._originalWidth || (el && (el.naturalWidth || el.width)) || 0;
+            var fullH = obj._originalHeight || (el && (el.naturalHeight || el.height)) || 0;
+            if (fullW && fullH && (
                 (obj.cropX || 0) > 0 || (obj.cropY || 0) > 0 ||
-                obj.width < obj._originalWidth || obj.height < obj._originalHeight
+                obj.width < fullW || obj.height < fullH
             )) {
                 cropState[key] = {
                     cropX: obj.cropX || 0,
                     cropY: obj.cropY || 0,
                     width: obj.width,
                     height: obj.height,
-                    originalWidth: obj._originalWidth,
-                    originalHeight: obj._originalHeight
+                    originalWidth: fullW,
+                    originalHeight: fullH
                 };
             }
         }
@@ -2219,7 +2242,8 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
     Handles session persistence via app.storage.tab: fragment metadata is saved
     to 'puzzle_fragments' and spatial state (positions/rotations) to 'puzzle_state'.
-    State is auto-saved every 30 seconds and restored on page revisit.
+    The canvas is kept in the tab every STATE_SAVE_INTERVAL_S and restored on a
+    revisit; an open saved join auto-saves after each edit (schedule_auto_save).
 
     Listens for JavaScript CustomEvents (puzzle-delete, puzzle-add-result,
     puzzle-fragment-meta, puzzle-selection) to keep Python-side state in sync
@@ -2268,6 +2292,9 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         'auto_save_handle': None,     # for cancelling debounced auto-save
         'loading': False,             # True while fragment images are loading (guards auto-save)
         'load_pending': 0,            # Number of fragments still loading
+        'loading_keys': set(),        # The fragments of that load not yet answered
+        'edited_while_loading': False,  # an edit came in during a load: save once it ends
+        'details': ('', ''),          # (title, notes) as last loaded or saved
         'pending_crops': {},          # Crop state to apply after each fragment loads {key: {cropX, cropY, width, height}}
         'is_published': False,        # Whether current doc is published to community
     }
@@ -2330,8 +2357,27 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
     # ── Document management functions ──
 
-    async def build_fragments_list():
-        """Build PuzzleFragment list from current canvas state."""
+    def _fragments_by_key(fragments):
+        """{canvas key: PuzzleFragment} for a stored document's fragments."""
+        return {f"{f.sys_id},{f.folio_label}": f for f in (fragments or [])}
+
+    def _tab_canvas_state():
+        """The canvas positions kept in the tab ({} when none or unreadable)."""
+        try:
+            saved = app.storage.tab.get('puzzle_state')
+            data = json.loads(saved) if isinstance(saved, str) else saved
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    async def build_fragments_list(stored=None):
+        """Build PuzzleFragment list from current canvas state.
+
+        A fragment the canvas has not drawn (its image is still loading, or
+        failed) keeps what is known of it rather than being written at the
+        origin: the stored document's own copy (``stored``, {key: fragment})
+        first, else the position this tab kept.
+        """
         try:
             state_json = await ui.run_javascript(
                 'window.puzzleCanvas.getState()', timeout=5.0
@@ -2350,13 +2396,24 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             logger.warning("build_fragments_list: getCropState() JS timed out, using empty crop data")
             crop_data = {}
 
+        stored = stored or {}
+        tab_state = None
         fragments = []
         for key, meta in puzzle_meta.items():
             parts = key.split(',', 1)
             sys_id = parts[0]
             folio_label = meta.get('folio_label') or (parts[1] if len(parts) > 1 else '1r')
-            spatial = state_data.get(key, {})
+            spatial = state_data.get(key)
             crop = crop_data.get(key, {})
+            if spatial is None:
+                kept = stored.get(key) or stored.get(f"{sys_id},{folio_label}")
+                if kept is not None:
+                    fragments.append(kept)
+                    continue
+                if tab_state is None:
+                    tab_state = _tab_canvas_state()
+                spatial = tab_state.get(key) or {}
+                crop = spatial.get('crop') or {}
 
             # Convert Fabric.js crop properties to crop_top/bottom/left/right.
             crop_x = crop.get('cropX', 0)
@@ -2415,12 +2472,18 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         return fragments
 
     def schedule_auto_save():
-        """Schedule a debounced auto-save using asyncio."""
+        """An edit was made: save the open draft after a short pause (debounced).
+
+        Called only from real edits (a drag, a delete, an add, a folio change,
+        a crop, a changed title or notes), never from loading or restoring a
+        canvas. An edit made while a draft is still loading is saved once the
+        load ends, so a half-drawn canvas is never written.
+        """
         if doc_state['current_doc_id'] is None:
             doc_state['has_unsaved_changes'] = True
             return
-        # Do NOT schedule auto-save while document is still loading.
         if doc_state.get('loading'):
+            doc_state['edited_while_loading'] = True
             return
         import asyncio
         if doc_state.get('auto_save_handle'):
@@ -2428,36 +2491,61 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
         async def do_auto_save():
             await asyncio.sleep(1.5)
-            if doc_state['current_doc_id'] and not doc_state.get('loading'):
-                # NOTE: this task is started with create_task and has no NiceGUI
-                # slot of its own, so build_fragments_list raises RuntimeError
-                # and the cycle is skipped: in practice this auto-save does not
-                # write. It is deliberately left that way here -- making it
-                # write needs the restore/placement fixes first (a stale or
-                # default-positioned canvas would otherwise overwrite the
-                # owner's draft). Explicit Save is the path that writes.
-                try:
-                    fragments = await build_fragments_list()
-                except RuntimeError:
-                    return  # slot context lost — skip this auto-save cycle
-                try:
-                    joins = for_current_visitor()
-                except NoVisitorKey:
-                    return  # visitor unknown this cycle; nothing is written
-                if _visitor_changed(joins):
-                    return  # signed in or out in another tab: this canvas is not theirs
-                # Only the visitor's own document is loaded (and so saved).
-                doc = await run.io_bound(joins.load_document, doc_state['current_doc_id'])
-                if doc:
-                    doc.fragments = fragments
-                    doc.title = title_input.value or doc.title
-                    doc.notes = notes_input.value or ''
-                    from datetime import datetime
-                    doc.updated_at = datetime.now().isoformat()
-                    await run.io_bound(lambda: _save_doc_with_thumbnail(joins, doc, fragments))
+            if getattr(page_client, '_deleted', False):
+                return
+            # This task has no page of its own (NiceGUI keeps one per task):
+            # enter it, or every browser call below raises and nothing is saved.
+            with page_client:
+                await _auto_save_now()
 
         loop = asyncio.get_event_loop()
         doc_state['auto_save_handle'] = loop.create_task(do_auto_save())
+
+    async def _auto_save_now():
+        """Write the canvas into the open draft (the auto-save itself)."""
+        doc_id = doc_state['current_doc_id']
+        if not doc_id or doc_state.get('loading'):
+            return
+        try:
+            joins = for_current_visitor()
+        except NoVisitorKey:
+            return  # visitor unknown this cycle; nothing is written
+        if _visitor_changed(joins):
+            return  # signed in or out in another tab: this canvas is not theirs
+        # Only the visitor's own document is loaded (and so saved).
+        doc = await run.io_bound(joins.load_document, doc_id)
+        if not doc or doc_state['current_doc_id'] != doc_id:
+            return
+        try:
+            fragments = await build_fragments_list(stored=_fragments_by_key(doc.fragments))
+        except Exception as e:
+            logger.warning("puzzle auto-save: the canvas could not be read: %s", e)
+            return
+        if not fragments and doc.fragments:
+            # An empty canvas never empties a saved draft by itself (a canvas
+            # that failed to come back looks the same as one cleared by hand).
+            logger.info("puzzle auto-save: empty canvas not written over draft %s", doc_id)
+            return
+        doc.fragments = fragments
+        doc.title = title_input.value or doc.title
+        doc.notes = notes_input.value or ''
+        from datetime import datetime
+        doc.updated_at = datetime.now().isoformat()
+        saved = await run.io_bound(lambda: _save_doc_with_thumbnail(joins, doc, fragments))
+        if saved:
+            doc_state['has_unsaved_changes'] = False
+            doc_state['details'] = (doc.title, doc.notes)
+        else:
+            logger.warning("puzzle auto-save: draft %s was not saved", doc_id)
+
+    def _load_finished():
+        """A draft or tab canvas has finished loading (every image answered)."""
+        doc_state['loading'] = False
+        doc_state['load_pending'] = 0
+        doc_state['loading_keys'] = set()
+        edited, doc_state['edited_while_loading'] = doc_state['edited_while_loading'], False
+        if edited:
+            schedule_auto_save()
 
     def _save_doc_with_thumbnail(joins, doc, fragments):
         """Save document with thumbnail (runs in thread via io_bound).
@@ -2529,12 +2617,26 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                         if is_active:
                             ui.icon('check_circle', size='xs').style('color: #4caf50;')
 
+    async def _open_draft_fragments():
+        """{key: fragment} of the open draft as stored, or {} (quietly)."""
+        doc_id = doc_state['current_doc_id']
+        if not doc_id:
+            return {}
+        try:
+            joins = for_current_visitor()
+            if _visitor_changed(joins):
+                return {}
+            doc = await run.io_bound(joins.load_document, doc_id)
+        except Exception:
+            return {}
+        return _fragments_by_key(doc.fragments) if doc else {}
+
     async def save_join():
         """Save current canvas as a join document."""
         if not puzzle_meta:
             ui.notify(tr('Add fragments before saving'), type='warning')
             return
-        fragments = await build_fragments_list()
+        fragments = await build_fragments_list(stored=await _open_draft_fragments())
         suggested_title = auto_suggest_title(fragments)
 
         with ui.dialog() as dlg, ui.card().classes('w-96 p-4').style(
@@ -2576,6 +2678,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     return
                 doc_state['current_doc_id'] = doc_id
                 doc_state['has_unsaved_changes'] = False
+                doc_state['details'] = (doc.title, doc.notes)
                 try:
                     app.storage.tab['puzzle_doc_id'] = doc_id
                 except RuntimeError:
@@ -2614,39 +2717,52 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             return None
         return document_from_published_detail(detail)
 
-    async def load_document(doc_id):
-        """Load a document onto the canvas.
+    async def load_document(doc_id, *, restoring=False):
+        """Load a document onto the canvas. True when it was loaded.
 
         The visitor's own saved document opens as itself (edits auto-save).
         Any other id opens the published version, if there is one, as an
         unsaved canvas: Save then creates the visitor's own document.
+
+        ``restoring``: the tab's open draft, reopened on a reload. Only the
+        visitor's own document, and quietly (False if it is not theirs).
         """
-        joins = _visitor_joins()
-        if joins is None:
-            return
+        if restoring:
+            try:
+                joins = for_current_visitor()
+            except NoVisitorKey:
+                return False
+            if _visitor_changed(joins):
+                return False
+        else:
+            joins = _visitor_joins()
+            if joins is None:
+                return False
         doc = await run.io_bound(joins.load_document, doc_id)
         owned = doc is not None
+        if not owned and restoring:
+            return False
         if not owned:
             doc = await _load_published_copy(doc_id)
         if doc is None:
             ui.notify(tr('Could not load document'), type='warning')
-            return
+            return False
 
         await ui.run_javascript('window.puzzleCanvas.clearAll()')
         puzzle_meta.clear()
         pending_fragment_meta.clear()
+        if doc_state.get('auto_save_handle'):
+            doc_state['auto_save_handle'].cancel()  # a save pending for the canvas just cleared
 
         doc_state['current_doc_id'] = doc.id if owned else None
         doc_state['has_unsaved_changes'] = not owned
-        try:
-            app.storage.tab['puzzle_doc_id'] = doc.id if owned else None
-        except RuntimeError:
-            pass
 
         # Set loading guard to prevent auto-save from overwriting
         # a partially-loaded document with a subset of fragments.
         doc_state['loading'] = True
         doc_state['load_pending'] = len(doc.fragments)
+        doc_state['loading_keys'] = {f"{f.sys_id},{f.folio_label}" for f in doc.fragments}
+        doc_state['edited_while_loading'] = False
 
         # Store pending crop state per fragment key.
         doc_state['pending_crops'] = {}
@@ -2713,36 +2829,52 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 'folio_label': frag.folio_label, 'fl_id': frag.fl_id,
                 'threshold': threshold, 'processed': processed, 'size': 800,
                 'image_url': frag_image_url, 'external_provider': ext_provider,
-                'page_index': frag_page_idx,
+                'page_index': frag_page_idx, 'is_cul': frag_is_cul,
             }
+
+        # The tab now holds this canvas, so a reload brings back this
+        # document and not the canvas the tab held before. The positions
+        # are kept once every image has answered (see on_puzzle_add_result).
+        try:
+            app.storage.tab['puzzle_fragments'] = dict(puzzle_meta)
+            app.storage.tab['puzzle_state'] = None
+            app.storage.tab['puzzle_doc_id'] = doc.id if owned else None
+        except RuntimeError:
+            pass
 
         # If doc has zero fragments, clear loading guard immediately
         if not doc.fragments:
-            doc_state['loading'] = False
-            doc_state['load_pending'] = 0
+            _load_finished()
 
         title_input.value = doc.title
         notes_input.value = doc.notes
+        doc_state['details'] = (doc.title or '', doc.notes or '')
         frag_text = '\n'.join(f"{f.shelfmark} ({f.folio_label})" for f in doc.fragments)
         fragments_label.text = frag_text or tr('No fragments')
         details_container.style('display: block;')
         joins_dialog.close()
-        if owned:
+        if owned and not restoring:
             ui.notify(tr('Loaded: {}').format(doc.title), type='info')
-        else:
+        elif not owned:
             ui.notify(tr('Opened the published version: {}. Save to keep your own copy.').format(doc.title),
                       type='info')
         await check_publish_state()
+        return True
 
     async def new_puzzle():
         """Clear canvas and reset to scratch pad state."""
         await ui.run_javascript('window.puzzleCanvas.clearAll()')
         puzzle_meta.clear()
         pending_fragment_meta.clear()
+        if doc_state.get('auto_save_handle'):
+            doc_state['auto_save_handle'].cancel()
         doc_state['current_doc_id'] = None
         doc_state['has_unsaved_changes'] = False
         doc_state['loading'] = False
         doc_state['load_pending'] = 0
+        doc_state['loading_keys'] = set()
+        doc_state['edited_while_loading'] = False
+        doc_state['details'] = ('', '')
         doc_state['pending_crops'] = {}
         title_input.value = ''
         notes_input.value = ''
@@ -3009,11 +3141,14 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             notes_input = ui.textarea(label=tr('Notes')).props('outlined dense').classes('w-full').style('max-height: 80px;')
             fragments_label = ui.label('').classes('text-caption').style('color: var(--text-secondary); white-space: pre-wrap;')
 
-            def on_title_edit():
-                if doc_state['current_doc_id']:
+            def on_details_blur():
+                # Leaving the field is an edit only if the text changed: a blur
+                # alone must not rewrite the draft.
+                current = (title_input.value or '', notes_input.value or '')
+                if doc_state['current_doc_id'] and current != doc_state['details']:
                     schedule_auto_save()
-            title_input.on('blur', on_title_edit)
-            notes_input.on('blur', lambda: schedule_auto_save() if doc_state['current_doc_id'] else None)
+            title_input.on('blur', on_details_blur)
+            notes_input.on('blur', on_details_blur)
 
     # ── Main container ──
     with ui.column().classes('puzzle-container w-full') as puzzle_main:
@@ -3554,6 +3689,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 ui.run_javascript(
                     f'window.puzzleCanvas.setSelectedScale({val / 100})'
                 )
+                schedule_auto_save()
             scale_slider.on('update:model-value', on_scale_change)
 
             ui.separator().props('vertical').style('height: 20px')
@@ -3571,6 +3707,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 ui.run_javascript(
                     f'window.puzzleCanvas.setSelectedRotation({val})'
                 )
+                schedule_auto_save()
             rotation_slider.on('update:model-value', on_rotation_change)
 
             ui.separator().props('vertical').style('height: 20px')
@@ -3701,15 +3838,18 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             if not key:
                 return
             pending = pending_fragment_meta.pop(key, None)
+            loading_keys = doc_state['loading_keys']
+            part_of_load = doc_state.get('loading') and key in loading_keys
             if not payload.get('success'):
                 if pending:
                     ui.notify(f'Failed to load {pending.get("shelfmark", key)}', type='negative')
-                # Still decrement loading counter on failure
-                if doc_state.get('loading'):
-                    doc_state['load_pending'] = doc_state.get('load_pending', 1) - 1
-                    if doc_state['load_pending'] <= 0:
-                        doc_state['loading'] = False
-                        doc_state['load_pending'] = 0
+                # A failed image still answers for its part of the load. It
+                # stays in puzzle_meta, so a save keeps its stored position.
+                if part_of_load:
+                    loading_keys.discard(key)
+                    doc_state['load_pending'] = len(loading_keys)
+                    if not loading_keys:
+                        await _on_load_complete()
                 return
             if not pending:
                 # Fragment loaded but not from pending_fragment_meta (e.g. from load_document)
@@ -3730,6 +3870,12 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             # Reliable because on_puzzle_add_result fires AFTER the image is fully loaded.
             pending_crop = doc_state.get('pending_crops', {}).get(key)
             if pending_crop:
+                if 'centerX' in pending_crop:   # tab restore: the centre as kept
+                    center_x_js = f"{pending_crop['centerX']}"
+                    center_y_js = f"{pending_crop['centerY']}"
+                else:                           # saved document: x/y of the cropped image
+                    center_x_js = f"{pending_crop['x']} + obj.width / 2"
+                    center_y_js = f"{pending_crop['y']} + obj.height / 2"
                 try:
                     await ui.run_javascript(f'''
                         var obj = window.puzzleCanvas.fragments["{key}"];
@@ -3747,8 +3893,8 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                                 height: obj._originalHeight - cropY - cropBottom
                             }});
                             if (typeof obj.setPositionByOrigin === 'function') {{
-                                var centerX = {pending_crop['x']} + obj.width / 2;
-                                var centerY = {pending_crop['y']} + obj.height / 2;
+                                var centerX = {center_x_js};
+                                var centerY = {center_y_js};
                                 var pt = (typeof fabric.Point === 'function')
                                     ? new fabric.Point(centerX, centerY)
                                     : {{ x: centerX, y: centerY }};
@@ -3762,21 +3908,31 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     pass  # Puzzle operation failed; continue with available data
                 doc_state['pending_crops'].pop(key, None)
 
-            # Decrement loading counter and clear guard when all fragments loaded.
-            if doc_state.get('loading'):
-                doc_state['load_pending'] = doc_state.get('load_pending', 1) - 1
-                if doc_state['load_pending'] <= 0:
-                    doc_state['loading'] = False
-                    doc_state['load_pending'] = 0
+            # Clear the guard when every fragment of the load has answered.
+            if part_of_load:
+                loading_keys.discard(key)
+                doc_state['load_pending'] = len(loading_keys)
+                if not loading_keys:
                     try:
                         await ui.run_javascript('window.puzzleCanvas && window.puzzleCanvas.fitAll()')
                     except Exception:
                         pass  # JavaScript execution failed; non-fatal UI glitch
+                    await _on_load_complete()
 
-            # Refresh fragment selector and trigger auto-save
             _refresh_fragment_select()
-            schedule_auto_save()
+            # A fragment the visitor added is an edit; one drawn by loading or
+            # restoring a canvas is not.
+            if pending:
+                schedule_auto_save()
         canvas_wrap.on('puzzle-add-result', on_puzzle_add_result)
+
+        async def _on_load_complete():
+            # The guard first: a slow browser answering save_state's calls
+            # must not hold back an edit made meanwhile.
+            _load_finished()
+            # Keep the loaded canvas's positions in the tab now, not at the
+            # next periodic save, so a reload restores what is on screen.
+            await save_state()
 
         def on_puzzle_fragment_meta(e):
             """Handle 'puzzle-fragment-meta' event: update stored metadata after folio nav or bg toggle."""
@@ -3910,6 +4066,20 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             tab_store['puzzle_owner'] = page_owner
         except RuntimeError:
             pass
+        if initial_doc:
+            # auto_load_doc opens that document; this tab's canvas comes back
+            # only if it cannot (restoring it first raced the document's load).
+            return
+        await _restore_tab_canvas()
+
+    async def _restore_tab_canvas():
+        """Bring back the canvas this tab held (after init_canvas's owner check).
+
+        The tab's open draft is reopened from its saved copy, which every edit
+        updates; the tab's own copy of it can be up to STATE_SAVE_INTERVAL_S
+        older. Only a canvas with no draft of the visitor's is rebuilt from
+        the tab.
+        """
         try:
             saved_meta = app.storage.tab.get('puzzle_fragments', {})
             saved_state = app.storage.tab.get('puzzle_state')
@@ -3918,45 +4088,29 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             saved_meta = {}
             saved_state = None
             saved_doc_id = None
-        # Restore saved document identity -- only a document this visitor
-        # owns (the tab may have been opened under another account).
         if saved_doc_id:
             try:
-                joins = for_current_visitor()
-                if _visitor_changed(joins):
-                    raise NoVisitorKey('the visitor changed since the page opened')
-                doc = await run.io_bound(joins.load_document, saved_doc_id)
-            except Exception:
-                doc = None  # visitor unknown or lookup failed: start unsaved
-            if doc is None:
-                try:
-                    app.storage.tab['puzzle_doc_id'] = None
-                except RuntimeError:
-                    pass
-            else:
-                doc_state['current_doc_id'] = saved_doc_id
-            # Restore details panel from saved doc
+                if await load_document(saved_doc_id, restoring=True):
+                    return
+            except Exception as e:
+                logger.warning("puzzle: reopening the tab's draft failed: %s", e)
             try:
-                if doc:
-                    title_input.value = doc.title
-                    notes_input.value = doc.notes
-                    frag_text = '\n'.join(f"{f.shelfmark} ({f.folio_label})" for f in doc.fragments)
-                    fragments_label.text = frag_text or ''
-                    details_container.style('display: block;')
-                    await check_publish_state()
-            except Exception:
-                pass  # Publish status check failed; assume unpublished
+                app.storage.tab['puzzle_doc_id'] = None  # not this visitor's (any more): open unsaved
+            except RuntimeError:
+                pass
         # Populate outer puzzle_meta so callbacks can find existing fragments
         if saved_meta and isinstance(saved_meta, dict):
             puzzle_meta.update(saved_meta)
             doc_state['loading'] = True
             doc_state['load_pending'] = len(saved_meta)
+            doc_state['loading_keys'] = set(saved_meta)
         else:
             doc_state['loading'] = False
             doc_state['load_pending'] = 0
 
         if saved_meta and isinstance(saved_meta, dict):
             restorable_count = 0
+            doc_state['pending_crops'] = {}
             for key, meta in saved_meta.items():
                 fl_id = meta.get('fl_id', '')
                 threshold = meta.get('threshold', 30)
@@ -3994,6 +4148,18 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                             scaleY = s.get('scaleY', 1.0)
                             flipH = s.get('flipH', False)
                             flipV = s.get('flipV', False)
+                            crop = s.get('crop') or {}
+                            if (crop.get('originalWidth') and crop.get('originalHeight')
+                                    and s.get('centerX') is not None and s.get('centerY') is not None):
+                                # Applied once the image is drawn (on_puzzle_add_result).
+                                doc_state['pending_crops'][key] = {
+                                    'cropX': crop.get('cropX', 0),
+                                    'cropY': crop.get('cropY', 0),
+                                    'crop_right': crop['originalWidth'] - crop.get('cropX', 0) - crop.get('width', 0),
+                                    'crop_bottom': crop['originalHeight'] - crop.get('cropY', 0) - crop.get('height', 0),
+                                    'centerX': s['centerX'],
+                                    'centerY': s['centerY'],
+                                }
                             if s.get('centerX') is not None and s.get('centerY') is not None:
                                 x = s.get('centerX', x)
                                 y = s.get('centerY', y)
@@ -4025,9 +4191,6 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 )
             # Fix load_pending to match actually restored count (not saved_meta count)
             if restorable_count != len(saved_meta):
-                doc_state['load_pending'] = restorable_count
-                if restorable_count == 0:
-                    doc_state['loading'] = False
                 # Remove skipped entries from puzzle_meta so save/export stays in sync
                 restored_keys = {k for k, m in saved_meta.items()
                                  if m.get('fl_id') or (m.get('external_provider') and m.get('sys_id'))}
@@ -4035,6 +4198,10 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     if ghost_key not in restored_keys:
                         del puzzle_meta[ghost_key]
                 app.storage.tab['puzzle_fragments'] = puzzle_meta
+                doc_state['loading_keys'] = set(restored_keys)
+                doc_state['load_pending'] = restorable_count
+                if restorable_count == 0:
+                    _load_finished()
 
         # Saved documents list is refreshed on-demand when dialog opens
 
@@ -4268,30 +4435,58 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             if not await _wait_for_canvas():
                 return
             await asyncio.sleep(1.0)
-            await load_document(initial_doc)
+            if not await load_document(initial_doc):
+                await _restore_tab_canvas()
 
         asyncio.ensure_future(_after_delay(1.5, auto_load_doc))
 
     # ── Periodic state save ──
     async def save_state():
-        """Periodically save canvas spatial state to session storage (every 30s)."""
+        """Keep the canvas positions in the tab (every STATE_SAVE_INTERVAL_S).
+
+        Only this tab's restore reads them (and discards them for another
+        visitor); no saved join is written here.
+        """
         try:
             state_json = await ui.run_javascript(
                 'window.puzzleCanvas && window.puzzleCanvas.canvas ? window.puzzleCanvas.getState() : null',
                 timeout=5.0
             )
-            if state_json:
-                app.storage.tab['puzzle_state'] = state_json
+            if not state_json:
+                return
+            state = json.loads(state_json) if isinstance(state_json, str) else dict(state_json)
+            crop_json = await ui.run_javascript(
+                'window.puzzleCanvas && window.puzzleCanvas.canvas ? window.puzzleCanvas.getCropState() : null',
+                timeout=5.0
+            )
+            crops = json.loads(crop_json) if isinstance(crop_json, str) and crop_json else {}
+            for key, crop in (crops if isinstance(crops, dict) else {}).items():
+                if key in state:
+                    state[key]['crop'] = crop
+            # A fragment on this canvas but not drawn (still loading, or its
+            # image failed) keeps the position it had, rather than going back
+            # to the default.
+            previous = app.storage.tab.get('puzzle_state')
+            if previous:
+                previous = json.loads(previous) if isinstance(previous, str) else previous
+                for key in puzzle_meta:
+                    if key not in state and key in previous:
+                        state[key] = previous[key]
+            app.storage.tab['puzzle_state'] = json.dumps(state)
         except Exception:
             pass  # Page may not be active or JS not ready
 
     async def _periodic_save_loop():
         while True:
-            await asyncio.sleep(30)
+            await asyncio.sleep(STATE_SAVE_INTERVAL_S)
             if getattr(page_client, '_deleted', False):
                 break
             try:
-                await save_state()
+                # This task has no page of its own (NiceGUI keeps one per
+                # task): without it nothing was ever saved, and a reload put
+                # every fragment back at the default position.
+                with page_client:
+                    await save_state()
             except Exception:
                 if getattr(page_client, '_deleted', False):
                     break

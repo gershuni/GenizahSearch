@@ -1,7 +1,8 @@
 """The web UI language is each visitor's own, never the previous visitor's.
 
-``web/translations.py::_current_lang`` is one value for the whole process: every
-page render sets it from that visitor's saved choice. ``_resolve_ui_language``
+``web/translations.py::_current_lang`` was one value for the whole process
+(until 2026-10-20; now the process default only): every page render set it from
+that visitor's saved choice. ``_resolve_ui_language``
 used to fall back to it when a visitor had saved nothing, so after one reader
 switched to English every new visitor was shown English until some other render
 set it back. A visitor with no saved choice now gets their browser's language:

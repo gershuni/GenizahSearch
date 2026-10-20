@@ -46,6 +46,11 @@ def wire(monkeypatch):
     monkeypatch.setattr(ss, 'safe_user_get', lambda key, default=None: (
         {'access_token': USER_TOKEN, 'refresh_token': 'refresh-1'} if key == 'auth_session' else default))
     monkeypatch.setattr(ss, 'get_persisted_session_uuid', lambda: None)
+    # httpx sends through a proxy mount, not the session's _transport, when a
+    # proxy variable is set (a cloud container has one): the mock below was
+    # then bypassed and the test made a real request. Build the client without.
+    for var in ('HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY', 'https_proxy', 'http_proxy', 'all_proxy'):
+        monkeypatch.delenv(var, raising=False)
 
     sent = []
 
