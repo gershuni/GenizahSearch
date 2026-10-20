@@ -3069,7 +3069,8 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                         dlg.close()
                         return
                     def _not_confirmed():
-                        # No answer (cancelled, or the app is stopping): never "Deleted".
+                        # No answer (cancelled, or the app is stopping), or a delete
+                        # that removed nothing: never "Deleted".
                         dlg.close()
                         ui.notify(tr('The change could not be saved. Check your connection and try again.'),
                                   type='negative')
@@ -3103,6 +3104,12 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     deleted = await io_bound_result.io_bound(joins.delete_document, doc_id)
                     if deleted is io_bound_result.INTERRUPTED:
                         _not_confirmed()
+                        return
+                    if not deleted:
+                        # It ran and deleted no row (the database was unavailable or
+                        # refused it): the document stays, open if it was.
+                        _not_confirmed()
+                        await refresh_docs_list()
                         return
                     if doc_state['current_doc_id'] == doc_id:
                         doc_state['current_doc_id'] = None
