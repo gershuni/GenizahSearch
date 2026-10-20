@@ -3287,7 +3287,7 @@ def create_joins_lab_page(
                                 ).style(
                                     'border-bottom:1px solid var(--border-light,#e2e8f0); '
                                     'min-height:44px;'
-                                ).on('click', lambda fn=_make_frag_click(): asyncio.ensure_future(fn())):
+                                ).on('click', lambda fn=_make_frag_click(): fn()):  # the coroutine: NiceGUI runs it in this page
                                     if library:
                                         ui.badge(library).classes(
                                             'text-xs'

@@ -20,11 +20,22 @@ task-spawn site under `web/`.
 - **Fragment Puzzle** keeps the canvas positions in the tab, so a reload or a
   return to /puzzle puts fragments back where they were (they came back
   stacked at the default spot). A fragment not drawn yet keeps its last
-  position. Saved joins are not written by this (auto-save stays off).
+  position.
+- **Fragment Puzzle auto-save works.** An edit of an open saved join (moving,
+  nudging or rotating a fragment, cropping, adding, removing, changing folio,
+  title or notes) is saved a moment later; it never saved. Opening or
+  reloading a join writes nothing. A fragment whose image did not load keeps
+  its saved place; an empty canvas never empties a saved join. A join opened
+  from a link replaces the canvas the tab held before, and a reload brings
+  that join back rather than the older canvas.
+- **Fragment Puzzle crops are kept.** Save wrote a crop the visitor had
+  confirmed as uncropped, and a reload lost any crop on an unsaved canvas.
 - **Joins Lab**: the address bar follows an anchor set from a card's pin, a
   Known Joins pin or a list (a reload or a copied address reopened the old
   anchor); Retry after a failed export downloads the file; adding candidates
-  to a list confirms it.
+  to a list confirms it, and picking a fragment from a list in the picker runs
+  in the page.
+- **Search results**: Retry after the full text failed to load runs in the page.
 - **The UI language is each visitor's own.** It was one value per process,
   set by every page render, so text drawn after an await and the library
   names in the search Word export, the list Excel export and both Parallels

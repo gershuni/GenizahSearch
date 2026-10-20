@@ -1280,6 +1280,16 @@ The web UI language, per visitor (2026-10-20; it was one value per process). Pre
 - **Function** `using_language` — override for a block; task-local, so the block may await
 - **Function** `visitor_language` — the one rule: a saved `ui_language`, else the browser's `Accept-Language` (`web/main.py::_resolve_ui_language`, the Excel export)
 
+## web/pages/puzzle.py (saving a join)
+
+How the web Fragment Puzzle saves (2026-10-20). Checked in a real browser by `scripts/e2e_puzzle_autosave.py` (manual, Playwright) and in the harness by `tests/render_smoke/test_puzzle_autosave_render_smoke.py`.
+- **Function** `schedule_auto_save` — called only from edits; debounced 1.5 s, deferred to the end of a load; the task enters `page_client`
+- **Function** `_auto_save_now` — writes the open draft; never writes an empty canvas over a non-empty draft
+- **Function** `build_fragments_list(stored=)` — a fragment the canvas did not draw keeps the stored draft's copy, else the tab's kept position
+- **Function** `load_document(doc_id, restoring=)` — returns True when loaded; writes the loaded canvas into the tab; `restoring` = the tab's own draft, quietly
+- **Function** `_restore_tab_canvas` — reopens the tab's draft from its saved copy, else rebuilds the tab's canvas (positions and crops); skipped for `?doc=` unless that cannot be opened
+- **Function** `save_state` — every `STATE_SAVE_INTERVAL_S` and at the end of a load: positions and `getCropState()` into the tab
+
 ## web/ai_listings.py
 
 Which AI listings are live, from production settings (docs/plans/AI_LISTINGS_LAUNCH_PLAN.md).

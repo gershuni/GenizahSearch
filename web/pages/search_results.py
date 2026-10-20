@@ -1077,7 +1077,7 @@ def create_result_card(search_state, refs, index, result):
                                 )
                                 ui.button(
                                     tr('Retry'), icon='refresh',
-                                    on_click=lambda: asyncio.ensure_future(_lazy_load_text()),
+                                    on_click=lambda: _lazy_load_text(),  # the coroutine: NiceGUI runs it in this page
                                 ).props('flat dense no-caps size=sm')
 
                 # Hook into toggle: load text on first expand
