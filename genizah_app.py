@@ -15228,7 +15228,10 @@ class GenizahGUI(QMainWindow):
 
         for disc in discoveries_data:
             title = disc.get('title') or tr('Untitled')
-            if disc.get('is_anonymous'):
+            # A row cached by an older build has no is_anonymous and may hold an
+            # anonymous author's username; offline it is never replaced, so it
+            # names nobody.
+            if disc.get('is_anonymous', True):
                 author = tr('Anonymous')
             else:
                 author = disc.get('author_username') or tr('Anonymous')

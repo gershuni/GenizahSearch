@@ -68,6 +68,17 @@ def test_the_list_says_anonymous_for_an_anonymous_discovery():
     assert texts[1].endswith('named'), texts[1]
 
 
+def test_a_row_cached_by_an_older_build_names_nobody():
+    """An older build cached the username and no is_anonymous. Started offline, that
+    cache is never replaced, so a row without the flag must not show its name."""
+    window = SimpleNamespace(discoveries_list=mock.Mock())
+    rows = [{'id': 1, 'title': 'Old cache', 'author_username': 'someone@example.org'}]
+    genizah_app.GenizahGUI._populate_discoveries_list(window, rows)
+    [text] = _texts(window.discoveries_list)
+    assert 'someone@example.org' not in text
+    assert text.endswith('Anonymous'), text
+
+
 def test_a_row_flagged_anonymous_hides_a_username_it_still_carries():
     """The flag alone decides, whatever else the row holds."""
     window = SimpleNamespace(discoveries_list=mock.Mock())
