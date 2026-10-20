@@ -787,6 +787,7 @@ init_search_api(app_override=_search_helper_app, path_prefix="")
 from web.chatgpt_api import register_chatgpt_api
 register_chatgpt_api(_search_helper_app)
 app.on_shutdown(_search_helper_app.state.shutdown_chatgpt_jobs)
+app.on_shutdown(_search_helper_app.state.shutdown_research_api_jobs)
 app.mount("/api", _search_helper_app)
 # Public MCP server (docs/plans/MCP_SERVER_PLAN.md): exact POST /mcp, registered
 # before the page routes below; no route at all unless MCP_ENABLED and the facade.

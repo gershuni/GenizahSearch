@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
@@ -56,10 +57,24 @@ def register_research_api(app, prefix, search_endpoint, parallels_endpoint):
         await asyncio.gather(*tasks, return_exceptions=True)
         directory.cleanup()
 
+    # Starlette 1.x has no add_event_handler. A mounted sub-app's lifespan never
+    # runs, so web/main.py also registers this on the host app (as for
+    # shutdown_chatgpt_jobs); the lifespan covers a top-level FastAPI app.
+    app.state.shutdown_research_api_jobs = shutdown
     if hasattr(app, 'on_shutdown'):
         app.on_shutdown(shutdown)
     else:
-        app.add_event_handler('shutdown', shutdown)
+        previous_lifespan = app.router.lifespan_context
+
+        @asynccontextmanager
+        async def lifespan(application):
+            async with previous_lifespan(application) as state:
+                try:
+                    yield state
+                finally:
+                    await shutdown()
+
+        app.router.lifespan_context = lifespan
 
     def error(code, message, status):
         return JSONResponse({'error': {'code': code, 'message': message}}, status_code=status)

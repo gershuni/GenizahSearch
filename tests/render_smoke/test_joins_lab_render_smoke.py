@@ -1594,9 +1594,9 @@ async def _click_export_and_capture_download(user, item_index: int):
     created: list[str] = []
     orig = background_tasks.create
 
-    def _traced(coro, name=None):
+    def _traced(coro, name=None, **kwargs):  # NiceGUI 3.18 also passes context=
         created.append(str(name))
-        return orig(coro, name=name)
+        return orig(coro, name=name, **kwargs)
 
     with patch('nicegui.background_tasks.create', side_effect=_traced), \
          patch('nicegui.events.background_tasks.create', side_effect=_traced):

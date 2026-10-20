@@ -6,16 +6,24 @@ called before ``ui.run()`` / NiceGUI initialises its routes.
 
 from __future__ import annotations
 
+import json
 import logging
 import mimetypes
 import re
 import uuid
+from base64 import b64decode
 
 from packaging.version import Version as _V
 
 import nicegui as _nicegui
 from nicegui.storage import RequestTrackingMiddleware as _NiceGUIRequestTrackingMiddleware
 from starlette.middleware.sessions import SessionMiddleware as _StarletteSessionMiddleware
+from starlette.requests import HTTPConnection
+
+try:  # Starlette 1.x: a dict that records whether it was read or changed
+    from starlette.middleware.sessions import Session as _StarletteSession
+except ImportError:  # Starlette 0.x: a plain dict
+    _StarletteSession = dict
 
 from web.session_hardening import is_canonical_session_id
 
@@ -30,7 +38,12 @@ _NV = _V(_nicegui.__version__)
 # Skipping the static-asset session patch also skips session id validation, so
 # the web app's startup block refuses to start on such a version
 # (web.session_hardening.require_session_id_validation).
-_PATCH_AUDIT_THRESHOLD = _V('3.8.0')
+_PATCH_AUDIT_THRESHOLD = _V('3.18.0')
+
+# NiceGUI 3.18.0's ESM route checks ``filepath.is_file()`` (checked against the
+# 3.18.0 wheel; the release notes do not say which release changed it), so a
+# bare directory URL is already a 404 there.
+_ESM_IS_FILE_FIXED_UPSTREAM = _V('3.18.0')
 if _NV > _PATCH_AUDIT_THRESHOLD:
     logger.warning(
         'NiceGUI %s exceeds framework_patches audit threshold %s. '
@@ -105,7 +118,12 @@ def _skips_session(path: str) -> bool:
 
 
 class _CacheSafeSessionMiddleware(_StarletteSessionMiddleware):
-    """Bypass cookie parsing/signing for known-public assets and session-free endpoints."""
+    """Bypass cookie parsing/signing for known-public assets and session-free endpoints.
+
+    Also drops a validly signed session cookie whose body is not a JSON
+    object, so the request starts a fresh session: Starlette 1.x builds its
+    ``Session`` from the body and raises (HTTP 500) on a list, string or number.
+    """
 
     async def __call__(self, scope, receive, send) -> None:
         if (
@@ -114,7 +132,28 @@ class _CacheSafeSessionMiddleware(_StarletteSessionMiddleware):
         ):
             await self.app(scope, receive, send)
             return
+        if scope.get('type') in ('http', 'websocket'):
+            scope = self._without_non_object_session_cookie(scope)
         await super().__call__(scope, receive, send)
+
+    def _without_non_object_session_cookie(self, scope):
+        cookies = HTTPConnection(scope).cookies
+        if self.session_cookie not in cookies:
+            return scope
+        try:
+            data = self.signer.unsign(cookies[self.session_cookie].encode('utf-8'), max_age=self.max_age)
+        except Exception:  # a bad or expired signature: Starlette starts a fresh session itself
+            return scope
+        try:
+            if isinstance(json.loads(b64decode(data)), dict):
+                return scope
+        except Exception:  # signed, but not JSON: treated like a non-object body
+            pass
+        kept = '; '.join(f'{name}={value}' for name, value in cookies.items() if name != self.session_cookie)
+        headers = [(key, value) for key, value in scope.get('headers', []) if key != b'cookie']
+        if kept:
+            headers.append((b'cookie', kept.encode('latin-1')))
+        return {**scope, 'headers': headers}
 
 
 def _validate_session_id(scope) -> None:
@@ -124,13 +163,23 @@ def _validate_session_id(scope) -> None:
     lowercase uuid4 string: any other value is replaced with a fresh one.
     Every other session key is kept, so the validation signs nobody out.
     A session body that is not a JSON object becomes an empty session first.
+
+    The session is then marked changed, so Starlette 1.x re-issues the cookie
+    on every request as Starlette 0.x did. Otherwise a session that is never
+    written after its id is minted keeps the expiry of its first response,
+    and every visitor would lose their user storage (and sign-in) 14 days
+    (Starlette's default max_age) after the first visit, however often
+    they came back.
     """
     session = scope.get('session')
     if not isinstance(session, dict):
-        session = {}
+        session = _StarletteSession()
         scope['session'] = session
     if not is_canonical_session_id(session.get('id')):
         session['id'] = str(uuid.uuid4())
+    mark_modified = getattr(session, 'mark_modified', None)
+    if mark_modified is not None:
+        mark_modified()
 
 
 class _CacheSafeRequestTrackingMiddleware(_NiceGUIRequestTrackingMiddleware):
@@ -185,12 +234,14 @@ def _patch_nicegui_esm_handler() -> None:
         RuntimeError: File at path .../aggrid/dist is not a file.
 
     Fix: override the route to add an is_file() check, returning 404 for directories.
-    Still needed as of NiceGUI 3.8.0 -- track upstream for fix.
+    Needed on NiceGUI 3.8.0; fixed upstream by 3.18.0 (``_ESM_IS_FILE_FIXED_UPSTREAM``).
     See also: .planning/debug/aggrid-dist-not-a-file.md
     """
-    # Guard: ESM is_file bug confirmed present in NiceGUI <= _PATCH_AUDIT_THRESHOLD
+    if _NV >= _ESM_IS_FILE_FIXED_UPSTREAM:
+        logger.debug('ESM is_file patch skipped (NiceGUI %s has the upstream fix)', _NV)
+        return
     if _NV > _PATCH_AUDIT_THRESHOLD:
-        logger.debug('ESM is_file patch skipped (NiceGUI %s >= fix threshold)', _NV)
+        logger.debug('ESM is_file patch skipped (NiceGUI %s exceeds audited %s)', _NV, _PATCH_AUDIT_THRESHOLD)
         return
 
     from starlette.responses import FileResponse
@@ -218,19 +269,26 @@ def _patch_nicegui_esm_handler() -> None:
     logger.debug('ESM is_file patch applied (NiceGUI %s)', _NV)
 
 
+# NiceGUI 3.14 renders the tag from ``ui.run(language=...)`` and, with no
+# language configured, emits ``dir="ltr"`` instead of a ``lang`` attribute.
+_UPSTREAM_HTML_TAG = '<html{% if html_lang %} lang="{{ html_lang }}"{% else %} dir="ltr"{% endif %}>'
+_PATCHED_HTML_TAG = '<html{% if html_lang %} lang="{{ html_lang }}"{% else %} lang="he"{% endif %}>'
+
+
 def _patch_html_lang_attribute() -> None:
     """Ensure <html> tag has lang attribute for Lighthouse a11y compliance.
 
-    NiceGUI's index.html template emits <html> with no lang. Patches the
-    template file in-place at startup to add lang="he". Idempotent (no-op
-    if already patched) and re-applies on every boot so it survives
-    pip install -U nicegui.
-
-    Still needed as of NiceGUI 3.8.0 -- no upstream lang= support yet.
+    NiceGUI's index.html template emits <html> with no lang (3.8), or, from
+    3.14, ``<html dir="ltr">`` unless ``ui.run(language=...)`` is set. We do
+    not set ``language``: it would also switch Quasar's language pack for
+    every visitor, while the page script in web/main.py sets each visitor's
+    own lang/dir/Quasar language. Patches the template file in-place at
+    startup to add lang="he" (and, on 3.14+, drop the dir="ltr" the page
+    script overrides anyway), as on 3.8. Idempotent (no-op if already
+    patched) and re-applies on every boot so it survives pip install -U nicegui.
     """
-    # Guard: html lang attribute not supported natively in NiceGUI <= _PATCH_AUDIT_THRESHOLD
     if _NV > _PATCH_AUDIT_THRESHOLD:
-        logger.debug('HTML lang patch skipped (NiceGUI %s >= fix threshold)', _NV)
+        logger.debug('HTML lang patch skipped (NiceGUI %s exceeds audited %s)', _NV, _PATCH_AUDIT_THRESHOLD)
         return
 
     from pathlib import Path
@@ -239,10 +297,13 @@ def _patch_html_lang_attribute() -> None:
         original = tmpl_file.read_text(encoding='utf-8')
         if '<html>' in original:
             patched = original.replace('<html>', '<html lang="he">', 1)
-            tmpl_file.write_text(patched, encoding='utf-8')
-            logger.debug('HTML lang patch applied (NiceGUI %s)', _NV)
+        elif _UPSTREAM_HTML_TAG in original:
+            patched = original.replace(_UPSTREAM_HTML_TAG, _PATCHED_HTML_TAG, 1)
         else:
             logger.debug('HTML lang patch skipped (already patched or template changed)')
+            return
+        tmpl_file.write_text(patched, encoding='utf-8')
+        logger.debug('HTML lang patch applied (NiceGUI %s)', _NV)
     except Exception as e:
         logger.warning('HTML lang patch failed: %s', e)
 
