@@ -22,6 +22,13 @@ from packaging.version import Version
 
 import web.framework_patches as patches
 
+# The backport is written against NiceGUI 3.8's binding tables (keys are
+# (id, name) and there is no per-object index); 3.15+ changed both and never
+# applies it. Kept, with these tests, so a rollback to 3.8 still has it.
+pytestmark = pytest.mark.skipif(
+    Version(patches._nicegui.__version__) >= patches._BINDING_REMOVE_FIXED_UPSTREAM,
+    reason='NiceGUI has the upstream fix; the backport stands down')
+
 # NiceGUI's own remove, whether or not web.main already applied the patch in this process.
 _ORIGINAL_REMOVE = (patches._nicegui_binding_remove
                     or (binding.remove if binding.remove is not patches._remove_bindings_without_marker_scan

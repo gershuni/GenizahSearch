@@ -308,9 +308,14 @@ async def _drain() -> None:
     """NiceGUI's `on_click` wrapper routes an ASYNC handler through
     `handle_event`, which schedules it as a background TASK rather than
     returning its coroutine -- so a test that merely awaits the click sees
-    nothing. Drain the loop until the scheduled work has finished."""
+    nothing. Drain the loop until the scheduled work has finished.
+
+    NiceGUI 3.18 starts each client's outbox loop (``outbox loop <id>``) as
+    soon as the client exists; it runs for the client's lifetime, so it is
+    not scheduled work and is not waited for."""
     for _ in range(50):
-        pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()
+                   and not t.get_name().startswith('outbox loop ')]
         if not pending:
             return
         await asyncio.gather(*pending, return_exceptions=True)
