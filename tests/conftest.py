@@ -444,6 +444,25 @@ def _refresh_local_indexer_for_local_indexer_tests(request):
         for _name in _deferral_names:
             if hasattr(shared.local_indexer, _name) and hasattr(request.module, _name):
                 setattr(request.module, _name, getattr(shared.local_indexer, _name))
+    else:
+        # Every other module that imported names from shared.local_indexer at
+        # collection has the same stale-alias hazard once a sibling reloaded
+        # it: test_phase_97_2_sqlite_vs_tantivy_consistency.py's
+        # `pytest.raises(LocalIndexerError)` let the NEW class through when a
+        # chunk ran test_local_indexer.py first (PR #419, 2026-10-20). Which
+        # files share a process follows the chunk plan, so rebind any stale
+        # alias rather than listing files.
+        live = sys.modules.get('shared.local_indexer')
+        if live is not None:
+            for _name, _value in list(vars(request.module).items()):
+                try:
+                    if getattr(_value, '__module__', None) != 'shared.local_indexer':
+                        continue
+                except Exception:  # an object whose attribute access raises
+                    continue
+                _current = getattr(live, _name, _value)
+                if _current is not _value:
+                    setattr(request.module, _name, _current)
     yield
 
 
