@@ -2105,8 +2105,7 @@ class SearchEngine:
         max_limit = Config.REGEX_VARIANTS_LIMIT  # 8000
         regex_mode = 'variants_maximum' if mode == 'fuzzy' else mode
         for term in terms:
-            if term.upper() in ['AND', 'OR', 'NOT', '(', ')']:
-                continue
+            # Every term, AND / OR / NOT included: both builders take them as words.
             _variants_noting_cutoff(self.var_mgr, term, mode, max_limit)
             if regex_mode != mode:
                 self.var_mgr.get_variants(term, regex_mode, limit=max_limit)
@@ -2333,12 +2332,13 @@ class SearchEngine:
             # _regex_candidate_query.
             raise ValueError('Regex mode has no query-string form; use _regex_candidate_query')
 
+        # AND / OR / NOT and a lone parenthesis are words here, quoted like any
+        # other: the parts are joined with AND, so one passed bare never worked as
+        # an operator, only as a parse error ("x AND OR AND y"), and the regex
+        # already requires it as a word. Latin text in a composition chunk
+        # (headers, shelfmarks, apparatus) lost its chunk to that error.
         parts = []
         for term in terms:
-            if term.upper() in ['AND', 'OR', 'NOT', '(', ')']:
-                parts.append(term)
-                continue
-
             # SEED-006 P2: a raw ASCII double-quote inside a term (the typed
             # gershayim substitute, e.g. רמב"ם) would break the quoted Tantivy
             # clauses below (f'"{term}"' -> "רמב"ם" = a parse error). The normal
