@@ -51,7 +51,9 @@ cookie.
 | `/api/fl_ids/{id}`, `/api/oxford_images/{id}`, `/api/oxford_image_url/{id}`, `/api/puzzle_folios/{id}`, `/api/visual_suggestions/{id}`, `/api/visual_suggestions/version` | GET | no | safe in principle; called by the site's own pages, not by API clients |
 | `/api/oxford_debug`, `/api/browse_debug/{id}` | GET | no | debug output; not cached |
 | `/api/visual_suggestions/batch_check`, `/api/puzzle_process`, `/api/puzzle_export` | POST | the puzzle routes are per visitor | never |
-| `/api/puzzle_image`, `/api/puzzle_ext_image`, `/api/proxy_image` | GET | puzzle uploads belong to one browser | never |
+| `/api/puzzle_image` | GET | a signed-out upload is served only to its own browser (`web/puzzle_image_access.py`) | never |
+| `/api/puzzle_ext_image` | GET | no: query string only; already sends `public, max-age=3600`, but still sets the cookie, so Cloudflare bypasses it | public in principle; left out of #409 with the other `/api/puzzle_*` routes; puzzle-canvas only, so not part of this decision's value question |
+| `/api/proxy_image` | GET | no: an allowlisted-domain proxy keyed on a full `url=` parameter | public in principle; not cached: the key is an arbitrary URL, and nothing in the repository calls it (2026-10-20 grep) |
 | `/api/export/*` | GET | the visitor's stored results, language, sign-in | never |
 
 **Caveats any future attempt must handle.** The prototype implements and tests all of them:
