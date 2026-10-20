@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 # Fabric.js CDN (v6.4.3 stable)
 FABRIC_JS_CDN = '<script src="https://cdn.jsdelivr.net/npm/fabric@6.4.3/dist/index.min.js"></script>'
 
+# How often the canvas positions are kept in the tab, for a reload or a return to /puzzle.
+STATE_SAVE_INTERVAL_S = 30
+
 # ── JavaScript: window.puzzleCanvas global object ─────────────────
 
 PUZZLE_CANVAS_JS = '''
@@ -4274,24 +4277,43 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
     # ── Periodic state save ──
     async def save_state():
-        """Periodically save canvas spatial state to session storage (every 30s)."""
+        """Keep the canvas positions in the tab (every STATE_SAVE_INTERVAL_S).
+
+        Only this tab's restore reads them (and discards them for another
+        visitor); no saved join is written here.
+        """
         try:
             state_json = await ui.run_javascript(
                 'window.puzzleCanvas && window.puzzleCanvas.canvas ? window.puzzleCanvas.getState() : null',
                 timeout=5.0
             )
-            if state_json:
-                app.storage.tab['puzzle_state'] = state_json
+            if not state_json:
+                return
+            state = json.loads(state_json) if isinstance(state_json, str) else dict(state_json)
+            # A fragment on this canvas but not drawn (still loading, or its
+            # image failed) keeps the position it had, rather than going back
+            # to the default.
+            previous = app.storage.tab.get('puzzle_state')
+            if previous:
+                previous = json.loads(previous) if isinstance(previous, str) else previous
+                for key in puzzle_meta:
+                    if key not in state and key in previous:
+                        state[key] = previous[key]
+            app.storage.tab['puzzle_state'] = json.dumps(state)
         except Exception:
             pass  # Page may not be active or JS not ready
 
     async def _periodic_save_loop():
         while True:
-            await asyncio.sleep(30)
+            await asyncio.sleep(STATE_SAVE_INTERVAL_S)
             if getattr(page_client, '_deleted', False):
                 break
             try:
-                await save_state()
+                # This task has no page of its own (NiceGUI keeps one per
+                # task): without it nothing was ever saved, and a reload put
+                # every fragment back at the default position.
+                with page_client:
+                    await save_state()
             except Exception:
                 if getattr(page_client, '_deleted', False):
                     break

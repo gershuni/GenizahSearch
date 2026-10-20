@@ -2460,13 +2460,11 @@ def init_api_routes(app_override=None):
         # from the module-global get_language() in the translations module,
         # which may not reflect the current per-request user state under
         # the multitenant architecture (Phase 87-92 invariants).
-        from web.safe_storage import safe_user_get
-        from web.translations import browser_language
-        _ui_lang = safe_user_get('ui_language')
         # No saved choice: the browser's language, as the page itself uses
         # (web/main.py::_resolve_ui_language).
-        if _ui_lang not in ('he', 'en'):
-            _ui_lang = browser_language()
+        from web.safe_storage import safe_user_get
+        from web.translations import visitor_language
+        _ui_lang = visitor_language(safe_user_get('ui_language'))
 
         try:
             export_svc = get_export_service(state.meta_mgr)

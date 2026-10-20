@@ -2053,17 +2053,28 @@ def create_catalog_browse_page(
     async def initial_load():
         """Load initial data and fetch results on page open."""
         try:
-            await _restore_session_filters()
+            try:
+                await _restore_session_filters()
+            except Exception:
+                # A browser that does not answer in time gets the unfiltered
+                # first page rather than no page at all.
+                logger.warning("catalog_browse: filter restore failed", exc_info=True)
             await fetch_authors()
             await fetch_works()
             await refresh_results()
         finally:
             initial_load_complete['value'] = True
 
+    # NiceGUI keeps the current page per asyncio task, and a task started with
+    # ensure_future starts with none: without the page's client, the first
+    # ui.run_javascript raised "slot stack ... empty" and the page never loaded.
+    _page_client = ui.context.client
+
     async def _deferred_initial_load():
         await asyncio.sleep(0.1)
         try:
-            await initial_load()
+            with _page_client:
+                await initial_load()
         except Exception:
-            pass  # Deferred UI refresh failed; page still usable
+            logger.warning("catalog_browse: initial load failed", exc_info=True)
     asyncio.ensure_future(_deferred_initial_load())

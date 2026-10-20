@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """The deferred /browse Related Fragments render leaves the UI language as it found it.
 
-The UI language is a process global (web/translations.py ``_current_lang``)
-that every page render sets. The Related Fragments block on /browse can render
-later, after an off-loop fetch, when another visitor's render may be in
-progress. It renders in the language captured when it was scheduled; it must
-then put the previous value back, or the other visitor's remaining rendering
-runs in this visitor's language.
+Until 2026-10-20 the UI language was a process global that every page render
+set (it is now per page: tests/test_web_language_per_client.py). The Related
+Fragments block on /browse can render later, after an off-loop fetch, when
+another visitor's render may be in progress. It renders in the language
+captured when it was scheduled; it must then put the previous value back, or
+the other visitor's remaining rendering runs in this visitor's language.
 
 ``using_language`` sets the language for a synchronous block and restores the
 previous value on exit (also on an exception). /browse must use it rather

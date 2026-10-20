@@ -172,6 +172,11 @@ def create_version_selector(
             transcription that does not contain what was searched.
     """
     container = ui.row().classes('items-center gap-2')
+    # The default is applied from a task started below, which has no page of
+    # its own (NiceGUI keeps the current page per asyncio task): without this
+    # client the caller's callback could not update the citation chip or
+    # notify, and the chip kept the citation of the text it replaced.
+    page_client = ui.context.client
 
     # Helper functions to separate editions and translations from all_sources.
     # PGP and FGP are split by the shared source-kind classifier so FGP editions
@@ -338,7 +343,8 @@ def create_version_selector(
 
         async def _safe_load():
             try:
-                await load_and_apply_latest()
+                with page_client:
+                    await load_and_apply_latest()
             except RuntimeError:
                 pass  # Parent element was deleted (NiceGUI timer lifecycle)
 

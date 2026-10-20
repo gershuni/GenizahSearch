@@ -459,7 +459,11 @@ def create_edit_text_dialog(
                     if dialog.is_deleted or edited_textarea.is_deleted or notes_textarea.is_deleted:
                         break
                     try:
-                        do_auto_save()
+                        # This task has no page of its own (NiceGUI keeps one
+                        # per task): without it the "Auto-saved" notice raised
+                        # after the first save and ended the loop.
+                        with dialog:
+                            do_auto_save()
                     except Exception:
                         break  # Error in loop iteration; break out gracefully
             asyncio.ensure_future(_auto_save_loop())

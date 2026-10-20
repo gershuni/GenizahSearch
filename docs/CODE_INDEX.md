@@ -1270,6 +1270,15 @@ Partial entry: the filter-state → read paths only, not the whole surface.
 - **Function** `_patch_html_lang_attribute` (Line 63) — patch NiceGUI index.html to add `lang="he"` for Lighthouse a11y
 - **Function** `apply_all_patches` (Line 92) — apply all NiceGUI monkey-patches; call once before ui.run()
 - **Function** `_is_session_free_path` — `/mcp` and `/mcp/`: never read, create or reissue a session (not cacheable; 2026-10-09)
+- **Function** `_patch_binding_remove` — NiceGUI < 3.15: `binding.remove` drops binding links without walking every property marker in the process, so `element.clear()` no longer slows with each open tab (2026-10-20)
+
+## web/translations.py
+
+The web UI language, per visitor (2026-10-20; it was one value per process). Precedence is in the module comment.
+- **Function** `get_language` / `tr` / `is_rtl` — `using_language` block, else the page build and the tasks it started, else the page's client (event handlers), else the request (saved choice, else browser), else the process default
+- **Function** `set_language` — in a page: that page's language; in another task: that task's; outside any task: the process default
+- **Function** `using_language` — override for a block; task-local, so the block may await
+- **Function** `visitor_language` — the one rule: a saved `ui_language`, else the browser's `Accept-Language` (`web/main.py::_resolve_ui_language`, the Excel export)
 
 ## web/ai_listings.py
 

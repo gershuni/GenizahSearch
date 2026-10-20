@@ -2666,12 +2666,17 @@ class _Sent:
 
 def _record_address_bar(stack) -> list:
     """Capture every history.replaceState URL the page sends (fire-and-forget
-    JavaScript never reaches the simulated client's javascript_rules)."""
+    JavaScript never reaches the simulated client's javascript_rules).
+
+    The page sends it through its own client (``Client.run_javascript``), which
+    also works from a background task; other page JavaScript goes through
+    ``ui.run_javascript`` and is answered with ``_Sent()`` as before."""
     import json
     import re
     from unittest.mock import patch
 
     from nicegui import ui
+    from nicegui.client import Client
     seen: list = []
     pattern = re.compile(r'history\.replaceState\(history\.state, "", (".*")\)')
 
@@ -2681,7 +2686,19 @@ def _record_address_bar(stack) -> list:
             seen.append(json.loads(m.group(1)))
         return _Sent()
 
-    stack.enter_context(patch.object(ui, 'run_javascript', side_effect=_fake))
+    original = Client.run_javascript
+
+    def _client_spy(self, code, *args, **kwargs):
+        if pattern.search(code):
+            return _fake(code)
+        return original(self, code, *args, **kwargs)
+
+    def _ui_fake(code, *args, **kwargs):
+        ui.context.client  # raises with no page in this task, as the real one does
+        return _fake(code)
+
+    stack.enter_context(patch.object(ui, 'run_javascript', side_effect=_ui_fake))
+    stack.enter_context(patch.object(Client, 'run_javascript', _client_spy))
     return seen
 
 
@@ -3190,5 +3207,37 @@ def test_compare_folio_turned_before_the_details_load_is_the_one_fetched(joins_l
             assert _pgp_hrefs(user, STUB_ANCHOR_SID) == [
                 f'https://pgp.example/{STUB_ANCHOR_SID}/7']
             assert _pgp_hrefs(user, cand_sid) == [f'https://pgp.example/{cand_sid}/5']
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_the_address_bar_follows_a_pinned_candidate(joins_lab_smoke_runner):
+    """"Pivot the workbench" (the push pin on a card) loads the new anchor in a
+    background task. The address bar was updated with ui.run_javascript, which
+    has no page there: the bar kept the OLD anchor, so a reload, bookmark or
+    copied address reopened it. It now goes through the page's own client."""
+    import contextlib
+
+    from nicegui import ElementFilter, ui
+    from tests.render_smoke.conftest import STUB_ANCHOR_SID, STUB_CAND_TEXT
+
+    async def driver(user):
+        with contextlib.ExitStack() as stack:
+            bar = _record_address_bar(stack)
+            await user.open('/joins-lab')
+            await _load_anchor_and_search(user)
+            await asyncio.sleep(0.5)
+            assert bar and f'sys_id={STUB_ANCHOR_SID}' in bar[-1], bar
+            with user._client:
+                pins = [b for b in ElementFilter(kind=ui.button)
+                        if b._props.get('icon') == 'push_pin' and b.visible]
+            assert pins, 'no "pivot the workbench" pin on the candidate cards'
+            _click_element(user, pins[0])
+            for _ in range(40):
+                if f'sys_id={STUB_CAND_TEXT.sys_id}' in bar[-1] or f'sys_id={STUB_ANCHOR_SID}' not in bar[-1]:
+                    break
+                await asyncio.sleep(0.05)
+        assert f'sys_id={STUB_ANCHOR_SID}' not in bar[-1], (
+            f'the address bar still names the old anchor: {bar[-1]}')
 
     joins_lab_smoke_runner(driver)

@@ -261,8 +261,8 @@ def build_side_query(
 # ---------------------------------------------------------------------------
 
 # WR-03: Text Position labels must be resolved at REQUEST time (inside
-# create_joins_builder), NOT at module import. tr() reads the process-global
-# _current_lang set per-request by web/main.py; a module-level dict freezes the
+# create_joins_builder), NOT at module import. tr() reads the visitor's
+# language, set per page by web/main.py; a module-level dict freezes the
 # labels at the import-time default ('he'), so an English visitor would see
 # Hebrew labels that never update. The English KEYS are stable and used for
 # state/routing; only the displayed VALUES need deferred tr(). (See _MODIFIER_KEYS

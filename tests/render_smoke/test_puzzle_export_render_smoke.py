@@ -277,3 +277,49 @@ def test_publishing_a_join_draws_it_with_this_browsers_images(
         assert drawn == own
 
     _run(driver)
+
+
+def test_canvas_positions_are_kept_in_the_tab(image_service, monkeypatch):
+    """The periodic save of the canvas positions ran in a task with no page, so
+    it never wrote and a reload put every fragment back at the default spot.
+    A fragment on the canvas but not drawn keeps the position it had."""
+    import json
+
+    import web.pages.puzzle as puzzle_page
+
+    # After the restore (0.5 s after load), as the real 30 s interval always is.
+    monkeypatch.setattr(puzzle_page, 'STATE_SAVE_INTERVAL_S', 1.5)
+    undrawn = '990000000000002,2v'
+    drawn = {KEY: {'x': 321, 'y': 123, 'rotation': 15, 'scaleX': 0.5, 'scaleY': 0.5}}
+
+    async def driver(user):
+        # What the browser's canvas reports: only the fragment it could draw.
+        user.javascript_rules[re.compile(r'.*puzzleCanvas\.getState\(\)')] = lambda _m: json.dumps(drawn)
+        user.javascript_rules[re.compile(r'.*puzzleCanvas\.getCropState\(\)')] = lambda _m: '{}'
+        await user.open('/puzzle')
+        with user._client:
+            # Restored by the page's init_canvas (0.5 s after load).
+            from web.saved_joins import owner_key
+            app.storage.tab['puzzle_owner'] = owner_key()
+            app.storage.tab['puzzle_fragments'] = {
+                KEY: {'sys_id': '990000000000001', 'shelfmark': 'ENA 1.1', 'folio_label': '1r',
+                      'fl_id': FL, 'threshold': 30, 'processed': True, 'size': 800,
+                      'image_url': '', 'external_provider': '', 'page_index': -1},
+                undrawn: {'sys_id': '990000000000002', 'shelfmark': 'ENA 1.2', 'folio_label': '2v',
+                          'fl_id': '45678902', 'threshold': 30, 'processed': True, 'size': 800,
+                          'image_url': '', 'external_provider': '', 'page_index': -1},
+            }
+            app.storage.tab['puzzle_state'] = json.dumps({undrawn: {'x': 7, 'y': 8, 'rotation': 90}})
+        saved = None
+        for _ in range(80):
+            await asyncio.sleep(0.1)
+            with user._client:
+                saved = app.storage.tab.get('puzzle_state')
+            if saved and KEY in json.loads(saved):
+                break
+        assert saved and KEY in json.loads(saved), 'the canvas positions were never kept in the tab'
+        state = json.loads(saved)
+        assert state[KEY]['x'] == 321 and state[KEY]['rotation'] == 15
+        assert state.get(undrawn, {}).get('rotation') == 90, state
+
+    _run(driver)
