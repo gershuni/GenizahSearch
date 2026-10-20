@@ -3927,10 +3927,12 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
         canvas_wrap.on('puzzle-add-result', on_puzzle_add_result)
 
         async def _on_load_complete():
+            # The guard first: a slow browser answering save_state's calls
+            # must not hold back an edit made meanwhile.
+            _load_finished()
             # Keep the loaded canvas's positions in the tab now, not at the
             # next periodic save, so a reload restores what is on screen.
             await save_state()
-            _load_finished()
 
         def on_puzzle_fragment_meta(e):
             """Handle 'puzzle-fragment-meta' event: update stored metadata after folio nav or bg toggle."""
