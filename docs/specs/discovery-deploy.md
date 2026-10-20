@@ -452,7 +452,8 @@ the 131 deletions the August review counted, plus **523 demotions it did not** (
 `low_coverage`, 119 `overlapping_tie`, 116 `shared_wording`, 57 `insufficient_length`, 13
 `missing_signal`; 406 of the 523 with lower coverage than live). Production serves `e5bcd347…`
 (genizahsearch.com showed its counts on 2026-10-20: 30,528 main pool, 28,074 additional, 58,602
-in all), so the 523 are on the site under "התאמות נוספות", and no ruling covers them.
+in all), so the 523 are on the site under "התאמות נוספות". **Owner ruling 2026-10-20: accept
+them, nothing more**; the matcher fix stays deferred.
 
 Rollback (§3) does not run this gate: returning to the prior asset is the point.
 
