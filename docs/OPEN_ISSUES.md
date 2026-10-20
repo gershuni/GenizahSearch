@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-19 (release v9.8.0, "Joins Lab upgrades", both) -- version bump and release texts only; no rows changed. 220 open.
+> **Last Updated:** 2026-10-20 (append-preservation gate, `feat/append-preservation-gate`) -- the C3 pointer now names the gate; P2 +1 (the V4.2 release's 523 unreviewed demotions, found by the gate's first run). 221 open.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
@@ -63,7 +63,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open |
 |----------|------|
 | P1 Critical Bugs | 0 |
-| P2 Medium Bugs | 46 |
+| P2 Medium Bugs | 47 |
 | P3 Low Priority | 134 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 20 |
@@ -71,7 +71,7 @@ Move to "Completed Issues" section at bottom with date
 | Deferred to v7.15+ | 6 |
 | 2026-05-29 audit follow-up | 2 |
 | FGP integration (§4.5) | 5 |
-| **Total open** | **220** |
+| **Total open** | **221** |
 
 > Counts here exclude closed items (recomputed 2026-08-14 by counting rows carrying ❌/⏸/⏳); closed history lives in docs/archive/OPEN_ISSUES_ARCHIVE.md.
 > Count notes from 2026-09-25 to 2026-10-05 moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-06.
@@ -92,6 +92,7 @@ Move to "Completed Issues" section at bottom with date
 > 2026-10-19 (tracker trim): 49 rows condensed, full text archived; no row opened or closed -- 221.
 > 2026-10-19 (Joins Lab links + Compare window, `feat/joins-lab-links-compare`): P2 +2 -2 (white Browse icons in the web Compare window; its FJMS/PGP buttons stuck on the first candidate), P3 +2 -2 (card / Known Joins Browse icons replaced the Lab; desktop Compare anchor line empty) -- all found and fixed the same day, archived -- 221.
 > 2026-10-19 (render-smoke hang on failure, `claude/blissful-goldberg-mn4em0`): P3 -1 ("A render-smoke file can hang a test lane", fixed, archived) -- 220.
+> 2026-10-20 (append-preservation gate, `feat/append-preservation-gate`): P2 +1 (the V4.2 release's 523 unreviewed demotions) -- 221.
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 
@@ -127,7 +128,7 @@ Move to "Completed Issues" section at bottom with date
 
 - ❌ **Open (2026-08-04) — `_band_measurements` reads the artifact path before it is assigned; staleness is unbounded, not one call.** `shared/discovery_service.py::_band_measurements` keys its cache on `self._last_path`, which only `_get_conn()` assigns, and a cache hit returns before `_get_conn()` runs, so a stale path can persist indefinitely (Codex). No production impact today: the artifact swaps only with a restart. A Phase 136 mutation control catches a regression; the fix belongs to a maintenance plan. Full text archived 2026-10-19.
 - ❌ **Open (2026-08-04) — `_browse_cached_call`'s cache key is path-blind for every enveloped read.** The same class as the entry above, but general: the shared caching wrapper keys on call arguments without including the resolved artifact path, so *any* enveloped read can return a previous artifact's rows after a swap. Same near-zero production exposure and the same reason for deferral (file ownership during Phase 136 waves 7–8). Fix both together: derive the key from the path `_get_conn()` actually opened, and assign that path before any cache lookup rather than after.
-> C3/H12 (audit) — no append-diff gate exists yet; a REF7+ append today could repeat the same silent loss. Tracked as Phase 3 "Append safety" in the audit's proposed next milestone; blocks any REF7+ work.
+> C3/H12 (audit) — the append-diff gate exists since 2026-10-20 (`scripts/verify_append_preservation.py`, step three of `docs/specs/discovery-deploy.md` §2.1 and §2.4): a live main-pool identification that a candidate deletes or demotes blocks the deploy unless the owner rules on that exact delta. The matcher itself is unchanged (`REF_DF_CAP`), so a REF7+ append will still lose identifications; the gate makes that loss visible and owner-ruled, not silent. Its first run found the V4.2 demotions in P2 below.
 
 ## 2026-05-29 Audit Follow-up (fan-out codebase audit + Codex review)
 
@@ -154,6 +155,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **The V4.2 discovery release also demoted 523 live main-pool identifications, and no ruling covers them** | the deployed artifact `e5bcd347…` vs its predecessor `528f6d36…`; `scripts/verify_append_preservation.py` | ❌ Open (found 2026-10-20) | The 2026-08-19 review counted only identifications that disappeared (131, of which 103 genuine loss, accepted by the owner). The append gate's first run on the same pair also finds 523 that stayed in the artifact but dropped out of the main pool into "התאמות נוספות": 218 `low_coverage`, 119 `overlapping_tie`, 116 `shared_wording`, 57 `insufficient_length`, 13 `missing_signal`; 406 of them now have lower coverage than in V4, which fits the same lost-seed mechanism (`REF_DF_CAP`). Production serves V4.2 (the live page's counts, 2026-10-20). Owner decision: accept them as they are, or review them first (`--report-html` gives one row per loss). Also: the local `discovery_data/live/` still holds V4 (`528f6d36…`), so local tests, and at least the Help-page check of 2026-10-06 that names `528f6d36`, ran against V4, not what production serves. |
 | **Desktop discoveries list shows the author of an anonymous discovery** | `genizah_app.py` (the discoveries list: the cache built from `get_discoveries` at ~15053-15062, the author line at ~15119), `desktop/supabase_corrections_client.py::get_discoveries` | ❌ Open (2026-10-05) | The list's cache keeps `author_username` but not `is_anonymous`, and the list prints `author_username or tr('Anonymous')`; the client fills `author_username` from `profiles` whether or not the discovery is anonymous. A new profile's username is the user's email (`supabase_setup.sql`, the new-user trigger), so this can show an email address. The detail dialogs do hide it (`desktop/corrections_ui.py`). Found in the 2026-10-05 recheck by reading the code; not checked against live data. |
 | **Web text drawn after an `await` can come out in another visitor's language** | `web/translations.py` (`_current_lang`, one value per process), every page that builds UI after an `await` | ❌ Open (2026-10-05) | `tr()` reads one process-wide language that `create_layout` sets on each render, so a page that draws after an `await` can use another visitor's language (display only, until reload). `using_language()` guards only `web/pages/browse.py` and `web/pages/search.py`. Downloads too (rechecked 2026-10-06): `web/export_service.py` resolves library names via `get_language()` in the search Word export, the list Excel export and both Parallels exports. Fix: a per-client language in `tr()`. Full text archived 2026-10-19. |
 | **Web Fragment Puzzle auto-save never writes** | `web/pages/puzzle.py::do_auto_save`, `_periodic_save_loop` | ❌ Open (2026-09-29) | Confirmed in the in-process NiceGUI harness: `do_auto_save` runs in a raw `loop.create_task` with no page slot, so `build_fragments_list` fails and nothing is saved; only the explicit Save writes. Before enabling it, fix four paths that would otherwise overwrite the owner's own draft with no edit: (1) after opening a draft through `?doc=`, the tab keeps an older canvas and a reload re-adds it; (2) an empty canvas plus a notes blur saves `[]`; (3) `puzzle_state` is never saved (the periodic loop has no client), so restored fragments land at default positions; (4) a fragment whose image failed is written as x=0 / rotation 0. Auto-save must also run only after a real edit, never as a side effect of loading. |
