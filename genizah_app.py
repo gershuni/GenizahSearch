@@ -835,6 +835,8 @@ def _build_search_results_xlsx_bytes(
     # omits the MiDRASH data-source / dataset / citation lines. Default False
     # keeps Genizah-only + mixed exports (and the cross-parity fixtures) unchanged.
     local_only=False,
+    # The search reached its limit or was stopped: the count is "N+".
+    result_count_capped=False,
 ):
     """Build the 4-sheet workbook bytes for desktop xlsx search-results export.
 
@@ -1166,6 +1168,7 @@ def _build_search_results_xlsx_bytes(
         deep_scan_on=deep_scan_on,
         export_datetime=_export_dt,
         result_count=len(results) if results is not None else 0,
+        result_count_capped=result_count_capped,
         local_only=local_only,  # EXPUX-03: omit MiDRASH credit for LOCAL-only
         app_name="Dicta Genizah Search Pro",  # desktop product name on the credit header
     )
@@ -27247,6 +27250,9 @@ class GenizahGUI(QMainWindow):
                     local_filepath_map=dict(getattr(self, '_local_filepath_cache', {}) or {}),
                     # EXPUX-03: omit MiDRASH credit on Credits sheet when LOCAL-only.
                     local_only=_local_only_export,
+                    # A selection is counted as selected; a whole list the search
+                    # cut off or Stop ended says "N+", as the website's does.
+                    result_count_capped=(not has_selection and self._run_left_matches_out()),
                 )
                 from desktop.export_save import save_export, write_bytes
                 path = save_export(self, path, lambda p: write_bytes(p, content))
