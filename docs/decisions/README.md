@@ -16,6 +16,7 @@ decision with no enforcer is a convention; the pages say which is which.
 | [0007](0007-tests-stay-flat.md) | `tests/` stays flat apart from its existing lane subdirectories | convention (many tests compute the repo root from their own depth) |
 | [0008](0008-root-assets-stay.md) | Data assets that `shared/config.py` or the PyInstaller spec resolve at the repository root stay there | [shared/config.py](../../shared/config.py), [GenizahSearchPro.spec](../../GenizahSearchPro.spec) |
 | [0009](0009-masked-corpus-rule.md) | Restricted-source strings never appear in tracked files or shipped surfaces | [scripts/check_atlas_masking.py](../../scripts/check_atlas_masking.py) |
+| [0010](0010-no-cdn-cache-for-the-api.md) | The data API is not cached by Cloudflare; only the six library image proxies are | convention |
 
 **Format** of a page: Status, Date, Source, Decision, Why, Consequences, Supersedes, Enforced by
 (0009 omits Why and Supersedes on purpose: either would describe the masked corpora).
