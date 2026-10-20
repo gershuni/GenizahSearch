@@ -26,10 +26,12 @@ masking-clean.
 dev box:   build --release --frozen-precision-defaults
              -> verify_discovery_sidecar.py <DB> --expected-frame-hash <hex>
              -> check_atlas_masking.py --scan-sqlite <DB> --scan-asset <DB> --scan-repo --strict
+             -> verify_append_preservation.py <LIVE copy> <DB>   (OPS-02: no unruled loss of a
+                live main-pool identification)
 web box:   scp <DB> asset-first (immutable content-hashed name)
              -> STAGE candidate manifest.json.candidate (points at the new asset_basename)
-             -> verify + strict masking gate the STAGED target (exact filename resolved
-                from the candidate manifest, NEVER the live/old one)
+             -> verify + strict masking gate + append-preservation gate the STAGED target
+                (exact filename resolved from the candidate manifest, NEVER the live/old one)
              -> ATOMIC live-manifest swap (mv manifest.json.candidate manifest.json)
              -> restart -> live smoke (flag-bypass readiness probe; DISCOVERY_ENABLED stays OFF)
 rollback:  ATOMIC repoint live manifest to the PRIOR asset_basename -> restart
@@ -94,10 +96,14 @@ $env:MASKING_SCAN_PATTERNS_FILE = '.masking_patterns'
 
 python scripts/verify_discovery_sidecar.py $DB --expected-frame-hash $FRAME
 python scripts/check_atlas_masking.py --scan-sqlite $DB --scan-asset $DB --scan-repo --strict
+# $LIVE = a byte copy of the asset production serves (its SHA-256 = the box's live content_hash)
+python scripts/verify_append_preservation.py $LIVE $DB --report-html _tmp\append-delta.html --draft-acceptance _tmp\append-acceptance.json
 ```
 
-Both MUST exit 0. If either fails, STOP — do not upload. (These are the same
-gates 134-07 already passed for the current frame; re-run them on any rebuild.)
+All three MUST exit 0. If any fails, STOP — do not upload. (The first two are the
+same gates 134-07 already passed for the current frame; re-run them on any rebuild.
+The third is OPS-02 — see the `## Amendment 2026-10-20` section below for what to do
+when it reports a loss.)
 
 > **⚠ Amendment 2026-08-02 (Phase 136) — `$FRAME` here is NOT an externally
 > pinned value.** It is read from the CANDIDATE build's own `manifest.json` —
@@ -159,9 +165,14 @@ STAGED_FRAME="<external pinned frame_content_hash — docs/specs/discovery-frame
 
 python scripts/verify_discovery_sidecar.py "$STAGED_DB" --expected-frame-hash "$STAGED_FRAME"
 python scripts/check_atlas_masking.py --scan-sqlite "$STAGED_DB" --scan-asset "$STAGED_DB" --scan-repo --strict
+# OPS-02. Add --acceptance scripts/discovery_append_acceptance_<live12>_to_<candidate12>.json
+# only when the owner has ruled on this exact delta (the file must be in the deployed code).
+python scripts/verify_append_preservation.py \
+    --live-manifest discovery_data/manifest.json \
+    --candidate-manifest discovery_data/manifest.json.candidate
 ```
 
-Both MUST exit 0 on the box before the swap. This re-checks the asset AT ITS
+All three MUST exit 0 on the box before the swap. This re-checks the asset AT ITS
 DESTINATION (defends against a corrupt transfer) and re-runs the masking gate
 against the exact bytes that will go live. **Reading `frame_content_hash` FROM
 the staged candidate manifest itself (the pre-2026-08-02 form of this command)
@@ -405,6 +416,46 @@ generated from the module's own `_frozen_real_band_precision_rows(v2_bands=True)
 of truth `_validate_precision_spec` cross-checks against — so it carries the D-02a `tier_a`
 authorization pair (`ci_low=0.9084`, `measurement_status='measured_pass'`, `precision` still NULL) by
 construction rather than by hand-transcription.
+
+---
+
+## Amendment 2026-10-20 (OPS-02, v9.0.0 audit C3) — the append-preservation gate
+
+**Why.** Track-1 matching is not monotonic in reference-corpus size: `REF_DF_CAP` drops every
+posting of an over-cap gram, so adding reference works removes match seeds from old, unrelated
+works. The V4 -> V4.2 append deleted 131 live main-pool identifications without any gate
+noticing; the owner accepted that loss on 2026-08-19 on condition that every later append is
+diffed against live before it ships, as a gate. `scripts/verify_append_preservation.py` is that
+gate, now step three of §2.1 and §2.4.
+
+**What blocks.** A live main-pool identification (`discovery_identification.main_pool = 1`,
+keyed by `(sys_id, canonical_work_id)`) that the candidate deletes or demotes below the
+main-pool bar. Each loss is given one cause (`demoted`, `deleted_page_reattributed`,
+`deleted_evidence_kept`, `deleted_no_pair_evidence`); the cause explains, it never excuses.
+Identifications outside the main pool that disappear, and everything the candidate adds, are
+counted and do not block. Both inputs must be public projections; anything unreadable fails.
+
+**When it reports a loss.**
+
+1. Send the owner the `--report-html` page (one row per loss: shelfmark, work, cause, coverage
+   live -> candidate).
+2. If the owner accepts, fill `ruled_by`, `ruled_on` and `ruling` in the `--draft-acceptance`
+   file, in the owner's words, and commit it as
+   `scripts/discovery_append_acceptance_<live12>_to_<candidate12>.json`. Never fill it without
+   the owner's ruling.
+3. Re-run with `--acceptance <that file>`; it passes only for exactly these two files (by
+   SHA-256) and exactly this set of losses. A rebuild voids it.
+4. Deploy that code before §2.4, so the box has the script and the acceptance.
+
+**Measured on V4 -> V4.2** (`528f6d36…` -> `e5bcd347…`, 2026-10-20): exit 1 with 654 losses —
+the 131 deletions the August review counted, plus **523 demotions it did not** (218
+`low_coverage`, 119 `overlapping_tie`, 116 `shared_wording`, 57 `insufficient_length`, 13
+`missing_signal`; 406 of the 523 with lower coverage than live). Production serves `e5bcd347…`
+(genizahsearch.com showed its counts on 2026-10-20: 30,528 main pool, 28,074 additional, 58,602
+in all), so the 523 are on the site under "התאמות נוספות". **Owner ruling 2026-10-20: accept
+them, nothing more**; the matcher fix stays deferred.
+
+Rollback (§3) does not run this gate: returning to the prior asset is the point.
 
 ---
 
