@@ -61,6 +61,30 @@ def _button(user, text):
     return found
 
 
+async def _wait_until(ready, timeout=10.0):
+    """Poll until ``ready()`` holds, at most ``timeout`` s; the assertion after
+    it says what is missing. Fixed sleeps were too short on Windows CI: the
+    page had not drawn its chips 0.5 s after opening (PR #419), while the same
+    open takes ~0.25 s on Linux."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not ready() and loop.time() < deadline:
+        await asyncio.sleep(0.05)
+
+
+def _texts(user):
+    return [b.text for b in _buttons(user)]
+
+
+def _labels(user):
+    return {e.text for e in _all_elements(user) if isinstance(e, ui.label)}
+
+
+async def _open_browse(user, ready):
+    await user.open(f'/browse?sys_id={SID}')
+    await _wait_until(lambda: ready(_texts(user)))
+
+
 def _button_with_tooltip(user, text):
     """``.tooltip()`` adds a sibling ui.tooltip that targets the button's html id."""
     targets = {t.props.get('target') for t in _all_elements(user)
@@ -104,8 +128,7 @@ def _assert_collapsing(button, icon, text):
 
 def test_go_buttons_carry_an_icon_and_keep_their_text():
     async def driver(user):
-        await user.open(f'/browse?sys_id={SID}')
-        await asyncio.sleep(0.5)
+        await _open_browse(user, lambda texts: texts.count('Go') >= 2)
         go_buttons = _button(user, 'Go')
         icons = sorted(b.props.get('icon') for b in go_buttons)
         assert icons == ['arrow_forward', 'search'], icons
@@ -117,8 +140,7 @@ def test_go_buttons_carry_an_icon_and_keep_their_text():
 
 def test_the_page_go_arrow_points_the_hebrew_way():
     async def driver(user):
-        await user.open(f'/browse?sys_id={SID}')
-        await asyncio.sleep(0.5)
+        await _open_browse(user, lambda texts: texts.count('עבור') >= 2)
         icons = sorted(b.props.get('icon') for b in _button(user, 'עבור'))
         assert icons == ['arrow_back', 'search'], icons
 
@@ -127,8 +149,7 @@ def test_the_page_go_arrow_points_the_hebrew_way():
 
 def test_chips_that_open_a_library_viewer_carry_open_in_new_and_replace_the_icon_button():
     async def driver(user):
-        await user.open(f'/browse?sys_id={SID}')
-        await asyncio.sleep(0.5)
+        await _open_browse(user, lambda texts: {'NLI', 'Cambridge'} <= set(texts))
         for name in ('NLI', 'Cambridge'):
             [chip] = _button(user, name)
             assert chip.props.get('icon-right') == 'open_in_new', chip.props
@@ -140,8 +161,7 @@ def test_chips_that_open_a_library_viewer_carry_open_in_new_and_replace_the_icon
 
 def test_chips_that_switch_images_carry_an_image_icon_and_keep_a_named_external_button():
     async def driver(user):
-        await user.open(f'/browse?sys_id={SID}')
-        await asyncio.sleep(0.5)
+        await _open_browse(user, lambda texts: {'NLI', 'Cambridge'} <= set(texts))
         for name in ('NLI', 'Cambridge'):
             [chip] = _button(user, name)
             assert chip.props.get('icon') == 'image', chip.props
@@ -156,11 +176,10 @@ def test_chips_that_switch_images_carry_an_image_icon_and_keep_a_named_external_
 
 def test_external_links_carry_open_in_new_after_their_text():
     async def driver(user):
-        await user.open(f'/browse?sys_id={SID}')
-        await asyncio.sleep(0.5)
+        await _open_browse(user, lambda texts: 'Show Metadata' in texts)
         [show] = _button(user, 'Show Metadata')
         _click(user, show)
-        await asyncio.sleep(0.2)
+        await _wait_until(lambda: {'NLI Ktiv', 'Cambridge CUDL'} <= _labels(user))
         links = {}
         for link in (e for e in _all_elements(user) if isinstance(e, ui.link)):
             children = link.default_slot.children
@@ -180,18 +199,17 @@ def test_external_links_carry_open_in_new_after_their_text():
 
 def test_both_submit_buttons_carry_send_and_keep_their_text():
     async def driver(user):
-        await user.open(f'/browse?sys_id={SID}')
-        await asyncio.sleep(0.5)
+        await _open_browse(user, lambda texts: 'Edit' in texts)
         [edit] = _button(user, 'Edit')
         _click(user, edit)
-        await asyncio.sleep(0.2)
+        await _wait_until(lambda: 'Submit' in _texts(user))
         [submit] = _button(user, 'Submit')
         _assert_collapsing(submit, 'send', 'Submit')
         assert 'browse-icon-flip-rtl' in submit.classes
 
         # The fullscreen editor has its own Submit; the inline one stays underneath.
         _click(user, _button_with_tooltip(user, 'Fullscreen Edit'))
-        await asyncio.sleep(0.2)
+        await _wait_until(lambda: _texts(user).count('Submit') >= 2)
         submits = _button(user, 'Submit')
         assert len(submits) == 2
         for submit in submits:

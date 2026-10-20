@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-20 (web fixes round 2, `ccr-bf48c2a5-pj4z5d`) -- web Fragment Puzzle auto-save switched on after its four preconditions were fixed and checked in a real browser (`scripts/e2e_puzzle_autosave.py`); a confirmed crop is now saved and kept by a reload; two handlers found by the new detached-task guard fixed; the publish-storage test no longer leaves the process behind a proxy. 218 open.
+> **Last Updated:** 2026-10-20 (web fixes round 2, `ccr-bf48c2a5-pj4z5d`) -- web Fragment Puzzle auto-save switched on after its four preconditions were fixed and checked in a real browser (`scripts/e2e_puzzle_autosave.py`); a confirmed crop is now saved and kept by a reload; two handlers found by the new detached-task guard fixed; the publish-storage test no longer leaves the process behind a proxy. Merged with #418 (append-preservation gate: V4.2's 523 demotions accepted by owner ruling, archived; P3 +1). 219 open.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
@@ -64,14 +64,14 @@ Move to "Completed Issues" section at bottom with date
 |----------|------|
 | P1 Critical Bugs | 0 |
 | P2 Medium Bugs | 43 |
-| P3 Low Priority | 135 |
+| P3 Low Priority | 136 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 20 |
 | Untested Areas | 5 |
 | Deferred to v7.15+ | 6 |
 | 2026-05-29 audit follow-up | 2 |
 | FGP integration (§4.5) | 5 |
-| **Total open** | **218** |
+| **Total open** | **219** |
 
 > Counts here exclude closed items (recomputed 2026-08-14 by counting rows carrying ❌/⏸/⏳); closed history lives in docs/archive/OPEN_ISSUES_ARCHIVE.md.
 > Count notes from 2026-09-25 to 2026-10-05 moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-06.
@@ -92,8 +92,9 @@ Move to "Completed Issues" section at bottom with date
 > 2026-10-19 (tracker trim): 49 rows condensed, full text archived; no row opened or closed -- 221.
 > 2026-10-19 (Joins Lab links + Compare window, `feat/joins-lab-links-compare`): P2 +2 -2 (white Browse icons in the web Compare window; its FJMS/PGP buttons stuck on the first candidate), P3 +2 -2 (card / Known Joins Browse icons replaced the Lab; desktop Compare anchor line empty) -- all found and fixed the same day, archived -- 221.
 > 2026-10-19 (render-smoke hang on failure, `claude/blissful-goldberg-mn4em0`): P3 -1 ("A render-smoke file can hang a test lane", fixed, archived) -- 220.
+> 2026-10-20 (append-preservation gate, `feat/append-preservation-gate`): P2 +1 -1 (the V4.2 release's 523 demotions, found by the gate and accepted by owner ruling the same day, archived); P3 +1 (the local artifact is V4, production V4.2) -- 221.
 > 2026-10-20 (web page context + per-visitor language, `ccr-bf48c2a5-pj4z5d`): P2 -2 (/catalog-browse first load; text in another visitor's language -- fixed, archived); P2 +2 -2 (citation chip after the default version; correction editor auto-save) and P3 +2 -2 (Joins Lab address bar; Retry export and list confirmation) found and fixed the same day, archived; puzzle auto-save and reload-loop rows narrowed -- 218.
-> 2026-10-20 (web fixes round 2, `ccr-bf48c2a5-pj4z5d`): P2 -1 (puzzle auto-save, fixed, archived); P2 +1 -1 (Save dropped a confirmed crop) and P3 +4 -4 (tab canvas carried no crop; the publish-storage test's real request; two event handlers returning a detached task) found and fixed the same day, archived; P3 +1 (two tabs on one draft: the last auto-save wins) -- 218.
+> 2026-10-20 (web fixes round 2, `ccr-bf48c2a5-pj4z5d`): P2 -1 (puzzle auto-save, fixed, archived); P2 +1 -1 (Save dropped a confirmed crop) and P3 +4 -4 (tab canvas carried no crop; the publish-storage test's real request; two event handlers returning a detached task) found and fixed the same day, archived; P3 +1 (two tabs on one draft: the last auto-save wins) -- 219.
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 
@@ -129,7 +130,7 @@ Move to "Completed Issues" section at bottom with date
 
 - ❌ **Open (2026-08-04) — `_band_measurements` reads the artifact path before it is assigned; staleness is unbounded, not one call.** `shared/discovery_service.py::_band_measurements` keys its cache on `self._last_path`, which only `_get_conn()` assigns, and a cache hit returns before `_get_conn()` runs, so a stale path can persist indefinitely (Codex). No production impact today: the artifact swaps only with a restart. A Phase 136 mutation control catches a regression; the fix belongs to a maintenance plan. Full text archived 2026-10-19.
 - ❌ **Open (2026-08-04) — `_browse_cached_call`'s cache key is path-blind for every enveloped read.** The same class as the entry above, but general: the shared caching wrapper keys on call arguments without including the resolved artifact path, so *any* enveloped read can return a previous artifact's rows after a swap. Same near-zero production exposure and the same reason for deferral (file ownership during Phase 136 waves 7–8). Fix both together: derive the key from the path `_get_conn()` actually opened, and assign that path before any cache lookup rather than after.
-> C3/H12 (audit) — no append-diff gate exists yet; a REF7+ append today could repeat the same silent loss. Tracked as Phase 3 "Append safety" in the audit's proposed next milestone; blocks any REF7+ work.
+> C3/H12 (audit) — the append-diff gate exists since 2026-10-20 (`scripts/verify_append_preservation.py`, step three of `docs/specs/discovery-deploy.md` §2.1 and §2.4): a live main-pool identification that a candidate deletes or demotes blocks the deploy unless the owner rules on that exact delta. The matcher itself is unchanged (`REF_DF_CAP`), so a REF7+ append will still lose identifications; the gate makes that loss visible and owner-ruled, not silent. Its first run found 523 V4.2 demotions that the August review had not counted; the owner accepted them on 2026-10-20 ("accept, nothing more"; archived).
 
 ## 2026-05-29 Audit Follow-up (fan-out codebase audit + Codex review)
 
@@ -206,6 +207,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **The local discovery artifact is V4; production serves V4.2** | `discovery_data/live/` (staged by the local `.env` for every test run) | ❌ Open (found 2026-10-20) | `live/` holds `528f6d36…` (V4); genizahsearch.com serves `e5bcd347…` (V4.2: its 30,528 / 28,074 counts on 2026-10-20). So local discovery tests, and at least the Help-page check of 2026-10-06 that names `528f6d36`, ran against V4. Restaging is not free: a current artifact can turn tests red that a stale one hid (see the memory note on local discovery preview); keep exactly one `discovery-v1-*.db` in `live/`. |
 | **Shelfmark resolver: `normalize_shelfmark` glues numbers across `=`, so `… Ms. Heb. 577.10.6=04` resolves to `577.10.60=4`** | `shared/browse_map_utils.py::normalize_shelfmark` (SHA-pinned), `shared/metadata_manager.py::resolve_system_by_shelfmark` | ❌ Open (found 2026-10-18) | `6=04` becomes `604`, the key of `577.10.60=4`. Today's exact step, so untouched by the catalogue-form work (whose own keys strip zeros first and check the numbers). Any fix changes the pinned normalizer or adds a numeric check to the exact step; both need a baseline run. |
 | **Shelfmark resolver: a named library with nothing matching keeps today's answer, which can be another library's record** | `shared/catalog_shelfmark.py::named_library_exact` (R3 of `docs/plans/SHELFMARK_PREFIX_SCOPE_PLAN.md`) | ❌ Open (found 2026-10-18, Codex round 7 of the prefix-rule review) | Inherited, not introduced: the library-prefix rule falls back to T1's old answer when no record of the named library and none storing the input matches. `Halper 441` -> HAS `990001035960205171` stored `441` (no Halper 441 exists); `adler MS 1512` -> a list with Mosseri `151/2` records and `990001035710205171`, whose Adler number is 1873; `BL T-S 12.123` -> the Cambridge record. Today's answer keeps the right record in 89,297 measured collection-alias cases, so dropping the fallback is wrong; the plan's owner question 2 offers: offer it as a choice (never opened directly) for an institution conflict, or not found. |
 | **Shelfmark resolver: T1's dotless rule and number gluing keep other shelfmarks inside a named library** | `shared/metadata_manager.py::resolve_system_by_shelfmark` (dotless exact match), `shared/browse_map_utils.py::normalize_shelfmark` (SHA-pinned) | ❌ Open (found 2026-10-18, Codex round 7) | Inherited: the prefix rule removes other libraries' records only, so `Westminster College Ms. L-G Glass 12` still lists the Westminster record stored `L-G Glass.1.2` beside the CUL Glass 12 record, HAS `Ms. 36` lists the record stored `Ms. 3, 6`, and `JTS Ms. 2162` lists `Ms. 216.2`. Same family as the `=` gluing entry above. Fix sketch: a numeric check on T1's exact candidates (as T2 has), which changes exact answers and needs its own baseline run and an owner ruling. |
