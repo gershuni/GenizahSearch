@@ -980,7 +980,8 @@ class ExportService:
             lab_mode_on=None,  # Web has no Lab Mode UI; omit the row.
             deep_scan_on=None,
             export_datetime=_export_dt,
-            result_count=f"{len(results)}+" if result_count_capped else len(results),
+            result_count=len(results),
+            result_count_capped=result_count_capped,
         )
 
         # --- Default-active sheet per D-03 ---

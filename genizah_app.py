@@ -305,9 +305,11 @@ def _setup_crash_handler():
     from datetime import datetime
 
     def exception_hook(exc_type, exc_value, exc_tb):
-        # Log to file
+        # Log to file, in the data folder (next to faulthandler_dump.txt): next to
+        # the program is Program Files in an installed copy, which is read-only, so
+        # nothing was ever written there.
         try:
-            crash_log = os.path.join(os.path.dirname(__file__), 'crash_log.txt')
+            crash_log = os.path.join(Config.INDEX_DIR, 'crash_log.txt')
             with open(crash_log, 'a', encoding='utf-8') as f:
                 f.write(f"\n{'='*60}\n")
                 f.write(f"Crash at {datetime.now().isoformat()}\n")
@@ -339,6 +341,9 @@ BATCH_SIZE = 500
 # page follows on the next event-loop turn. Building 500 rows took 1.2-2.7 s
 # (owner's machine, 2026-09-30), so 500 rows up front delayed the first result.
 FIRST_PAINT_ROWS = 50
+# How long a quit waits for a running metadata loader (the other close-time waits
+# are 2 s too); see GenizahGUI._stop_meta_loader_for_close.
+_META_LOADER_CLOSE_WAIT_MS = 2000
 
 class LabPanel(QFrame):
     def __init__(self, parent, mode):
@@ -830,6 +835,8 @@ def _build_search_results_xlsx_bytes(
     # omits the MiDRASH data-source / dataset / citation lines. Default False
     # keeps Genizah-only + mixed exports (and the cross-parity fixtures) unchanged.
     local_only=False,
+    # The search reached its limit or was stopped: the count is "N+".
+    result_count_capped=False,
 ):
     """Build the 4-sheet workbook bytes for desktop xlsx search-results export.
 
@@ -1161,6 +1168,7 @@ def _build_search_results_xlsx_bytes(
         deep_scan_on=deep_scan_on,
         export_datetime=_export_dt,
         result_count=len(results) if results is not None else 0,
+        result_count_capped=result_count_capped,
         local_only=local_only,  # EXPUX-03: omit MiDRASH credit for LOCAL-only
         app_name="Dicta Genizah Search Pro",  # desktop product name on the credit header
     )
@@ -15149,11 +15157,15 @@ class GenizahGUI(QMainWindow):
             for d in discoveries:
                 logger.debug("discovery id=%s, title=%s, is_hidden=%s", d.id, d.title[:30] if d.title else 'N/A', d.is_hidden)
 
-            # Convert to cacheable format with discovery_type, is_pinned, is_hidden
+            # Convert to cacheable format with discovery_type, is_pinned, is_hidden.
+            # An anonymous discovery's username is never cached: the client fills
+            # it from `profiles` either way, and a new account's username is its
+            # email address.
             cache_data = [{
                 'id': d.id,
                 'title': d.title,
-                'author_username': d.author_username,
+                'author_username': None if d.is_anonymous else d.author_username,
+                'is_anonymous': d.is_anonymous,
                 'discovery_type': d.discovery_type,
                 'shelfmark': d.shelfmark,
                 'document_id': d.document_id,
@@ -15216,7 +15228,13 @@ class GenizahGUI(QMainWindow):
 
         for disc in discoveries_data:
             title = disc.get('title') or tr('Untitled')
-            author = disc.get('author_username') or tr('Anonymous')
+            # A row cached by an older build has no is_anonymous and may hold an
+            # anonymous author's username; offline it is never replaced, so it
+            # names nobody.
+            if disc.get('is_anonymous', True):
+                author = tr('Anonymous')
+            else:
+                author = disc.get('author_username') or tr('Anonymous')
             disc_type = disc.get('discovery_type') or 'discovery'
             is_pinned = disc.get('is_pinned', False)
             is_hidden = disc.get('is_hidden', False)
@@ -27235,6 +27253,9 @@ class GenizahGUI(QMainWindow):
                     local_filepath_map=dict(getattr(self, '_local_filepath_cache', {}) or {}),
                     # EXPUX-03: omit MiDRASH credit on Credits sheet when LOCAL-only.
                     local_only=_local_only_export,
+                    # A selection is counted as selected; a whole list the search
+                    # cut off or Stop ended says "N+", as the website's does.
+                    result_count_capped=(not has_selection and self._run_left_matches_out()),
                 )
                 from desktop.export_save import save_export, write_bytes
                 path = save_export(self, path, lambda p: write_bytes(p, content))
@@ -34789,9 +34810,7 @@ class GenizahGUI(QMainWindow):
                 except Exception:
                     logger.exception("closeEvent: lists sync shutdown failed")
 
-            if getattr(self, 'meta_loader', None) and self.meta_loader.isRunning():
-                self.meta_loader.request_cancel()
-                self.meta_loader.wait()
+            self._stop_meta_loader_for_close()
 
             if getattr(self, 'search_thread', None) and self.search_thread.isRunning():
                 self.search_thread.request_cancel()  # flag + un-park in one call (a parked worker never reaches its callback)
@@ -34848,6 +34867,24 @@ class GenizahGUI(QMainWindow):
                     t.wait()
         finally:
             super().closeEvent(event)
+
+    def _stop_meta_loader_for_close(self):
+        """Ask a running metadata loader to stop, and wait for it a bounded time.
+
+        The loader sees the request only when its current NLI request returns, and
+        the unbounded wait that was here kept a quit -- and the app.lock it holds --
+        alive for as long as that request hung, so the app could not be opened
+        again. No terminate(): the loader may be writing the NLI cache, and
+        settle_running_threads() after app.exec() keeps a thread still running
+        from being destroyed (desktop/qthread_exit.py).
+        """
+        loader = getattr(self, 'meta_loader', None)
+        if loader is None or not loader.isRunning():
+            return
+        loader.request_cancel()
+        if not loader.wait(_META_LOADER_CLOSE_WAIT_MS):
+            logger.warning("closeEvent: metadata loader still running after %d ms; "
+                           "left to finish at exit", _META_LOADER_CLOSE_WAIT_MS)
 
     def _add_single_comp_node(self, parent, ms_item):
         """Adds a node to the composition tree with parent/child logic."""

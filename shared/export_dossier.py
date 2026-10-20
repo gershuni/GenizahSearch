@@ -597,6 +597,8 @@ def build_credits_info_sheet(
     deep_scan_on: Optional[bool] = None,
     export_datetime: Optional[str] = None,
     result_count: Optional[int] = None,
+    # The search reached its limit or was stopped: the count is "N+".
+    result_count_capped: bool = False,
     local_only: bool = False,
     app_name: str = 'Dicta Genizah Search',
 ) -> None:
@@ -693,7 +695,7 @@ def build_credits_info_sheet(
     _put('date_time', export_datetime)
     if result_count is not None:
         ws.cell(row=row, column=1, value=labels['result_count']).font = Font(bold=True)
-        ws.cell(row=row, column=2, value=result_count)
+        ws.cell(row=row, column=2, value=f"{result_count}+" if result_count_capped else result_count)
         row += 1
 
     # Blank separator row before the visit-link

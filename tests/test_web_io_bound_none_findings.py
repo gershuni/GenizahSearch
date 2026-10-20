@@ -1011,6 +1011,129 @@ def test_puzzle_a_deletion_with_no_answer_never_says_deleted(monkeypatch, tmp_pa
     assert 'The change could not be saved. Check your connection and try again.' in shown['messages']
 
 
+def test_puzzle_a_deletion_that_removes_nothing_never_says_deleted(monkeypatch, tmp_path):
+    """The deletion answered, and its answer was False (no row deleted: the database
+    was unavailable or refused it). The page said "Deleted" anyway."""
+    from nicegui import ui
+    from nicegui.testing.user_interaction import UserInteraction
+
+    import shared.puzzle_service as ps
+    from tests.test_web_saved_joins_isolation import _open_drawer, _seed, _visitor_key
+    svc = ps.PuzzleService(db_path=str(tmp_path / 'joins.db'), thread_safe=True)
+    monkeypatch.setattr(ps, '_service_instance', svc)
+    deletes = []
+
+    def _refuse(doc_id, *, owner_key=None):
+        deletes.append(doc_id)
+        return False
+    monkeypatch.setattr(svc, 'delete_document', _refuse)
+    _puzzle_io_bound(monkeypatch, lambda fn: 'run')
+    shown = {}
+
+    def _buttons(user, pred):
+        return [el for el in user._client.elements.values() if isinstance(el, ui.button) and pred(el)]
+
+    async def driver(a, b):
+        await a.open('/puzzle')
+        assert _seed(svc, _own_doc(), _visitor_key(a)) == 'doc-own'
+        before = set(map(id, _buttons(a, lambda el: el.props.get('icon') == 'delete')))
+        await _open_drawer(a)
+        row_delete = [el for el in _buttons(a, lambda el: el.props.get('icon') == 'delete') if id(el) not in before]
+        assert row_delete, 'no delete button on the saved join'
+        UserInteraction(a, {row_delete[0]}, None).click()
+        confirm = []
+        for _ in range(40):
+            await asyncio.sleep(0.05)
+            confirm = _buttons(a, lambda el: el.text == 'Delete')
+            if confirm:
+                break
+        assert confirm, 'no confirmation dialog'
+        UserInteraction(a, {confirm[-1]}, None).click()
+        await _wait_for(lambda: deletes)
+        await asyncio.sleep(0.5)
+        shown['messages'] = list(a.notify.messages)
+
+    try:
+        _run_puzzle(driver, _puzzle_patches())
+        ids = {d['id'] for d in svc.list_documents()}
+    finally:
+        if svc._conn is not None:
+            svc._conn.close()
+    assert deletes == ['doc-own'], deletes
+    assert ids == {'doc-own'}, ids
+    assert 'Deleted' not in shown['messages'], shown['messages']
+    assert 'The change could not be saved. Check your connection and try again.' in shown['messages']
+
+
+def test_puzzle_a_published_join_whose_delete_removes_nothing_shows_it_unpublished(monkeypatch, tmp_path):
+    """Delete unpublishes first, then deletes the saved copy. When that delete removed
+    nothing, the open join stayed marked published with a green Publish button,
+    though its public copy was gone (Codex on PR #421)."""
+    from nicegui import ui
+    from nicegui.testing.user_interaction import UserInteraction
+
+    import shared.puzzle_publish_service as pps
+    import shared.puzzle_service as ps
+    from tests.test_web_saved_joins_isolation import _open_drawer, _seed
+    from web.auth_state import GlobalAuthState
+    svc = ps.PuzzleService(db_path=str(tmp_path / 'joins.db'), thread_safe=True)
+    monkeypatch.setattr(ps, '_service_instance', svc)
+    monkeypatch.setattr(GlobalAuthState, 'get_user', classmethod(lambda cls: {'id': 'u-1'}))
+    detail = {'id': 'doc-own', 'title': 'Mine', 'notes': '', 'is_published': True,
+              'fragments_json': {'fragments': [], 'join_type': 'physical'}}
+    unpublished = []
+
+    def unpublish_join(client, user_id, join_id):
+        unpublished.append(join_id)
+        detail['is_published'] = False
+    monkeypatch.setattr(pps, 'unpublish_join', unpublish_join)
+    deletes = []
+
+    def _refuse(doc_id, *, owner_key=None):
+        deletes.append(doc_id)
+        return False
+    monkeypatch.setattr(svc, 'delete_document', _refuse)
+    _puzzle_io_bound(monkeypatch, lambda fn: 'run')
+    shown = {}
+
+    def _buttons(user, pred):
+        return [el for el in user._client.elements.values() if isinstance(el, ui.button) and pred(el)]
+
+    async def driver(a, b):
+        assert _seed(svc, _own_doc(), 'u:u-1') == 'doc-own'
+        await a.open('/puzzle?doc=doc-own')
+        await asyncio.sleep(3.2)        # the page loads ?doc= after its start-up delay
+        publish = _buttons(a, lambda el: el.props.get('icon') == 'publish')
+        assert publish and publish[0].props.get('color') == 'green', 'the join is not shown as published'
+        before = set(map(id, _buttons(a, lambda el: el.props.get('icon') == 'delete')))
+        await _open_drawer(a)
+        row_delete = [el for el in _buttons(a, lambda el: el.props.get('icon') == 'delete') if id(el) not in before]
+        assert row_delete, 'no delete button on the saved join'
+        UserInteraction(a, {row_delete[0]}, None).click()
+        confirm = []
+        for _ in range(40):
+            await asyncio.sleep(0.05)
+            confirm = _buttons(a, lambda el: el.text == 'Delete')
+            if confirm:
+                break
+        assert confirm, 'no confirmation dialog'
+        UserInteraction(a, {confirm[-1]}, None).click()
+        await _wait_for(lambda: deletes)
+        await asyncio.sleep(0.5)
+        shown['messages'] = list(a.notify.messages)
+        shown['color'] = publish[0].props.get('color')
+
+    try:
+        _run_puzzle(driver, _puzzle_patches(detail=detail))
+    finally:
+        if svc._conn is not None:
+            svc._conn.close()
+    assert unpublished == ['doc-own'], unpublished
+    assert deletes == ['doc-own'], deletes
+    assert 'Deleted' not in shown['messages'], shown['messages']
+    assert shown['color'] != 'green', 'the join is still shown as published'
+
+
 def test_puzzle_an_unpublish_with_no_answer_never_says_unpublished(monkeypatch, tmp_path):
     """Finding 8. unpublish_join returns nothing when it is done, so the page could
     not tell done from no answer, and announced "Unpublished" for both."""
