@@ -41,6 +41,8 @@ if TYPE_CHECKING:
 
 from nicegui import app
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError as PydanticValidationError, model_validator
 
@@ -103,6 +105,13 @@ _parallels_rate_limiter = RateLimiter(default_limit=120)
 # to poll for a flag flip must not be able to exhaust (or be starved by) any
 # of the three heavier buckets, and vice versa.
 _capabilities_rate_limiter = RateLimiter(default_limit=120)
+
+# Browser and Cloudflare lifetime of a COMPLETE /api/browse answer. The route sets no
+# session cookie (web/framework_patches.py _is_public_api_read_route) and its answer
+# depends on the query string alone. 0 sends ``no-store``. An answer with an enrichment
+# timeout or failure is never kept, so a passing outage is not served from cache.
+API_BROWSE_HTTP_MAX_AGE = max(0, int(os.environ.get('API_BROWSE_HTTP_MAX_AGE', '3600')))
+_TRANSIENT_BROWSE_WARNINGS = frozenset({'enrichment_timeout', 'enrichment_failed'})
 
 
 # ---------------------------------------------------------------------------
@@ -2161,7 +2170,12 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             getattr(bundle.page, 'sys_id', None)
         )
 
-        return envelope
+        transient = any(w.get('code') in _TRANSIENT_BROWSE_WARNINGS for w in warnings_list)
+        if API_BROWSE_HTTP_MAX_AGE and not transient:
+            cache_control = f'public, max-age={API_BROWSE_HTTP_MAX_AGE}'
+        else:
+            cache_control = 'no-store'
+        return JSONResponse(jsonable_encoder(envelope), headers={'Cache-Control': cache_control})
 
     @target_app.post(
         f'{path_prefix}/parallels',

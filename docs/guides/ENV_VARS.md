@@ -143,6 +143,7 @@ NLI_SEMAPHORE_TIMEOUT=1               # Max seconds to wait for a slot in the 8-
 # Cloudflare as well as browsers -- Cloudflare keeps them only under a Cache Rule for those paths
 # (no file extension). Only 200 image bytes get the lifetime; a 404/error/redirect is no-store.
 IMAGE_HTTP_MAX_AGE=604800             # Cache-Control max-age of image bytes, seconds: a week (owner 2026-10-19; was a fixed 600; 0 = no-store)
+API_BROWSE_HTTP_MAX_AGE=3600           # Cache-Control max-age of a complete /api/browse answer, seconds (prototype; 0 = no-store; an enrichment failure is always no-store)
 IMAGE_CACHE_MAX_ENTRIES=2048          # in-memory image cache entries over 5 shards (was 512, ~100 per library --
                                        # less than one Visual Similarity grid); memory is bounded by the next line
 IMAGE_CACHE_MAX_BYTES=268435456       # in-memory image cache byte cap (256 MB, unchanged)

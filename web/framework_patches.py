@@ -99,9 +99,25 @@ def _is_public_image_route(path: str) -> bool:
     return bool(_PUBLIC_IMAGE_ROUTE_RE.fullmatch(path))
 
 
+# The public read-only API routes whose answer depends on the query string alone
+# (web/search_api.py browse handler, D-22 statelessness; web/chatgpt_api.py wraps the same
+# handler). Exact paths. Their success Cache-Control is set by the handler; every other
+# answer on these paths -- an error, a 429, a 503 from SEARCH_API_MODE -- gets ``no-store``
+# from _CacheSafeRequestTrackingMiddleware, so a Cloudflare Cache Rule for them never
+# keeps a failure. NOT /api/search or /api/parallels (POST), the job routes (per-caller
+# polling) or /api/chatgpt/manuscript-details (snapshot paging, already no-store).
+# tests/test_api_route_sessions.py pins it.
+_PUBLIC_API_READ_PATHS = frozenset({'/api/browse', '/api/chatgpt/browse'})
+
+
+def _is_public_api_read_route(path: str) -> bool:
+    """Return whether ``path`` is one of the session-free, cacheable API reads."""
+    return path in _PUBLIC_API_READ_PATHS
+
+
 def _skips_session(path: str) -> bool:
     return (_is_public_cacheable_asset_path(path) or _is_session_free_path(path)
-            or _is_public_image_route(path))
+            or _is_public_image_route(path) or _is_public_api_read_route(path))
 
 
 class _CacheSafeSessionMiddleware(_StarletteSessionMiddleware):
@@ -141,9 +157,14 @@ class _CacheSafeRequestTrackingMiddleware(_NiceGUIRequestTrackingMiddleware):
     """
 
     async def dispatch(self, request, call_next):
-        if _skips_session(request.url.path):
+        path = request.url.path
+        if _skips_session(path):
             # _CacheSafeSessionMiddleware bypassed these paths: no session in scope.
-            return await call_next(request)
+            response = await call_next(request)
+            if _is_public_api_read_route(path):
+                # Fail closed: only an answer the handler marked cacheable is kept.
+                response.headers.setdefault('Cache-Control', 'no-store')
+            return response
         _validate_session_id(request.scope)
         return await super().dispatch(request, call_next)
 
