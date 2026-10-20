@@ -3107,8 +3107,12 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                         return
                     if not deleted:
                         # It ran and deleted no row (the database was unavailable or
-                        # refused it): the document stays, open if it was.
+                        # refused it): the document stays, open if it was. Its public
+                        # copy may already be gone (unpublished above), so the open
+                        # document's publish state is read again.
                         _not_confirmed()
+                        if doc_state['current_doc_id'] == doc_id:
+                            await check_publish_state()
                         await refresh_docs_list()
                         return
                     if doc_state['current_doc_id'] == doc_id:
