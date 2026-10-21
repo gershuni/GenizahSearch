@@ -136,7 +136,10 @@
       var merged = {};
       if (DELAY_MAX_MS) merged.reconnectionDelayMax = DELAY_MAX_MS;  // only when configured
       for (var k in (opts || {})) merged[k] = opts[k];  // the caller's keys win
-      return wrapSocket(io.call(this, url, merged), hasPollingFallback(merged));
+      // Read BEFORE io(): socket.io turns the transport names in its options into
+      // transport classes, in place, so afterwards there is no 'websocket' to find.
+      var fallback = hasPollingFallback(merged);
+      return wrapSocket(io.call(this, url, merged), fallback);
     };
     for (var name in io) wrapped[name] = io[name];  // Manager, Socket, connect, protocol, ...
     wrapped.__gsWrapped = true;

@@ -150,7 +150,10 @@ for (const c of cases) {
   // socket.io.min.js loads: `globalThis.io = ...`
   const ioCalls = [];
   const fakeIo = function (url, opts) {
-    ioCalls.push(opts);
+    ioCalls.push(JSON.parse(JSON.stringify(opts || {})));
+    // socket.io 4.8 turns the transport names in the options it is given into transport
+    // classes, IN PLACE (seen in Chromium): a wrapper must read them before calling io().
+    if (opts && Array.isArray(opts.transports)) opts.transports = opts.transports.map(() => function () {});
     const listeners = {};
     return {
       on(ev, fn) { (listeners[ev] = listeners[ev] || []).push(fn); return this; },
