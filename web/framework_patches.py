@@ -16,6 +16,7 @@ import os
 import re
 import ssl
 import time
+import types
 import uuid
 from base64 import b64decode
 
@@ -465,14 +466,25 @@ _nicegui_expects_arguments = None  # NiceGUI's own, kept by the patch (tests com
 _expects_arguments_by_function: dict = {}
 
 
+def _memoizable(key) -> bool:
+    """Only a module-level function: kept alive by its module anyway.
+
+    A function defined inside a page (a class built per page build, a method
+    closing over that page's elements) is new on every build; remembering it
+    would keep one entry, and the elements it reaches, per page forever.
+    """
+    return (isinstance(key, types.FunctionType) and key.__closure__ is None
+            and '<locals>' not in key.__qualname__)
+
+
 def _expects_arguments_memo(func) -> bool:
     """``helpers.expects_arguments``, remembered per function for BOUND METHODS only.
 
     A bound method's signature is its function's without ``self``, the same for
-    every instance, so the answer is kept by ``func.__func__``: a function object
-    its class keeps alive anyway. Plain functions and lambdas pass straight
-    through: keeping them would keep their closures, and the elements those
-    capture, alive.
+    every instance, so the answer is kept by ``func.__func__`` when that is a
+    module-level function (``_memoizable``). Plain functions and lambdas pass
+    straight through: keeping them would keep their closures, and the elements
+    those capture, alive.
     """
     if inspect.ismethod(func):
         key = func.__func__
@@ -483,7 +495,8 @@ def _expects_arguments_memo(func) -> bool:
         except TypeError:  # an unhashable callable bound as a method: no memo
             return _nicegui_expects_arguments(func)
         result = _nicegui_expects_arguments(func)
-        _expects_arguments_by_function[key] = result
+        if _memoizable(key):
+            _expects_arguments_by_function[key] = result
         return result
     return _nicegui_expects_arguments(func)
 

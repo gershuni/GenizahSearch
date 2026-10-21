@@ -302,3 +302,28 @@ def test_a_failed_save_leaves_the_next_click_free_to_write(editor):
     state = asyncio.run(_run())
     assert [c['helper'] for c in editor['calls']] == ['create_correction', 'create_correction']
     assert state.draft_id == 41
+
+
+def test_a_stale_button_after_a_submit_writes_nothing(editor):
+    """After a successful Submit the page reloads with the old form kept,
+    dimmed, under the spinner: a second activation of its (focused) Submit or
+    Save Draft must not write again. The handlers act only in edit mode and
+    never during a load."""
+    async def _run():
+        client, state = await editor['open_in_edit_mode']()
+        submit = _handler(client, 'handle_submit_correction')
+        draft = _handler(client, 'handle_save_draft')
+        with client:
+            await submit()  # success: out of edit mode, the page reloads
+            assert state.edit_mode is False
+            await submit()
+            await draft()
+            state.edit_mode = True  # and while a page loads, even in edit mode
+            state.is_loading = True
+            await submit()
+            await draft()
+            state.is_loading = False
+        return state
+
+    asyncio.run(_run())
+    assert [c['helper'] for c in editor['calls']] == ['create_correction'], editor['calls']

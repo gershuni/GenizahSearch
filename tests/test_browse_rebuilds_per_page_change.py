@@ -174,6 +174,23 @@ def test_opening_the_page_clears_the_content_area_once_per_phase(page):
     assert refs.loading_row.visible is False
     assert 'browse-loading' not in refs.content_container.classes
     assert page['selectors'] == 1, f'the version selector was built {page["selectors"]} times for one Phase B'
+    # The line-number toggle ("always visible when text is present") survives
+    # Phase B: the deleted second fill cleared its container and dropped it.
+    toggles = [e for e in refs.content_container.descendants() if isinstance(e, ui.button)
+               and str(e._props.get('icon', '')).strip('"') == 'format_list_numbered']
+    assert len(toggles) == 1, f'{len(toggles)} line-number toggles after Phase B'
+
+
+def test_the_spinner_row_takes_no_room_from_the_content():
+    """The spinner row floats (zero height, sticky) instead of pushing the
+    dimmed content down by its own height for the whole load."""
+    css = (_REPO / 'web' / 'static' / 'common.css').read_text(encoding='utf-8')
+    rule = css[css.index('.browse-loading-row {'):]
+    rule = rule[:rule.index('}')]
+    assert 'height: 0' in rule and 'position: sticky' in rule, rule
+    import web.pages.browse as browse
+    src = Path(browse.__file__).read_text(encoding='utf-8')
+    assert "ui.row().classes('w-full justify-center browse-loading-row')" in src
 
 
 def test_a_page_turn_keeps_the_old_content_under_the_spinner(page):
@@ -193,6 +210,8 @@ def test_a_page_turn_keeps_the_old_content_under_the_spinner(page):
         assert state.is_loading
         assert len(page['clears']) == n_open, f'cleared for the spinner: {page["clears"][n_open:]}'
         assert 'browse-loading' in refs.content_container.classes
+        # `inert`, not only pointer-events: no focus, no Enter/Space on its buttons.
+        assert 'inert' in refs.content_container.props
         assert len(list(refs.content_container.descendants())) == n_content
         page['hold'].set()
         assert await _wait(lambda: state.current_page.p_num == 2 and _settled(page)), 'page 2 never landed'
@@ -207,6 +226,7 @@ def test_a_page_turn_keeps_the_old_content_under_the_spinner(page):
     refs = page['refs']
     assert refs.loading_row.visible is False
     assert 'browse-loading' not in refs.content_container.classes
+    assert 'inert' not in refs.content_container.props
     assert page['selectors'] == 2, f'{page["selectors"]} version selectors for two Phase Bs'
 
 

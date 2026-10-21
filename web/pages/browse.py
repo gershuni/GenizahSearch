@@ -1749,6 +1749,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
     async def handle_submit_correction():
         """Submit the correction to the backend."""
+        if not state.edit_mode or state.is_loading:
+            return  # a stale button (the form after a submit, kept under a reload)
         if not GlobalAuthState.is_logged_in():
             ui.notify(tr('Please login first'), type='negative')
             return
@@ -1824,6 +1826,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
     async def handle_save_draft():
         """Save the draft to Supabase, off the loop (see handle_submit_correction)."""
+        if not state.edit_mode or state.is_loading:
+            return  # a stale button (the form after a submit, kept under a reload)
         if not GlobalAuthState.is_logged_in():
             ui.notify(tr('Please login to save drafts'), type='warning')
             return
@@ -2023,12 +2027,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             # The spinner is a row of its own above the content, shown and
             # hidden in place: building it here cost a full clear of the page
             # and a second full rebuild when Phase A landed. The old content
-            # stays, dimmed and inert (.browse-loading), until the new page.
+            # stays, dimmed (.browse-loading) and `inert`, until the new page:
+            # `inert` also takes focus and Enter/Space from its buttons, which
+            # `pointer-events: none` does not (a focused Submit fired again).
             loading_row.set_visibility(True)
             content_container.classes(add='browse-loading')
+            content_container.props(add='inert')
             return
         loading_row.set_visibility(False)
         content_container.classes(remove='browse-loading')
+        content_container.props(remove='inert')
         content_container.clear()
 
         with content_container:
@@ -5478,11 +5486,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     ui.icon('warning', color='orange')
                     ui.label(tr('Service not available')).classes('text-yellow-800')
 
-        # The loading spinner, built once and toggled by update_content().
-        loading_row = ui.row().classes('w-full justify-center py-16')
+        # The loading spinner, built once and toggled by update_content(). A
+        # zero-height sticky row (.browse-loading-row): it floats over the top
+        # of the dimmed content and stays in view when the reader has scrolled,
+        # instead of pushing the content down while a page loads.
+        loading_row = ui.row().classes('w-full justify-center browse-loading-row')
         with loading_row:
-            ui.spinner(size='xl', color='green')
-            ui.label(tr('Loading...')).classes('ml-3 text-lg').style('color: var(--text-secondary);')
+            with ui.row().classes('items-center browse-loading-pill'):
+                ui.spinner(size='xl', color='green')
+                ui.label(tr('Loading...')).classes('ml-3 text-lg').style('color: var(--text-secondary);')
         loading_row.set_visibility(False)
         refs.loading_row = loading_row
 

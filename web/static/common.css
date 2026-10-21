@@ -2290,5 +2290,12 @@ body {
 .print-only { display: none; }
 
 /* /browse while a page loads: the previous content stays under the spinner,
-   dimmed and inert, instead of being rebuilt as a spinner and rebuilt again. */
+   dimmed and inert, instead of being rebuilt as a spinner and rebuilt again.
+   (update_content also sets the `inert` attribute: no focus, no keyboard.) */
 .browse-loading { opacity: .5; pointer-events: none; }
+/* The spinner row takes no height, so the content does not jump down while a
+   page loads, and sticks in view when the reader has scrolled down. */
+.browse-loading-row { position: sticky; top: 35vh; height: 0; overflow: visible; z-index: 5; align-items: flex-start;
+    margin-bottom: calc(-1 * var(--nicegui-default-gap, 1rem)); /* the column's gap: no 1rem shift either */ }
+.browse-loading-pill { margin-top: 2rem; padding: .5rem 1.25rem; border-radius: 9999px;
+    background: var(--bg-card, #ffffff); box-shadow: 0 2px 10px rgba(0, 0, 0, .15); }

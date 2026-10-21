@@ -754,7 +754,14 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
 
 
 def update_enrichment_sections(state: BrowseState, refs: BrowsePageRefs):
-    """Update enrichment placeholder containers after Phase B completes."""
+    """Update enrichment placeholder containers after Phase B completes.
+
+    NO RUNTIME CALLER since 2026-10-21: Phase B's ``refs.update_content()``
+    fills these five placeholders inline (browse.py), and this second fill
+    rebuilt them all again. Kept, with its source-text guards
+    (tests/test_codex_review_333_round9.py, _round10.py), until those are
+    re-pointed at the inline path; a fix to Phase B belongs in browse.py.
+    """
     # PGP link button in header
     pgp_container = refs.enrichment_refs.get('pgp_link_container')
     if pgp_container:

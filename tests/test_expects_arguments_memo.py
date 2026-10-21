@@ -20,7 +20,7 @@ import types
 import weakref
 
 import pytest
-from nicegui import helpers, ui
+from nicegui import events, helpers, ui
 from nicegui.client import Client
 from nicegui.testing.general import prepare_simulation
 from packaging.version import Version
@@ -111,6 +111,49 @@ def test_the_memo_holds_functions_only_and_stays_small_after_a_hundred_elements(
     del client
     gc.collect()
     assert gone() is None, 'an element outlived its page'
+
+
+def test_a_class_built_per_page_is_not_remembered_and_keeps_no_page_alive(patched):
+    """A handler that is a method of a class defined INSIDE a page function is a
+    new function per page build, closing over that page's elements: the memo
+    must not keep it (one entry per page, forever, with its elements)."""
+    def build_page(i):  # a page function: its locals are this page's own
+        with Client(ui.page(f'/_memo_nested_{next(_paths)}')) as client:
+            label = ui.label(f'page {i}')
+
+            class PageState:
+                def on_click(self, e):
+                    label.text = 'clicked'  # closes over this page's label
+
+            button = ui.button('go', on_click=PageState().on_click)
+            # NiceGUI asks for the handler's signature when the click is
+            # dispatched (events.handle_event), not when the button is built.
+            for listener in list(button._event_listeners.values()):
+                events.handle_event(listener.handler, events.ClickEventArguments(sender=button, client=client))
+        assert label.text == 'clicked'
+        return client, weakref.ref(label)
+
+    gone = []
+    for i in range(5):
+        client, ref = build_page(i)
+        gone.append(ref)
+        client.delete()
+        del client
+    gc.collect()
+    names = [key.__qualname__ for key in patches._expects_arguments_by_function]
+    assert not any('<locals>' in name for name in names), names
+    assert all(ref() is None for ref in gone), 'a page-built handler kept its page alive'
+    # ...and the answer for such a handler is still NiceGUI's own.
+    holder = types.SimpleNamespace()
+
+    def build():
+        class Local:
+            def handler(self, e):
+                return holder
+        return Local().handler
+
+    method = build()
+    assert helpers.expects_arguments(method) is _ORIGINAL(method) is True
 
 
 def test_the_patch_is_idempotent(patched):
