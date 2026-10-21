@@ -54,7 +54,7 @@ def defaults(monkeypatch):
 def test_head_html_inlines_the_script_after_its_config(defaults):
     html = rb.head_html()
     config = json.loads(re.search(r'<script>window\.GS_RECONNECT=(\{.*?\});</script>', html).group(1))
-    assert config == {'base_ms': 1500, 'cap_ms': 60000, 'delay_max_ms': 30000}
+    assert config == {'base_ms': 1500, 'cap_ms': 60000, 'delay_max_ms': 0}  # 0: socket.io's own 5 s
     assert JS.read_text(encoding='utf-8') in html, 'the script must be inlined, not fetched'
     assert html.index('GS_RECONNECT=') < html.index("defineProperty(window, 'io'"), \
         'the config must be set before the script reads it'
@@ -162,6 +162,8 @@ for (const c of cases) {
   // nicegui.js: window.socket = io(url, {...}); window.socket.on(event, handler)
   const socket = win.io('ws://x', c.opts || { path: '/_nicegui_ws/socket.io', query: { client_id: 'c1' } });
   socket.on('connect_error', function (err) { events.push([t, err.message]); });
+  const events2 = [];
+  if (c.listeners === 2) socket.on('connect_error', function (err) { events2.push([t, err.message]); });
   function runUntil(limit) {
     while (timers.length) {
       timers.sort((a, b) => a.at - b.at);
@@ -183,7 +185,7 @@ for (const c of cases) {
     }
   }
   runUntil(Infinity);
-  out.push({ events, captured, storage: store, io_opts: ioCalls, flag: win.__gsReconnectBackoff,
+  out.push({ events, events2, captured, storage: store, io_opts: ioCalls, flag: win.__gsReconnectBackoff,
              protocol: win.io.protocol, waiting: (docListeners.visibilitychange || []).length });
 }
 process.stdout.write(JSON.stringify(out));
@@ -242,7 +244,9 @@ def test_a_hidden_tab_waits_to_be_viewed(tmp_path):
         {'steps': [[0, 'error', IHF], [10000, 'show']], 'hidden': True, 'posthog': True},
     ])
     assert hidden['events'] == [] and hidden['waiting'] == 1, hidden
-    assert hidden['captured'] == []
+    # Sent when the reload is SCHEDULED (a hidden tab may never be viewed again).
+    assert hidden['captured'] == [['reload_scheduled', {
+        'reason': IHF, 'attempt': 1, 'delay_ms': 1500, 'hidden': True}]]
     # Viewed at 10 s: the countdown starts then, and the event says the tab had been hidden.
     assert shown_then_hidden['events'] == [[11500, IHF]], shown_then_hidden
     assert shown_then_hidden['captured'] == [['reload_scheduled', {
@@ -251,7 +255,7 @@ def test_a_hidden_tab_waits_to_be_viewed(tmp_path):
 
 
 @needs_node
-def test_posthog_is_told_before_the_deferred_handler_runs_and_is_optional(tmp_path):
+def test_posthog_is_told_when_a_reload_is_scheduled_and_is_optional(tmp_path):
     with_ph, without_ph = _run_cases(tmp_path, [
         {'steps': [[0, 'error', IHF], [1500, 'error', 'timeout']], 'posthog': True},
         {'steps': [[0, 'error', IHF]]},
@@ -290,14 +294,13 @@ def test_io_gets_the_merged_options_and_the_caller_wins(tmp_path):
         {'steps': [], 'opts': {'path': '/p', 'reconnectionDelayMax': 7, 'randomizationFactor': 0.2}},
         {'steps': [[0, 'error', IHF]], 'cfg': {'base_ms': 100, 'cap_ms': 60000, 'delay_max_ms': 9000}},
     ])
-    assert merged['io_opts'] == [{'reconnectionDelay': 1500, 'reconnectionDelayMax': 30000,
-                                  'randomizationFactor': 0.9, 'path': '/_nicegui_ws/socket.io',
-                                  'query': {'client_id': 'c1'}}]
+    # socket.io's own reconnection schedule is left alone by default: a 30 s maximum
+    # (the server's reconnect_timeout) turned ordinary 15-25 s outages into reloads.
+    assert merged['io_opts'] == [{'path': '/_nicegui_ws/socket.io', 'query': {'client_id': 'c1'}}]
     assert merged['protocol'] == 5, "socket.io's own properties (Manager, protocol, ...) must survive"
-    assert caller['io_opts'] == [{'reconnectionDelay': 1500, 'reconnectionDelayMax': 7,
-                                  'randomizationFactor': 0.2, 'path': '/p'}]
-    assert configured['io_opts'][0]['reconnectionDelay'] == 100
-    assert configured['io_opts'][0]['reconnectionDelayMax'] == 9000
+    assert caller['io_opts'] == [{'reconnectionDelayMax': 7, 'randomizationFactor': 0.2, 'path': '/p'}]
+    assert configured['io_opts'] == [{'reconnectionDelayMax': 9000, 'path': '/_nicegui_ws/socket.io',
+                                      'query': {'client_id': 'c1'}}]
     assert configured['events'] == [[100, IHF]]
 
 
@@ -307,3 +310,59 @@ def test_a_second_install_is_a_no_op(tmp_path):
     assert case['flag'] is True
     assert len(case['io_opts']) == 1, 'io was wrapped twice'
     assert case['events'] == [[1500, IHF]], 'a doubly wrapped handler would wait twice'
+
+
+# --- the review's scenarios (2026-10-21; reproduced in Chromium against socket.io 4.8.1) --------
+
+NICEGUI_OPTS = {'path': '/_nicegui_ws/socket.io', 'query': {'client_id': 'c1'},
+                'transports': ['websocket', 'polling']}  # what nicegui.js passes: a polling fallback
+
+
+@needs_node
+def test_niceguis_first_timeout_is_its_polling_fallback_and_passes_at_once(tmp_path):
+    """nicegui.js answers its FIRST "timeout" by switching to long polling, synchronously,
+    before socket.io's next attempt. Delaying it sent that attempt out on the hanging
+    websocket again, and the second timeout reloaded: a reload loop behind proxies that
+    hang websockets. Only a later timeout (which reloads) is deferred."""
+    fallback, websocket_only = _run_cases(tmp_path, [
+        {'steps': [[0, 'error', 'timeout'], [20000, 'error', 'timeout']], 'opts': NICEGUI_OPTS,
+         'posthog': True},
+        {'steps': [[0, 'error', 'timeout']],
+         'opts': dict(NICEGUI_OPTS, transports=['websocket'])},  # no fallback: it reloads
+    ])
+    assert fallback['events'] == [[0, 'timeout'], [21500, 'timeout']], fallback
+    assert fallback['storage'] == {'gs_reload_n': '1'}, 'the fallback is not a reload'
+    assert [c[1]['reason'] for c in fallback['captured']] == ['timeout'], fallback['captured']
+    assert websocket_only['events'] == [[1500, 'timeout']], websocket_only
+
+
+@needs_node
+def test_a_refusal_arriving_while_a_timeout_waits_is_never_dropped(tmp_path):
+    """socket.io destroys a socket whose CONNECT is refused: NiceGUI's reload is the page's
+    only way back. A refusal during a pending timeout replaced nothing and was dropped,
+    so the tab stayed dead (20 of 20 hidden tabs in Chromium)."""
+    visible, hidden = _run_cases(tmp_path, [
+        {'steps': [[0, 'error', 'timeout'], [500, 'error', IHF]]},
+        {'steps': [[0, 'error', 'timeout'], [500, 'error', IHF], [12000, 'show']], 'hidden': True},
+    ])
+    assert visible['events'] == [[1500, IHF]], visible   # the refusal, at the timeout's slot
+    assert hidden['events'] == [[13500, IHF]], hidden
+
+
+@needs_node
+def test_a_reconnect_cancels_a_pending_timeout_reload_but_not_a_refusal(tmp_path):
+    """A page that reconnected and is in use must not be reloaded by a stale timeout;
+    a refused handshake's socket is gone, so that reload still runs."""
+    timeout, refusal = _run_cases(tmp_path, [
+        {'steps': [[0, 'error', 'timeout'], [200, 'connect']]},
+        {'steps': [[0, 'error', IHF], [200, 'connect']]},
+    ])
+    assert timeout['events'] == [], timeout
+    assert refusal['events'] == [[1500, IHF]], refusal
+
+
+@needs_node
+def test_each_connect_error_listener_keeps_its_own_pending_reload(tmp_path):
+    """One page-global slot let a second listener take the deferred error from NiceGUI's."""
+    (case,) = _run_cases(tmp_path, [{'steps': [[0, 'error', IHF]], 'listeners': 2}])
+    assert case['events'] == [[1500, IHF]] and case['events2'] == [[3000, IHF]], case

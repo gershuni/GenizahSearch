@@ -1,8 +1,10 @@
 /* Reconnect backoff (inlined into <head> on every page, so kept short; the why is in
  * web/reconnect_backoff.py). Runs before socket.io: an accessor on window.io wraps
- * io(url, opts) to spread socket.io's retries, and the socket's `on` delays NiceGUI's
- * reload for "Implicit handshake failed" / "timeout" by base * 2^n, jittered, n per
- * tab in sessionStorage; a hidden tab waits to be viewed. Other errors pass through.
+ * io(url, opts), and the socket's `on` delays NiceGUI's RELOAD for "Implicit handshake
+ * failed" / a later "timeout" by base * 2^n, jittered, n per tab in sessionStorage; a
+ * hidden tab waits to be viewed. NiceGUI's first "timeout" is its switch to polling, not
+ * a reload: it passes at once. A handshake refusal is never dropped; a reconnect cancels
+ * a pending "timeout" reload. Every other error passes through.
  * Tests: tests/test_reconnect_backoff.py (a Node vm harness over this file). */
 (function () {
   'use strict';
@@ -12,9 +14,10 @@
   var cfg = window.GS_RECONNECT || {};
   var BASE_MS = cfg.base_ms > 0 ? cfg.base_ms : 1500;
   var CAP_MS = cfg.cap_ms > 0 ? cfg.cap_ms : 60000;
-  var DELAY_MAX_MS = cfg.delay_max_ms > 0 ? cfg.delay_max_ms : 30000;
+  var DELAY_MAX_MS = cfg.delay_max_ms > 0 ? cfg.delay_max_ms : 0;  // 0: socket.io's own schedule
   var STABLE_MS = 60000;   // a connection up this long ends the run of reloads
   var KEY = 'gs_reload_n', N_MAX = 30;
+  var IHF = 'Implicit handshake failed';
   var memoryN = 0;         // used when sessionStorage is unavailable (private mode, blocked storage)
 
   function readN() {
@@ -31,11 +34,6 @@
     try { window.sessionStorage.setItem(KEY, String(n)); } catch (e) { /* memory only */ }
   }
 
-  function isDeferred(err) {
-    var msg = err && err.message;
-    return msg === 'Implicit handshake failed' || msg === 'timeout';
-  }
-
   function whenVisible(fn) {
     if (!document.hidden) { fn(); return; }
     var once = function () {
@@ -46,48 +44,82 @@
     document.addEventListener('visibilitychange', once);
   }
 
-  var pending = false;  // one scheduled run at a time; the first one is the one that reloads
-
-  function deferReload(socket, handler, err) {
-    if (pending) return;
-    pending = true;
-    var n = readN();
-    writeN(n + 1);
-    var hidden = !!document.hidden;
-    // The cap bounds the exponential; the jitter spreads around it, so the
-    // longest wait is 1.5 x cap and no two tabs share a cadence even there.
-    var delay = Math.round(Math.min(CAP_MS, BASE_MS * Math.pow(2, n)) * (0.5 + Math.random()));
-    whenVisible(function () {
-      setTimeout(function () {
-        whenVisible(function () {
-          pending = false;
-          try {
-            if (window.posthog && typeof window.posthog.capture === 'function') {
-              window.posthog.capture('reload_scheduled', {
-                reason: err.message, attempt: n + 1, delay_ms: delay, hidden: hidden,
-              });
-            }
-          } catch (e) { /* analytics must not stop the reload */ }
-          handler.call(socket, err);
-        });
-      }, delay);
-    });
+  // NiceGUI's own rule (nicegui.js usePollingFallback): its first "timeout" switches a
+  // websocket-first page to polling instead of reloading.
+  function hasPollingFallback(opts) {
+    var t = opts && opts.transports;
+    return !!(t && t.length && t[0] === 'websocket' && t.indexOf('polling') >= 0);
   }
 
-  function wrapSocket(socket) {
+  // One connect_error listener: its own fallback and its own pending reload, so a second
+  // listener can never take a deferred error from another.
+  function deferring(socket, handler, fallback) {
+    var pending = null;  // {err, timer, cancelled}: the one reload this listener has scheduled
+
+    function schedule(err) {
+      if (pending) {  // never drop an error: a refusal (the socket is gone) wins over a timeout
+        if (err.message === IHF) pending.err = err;
+        return;
+      }
+      var n = readN();
+      writeN(n + 1);
+      // The cap bounds the exponential; the jitter spreads around it, so the longest
+      // wait is 1.5 x cap and no two tabs share a cadence even there.
+      var delay = Math.round(Math.min(CAP_MS, BASE_MS * Math.pow(2, n)) * (0.5 + Math.random()));
+      try {
+        if (window.posthog && typeof window.posthog.capture === 'function') {
+          window.posthog.capture('reload_scheduled', {
+            reason: err.message, attempt: n + 1, delay_ms: delay, hidden: !!document.hidden,
+          });
+        }
+      } catch (e) { /* analytics must not stop the reload */ }
+      var p = pending = {err: err, timer: null, cancelled: false};
+      whenVisible(function () {
+        if (p.cancelled) return;
+        p.timer = setTimeout(function () {
+          whenVisible(function () {
+            if (p.cancelled) return;
+            pending = null;
+            handler.call(socket, p.err);
+          });
+        }, delay);
+      });
+    }
+
+    return {
+      listener: function (err) {
+        var msg = err && err.message;
+        if (msg === 'timeout' && fallback) {
+          fallback = false;  // the switch to polling: NiceGUI does not reload on this one
+          return handler.apply(this, arguments);
+        }
+        if (msg === 'timeout' || msg === IHF) return schedule(err);
+        return handler.apply(this, arguments);
+      },
+      reconnected: function () {  // a pending timeout reload is moot; a refusal still reloads
+        if (pending && pending.err.message === 'timeout') {
+          pending.cancelled = true;
+          clearTimeout(pending.timer);
+          pending = null;
+        }
+      },
+    };
+  }
+
+  function wrapSocket(socket, fallback) {
     if (!socket || typeof socket.on !== 'function') return socket;
     var on = socket.on;
+    var listeners = [];
     socket.on = function (event, handler) {
       if (event !== 'connect_error' || typeof handler !== 'function') return on.apply(this, arguments);
-      var self = this;
-      return on.call(this, event, function (err) {
-        if (isDeferred(err)) deferReload(self, handler, err);
-        else handler.apply(this, arguments);
-      });
+      var d = deferring(this, handler, fallback);
+      listeners.push(d);
+      return on.call(this, event, d.listener);
     };
     // A connection that stays up STABLE_MS ends the run: the next reload starts from base again.
     var stable = null;
     on.call(socket, 'connect', function () {
+      for (var i = 0; i < listeners.length; i++) listeners[i].reconnected();
       clearTimeout(stable);
       stable = setTimeout(function () { writeN(0); }, STABLE_MS);
     });
@@ -101,9 +133,10 @@
     if (typeof io !== 'function' || io.__gsWrapped) return io;
     var wrapped = function (url, opts) {
       if (url && typeof url === 'object') { opts = url; url = undefined; }  // io(opts) form
-      var merged = {reconnectionDelay: BASE_MS, reconnectionDelayMax: DELAY_MAX_MS, randomizationFactor: 0.9};
+      var merged = {};
+      if (DELAY_MAX_MS) merged.reconnectionDelayMax = DELAY_MAX_MS;  // only when configured
       for (var k in (opts || {})) merged[k] = opts[k];  // the caller's keys win
-      return wrapSocket(io.call(this, url, merged));
+      return wrapSocket(io.call(this, url, merged), hasPollingFallback(merged));
     };
     for (var name in io) wrapped[name] = io[name];  // Manager, Socket, connect, protocol, ...
     wrapped.__gsWrapped = true;

@@ -529,7 +529,9 @@ _nicegui_on_handshake = None
 _HANDSHAKE_CATEGORIES = ('accepted', 'unknown_client', 'refused_other')
 _HANDSHAKE_STATS = {name: {'count': 0, 'first': None, 'last': None} for name in _HANDSHAKE_CATEGORIES}
 _HANDSHAKE_STATS['burst_warnings'] = 0
-_UNKNOWN_CLIENT_RECENT = collections.deque()  # timestamps of unknown_client refusals in the last minute
+# Timestamps of unknown_client refusals in the last minute. Bounded: only "more than the
+# threshold" matters, and spammed explicit handshakes must not grow it without limit.
+_UNKNOWN_CLIENT_RECENT = collections.deque(maxlen=4096)
 _HANDSHAKE_BURST_WINDOW_S = 60.0
 _HANDSHAKE_BURST_THRESHOLD = 30  # more than this many unknown clients in a minute is a reload burst
 _handshake_burst_warned_at = 0.0
@@ -562,7 +564,10 @@ def _handshake_stats() -> dict:
     snapshot = {name: dict(_HANDSHAKE_STATS[name]) for name in _HANDSHAKE_CATEGORIES}
     snapshot['burst_warnings'] = _HANDSHAKE_STATS['burst_warnings']
     cutoff = time.time() - _HANDSHAKE_BURST_WINDOW_S
-    snapshot['unknown_client_last_minute'] = sum(1 for t in _UNKNOWN_CLIENT_RECENT if t >= cutoff)
+    # memstat calls this from a worker thread while the loop appends: copy the deque in
+    # one C-level step first (iterating it directly raises "deque mutated during iteration").
+    recent = tuple(_UNKNOWN_CLIENT_RECENT)
+    snapshot['unknown_client_last_minute'] = sum(1 for t in recent if t >= cutoff)
     return snapshot
 
 
