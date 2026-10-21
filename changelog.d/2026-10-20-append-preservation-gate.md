@@ -1,4 +1,0 @@
-## [Unreleased] -- A discovery release can no longer lose live identifications silently (web, branch `feat/append-preservation-gate`)
-
-- New deploy gate `scripts/verify_append_preservation.py` (OPS-02, v9.0.0 audit C3): it compares a candidate discovery artifact with the one production serves and fails if any live main-pool identification is deleted or demoted, unless the owner has ruled on exactly that set of losses for exactly those two files. Each loss gets one cause from a closed list, and `--report-html` gives one row per loss for the owner to review. Step three of `docs/specs/discovery-deploy.md` §2.1 (dev box) and §2.4 (web box, before the manifest swap).
-- First run, on V4 -> V4.2: 654 losses -- the 131 deletions counted in August, plus 523 demotions out of the main pool that the August review did not count. The owner accepted those on 2026-10-20; they stay in the second list.

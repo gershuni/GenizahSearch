@@ -4,6 +4,270 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [9.8.1] - 2026-10-21 — Reliability and sign-up
+
+Sign-up follows email confirmation on both apps, and a new account's username is never its
+email address. The website moves to NiceGUI 3.18 with a round of reliability and latency fixes
+and a new `ux_timing` measurement; the public API's `exact` matches whole words. The desktop
+recognises your own corrections by account id and gets four smaller fixes. Desktop: installer
+9.8.1. PRs #418-#425.
+
+### Reliability fixes and user-perceived latency (web, PR #423)
+
+A review of visitor isolation, the NiceGUI 3.18 upgrade and web latency
+(2026-10-20/21). Every finding acted on was reproduced first and checked by a
+second reviewer; each fix has a test that fails on the old code, run on NiceGUI
+3.8.0 and 3.18.0. Two changes are deliberate, by owner decision on 2026-10-21:
+the public API's (and MCP's and the ChatGPT app's) `exact` search mode now
+matches whole words, as the website's Exact does, and a new account's public
+username is never its email address (a database change, applied separately).
+No request or response shape and no data-access permission changed.
+
+#### Fixed
+- **English visitors saw Hebrew library names and image credits** on /browse
+  (header, Library field, Quick View, print plate, "How to cite") and in the
+  Joins Lab / Compare viewers. Since the UI language became per visitor, a
+  worker thread had no language and took the process default.
+  `web.translations.in_visitor_language` carries only the language into it.
+- **A website Responsa downgrade notice reached another caller's
+  /api/search response** (and MCP/ChatGPT) on the same wait thread, with a
+  stale `responsa_options_effective`. Each call now clears the signal first.
+  The old regression test could not fail; it now stages the signal on the
+  right thread.
+- **Fragment Puzzle "Add from list" said "No lists found" to every signed-in
+  user**: it read the lists in a worker thread as the anonymous client. The
+  client is now built on the loop, and the account is checked again on every
+  pick in the open picker. A guard test flags any user-scoped Supabase helper
+  offloaded without a client.
+- **Web sign-up ignored email confirmation**, which production requires. After
+  Register, every new visitor saw the English error "Email not confirmed"
+  (someone re-registering an address saw "Invalid login credentials"), and the
+  username, name and affiliation they typed were never saved. Register now
+  answers "check your inbox" (the same for an address that already has an
+  account, so the form does not reveal who is registered), and the two common
+  sign-in errors are translated and say what to do next. The typed fields
+  travel in the sign-up metadata and the database writes them when the account
+  is created (below).
+- **Hardening: a new account's username is what the person typed, or empty --
+  never the email address** (`migrations/profiles_no_email_username.sql`, run
+  in the Supabase SQL editor, with `scripts/verify_profiles_no_email_username.sql`
+  before and after). Existing usernames that were email addresses are replaced
+  the same way: the username typed at sign-up where the account's metadata
+  has one, otherwise empty; each change is recorded so it can be undone.
+  Pages that show an author fall back to their usual placeholder ("Unknown",
+  "Anonymous") for an empty username instead of showing "None".
+- **The "How to cite" chip stopped following the page after a network blip**:
+  it was forgotten on every disconnect, and on NiceGUI 3.18 the page survives
+  the reconnect. It is now forgotten when the client is deleted.
+- **One stale `/_nicegui/<old version>/...` request stopped user-storage
+  pruning for a minute** (a session-less 404 client made `prune_user_storage`
+  raise). Such 404s are answered without a NiceGUI client.
+- **Six async pages answered a 3 s stall with a reload loop (3.8) or a 500
+  page (3.18)**, /auth/callback after signing the user in. They now wait up to
+  20 s (`ASYNC_PAGE_RESPONSE_TIMEOUT`).
+- **`/api/puzzle_process` and `/api/puzzle_export` ran image work on the event
+  loop** (up to ~3 s and ~6 s per request). Both now run it in a thread;
+  the export also gets the puzzle rate limit, a 20-fragment cap and a 400 for a
+  malformed body.
+- **The `browse_manuscript` event arrived for about one page view in ten**:
+  sent through `ui.run_javascript` from a task with no page. `posthog_capture`
+  takes the page's client; the password-recovery events go out inside the page.
+- **A signed-in /browse page turn waited for 3-4 Supabase round trips** (the
+  Recently Viewed write) before it showed, blocking every visitor meanwhile.
+  It now runs after the page shows, in a thread, one write at a time per
+  account across its tabs, and a write that waited is dropped if the browser
+  has switched account.
+- **Building a signed-in Supabase client re-read the CA bundle four times on
+  the event loop** (1.56 s -> 0.17 s per build locally): httpx's default SSL
+  context is built from the bundle read once.
+- **A search started from the URL** (the homepage box) no longer waits a fixed
+  0.5 s before it starts.
+- **A test overwrote the developer's real `browse_map.pkl`**
+  (`tests/test_browse_map_atomic_write.py` faked the dedupe before redirecting
+  the path). The order is fixed and guarded.
+- **Deploys installed whatever Starlette / python-socketio / engineio was
+  newest**: `requirements.txt` now pins them to the lock CI tests, and
+  `deploy.sh` installs with the lock as constraints, so transitive packages
+  match CI too.
+
+#### Added
+- **`ux_timing`** (PostHog): the user-perceived time of a Browse page turn or
+  first page, a search's first visible rows, a Quick View, an add-to-list and a
+  comment, from the click (or the navigation) to the next paint, split into
+  server, transport and render time, with the page image apart. Low-cardinality
+  properties only. `UX_TIMING_ENABLED` (default on) and
+  `UX_TIMING_SAMPLE_RATE` (default 1.0); docs/guides/ENV_VARS.md.
+
+#### Changed
+- **The public API's `exact` (and MCP, the ChatGPT app, and the web Joins
+  Lab's single-line Exact) now matches whole words, as the website's Exact
+  does** (owner decision 2026-10-21). A word inside a longer one is no longer
+  matched and a phrase across a page break is found; on the real index the
+  old `exact` returned up to 2.5 times the rows (all matches inside longer
+  words) and ran about five times slower at the API's cap. Every response
+  field still says `"exact"`; `/api/parallels` and the Joins Lab's
+  Responsa-style search are unchanged. docs/SEARCH_API.md, Changelog.
+
+### Desktop accounts without a username, and sign-up under email confirmation (desktop, PR #424)
+
+The desktop side of the 2026-10-21 `profiles` username hardening: a username is
+now what the person typed at an email sign-up, or empty (every Google sign-up,
+and the accounts whose username was their email address), and the production
+project requires email confirmation. Each fix has a regression test that fails
+on the old code.
+
+#### Fixed
+- **Your own corrections** (draft, pending, rejected) show in the version
+  selector of the Manuscript Viewer and of the Browse tab again for an account
+  with no username, and for a sign-in saved before the change. The author is
+  now recognised by account id, never by username. The client had also never
+  kept a correction's author id, so every author without a username shared one
+  entry and only the newest of them was shown, to reviewers too. A reviewer
+  still sees everyone's; nobody sees anyone else's unpublished corrections.
+- **Register** no longer says "You can now login" before the account is
+  confirmed. It says to open the confirmation link sent to that address (the
+  website's approved text, in Hebrew too), and no longer tries to write the
+  profile with no session; the new-user trigger writes it from the sign-up
+  form's fields, which are still sent.
+- **Signing in before confirming** shows the website's approved message, in
+  Hebrew too (it was English only).
+- **The account name** in the corner button, the Community header and the
+  corrections status line is the username, else the full name; never "None".
+
+### NiceGUI 3.18 and Starlette 1.9 (web, PR #422)
+
+The web app moves from NiceGUI 3.8.0 to 3.18.0. NiceGUI 3.14 and later need
+Starlette 1.x, so Starlette goes from 0.52.1 to 1.9.0, with python-socketio
+5.17.0, python-engineio 4.14.0, python-multipart 0.0.32, multidict 6.9.1,
+anyio 4.14.2, aiohttp 3.14.3 and Pygments 2.21.0 (plus tinycss2 and
+webencodings, new NiceGUI dependencies). The desktop app does not use NiceGUI.
+
+#### Changed
+- **Clearing a page no longer slows with every other open tab.** NiceGUI 3.15
+  indexes bindings by object. Measured: clearing 50 bound elements with 40,000
+  other elements live took 54 ms on 3.8, 9.2 ms with our backport, 0.22 ms on
+  3.18. The backport (`framework_patches._patch_binding_remove`) stands down on
+  3.15 and later; it stays for a rollback to 3.8.
+- **A dropped websocket reconnects without reloading the page** (NiceGUI 3.12).
+  On 3.8 every reconnect reloaded silently. A server restart still reloads each
+  open tab once; there is still no reconnect backoff upstream.
+
+#### Fixed
+- **The web app would not start on Starlette 1.x**: `web/research_api.py` used
+  `add_event_handler`, which Starlette 1.x removed. The `/api` sub-app's job
+  cleanup now runs from the main app's shutdown, as the ChatGPT jobs' does
+  (before, as a mounted sub-app, it never ran).
+- **Sessions keep their rolling 14-day expiry.** Starlette 1.x re-sends the
+  session cookie only when the session changes, which would have signed every
+  visitor out 14 days after the first visit. The cookie is re-issued on each
+  request as before, and a signed cookie whose body is not a JSON object starts
+  a fresh session instead of an HTTP 500.
+
+#### Framework patches
+- Audited against 3.18.0 (`_PATCH_AUDIT_THRESHOLD`). The ESM directory guard
+  stands down (fixed upstream). The `<html lang="he">` patch handles the 3.14
+  template, which otherwise sends `dir="ltr"` and no `lang`.
+
+### Background work stays in its page; each visitor's own language (web, PR #419)
+
+NiceGUI keeps the current page per asyncio task, and a task the page starts
+(`asyncio.ensure_future`, `create_task`) begins with none. Every site below did
+page work from such a task and swallowed the error, so the work silently did
+not happen. Found from the tracker's /catalog-browse row and a sweep of every
+task-spawn site under `web/`.
+
+#### Fixed
+- **/catalog-browse** shows its first page of results again without a filter
+  being picked (it opened with no results; confirmed on the live site
+  2026-10-07). A browser that does not answer the saved-filter read in time now
+  gets the unfiltered page instead of none.
+- **The reading view's "How to cite" chip** follows the version shown by
+  default (a PGP or FGP edition, a user correction); it kept the citation of
+  the automatic transcription it replaced, disagreeing with the printed sheet
+  and the Word export.
+- **The correction editor** keeps auto-saving the draft every 30 s; it saved
+  once and stopped.
+- **Fragment Puzzle** keeps the canvas positions in the tab, so a reload or a
+  return to /puzzle puts fragments back where they were (they came back
+  stacked at the default spot). A fragment not drawn yet keeps its last
+  position.
+- **Fragment Puzzle auto-save works.** An edit of an open saved join (moving,
+  nudging or rotating a fragment, cropping, adding, removing, changing folio,
+  title or notes) is saved a moment later; it never saved. Opening or
+  reloading a join writes nothing. A fragment whose image did not load keeps
+  its saved place; an empty canvas never empties a saved join. A join opened
+  from a link replaces the canvas the tab held before, and a reload brings
+  that join back rather than the older canvas.
+- **Fragment Puzzle crops are kept.** Save wrote a crop the visitor had
+  confirmed as uncropped, and a reload lost any crop on an unsaved canvas.
+- **Joins Lab**: the address bar follows an anchor set from a card's pin, a
+  Known Joins pin or a list (a reload or a copied address reopened the old
+  anchor); Retry after a failed export downloads the file; adding candidates
+  to a list confirms it, and picking a fragment from a list in the picker runs
+  in the page.
+- **Search results**: Retry after the full text failed to load runs in the page.
+- **The UI language is each visitor's own.** It was one value per process,
+  set by every page render, so text drawn after an await and the library
+  names in the search Word export, the list Excel export and both Parallels
+  exports could come out in the previous visitor's language. `get_language()`
+  now answers from the page, the task the page started, or the request
+  (saved choice, else the browser's language); see `web/translations.py`.
+
+#### Changed
+- **Element cleanup no longer slows with the number of open tabs.** NiceGUI
+  3.8's `binding.remove` (run by every `element.clear()`) walked a marker for
+  every bindable property of every element on every open page; it now removes
+  the binding links only, as NiceGUI 3.15 does (`web/framework_patches.py`,
+  stands down on 3.15+). Synthetic benchmark, one 300-element clear: 0.5 /
+  2.7 / 44 ms with 1,000 / 10,000 / 100,000 other elements live before,
+  0.04-0.09 ms after. This was
+  the `binding.remove` under `browse.py` `clear()` seen during the post-restart
+  reload loops (2026-10-07); the reload loops themselves stay open.
+
+### Six quick fixes from the tracker (web + desktop, PR #421)
+
+Six open rows of `docs/OPEN_ISSUES.md`, picked as the most pressing of the
+quick ones. Each has a regression test that fails on the old code.
+
+#### Fixed
+- **Desktop discoveries list** no longer shows the author of an anonymous
+  discovery. It printed the username the client fetched from `profiles`, and a
+  new account's username is its email address. The detail dialogs already hid
+  it.
+- **Quitting the desktop app** waits at most 2 s for a metadata loader stuck in
+  an NLI request (it waited without limit, so the process and its single-copy
+  lock stayed alive and the app could not be opened again). No `terminate()`:
+  the exit's own thread settling holds a loader still running.
+- **AND, OR and NOT in a text** are searched as words. Passed into the Tantivy
+  query bare, they were a parse error: Composition Search and Parallels (web
+  and `POST /api/parallels`) dropped the chunk while reporting success, and an
+  Exact search for them returned nothing. Hebrew text was unaffected; Latin
+  headers, shelfmarks and apparatus were not.
+- **`crash_log.txt`** is written to the data folder, next to
+  `faulthandler_dump.txt`. An installed copy tried to write it under Program
+  Files, which is read-only, so a crash with telemetry declined left no trace.
+- **Web Fragment Puzzle:** Delete no longer says "Deleted" when the delete ran
+  and removed nothing; it shows the failure message and the document stays.
+- **Desktop Excel export** writes "N+" in the Result count row for a list the
+  search cut off or Stop ended, as the website has since 2026-10-06. The "+"
+  is now added in one place (`shared/export_dossier.py`), for both apps.
+
+### A discovery release can no longer lose live identifications silently (web, PR #418)
+
+- New deploy gate `scripts/verify_append_preservation.py` (OPS-02, v9.0.0 audit C3): it compares a candidate discovery artifact with the one production serves and fails if any live main-pool identification is deleted or demoted, unless the owner has ruled on exactly that set of losses for exactly those two files. Each loss gets one cause from a closed list, and `--report-html` gives one row per loss for the owner to review. Step three of `docs/specs/discovery-deploy.md` §2.1 (dev box) and §2.4 (web box, before the manifest swap).
+- First run, on V4 -> V4.2: 654 losses -- the 131 deletions counted in August, plus 523 demotions out of the main pool that the August review did not count. The owner accepted those on 2026-10-20; they stay in the second list.
+
+### Fragment Puzzle publish test waits for its dialogs (ci, PR #425)
+
+`tests/render_smoke/test_puzzle_export_render_smoke.py`: the Save and Publish
+steps slept a fixed 0.3 s before clicking the button in the dialog they open.
+Both dialogs are built only after the page's handler has been to a worker
+thread, and on a slow Windows runner that took longer: the publish test failed
+with `AssertionError: 0` (no Publish button yet) on PR #424, which changed no web
+code. The test now waits, up to 15 s, for the dialog's button to exist, and for
+the save to have recorded the document's id before it clicks Publish. Clicking
+still requires exactly one such button. No product change.
+
 ## [9.8.0] - 2026-10-19 — Joins Lab upgrades
 
 The Joins Lab sorts and filters by library and domain, has three card sizes, and a fuller

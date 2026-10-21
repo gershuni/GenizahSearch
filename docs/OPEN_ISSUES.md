@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-21 (desktop accounts without a username, PR #424, `claude/stoic-chaum-a0eaf3`) -- the desktop recognises correction authors by account id (Manuscript Viewer and Browse tab), Register and an unconfirmed sign-in show the website's approved messages, and the account name never shows "None". The P3 row opened on #423 is fixed and archived. P3 -1 -- 237 open.
+> **Last Updated:** 2026-10-21 (v9.8.1 release, both: PRs #418-#425, `master-main`) -- version 9.8.1, CHANGELOG section folded from `changelog.d/`; no desktop or web What's New (owner). No row changed. 237 open.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
