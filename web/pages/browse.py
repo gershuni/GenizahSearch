@@ -83,7 +83,7 @@ from web.translations import tr, is_rtl, get_language, using_language, in_visito
 from web.ux_timing import ux_done
 from web.auth_state import GlobalAuthState
 from web.feature_flags import WEB_PUZZLE_ENABLED
-from web.supabase_client import create_correction, update_correction, get_corrections
+from web.supabase_client import create_correction, update_correction, get_corrections, get_user_client
 from web.components.typography import h1, h2, h3
 from web.components.joins_panel import peek_connected_fragments, load_connected_fragments_into
 from web.components.shelfmark_picker import items_from_manuscripts, open_shelfmark_picker
@@ -1767,16 +1767,20 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # Determine status based on role
         status = 'approved' if (GlobalAuthState.is_admin() or GlobalAuthState.is_editor()) else 'pending'
 
-        # Do the Supabase call BEFORE any UI rebuild
+        # Do the Supabase call BEFORE any UI rebuild, off the loop: the client
+        # is built here (a worker cannot read the visitor's storage and would
+        # write anonymously, refused by RLS).
+        client = get_user_client()
         try:
             if state.draft_id:
-                result = update_correction(state.draft_id, {
+                result = await run.io_bound(update_correction, state.draft_id, {
                     'corrected_text': state.edit_text,
                     'notes': state.edit_notes,
                     'status': status
-                })
+                }, client=client)
             else:
-                result = create_correction(
+                result = await run.io_bound(
+                    create_correction,
                     author_id=user_id,
                     sys_id=state.current_page.sys_id,
                     shelfmark=state.current_page.shelfmark or '',
@@ -1785,11 +1789,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     corrected_text=state.edit_text,
                     notes=state.edit_notes if state.edit_notes else '',
                     status=status,
-                    ie_id=state.volume_ie
+                    ie_id=state.volume_ie,
+                    client=client,
                 )
         except Exception as e:
             ui.notify(f'{tr("Error")}: {e}', type='negative')
             logger.error(f"Submit error: {e}")
+            return
+
+        if result is None:  # no answer: cancelled, or the app is stopping; stay in edit mode
+            ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')
             return
 
         if "error" in result:
@@ -1808,8 +1817,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         ui.notify(tr('Correction submitted successfully'), type='positive')
         await load_page(direction=0)
 
-    def handle_save_draft():
-        """Save draft locally (simulated for now, or use backend draft)."""
+    async def handle_save_draft():
+        """Save the draft to Supabase, off the loop (see handle_submit_correction)."""
         if not GlobalAuthState.is_logged_in():
             ui.notify(tr('Please login to save drafts'), type='warning')
             return
@@ -1819,16 +1828,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             ui.notify(tr('User not found'), type='negative')
             return
 
+        client = get_user_client()
         if state.draft_id:
             # Update existing draft
-            result = update_correction(state.draft_id, {
+            result = await run.io_bound(update_correction, state.draft_id, {
                 'corrected_text': state.edit_text,
                 'notes': state.edit_notes,
                 'status': 'draft'
-            })
+            }, client=client)
         else:
             # Create new draft
-            result = create_correction(
+            result = await run.io_bound(
+                create_correction,
                 author_id=user_id,
                 sys_id=state.current_page.sys_id,
                 shelfmark=state.current_page.shelfmark or '',
@@ -1837,8 +1848,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 corrected_text=state.edit_text,
                 notes=state.edit_notes if state.edit_notes else '',
                 status='draft',
-                ie_id=state.volume_ie
+                ie_id=state.volume_ie,
+                client=client,
             )
+
+        if result is None:  # no answer: cancelled, or the app is stopping; stay in edit mode
+            ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')
+            return
 
         if "error" in result:
             error_msg = result["error"]

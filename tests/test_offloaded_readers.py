@@ -46,6 +46,24 @@ READERS_WITH_EXPLICIT_CLIENT = [
 WRITERS_WITH_EXPLICIT_CLIENT = [
     ('web.supabase_client', 'update_profile'),
     ('web.supabase_client', 'add_recent_item'),
+    # 2026-10-21: the list, project, correction and comment writers run in a
+    # worker now (UserListsManager, the comment dialog, the browse editor).
+    ('web.supabase_client', 'create_list'),
+    ('web.supabase_client', 'update_list'),
+    ('web.supabase_client', 'delete_list'),
+    ('web.supabase_client', 'restore_list'),
+    ('web.supabase_client', 'empty_trash'),
+    ('web.supabase_client', 'add_list_item'),
+    ('web.supabase_client', 'add_list_items'),
+    ('web.supabase_client', 'update_list_item'),
+    ('web.supabase_client', 'delete_list_item'),
+    ('web.supabase_client', 'get_projects'),
+    ('web.supabase_client', 'create_project'),
+    ('web.supabase_client', 'update_project'),
+    ('web.supabase_client', 'delete_project'),
+    ('web.supabase_client', 'create_correction'),
+    ('web.supabase_client', 'update_correction'),
+    ('web.supabase_client', 'create_comment'),
 ]
 
 
