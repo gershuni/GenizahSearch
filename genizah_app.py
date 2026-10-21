@@ -105,7 +105,7 @@ from desktop.list_filter_dialog import ListFilterDialog
 from desktop.variant_run_settings import (PreviewVariants, engine_with_variant_settings,
                                           recorded_settings_searcher, variant_settings_now)
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
-from shared_export_utils import coerce_img_page_cell
+from shared_export_utils import clean_text_single_line, coerce_img_page_cell
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
 from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter, chain_needs_completion
 from shared.document_service import select_pgp_page_entry
@@ -790,6 +790,39 @@ def _format_list_star(in_list=False):
 # ---------------------------------------------------------------------------
 
 
+# The index's continuous docs (shared/indexer.py). A row found through one
+# carries the doc's whole text in 'full_text', while its 'uid' is the page the
+# row is shown as (search_engine._aggregate_result_row).
+_AGGREGATE_SCOPES = frozenset(('system', 'part'))
+
+
+def _page_text_for_export(res, fetcher=None):
+    """The text of the page a result row shows, for the exports' Full Text
+    (xlsx) and matched-passage context (DOCX/TXT).
+
+    A whole-manuscript or part row is read by its uid, the page's, as the
+    website does (web/export_service.py::_resolve_result_full_text); if that
+    read fails it keeps the doc's text. Any other row keeps its stored text,
+    and is read by uid only when it has none (PGP tag rows, MUST-FIX 94-04-D).
+    *fetcher*: ``uid -> str``, or None.
+    """
+    uid = res.get('uid', '')
+
+    def _fetch():
+        if fetcher is None or not uid:
+            return ''
+        try:
+            return fetcher(uid) or ''
+        except Exception:
+            return ''
+
+    if res.get('scope') in _AGGREGATE_SCOPES:
+        page_text = _fetch()
+        if page_text:
+            return page_text
+    return res.get('full_text') or res.get('full_text_excerpt') or _fetch()
+
+
 # ---------------------------------------------------------------------------
 # Phase 94 EXPORT-META-09 — desktop xlsx 3-sheet builder (module-level helper).
 # ---------------------------------------------------------------------------
@@ -874,8 +907,10 @@ def _build_search_results_xlsx_bytes(
         printed_ids: set of sys_ids that are printed — ``'Yes'`` in Is Printed col.
         result_domains: dict ``sys_id -> list of domain names`` — pipe-joined.
         lang: ``'he'`` / ``'en'`` for conditional RTL view direction (D-04).
-        full_text_fetcher: optional callable ``uid -> str`` for hydrating
-            rows that lack ``full_text`` / ``full_text_excerpt`` (MUST-FIX 94-04-D).
+        full_text_fetcher: optional callable ``uid -> str`` that reads a page:
+            for rows that lack ``full_text`` / ``full_text_excerpt`` (MUST-FIX
+            94-04-D) and for whole-manuscript / part rows, whose ``full_text``
+            is the whole doc (:func:`_page_text_for_export`).
             Pass ``None`` to skip hydration (e.g., test contexts without a searcher).
         search_query, search_mode, search_gap, lab_mode_on, deep_scan_on,
         export_datetime: per-field search metadata surfaced on the new
@@ -995,21 +1030,13 @@ def _build_search_results_xlsx_bytes(
         source_label = display_dict.get('source', '') or ''
 
         snippet_raw = res.get('raw_file_hl', '') or res.get('snippet', '') or ''
-        # D-02 amendment: Full Text grandfathered (Tantivy-indexed page text).
-        # Desktop result dict carries 'full_text' or 'full_text_excerpt'
-        # (PATTERNS.md Pattern 7.3).
-        full_text = res.get('full_text') or res.get('full_text_excerpt') or ''
-        # MUST-FIX 94-04-D: fallback hydration via Tantivy when the row
-        # lacks stored text (PGP tag rows at :17065-17076 omit full_text).
-        # Mirrors the existing fallback pattern at genizah_app.py:17813-17815.
-        if not full_text and full_text_fetcher is not None:
-            uid = res.get('uid', '')
-            if uid:
-                try:
-                    full_text = full_text_fetcher(uid) or ''
-                except Exception:
-                    full_text = ''
-        full_text = (full_text or '')[:32000]
+        # The sanitizer drops line breaks, gluing the words on either side;
+        # the website's snippet marks them ' ‖ ' (search_engine._highlight_pair).
+        snippet_raw = str(snippet_raw).replace('\r\n', '\n').replace('\r', '\n').replace('\n', ' \u2016 ')
+        # D-02 amendment: Full Text is the page's text, on one line, as the
+        # website writes it (web/export_service.py: clean_text_single_line).
+        full_text = clean_text_single_line(
+            _page_text_for_export(res, full_text_fetcher))[:32000]
 
         has_pgp_cell = 'Yes' if (sys_id and sys_id in _trans_set) else ''
         is_printed_cell = 'Yes' if (sys_id and sys_id in _printed_set) else ''
@@ -23378,15 +23405,14 @@ class GenizahGUI(QMainWindow):
 
         for b in self.export_buttons: b.setEnabled(True)
 
-        # Hide Source column if secondary source file (V0.7) is missing or empty
-        # If Config.FILE_V7 is missing/empty, it implies we only have one source (V0.8) in index
-        has_multiple_sources = os.path.exists(Config.FILE_V7) and os.path.getsize(Config.FILE_V7) > 0
-        # Phase 95 D-11 — show COL_SRC also when LOCAL hits present.
-        has_local = any(
-            (r.get('display', {}) or {}).get('source') == 'LOCAL'
+        # Show the Source column when a row is not V0.8: V0.7 pages, or LOCAL
+        # hits (Phase 95 D-11). Decided from the rows: the installed exe's
+        # folder has no AllGenizah_OLD.txt, but the index it opens can hold V0.7.
+        row_sources = {
+            (r.get('display', {}) or {}).get('source')
             for r in (self.last_results or [])
-        )
-        self.results_table.setColumnHidden(self.COL_SRC, not (has_multiple_sources or has_local))
+        }
+        self.results_table.setColumnHidden(self.COL_SRC, not (row_sources & {'V0.7', 'LOCAL'}))
         _pt.append(('setup', time.perf_counter()))
         # Phase 95 REQ-6 — update LOCAL filter button visibility after search results land.
         self._update_local_filter_visibility_search()
@@ -27018,19 +27044,14 @@ class GenizahGUI(QMainWindow):
             for r in results_to_export
         )
 
-        # EXPUX-04: fuller matched-passage text for DOCX/TXT. Mirrors the xlsx
-        # full_text resolution (genizah_app.py:2735) — LOCAL dicts carry
+        # EXPUX-04: fuller matched-passage text for DOCX/TXT: the page's text,
+        # as in the xlsx Full Text (_page_text_for_export) — LOCAL dicts carry
         # 'full_text'; Genizah hydrates from the Tantivy index via 'uid'.
+        _searcher = getattr(self, 'searcher', None)
+        _page_fetcher = _searcher.get_full_text_by_id if _searcher is not None else None
+
         def _full_text_for_export(r):
-            ft = r.get('full_text') or r.get('full_text_excerpt') or ''
-            if not ft and getattr(self, 'searcher', None) is not None:
-                uid = r.get('uid', '')
-                if uid:
-                    try:
-                        ft = self.searcher.get_full_text_by_id(uid) or ''
-                    except Exception:
-                        ft = ''
-            return ft or ''
+            return _page_text_for_export(r, _page_fetcher) or ''
 
         for r in results_to_export:
             d = r['display']

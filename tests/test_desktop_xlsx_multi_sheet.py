@@ -403,3 +403,75 @@ def test_credit_text_and_search_info_text_ignored_on_main_sheet(stub_dossier):
     assert 'Credits and Info' in wb.sheetnames
 
 
+# ---------------------------------------------------------------------------
+# Full Text is the page's text, and line breaks do not glue words
+# (OPEN_ISSUES P2 "Desktop Excel export: 'Full Text' holds the whole
+# manuscript, and line breaks are deleted", 2026-10-21). The website writes the
+# page (get_full_text_by_id(uid)) through clean_text_single_line, and the
+# snippet's line breaks as ' ‖ ' (web/export_service.py).
+# ---------------------------------------------------------------------------
+
+_PAGE_ONE = 'עמוד ראשון בלי ההתאמה'
+_PAGE_TWO = 'עמוד שני כהנים גדולים'
+_PAGES = {'IE1_P000002_FL2': _PAGE_TWO}
+
+
+def _aggregate_row(scope):
+    # The shape search_engine._aggregate_result_row returns: 'full_text' is
+    # the whole manuscript (or part) doc, 'uid' the page the row is shown as.
+    return {
+        'uid': 'IE1_P000002_FL2',
+        'scope': scope,
+        'display': {'id': '990000000000100001', 'img': '2', 'source': 'V0.8'},
+        'snippet': 'שני *כהנים* גדולים',
+        'raw_file_hl': 'שני *כהנים* גדולים',
+        'full_text': _PAGE_ONE + '\n' + _PAGE_TWO,
+    }
+
+
+def _main_cell(content, col, row=2):
+    return _load(content)['Search Results'].cell(row, col).value
+
+
+@pytest.mark.parametrize('scope', ['system', 'part'])
+def test_a_whole_manuscript_row_exports_its_page(stub_dossier, scope):
+    content = _build([_aggregate_row(scope)], full_text_fetcher=_PAGES.get)
+    assert _main_cell(content, 8) == _PAGE_TWO
+
+
+def test_a_page_row_keeps_its_own_text(stub_dossier):
+    row = _aggregate_row('page')
+    row['full_text'] = _PAGE_TWO
+
+    def _no_read(uid):
+        raise AssertionError('a page row already holds its page')
+
+    content = _build([row], full_text_fetcher=_no_read)
+    assert _main_cell(content, 8) == _PAGE_TWO
+
+
+def test_a_whole_manuscript_row_keeps_its_text_when_the_page_cannot_be_read(stub_dossier):
+    content = _build([_aggregate_row('system')], full_text_fetcher=lambda uid: None)
+    assert _main_cell(content, 8) == _PAGE_ONE + ' ' + _PAGE_TWO
+
+
+def _build_sanitized(results, **kwargs):
+    # The real sanitizer, which drops '\n': the glue happened there.
+    from genizah_app import _build_search_results_xlsx_bytes
+    from shared.export_utils import sanitize_text_for_excel
+    return _build_search_results_xlsx_bytes(
+        results=results, meta_resolver=_meta_resolver_fake,
+        sanitize_fn=sanitize_text_for_excel, **kwargs)
+
+
+def test_snippet_line_breaks_become_separators(stub_dossier):
+    row = _make_result('A', snippet='באן *אלמראה*\nובעלהא\r\nפי')
+    snippet = str(_main_cell(_build_sanitized([row]), 7))
+    assert snippet == 'באן אלמראה ‖ ובעלהא ‖ פי'
+
+
+def test_full_text_line_breaks_become_spaces(stub_dossier):
+    row = _make_result('A', full_text='באן אלמראה\nובעלהא\r\nפי\n\nאלבית ')
+    assert _main_cell(_build_sanitized([row]), 8) == 'באן אלמראה ובעלהא פי אלבית'
+
+
