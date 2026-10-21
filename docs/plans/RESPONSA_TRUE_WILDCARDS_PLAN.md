@@ -276,7 +276,7 @@ finite word; today's query also adds edge-bracket terms, which the plain column 
 - **How much the mark classes are worth** (`marks` subcommand, 4 s over the 7,284,528 distinct
   folded words): **200** words hold a Hebrew mark; **93,673** hold a mark of another script, of
   which **5** also hold a Hebrew letter (HTR noise); the rest are Arabic-script words (hamza above
-  U+0654 in 82,743, hamza below U+0655 in 11,047, maddah U+0653 in 3,904). The HTR text carries
+  U+0654 in 80,028 words, hamza below U+0655 in 10,915, maddah U+0653 in 3,815). The HTR text carries
   almost no nikud, so for Hebrew queries the mark question is about 205 words in 7.3 million;
   brackets are the tolerance that matters (56,131 tokens, §5.1).
 - Implication for §5.1: "all expanded stems in one alternation" must be split into several

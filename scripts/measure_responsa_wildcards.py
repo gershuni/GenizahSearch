@@ -406,26 +406,29 @@ def cmd_marks(args):
     require(path, 'reversed word list (run `scan` first)')
     rev, _ = _load_reversed(path, log)
     hebrew = other = both = other_with_hebrew_letter = 0
-    by_char = {}
+    words_by_char = {}   # distinct words holding the mark (once per word, however often it repeats)
     samples = {}
     for r in rev:
         h = o = False
+        seen = set()
         for ch in r:
             if unicodedata.category(ch)[0] == 'M':
                 if '֑' <= ch <= 'ׇ':
                     h = True
                 else:
                     o = True
-                    by_char[ch] = by_char.get(ch, 0) + 1
-                    if len(samples.setdefault(ch, [])) < 3:
-                        samples[ch].append(r[::-1])
+                    seen.add(ch)
+        for ch in seen:
+            words_by_char[ch] = words_by_char.get(ch, 0) + 1
+            if len(samples.setdefault(ch, [])) < 3:
+                samples[ch].append(r[::-1])
         hebrew += h
         other += o
         both += h and o
         if o and any('א' <= ch <= 'ת' for ch in r):
             other_with_hebrew_letter += 1
     top = [{'char': f'U+{ord(ch):04X} {unicodedata.name(ch, "?")}', 'words': n, 'samples': samples[ch]}
-           for ch, n in sorted(by_char.items(), key=lambda kv: -kv[1])[:12]]
+           for ch, n in sorted(words_by_char.items(), key=lambda kv: -kv[1])[:12]]
     log(f'{len(rev):,} distinct words: {hebrew:,} hold a Hebrew mark, {other:,} a mark of another script '
         f'({other_with_hebrew_letter:,} of those hold a Hebrew letter), {both:,} both')
     for row in top:
@@ -445,28 +448,32 @@ def cmd_token_only(args):
     path = reversed_list_path(args.out_dir)
     require(path, 'reversed word list (run `scan` first)')
     rev, _ = _load_reversed(path, log)
-    by_char = {}
+    occurrences = {}     # code-point occurrences (a word may repeat the character)
+    words_by_char = {}   # distinct words holding the character at least once
     samples = {}
     words_with_any = words_with_any_and_hebrew = 0
     for r in rev:
-        hit = False
+        seen = set()
         for ch in r:
             if _continues_word(ch) or _looked_past(ch):
                 continue
-            hit = True
-            by_char[ch] = by_char.get(ch, 0) + 1
+            occurrences[ch] = occurrences.get(ch, 0) + 1
+            seen.add(ch)
+        for ch in seen:
+            words_by_char[ch] = words_by_char.get(ch, 0) + 1
             if len(samples.setdefault(ch, [])) < 3:
                 samples[ch].append(r[::-1])
-        if hit:
+        if seen:
             words_with_any += 1
             if any('א' <= ch <= 'ת' for ch in r):
                 words_with_any_and_hebrew += 1
-    rows = [{'char': f'U+{ord(ch):04X} {unicodedata.name(ch, "?")} ({unicodedata.category(ch)})', 'words': n,
-             'samples': samples[ch]} for ch, n in sorted(by_char.items(), key=lambda kv: -kv[1])]
+    rows = [{'char': f'U+{ord(ch):04X} {unicodedata.name(ch, "?")} ({unicodedata.category(ch)})',
+             'words': n, 'occurrences': occurrences[ch], 'samples': samples[ch]}
+            for ch, n in sorted(words_by_char.items(), key=lambda kv: -kv[1])]
     log(f'{len(rev):,} distinct words: {words_with_any:,} hold a token-only boundary character '
         f'({words_with_any_and_hebrew:,} of them also a Hebrew letter); {len(rows)} distinct characters')
     for row in rows[:25]:
-        log(f'  {row["char"]}: {row["words"]:,} words, e.g. {row["samples"]}')
+        log(f'  {row["char"]}: {row["words"]:,} words, {row["occurrences"]:,} occurrences, e.g. {row["samples"]}')
     log.finish({'distinct_words': len(rev), 'words_with_token_only_char': words_with_any,
                 'words_with_token_only_char_and_hebrew_letter': words_with_any_and_hebrew, 'characters': rows})
     return EXIT_OK
