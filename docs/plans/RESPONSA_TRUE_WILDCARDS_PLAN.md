@@ -1,8 +1,9 @@
 # Responsa wildcards: `*` as any sequence, `#` as the grammatical list
 
 **Status:** plan, revision 4, **Codex SHIP** (four rounds on 2026-10-21: DO NOT SHIP, DO NOT SHIP,
-SHIP WITH FIXES, SHIP; §12). It is the basis for Phase 0 and Phase 1. Not implemented. Owner
-decisions are open in §9.
+SHIP WITH FIXES, SHIP; §12). It is the basis for Phase 0 and Phase 1. Not implemented. Decisions 7
+and 8 in §9 were taken on 2026-10-21 (negation unchanged; counts may change), so Phase 0 and Phase 1
+may start; decisions 1-6 and 9 wait for Phase 0's numbers.
 **Tracker rows (P2, `docs/OPEN_ISSUES.md`, 2026-10-21; they reach `master-main` with PR #426):**
 - "Responsa `*word` misses pages, and reads every whole-manuscript doc"
 - "Responsa: `#word#` never keeps its suffixes; a star inside a word returns nothing"
@@ -214,12 +215,11 @@ scanning the file:
 - **Order of expansion.** `%` (plene/defective), Judeo-Arabic and spelling variants expand the
   literal part, then the star applies. Retrieval and check must apply the same order (today
   wildcard branches skip the expanded forms on one side; Codex 2.17).
-- **Negation** gets its own Responsa predicate with the same word definition. Today it is a
-  substring test on the row's `full_text`. For a row found through its whole manuscript, that text
-  is the whole manuscript, so `-כהנים` can hide such a row because the manuscript contains
-  `אלכהנים` somewhere. For a page row it is the page. Its **domain** (the matched page, or the whole
-  manuscript) is an owner decision (§9, decision 7). Ordinary non-Responsa `exclude_words` keep
-  their behaviour.
+- **Negation is unchanged (owner, 2026-10-21; §9, decision 7).** It stays a substring test on the
+  row's `full_text`: for a row found through its whole manuscript that text is the whole manuscript,
+  so `-כהנים` can hide such a row because the manuscript contains `אלכהנים` somewhere; for a page
+  row it is the page. A whole-word predicate on the matched page was offered and declined. Ordinary
+  non-Responsa `exclude_words` keep their behaviour too.
 - OR groups and inline alternation are expanded on both sides by the compiler. Today their parser
   branches return before wildcard parsing (Codex 2.16).
 
@@ -322,8 +322,8 @@ merging or de-duplication.
 
 **Proposed de-duplication (Codex 6.8):**
 - **First wins:** the page row, since pages are read first.
-- **Exclusion** reads the domain chosen in decision 7: by default the matched page's text, never the
-  whole manuscript a row happened to come through.
+- **Exclusion** keeps today's rule (decision 7): it reads the surviving row's `full_text`, so a
+  page row is checked on its page and a crossing row on its aggregate.
 - **Crossing rows** keep their `page_highlights` from the aggregate (or seam).
 - **Test:** fixture rows that share a uid between a page document and an aggregate, checked on
   which row survives, its `full_text` and its exclusion result, not only on UID counts.
@@ -463,7 +463,7 @@ LOCAL-only path, ALL and `ids_only`, all through the compiler (§5.1):
 - whole words by Exact's predicate (§5.2), including every `within_document` component, both
   `bidirectional` branches and the `flex_spacing` rule;
 - the guard measured by real cost on every path, with length-grouped trees (§5.3);
-- negation as its own predicate with the decided domain;
+- negation left as it is (decision 7), pinned by a test on both a page row and a manuscript row;
 - the web highlight fixed to match raw text before escaping.
 
 **Unsupported star shapes** are refused with a visible message on every surface. That includes Joins
@@ -580,9 +580,11 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
    whole manuscript, depending on how the result was found. Recommended: a whole word, checked on
    the matched page only, with `-*כהנים` for the broad form. Or should the whole manuscript count,
    always?
+   **Decided 2026-10-21: keep today's behaviour.** Phase 1 pins it; §4 and §5.4 are updated.
 8. **Counts change for existing searches.** Edge words become whole words, so some searches return
    fewer rows (`כהנים גדול`: 264 to 4), and star searches return more. API and MCP users get the
    same change. This needs a go-ahead and a sentence in the release notes.
+   **Decided 2026-10-21: go ahead**, bracket rule included. Phase 1 may start.
 9. **Page-break matches under a star.** Whole manuscripts would mean reading billions of characters
    for a handful of matches.
    - Skip page-break matches for star phrase searches (measured loss 0-0.3%). This is said on
