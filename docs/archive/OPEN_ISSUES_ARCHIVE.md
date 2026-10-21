@@ -9,6 +9,14 @@
 
 > Previous (2026-08-10, fourth session close) — **the citations question was put to Codex twice and the answer reframed the work.** WP4 is **DEFERRED by measurement**: the multi-alignment rate is 24.0% (not 7.0% — `n_spans` counts page hulls), and the "spurious piece" is usually either the work's own doublet (`תנ"ך, שמות` command//execution) or a compilation quoting its source — 34 works at ≥2x their length peers hold 53% of all conflicts. "Later work is probably the citation" was built twice and fires in the RIGHT direction, but the bake starved it 26,608→1,484 (both sides must already be `shipped`, and the verdict is unrecordable in the single `routing_reason` column). The deeper defect is **decision-to-surface integrity** (Codex's phrase): the findings chip is a constant ("Direct match" on 28,462 of 28,464 public main-pool rows), the expansion pane never reads the router, the one honesty warning dies on the v3 swap (108,235 rows → 0), and the public projection ships the quoter (`ילקוט שמעוני` 625 ids) while deleting the quoted work (`תנחומא` 0) and promoting 280 tie-broken rows. The owner's divergence statistic marks the off works and his own blind grades validate it (0 of 57 `ילקוט` rows correct; `ראב"ש` at #2/#3/#6/#14) — a curated quoter/quoted-inside flag seeded from that ranking is the proposed fix (curation sheet delivered). Session-4 record is inline below; no separate handout this session.
 
+### The "30-day" NLI FL-id cache held 5 minutes (2026-10-21, found and fixed same day)
+
+Found while diagnosing the Visual Similarity blank thumbnails (the open P2 row "Visual Similarity / Joins Lab grids: thumbnails of manuscripts nobody opened come up blank"); fixed on `claude/happy-maxwell-2hdkns`, not deployed. Regression test: `tests/test_nli_image_store.py::TestProxyUsesTheStores::test_resolved_fl_ids_outlive_the_five_minute_memory_cache` (fails on the old code).
+
+| Issue | File | Status | Notes |
+|-------|------|--------|-------|
+| **The restart-persistent NLI FL-id cache (`nli_fl_ids_cache.json`, `NLI_DISK_CACHE_TTL` 30 days) never held more than the last 5 minutes** | `web/api.py::fetch_fl_ids_from_nli` / `_persist_positive_cache_snapshot` (removed) | ✅ Fixed (2026-10-21) | ❌ Open when logged the same day. Each network resolve saved a snapshot of the memory cache, which `_prune_nli_memory_cache_locked` had just trimmed to `NLI_CACHE_TTL` (300 s); the file was also read only at startup. Measured: resolve A, then B six minutes later -> the file holds only B. So the 2026-03-25 fix against post-restart "semaphore timeout storms" stopped helping five minutes after each restart, and nearly every grid thumbnail needed a manifest. Now a SQLite store (`web/nli_image_store.py`, `<INDEX_DIR>/nli_fl_ids.db`) written one entry at a time and read on a memory miss, holding manifest lists only; the old JSON is not read (it mixes manifest lists with one-image MARC fallback lists; Codex on #427). Its JSON-specific tests (`tests/test_nli_cache_persist_retry.py`: os.replace retry and lock) were removed with the writer. |
+
 ### Desktop Excel page text and the Source column (2026-10-21, fixed)
 
 Fixed on `claude/desktop-xlsx-fulltext-source` (desktop-only; needs an installer). Both rows were opened the same day by the desktop vs website comparison of the Responsa query `*כהנים *גדולים`; each fix has a regression test that fails on the old code.
@@ -1207,6 +1215,8 @@ Moved verbatim by `scripts/archive_closed_issues.py`. Nothing was edited or dele
 ### Dated header log (superseded session headers)
 
 Moved verbatim from the top of the tracker on 2026-09-18 (the 2026-09-06 split did the same for the headers before them).
+
+> Previous: 2026-10-21 (desktop Excel page text and the Source column, `claude/desktop-xlsx-fulltext-source`, desktop-only) -- the desktop Excel, Word and text downloads write the page a row shows, not its whole manuscript; Excel keeps line breaks as the website does; the Source column shows whenever a row is V0.7. P2 -2 (both fixed, archived). 240 open.
 
 > Previous: 2026-10-21 (desktop vs website comparison of `*כהנים *גדולים`, `master-main`, no code change) -- P2 +5: desktop Excel export, hidden Source column, Responsa `*word` recall/speed, `#word#` suffixes and in-word stars, Responsa outer word boundaries. 242 open.
 

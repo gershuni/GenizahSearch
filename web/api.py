@@ -19,8 +19,8 @@ import os
 import threading
 import time as _module_time
 from collections import OrderedDict
-from genizah_core import Config
 from shared.synthetic_sys_id import is_synthetic_sys_id
+from web import nli_image_store
 from urllib.parse import urlparse
 from web.crawler_visibility import (
     ARCHIVE_DISALLOWED_PATHS,
@@ -59,7 +59,6 @@ NLI_MAX_CONCURRENT_FETCHES = max(1, int(os.environ.get('NLI_MAX_CONCURRENT_FETCH
 # Starlette threadpool workers doing nothing useful. Env override preserved
 # for emergencies.
 NLI_SEMAPHORE_TIMEOUT = int(os.environ.get('NLI_SEMAPHORE_TIMEOUT', '1'))
-NLI_PERSISTENT_CACHE_FILE = os.path.join(Config.INDEX_DIR, 'nli_fl_ids_cache.json')
 IMAGE_CACHE_MAX_BYTES = max(0, int(os.environ.get('IMAGE_CACHE_MAX_BYTES', str(256 * 1024 * 1024))))
 # 2048 since 2026-10-19 (was 512): ~100 images per library could not hold one Visual
 # Similarity grid. The byte cap is unchanged, so the memory ceiling is too.
@@ -73,11 +72,6 @@ PUZZLE_RATE_LIMIT_BUCKET_TTL = max(60, int(os.environ.get('PUZZLE_RATE_LIMIT_BUC
 
 # Concurrency cap for NLI IIIF fetches (prevents burst-flooding the upstream)
 _nli_semaphore = threading.Semaphore(NLI_MAX_CONCURRENT_FETCHES)
-
-# Phase 92.2 D-NLI-01: serialize os.replace across concurrent background threads
-# to avoid [WinError 5] access-denied races on Windows. Lock is acquired BEFORE
-# writing the temp file so concurrent callers queue rather than race on the rename.
-_nli_persist_lock = threading.Lock()
 
 # Persistent session for NLI requests (connection reuse via keep-alive)
 _nli_session = requests.Session()
@@ -258,163 +252,24 @@ ALLOWED_IMAGE_DOMAINS = [
 ]
 
 
-def _normalize_persisted_fl_ids(fl_ids) -> list[str]:
-    """Normalize persisted FL IDs to a clean list of digit strings."""
-    normalized = []
-    for fl_id in fl_ids or []:
-        digits = re.sub(r'\D', '', str(fl_id))
-        if digits:
-            normalized.append(digits)
-    return normalized
-
-
-def _load_nli_persistent_cache(
-    cache_path: str = NLI_PERSISTENT_CACHE_FILE,
-    *,
-    now: float | None = None,
-) -> tuple[dict[str, list[str]], dict[str, float]]:
-    """Load persisted positive NLI FL-ID cache entries from disk.
-
-    Persisted entries are rehydrated with a fresh in-memory timestamp so they
-    can absorb the immediate post-restart burst even if they were last fetched
-    hours or days earlier.
-    """
-    import time as _time
-
-    now = _time.time() if now is None else now
-    if NLI_DISK_CACHE_TTL <= 0:
-        return {}, {}
-
-    try:
-        with open(cache_path, 'r', encoding='utf-8') as handle:
-            payload = json.load(handle)
-    except FileNotFoundError:
-        return {}, {}
-    except Exception as e:
-        logger.warning(f"Failed to load persisted NLI FL-ID cache from {cache_path}: {e}")
-        return {}, {}
-
-    entries = payload.get('entries', {}) if isinstance(payload, dict) else {}
-    cache: dict[str, list[str]] = {}
-    cache_time: dict[str, float] = {}
-    changed = False
-
-    for system_id, entry in entries.items():
-        if not isinstance(entry, dict):
-            changed = True
-            continue
-        cached_at = entry.get('cached_at')
-        if not isinstance(cached_at, (int, float)):
-            changed = True
-            continue
-        if now - float(cached_at) >= NLI_DISK_CACHE_TTL:
-            changed = True
-            continue
-        fl_ids = _normalize_persisted_fl_ids(entry.get('fl_ids', []))
-        if not fl_ids:
-            changed = True
-            continue
-        cache[str(system_id)] = fl_ids
-        cache_time[str(system_id)] = now
-
-    if changed:
-        _save_nli_persistent_cache(cache, cache_time, cache_path=cache_path, now=now)
-
-    if cache:
-        logger.info(f"Loaded {len(cache)} persisted NLI FL-ID cache entries from {cache_path}")
-    return cache, cache_time
-
-
 def _save_nli_persistent_cache(
     cache: dict[str, object],
     cache_time: dict[str, float],
-    cache_path: str = NLI_PERSISTENT_CACHE_FILE,
+    cache_path: str | None = None,
     *,
     now: float | None = None,
 ) -> bool:
-    """Persist positive NLI FL-ID cache entries with an atomic file replace.
+    """Keep positive NLI FL-id entries for ``NLI_DISK_CACHE_TTL`` (30 days).
 
-    Phase 92.2 D-NLI-01: serializes writes via _nli_persist_lock to prevent
-    [WinError 5] access-denied races when multiple background threads call
-    os.replace() on the same target simultaneously. Retries os.replace at
-    100/250/500ms before logging WARNING once and returning False.
-
-    Returns:
-        True on success, False on final failure (all retries exhausted).
+    The one write into the FL-id store (web/nli_image_store.py), which the proxy
+    reads when its 5-minute memory cache misses. Called with just the entries
+    resolved now -- not a copy of the memory cache, which is what kept the old
+    JSON file at five minutes' worth (2026-10-21). Tests replace it with a no-op
+    to keep their sys_ids out of the store.
     """
-    import time as _time
-
-    now = _time.time() if now is None else now
-    if NLI_DISK_CACHE_TTL <= 0:
-        return True  # disabled; not an error
-
-    entries = {}
-    for system_id, fl_ids in cache.items():
-        if not isinstance(fl_ids, list):
-            continue
-        cached_at = cache_time.get(system_id)
-        if not isinstance(cached_at, (int, float)):
-            continue
-        if now - float(cached_at) >= NLI_DISK_CACHE_TTL:
-            continue
-        normalized_fl_ids = _normalize_persisted_fl_ids(fl_ids)
-        if not normalized_fl_ids:
-            continue
-        entries[str(system_id)] = {
-            'fl_ids': normalized_fl_ids,
-            'cached_at': float(cached_at),
-        }
-
-    payload = {'version': 1, 'entries': entries}
-    temp_path = f"{cache_path}.tmp.{os.getpid()}.{threading.get_ident()}"
-
-    # D-NLI-01: acquire lock BEFORE writing the temp file so concurrent callers
-    # queue rather than race on the atomic rename (Reviews Codex-LOW-1: barrier
-    # belongs outside the lock in tests; the lock itself is the serializer here).
-    with _nli_persist_lock:
-        try:
-            cache_dir = os.path.dirname(cache_path)
-            if cache_dir:
-                os.makedirs(cache_dir, exist_ok=True)
-            with open(temp_path, 'w', encoding='utf-8') as handle:
-                json.dump(payload, handle, ensure_ascii=True, sort_keys=True)
-        except Exception as e:
-            logger.warning("Failed to write NLI FL-ID cache temp file %s: %s", temp_path, e)
-            try:
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-            except Exception:
-                pass
-            return False
-
-        # Retry os.replace at 100/250/500ms on EACCES / WinError 5
-        _replace_delays = (0.1, 0.25, 0.5)
-        last_exc: Exception | None = None
-        for attempt, delay in enumerate((*_replace_delays, None), start=1):
-            try:
-                os.replace(temp_path, cache_path)
-                return True
-            except Exception as exc:
-                last_exc = exc
-                if delay is None:
-                    break
-                logger.debug(
-                    "os.replace NLI cache attempt %d failed (%s); retrying in %.0fms",
-                    attempt, exc, delay * 1000,
-                )
-                _time.sleep(delay)
-
-        # All retries exhausted — warn ONCE and clean up temp file
-        logger.warning(
-            "Failed to persist NLI FL-ID cache to %s after %d attempts: %s",
-            cache_path, len(_replace_delays) + 1, last_exc,
-        )
-        try:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-        except Exception:
-            pass
-        return False
+    return nli_image_store.fl_id_store_put(
+        cache, cache_time, NLI_DISK_CACHE_TTL, path=cache_path, now=now,
+    )
 
 # Phase 98 Plan 03 test seam: closure-encapsulated helpers (fetch_fl_ids_from_nli,
 # _fetch_nli_image_bytes, etc.) live inside init_api_routes(). Tests need to
@@ -692,10 +547,18 @@ def init_api_routes(app_override=None):
 
     # Sentinel for negative cache entries (distinguishes "cached empty" from "not cached")
     _NLI_FAIL_SENTINEL = object()
-    _nli_cache, _nli_cache_time = _load_nli_persistent_cache()
-    _nli_cache = OrderedDict(_nli_cache)
-    _nli_cache_time = OrderedDict(_nli_cache_time)
+    # The memory cache starts empty: a miss reads the 30-day FL-id store
+    # (web/nli_image_store.py). The old nli_fl_ids_cache.json is not read.
+    nli_image_store.fl_id_store_prepare(NLI_DISK_CACHE_TTL)
+    nli_image_store.thumb_cache_prepare()
+    _nli_cache = OrderedDict()
+    _nli_cache_time = OrderedDict()
     _nli_cache_lock = threading.Lock()
+    # Memory entries that came from the MARC fallback, which usually names only the
+    # first image. They live NLI_CACHE_TTL as before and are never stored for 30 days
+    # or used to keep a thumbnail: stored, a missing page was answered with another
+    # page's image for a month after NLI recovered (Codex on #427).
+    _nli_partial_keys = set()
 
     def _prune_nli_memory_cache_locked(now: float) -> None:
         """Drop expired/oldest FL-ID cache entries from the in-process cache."""
@@ -708,9 +571,11 @@ def init_api_routes(app_override=None):
         for key in stale_keys:
             _nli_cache.pop(key, None)
             _nli_cache_time.pop(key, None)
+            _nli_partial_keys.discard(key)
         while NLI_MEMORY_CACHE_MAX_ENTRIES and len(_nli_cache) > NLI_MEMORY_CACHE_MAX_ENTRIES:
             key, _value = _nli_cache.popitem(last=False)
             _nli_cache_time.pop(key, None)
+            _nli_partial_keys.discard(key)
 
     def _nli_memory_cache_stats() -> dict:
         import time as _time
@@ -729,24 +594,29 @@ def init_api_routes(app_override=None):
             }
 
     _register_runtime_cache_stats('nli_fl_ids', _nli_memory_cache_stats)
+    _register_runtime_cache_stats('nli_image_store', nli_image_store.stats)
 
-    def _persist_positive_cache_snapshot(snapshot: tuple | None = None) -> None:
-        """Persist the positive NLI cache to disk.
+    def _remember_fl_ids(cache_key: str, fl_ids: list, *, complete: bool = True) -> None:
+        """Put freshly resolved FL ids in the memory cache, and a manifest's (complete)
+        list in the 30-day store too; a MARC fallback list stays in memory only."""
+        import time as _time
+        now = _time.time()
+        with _nli_cache_lock:
+            _nli_cache[cache_key] = fl_ids
+            _nli_cache_time[cache_key] = now
+            if complete:
+                _nli_partial_keys.discard(cache_key)
+            else:
+                _nli_partial_keys.add(cache_key)
+            _prune_nli_memory_cache_locked(now)
+        if complete:
+            _save_nli_persistent_cache({cache_key: fl_ids}, {cache_key: now})
 
-        Audit #23: callers that have just mutated the cache under
-        ``_nli_cache_lock`` should pass a snapshot copied *inside* that same
-        critical section (``(dict(_nli_cache), dict(_nli_cache_time))``) so the
-        persisted view is consistent with the update and cannot interleave with
-        a concurrent mutation between the unlock and the re-lock. When no
-        snapshot is supplied this falls back to taking its own locked copy.
-        """
-        if snapshot is None:
-            with _nli_cache_lock:
-                cache_snapshot = dict(_nli_cache)
-                cache_time_snapshot = dict(_nli_cache_time)
-        else:
-            cache_snapshot, cache_time_snapshot = snapshot
-        _save_nli_persistent_cache(cache_snapshot, cache_time_snapshot)
+    def _fl_ids_complete(system_id: str, suffix: int = 1) -> bool:
+        """False while the memory cache holds a MARC fallback list for this manuscript."""
+        cache_key = f"{system_id}:{suffix}" if suffix != 1 else system_id
+        with _nli_cache_lock:
+            return cache_key not in _nli_partial_keys
 
     def fetch_fl_ids_from_nli(system_id: str, suffix: int = 1) -> list:
         """Fetch ALL FL IDs from NLI IIIF manifest (contains all pages). Results are cached.
@@ -758,7 +628,7 @@ def init_api_routes(app_override=None):
 
         Resolution order:
         1. In-memory cache — includes negative entries to avoid retrying failures (fastest)
-        2. Restart-persistent positive cache file under Config.INDEX_DIR
+        2. The 30-day FL-id store (web/nli_image_store.py), copied into memory on a hit
         3. NLI IIIF manifest network fetch (all pages)
         4. NLI MARC API fallback (typically 1 FL ID)
         """
@@ -780,6 +650,17 @@ def init_api_routes(app_override=None):
                 # Cooldown expired — fall through to retry
             elif cache_age < NLI_CACHE_TTL:
                 return cached_val
+
+        # Resolved within NLI_DISK_CACHE_TTL: no manifest download, and no
+        # semaphore slot -- a grid of cards no longer queues for 8 slots.
+        stored = nli_image_store.fl_id_store_get(cache_key, NLI_DISK_CACHE_TTL)
+        if stored:
+            with _nli_cache_lock:
+                _nli_cache[cache_key] = stored
+                _nli_cache_time[cache_key] = _time.time()
+                _nli_partial_keys.discard(cache_key)
+                _prune_nli_memory_cache_locked(_time.time())
+            return stored
 
         # Phase 98 D-11: circuit check BEFORE semaphore acquisition. If NLI is
         # known-degraded, return [] immediately — do not even attempt to acquire
@@ -853,15 +734,7 @@ def init_api_routes(app_override=None):
                                 fl_ids.append(fl_match.group(1))
 
                 if fl_ids:
-                    # Audit #23: copy the snapshot INSIDE the same critical
-                    # section as the update so the persisted view is consistent
-                    # (no interleaving mutation between unlock and re-lock).
-                    with _nli_cache_lock:
-                        _nli_cache[cache_key] = fl_ids
-                        _nli_cache_time[cache_key] = _time.time()
-                        _prune_nli_memory_cache_locked(_time.time())
-                        _cache_snapshot = (dict(_nli_cache), dict(_nli_cache_time))
-                    _persist_positive_cache_snapshot(_cache_snapshot)
+                    _remember_fl_ids(cache_key, fl_ids)
                     logger.info(f"Resolved {len(fl_ids)} FL IDs for {cache_key} from network IIIF manifest")
                     # Phase 98 D-06/D-08: real success — close the breaker.
                     _nli_record_success(path='fetch_fl_ids_from_nli')
@@ -911,13 +784,7 @@ def init_api_routes(app_override=None):
                             seen.add(fl_id)
                             unique_fl_ids.append(fl_id)
                     if unique_fl_ids:
-                        # Audit #23: snapshot copied inside the lock (see above).
-                        with _nli_cache_lock:
-                            _nli_cache[cache_key] = unique_fl_ids
-                            _nli_cache_time[cache_key] = _time.time()
-                            _prune_nli_memory_cache_locked(_time.time())
-                            _cache_snapshot = (dict(_nli_cache), dict(_nli_cache_time))
-                        _persist_positive_cache_snapshot(_cache_snapshot)
+                        _remember_fl_ids(cache_key, unique_fl_ids, complete=False)
                         logger.info(f"Cached {len(unique_fl_ids)} FL IDs from MARC for {system_id}")
                         # Phase 98 D-06/D-08: MARC fallback succeeded.
                         _nli_record_success(path='fetch_fl_ids_from_nli')
@@ -1070,7 +937,14 @@ def init_api_routes(app_override=None):
 
         Returns (content_bytes, content_type, fl_id) on success, or None when
         nothing was retrievable. The fl_id is the FL digit string that
-        actually succeeded (for logging / observability).
+        actually succeeded (for logging / observability); '' for a thumbnail
+        served from disk.
+
+        Grid thumbnails (NLI_THUMB_CACHE_WIDTHS, 300) are kept on disk
+        (web/nli_image_store.py): read before the breaker check, so they show
+        during an NLI outage, and written only for the requested page's own
+        IIIF image, from a manifest's list -- never the fallback loop's other page,
+        a Rosetta stand-in, or a page of a MARC fallback list.
 
         FL ids are sourced from fetch_fl_ids_from_nli, which reads the NLI
         IIIF manifest's canvas_map. This is the AUTHORITATIVE source. NEVER
@@ -1085,6 +959,10 @@ def init_api_routes(app_override=None):
         if entry is not None:
             content, content_type, fl_id = entry
             return (content, content_type, fl_id)
+
+        stored = nli_image_store.thumb_get(sys_id, page, width, suffix)
+        if stored is not None:
+            return (stored, 'image/jpeg', '')
 
         # Phase 98 D-17: circuit check BEFORE the FL-id iteration loop. Without
         # this guard, a 20-element fl_ids list would multiply per-call blocking
@@ -1127,7 +1005,7 @@ def init_api_routes(app_override=None):
                 ct = resp.headers.get('Content-Type', '')
                 if resp.status_code == 200 and 'image' in ct and len(resp.content) > min_size:
                     _nli_record_success(path='_fetch_nli_image_bytes')
-                    return (resp.content, ct or 'image/jpeg')
+                    return (resp.content, ct or 'image/jpeg', 'iiif')
                 elif resp.status_code == 429:
                     _nli_record_failure(failure_type='429', path='_fetch_nli_image_bytes')
                 elif 500 <= resp.status_code < 600:
@@ -1191,7 +1069,7 @@ def init_api_routes(app_override=None):
                     if len(r2.content) > _ROSETTA_PLACEHOLDER_MAX_BYTES:
                         _nli_record_success(path='_fetch_nli_image_bytes_rosetta_thumb')
                         logger.info("NLI IIIF unavailable for FL%s; served Rosetta thumbnail (%d bytes)", fl_id, len(r2.content))
-                        return (r2.content, ct2 or 'image/png')
+                        return (r2.content, ct2 or 'image/png', 'rosetta')
                     logger.info("Rosetta returned the no-image placeholder for FL%s (%d bytes)", fl_id, len(r2.content))
                 # A Rosetta 429/5xx is a breaker failure exactly as an IIIF one is
                 # (shared/nli_circuit_breaker.py D-06). Without this the loop could
@@ -1220,6 +1098,8 @@ def init_api_routes(app_override=None):
             got = _try_fl(fl_ids[page])
             if got is not None:
                 _image_cache.set(cache_key, (got[0], got[1], fl_ids[page]))
+                if got[2] == 'iiif' and _fl_ids_complete(sys_id, suffix):
+                    nli_image_store.thumb_put(sys_id, page, width, suffix, got[0])
                 return (got[0], got[1], fl_ids[page])
 
         # Fallback: try each FL id until one works.
@@ -1237,11 +1117,9 @@ def init_api_routes(app_override=None):
     # FastAPI route). Production code never reads this dict.
     _api_test_seam['fetch_fl_ids_from_nli'] = fetch_fl_ids_from_nli
     _api_test_seam['_fetch_nli_image_bytes'] = _fetch_nli_image_bytes
-    # Audit SEED-021 #36/#23: expose the image route + the persist-snapshot
-    # helper so tests can assert the new non-200/non-429/non-5xx status logging
-    # and the lock-consistent cache snapshot without going through TestClient.
+    # Audit SEED-021 #36: expose the image route so tests can assert the
+    # non-200/non-429/non-5xx status logging without going through TestClient.
     _api_test_seam['nli_image'] = nli_image
-    _api_test_seam['_persist_positive_cache_snapshot'] = _persist_positive_cache_snapshot
 
     @target_app.get('/api/nli_image_by_sysid/{sys_id}')
     @_image_cache_headers

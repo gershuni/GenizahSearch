@@ -61,6 +61,11 @@ Related code and decisions found in the current codebase:
 
 ## Notes
 
+- **2026-10-21:** a first, smaller step was built: the web proxy keeps NLI thumbnails (300 px)
+  on disk as they are viewed, and a manuscript's image ids for 30 days (`web/nli_image_store.py`).
+  Filling the thumbnails ahead of time, and the desktop's use of them, is planned in
+  `docs/plans/NLI_THUMBNAIL_PREFETCH_PLAN.md`. The 800 px reading images below are still this seed.
+
 - The puzzle derivative cache at `web/api.py` already implements HMAC-secured upload + server-side disk cache — same pattern could extend to browse thumbnails
 - NLI negative cache (`NLI_FAIL_CACHE_TTL = 60s`) was added in v7.5 to prevent hammering during outages, but doesn't solve the fundamental availability problem
 - Desktop app already downloads images on-demand and could contribute to server cache (mentioned in puzzle spec)

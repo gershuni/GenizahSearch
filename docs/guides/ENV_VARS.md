@@ -148,6 +148,27 @@ NLI_SEMAPHORE_TIMEOUT=1               # Max seconds to wait for a slot in the 8-
 
 # (Other existing NLI knobs unchanged: NLI_CACHE_TTL, NLI_FAIL_CACHE_TTL, NLI_MAX_CONCURRENT_FETCHES)
 
+# NLI image proxy's disk stores (2026-10-21; web-only, web/nli_image_store.py). Both are caches:
+# deleting them is safe, they refill from NLI. Locations are read on every call; unset means
+# under INDEX_DIR, an EMPTY value turns that store off. tests/conftest.py points both at a
+# temporary folder per test.
+NLI_DISK_CACHE_TTL=2592000            # how long a manuscript's NLI image ids are kept, seconds (30 days;
+                                       # 0 turns the store off). Until 2026-10-21 the JSON file this
+                                       # governed held only the last 5 minutes (see the changelog)
+NLI_FL_ID_STORE_FILE=                 # the image-id store, SQLite (default <INDEX_DIR>/nli_fl_ids.db).
+                                       # Manifest lists only: a MARC-fallback list (usually one image)
+                                       # stays in memory for NLI_CACHE_TTL. The old nli_fl_ids_cache.json
+                                       # is not read (it mixes the two) and is safe to delete
+NLI_THUMB_CACHE_DIR=                  # kept thumbnails (default <INDEX_DIR>/nli_thumbs): the IIIF JPEG of
+                                       # a page, written the first time the proxy fetches it, read before
+                                       # the NLI breaker -- so it shows during an outage. Layout:
+                                       # w<width>/<md5(sys_id)[:2]>/<sys_id>_s<suffix>_p<page>.jpg
+NLI_THUMB_CACHE_WIDTHS=300            # widths kept on disk, px, comma-separated (the grids fetch 300; 600 and
+                                       # 2000 stay in memory only, so many widths cannot mean many copies)
+NLI_THUMB_CACHE_MAX_MB=10240          # the folder's size cap (about 26 KB a thumbnail); 0 = no cap. Measured
+                                       # at startup in the background; nothing is written until it is
+NLI_THUMB_CACHE_MIN_FREE_MB=2048      # no thumbnail is written while the disk has less free space than this
+
 # Library image routes (/api/nli_image, nli_image_by_sysid, cambridge/manchester/jts/oxford_image;
 # web-only, web/api.py). Since 2026-10-19 they set no session cookie, so these lifetimes reach
 # Cloudflare as well as browsers -- Cloudflare keeps them only under a Cache Rule for those paths

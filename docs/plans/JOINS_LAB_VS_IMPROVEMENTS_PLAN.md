@@ -65,8 +65,12 @@ details.
 
 Left:
 
-- **PR 6 step (b)**, a size-capped disk store for images, still waits for `df -h /` from the
-  server and the owner's reading of NLI's terms of use.
+- **PR 6 step (b)**, a disk store for images filled as they are viewed: built 2026-10-21 on
+  `claude/happy-maxwell-2hdkns` for thumbnails (300 px, `web/nli_image_store.py`), capped at 10 GB
+  (`NLI_THUMB_CACHE_MAX_MB`) and 2 GB of free disk, at the owner's request after the Visual
+  Similarity blank cards. The owner's reading of NLI's terms of use is still open, and `df -h /` is still unread;
+  both come before deploying it. Filling it ahead of time:
+  [`NLI_THUMBNAIL_PREFETCH_PLAN.md`](NLI_THUMBNAIL_PREFETCH_PLAN.md).
 - **A Cloudflare Cache Rule for the six image routes**, once #409 is deployed. Their paths have
   no file extension, so Cloudflare does not cache them until a rule makes them eligible.
   Until then, the week-long `Cache-Control` helps browsers only.
