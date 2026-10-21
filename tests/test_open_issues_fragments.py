@@ -148,6 +148,8 @@ def test_no_fragments_is_a_no_op(tmp_path):
     ("2026-10-21-b.md", "### P2 - Medium\n"),                                 # heading, no rows
     ("2026-10-21-b.md", "### P2 - Medium\n| **a** | b | ❌ Open |\n"),       # three cells
     ("2026-10-21-b.md", "### P2 - Medium\n| **a** | b | ✅ Fixed (2026-10-21) | n |\n"),
+    ("2026-10-21-b.md", "### P2 - Medium\n| **a** | b | ✅ Fixed (was ❌ Open) | n |\n"),
+    ("2026-10-21-b.md", "### P2 - Medium\n| **a** | b | Closed, see ⏳ note | n |\n"),
     ("2026-10-21-b.md", "### P2 - Medium\nplain prose, not a row\n"),
     ("my-bug.md", "### P2 - Medium\n" + ROW_P2 + "\n"),
     ("2026-10-21-Upper.md", "### P2 - Medium\n" + ROW_P2 + "\n"),

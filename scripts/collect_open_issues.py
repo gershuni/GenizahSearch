@@ -15,8 +15,9 @@ exactly as the tracker writes it, followed by that section's new table rows:
     | **Title** | `file.py` | ❌ Open (2026-10-21) | Notes |
 
 Only the three bug sections are accepted (P1, P2, P3): they are the ones the
-Quick Summary counts by section. Every row has the tracker's four cells and an
-open status (❌, ⏸ or ⏳), since the tracker holds only open items. Closing a
+Quick Summary counts by section. Every row has the tracker's four cells and a
+status that starts with an open mark (❌, ⏸ or ⏳), since the tracker holds only
+open items. Closing a
 row is still an edit of the tracker (and the archive), as before.
 
     python scripts/collect_open_issues.py           # show what would be folded in
@@ -64,6 +65,12 @@ def _cells(row: str) -> list:
     return [c.strip() for c in _CELL_SPLIT.split(row.strip())[1:-1]]
 
 
+def _is_open(status: str) -> bool:
+    """The status cell STARTS with an open mark: `✅ Fixed (was ❌ Open)` is not open
+    (Codex review of PR #428)."""
+    return status.strip().startswith(OPEN_MARKS)
+
+
 def parse(text: str) -> tuple:
     """({section heading: [rows]}, [problems]) for one fragment's text."""
     blocks, found, current = {}, [], None
@@ -90,8 +97,8 @@ def parse(text: str) -> tuple:
             found.append("a row has %d cells, not 4 (Issue | File | Status | Notes): %r"
                          % (len(cells), ln[:60]))
             continue
-        if not any(m in cells[2] for m in OPEN_MARKS):
-            found.append("a row's status is not open (needs one of %s): %r"
+        if not _is_open(cells[2]):
+            found.append("a row's status does not start with an open mark (one of %s): %r"
                          % (" ".join(OPEN_MARKS), cells[2][:40]))
             continue
         blocks[current].append(ln)
@@ -134,8 +141,7 @@ def fold(tracker: str, fragments: list, today: str) -> str:
             raise ValueError("the %r section has no table" % heading)
         lines[sep + 1:sep + 1] = rows
 
-    deltas = {h: sum(1 for r in rows if any(m in _cells(r)[2] for m in OPEN_MARKS))
-              for h, rows in added.items()}
+    deltas = {h: sum(1 for r in rows if _is_open(_cells(r)[2])) for h, rows in added.items()}
     total_delta = sum(deltas.values())
     for heading, delta in deltas.items():
         if not delta:

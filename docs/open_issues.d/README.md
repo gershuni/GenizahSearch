@@ -19,7 +19,8 @@ their CI. Two files never conflict. This is the tracker's version of
   | **Title** | `path/file.py` | ❌ Open (2026-10-21) | What, where, how measured, fix sketch. |
   ```
 
-  Every row must be open (❌, ⏸ or ⏳): the tracker holds only open items.
+  Every row's status must start with an open mark (❌, ⏸ or ⏳): the tracker
+  holds only open items.
 - **Not here:** closing a row (mark it fixed and move it to
   `docs/archive/OPEN_ISSUES_ARCHIVE.md`, as before), rewriting an existing row,
   and rows for the tracker's other sections (they have no per-section count).
