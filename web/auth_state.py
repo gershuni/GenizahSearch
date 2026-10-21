@@ -23,7 +23,7 @@ load_dotenv()
 # Import Supabase client
 from web.supabase_client import (
     sign_in as supabase_sign_in, sign_up as supabase_sign_up,
-    sign_out as supabase_sign_out, get_profile, update_profile,
+    sign_out as supabase_sign_out, get_profile,
     get_oauth_url
 )
 
@@ -166,7 +166,7 @@ class GlobalAuthState:
             import json
             uid = json.dumps(user.get('id', ''))
             email = json.dumps(user.get('email', ''))
-            name = json.dumps((profile or {}).get('full_name', '') or (profile or {}).get('username', ''))
+            name = json.dumps((profile or {}).get('full_name') or (profile or {}).get('username') or '')
             js = f"if(window.posthog)posthog.identify({uid},{{email:{email},name:{name}}})"
             ui.run_javascript(js)
         except Exception:
@@ -275,7 +275,7 @@ async def do_login(email: str, password: str) -> Dict:
             'status_code': result.get('status_code', ''),
             'method': 'password',
         })
-        return result
+        return {**result, 'error': _login_error_message(result)}
 
     session = result.get('session', {})
     user = result.get('user')
@@ -314,20 +314,49 @@ async def do_login(email: str, password: str) -> Dict:
     return {"success": True, "user": user, "profile": profile}
 
 
+def _login_error_message(result: Dict) -> str:
+    """The sign-in error to show: Supabase's text is English, and for the two
+    errors people actually hit it does not say what to do next."""
+    from web.translations import tr
+    code = result.get('error_code')
+    if code == 'email_not_confirmed':
+        return tr('Your email address is not confirmed yet. Open the confirmation link we sent you '
+                  '(check the spam folder too), then sign in.')
+    if code == 'invalid_credentials':
+        return tr('Wrong email or password. If you signed up with Google, use "Login with Google". '
+                  'To set a new password, use "Forgot password?".')
+    return result.get('error', '')
+
+
+# What the visitor typed in the Register form, kept in the sign-up metadata.
+# The database's new-user trigger (handle_new_user,
+# migrations/profiles_no_email_username.sql) writes it into the profile when
+# the account is created: production requires email confirmation, so sign_up
+# returns no session and the app could not write the profile (RLS: owner
+# only) then. A key of our own: a Google sign-in merges Google's claims,
+# full_name among them, into the top-level metadata.
+SIGNUP_PROFILE_KEY = 'signup_profile'
+
+
 async def do_register(email: str, username: str, password: str,
                       full_name: str = None, affiliation: str = None) -> Dict:
-    """
-    Perform registration and automatically log in.
+    """Register; sign in as well when Supabase returns a session.
 
-    Returns:
-        Success dict with user info or error dict
+    Returns an error dict, do_login's result when the sign-up came with a
+    session, or {'success': True, 'check_email': True} when it did not. That is
+    production, which requires email confirmation, and also an address that
+    already has an account: Supabase answers both alike, and so do we, so the
+    form does not tell anyone which addresses are registered.
     """
-    # Register with metadata
     metadata = {}
     if full_name:
         metadata['full_name'] = full_name
     if affiliation:
         metadata['affiliation'] = affiliation
+    typed = {name: value for name, value in
+             (('username', username), ('full_name', full_name), ('affiliation', affiliation)) if value}
+    if typed:
+        metadata[SIGNUP_PROFILE_KEY] = typed
 
     from nicegui import run
     result = await run.io_bound(supabase_sign_up, email, password, metadata if metadata else None)
@@ -341,19 +370,12 @@ async def do_register(email: str, username: str, password: str,
     if not user:
         return {"error": "Registration failed - no user returned"}
 
-    # Update profile with additional info
-    if username or full_name or affiliation:
-        profile_data = {}
-        if username:
-            profile_data['username'] = username
-        if full_name:
-            profile_data['full_name'] = full_name
-        if affiliation:
-            profile_data['affiliation'] = affiliation
+    if not result.get('session'):
+        if result.get('already_registered'):
+            logger.info("do_register: sign-up for an address that already has an account")
+        return {'success': True, 'check_email': True}
 
-        await run.io_bound(update_profile, user['id'], profile_data)
-
-    # Auto-login after registration
+    # No confirmation step (e.g. a project with it switched off): sign in now.
     return await do_login(email, password)
 
 
@@ -544,9 +566,11 @@ def create_login_dialog():
                     reg_password = ui.input(tr('Password'), password=True).classes('w-full').props('outlined dense')
                     reg_confirm = ui.input(tr('Confirm Password'), password=True).classes('w-full').props('outlined dense')
                     reg_error = ui.label('').classes('text-red-500 text-sm hidden')
+                    reg_notice = ui.label('').classes('text-green-700 text-sm hidden')
 
                     async def handle_register():
                         reg_error.classes('hidden', remove='visible')
+                        reg_notice.classes('hidden', remove='visible')
 
                         if not all([reg_email.value, reg_username.value, reg_password.value, reg_confirm.value]):
                             reg_error.text = tr('Please fill in required fields')
@@ -569,6 +593,17 @@ def create_login_dialog():
                         if "error" in result:
                             reg_error.text = result["error"]
                             reg_error.classes('visible', remove='hidden')
+                        elif result.get('check_email'):
+                            # Not signed in yet: the account waits for its link.
+                            reg_notice.text = tr(
+                                'Check your inbox at {email} (and the spam folder). A new account gets a '
+                                'confirmation link: open it, then sign in here. If this address already has '
+                                'an account, sign in, or use "Forgot password?".'
+                            ).format(email=reg_email.value)
+                            reg_notice.classes('visible', remove='hidden')
+                            reg_password.value = ''
+                            reg_confirm.value = ''
+                            login_email.value = reg_email.value
                         else:
                             dialog.close()
                             ui.navigate.reload()

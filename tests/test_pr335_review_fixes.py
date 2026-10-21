@@ -497,8 +497,11 @@ def test_the_chip_registry_is_cleaned_up_on_disconnect():
     case.
     """
     code = _code_only(CHIP)
-    assert 'client.on_disconnect' in code, (
-        'nothing removes a registry entry when its client disconnects')
+    # On deletion, not on every disconnect: a socket that drops and reconnects
+    # keeps the same page (tests/test_citation_chip_reconnect.py).
+    assert 'client.on_delete' in code, (
+        'nothing removes a registry entry when its client is deleted')
+    assert 'client.on_disconnect' not in code
     assert '_forget' in code
 
     # PER-CLIENT, never app-wide. `app.on_disconnect` appends to ONE global

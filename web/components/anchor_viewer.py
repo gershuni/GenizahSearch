@@ -39,7 +39,7 @@ from nicegui import run, ui
 from shared.joins_lab import MARK_A, MARK_B
 from web.components.image_resolution import resolve_external_images, resolve_image_url
 from web.components.typography import render_line_numbered_html
-from web.translations import is_rtl, tr
+from web.translations import in_visitor_language, is_rtl, tr
 
 logger = logging.getLogger(__name__)
 
@@ -892,7 +892,7 @@ class AnchorViewer:
         def _resolve() -> Optional[tuple]:
             return self._resolve_off_loop(p_num=_p_num, direction=_direction)
 
-        result = await run.io_bound(_resolve)
+        result = await run.io_bound(in_visitor_language(_resolve))
 
         # Discard stale results: a newer navigation began while we awaited.
         if my_gen != self._nav_gen:
@@ -924,9 +924,10 @@ class AnchorViewer:
             self._page_label.set_text(str(page.p_num))
 
         # Info header — shelfmark + library + title. These come already
-        # localized from get_browse_page() (via get_language()), so the library
-        # name and title render in Hebrew under a Hebrew UI with no extra
-        # translation. The shelfmark is a language-neutral identifier.
+        # localized from get_browse_page(), which ran in the visitor's language
+        # (in_visitor_language above), so the library name and title render in
+        # Hebrew under a Hebrew UI with no extra translation. The shelfmark is a
+        # language-neutral identifier.
         if self._shelfmark_label is not None:
             self._shelfmark_label.set_text(page.shelfmark or page.sys_id or "")
         if self._meta_label is not None:

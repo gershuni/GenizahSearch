@@ -246,7 +246,7 @@ async def create_corrections_page():
                         ui.icon('account_circle').classes('text-3xl').style('color: var(--primary-600);')
                         with ui.column().classes('gap-0'):
                             # Changed to H3
-                            h3(user.get('full_name', user.get('username', '')), classes='font-bold')
+                            h3(user.get('full_name') or user.get('username') or '', classes='font-bold')
                             ui.label(f"{tr('Role')}: {user.get('role', 'contributor').title()} | {tr('Reputation')}: {user.get('reputation', 0)}").classes('text-sm').style('color: var(--text-secondary);')
 
                     def handle_logout():
@@ -786,7 +786,7 @@ async def create_corrections_page():
                                             ui.label(f" • {tr('Image')} {page_num}").classes('text-sm')
 
                                 with ui.row().classes('items-center gap-3'):
-                                    ui.label(f"by {corr.get('author', {}).get('username', 'Unknown')}").style('color: var(--text-secondary);')
+                                    ui.label(f"by {(corr.get('author') or {}).get('username') or 'Unknown'}").style('color: var(--text-secondary);')
 
                                     # Vote display for reviewers
                                     upvotes = corr.get('upvotes', 0)
@@ -884,7 +884,7 @@ async def create_corrections_page():
                                         else:
                                             ui.label(f"#{i}").classes('w-6 text-center')
 
-                                        ui.label(contributor.get('full_name') or contributor.get('username', 'Unknown')).classes('font-medium')
+                                        ui.label(contributor.get('full_name') or contributor.get('username') or 'Unknown').classes('font-medium')
 
                                     with ui.row().classes('items-center gap-4'):
                                         ui.label(f"{contributor.get('_corrections_count', 0)} {tr('corrections')}").style('color: var(--text-secondary);')

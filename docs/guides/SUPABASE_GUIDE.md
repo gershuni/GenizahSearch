@@ -459,6 +459,27 @@ caller's role itself**, because the guards step aside for it.
 - **Changing a rule:** edit the migration's function, re-run the whole file (it is idempotent and
   one transaction), then re-run the verification.
 
+### New accounts: the profile row (hardening, 2026-10-21)
+
+`handle_new_user` (an `AFTER INSERT` trigger on `auth.users`) creates the profile and the default
+"General" list. From `migrations/profiles_no_email_username.sql`: for an email/password sign-up it
+takes the username, full name and affiliation the person typed -- the website sends them under
+`raw_user_meta_data.signup_profile`, the desktop app at the top level -- and for any other provider
+(Google) none of them. The username is never an email address and never one already taken (it is
+then left empty); `profiles` is publicly readable, so nothing private may go there. The same
+migration replaced the existing usernames that contained `@`, recording each change in
+`private.profiles_username_fix_20261021` (not exposed to the Data API; undo statement at the end of
+the file). `supabase_setup.sql` carries the same function.
+
+- **Run:** the file is a dry run as written (it ends in a `DRY RUN` error and keeps nothing);
+  switch `genizah.dry_run` to `'off'` to apply. It locks `auth.users` and `profiles` for its
+  duration (about a second; sign-ups and sign-ins wait), so no sign-up can run the old trigger
+  across it; after 15 s waiting for the lock it gives up and can simply be run again.
+- **Verify:** `scripts/verify_profiles_no_email_username.sql`, before and after; it signs up ten
+  test accounts inside a transaction it always undoes. A pass after the migration is every check PASS.
+- **App side:** the website shows "check your inbox" after Register (production requires email
+  confirmation) and never writes the profile itself at sign-up.
+
 ### Detailed Policy SQL Examples
 
 ```sql

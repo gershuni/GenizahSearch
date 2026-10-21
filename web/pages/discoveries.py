@@ -1352,7 +1352,7 @@ def create_feed_item(item: dict, on_refresh=None):
                         author_name = tr('Anonymous')
                     else:
                         author_name = author.get('full_name') or author.get('username') or tr('Anonymous')
-                    affiliation = author.get('affiliation', '')
+                    affiliation = author.get('affiliation') or ''
                     author_text = f"{author_name}" + (f" ({affiliation})" if affiliation else "")
                     ui.label(author_text).classes('text-xs').style('color: var(--text-tertiary);')
 

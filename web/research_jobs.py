@@ -541,11 +541,17 @@ class IsolatedEngine:
             # Early rows come back through the job (preview.pkl), not by pickling
             # the caller's callback into the child.
             preview = arguments.pop('preview_callback', None)
-            # The cut-off signal is per thread: this call's answer replaces any older one,
-            # and a call that fails or is stopped leaves none.
-            from shared.search_engine import consume_last_search_cutoff
+            # The cut-off and Responsa downgrade signals are per thread: this call's
+            # answer replaces any older one, and a call that fails or is stopped leaves
+            # none. A website search never reads the downgrade signal (it has results[0]),
+            # so without this the next caller on this wait thread would report it.
+            from shared.search_engine import (consume_last_search_cutoff,
+                                              _consume_last_responsa_downgrade,
+                                              _consume_last_responsa_downgrade_meta)
             consume_last_search_cutoff()
             consume_time_limit_stop()
+            _consume_last_responsa_downgrade()
+            _consume_last_responsa_downgrade_meta()
             queue = get_queue()
             from shared.config import Config
             time_limit = Config.WEB_SEARCH_TIME_LIMIT

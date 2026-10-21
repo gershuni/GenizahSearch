@@ -1066,6 +1066,10 @@ POSTHOG_SCRIPT = f'''
 </script>
 ''' if _posthog_key else ''
 
+# User-perceived latency of page turns, searches, Quick View and saves (ux_timing).
+from web.ux_timing import head_html as _ux_timing_head_html  # noqa: E402
+POSTHOG_SCRIPT += _ux_timing_head_html()
+
 
 # posthog_capture moved to web/analytics.py to avoid circular imports
 from web.analytics import posthog_capture  # noqa: F401 — re-export
@@ -1499,7 +1503,10 @@ def _render_password_recovery_handler():
         # from "nothing happened". This is a prime suspect for the 2026-07-28
         # live failure, so it gets its own guard and a loud log.
         try:
-            await _handle_recovery_payload(payload, _open_set_password, _open_error)
+            # Inside the page: this task has none, and the dispatch's PostHog
+            # events and posthog.identify go out through ui.run_javascript.
+            with page_client:
+                await _handle_recovery_payload(payload, _open_set_password, _open_error)
         except Exception as exc:
             logger.warning("[pwreset] dispatch FAILED: %r", exc, exc_info=True)
 
@@ -2283,6 +2290,14 @@ def apply_theme_immediately():
         }})();
     </script>'''
 
+# How long NiceGUI waits for an ASYNC page builder before it answers (its default
+# is 3 s). A sync page building in another tab blocks the one event loop, so a
+# stall elsewhere could push these past 3 s: on NiceGUI 3.8 the page was then
+# served with a deleted client and the browser reload-looped; on 3.18 the visitor
+# gets a 500 page, after /auth/callback has already signed them in. Sync pages
+# are not affected. tests/test_async_page_response_timeout.py
+ASYNC_PAGE_RESPONSE_TIMEOUT = 20.0
+
 @ui.page('/', title='Dicta Genizah Search | חיפוש בגניזה הקהירית — אתר הגניזה של דיקטה')
 def dashboard_page():
     safe_user_set('current_page', '/')
@@ -2899,7 +2914,8 @@ def atlas_page_route():
         from web.pages.atlas import create_atlas_page
         create_atlas_page()
 
-@ui.page('/computed-identifications', title='Computed Identifications | זיהויים מחושבים — Dicta Genizah Search')
+@ui.page('/computed-identifications', title='Computed Identifications | זיהויים מחושבים — Dicta Genizah Search',
+         response_timeout=ASYNC_PAGE_RESPONSE_TIMEOUT)
 async def findings_page_route():
     """Phase 136 (NOVEL-01/PANEL-02, plan 136-16): the corpus-wide findings page.
 
@@ -3013,7 +3029,7 @@ def settings_page_route():
         from web.pages.settings import create_settings_page
         create_settings_page()
 
-@ui.page('/help', title='Help | Dicta Genizah Search')
+@ui.page('/help', title='Help | Dicta Genizah Search', response_timeout=ASYNC_PAGE_RESPONSE_TIMEOUT)
 async def help_page_route():
     safe_user_set('current_page', '/help')
     # noindex the /help page ONLY while the pre-release discovery methods section
@@ -3042,7 +3058,8 @@ async def help_page_route():
         from web.pages.help import create_help_page
         create_help_page(precision=precision, band_counts=band_counts)
 
-@ui.page('/corrections', title='Corrections | תיקונים — Dicta Genizah Search')
+@ui.page('/corrections', title='Corrections | תיקונים — Dicta Genizah Search',
+         response_timeout=ASYNC_PAGE_RESPONSE_TIMEOUT)
 async def corrections_page_route():
     safe_user_set('current_page', '/corrections')
     ui.add_head_html(page_meta('/corrections', noindex=True))
@@ -3074,7 +3091,7 @@ def discoveries_page_route():
         from web.pages.discoveries import create_discoveries_page
         create_discoveries_page()
 
-@ui.page('/admin', title='Admin — Dicta Genizah Search')
+@ui.page('/admin', title='Admin — Dicta Genizah Search', response_timeout=ASYNC_PAGE_RESPONSE_TIMEOUT)
 async def admin_page_route():
     safe_user_set('current_page', '/admin')
     ui.add_head_html(page_meta('/admin', noindex=True))
@@ -3088,7 +3105,8 @@ async def admin_page_route():
         from web.pages.admin import create_admin_page
         await create_admin_page()
 
-@ui.page('/profile', title='Profile | פרופיל — Dicta Genizah Search')
+@ui.page('/profile', title='Profile | פרופיל — Dicta Genizah Search',
+         response_timeout=ASYNC_PAGE_RESPONSE_TIMEOUT)
 async def profile_page_route():
     safe_user_set('current_page', '/profile')
     ui.add_head_html(page_meta('/profile', noindex=True))
@@ -3229,7 +3247,7 @@ async def _oauth_complete_login(user, profile, session, status_label, show_error
     ui.navigate.to('/')
 
 
-@ui.page('/auth/callback')
+@ui.page('/auth/callback', response_timeout=ASYNC_PAGE_RESPONSE_TIMEOUT)
 async def auth_callback_route(code: str = None, error: str = None, error_description: str = None):
     """
     OAuth callback handler.

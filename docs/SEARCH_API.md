@@ -281,7 +281,7 @@ when the offending key is the legacy `mode` field (renamed to `search_mode` in P
 | Name | Type | Constraint | Default | Notes |
 | ---- | ---- | ---------- | ------- | ----- |
 | `query` | string | 1..1000 chars (post-strip; empty → `query_required`; over cap → `query_too_long`) | required | `QUERY_LENGTH_CAP=1000` |
-| `search_mode` | enum | `exact \| variants \| variants_extended \| responsa \| title \| shelfmark \| fuzzy` | required | `regex` was intentionally dropped per Phase 81A D-09. `variants` uses the website's default variant settings (Basic: the 30 most frequent letter-confusion pairs plus the website's custom letter pairs, one change per word), the same as a website search with default settings. `variants_extended` (added 2026-10-11) is the website's Extended level at its defaults: 70 pairs, up to two changes per word. **It runs only as a background job** (`POST /api/search/jobs`): measured on the real index, common phrases run to the three-minute worker limit and return what they found with `results_cut_off`, so a synchronous request is refused with 400 `background_job_required`. The website's Maximum level is not offered: it overran the worker time limit and its workers were stopped by force. `fuzzy` (added 2026-06) finds near spellings — whole words one letter away, two from 5 letters, prefixed forms included (since 2026-10; before, the exact word only) — bounded by `SEARCH_API_FUZZY_TIMEOUT` (default 110s as of 2026-09-08, down from 300s — see "Edge-Timeout Ceiling" below), not the interactive 30s baseline |
+| `search_mode` | enum | `exact \| variants \| variants_extended \| responsa \| title \| shelfmark \| fuzzy` | required | `exact` matches the words as typed, as whole words, with no spelling variation: the website's Exact (since 2026-10-21; before, some matches inside a longer word were returned too -- see Changelog). For prefixed forms use `responsa` with `#word`. `regex` was intentionally dropped per Phase 81A D-09. `variants` uses the website's default variant settings (Basic: the 30 most frequent letter-confusion pairs plus the website's custom letter pairs, one change per word), the same as a website search with default settings. `variants_extended` (added 2026-10-11) is the website's Extended level at its defaults: 70 pairs, up to two changes per word. **It runs only as a background job** (`POST /api/search/jobs`): measured on the real index, common phrases run to the three-minute worker limit and return what they found with `results_cut_off`, so a synchronous request is refused with 400 `background_job_required`. The website's Maximum level is not offered: it overran the worker time limit and its workers were stopped by force. `fuzzy` (added 2026-06) finds near spellings — whole words one letter away, two from 5 letters, prefixed forms included (since 2026-10; before, the exact word only) — bounded by `SEARCH_API_FUZZY_TIMEOUT` (default 110s as of 2026-09-08, down from 300s — see "Edge-Timeout Ceiling" below), not the interactive 30s baseline |
 | `responsa_options` | object \| null | valid only when `search_mode="responsa"` | `null` | see sub-table below |
 | `gap` | integer | `>= 0`; must be `0` when `search_mode in {title, shelfmark}`; at most `10` unless `search_mode == 'responsa'` (2026-10-12) | `0` | proximity slop for keyword search |
 | `limit` | integer | `1..100` for non-fuzzy modes (`MAX_LIMIT=100`); `1..SEARCH_API_FUZZY_MAX_LIMIT` (default 500, max 2000) for `fuzzy` | `50` (fuzzy with no explicit limit widens to a recall-oriented default of 250) | P9X: fuzzy recall-over-precision — non-fuzzy boundary unchanged |
@@ -1324,6 +1324,20 @@ The following improvements are documented here as future work but are NOT implem
 ---
 
 ## Changelog
+
+### 2026-10-21 — `exact` matches whole words, as the website's Exact does
+
+- `POST /api/search` (and its background jobs, the MCP server's `search_manuscripts` and the ChatGPT
+  app) with `search_mode: "exact"` now runs the website's Exact: the words as typed, as whole
+  words. A word inside a longer one (a prefixed or suffixed form) is no longer matched, and a phrase
+  that crosses a page break is now found. The request and response shapes are unchanged, and every
+  field still says `"exact"` (`mode`, `request.search_mode`). Owner decision 2026-10-21.
+  Measured on the real index before the change (whole-word vs the old `exact`): שלום 31,400 vs
+  33,109 rows; בני ישראל 37,573 vs 41,053 (and 14 page-break crossings only whole-word found);
+  ר' יהודה 2,832 vs 7,001; every row only the old `exact` returned was a match inside a longer word.
+  At the API's candidate cap the whole-word search also ran about five times faster (3.8 s vs
+  18.3 s for שלום). For prefixed forms use `responsa` with `#word`; `variants` and `fuzzy` were
+  already whole-word. `/api/parallels` chunk `mode: "exact"` is unchanged.
 
 ### 2026-10-11 — The Extended variant level; chunk parallels over MCP
 

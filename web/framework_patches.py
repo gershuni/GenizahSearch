@@ -6,10 +6,13 @@ called before ``ui.run()`` / NiceGUI initialises its routes.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import mimetypes
+import os
 import re
+import ssl
 import uuid
 from base64 import b64decode
 
@@ -361,6 +364,94 @@ def _patch_binding_remove() -> None:
     logger.debug('binding.remove patch applied (NiceGUI %s)', _NV)
 
 
+# NiceGUI's own 404 handler, which ``_patch_sessionless_404`` still delegates to.
+_nicegui_404_handler = None
+
+
+def _patch_sessionless_404() -> None:
+    """Answer a 404 that carries no session without building a NiceGUI client.
+
+    ``_CacheSafeSessionMiddleware`` gives the requests of ``_skips_session`` paths
+    no session. NiceGUI's 404 handler built its HTML error page in a new
+    ``Client``, which lives for at least 60 s, and while it did, every
+    ``prune_user_storage`` run raised on its first line (``client.request.session``
+    asserts the middleware): no visitor's user storage was pruned. Triggers: any
+    stale ``/_nicegui/<old version>/...`` URL after an upgrade, a bare ``esm``
+    path, and on 3.8 every missing ``/static`` file. Those now get FastAPI's JSON
+    404; pages keep NiceGUI's HTML one. tests/test_sessionless_404.py
+    """
+    global _nicegui_404_handler
+    if _NV > _PATCH_AUDIT_THRESHOLD:
+        logger.warning(
+            'Session-less 404 patch skipped: NiceGUI %s exceeds audited %s',
+            _NV, _PATCH_AUDIT_THRESHOLD,
+        )
+        return
+
+    from fastapi.exception_handlers import http_exception_handler
+    from nicegui import app
+
+    current = app.exception_handlers.get(404)
+    if getattr(current, '_genizah_sessionless_404', False):
+        return
+    _nicegui_404_handler = current
+
+    async def _sessionless_404(request, exc):
+        if 'session' not in request.scope:
+            return await http_exception_handler(request, exc)
+        return await _nicegui_404_handler(request, exc)
+
+    _sessionless_404._genizah_sessionless_404 = True
+    app.add_exception_handler(404, _sessionless_404)
+    logger.debug('Session-less 404 patch applied (NiceGUI %s)', _NV)
+
+
+@functools.lru_cache(maxsize=1)
+def _certifi_ca_text() -> str:
+    import certifi
+
+    with open(certifi.where(), encoding='ascii') as f:
+        return f.read()
+
+
+def _patch_httpx_ssl_context() -> None:
+    """Build httpx's default SSL context from the CA bundle read once.
+
+    ``get_user_client()`` builds a supabase client for each signed-in task, and
+    that builds about four httpx clients, each calling
+    ``ssl.create_default_context(cafile=certifi.where())``. OpenSSL 3.0 loads a
+    CA *file* slowly (about 190 ms per context on the dev box; cpython#95031
+    reports 40-60 ms on Ubuntu with OpenSSL 3.0.x), all on the event loop: about
+    1.2 s per signed-in call locally. The same certificates from text (cadata)
+    give the same context much faster. Each client still gets its OWN context:
+    httpcore sets ALPN on a context for each connection, so a shared one would
+    race. SSL_CERT_FILE / SSL_CERT_DIR and any non-default ``verify`` keep
+    httpx's own code. tests/test_httpx_ssl_context_patch.py
+    """
+    import httpx
+
+    if not httpx.__version__.startswith('0.28.'):
+        logger.warning('httpx SSL context patch skipped: httpx %s is not the audited 0.28.x',
+                       httpx.__version__)
+        return
+
+    import httpx._transports.default as _transports
+
+    original = _transports.create_ssl_context
+    if getattr(original, '_genizah_cadata', False):
+        return
+
+    def create_ssl_context(verify=True, cert=None, trust_env=True):
+        if (verify is True and not cert
+                and not (trust_env and (os.environ.get('SSL_CERT_FILE') or os.environ.get('SSL_CERT_DIR')))):
+            return ssl.create_default_context(cadata=_certifi_ca_text())
+        return original(verify=verify, cert=cert, trust_env=trust_env)
+
+    create_ssl_context._genizah_cadata = True
+    _transports.create_ssl_context = create_ssl_context
+    logger.debug('httpx SSL context patch applied (httpx %s)', httpx.__version__)
+
+
 def apply_all_patches() -> None:
     """Apply all NiceGUI monkey-patches. Call once before ui.run().
 
@@ -372,6 +463,8 @@ def apply_all_patches() -> None:
         ('ESM is_file', _patch_nicegui_esm_handler),
         ('HTML lang', _patch_html_lang_attribute),
         ('binding.remove', _patch_binding_remove),
+        ('Session-less 404', _patch_sessionless_404),
+        ('httpx SSL context', _patch_httpx_ssl_context),
     ]:
         try:
             fn()
