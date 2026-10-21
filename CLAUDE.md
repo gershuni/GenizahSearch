@@ -219,7 +219,9 @@ data. Register it nightly with
 2. **After fixing any bug:** mark it `✅ Fixed (YYYY-MM-DD)` **and move the entry to
    `docs/archive/OPEN_ISSUES_ARCHIVE.md`** in the same edit — closed items must not accumulate
    in the tracker.
-3. **After finding new bugs:** Add to appropriate section with `❌ Open` status
+3. **After finding new bugs:** write the P1/P2/P3 row as a file in `docs/open_issues.d/` (see its
+   README), not in the tracker itself: rows added there conflict across open PRs. `init.ps1`
+   lists pending fragments; `scripts/collect_open_issues.py --apply` folds them in
 4. **At session end:** Update the "Last Updated" timestamp and summary counts
 
 Closed history (fixed/resolved/superseded + the full Change Log) lives in
@@ -250,7 +252,7 @@ python scripts/bump_version.py 6.3.0 --dry-run # preview only
 **Files updated automatically:** `version.py` (source of truth), `version_info.txt` (Windows EXE metadata), `CompileScriptGenizah.iss` (Inno Setup), `README.md` (header line).
 
 **Manual steps after running the script:**
-1. `python scripts/collect_changelog.py --apply` (folds `changelog.d/` in), then `CHANGELOG.md` — add `## [X.Y.Z]` section
+1. `python scripts/collect_changelog.py --apply` (folds `changelog.d/` in), then `CHANGELOG.md` — add `## [X.Y.Z]` section; `python scripts/collect_open_issues.py --apply` (folds `docs/open_issues.d/` in)
 2. `CLAUDE.md` "Recently Changed" — add one-line entry
 3. `README.md` "What's New" section — update feature description
 
