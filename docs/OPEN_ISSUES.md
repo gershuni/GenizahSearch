@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-21 (v9.8.1 release, both: PRs #418-#425, `master-main`) -- version 9.8.1, CHANGELOG section folded from `changelog.d/`; no desktop or web What's New (owner). After the deploy the Cloudflare image Cache Rule went live (row annotated). 237 open.
+> **Last Updated:** 2026-10-21 (desktop vs website comparison of `*כהנים *גדולים`, `master-main`, no code change) -- P2 +5: desktop Excel export, hidden Source column, Responsa `*word` recall/speed, `#word#` suffixes and in-word stars, Responsa outer word boundaries. 242 open.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
@@ -63,7 +63,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open |
 |----------|------|
 | P1 Critical Bugs | 0 |
-| P2 Medium Bugs | 47 |
+| P2 Medium Bugs | 52 |
 | P3 Low Priority | 149 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 20 |
@@ -71,7 +71,7 @@ Move to "Completed Issues" section at bottom with date
 | Deferred to v7.15+ | 6 |
 | 2026-05-29 audit follow-up | 2 |
 | FGP integration (§4.5) | 5 |
-| **Total open** | **237** |
+| **Total open** | **242** |
 
 > Counts here exclude closed items (recomputed 2026-08-14 by counting rows carrying ❌/⏸/⏳); closed history lives in docs/archive/OPEN_ISSUES_ARCHIVE.md.
 > Count notes from 2026-09-25 to 2026-10-05 moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-06.
@@ -105,6 +105,9 @@ Move to "Completed Issues" section at bottom with date
 > 2026-10-21 (live checks Q13 / discovery_responses): P2 +1 (web discovery replies fail: the table does not exist live); the anonymous-author row: nothing exposed today -- 237.
 > 2026-10-21 (Codex review on #423): P3 +1 (case-variant usernames from simultaneous sign-ups; needs a database index) -- 238.
 > 2026-10-21 (desktop accounts without a username, PR #424): P3 -1 (desktop registration and own corrections by username: fixed, archived) -- 237.
+> 2026-10-21 (desktop vs website `*כהנים *גדולים` comparison): P2 +3 (desktop Excel Full Text and glued lines; hidden Source column; Responsa `*word` recall and speed) -- 240.
+> 2026-10-21 (Responsa wildcard shapes): P2 +1 (`#word#` loses its suffixes to the 500-term guard; a star inside a word returns nothing) -- 241.
+> 2026-10-21 (Responsa outer edges): P2 +1 (the first and last words of a Responsa query have no word boundary) -- 242.
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 
@@ -166,6 +169,11 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **Desktop Excel export: "Full Text" holds the whole manuscript, and line breaks are deleted** | `genizah_app.py::_build_search_results_xlsx_bytes` (`res['full_text']`, `sanitize_fn` on `raw_file_hl`) | ❌ Open (2026-10-21, measured on the owner's `*כהנים *גדולים` export) | A row found through a whole-manuscript doc (`_aggregate_result_row`, 248 of 405 rows) exports that doc's text cut at 32,000 chars: 132 rows' Full Text does not contain the match; file 4.3 MB vs the website's 0.65 MB for the same rows. The website exports the page (`get_full_text_by_id(uid)`). `sanitize_text_for_excel` drops `\n` without a space, so Snippet and Full Text glue words across lines (`אלמראהובעלהא`); the website uses ` ‖ ` / `clean_text_single_line`. |
+| **Desktop hides the Source (מקור) column although the index holds V0.7** | `genizah_app.py` (`has_multiple_sources` = `AllGenizah_OLD.txt` next to the exe) | ❌ Open (2026-10-21) | The installed exe looks in `C:\Program Files\Genizah Search Pro\`; the index it uses (`~\Genizah_Tantivy_Index`) was built from the repo's `AllGenizah_OLD.txt` and returns V0.7 rows (44 of 405 for `*כהנים *גדולים`) with no visible marker. Decide from the rows (any `source == 'V0.7'`), as the LOCAL check beside it does. |
+| **Responsa `*word` misses pages, and reads every whole-manuscript doc** | `shared/search_engine.py::build_tantivy_query` (prefix wildcard = the 24 `expand_grammatical_prefixes` forms + bracket forms), `execute_search` (Responsa keeps the single mixed page+aggregate query) | ❌ Open (2026-10-21; ground truth by scanning `Transcriptions.txt`) | `*כהנים *גדולים`: 369 V0.8 pages match the engine's own regex; the desktop finds 361, the website 360. Missed: 7 Judeo-Arabic forms (`אלכהנים`/`ואלכהנים`/`באלכהנים` … `אלגדולים`) and one `גדולים'`. 15 pages are found only because their whole manuscript also holds a listed form elsewhere (EVR ARAB I 118 p.168 is one; the website misses it). The 3,723 candidates include 1,829 whole-manuscript docs, 619M chars: 31 s with the `regex` module (desktop), 9.8 s with stdlib `re` (production workers). Candidate retrieval from real index terms ending in the word would fix recall and let Responsa read pages first. Owner decision. Measured: `tantivy.Query.regex_query` (tantivy 0.25) `.*כהנים` AND `.*גדולים` on page docs = 1,918 pages in 7 s. |
+| **Responsa: `#word#` never keeps its suffixes; a star inside a word returns nothing** | `shared/responsa.py::_apply_explosion_guard` (`MAX_EXPANDED_TERMS` 500), `parse_responsa_query`, `shared/search_engine.py::build_tantivy_query` | ❌ Open (2026-10-21, local index) | 24 prefixes x 25 suffixes = 600 > 500, so the guard drops the suffixes of every `#word#` (and of `*word*`, rewritten to it): `#כהנ# גדולים` and `*כהנ* גדולים` return 2 rows (plain `כהנים גדולים`: 360); only a 5-second status warning says so. `כ*נים` is not parsed as a wildcard (literal `*`, 0 rows); `*כ*ה*נ*ים` builds the right regex but sends the pattern to Tantivy as a literal term (0 candidates, 0 rows), so character patterns always return nothing. |
+| **Responsa: the query's first and last words have no word boundary** | `shared/search_engine.py::build_regex_pattern` (Responsa branch), `execute_search` (`_whole_words` is off for Responsa) | ❌ Open (2026-10-21, local index) | The regex checks boundaries only between words, so the first word acts as `*word` and the last as `word*`, with or without an operator: Responsa `כהנים גדול` returns 264 rows, 260 of them `כהנים גדולים` (Exact: 4); a single `ספר` accepts `מספרים`. The index side still needs the typed form somewhere on the page, so which such pages appear is chance. |
 | **Web: replies to community discoveries fail, because `discovery_responses` does not exist in production** | `web/supabase_client.py::get_discovery_responses` / `create_discovery_response`, `web/pages/discoveries.py` (the reply box) | ❌ Open (2026-10-21; table absence live-confirmed, the page behaviour from code reading) | Reading logs an error and returns no replies, so every discovery looks unanswered; posting shows the raw database error instead of "Reply posted". Owner decision: create the table (DDL in `migrations/` with RLS, grants and the anonymous author kept out of the data from the start), or hide the reply box until then. The desktop's replies are stubs (P2 row "Desktop discovery responses are stubs"). |
 | **Hardening: mask the author of anonymous discoveries and responses in the data, not only on screen** | `supabase_setup.sql` (discoveries SELECT has no column restriction; anon SELECT), `web/supabase_client.py::get_discovery_responses` (`select('*')`) | ❌ Open (2026-10-20, repo SQL; live-checked 2026-10-21: nothing exposed today) | Live 2026-10-21 (Q13): no discovery is marked anonymous, and `discovery_responses` does not exist, so no author is exposed today; the first anonymous discovery would be. Fix before that feature is used. Options (owner): a SECURITY DEFINER read that returns no `user_id` for an anonymous row, or call it "name hidden on the page" instead of "anonymous". |
 | **Hardening: give the documented `published_joins` admin UPDATE policy a real `WITH CHECK`** | `docs/guides/SUPABASE_GUIDE.md` (the published_joins policies; no tracked DDL) | ❌ Open (2026-10-20, docs; production unverified) · 🔑 Q4, flag (b), of `scripts/supabase_live_check.sql` | Its `WITH CHECK` is `true`; permissive policies' checks combine with OR, so it widens every other UPDATE policy on the table. Fix: `WITH CHECK (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'))`. See also "Supabase DDL gaps". |
