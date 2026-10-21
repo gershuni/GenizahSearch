@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-21 (v9.8.1 release, both: PRs #418-#425, `master-main`) -- version 9.8.1, CHANGELOG section folded from `changelog.d/`; no desktop or web What's New (owner). After the deploy the Cloudflare image Cache Rule went live (row annotated). 237 open.
+> **Last Updated:** 2026-10-21 (NLI thumbnails on disk, web, `claude/happy-maxwell-2hdkns`) -- Visual Similarity blank thumbnails diagnosed: 8 NLI manifest slots with a 1 s wait, and a "30-day" FL-id cache that held 5 minutes (fixed, archived); thumbnails now kept on disk; the first view of an unopened manuscript stays open (P2), and a desktop image-cache key collision found by reading the code (P3). 239 open.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
@@ -63,15 +63,15 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open |
 |----------|------|
 | P1 Critical Bugs | 0 |
-| P2 Medium Bugs | 47 |
-| P3 Low Priority | 149 |
+| P2 Medium Bugs | 48 |
+| P3 Low Priority | 150 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 20 |
 | Untested Areas | 5 |
 | Deferred to v7.15+ | 6 |
 | 2026-05-29 audit follow-up | 2 |
 | FGP integration (§4.5) | 5 |
-| **Total open** | **237** |
+| **Total open** | **239** |
 
 > Counts here exclude closed items (recomputed 2026-08-14 by counting rows carrying ❌/⏸/⏳); closed history lives in docs/archive/OPEN_ISSUES_ARCHIVE.md.
 > Count notes from 2026-09-25 to 2026-10-05 moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-06.
@@ -105,6 +105,7 @@ Move to "Completed Issues" section at bottom with date
 > 2026-10-21 (live checks Q13 / discovery_responses): P2 +1 (web discovery replies fail: the table does not exist live); the anonymous-author row: nothing exposed today -- 237.
 > 2026-10-21 (Codex review on #423): P3 +1 (case-variant usernames from simultaneous sign-ups; needs a database index) -- 238.
 > 2026-10-21 (desktop accounts without a username, PR #424): P3 -1 (desktop registration and own corrections by username: fixed, archived) -- 237.
+> 2026-10-21 (NLI thumbnails on disk, `claude/happy-maxwell-2hdkns`): P2 +1 (grid thumbnails of unopened manuscripts, partly fixed, stays open) +1 -1 (the "30-day" FL-id cache held 5 minutes: found and fixed the same day, archived); P3 +1 (desktop image-cache key collision) -- 239.
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 
@@ -166,6 +167,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **Visual Similarity / Joins Lab grids: thumbnails of manuscripts nobody opened come up blank, and different ones on each redraw** | `web/api.py::fetch_fl_ids_from_nli` (`NLI_MAX_CONCURRENT_FETCHES` 8, `NLI_SEMAPHORE_TIMEOUT` 1 s), `web/nli_image_store.py` | ⚠️ Partly fixed (2026-10-21, `claude/happy-maxwell-2hdkns`, not deployed) | Owner report 2026-10-21. Each card whose manuscript the server has not resolved needs an NLI manifest; 8 run at once and the others wait 1 s, then the route answers 404; a failure is `no-store`, so each redraw (the size buttons) re-asks exactly the failed cards. Reproduced: 12 of 20 lost at a 1.5 s manifest; production cold thumbnails took 2.3-3.5 s. Fixed on the branch: the FL-id store keeps 30 days (the "30-day" JSON held 5 minutes; archived) and thumbnails are kept on disk, so a manuscript resolved in the last 30 days, or a thumbnail fetched once, no longer waits for a slot. Still open: the first view of a manuscript nobody opened in 30 days. Fix: [docs/plans/NLI_THUMBNAIL_PREFETCH_PLAN.md](plans/NLI_THUMBNAIL_PREFETCH_PLAN.md) (prefetch; four owner decisions), or a one-time browser retry. 🔑 Server check after deploy: `/_internal/memstat` → `nli_image_store` counters, and `journalctl -u genizah-web` for "NLI semaphore timeout". |
 | **Web: replies to community discoveries fail, because `discovery_responses` does not exist in production** | `web/supabase_client.py::get_discovery_responses` / `create_discovery_response`, `web/pages/discoveries.py` (the reply box) | ❌ Open (2026-10-21; table absence live-confirmed, the page behaviour from code reading) | Reading logs an error and returns no replies, so every discovery looks unanswered; posting shows the raw database error instead of "Reply posted". Owner decision: create the table (DDL in `migrations/` with RLS, grants and the anonymous author kept out of the data from the start), or hide the reply box until then. The desktop's replies are stubs (P2 row "Desktop discovery responses are stubs"). |
 | **Hardening: mask the author of anonymous discoveries and responses in the data, not only on screen** | `supabase_setup.sql` (discoveries SELECT has no column restriction; anon SELECT), `web/supabase_client.py::get_discovery_responses` (`select('*')`) | ❌ Open (2026-10-20, repo SQL; live-checked 2026-10-21: nothing exposed today) | Live 2026-10-21 (Q13): no discovery is marked anonymous, and `discovery_responses` does not exist, so no author is exposed today; the first anonymous discovery would be. Fix before that feature is used. Options (owner): a SECURITY DEFINER read that returns no `user_id` for an anonymous row, or call it "name hidden on the page" instead of "anonymous". |
 | **Hardening: give the documented `published_joins` admin UPDATE policy a real `WITH CHECK`** | `docs/guides/SUPABASE_GUIDE.md` (the published_joins policies; no tracked DDL) | ❌ Open (2026-10-20, docs; production unverified) · 🔑 Q4, flag (b), of `scripts/supabase_live_check.sql` | Its `WITH CHECK` is `true`; permissive policies' checks combine with OR, so it widens every other UPDATE policy on the table. Fix: `WITH CHECK (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'))`. See also "Supabase DDL gaps". |
@@ -220,6 +222,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **Desktop image cache: a 400 px thumbnail and the 2000 px viewer image of the same page share one file** | `desktop/image_loader.py::ImageLoaderThread.run` (cache name `FL<id>_v2.jpg` from the FL id alone); thumbnails from `shared/metadata_manager.py::_resolve_thumbnail` (`/full/400,`) | ❌ Open (found 2026-10-21 by reading the code; not reproduced) | Every `ImageLoaderThread` names its cache file by FL id only, whatever the requested width. A thumbnail loaded first (Joins Lab grid, result-dialog thumbnail, Lists preview, Browse thumbnails) is saved as the file the manuscript viewer then reads for its 2000 px image, so page 1 can show enlarged and blurry. Fix: key the file by FL id and width (or by URL). Fold into the desktop phase of [docs/plans/NLI_THUMBNAIL_PREFETCH_PLAN.md](plans/NLI_THUMBNAIL_PREFETCH_PLAN.md) section 7. ✋ *By hand:* open a manuscript's thumbnail in the Joins Lab, then the same manuscript in the viewer, with an empty `images_cache/`. |
 | **Responsa downgrade warnings follow the server process's language, not the visitor's** | `shared/search_engine.py::_tr`, `shared/responsa.py::_tr` (`genizah_core.CURRENT_LANG`), `web/pages/search.py` (the `responsa_warning` notify) | ❌ Open (2026-10-20) | Built in the research worker in the process's `lang.pkl` language ('en' when absent) and shown as is; the API repeats it. Fix: pin the workers to English, then split the joined labels on '; ' and `tr()` each on the web side. |
 | **Admin approve/reject drops `reviewed_by` / `reviewed_at` from its payload (it runs in a worker thread)** | `web/pages/admin.py` (`update_correction_status` in `run.io_bound`; `GlobalAuthState.get_user_id()` is None there) | ❌ Open (2026-10-20, code reading) | No visible effect while the 2026-09-25 guard trigger stamps both server-side (`migrations/add_privileged_column_guards.sql`). Pass the reviewer id captured on the loop. |
 | **Tests that build a /browse page make real anonymous Supabase reads against the production URL** | the page's comments loader and joins panel (committed default URL and anon key); likely `tests/test_browse_print_control.py`, `tests/test_browse_computed_deeplink.py`, `tests/test_discovery_panel_browse_wiring.py` (not checked) | ❌ Open (2026-10-20) | Found when a new test hit PostgREST (harmless reads, one a uuid parse error). Tests then depend on the network and touch production. `tests/test_ux_timing.py` and `tests/test_browse_recents_off_loop.py` use a `supabase_offline` fixture (the URL points at a refused local port); make it an autouse default in conftest. |

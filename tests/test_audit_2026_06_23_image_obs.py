@@ -2,9 +2,9 @@
 """SEED-021 — image-fetch observability + viewer-polish audit tests.
 
 Covers:
-  #23 — fetch_fl_ids_from_nli persists a LOCK-CONSISTENT cache snapshot
-        (the snapshot is copied inside the same critical section as the update,
-        passed into _persist_positive_cache_snapshot).
+  #23 — fetch_fl_ids_from_nli persists what it just resolved. Since 2026-10-21
+        it persists ONLY that entry (into the 30-day FL-id store), not a copy
+        of the memory cache: the copy is what kept the old file at 5 minutes.
   #36 — nli_image logs non-200/non-429/non-5xx statuses (404 / unexpected 4xx)
         at debug for both the IIIF and Rosetta fetch handlers.
   #37 — resolve_external_images warning includes exc_info (stack trace).
@@ -127,64 +127,40 @@ class TestNliImageStatusLogging:
         assert 'non-success status' not in msgs
 
 
-# ─── #23 — lock-consistent persisted snapshot ───────────────────────────────────
+# ─── #23 — what a resolve persists ──────────────────────────────────────────────
 
-class TestPersistSnapshotConsistency:
-    """The persisted snapshot must reflect the cache AT update time, copied
-    inside the same critical section — not a re-locked read that could
-    interleave with a concurrent mutation."""
+class TestPersistResolvedEntry:
+    """A resolve persists the entry it resolved -- and only that one. Persisting a
+    copy of the memory cache (5-minute entries) kept the "30-day" file at five
+    minutes' worth (2026-10-21; tests/test_nli_image_store.py has the scenario)."""
 
-    def test_snapshot_reflects_update_under_lock(self):
-        captured = {}
+    def test_persists_only_the_resolved_entry(self):
+        captured = []
 
-        def _capture_save(cache_snapshot, cache_time_snapshot):
-            captured['cache'] = dict(cache_snapshot)
-            captured['time'] = dict(cache_time_snapshot)
+        def _capture_save(cache, cache_time):
+            captured.append((dict(cache), dict(cache_time)))
 
-        manifest = _MockResponse(
-            status_code=200,
-            json_data={'sequences': [{'canvases': [
-                {'images': [{'resource': {'service': {
-                    '@id': 'https://iiif.nli.org.il/IIIFv21/FL7734473/info.json'}}}]},
-            ]}]},
-        )
+        def _manifest(fl):
+            return _MockResponse(
+                status_code=200,
+                json_data={'sequences': [{'canvases': [
+                    {'images': [{'resource': {'service': {
+                        '@id': f'https://iiif.nli.org.il/IIIFv21/FL{fl}/info.json'}}}]},
+                ]}]},
+            )
+
         with patch('web.api._save_nli_persistent_cache', side_effect=_capture_save):
             # fetch_fl_ids_from_nli fetches the IIIF manifest via _nli_session.get.
-            with patch('web.api._nli_session.get', return_value=manifest):
-                fl_ids = _seam('fetch_fl_ids_from_nli')('sysid_snap_test')
+            with patch('web.api._nli_session.get', return_value=_manifest('7734473')):
+                assert _seam('fetch_fl_ids_from_nli')('sysid_snap_test') == ['7734473']
+            with patch('web.api._nli_session.get', return_value=_manifest('7734474')):
+                assert _seam('fetch_fl_ids_from_nli')('sysid_snap_test_2') == ['7734474']
 
-        assert fl_ids == ['7734473']
-        # The persisted snapshot must already contain the just-resolved entry —
-        # proving the snapshot was copied AFTER the in-lock update (consistent).
-        assert captured['cache'].get('sysid_snap_test') == ['7734473']
-        assert 'sysid_snap_test' in captured['time']
-
-    def test_persist_helper_accepts_passed_snapshot(self):
-        """The writer accepts an explicit pre-copied snapshot (the consistent path)."""
-        captured = {}
-
-        def _capture_save(cache_snapshot, cache_time_snapshot):
-            captured['cache'] = cache_snapshot
-            captured['time'] = cache_time_snapshot
-
-        snap = ({'k': ['1', '2']}, {'k': 123.0})
-        with patch('web.api._save_nli_persistent_cache', side_effect=_capture_save):
-            _seam('_persist_positive_cache_snapshot')(snap)
-
-        assert captured['cache'] == {'k': ['1', '2']}
-        assert captured['time'] == {'k': 123.0}
-
-    def test_persist_helper_self_locks_when_no_snapshot(self):
-        """Backward-compat: called with no arg, it still takes its own copy."""
-        captured = {}
-
-        def _capture_save(cache_snapshot, cache_time_snapshot):
-            captured['called'] = True
-
-        with patch('web.api._save_nli_persistent_cache', side_effect=_capture_save):
-            _seam('_persist_positive_cache_snapshot')()
-
-        assert captured.get('called') is True
+        assert [cache for cache, _ in captured] == [
+            {'sysid_snap_test': ['7734473']},
+            {'sysid_snap_test_2': ['7734474']},
+        ]
+        assert all(set(cache) == set(cache_time) for cache, cache_time in captured)
 
 
 # ─── #37 / #38 — resolve_external_images observability ──────────────────────────

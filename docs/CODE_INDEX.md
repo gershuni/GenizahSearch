@@ -1319,6 +1319,15 @@ Public MCP server at `POST /mcp` (docs/plans/MCP_SERVER_PLAN.md; contract in doc
 - **Function** `_run_tool` / `_start_and_wait` — one `mcp_tool_call` event per call; coded errors; in-tool wait of three polls
 - **Function** `how_to_cite` — page citation from `shared/transcription_credits.py`, by `text_source`
 
+## web/nli_image_store.py
+
+The NLI image proxy's two disk stores (2026-10-21; docs/plans/NLI_THUMBNAIL_PREFETCH_PLAN.md). Locations from the environment on every call; every error is a miss.
+- **Function** `fl_id_store_get` / `fl_id_store_put` — a manuscript's NLI image ids in `nli_fl_ids.db`, kept `NLI_DISK_CACHE_TTL` (30 days); `web/api.py::_save_nli_persistent_cache` is the one writer
+- **Function** `fl_id_store_prepare` — at startup: read the old `nli_fl_ids_cache.json` in once, drop expired rows
+- **Function** `thumb_path` — where a thumbnail lives, or None (corpus sys_ids only, widths in `NLI_THUMB_CACHE_WIDTHS`); the prefetch script is to use it too
+- **Function** `thumb_get` / `thumb_put` — read / keep a JPEG (atomic write; none past `NLI_THUMB_CACHE_MAX_MB` or below `NLI_THUMB_CACHE_MIN_FREE_MB` free)
+- **Function** `stats` — counters for `/_internal/memstat` (`nli_image_store`)
+
 ## web/public_pages.py
 
 - **Function** `register_public_pages` — `/terms`, `/support`, `/ai/privacy`, and `/.well-known/openai-apps-challenge` (only when `OPENAI_APPS_CHALLENGE` is set)

@@ -63,7 +63,7 @@ WEB_PUZZLE_ENABLED=true   # enables web puzzle page (set false to hide)
 ATLAS_PREVIEW_ENABLED=false  # Phase 133 Visual Atlas Preview beta (/atlas); default OFF, ANDed with baked-asset readiness
 MASKING_SCAN_PATTERNS_FILE=  # path to a gitignored restricted-string pattern file for scripts/check_atlas_masking.py (dev/CI only)
 PUZZLE_UPLOAD_SECRET=xxx  # HMAC secret for puzzle upload tokens (auto-generated if unset)
-NLI_DISK_CACHE_TTL=2592000  # restart-persistent NLI FL-ID cache TTL in seconds (default 30 days)
+NLI_DISK_CACHE_TTL=2592000  # how long the NLI image-id store (nli_fl_ids.db) keeps an entry, seconds (default 30 days)
 NLI_MAX_CONCURRENT_FETCHES=4  # concurrent NLI manifest fetch cap
 NLI_SEMAPHORE_TIMEOUT=20  # seconds to wait for an NLI fetch slot
 ```
