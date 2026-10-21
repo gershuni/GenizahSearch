@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-21 (reliability and latency review, `claude/reliability-latency-review`) -- the `profiles` username hardening applied live (owner, verify 13/13 PASS); web sign-up fixed for email confirmation (a "check your inbox" answer, the two common sign-in errors translated, the typed fields left to the new trigger); API / MCP / Joins Lab Exact now whole-word (owner); Codex rounds 1-4: their findings in the branch's new code fixed, or removed with the code, one pre-existing one logged; P1 -1, P2 -2, P3 +5 -- 236 open. 2026-10-20: 13 fixes with regression tests and `ux_timing`; P1 +1, P2 +8, P3 +9.
+> **Last Updated:** 2026-10-21 (reliability and latency review, `claude/reliability-latency-review`) -- the `profiles` username hardening applied live (owner, verify 13/13 PASS); web sign-up fixed for email confirmation (a "check your inbox" answer, the two common sign-in errors translated, the typed fields left to the new trigger); API / MCP / Joins Lab Exact now whole-word (owner); Codex rounds 1-4: their findings in the branch's new code fixed, or removed with the code, one pre-existing one logged; P1 -1, P2 -2 +1, P3 +5 -- 237 open. 2026-10-20: 13 fixes with regression tests and `ux_timing`; P1 +1, P2 +8, P3 +9.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
@@ -63,7 +63,7 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open |
 |----------|------|
 | P1 Critical Bugs | 0 |
-| P2 Medium Bugs | 46 |
+| P2 Medium Bugs | 47 |
 | P3 Low Priority | 149 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 20 |
@@ -71,7 +71,7 @@ Move to "Completed Issues" section at bottom with date
 | Deferred to v7.15+ | 6 |
 | 2026-05-29 audit follow-up | 2 |
 | FGP integration (§4.5) | 5 |
-| **Total open** | **236** |
+| **Total open** | **237** |
 
 > Counts here exclude closed items (recomputed 2026-08-14 by counting rows carrying ❌/⏸/⏳); closed history lives in docs/archive/OPEN_ISSUES_ARCHIVE.md.
 > Count notes from 2026-09-25 to 2026-10-05 moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-06.
@@ -102,6 +102,7 @@ Move to "Completed Issues" section at bottom with date
 > 2026-10-21 (API Exact, `claude/reliability-latency-review`): P2 -1 (API / MCP / Joins Lab Exact not whole-word: switched by owner decision, archived) -- 235.
 > 2026-10-21 (Codex round 4, information only): P3 +1 (Exact misses a phrase with 4+ stray tokens between its words; pre-existing) -- 236.
 > 2026-10-21 (profiles usernames live): P1 -1 (fixed live by the owner, archived), P3 +1 (its residuals: anonymous reads of unneeded columns, the Google-name decision) -- 236.
+> 2026-10-21 (live checks Q13 / discovery_responses): P2 +1 (web discovery replies fail: the table does not exist live); the anonymous-author row: nothing exposed today -- 237.
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 
@@ -163,7 +164,8 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
-| **Hardening: mask the author of anonymous discoveries and responses in the data, not only on screen** | `supabase_setup.sql` (discoveries SELECT has no column restriction; anon SELECT), `web/supabase_client.py::get_discovery_responses` (`select('*')`) | ❌ Open (2026-10-20, repo SQL; production unverified) · 🔑 Q13 of `scripts/supabase_live_check.sql` | Options (owner): a SECURITY DEFINER read that returns no `user_id` for an anonymous row, or call it "name hidden on the page" instead of "anonymous". |
+| **Web: replies to community discoveries fail, because `discovery_responses` does not exist in production** | `web/supabase_client.py::get_discovery_responses` / `create_discovery_response`, `web/pages/discoveries.py` (the reply box) | ❌ Open (2026-10-21; table absence live-confirmed, the page behaviour from code reading) | Reading logs an error and returns no replies, so every discovery looks unanswered; posting shows the raw database error instead of "Reply posted". Owner decision: create the table (DDL in `migrations/` with RLS, grants and the anonymous author kept out of the data from the start), or hide the reply box until then. The desktop's replies are stubs (P2 row "Desktop discovery responses are stubs"). |
+| **Hardening: mask the author of anonymous discoveries and responses in the data, not only on screen** | `supabase_setup.sql` (discoveries SELECT has no column restriction; anon SELECT), `web/supabase_client.py::get_discovery_responses` (`select('*')`) | ❌ Open (2026-10-20, repo SQL; live-checked 2026-10-21: nothing exposed today) | Live 2026-10-21 (Q13): no discovery is marked anonymous, and `discovery_responses` does not exist, so no author is exposed today; the first anonymous discovery would be. Fix before that feature is used. Options (owner): a SECURITY DEFINER read that returns no `user_id` for an anonymous row, or call it "name hidden on the page" instead of "anonymous". |
 | **Hardening: give the documented `published_joins` admin UPDATE policy a real `WITH CHECK`** | `docs/guides/SUPABASE_GUIDE.md` (the published_joins policies; no tracked DDL) | ❌ Open (2026-10-20, docs; production unverified) · 🔑 Q4, flag (b), of `scripts/supabase_live_check.sql` | Its `WITH CHECK` is `true`; permissive policies' checks combine with OR, so it widens every other UPDATE policy on the table. Fix: `WITH CHECK (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'))`. See also "Supabase DDL gaps". |
 | **Full garbage collections stall the event loop 0.25-0.53 s; nothing calls `gc.freeze()` after startup** | `web/main.py::initialize_engine` | ❌ Open (2026-10-20, measured locally) | Startup leaves 0.6-0.84 M tracked objects (csv bank, engines, browse map), and every gen-2 pass walks them on the thread that allocates, mostly the loop: 465 and 534 ms in a real /browse run, 92-133 ms after `gc.collect(); gc.freeze()`. Freeze once, after the background loaders finish (MetadataManager threads, the FL-ID build); `/_internal/objgraph` must then unfreeze or report the freeze count, since frozen objects are invisible to `gc.get_objects`. Owner decision. |
 | **A /browse page change rebuilds the whole content area 2-3 times on the loop, and NiceGUI 3.18 builds elements ~55-60% slower than 3.8** | `web/pages/browse.py::load_page` (spinner, Phase A and Phase B each call `update_content()`), NiceGUI 3.18 `observables.py` (`expects_arguments` for every collection) | ❌ Open (2026-10-20, measured locally) | 94-300 ms of loop CPU per anonymous page change, in slices below perf_watch's 300 ms threshold; 1,200 elements build in 117-127 ms on 3.8 and 189-199 ms on 3.18 (memoizing `expects_arguments` recovers about half). Fixes: no full rebuild for the spinner; Phase B updates only its own containers; count the whole manuscript's letters once, not twice per render (`choose_default_source`). Measure with `ux_timing` first. |
@@ -452,7 +454,7 @@ Surfaced while writing `docs/architecture/DATA_LIFECYCLE.md` (every row verified
 |-------|------|--------|-------|
 | **`bodleian_master_index.csv` has no code reader but ships in every installer** | `GenizahSearchPro.spec` datas | ❌ Open (owner call) | `.gitignore` already files it under "legacy, unreferenced" (Phase 65). Dropping it from the spec removes 89 KB from each installer; no code path changes. |
 | **`fgp_data/fgp_transcriptions.db` is already in the spec while §4.5 says shipping is pending; its producer scripts are gitignored** | `GenizahSearchPro.spec`, `fgp_data/fgp_*.py` (untracked), `gui_threads.py` sidecar-updater map | ❌ Open | 405 MB rides in every installer with the flag off; the scripts that build it and the schema README exist only on the owner's machine (`fgp_data/` is ignored whole); FGP is absent from the post-install updater map. |
-| **Supabase DDL gaps** | `supabase_setup.sql`, `migrations/` | ❌ Open | `published_joins`, `published_join_fragments`, `discovery_responses` are written by code and have no DDL anywhere in the repo; `document_sources` is defined only in `migrations/`; no ledger records which migrations have been applied to production. |
+| **Supabase DDL gaps** | `supabase_setup.sql`, `migrations/` | ❌ Open | `published_joins`, `published_join_fragments`, `discovery_responses` are written by code and have no DDL anywhere in the repo (`discovery_responses` does not exist in production either: 42P01, 2026-10-21; see the P2 row on discovery replies); `document_sources` is defined only in `migrations/`; no ledger records which migrations have been applied to production. |
 | **`images_cache/` grows without bound** | `desktop/image_loader.py` | ❌ Open | No eviction, no size cap, no clear action; the `_v2` filename bump orphaned the older 600px files instead of deleting them. |
 | **Desktop Supabase refresh token stored as plaintext JSON with default permissions** | `supabase_corrections_client.py` (`~/.genizah_corrections/supabase_credentials.json`) | ❌ Open | The password goes to the OS keyring but the long-lived refresh token does not. Owner decision on whether to move the token to the keyring too. |
 | **Stale operational facts in the guides and CI comments** | `docs/guides/DEPLOYMENT_TECHNICAL.md`, `docs/guides/ENV_VARS.md`, `.github/workflows/ci.yml`, `scripts/ci_materialize_discovery_fixture.py` | ❌ Open | `libraries.csv` "~15 MB / ~217K" (49.5 MB / 255,723), `fjms_enrichment.db` "941 MB" (1.6 GB), `Genizah_OLD.txt` (code: `AllGenizah_OLD.txt`), an `extension/store/` that does not exist; all three CI-side texts credit `tests/test_cert01_grading_validator.py` with resolving the real artifact through `discovery_data/manifest.json`, which `scripts/cert01_freeze.py` does. |

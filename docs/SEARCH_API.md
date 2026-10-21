@@ -14,7 +14,7 @@ speculative) is why this note exists.
 
 ## Stability
 
-This is a public research-automation API. We aim to keep this contract stable. Breaking changes (request shape, response envelope shape, error codes) will only ship on major website-version releases and will be announced in `CHANGELOG.md` and the `Changelog` section below. Additive changes (new optional fields, new optional request keys, new endpoints) may ship at any time.
+This is a public research-automation API. We aim to keep this contract stable. Breaking changes (request shape, response envelope shape, error codes) will only ship on major website-version releases and will be announced in `CHANGELOG.md` and the `Changelog` section below. Additive changes (new optional fields, new optional request keys, new endpoints) may ship at any time. A change to which results a mode returns, within the same request and response shape, may also ship at any time when it makes a mode do what it is documented to do or match the website's search of the same name; it is dated in the `Changelog` section below (for example 2026-10-21, `exact` became whole-word).
 
 **Interactive docs:** [`/api/docs`](https://genizahsearch.com/api/docs) (Swagger UI) · [`/api/openapi.json`](https://genizahsearch.com/api/openapi.json) (OpenAPI spec)
 

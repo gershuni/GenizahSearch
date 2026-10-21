@@ -1,10 +1,13 @@
 ## [Unreleased] -- Reliability fixes and user-perceived latency (web, branch `claude/reliability-latency-review`)
 
 A review of visitor isolation, the NiceGUI 3.18 upgrade and web latency
-(2026-10-20). Every finding acted on was reproduced first and checked by a
+(2026-10-20/21). Every finding acted on was reproduced first and checked by a
 second reviewer; each fix has a test that fails on the old code, run on NiceGUI
-3.8.0 and 3.18.0. No search semantics, public API behaviour or data-access
-permission changed.
+3.8.0 and 3.18.0. Two changes are deliberate, by owner decision on 2026-10-21:
+the public API's (and MCP's and the ChatGPT app's) `exact` search mode now
+matches whole words, as the website's Exact does, and a new account's public
+username is never its email address (a database change, applied separately).
+No request or response shape and no data-access permission changed.
 
 ### Fixed
 - **English visitors saw Hebrew library names and image credits** on /browse

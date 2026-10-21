@@ -11,6 +11,10 @@ and two writes for one account must not interleave, from one tab or several
 (Codex 2026-10-21: two tabs left duplicate rows). A write that waited is
 dropped if the browser has switched account meanwhile (Codex 2026-10-21: it
 landed in the new account's history).
+
+The tests wait on events, not on fixed sleeps: a write scheduled (the page's
+Phase A is done), a write started, a write held open until the test lets it
+finish. Fixed sleeps passed locally and failed on a slow Windows CI runner.
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ import itertools
 import threading
 import time
 
-from nicegui import core, ui
+from nicegui import background_tasks, core, ui
 from nicegui.client import Client
 import pytest
 from nicegui.testing.general import prepare_simulation
@@ -45,7 +49,9 @@ def recents(monkeypatch, supabase_offline):
     """A /browse page on a fake service; every Recently Viewed write is recorded.
 
     ``signed_in['id']`` is the account the visitor is signed in as; ``write_s``
-    how long one write takes (a slow Supabase).
+    how long one write takes (a slow Supabase); a write whose fl_id is in
+    ``hold`` waits for that threading.Event; ``scheduled`` counts the writes the
+    page has handed to background_tasks (one per Phase A).
     """
     from web.services import BrowsePage
     import web.auth_state as auth_state
@@ -78,21 +84,35 @@ def recents(monkeypatch, supabase_offline):
             raise AssertionError('the recents write ran on the event loop')
 
     h = {'calls': [], 'active': {'n': 0, 'max': 0}, 'pages': [], 'loop_thread': None,
-         'signed_in': {'id': 'user-1'}, 'write_s': 0.3, 'client': object()}
+         'signed_in': {'id': 'user-1'}, 'write_s': 0.3, 'client': object(), 'hold': {},
+         'scheduled': []}
 
     def recorder(user_id, sys_id, shelfmark, title, fl_id, *, client=None):
         active = h['active']
         active['n'] += 1
         active['max'] = max(active['max'], active['n'])
         h['calls'].append({'thread': threading.get_ident(), 'client': client, 'user': user_id,
-                           'fl_id': fl_id, 'phase_a_shown': any(
-                               isinstance(e, ui.button) and str(e._props.get('data-action', '')).strip('"') == 'next'
-                               for e in h['pages'][0].elements.values())})
+                           'fl_id': fl_id})
+        held = h['hold'].get(fl_id)
+        if held is not None:
+            held.wait(20)
         time.sleep(h['write_s'])
         active['n'] -= 1
         return {'success': True}
 
+    real_create = background_tasks.create
+
+    def counting_create(coroutine, *args, **kwargs):
+        if kwargs.get('name') == 'browse-recents':
+            # Judged when the write is handed over: by the time a queued write
+            # runs, the next page's load may already have cleared this one.
+            h['scheduled'].append({'phase_a_shown': any(
+                isinstance(e, ui.button) and str(e._props.get('data-action', '')).strip('"') == 'next'
+                for e in h['pages'][-1].elements.values())})
+        return real_create(coroutine, *args, **kwargs)
+
     monkeypatch.setattr(browse, 'get_service', lambda: _Service())
+    monkeypatch.setattr(background_tasks, 'create', counting_create)
     monkeypatch.setattr(auth_state.GlobalAuthState, 'is_logged_in', staticmethod(lambda: True))
     monkeypatch.setattr(auth_state.GlobalAuthState, 'get_user_id', staticmethod(lambda: h['signed_in']['id']))
     monkeypatch.setattr(supabase_client, 'add_recent_item', recorder)
@@ -108,14 +128,29 @@ def recents(monkeypatch, supabase_offline):
         return client
 
     h['open_page'] = open_page
-    return h
+    yield h
+    for held in h['hold'].values():
+        held.set()  # never leave a worker thread waiting
 
 
-def _click_next(client):
+async def _wait(pred, timeout=20.0):
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not pred():
+        if asyncio.get_running_loop().time() > deadline:
+            return False
+        await asyncio.sleep(0.02)
+    return True
+
+
+def _next_buttons(client):
     # The live Next button: every render rebuilds it.
-    nexts = [e for e in client.elements.values() if isinstance(e, ui.button)
-             and str(e._props.get('data-action', '')).strip('"') == 'next']
-    for listener in nexts[-1]._event_listeners.values():
+    return [e for e in client.elements.values() if isinstance(e, ui.button)
+            and str(e._props.get('data-action', '')).strip('"') == 'next']
+
+
+async def _click_next(client):
+    assert await _wait(lambda: _next_buttons(client)), 'the page rendered no Next button'
+    for listener in _next_buttons(client)[-1]._event_listeners.values():
         if listener.type == 'click':
             listener.handler(None)
 
@@ -125,11 +160,13 @@ def test_recents_are_written_after_phase_a_off_the_loop_one_at_a_time(recents):
         core.loop = asyncio.get_running_loop()
         recents['loop_thread'] = threading.get_ident()
         client = recents['open_page']()
-        await asyncio.sleep(1.0)
-        for _ in range(2):  # two quick page turns: each shows, their writes would overlap
-            _click_next(client)
-            await asyncio.sleep(0.15)
-        await asyncio.sleep(1.5)
+        assert await _wait(lambda: len(recents['scheduled']) == 1), 'the load scheduled no write'
+        # Two page turns, each clicked as soon as the previous page has shown:
+        # the writes (0.3 s each) would overlap without the lock.
+        for n in (2, 3):
+            await _click_next(client)
+            assert await _wait(lambda: len(recents['scheduled']) == n), f'page turn {n} scheduled no write'
+        assert await _wait(lambda: len(recents['calls']) == 3 and recents['active']['n'] == 0)
 
     asyncio.run(_run())
     calls = recents['calls']
@@ -137,7 +174,7 @@ def test_recents_are_written_after_phase_a_off_the_loop_one_at_a_time(recents):
     assert all(c['thread'] != recents['loop_thread'] for c in calls), 'recents written on the event loop'
     assert all(c['client'] is recents['client'] and c['user'] == 'user-1' for c in calls), (
         'the write did not get the visitor\'s own client')
-    assert all(c['phase_a_shown'] for c in calls), 'recents written before the page was shown'
+    assert all(s['phase_a_shown'] for s in recents['scheduled']), 'recents written before the page was shown'
     assert recents['active']['max'] == 1, 'two recents writes overlapped'
 
 
@@ -146,7 +183,7 @@ def test_two_tabs_of_one_account_write_one_at_a_time(recents):
         core.loop = asyncio.get_running_loop()
         recents['open_page']()
         recents['open_page']()  # the same account in a second tab, at once
-        await asyncio.sleep(2.0)
+        assert await _wait(lambda: len(recents['calls']) == 2 and recents['active']['n'] == 0)
 
     asyncio.run(_run())
     assert len(recents['calls']) == 2, recents['calls']
@@ -156,18 +193,21 @@ def test_two_tabs_of_one_account_write_one_at_a_time(recents):
 
 
 def test_a_waiting_write_is_dropped_after_an_account_switch(recents):
-    recents['write_s'] = 1.0
+    release = threading.Event()
+    recents['hold']['FL2'] = release  # page 2's write holds the account's lock until released
 
     async def _run():
         core.loop = asyncio.get_running_loop()
         client = recents['open_page']()
-        await asyncio.sleep(1.5)  # the load's own write is done
-        _click_next(client)       # its write starts and holds the account's lock
-        await asyncio.sleep(0.15)
-        _click_next(client)       # this one waits for the lock
-        await asyncio.sleep(0.15)
+        assert await _wait(lambda: len(recents['calls']) == 1 and recents['active']['n'] == 0)
+        await _click_next(client)  # page 2: its write starts and is held
+        assert await _wait(lambda: len(recents['calls']) == 2), 'page 2 wrote nothing'
+        await _click_next(client)  # page 3: its write is scheduled and waits for the lock
+        assert await _wait(lambda: len(recents['scheduled']) == 3), 'page 3 scheduled no write'
         recents['signed_in']['id'] = 'user-2'  # signed out and in as someone else, in another tab
-        await asyncio.sleep(2.5)
+        release.set()
+        assert await _wait(lambda: recents['active']['n'] == 0)
+        await asyncio.sleep(0.5)  # room for the waiting write to run, if it were going to
 
     asyncio.run(_run())
     calls = recents['calls']
