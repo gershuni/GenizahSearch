@@ -11,9 +11,11 @@ Supports shelfmark mentions in format: [[shelfmark:T-S 8J6.1|id:123456]]
 """
 
 import asyncio
+import time
 
 from nicegui import ui
 from web.translations import tr, is_rtl
+from web.ux_timing import ux_done
 from web.auth_state import GlobalAuthState
 from web.supabase_client import create_comment
 from web.state import state
@@ -222,6 +224,7 @@ def create_comment_dialog(
                     comment_page = page_number if scope_select.value == 'page' else None
 
                     # Submit to Supabase
+                    ux_client, ux_t0 = ui.context.client, time.perf_counter()
                     result = create_comment(
                         author_id=user_id,
                         sys_id=document_id,
@@ -232,6 +235,8 @@ def create_comment_dialog(
                         ie_id=ie_id
                     )
 
+                    ux_done(ux_client, 'save_comment', 'error' if "error" in result else 'ok',
+                            server_ms=(time.perf_counter() - ux_t0) * 1000)
                     if "error" in result:
                         error_label.text = result.get("error", "Error submitting comment")
                         error_label.classes('visible', remove='hidden')
@@ -245,7 +250,7 @@ def create_comment_dialog(
                             else:
                                 on_submit()
 
-                submit_btn = ui.button(tr('Submit'), on_click=submit_comment).props('color=primary')
+                submit_btn = ui.button(tr('Submit'), on_click=submit_comment).props('color=primary data-ux=save_comment')
 
                 if not GlobalAuthState.is_logged_in():
                     submit_btn.props('disable')

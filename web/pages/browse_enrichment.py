@@ -22,7 +22,7 @@ from typing import Any, Dict, Optional
 
 from nicegui import ui, run
 
-from web.translations import tr, get_language
+from web.translations import tr, get_language, in_visitor_language
 from web.document_service import get_document_for_fragment, get_section_for_page, get_all_sources_for_fragment
 from web.feature_flags import web_fgp_enabled
 from shared.fgp_service import (
@@ -508,7 +508,7 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
             return result
 
         try:
-            return await run.io_bound(_browse_enrich_sync)
+            return await run.io_bound(in_visitor_language(_browse_enrich_sync))
         except Exception as e:
             logger.error(f"Failed to fetch browse enrichment: {e}")
             return {}

@@ -1993,6 +1993,7 @@ def init_api_routes(app_override=None):
         from web.puzzle_tokens import verify_upload_token
         from web.puzzle_image_access import browser_key_for_request, signed_in_user_id
         from PIL import Image as _PILImage
+        from nicegui import run
         import io as _io
 
         MAX_BODY_SIZE = 10 * 1024 * 1024  # 10 MB
@@ -2048,29 +2049,39 @@ def init_api_routes(app_override=None):
         if not is_jpeg and not is_png:
             return Response(content="Invalid image format", status_code=400)
 
-        # Verify Pillow can open it (prevents crafted payloads)
-        try:
-            img = _PILImage.open(_io.BytesIO(raw_bytes))
-            img.verify()
-        except Exception:
-            return Response(content="Corrupt image data", status_code=400)  # Request processing failed; return error response
-
-        if not processed:
-            # Keep the original (validated as a real image) and return it
-            result_bytes = raw_bytes
-        else:
-            # Apply background removal
+        def _verify_process_and_store():
+            # Up to seconds of CPU at 2000 px, plus a disk write: in a worker
+            # thread, not on the event loop that serves every visitor.
+            # Verify Pillow can open it (prevents crafted payloads)
             try:
-                result_bytes = remove_background(raw_bytes, threshold=threshold, is_cul=is_cul)
+                img = _PILImage.open(_io.BytesIO(raw_bytes))
+                img.verify()
             except Exception:
-                result_bytes = raw_bytes  # Image processing failed; serve original bytes
-            if result_bytes[:4] != b'\x89PNG':
-                # Only a processed PNG belongs under a processed-image name.
-                return _puzzle_image_response(result_bytes, True)
+                return Response(content="Corrupt image data", status_code=400)  # Request processing failed; return error response
 
-        stored = service.store_upload(fl_id, size, threshold, processed, is_cul, result_bytes,
-                                      user_id=user_id, browser_key=browser_key)
-        return _puzzle_image_response(result_bytes, stored != STORED_SHARED)
+            if not processed:
+                # Keep the original (validated as a real image) and return it
+                result_bytes = raw_bytes
+            else:
+                # Apply background removal
+                try:
+                    result_bytes = remove_background(raw_bytes, threshold=threshold, is_cul=is_cul)
+                except Exception:
+                    result_bytes = raw_bytes  # Image processing failed; serve original bytes
+                if result_bytes[:4] != b'\x89PNG':
+                    # Only a processed PNG belongs under a processed-image name.
+                    return _puzzle_image_response(result_bytes, True)
+
+            stored = service.store_upload(fl_id, size, threshold, processed, is_cul, result_bytes,
+                                          user_id=user_id, browser_key=browser_key)
+            return _puzzle_image_response(result_bytes, stored != STORED_SHARED)
+
+        resp = await run.io_bound(_verify_process_and_store)
+        if resp is None:
+            # NiceGUI's answer while the app stops or the wait is cancelled;
+            # the upload may or may not have been stored.
+            return Response(content="Image processing unavailable", status_code=503)
+        return resp
 
     def _fetch_provider_image(provider: str, sys_id: str, page: int):
         """Fetch raw image bytes from a library-specific IIIF source.
@@ -2222,32 +2233,57 @@ def init_api_routes(app_override=None):
     # through web/saved_joins.py (kept per visitor); there are no document
     # routes here.
 
+    # Each fragment costs about a second of CPU at export size; the web Puzzle
+    # page exports through its own path, so only outside callers meet this.
+    _PUZZLE_EXPORT_MAX_FRAGMENTS = 20
+
     @target_app.post('/api/puzzle_export')
     async def puzzle_export(request: Request):
         """Export composite PNG from fragment data."""
         from shared.puzzle_model import PuzzleFragment
-        from shared.puzzle_export import compose_puzzle_export
         from shared.puzzle_image_service import get_puzzle_image_service
+        from starlette.responses import JSONResponse
+        from nicegui import run
         import io
 
-        body = await request.json()
-        fragments = [PuzzleFragment(**f) for f in body.get('fragments', [])]
+        # Anonymous and expensive: the same per-IP limit as the uploads.
+        rate_resp = _check_puzzle_rate_limit(request)
+        if rate_resp:
+            return rate_resp
+
+        try:
+            body = await request.json()
+            raw_fragments = body.get('fragments', [])
+            if len(raw_fragments) > _PUZZLE_EXPORT_MAX_FRAGMENTS:
+                return JSONResponse({'error': 'too many fragments'}, status_code=413)
+            fragments = [PuzzleFragment(**f) for f in raw_fragments]
+        except (ValueError, TypeError, AttributeError):
+            # Not JSON, not an object, or a fragment with fields the model lacks.
+            return JSONResponse({'error': 'invalid fragments'}, status_code=400)
         if not fragments:
-            from starlette.responses import JSONResponse
             return JSONResponse({'error': 'no fragments'}, status_code=400)
 
         from web.puzzle_image_access import browser_key_for_request
-        img_svc = get_puzzle_image_service().for_browser(browser_key_for_request(request))
-        result = compose_puzzle_export(fragments, img_svc, export_size=3000, margin=20)
-        if result is None:
-            from starlette.responses import JSONResponse
+        browser_key = browser_key_for_request(request)
+
+        def _compose_png():
+            # Seconds of CPU (and a fetch on a cache miss): in a worker thread,
+            # not on the event loop that serves every visitor.
+            from shared.puzzle_export import compose_puzzle_export
+            img_svc = get_puzzle_image_service().for_browser(browser_key)
+            result = compose_puzzle_export(fragments, img_svc, export_size=3000, margin=20)
+            if result is None:
+                return None
+            buf = io.BytesIO()
+            result.save(buf, 'PNG')
+            return buf.getvalue()
+
+        png_bytes = await run.io_bound(_compose_png)
+        if png_bytes is None:
             return JSONResponse({'error': 'export failed'}, status_code=500)
 
-        buf = io.BytesIO()
-        result.save(buf, 'PNG')
-        buf.seek(0)
         return Response(
-            content=buf.getvalue(),
+            content=png_bytes,
             media_type='image/png',
             headers={'Content-Disposition': 'attachment; filename="puzzle_export.png"',
                      'Cache-Control': 'private, no-store'}

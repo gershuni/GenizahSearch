@@ -415,21 +415,55 @@ GRANT USAGE, SELECT ON SEQUENCE public.document_fragments_id_seq TO service_role
 
 -- ============================================
 -- FUNCTION: Create profile & default list for new users
+-- The username is what the person typed at an email/password sign-up, never
+-- the email address (profiles is readable by anon). Keep this identical to
+-- migrations/profiles_no_email_username.sql (tests/test_profiles_no_email_username_sql.py).
 -- ============================================
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
-BEGIN
-    -- Create profile
-    INSERT INTO public.profiles (id, username)
-    VALUES (NEW.id, NEW.email);
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  meta jsonb := coalesce(new.raw_user_meta_data, '{}'::jsonb);
+  typed jsonb := case when jsonb_typeof(meta -> 'signup_profile') = 'object'
+                      then meta -> 'signup_profile' else '{}'::jsonb end;
+  v_username text;
+  v_full_name text;
+  v_affiliation text;
+begin
+  if coalesce(new.raw_app_meta_data ->> 'provider', '') = 'email' then
+    v_username    := left(nullif(btrim(coalesce(typed ->> 'username',    meta ->> 'username')),    ''), 100);
+    v_full_name   := left(nullif(btrim(coalesce(typed ->> 'full_name',   meta ->> 'full_name')),   ''), 200);
+    v_affiliation := left(nullif(btrim(coalesce(typed ->> 'affiliation', meta ->> 'affiliation')), ''), 200);
+  end if;
 
-    -- Create default "General" list
-    INSERT INTO public.user_lists (user_id, name, name_en, is_default)
-    VALUES (NEW.id, 'General', 'General', true);
+  if v_username is not null
+     and (position('@' in v_username) > 0
+          or exists (select 1 from public.profiles p where lower(p.username) = lower(v_username))) then
+    v_username := null;
+  end if;
 
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+  begin
+    insert into public.profiles (id, username, full_name, affiliation)
+    values (new.id, v_username, v_full_name, v_affiliation);
+  exception when unique_violation then
+    -- The username was taken between the check and the insert (two sign-ups
+    -- at once). Any other clash (the id) still aborts, as before.
+    if v_username is null then
+      raise;
+    end if;
+    insert into public.profiles (id, username, full_name, affiliation)
+    values (new.id, null, v_full_name, v_affiliation);
+  end;
+
+  insert into public.user_lists (user_id, name, name_en, is_default)
+  values (new.id, 'General', 'General', true);
+
+  return new;
+end;
+$$;
 
 -- Trigger for new user signup
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;

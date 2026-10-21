@@ -766,12 +766,19 @@ def test_responsa_downgrade_threadlocal_cleared_on_exception(monkeypatch, mock_m
     next request on the same worker thread MUST NOT inherit the stale warning.
     Plan 03's execute_search must consume-on-entry; the handler must consume
     in a try/finally."""
+    from concurrent.futures import ThreadPoolExecutor
     from web.state import state
+    from web.research_jobs import wait_executor
     from genizah_core import _set_last_responsa_downgrade  # noqa: F401 — must exist after Plan 02
 
+    # The search runs on a research-wait thread, and the signal is per thread:
+    # staged on this (main) thread it could never reach the request. One wait
+    # thread, so the stale signal sits on the thread the request then uses.
+    pinned = ThreadPoolExecutor(max_workers=1, thread_name_prefix='research-wait')
+    monkeypatch.setattr('web.research_jobs._wait_executor', pinned)
     # Stage a stale signal in the thread-local AS IF a prior request crashed
     # before consuming.
-    _set_last_responsa_downgrade('STALE_FROM_PRIOR_REQUEST')
+    wait_executor().submit(_set_last_responsa_downgrade, 'STALE_FROM_PRIOR_REQUEST').result()
 
     saved = state.searcher
     try:
@@ -790,10 +797,12 @@ def test_responsa_downgrade_threadlocal_cleared_on_exception(monkeypatch, mock_m
         leaked = [w for w in warnings if 'STALE_FROM_PRIOR_REQUEST' in str(w)]
         assert not leaked, (
             f'thread-local downgrade signal leaked across requests: {warnings!r}. '
-            'Plan 03 must clear-on-entry inside SearchEngine.execute_search.'
+            '_run_search_sync must clear it on its own thread before the search '
+            '(an engine that does not clear it itself cannot be relied on).'
         )
     finally:
         state.searcher = saved
+        pinned.shutdown(wait=False)
 
 
 # R2-#2 — app-state idempotency ----------------------------------------

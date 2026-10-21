@@ -19,9 +19,9 @@ structural errors. Concern #2 forbids global exception handlers, so capturing
 inside the handler is the only way to keep observability for those errors.
 
 R2-#1: SearchEngine.execute_search clears the thread-local downgrade signal
-on entry. The handler reads it on the success path AND has a defensive
-finally-block consume so the thread-local is drained even on the exception
-path — no stale-signal leak across requests on the same worker thread.
+on entry, and so do IsolatedEngine before each job and _run_search_sync before
+the search, on the wait thread the search runs on (website searches share those
+threads and never read the signal) — no stale-signal leak across requests.
 
 Stateless contract (D-20): handler MUST NOT read any of the forbidden
 session-scoped surfaces (last results, current search query, storage user,
@@ -61,6 +61,7 @@ from shared.search_engine import MAX_WORD_GAP
 from shared.search_regex import SearchBudgetExceeded, search_budget
 from web.research_jobs import api_engine, wait_executor, with_request_settings, ResearchJobError
 from web.variant_preferences import default_search
+from web.pages.search_state import engine_mode
 # Phase 79 imports.
 from shared.browse_service import (
     fetch_browse_bundle,
@@ -233,7 +234,7 @@ class SearchRequest(BaseModel):
     search_mode: Literal['exact', 'variants', 'variants_extended',
                          'responsa', 'title', 'shelfmark', 'fuzzy'] = Field(
         ...,
-        description="Search mode: 'exact' (literal), 'variants' (letter-confusion spellings: the 30 most frequent pairs, one change per word; the website's Basic level), 'variants_extended' (the website's Extended level: 70 pairs, up to two changes per word; background jobs only, POST /api/search/jobs), 'responsa' (Responsa Project style), 'title' (FJMS title metadata), 'shelfmark' (call number lookup), 'fuzzy' (near spellings: whole words one letter away, two from 5 letters, prefixed forms included — slowest mode).",
+        description="Search mode: 'exact' (the words as typed, as whole words, with no spelling variation: the website's Exact; a word inside a longer one, such as a prefixed form, is not matched (until 2026-10-21 some were); for prefixed forms use 'responsa' with #word), 'variants' (letter-confusion spellings: the 30 most frequent pairs, one change per word; the website's Basic level), 'variants_extended' (the website's Extended level: 70 pairs, up to two changes per word; background jobs only, POST /api/search/jobs), 'responsa' (Responsa Project style), 'title' (FJMS title metadata), 'shelfmark' (call number lookup), 'fuzzy' (near spellings: whole words one letter away, two from 5 letters, prefixed forms included — slowest mode).",
     )
     responsa_options: Optional[ResponsaOptions] = Field(
         default=None,
@@ -1159,7 +1160,7 @@ class ParallelsRequest(BaseModel):
     )
     mode: Literal['exact', 'variants', 'fuzzy'] = Field(
         default=PARALLELS_MODE_DEFAULT,
-        description="Matching mode for each chunk: 'exact' (literal), 'variants' (the 30 most frequent letter-confusion pairs, one change per word: the website's Basic level), 'fuzzy' (approximate).",
+        description="Matching mode for each chunk: 'exact' (the words as typed, no spelling variation), 'variants' (the 30 most frequent letter-confusion pairs, one change per word: the website's Basic level), 'fuzzy' (approximate).",
     )
     max_freq: Optional[float] = Field(
         default=None,
@@ -1749,7 +1750,10 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 results = []
                 total = 0
             else:
-                internal_mode = _SEARCH_MODE_TO_INTERNAL[req.search_mode]
+                # 2026-10-21 (owner decision): 'exact' runs the website's Exact, the
+                # engine's whole-word 'literal' (web.pages.search_state.engine_mode).
+                # Only here: the table, and so the response's `mode`, still say 'exact'.
+                internal_mode = engine_mode(_SEARCH_MODE_TO_INTERNAL[req.search_mode])
 
                 # Resolve before dispatch so the worker also enforces this
                 # deadline; the HTTP wait alone cannot stop a worker thread.
@@ -1766,7 +1770,14 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
 
                 def _run_search_sync():
                     from shared.search_engine import consume_last_search_cutoff
+                    from genizah_core import (
+                        _consume_last_responsa_downgrade_meta as _consume_meta_inner,
+                    )
+                    # This wait thread also runs website searches, which never read
+                    # the downgrade signals: drop any left here, whatever the engine.
                     consume_last_search_cutoff()
+                    _consume_last_responsa_downgrade()
+                    _consume_meta_inner()
                     with search_budget(core_timeout if core_timeout is not None else 0):
                         res = worker_searcher.execute_search(
                             query_str=query,
@@ -1778,9 +1789,6 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                             restrict_sys_ids=restrict_sys_ids,
                             text_position=None,
                         ) or []
-                    from genizah_core import (
-                        _consume_last_responsa_downgrade_meta as _consume_meta_inner,
-                    )
                     # D8: whether the search reached its candidate limit (same thread).
                     return (res, _consume_last_responsa_downgrade(), _consume_meta_inner(),
                             consume_last_search_cutoff())
@@ -1867,14 +1875,12 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
 
             # 8a. R2-#1 / 81A: downgrade_msg + cascade_meta were captured inside
             # the executor worker above (where execute_search set the
-            # thread-locals); the short-circuit branch leaves them None. The
-            # defensive drains in `finally` below still guard the exception path.
+            # thread-locals); the short-circuit branch leaves them None.
 
             # 9. Lift cascade-downgrade warning.
             #    R2-#1 + Concern #6: read the thread-local meta channel FIRST
-            #    (resilient to empty results). The OUTER finally below ensures
-            #    the thread-local is drained even on the exception path so it
-            #    cannot leak into the next request on this worker thread.
+            #    (resilient to empty results). _run_search_sync clears it before
+            #    the search, so an older signal on its thread cannot reach here.
             warnings_list: list = []
             if (search_cutoff or {}).get('capped') or (search_cutoff or {}).get('interrupted'):
                 # The engine read its 50,000-candidate limit, or a background job
@@ -2005,6 +2011,8 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             #     step 8a's consume call, that stale signal must NOT leak to
             #     the next request on this worker thread. Calling consume here
             #     is a no-op when the success path already drained it.
+            #     NOTE: this runs on the event-loop thread, not the wait thread
+            #     the search ran on; the drain that matters is in _run_search_sync.
             try:
                 _consume_last_responsa_downgrade()
             except Exception:

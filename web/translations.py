@@ -6,15 +6,18 @@ Uses a simple key-value approach where English is the key
 and translations are the values. Supports RTL languages.
 """
 
+import functools
 import weakref
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Iterator
+from typing import Callable, Iterator, TypeVar
 
 from nicegui.slot import Slot, get_task_id
 from nicegui.storage import request_contextvar
 
 from shared.genizah_translations import TRANSLATIONS
+
+_T = TypeVar('_T')
 
 # The language is each visitor's own. One process serves every visitor on one
 # event loop, so a single module-level value was whatever the LAST page render
@@ -33,7 +36,8 @@ from shared.genizah_translations import TRANSLATIONS
 #      applies (web/main.py::_resolve_ui_language);
 #   5. otherwise (a worker thread, startup, a test): the process default below.
 # A worker thread (``run.io_bound``) gets no context at all, so code there must
-# be handed the language (``build_author_options(lang)`` and the like).
+# be handed the language (``build_author_options(lang)`` and the like), or run
+# through ``in_visitor_language(fn)``.
 _current_lang = 'he'  # the process default (5); set_language() changes it only outside any task
 _override_lang: ContextVar[str | None] = ContextVar('genizah_override_lang', default=None)
 _page_lang: ContextVar[str | None] = ContextVar('genizah_page_lang', default=None)
@@ -187,6 +191,25 @@ def using_language(lang: str) -> Iterator[None]:
         yield
     finally:
         _override_lang.reset(token)
+
+
+def in_visitor_language(fn: Callable[..., _T]) -> Callable[..., _T]:
+    """``fn``, to run in a worker thread in the current visitor's language.
+
+    The language is read now, on the event loop; the returned callable runs
+    ``fn`` inside ``using_language`` of it. For ``run.io_bound(...)``, whose
+    threads get no context (``run.io_bound(in_visitor_language(fn), *args)``).
+    Only the language is carried: copying the whole context would also hand
+    the thread the request, and with it the visitor's storage.
+    """
+    lang = get_language()
+
+    @functools.wraps(fn)
+    def _in_language(*args, **kwargs):
+        with using_language(lang):
+            return fn(*args, **kwargs)
+
+    return _in_language
 
 
 def is_rtl() -> bool:

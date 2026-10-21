@@ -85,7 +85,7 @@ BUILDS_A_SNAPSHOT = ToolAnnotations(readOnlyHint=False, destructiveHint=False,
 # whose "variants (morphological)" is misleading. The spike showed a model guessing these.
 SEARCH_MODES = (
     'Search modes: '
-    'exact = the words as typed, with no spelling variation. '
+    "exact = the words as typed, as whole words, with no spelling variation (the website's Exact). "
     'variants = also the common letter-confusion spellings (the 30 most frequent letter-confusion '
     "pairs, one change per word: the website's Basic level). "
     'variants_extended = 70 pairs, up to two changes per word (the Extended level): slow, and on '

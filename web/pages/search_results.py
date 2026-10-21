@@ -16,7 +16,8 @@ from nicegui import ui, run
 from web.safe_storage import safe_user_get as _safe_get
 from web.state import state
 from web.pages.search_helpers import compute_selected_uids
-from web.translations import tr, is_rtl, get_language
+from web.translations import tr, is_rtl, get_language, in_visitor_language
+from web.ux_timing import ux_done
 from web.feature_flags import WEB_PUZZLE_ENABLED, web_fgp_enabled
 from web.components.filter_panel import persist_value
 from web.pages.search_state import (
@@ -47,6 +48,7 @@ import re
 from shared.search_regex import compile as compile_search_regex, SearchBudgetExceeded, search_budget
 import html
 import asyncio
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -376,7 +378,7 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
                     excl_title = excl_display.get('title', '')
                     with ui.row().classes('w-full items-center gap-2 py-1 px-2 cursor-pointer').style(
                         'border-bottom: 1px solid var(--border-light); overflow: hidden; max-width: 100%;'
-                    ).on('click', lambda r=excl_result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, None, r)):
+                    ).props('data-ux=result_quick_view').on('click', lambda r=excl_result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, None, r)):
                         _isolated_label(excl_shelfmark, classes='text-sm font-medium truncate shrink-0', style=(
                             'color: var(--text-secondary); max-width: 200px;'
                         ))
@@ -421,7 +423,7 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
                         ui.button(icon='add_circle_outline', on_click=_restore_word_result).props(
                             f'flat round dense size=xs aria-label="{tr("Restore")}"'
                         ).style('color: var(--text-muted);').tooltip(tr('Restore'))
-                        with ui.row().classes('items-center gap-2 flex-grow min-w-0 cursor-pointer').on(
+                        with ui.row().classes('items-center gap-2 flex-grow min-w-0 cursor-pointer').props('data-ux=result_quick_view').on(
                             'click', lambda r=excl_result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, None, r)
                         ):
                             _isolated_label(excl_shelfmark, classes='text-sm font-medium truncate shrink-0', style=(
@@ -464,7 +466,7 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
                     excl_title = excl_display.get('title', '')
                     with ui.row().classes('w-full items-center gap-2 py-1 px-2 cursor-pointer').style(
                         'border-bottom: 1px solid var(--border-light); overflow: hidden; max-width: 100%;'
-                    ).on('click', lambda r=excl_result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, None, r)):
+                    ).props('data-ux=result_quick_view').on('click', lambda r=excl_result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, None, r)):
                         _isolated_label(excl_shelfmark, classes='text-sm font-medium truncate shrink-0', style=(
                             'color: var(--text-secondary); max-width: 200px;'
                         ))
@@ -824,7 +826,7 @@ def create_result_card(search_state, refs, index, result):
             ui.button(
                 icon='open_in_full',
                 on_click=lambda idx=index, r=result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, idx, r)
-            ).props(f'flat round dense size=sm aria-label="{tr("Quick View")}"').tooltip(tr('Quick View'))
+            ).props(f'flat round dense size=sm data-ux=result_quick_view aria-label="{tr("Quick View")}"').tooltip(tr('Quick View'))
 
             # Add to List
             def make_star_handler(r):
@@ -984,7 +986,7 @@ def create_result_card(search_state, refs, index, result):
             with _expand_row:
                 # Left: manuscript image thumbnail (click opens Quick View)
                 if _img_url:
-                    with ui.element('div').classes('cursor-pointer').on(
+                    with ui.element('div').classes('cursor-pointer').props('data-ux=result_quick_view').on(
                         'click', lambda idx=index, r=result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, idx, r)
                     ):
                         ui.html(
@@ -1056,9 +1058,9 @@ def create_result_card(search_state, refs, index, result):
                         except (ValueError, TypeError):
                             p_num = 1
                         from web.services import get_service
-                        page_data = await run.io_bound(
+                        page_data = await run.io_bound(in_visitor_language(
                             lambda: get_service().get_browse_page(sid, p_num=p_num)
-                        )
+                        ))
                         if page_data and page_data.text:
                             r['full_text'] = page_data.text
                             _render_full_text(tc, page_data.text, hp)
@@ -1107,6 +1109,13 @@ def open_advanced_dialog(search_state, refs, index, result):
     uses index=0, and disables navigation. This is used for excluded results and tag search.
     """
     standalone = (index is None)
+    # ux_timing: from here (the click) until the content is shown; the fetch runs
+    # in a task with no page of its own, so keep the page's client.
+    _ux_t0 = time.perf_counter()
+    try:
+        _ux_client = ui.context.client
+    except RuntimeError:
+        _ux_client = None
     # PostHog: track result clicks
     from web.analytics import posthog_capture
     display = result.get('display', {}) if isinstance(result, dict) else {}
@@ -1245,10 +1254,10 @@ def open_advanced_dialog(search_state, refs, index, result):
         # Fetch page data asynchronously
         async def fetch_and_render():
             if adv_state.current_sys_id:
-                page = await run.io_bound(lambda: service.get_browse_page(
+                page = await run.io_bound(in_visitor_language(lambda: service.get_browse_page(
                     adv_state.current_sys_id, p_num=adv_state.current_p_num,
                     volume_ie=adv_state.volume_ie
-                ))
+                )))
                 adv_state.current_page = page
                 if page:
                     adv_state.total_pages = page.total_pages
@@ -1284,6 +1293,9 @@ def open_advanced_dialog(search_state, refs, index, result):
                     pass  # Enrichment failed for this item; continue with available data
 
             render_content(result)
+            ux_done(_ux_client, 'result_quick_view', 'ok' if adv_state.current_page else 'error',
+                    server_ms=(time.perf_counter() - _ux_t0) * 1000,
+                    img_selector='img.adv-zoomable-image')
 
         # Cat-2: deferred enrichment fetch after dialog mount - sync UI builder cannot await.
         asyncio.ensure_future(fetch_and_render())
@@ -1294,10 +1306,10 @@ def open_advanced_dialog(search_state, refs, index, result):
             return
 
         target_p_num = p_num if p_num is not None else adv_state.current_p_num
-        page = await run.io_bound(lambda: service.get_browse_page(
+        page = await run.io_bound(in_visitor_language(lambda: service.get_browse_page(
             adv_state.current_sys_id, p_num=target_p_num, direction=direction,
             volume_ie=adv_state.volume_ie
-        ))
+        )))
 
         if page:
             adv_state.current_page = page

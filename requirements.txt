@@ -8,6 +8,9 @@ packaging==26.0
 python-docx==1.2.0
 pymupdf>=1.24,<2.0  # Phase 95 D-43 — PDF extraction (Hebrew RTL)
 nicegui==3.18.0
+starlette==1.9.0  # Pinned to requirements-lock.txt, which CI tests (nicegui sets only a floor); web/framework_patches.py's session patch is audited against Starlette 1.9.0
+python-socketio==5.17.0  # Pinned to requirements-lock.txt, which CI tests (nicegui sets only a floor)
+python-engineio==4.14.0  # Pinned to requirements-lock.txt, which CI tests (python-socketio sets only a floor)
 supabase==2.28.0
 python-dotenv==1.2.2
 keyring==25.7.0

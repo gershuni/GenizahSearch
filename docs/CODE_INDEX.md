@@ -1271,6 +1271,8 @@ Partial entry: the filter-state → read paths only, not the whole surface.
 - **Function** `apply_all_patches` (Line 92) — apply all NiceGUI monkey-patches; call once before ui.run()
 - **Function** `_is_session_free_path` — `/mcp` and `/mcp/`: never read, create or reissue a session (not cacheable; 2026-10-09)
 - **Function** `_patch_binding_remove` — NiceGUI < 3.15: `binding.remove` drops binding links without walking every property marker in the process, so `element.clear()` no longer slows with each open tab (2026-10-20)
+- **Function** `_patch_sessionless_404` — a 404 without a session (stale `/_nicegui/<old version>/...`, missing `/static` on 3.8) gets FastAPI's JSON 404, not NiceGUI's HTML page in a session-less `Client` that broke `prune_user_storage` for 60 s (2026-10-20)
+- **Function** `_patch_httpx_ssl_context` — httpx 0.28: the default SSL context is built from the certifi bundle read once (`cadata`), not re-read per client; a signed-in supabase client build went 1.56 s -> 0.17 s locally (2026-10-20)
 
 ## web/translations.py
 
@@ -1278,6 +1280,7 @@ The web UI language, per visitor (2026-10-20; it was one value per process). Pre
 - **Function** `get_language` / `tr` / `is_rtl` — `using_language` block, else the page build and the tasks it started, else the page's client (event handlers), else the request (saved choice, else browser), else the process default
 - **Function** `set_language` — in a page: that page's language; in another task: that task's; outside any task: the process default
 - **Function** `using_language` — override for a block; task-local, so the block may await
+- **Function** `in_visitor_language` — wrap a callable for `run.io_bound`, whose threads get no context: it runs in the language read on the loop (2026-10-20; the browse library name and image credit were Hebrew for English visitors)
 - **Function** `visitor_language` — the one rule: a saved `ui_language`, else the browser's `Accept-Language` (`web/main.py::_resolve_ui_language`, the Excel export)
 
 ## web/pages/puzzle.py (saving a join)
@@ -1289,6 +1292,15 @@ How the web Fragment Puzzle saves (2026-10-20). Checked in a real browser by `sc
 - **Function** `load_document(doc_id, restoring=)` — returns True when loaded; writes the loaded canvas into the tab; `restoring` = the tab's own draft, quietly
 - **Function** `_restore_tab_canvas` — reopens the tab's draft from its saved copy, else rebuilds the tab's canvas (positions and crops); skipped for `?doc=` unless that cannot be opened
 - **Function** `save_state` — every `STATE_SAVE_INTERVAL_S` and at the end of a load: positions and `getCropState()` into the tab
+
+## web/ux_timing.py
+
+User-perceived latency, measured in the browser (PostHog `ux_timing`, 2026-10-20). Browser side: `web/static/js/ux_timing.js`; env: `UX_TIMING_ENABLED`, `UX_TIMING_SAMPLE_RATE`.
+- **Function** `ux_done(client, workflow, outcome, *, server_ms, nav, img_selector)` — tell the page's browser an update was just sent; always pass the page's own client
+- **Function** `ux_ignored(client, workflow)` — the server turned the latest action away (Enter again while a search runs); the browser keeps the earlier start
+- **Function** `pending_wait_ms` — per-workflow time the browser keeps a start (a search: `WEB_SEARCH_TIME_LIMIT` + 30 s; others 60 s)
+- **Constant** `WORKFLOWS` / `OUTCOMES` — the registry; triggers are elements tagged `data-ux=<workflow>` (`data-ux-enter` for Enter)
+- **Function** `head_html` — the `<head>` snippet, appended to `POSTHOG_SCRIPT` (web/main.py)
 
 ## web/ai_listings.py
 
@@ -1341,7 +1353,7 @@ Public MCP server at `POST /mcp` (docs/plans/MCP_SERVER_PLAN.md; contract in doc
     - Method `get_username` (Line 137)
     - Method `get_headers` (Line 148)
 - **Function** `do_login` (Line 154) — perform login and update global auth state
-- **Function** `do_register` (Line 199) — register and auto-login
+- **Function** `do_register` (Line 199) — register; signs in only when Supabase returns a session, else `{'check_email': True}` (production requires email confirmation; the same answer for an address that already has an account). The typed fields go in the metadata under `SIGNUP_PROFILE_KEY`; the database trigger writes them into the profile (`migrations/profiles_no_email_username.sql`)
 - **Function** `do_logout` (Line 240) — clear auth state
 - **Function** `create_login_dialog` (Line 245) — build login/register dialog
 - **Function** `create_auth_buttons` (Line 421) — header auth buttons (login/register or user menu)
@@ -1852,7 +1864,7 @@ Imported by `web/api.py` handlers `GET /api/export/json` (Line ~1920) and `GET /
 - **Function** `clear_search_history` (Line 477) — Clear all search history.
 - **Function** `domain_display_name` (Line 486) — Get display name for a domain (Hebrew if UI is Hebrew, else English).
 - **Function** `preview_shows_final_rows` — True when no post-search filter could hide an early row, so the page may show the worker's preview
-- **Function** `engine_mode` — the engine mode a web search runs: the page's Exact is the engine's `literal` (whole words, Exact's fast paths)
+- **Function** `engine_mode` — the engine mode a web search runs: the page's Exact is the engine's `literal` (whole words, Exact's fast paths). Also used by `/api/search` (search_mode `exact`, since 2026-10-21; the response still says `exact`) and the Joins Lab's single-line search
 
 ## shared/composition_windows.py
 

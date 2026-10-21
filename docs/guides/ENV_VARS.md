@@ -124,6 +124,16 @@ GENIZAH_NOT_SCHEDULED_MS=60000        # (2026-08-19) above this, a tick that bur
                                        # worker counts) vs blocking I/O on the loop.
 GENIZAH_PERF_SUMMARY_SECONDS=300      # periodic counter summary; 0 disables
 
+# User-perceived latency (2026-10-20; web-only, web/ux_timing.py + web/static/js/ux_timing.js).
+# One PostHog event, `ux_timing`, per measured action: a Browse page turn or first page, a
+# search's first visible rows, a Quick View, an add-to-list or a comment -- from the user's
+# click (or the navigation, for a URL-started load) to the next paint, split into
+# server_ms / transport_ms / render_ms, with the page image's load time (img_ms) apart.
+# $web_vitals cannot see these: in-page NiceGUI updates are websocket round trips. Nothing is
+# sent without POSTHOG_API_KEY, and posthog-js keeps its localhost opt-out.
+UX_TIMING_ENABLED=1                   # 0/false turns the browser side off (the head snippet is not served)
+UX_TIMING_SAMPLE_RATE=1.0             # share of page loads that send events (~5k real events/month at 1.0)
+
 # Phase 98 NLI Resilience env knobs (added 2026-05-25)
 NLI_CIRCUIT_THRESHOLD=3               # Consecutive failures to trip the shared circuit breaker
 NLI_CIRCUIT_WINDOW=60                 # Seconds the breaker stays open before auto-recovery probes

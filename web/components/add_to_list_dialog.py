@@ -10,8 +10,11 @@ Provides a reusable dialog for adding items to personal lists with:
 - A sign-in prompt for anonymous visitors (see require_login_for_lists)
 """
 
+import time
+
 from nicegui import ui
 from web.translations import tr, get_language
+from web.ux_timing import ux_done
 from web.components.typography import h3
 from web.auth_state import GlobalAuthState, create_login_dialog
 from web.state import state
@@ -311,6 +314,7 @@ def show_add_to_list_dialog(
                     # anonymous visitors have no lists to add to).
                     ui.notify(tr('Please log in to access lists'), type='warning')
                     return
+                ux_client, ux_t0 = ui.context.client, time.perf_counter()
                 result = await lists_mgr.add_item(sys_id, selected_list.value, note=note_input.value, fl_id=fl_id)
 
                 if result:
@@ -320,8 +324,10 @@ def show_add_to_list_dialog(
                         on_success()
                 else:
                     ui.notify(tr('Already in list'), type='info')
+                ux_done(ux_client, 'save_list_add', 'ok' if result else 'duplicate',
+                        server_ms=(time.perf_counter() - ux_t0) * 1000)
 
-            add_btn = ui.button(tr('Add'), on_click=do_add).classes('btn-primary')
+            add_btn = ui.button(tr('Add'), on_click=do_add).classes('btn-primary').props('data-ux=save_list_add')
 
             # Hide add button when no lists exist (user must create one)
             if not list_options:

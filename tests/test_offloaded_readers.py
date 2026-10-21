@@ -20,8 +20,10 @@ reads on the loop. Codex flagged four issues; these tests pin the corrections:
       403 is still counted.
 """
 
+import ast
 import asyncio
 import inspect
+import pathlib
 
 import pytest
 
@@ -36,10 +38,19 @@ READERS_WITH_EXPLICIT_CLIENT = [
     ('web.supabase_client', 'get_discovery_responses'),
     ('web.supabase_client', 'get_recent_items'),
     ('web.supabase_client', 'get_list_items'),
+    ('web.supabase_client', 'get_user_lists'),
+]
+
+# Writers take the same keyword-only client (2026-10-20, RLS-06): an
+# owner-only UPDATE/DELETE run anonymously changes 0 rows and says nothing.
+WRITERS_WITH_EXPLICIT_CLIENT = [
+    ('web.supabase_client', 'update_profile'),
+    ('web.supabase_client', 'add_recent_item'),
 ]
 
 
-@pytest.mark.parametrize('module_name,func_name', READERS_WITH_EXPLICIT_CLIENT)
+@pytest.mark.parametrize('module_name,func_name',
+                         READERS_WITH_EXPLICIT_CLIENT + WRITERS_WITH_EXPLICIT_CLIENT)
 def test_reader_accepts_keyword_only_client_defaulting_to_none(module_name, func_name):
     """Each offloadable reader must take a keyword-only `client=None`.
 
@@ -783,3 +794,198 @@ def test_admin_payload_offloaded_leaves_the_loop_free(monkeypatch):
     result = asyncio.run(main())
     assert result['total_corrections'] == 0
     assert ticks >= 5, f'event loop was starved while /admin loaded (ticks={ticks})'
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-20 (RLS-06) -- no user-scoped helper is offloaded without client=
+# ---------------------------------------------------------------------------
+#
+# The P1 fix above threaded client= through the readers it knew about; three
+# other sites kept the bare shape and ran ANONYMOUS for a signed-in user. The
+# /puzzle "Add from List" picker (get_user_lists, get_list_items) always said
+# "No lists found", and web sign-up's update_profile changed 0 rows, so the
+# chosen username was never saved. NiceGUI's run.io_bound, and bounded_io_bound
+# and io_bound_result.io_bound built on it, submit with loop.run_in_executor,
+# which does not copy contextvars: in the worker app.storage.user raises,
+# safe_user_get returns {}, and get_user_client() returns the anonymous
+# singleton. (asyncio.to_thread copies the context and is not affected.)
+#
+# Scope: a web/supabase_client.py function that calls get_user_client(), passed
+# STRAIGHT to an offload -- bare, inside a lambda, or through partial. Blind
+# spot: a wrapper defined elsewhere that calls such a helper and is offloaded
+# itself (admin.py's _load_admin_data takes its client positionally and has
+# its own test above).
+
+_REPO = pathlib.Path(__file__).resolve().parent.parent
+
+# Offload call name -> position of the callable among its arguments.
+_OFFLOADERS = {'io_bound': 0, 'bounded_io_bound': 1}
+
+
+def _call_name(call):
+    func = call.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _user_scoped_helpers():
+    """Top-level functions of web/supabase_client.py that call get_user_client()."""
+    tree = ast.parse((_REPO / 'web' / 'supabase_client.py').read_text(encoding='utf-8'))
+    return {
+        node.name for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name != 'get_user_client'
+        and any(isinstance(n, ast.Call) and _call_name(n) == 'get_user_client'
+                for n in ast.walk(node))
+    }
+
+
+def _helper_refs(tree, helpers, own_module=False):
+    """How a file names the helpers: {local name: helper}, plus module aliases.
+
+    Import statements anywhere in the file count (several pages import inside
+    the handler). Only names imported from web.supabase_client are helpers, so
+    an unrelated local function of the same name is not.
+    """
+    names = {h: h for h in helpers} if own_module else {}
+    modules = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module == 'web.supabase_client' or (node.level and node.module == 'supabase_client'):
+                for a in node.names:
+                    if a.name in helpers:
+                        names[a.asname or a.name] = a.name
+            elif node.module == 'web' or (node.level and node.module is None):
+                for a in node.names:
+                    if a.name == 'supabase_client':
+                        modules.add(a.asname or a.name)
+        elif isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name == 'web.supabase_client':
+                    modules.add(a.asname or 'web.supabase_client')
+    return names, modules
+
+
+def _helper_named(expr, helpers, names, modules):
+    if isinstance(expr, ast.Name):
+        return names.get(expr.id)
+    if isinstance(expr, ast.Attribute) and expr.attr in helpers \
+            and ast.unparse(expr.value) in modules:
+        return expr.attr
+    return None
+
+
+def _passes_client(call):
+    # **kwargs cannot be read statically; give it the benefit of the doubt.
+    return any(kw.arg == 'client' or kw.arg is None for kw in call.keywords)
+
+
+def _offload_violations(source, helpers, own_module=False):
+    """Return ([(line, helper)], offload sites seen) for one file's source."""
+    tree = ast.parse(source)
+    names, modules = _helper_refs(tree, helpers, own_module)
+    violations, sites = [], 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        pos = _OFFLOADERS.get(_call_name(node))
+        if pos is None or len(node.args) <= pos:
+            continue
+        sites += 1
+        target = node.args[pos]
+        if isinstance(target, ast.Call) and _call_name(target) == 'partial' and target.args:
+            helper = _helper_named(target.args[0], helpers, names, modules)
+            if helper and not (_passes_client(target) or _passes_client(node)):
+                violations.append((node.lineno, helper))
+        elif isinstance(target, ast.Lambda):
+            for inner in ast.walk(target.body):
+                if isinstance(inner, ast.Call):
+                    helper = _helper_named(inner.func, helpers, names, modules)
+                    if helper and not _passes_client(inner):
+                        violations.append((node.lineno, helper))
+        else:
+            helper = _helper_named(target, helpers, names, modules)
+            if helper and not _passes_client(node):
+                violations.append((node.lineno, helper))
+    return violations, sites
+
+
+def test_user_scoped_helper_set_is_not_empty():
+    """The guard is only as good as this set: an empty one passes everything."""
+    helpers = _user_scoped_helpers()
+    for name in ('get_user_lists', 'get_list_items', 'update_profile',
+                 'add_recent_item', 'get_recent_items', 'get_corrections'):
+        assert name in helpers, f'{name} no longer recognised as user-scoped'
+    # get_profile reads a TO-public table through get_client() on purpose.
+    assert 'get_profile' not in helpers
+
+
+def test_no_user_scoped_helper_is_offloaded_without_a_client():
+    """Every offload in web/ of a user-scoped helper passes client=."""
+    helpers = _user_scoped_helpers()
+    offenders, sites = [], 0
+    for path in sorted((_REPO / 'web').rglob('*.py')):
+        rel = path.relative_to(_REPO).as_posix()
+        found, n = _offload_violations(path.read_text(encoding='utf-8'), helpers,
+                                       own_module=(rel == 'web/supabase_client.py'))
+        sites += n
+        offenders += [f'{rel}:{line} {helper}' for line, helper in found]
+    # web/ has well over a hundred offloads; a handful means the scan broke.
+    assert sites > 50, f'only {sites} offload sites seen -- the scan is not finding them'
+    assert not offenders, (
+        'these offloads run a user-scoped helper in a worker with no client=, so it '
+        'silently uses the ANONYMOUS client (owner-only rows come back empty, '
+        'owner-only writes change nothing). Build `client = get_user_client()` on the '
+        'event loop and pass client=client: ' + '; '.join(offenders))
+
+
+_SEEDED_HEADER = (
+    'import functools\n'
+    'from functools import partial\n'
+    'from nicegui import run\n'
+    'from web import io_bound_result\n'
+    'from web import supabase_client as sc\n'
+    'from web.bounded_io import bounded_io_bound\n'
+    'from web.supabase_client import get_user_lists, get_list_items, update_profile, get_profile\n'
+    'from web.supabase_client import get_user_lists as lists_alias\n'
+)
+
+SEEDED_VIOLATIONS = [
+    ('bare', 'async def f(uid):\n    await run.io_bound(get_user_lists, uid)\n'),
+    ('lambda', 'async def f(uid):\n    await run.io_bound(lambda: get_user_lists(uid))\n'),
+    ('partial', 'async def f():\n    await run.io_bound(functools.partial(get_list_items, 7))\n'),
+    ('bare_partial', 'async def f():\n    await run.io_bound(partial(get_list_items, 7))\n'),
+    ('bounded', 'async def f(sem):\n    await bounded_io_bound(sem, get_list_items, 7)\n'),
+    ('io_bound_result', 'async def f(uid, d):\n    await io_bound_result.io_bound(update_profile, uid, d)\n'),
+    ('module_alias', 'async def f(uid):\n    await run.io_bound(sc.add_recent_item, uid, "990001")\n'),
+    ('import_alias', 'async def f(uid):\n    await run.io_bound(lists_alias, uid)\n'),
+    ('import_in_handler', 'async def f(uid):\n'
+                          '    from web.supabase_client import get_recent_items\n'
+                          '    await run.io_bound(get_recent_items, uid)\n'),
+]
+
+
+@pytest.mark.parametrize('trap_id,snippet', SEEDED_VIOLATIONS, ids=[t for t, _ in SEEDED_VIOLATIONS])
+def test_seeded_offload_without_client_is_flagged(trap_id, snippet):
+    found, _ = _offload_violations(_SEEDED_HEADER + snippet, _user_scoped_helpers())
+    assert len(found) == 1, f'{trap_id}: the guard missed a seeded violation ({found})'
+
+
+NEGATIVE_CONTROLS = [
+    ('bare_with_client', 'async def f(uid, c):\n    await run.io_bound(get_user_lists, uid, client=c)\n'),
+    ('lambda_with_client', 'async def f(uid, c):\n    await run.io_bound(lambda: get_user_lists(uid, client=c))\n'),
+    ('partial_with_client', 'async def f(c):\n    await run.io_bound(partial(get_list_items, 7, client=c))\n'),
+    ('bounded_with_client', 'async def f(sem, c):\n    await bounded_io_bound(sem, get_list_items, 7, client=c)\n'),
+    ('public_reader', 'async def f(uid):\n    await run.io_bound(get_profile, uid)\n'),
+    ('not_imported', 'def get_comments(x):\n    return x\n'
+                     'async def f():\n    await run.io_bound(get_comments, 1)\n'),
+]
+
+
+@pytest.mark.parametrize('ctrl_id,snippet', NEGATIVE_CONTROLS, ids=[c for c, _ in NEGATIVE_CONTROLS])
+def test_offload_with_client_or_public_helper_is_not_flagged(ctrl_id, snippet):
+    found, _ = _offload_violations(_SEEDED_HEADER + snippet, _user_scoped_helpers())
+    assert found == [], f'{ctrl_id}: false positive {found}'

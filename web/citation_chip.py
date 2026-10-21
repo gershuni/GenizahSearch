@@ -225,15 +225,19 @@ def render_citation_chip(*, lang: str = 'en') -> None:
         # long-running server ordinary traffic accumulated one closure per
         # visit, each holding a whole obsolete UI tree.
         #
-        # `client.on_disconnect`, NOT `app.on_disconnect`. The app-level hook
+        # `client.on_delete`, NOT `app.on_disconnect`. The app-level hook
         # appends to ONE global list that fires for EVERY disconnect, so a
         # per-render handler there meant the first reader to close a tab forgot
         # the chips of every other reader still on the site -- their citations
         # then silently stopped following the page. That is worse than the leak
         # it replaced: a leak wastes memory, this served wrong citations. The
         # global list also grew forever, so the leak had merely moved.
+        # Not `client.on_disconnect` either: it also fires when a socket drops
+        # and this same page reconnects (NiceGUI 3.18 keeps the page instead of
+        # reloading it), which forgot a live chip in the same way.
+        # tests/test_citation_chip_reconnect.py
         try:
-            client.on_disconnect(lambda *_a, _id=client_id: _forget(_id))
+            client.on_delete(lambda *_a, _id=client_id: _forget(_id))
         except Exception:                                        # noqa: BLE001
             # An older NiceGUI without the per-client hook. The failed-update
             # backstop still applies; that is a leak, not a wrong citation, and

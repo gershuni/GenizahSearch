@@ -19,7 +19,8 @@ echo "[2/3] Activating virtual environment..."
 source venv/bin/activate
 
 echo "[3/3] Installing any new dependencies..."
-pip install -q -r requirements.txt
+# -c: every package, transitive ones included, at the version CI tested (requirements-lock.txt).
+pip install -q -r requirements.txt -c requirements-lock.txt
 
 echo "[4/4] Restarting services..."
 sudo systemctl restart genizah-web

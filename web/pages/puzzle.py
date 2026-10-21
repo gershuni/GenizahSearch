@@ -3222,7 +3222,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
 
             async def on_add_from_list():
                 """Show dialog to pick a manuscript from personal lists."""
-                from web.supabase_client import get_user_lists, get_list_items
+                from web.supabase_client import get_user_client, get_user_lists, get_list_items
                 from web.auth_state import GlobalAuthState
                 logged_in = GlobalAuthState.is_logged_in()
                 user_id = GlobalAuthState.get_user_id()
@@ -3231,7 +3231,11 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                     ui.notify(tr('Please log in to access lists'), type='warning')
                     return
 
-                lists = await run.io_bound(get_user_lists, user_id)
+                # Built here, on the loop, for both reads below: in a run.io_bound
+                # worker there is no request, so get_user_client() would be
+                # anonymous and the owner-only lists and items would come back empty.
+                client = get_user_client()
+                lists = await run.io_bound(lambda: get_user_lists(user_id, client=client))
                 if not lists:
                     ui.notify(tr('No lists found'), type='info')
                     return
@@ -3254,7 +3258,17 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                         list_id = e.value if hasattr(e, 'value') else list_select.value
                         if not list_id:
                             return
-                        items = await run.io_bound(get_list_items, int(list_id))
+                        # The account as of this pick, not of the dialog's opening:
+                        # it may have stayed open across a sign-out (whose access
+                        # token Supabase still honours until it expires) and a
+                        # sign-in as someone else in another tab.
+                        if GlobalAuthState.get_user_id() != user_id:
+                            dlg.close()
+                            return
+                        items = await run.io_bound(get_list_items, int(list_id), client=get_user_client())
+                        if GlobalAuthState.get_user_id() != user_id:
+                            dlg.close()
+                            return
                         with items_container:
                             if not items:
                                 ui.label(tr('Empty list')).style('color: #999;')

@@ -582,7 +582,7 @@ def _fetch_community_puzzle_joins(document_id: str) -> List[Dict]:
                 'id, full_name'
             ).in_('id', pj_user_ids).execute()
             pj_profiles = {
-                p['id']: p.get('full_name', 'Anonymous')
+                p['id']: p.get('full_name') or 'Anonymous'
                 for p in (pj_profiles_resp.data or [])
             }
         except Exception:

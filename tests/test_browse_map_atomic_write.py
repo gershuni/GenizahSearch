@@ -13,7 +13,11 @@ import glob
 import os
 import pickle
 import threading
+import time
 
+import pytest
+
+import shared.browse_map_utils as browse_map_utils
 import shared.search_engine as search_engine_mod
 from shared.config import Config
 from shared.search_engine import SearchEngine
@@ -21,10 +25,17 @@ from shared.search_engine import SearchEngine
 
 def _fresh_engine(monkeypatch, browse_map_path, on_disk):
     # An engine built by an earlier test in the process may still be loading the
-    # real browse map on its FL-ID thread (tests/test_local_reload_after_refresh.py
-    # does). Its load holds the class lock and ends by filling the class cache: a
-    # test that cleared the cache first would wait on that lock and get the real
-    # map. Wait for it here, then clear.
+    # real browse map on its FL-ID thread (tests/test_recovery_gate.py and other
+    # files that build real engines do). Its load holds the class lock and ends by
+    # filling the class cache: a test that cleared the cache first would wait on
+    # that lock and get the real map. Wait for it here, then clear.
+    #
+    # That load also calls dedupe_browse_map and then writes to Config.BROWSE_MAP,
+    # both looked up after its pickle.load. A dedupe faked before this wait is the
+    # one it calls, and it writes the fixture onto the REAL map (B17): call this
+    # before faking dedupe.
+    assert search_engine_mod.dedupe_browse_map is browse_map_utils.dedupe_browse_map, (
+        'redirect Config.BROWSE_MAP before faking dedupe')
     with SearchEngine._browse_map_lock:
         pass
     monkeypatch.setattr(Config, 'BROWSE_MAP', str(browse_map_path))
@@ -41,12 +52,11 @@ def _leftover_tmp_siblings(browse_map_path):
     return glob.glob(str(browse_map_path) + '.*.tmp')
 
 
-def test_dedup_write_is_atomic_and_leaves_no_tmp_file(tmp_path, monkeypatch):
-    browse_map_path = tmp_path / 'browse_map.pkl'
+def _assert_dedup_write_is_atomic(monkeypatch, browse_map_path):
     cleaned = {'sid': ['one', 'two']}
+    engine = _fresh_engine(monkeypatch, browse_map_path, {'sid': ['raw']})
     monkeypatch.setattr(search_engine_mod, 'dedupe_browse_map',
                         lambda raw: (cleaned, True))
-    engine = _fresh_engine(monkeypatch, browse_map_path, {'sid': ['raw']})
 
     got = engine._load_browse_map()
 
@@ -56,14 +66,81 @@ def test_dedup_write_is_atomic_and_leaves_no_tmp_file(tmp_path, monkeypatch):
     assert not _leftover_tmp_siblings(browse_map_path)
 
 
+def test_dedup_write_is_atomic_and_leaves_no_tmp_file(tmp_path, monkeypatch):
+    _assert_dedup_write_is_atomic(monkeypatch, tmp_path / 'browse_map.pkl')
+
+
+class _SlowPage(dict):
+    """A browse-map page that takes a while to unpickle, standing in for the
+    real ~133 MB map: it holds a background load inside the class lock long
+    enough for a test to start while that load is still running."""
+
+    def __setstate__(self, state):
+        time.sleep(1.0)
+        self.__dict__.update(state)
+
+
+def test_a_faked_dedupe_never_reaches_a_map_another_thread_is_loading(tmp_path, monkeypatch):
+    """B17: an earlier test's FL-ID thread, still loading the REAL browse map
+    under the class lock, called the dedupe a later test had already faked
+    and os.replace()d that test's fixture onto the developer's real
+    browse_map.pkl (it formats the write path from Config.BROWSE_MAP after
+    dedupe returns, while Config still named the real file). Here a 'live'
+    map under tmp_path plays the real one, and the atomic-write test runs
+    while a load of it holds the lock; the live map must come out untouched."""
+    live = tmp_path / 'live' / 'browse_map.pkl'
+    live.parent.mkdir()
+    page = _SlowPage(p_num=1, uid='IE1_P000001_FL1')
+    page.slow = True  # pickle only calls __setstate__ when there is instance state
+    with open(live, 'wb') as f:
+        pickle.dump({'990000000000000001': [page]}, f)
+    live_bytes = live.read_bytes()
+
+    with SearchEngine._browse_map_lock:
+        pass
+    monkeypatch.setattr(Config, 'BROWSE_MAP', str(live))
+    monkeypatch.setattr(SearchEngine, '_shared_browse_map', None)
+    loader = threading.Thread(
+        target=SearchEngine.__new__(SearchEngine)._load_browse_map, daemon=True)
+    loader.start()
+    deadline = time.monotonic() + 10
+    while not SearchEngine._browse_map_lock.locked():
+        assert time.monotonic() < deadline, 'the live load never took the lock'
+        time.sleep(0.005)
+
+    test_dir = tmp_path / 'test'
+    test_dir.mkdir()
+    with monkeypatch.context() as mp:
+        _assert_dedup_write_is_atomic(mp, test_dir / 'browse_map.pkl')
+    loader.join(timeout=30)
+
+    assert not loader.is_alive()
+    assert live.read_bytes() == live_bytes, (
+        'a faked dedupe was written onto the live map: %r'
+        % pickle.loads(live.read_bytes()))
+
+
+def test_fresh_engine_refuses_a_dedupe_faked_before_the_redirect(tmp_path, monkeypatch):
+    """The guard that keeps B17's ordering from coming back must be able to
+    fire. Config is redirected first and the fake never asks for a write, so
+    this check cannot reach the real map itself."""
+    with SearchEngine._browse_map_lock:
+        pass
+    monkeypatch.setattr(Config, 'BROWSE_MAP', str(tmp_path / 'browse_map.pkl'))
+    monkeypatch.setattr(search_engine_mod, 'dedupe_browse_map', lambda raw: (raw, False))
+
+    with pytest.raises(AssertionError, match='redirect Config.BROWSE_MAP before faking dedupe'):
+        _fresh_engine(monkeypatch, tmp_path / 'browse_map.pkl', {})
+
+
 def test_unchanged_map_never_writes(tmp_path, monkeypatch):
     """changed=False is the common case (an already-clean map); no .tmp file
     and no rewrite of browse_map.pkl should happen at all."""
     browse_map_path = tmp_path / 'browse_map.pkl'
     original = {'sid': ['one']}
+    engine = _fresh_engine(monkeypatch, browse_map_path, original)
     monkeypatch.setattr(search_engine_mod, 'dedupe_browse_map',
                         lambda raw: (raw, False))
-    engine = _fresh_engine(monkeypatch, browse_map_path, original)
     mtime_before = os.path.getmtime(browse_map_path)
 
     engine._load_browse_map()
@@ -79,9 +156,9 @@ def test_a_write_failure_leaves_the_original_file_untouched(tmp_path, monkeypatc
     os.replace buys over the old in-place `open(BROWSE_MAP, 'wb')`."""
     browse_map_path = tmp_path / 'browse_map.pkl'
     original = {'sid': ['raw', 'raw']}
+    engine = _fresh_engine(monkeypatch, browse_map_path, original)
     monkeypatch.setattr(search_engine_mod, 'dedupe_browse_map',
                         lambda raw: ({'sid': ['raw']}, True))
-    engine = _fresh_engine(monkeypatch, browse_map_path, original)
 
     def _boom(*_a, **_k):
         raise OSError('disk full')
@@ -118,6 +195,11 @@ def test_two_concurrent_writers_do_not_clobber_each_others_tmp_file(tmp_path, mo
     original = {'sid': ['raw', 'raw']}
     with open(browse_map_path, 'wb') as f:
         pickle.dump(original, f)
+    # Let an earlier test's load of the real map finish on the REAL lock before
+    # swapping it out, as _fresh_engine does: once the lock is swapped nothing
+    # waits for that load, and it would reach the fakes patched below.
+    with SearchEngine._browse_map_lock:
+        pass
     monkeypatch.setattr(Config, 'BROWSE_MAP', str(browse_map_path))
     monkeypatch.setattr(SearchEngine, '_shared_browse_map', None)
     monkeypatch.setattr(SearchEngine, '_browse_map_lock', threading.Lock())

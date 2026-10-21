@@ -11,11 +11,13 @@ Features:
 """
 
 import logging
+import time
 
 from nicegui import background_tasks, ui, run
 from typing import Optional
 import asyncio
 import re
+import weakref
 import html as html_module
 from urllib.parse import quote
 from shared.fgp_service import (
@@ -77,7 +79,8 @@ from web.services import (
     is_oxford_manuscript,
 )
 from shared.synthetic_sys_id import is_synthetic_sys_id
-from web.translations import tr, is_rtl, get_language, using_language
+from web.translations import tr, is_rtl, get_language, using_language, in_visitor_language
+from web.ux_timing import ux_done
 from web.auth_state import GlobalAuthState
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.supabase_client import create_correction, update_correction, get_corrections
@@ -613,6 +616,20 @@ def _external_link(text: str, url: str):
     return link
 
 
+# One Recently-Viewed write at a time per account, across all its tabs:
+# add_recent_item is a delete then an insert, and two interleaved pairs leave a
+# duplicate row (recent_items has no unique key). Weak values: a lock no write
+# is holding or waiting on goes away with its last user.
+_recents_locks: 'weakref.WeakValueDictionary[str, asyncio.Lock]' = weakref.WeakValueDictionary()
+
+
+def _recents_lock_for(user_id: str) -> asyncio.Lock:
+    lock = _recents_locks.get(user_id)
+    if lock is None:
+        lock = _recents_locks[user_id] = asyncio.Lock()
+    return lock
+
+
 def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional[str] = None, initial_fl_id: Optional[str] = None, initial_page: Optional[int] = None, initial_shelfmark: Optional[str] = None, initial_volume_ie: Optional[str] = None, embedded: bool = False, open_computed: bool = False):
     """Create the professional manuscript viewer page UI.
 
@@ -965,12 +982,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
         dialog.open()
 
-    async def load_page(direction: int = 0, p_num: Optional[int] = None, fl_id: Optional[str] = None):
+    async def load_page(direction: int = 0, p_num: Optional[int] = None, fl_id: Optional[str] = None,
+                        _ux_nav: bool = False):
         """Load a page of the manuscript with async two-phase loading.
 
         Phase A (fast): Fetch page data via run.io_bound → render image + header immediately.
         Phase B (background): Fetch PGP + FJMS enrichment → update placeholder containers.
+
+        ``_ux_nav``: the page's own URL started this load (web/ux_timing.py).
         """
+        _ux_t0 = time.perf_counter()
         if not state.sys_id and not fl_id:
             state.error = tr('No manuscript found')
             update_content()
@@ -979,6 +1000,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # Generation guard: prevent stale updates from superseded loads
         _load_generation['value'] += 1
         my_gen = _load_generation['value']
+        _recent = None  # (sys_id, fl_id) to record in Recently Viewed after Phase A
 
         # Reset enrichment state
         state.enrichment_loaded = False
@@ -1045,7 +1067,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 else:
                     return service.get_browse_page(_sys_id, p_num=1, volume_ie=_volume_ie)
 
-            page = await run.io_bound(_fetch_page)
+            page = await run.io_bound(in_visitor_language(_fetch_page))
 
             if my_gen != _load_generation['value']:
                 return  # Superseded by newer load
@@ -1071,13 +1093,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 _is_synth_js = 'true' if is_synthetic_sys_id(page.sys_id) else 'false'
                 _run_page_javascript(f'window.GENIZAH_IS_SYNTHETIC = {_is_synth_js};')
 
-                # PostHog: track manuscript views
+                # PostHog: track manuscript views (through the page's client:
+                # this task has no page, or a cleared button's dead one)
                 from web.analytics import posthog_capture
                 posthog_capture('browse_manuscript', {
                     'sys_id': state.sys_id,
                     'shelfmark': page.shelfmark[:80] if page.shelfmark else '',
                     'page_num': page.p_num,
-                })
+                }, client=_page_client)
 
                 # Sync browser URL bar for sharing/bookmarking
                 _update_browser_url()
@@ -1085,13 +1108,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # Anonymous web traffic shares the process-wide local lists store;
                 # persisting recents there causes cross-user leakage and blocking
                 # whole-file rewrites on every uncached browse request.
+                # Written after Phase A, off the loop (_record_recent): 3-4 Supabase
+                # round trips here delayed this page and stalled every visitor.
                 if state.sys_id and service.is_ready and GlobalAuthState.is_logged_in():
-                    try:
-                        from web.state import state as app_state
-                        if app_state.lists_mgr:
-                            app_state.lists_mgr.add_to_recent_sync(state.sys_id, fl_id=page.fl_id)
-                    except Exception as track_err:
-                        logger.error(f"Failed to track recent item: {track_err}")
+                    _recent = (state.sys_id, page.fl_id, GlobalAuthState.get_user_id())
             else:
                 # No Tantivy page — try metadata-only fallback from csv_bank.
                 # Phase 86: derive requested p_num from explicit p_num OR from
@@ -1105,7 +1125,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     _requested_p = state.current_page.p_num if state.current_page else None
                 def _fetch_metadata_only():
                     return service.get_metadata_only_browse_page(_fallback_sys, p_num=_requested_p)
-                meta_page = await run.io_bound(_fetch_metadata_only)
+                meta_page = await run.io_bound(in_visitor_language(_fetch_metadata_only))
                 if my_gen != _load_generation['value']:
                     return
                 if meta_page:
@@ -1167,10 +1187,44 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
         state.is_loading = False
         update_content()  # Phase A complete: show image + header + title translation
+        if my_gen == _load_generation['value']:
+            ux_done(_page_client, 'browse_page', 'error' if state.error else 'ok',
+                    server_ms=(time.perf_counter() - _ux_t0) * 1000, nav=_ux_nav,
+                    img_selector='.img-loading-container img.zoomable-image')
+        # Only the current load: one overtaken during the title lookup above
+        # would otherwise record its page after the newer one's.
+        if _recent and my_gen == _load_generation['value']:
+            background_tasks.create(_record_recent(*_recent), name='browse-recents')
 
         # === Phase B: Background enrichment ===
         if state.current_page and state.current_page.sys_id and not state.error:
             await _load_enrichment(state.current_page, my_gen)
+
+    async def _record_recent(sys_id: str, fl_id: Optional[str], user_id: Optional[str]) -> None:
+        """Record a viewed manuscript in the visitor's Recently Viewed, off the loop.
+
+        ``user_id`` is the account that viewed the page, read when it rendered.
+        The client and the title are read here, on the loop: in a worker thread
+        the visitor's storage is unreadable, so the write would go out as
+        anonymous and RLS would drop it silently. One write at a time per account
+        (_recents_lock_for); a write that waited is dropped if the browser has
+        since switched account, so A's page never lands in B's history.
+        """
+        if not user_id:
+            return
+        async with _recents_lock_for(user_id):
+            try:
+                from web.state import state as app_state
+                from web.supabase_client import add_recent_item, get_user_client
+                lists_mgr = app_state.lists_mgr
+                if GlobalAuthState.get_user_id() != user_id or not lists_mgr:
+                    return
+                meta_mgr = getattr(lists_mgr, 'meta_mgr', None)
+                shelfmark, title = meta_mgr.get_meta_for_id(sys_id) if meta_mgr else (None, None)
+                await run.io_bound(add_recent_item, user_id, sys_id, shelfmark, title, fl_id,
+                                   client=get_user_client())
+            except Exception as track_err:
+                logger.error(f"Failed to track recent item: {track_err}")
 
     # Enrichment thin wrappers (inject state + refs into extracted module functions)
     async def _load_enrichment(page, generation):
@@ -1998,7 +2052,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     ui.button(
                         icon='skip_next' if is_rtl() else 'skip_previous',
                         on_click=lambda: navigate_shelfmark(-1)
-                    ).props('flat round aria-label="Previous manuscript" data-action="prev-manuscript"').style('color: white !important;').tooltip(tr('Previous manuscript'))
+                    ).props('flat round aria-label="Previous manuscript" data-action="prev-manuscript" data-ux="browse_page"').style('color: white !important;').tooltip(tr('Previous manuscript'))
 
                     # Shelfmark and Title
                     with ui.row().classes('flex-1 items-center justify-center gap-4'):
@@ -2182,7 +2236,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     ui.button(
                         icon='skip_previous' if is_rtl() else 'skip_next',
                         on_click=lambda: navigate_shelfmark(1)
-                    ).props('flat round aria-label="Next manuscript" data-action="next-manuscript"').style('color: white !important;').tooltip(tr('Next manuscript'))
+                    ).props('flat round aria-label="Next manuscript" data-action="next-manuscript" data-ux="browse_page"').style('color: white !important;').tooltip(tr('Next manuscript'))
 
             # === Action Buttons Row ===
             # Removed - buttons moved to appropriate headers
@@ -4236,7 +4290,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ui.button(
                                 icon='chevron_right' if is_rtl() else 'chevron_left',
                                 on_click=lambda: load_page(direction=-1)
-                            ).props(f'flat round dense size=sm {"disabled" if prev_disabled else ""} data-action="prev" aria-label="{tr("Previous Page")}"').classes(
+                            ).props(f'flat round dense size=sm {"disabled" if prev_disabled else ""} data-action="prev" data-ux="browse_page" aria-label="{tr("Previous Page")}"').classes(
                                 'text-green-700' if not prev_disabled else 'text-gray-300'
                             )
 
@@ -4283,7 +4337,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                                 ui.button(
                                     tr('Go'), icon='arrow_back' if is_rtl() else 'arrow_forward', on_click=handle_go_click,
-                                ).props(f'flat dense color=green size=sm aria-label="{tr("Go")}"').classes('browse-icon-collapse')
+                                ).props(f'flat dense color=green size=sm data-ux=browse_page aria-label="{tr("Go")}"').classes('browse-icon-collapse')
 
                             ui.label(f"/ {page.total_pages}").classes('text-xs').style('color: var(--text-secondary);')
 
@@ -4291,7 +4345,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             ui.button(
                                 icon='chevron_left' if is_rtl() else 'chevron_right',
                                 on_click=lambda: load_page(direction=1)
-                            ).props(f'flat round dense size=sm {"disabled" if next_disabled else ""} data-action="next" aria-label="{tr("Next Page")}"').classes(
+                            ).props(f'flat round dense size=sm {"disabled" if next_disabled else ""} data-action="next" data-ux="browse_page" aria-label="{tr("Next Page")}"').classes(
                                 'text-green-700' if not next_disabled else 'text-gray-300'
                             )
 
@@ -5426,7 +5480,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             # route wins when it resolves, but when the FL id is stale/unknown
             # (or its uid has no text) _fetch_page retries the volume+page
             # route instead of dead-ending on 'No text available'.
-            asyncio.ensure_future(load_page(fl_id=bootstrap['fl_id'], p_num=bootstrap['p_num']))
+            asyncio.ensure_future(load_page(fl_id=bootstrap['fl_id'], p_num=bootstrap['p_num'], _ux_nav=True))
         elif action == 'sys_id':
             if bootstrap['clear_desk']:
                 # Stale desk - use snapshot helper, not direct pop (Codex HIGH #9).
@@ -5436,7 +5490,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             state.is_loading = True
             update_content()
             # Cat-2: deferred init - container must mount before async load.
-            asyncio.ensure_future(load_page(p_num=bootstrap['p_num']))
+            asyncio.ensure_future(load_page(p_num=bootstrap['p_num'], _ux_nav=True))
         elif action == 'restore_desk':
             # Reuses the existing local _restore_reading_desk_state() helper.
             # NOTE (Codex MEDIUM #5): _restore_reading_desk_state is responsible for
@@ -5448,7 +5502,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     state.is_loading = True
                     update_content()
                     # Cat-2: deferred init safety-net fallback - container must mount before async load.
-                    asyncio.ensure_future(load_page(p_num=bootstrap['p_num']))
+                    asyncio.ensure_future(load_page(p_num=bootstrap['p_num'], _ux_nav=True))
                 else:
                     update_content()
         elif action == 'shelfmark':
@@ -5474,7 +5528,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             state.is_loading = True
             update_content()
             # Cat-2: bootstrap deferred init.
-            asyncio.ensure_future(load_page(p_num=bootstrap['p_num']))
+            asyncio.ensure_future(load_page(p_num=bootstrap['p_num'], _ux_nav=True))
         else:  # action == 'none'
             update_content()
 

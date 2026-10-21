@@ -54,13 +54,13 @@ async def create_profile_page():
                 # Full Name (editable) - from profile
                 full_name_input = ui.input(
                     label=tr('Full Name'),
-                    value=profile.get('full_name', '')
+                    value=profile.get('full_name') or ''
                 ).classes('w-full').props('outlined')
 
                 # Affiliation (editable) - from profile
                 affiliation_input = ui.input(
                     label=tr('Affiliation'),
-                    value=profile.get('affiliation', '')
+                    value=profile.get('affiliation') or ''
                 ).classes('w-full').props('outlined')
 
                 # Bio (editable) - from profile
