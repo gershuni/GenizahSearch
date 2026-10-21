@@ -244,6 +244,26 @@ def test_a_failed_delete_is_finished_by_the_next_run_without_duplicating(tmp_pat
     assert sorted(p.name for p in d.iterdir()) == ["README.md"]
 
 
+def test_the_same_row_in_two_fragments_is_folded_once(tmp_path):
+    """Two PRs that found the same bug: the row lands once and counts once (Codex
+    review of PR #428); the note names the fragment that added it."""
+    d, t = _tree(tmp_path, {"2026-10-21-a.md": "### P2 - Medium\n" + ROW_P2 + "\n",
+                            "2026-10-20-b.md": "### P2 - Medium\n" + ROW_P2 + "\n"})
+    assert _run(d, t, "--apply") == 0
+    text = t.read_text(encoding="utf-8")
+    assert text.count(ROW_P2) == 1
+    assert "| P2 Medium Bugs | 2 |" in text and "| **Total open** | **4** |" in text
+    assert "(folded 1 fragment(s) from `docs/open_issues.d/`: 2026-10-21-a.md) -- P2 +1. 4 open." in text
+    assert sorted(p.name for p in d.iterdir()) == ["README.md"]
+
+
+def test_a_row_repeated_inside_one_fragment_is_folded_once(tmp_path):
+    d, t = _tree(tmp_path, {"2026-10-21-a.md": "### P2 - Medium\n%s\n%s\n" % (ROW_P2, ROW_P2)})
+    assert _run(d, t, "--apply") == 0
+    text = t.read_text(encoding="utf-8")
+    assert text.count(ROW_P2) == 1 and "| P2 Medium Bugs | 2 |" in text
+
+
 def test_the_count_note_names_only_the_fragments_that_added_rows(tmp_path):
     d, t = _tree(tmp_path, {"2026-10-21-a.md": "### P2 - Medium\n" + ROW_P2 + "\n",
                             "2026-10-20-b.md": "### P3 - Low Priority\n" + ROW_P3B + "\n"})

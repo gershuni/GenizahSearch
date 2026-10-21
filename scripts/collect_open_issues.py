@@ -136,15 +136,27 @@ def problems(path: Path) -> list:
     return found + parse(path.read_text(encoding="utf-8"))[1]
 
 
-def new_rows(tracker: str, blocks: dict) -> dict:
-    """*blocks* without the rows the tracker already holds verbatim.
+def _present(tracker: str) -> set:
+    return {ln.rstrip() for ln in tracker.split("\n")}
 
-    The tracker is written before the fragments are deleted, so a run that was
-    interrupted, or could not delete a fragment, leaves rows that are both in the
-    tracker and in a fragment; folding them again would duplicate the rows and
-    the counts (Codex review of PR #428)."""
-    present = {ln.rstrip() for ln in tracker.split("\n")}
-    return {h: [r for r in rows if r.rstrip() not in present] for h, rows in blocks.items()}
+
+def new_rows(blocks: dict, present: set) -> dict:
+    """*blocks* without the rows in *present*, which grows with the rows kept.
+
+    *present* starts as the tracker's lines: the tracker is written before the
+    fragments are deleted, so a run that was interrupted, or could not delete a
+    fragment, leaves rows in both places, and folding them again would duplicate
+    the rows and the counts. It then carries the rows accepted earlier in the same
+    fold: two fragments from two PRs that found the same bug, or one fragment
+    that repeats a row, add it once (Codex review of PR #428, twice)."""
+    fresh = {}
+    for heading, rows in blocks.items():
+        fresh[heading] = []
+        for r in rows:
+            if r.rstrip() not in present:
+                present.add(r.rstrip())
+                fresh[heading].append(r)
+    return fresh
 
 
 def fold(tracker: str, fragments: list, today: str) -> str:
@@ -157,8 +169,9 @@ def fold(tracker: str, fragments: list, today: str) -> str:
     lines = tracker.split("\n")
     added = {h: [] for h in SECTIONS}
     names = []
+    present = _present(tracker)
     for name, blocks in fragments:
-        fresh = new_rows(tracker, blocks)
+        fresh = new_rows(blocks, present)
         if not any(fresh.values()):
             continue
         names.append(name)
@@ -240,11 +253,13 @@ def main(argv=None) -> int:
 
     fragments = [(p.name, parse(p.read_text(encoding="utf-8"))[0]) for p in paths]
     text = args.tracker.read_text(encoding="utf-8")
+    present = _present(text)
     for name, blocks in fragments:
-        fresh = new_rows(text, blocks)
+        fresh = new_rows(blocks, present)
         print("  %s  %s" % (name, ", ".join(
             "%s: %d row(s)%s" % (h[4:], len(r), "" if len(fresh[h]) == len(r)
-                                 else " (%d already in the tracker)" % (len(r) - len(fresh[h])))
+                                 else " (%d already in the tracker or in a fragment above)"
+                                 % (len(r) - len(fresh[h])))
             for h, r in blocks.items())))
     today = args.today or datetime.date.today().isoformat()
     try:
