@@ -100,6 +100,13 @@ GENIZAH_STORAGE_RETENTION_DAYS=90     # delete .nicegui storage-user files untou
                                        # a browser absent longer is logged out on return — auth_session lives in the file)
 NLI_CACHE_MAX_ENTRIES=20000           # metadata nli_cache LRU bound (code default 75000; prod set 20000 on 2026-07-08)
 IIIF_MANIFEST_CACHE_MAX_ENTRIES=1500  # IIIF manifest cache bound (code default 5000; prod set 1500 on 2026-07-08)
+GENIZAH_GC_FREEZE=1                   # gc.collect(); gc.freeze() ONCE after the startup loaders finish (web/gc_freeze.py), so
+                                       # full collections stop walking the 0.6-0.84 M startup objects on the event loop;
+                                       # 0/false/no/off disables. Frozen objects leave gc.get_objects(): /_internal/objgraph
+                                       # reports gc_freeze_count and takes action=unfreeze / action=refreeze.
+GENIZAH_GC_FREEZE_MAX_WAIT_SECONDS=180 # freeze anyway after waiting this long for the MetadataManager threads, the FL-ID
+                                       # build and the FJMS prewarm (the log line then names the loader still running)
+GENIZAH_GC_FREEZE_POLL_SECONDS=1.0    # how often the wait re-checks those loaders
 
 # Perf watch (2026-07-30 slowness diagnosis; web-only, web/perf_watch.py). Default ON and
 # deliberately quiet — nothing is logged while the app behaves. Added because a 9-second

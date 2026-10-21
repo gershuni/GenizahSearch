@@ -303,9 +303,24 @@ class MetadataManager:
         self._load_small_caches()
 
     def start_background_loading(self):
-        """Start loading heavy metadata resources (CSV, Maps) in background."""
-        threading.Thread(target=self._load_heavy_caches_bg, daemon=True).start()
-        threading.Thread(target=self._build_file_map_background, daemon=True).start()
+        """Start loading heavy metadata resources (CSV, Maps) in background.
+
+        The thread handles are kept so ``background_loading_finished()`` can
+        say when both are done (the web's one-time gc.freeze waits for it).
+        """
+        self._bg_threads = [
+            threading.Thread(target=self._load_heavy_caches_bg, daemon=True),
+            threading.Thread(target=self._build_file_map_background, daemon=True),
+        ]
+        for thread in self._bg_threads:
+            thread.start()
+
+    def background_loading_finished(self):
+        """True once every thread of start_background_loading() has exited.
+
+        True when the loading was never started: there is nothing to wait for.
+        """
+        return all(not t.is_alive() for t in getattr(self, '_bg_threads', ()))
 
     def _load_small_caches(self):
         if os.path.exists(Config.CACHE_NLI):
