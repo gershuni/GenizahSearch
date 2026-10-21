@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-21 (reliability and latency review, `claude/reliability-latency-review`) -- the `profiles` username hardening applied live (owner, verify 13/13 PASS); web sign-up fixed for email confirmation (a "check your inbox" answer, the two common sign-in errors translated, the typed fields left to the new trigger); API / MCP / Joins Lab Exact now whole-word (owner); Codex rounds 1-4: their findings in the branch's new code fixed, or removed with the code, one pre-existing one logged; P1 -1, P2 -2 +1, P3 +5 -- 237 open. 2026-10-20: 13 fixes with regression tests and `ux_timing`; P1 +1, P2 +8, P3 +9.
+> **Last Updated:** 2026-10-21 (reliability and latency review, `claude/reliability-latency-review`) -- the `profiles` username hardening applied live (owner, verify 13/13 PASS); web sign-up fixed for email confirmation (a "check your inbox" answer, the two common sign-in errors translated, the typed fields left to the new trigger); API / MCP / Joins Lab Exact now whole-word (owner); Codex rounds 1-4: their findings in the branch's new code fixed, or removed with the code, one pre-existing one logged; P1 -1, P2 -2 +1, P3 +6 -- 238 open. 2026-10-20: 13 fixes with regression tests and `ux_timing`; P1 +1, P2 +8, P3 +9.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
@@ -64,14 +64,14 @@ Move to "Completed Issues" section at bottom with date
 |----------|------|
 | P1 Critical Bugs | 0 |
 | P2 Medium Bugs | 47 |
-| P3 Low Priority | 149 |
+| P3 Low Priority | 150 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 20 |
 | Untested Areas | 5 |
 | Deferred to v7.15+ | 6 |
 | 2026-05-29 audit follow-up | 2 |
 | FGP integration (§4.5) | 5 |
-| **Total open** | **237** |
+| **Total open** | **238** |
 
 > Counts here exclude closed items (recomputed 2026-08-14 by counting rows carrying ❌/⏸/⏳); closed history lives in docs/archive/OPEN_ISSUES_ARCHIVE.md.
 > Count notes from 2026-09-25 to 2026-10-05 moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-06.
@@ -103,6 +103,7 @@ Move to "Completed Issues" section at bottom with date
 > 2026-10-21 (Codex round 4, information only): P3 +1 (Exact misses a phrase with 4+ stray tokens between its words; pre-existing) -- 236.
 > 2026-10-21 (profiles usernames live): P1 -1 (fixed live by the owner, archived), P3 +1 (its residuals: anonymous reads of unneeded columns, the Google-name decision) -- 236.
 > 2026-10-21 (live checks Q13 / discovery_responses): P2 +1 (web discovery replies fail: the table does not exist live); the anonymous-author row: nothing exposed today -- 237.
+> 2026-10-21 (Codex review on #423): P3 +1 (case-variant usernames from simultaneous sign-ups; needs a database index) -- 238.
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 
@@ -369,6 +370,7 @@ Move to "Completed Issues" section at bottom with date
 | **`requirements-lock.txt` is a Windows resolution, so Linux-only packages still float on deploy** | `requirements-lock.txt`; `deploy.sh` (`-c requirements-lock.txt` since 2026-10-21) | ❌ Open (2026-10-21, Codex review; pre-existing) | The constraints pin every package the lock lists, but packages only Linux needs are not in it (e.g. `SecretStorage` and `jeepney`, which `keyring` requires there), so the server resolves them freely, as it did before the constraint. Fix: generate the server's closure on Linux / Python 3.11 (a second lock or a `pip freeze` from the server) and constrain with that. |
 | **Exact (whole words) misses a phrase with four or more stray tokens between its words** | `shared/search_engine.py::build_phrase_candidate_query` (`_PHRASE_EXTRA_SLOP = 3`) | ❌ Open (2026-10-21, Codex review round 4; pre-existing on the website and desktop, the API since its Exact became whole-word) | The phrase prefilter retrieves a page only when each adjacent pair of words is within slop gap + 3; the hebword tokenizer keeps lone lacuna brackets and marks as tokens, so `אהרן [ ] [ ] כהן` (four) is never a candidate, and no "N+" or cut-off warning says so. Reproduced by Codex in the engine; frequency on the real index unmeasured (2026-09-30: +2 missed nothing over six phrases). Fix: measure how many pages have 4+ stray tokens inside a phrase; raise the slop or count only word tokens in it, keeping the regex as the judge; add the case to `scripts/verify_search_combinations.py`. |
 | **Hardening follow-up: `profiles` columns no page needs are readable anonymously, and whether a Google account's own name is shown** | `supabase_setup.sql` (profiles SELECT grants); every `profiles` `select('*')` (web, and the installed desktop) | ❌ Open (2026-10-21) | `settings` and `last_login` are readable like the public name fields. Column-level grants need every `select('*')` on `profiles` gone first, including the installed desktop, or those reads fail. Since 2026-10-21 a Google sign-up gets an empty name (its claims are not published); showing Google's name instead is an owner decision. The username-fix record `private.profiles_username_fix_20261021` can be dropped once the undo is no longer wanted. |
+| **Two sign-ups at the same moment can take usernames that differ only by case** | `handle_new_user` (`migrations/profiles_no_email_username.sql`: a `lower()` existence check before the insert); `profiles.username` is `UNIQUE`, case-sensitive | ❌ Open (2026-10-21, Codex review on #423; needs a database change) | Under READ COMMITTED both sign-ups pass the check before either commits, so `Alice` and `alice` can both be saved; the window is the few milliseconds between check and commit. Fix (owner-run, after confirming no case duplicates exist: `select lower(username), count(*) from public.profiles where username is not null group by 1 having count(*) > 1`): `create unique index concurrently profiles_username_lower_key on public.profiles (lower(username));` -- the trigger's `unique_violation` fallback then covers it. Add the index to `supabase_setup.sql` in the same change. |
 
 ---
 
