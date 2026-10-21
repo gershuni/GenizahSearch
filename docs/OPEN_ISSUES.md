@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-21 (desktop Excel page text and the Source column, `claude/desktop-xlsx-fulltext-source`, desktop-only) -- the desktop Excel, Word and text downloads write the page a row shows, not its whole manuscript; Excel keeps line breaks as the website does; the Source column shows whenever a row is V0.7. P2 -2 (both fixed, archived). 240 open.
+> **Last Updated:** 2026-10-21 (NLI thumbnails on disk, web, `claude/happy-maxwell-2hdkns`) -- Visual Similarity blank thumbnails diagnosed: 8 NLI manifest slots with a 1 s wait, and a "30-day" FL-id cache that held 5 minutes (fixed, archived); thumbnails now kept on disk; the first view of an unopened manuscript stays open (P2), and a desktop image-cache key collision found by reading the code (P3). 242 open.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
@@ -66,15 +66,15 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open |
 |----------|------|
 | P1 Critical Bugs | 0 |
-| P2 Medium Bugs | 50 |
-| P3 Low Priority | 149 |
+| P2 Medium Bugs | 51 |
+| P3 Low Priority | 150 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 20 |
 | Untested Areas | 5 |
 | Deferred to v7.15+ | 6 |
 | 2026-05-29 audit follow-up | 2 |
 | FGP integration (§4.5) | 5 |
-| **Total open** | **240** |
+| **Total open** | **242** |
 
 > Counts here exclude closed items (recomputed 2026-08-14 by counting rows carrying ❌/⏸/⏳); closed history lives in docs/archive/OPEN_ISSUES_ARCHIVE.md.
 > Count notes from 2026-09-25 to 2026-10-05 moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-06.
@@ -112,6 +112,7 @@ Move to "Completed Issues" section at bottom with date
 > 2026-10-21 (Responsa wildcard shapes): P2 +1 (`#word#` loses its suffixes to the 500-term guard; a star inside a word returns nothing) -- 241.
 > 2026-10-21 (Responsa outer edges): P2 +1 (the first and last words of a Responsa query have no word boundary) -- 242.
 > 2026-10-21 (desktop Excel page text + Source column, `claude/desktop-xlsx-fulltext-source`): P2 -2 (desktop Excel Full Text and glued lines; hidden Source column: fixed, archived) -- 240.
+> 2026-10-21 (NLI thumbnails on disk, `claude/happy-maxwell-2hdkns`): P2 +1 (grid thumbnails of unopened manuscripts, partly fixed, stays open) +1 -1 (the "30-day" FL-id cache held 5 minutes: found and fixed the same day, archived); P3 +1 (desktop image-cache key collision) -- 242.
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 
@@ -173,6 +174,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **Visual Similarity / Joins Lab grids: thumbnails of manuscripts nobody opened come up blank, and different ones on each redraw** | `web/api.py::fetch_fl_ids_from_nli` (`NLI_MAX_CONCURRENT_FETCHES` 8, `NLI_SEMAPHORE_TIMEOUT` 1 s), `web/nli_image_store.py` | ⚠️ Partly fixed (2026-10-21, `claude/happy-maxwell-2hdkns`, not deployed) | Owner report 2026-10-21. Each card whose manuscript the server has not resolved needs an NLI manifest; 8 run at once and the others wait 1 s, then the route answers 404; a failure is `no-store`, so each redraw (the size buttons) re-asks exactly the failed cards. Reproduced: 12 of 20 lost at a 1.5 s manifest; production cold thumbnails took 2.3-3.5 s. Fixed on the branch: the FL-id store keeps 30 days (the "30-day" JSON held 5 minutes; archived) and thumbnails are kept on disk, so a manuscript resolved in the last 30 days, or a thumbnail fetched once, no longer waits for a slot. Still open: the first view of a manuscript nobody opened in 30 days. Fix: [docs/plans/NLI_THUMBNAIL_PREFETCH_PLAN.md](plans/NLI_THUMBNAIL_PREFETCH_PLAN.md) (prefetch; four owner decisions), or a one-time browser retry. 🔑 Server check after deploy: `/_internal/memstat` → `nli_image_store` counters, and `journalctl -u genizah-web` for "NLI semaphore timeout". |
 | **Responsa `*word` misses pages, and reads every whole-manuscript doc** | `shared/search_engine.py::build_tantivy_query` (prefix wildcard = the 24 `expand_grammatical_prefixes` forms + bracket forms), `execute_search` (Responsa keeps the single mixed page+aggregate query) | ❌ Open (2026-10-21; ground truth by scanning `Transcriptions.txt`) | `*כהנים *גדולים`: 369 V0.8 pages match the engine's own regex; the desktop finds 361, the website 360. Missed: 7 Judeo-Arabic forms (`אלכהנים`/`ואלכהנים`/`באלכהנים` … `אלגדולים`) and one `גדולים'`. 15 pages are found only because their whole manuscript also holds a listed form elsewhere (EVR ARAB I 118 p.168 is one; the website misses it). The 3,723 candidates include 1,829 whole-manuscript docs, 619M chars: 31 s with the `regex` module (desktop), 9.8 s with stdlib `re` (production workers). Candidate retrieval from real index terms ending in the word would fix recall and let Responsa read pages first. Owner decision. Measured: `tantivy.Query.regex_query` (tantivy 0.25) `.*כהנים` AND `.*גדולים` on page docs = 1,918 pages in 7 s. |
 | **Responsa: `#word#` never keeps its suffixes; a star inside a word returns nothing** | `shared/responsa.py::_apply_explosion_guard` (`MAX_EXPANDED_TERMS` 500), `parse_responsa_query`, `shared/search_engine.py::build_tantivy_query` | ❌ Open (2026-10-21, local index) | 24 prefixes x 25 suffixes = 600 > 500, so the guard drops the suffixes of every `#word#` (and of `*word*`, rewritten to it): `#כהנ# גדולים` and `*כהנ* גדולים` return 2 rows (plain `כהנים גדולים`: 360); only a 5-second status warning says so. `כ*נים` is not parsed as a wildcard (literal `*`, 0 rows); `*כ*ה*נ*ים` builds the right regex but sends the pattern to Tantivy as a literal term (0 candidates, 0 rows), so character patterns always return nothing. |
 | **Responsa: the query's first and last words have no word boundary** | `shared/search_engine.py::build_regex_pattern` (Responsa branch), `execute_search` (`_whole_words` is off for Responsa) | ❌ Open (2026-10-21, local index) | The regex checks boundaries only between words, so the first word acts as `*word` and the last as `word*`, with or without an operator: Responsa `כהנים גדול` returns 264 rows, 260 of them `כהנים גדולים` (Exact: 4); a single `ספר` accepts `מספרים`. The index side still needs the typed form somewhere on the page, so which such pages appear is chance. |
@@ -230,6 +232,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **Desktop image cache: a 400 px thumbnail and the 2000 px viewer image of the same page share one file** | `desktop/image_loader.py::ImageLoaderThread.run` (cache name `FL<id>_v2.jpg` from the FL id alone); thumbnails from `shared/metadata_manager.py::_resolve_thumbnail` (`/full/400,`) | ❌ Open (found 2026-10-21 by reading the code; not reproduced) | Every `ImageLoaderThread` names its cache file by FL id only, whatever the requested width. A thumbnail loaded first (Joins Lab grid, result-dialog thumbnail, Lists preview, Browse thumbnails) is saved as the file the manuscript viewer then reads for its 2000 px image, so page 1 can show enlarged and blurry. Fix: key the file by FL id and width (or by URL). Fold into the desktop phase of [docs/plans/NLI_THUMBNAIL_PREFETCH_PLAN.md](plans/NLI_THUMBNAIL_PREFETCH_PLAN.md) section 7. ✋ *By hand:* open a manuscript's thumbnail in the Joins Lab, then the same manuscript in the viewer, with an empty `images_cache/`. |
 | **Responsa downgrade warnings follow the server process's language, not the visitor's** | `shared/search_engine.py::_tr`, `shared/responsa.py::_tr` (`genizah_core.CURRENT_LANG`), `web/pages/search.py` (the `responsa_warning` notify) | ❌ Open (2026-10-20) | Built in the research worker in the process's `lang.pkl` language ('en' when absent) and shown as is; the API repeats it. Fix: pin the workers to English, then split the joined labels on '; ' and `tr()` each on the web side. |
 | **Admin approve/reject drops `reviewed_by` / `reviewed_at` from its payload (it runs in a worker thread)** | `web/pages/admin.py` (`update_correction_status` in `run.io_bound`; `GlobalAuthState.get_user_id()` is None there) | ❌ Open (2026-10-20, code reading) | No visible effect while the 2026-09-25 guard trigger stamps both server-side (`migrations/add_privileged_column_guards.sql`). Pass the reviewer id captured on the loop. |
 | **Tests that build a /browse page make real anonymous Supabase reads against the production URL** | the page's comments loader and joins panel (committed default URL and anon key); likely `tests/test_browse_print_control.py`, `tests/test_browse_computed_deeplink.py`, `tests/test_discovery_panel_browse_wiring.py` (not checked) | ❌ Open (2026-10-20) | Found when a new test hit PostgREST (harmless reads, one a uuid parse error). Tests then depend on the network and touch production. `tests/test_ux_timing.py` and `tests/test_browse_recents_off_loop.py` use a `supabase_offline` fixture (the URL points at a refused local port); make it an autouse default in conftest. |

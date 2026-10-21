@@ -31,6 +31,25 @@ if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
 
 
 # ---------------------------------------------------------------------------
+# The NLI image proxy's on-disk stores (web/nli_image_store.py): the 30-day
+# FL-id store and the thumbnail folder default to INDEX_DIR, the developer's
+# real data folder. Point both at a temporary folder before anything imports
+# web.api -- init_api_routes() opens the store, and a module-scoped fixture can
+# run it before any per-test fixture -- and give every test its own folder
+# below (`_isolate_nli_image_store`). Set, not setdefault: a test must never
+# read or write the real stores.
+# ---------------------------------------------------------------------------
+import atexit as _atexit
+import shutil as _shutil
+import tempfile as _tempfile
+
+_NLI_IMAGE_STORE_TMP = _tempfile.mkdtemp(prefix="nli_image_store_")
+_atexit.register(_shutil.rmtree, _NLI_IMAGE_STORE_TMP, True)
+os.environ["NLI_FL_ID_STORE_FILE"] = os.path.join(_NLI_IMAGE_STORE_TMP, "session", "nli_fl_ids.db")
+os.environ["NLI_THUMB_CACHE_DIR"] = os.path.join(_NLI_IMAGE_STORE_TMP, "session", "nli_thumbs")
+
+
+# ---------------------------------------------------------------------------
 # Skip Phase 97.3 / 100 / 97.2 desktop tests on CI runners (D-F15).
 #
 # Phase 97.3 (2026-05-26) introduced the FolderWalkWorker QThread + heavily
@@ -526,6 +545,18 @@ def _isolate_personal_state_files(monkeypatch, _personal_state_root):
     monkeypatch.setattr(Config, "SESSION_FILE", str(folder / "session.json"))
     monkeypatch.setattr(Config, "CONFIG_FILE", str(folder / "config.pkl"))
     monkeypatch.setattr(Config, "LANGUAGE_FILE", str(folder / "lang.pkl"))
+
+
+# Each test its own FL-id store and thumbnail folder (created only if written):
+# a thumbnail one test fetched must not answer another test's request.
+_NLI_IMAGE_STORE_SEQ = itertools.count()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_nli_image_store(monkeypatch):
+    folder = os.path.join(_NLI_IMAGE_STORE_TMP, str(next(_NLI_IMAGE_STORE_SEQ)))
+    monkeypatch.setenv("NLI_FL_ID_STORE_FILE", os.path.join(folder, "nli_fl_ids.db"))
+    monkeypatch.setenv("NLI_THUMB_CACHE_DIR", os.path.join(folder, "nli_thumbs"))
 
 
 # ---------------------------------------------------------------------------
