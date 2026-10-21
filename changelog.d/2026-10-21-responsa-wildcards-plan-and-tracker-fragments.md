@@ -3,8 +3,8 @@
 - `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md` (Codex SHIP after four rounds): Responsa `*` as any
   sequence of letters inside a word through the index's pattern lookup, `#` kept as the grammatical
   list, whole words at the query's edges, `#word#` keeping its suffixes, pages first. Measured on
-  the local index. Decided by the owner: counts may change, and negated words keep today's
-  behaviour; still provisional, pending Phase 0's numbers: how a word that starts with a star is
+  the local index. Decided by the owner: counts may change, and excluded words are checked on the
+  matched page only, in every mode; still provisional, pending Phase 0's numbers: how a word that starts with a star is
   looked up (accept the cost, a reversed field, or a word list beside the index) and where
   page-break matches come from under a star (seam documents, or none with a notice). No product
   code.

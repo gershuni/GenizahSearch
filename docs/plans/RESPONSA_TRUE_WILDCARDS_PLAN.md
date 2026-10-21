@@ -2,7 +2,7 @@
 
 **Status:** plan, revision 4, **Codex SHIP** (four rounds on 2026-10-21: DO NOT SHIP, DO NOT SHIP,
 SHIP WITH FIXES, SHIP; §12). It is the basis for Phase 0 and Phase 1. Not implemented. Decisions 7
-and 8 in §9 were taken on 2026-10-21 (negation unchanged; counts may change), so Phase 0 and Phase 1
+and 8 in §9 were taken on 2026-10-21 (exclusion on the page only; counts may change), so Phase 0 and Phase 1
 may start; decisions 1-6 and 9 wait for Phase 0's numbers.
 **Tracker rows (P2, `docs/OPEN_ISSUES.md`, 2026-10-21; they reach `master-main` with PR #426):**
 - "Responsa `*word` misses pages, and reads every whole-manuscript doc"
@@ -215,11 +215,14 @@ scanning the file:
 - **Order of expansion.** `%` (plene/defective), Judeo-Arabic and spelling variants expand the
   literal part, then the star applies. Retrieval and check must apply the same order (today
   wildcard branches skip the expanded forms on one side; Codex 2.17).
-- **Negation is unchanged (owner, 2026-10-21; §9, decision 7).** It stays a substring test on the
-  row's `full_text`: for a row found through its whole manuscript that text is the whole manuscript,
-  so `-כהנים` can hide such a row because the manuscript contains `אלכהנים` somewhere; for a page
-  row it is the page. A whole-word predicate on the matched page was offered and declined. Ordinary
-  non-Responsa `exclude_words` keep their behaviour too.
+- **Negation: the page only, letters anywhere (owner, 2026-10-21; §9, decision 7).** Today it is a
+  substring test on the row's `snippet` + `full_text` (`execute_search` ~4519, the line-break path
+  ~3591, `ids_only` ~4109): for a row found through its whole manuscript that text is the whole
+  manuscript, so `-כהנים` hides such a row because `אלכהנים` appears somewhere else in the
+  manuscript. The decided rule: the excluded letters must appear **on the page the match is on**
+  (for a crossing, on the pages the span covers), anywhere inside a word, as today. It is one rule
+  for Responsa `-word` and for the "Exclude Words" box of Exact, Variants and Fuzzy, which has no
+  wildcards: a whole-word form was offered and declined for that reason.
 - OR groups and inline alternation are expanded on both sides by the compiler. Today their parser
   branches return before wildcard parsing (Codex 2.16).
 
@@ -322,8 +325,8 @@ merging or de-duplication.
 
 **Proposed de-duplication (Codex 6.8):**
 - **First wins:** the page row, since pages are read first.
-- **Exclusion** keeps today's rule (decision 7): it reads the surviving row's `full_text`, so a
-  page row is checked on its page and a crossing row on its aggregate.
+- **Exclusion** reads the matched page's text (decision 7): a page row is checked on its page and a
+  crossing row on the pages its span covers, never on the whole aggregate it came through.
 - **Crossing rows** keep their `page_highlights` from the aggregate (or seam).
 - **Test:** fixture rows that share a uid between a page document and an aggregate, checked on
   which row survives, its `full_text` and its exclusion result, not only on UID counts.
@@ -463,7 +466,8 @@ LOCAL-only path, ALL and `ids_only`, all through the compiler (§5.1):
 - whole words by Exact's predicate (§5.2), including every `within_document` component, both
   `bidirectional` branches and the `flex_spacing` rule;
 - the guard measured by real cost on every path, with length-grouped trees (§5.3);
-- negation left as it is (decision 7), pinned by a test on both a page row and a manuscript row;
+- exclusion checked on the matched page(s) only, in every mode (decision 7), with a test where the
+  excluded letters sit on another page of the same manuscript;
 - the web highlight fixed to match raw text before escaping.
 
 **Unsupported star shapes** are refused with a visible message on every surface. That includes Joins
@@ -580,7 +584,9 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
    whole manuscript, depending on how the result was found. Recommended: a whole word, checked on
    the matched page only, with `-*כהנים` for the broad form. Or should the whole manuscript count,
    always?
-   **Decided 2026-10-21: keep today's behaviour.** Phase 1 pins it; §4 and §5.4 are updated.
+   **Decided 2026-10-21: the page only, letters anywhere, in every mode.** The "Exclude Words" box
+   of regular search has no wildcards, so the whole-word form was declined. §4, §5.4, §7 and §10
+   are updated.
 8. **Counts change for existing searches.** Edge words become whole words, so some searches return
    fewer rows (`כהנים גדול`: 264 to 4), and star searches return more. API and MCP users get the
    same change. This needs a go-ahead and a sentence in the release notes.
@@ -595,7 +601,8 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
 
 ## 10. What this does not change
 
-- Exact, Variants, Fuzzy and Regex modes, apart from §6's shared crossing source if B is chosen.
+- Exact, Variants, Fuzzy and Regex modes, apart from §6's shared crossing source if B is chosen and
+  the exclusion domain (decision 7: the matched page, in every mode).
 - Composition and letter-level (passage) search.
 - The lists themselves (24 prefixes, 25 suffixes).
 - The desktop's `regex`-module speed is out of scope. If the desktop is still slow after pages
