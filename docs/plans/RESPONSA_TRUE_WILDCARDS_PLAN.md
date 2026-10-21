@@ -1,9 +1,12 @@
 # Responsa wildcards: `*` as any sequence, `#` as the grammatical list
 
-**Status:** plan, revision 5: **Phase 0 done (2026-10-21, §3.6)**; revision 4 was **Codex SHIP**
-(four rounds on 2026-10-21: DO NOT SHIP, DO NOT SHIP, SHIP WITH FIXES, SHIP; §12). It is the basis
-for Phase 1. Not implemented. Decisions 7 and 8 in §9 were taken on 2026-10-21 (exclusion on the
-page only; counts may change). Phase 0's numbers inform decision 1 (a word list beside the index
+**Status:** plan, revision 5: **Phase 0 measured (2026-10-21, §3.6)** -- every item has its
+numbers except the two halves of item 6 that cannot run yet: the "after" timings, which run with
+Phase 1 and Phase 2 through the same subcommand, and the Linux-worker run, which is the owner's
+(§3.6.6 holds today's desktop timings on both regex routes, on the laptop). Revision 4 was
+**Codex SHIP** (four rounds on 2026-10-21: DO NOT SHIP, DO NOT SHIP, SHIP WITH FIXES, SHIP; §12).
+It is the basis for Phase 1. Not implemented. Decisions 7 and 8 in §9 were taken on 2026-10-21
+(exclusion on the page only; counts may change). Phase 0's numbers inform decision 1 (a word list beside the index
 gives the same V0.8 pages in 0.14-1.8 s against 4.6-6.1 s per leading-star lookup; §3.6.1),
 decision 2 (an OR of 600 or 1,200 scored term queries keeps distinct BM25 scores in under a second;
 §3.6.3), decision 3 (`*נים *לים` has 99,981 candidate pages, 100,373 with bracket tolerance; §3.6.4),
@@ -197,9 +200,9 @@ for `scan`, `wordlist`, `patterns`, `scored-terms`, `missing-pages`, `verify-tol
 
 - **Build.** One pass over `Transcriptions.txt`: 941,026 pages (every one with a uid; the same
   count as the index's V0.8 page docs), 796,066,613 characters, **159,793,249 tokens** after
-  `strip_search_diacritics` (159,805,602 before folding; §4's 160,171,128 came from another
-  tokenizer approximation), **7,284,528 distinct words** under the tokenizer's class (the `regex`
-  module's `\w` agrees with the Rust crate's). Scan **313.8 s**, reverse + sort **9.8 s**, write
+  `strip_search_diacritics` (159,805,602 before folding; §4's 160,171,128 was counted another way,
+  0.2% apart), **7,284,528 distinct words** under the tokenizer's class (the `regex` module's `\w`
+  agrees with the Rust crate's: Alphabetic, marks, decimal digits, connector punctuation). Scan **313.8 s**, reverse + sort **9.8 s**, write
   **2.2 s**: **325.8 s in all** (§3.4's "16 s" collected one ending only).
 - **Size.** 99,508,668 bytes (**94.9 MiB**) on disk as UTF-8 lines; loading it into a Python list
   takes **0.40 s** and **725 MiB** of process RSS (29 -> 754 MiB; 7.3 M `str` objects). The build
@@ -293,10 +296,14 @@ paths under one check.
 - **Stage 1** (`regex_query('.*נים')` AND `regex_query('.*לים')` AND `scope:page` AND
   `source:"V0.8"`): **99,981** candidate pages in **10.24 s** (§3.2: 99,964).
 - **Stage 2** (fetch each candidate, run the oracle): **3,865** pages pass; 193,552,137 characters
-  read; 116.4 s, of which the fetches are 13.2 s and the pure-Python oracle the rest (the product's
-  compiled regex did the same in 8.4 s in §3.2).
-- **Brute force** over all 941,026 pages of the file: 101,067 pages hold both `נים` and `לים`;
-  **3,872** pages match; 119.7 s. (343 page uids occur twice in the file.)
+  read; 100.9-116.4 s over two runs, of which the fetches are 3.3-13.2 s and the pure-Python oracle
+  the rest (the product's compiled regex did the same in 8.4 s in §3.2).
+- **Brute force** over all 941,026 pages of the file. The prefilter looks for `נים` and `לים` in
+  the page's text with every looked-past character removed (marks, quotes, brackets), so it is
+  exactly as permissive as the oracle (`נ[י]ם` and `נִים` pass; a literal test, the first run's,
+  skipped them -- Codex on PR #429 -- and gave the same 7 pages below): **101,087** pages
+  prefiltered; **3,872** distinct page uids match; 130.2 s. (343 further matches were a second copy
+  of a uid already matched: the file holds some pages twice, and both sides here count by uid.)
 - **Difference: 7 pages the index path misses, 0 the other way.** All seven have one cause, **a
   bracket glued to the end of the token** (`נתקנים[`, `פנים[`, `כלשונים[`, `ובנים[`, `אדונים[` for the
   first word; `בקולים[`, `גדולים[` for the second): `.*נים` does not match a term that ends in `[`,
@@ -305,9 +312,11 @@ paths under one check.
   990053164840205171 p1, 990053520270205171 p1. For each the index holds exactly one V0.8 page doc
   whose text equals the file's. **No maqaf, digit, Hebrew punctuation or tokenizer split is among
   them.**
-- **The §4 contract covers this and is complete for this query**: the bracket-tolerant stage 1
-  (`.*נים[\[\]]*` AND `.*לים[\[\]]*`) returns **100,373** candidates in **10.30 s** (392 more) and
-  **admits all seven** (`verify-tolerant`).
+- **The §4 contract covers this and is complete for this query**: §5.1's tolerant stage 1
+  (`.*נ[\[\]֑-ׇ]*י[\[\]֑-ׇ]*ם[\[\]֑-ׇ]*` AND the same for `לים`)
+  returns **100,392** candidates in **9.67 s** (411 more than the plain lookup, at the same cost)
+  and **admits all seven** (`verify-tolerant`). The end-only form `.*נים[\[\]]*` gave 100,373 and
+  also admitted all seven.
 
 #### 3.6.5 Aggregate topology -- `topology` (27 s)
 
@@ -345,7 +354,11 @@ order**, and the V0.8 -> V0.7 restart is nearly all of it: a crossing found ther
 the text joined to its own beginning. Seam documents (§6 B) built per source and per IE, with
 page-number continuity, remove every kind above. This bears on decision 9.
 
-#### 3.6.6 Desktop timings today for the §8 query set -- `desktop-timings` (442 s)
+#### 3.6.6 Desktop timings today for the §8 query set -- `desktop-timings` (442 s): the "before" half of item 6
+
+This is the "before" of item 6, on the laptop. The "after" is the same subcommand once Phase 1 and
+Phase 2 land; the Linux-worker run is the owner's and is **not** replaced by the stdlib-`re` column
+below, which is the worker's matching route measured on this Windows laptop.
 
 Method: `SearchEngine.execute_search(query, 'exact', 0, responsa_options={'responsa_mode': True,
 'variants': False, 'ja': False, 'flex_spacing': False, 'bidirectional': False, 'variant_mode':
@@ -422,8 +435,8 @@ Counted on the folded tokens (`content_search`'s terms) of the whole V0.8 file:
 Every sample is HTR noise (Cyrillic, Arabic and Yiddish-ligature characters glued to the mark), not
 a Hebrew word split by punctuation. Sof pasuq is the one other character of the four the tokenizer
 keeps inside tokens, at the same order of magnitude as maqaf (271 against 193 of 159.8 M tokens).
-The §4 exception can name both ("Hebrew punctuation kept inside a token: maqaf and sof pasuq,
-under 500 tokens together"); paseq and nun hafukha do not occur.
+**§4's exception now names both** (maqaf and sof pasuq; Exact's predicate ends a word at either,
+the token keeps both), and Phase 1's pinning test covers both; paseq and nun hafukha do not occur.
 
 ## 4. The contract (proposed)
 
@@ -440,17 +453,16 @@ under 500 tokens together"); paseq and nun hafukha do not occur.
   - Every stage-1 lookup must return every document the stage-2 check could accept.
   - A lookup tolerates brackets and marks inside tokens, so it never drops a page the check would
     keep.
-  - **Words and tokens differ in one place: maqaf (U+05BE).** Exact's predicate ends a word at a
-    maqaf (category Pd), but `hebword` keeps it inside the token. So `abc` inside `abc־def` is a
-    whole word to the check, but not an indexed token, and a finite lookup misses it (Codex round 2,
-    2.1, reproduced).
-  - Measured: **196 of 160,171,128** V0.8 tokens contain a maqaf, and the samples are HTR noise.
+  - **Words and tokens differ in two places: maqaf (U+05BE) and sof pasuq (U+05C3).** Exact's
+    predicate ends a word at either (categories Pd and Po), but `hebword` keeps both inside the
+    token. So `abc` inside `abc־def` is a whole word to the check, but not an indexed token, and a
+    finite lookup misses it (Codex round 2, 2.1, reproduced); `abc׃def` is the same case.
+  - Measured (Phase 0, §3.6.7): **193 tokens hold a maqaf and 271 a sof pasuq, of 159,793,249**
+    V0.8 tokens; paseq (U+05C0) and nun hafukha (U+05C6) do not occur; every sample is HTR noise.
     Underscore (Pc, 970 tokens) continues a word under both rules.
-  - Phase 0 counts the other Hebrew-block punctuation kept inside tokens (paseq U+05C0, sof pasuq
-    U+05C3, nun hafukha U+05C6).
-  - Phase 1 accepts this gap explicitly: a test pins it, and the contract names it. The word list
-    (§5.6 C) closes it, because it maps each word, by Exact's predicate, to the index tokens that
-    hold it.
+  - Phase 1 accepts this gap explicitly: one test pins both characters, and the contract names
+    them. The word list (§5.6 C) closes it, because it maps each word, by Exact's predicate, to the
+    index tokens that hold it.
 - **Brackets: one acceptance rule for every path.** Today the main path strips brackets from the
   text for a bracket-free query, then drops the page if the match does not reproduce on the
   original text. LOCAL checks the raw text instead (Codex 6.6).
@@ -709,8 +721,10 @@ direction sound, with these corrections.
 
 ## 7. Phases
 
-**Phase 0: measurements, no product code.** **Done 2026-10-21: every item below has its numbers in
-§3.6 (item N in §3.6.N), from `scripts/measure_responsa_wildcards.py`.**
+**Phase 0: measurements, no product code.** **Measured 2026-10-21: items 1-5 and 7, and the
+"before" half of item 6, have their numbers in §3.6 (item N in §3.6.N), from
+`scripts/measure_responsa_wildcards.py`. Still open in item 6: the "after" timings (run the same
+subcommand when Phase 1 and Phase 2 land) and the Linux-worker run (the owner's).**
 1. The full reversed word list (§5.6 C): build time and size, and lookup plus `term_set_query` time
    for narrow and broad stems.
 2. Bracket- and mark-tolerant patterns, for star words and for finite words (§5.1): DFA size and
@@ -885,6 +899,12 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
 
 ## 12. Review history
 
+- **Phase 0 round (Codex on PR #429, 2026-10-21): three findings, all folded in.** P1: the
+  brute-force oracle's prefilter was a literal substring test, so a page whose ending held an
+  internal bracket or mark (`נ[י]ם`, `נִים`) was skipped before the check ran; the prefilter now
+  removes the looked-past characters first, and item 4 was re-measured (§3.6.4). P2: sof pasuq
+  joins maqaf in §4's exception and in Phase 1's pinning test. P2: Phase 0 is "measured", not
+  "done": item 6's "after" timings and its Linux-worker run are still open (status line, §7).
 - **Round 1 (Codex, 2026-10-21): DO NOT SHIP.** Four HIGH findings, all folded in:
   - the raw `_prefix_tree` drops forms (§5.1);
   - "whole word" was two conflicting definitions, and outer bounds did not bound `AND` operands

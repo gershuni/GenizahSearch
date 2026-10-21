@@ -17,7 +17,7 @@ Items (plan section 7, Phase 0):
   scored-terms     item 3: a boolean OR of 600 and 1,200 term_query clauses
   missing-pages    item 4: the pages a brute-force scan finds for `*nim *lim` that the
                    index path (two leading-star lookups + the letters-only check) misses
-  verify-tolerant  item 4, closing check: a bracket-tolerant stage 1 admits those pages?
+  verify-tolerant  item 4, closing check: the bracket- and mark-tolerant stage 1 admits them?
   topology         item 5: junctions inside whole-manuscript and part documents that
                    are not two consecutive pages of one volume and one transcription
   desktop-timings  item 6: execute_search in Responsa mode, as the desktop calls it,
@@ -108,6 +108,8 @@ def _continues_word(ch):
 # A maximal run of word characters and looked-past characters. A run made only of
 # looked-past characters (e.g. the lacuna mark `][`) is not a word.
 WORD_RUN_RE = regex.compile(r"[\p{L}\p{Nd}\p{Pc}\p{M}'\"\u05F3\u05F4\u2018\u2019\[\]]+")
+# The looked-past characters alone, for removing them from a text at C speed.
+LOOKED_PAST_RE = regex.compile(r"[\p{M}'\"\u05F3\u05F4\u2018\u2019\[\]]")
 
 
 def semantic_words(folded_text):
@@ -759,6 +761,11 @@ def _classify_token(word, tokens):
         return 'bracket glued at the token end'
     if tok and unicodedata.category(tok[-1])[0] == 'M':
         return 'mark after the last letter of the token'
+    inner = tok.strip('[]')
+    if '[' in inner or ']' in inner:
+        return 'bracket inside the word'
+    if any(unicodedata.category(ch)[0] == 'M' for ch in inner):
+        return 'mark inside the word'
     if tok != word:
         extra = sorted({ch for ch in tok if ch not in word})
         return 'token joins neighbouring characters: ' + ', '.join(
@@ -838,14 +845,18 @@ def cmd_missing_pages(args):
             log(f'  stage 2: {i + 1:,} checked, {len(index_found):,} pass, {time.perf_counter() - started:.0f} s')
     t_stage2 = time.perf_counter() - started
     log(f'stage 2: {len(index_found):,} pages pass, {chars:,} chars read, {t_stage2:.1f} s (fetch {t_fetch:.1f} s)')
-    # Brute force over the file.
+    # Brute force over the file. The prefilter must not be narrower than the oracle: it looks for
+    # the two endings in the page's text with every looked-past character removed (marks, quotes,
+    # brackets), exactly what star_word compares against -- a literal test would skip `נ[י]ם` and
+    # `נִים` (Codex review of PR #429).
     brute = {}
     pages = prefiltered = duplicates = 0
     started = time.perf_counter()
     for header, text in iter_pages(args.corpus_file):
         pages += 1
         folded = strip_search_diacritics(text)
-        if STAR_WORD_1[1:] not in folded or STAR_WORD_2[1:] not in folded:
+        core_text = LOOKED_PAST_RE.sub('', folded)
+        if STAR_WORD_1[1:] not in core_text or STAR_WORD_2[1:] not in core_text:
             continue
         prefiltered += 1
         pair = first_pair(folded, STAR_WORD_1, STAR_WORD_2)
@@ -885,8 +896,9 @@ def cmd_missing_pages(args):
 
 
 def cmd_verify_tolerant(args):
-    """Item 4, closing check: does a bracket-tolerant stage 1 (`.*X[\\[\\]]*`, the §4 rule) admit
-    every page the plain stage 1 missed? Reads missing-pages.json."""
+    """Item 4, closing check: does the bracket- and mark-tolerant stage 1 of section 5.1
+    (`.*נ[\\[\\]\\u0591-\\u05C7]*י...ם[...]*`: the tolerance class between the letters and at the
+    end) admit every page the plain stage 1 missed? Reads missing-pages.json."""
     log = Log(args.out_dir, 'verify-tolerant')
     path = os.path.join(args.out_dir, 'missing-pages.json')
     require(path, 'missing-pages.json (run `missing-pages` first)')
@@ -895,9 +907,12 @@ def cmd_verify_tolerant(args):
     missing = [m['uid'] for m in record['missing_pages']]
     idx, searcher = open_index(args.index_dir)
     schema = idx.schema
-    tolerant_q = q_and(tantivy.Query.regex_query(schema, 'content_search', '.*' + STAR_WORD_1[1:] + T_BRACKETS),
-                       tantivy.Query.regex_query(schema, 'content_search', '.*' + STAR_WORD_2[1:] + T_BRACKETS),
-                       q_pages(idx), q_v08(idx))
+    tolerant_q = q_and(
+        tantivy.Query.regex_query(schema, 'content_search',
+                                  '.*' + tolerant(STAR_WORD_1[1:], T_BRACKETS_MARKS) + T_BRACKETS_MARKS),
+        tantivy.Query.regex_query(schema, 'content_search',
+                                  '.*' + tolerant(STAR_WORD_2[1:], T_BRACKETS_MARKS) + T_BRACKETS_MARKS),
+        q_pages(idx), q_v08(idx))
     candidates, seconds = timed(hit_addresses, searcher, tolerant_q, 3_000_000)
     log(f'tolerant stage 1: {len(candidates):,} candidate V0.8 pages in {seconds:.2f} s '
         f'(plain stage 1: {record["stage1"]["candidates"]:,} in {record["stage1"]["seconds"]} s)')
