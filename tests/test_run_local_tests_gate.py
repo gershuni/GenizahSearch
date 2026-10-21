@@ -459,3 +459,15 @@ def test_no_chunk_exceeds_the_file_cap_that_made_the_run_finish():
     assert plan
     for chunk, _load in plan:
         assert 0 < len(chunk) <= runner.MAX_FILES_PER_CHUNK
+
+
+def test_a_cp1252_console_shows_a_hebrew_failure_instead_of_crashing():
+    """The Windows CI console is cp1252: printing a failing chunk's Hebrew output
+    raised UnicodeEncodeError and hid the failing test's name (PR #428)."""
+    import io
+    raw = io.BytesIO()
+    console = io.TextIOWrapper(raw, encoding="cp1252")
+    runner._tolerant_console([console])
+    print("FAILED tests/test_x.py::test_y - assert 'שלום' == 'עולם'", file=console)
+    console.flush()
+    assert b"FAILED tests/test_x.py::test_y" in raw.getvalue()

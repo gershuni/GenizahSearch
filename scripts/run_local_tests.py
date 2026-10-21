@@ -606,5 +606,19 @@ def _record_durations(results):
           % (len(updated), os.path.relpath(DURATIONS, REPO_ROOT)))
 
 
+def _tolerant_console(streams=None):
+    """Make *streams* (stdout and stderr) replace what their encoding cannot show.
+
+    A failing chunk's output is Hebrew-heavy; on a Windows console (cp1252 on the CI
+    runner) printing it raised UnicodeEncodeError, which ended the run without the
+    name of the test that failed (PR #428, 2026-10-21)."""
+    for stream in streams if streams is not None else (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 if __name__ == "__main__":
+    _tolerant_console()
     sys.exit(main())

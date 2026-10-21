@@ -193,9 +193,13 @@ scanning the file:
   - Proposed: a bracket-free query matches the bracket-stripped text, and the row is **kept**, with
     its highlight mapped back to original offsets (`_unstripped_span`).
   - This adds rows, so it falls under decision 8.
-- **`*`** matches zero or more characters that continue a word (letters, digits, `_`, and the
-  looked-past marks, quotes and brackets), inside one word. It never crosses a space or other
-  punctuation. Any number of stars may appear, in any position.
+- **`*`** matches zero or more **letters** (of any script) inside one word, as §1 asks. The
+  looked-past marks, quotes and brackets are passed over transparently.
+  - It does **not** consume digits or connector punctuation such as `_`, although Exact's predicate
+    treats those as continuing a word (Codex PR #428 review). So `א*ב` does not match `א12_ב`.
+  - Letting a star cross them would be an owner decision.
+  - It never crosses a space or other punctuation. Any number of stars may appear, in any
+    position.
 - **`#`** means exactly the grammatical forms, in both stages: 24 prefix forms, 25 suffix forms,
   and for `#X#` every combination (600).
 - **Every word is a whole word**, the first and last included. A star relaxes only its own side:
@@ -248,7 +252,7 @@ reparsed against another schema the way today's string is (Codex 2.4).
   and marks are tolerated between letters, and the query runs on `content_search` when present.
 
 **`check`** is the regex fragment for stage 2.
-- A star becomes the "continues a word" class, not `\S*`.
+- A star becomes letters with the looked-past marks, quotes and brackets (§4), not `\S*`.
 - Literal pieces are mark-tolerant (`make_mark_tolerant_pattern`), as plain words are today.
 - `#X#`'s 600 forms are written as **length-grouped prefix trees** (`_variant_alternation`). It must
   not be the raw `_prefix_tree`, which needs equal-length forms: `['abc', 'abcd']` gives a tree that
@@ -490,7 +494,8 @@ phase.** It FAILS, never skips, when `Transcriptions.txt` or the index is missin
   where the folded field has `ab` (Codex 5.1).
 - **It segments into semantic words by Exact's predicate, not into index tokens** (Codex round 2,
   2.1). A token oracle would repeat the maqaf omission.
-- **It treats words by the §4 contract:** stars through `fnmatch` over the "continues a word" class,
+- **It treats words by the §4 contract:** stars through `fnmatch` over letters (plus the
+  looked-past marks, quotes and brackets; never digits or `_`),
   and the grammatical lists.
 - **It maps every span back to original (unfolded) coordinates** before comparing.
 - **It uses ordered page fixtures with physical order and source,** so it can rule on crossings.

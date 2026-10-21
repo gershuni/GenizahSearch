@@ -120,6 +120,10 @@ def test_apply_adds_rows_counts_and_one_note_and_deletes_the_fragments(tmp_path)
     assert lines[note] == ("> 2026-10-22 (folded from `docs/open_issues.d/`: "
                            "2026-10-21-newer.md, 2026-10-20-older.md): P2 +1, P3 +2 -- 6.")
     assert lines[note + 1].startswith("> **Checks the cloud")
+    # The header no longer announces the old total (Codex review of PR #428).
+    assert lines[2] == ("> **Last Updated:** 2026-10-22 (folded 2 fragment(s) from "
+                        "`docs/open_issues.d/`: 2026-10-21-newer.md, 2026-10-20-older.md) "
+                        "-- P2 +1, P3 +2. 6 open.")
     assert sorted(p.name for p in d.iterdir()) == ["README.md"]
 
 
@@ -160,6 +164,7 @@ def test_a_malformed_fragment_stops_the_fold_and_writes_nothing(tmp_path, name, 
     ("### P2 - Medium", "### P2 - Renamed"),                 # section heading gone
     ("| P2 Medium Bugs | 1 |", "| P2 Bugs | 1 |"),           # its count row gone
     ("| **Total open** | **3** |", "| Total | 3 |"),         # total row gone
+    ("> **Last Updated:**", "> Updated:"),                    # header line gone
 ])
 def test_a_tracker_missing_what_the_fold_needs_writes_nothing(tmp_path, broken):
     d, t = _tree(tmp_path, {"2026-10-21-a.md": "### P2 - Medium\n" + ROW_P2 + "\n"})

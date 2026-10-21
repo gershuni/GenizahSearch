@@ -27,7 +27,9 @@ their CI. Two files never conflict. This is the tracker's version of
   CI, including that its sections exist in the tracker.
 - **Fold:** `python scripts/collect_open_issues.py --apply` puts the rows at the
   top of their sections, adds them to the Quick Summary counts and the total,
-  writes one count note naming the fragments, and deletes them. Run it at a
+  writes one count note naming the fragments, rewrites the "Last Updated" line
+  with the new total, and deletes them. A session that only wrote fragments
+  leaves the tracker's counts and header alone. Run it at a
   release, alongside `scripts/collect_changelog.py`, or whenever the pile grows.
   Until then `scripts/init.ps1` lists the pending fragments under the tracker, so
   a session reading the tracker sees them too.

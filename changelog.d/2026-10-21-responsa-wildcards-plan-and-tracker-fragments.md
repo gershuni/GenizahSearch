@@ -11,3 +11,5 @@
   one count note); `tests/test_open_issues_fragments.py` validates every file; `scripts/init.ps1`
   lists the pending ones. First fragment: the website's expanded result text highlights after
   HTML-escaping (P3).
+- `scripts/run_local_tests.py` no longer crashes printing a failing chunk's Hebrew output on a
+  cp1252 console (the Windows CI runner), which had hidden the name of the failing test.

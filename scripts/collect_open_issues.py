@@ -23,9 +23,10 @@ row is still an edit of the tracker (and the archive), as before.
     python scripts/collect_open_issues.py --apply   # write OPEN_ISSUES.md, delete the fragments
 
 ``--apply`` puts each fragment's rows at the top of its section's table, adds
-them to the section's Quick Summary count and to the total, and writes one count
-note naming the fragments. It writes nothing if any fragment is malformed or the
-tracker lacks a section or count row it needs.
+them to the section's Quick Summary count and to the total, writes one count
+note naming the fragments, and rewrites the "Last Updated" line with the new
+total. It writes nothing if any fragment is malformed or the tracker lacks a
+section, count row or "Last Updated" line it needs.
 """
 from __future__ import annotations
 
@@ -50,6 +51,7 @@ OPEN_MARKS = ("❌", "⏸", "⏳")   # ❌ ⏸ ⏳ -- what the Quick Summary cou
 _CELL_SPLIT = re.compile(r"(?<!\\)\|")
 _SEPARATOR_RE = re.compile(r"^\|[\s:|-]+\|\s*$")
 _NOTE_RE = re.compile(r"^> \d{4}-\d{2}-\d{2} ")
+_LAST_UPDATED_RE = re.compile(r"^>\s*\*\*Last Updated:\*\*")
 
 
 def fragment_paths(fragment_dir: Path) -> list:
@@ -159,6 +161,13 @@ def fold(tracker: str, fragments: list, today: str) -> str:
     parts = ", ".join("%s +%d" % (SECTIONS[h].split()[0], d) for h, d in deltas.items() if d)
     lines.insert(last_note + 1, "> %s (folded from `docs/open_issues.d/`: %s): %s -- %d."
                  % (today, names, parts, new_total))
+    # The header is what a session reads first (init.ps1 prints it as the newest entry):
+    # it must not keep announcing the old total once the counts have moved.
+    lu = next((i for i, ln in enumerate(lines) if _LAST_UPDATED_RE.match(ln)), None)
+    if lu is None:
+        raise ValueError("the tracker has no '> **Last Updated:**' line")
+    lines[lu] = ("> **Last Updated:** %s (folded %d fragment(s) from `docs/open_issues.d/`: %s) "
+                 "-- %s. %d open." % (today, len(fragments), names, parts, new_total))
     return "\n".join(lines)
 
 
