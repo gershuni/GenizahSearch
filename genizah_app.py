@@ -122,7 +122,9 @@ except ImportError:
     _HAS_NLI_CROSSREF = False
 
 # Community features - corrections, comments, discoveries
-from desktop.corrections_client import get_corrections_client
+from desktop.corrections_client import (
+    account_display_name, correction_author_key, get_corrections_client, is_own_correction,
+)
 from desktop.corrections_ui import (
     LoginDialog, RegisterDialog,
     CorrectionSubmitDialog, CorrectionsViewerDialog, CorrectionDetailDialog,
@@ -2469,9 +2471,9 @@ class GenizahGUI(QMainWindow):
         which needs a sign-in: is_logged_in() makes a request, so it is asked once)."""
         logged_in = self.corrections_client.is_logged_in()
         if logged_in:
-            user = self.corrections_client.current_user
-            if user:
-                self.corner_login_btn.setText(f"{user.username} ({tr('Logout')})")
+            name = account_display_name(self.corrections_client.current_user)
+            if name:
+                self.corner_login_btn.setText(f"{name} ({tr('Logout')})")
             else:
                 self.corner_login_btn.setText(tr("Logout"))
         else:
@@ -4253,10 +4255,10 @@ class GenizahGUI(QMainWindow):
                 # Filter corrections by page number
                 page_corrections = [c for c in corrections if c.page_number == page_num or c.page_number is None]
 
-                # Group by user, keep latest per user
+                # Group by author (by account id: most accounts have no username), keep latest per author
                 corrections_by_user = {}
                 for corr in page_corrections:
-                    user_key = corr.author_username or f"user_{corr.author_id}"
+                    user_key = correction_author_key(corr)
                     if user_key not in corrections_by_user:
                         corrections_by_user[user_key] = corr
                     else:
@@ -4265,28 +4267,28 @@ class GenizahGUI(QMainWindow):
                             corrections_by_user[user_key] = corr
 
                 # Determine user permissions for viewing corrections
-                current_username = self.corrections_client.current_user.username if self.corrections_client.current_user else None
-                is_reviewer_or_admin = self.corrections_client.current_user and self.corrections_client.current_user.role in ('reviewer', 'editor', 'admin')
+                current_user = self.corrections_client.current_user
+                is_reviewer_or_admin = current_user and current_user.role in ('reviewer', 'editor', 'admin')
 
                 for corr in corrections_by_user.values():
                     user_name = corr.author_username or 'User'
                     status = corr.status
 
                     # Skip if user already has a version entry (avoid duplicates)
-                    if user_name in users_with_versions:
+                    if corr.author_username and corr.author_username in users_with_versions:
                         continue
 
                     # Filter based on status and user permissions:
                     # - Authors can see their own corrections (any status)
                     # - Reviewers/admins can see all corrections
                     # - Regular users can only see approved corrections from others
-                    is_own_correction = current_username and user_name == current_username
+                    own = is_own_correction(corr, current_user)
 
                     if status == 'rejected':
-                        if not is_own_correction and not is_reviewer_or_admin:
+                        if not own and not is_reviewer_or_admin:
                             continue
                     elif status in ('draft', 'pending'):
-                        if not is_own_correction and not is_reviewer_or_admin:
+                        if not own and not is_reviewer_or_admin:
                             continue
 
                     created_at = corr.created_at[:10] if corr.created_at else ''
@@ -15114,8 +15116,9 @@ class GenizahGUI(QMainWindow):
         """Update the community header with user info."""
         if self.corrections_client.is_logged_in() and self.corrections_client.current_user:
             user = self.corrections_client.current_user
+            name = account_display_name(user) or tr('User')
             self.community_user_label.setText(
-                f"👤 {tr('Logged in as')} <b>{user.username}</b> | ⭐ {tr('Reputation')}: {user.reputation_score}"
+                f"👤 {tr('Logged in as')} <b>{name}</b> | ⭐ {tr('Reputation')}: {user.reputation_score}"
             )
             self.community_register_btn.hide()
         else:

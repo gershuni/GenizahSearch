@@ -196,6 +196,47 @@ class FeedItem:
     join_source: Optional[str] = None
 
 
+# Who wrote a correction, and what to call the signed-in account. Since
+# 2026-10-21 profiles.username is what the person typed at an email sign-up,
+# else empty (every Google sign-up, and the accounts whose username was their
+# email address), and a cached desktop sign-in can still hold the old one. So
+# an author is recognised by account id, never by username. Both clients'
+# objects work here: on the Supabase client the ids are the auth UUID
+# (User._uuid, Correction.author_id); the REST client's User has no _uuid and
+# its ids are the backend's integers.
+
+def _account_id(user):
+    return getattr(user, '_uuid', None) or getattr(user, 'id', None)
+
+
+def is_own_correction(correction, user) -> bool:
+    """Whether the signed-in `user` wrote `correction`."""
+    if correction is None or user is None:
+        return False
+    author_id = getattr(correction, 'author_id', None)
+    my_id = _account_id(user)
+    if author_id in (None, '') or my_id in (None, ''):
+        return False
+    return str(author_id) == str(my_id)
+
+
+def correction_author_key(correction):
+    """The key that groups a page's corrections by author: the author's id,
+    else the username, else the correction itself (never one shared bucket
+    for every author without a username)."""
+    return (getattr(correction, 'author_id', None)
+            or getattr(correction, 'author_username', None)
+            or f"correction_{correction.id}")
+
+
+def account_display_name(user) -> str:
+    """The name to show for the signed-in account: its username, else its
+    full name, else '' (the caller shows its own neutral word)."""
+    if user is None:
+        return ''
+    return (getattr(user, 'username', None) or getattr(user, 'full_name', None) or '').strip()
+
+
 class CorrectionsClient:
     """
     Client for the Genizah Corrections API.
