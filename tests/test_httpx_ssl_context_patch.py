@@ -27,6 +27,18 @@ def patched():
     fp._patch_httpx_ssl_context()
 
 
+_PROXY_VARS = ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy')
+
+
+@pytest.fixture
+def no_ambient_tls(monkeypatch):
+    """No CA override and no proxy from the environment: httpx follows
+    SSL_CERT_FILE / SSL_CERT_DIR by design (the patch keeps that), and each
+    proxy adds a transport that builds its own context."""
+    for name in ('SSL_CERT_FILE', 'SSL_CERT_DIR') + _PROXY_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
 def _context(client: httpx.Client) -> ssl.SSLContext:
     return client._transport._pool._ssl_context
 
@@ -48,7 +60,7 @@ def test_the_default_context_never_reads_the_ca_file(patched, monkeypatch):
                          for cafile, capath, has_data in loads), loads
 
 
-def test_it_trusts_the_same_certificates_and_still_verifies(patched):
+def test_it_trusts_the_same_certificates_and_still_verifies(patched, no_ambient_tls):
     reference = ssl.create_default_context(cafile=certifi.where())
     with httpx.Client() as client:
         ctx = _context(client)
@@ -62,7 +74,7 @@ def test_each_client_gets_its_own_context(patched):
         assert _context(a) is not _context(b)
 
 
-def test_an_explicit_ca_setting_keeps_httpx_behaviour(patched, monkeypatch):
+def test_an_explicit_ca_setting_keeps_httpx_behaviour(patched, no_ambient_tls, monkeypatch):
     loads = []
     real = ssl.SSLContext.load_verify_locations
 
@@ -74,7 +86,9 @@ def test_an_explicit_ca_setting_keeps_httpx_behaviour(patched, monkeypatch):
     monkeypatch.setenv('SSL_CERT_FILE', certifi.where())
     with httpx.Client():
         pass
-    assert loads == [certifi.where()]
+    # One load per transport: a system proxy (Windows reads it from the
+    # registry, not the environment) adds transports, each from the same file.
+    assert loads and set(loads) == {certifi.where()}, loads
     with httpx.Client(verify=False) as insecure:
         assert _context(insecure).verify_mode == ssl.CERT_NONE
 
