@@ -157,14 +157,16 @@ NLI_DISK_CACHE_TTL=2592000            # how long a manuscript's NLI image ids ar
                                        # governed held only the last 5 minutes (see the changelog)
 NLI_FL_ID_STORE_FILE=                 # the image-id store, SQLite (default <INDEX_DIR>/nli_fl_ids.db).
                                        # At startup it reads the old nli_fl_ids_cache.json beside it once
-                                       # and renames it .imported
+                                       # and renames it .imported. Manifest lists only: a MARC-fallback
+                                       # list (usually one image) stays in memory for NLI_CACHE_TTL
 NLI_THUMB_CACHE_DIR=                  # kept thumbnails (default <INDEX_DIR>/nli_thumbs): the IIIF JPEG of
                                        # a page, written the first time the proxy fetches it, read before
                                        # the NLI breaker -- so it shows during an outage. Layout:
                                        # w<width>/<md5(sys_id)[:2]>/<sys_id>_s<suffix>_p<page>.jpg
 NLI_THUMB_CACHE_WIDTHS=300            # widths kept on disk, px, comma-separated (the grids fetch 300; 600 and
                                        # 2000 stay in memory only, so many widths cannot mean many copies)
-NLI_THUMB_CACHE_MAX_MB=10240          # the folder's size cap (about 26 KB a thumbnail); 0 = no cap
+NLI_THUMB_CACHE_MAX_MB=10240          # the folder's size cap (about 26 KB a thumbnail); 0 = no cap. Measured
+                                       # at startup in the background; nothing is written until it is
 NLI_THUMB_CACHE_MIN_FREE_MB=2048      # no thumbnail is written while the disk has less free space than this
 
 # Library image routes (/api/nli_image, nli_image_by_sysid, cambridge/manchester/jts/oxford_image;

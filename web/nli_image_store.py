@@ -66,6 +66,7 @@ _stats = {
     'thumb_writes': 0,
     'thumb_skipped_low_disk': 0,
     'thumb_skipped_full': 0,
+    'thumb_skipped_counting': 0,
     'fl_id_hits': 0,
     'fl_id_misses': 0,
     'fl_id_writes': 0,
@@ -265,15 +266,18 @@ def thumb_path(sys_id: str, page: int, width: int, suffix: int = 1,
     return os.path.join(root, f'w{int(width)}', shard, f'{sys_id}_s{int(suffix)}_p{int(page)}.jpg')
 
 
-# The folder's size, for NLI_THUMB_CACHE_MAX_MB: counted once per process (in a
-# background thread when the folder already exists), then kept up to date by the
-# writes. ``pending`` holds what was written while the count ran; adding it to the
-# count can only over-estimate, which is the safe side.
+# The folder's size, for NLI_THUMB_CACHE_MAX_MB: counted once per process -- in a
+# background thread when the folder already exists, started at startup by
+# ``thumb_cache_prepare`` -- then kept up to date by the writes. Nothing is written
+# until the count is in, because the folder may already be full (Codex on #427).
 _size_lock = threading.Lock()
-_size = {'root': None, 'bytes': None, 'pending': 0}
+_size = {'root': None, 'bytes': None}
+# Thumbnails being written now. A second request for the same thumbnail does not
+# write it again, so one file is never counted twice (Codex on #427).
+_writing: set = set()
 
 
-def _count_folder(root: str) -> None:
+def _folder_bytes(root: str) -> int:
     total = 0
     for dirpath, _dirs, files in os.walk(root):
         for name in files:
@@ -282,40 +286,57 @@ def _count_folder(root: str) -> None:
                     total += os.path.getsize(os.path.join(dirpath, name))
                 except OSError:
                     pass
+    return total
+
+
+def _count_folder(root: str) -> None:
+    try:
+        total = _folder_bytes(root)
+    except Exception as e:  # unknown size: keep writes off rather than guess
+        logger.warning("Could not size the NLI thumbnail cache %s; none are kept until a restart: %s", root, e)
+        return
     with _size_lock:
         if _size['root'] == root:
-            _size['bytes'] = total + _size['pending']
+            _size['bytes'] = total
     logger.info("NLI thumbnail cache %s holds %.1f MB", root, total / (1024 * 1024))
 
 
-def _reserve(root: str, n: int) -> bool:
-    """Count ``n`` more bytes against NLI_THUMB_CACHE_MAX_MB; False when they do not fit."""
+def _start_count_locked(root: str) -> None:
+    exists = os.path.isdir(root)
+    _size.update(root=root, bytes=None if exists else 0)
+    if exists:
+        threading.Thread(target=_count_folder, args=(root,), daemon=True, name='nli-thumb-size').start()
+
+
+def thumb_cache_prepare() -> None:
+    """At startup: start counting the thumbnail folder, so thumbnails are kept again soon."""
+    root = thumb_cache_dir()
+    if root and NLI_THUMB_CACHE_MAX_MB:
+        with _size_lock:
+            if _size['root'] != root:
+                _start_count_locked(root)
+
+
+def _reserve(root: str, n: int) -> str:
+    """Count ``n`` more bytes against NLI_THUMB_CACHE_MAX_MB: 'ok', 'counting' or 'full'."""
     cap = NLI_THUMB_CACHE_MAX_MB * 1024 * 1024
     if not cap:
-        return True
+        return 'ok'
     with _size_lock:
         if _size['root'] != root:
-            exists = os.path.isdir(root)
-            _size.update(root=root, bytes=None if exists else 0, pending=0)
-            if exists:
-                threading.Thread(target=_count_folder, args=(root,), daemon=True,
-                                 name='nli-thumb-size').start()
+            _start_count_locked(root)
         if _size['bytes'] is None:
-            _size['pending'] += n       # still counting; the free-space floor still applies
-            return True
+            return 'counting'
         if _size['bytes'] + n > cap:
-            return False
+            return 'full'
         _size['bytes'] += n
-        return True
+        return 'ok'
 
 
 def _release(root: str, n: int) -> None:
     with _size_lock:
-        if _size['root'] == root:
-            if _size['bytes'] is None:
-                _size['pending'] -= n
-            else:
-                _size['bytes'] -= n
+        if _size['root'] == root and _size['bytes'] is not None:
+            _size['bytes'] -= n
 
 
 def thumb_get(sys_id: str, page: int, width: int, suffix: int = 1) -> bytes | None:
@@ -345,16 +366,30 @@ def thumb_put(sys_id: str, page: int, width: int, suffix: int, content: bytes) -
     """Keep a JPEG fetched from NLI's IIIF server. True when written.
 
     Not written: anything that is not a JPEG, a key ``thumb_path`` refuses, a
-    write past ``NLI_THUMB_CACHE_MAX_MB``, or when the disk is below
-    ``NLI_THUMB_CACHE_MIN_FREE_MB``. Written atomically (temporary file, then
-    rename), so a reader never sees half a file.
+    thumbnail already kept or being written by another request, a write past
+    ``NLI_THUMB_CACHE_MAX_MB`` or before the folder is counted, or when the disk
+    is below ``NLI_THUMB_CACHE_MIN_FREE_MB``. Written atomically (temporary file,
+    then rename), so a reader never sees half a file.
     """
     root = thumb_cache_dir()
     path = thumb_path(sys_id, page, width, suffix, root=root)
     if path is None or not content or not content.startswith(_JPEG_MAGIC):
         return False
-    if not _reserve(root, len(content)):
-        _count('thumb_skipped_full')
+    with _size_lock:
+        if path in _writing or os.path.exists(path):
+            return False
+        _writing.add(path)
+    try:
+        return _write_new_thumb(root, path, content)
+    finally:
+        with _size_lock:
+            _writing.discard(path)
+
+
+def _write_new_thumb(root: str, path: str, content: bytes) -> bool:
+    verdict = _reserve(root, len(content))
+    if verdict != 'ok':
+        _count('thumb_skipped_counting' if verdict == 'counting' else 'thumb_skipped_full')
         return False
     directory = os.path.dirname(path)
     temp_path = f'{path}.tmp.{os.getpid()}.{threading.get_ident()}'

@@ -122,7 +122,7 @@ class TestThumbnailCache:
     def test_files_already_on_disk_count_toward_the_cap(self, monkeypatch):
         assert store.thumb_put(SID, 0, 300, 1, JPEG)
         root = store.thumb_cache_dir()
-        store._size.update(root=None, bytes=None, pending=0)            # as after a restart
+        store._size.update(root=None, bytes=None)                         # as after a restart
         monkeypatch.setattr(store, 'NLI_THUMB_CACHE_MAX_MB', 8 / 1024)
         store._reserve(root, 0)                                          # starts the count
         deadline = time.time() + 5
@@ -130,6 +130,57 @@ class TestThumbnailCache:
             time.sleep(0.01)
         assert store.stats()['thumb_bytes'] == len(JPEG)
         assert store.thumb_put(SID, 1, 300, 1, JPEG) is False
+
+    def test_two_requests_for_one_thumbnail_count_it_once(self, monkeypatch):
+        # Codex on #427 (P2): both writers counted the bytes, one file remained, and the
+        # cache then refused new thumbnails it had room for.
+        monkeypatch.setattr(store, 'NLI_THUMB_CACHE_MAX_MB', (2 * len(JPEG) + 100) / (1024 * 1024))
+        entered, release = threading.Event(), threading.Event()
+        real_disk_usage = store.shutil.disk_usage
+
+        def first_writer_waits(path):
+            if not entered.is_set():
+                entered.set()
+                release.wait(5)
+            return real_disk_usage(path)
+
+        monkeypatch.setattr(store.shutil, 'disk_usage', first_writer_waits)
+        first = threading.Thread(target=store.thumb_put, args=(SID, 0, 300, 1, JPEG))
+        first.start()
+        assert entered.wait(5)
+        store.thumb_put(SID, 0, 300, 1, JPEG)             # the same thumbnail, meanwhile
+        release.set()
+        first.join(5)
+        assert store.thumb_get(SID, 0, 300, 1) == JPEG
+        assert store.stats()['thumb_bytes'] == len(JPEG)
+        assert store.thumb_put(SID, 1, 300, 1, JPEG)      # room for one more
+
+    def test_no_write_while_the_folder_is_still_being_counted(self, monkeypatch):
+        # Codex on #427 (P2): after a restart every write was accepted while the folder
+        # was counted, even when it was already full.
+        assert store.thumb_put(SID, 0, 300, 1, JPEG)
+        root = store.thumb_cache_dir()
+        store._size.update(root=None, bytes=None)                         # as after a restart
+        monkeypatch.setattr(store, 'NLI_THUMB_CACHE_MAX_MB', (len(JPEG) + 100) / (1024 * 1024))
+        counting, finish = threading.Event(), threading.Event()
+        real_walk = os.walk
+
+        def slow_walk(top, *a, **kw):
+            if top == root:
+                counting.set()
+                finish.wait(5)
+            return real_walk(top, *a, **kw)
+
+        monkeypatch.setattr(store.os, 'walk', slow_walk)
+        store._reserve(root, 0)                                           # starts the count
+        assert counting.wait(5)
+        assert store.thumb_put(SID, 1, 300, 1, JPEG) is False            # full, not yet known
+        finish.set()
+        deadline = time.time() + 5
+        while store.stats()['thumb_bytes'] is None and time.time() < deadline:
+            time.sleep(0.01)
+        assert store.stats()['thumb_bytes'] == len(JPEG)
+        assert store.thumb_get(SID, 1, 300, 1) is None
 
     def test_no_write_when_the_disk_is_nearly_full(self, monkeypatch):
         monkeypatch.setattr(store, 'NLI_THUMB_CACHE_MIN_FREE_MB', 10 ** 12)
@@ -142,11 +193,11 @@ class TestThumbnailCache:
 # ─── Wired into the proxy (web/api.py) ────────────────────────────────────────
 
 class _Resp:
-    def __init__(self, status, content_type, content=b'', json_data=None):
+    def __init__(self, status, content_type, content=b'', json_data=None, text=''):
         self.status_code = status
         self.headers = {'Content-Type': content_type}
         self.content = content
-        self.text = ''
+        self.text = text
         self._json = json_data
 
     def json(self):
@@ -163,11 +214,14 @@ def _manifest(fl_ids):
 class _FakeNli:
     """NLI as a router: manifests, IIIF images and Rosetta thumbnails by FL id."""
 
-    def __init__(self, manifests, iiif_ok=(), rosetta_ok=(), manifest_delay=0.0):
+    def __init__(self, manifests, iiif_ok=(), rosetta_ok=(), manifest_delay=0.0,
+                 marc=None, manifest_status=200):
         self.manifests = manifests          # sys_id -> [fl, ...]
         self.iiif_ok = set(iiif_ok)
         self.rosetta_ok = set(rosetta_ok)
         self.manifest_delay = manifest_delay
+        self.marc = marc or {}              # sys_id -> [fl, ...] in the MARC record
+        self.manifest_status = manifest_status
         self.manifest_calls = 0
         self._lock = threading.Lock()
 
@@ -176,11 +230,16 @@ class _FakeNli:
             with self._lock:
                 self.manifest_calls += 1
             time.sleep(self.manifest_delay)
+            if self.manifest_status != 200:
+                return _Resp(self.manifest_status, 'text/plain')
             sys_id = url.split('PNX_MANUSCRIPTS', 1)[1].rsplit('-', 1)[0]
             if sys_id in self.manifests:
                 return _manifest(self.manifests[sys_id])
             return _Resp(404, 'text/plain')
         if '/marc/bib/' in url:
+            fls = self.marc.get(url.rsplit('/', 1)[1])
+            if fls:
+                return _Resp(200, 'application/xml', text=''.join(f'<sf>FL{fl}</sf>' for fl in fls))
             return _Resp(404, 'text/plain')
         fl = url.split('/FL', 1)[1].split('/', 1)[0]
         if fl in self.iiif_ok:
@@ -219,7 +278,7 @@ def _empty_memory_caches(request):
         for fn in (seam['fetch_fl_ids_from_nli'], seam['_fetch_nli_image_bytes']):
             for name, cell in zip(fn.__code__.co_freevars, fn.__closure__ or ()):
                 value = cell.cell_contents
-                if name in ('_nli_cache', '_nli_cache_time'):
+                if name in ('_nli_cache', '_nli_cache_time', '_nli_partial_keys'):
                     value.clear()
                 elif name == '_image_cache':
                     with value._lock:
@@ -293,6 +352,28 @@ class TestProxyUsesTheStores:
         with patch('shared.puzzle_image_service.get_with_checked_redirects',
                    side_effect=AssertionError('no NLI call for a kept thumbnail')):
             assert seam['_fetch_nli_image_bytes'](SID, 1, width=300) == (JPEG, 'image/jpeg', '')
+
+    def test_a_marc_fallback_list_is_kept_neither_30_days_nor_as_a_thumbnail(self, seam, request):
+        # Codex on #427 (P2): with the manifest failing, MARC names only the first image.
+        # Stored for 30 days, it answered every later page with that image after NLI
+        # recovered; the old 5-minute memory cache recovered on its own.
+        sid = '990000000000305171'
+        nli = _FakeNli({sid: ['31', '32', '33']}, iiif_ok=['31', '32', '33'],
+                       marc={sid: ['31']}, manifest_status=500)
+        p1, p2 = nli.patches()
+        with p1, p2:
+            assert seam['fetch_fl_ids_from_nli'](sid) == ['31']
+            assert seam['_fetch_nli_image_bytes'](sid, 0, width=300)[0] == JPEG
+        assert store.fl_id_store_get(sid, 30 * DAY) is None
+        assert store.thumb_get(sid, 0, 300, 1) is None
+
+        request.node.clear_memory()           # five minutes later, NLI is back
+        nli.manifest_status = 200
+        p1, p2 = nli.patches()
+        with p1, p2:
+            assert seam['fetch_fl_ids_from_nli'](sid) == ['31', '32', '33']
+            assert seam['_fetch_nli_image_bytes'](sid, 2, width=2000)[2] == '33'
+        assert store.fl_id_store_get(sid, 30 * DAY) == ['31', '32', '33']
 
     def test_a_rosetta_stand_in_is_served_but_not_kept(self, seam):
         nli = _FakeNli({SID: ['601']}, rosetta_ok=['601'])

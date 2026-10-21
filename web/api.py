@@ -550,9 +550,15 @@ def init_api_routes(app_override=None):
     # The memory cache starts empty: a miss reads the 30-day FL-id store
     # (web/nli_image_store.py), which takes in the old JSON cache file once.
     nli_image_store.fl_id_store_prepare(NLI_DISK_CACHE_TTL)
+    nli_image_store.thumb_cache_prepare()
     _nli_cache = OrderedDict()
     _nli_cache_time = OrderedDict()
     _nli_cache_lock = threading.Lock()
+    # Memory entries that came from the MARC fallback, which usually names only the
+    # first image. They live NLI_CACHE_TTL as before and are never stored for 30 days
+    # or used to keep a thumbnail: stored, a missing page was answered with another
+    # page's image for a month after NLI recovered (Codex on #427).
+    _nli_partial_keys = set()
 
     def _prune_nli_memory_cache_locked(now: float) -> None:
         """Drop expired/oldest FL-ID cache entries from the in-process cache."""
@@ -565,9 +571,11 @@ def init_api_routes(app_override=None):
         for key in stale_keys:
             _nli_cache.pop(key, None)
             _nli_cache_time.pop(key, None)
+            _nli_partial_keys.discard(key)
         while NLI_MEMORY_CACHE_MAX_ENTRIES and len(_nli_cache) > NLI_MEMORY_CACHE_MAX_ENTRIES:
             key, _value = _nli_cache.popitem(last=False)
             _nli_cache_time.pop(key, None)
+            _nli_partial_keys.discard(key)
 
     def _nli_memory_cache_stats() -> dict:
         import time as _time
@@ -588,15 +596,27 @@ def init_api_routes(app_override=None):
     _register_runtime_cache_stats('nli_fl_ids', _nli_memory_cache_stats)
     _register_runtime_cache_stats('nli_image_store', nli_image_store.stats)
 
-    def _remember_fl_ids(cache_key: str, fl_ids: list) -> None:
-        """Put freshly resolved FL ids in the memory cache and the 30-day store."""
+    def _remember_fl_ids(cache_key: str, fl_ids: list, *, complete: bool = True) -> None:
+        """Put freshly resolved FL ids in the memory cache, and a manifest's (complete)
+        list in the 30-day store too; a MARC fallback list stays in memory only."""
         import time as _time
         now = _time.time()
         with _nli_cache_lock:
             _nli_cache[cache_key] = fl_ids
             _nli_cache_time[cache_key] = now
+            if complete:
+                _nli_partial_keys.discard(cache_key)
+            else:
+                _nli_partial_keys.add(cache_key)
             _prune_nli_memory_cache_locked(now)
-        _save_nli_persistent_cache({cache_key: fl_ids}, {cache_key: now})
+        if complete:
+            _save_nli_persistent_cache({cache_key: fl_ids}, {cache_key: now})
+
+    def _fl_ids_complete(system_id: str, suffix: int = 1) -> bool:
+        """False while the memory cache holds a MARC fallback list for this manuscript."""
+        cache_key = f"{system_id}:{suffix}" if suffix != 1 else system_id
+        with _nli_cache_lock:
+            return cache_key not in _nli_partial_keys
 
     def fetch_fl_ids_from_nli(system_id: str, suffix: int = 1) -> list:
         """Fetch ALL FL IDs from NLI IIIF manifest (contains all pages). Results are cached.
@@ -638,6 +658,7 @@ def init_api_routes(app_override=None):
             with _nli_cache_lock:
                 _nli_cache[cache_key] = stored
                 _nli_cache_time[cache_key] = _time.time()
+                _nli_partial_keys.discard(cache_key)
                 _prune_nli_memory_cache_locked(_time.time())
             return stored
 
@@ -763,7 +784,7 @@ def init_api_routes(app_override=None):
                             seen.add(fl_id)
                             unique_fl_ids.append(fl_id)
                     if unique_fl_ids:
-                        _remember_fl_ids(cache_key, unique_fl_ids)
+                        _remember_fl_ids(cache_key, unique_fl_ids, complete=False)
                         logger.info(f"Cached {len(unique_fl_ids)} FL IDs from MARC for {system_id}")
                         # Phase 98 D-06/D-08: MARC fallback succeeded.
                         _nli_record_success(path='fetch_fl_ids_from_nli')
@@ -922,7 +943,8 @@ def init_api_routes(app_override=None):
         Grid thumbnails (NLI_THUMB_CACHE_WIDTHS, 300) are kept on disk
         (web/nli_image_store.py): read before the breaker check, so they show
         during an NLI outage, and written only for the requested page's own
-        IIIF image -- never the fallback loop's other page or a Rosetta stand-in.
+        IIIF image, from a manifest's list -- never the fallback loop's other page,
+        a Rosetta stand-in, or a page of a MARC fallback list.
 
         FL ids are sourced from fetch_fl_ids_from_nli, which reads the NLI
         IIIF manifest's canvas_map. This is the AUTHORITATIVE source. NEVER
@@ -1076,7 +1098,7 @@ def init_api_routes(app_override=None):
             got = _try_fl(fl_ids[page])
             if got is not None:
                 _image_cache.set(cache_key, (got[0], got[1], fl_ids[page]))
-                if got[2] == 'iiif':
+                if got[2] == 'iiif' and _fl_ids_complete(sys_id, suffix):
                     nli_image_store.thumb_put(sys_id, page, width, suffix, got[0])
                 return (got[0], got[1], fl_ids[page])
 

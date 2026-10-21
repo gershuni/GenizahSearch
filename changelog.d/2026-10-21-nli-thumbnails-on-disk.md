@@ -14,7 +14,10 @@ the failed cards. Reproduced: 12 of 20 cards lost when a manifest takes 1.5 s.
   `<INDEX_DIR>/nli_fl_ids.db`, written one entry at a time and read when memory
   misses: a manuscript anyone opened in the last 30 days needs no manifest and
   takes none of the 8 slots. The old JSON file is read into it once at startup
-  and renamed `.imported`.
+  and renamed `.imported`. A list from the MARC fallback (used when the manifest
+  fails; it usually names only the first image) stays in memory for 5 minutes as
+  before and is never stored, or later pages would show the first image for a
+  month (Codex review).
 
 ### Added
 - **Thumbnails on disk** (`web/nli_image_store.py`): the NLI image proxy keeps
@@ -22,7 +25,9 @@ the failed cards. Reproduced: 12 of 20 cards lost when a manifest takes 1.5 s.
   `<INDEX_DIR>/nli_thumbs/` and serves it from there afterwards, also during an
   NLI outage (it is read before the circuit breaker). Only the requested page's
   own IIIF JPEG is kept, never a Rosetta stand-in or another page's image; the
-  folder stops at 10 GB, and at 2 GB of free disk. Settings:
+  folder stops at 10 GB, and at 2 GB of free disk. After a restart nothing is
+  written until the folder has been measured, and two requests for one thumbnail
+  write and count it once (Codex review). Settings:
   `NLI_THUMB_CACHE_DIR`, `NLI_THUMB_CACHE_WIDTHS`, `NLI_THUMB_CACHE_MAX_MB`,
   `NLI_THUMB_CACHE_MIN_FREE_MB`, `NLI_FL_ID_STORE_FILE` (docs/guides/ENV_VARS.md). Counters in
   `/_internal/memstat` under `nli_image_store`.
