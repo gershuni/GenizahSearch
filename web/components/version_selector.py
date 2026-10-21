@@ -332,7 +332,7 @@ def create_version_selector(
 
             if current_default:
                 user_info = current_default.get('user', {})
-                user_name = user_info.get('full_name') or user_info.get('username', 'User')
+                user_name = user_info.get('full_name') or user_info.get('username') or 'User'
                 version_label.text = f"{tr('by')} {user_name}"
                 if on_version_change:
                     on_version_change(current_default.get('content', original_text), {

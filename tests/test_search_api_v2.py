@@ -79,6 +79,11 @@ EXPECTED_INTERNAL_MODE = {
     'variants_extended': 'variants_extended',
 }
 
+# What the engine runs. 2026-10-21 (owner decision): API 'exact' is the website's
+# whole-word Exact, the engine's 'literal'; the table above (and so the response's
+# `mode`) still says 'exact'.
+EXPECTED_ENGINE_MODE = {**EXPECTED_INTERNAL_MODE, 'exact': 'literal'}
+
 REQUEST_ECHO_KEYS = {
     'search_mode',
     'responsa_options',
@@ -269,7 +274,19 @@ def test_search_mode_engine_receives_translated_internal_mode(client, stub_searc
     assert r.status_code == 200, r.text
     assert len(stub_searcher.calls) == 1
     call = stub_searcher.calls[0]
-    assert call['mode'] == EXPECTED_INTERNAL_MODE[search_mode], call
+    assert call['mode'] == EXPECTED_ENGINE_MODE[search_mode], call
+
+
+def test_exact_runs_whole_word_and_still_answers_exact(client, stub_searcher):
+    """2026-10-21 (owner decision): API 'exact' runs the engine's whole-word
+    'literal' -- the website's Exact: no match inside a longer word, page-break
+    crossings found -- while every field a caller reads still says 'exact'."""
+    r = _post_search(client, query='ברכת המזון', search_mode='exact')
+    assert r.status_code == 200, r.text
+    assert stub_searcher.calls[-1]['mode'] == 'literal'
+    body = r.json()
+    assert body['mode'] == 'exact'
+    assert body['request']['search_mode'] == 'exact'
 
 
 def test_search_mode_exact_vs_variants_behavioral_difference(client, stub_searcher):
@@ -280,7 +297,7 @@ def test_search_mode_exact_vs_variants_behavioral_difference(client, stub_search
     r2 = _post_search(client, query='ברכת המזון', search_mode='variants')
     assert r1.status_code == 200 and r2.status_code == 200
     assert len(stub_searcher.calls) == 2
-    assert stub_searcher.calls[0]['mode'] == 'exact'
+    assert stub_searcher.calls[0]['mode'] == 'literal'  # whole-word Exact (2026-10-21)
     assert stub_searcher.calls[1]['mode'] == 'variants'
     assert stub_searcher.calls[0]['mode'] != stub_searcher.calls[1]['mode']
 
@@ -545,6 +562,19 @@ def test_gap_field_has_a_floor_and_no_ceiling_and_says_the_limit():
     assert prop.get('minimum') == 0
     assert not {'maximum', 'exclusiveMaximum'} & set(prop), prop
     assert str(MAX_WORD_GAP) in prop['description'] and 'responsa' in prop['description']
+
+
+def test_exact_descriptions_say_what_exact_matches():
+    """EXACT-2: the descriptions agents read say what 'exact' matches. Search
+    'exact' is whole words since 2026-10-21 (the website's Exact); the parallels
+    chunk mode is unchanged."""
+    from web.search_api import ParallelsRequest
+    s = SearchRequest.model_json_schema()['properties']['search_mode']['description']
+    c = ParallelsRequest.model_json_schema()['properties']['mode']['description']
+    assert '(literal)' not in s and '(literal)' not in c
+    assert 'not limited to whole words' not in s
+    assert "'exact' (the words as typed, as whole words" in s
+    assert "'exact' (the words as typed, no spelling variation)" in c
 
 
 def test_negative_gap_is_400(client, stub_searcher):

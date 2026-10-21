@@ -104,6 +104,7 @@ from web.joins_lab_storage import (
     write_full_state,
 )
 from web.safe_storage import safe_user_get, safe_user_pop, safe_user_set
+from web.pages.search_state import engine_mode
 from web.services import get_service
 from web.state import state
 from web.supabase_client import (
@@ -3704,7 +3705,9 @@ def create_joins_lab_page(
             if not query_str:
                 ui.notify(tr('Enter a search query to run'), type='warning')
                 return
-            mode_str = q['mode']
+            # Exact is the website's whole-word Exact, the engine's 'literal'
+            # (2026-10-21, owner). The Responsa-style branch above keeps 'exact'.
+            mode_str = engine_mode(q['mode'])
             ro = None
             # All non-default positions map straight to execute_search(text_position=).
             direct_text_position = (

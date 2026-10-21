@@ -864,7 +864,7 @@ def create_user_row(user):
                         ui.separator()
                         ui.menu_item(
                             tr('Delete User'),
-                            lambda uid=user_id, uname=user.get('username', 'user'): confirm_delete_user(uid, uname)
+                            lambda uid=user_id, uname=user.get('username') or 'user': confirm_delete_user(uid, uname)
                         ).classes('text-red-500')
 
 

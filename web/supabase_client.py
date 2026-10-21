@@ -563,10 +563,16 @@ def sign_up(email: str, password: str, metadata: Dict = None) -> Dict:
             'options': options if options else None
         })
         if response and response.user:
+            # With email confirmation on (production), an address that already
+            # has an account gets a stand-in user with no identities and no
+            # session, not an error. For the server log only: telling the
+            # visitor would say which addresses are registered.
+            identities = getattr(response.user, 'identities', None)
             return {
                 'success': True,
                 'user': _user_to_dict(response.user),
-                'session': _session_to_dict(response.session) if response.session else None
+                'session': _session_to_dict(response.session) if response.session else None,
+                'already_registered': identities is not None and len(identities) == 0,
             }
         return {'error': 'Registration failed - no user returned'}
     except AuthApiError as e:
@@ -1010,10 +1016,17 @@ def get_user_corrections_count(user_id: str) -> int:
         return 0  # Operation failed; use fallback value
 
 
-def update_profile(user_id: str, data: Dict) -> Dict:
-    """Update a user's profile."""
+def update_profile(user_id: str, data: Dict, *, client=None) -> Dict:
+    """Update a user's profile.
+
+    `client` (2026-10-20, keyword-only, default None = unchanged behaviour): see
+    `get_corrections`. The profiles UPDATE policy is `auth.uid() = id`, so an
+    anonymous client (any off-loop call without one) updates 0 rows and this
+    returns 'Update failed'.
+    """
     try:
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         response = client.table('profiles').update(data).eq('id', user_id).execute()
         if response.data:
             return {'success': True, 'profile': response.data[0]}
@@ -1072,17 +1085,20 @@ def get_list_item_counts() -> Dict[int, int]:
         raise
 
 
-def get_user_lists(user_id: str, include_deleted: bool = False) -> List[Dict]:
+def get_user_lists(user_id: str, include_deleted: bool = False, *, client=None) -> List[Dict]:
     """Get all lists for a user.
 
     Args:
         user_id: The user's UUID
         include_deleted: If True, include soft-deleted lists (for trash view)
+        client: (2026-10-20, keyword-only, default None = unchanged behaviour)
+            see `get_corrections`. Anon reads 0 rows here, so an off-loop call
+            without one tells a signed-in user they have no lists.
     """
     try:
         # READER-01 (Phase 92.1) BUG-FIX ROOT: user_lists SELECT RLS is `TO authenticated`;
         # anon singleton returns 0 rows. Smoke run 1 Symptom 1 -- 2026-05-17.
-        client = get_user_client()
+        client = client or get_user_client()
         query = client.table('user_lists').select('*').eq('user_id', user_id)
         if not include_deleted:
             query = query.is_('deleted_at', 'null')
@@ -1096,7 +1112,7 @@ def get_user_lists(user_id: str, include_deleted: bool = False) -> List[Dict]:
             try:
                 # READER-01 (Phase 92.1): same migration as main path -- fallback when
                 # deleted_at column doesn't exist yet.
-                client = get_user_client()
+                client = client or get_user_client()
                 response = client.table('user_lists').select('*').eq('user_id', user_id).order('created_at').execute()
                 return response.data or []
             except Exception as e2:
@@ -1106,6 +1122,7 @@ def get_user_lists(user_id: str, include_deleted: bool = False) -> List[Dict]:
             logger.warning("JWT expired in get_user_lists, refreshing session and retrying")
             _refresh_user_session()
             try:
+                # No client=: a passed one still carries the expired token.
                 return get_user_lists(user_id=user_id, include_deleted=include_deleted)
             except Exception as e2:
                 logger.error(f"Error getting lists (retry): {e2}")
@@ -1338,10 +1355,16 @@ def get_recent_items(user_id: str, limit: int = 50, *, client=None) -> List[Dict
 
 
 def add_recent_item(user_id: str, sys_id: str, shelfmark: str = None,
-                    title: str = None, fl_id: str = None) -> Dict:
-    """Add an item to recent history."""
+                    title: str = None, fl_id: str = None, *, client=None) -> Dict:
+    """Add an item to recent history.
+
+    `client` (2026-10-20, keyword-only, default None = unchanged behaviour): see
+    `get_recent_items`. Off the loop without one, every statement runs
+    anonymously: the insert is refused and the deletes change nothing.
+    """
     try:
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
 
         # Remove existing entry for this sys_id (to move it to top)
         client.table('recent_items').delete().eq('user_id', user_id).eq('sys_id', sys_id).execute()

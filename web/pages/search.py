@@ -15,6 +15,7 @@ from web import io_bound_result
 from web.state import state
 from web.pages.search_helpers import compute_selected_uids
 from web.translations import tr, is_rtl, get_language, using_language
+from web.ux_timing import ux_done, ux_ignored
 from web.components.typography import h2, h3, h4
 from web.clipboard import copy_text_to_clipboard
 from web.components.filter_panel import (
@@ -144,6 +145,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # Helper: deferred async callback without ui.timer (avoids parent_slot RuntimeError on navigation)
     # Capture NiceGUI client for deferred async tasks (slot context)
     _page_client = ui.context.client
+    # ux_timing: the next search was started by this page's URL, not a click.
+    _ux_url_start = {'nav': False}
 
     async def _after_delay(delay, coro_func, *args):
         """Schedule an async callback after a delay, with NiceGUI client context."""
@@ -490,7 +493,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     with ui.row().classes('items-center gap-2 shrink-0'):
                         collapsed_search_btn = ui.button(
                             tr('Search'), icon='search', on_click=lambda: execute_search()
-                        ).classes('btn-primary h-8 px-4 text-sm')
+                        ).classes('btn-primary h-8 px-4 text-sm').props('data-ux=search_results')
 
                         def expand_panel():
                             search_state.is_panel_collapsed = False
@@ -538,7 +541,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         query_input = ui.input(
                             placeholder=tr('Enter Hebrew text to search'),
                             value=saved_query
-                        ).classes('w-full text-lg').props('outlined dense clearable').style('direction: rtl;')
+                        ).classes('w-full text-lg').props('outlined dense clearable data-ux-enter=search_results').style('direction: rtl;')
                         query_input.on('keydown.enter', lambda: execute_search())
 
                         # --- Live shortcut detection: switch mode when user types prefix + space ---
@@ -711,7 +714,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         # Search Button
                         search_btn = ui.button(tr('Search'), icon='search', on_click=lambda: execute_search()).classes(
                             'btn-primary h-10 px-8'
-                        )
+                        ).props('data-ux=search_results')
 
                         # Stop Button (hidden by default) - replaces search button
                         stop_btn = ui.button(
@@ -4994,6 +4997,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     async def execute_search():
         # Guard against double-submit (rage-clicking while search is running)
         if search_state.is_running:
+            ux_ignored(_page_client, 'search_results')
             return
 
         # Handle PGP tag search mode — navigate to tag results page
@@ -5061,6 +5065,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.manual_transcription_sys_ids = set()
         search_state.printed_ids = set()
         search_state.search_generation += 1  # Invalidate stale background enrichment
+
+        # ux_timing (web/ux_timing.py): report this search's first visible rows, once.
+        _ux = {'sent': False, 'nav': _ux_url_start['nav'], 'generation': search_state.search_generation}
+        _ux_url_start['nav'] = False
+
+        def _ux_first_rows(outcome):
+            if _ux['sent'] or search_state.search_generation != _ux['generation']:
+                return
+            _ux['sent'] = True
+            ux_done(_page_client, 'search_results', outcome, nav=_ux['nav'],
+                    server_ms=(time.time() - search_state.search_start_time) * 1000)
 
         # Immediate visual feedback — swap buttons before the 500ms timer tick
         search_btn.style('display: none;')
@@ -5237,6 +5252,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             stop_btn.style('display: none;')
             progress_bar.classes('opacity-0')
             render_results([])
+            _ux_first_rows('zero')
             return
 
         # Early rows (2026-10-05): the worker hands over the first rows it finds
@@ -5292,6 +5308,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 except Exception:
                     logger.exception('Search preview render failed')
                     return
+                _ux_first_rows('preview')
                 painted = len(rows)
                 logger.info('Search perf: preview_rows=%d since_submit_ms=%.0f', painted,
                             (time.time() - search_state.search_start_time) * 1000)
@@ -5398,6 +5415,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             status_label.text = ''
             results_count.text = f"0 {tr('Results')}"
             render_results([])
+            _ux_first_rows('error')
             return
 
         # Skip expensive enrichment when search was cancelled (GAP-R7 round 3), or the
@@ -5494,6 +5512,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             # Render what we have (no enrichment badges -- acceptable for partial results)
             render_results(results, page=0)
+            _ux_first_rows('partial')
             return
 
         # --- Staged enrichment: render fast, enrich progressively ---
@@ -5707,6 +5726,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # IMMEDIATE RENDER — user sees results with title translations only
         render_results(results, page=0)
+        _ux_first_rows('ok' if results else 'zero')
         # SEED-026 (smoke round 3 — BUG A real root cause): reveal the library filter button
         # HERE, at render time, NOT only in _apply_enrichment_to_ui(). The library filter
         # needs no enrichment data (only bool(search_state.results)); enrichment runs later
@@ -6044,7 +6064,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             'w-full p-4 cursor-pointer transition-all hover:shadow-md'
                         ).style('border-radius: 10px;'):
                             with ui.row().classes('w-full items-start justify-between'):
-                                with ui.column().classes('flex-grow min-w-0 gap-1').on(
+                                with ui.column().classes('flex-grow min-w-0 gap-1').props('data-ux=result_quick_view').on(
                                     'click',
                                     lambda r=result: open_advanced_dialog(None, _tag_to_result(r))
                                 ):
@@ -6089,8 +6109,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # VS Browse mode: auto-search with wildcard restricted to suggestion pool
         query_input.value = '*'
         mode_select.value = 'shelfmark'
-        # Cat-2: deferred page-mount init - execute_search needs UI to render first.
-        asyncio.ensure_future(_after_delay(0.5, execute_search))
+        # Next tick, not a fixed wait: everything execute_search sends is held in
+        # the outbox until the socket connects (tests/test_search_url_start_delay.py).
+        asyncio.ensure_future(_after_delay(0, execute_search))
     elif search_state.results:
         results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}"
         render_results(search_state.results, page=0)
@@ -6108,8 +6129,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             logger.exception("SEED-026: filter button reveal on session restore failed (non-fatal)")
         ui.notify(tr('Session restored'), type='info', timeout=3000, position='top')
     elif initial_query:
-        # Cat-2: deferred page-mount init - execute_search needs UI to render first.
-        asyncio.ensure_future(_after_delay(0.5, execute_search))
+        _ux_url_start['nav'] = True
+        # Next tick, not a fixed wait: a 0.5 s wait here delayed every homepage-box
+        # search's first rows; execute_search reads only server-side values and
+        # what it sends waits in the outbox for the socket.
+        asyncio.ensure_future(_after_delay(0, execute_search))
 
     # --- Deferred initialization (runs after UI renders) ---
 
