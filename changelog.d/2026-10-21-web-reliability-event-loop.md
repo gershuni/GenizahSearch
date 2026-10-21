@@ -13,8 +13,9 @@ search.
   projects), comments, and /browse corrections and drafts ran their Supabase
   round trip (~150 ms, Oregon to Frankfurt) on the event loop. They now run in
   a worker with the visitor's own client, built on the loop. "Add all results to
-  a list" is one insert instead of one per row. A second click while a save is
-  in flight is ignored, so a double click no longer writes twice.
+  a list" is one insert instead of one per row. A second Save Draft or Submit
+  waits for the first save and then runs, so a double click no longer writes two
+  drafts; a double-clicked comment posts once.
 - **A /browse page turn rebuilds the page twice, not three or four times.** The
   spinner no longer clears the page: the previous page stays under it, dimmed
   and inert, and the spinner floats over it without moving it. Phase B fills its
@@ -36,21 +37,28 @@ search.
 
 ### Added
 - **Reconnect backoff.** After a restart every open tab used to reload within
-  the same 5 seconds. A small script in every page's head now spreads socket.io's
-  reconnects (up to 30 s apart) and delays the reload after a refused handshake
-  or a connect timeout by a jittered 1.5 s, doubling per consecutive reload up to
-  60 s; a background tab waits until it is viewed. Settings:
-  `RECONNECT_BACKOFF_ENABLED`, `RECONNECT_BACKOFF_BASE_MS`,
-  `RECONNECT_BACKOFF_CAP_MS`, `RECONNECT_DELAY_MAX_MS`. Handshake outcomes are
-  counted in `/_internal/memstat` under `handshakes` (a warning when more than
-  30 unknown clients arrive in a minute), and the browser sends a PostHog
-  `reload_scheduled` event.
+  the same 5 seconds. A small script in every page's head now delays the reload
+  after a refused handshake, or after a second connect timeout, by a jittered
+  1.5 s, doubling per consecutive reload up to 60 s; a background tab waits
+  until it is viewed. NiceGUI's first timeout, its switch to long polling, is
+  untouched, and a page that reconnects is not reloaded for an old timeout.
+  Checked in headless Chromium against socket.io 4.8.1 with NiceGUI's own
+  connection code: with websockets hanging, 30 of 30 tabs connect over polling
+  with no reload, as without the script; hidden tabs whose handshake is refused
+  all reload when viewed. Settings: `RECONNECT_BACKOFF_ENABLED`,
+  `RECONNECT_BACKOFF_BASE_MS`, `RECONNECT_BACKOFF_CAP_MS`,
+  `RECONNECT_DELAY_MAX_MS` (unset: socket.io's own retry schedule). Handshake
+  outcomes are counted in `/_internal/memstat` under `handshakes` (a warning
+  when more than 30 unknown clients arrive in a minute), and the browser sends
+  a PostHog `reload_scheduled` event when it schedules a reload.
 
 ### Not yet
 - Phase B of a /browse page still rebuilds the whole content area once, instead
   of filling only its own containers.
 - The /corrections page's save, approve and reject, the lists' `*_sync` helpers
   and the comment dialog's shelfmark picker still call Supabase on the loop.
+- Found while reviewing, not changed: after a page turn in edit mode, the
+  correction editor keeps the previous page's text and draft (tracker, P2).
 - None of the above has been measured on the server yet. After the deploy: the
   `[init] gc.freeze:` line, perf_watch's loop-lag lines, and, during the next
   restart, `handshakes` in `/_internal/memstat` and `/browse` latency.
