@@ -15,8 +15,10 @@ can legitimately produce different strings for the same sys_id (e.g.,
 page-text vs full-document text), so a strict cell-value parity assertion
 would either fail spuriously or require fragile mock alignment. Identical
 structure (EXPORT-META-09) covers what the user can OBSERVE on tab-name +
-column-header — that's what the parity gate enforces. Functional drift in
-data cells is caught by the per-app unit tests
+column-header — that's what the parity gate enforces. The one cell-value
+pin is how line breaks are written in Snippet and Full Text on a page row
+(2026-10-21). Functional drift in other data cells is caught by the per-app
+unit tests
 (:file:`tests/test_export_service_multi_sheet.py` for web,
 :file:`tests/test_desktop_xlsx_multi_sheet.py` for desktop).
 """
@@ -177,3 +179,28 @@ def test_bibliography_sub_sheet_headers_identical(stub_dossier):
         f"PARITY VIOLATION: web bibliography headers={web_h} "
         f"vs desktop bibliography headers={desktop_h}"
     )
+
+
+def test_line_breaks_in_snippet_and_full_text_match_the_website(stub_dossier):
+    # One cell-value pin, on a page row (OPEN_ISSUES P2, 2026-10-21): the
+    # desktop glued the words on either side of a line break, because the
+    # sanitizer drops '\n'. The website writes the snippet's line breaks as
+    # ' ‖ ' and the full text through clean_text_single_line. A search row
+    # carries both snippet forms (search_engine._highlight_pair): the website
+    # reads 'snippet', the desktop 'raw_file_hl'.
+    from genizah_app import _build_search_results_xlsx_bytes
+    from shared.export_utils import sanitize_text_for_excel
+    file_form = 'באן *אלמראה*\nובעלהא פי'
+    row = _make_result('99001234567890')
+    row.update(snippet=file_form.replace('\n', ' ‖ '), raw_file_hl=file_form,
+               full_text='באן אלמראה\nובעלהא פי\r\nאלבית', scope='page')
+    wb_web = _build_web([row])
+    wb_desktop = openpyxl.load_workbook(BytesIO(_build_search_results_xlsx_bytes(
+        results=[row], meta_resolver=_meta_resolver_fake,
+        sanitize_fn=sanitize_text_for_excel,
+    )), rich_text=True)
+    for col in (7, 8):      # Snippet, Full Text
+        web_cell = str(wb_web['Search Results'].cell(2, col).value)
+        desktop_cell = str(wb_desktop['Search Results'].cell(2, col).value)
+        assert desktop_cell == web_cell, (col, desktop_cell, web_cell)
+    assert str(wb_desktop['Search Results'].cell(2, 7).value) == 'באן אלמראה ‖ ובעלהא פי'
