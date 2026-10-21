@@ -240,6 +240,29 @@ def test_timeout_freezes_anyway_and_names_the_loader(monkeypatch, capsys):
     assert 'STILL RUNNING' in out and 'MetadataManager.start_background_loading' in out
 
 
+def test_a_wedged_extra_task_is_bounded_by_the_same_budget(monkeypatch, capsys):
+    """A prewarm whose io_bound never returns must not defer the freeze forever:
+    the loaders and the extra tasks share GENIZAH_GC_FREEZE_MAX_WAIT_SECONDS."""
+    monkeypatch.setenv('GENIZAH_GC_FREEZE_MAX_WAIT_SECONDS', '0.05')
+    order = []
+
+    async def main():
+        never = asyncio.Event()
+        wedged = asyncio.create_task(never.wait(), name='fjms-prewarm')
+        try:
+            return await asyncio.wait_for(gc_freeze.freeze_after_loaders(
+                _finished_state(), extra_tasks=(wedged,),
+                collect=lambda: order.append('collect'), freeze=lambda: order.append('freeze'),
+            ), timeout=5.0)
+        finally:
+            wedged.cancel()
+
+    assert _run(main()) is True
+    assert order == ['collect', 'freeze']
+    assert gc_freeze.stats()['pending_loaders'] == ['startup task fjms-prewarm']
+    assert 'STILL RUNNING' in capsys.readouterr().out
+
+
 def test_disabled_touches_nothing(monkeypatch, capsys):
     monkeypatch.setenv('GENIZAH_GC_FREEZE', 'off')
     state = _never_finishing_state()
@@ -311,6 +334,11 @@ def test_background_loading_finished_with_finished_blocked_and_no_threads():
         gate.set()
         blocked.join(timeout=5.0)
     assert mgr.background_loading_finished() is True
+
+    # Created but not started yet (the window inside start_background_loading):
+    # is_alive() is False before start(), but nothing has loaded.
+    mgr._bg_threads = [done, threading.Thread(target=lambda: None)]
+    assert mgr.background_loading_finished() is False
 
 
 def test_start_background_loading_keeps_both_thread_handles():

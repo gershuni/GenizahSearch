@@ -3493,7 +3493,7 @@ async def initialize_engine():
         await run.io_bound(_prewarm_sync)
 
     if init_ok:
-        prewarm = asyncio.create_task(_prewarm_fjms_background())
+        prewarm = asyncio.create_task(_prewarm_fjms_background(), name='fjms-prewarm')
         # One gc.collect(); gc.freeze() once the loaders that keep allocating
         # after _init_sync (MetadataManager threads, FL-ID build, this prewarm)
         # are done -- see web/gc_freeze.py. Scheduled from HERE, not as another

@@ -103,9 +103,11 @@ IIIF_MANIFEST_CACHE_MAX_ENTRIES=1500  # IIIF manifest cache bound (code default 
 GENIZAH_GC_FREEZE=1                   # gc.collect(); gc.freeze() ONCE after the startup loaders finish (web/gc_freeze.py), so
                                        # full collections stop walking the 0.6-0.84 M startup objects on the event loop;
                                        # 0/false/no/off disables. Frozen objects leave gc.get_objects(): /_internal/objgraph
-                                       # reports gc_freeze_count and takes action=unfreeze / action=refreeze.
+                                       # reports gc_freeze_count and takes action=unfreeze / action=refreeze. It pins
+                                       # everything alive then, incl. early visitors' page state (cyclic garbage among
+                                       # it stays until action=unfreeze): a one-time, bounded cost.
 GENIZAH_GC_FREEZE_MAX_WAIT_SECONDS=180 # freeze anyway after waiting this long for the MetadataManager threads, the FL-ID
-                                       # build and the FJMS prewarm (the log line then names the loader still running)
+                                       # build and the FJMS prewarm (the log line then names what is still running)
 GENIZAH_GC_FREEZE_POLL_SECONDS=1.0    # how often the wait re-checks those loaders
 
 # Perf watch (2026-07-30 slowness diagnosis; web-only, web/perf_watch.py). Default ON and

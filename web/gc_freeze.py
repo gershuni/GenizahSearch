@@ -8,7 +8,10 @@ the engines, the browse map), and every full (generation 2) collection walks
 all of them on whichever thread trips the threshold -- mostly the event loop:
 465 and 534 ms in a real /browse run (measured 2026-10-20), 92-133 ms after
 ``gc.collect(); gc.freeze()``. ``gc.freeze()`` moves everything tracked at that
-moment into the permanent generation, which later collections ignore.
+moment into the permanent generation, which later collections ignore. That is
+everything alive, not only the startup data: the page state of visitors served
+during the wait is pinned too, and cyclic garbage among it stays until
+``action=unfreeze`` -- a one-time, bounded cost, not a growth.
 
 Design
 ------
@@ -21,8 +24,9 @@ Design
   runs those concurrently, so no handler can run "after" ``initialize_engine``;
   it is scheduled from inside it. ``AppState.is_ready()`` flips True before the
   loaders finish and is not a done signal.
-- Bounded wait: after ``GENIZAH_GC_FREEZE_MAX_WAIT_SECONDS`` it freezes anyway
-  and names the loader still running (what that loader builds afterwards stays
+- Bounded wait (the loaders AND the extra tasks share it): after
+  ``GENIZAH_GC_FREEZE_MAX_WAIT_SECONDS`` it freezes anyway and names what is
+  still running (what that loader builds afterwards stays
   unfrozen, which only costs what it was costing before).
 - Never raises; a failure degrades to one ``[init]`` log line.
 - Frozen objects are invisible to ``gc.get_objects()`` AND ``gc.get_referrers()``,
@@ -226,8 +230,12 @@ async def freeze_after_loaders(
             pending = pending_loaders(state)
         if extra_tasks:
             # A failed prewarm is its own log line; it must not stop the freeze.
-            await asyncio.gather(*extra_tasks, return_exceptions=True)
-            pending = pending_loaders(state)
+            # The same budget bounds this wait: a wedged io_bound pool must not
+            # defer the freeze forever with nothing in the log.
+            remaining = max(0.0, max_wait - (time.monotonic() - started))
+            _done, not_done = await asyncio.wait(list(extra_tasks), timeout=remaining)
+            pending = list(pending_loaders(state)) + sorted(
+                f"startup task {t.get_name()}" for t in not_done)
         waited = time.monotonic() - started
         t0 = time.perf_counter()
         collect()

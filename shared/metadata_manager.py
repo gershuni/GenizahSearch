@@ -319,8 +319,11 @@ class MetadataManager:
         """True once every thread of start_background_loading() has exited.
 
         True when the loading was never started: there is nothing to wait for.
+        A handle created but not yet started counts as pending (``is_alive()``
+        is False before ``start()`` too).
         """
-        return all(not t.is_alive() for t in getattr(self, '_bg_threads', ()))
+        return all(t.ident is not None and not t.is_alive()
+                   for t in getattr(self, '_bg_threads', ()))
 
     def _load_small_caches(self):
         if os.path.exists(Config.CACHE_NLI):
