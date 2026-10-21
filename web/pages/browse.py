@@ -1191,7 +1191,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             ux_done(_page_client, 'browse_page', 'error' if state.error else 'ok',
                     server_ms=(time.perf_counter() - _ux_t0) * 1000, nav=_ux_nav,
                     img_selector='.img-loading-container img.zoomable-image')
-        if _recent:
+        # Only the current load: one overtaken during the title lookup above
+        # would otherwise record its page after the newer one's.
+        if _recent and my_gen == _load_generation['value']:
             background_tasks.create(_record_recent(*_recent), name='browse-recents')
 
         # === Phase B: Background enrichment ===

@@ -148,6 +148,33 @@ def _next_buttons(client):
             and str(e._props.get('data-action', '')).strip('"') == 'next']
 
 
+def _load_page_of(client):
+    """The page's own ``load_page``, reached through the live Next button
+    (``on_click=lambda: load_page(direction=1)``): while a load runs the page
+    shows a spinner and has no navigation button to click."""
+    import functools
+
+    stack = [listener.handler for listener in _next_buttons(client)[-1]._event_listeners.values()
+             if listener.type == 'click']
+    seen = set()
+    while stack:
+        fn = stack.pop()
+        if id(fn) in seen:
+            continue
+        seen.add(id(fn))
+        if getattr(fn, '__name__', '') == 'load_page':
+            return fn
+        if isinstance(fn, functools.partial):
+            stack.append(fn.func)
+        for cell in getattr(fn, '__closure__', None) or ():
+            try:
+                if callable(cell.cell_contents):
+                    stack.append(cell.cell_contents)
+            except ValueError:
+                pass
+    raise AssertionError('load_page is not reachable from the Next button')
+
+
 async def _click_next(client):
     assert await _wait(lambda: _next_buttons(client)), 'the page rendered no Next button'
     for listener in _next_buttons(client)[-1]._event_listeners.values():
@@ -214,3 +241,50 @@ def test_a_waiting_write_is_dropped_after_an_account_switch(recents):
     assert [c['fl_id'] for c in calls] == ['FL1', 'FL2'], (
         f'the write that waited ran after the account switch: {calls}')
     assert all(c['user'] == 'user-1' for c in calls), calls
+
+
+def test_a_load_overtaken_by_a_newer_one_records_nothing(recents, monkeypatch):
+    """Codex on #423: a load that passed its last generation check and was then
+    overtaken while awaiting the title lookup still scheduled its page, after
+    the newer load's -- so the superseded folio became the most recent."""
+    import shared.translation_service as translation_service
+
+    entered, release = threading.Event(), threading.Event()
+    slow = {'next': False}
+
+    class _Titles:  # the title lookup, made slow for one load
+        def __init__(self, *_a, **_k):
+            pass
+
+        def titles_available(self):
+            if slow['next']:
+                slow['next'] = False
+                entered.set()
+                release.wait(20)
+            return False
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(translation_service, 'TranslationService', _Titles)
+
+    async def _run():
+        core.loop = asyncio.get_running_loop()
+        client = recents['open_page']()
+        assert await _wait(lambda: len(recents['calls']) == 1 and recents['active']['n'] == 0)
+        load_page = _load_page_of(client)
+        slow['next'] = True
+        with client:
+            older = background_tasks.create(load_page(direction=1), name='older-load')  # page 2, held in its lookup
+        assert await _wait(entered.is_set), 'the older load never reached its title lookup'
+        with client:
+            newer = background_tasks.create(load_page(direction=1), name='newer-load')  # page 3, runs through
+        await newer
+        assert await _wait(lambda: len(recents['scheduled']) == 2), 'the newer load scheduled no write'
+        release.set()
+        await older
+        assert await _wait(lambda: recents['active']['n'] == 0)
+        await asyncio.sleep(0.5)  # room for a stale write to run, if one were scheduled
+
+    asyncio.run(_run())
+    assert [c['fl_id'] for c in recents['calls']] == ['FL1', 'FL3'], recents['calls']
