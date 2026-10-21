@@ -156,9 +156,9 @@ NLI_DISK_CACHE_TTL=2592000            # how long a manuscript's NLI image ids ar
                                        # 0 turns the store off). Until 2026-10-21 the JSON file this
                                        # governed held only the last 5 minutes (see the changelog)
 NLI_FL_ID_STORE_FILE=                 # the image-id store, SQLite (default <INDEX_DIR>/nli_fl_ids.db).
-                                       # At startup it reads the old nli_fl_ids_cache.json beside it once
-                                       # and renames it .imported. Manifest lists only: a MARC-fallback
-                                       # list (usually one image) stays in memory for NLI_CACHE_TTL
+                                       # Manifest lists only: a MARC-fallback list (usually one image)
+                                       # stays in memory for NLI_CACHE_TTL. The old nli_fl_ids_cache.json
+                                       # is not read (it mixes the two) and is safe to delete
 NLI_THUMB_CACHE_DIR=                  # kept thumbnails (default <INDEX_DIR>/nli_thumbs): the IIIF JPEG of
                                        # a page, written the first time the proxy fetches it, read before
                                        # the NLI breaker -- so it shows during an outage. Layout:

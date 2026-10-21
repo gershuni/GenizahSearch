@@ -13,11 +13,11 @@ the failed cards. Reproduced: 12 of 20 cards lost when a manifest takes 1.5 s.
   minutes, so the "30-day" file held the last 5 minutes. It is now a SQLite file,
   `<INDEX_DIR>/nli_fl_ids.db`, written one entry at a time and read when memory
   misses: a manuscript anyone opened in the last 30 days needs no manifest and
-  takes none of the 8 slots. The old JSON file is read into it once at startup
-  and renamed `.imported`. A list from the MARC fallback (used when the manifest
-  fails; it usually names only the first image) stays in memory for 5 minutes as
-  before and is never stored, or later pages would show the first image for a
-  month (Codex review).
+  takes none of the 8 slots. A list from the MARC fallback (used when the
+  manifest fails; it usually names only the first image) stays in memory for 5
+  minutes as before and is never stored, or later pages would show the first
+  image for a month. For the same reason the old JSON file is not read: it
+  mixes the two kinds of list (Codex review). It is safe to delete.
 
 ### Added
 - **Thumbnails on disk** (`web/nli_image_store.py`): the NLI image proxy keeps

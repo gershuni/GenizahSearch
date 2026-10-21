@@ -7,10 +7,12 @@ Two stores, both safe to delete (they refill from NLI), both under
 * **FL-id store** (``nli_fl_ids.db``, SQLite): a manuscript's NLI image ids as
   read from its IIIF manifest, kept ``NLI_DISK_CACHE_TTL`` seconds (30 days). The
   proxy reads it when its 5-minute memory cache misses, so a manuscript resolved
-  last week needs no manifest download today. It replaces
+  last week needs no manifest download today. Only manifest lists go in: the
+  MARC fallback usually names just the first image. It replaces
   ``nli_fl_ids_cache.json``, which was rewritten from the memory cache on every
-  save and so never held more than the last 5 minutes (2026-10-21); that file is
-  imported once and renamed ``.imported``.
+  save and so never held more than the last 5 minutes (2026-10-21). That file is
+  not read: it cannot tell a manifest's list from a MARC fallback's (Codex on
+  #427), and it is safe to delete.
 
 * **Thumbnail cache** (``nli_thumbs/``): the JPEG of one page at a grid width
   (``NLI_THUMB_CACHE_WIDTHS``, 300), written the first time the proxy gets it from
@@ -57,7 +59,6 @@ NLI_THUMB_CACHE_MAX_MB = max(0, int(os.environ.get('NLI_THUMB_CACHE_MAX_MB', '10
 NLI_THUMB_CACHE_MIN_FREE_MB = max(0, int(os.environ.get('NLI_THUMB_CACHE_MIN_FREE_MB', '2048')))
 
 _JPEG_MAGIC = b'\xff\xd8'
-_LEGACY_JSON_NAME = 'nli_fl_ids_cache.json'
 
 _stats_lock = threading.Lock()
 _stats = {
@@ -162,14 +163,11 @@ def fl_id_store_get(cache_key: str, ttl_seconds: int, *, path: str | None = None
 
 
 def fl_id_store_put(cache: dict, cache_time: dict, ttl_seconds: int, *,
-                    path: str | None = None, now: float | None = None,
-                    replace: bool = True) -> bool:
+                    path: str | None = None, now: float | None = None) -> bool:
     """Write positive entries (``key -> FL ids``, each with its time in ``cache_time``).
 
     Entries that are not a non-empty FL-id list, or already older than
-    ``ttl_seconds``, are skipped. ``replace=False`` keeps a row that is already
-    there (the one-time import of the old JSON file). True when written or
-    nothing to write.
+    ``ttl_seconds``, are skipped. True when written or nothing to write.
     """
     path = path or fl_id_store_path()
     if not path or ttl_seconds <= 0:
@@ -187,12 +185,11 @@ def fl_id_store_put(cache: dict, cache_time: dict, ttl_seconds: int, *,
             rows.append((str(key), json.dumps(normalized), float(cached_at)))
     if not rows:
         return True
-    verb = 'INSERT OR REPLACE' if replace else 'INSERT OR IGNORE'
     try:
         conn = _connect(path)
         try:
             with conn:
-                conn.executemany(f'{verb} INTO fl_ids (cache_key, fl_ids, cached_at) VALUES (?, ?, ?)', rows)
+                conn.executemany('INSERT OR REPLACE INTO fl_ids (cache_key, fl_ids, cached_at) VALUES (?, ?, ?)', rows)
         finally:
             conn.close()
     except (sqlite3.Error, OSError) as e:
@@ -203,35 +200,12 @@ def fl_id_store_put(cache: dict, cache_time: dict, ttl_seconds: int, *,
     return True
 
 
-def fl_id_store_prepare(ttl_seconds: int, *, now: float | None = None) -> int:
-    """At startup: import the old JSON cache once, then drop expired rows.
-
-    The JSON file sits beside the store (``nli_fl_ids_cache.json``) and is renamed
-    ``.imported`` after a successful import, so it is read once; a row the store
-    already has is kept. Returns how many entries the old file held.
-    """
+def fl_id_store_prepare(ttl_seconds: int, *, now: float | None = None) -> None:
+    """At startup: drop the rows older than ``ttl_seconds``."""
     path = fl_id_store_path()
     if not path or ttl_seconds <= 0:
-        return 0
+        return
     now = time.time() if now is None else now
-    imported = 0
-    legacy = os.path.join(os.path.dirname(path), _LEGACY_JSON_NAME)
-    if os.path.exists(legacy):
-        try:
-            with open(legacy, 'r', encoding='utf-8') as handle:
-                payload = json.load(handle)
-            entries = payload.get('entries', {}) if isinstance(payload, dict) else {}
-            cache, cache_time = {}, {}
-            for key, entry in entries.items():
-                if isinstance(entry, dict):
-                    cache[str(key)] = entry.get('fl_ids')
-                    cache_time[str(key)] = entry.get('cached_at')
-            if fl_id_store_put(cache, cache_time, ttl_seconds, path=path, now=now, replace=False):
-                imported = len(cache)
-                os.replace(legacy, legacy + '.imported')
-                logger.info("Read %d NLI FL-id entries from %s into the store", imported, legacy)
-        except (OSError, ValueError) as e:
-            logger.warning("Could not import the old NLI FL-id cache %s: %s", legacy, e)
     try:
         conn = _connect(path)
         try:
@@ -241,7 +215,6 @@ def fl_id_store_prepare(ttl_seconds: int, *, now: float | None = None) -> int:
             conn.close()
     except (sqlite3.Error, OSError) as e:
         logger.warning("NLI FL-id store cleanup failed (%s): %s", path, e)
-    return imported
 
 
 # ── Thumbnail cache ───────────────────────────────────────────────────────────

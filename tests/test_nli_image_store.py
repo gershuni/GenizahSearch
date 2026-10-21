@@ -49,25 +49,6 @@ class TestFlIdStore:
         assert store.fl_id_store_get('k', 30 * DAY, now=now) == ['1']
         assert store.fl_id_store_get('k', 30 * DAY, now=now + 21 * DAY) is None
 
-    def test_old_json_cache_is_imported_once_without_overwriting_newer_rows(self):
-        now = time.time()
-        legacy = os.path.join(os.path.dirname(store.fl_id_store_path()), 'nli_fl_ids_cache.json')
-        os.makedirs(os.path.dirname(legacy), exist_ok=True)
-        with open(legacy, 'w', encoding='utf-8') as handle:
-            json.dump({'version': 1, 'entries': {
-                'old': {'fl_ids': ['111'], 'cached_at': now - DAY},
-                'both': {'fl_ids': ['222'], 'cached_at': now - DAY},
-                'expired': {'fl_ids': ['333'], 'cached_at': now - 40 * DAY},
-            }}, handle)
-        store.fl_id_store_put({'both': ['999']}, {'both': now}, 30 * DAY)
-
-        assert store.fl_id_store_prepare(30 * DAY, now=now) == 3
-        assert store.fl_id_store_get('old', 30 * DAY) == ['111']
-        assert store.fl_id_store_get('both', 30 * DAY) == ['999']
-        assert store.fl_id_store_get('expired', 30 * DAY) is None
-        assert not os.path.exists(legacy) and os.path.exists(legacy + '.imported')
-        assert store.fl_id_store_prepare(30 * DAY, now=now) == 0
-
     def test_prepare_drops_expired_rows(self):
         now = time.time()
         store.fl_id_store_put({'k': ['1']}, {'k': now - 10}, 30 * DAY, now=now)
@@ -374,6 +355,23 @@ class TestProxyUsesTheStores:
             assert seam['fetch_fl_ids_from_nli'](sid) == ['31', '32', '33']
             assert seam['_fetch_nli_image_bytes'](sid, 2, width=2000)[2] == '33'
         assert store.fl_id_store_get(sid, 30 * DAY) == ['31', '32', '33']
+
+    def test_the_old_json_cache_is_not_trusted_after_the_upgrade(self, seam):
+        # Codex on #427 (P2): nli_fl_ids_cache.json mixes manifest lists with one-image
+        # MARC fallback lists and cannot tell them apart. Imported into the 30-day
+        # store, such a list answered page 2 with page 1 after NLI recovered.
+        sid = '990000000000405171'
+        legacy = os.path.join(os.path.dirname(store.fl_id_store_path()), 'nli_fl_ids_cache.json')
+        os.makedirs(os.path.dirname(legacy), exist_ok=True)
+        with open(legacy, 'w', encoding='utf-8') as handle:
+            json.dump({'version': 1, 'entries': {sid: {'fl_ids': ['41'], 'cached_at': time.time()}}}, handle)
+        store.fl_id_store_prepare(30 * DAY)                                # the first start
+        nli = _FakeNli({sid: ['41', '42']}, iiif_ok=['41', '42'])
+        p1, p2 = nli.patches()
+        with p1, p2:
+            assert seam['_fetch_nli_image_bytes'](sid, 1, width=2000)[2] == '42'
+        assert nli.manifest_calls == 1
+        assert store.fl_id_store_get(sid, 30 * DAY) == ['41', '42']
 
     def test_a_rosetta_stand_in_is_served_but_not_kept(self, seam):
         nli = _FakeNli({SID: ['601']}, rosetta_ok=['601'])

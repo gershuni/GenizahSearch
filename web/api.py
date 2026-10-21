@@ -548,7 +548,7 @@ def init_api_routes(app_override=None):
     # Sentinel for negative cache entries (distinguishes "cached empty" from "not cached")
     _NLI_FAIL_SENTINEL = object()
     # The memory cache starts empty: a miss reads the 30-day FL-id store
-    # (web/nli_image_store.py), which takes in the old JSON cache file once.
+    # (web/nli_image_store.py). The old nli_fl_ids_cache.json is not read.
     nli_image_store.fl_id_store_prepare(NLI_DISK_CACHE_TTL)
     nli_image_store.thumb_cache_prepare()
     _nli_cache = OrderedDict()
