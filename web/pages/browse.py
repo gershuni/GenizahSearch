@@ -2008,15 +2008,19 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # after the visitor navigated away (e.g. to the Joins Lab).
         if content_container.is_deleted or getattr(_client, '_deleted', False):
             return
+        if state.is_loading:
+            # The spinner is a row of its own above the content, shown and
+            # hidden in place: building it here cost a full clear of the page
+            # and a second full rebuild when Phase A landed. The old content
+            # stays, dimmed and inert (.browse-loading), until the new page.
+            loading_row.set_visibility(True)
+            content_container.classes(add='browse-loading')
+            return
+        loading_row.set_visibility(False)
+        content_container.classes(remove='browse-loading')
         content_container.clear()
 
         with content_container:
-            if state.is_loading:
-                with ui.row().classes('w-full justify-center py-16'):
-                    ui.spinner(size='xl', color='green')
-                    ui.label(tr('Loading...')).classes('ml-3 text-lg').style('color: var(--text-secondary);')
-                return
-
             if state.error and not state.current_page:
                 with ui.card().classes('w-full p-8 text-center'):
                     ui.icon('error_outline', size='4rem').classes('text-red-400')
@@ -5463,6 +5467,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     ui.icon('warning', color='orange')
                     ui.label(tr('Service not available')).classes('text-yellow-800')
 
+        # The loading spinner, built once and toggled by update_content().
+        loading_row = ui.row().classes('w-full justify-center py-16')
+        with loading_row:
+            ui.spinner(size='xl', color='green')
+            ui.label(tr('Loading...')).classes('ml-3 text-lg').style('color: var(--text-secondary);')
+        loading_row.set_visibility(False)
+        refs.loading_row = loading_row
+
         # Main content container
         content_container = ui.column().classes('w-full')
         # Expose it on refs so deferred enrichment (Phase B) can check page
@@ -5552,6 +5564,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         ui.add_body_html('''
         <script>
             document.addEventListener('keydown', function(e) {
+                // A page is loading: the old content is inert, so no second load
+                // from its (still clickable, programmatically) navigation buttons.
+                if (document.querySelector('.browse-loading')) return;
                 // Ignore if focused on any text input element
                 const tag = document.activeElement.tagName;
                 if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement.isContentEditable) return;

@@ -2288,3 +2288,7 @@ body {
 /* Print-sheet furniture is hidden on screen. Kept OUTSIDE the media query so
    the rule applies whether or not the print block is reached. */
 .print-only { display: none; }
+
+/* /browse while a page loads: the previous content stays under the spinner,
+   dimmed and inert, instead of being rebuilt as a spinner and rebuilt again. */
+.browse-loading { opacity: .5; pointer-events: none; }
