@@ -1,21 +1,24 @@
 # Responsa wildcards: `*` as any sequence, `#` as the grammatical list
 
-**Status:** plan, revision 5: **Phase 0 measured (2026-10-21, §3.6)** -- every item has its
-numbers except the two halves of item 6 that cannot run yet: the "after" timings, which run with
-Phase 1 and Phase 2 through the same subcommand, and the Linux-worker run, which is the owner's
-(§3.6.6 holds today's desktop timings on both regex routes, on the laptop). Revision 4 was
-**Codex SHIP** (four rounds on 2026-10-21: DO NOT SHIP, DO NOT SHIP, SHIP WITH FIXES, SHIP; §12).
-It is the basis for Phase 1. Not implemented. Decisions 7 and 8 in §9 were taken on 2026-10-21
-(exclusion on the page only; counts may change). Phase 0's numbers inform decision 1 (a word list beside the index
-gives the same V0.8 pages in 0.14-1.8 s against 4.6-6.1 s per leading-star lookup; §3.6.1),
-decision 2 (an OR of 600 or 1,200 scored term queries keeps distinct BM25 scores in under a second;
-§3.6.3), decision 3 (`*נים *לים` has 99,981 candidate pages, 100,373 with bracket tolerance; §3.6.4),
-decision 5 (one `regex_query` holds at most 60-120 stems: the 1,000-state limit, §3.6.2) and
-decision 9 (12.95% of whole-manuscript junctions and 45.95% of part junctions are not consecutive
-pages of one volume and one transcription; §3.6.5). Decisions 4 and 6 are still the owner's call
-with no new number. Phase 0 also fixed §4's open question: the seven pages stage 1 missed are all
-edge brackets, which the contract already covers, and sof pasuq joins maqaf as the punctuation kept
-inside tokens (§3.6.4, §3.6.7).
+**Status:** plan, revision 6: **all nine §9 decisions taken (2026-10-21)** and the phases
+resequenced -- Phase 1 unchanged (whole words on every path, no rebuild), **Phase 2 is the index
+format** (seam documents and the reversed-words field on one rebuild, the engine's fallback for an
+old index, the server rebuild and the desktop re-index), **Phase 3 is true `*`** on the new index.
+**Phase 0 measured (2026-10-21, §3.6)** -- every item has its numbers except the two halves of
+item 6 that cannot run yet: the "after" timings, which run with Phase 1 and Phase 3 through the
+same subcommand, and the Linux-worker run, which is the owner's (§3.6.6 holds today's desktop
+timings on both regex routes, on the laptop). Revision 4 was **Codex SHIP** (four rounds on
+2026-10-21: DO NOT SHIP, DO NOT SHIP, SHIP WITH FIXES, SHIP; §12). Not implemented. Decisions 7
+and 8 were taken first (exclusion on the page only; counts may change); decisions 1-6 and 9 were
+taken from Phase 0's numbers: 1 from §3.6.1 (identical page sets, 0.14-1.8 s against 4.6-6.1 s
+per leading-star lookup), 2 from §3.6.3 (an OR of 600 or 1,200 scored term queries keeps distinct
+BM25 scores in under a second), 3 from §3.6.4 (99,981 candidate pages, 100,392 with bracket
+tolerance), 5 from §3.6.2 (one `regex_query` holds at most 60-120 stems: the 1,000-state limit),
+9 from §3.6.5 (12.95% of whole-manuscript junctions and 45.95% of part junctions are not
+consecutive pages of one volume and one transcription), 4 and 6 on their own terms. Phase 0 also
+fixed §4's open question: the seven pages stage 1 missed are all edge brackets, which the contract
+already covers; sof pasuq joins maqaf, and a foreign mark inside a Hebrew word is a third, counted
+gap (§3.6.4, §3.6.7, §3.6.2).
 **Tracker rows (P2, `docs/OPEN_ISSUES.md`, 2026-10-21; they reach `master-main` with PR #426):**
 - "Responsa `*word` misses pages, and reads every whole-manuscript doc"
 - "Responsa: `#word#` never keeps its suffixes; a star inside a word returns nothing"
@@ -380,7 +383,7 @@ page-number continuity, remove every kind above. This bears on decision 9.
 #### 3.6.6 Desktop timings today for the §8 query set -- `desktop-timings` (442 s): the "before" half of item 6
 
 This is the "before" of item 6, on the laptop. The "after" is the same subcommand once Phase 1 and
-Phase 2 land; the Linux-worker run is the owner's and is **not** replaced by the stdlib-`re` column
+Phase 3 land; the Linux-worker run is the owner's and is **not** replaced by the stdlib-`re` column
 below, which is the worker's matching route measured on this Windows laptop.
 
 Method: `SearchEngine.execute_search(query, 'exact', 0, responsa_options={'responsa_mode': True,
@@ -434,7 +437,7 @@ The same queries on the production worker's stdlib `re` route (`--engines re`, a
   reversed branches over whole-manuscript text (`AND`, bidirectional) are **slower on stdlib `re`**
   (2.7x and 1.5x), so a Linux worker is not faster on every query.
 - Every heavy query here spends its time in the aggregate documents (§3.5): the same set after
-  pages first (§5.4) is what Phase 1 and Phase 2 are measured against, with the same subcommand
+  pages first (§5.4) is what Phase 1 and Phase 3 are measured against, with the same subcommand
   ("before and after", §7 item 6). The Linux-worker run is the owner's: the same command with
   `--index-dir`, `--corpus-file` and `--engines re`.
 - Where the time goes (the engine's own `search_perf` line): `#כהנים #גדולים` reads 3,723
@@ -658,7 +661,7 @@ Where crossings come from under a true star is §6.
   keep an arbitrary half.
 - Reading page candidates costs about 85 µs each here.
 - The Responsa page limit is an owner decision (§9, decision 3), and it must hold on every path
-  above.
+  above. **Decided 2026-10-21: 150,000 candidate pages; aggregates and seams get their own limit.**
 
 ### 5.6 The leading-star cost
 
@@ -674,8 +677,12 @@ Each word that starts with a star costs 7-10 s in stage 1, on both apps. Options
   change, but the list must stay in step with the index. LOCAL keeps option A, since its index is
   small and changes file by file.
 
-Recommendation: A in Phase 2, then C. If §6's seams are chosen, they need a rebuild anyway, and B
-can ride the same rebuild.
+Recommendation was: A first, then C; B if §6's seams are chosen, on the same rebuild.
+**Decided 2026-10-21 (decision 1): B**, the reversed-words field, on the same rebuild as the seam
+documents (Phase 2); C is not pursued; A stays for a desktop on an old index until the user
+re-indexes, and for `*כהנ*` (stars at both ends). The rebuild step measures the field's size first
+(estimate: +2-3 GB on 12.9 GB, without positions). §3.6.1 measured the lookup side: identical page
+sets, 0.14-1.8 s against 4.6-6.1 s per leading-star lookup.
 
 ### 5.7 Texts that change with the behaviour (same PR as the behaviour)
 
@@ -757,16 +764,22 @@ true star it dominates: about 4.7 billion characters loaded for 12 crossings.
 - **Page pairs** (pages i and i+1 whole) avoid the K limit within two pages, but index each page's
   text twice and retrieve less precisely than seams. They lose to B.
 
-Recommendation: C in Phase 2 (with the limits above), then B in one index-format change, together
-with §5.6 B or C, so that users rebuild once. Owner decision 9. Codex round 2 judged the seam
-direction sound, with these corrections.
+Recommendation was: C as the interim (with the limits above), then B in one index-format change,
+together with §5.6 B or C, so that users rebuild once. Codex round 2 judged the seam direction
+sound, with these corrections.
+**Decided 2026-10-21 (decision 9): B first, no interim.** The seam documents are built per source
+and per IE with consecutive page numbers, so none of §3.6.5's 226,926 false junctions survives
+(the V0.8 -> V0.7 restart inside one document above all), on the same rebuild as the
+reversed-words field (Phase 2), before true `*` ships (Phase 3). The crossing step of star searches
+reads seams, never whole manuscripts. C's limits stay in the text as the record of why an interim
+without crossings was not chosen.
 
 ## 7. Phases
 
 **Phase 0: measurements, no product code.** **Measured 2026-10-21: items 1-5 and 7, and the
 "before" half of item 6, have their numbers in §3.6 (item N in §3.6.N), from
 `scripts/measure_responsa_wildcards.py`. Still open in item 6: the "after" timings (run the same
-subcommand when Phase 1 and Phase 2 land) and the Linux-worker run (the owner's).**
+subcommand when Phase 1 and Phase 3 land) and the Linux-worker run (the owner's).**
 1. The full reversed word list (§5.6 C): build time and size, and lookup plus `term_set_query` time
    for narrow and broad stems.
 2. Bracket- and mark-tolerant patterns, for star words and for finite words (§5.1): DFA size and
@@ -799,14 +812,25 @@ contract for jobs.
 **Counts change.** For example, `כהנים גדול` goes from 264 rows to the 4 Exact finds. The owner's
 go-ahead is recorded (§9, decision 8, 2026-10-21); the release notes carry a sentence on it.
 
-**Phase 2: true `*`.**
-- Star retrieval and pages first (§5.4).
-- The crossing source decided in §6 (recommended: C, no crossings for star words, with a notice).
-- The Responsa page limit (§5.5).
-- Every text in §5.7.
+**Phase 2: the index format (resequenced 2026-10-21, decisions 1 and 9).** One rebuild carries
+both:
+- the seam documents (§6 B), built per source and per IE with consecutive page numbers, so none
+  of §3.6.5's 226,926 false junctions survives;
+- the reversed-words field (§5.6 B), its size measured first (estimate: +2-3 GB on 12.9 GB,
+  without positions);
+- the indexer changes for both; the engine's use of both, with a fallback to today's routes when
+  the open index lacks them (a desktop on an old index until the user re-indexes);
+- the server rebuild and the desktop re-index.
 
-**Phase 3: the index format.** Seam documents (§6 B) and the leading-star speed-up (§5.6 B or C) in
-one rebuild, after the owner decides.
+**Phase 3: true `*`, on the new index.**
+- Star retrieval and pages first (§5.4); a leading star through the reversed-words field,
+  `*כהנ*` (both ends) through today's slow route.
+- Crossings read from seams, never from whole manuscripts (decision 9).
+- The Responsa page limit, 150,000 candidate pages (§5.5, decision 3); bare stars refused and
+  one- or two-letter star words warned (decision 4); variants and Judeo-Arabic on star words
+  through several `regex_query`s ORed (decision 5); order by the finite words' score (decision 2);
+  a star matches zero letters (decision 6).
+- Every text in §5.7.
 
 ## 8. Gates (each with the mutation that must turn it red)
 
@@ -841,7 +865,7 @@ phase.** It FAILS, never skips, when `Transcriptions.txt` or the index is missin
 - **Query set.**
   - Phase 1: `#כהנים #גדולים`, `#כהנ# גדולים`, `כהנים גדול`, a lone `ספר`, a `[2]` gap, a
     bidirectional pair, an `AND` query, a `|` line query, a negation, a crossing fixture.
-  - Phase 2 adds `*כהנים *גדולים`, `*נים *לים`, `כ*נים גדולים` and `*כ*ה*נ*ים גדולים`.
+  - Phase 3 adds `*כהנים *גדולים`, `*נים *לים`, `כ*נים גדולים` and `*כ*ה*נ*ים גדולים`.
 
 **2. Unit tests with expectations written by hand,** never generated by the compiler:
 - the parser (every star position; `#`, `%` and `-` combinations; OR groups; inline alternation);
@@ -870,7 +894,7 @@ the same builder twice and compares counts; Codex 5.3):
   `tests/test_cross_page_spans.py:93`;
 - a match beside the `²` joiner.
 
-In Phase 3 the same cases run against seams.
+In Phase 2 the same cases run against seams.
 
 **5. Existing pins, updated deliberately:**
 - `tests/test_responsa_core.py:617-622` (`MAX_EXPANDED_TERMS == 500` and the cascade);
@@ -878,7 +902,7 @@ In Phase 3 the same cases run against seams.
 - `tests/test_join_workbench_builder.py`, which tests a copy of the builder, so a live-widget test is
   needed too.
 
-There is no dedicated test of the `*word*` rewrite warning. Phase 2 adds one that asserts a
+There is no dedicated test of the `*word*` rewrite warning. Phase 3 adds one that asserts a
 supported true star is **no longer rewritten**, rather than preserving the obsolete warning.
 
 ## 9. Decisions for the owner
@@ -889,16 +913,34 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
      server and on every desktop computer.
    - Keep a separate word list beside the index: no rebuild, and measured at 3 seconds instead of 9
      for the broadest ending.
+   **Decided 2026-10-21: the reversed-words field in the index (§5.6 B), on the same rebuild as
+   the seam documents (decision 9; Phase 2).** The word list (C) is not pursued. A desktop on an
+   old index keeps today's slow route (A) until the user re-indexes, and `*כהנ*` (stars at both
+   ends) keeps the slow route too. The rebuild step measures the field's size first (estimate given
+   to the owner: +2-3 GB on 12.9 GB, without positions). From §3.6.1: identical page sets, 0.14-1.8 s
+   against 4.6-6.1 s per leading-star lookup.
 2. **Order of results for star searches.** The index gives every star match the same score. Order
    them by shelfmark, by how often the words occur on the page, or by the score of the query's other,
    non-star words?
+   **Decided 2026-10-21: by the score of the query's non-star words** (the scored term OR of
+   §3.6.3, which keeps distinct BM25 scores at 600 and 1,200 forms). A query whose words all carry
+   stars is ordered by the number of matches on the page, then by shelfmark.
 3. **How many candidate pages a search may read before it says "N+".** Today 50,000. `*נים *לים`
    has about 100,000; reading all of them took 8 seconds here.
+   **Decided 2026-10-21: 150,000 candidate pages** (§3.6.4 measured 99,981, 100,392 with bracket
+   tolerance); aggregates and seams get their own limit (§5.5); beyond it the search says "N+".
 4. **Very short or bare stars.** `*` alone matches every word; `*ים` reaches 1.35 million pages.
    Allow, warn, or refuse with a message suggesting a gap `[1]`?
+   **Decided 2026-10-21: a bare star (`*` alone, or a word made only of stars) is refused** with a
+   message suggesting a gap `[1]`; a star word with one or two letters of its own runs, with a
+   warning that the list will be cut ("N+").
 5. **Stars with spelling variants or Judeo-Arabic on.** Allowed (slower; one bigger pattern per
    word), or the star word is searched without them?
+   **Decided 2026-10-21: they apply.** The expanded stems are split into several `regex_query`s
+   ORed, each under the 1,000-state limit (§3.6.2: 60-120 stems per query with the Hebrew mark
+   class).
 6. **Does a star match zero letters?** Recommended yes: `*כהנים` includes `כהנים` itself.
+   **Decided 2026-10-21: yes**, `*כהנים` includes `כהנים`.
 7. **Negated words.** Today `-כהנים` hides a result when the letters `כהנים` appear anywhere in
    the text it was found in, even inside `אלכהנים`. Sometimes that text is the page, sometimes the
    whole manuscript, depending on how the result was found. Recommended: a whole word, checked on
@@ -918,11 +960,16 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
      complete. "Anywhere in the manuscript" (`AND`) searches are never cut this way.
    - Or add small "seam" documents at every page break: precise and fast, but it needs one rebuild
      on the server and on every desktop computer.
+   **Decided 2026-10-21: seams first.** The seam documents (§6 B), built per source and per IE with
+   consecutive page numbers so that none of the 226,926 false junctions of §3.6.5 survives, are
+   built before true `*` ships (Phase 2, with the reversed-words field of decision 1). The crossing
+   step of star searches reads seams, never whole manuscripts.
 
 ## 10. What this does not change
 
-- Exact, Variants, Fuzzy and Regex modes, apart from §6's shared crossing source if B is chosen and
-  the exclusion domain (decision 7: the matched page, in every mode).
+- Exact, Variants, Fuzzy and Regex modes, apart from §6's seam documents as the shared crossing
+  source (decision 9, Phase 2) and the exclusion domain (decision 7: the matched page, in every
+  mode).
 - Composition and letter-level (passage) search.
 - The lists themselves (24 prefixes, 25 suffixes).
 - The desktop's `regex`-module speed is out of scope. If the desktop is still slow after pages
@@ -978,7 +1025,7 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
   - Round-1 status: 6.1, 6.3, 6.5, 6.7, 6.9 and 6.10 fixed; 6.2, 6.4, 6.6 and 6.8 partly fixed.
   - New: maqaf words vs index tokens (HIGH; measured at 196 of 160M tokens and documented as a
     pinned exception, §4); `_first_accepted_match` instead of `closest` (§5.2); a wider
-    approximation case list (§5.2); seams across short pages (HIGH, Phase 3; §6); seam consumer
+    approximation case list (§5.2); seams across short pages (HIGH, Phase 2; §6); seam consumer
     isolation and provenance (§6); the main/LOCAL parity domain (§8); the interim's reach into the
     API, MCP and refinement, and its exclusion of `within_document` (§6).
   - Decided in the plan: the bracket rule (§4) and the de-duplication rule (§5.4).
