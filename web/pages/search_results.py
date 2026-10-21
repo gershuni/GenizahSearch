@@ -378,7 +378,7 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
                     excl_title = excl_display.get('title', '')
                     with ui.row().classes('w-full items-center gap-2 py-1 px-2 cursor-pointer').style(
                         'border-bottom: 1px solid var(--border-light); overflow: hidden; max-width: 100%;'
-                    ).on('click', lambda r=excl_result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, None, r)):
+                    ).props('data-ux=result_quick_view').on('click', lambda r=excl_result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, None, r)):
                         _isolated_label(excl_shelfmark, classes='text-sm font-medium truncate shrink-0', style=(
                             'color: var(--text-secondary); max-width: 200px;'
                         ))
@@ -423,7 +423,7 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
                         ui.button(icon='add_circle_outline', on_click=_restore_word_result).props(
                             f'flat round dense size=xs aria-label="{tr("Restore")}"'
                         ).style('color: var(--text-muted);').tooltip(tr('Restore'))
-                        with ui.row().classes('items-center gap-2 flex-grow min-w-0 cursor-pointer').on(
+                        with ui.row().classes('items-center gap-2 flex-grow min-w-0 cursor-pointer').props('data-ux=result_quick_view').on(
                             'click', lambda r=excl_result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, None, r)
                         ):
                             _isolated_label(excl_shelfmark, classes='text-sm font-medium truncate shrink-0', style=(
@@ -466,7 +466,7 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
                     excl_title = excl_display.get('title', '')
                     with ui.row().classes('w-full items-center gap-2 py-1 px-2 cursor-pointer').style(
                         'border-bottom: 1px solid var(--border-light); overflow: hidden; max-width: 100%;'
-                    ).on('click', lambda r=excl_result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, None, r)):
+                    ).props('data-ux=result_quick_view').on('click', lambda r=excl_result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, None, r)):
                         _isolated_label(excl_shelfmark, classes='text-sm font-medium truncate shrink-0', style=(
                             'color: var(--text-secondary); max-width: 200px;'
                         ))
@@ -986,7 +986,7 @@ def create_result_card(search_state, refs, index, result):
             with _expand_row:
                 # Left: manuscript image thumbnail (click opens Quick View)
                 if _img_url:
-                    with ui.element('div').classes('cursor-pointer').on(
+                    with ui.element('div').classes('cursor-pointer').props('data-ux=result_quick_view').on(
                         'click', lambda idx=index, r=result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, idx, r)
                     ):
                         ui.html(

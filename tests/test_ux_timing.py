@@ -141,6 +141,31 @@ def test_every_trigger_names_a_registered_workflow():
     assert found >= {'browse_page', 'search_results', 'result_quick_view', 'save_list_add', 'save_comment'}
 
 
+def test_every_quick_view_opener_marks_its_start():
+    """Codex on #423: excluded-result rows, the expanded thumbnail and tag cards
+    opened Quick View with no ``data-ux`` marker, so the browser recorded no start
+    and those opens were never measured. Every element whose click handler calls
+    open_advanced_dialog must carry ``data-ux=result_quick_view``."""
+    openers = []
+    for name in ('search_results.py', 'search.py'):
+        tree = ast.parse((WEB / 'pages' / name).read_text(encoding='utf-8'))
+        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Lambda) and isinstance(node.body, ast.Call)
+                    and getattr(node.body.func, 'id', None) == 'open_advanced_dialog'):
+                continue
+            # The outermost call of the chain this handler belongs to: ui.x(...).props(...).on(...)
+            chain = parents[node]
+            while not isinstance(chain, ast.Call):
+                chain = parents[chain]
+            while isinstance(parents.get(chain), ast.Attribute) and isinstance(parents.get(parents[chain]), ast.Call):
+                chain = parents[parents[chain]]
+            openers.append((f'{name}:{node.lineno}', ast.unparse(chain)))
+    assert len(openers) >= 6, openers
+    unmarked = [where for where, chain in openers if 'data-ux=result_quick_view' not in chain]
+    assert not unmarked, f'Quick View openers with no data-ux marker: {unmarked}'
+
+
 def test_ux_ignored_sends_one_call_and_never_raises(measuring):
     client = _Recorder()
     ux.ux_ignored(client, 'search_results')
@@ -176,10 +201,14 @@ const fs = require('fs'), vm = require('vm');
 const src = fs.readFileSync(process.argv[2], 'utf8');
 const cases = JSON.parse(fs.readFileSync(0, 'utf8'));
 const out = [];
-for (const steps of cases) {
+for (const raw of cases) {
+  // A case is its steps, or {steps, ph: 'late'}: PostHog not started until a 'ph_ready' step.
+  const steps = Array.isArray(raw) ? raw : raw.steps;
+  const phLate = !Array.isArray(raw) && raw.ph === 'late';
   let t = 0; const timers = []; const listeners = {}; const captured = [];
+  const capture = (name, props) => captured.push(props);
   const win = {GS_UX: {rate: 1, v: 1, wait: {search_results: 210000}},
-               posthog: {capture: (name, props) => captured.push(props)}};
+               posthog: phLate ? {init: () => {}} : {capture}};
   const ctx = {
     window: win, Math, URL,
     document: {addEventListener: (type, fn) => { listeners[type] = fn; },
@@ -190,17 +219,21 @@ for (const steps of cases) {
     navigator: {webdriver: false}, location: {origin: 'http://x'},
   };
   vm.runInNewContext(src, ctx);
-  function flush() {
+  function runUntil(limit) {  // the timers due by `limit`, in time order
     while (timers.length) {
       timers.sort((a, b) => a.at - b.at);
+      if (timers[0].at > limit) break;
       const next = timers.shift();
       t = Math.max(t, next.at);
       next.fn();
     }
   }
   for (const [at, op, workflow] of steps) {
-    t = at;
-    if (op === 'enter') {
+    runUntil(at);
+    t = Math.max(t, at);
+    if (op === 'ph_ready') {
+      win.posthog.capture = capture;
+    } else if (op === 'enter') {
       listeners.keydown({key: 'Enter', isComposing: false, isTrusted: true, timeStamp: t,
         target: {closest: sel => sel === '[data-ux-enter]' ? {getAttribute: () => workflow} : null}});
     } else if (op === 'click') {
@@ -210,9 +243,9 @@ for (const steps of cases) {
       win.gsUx.ignored(workflow);
     } else if (op === 'done') {
       win.gsUx.done(workflow, 'ok', 100, false, null);
-      flush();
     }
   }
+  runUntil(Infinity);
   out.push(captured.map(p => [p.workflow, p.total_ms]));
 }
 process.stdout.write(JSON.stringify(out));
@@ -247,6 +280,10 @@ def test_browser_side_measures_from_the_action_the_server_is_working_on(tmp_path
         ([[0, 'enter', S]] + [[1000 + i, 'enter', S] for i in range(205)]
          + [[3000 + i, 'ignored', S] for i in range(205)]
          + [[10000, 'done', S], [12000, 'enter', S], [13000, 'done', S]]),
+        # PostHog starts after the search finished (Codex on #423): sent once it is up.
+        {'ph': 'late', 'steps': [[0, 'enter', S], [1000, 'done', S], [1800, 'ph_ready', S]]},
+        # PostHog never starts: nothing sent, nothing thrown, the retries stop.
+        {'ph': 'late', 'steps': [[0, 'enter', S], [1000, 'done', S]]},
     ]
     proc = subprocess.run(['node', str(harness), str(WEB / 'static' / 'js' / 'ux_timing.js')],
                           input=json.dumps(cases), capture_output=True, text=True,
@@ -261,6 +298,8 @@ def test_browser_side_measures_from_the_action_the_server_is_working_on(tmp_path
     assert out[5] == [[S, 70000]], out[5]
     assert out[6] == [], out[6]
     assert out[7] == [[S, 1000]], out[7]
+    assert out[8] == [[S, 1000]], out[8]  # measured to its paint, sent when PostHog came up
+    assert out[9] == [], out[9]
 
 
 # --- a real /browse load and page turn ------------------------------------------------------

@@ -17,6 +17,10 @@
   var PENDING_MAX_MS = 60000, IMAGE_MAX_MS = 15000, PAINT_MAX_MS = 1000;
   var waitMs = cfg.wait || {};  // per workflow, where the server's own limit is longer
   var REPLACED_MAX = 200;
+  // The page starts PostHog on an idle callback (or after 2 s); until then
+  // posthog.capture does not exist. Keep trying rather than lose the fastest
+  // samples (a page loaded from its URL usually finishes before that).
+  var PH_WAIT_MS = 15000, PH_POLL_MS = 250;
   var pending = {}, replaced = {}, spoiled = {};
   var navDone = false;
 
@@ -75,6 +79,23 @@
     setTimeout(function () { settle('timeout'); }, IMAGE_MAX_MS);
   }
 
+  function send(props) {
+    if (!sampled) return;
+    var waited = 0;
+    (function attempt() {
+      try {
+        var ph = window.posthog;
+        if (ph && typeof ph.capture === 'function') {
+          ph.capture('ux_timing', props);
+          return;
+        }
+      } catch (_) { return; }
+      if (waited >= PH_WAIT_MS) return;  // PostHog never started: drop it
+      waited += PH_POLL_MS;
+      setTimeout(attempt, PH_POLL_MS);
+    })();
+  }
+
   function referrerPath() {
     try {
       var r = new URL(document.referrer);
@@ -126,9 +147,7 @@
               v: cfg.v
             };
             window.gsUx.last = props;  // for debugging in the browser console
-            if (sampled && window.posthog && window.posthog.capture) {
-              window.posthog.capture('ux_timing', props);
-            }
+            send(props);
           });
         });
       } catch (_) { /* measuring must never break the page */ }

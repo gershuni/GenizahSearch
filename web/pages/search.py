@@ -6064,7 +6064,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             'w-full p-4 cursor-pointer transition-all hover:shadow-md'
                         ).style('border-radius: 10px;'):
                             with ui.row().classes('w-full items-start justify-between'):
-                                with ui.column().classes('flex-grow min-w-0 gap-1').on(
+                                with ui.column().classes('flex-grow min-w-0 gap-1').props('data-ux=result_quick_view').on(
                                     'click',
                                     lambda r=result: open_advanced_dialog(None, _tag_to_result(r))
                                 ):
