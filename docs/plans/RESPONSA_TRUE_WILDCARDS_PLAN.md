@@ -457,6 +457,15 @@ keeps inside tokens, at the same order of magnitude as maqaf (271 against 193 of
 **§4's exception now names both** (maqaf and sof pasuq; Exact's predicate ends a word at either,
 the token keeps both), and Phase 1's pinning test covers both; paseq and nun hafukha do not occur.
 
+**The list is exhaustive** (`token-only`, 5 s over the 7,284,528 distinct folded words): every
+character the tokenizer keeps inside a token that Exact's predicate neither continues a word
+through (letters, decimal digits, connector punctuation) nor looks past (marks, quotes, brackets)
+was counted, which covers whatever else the tokenizer's `\w` admits (join controls U+200C/U+200D,
+letter-numbers such as U+2160, alphabetic symbols such as U+24B6; Codex round 3 on PR #429). Only
+**two** such characters occur: sof pasuq (247 occurrences in 121 words) and maqaf (161 in 95
+words); **165** distinct words hold one, **6** of them with a Hebrew letter. Join controls in
+particular: **0** bytes of U+200C or U+200D in the whole corpus file (1.5 s byte count).
+
 ## 4. The contract (proposed)
 
 - **Whole word = Exact's predicate.** `_starts_word` / `_ends_word` (`shared/search_engine.py:397`,
@@ -478,7 +487,11 @@ the token keeps both), and Phase 1's pinning test covers both; paseq and nun haf
     finite lookup misses it (Codex round 2, 2.1, reproduced); `abc׃def` is the same case.
   - Measured (Phase 0, §3.6.7): **193 tokens hold a maqaf and 271 a sof pasuq, of 159,793,249**
     V0.8 tokens; paseq (U+05C0) and nun hafukha (U+05C6) do not occur; every sample is HTR noise.
-    Underscore (Pc, 970 tokens) continues a word under both rules.
+    Underscore (Pc, 970 tokens) continues a word under both rules. **The two are the whole list:**
+    of every character the tokenizer keeps inside a token that the predicate neither continues a
+    word through nor looks past (the tokenizer's `\w` also admits join controls U+200C/U+200D,
+    letter-numbers and alphabetic symbols), only these two occur in the 7,284,528 distinct indexed
+    words (165 words, 6 of them with a Hebrew letter; `token-only`, §3.6.7).
   - Phase 1 accepts this gap explicitly: one test pins both characters, and the contract names
     them. The word list (§5.6 C) closes it, because it maps each word, by Exact's predicate, to the
     index tokens that hold it.
@@ -925,8 +938,11 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
   joins maqaf in §4's exception and in Phase 1's pinning test. P2: Phase 0 is "measured", not
   "done": item 6's "after" timings and its Linux-worker run are still open (status line, §7).
   **Round 2 (same PR):** P2, the mark-tolerance class of the probes covered Hebrew marks only
-  (U+0591-05C7) while the oracle looks past every Unicode mark; the class is now `[\[\]\p{M}]*`
-  and §3.6.2 and §3.6.4 were re-measured with it.
+  (U+0591-05C7) while the oracle looks past every Unicode mark; both classes are now measured
+  (§3.6.2), and the all-marks class turned out to fit one star word and no alternation.
+  **Round 3 (same PR):** P2, join controls (U+200C/U+200D) are kept by the tokenizer's `\w` but end
+  a word for Exact's predicate, like maqaf; the `token-only` subcommand now counts every such
+  character over the distinct indexed words, and §4's exception says the list is exhaustive.
 - **Round 1 (Codex, 2026-10-21): DO NOT SHIP.** Four HIGH findings, all folded in:
   - the raw `_prefix_tree` drops forms (§5.1);
   - "whole word" was two conflicting definitions, and outer bounds did not bound `AND` operands

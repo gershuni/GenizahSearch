@@ -24,6 +24,8 @@ Items (plan section 7, Phase 0):
                    with the `regex` module (desktop) and stdlib `re` (production worker)
   punct            item 7: the punctuation counts, read back from scan.json
   marks            items 2 + 7: distinct words holding Hebrew marks / other-script marks
+  token-only       item 7, exhaustive: every character kept inside a token that ends a word
+                   for Exact's predicate (maqaf, sof pasuq, join controls, ...), by count
 
 Run (Windows, the owner's laptop):
   python -I -X utf8 scripts/measure_responsa_wildcards.py scan ^
@@ -430,6 +432,43 @@ def cmd_marks(args):
         log(f'  {row["char"]}: {row["words"]:,} words, e.g. {row["samples"]}')
     log.finish({'distinct_words': len(rev), 'with_hebrew_mark': hebrew, 'with_other_script_mark': other,
                 'other_script_mark_and_hebrew_letter': other_with_hebrew_letter, 'both': both, 'top_other_marks': top})
+    return EXIT_OK
+
+
+def cmd_token_only(args):
+    """Item 7, exhaustive: every character the tokenizer keeps inside a token that Exact's predicate
+    neither continues a word through nor looks past -- so a word boundary to the check, inside one
+    index term (maqaf and sof pasuq are two; join controls U+200C/U+200D, letter-numbers and
+    alphabetic symbols are the others Rust's \\w admits; Codex round 3 on PR #429). Counts distinct
+    content_search words, from the reversed word list."""
+    log = Log(args.out_dir, 'token-only')
+    path = reversed_list_path(args.out_dir)
+    require(path, 'reversed word list (run `scan` first)')
+    rev, _ = _load_reversed(path, log)
+    by_char = {}
+    samples = {}
+    words_with_any = words_with_any_and_hebrew = 0
+    for r in rev:
+        hit = False
+        for ch in r:
+            if _continues_word(ch) or _looked_past(ch):
+                continue
+            hit = True
+            by_char[ch] = by_char.get(ch, 0) + 1
+            if len(samples.setdefault(ch, [])) < 3:
+                samples[ch].append(r[::-1])
+        if hit:
+            words_with_any += 1
+            if any('א' <= ch <= 'ת' for ch in r):
+                words_with_any_and_hebrew += 1
+    rows = [{'char': f'U+{ord(ch):04X} {unicodedata.name(ch, "?")} ({unicodedata.category(ch)})', 'words': n,
+             'samples': samples[ch]} for ch, n in sorted(by_char.items(), key=lambda kv: -kv[1])]
+    log(f'{len(rev):,} distinct words: {words_with_any:,} hold a token-only boundary character '
+        f'({words_with_any_and_hebrew:,} of them also a Hebrew letter); {len(rows)} distinct characters')
+    for row in rows[:25]:
+        log(f'  {row["char"]}: {row["words"]:,} words, e.g. {row["samples"]}')
+    log.finish({'distinct_words': len(rev), 'words_with_token_only_char': words_with_any,
+                'words_with_token_only_char_and_hebrew_letter': words_with_any_and_hebrew, 'characters': rows})
     return EXIT_OK
 
 
@@ -1167,8 +1206,8 @@ def cmd_desktop_timings(args):
 def main(argv=None):
     from shared.config import Config
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('item', choices=['scan', 'punct', 'marks', 'wordlist', 'patterns', 'scored-terms', 'missing-pages',
-                                     'verify-tolerant', 'topology', 'desktop-timings'])
+    ap.add_argument('item', choices=['scan', 'punct', 'marks', 'token-only', 'wordlist', 'patterns', 'scored-terms',
+                                     'missing-pages', 'verify-tolerant', 'topology', 'desktop-timings'])
     ap.add_argument('--index-dir', default=os.path.join(Config.INDEX_DIR, 'tantivy_db'))
     ap.add_argument('--corpus-file', default=os.environ.get('GENIZAH_CORPUS_FILE') or Config.FILE_V8)
     ap.add_argument('--browse-map', default=Config.BROWSE_MAP)
@@ -1179,7 +1218,8 @@ def main(argv=None):
     ap.add_argument('--query-timeout', type=float, default=600.0, help='desktop-timings: stop a query after this many seconds')
     args = ap.parse_args(argv)
     handler = {
-        'scan': cmd_scan, 'punct': cmd_punct, 'marks': cmd_marks, 'wordlist': cmd_wordlist, 'patterns': cmd_patterns,
+        'scan': cmd_scan, 'punct': cmd_punct, 'marks': cmd_marks, 'token-only': cmd_token_only,
+        'wordlist': cmd_wordlist, 'patterns': cmd_patterns,
         'scored-terms': cmd_scored_terms, 'missing-pages': cmd_missing_pages, 'verify-tolerant': cmd_verify_tolerant,
         'topology': cmd_topology, 'desktop-timings': cmd_desktop_timings,
     }[args.item]
