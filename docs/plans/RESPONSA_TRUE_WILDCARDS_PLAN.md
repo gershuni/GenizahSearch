@@ -282,9 +282,13 @@ finite word; today's query also adds edge-bracket terms, which the plain column 
 - Implication for §5.1: "all expanded stems in one alternation" must be split into several
   `regex_query`s ORed (each under the limit), or the variant forms stay scored term queries (3.6.3)
   and the pattern carries only the star and the bracket tolerance of the literal part, with the
-  Hebrew mark class at most; the all-marks class is for a lone star word, or left to the oracle's
-  side (the 5 words). Decision 5 (stars with variants on) now has its cost: one pattern per 60-120
-  stems with the Hebrew class, 100-190 without marks.
+  Hebrew mark class at most; the all-marks class fits a lone star word only. **A finite-word
+  lookup without the all-marks class therefore misses a Hebrew word carrying a non-Hebrew mark**
+  (stage 1 runs first, so the oracle never sees such a page): that is a retrieval gap of the same
+  kind as maqaf's, 5 distinct words in the corpus, and §4 names it with that count; the word list
+  (§5.6 C) closes it, because it maps each word, by Exact's predicate, to the index tokens that
+  hold it. Decision 5 (stars with variants on) now has its cost: one pattern per 60-120 stems with
+  the Hebrew class, 100-190 without marks.
 
 #### 3.6.3 Scored term queries with 600 and 1,200 forms -- `scored-terms` (3 s)
 
@@ -492,9 +496,15 @@ particular: **0** bytes of U+200C or U+200D in the whole corpus file (1.5 s byte
     word through nor looks past (the tokenizer's `\w` also admits join controls U+200C/U+200D,
     letter-numbers and alphabetic symbols), only these two occur in the 7,284,528 distinct indexed
     words (165 words, 6 of them with a Hebrew letter; `token-only`, §3.6.7).
-  - Phase 1 accepts this gap explicitly: one test pins both characters, and the contract names
-    them. The word list (§5.6 C) closes it, because it maps each word, by Exact's predicate, to the
-    index tokens that hold it.
+  - **A third, smaller gap is marks of another script inside a Hebrew word** (`אَב`): the predicate
+    looks past every mark, `content_search` keeps marks outside U+0300-036F, and a finite lookup
+    cannot carry the all-marks tolerance class (one pattern of it exhausts the 1,000-state limit,
+    §3.6.2), so such a token is missed by the bare term query and by a bracket- or Hebrew-mark-
+    tolerant pattern. Measured: **5** distinct indexed words hold a non-Hebrew mark and a Hebrew
+    letter, all HTR noise (`marks`, §3.6.2).
+  - Phase 1 accepts these gaps explicitly: one test pins the two characters and the foreign-mark
+    case, and the contract names them with their counts. The word list (§5.6 C) closes all three,
+    because it maps each word, by Exact's predicate, to the index tokens that hold it.
 - **Brackets: one acceptance rule for every path.** Today the main path strips brackets from the
   text for a bracket-free query, then drops the page if the match does not reproduce on the
   original text. LOCAL checks the raw text instead (Codex 6.6).
@@ -947,6 +957,9 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
   distinct words now. **Round 5:** P2, the Hebrew-marks class `U+0591-05C7` also swallowed the
   block's punctuation (maqaf, paseq, sof pasuq, nun hafukha), which the oracle treats as word
   boundaries; the class is now the block's category-M code points only, and §3.6.2 was re-run.
+  **Round 6:** P2, "left to the oracle's side" was wrong for the 5 Hebrew words with a foreign
+  mark: stage 1 runs first, so they are a retrieval gap; §4 now names it with its count, pinned in
+  Phase 1 and closed by the word list like maqaf's.
 - **Round 1 (Codex, 2026-10-21): DO NOT SHIP.** Four HIGH findings, all folded in:
   - the raw `_prefix_tree` drops forms (§5.1);
   - "whole word" was two conflicting definitions, and outer bounds did not bound `AND` operands
