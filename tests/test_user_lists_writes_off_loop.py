@@ -263,6 +263,19 @@ def test_cached_data_forwards_the_client_only_when_given(harness, monkeypatch):
     assert set(mgr._get_cached_data()['lists']) == {'7', '8'}
 
 
+def test_cached_data_in_a_worker_never_rereads_the_user_id(harness, monkeypatch):
+    """Signed in but no id yet (token rotation, REVIEWS.md R2): the loop passes
+    user_id=None. The worker must answer the skeleton, never fall back to
+    `self.user_id`, which reads the visitor's storage and is blind off the loop."""
+    reads = []
+    monkeypatch.setattr(UserListsManager, 'user_id', property(lambda self: reads.append(1) or USER_ID))
+    mgr = UserListsManager(None, None)
+    data = mgr._get_cached_data(client=SENTINEL, user_id=None, is_authenticated=True)
+    assert data['lists'] == mgr._get_default_data()['lists']
+    assert reads == [], 'the worker path re-read the user id from storage'
+    assert harness.calls == []
+
+
 def test_a_slow_write_does_not_stall_the_event_loop(harness):
     """The behavioural contract (shape: tests/test_offloaded_readers.py): a ticker
     keeps ticking while a 0.3 s write runs. On the loop it would get ~0 ticks."""

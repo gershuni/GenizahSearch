@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import threading
+import time
 
 import pytest
 from nicegui import core, ui
@@ -64,10 +65,12 @@ def dialog(monkeypatch):
     import web.components.comment_dialog as cd
 
     h = {'calls': [], 'client_threads': [], 'answer': {'success': True, 'comment': {'id': 9}},
-         'notes': [], 'loop_thread': None, 'submitted': []}
+         'notes': [], 'loop_thread': None, 'submitted': [], 'delay': 0.0}
 
     def record(*args, client=None, **kwargs):
         h['calls'].append({'thread': threading.get_ident(), 'client': client, 'args': args, 'kwargs': kwargs})
+        if h['delay']:
+            time.sleep(h['delay'])  # the round trip, in the worker
         return h['answer']
 
     def build_client():
@@ -82,7 +85,7 @@ def dialog(monkeypatch):
     monkeypatch.setenv('GENIZAH_STORAGE_SECRET', 'x' * 40)
     prepare_simulation()
 
-    async def submit(text):
+    async def submit(text, clicks=1):
         core.loop = asyncio.get_running_loop()
         h['loop_thread'] = threading.get_ident()
         with Client(ui.page(f'/_comment_probe_{next(_paths)}')) as client:
@@ -93,7 +96,14 @@ def dialog(monkeypatch):
             textarea.value = text
             button = next(e for e in elements if isinstance(e, ui.button)
                           and str(e._props.get('data-ux', '')).strip('"') == 'save_comment')
-            await _submit_handler_of(button)()
+            handler = _submit_handler_of(button)
+            if clicks == 1:
+                await handler()
+            else:
+                async def click():  # a task of its own, as NiceGUI runs each click: enter the page
+                    with client:
+                        await handler()
+                await asyncio.gather(*(click() for _ in range(clicks)))
             return next(e for e in elements if isinstance(e, ui.label) and 'text-red-500' in e._classes)
 
     h['submit'] = submit
@@ -135,3 +145,12 @@ def test_a_refused_write_shows_its_error(dialog):
     assert error_label.text == 'new row violates row-level security policy'
     assert 'hidden' not in error_label._classes
     assert dialog['notes'] == [] and dialog['submitted'] == []
+
+
+def test_two_quick_submit_clicks_post_the_comment_once(dialog):
+    dialog['delay'] = 0.2
+    asyncio.run(dialog['submit']('שלום', clicks=2))
+
+    assert len(dialog['calls']) == 1, 'a second click while the write ran posted the comment twice'
+    assert [kind for _m, kind in dialog['notes']] == ['positive'], dialog['notes']
+    assert dialog['submitted'] == [True]

@@ -1767,10 +1767,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # Determine status based on role
         status = 'approved' if (GlobalAuthState.is_admin() or GlobalAuthState.is_editor()) else 'pending'
 
+        if state.correction_saving:  # a second click while the first write runs
+            return
         # Do the Supabase call BEFORE any UI rebuild, off the loop: the client
         # is built here (a worker cannot read the visitor's storage and would
         # write anonymously, refused by RLS).
         client = get_user_client()
+        state.correction_saving = True
         try:
             if state.draft_id:
                 result = await run.io_bound(update_correction, state.draft_id, {
@@ -1796,6 +1799,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             ui.notify(f'{tr("Error")}: {e}', type='negative')
             logger.error(f"Submit error: {e}")
             return
+        finally:
+            state.correction_saving = False
 
         if result is None:  # no answer: cancelled, or the app is stopping; stay in edit mode
             ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')
@@ -1828,29 +1833,35 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             ui.notify(tr('User not found'), type='negative')
             return
 
+        if state.correction_saving:  # a second click while the first write runs
+            return
         client = get_user_client()
-        if state.draft_id:
-            # Update existing draft
-            result = await run.io_bound(update_correction, state.draft_id, {
-                'corrected_text': state.edit_text,
-                'notes': state.edit_notes,
-                'status': 'draft'
-            }, client=client)
-        else:
-            # Create new draft
-            result = await run.io_bound(
-                create_correction,
-                author_id=user_id,
-                sys_id=state.current_page.sys_id,
-                shelfmark=state.current_page.shelfmark or '',
-                page_number=state.current_page.p_num,
-                original_text=state.original_edit_text,
-                corrected_text=state.edit_text,
-                notes=state.edit_notes if state.edit_notes else '',
-                status='draft',
-                ie_id=state.volume_ie,
-                client=client,
-            )
+        state.correction_saving = True
+        try:
+            if state.draft_id:
+                # Update existing draft
+                result = await run.io_bound(update_correction, state.draft_id, {
+                    'corrected_text': state.edit_text,
+                    'notes': state.edit_notes,
+                    'status': 'draft'
+                }, client=client)
+            else:
+                # Create new draft
+                result = await run.io_bound(
+                    create_correction,
+                    author_id=user_id,
+                    sys_id=state.current_page.sys_id,
+                    shelfmark=state.current_page.shelfmark or '',
+                    page_number=state.current_page.p_num,
+                    original_text=state.original_edit_text,
+                    corrected_text=state.edit_text,
+                    notes=state.edit_notes if state.edit_notes else '',
+                    status='draft',
+                    ie_id=state.volume_ie,
+                    client=client,
+                )
+        finally:
+            state.correction_saving = False
 
         if result is None:  # no answer: cancelled, or the app is stopping; stay in edit mode
             ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')

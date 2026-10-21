@@ -48,6 +48,9 @@ class BrowseState:
         self.draft_saved: bool = False
         self.draft_id: Optional[str] = None
         self.edit_loading: bool = False
+        # A correction or draft write is in flight (the write runs off the loop,
+        # so a second click would otherwise start a second write: two drafts).
+        self.correction_saving: bool = False
         self.error_message: Optional[str] = None
         self.fullscreen_edit: bool = False  # Fullscreen edit mode
         # PGP transcription data

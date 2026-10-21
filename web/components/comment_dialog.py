@@ -202,7 +202,13 @@ def create_comment_dialog(
             with ui.row().classes('w-full justify-end gap-2 mt-4'):
                 ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
 
+                # A write is in flight: it runs off the loop, so a second click
+                # would otherwise post the comment twice.
+                submitting = {'busy': False}
+
                 async def submit_comment():
+                    if submitting['busy']:
+                        return
                     if not GlobalAuthState.is_logged_in():
                         error_label.text = tr('Please login first')
                         error_label.classes('visible', remove='hidden')
@@ -229,17 +235,21 @@ def create_comment_dialog(
                     # the await, as the call's arguments.
                     client = get_user_client()
                     ux_client, ux_t0 = ui.context.client, time.perf_counter()
-                    result = await run.io_bound(
-                        create_comment,
-                        author_id=user_id,
-                        sys_id=document_id,
-                        content=comment_text.value.strip(),
-                        page_number=comment_page,
-                        scope=scope_select.value,
-                        is_public=not private_check.value,
-                        ie_id=ie_id,
-                        client=client,
-                    )
+                    submitting['busy'] = True
+                    try:
+                        result = await run.io_bound(
+                            create_comment,
+                            author_id=user_id,
+                            sys_id=document_id,
+                            content=comment_text.value.strip(),
+                            page_number=comment_page,
+                            scope=scope_select.value,
+                            is_public=not private_check.value,
+                            ie_id=ie_id,
+                            client=client,
+                        )
+                    finally:
+                        submitting['busy'] = False
                     if result is None:  # no answer: cancelled, or the app is stopping
                         result = {'error': tr(
                             'The change could not be saved. Check your connection and try again.')}

@@ -1452,7 +1452,11 @@ def get_projects(user_id: str, *, client=None) -> List[Dict]:
 
     `client` (2026-10-21, keyword-only, default None = unchanged behaviour): see
     `get_user_lists`. The JWT-expiry retry below deliberately builds a fresh
-    client: a passed one still carries the expired token.
+    client: a passed one still carries the expired token. In a `run.io_bound`
+    worker the refresh cannot read the visitor's session, so the retry reads as
+    anonymous and returns [] (the WARNING below still names the expiry); the
+    loop-side `get_user_client()` refreshes a token near expiry before handing
+    the client over, which keeps that window small.
     """
     try:
         # READER-01 (Phase 92.1): projects SELECT RLS is `TO authenticated`; projects panel

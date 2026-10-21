@@ -178,7 +178,10 @@ class UserListsManager:
         if not authed:
             return self._get_default_data()
 
-        if user_id is None:
+        # An explicit `is_authenticated` means the caller resolved auth on the
+        # loop and may be calling from a worker, where `self.user_id` reads the
+        # visitor's storage and silently answers None: never re-derive it here.
+        if user_id is None and is_authenticated is None:
             user_id = self.user_id
         if not user_id:
             # R2 defensive guard: never call get_user_lists(None) / get_projects(None).

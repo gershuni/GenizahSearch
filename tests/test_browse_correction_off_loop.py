@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import threading
+import time
 
 import pytest
 from nicegui import core, ui
@@ -94,12 +95,14 @@ def editor(monkeypatch, supabase_offline):  # noqa: F811  (the imported fixture,
             raise AssertionError('the recents write ran on the event loop')
 
     h = {'calls': [], 'client_threads': [], 'answer': {'success': True, 'correction': {'id': 41}},
-         'notes': [], 'states': [], 'loop_thread': None, 'pages': []}
+         'notes': [], 'states': [], 'loop_thread': None, 'pages': [], 'delay': 0.0}
 
     def recorder(name):
         def record(*args, client=None, **kwargs):
             h['calls'].append({'helper': name, 'thread': threading.get_ident(), 'client': client,
                                'args': args, 'kwargs': kwargs})
+            if h['delay']:
+                time.sleep(h['delay'])  # the round trip, in the worker
             return h['answer']
         record.__name__ = name
         return record
@@ -248,3 +251,54 @@ def test_save_draft_with_no_answer_toasts_a_failure_and_keeps_the_draft_unsaved(
     assert 'positive' not in _types(editor)
     assert state.edit_mode is True and state.draft_saved is False and state.draft_id is None
     assert state.edit_text == 'שלום עולם'
+
+
+# ---------------------------------------------------------------------------
+# A second click while the first write runs (the write is off the loop now, so
+# the loop serves the second click at once: without a guard, two drafts)
+# ---------------------------------------------------------------------------
+
+def _drive_twice(editor, handler_name):
+    async def _run():
+        client, state = await editor['open_in_edit_mode']()
+        handler = _handler(client, handler_name)
+        with client:
+            await asyncio.gather(handler(), handler())
+        return client, state, handler
+
+    return asyncio.run(_run())
+
+
+def test_two_quick_save_draft_clicks_write_one_draft(editor):
+    editor['delay'] = 0.2
+    _client, state, _handler_fn = _drive_twice(editor, 'handle_save_draft')
+
+    assert [c['helper'] for c in editor['calls']] == ['create_correction'], editor['calls']
+    assert [kind for _m, kind in editor['notes']].count('positive') == 1, editor['notes']
+    assert state.draft_id == 41 and state.correction_saving is False
+
+
+def test_two_quick_submit_clicks_submit_once(editor):
+    editor['delay'] = 0.2
+    _client, state, _handler_fn = _drive_twice(editor, 'handle_submit_correction')
+
+    assert [c['helper'] for c in editor['calls']] == ['create_correction'], editor['calls']
+    assert state.correction_saving is False
+
+
+def test_a_failed_save_leaves_the_next_click_free_to_write(editor):
+    editor['answer'] = None
+
+    async def _run():
+        client, state = await editor['open_in_edit_mode']()
+        handler = _handler(client, 'handle_save_draft')
+        with client:
+            await handler()
+            assert state.correction_saving is False, 'the in-flight flag outlived a failed write'
+            editor['answer'] = {'success': True, 'correction': {'id': 41}}
+            await handler()
+        return state
+
+    state = asyncio.run(_run())
+    assert [c['helper'] for c in editor['calls']] == ['create_correction', 'create_correction']
+    assert state.draft_id == 41
