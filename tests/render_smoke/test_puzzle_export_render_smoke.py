@@ -168,10 +168,14 @@ def test_png_export_uses_this_browsers_own_image(image_service, downloads):
     _run(driver)
 
 
+def _buttons(user, predicate):
+    return [el for el in user._client.elements.values()
+            if isinstance(el, ui.button) and predicate(el)]
+
+
 def _click_button(user, predicate):
     with user._client:
-        buttons = [el for el in user._client.elements.values()
-                   if isinstance(el, ui.button) and predicate(el)]
+        buttons = _buttons(user, predicate)
         assert len(buttons) == 1, len(buttons)
         for listener in buttons[0]._event_listeners.values():
             if listener.type == 'click':
@@ -193,6 +197,11 @@ async def _wait_until(check, timeout=15.0):
         if asyncio.get_running_loop().time() > deadline:
             raise AssertionError('timed out')
         await asyncio.sleep(0.1)
+
+
+def _tab_value(user, key):
+    with user._client:
+        return app.storage.tab.get(key)
 
 
 @pytest.fixture
@@ -224,10 +233,17 @@ def _put_own_image(image_service, session_id, color):
     return data
 
 
+async def _click_dialog_button(user, opener, label):
+    """Click ``opener``, then ``label`` in the dialog it opens. The dialog is
+    built only after the page's handler has been to a worker thread, which a
+    slow runner can take well over any fixed sleep to come back from."""
+    _click_button(user, opener)
+    await _wait_until(lambda: _buttons(user, _text(label)))
+    _click_button(user, _text(label))
+
+
 async def _save_join(user):
-    _click_button(user, _icon('save'))
-    await asyncio.sleep(0.3)
-    _click_button(user, _text('Save'))
+    await _click_dialog_button(user, _icon('save'), 'Save')
 
 
 def test_saving_a_join_draws_its_thumbnail_with_this_browsers_images(
@@ -267,11 +283,11 @@ def test_publishing_a_join_draws_it_with_this_browsers_images(
         own = _put_own_image(image_service, session_id, (90, 30, 160, 255))
         await _save_join(user)
         await _wait_until(lambda: thumbnail_services)
-        await asyncio.sleep(0.3)
+        # Publishing needs the save to have finished: the page records the
+        # saved document's id in the tab once its worker thread is back.
+        await _wait_until(lambda: _tab_value(user, 'puzzle_doc_id'))
         assert joins_service.list_documents(owner_key='u:account-x')
-        _click_button(user, _icon('publish'))
-        await asyncio.sleep(0.3)
-        _click_button(user, _text('Publish'))
+        await _click_dialog_button(user, _icon('publish'), 'Publish')
         await _wait_until(lambda: published)
         drawn = published[-1].resolve_fragment_image(FL, 800, 30.0, True, False)
         assert drawn == own
