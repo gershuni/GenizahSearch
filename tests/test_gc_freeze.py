@@ -414,7 +414,7 @@ def test_objgraph_reports_the_freeze_count_and_unfreezes_and_refreezes(monkeypat
     probes = [_FreezeProbe(), _FreezeProbe()]
     try:
         body = call(action='stats')
-        assert body['gc_freeze_count'] == gc.get_freeze_count()
+        assert 0 <= gc.get_freeze_count() <= body['gc_freeze_count']  # frozen objects can still be freed
         assert 'gc.get_objects()' in body['note'] and 'action=unfreeze' in body['note']
 
         body = call(action='backrefs', target_class='_FreezeProbe', sample=1, max_depth=1)
