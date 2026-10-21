@@ -1273,6 +1273,7 @@ Partial entry: the filter-state → read paths only, not the whole surface.
 - **Function** `_patch_binding_remove` — NiceGUI < 3.15: `binding.remove` drops binding links without walking every property marker in the process, so `element.clear()` no longer slows with each open tab (2026-10-20)
 - **Function** `_patch_sessionless_404` — a 404 without a session (stale `/_nicegui/<old version>/...`, missing `/static` on 3.8) gets FastAPI's JSON 404, not NiceGUI's HTML page in a session-less `Client` that broke `prune_user_storage` for 60 s (2026-10-20)
 - **Function** `_patch_httpx_ssl_context` — httpx 0.28: the default SSL context is built from the certifi bundle read once (`cadata`), not re-read per client; a signed-in supabase client build went 1.56 s -> 0.17 s locally (2026-10-20)
+- **Function** `_patch_expects_arguments_memo` — NiceGUI 3.18: `helpers.expects_arguments` (an `inspect.signature` per call, asked for the Classes/Style/Props change handler of every element built and for every event handler) is remembered per function for bound methods, keyed by `__func__`; plain functions and lambdas pass through so no closure is kept alive. It was 31% of a 1,204-element build on the dev box (2026-10-21)
 
 ## web/translations.py
 

@@ -7,6 +7,7 @@ called before ``ui.run()`` / NiceGUI initialises its routes.
 from __future__ import annotations
 
 import functools
+import inspect
 import json
 import logging
 import mimetypes
@@ -452,6 +453,62 @@ def _patch_httpx_ssl_context() -> None:
     logger.debug('httpx SSL context patch applied (httpx %s)', httpx.__version__)
 
 
+# NiceGUI asks ``helpers.expects_arguments`` -- an ``inspect.signature`` per call --
+# for the change handler of the Classes, Style and Props of every element it builds
+# (observables.py) and for every event handler it registers. Those three handlers
+# are bound methods of the same three functions (``Classes._update`` and friends),
+# so the answer never changes; on 3.18 the question was 31% of a 1,204-element
+# build on the dev box. Kept until NiceGUI answers it once itself.
+_nicegui_expects_arguments = None  # NiceGUI's own, kept by the patch (tests compare against it)
+_expects_arguments_by_function: dict = {}
+
+
+def _expects_arguments_memo(func) -> bool:
+    """``helpers.expects_arguments``, remembered per function for BOUND METHODS only.
+
+    A bound method's signature is its function's without ``self``, the same for
+    every instance, so the answer is kept by ``func.__func__``: a function object
+    its class keeps alive anyway. Plain functions and lambdas pass straight
+    through: keeping them would keep their closures, and the elements those
+    capture, alive.
+    """
+    if inspect.ismethod(func):
+        key = func.__func__
+        try:
+            return _expects_arguments_by_function[key]
+        except KeyError:
+            pass
+        except TypeError:  # an unhashable callable bound as a method: no memo
+            return _nicegui_expects_arguments(func)
+        result = _nicegui_expects_arguments(func)
+        _expects_arguments_by_function[key] = result
+        return result
+    return _nicegui_expects_arguments(func)
+
+
+def _patch_expects_arguments_memo() -> None:
+    """Answer NiceGUI's per-element signature question once per function.
+
+    Callers resolve the name through the package namespace (``helpers.expects_arguments``
+    in observables.py, events.py, event.py, client.py and page.py), so the package
+    attribute is what is rebound; ``nicegui.helpers.functions`` keeps its own.
+    """
+    global _nicegui_expects_arguments
+    if _NV > _PATCH_AUDIT_THRESHOLD:
+        logger.warning(
+            'expects_arguments memo patch skipped: NiceGUI %s exceeds audited %s',
+            _NV, _PATCH_AUDIT_THRESHOLD,
+        )
+        return
+    from nicegui import helpers
+
+    if helpers.expects_arguments is _expects_arguments_memo:
+        return
+    _nicegui_expects_arguments = helpers.expects_arguments
+    helpers.expects_arguments = _expects_arguments_memo
+    logger.debug('expects_arguments memo patch applied (NiceGUI %s)', _NV)
+
+
 def apply_all_patches() -> None:
     """Apply all NiceGUI monkey-patches. Call once before ui.run().
 
@@ -465,6 +522,7 @@ def apply_all_patches() -> None:
         ('binding.remove', _patch_binding_remove),
         ('Session-less 404', _patch_sessionless_404),
         ('httpx SSL context', _patch_httpx_ssl_context),
+        ('expects_arguments memo', _patch_expects_arguments_memo),
     ]:
         try:
             fn()
