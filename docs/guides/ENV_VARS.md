@@ -105,7 +105,8 @@ GENIZAH_GC_FREEZE=1                   # gc.collect(); gc.freeze() ONCE after the
                                        # 0/false/no/off disables. Frozen objects leave gc.get_objects(): /_internal/objgraph
                                        # reports gc_freeze_count and takes action=unfreeze / action=refreeze. It pins
                                        # everything alive then, incl. early visitors' page state (cyclic garbage among
-                                       # it stays until action=unfreeze): a one-time, bounded cost.
+                                       # it stays until action=unfreeze): ~3 MB per ~1,200-element page open at that
+                                       # moment (measured 2026-10-21), once -- and again at every action=refreeze.
 GENIZAH_GC_FREEZE_MAX_WAIT_SECONDS=180 # freeze anyway after waiting this long for the MetadataManager threads, the FL-ID
                                        # build and the FJMS prewarm (the log line then names what is still running)
 GENIZAH_GC_FREEZE_POLL_SECONDS=1.0    # how often the wait re-checks those loaders
@@ -194,18 +195,19 @@ IMAGE_CACHE_TTL=600                   # in-memory image cache lifetime, seconds 
 # ONCE -- every tab inside one 5 s window, each a full page build on the one event loop, and the
 # saturated server's late answers ("timeout") reload them again. nicegui.js cannot be changed
 # (immutable cached URL), so web/static/js/reconnect_backoff.js runs in <head> before socket.io:
-# it spreads socket.io's retries and delays the reload for a refused handshake or a timeout by
-# base * 2^n (n = consecutive reloads of that tab, in sessionStorage), jittered x0.5-1.5, and a
-# hidden tab waits until it is viewed. The server counts what it refuses: /_internal/memstat
+# it delays the reload for a refused handshake or a second timeout by base * 2^n (n =
+# consecutive reloads of that tab, in sessionStorage), jittered x0.5-1.5, and a hidden tab waits
+# until it is viewed. NiceGUI's first timeout (its switch to long polling) passes at once, a
+# refusal is never dropped, and a reconnect cancels a pending timeout reload. The server counts what it refuses: /_internal/memstat
 # `handshakes` (web/framework_patches.py::_patch_handshake_counter; >30 unknown clients in a
 # minute logs one "reload burst" warning). Independent of POSTHOG_API_KEY.
 RECONNECT_BACKOFF_ENABLED=1           # 0/false serves no snippet: NiceGUI reloads at once again
-RECONNECT_BACKOFF_BASE_MS=1500        # first reload wait, ms (doubles per consecutive reload); also
-                                       # socket.io's reconnectionDelay (its default is 1000)
+RECONNECT_BACKOFF_BASE_MS=1500        # first reload wait, ms (doubles per consecutive reload)
 RECONNECT_BACKOFF_CAP_MS=60000        # the exponential's cap, ms; the jitter spreads around it, so the
                                        # longest wait is 1.5 x this
-RECONNECT_DELAY_MAX_MS=30000          # socket.io's reconnectionDelayMax, ms (its default is 5000: after
-                                       # three attempts every tab retried on the same rigid 5 s cadence)
+RECONNECT_DELAY_MAX_MS=0              # socket.io's reconnectionDelayMax, ms; 0 keeps socket.io's 5000.
+                                       # Keep any value well below NICEGUI_RECONNECT_TIMEOUT (30 s): a
+                                       # retry after it finds the client deleted, and the page reloads
 ```
 
 **Operational note (Phase 98 — two PostHog drop counters):** Phase 98 ships with TWO PostHog
