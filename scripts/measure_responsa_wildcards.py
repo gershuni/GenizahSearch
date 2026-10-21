@@ -585,8 +585,10 @@ def cmd_wordlist(args):
 # --------------------------------------------------------------------------------------
 
 T_BRACKETS = r'[\[\]]*'
-# Brackets + the Hebrew marks (points and te'amim, U+0591-05C7): a small class, cheap in DFA states.
-T_BRACKETS_HEBREW_MARKS = r'[\[\]\u0591-\u05C7]*'
+# Brackets + the Hebrew marks (te'amim and points: the category-M code points of U+0591-05C7, which
+# leaves out the block's punctuation -- maqaf U+05BE, paseq U+05C0, sof pasuq U+05C3, nun hafukha
+# U+05C6 -- that the oracle treats as word boundaries; Codex round 5 on PR #429). Cheap in DFA states.
+T_BRACKETS_HEBREW_MARKS = r'[\[\]\u0591-\u05BD\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7]*'
 # Brackets + every Unicode mark (category M), the class the oracle looks past: content_search keeps
 # all marks outside U+0300-036F (Hebrew points and te'amim, Arabic harakat in Judeo-Arabic words,
 # ...). A Hebrew-only class would miss `\u05D0\u064E\u05D1` (Codex round 2 on PR #429) -- but the all-marks class

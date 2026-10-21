@@ -225,7 +225,7 @@ for `scan`, `wordlist`, `patterns`, `scored-terms`, `missing-pages`, `verify-tol
 #### 3.6.2 Bracket- and mark-tolerant patterns, and the pattern size limit -- `patterns` (46-70 s), `marks` (4 s)
 
 Tolerance classes between letters (and at both edges): **brackets** `[\[\]]*`; **brackets+Hebrew
-marks** `[\[\]֑-ׇ]*` (the points and te'amim); **brackets+all marks** `[\[\]\p{M}]*`,
+marks** `[\[\]...]*` over the Hebrew block's category-M code points only (U+0591-05BD, 05BF, 05C1-05C2, 05C4-05C5, 05C7: te'amim and points, not the block's punctuation, which the oracle treats as word boundaries); **brackets+all marks** `[\[\]\p{M}]*`,
 every Unicode mark, which is the class the oracle looks past (`content_search` keeps all marks
 outside U+0300-036F; a Hebrew-only class would miss a Hebrew word carrying an Arabic mark, Codex
 round 2 on PR #429). All on `content_search` AND `scope:page`; "plain" is the lookup the forms get
@@ -235,22 +235,22 @@ finite word; today's query also adds edge-bracket terms, which the plain column 
 | Case | Pattern chars | Build | Count | Pages | Plain | Pattern-only pages |
 |---|---|---|---|---|---|---|
 | (a) `כ[\[\]]*ה[\[\]]*נ[\[\]]*.*` (star at the end) | 26 | 0.3 ms | 0.02 s | 38,698 | `כהנ.*`: 38,697 in 0.01 s | 1 |
-| (a) the same, brackets+Hebrew marks | 65 | 0.4 ms | 0.01 s | 38,703 | 38,697 | 6 |
+| (a) the same, brackets+Hebrew marks | 173 | 0.4 ms | 0.01 s | 38,703 | 38,697 | 6 |
 | (a) the same, brackets+all marks | 41 | **23-27 ms** | 0.01-0.02 s | 38,703 | 38,697 | 6 |
 | (a) `.*כ[\[\]]*ה[\[\]]*נ[\[\]]*י[\[\]]*ם[\[\]]*` (star at the start) | 42 | 0.6 ms | **3.8-4.3 s** | 53,239 | `.*כהנים`: 53,180 in 5.2-5.7 s | 59 |
-| (a) the same, brackets+Hebrew marks | 107 | 1.1 ms | 5.2 s | 53,240 | 53,180 | 60 |
+| (a) the same, brackets+Hebrew marks | 287 | 1.0-1.1 ms | 5.2-5.5 s | 53,240 | 53,180 | 60 |
 | (a) the same, brackets+all marks | 67 | **49-70 ms** | 4.0-5.5 s | 53,240 | 53,180 | 60 |
-| (b) 24 prefix forms of `כהנים`, brackets+Hebrew marks | 2,947 | 3.6 ms | 0.03-0.04 s | 45,242 | `term_set` 24: 45,086 in 0.03 s | 156: 154 edge bracket, 1 in-word bracket, 1 mark |
+| (b) 24 prefix forms of `כהנים`, brackets+Hebrew marks | 7,915 | 3.6-4.4 ms | 0.03-0.04 s | 45,242 | `term_set` 24: 45,086 in 0.03 s | 156: 154 edge bracket, 1 in-word bracket, 1 mark |
 | (b) the same, brackets+all marks | -- | **refused: 1,000 states** | | | | |
 | (c) 200 spelling variants of `כהנים` (`variants_extended`), either mark class | -- | **refused** (Hebrew marks: 1,000 states; all marks: 10,485,760 bytes) | | | | |
-| (d) 600 forms of `#כהנ#`, brackets+Hebrew marks | 70,627 | 43-54 ms | 0.04 s | 63,633 | `term_set` 600: 63,233 in 0.03 s | 400: 393 edge bracket, 3 in-word bracket, 4 mark |
+| (d) 600 forms of `#כהנ#`, brackets+Hebrew marks | 189,643 | 42-68 ms | 0.04 s | 63,633 | `term_set` 600: 63,233 in 0.03 s | 400: 393 edge bracket, 3 in-word bracket, 4 mark |
 | (d) the same, brackets+all marks | -- | **refused: 10,485,760 bytes** | | | | |
 | (d) 600 forms of `#כהנ#`, brackets only | 27,649 | 22 ms | 0.04 s | 63,629 | 63,233 | 396 |
 
 - **A tolerant pattern costs what the plain one costs at search time**: nothing measurable for a
   pattern that starts with a letter (the term-dictionary walk is pruned), and the same 4-6 s for a
-  leading star. Build time is where the class shows: a 70,627-character pattern of 600 forms with
-  the Hebrew class builds in 54 ms; the all-marks class makes a single-branch pattern cost 23-70 ms.
+  leading star. Build time is where the class shows: a 189,643-character pattern of 600 forms with
+  the Hebrew class builds in 68 ms; the all-marks class makes a single-branch pattern cost 23-70 ms.
 - **What tolerance adds is small and almost all edge brackets**, which today's query already
   reaches through its extra terms: of the 400 pages only the 600-form pattern reaches, 393 are
   `כהנ[` / `]הכהנ`-style edge brackets, **3 have a bracket inside the word** and **4 a mark**. For
@@ -943,6 +943,10 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
   **Round 3 (same PR):** P2, join controls (U+200C/U+200D) are kept by the tokenizer's `\w` but end
   a word for Exact's predicate, like maqaf; the `token-only` subcommand now counts every such
   character over the distinct indexed words, and §4's exception says the list is exhaustive.
+  **Round 4:** P2, `token-only` and `marks` counted occurrences under a "words" label; both count
+  distinct words now. **Round 5:** P2, the Hebrew-marks class `U+0591-05C7` also swallowed the
+  block's punctuation (maqaf, paseq, sof pasuq, nun hafukha), which the oracle treats as word
+  boundaries; the class is now the block's category-M code points only, and §3.6.2 was re-run.
 - **Round 1 (Codex, 2026-10-21): DO NOT SHIP.** Four HIGH findings, all folded in:
   - the raw `_prefix_tree` drops forms (§5.1);
   - "whole word" was two conflicting definitions, and outer bounds did not bound `AND` operands
