@@ -28,6 +28,11 @@ them to the section's Quick Summary count and to the total, writes one count
 note naming the fragments, and rewrites the "Last Updated" line with the new
 total. It writes nothing if any fragment is malformed or the tracker lacks a
 section, count row or "Last Updated" line it needs.
+
+Running it again is safe: a row the tracker already holds verbatim is not added
+or counted again, so a run that wrote the tracker but could not delete a
+fragment (a locked file on Windows, an interrupted run) is finished by the next
+run, which only deletes the fragment.
 """
 from __future__ import annotations
 
@@ -131,16 +136,36 @@ def problems(path: Path) -> list:
     return found + parse(path.read_text(encoding="utf-8"))[1]
 
 
+def new_rows(tracker: str, blocks: dict) -> dict:
+    """*blocks* without the rows the tracker already holds verbatim.
+
+    The tracker is written before the fragments are deleted, so a run that was
+    interrupted, or could not delete a fragment, leaves rows that are both in the
+    tracker and in a fragment; folding them again would duplicate the rows and
+    the counts (Codex review of PR #428)."""
+    present = {ln.rstrip() for ln in tracker.split("\n")}
+    return {h: [r for r in rows if r.rstrip() not in present] for h, rows in blocks.items()}
+
+
 def fold(tracker: str, fragments: list, today: str) -> str:
     """The tracker with the fragments' rows, counts and one count note added.
 
-    *fragments* is [(name, {heading: [rows]})], newest first. Raises ValueError
-    when the tracker lacks a section table or a Quick Summary row it needs."""
+    *fragments* is [(name, {heading: [rows]})], newest first. A fragment whose
+    rows are all in the tracker already adds nothing and is not named; when every
+    fragment is such, the tracker comes back unchanged. Raises ValueError when
+    the tracker lacks a section table or a Quick Summary row it needs."""
     lines = tracker.split("\n")
     added = {h: [] for h in SECTIONS}
-    for _name, blocks in fragments:
-        for heading, rows in blocks.items():
+    names = []
+    for name, blocks in fragments:
+        fresh = new_rows(tracker, blocks)
+        if not any(fresh.values()):
+            continue
+        names.append(name)
+        for heading, rows in fresh.items():
             added[heading].extend(rows)
+    if not names:
+        return tracker
 
     for heading, rows in added.items():
         if not rows:
@@ -179,17 +204,16 @@ def fold(tracker: str, fragments: list, today: str) -> str:
     end = next((i for i in range(summary + 1, len(lines)) if lines[i].startswith("## ")),
                len(lines))
     last_note = max((i for i in range(summary, end) if _NOTE_RE.match(lines[i])), default=t)
-    names = ", ".join(n for n, _b in fragments)
     parts = ", ".join("%s +%d" % (SECTIONS[h].split()[0], d) for h, d in deltas.items() if d)
     lines.insert(last_note + 1, "> %s (folded from `docs/open_issues.d/`: %s): %s -- %d."
-                 % (today, names, parts, new_total))
+                 % (today, ", ".join(names), parts, new_total))
     # The header is what a session reads first (init.ps1 prints it as the newest entry):
     # it must not keep announcing the old total once the counts have moved.
     lu = next((i for i, ln in enumerate(lines) if _LAST_UPDATED_RE.match(ln)), None)
     if lu is None:
         raise ValueError("the tracker has no '> **Last Updated:**' line")
     lines[lu] = ("> **Last Updated:** %s (folded %d fragment(s) from `docs/open_issues.d/`: %s) "
-                 "-- %s. %d open." % (today, len(fragments), names, parts, new_total))
+                 "-- %s. %d open." % (today, len(names), ", ".join(names), parts, new_total))
     return "\n".join(lines)
 
 
@@ -215,10 +239,13 @@ def main(argv=None) -> int:
         return 0
 
     fragments = [(p.name, parse(p.read_text(encoding="utf-8"))[0]) for p in paths]
-    for name, blocks in fragments:
-        print("  %s  %s" % (name, ", ".join("%s: %d row(s)" % (h[4:], len(r))
-                                            for h, r in blocks.items())))
     text = args.tracker.read_text(encoding="utf-8")
+    for name, blocks in fragments:
+        fresh = new_rows(text, blocks)
+        print("  %s  %s" % (name, ", ".join(
+            "%s: %d row(s)%s" % (h[4:], len(r), "" if len(fresh[h]) == len(r)
+                                 else " (%d already in the tracker)" % (len(r) - len(fresh[h])))
+            for h, r in blocks.items())))
     today = args.today or datetime.date.today().isoformat()
     try:
         new_text = fold(text, fragments, today)
@@ -231,9 +258,21 @@ def main(argv=None) -> int:
         return 0
     # read_text already turned CRLF into "\n"; write "\n" as collect_changelog.py does
     # (git's autocrlf restores the checkout's endings).
-    args.tracker.write_text(new_text, encoding="utf-8", newline="\n")
+    if new_text != text:
+        args.tracker.write_text(new_text, encoding="utf-8", newline="\n")
+    # The tracker is written first: a fragment that cannot be deleted is folded
+    # again by the next run, which skips its rows (new_rows) and only deletes it.
+    kept = []
     for p in paths:
-        p.unlink()
+        try:
+            p.unlink()
+        except OSError as exc:
+            kept.append("%s (%s)" % (p.name, exc.strerror or exc))
+    if kept:
+        print("! %s is written, but could not delete: %s. Delete by hand, or run again: "
+              "rows already in the tracker are not folded twice."
+              % (args.tracker.name, "; ".join(kept)))
+        return 1
     print("%d fragment(s) folded into %s and deleted." % (len(paths), args.tracker.name))
     return 0
 

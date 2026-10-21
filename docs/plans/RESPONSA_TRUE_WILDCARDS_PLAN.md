@@ -167,7 +167,8 @@ scanning the file:
 
 - **Whole word = Exact's predicate.** `_starts_word` / `_ends_word` (`shared/search_engine.py:397`,
   `:405`):
-  - a word continues through letters and decimal digits of any script and `_`;
+  - a word continues through letters and decimal digits of any script and every connector
+    punctuation character (Unicode `Pc`: `_`, U+203F and the like; `_continues_word`);
   - marks, and the in-word quotes and brackets of `_IN_WORD_QUOTES`, are looked past.
 
   Responsa and Exact then agree on what a whole word is. It is **not** the tokenizer's class: that
@@ -476,8 +477,8 @@ Lab: both executor adapters and the cross-side matching swallow exceptions today
 parser error would show as no results. It also includes the API and MCP, which need a defined error
 contract for jobs.
 
-**Counts change.** For example, `כהנים גדול` goes from 264 rows to the 4 Exact finds. This needs the
-owner's go-ahead (§9, decision 8).
+**Counts change.** For example, `כהנים גדול` goes from 264 rows to the 4 Exact finds. The owner's
+go-ahead is recorded (§9, decision 8, 2026-10-21); the release notes carry a sentence on it.
 
 **Phase 2: true `*`.**
 - Star retrieval and pages first (§5.4).

@@ -205,3 +205,55 @@ def test_a_tracker_missing_what_the_fold_needs_writes_nothing(tmp_path, broken):
 def test_an_escaped_pipe_inside_a_cell_is_not_a_cell_boundary():
     row = r"| **a \| b** | `x.py` | ❌ Open | n |"
     assert co.parse("### P2 - Medium\n" + row + "\n") == ({"### P2 - Medium": [row]}, [])
+
+
+# The tracker is written before the fragments are deleted, so a run that could not
+# delete one (a locked file on Windows, an interrupted run) leaves its rows in both
+# places; the next run must not fold them twice (Codex review of PR #428).
+FOLDED_P2 = TRACKER.replace("|-------|------|--------|-------|\n| **Old P2**",
+                            "|-------|------|--------|-------|\n" + ROW_P2 + "\n| **Old P2**")
+
+
+def test_a_fragment_whose_rows_the_tracker_already_holds_adds_nothing_and_is_deleted(tmp_path):
+    d, t = _tree(tmp_path, {"2026-10-21-a.md": "### P2 - Medium\n" + ROW_P2 + "\n"})
+    t.write_text(FOLDED_P2, encoding="utf-8")
+    assert _run(d, t, "--apply") == 0
+    assert t.read_text(encoding="utf-8") == FOLDED_P2
+    assert sorted(p.name for p in d.iterdir()) == ["README.md"]
+
+
+def test_a_failed_delete_is_finished_by_the_next_run_without_duplicating(tmp_path, monkeypatch):
+    d, t = _tree(tmp_path, {"2026-10-21-a.md": "### P2 - Medium\n" + ROW_P2 + "\n",
+                            "2026-10-20-b.md": "### P3 - Low Priority\n" + ROW_P3B + "\n"})
+    real_unlink = Path.unlink
+
+    def locked(self, *args, **kwargs):
+        if self.name == "2026-10-21-a.md":
+            raise PermissionError(13, "Permission denied")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", locked)
+    assert _run(d, t, "--apply") == 1
+    first = t.read_text(encoding="utf-8")
+    assert first.count(ROW_P2) == 1 and first.count(ROW_P3B) == 1
+    assert "| P2 Medium Bugs | 2 |" in first and "| **Total open** | **5** |" in first
+    assert sorted(p.name for p in d.iterdir()) == ["2026-10-21-a.md", "README.md"]
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+    assert _run(d, t, "--apply") == 0
+    assert t.read_text(encoding="utf-8") == first      # same rows, same counts
+    assert sorted(p.name for p in d.iterdir()) == ["README.md"]
+
+
+def test_the_count_note_names_only_the_fragments_that_added_rows(tmp_path):
+    d, t = _tree(tmp_path, {"2026-10-21-a.md": "### P2 - Medium\n" + ROW_P2 + "\n",
+                            "2026-10-20-b.md": "### P3 - Low Priority\n" + ROW_P3B + "\n"})
+    t.write_text(FOLDED_P2, encoding="utf-8")
+    assert _run(d, t, "--apply") == 0
+    text = t.read_text(encoding="utf-8")
+    assert text.count(ROW_P2) == 1 and text.count(ROW_P3B) == 1
+    assert "| P2 Medium Bugs | 1 |" in text and "| P3 Low Priority | 3 |" in text
+    assert "| **Total open** | **4** |" in text
+    assert "> 2026-10-22 (folded from `docs/open_issues.d/`: 2026-10-20-b.md): P3 +1 -- 4." in text
+    assert ("> **Last Updated:** 2026-10-22 (folded 1 fragment(s) from `docs/open_issues.d/`: "
+            "2026-10-20-b.md) -- P3 +1. 4 open.") in text
+    assert sorted(p.name for p in d.iterdir()) == ["README.md"]

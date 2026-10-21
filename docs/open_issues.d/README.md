@@ -33,4 +33,6 @@ their CI. Two files never conflict. This is the tracker's version of
   leaves the tracker's counts and header alone. Run it at a
   release, alongside `scripts/collect_changelog.py`, or whenever the pile grows.
   Until then `scripts/init.ps1` lists the pending fragments under the tracker, so
-  a session reading the tracker sees them too.
+  a session reading the tracker sees them too. Running it again is safe: a row
+  the tracker already holds is not added or counted twice, so a run that could
+  not delete a fragment is finished by the next one.
