@@ -23,6 +23,7 @@ Items (plan section 7, Phase 0):
   desktop-timings  item 6: execute_search in Responsa mode, as the desktop calls it,
                    with the `regex` module (desktop) and stdlib `re` (production worker)
   punct            item 7: the punctuation counts, read back from scan.json
+  marks            items 2 + 7: distinct words holding Hebrew marks / other-script marks
 
 Run (Windows, the owner's laptop):
   python -I -X utf8 scripts/measure_responsa_wildcards.py scan ^
@@ -394,6 +395,44 @@ def cmd_scan(args):
     return EXIT_OK
 
 
+def cmd_marks(args):
+    """Items 2 and 7, the size of the mark question: how many distinct content_search words hold a
+    Hebrew mark (U+0591-05C7), a mark of another script, or both -- and how many of the latter
+    hold a Hebrew letter at all. Reads the reversed word list."""
+    log = Log(args.out_dir, 'marks')
+    path = reversed_list_path(args.out_dir)
+    require(path, 'reversed word list (run `scan` first)')
+    rev, _ = _load_reversed(path, log)
+    hebrew = other = both = other_with_hebrew_letter = 0
+    by_char = {}
+    samples = {}
+    for r in rev:
+        h = o = False
+        for ch in r:
+            if unicodedata.category(ch)[0] == 'M':
+                if '֑' <= ch <= 'ׇ':
+                    h = True
+                else:
+                    o = True
+                    by_char[ch] = by_char.get(ch, 0) + 1
+                    if len(samples.setdefault(ch, [])) < 3:
+                        samples[ch].append(r[::-1])
+        hebrew += h
+        other += o
+        both += h and o
+        if o and any('א' <= ch <= 'ת' for ch in r):
+            other_with_hebrew_letter += 1
+    top = [{'char': f'U+{ord(ch):04X} {unicodedata.name(ch, "?")}', 'words': n, 'samples': samples[ch]}
+           for ch, n in sorted(by_char.items(), key=lambda kv: -kv[1])[:12]]
+    log(f'{len(rev):,} distinct words: {hebrew:,} hold a Hebrew mark, {other:,} a mark of another script '
+        f'({other_with_hebrew_letter:,} of those hold a Hebrew letter), {both:,} both')
+    for row in top:
+        log(f'  {row["char"]}: {row["words"]:,} words, e.g. {row["samples"]}')
+    log.finish({'distinct_words': len(rev), 'with_hebrew_mark': hebrew, 'with_other_script_mark': other,
+                'other_script_mark_and_hebrew_letter': other_with_hebrew_letter, 'both': both, 'top_other_marks': top})
+    return EXIT_OK
+
+
 def cmd_punct(args):
     """Item 7 read back from scan.json (the scan does the counting)."""
     path = os.path.join(args.out_dir, 'scan.json')
@@ -500,7 +539,16 @@ def cmd_wordlist(args):
 # --------------------------------------------------------------------------------------
 
 T_BRACKETS = r'[\[\]]*'
-T_BRACKETS_MARKS = r'[\[\]\u0591-\u05C7]*'     # brackets + the Hebrew marks content_search keeps (nikud, te'amim)
+# Brackets + the Hebrew marks (points and te'amim, U+0591-05C7): a small class, cheap in DFA states.
+T_BRACKETS_HEBREW_MARKS = r'[\[\]\u0591-\u05C7]*'
+# Brackets + every Unicode mark (category M), the class the oracle looks past: content_search keeps
+# all marks outside U+0300-036F (Hebrew points and te'amim, Arabic harakat in Judeo-Arabic words,
+# ...). A Hebrew-only class would miss `\u05D0\u064E\u05D1` (Codex round 2 on PR #429) -- but the all-marks class
+# costs so many DFA states that only a single-branch pattern builds with it (measured in
+# cmd_patterns), so both classes are measured and the plan carries both.
+T_BRACKETS_MARKS = r'[\[\]\p{M}]*'
+TOLERANCES = (('brackets+all marks', T_BRACKETS_MARKS), ('brackets+Hebrew marks', T_BRACKETS_HEBREW_MARKS),
+              ('brackets', T_BRACKETS), ('none', ''))
 
 
 def tolerant(word, between):
@@ -581,24 +629,21 @@ def cmd_patterns(args):
     def ts(forms):
         return tantivy.Query.term_set_query(schema, 'content_search', list(forms))
 
-    # (a) a star word, trailing star, with brackets (and brackets+marks) between the letters
-    rows.append(_pattern_case(log, idx, searcher, 'a1 trailing star, brackets',
-                              tolerant(STEM_1, T_BRACKETS) + T_BRACKETS + '.*', rx(STEM_1 + '.*'), f'regex {STEM_1}.*'))
-    rows.append(_pattern_case(log, idx, searcher, 'a1 trailing star, brackets+marks',
-                              tolerant(STEM_1, T_BRACKETS_MARKS) + T_BRACKETS_MARKS + '.*', rx(STEM_1 + '.*'),
-                              f'regex {STEM_1}.*'))
+    # (a) a star word, trailing star, with each tolerance class between the letters
+    for t_label, between in TOLERANCES[:3]:
+        rows.append(_pattern_case(log, idx, searcher, f'a1 trailing star, {t_label}',
+                                  tolerant(STEM_1, between) + between + '.*', rx(STEM_1 + '.*'), f'regex {STEM_1}.*'))
     # (a) the leading-star form
-    rows.append(_pattern_case(log, idx, searcher, 'a2 leading star, brackets',
-                              '.*' + tolerant(FINITE_WORD, T_BRACKETS) + T_BRACKETS, rx('.*' + FINITE_WORD),
-                              f'regex .*{FINITE_WORD}'))
-    rows.append(_pattern_case(log, idx, searcher, 'a2 leading star, brackets+marks',
-                              '.*' + tolerant(FINITE_WORD, T_BRACKETS_MARKS) + T_BRACKETS_MARKS, rx('.*' + FINITE_WORD),
-                              f'regex .*{FINITE_WORD}'))
+    for t_label, between in TOLERANCES[:3]:
+        rows.append(_pattern_case(log, idx, searcher, f'a2 leading star, {t_label}',
+                                  '.*' + tolerant(FINITE_WORD, between) + between, rx('.*' + FINITE_WORD),
+                                  f'regex .*{FINITE_WORD}'))
     # (b) a finite word: its 24 prefix forms in one alternation
     forms24 = prefix_forms(FINITE_WORD)
-    rows.append(_pattern_case(log, idx, searcher, f'b {len(forms24)} prefix forms, brackets+marks',
-                              alternation(forms24, T_BRACKETS_MARKS), ts(forms24), f'term_set {len(forms24)} forms',
-                              examples_from_forms=forms24))
+    for t_label, between in TOLERANCES[:2]:
+        rows.append(_pattern_case(log, idx, searcher, f'b {len(forms24)} prefix forms, {t_label}',
+                                  alternation(forms24, between), ts(forms24), f'term_set {len(forms24)} forms',
+                                  examples_from_forms=forms24))
     # (c) 200 stem alternatives, what spelling variants produce
     try:
         from shared.variants import VariantManager
@@ -606,17 +651,17 @@ def cmd_patterns(args):
         variants_source = 'VariantManager.get_variants(variants_extended, limit=200)'
     except Exception as exc:  # noqa: BLE001
         variants, variants_source = [], f'VariantManager unavailable: {exc}'
-    if variants:
-        rows.append(_pattern_case(log, idx, searcher, f'c {len(variants)} spelling variants, brackets+marks',
-                                  alternation(variants, T_BRACKETS_MARKS), ts(variants),
-                                  f'term_set {len(variants)} variants', examples_from_forms=variants))
+    for t_label, between in TOLERANCES[:2]:
+        if variants:
+            rows.append(_pattern_case(log, idx, searcher, f'c {len(variants)} spelling variants, {t_label}',
+                                      alternation(variants, between), ts(variants),
+                                      f'term_set {len(variants)} variants', examples_from_forms=variants))
     # (d) the 600 forms of #X#
     forms600 = grammatical_forms(STEM_1)
-    rows.append(_pattern_case(log, idx, searcher, f'd {len(forms600)} forms of #{STEM_1}#, brackets+marks',
-                              alternation(forms600, T_BRACKETS_MARKS), ts(forms600), f'term_set {len(forms600)} forms',
-                              examples_from_forms=forms600))
-    rows.append(_pattern_case(log, idx, searcher, f'd {len(forms600)} forms of #{STEM_1}#, brackets only',
-                              alternation(forms600, T_BRACKETS), ts(forms600), f'term_set {len(forms600)} forms'))
+    for t_label, between in TOLERANCES[:3]:
+        rows.append(_pattern_case(log, idx, searcher, f'd {len(forms600)} forms of #{STEM_1}#, {t_label}',
+                                  alternation(forms600, between), ts(forms600), f'term_set {len(forms600)} forms',
+                                  examples_from_forms=forms600))
 
     # The size limit: grow an alternation until regex_query raises, for three kinds of list and
     # with/without the tolerance classes (the limit is on DFA states, so structure matters).
@@ -634,9 +679,9 @@ def cmd_patterns(args):
     pools.append((f'grammatical forms: #{STEM_1}# then #{STEM_2}# (24 x 25 each)', forms600 + grammatical_forms(STEM_2)))
     probes = []
     for label, pool in pools:
-        for between_label, between in (('brackets+marks', T_BRACKETS_MARKS), ('brackets', T_BRACKETS), ('none', '')):
+        for between_label, between in TOLERANCES:
             probes.append(_probe_limit(log, idx, searcher, f'{label}; tolerance {between_label}', pool, between))
-    log.finish({'index_dir': args.index_dir, 'tolerance_classes': {'brackets': T_BRACKETS, 'brackets_marks': T_BRACKETS_MARKS},
+    log.finish({'index_dir': args.index_dir, 'tolerance_classes': dict(TOLERANCES),
                 'variants_source': variants_source, 'cases': rows, 'size_limit_probes': probes})
     return EXIT_OK
 
@@ -1122,7 +1167,7 @@ def cmd_desktop_timings(args):
 def main(argv=None):
     from shared.config import Config
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('item', choices=['scan', 'punct', 'wordlist', 'patterns', 'scored-terms', 'missing-pages',
+    ap.add_argument('item', choices=['scan', 'punct', 'marks', 'wordlist', 'patterns', 'scored-terms', 'missing-pages',
                                      'verify-tolerant', 'topology', 'desktop-timings'])
     ap.add_argument('--index-dir', default=os.path.join(Config.INDEX_DIR, 'tantivy_db'))
     ap.add_argument('--corpus-file', default=os.environ.get('GENIZAH_CORPUS_FILE') or Config.FILE_V8)
@@ -1134,7 +1179,7 @@ def main(argv=None):
     ap.add_argument('--query-timeout', type=float, default=600.0, help='desktop-timings: stop a query after this many seconds')
     args = ap.parse_args(argv)
     handler = {
-        'scan': cmd_scan, 'punct': cmd_punct, 'wordlist': cmd_wordlist, 'patterns': cmd_patterns,
+        'scan': cmd_scan, 'punct': cmd_punct, 'marks': cmd_marks, 'wordlist': cmd_wordlist, 'patterns': cmd_patterns,
         'scored-terms': cmd_scored_terms, 'missing-pages': cmd_missing_pages, 'verify-tolerant': cmd_verify_tolerant,
         'topology': cmd_topology, 'desktop-timings': cmd_desktop_timings,
     }[args.item]

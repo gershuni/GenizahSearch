@@ -222,50 +222,69 @@ for `scan`, `wordlist`, `patterns`, `scored-terms`, `missing-pages`, `verify-tol
 - The saving per leading-star word is 3.7 s for the broadest ending (1.8 s against 5.4 s) and
   5.4 s for a narrow one (0.14 s against 5.5 s, 40x).
 
-#### 3.6.2 Bracket- and mark-tolerant patterns, and the pattern size limit -- `patterns` (47 s)
+#### 3.6.2 Bracket- and mark-tolerant patterns, and the pattern size limit -- `patterns` (46-70 s), `marks` (4 s)
 
-Tolerance classes between letters (and at both edges): brackets `[\[\]]*`; brackets+marks
-`[\[\]\u0591-\u05C7]*` (the Hebrew points `content_search` keeps). All on `content_search` AND
-`scope:page`; "plain" is the lookup the forms get without tolerance (one `regex_query` for a star
-word, one `term_set_query` of the bare forms for a finite word; today's query also adds
-edge-bracket terms, which the plain column here does not).
+Tolerance classes between letters (and at both edges): **brackets** `[\[\]]*`; **brackets+Hebrew
+marks** `[\[\]֑-ׇ]*` (the points and te'amim); **brackets+all marks** `[\[\]\p{M}]*`,
+every Unicode mark, which is the class the oracle looks past (`content_search` keeps all marks
+outside U+0300-036F; a Hebrew-only class would miss a Hebrew word carrying an Arabic mark, Codex
+round 2 on PR #429). All on `content_search` AND `scope:page`; "plain" is the lookup the forms get
+without tolerance (one `regex_query` for a star word, one `term_set_query` of the bare forms for a
+finite word; today's query also adds edge-bracket terms, which the plain column here does not).
 
 | Case | Pattern chars | Build | Count | Pages | Plain | Pattern-only pages |
 |---|---|---|---|---|---|---|
 | (a) `כ[\[\]]*ה[\[\]]*נ[\[\]]*.*` (star at the end) | 26 | 0.3 ms | 0.02 s | 38,698 | `כהנ.*`: 38,697 in 0.01 s | 1 |
-| (a) the same, brackets+marks | 65 | 0.4 ms | 0.01 s | 38,703 | 38,697 | 6 |
+| (a) the same, brackets+Hebrew marks | 65 | 0.4 ms | 0.01 s | 38,703 | 38,697 | 6 |
+| (a) the same, brackets+all marks | 41 | **23-27 ms** | 0.01-0.02 s | 38,703 | 38,697 | 6 |
 | (a) `.*כ[\[\]]*ה[\[\]]*נ[\[\]]*י[\[\]]*ם[\[\]]*` (star at the start) | 42 | 0.6 ms | **3.8-4.3 s** | 53,239 | `.*כהנים`: 53,180 in 5.2-5.7 s | 59 |
-| (a) the same, brackets+marks | 107 | 1.1 ms | 5.2 s | 53,240 | 53,180 | 60 |
-| (b) 24 prefix forms of `כהנים`, brackets+marks | 2,947 | 3.6 ms | 0.03-0.04 s | 45,242 | `term_set` 24: 45,086 in 0.03 s | 156: 154 edge bracket, 1 in-word bracket, 1 mark |
-| (c) 200 spelling variants of `כהנים` (`variants_extended`), brackets+marks | -- | **refused** (below) | | | | |
-| (d) 600 forms of `#כהנ#`, brackets+marks | 70,627 | 43-54 ms | 0.04 s | 63,633 | `term_set` 600: 63,233 in 0.03 s | 400: 393 edge bracket, 3 in-word bracket, 4 mark |
+| (a) the same, brackets+Hebrew marks | 107 | 1.1 ms | 5.2 s | 53,240 | 53,180 | 60 |
+| (a) the same, brackets+all marks | 67 | **49-70 ms** | 4.0-5.5 s | 53,240 | 53,180 | 60 |
+| (b) 24 prefix forms of `כהנים`, brackets+Hebrew marks | 2,947 | 3.6 ms | 0.03-0.04 s | 45,242 | `term_set` 24: 45,086 in 0.03 s | 156: 154 edge bracket, 1 in-word bracket, 1 mark |
+| (b) the same, brackets+all marks | -- | **refused: 1,000 states** | | | | |
+| (c) 200 spelling variants of `כהנים` (`variants_extended`), either mark class | -- | **refused** (Hebrew marks: 1,000 states; all marks: 10,485,760 bytes) | | | | |
+| (d) 600 forms of `#כהנ#`, brackets+Hebrew marks | 70,627 | 43-54 ms | 0.04 s | 63,633 | `term_set` 600: 63,233 in 0.03 s | 400: 393 edge bracket, 3 in-word bracket, 4 mark |
+| (d) the same, brackets+all marks | -- | **refused: 10,485,760 bytes** | | | | |
 | (d) 600 forms of `#כהנ#`, brackets only | 27,649 | 22 ms | 0.04 s | 63,629 | 63,233 | 396 |
 
-- **A tolerant pattern costs what the plain one costs**: nothing measurable for a pattern that
-  starts with a letter (the term-dictionary walk is pruned), and the same 4-6 s for a leading star.
-  A 70,627-character pattern of 600 forms builds in 54 ms and searches in 40 ms.
+- **A tolerant pattern costs what the plain one costs at search time**: nothing measurable for a
+  pattern that starts with a letter (the term-dictionary walk is pruned), and the same 4-6 s for a
+  leading star. Build time is where the class shows: a 70,627-character pattern of 600 forms with
+  the Hebrew class builds in 54 ms; the all-marks class makes a single-branch pattern cost 23-70 ms.
 - **What tolerance adds is small and almost all edge brackets**, which today's query already
   reaches through its extra terms: of the 400 pages only the 600-form pattern reaches, 393 are
   `כהנ[` / `]הכהנ`-style edge brackets, **3 have a bracket inside the word** and **4 a mark**. For
   `*נים *לים` the edge bracket is exactly what stage 1 misses today (3.6.4).
-- **The size limit is 1,000 DFA states, not a character count.** The error is
+- **Two size limits, neither a character count.** The first is
   `ValueError: An invalid argument was passed: 'RegexQueryError: Compiled regex exceeds size limit of 1000 states'`
-  (tantivy-fst's hard-coded `STATE_LIMIT`; the DFA is built eagerly). The largest alternation that
-  builds, found by doubling from 8 and bisecting to the exact count:
+  (tantivy-fst's hard-coded DFA `STATE_LIMIT`; the DFA is built eagerly); the second, reached only
+  with the all-marks class, is `... Compiled regex exceeds size limit of 10485760 bytes` (the
+  compiled program). The largest alternation that builds, found by doubling from 8 and bisecting
+  to the exact count:
 
-| List | brackets+marks | brackets | no tolerance |
-|---|---|---|---|
-| distinct corpus words ending in `נים` (29,663 available) | **69** | 108 | 127 |
-| spelling variants of `כהנים` (200 from `VariantManager`) | **125** | 186 | 186 |
-| grammatical forms, `#כהנ#` then `#גדול#` (1,200) | **616** | 935 | 935 |
+| List | brackets+all marks | brackets+Hebrew marks | brackets | no tolerance |
+|---|---|---|---|---|
+| distinct corpus words ending in `נים` (29,663 available) | **1** | **69** | 108 | 127 |
+| spelling variants of `כהנים` (200 from `VariantManager`) | **0** | **125** | 186 | 186 |
+| grammatical forms, `#כהנ#` then `#גדול#` (1,200) | **1** | **616** | 935 | 935 |
 
-  One word's 600 `#X#` forms fit (they share prefixes and suffixes, so the DFA stays small), but
-  **200 spelling variants in one `regex_query` do not, and neither do two words' forms in one
-  pattern**; unrelated words cost about 8-16 states each. Implication for §5.1: "all expanded stems
-  in one alternation" must be split into several `regex_query`s ORed (each under the limit), or the
-  variant forms stay scored term queries (3.6.3) and the pattern carries only the star and the
-  bracket/mark tolerance of the literal part. Decision 5 (stars with variants on) now has its cost:
-  one pattern per 60-120 stems.
+  So with the Hebrew class one word's 600 `#X#` forms fit (they share prefixes and suffixes, so
+  the DFA stays small), but **200 spelling variants in one `regex_query` do not, and neither do two
+  words' forms in one pattern**; unrelated words cost about 8-16 states each. **The all-marks class
+  (about 2,400 code points, many UTF-8 byte ranges) spends the whole budget on one branch**: it
+  fits a single star word (3.6.4 used it) and nothing with an alternation.
+- **How much the mark classes are worth** (`marks` subcommand, 4 s over the 7,284,528 distinct
+  folded words): **200** words hold a Hebrew mark; **93,673** hold a mark of another script, of
+  which **5** also hold a Hebrew letter (HTR noise); the rest are Arabic-script words (hamza above
+  U+0654 in 82,743, hamza below U+0655 in 11,047, maddah U+0653 in 3,904). The HTR text carries
+  almost no nikud, so for Hebrew queries the mark question is about 205 words in 7.3 million;
+  brackets are the tolerance that matters (56,131 tokens, §5.1).
+- Implication for §5.1: "all expanded stems in one alternation" must be split into several
+  `regex_query`s ORed (each under the limit), or the variant forms stay scored term queries (3.6.3)
+  and the pattern carries only the star and the bracket tolerance of the literal part, with the
+  Hebrew mark class at most; the all-marks class is for a lone star word, or left to the oracle's
+  side (the 5 words). Decision 5 (stars with variants on) now has its cost: one pattern per 60-120
+  stems with the Hebrew class, 100-190 without marks.
 
 #### 3.6.3 Scored term queries with 600 and 1,200 forms -- `scored-terms` (3 s)
 
@@ -313,10 +332,10 @@ paths under one check.
   whose text equals the file's. **No maqaf, digit, Hebrew punctuation or tokenizer split is among
   them.**
 - **The §4 contract covers this and is complete for this query**: §5.1's tolerant stage 1
-  (`.*נ[\[\]֑-ׇ]*י[\[\]֑-ׇ]*ם[\[\]֑-ׇ]*` AND the same for `לים`)
+  (`.*נ[\[\]\p{M}]*י[\[\]\p{M}]*ם[\[\]\p{M}]*` AND the same for `לים`)
   returns **100,392** candidates in **9.67 s** (411 more than the plain lookup, at the same cost)
-  and **admits all seven** (`verify-tolerant`). The end-only form `.*נים[\[\]]*` gave 100,373 and
-  also admitted all seven.
+  and **admits all seven** (`verify-tolerant`); the Hebrew-marks class gave the same 100,392, and
+  the end-only form `.*נים[\[\]]*` gave 100,373, both admitting all seven.
 
 #### 3.6.5 Aggregate topology -- `topology` (27 s)
 
@@ -905,6 +924,9 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
   removes the looked-past characters first, and item 4 was re-measured (§3.6.4). P2: sof pasuq
   joins maqaf in §4's exception and in Phase 1's pinning test. P2: Phase 0 is "measured", not
   "done": item 6's "after" timings and its Linux-worker run are still open (status line, §7).
+  **Round 2 (same PR):** P2, the mark-tolerance class of the probes covered Hebrew marks only
+  (U+0591-05C7) while the oracle looks past every Unicode mark; the class is now `[\[\]\p{M}]*`
+  and §3.6.2 and §3.6.4 were re-measured with it.
 - **Round 1 (Codex, 2026-10-21): DO NOT SHIP.** Four HIGH findings, all folded in:
   - the raw `_prefix_tree` drops forms (§5.1);
   - "whole word" was two conflicting definitions, and outer bounds did not bound `AND` operands
