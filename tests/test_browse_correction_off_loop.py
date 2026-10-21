@@ -254,36 +254,80 @@ def test_save_draft_with_no_answer_toasts_a_failure_and_keeps_the_draft_unsaved(
 
 
 # ---------------------------------------------------------------------------
-# A second click while the first write runs (the write is off the loop now, so
-# the loop serves the second click at once: without a guard, two drafts)
+# A second click while the first write runs. The write is off the loop now, so
+# the loop serves the second click at once: without a lock, two drafts. It now
+# waits for the first and then runs, as it did when the write blocked.
 # ---------------------------------------------------------------------------
 
-def _drive_twice(editor, handler_name):
+def _drive_twice(editor, first, second, *, between=0.0, during=None):
     async def _run():
         client, state = await editor['open_in_edit_mode']()
-        handler = _handler(client, handler_name)
+        a, b = _handler(client, first), _handler(client, second)
+
+        async def later():
+            await asyncio.sleep(between)
+            if during:
+                during(state)
+            await b()
+
         with client:
-            await asyncio.gather(handler(), handler())
-        return client, state, handler
+            await asyncio.gather(a(), later())
+        return client, state
 
     return asyncio.run(_run())
 
 
-def test_two_quick_save_draft_clicks_write_one_draft(editor):
-    editor['delay'] = 0.2
-    _client, state, _handler_fn = _drive_twice(editor, 'handle_save_draft')
+def _kinds(editor):
+    return [(c['helper'], (c['kwargs'].get('status') if c['kwargs'] else c['args'][1]['status']))
+            for c in editor['calls']]
 
-    assert [c['helper'] for c in editor['calls']] == ['create_correction'], editor['calls']
-    assert [kind for _m, kind in editor['notes']].count('positive') == 1, editor['notes']
-    assert state.draft_id == 41 and state.correction_saving is False
+
+def test_two_quick_save_draft_clicks_write_the_draft_then_update_it(editor):
+    editor['delay'] = 0.2
+    _client, state = _drive_twice(editor, 'handle_save_draft', 'handle_save_draft')
+
+    assert _kinds(editor) == [('create_correction', 'draft'), ('update_correction', 'draft')], editor['calls']
+    assert editor['calls'][1]['args'][0] == 41, 'the second save must update the draft the first created'
+    assert state.draft_id == 41 and not state.correction_lock.locked()
+
+
+def test_submit_during_a_draft_save_waits_and_submits_the_draft(editor):
+    """Dropping the Submit (an in-flight flag) left the correction unsubmitted
+    with no word to the reader; it waits for the draft and submits it."""
+    editor['delay'] = 0.2
+    _client, state = _drive_twice(editor, 'handle_save_draft', 'handle_submit_correction', between=0.05)
+
+    assert _kinds(editor) == [('create_correction', 'draft'), ('update_correction', 'pending')], editor['calls']
+    assert state.edit_mode is False, 'the Submit did not run'
 
 
 def test_two_quick_submit_clicks_submit_once(editor):
     editor['delay'] = 0.2
-    _client, state, _handler_fn = _drive_twice(editor, 'handle_submit_correction')
+    _client, state = _drive_twice(editor, 'handle_submit_correction', 'handle_submit_correction')
 
     assert [c['helper'] for c in editor['calls']] == ['create_correction'], editor['calls']
-    assert state.correction_saving is False
+    assert not state.correction_lock.locked()
+
+
+def test_text_typed_during_a_draft_save_is_not_marked_saved(editor):
+    editor['delay'] = 0.3
+
+    async def _run():
+        client, state = await editor['open_in_edit_mode']()
+        save = _handler(client, 'handle_save_draft')
+
+        async def type_more():
+            await asyncio.sleep(0.1)
+            state.edit_text = 'שלום עולם ומלואו'  # bind_value keeps writing while the save runs
+
+        with client:
+            await asyncio.gather(save(), type_more())
+        return state
+
+    state = asyncio.run(_run())
+    assert editor['calls'][0]['kwargs']['corrected_text'] == 'שלום עולם'
+    assert state.draft_id == 41
+    assert state.draft_saved is False, 'text that is not in the draft was shown as Saved'
 
 
 def test_a_failed_save_leaves_the_next_click_free_to_write(editor):
@@ -294,7 +338,7 @@ def test_a_failed_save_leaves_the_next_click_free_to_write(editor):
         handler = _handler(client, 'handle_save_draft')
         with client:
             await handler()
-            assert state.correction_saving is False, 'the in-flight flag outlived a failed write'
+            assert not state.correction_lock.locked(), 'the lock outlived a failed write'
             editor['answer'] = {'success': True, 'correction': {'id': 41}}
             await handler()
         return state
