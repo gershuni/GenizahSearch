@@ -34,6 +34,13 @@ TRACKER = "\n".join([
     "",
     "> **Last Updated:** 2026-10-20 -- 3 open.",
     "",
+    "## Protocol",
+    "",
+    "```markdown",
+    "### P2 - Medium",                          # an example, as the real tracker has
+    "| **Issue description** | `file.py` | ❌ Open (2026-10-21) | Details |",
+    "```",
+    "",
     "## Quick Summary",
     "",
     "| Category | Open |",
@@ -83,8 +90,26 @@ def test_every_fragment_in_the_tree_folds_into_the_real_tracker(path):
 def test_every_section_the_script_accepts_exists_in_the_real_tracker():
     lines = co.TRACKER.read_text(encoding="utf-8").splitlines()
     for heading, label in co.SECTIONS.items():
-        assert heading in lines
+        assert co._heading_index(lines, heading) is not None
         assert any(ln.startswith("| %s | " % label) for ln in lines)
+
+
+@pytest.mark.parametrize("heading", list(co.SECTIONS), ids=lambda h: h[4:])
+def test_a_row_for_every_section_lands_in_the_real_tracker_table(heading):
+    """Folded into the real tracker, a row lands under the real section heading, not
+    under the fenced example in its maintenance protocol (Codex review of PR #428)."""
+    row = "| **Probe row** | `probe.py` | ❌ Open (2026-01-01) | probe |"
+    text = co.fold(co.TRACKER.read_text(encoding="utf-8"),
+                   [("2026-01-01-probe.md", {heading: [row]})], "2026-01-01")
+    lines = text.split("\n")
+    i = lines.index(row)
+    above = [ln for ln in lines[:i] if ln.startswith("#")]
+    assert above[-1] == heading and co._heading_index(lines, heading) < i
+
+
+def test_a_heading_inside_a_code_fence_is_not_the_section():
+    lines = ["```", "### P2 - Medium", "```", "### P2 - Medium"]
+    assert co._heading_index(lines, "### P2 - Medium") == 3
 
 
 def _tree(tmp_path, fragments):
@@ -109,9 +134,9 @@ def test_apply_adds_rows_counts_and_one_note_and_deletes_the_fragments(tmp_path)
     })
     assert _run(d, t, "--apply") == 0
     lines = t.read_text(encoding="utf-8").split("\n")
-    p2 = lines.index("### P2 - Medium")
+    p2 = co._heading_index(lines, "### P2 - Medium")      # the real one, not the fenced example
     assert lines[p2 + 4] == ROW_P2 and lines[p2 + 5].startswith("| **Old P2**")
-    p3 = lines.index("### P3 - Low Priority")
+    p3 = co._heading_index(lines, "### P3 - Low Priority")
     # Newest fragment first, each fragment's rows in its own order, above the old rows.
     assert lines[p3 + 4:p3 + 7] == [ROW_P3, ROW_P3B, "| **Old P3 a** | `y.py` | ❌ Open | n |"]
     assert "| P2 Medium Bugs | 2 |" in lines and "| P3 Low Priority | 4 |" in lines

@@ -65,6 +65,21 @@ def _cells(row: str) -> list:
     return [c.strip() for c in _CELL_SPLIT.split(row.strip())[1:-1]]
 
 
+def _heading_index(lines: list, heading: str):
+    """Index of the first *heading* line outside fenced code blocks (None if absent).
+
+    The tracker's own maintenance protocol shows a fragment example inside a ``` fence,
+    `### P2 - Medium` included; taking that line made every P2 fold fail (Codex review
+    of PR #428)."""
+    fenced = False
+    for i, ln in enumerate(lines):
+        if ln.lstrip().startswith("```"):
+            fenced = not fenced
+        elif not fenced and ln == heading:
+            return i
+    return None
+
+
 def _is_open(status: str) -> bool:
     """The status cell STARTS with an open mark: `✅ Fixed (was ❌ Open)` is not open
     (Codex review of PR #428)."""
@@ -130,10 +145,9 @@ def fold(tracker: str, fragments: list, today: str) -> str:
     for heading, rows in added.items():
         if not rows:
             continue
-        try:
-            start = lines.index(heading)
-        except ValueError:
-            raise ValueError("the tracker has no %r section" % heading) from None
+        start = _heading_index(lines, heading)
+        if start is None:
+            raise ValueError("the tracker has no %r section" % heading)
         sep = next((i for i in range(start + 1, len(lines))
                     if _SEPARATOR_RE.match(lines[i])
                     or lines[i].startswith("#")), None)
@@ -159,7 +173,9 @@ def fold(tracker: str, fragments: list, today: str) -> str:
     new_total = int(total_re.match(lines[t]).group(1)) + total_delta
     lines[t] = "| **Total open** | **%d** |" % new_total
 
-    summary = lines.index("## Quick Summary") if "## Quick Summary" in lines else t
+    summary = _heading_index(lines, "## Quick Summary")
+    if summary is None:
+        summary = t
     end = next((i for i in range(summary + 1, len(lines)) if lines[i].startswith("## ")),
                len(lines))
     last_note = max((i for i in range(summary, end) if _NOTE_RE.match(lines[i])), default=t)
