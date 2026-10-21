@@ -1101,6 +1101,11 @@ POSTHOG_SCRIPT = f'''
 from web.ux_timing import head_html as _ux_timing_head_html  # noqa: E402
 POSTHOG_SCRIPT += _ux_timing_head_html()
 
+# Reconnect backoff: a restart must not reload every open tab at once (web/reconnect_backoff.py).
+# Shared, so every page -- /privacy-extension and /reset-hints included -- gets it before socket.io.
+from web.reconnect_backoff import head_html as _reconnect_backoff_head_html  # noqa: E402
+ui.add_head_html(_reconnect_backoff_head_html(), shared=True)
+
 
 # posthog_capture moved to web/analytics.py to avoid circular imports
 from web.analytics import posthog_capture  # noqa: F401 — re-export

@@ -185,6 +185,25 @@ IMAGE_CACHE_MAX_ENTRIES=2048          # in-memory image cache entries over 5 sha
                                        # less than one Visual Similarity grid); memory is bounded by the next line
 IMAGE_CACHE_MAX_BYTES=268435456       # in-memory image cache byte cap (256 MB, unchanged)
 IMAGE_CACHE_TTL=600                   # in-memory image cache lifetime, seconds (unchanged)
+
+# Reconnect backoff (2026-10-21; web-only, web/reconnect_backoff.py)
+# A restart drops every open tab's socket; when the server is back, each tab's handshake carries
+# a client id the new process never had, NiceGUI refuses it and nicegui.js reloads the page AT
+# ONCE -- every tab inside one 5 s window, each a full page build on the one event loop, and the
+# saturated server's late answers ("timeout") reload them again. nicegui.js cannot be changed
+# (immutable cached URL), so web/static/js/reconnect_backoff.js runs in <head> before socket.io:
+# it spreads socket.io's retries and delays the reload for a refused handshake or a timeout by
+# base * 2^n (n = consecutive reloads of that tab, in sessionStorage), jittered x0.5-1.5, and a
+# hidden tab waits until it is viewed. The server counts what it refuses: /_internal/memstat
+# `handshakes` (web/framework_patches.py::_patch_handshake_counter; >30 unknown clients in a
+# minute logs one "reload burst" warning). Independent of POSTHOG_API_KEY.
+RECONNECT_BACKOFF_ENABLED=1           # 0/false serves no snippet: NiceGUI reloads at once again
+RECONNECT_BACKOFF_BASE_MS=1500        # first reload wait, ms (doubles per consecutive reload); also
+                                       # socket.io's reconnectionDelay (its default is 1000)
+RECONNECT_BACKOFF_CAP_MS=60000        # the exponential's cap, ms; the jitter spreads around it, so the
+                                       # longest wait is 1.5 x this
+RECONNECT_DELAY_MAX_MS=30000          # socket.io's reconnectionDelayMax, ms (its default is 5000: after
+                                       # three attempts every tab retried on the same rigid 5 s cadence)
 ```
 
 **Operational note (Phase 98 — two PostHog drop counters):** Phase 98 ships with TWO PostHog

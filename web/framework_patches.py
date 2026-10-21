@@ -6,6 +6,7 @@ called before ``ui.run()`` / NiceGUI initialises its routes.
 
 from __future__ import annotations
 
+import collections
 import functools
 import inspect
 import json
@@ -14,6 +15,7 @@ import mimetypes
 import os
 import re
 import ssl
+import time
 import uuid
 from base64 import b64decode
 
@@ -509,6 +511,102 @@ def _patch_expects_arguments_memo() -> None:
     logger.debug('expects_arguments memo patch applied (NiceGUI %s)', _NV)
 
 
+# NiceGUI's own ``_on_handshake``, kept by ``_patch_handshake_counter`` (tests compare against it).
+_nicegui_on_handshake = None
+_HANDSHAKE_CATEGORIES = ('accepted', 'unknown_client', 'refused_other')
+_HANDSHAKE_STATS = {name: {'count': 0, 'first': None, 'last': None} for name in _HANDSHAKE_CATEGORIES}
+_HANDSHAKE_STATS['burst_warnings'] = 0
+_UNKNOWN_CLIENT_RECENT = collections.deque()  # timestamps of unknown_client refusals in the last minute
+_HANDSHAKE_BURST_WINDOW_S = 60.0
+_HANDSHAKE_BURST_THRESHOLD = 30  # more than this many unknown clients in a minute is a reload burst
+_handshake_burst_warned_at = 0.0
+
+
+def _record_handshake(category: str) -> None:
+    global _handshake_burst_warned_at
+    now = time.time()
+    entry = _HANDSHAKE_STATS[category]
+    entry['count'] += 1
+    entry['last'] = now
+    if entry['first'] is None:
+        entry['first'] = now
+    if category != 'unknown_client':
+        return
+    _UNKNOWN_CLIENT_RECENT.append(now)
+    while _UNKNOWN_CLIENT_RECENT and _UNKNOWN_CLIENT_RECENT[0] < now - _HANDSHAKE_BURST_WINDOW_S:
+        _UNKNOWN_CLIENT_RECENT.popleft()
+    if (len(_UNKNOWN_CLIENT_RECENT) > _HANDSHAKE_BURST_THRESHOLD
+            and now - _handshake_burst_warned_at >= _HANDSHAKE_BURST_WINDOW_S):
+        _handshake_burst_warned_at = now
+        _HANDSHAKE_STATS['burst_warnings'] += 1
+        logger.warning('reload burst: %d handshakes from unknown clients in the last minute '
+                       '(open tabs reloading after a restart; web/static/js/reconnect_backoff.js spreads them)',
+                       len(_UNKNOWN_CLIENT_RECENT))
+
+
+def _handshake_stats() -> dict:
+    """A snapshot for ``/_internal/memstat`` (registered as ``handshakes``)."""
+    snapshot = {name: dict(_HANDSHAKE_STATS[name]) for name in _HANDSHAKE_CATEGORIES}
+    snapshot['burst_warnings'] = _HANDSHAKE_STATS['burst_warnings']
+    cutoff = time.time() - _HANDSHAKE_BURST_WINDOW_S
+    snapshot['unknown_client_last_minute'] = sum(1 for t in _UNKNOWN_CLIENT_RECENT if t >= cutoff)
+    return snapshot
+
+
+def _patch_handshake_counter() -> None:
+    """Count the handshakes NiceGUI accepts and refuses, without changing one.
+
+    After a restart every open tab reconnects with a client id the new process
+    never had, and ``_on_handshake`` refuses it (the tab then reloads: see
+    web/reconnect_backoff.py). Nothing recorded how many, so a reload storm was
+    visible only as load. The wrapper is transparent -- same bool, same
+    exceptions, same ``Client`` state -- and counts ``accepted``,
+    ``unknown_client`` (``Client.instances`` has no such id) and
+    ``refused_other`` (``accept_handshake`` said no), with first/last times;
+    more than 30 unknown clients in a minute logs ONE "reload burst" warning.
+    Rebinding the module global covers the implicit path (``_on_connect`` looks
+    ``_on_handshake`` up at call time); ``sio.on('handshake', ...)`` replaces the
+    explicit one. Snapshot: ``web.api.get_runtime_cache_stats()['handshakes']``.
+    tests/test_handshake_counter.py
+    """
+    if _NV > _PATCH_AUDIT_THRESHOLD:
+        logger.warning('Handshake counter patch skipped: NiceGUI %s exceeds audited %s',
+                       _NV, _PATCH_AUDIT_THRESHOLD)
+        return
+
+    import nicegui.nicegui as _server
+    from nicegui import core
+    from nicegui.client import Client
+
+    global _nicegui_on_handshake
+    current = _server._on_handshake
+    if getattr(current, '_genizah_handshake_counter', False):
+        return
+    _nicegui_on_handshake = current
+
+    @functools.wraps(current)
+    async def _counted_handshake(sid, data):
+        client_id = data.get('client_id') if isinstance(data, dict) else None
+        known = Client.instances.get(client_id) is not None
+        try:
+            accepted = await current(sid, data)
+        except BaseException:
+            _record_handshake('refused_other')
+            raise
+        _record_handshake('accepted' if accepted else ('refused_other' if known else 'unknown_client'))
+        return accepted
+
+    _counted_handshake._genizah_handshake_counter = True
+    _server._on_handshake = _counted_handshake
+    core.sio.on('handshake', _counted_handshake)
+    try:
+        from web.api import register_runtime_cache_stats
+        register_runtime_cache_stats('handshakes', _handshake_stats)
+    except Exception as e:  # the counter still counts; only /_internal/memstat misses it
+        logger.warning('Handshake counter stats not registered: %s', e)
+    logger.debug('Handshake counter patch applied (NiceGUI %s)', _NV)
+
+
 def apply_all_patches() -> None:
     """Apply all NiceGUI monkey-patches. Call once before ui.run().
 
@@ -523,6 +621,7 @@ def apply_all_patches() -> None:
         ('Session-less 404', _patch_sessionless_404),
         ('httpx SSL context', _patch_httpx_ssl_context),
         ('expects_arguments memo', _patch_expects_arguments_memo),
+        ('Handshake counter', _patch_handshake_counter),
     ]:
         try:
             fn()

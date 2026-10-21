@@ -1274,6 +1274,7 @@ Partial entry: the filter-state → read paths only, not the whole surface.
 - **Function** `_patch_sessionless_404` — a 404 without a session (stale `/_nicegui/<old version>/...`, missing `/static` on 3.8) gets FastAPI's JSON 404, not NiceGUI's HTML page in a session-less `Client` that broke `prune_user_storage` for 60 s (2026-10-20)
 - **Function** `_patch_httpx_ssl_context` — httpx 0.28: the default SSL context is built from the certifi bundle read once (`cadata`), not re-read per client; a signed-in supabase client build went 1.56 s -> 0.17 s locally (2026-10-20)
 - **Function** `_patch_expects_arguments_memo` — NiceGUI 3.18: `helpers.expects_arguments` (an `inspect.signature` per call, asked for the Classes/Style/Props change handler of every element built and for every event handler) is remembered per function for bound methods, keyed by `__func__`; plain functions and lambdas pass through so no closure is kept alive. It was 31% of a 1,204-element build on the dev box (2026-10-21)
+- **Function** `_patch_handshake_counter` — a transparent wrapper over `nicegui.nicegui._on_handshake` (module global for the implicit path, `sio.on('handshake')` for the explicit one) counting `accepted` / `unknown_client` / `refused_other` with first/last times; `/_internal/memstat` `handshakes`; more than 30 unknown clients in a minute logs one "reload burst" warning (2026-10-21)
 
 ## web/translations.py
 
@@ -1302,6 +1303,13 @@ User-perceived latency, measured in the browser (PostHog `ux_timing`, 2026-10-20
 - **Function** `pending_wait_ms` — per-workflow time the browser keeps a start (a search: `WEB_SEARCH_TIME_LIMIT` + 30 s; others 60 s)
 - **Constant** `WORKFLOWS` / `OUTCOMES` — the registry; triggers are elements tagged `data-ux=<workflow>` (`data-ux-enter` for Enter)
 - **Function** `head_html` — the `<head>` snippet, appended to `POSTHOG_SCRIPT` (web/main.py)
+
+## web/reconnect_backoff.py
+
+A website restart must not reload every open tab at once (2026-10-21). Browser side: `web/static/js/reconnect_backoff.js`, inlined in `<head>` before the deferred socket.io.min.js; env: `RECONNECT_BACKOFF_ENABLED`, `RECONNECT_BACKOFF_BASE_MS`, `RECONNECT_BACKOFF_CAP_MS`, `RECONNECT_DELAY_MAX_MS`.
+- **Function** `head_html` — `window.GS_RECONNECT` config, then the script inlined (never a `src` with `defer`); `''` when switched off. Added once for every page with `ui.add_head_html(..., shared=True)` in web/main.py
+- **Function** `enabled` / `config` — the switch (independent of `POSTHOG_API_KEY`) and the three numbers the browser reads
+- **Script** `reconnect_backoff.js` — an accessor on `window.io` wraps socket.io's `io(url, opts)`: merges `reconnectionDelay`/`reconnectionDelayMax`/`randomizationFactor` (caller keys win) and delays NiceGUI's `connect_error` handler for "Implicit handshake failed" and "timeout" by `base * 2^n`, jittered x0.5-1.5 (n: consecutive reloads in `sessionStorage['gs_reload_n']`, reset after 60 s connected); a hidden tab waits for `visibilitychange`; other errors pass through; `posthog.capture('reload_scheduled', ...)` before the deferred handler
 
 ## web/ai_listings.py
 
