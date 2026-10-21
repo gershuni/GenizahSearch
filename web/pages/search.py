@@ -3174,25 +3174,36 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         if list_options:
                             ui.button(tr('Back'), on_click=back_to_list_selection).props('flat')
 
-                        async def create_and_add_all():
-                            name = new_list_name.value.strip()
-                            if not name:
-                                ui.notify(tr('Please enter a list name'), type='warning')
-                                return
+                        adding = {'busy': False}  # a bulk add is in flight (see create_and_add_all)
 
-                            from web.auth_state import GlobalAuthState
-                            if not GlobalAuthState.is_logged_in():
-                                # The session ended while the dialog was open.
-                                ui.notify(tr('Please log in to access lists'), type='warning')
+                        async def create_and_add_all():
+                            # One bulk add at a time: the insert runs off the loop, so a second click
+                            # would otherwise run while the first is in flight and add the batch twice
+                            # (list_items has no unique key). Shared with add_all below.
+                            if adding['busy']:
                                 return
-                            new_list_id = state.lists_mgr.create_list_sync(name, color=selected_color['value'])
-                            if not new_list_id:
-                                ui.notify(tr('Failed to create list'), type='negative')
-                                return
-                            ui.notify(f"{tr('List created')}: {name}", type='positive')
-                            sys_ids = [res.get('display', {}).get('id') for res in selected_results]
-                            if await _bulk_add_items(state.lists_mgr, sys_ids, new_list_id):
-                                dialog.close()
+                            adding['busy'] = True
+                            try:
+                                name = new_list_name.value.strip()
+                                if not name:
+                                    ui.notify(tr('Please enter a list name'), type='warning')
+                                    return
+
+                                from web.auth_state import GlobalAuthState
+                                if not GlobalAuthState.is_logged_in():
+                                    # The session ended while the dialog was open.
+                                    ui.notify(tr('Please log in to access lists'), type='warning')
+                                    return
+                                new_list_id = state.lists_mgr.create_list_sync(name, color=selected_color['value'])
+                                if not new_list_id:
+                                    ui.notify(tr('Failed to create list'), type='negative')
+                                    return
+                                ui.notify(f"{tr('List created')}: {name}", type='positive')
+                                sys_ids = [res.get('display', {}).get('id') for res in selected_results]
+                                if await _bulk_add_items(state.lists_mgr, sys_ids, new_list_id):
+                                    dialog.close()
+                            finally:
+                                adding['busy'] = False
 
                         ui.button(tr('Create and Add'), on_click=create_and_add_all).classes('btn-primary')
 
@@ -3201,18 +3212,24 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
 
                     async def add_all():
-                        if not list_options or creating_new_list['active']:
+                        if adding['busy']:  # one bulk add at a time (see create_and_add_all)
                             return
+                        adding['busy'] = True
+                        try:
+                            if not list_options or creating_new_list['active']:
+                                return
 
-                        if selected_list.value == '__new__':
-                            form_container.set_visibility(False)
-                            new_list_container.set_visibility(True)
-                            creating_new_list['active'] = True
-                            return
+                            if selected_list.value == '__new__':
+                                form_container.set_visibility(False)
+                                new_list_container.set_visibility(True)
+                                creating_new_list['active'] = True
+                                return
 
-                        sys_ids = [res.get('display', {}).get('id') for res in selected_results]
-                        if await _bulk_add_items(state.lists_mgr, sys_ids, selected_list.value):
-                            dialog.close()
+                            sys_ids = [res.get('display', {}).get('id') for res in selected_results]
+                            if await _bulk_add_items(state.lists_mgr, sys_ids, selected_list.value):
+                                dialog.close()
+                        finally:
+                            adding['busy'] = False
 
                     add_btn = ui.button(tr('Add All'), on_click=add_all).classes('btn-primary')
                     if not list_options:

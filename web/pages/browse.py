@@ -1834,6 +1834,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
         client = get_user_client()
         sent = (state.edit_text, state.edit_notes)  # what this write carries
+        load_gen = _load_generation['value']  # the page this draft belongs to
         if state.draft_id:
             # Update existing draft
             result = await run.io_bound(update_correction, state.draft_id, {
@@ -1868,6 +1869,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                           type='negative', timeout=10000)
             else:
                 ui.notify(error_msg, type='negative')
+        elif load_gen != _load_generation['value']:
+            # The reader moved to another page while the write ran: the draft is
+            # saved, but its id must not become the new page's draft (a later
+            # save would overwrite this draft with the other page's text).
+            ui.notify(tr('Draft saved'), type='positive')
         else:
             # Text typed while the write ran is not in the draft: say "Saved"
             # only when the editor still holds what was sent.

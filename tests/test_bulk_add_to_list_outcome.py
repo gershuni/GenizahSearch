@@ -101,6 +101,23 @@ def test_bulk_add_is_async_and_awaits_the_batched_manager_write():
             f'{closure} calls _bulk_add_items without awaiting it')
 
 
+@pytest.mark.parametrize('closure', ['add_all', 'create_and_add_all'])
+def test_a_second_click_during_a_bulk_add_adds_nothing(closure):
+    """The insert runs off the loop now, so a second click on Add All / Create and
+    Add would run while the first is in flight and insert the batch twice
+    (list_items has no unique key; Codex on #430). Both handlers share one
+    in-flight flag: checked first, set before the await, cleared in a finally."""
+    fn = _bulk_add_closures()[closure]
+    first = fn.body[0]
+    assert (isinstance(first, ast.If) and "adding['busy']" in ast.unparse(first.test)
+            and isinstance(first.body[0], ast.Return)), f'{closure} does not start by refusing a second click'
+    tries = [n for n in ast.walk(fn) if isinstance(n, ast.Try) and n.finalbody]
+    assert tries and any("adding['busy'] = False" in ast.unparse(stmt)
+                         for t in tries for stmt in t.finalbody), f'{closure} never clears the flag in a finally'
+    guarded = [t for t in tries if _calls(t, '_bulk_add_items')]
+    assert guarded, f'{closure} awaits the bulk add outside the guarded block'
+
+
 def _parented_calls(fn, name):
     parents = {}
     for node in ast.walk(fn):

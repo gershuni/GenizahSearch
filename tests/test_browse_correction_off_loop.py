@@ -330,6 +330,33 @@ def test_text_typed_during_a_draft_save_is_not_marked_saved(editor):
     assert state.draft_saved is False, 'text that is not in the draft was shown as Saved'
 
 
+def test_a_draft_that_lands_after_a_page_turn_does_not_become_the_new_pages_draft(editor):
+    """Save Draft, then a page turn while the write runs (Codex on #430): the
+    old draft's id must not land in the state of the page now shown, or the
+    next save would overwrite that draft with the other page's text."""
+    editor['delay'] = 0.3
+
+    async def _run():
+        client, state = await editor['open_in_edit_mode']()
+        save = _handler(client, 'handle_save_draft')
+        load_page = _load_page_of(client)
+
+        async def turn_page():
+            await asyncio.sleep(0.1)
+            await load_page(direction=1)
+
+        with client:
+            await asyncio.gather(save(), turn_page())
+        return state
+
+    state = asyncio.run(_run())
+    assert [c['helper'] for c in editor['calls']] == ['create_correction'], editor['calls']
+    assert state.current_page.p_num == 2
+    assert state.draft_id is None, "the previous page's draft id became the new page's draft"
+    assert state.draft_saved is False
+    assert 'positive' in [kind for _m, kind in editor['notes']], 'the save itself succeeded and says so'
+
+
 def test_a_failed_save_leaves_the_next_click_free_to_write(editor):
     editor['answer'] = None
 

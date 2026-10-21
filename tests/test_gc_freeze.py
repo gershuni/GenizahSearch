@@ -424,14 +424,18 @@ def test_objgraph_reports_the_freeze_count_and_unfreezes_and_refreezes(monkeypat
         body = call(action='backrefs', target_class='NoSuchClassAnywhere')
         assert body['total_count'] == 0 and 'gc_freeze_count' in body
 
+        # Compare the endpoint's own snapshot only: a frozen object can still be
+        # freed by its refcount afterwards (the endpoint's locals, a rebound
+        # variable here), so the live count may already be lower (Codex on #430).
         refrozen = call(action='refreeze')
         assert refrozen['action'] == 'refreeze'
-        assert refrozen['objects_moved'] == refrozen['gc_freeze_count'] == gc.get_freeze_count() > 0
+        assert refrozen['objects_moved'] == refrozen['gc_freeze_count'] > 0
+        assert 0 < gc.get_freeze_count() <= refrozen['gc_freeze_count']
         assert gc_freeze.stats()['unfrozen_for_diagnostics'] is False
 
         unfrozen = call(action='unfreeze')
         assert unfrozen['action'] == 'unfreeze'
-        assert unfrozen['objects_moved'] == refrozen['gc_freeze_count']
+        assert 0 < unfrozen['objects_moved'] <= refrozen['gc_freeze_count']
         assert unfrozen['gc_freeze_count'] == 0 == gc.get_freeze_count()
         assert gc_freeze.stats()['unfrozen_for_diagnostics'] is True
     finally:
