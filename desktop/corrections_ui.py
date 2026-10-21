@@ -26,8 +26,9 @@ except ImportError:
 
 from desktop.corrections_client import (
     CorrectionsClient, get_corrections_client,
-    Correction, Comment, FeedItem
+    Correction, Comment, FeedItem, account_display_name,
 )
+from desktop.supabase_corrections_client import CHECK_EMAIL_MESSAGE
 
 
 def safe_date_str(date_value, default: str = "") -> str:
@@ -165,7 +166,7 @@ class LoginDialog(QDialog):
             self.login_success.emit(self.client.current_user)
             self.accept()
         else:
-            QMessageBox.warning(self, tr("Login Failed"), message)
+            QMessageBox.warning(self, tr("Login Failed"), tr(message))
             self.btn_login.setEnabled(True)
             self.btn_login.setText(tr("Login"))
 
@@ -299,7 +300,11 @@ class RegisterDialog(QDialog):
         )
 
         if success:
-            QMessageBox.information(self, tr("Success"), tr("Account created! You can now login."))
+            if message == CHECK_EMAIL_MESSAGE:
+                # The account waits for its confirmation link: no sign-in yet.
+                QMessageBox.information(self, tr("Create Account"), tr(CHECK_EMAIL_MESSAGE).format(email=email))
+            else:
+                QMessageBox.information(self, tr("Success"), tr("Account created! You can now login."))
             self.accept()
         else:
             QMessageBox.warning(self, tr("Registration Failed"), message)
@@ -826,7 +831,8 @@ class CorrectionsStatusWidget(QWidget):
         """Update the status display"""
         if self.client.is_logged_in() and self.client.current_user:
             user = self.client.current_user
-            self.user_label.setText(f"⭐ {user.reputation_score} | {user.username}")
+            name = account_display_name(user) or tr("User")
+            self.user_label.setText(f"⭐ {user.reputation_score} | {name}")
             self.login_btn.setText(tr("Logout"))
             self.login_btn.clicked.disconnect()
             self.login_btn.clicked.connect(self.do_logout)

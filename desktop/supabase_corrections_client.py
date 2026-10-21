@@ -69,6 +69,19 @@ from shared.supabase_provider import SUPABASE_URL, SUPABASE_ANON_KEY
 # defense-in-depth; this is the load-bearing gate.
 from shared.synthetic_sys_id import is_synthetic_sys_id
 
+# Sign-up and sign-in answers under email confirmation (production requires
+# it). The English keys of the website's approved messages: the dialogs
+# translate them, and fill in {email}.
+CHECK_EMAIL_MESSAGE = (
+    'Check your inbox at {email} (and the spam folder). A new account gets a '
+    'confirmation link: open it, then sign in here. If this address already has '
+    'an account, sign in, or use "Forgot password?".'
+)
+EMAIL_NOT_CONFIRMED_MESSAGE = (
+    'Your email address is not confirmed yet. Open the confirmation link we sent you '
+    '(check the spam folder too), then sign in.'
+)
+
 
 def _sanitize_ilike_pattern(value) -> str:
     """Sanitize a user string for interpolation into a PostgREST `.ilike` pattern.
@@ -116,7 +129,7 @@ class Correction:
     corrected_text: str
     status: str
     correction_type: str = "text_correction"
-    author_id: Optional[int] = None
+    author_id: Optional[str] = None  # the author's Supabase auth id (a UUID)
     author_username: Optional[str] = None
     line_number: Optional[int] = None
     char_start: Optional[int] = None
@@ -605,8 +618,8 @@ class SupabaseCorrectionsClient:
             error_msg = str(e).lower()
             if 'invalid login credentials' in error_msg:
                 return False, "Invalid email or password. Please check your credentials and try again."
-            elif 'email not confirmed' in error_msg:
-                return False, "Email not confirmed. Please check your inbox for a confirmation link."
+            elif getattr(e, 'code', None) == 'email_not_confirmed' or 'email not confirmed' in error_msg:
+                return False, EMAIL_NOT_CONFIRMED_MESSAGE
             elif 'user not found' in error_msg:
                 return False, "No account found with this email. Please register first at genizahsearch.com."
             elif 'too many requests' in error_msg or 'rate limit' in error_msg:
@@ -649,6 +662,14 @@ class SupabaseCorrectionsClient:
             })
 
             if response.user:
+                if not getattr(response, 'session', None):
+                    # Production requires email confirmation, so there is no
+                    # session yet and the profile cannot be written from here
+                    # (RLS: its owner only). The new-user trigger has already
+                    # written it from the metadata above. An address that
+                    # already has an account gets this same answer.
+                    return True, CHECK_EMAIL_MESSAGE
+
                 # Update profile with additional info
                 try:
                     client.table('profiles').upsert({
@@ -1077,6 +1098,7 @@ class SupabaseCorrectionsClient:
             original_text=data.get('original_text', ''),
             corrected_text=data.get('corrected_text', ''),
             status=data.get('status', 'pending'),
+            author_id=data.get('author_id'),
             author_username=profiles.get('username'),
             page_number=data.get('page_number'),
             notes=data.get('notes'),

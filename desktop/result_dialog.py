@@ -17,6 +17,7 @@ from genizah_core import (
     load_app_config, save_app_config, tr,
 )
 from desktop.gui_threads import EnrichMetadataThread, PGPSourceWorker
+from desktop.corrections_client import correction_author_key, is_own_correction
 from desktop.corrections_ui import (
     CommentDialog, CommentsViewerDialog, CorrectionsViewerDialog, JoinsDialog,
 )
@@ -1743,7 +1744,8 @@ class ResultDialog(QDialog):
                 if is_current_user:
                     new_user_idx = self.rd_version_combo.count() - 1
                     # Also add the username to tracked set (for matching with corrections)
-                    users_with_versions.add(client.current_user.username)
+                    if client.current_user.username:
+                        users_with_versions.add(client.current_user.username)
 
                 # Track users who already have versions (to avoid duplicates with corrections)
                 users_with_versions.add(user_name)
@@ -1761,10 +1763,10 @@ class ResultDialog(QDialog):
             for c in corrections:
                 logger.debug("corr id=%s, status=%s, author=%s, page=%s", c.id, c.status, c.author_username, c.page_number)
 
-            # Group by user, keep latest per user
+            # Group by author (by account id: most accounts have no username), keep latest per author
             corrections_by_user = {}
             for corr in page_corrections:
-                user_key = corr.author_username or f"user_{corr.author_id}"
+                user_key = correction_author_key(corr)
                 if user_key not in corrections_by_user:
                     corrections_by_user[user_key] = corr
                 else:
@@ -1773,7 +1775,6 @@ class ResultDialog(QDialog):
                         corrections_by_user[user_key] = corr
 
             # Determine user permissions for viewing corrections
-            current_username = client.current_user.username if client.current_user else None
             is_reviewer_or_admin = client.current_user and client.current_user.role in ('reviewer', 'editor', 'admin')
 
             for corr in corrections_by_user.values():
@@ -1781,7 +1782,7 @@ class ResultDialog(QDialog):
                 status = corr.status
 
                 # Skip if user already has a version entry (avoid duplicates)
-                if user_name in users_with_versions:
+                if corr.author_username and corr.author_username in users_with_versions:
                     logger.debug("correction: user=%s SKIPPED (has version)", user_name)
                     continue
 
@@ -1789,16 +1790,16 @@ class ResultDialog(QDialog):
                 # - Authors can see their own corrections (any status)
                 # - Reviewers/admins can see all corrections
                 # - Regular users can only see approved corrections from others
-                is_own_correction = current_username and user_name == current_username
+                own = is_own_correction(corr, client.current_user)
 
                 if status == 'rejected':
                     # Rejected corrections: only visible to author or admin
-                    if not is_own_correction and not is_reviewer_or_admin:
+                    if not own and not is_reviewer_or_admin:
                         logger.debug("correction: user=%s SKIPPED (rejected, not authorized)", user_name)
                         continue
                 elif status in ('draft', 'pending'):
                     # Draft/Pending: only visible to author or reviewer/admin
-                    if not is_own_correction and not is_reviewer_or_admin:
+                    if not own and not is_reviewer_or_admin:
                         logger.debug("correction: user=%s SKIPPED (%s, not authorized)", user_name, status)
                         continue
 
@@ -1832,7 +1833,7 @@ class ResultDialog(QDialog):
                 })
 
                 # Check if this is the current user's correction
-                if client.current_user and user_name == client.current_user.username:
+                if own:
                     new_user_idx = self.rd_version_combo.count() - 1
 
         except Exception as e:
