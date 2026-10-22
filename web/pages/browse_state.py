@@ -10,6 +10,7 @@ and pure logic.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Optional, List, Dict
 
@@ -48,6 +49,9 @@ class BrowseState:
         self.draft_saved: bool = False
         self.draft_id: Optional[str] = None
         self.edit_loading: bool = False
+        # One correction or draft write at a time (the write runs off the loop,
+        # so a second click would otherwise start a second write: two drafts).
+        self.correction_lock = asyncio.Lock()
         self.error_message: Optional[str] = None
         self.fullscreen_edit: bool = False  # Fullscreen edit mode
         # PGP transcription data

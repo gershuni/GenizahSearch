@@ -6,13 +6,17 @@ called before ``ui.run()`` / NiceGUI initialises its routes.
 
 from __future__ import annotations
 
+import collections
 import functools
+import inspect
 import json
 import logging
 import mimetypes
 import os
 import re
 import ssl
+import time
+import types
 import uuid
 from base64 import b64decode
 
@@ -452,6 +456,175 @@ def _patch_httpx_ssl_context() -> None:
     logger.debug('httpx SSL context patch applied (httpx %s)', httpx.__version__)
 
 
+# NiceGUI asks ``helpers.expects_arguments`` -- an ``inspect.signature`` per call --
+# for the change handler of the Classes, Style and Props of every element it builds
+# (observables.py) and for every event handler it registers. Those three handlers
+# are bound methods of the same three functions (``Classes._update`` and friends),
+# so the answer never changes; on 3.18 the question was 31% of a 1,204-element
+# build on the dev box. Kept until NiceGUI answers it once itself.
+_nicegui_expects_arguments = None  # NiceGUI's own, kept by the patch (tests compare against it)
+_expects_arguments_by_function: dict = {}
+
+
+def _memoizable(key) -> bool:
+    """Only a module-level function: kept alive by its module anyway.
+
+    A function defined inside a page (a class built per page build, a method
+    closing over that page's elements) is new on every build; remembering it
+    would keep one entry, and the elements it reaches, per page forever.
+    """
+    return (isinstance(key, types.FunctionType) and key.__closure__ is None
+            and '<locals>' not in key.__qualname__)
+
+
+def _expects_arguments_memo(func) -> bool:
+    """``helpers.expects_arguments``, remembered per function for BOUND METHODS only.
+
+    A bound method's signature is its function's without ``self``, the same for
+    every instance, so the answer is kept by ``func.__func__`` when that is a
+    module-level function (``_memoizable``). Plain functions and lambdas pass
+    straight through: keeping them would keep their closures, and the elements
+    those capture, alive.
+    """
+    if inspect.ismethod(func):
+        key = func.__func__
+        try:
+            return _expects_arguments_by_function[key]
+        except KeyError:
+            pass
+        except TypeError:  # an unhashable callable bound as a method: no memo
+            return _nicegui_expects_arguments(func)
+        result = _nicegui_expects_arguments(func)
+        if _memoizable(key):
+            _expects_arguments_by_function[key] = result
+        return result
+    return _nicegui_expects_arguments(func)
+
+
+def _patch_expects_arguments_memo() -> None:
+    """Answer NiceGUI's per-element signature question once per function.
+
+    Callers resolve the name through the package namespace (``helpers.expects_arguments``
+    in observables.py, events.py, event.py, client.py and page.py), so the package
+    attribute is what is rebound; ``nicegui.helpers.functions`` keeps its own.
+    """
+    global _nicegui_expects_arguments
+    if _NV > _PATCH_AUDIT_THRESHOLD:
+        logger.warning(
+            'expects_arguments memo patch skipped: NiceGUI %s exceeds audited %s',
+            _NV, _PATCH_AUDIT_THRESHOLD,
+        )
+        return
+    from nicegui import helpers
+
+    if helpers.expects_arguments is _expects_arguments_memo:
+        return
+    _nicegui_expects_arguments = helpers.expects_arguments
+    helpers.expects_arguments = _expects_arguments_memo
+    logger.debug('expects_arguments memo patch applied (NiceGUI %s)', _NV)
+
+
+# NiceGUI's own ``_on_handshake``, kept by ``_patch_handshake_counter`` (tests compare against it).
+_nicegui_on_handshake = None
+_HANDSHAKE_CATEGORIES = ('accepted', 'unknown_client', 'refused_other')
+_HANDSHAKE_STATS = {name: {'count': 0, 'first': None, 'last': None} for name in _HANDSHAKE_CATEGORIES}
+_HANDSHAKE_STATS['burst_warnings'] = 0
+# Timestamps of unknown_client refusals in the last minute. Bounded: only "more than the
+# threshold" matters, and spammed explicit handshakes must not grow it without limit.
+_UNKNOWN_CLIENT_RECENT = collections.deque(maxlen=4096)
+_HANDSHAKE_BURST_WINDOW_S = 60.0
+_HANDSHAKE_BURST_THRESHOLD = 30  # more than this many unknown clients in a minute is a reload burst
+_handshake_burst_warned_at = 0.0
+
+
+def _record_handshake(category: str) -> None:
+    global _handshake_burst_warned_at
+    now = time.time()
+    entry = _HANDSHAKE_STATS[category]
+    entry['count'] += 1
+    entry['last'] = now
+    if entry['first'] is None:
+        entry['first'] = now
+    if category != 'unknown_client':
+        return
+    _UNKNOWN_CLIENT_RECENT.append(now)
+    while _UNKNOWN_CLIENT_RECENT and _UNKNOWN_CLIENT_RECENT[0] < now - _HANDSHAKE_BURST_WINDOW_S:
+        _UNKNOWN_CLIENT_RECENT.popleft()
+    if (len(_UNKNOWN_CLIENT_RECENT) > _HANDSHAKE_BURST_THRESHOLD
+            and now - _handshake_burst_warned_at >= _HANDSHAKE_BURST_WINDOW_S):
+        _handshake_burst_warned_at = now
+        _HANDSHAKE_STATS['burst_warnings'] += 1
+        logger.warning('reload burst: %d handshakes from unknown clients in the last minute '
+                       '(open tabs reloading after a restart; web/static/js/reconnect_backoff.js spreads them)',
+                       len(_UNKNOWN_CLIENT_RECENT))
+
+
+def _handshake_stats() -> dict:
+    """A snapshot for ``/_internal/memstat`` (registered as ``handshakes``)."""
+    snapshot = {name: dict(_HANDSHAKE_STATS[name]) for name in _HANDSHAKE_CATEGORIES}
+    snapshot['burst_warnings'] = _HANDSHAKE_STATS['burst_warnings']
+    cutoff = time.time() - _HANDSHAKE_BURST_WINDOW_S
+    # memstat calls this from a worker thread while the loop appends: copy the deque in
+    # one C-level step first (iterating it directly raises "deque mutated during iteration").
+    recent = tuple(_UNKNOWN_CLIENT_RECENT)
+    snapshot['unknown_client_last_minute'] = sum(1 for t in recent if t >= cutoff)
+    return snapshot
+
+
+def _patch_handshake_counter() -> None:
+    """Count the handshakes NiceGUI accepts and refuses, without changing one.
+
+    After a restart every open tab reconnects with a client id the new process
+    never had, and ``_on_handshake`` refuses it (the tab then reloads: see
+    web/reconnect_backoff.py). Nothing recorded how many, so a reload storm was
+    visible only as load. The wrapper is transparent -- same bool, same
+    exceptions, same ``Client`` state -- and counts ``accepted``,
+    ``unknown_client`` (``Client.instances`` has no such id) and
+    ``refused_other`` (``accept_handshake`` said no), with first/last times;
+    more than 30 unknown clients in a minute logs ONE "reload burst" warning.
+    Rebinding the module global covers the implicit path (``_on_connect`` looks
+    ``_on_handshake`` up at call time); ``sio.on('handshake', ...)`` replaces the
+    explicit one. Snapshot: ``web.api.get_runtime_cache_stats()['handshakes']``.
+    tests/test_handshake_counter.py
+    """
+    if _NV > _PATCH_AUDIT_THRESHOLD:
+        logger.warning('Handshake counter patch skipped: NiceGUI %s exceeds audited %s',
+                       _NV, _PATCH_AUDIT_THRESHOLD)
+        return
+
+    import nicegui.nicegui as _server
+    from nicegui import core
+    from nicegui.client import Client
+
+    global _nicegui_on_handshake
+    current = _server._on_handshake
+    if getattr(current, '_genizah_handshake_counter', False):
+        return
+    _nicegui_on_handshake = current
+
+    @functools.wraps(current)
+    async def _counted_handshake(sid, data):
+        client_id = data.get('client_id') if isinstance(data, dict) else None
+        known = Client.instances.get(client_id) is not None
+        try:
+            accepted = await current(sid, data)
+        except BaseException:
+            _record_handshake('refused_other')
+            raise
+        _record_handshake('accepted' if accepted else ('refused_other' if known else 'unknown_client'))
+        return accepted
+
+    _counted_handshake._genizah_handshake_counter = True
+    _server._on_handshake = _counted_handshake
+    core.sio.on('handshake', _counted_handshake)
+    try:
+        from web.api import register_runtime_cache_stats
+        register_runtime_cache_stats('handshakes', _handshake_stats)
+    except Exception as e:  # the counter still counts; only /_internal/memstat misses it
+        logger.warning('Handshake counter stats not registered: %s', e)
+    logger.debug('Handshake counter patch applied (NiceGUI %s)', _NV)
+
+
 def apply_all_patches() -> None:
     """Apply all NiceGUI monkey-patches. Call once before ui.run().
 
@@ -465,6 +638,8 @@ def apply_all_patches() -> None:
         ('binding.remove', _patch_binding_remove),
         ('Session-less 404', _patch_sessionless_404),
         ('httpx SSL context', _patch_httpx_ssl_context),
+        ('expects_arguments memo', _patch_expects_arguments_memo),
+        ('Handshake counter', _patch_handshake_counter),
     ]:
         try:
             fn()

@@ -1732,12 +1732,23 @@ def create_catalog_browse_page(
             ).props('flat dense no-caps disable color=secondary').classes('text-sm')
             parallels_btn_ref['ref'] = pb
 
+            # Narrow screens: the sidebar is hidden under 768px and this button
+            # shows it (common.css `.catalog-sidebar`); wider screens never see
+            # the button. Before this the 280px sidebar left the results about
+            # 60px wide on a phone (owner, 2026-10-22).
+            ui.button(
+                tr('Filters'), icon='tune',
+                on_click=lambda: sidebar_ref['ref'].classes(toggle='is-open'),
+            ).props(f'flat dense no-caps color=primary aria-label="{tr("Filters")}"').classes(
+                'text-sm catalog-filters-toggle'
+            )
+
         # ── Two-column layout ──────────────────────────────────────
-        with ui.row().classes('w-full gap-0 flex-nowrap items-start'):
+        with ui.row().classes('w-full gap-0 flex-nowrap items-start catalog-layout'):
 
             # ── Sidebar ────────────────────────────────────────────
             sidebar_col = ui.column().classes(
-                'w-72 min-w-[280px] shrink-0 pr-4'
+                'w-72 min-w-[280px] shrink-0 pr-4 catalog-sidebar'
             ).style('position: sticky; top: 70px; align-self: flex-start;')
             sidebar_ref['ref'] = sidebar_col
 

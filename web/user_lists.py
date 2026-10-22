@@ -23,11 +23,13 @@ from typing import Optional, Dict, List
 from dotenv import load_dotenv
 load_dotenv()
 
+from nicegui import run
+
 from web.auth_state import GlobalAuthState
 from web.supabase_client import (
-    get_user_lists, create_list as sb_create_list,
+    get_user_client, get_user_lists, create_list as sb_create_list,
     update_list as sb_update_list, delete_list as sb_delete_list,
-    get_list_items, add_list_item, update_list_item, delete_list_item,
+    get_list_items, add_list_item, add_list_items, update_list_item, delete_list_item,
     get_recent_items, add_recent_item, get_projects, create_project as sb_create_project,
     update_project as sb_update_project, delete_project as sb_delete_project
 )
@@ -146,7 +148,8 @@ class UserListsManager:
             'all_tags': []
         }
 
-    def _get_cached_data(self) -> Dict:
+    def _get_cached_data(self, *, client=None, user_id: Optional[str] = None,
+                         is_authenticated: Optional[bool] = None) -> Dict:
         """Fetch lists+projects data fresh from Supabase on every call (Phase 89).
 
         Previously this method memoized the result in a (user_id, timestamp, data)
@@ -162,17 +165,34 @@ class UserListsManager:
         None (edge case during token rotation / partial auth state), return
         default data rather than calling Supabase with user_id=None which
         would behave like an unfiltered query. See REVIEWS.md R2.
+
+        The three keyword-only parameters (2026-10-21) make this read safe in a
+        `run.io_bound` worker, exactly as on `get_items_in_list_sync`: a worker
+        cannot read the visitor's storage, so the auth decision, the user id and
+        the client are resolved on the loop (`_worker_context`) and passed in.
+        All three default to None = unchanged behaviour; `client` is forwarded
+        to the two readers only when given, so a caller (or a test fake) that
+        takes a user id alone still works.
         """
-        if not self.is_authenticated:
+        authed = self.is_authenticated if is_authenticated is None else is_authenticated
+        if not authed:
             return self._get_default_data()
 
-        user_id = self.user_id
+        # An explicit `is_authenticated` means the caller resolved auth on the
+        # loop and may be calling from a worker, where `self.user_id` reads the
+        # visitor's storage and silently answers None: never re-derive it here.
+        if user_id is None and is_authenticated is None:
+            user_id = self.user_id
         if not user_id:
             # R2 defensive guard: never call get_user_lists(None) / get_projects(None).
             return self._get_default_data()
 
-        lists = get_user_lists(user_id)
-        projects = get_projects(user_id)
+        if client is None:
+            lists = get_user_lists(user_id)
+            projects = get_projects(user_id)
+        else:
+            lists = get_user_lists(user_id, client=client)
+            projects = get_projects(user_id, client=client)
 
         data = self._get_default_data()
         data['lists'] = {}
@@ -212,6 +232,45 @@ class UserListsManager:
         """
         pass
 
+    def _worker_context(self):
+        """(authed, user_id, client) for a write that will run in a worker thread.
+
+        Resolved HERE, on the event loop, before the offload. In a
+        `run.io_bound` worker the visitor's storage is unreadable:
+        `self.is_authenticated` reads as logged-out and `get_user_client()`
+        hands back the anonymous client, so the write would be refused by RLS
+        with nothing saying so (see get_items_in_list_sync). The client is
+        built only for a signed-in visitor; anonymous callers get
+        ``(False, None, None)`` and never reach Supabase.
+        """
+        if not self.is_authenticated:
+            return False, None, None
+        return True, self.user_id, get_user_client()
+
+    def _resolve_list_id(self, list_id: str, user_id: str, *, client) -> Optional[int]:
+        """``'default'`` -> the default list's row id (one Supabase read); else ``int(list_id)``.
+
+        Runs in the worker: resolving ``'default'`` is a read. None when the id
+        is not numeric (or no default list exists).
+        """
+        actual_list_id = list_id
+        if list_id == 'default':
+            data = self._get_cached_data(client=client, user_id=user_id, is_authenticated=True)
+            for lid, ldata in data.get('lists', {}).items():
+                if ldata.get('is_default'):
+                    actual_list_id = lid
+                    break
+        try:
+            return int(actual_list_id)
+        except ValueError:
+            return None
+
+    def _meta_for(self, sys_id: str):
+        """(shelfmark, title) for an item, or (None, None) without a metadata manager."""
+        if self.meta_mgr:
+            return self.meta_mgr.get_meta_for_id(sys_id)
+        return None, None
+
     # === List Operations ===
 
     def _get_list_item_count(self, list_id: str) -> int:
@@ -245,6 +304,23 @@ class UserListsManager:
             return lists
         return []
 
+    def _create_list_blocking(self, user_id: str, name: str, color: Optional[str],
+                              project_id: Optional[str], project_id_int: Optional[int],
+                              *, client) -> Dict:
+        """The Supabase part of create_list; runs in a worker thread."""
+        # If in a project, get project color
+        if project_id:
+            data = self._get_cached_data(client=client, user_id=user_id, is_authenticated=True)
+            project = data.get('projects', {}).get(str(project_id), {})
+            color = project.get('color', '#FFD700')
+        return sb_create_list(
+            user_id, name,
+            name_en=name,
+            color=color or '#FFD700',
+            project_id=project_id_int,
+            client=client,
+        )
+
     async def create_list(self, name: str, color: str = None, project_id: str = None) -> Optional[str]:
         """
         Create a new list, optionally inside a project.
@@ -253,24 +329,19 @@ class UserListsManager:
             name: List name
             color: Color (ignored if project_id is set - will inherit from project)
             project_id: Optional project to add list to
-        """
-        if self.is_authenticated:
-            # If in a project, get project color
-            if project_id:
-                data = self._get_cached_data()
-                project = data.get('projects', {}).get(str(project_id), {})
-                color = project.get('color', '#FFD700')
 
-            result = sb_create_list(
-                self.user_id, name,
-                name_en=name,
-                color=color or '#FFD700',
-                project_id=int(project_id) if project_id else None
-            )
-            if result.get('success'):
+        The Supabase round trips (the project colour read, the insert) run off
+        the event loop (2026-10-21); auth and the client are resolved here, on it.
+        """
+        authed, user_id, client = self._worker_context()
+        if authed:
+            project_id_int = int(project_id) if project_id else None
+            result = await run.io_bound(self._create_list_blocking, user_id, name, color,
+                                        project_id, project_id_int, client=client)
+            if result and result.get('success'):
                 self.invalidate_cache()
                 return str(result['list']['id'])
-            LOGGER.error(f"Failed to create list: {result.get('error')}")
+            LOGGER.error(f"Failed to create list: {result.get('error') if result else 'no answer'}")
             return None
         return None
 
@@ -295,8 +366,9 @@ class UserListsManager:
         return None
 
     async def update_list(self, list_id: str, name: str = None, color: str = None) -> bool:
-        """Update a list's properties."""
-        if self.is_authenticated:
+        """Update a list's properties. The write runs off the event loop."""
+        authed, _user_id, client = self._worker_context()
+        if authed:
             data = {}
             if name is not None:
                 data['name'] = name
@@ -309,8 +381,8 @@ class UserListsManager:
             except ValueError:
                 return False
 
-            result = sb_update_list(list_id_int, data)
-            if result.get('success'):
+            result = await run.io_bound(sb_update_list, list_id_int, data, client=client)
+            if result and result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -318,15 +390,17 @@ class UserListsManager:
 
     async def update_list_project(self, list_id: str, project_id: Optional[str]) -> bool:
         """Move a list to a project (or remove from project if project_id is None)."""
-        if self.is_authenticated:
+        authed, _user_id, client = self._worker_context()
+        if authed:
             try:
                 list_id_int = int(list_id)
                 project_id_int = int(project_id) if project_id else None
             except (ValueError, TypeError):
                 return False
 
-            result = sb_update_list(list_id_int, {'project_id': project_id_int})
-            if result.get('success'):
+            result = await run.io_bound(sb_update_list, list_id_int, {'project_id': project_id_int},
+                                        client=client)
+            if result and result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -334,14 +408,15 @@ class UserListsManager:
 
     async def delete_list(self, list_id: str) -> bool:
         """Soft-delete a list (move to trash)."""
-        if self.is_authenticated:
+        authed, _user_id, client = self._worker_context()
+        if authed:
             try:
                 list_id_int = int(list_id)
             except ValueError:
                 return False
 
-            result = sb_delete_list(list_id_int)  # Now does soft delete
-            if result.get('success'):
+            result = await run.io_bound(sb_delete_list, list_id_int, client=client)  # soft delete
+            if result and result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -356,15 +431,16 @@ class UserListsManager:
 
     async def restore_list(self, list_id: str) -> bool:
         """Restore a soft-deleted list from trash."""
-        if self.is_authenticated:
+        authed, _user_id, client = self._worker_context()
+        if authed:
             try:
                 list_id_int = int(list_id)
             except ValueError:
                 return False
 
             from web.supabase_client import restore_list as sb_restore_list
-            result = sb_restore_list(list_id_int)
-            if result.get('success'):
+            result = await run.io_bound(sb_restore_list, list_id_int, client=client)
+            if result and result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -372,14 +448,15 @@ class UserListsManager:
 
     async def permanently_delete_list(self, list_id: str) -> bool:
         """Permanently delete a list (no recovery)."""
-        if self.is_authenticated:
+        authed, _user_id, client = self._worker_context()
+        if authed:
             try:
                 list_id_int = int(list_id)
             except ValueError:
                 return False
 
-            result = sb_delete_list(list_id_int, permanent=True)
-            if result.get('success'):
+            result = await run.io_bound(sb_delete_list, list_id_int, permanent=True, client=client)
+            if result and result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -391,9 +468,12 @@ class UserListsManager:
         None (not 0) for a failure or a signed-out caller, so the page can tell
         a failed Empty Trash from an empty one.
         """
-        if self.is_authenticated:
+        authed, user_id, client = self._worker_context()
+        if authed:
             from web.supabase_client import empty_trash as sb_empty_trash
-            result = sb_empty_trash(self.user_id)
+            result = await run.io_bound(sb_empty_trash, user_id, client=client)
+            if result is None:
+                return None
             if result.get('deleted_count'):
                 self.invalidate_cache()
             if result.get('success'):
@@ -403,40 +483,38 @@ class UserListsManager:
 
     # === Item Operations ===
 
+    def _add_item_blocking(self, user_id: str, sys_id: str, list_id: str, note: str,
+                           tags: Optional[List[str]], fl_id: Optional[str], *, client) -> Dict:
+        """The Supabase part of add_item; runs in a worker thread."""
+        list_id_int = self._resolve_list_id(list_id, user_id, client=client)
+        if list_id_int is None:
+            return {'error': 'Invalid list id'}
+        shelfmark, title = self._meta_for(sys_id)
+        return add_list_item(
+            list_id_int, sys_id,
+            shelfmark=shelfmark,
+            title=title,
+            fl_id=fl_id,
+            note=note,
+            tags=tags,
+            client=client,
+        )
+
     async def add_item(self, sys_id: str, list_id: str = 'default',
                        note: str = '', tags: List[str] = None,
                        source: str = '', fl_id: str = None, img: str = None) -> bool:
-        """Add an item to a list."""
-        if self.is_authenticated:
-            # Find the actual list ID
-            actual_list_id = list_id
-            if list_id == 'default':
-                data = self._get_cached_data()
-                for lid, ldata in data.get('lists', {}).items():
-                    if ldata.get('is_default'):
-                        actual_list_id = lid
-                        break
+        """Add an item to a list. The write (and the 'default' lookup) runs off the loop."""
+        authed, user_id, client = self._worker_context()
+        if authed:
+            if list_id != 'default':
+                try:
+                    int(list_id)
+                except ValueError:
+                    return False
 
-            try:
-                list_id_int = int(actual_list_id)
-            except ValueError:
-                return False
-
-            # Get metadata for the item
-            shelfmark = None
-            title = None
-            if self.meta_mgr:
-                shelfmark, title = self.meta_mgr.get_meta_for_id(sys_id)
-
-            result = add_list_item(
-                list_id_int, sys_id,
-                shelfmark=shelfmark,
-                title=title,
-                fl_id=fl_id,
-                note=note,
-                tags=tags
-            )
-            if result.get('success'):
+            result = await run.io_bound(self._add_item_blocking, user_id, sys_id, list_id, note,
+                                        tags, fl_id, client=client)
+            if result and result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -476,16 +554,58 @@ class UserListsManager:
             return result.get('success', False)
         return False
 
+    def _add_items_blocking(self, user_id: str, sys_ids: List[str], list_id: str, note: str,
+                            tags: Optional[List[str]], fl_id: Optional[str], *, client) -> Dict:
+        """The Supabase part of add_items; runs in a worker thread."""
+        list_id_int = self._resolve_list_id(list_id, user_id, client=client)
+        if list_id_int is None:
+            return {'error': 'Invalid list id'}
+        rows = []
+        for sys_id in sys_ids:
+            shelfmark, title = self._meta_for(sys_id)
+            rows.append({'sys_id': sys_id, 'shelfmark': shelfmark, 'title': title,
+                         'fl_id': fl_id, 'note': note, 'tags': tags})
+        return add_list_items(list_id_int, rows, client=client)
+
+    async def add_items(self, sys_ids, list_id: str = 'default', *, note: str = '',
+                        tags: List[str] = None, fl_id: str = None) -> int:
+        """Add several items to one list in ONE insert; returns the number added.
+
+        The search page's bulk add used to run one `add_item_sync` per item on
+        the event loop (one transatlantic round trip each). Anonymous visitors
+        get 0 with no Supabase call; empty sys_ids are skipped. The insert is
+        all or nothing (`add_list_items`), so the answer is 0 or the number
+        wanted; no answer from the worker (run.io_bound returned None) is 0.
+        """
+        authed, user_id, client = self._worker_context()
+        if not authed:
+            return 0
+        wanted = [s for s in sys_ids if s]
+        if not wanted:
+            return 0
+        if list_id != 'default':
+            try:
+                int(list_id)
+            except ValueError:
+                return 0
+        result = await run.io_bound(self._add_items_blocking, user_id, wanted, list_id, note,
+                                    tags, fl_id, client=client)
+        if result and result.get('success'):
+            self.invalidate_cache()
+            return int(result.get('added') or 0)
+        return 0
+
     async def remove_item_from_list(self, item_id: str, list_id: str) -> bool:
         """Remove an item from a list."""
-        if self.is_authenticated:
+        authed, _user_id, client = self._worker_context()
+        if authed:
             try:
                 item_id_int = int(item_id)
             except ValueError:
                 return False
 
-            result = delete_list_item(item_id_int)
-            if result.get('success'):
+            result = await run.io_bound(delete_list_item, item_id_int, client=client)
+            if result and result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -508,14 +628,15 @@ class UserListsManager:
 
     async def update_item_note(self, item_id: str, note: str, list_id: str = None) -> bool:
         """Update an item's note."""
-        if self.is_authenticated:
+        authed, _user_id, client = self._worker_context()
+        if authed:
             try:
                 item_id_int = int(item_id)
             except ValueError:
                 return False
 
-            result = update_list_item(item_id_int, {'note': note})
-            if result.get('success'):
+            result = await run.io_bound(update_list_item, item_id_int, {'note': note}, client=client)
+            if result and result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -523,14 +644,15 @@ class UserListsManager:
 
     async def update_item_tags(self, item_id: str, tags: List[str], list_id: str = None) -> bool:
         """Update an item's tags."""
-        if self.is_authenticated:
+        authed, _user_id, client = self._worker_context()
+        if authed:
             try:
                 item_id_int = int(item_id)
             except ValueError:
                 return False
 
-            result = update_list_item(item_id_int, {'tags': tags})
-            if result.get('success'):
+            result = await run.io_bound(update_list_item, item_id_int, {'tags': tags}, client=client)
+            if result and result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -682,9 +804,9 @@ class UserListsManager:
             return projects
         return []
 
-    def get_next_project_color(self) -> str:
-        """Get the next available project color from the palette."""
-        projects = self.get_projects()
+    @staticmethod
+    def _next_project_color(projects: List[Dict]) -> str:
+        """The first palette colour no project in ``projects`` uses (cycling when all are used)."""
         used_colors = {p.get('color') for p in projects}
 
         for color in PROJECT_COLORS:
@@ -694,14 +816,27 @@ class UserListsManager:
         # Cycle if all colors used
         return PROJECT_COLORS[len(projects) % len(PROJECT_COLORS)]
 
-    async def create_project(self, name: str, color: str = None) -> Optional[str]:
-        """Create a new project with auto-assigned color if not specified."""
-        if color is None:
-            color = self.get_next_project_color()
+    def get_next_project_color(self) -> str:
+        """Get the next available project color from the palette."""
+        return self._next_project_color(self.get_projects())
 
-        if self.is_authenticated:
-            result = sb_create_project(self.user_id, name, color)
-            if result.get('success'):
+    def _create_project_blocking(self, user_id: str, name: str, color: Optional[str], *, client) -> Dict:
+        """The Supabase part of create_project; runs in a worker thread."""
+        if color is None:
+            data = self._get_cached_data(client=client, user_id=user_id, is_authenticated=True)
+            color = self._next_project_color(list(data.get('projects', {}).values()))
+        return sb_create_project(user_id, name, color, client=client)
+
+    async def create_project(self, name: str, color: str = None) -> Optional[str]:
+        """Create a new project with auto-assigned color if not specified.
+
+        The colour lookup (a projects read) and the insert run off the loop.
+        """
+        authed, user_id, client = self._worker_context()
+        if authed:
+            result = await run.io_bound(self._create_project_blocking, user_id, name, color,
+                                        client=client)
+            if result and result.get('success'):
                 self.invalidate_cache()
                 return str(result['project']['id'])
             return None
@@ -722,7 +857,8 @@ class UserListsManager:
 
     async def update_project(self, project_id: str, name: str = None) -> bool:
         """Update a project's name. Color is auto-assigned and not editable."""
-        if self.is_authenticated:
+        authed, _user_id, client = self._worker_context()
+        if authed:
             data = {}
             if name is not None:
                 data['name'] = name
@@ -735,12 +871,26 @@ class UserListsManager:
             except ValueError:
                 return False
 
-            result = sb_update_project(project_id_int, data)
-            if result.get('success'):
+            result = await run.io_bound(sb_update_project, project_id_int, data, client=client)
+            if result and result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
         return False
+
+    def _delete_project_blocking(self, user_id: str, project_id: str, project_id_int: int,
+                                 delete_lists: bool, *, client) -> Dict:
+        """The Supabase part of delete_project (unlink loop included); runs in a worker thread."""
+        # If not deleting lists, first unlink them from the project
+        if not delete_lists:
+            data = self._get_cached_data(client=client, user_id=user_id, is_authenticated=True)
+            for list_id, list_data in data.get('lists', {}).items():
+                if str(list_data.get('project_id')) == project_id:
+                    try:
+                        sb_update_list(int(list_id), {'project_id': None}, client=client)
+                    except Exception:
+                        pass  # Cache operation failed; continue without cached data
+        return sb_delete_project(project_id_int, client=client)
 
     async def delete_project(self, project_id: str, delete_lists: bool = False) -> bool:
         """
@@ -750,24 +900,16 @@ class UserListsManager:
             project_id: Project to delete
             delete_lists: If True, delete lists in project. If False, lists become standalone.
         """
-        if self.is_authenticated:
+        authed, user_id, client = self._worker_context()
+        if authed:
             try:
                 project_id_int = int(project_id)
             except ValueError:
                 return False
 
-            # If not deleting lists, first unlink them from the project
-            if not delete_lists:
-                data = self._get_cached_data()
-                for list_id, list_data in data.get('lists', {}).items():
-                    if str(list_data.get('project_id')) == project_id:
-                        try:
-                            sb_update_list(int(list_id), {'project_id': None})
-                        except Exception:
-                            pass  # Cache operation failed; continue without cached data
-
-            result = sb_delete_project(project_id_int)
-            if result.get('success'):
+            result = await run.io_bound(self._delete_project_blocking, user_id, project_id,
+                                        project_id_int, delete_lists, client=client)
+            if result and result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -778,15 +920,17 @@ class UserListsManager:
         Move a list to a project (or remove from project if project_id is None).
         The list's display color will change to match the project.
         """
-        if self.is_authenticated:
+        authed, _user_id, client = self._worker_context()
+        if authed:
             try:
                 list_id_int = int(list_id)
                 project_id_int = int(project_id) if project_id else None
             except ValueError:
                 return False
 
-            result = sb_update_list(list_id_int, {'project_id': project_id_int})
-            if result.get('success'):
+            result = await run.io_bound(sb_update_list, list_id_int, {'project_id': project_id_int},
+                                        client=client)
+            if result and result.get('success'):
                 self.invalidate_cache()
                 return True
             return False
@@ -906,11 +1050,17 @@ class UserListsManager:
         compatible because Python lets `None`-returning callers ignore
         the return value; the only caller that consumes the new return
         is the threaded async_refresh_ui added in Phase 92.2 Task 6 Part D.
-        Anonymous callers get the default skeleton (sweep C2).
+        Anonymous callers get the default skeleton (sweep C2). The two reads
+        run off the event loop (2026-10-21); no answer from the worker is the
+        default skeleton too, as it is for a failed read.
         """
         self.invalidate_cache()
-        if self.is_authenticated:
-            return self._get_cached_data()
+        authed, user_id, client = self._worker_context()
+        if authed:
+            data = await run.io_bound(self._get_cached_data, client=client, user_id=user_id,
+                                      is_authenticated=True)
+            if data is not None:
+                return data
         return self._get_default_data()
 
 

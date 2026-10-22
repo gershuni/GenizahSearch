@@ -362,6 +362,25 @@ def _objgraph_endpoint(
     max_depth = max(1, min(int(max_depth), 20))
     _gc.collect()
 
+    if action in ('unfreeze', 'refreeze'):
+        # The startup objects were moved to the permanent generation by
+        # web/gc_freeze.py; gc.get_objects() and gc.get_referrers() skip that
+        # generation, so stats/backrefs cannot see them until unfrozen.
+        from web.gc_freeze import refreeze_for_diagnostics, unfreeze_for_diagnostics
+        moved = unfreeze_for_diagnostics() if action == 'unfreeze' else refreeze_for_diagnostics()
+        return JSONResponse({
+            'pid': os.getpid(),
+            'timestamp_utc': _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime()),
+            'action': action,
+            'objects_moved': moved,
+            'gc_freeze_count': _gc.get_freeze_count(),
+            'note': (
+                'unfreeze: the frozen startup objects are visible to stats/backrefs again, '
+                'and every full collection walks them again (the 0.25-0.53 s stalls) until '
+                'action=refreeze, which gc.collect()s and freezes everything alive now.'
+            ),
+        })
+
     if action == 'backrefs':
         # Find instances of target_class and walk referrers up to root.
         instances = objgraph.by_type(target_class)
@@ -374,8 +393,12 @@ def _objgraph_endpoint(
                 'action': 'backrefs',
                 'target_class': target_class,
                 'total_count': 0,
+                'gc_freeze_count': _gc.get_freeze_count(),
                 'samples': [],
-                'note': f'no instances of {target_class} found',
+                'note': (
+                    f'no instances of {target_class} found among the unfrozen objects '
+                    f'(gc_freeze_count startup objects are invisible here; action=unfreeze first)'
+                ),
             })
         step = max(1, total_count // sample)
         sampled = [instances[i * step] for i in range(sample) if i * step < total_count]
@@ -400,12 +423,16 @@ def _objgraph_endpoint(
             'total_count': total_count,
             'sample_count': len(samples_out),
             'max_depth': max_depth,
+            'gc_freeze_count': _gc.get_freeze_count(),
             'samples': samples_out,
             'note': (
                 'Each sample shows gc.get_referrers walk up to max_depth. '
                 'A chain ending at a NiceGUI Storage / app.storage internal '
                 'dict identifies the retention root. A short chain ending '
-                'at a frame, function, or generator suggests a live closure.'
+                'at a frame, function, or generator suggests a live closure. '
+                'The gc_freeze_count startup objects (web/gc_freeze.py) are NOT '
+                'returned by gc.get_referrers(), so a chain truncates at a frozen '
+                'hop: action=unfreeze first, action=refreeze after.'
             ),
         })
 
@@ -422,13 +449,17 @@ def _objgraph_endpoint(
         'timestamp_utc': _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime()),
         'action': 'stats',
         'baseline_was_taken_this_call': not bool(growth) and _objgraph_baseline_taken,
+        'gc_freeze_count': _gc.get_freeze_count(),
         'most_common_types': [{'class': c, 'count': n} for c, n in most_common],
         'growth_since_last_call': [{'class': c, 'count': n, 'delta': d} for c, n, d in growth],
         'note': (
             'most_common_types = absolute instance counts. '
             'growth_since_last_call = delta since previous /_internal/objgraph call '
             '(or empty if this is the first call after process start). '
-            'Use action=backrefs&target_class=ObservableDict to trace retention path.'
+            'Use action=backrefs&target_class=ObservableDict to trace retention path. '
+            'The gc_freeze_count startup objects (web/gc_freeze.py) are NOT in '
+            'gc.get_objects(), so most_common_types, growth and by_type count '
+            'post-freeze objects only: action=unfreeze to see them, action=refreeze after.'
         ),
     })
 
@@ -1069,6 +1100,11 @@ POSTHOG_SCRIPT = f'''
 # User-perceived latency of page turns, searches, Quick View and saves (ux_timing).
 from web.ux_timing import head_html as _ux_timing_head_html  # noqa: E402
 POSTHOG_SCRIPT += _ux_timing_head_html()
+
+# Reconnect backoff: a restart must not reload every open tab at once (web/reconnect_backoff.py).
+# Shared, so every page -- /privacy-extension and /reset-hints included -- gets it before socket.io.
+from web.reconnect_backoff import head_html as _reconnect_backoff_head_html  # noqa: E402
+ui.add_head_html(_reconnect_backoff_head_html(), shared=True)
 
 
 # posthog_capture moved to web/analytics.py to avoid circular imports
@@ -1920,7 +1956,14 @@ def create_layout():
     # === Build Header with correct DOM order ===
     # reveal: hide header on scroll down, show on scroll up (mobile-friendly)
     with ui.header().classes('q-py-none header-reveal-mobile').props('reveal').style('height: 64px;'):
-        with ui.row().classes('w-full h-full items-center justify-between px-6 app-header'):
+        # wrap=False: a NiceGUI row wraps by default, and this one sits in a
+        # 64px header. In the English UI at 390px (Hebrew at 360px) the auth
+        # group no longer fit beside the logo, wrapped to a second line and
+        # rendered OUTSIDE the header, as grey text over the page (owner's
+        # phone screenshots, 2026-10-22). `phone-icon-only` (common.css) on
+        # Login and Register makes the groups fit; no-wrap makes the failure
+        # mode clipping rather than a ghost row.
+        with ui.row(wrap=False).classes('w-full h-full items-center justify-between px-6 app-header'):
             if rtl_mode:
                 # RTL: Render Right -> Center -> Left for correct tab order
                 render_header_right()
@@ -1953,10 +1996,12 @@ def create_layout():
 
     # Set drawer side based on RTL mode - Quasar will handle page padding correctly
     drawer_side = 'right' if rtl_mode else 'left'
+    # breakpoint=1023 (was 768, 2026-10-22): a tablet gets the overlay drawer
+    # and keeps the width for the page; the sidebar stays open from 1024px.
     main_drawer = (
         ui.drawer(side=drawer_side, value=False, bordered=True)
         .classes('shadow-xl')
-        .props('width=280 breakpoint=768')
+        .props('width=280 breakpoint=1023')
     )
     if drawer_open:
         # Only when the reader has not explicitly closed it. An explicit close
@@ -1975,7 +2020,7 @@ def create_layout():
         safe_user_set('drawer_open', not safe_user_get('drawer_open', True))
 
     def nav_to(path):
-        """Navigate to path. Drawer auto-hides on mobile via breakpoint=768."""
+        """Navigate to path. Drawer auto-hides on mobile via breakpoint=1023."""
         ui.navigate.to(path)
 
     # Connect menu button to toggle function (using refs dictionary)
@@ -3457,7 +3502,17 @@ async def initialize_engine():
         await run.io_bound(_prewarm_sync)
 
     if init_ok:
-        asyncio.create_task(_prewarm_fjms_background())
+        prewarm = asyncio.create_task(_prewarm_fjms_background(), name='fjms-prewarm')
+        # One gc.collect(); gc.freeze() once the loaders that keep allocating
+        # after _init_sync (MetadataManager threads, FL-ID build, this prewarm)
+        # are done -- see web/gc_freeze.py. Scheduled from HERE, not as another
+        # app.on_startup handler: NiceGUI runs those concurrently, so none of
+        # them can run "after" this one.
+        from web.gc_freeze import freeze_after_loaders
+        asyncio.create_task(
+            freeze_after_loaders(state, extra_tasks=(prewarm,)),
+            name='gc-freeze-after-loaders',
+        )
 
 app.on_startup(compact_export_storage_on_startup)
 app.on_startup(start_malloc_trim_on_startup)

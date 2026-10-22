@@ -100,6 +100,16 @@ GENIZAH_STORAGE_RETENTION_DAYS=90     # delete .nicegui storage-user files untou
                                        # a browser absent longer is logged out on return — auth_session lives in the file)
 NLI_CACHE_MAX_ENTRIES=20000           # metadata nli_cache LRU bound (code default 75000; prod set 20000 on 2026-07-08)
 IIIF_MANIFEST_CACHE_MAX_ENTRIES=1500  # IIIF manifest cache bound (code default 5000; prod set 1500 on 2026-07-08)
+GENIZAH_GC_FREEZE=1                   # gc.collect(); gc.freeze() ONCE after the startup loaders finish (web/gc_freeze.py), so
+                                       # full collections stop walking the 0.6-0.84 M startup objects on the event loop;
+                                       # 0/false/no/off disables. Frozen objects leave gc.get_objects(): /_internal/objgraph
+                                       # reports gc_freeze_count and takes action=unfreeze / action=refreeze. It pins
+                                       # everything alive then, incl. early visitors' page state (cyclic garbage among
+                                       # it stays until action=unfreeze): ~3 MB per ~1,200-element page open at that
+                                       # moment (measured 2026-10-21), once -- and again at every action=refreeze.
+GENIZAH_GC_FREEZE_MAX_WAIT_SECONDS=180 # freeze anyway after waiting this long for the MetadataManager threads, the FL-ID
+                                       # build and the FJMS prewarm (the log line then names what is still running)
+GENIZAH_GC_FREEZE_POLL_SECONDS=1.0    # how often the wait re-checks those loaders
 
 # Perf watch (2026-07-30 slowness diagnosis; web-only, web/perf_watch.py). Default ON and
 # deliberately quiet — nothing is logged while the app behaves. Added because a 9-second
@@ -178,6 +188,26 @@ IMAGE_CACHE_MAX_ENTRIES=2048          # in-memory image cache entries over 5 sha
                                        # less than one Visual Similarity grid); memory is bounded by the next line
 IMAGE_CACHE_MAX_BYTES=268435456       # in-memory image cache byte cap (256 MB, unchanged)
 IMAGE_CACHE_TTL=600                   # in-memory image cache lifetime, seconds (unchanged)
+
+# Reconnect backoff (2026-10-21; web-only, web/reconnect_backoff.py)
+# A restart drops every open tab's socket; when the server is back, each tab's handshake carries
+# a client id the new process never had, NiceGUI refuses it and nicegui.js reloads the page AT
+# ONCE -- every tab inside one 5 s window, each a full page build on the one event loop, and the
+# saturated server's late answers ("timeout") reload them again. nicegui.js cannot be changed
+# (immutable cached URL), so web/static/js/reconnect_backoff.js runs in <head> before socket.io:
+# it delays the reload for a refused handshake or a second timeout by base * 2^n (n =
+# consecutive reloads of that tab, in sessionStorage), jittered x0.5-1.5, and a hidden tab waits
+# until it is viewed. NiceGUI's first timeout (its switch to long polling) passes at once, a
+# refusal is never dropped, and a reconnect cancels a pending timeout reload. The server counts what it refuses: /_internal/memstat
+# `handshakes` (web/framework_patches.py::_patch_handshake_counter; >30 unknown clients in a
+# minute logs one "reload burst" warning). Independent of POSTHOG_API_KEY.
+RECONNECT_BACKOFF_ENABLED=1           # 0/false serves no snippet: NiceGUI reloads at once again
+RECONNECT_BACKOFF_BASE_MS=1500        # first reload wait, ms (doubles per consecutive reload)
+RECONNECT_BACKOFF_CAP_MS=60000        # the exponential's cap, ms; the jitter spreads around it, so the
+                                       # longest wait is 1.5 x this
+RECONNECT_DELAY_MAX_MS=0              # socket.io's reconnectionDelayMax, ms; 0 keeps socket.io's 5000.
+                                       # Keep any value well below NICEGUI_RECONNECT_TIMEOUT (30 s): a
+                                       # retry after it finds the client deleted, and the page reloads
 ```
 
 **Operational note (Phase 98 — two PostHog drop counters):** Phase 98 ships with TWO PostHog

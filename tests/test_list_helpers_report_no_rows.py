@@ -125,19 +125,22 @@ def signed_in_manager(monkeypatch):
     from web.user_lists import UserListsManager
     monkeypatch.setattr(UserListsManager, 'is_authenticated', property(lambda self: True))
     monkeypatch.setattr(UserListsManager, 'user_id', property(lambda self: 'u1'))
+    # The manager builds the visitor's client on the loop for its worker
+    # (2026-10-21); the fake helpers below take it and ignore it.
+    monkeypatch.setattr('web.user_lists.get_user_client', lambda: object())
     mgr = UserListsManager(None, None)
     monkeypatch.setattr(mgr, 'invalidate_cache', lambda: None, raising=False)
     return mgr
 
 
 def test_manager_empty_trash_failure_is_none_not_zero(monkeypatch, signed_in_manager):
-    monkeypatch.setattr('web.supabase_client.empty_trash', lambda uid: {'error': 'boom'})
+    monkeypatch.setattr('web.supabase_client.empty_trash', lambda uid, client=None: {'error': 'boom'})
     assert asyncio.run(signed_in_manager.empty_trash()) is None
 
 
 def test_manager_empty_trash_success_returns_the_count(monkeypatch, signed_in_manager):
     monkeypatch.setattr('web.supabase_client.empty_trash',
-                        lambda uid: {'success': True, 'deleted_count': 3})
+                        lambda uid, client=None: {'success': True, 'deleted_count': 3})
     assert asyncio.run(signed_in_manager.empty_trash()) == 3
 
 

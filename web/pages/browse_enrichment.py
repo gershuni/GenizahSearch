@@ -225,6 +225,9 @@ class BrowsePageRefs:
     load_generation: Dict[str, int] = field(default_factory=lambda: {'value': 0})
     page_client: Any = None
     content_container: Any = None
+    # The spinner row above content_container, shown while state.is_loading
+    # (built once with the page; update_content() only toggles it).
+    loading_row: Any = None
     slider_refs: Dict[str, Any] = field(default_factory=dict)
     # One-shot /browse?computed=1 request. This deliberately lives outside
     # enrichment_refs because that dict is cleared on manuscript navigation.
@@ -743,13 +746,22 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
     state.enrichment_loading = False
 
     # Re-render with full enrichment data (attribution, source badges, folio labels,
-    # external links, Oxford part, physical metadata) then update PGP/FJMS containers
+    # external links, Oxford part, physical metadata). With enrichment_loaded set,
+    # that rebuild fills the five placeholders inline, so update_enrichment_sections
+    # is NOT called after it: it cleared and refilled the same five again (the
+    # version selector, and choose_default_source with it, twice per page).
     refs.update_content()
-    update_enrichment_sections(state, refs)
 
 
 def update_enrichment_sections(state: BrowseState, refs: BrowsePageRefs):
-    """Update enrichment placeholder containers after Phase B completes."""
+    """Update enrichment placeholder containers after Phase B completes.
+
+    NO RUNTIME CALLER since 2026-10-21: Phase B's ``refs.update_content()``
+    fills these five placeholders inline (browse.py), and this second fill
+    rebuilt them all again. Kept, with its source-text guards
+    (tests/test_codex_review_333_round9.py, _round10.py), until those are
+    re-pointed at the inline path; a fix to Phase B belongs in browse.py.
+    """
     # PGP link button in header
     pgp_container = refs.enrichment_refs.get('pgp_link_container')
     if pgp_container:

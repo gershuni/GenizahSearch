@@ -147,6 +147,9 @@ def signed_in(monkeypatch):
 def test_no_web_list_item_write_sends_a_page(monkeypatch, signed_in):
     client = _RecordingClient()
     monkeypatch.setattr(supabase_client, 'get_user_client', lambda: client)
+    # The manager builds the visitor's client on the loop through its own import
+    # (its writes run in a worker, where storage is unreadable): patch that name too.
+    monkeypatch.setattr(user_lists, 'get_user_client', lambda: client)
     mgr = user_lists.UserListsManager(None, None)
 
     assert supabase_client.add_list_item(7, '990001', shelfmark='T-S 1.1', fl_id='FL1', note='n')['success']
@@ -182,13 +185,13 @@ class _FakeSupabase:
         self.updates = []
         self.deletes = []
 
-    def get_user_lists(self, user_id):
+    def get_user_lists(self, user_id, *, client=None):
         return [
             {'id': 7, 'name': 'Research', 'name_en': 'Research', 'is_default': False, 'is_system': False},
             {'id': 9, 'name': 'Recently Viewed', 'name_en': 'Recently Viewed', 'is_system': True},
         ]
 
-    def get_projects(self, user_id):
+    def get_projects(self, user_id, *, client=None):
         return []
 
     def get_list_items(self, list_id, *, client=None):
@@ -197,11 +200,11 @@ class _FakeSupabase:
     def get_recent_items(self, user_id, *, client=None):
         return [{'sys_id': '990002', 'shelfmark': 'ENA 1.2', 'title': '', 'fl_id': ''}]
 
-    def update_list_item(self, item_id, data):
+    def update_list_item(self, item_id, data, *, client=None):
         self.updates.append((item_id, data))
         return {'success': True, 'item': dict(ROW, **data)}
 
-    def delete_list_item(self, item_id):
+    def delete_list_item(self, item_id, *, client=None):
         self.deletes.append(item_id)
         return {'success': True}
 

@@ -143,15 +143,17 @@ async def _wait(pred, timeout=20.0):
 
 
 def _next_buttons(client):
-    # The live Next button: every render rebuilds it.
+    # The live Next button: every full render rebuilds it (the old one stays,
+    # dimmed and inert, while a page loads).
     return [e for e in client.elements.values() if isinstance(e, ui.button)
             and str(e._props.get('data-action', '')).strip('"') == 'next']
 
 
 def _load_page_of(client):
     """The page's own ``load_page``, reached through the live Next button
-    (``on_click=lambda: load_page(direction=1)``): while a load runs the page
-    shows a spinner and has no navigation button to click."""
+    (``on_click=lambda: load_page(direction=1)``). While a load runs, the
+    previous page's buttons stay under the spinner, dimmed and inert; the
+    newest one is taken."""
     import functools
 
     stack = [listener.handler for listener in _next_buttons(client)[-1]._event_listeners.values()

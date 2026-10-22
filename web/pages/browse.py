@@ -83,7 +83,7 @@ from web.translations import tr, is_rtl, get_language, using_language, in_visito
 from web.ux_timing import ux_done
 from web.auth_state import GlobalAuthState
 from web.feature_flags import WEB_PUZZLE_ENABLED
-from web.supabase_client import create_correction, update_correction, get_corrections
+from web.supabase_client import create_correction, update_correction, get_corrections, get_user_client
 from web.components.typography import h1, h2, h3
 from web.components.joins_panel import peek_connected_fragments, load_connected_fragments_into
 from web.components.shelfmark_picker import items_from_manuscripts, open_shelfmark_picker
@@ -411,6 +411,93 @@ VIEWER_STYLES = '''
     }
     /* Icons that point "forward" (send) face the other way in the Hebrew UI. */
     [dir="rtl"] .browse-icon-flip-rtl .q-icon { transform: scaleX(-1); }
+
+    /* Phone layout (owner, 2026-10-22). Measured at 390x844 before this: the
+       image began 958px down the page (title, lookup card, a 343px header
+       card with three stacked text buttons, a 225px control bar), then 279px
+       of zoom and slider rows above a 406px image letterboxed in a fixed-height
+       box, and the transcription scrolled inside a 426px pane of its own.
+       Nothing here applies above 640px. */
+    /* At every width (owner's mockups, 2026-10-22): the page title is for
+       screen readers only, the lookup is a slim row, the image panel is one
+       toolbar row with the sliders behind the `tune` button. */
+    .browse-page-title {
+        position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0;
+        overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+    }
+    .browse-lookup-card { padding: 6px 10px !important; margin-bottom: 8px !important; gap: 0 !important; }
+    .browse-lookup-row { gap: 8px !important; flex-wrap: nowrap !important; }
+    .browse-lookup-icon { display: none; }
+    .browse-header-card { padding: 8px 10px !important; margin-bottom: 8px !important; }
+    /* The card's own 16px padding and gap go; its row carries the padding. */
+    .browse-controls-card { margin-bottom: 8px !important; padding: 0 !important; gap: 0 !important; }
+    .browse-controls-card > .nicegui-row { gap: 4px 8px !important; padding: 6px 10px !important; }
+    .browse-image-head { padding: 4px 8px !important; }
+    .browse-image-title { display: none; }
+    .browse-image-adjust { display: none !important; padding: 4px 8px !important; }
+    .browse-image-adjust.is-open { display: flex !important; }
+    /* The rotation slider needs a wide panel; below 1440px the two rotate
+       buttons do the job and the toolbar stays one row. */
+    @media (max-width: 1439px) { .browse-rotate-slider { display: none !important; } }
+    /* Laptop and up: the lookup is a short row, the green card is one line
+       WHEN IT FITS, with the title cut to the width, and the two panels get
+       the height. Nothing forces the line: beside the 280px drawer a 1024px
+       screen leaves 744px, and the shelfmark, links and buttons alone can
+       need more (Codex on #434), so the row still wraps. The title's box has
+       a zero flex basis and a 160px floor: it fills what is left of the first
+       line and drops to a line of its own only when less than that is left. */
+    @media (min-width: 1024px) {
+        .browse-lookup-card { max-width: 560px; }
+        .browse-header-center { gap: 8px !important; min-width: 0; }
+        .browse-header-center > h2 { white-space: nowrap; font-size: 1.15rem !important; }
+        .browse-header-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .browse-header-center > *:has(> .browse-header-title) { flex: 1 1 0%; min-width: 160px; }
+        .browse-header-center .q-btn { white-space: nowrap; }
+    }
+    /* Transcription type by width (the owner's screen-size table). */
+    .viewer-panels .transcription-text { font-size: 17px !important; line-height: 1.8 !important; }
+    @media (min-width: 641px) { .viewer-panels .transcription-text { font-size: 18px !important; line-height: 1.9 !important; } }
+    @media (min-width: 1024px) { .viewer-panels .transcription-text { font-size: 19px !important; line-height: 2 !important; } }
+    @media (min-width: 1440px) { .viewer-panels .transcription-text { font-size: 20px !important; line-height: 2 !important; max-width: 760px; } }
+
+    @media (max-width: 640px) {
+        .browse-header-card h2 { font-size: 1.1rem !important; }
+        .browse-header-center { gap: 4px 6px !important; }
+        .browse-header-card .q-btn { min-height: 36px; }
+        .browse-controls-card .q-btn { min-height: 36px; }
+        .shortcuts-hint { display: none !important; }
+
+        /* Image panel: one row of 34px icon buttons. The rotation slider, the
+           zoom figure and the separators go. */
+        .browse-image-head { padding: 4px 6px !important; }
+        .browse-image-tools { gap: 2px !important; flex-wrap: nowrap !important; }
+        .browse-image-tools .q-separator, .browse-rotate-slider, .zoom-level-label { display: none !important; }
+        .browse-image-head .q-btn, .browse-image-adjust .q-btn {
+            min-width: 34px !important; min-height: 34px !important; width: 34px; height: 34px; padding: 0 !important;
+        }
+
+        /* The image sets the height of its box: no dark band above or below
+           it. The box's inline `height: calc(60vh - 100px)` beat every earlier
+           phone rule in this file; only `!important` reaches it. Fullscreen
+           keeps its full-height box. */
+        .viewer-panels > .q-card { min-height: 0 !important; }
+        .image-container { height: auto !important; min-height: 120px !important; max-height: 75vh !important; }
+        .image-container img.zoomable-image { max-height: 75vh !important; }
+        .fullscreen-mode .image-container { max-height: none !important; }
+        .fullscreen-mode .image-container img.zoomable-image { max-height: 100vh !important; }
+
+        /* Transcription: the page scrolls, not a pane inside it. The same
+           un-scroll as the print rules in common.css, scoped to the viewer. */
+        .viewer-panels .q-scrollarea,
+        .viewer-panels .q-scrollarea__container,
+        .viewer-panels .q-scrollarea__content {
+            height: auto !important; max-height: none !important; min-height: 0 !important;
+            overflow: visible !important; position: static !important; transform: none !important;
+            contain: none !important;
+        }
+        .viewer-panels .q-scrollarea { padding: 10px !important; }
+        .viewer-panels .q-scrollarea__thumb, .viewer-panels .q-scrollarea__bar { display: none !important; }
+    }
 
     @media (max-width: 480px) {
         .metadata-header {
@@ -1747,8 +1834,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             }});
         ''')
 
-    async def handle_submit_correction():
+    async def _submit_correction_now():
         """Submit the correction to the backend."""
+        if not state.edit_mode or state.is_loading:
+            return  # a stale button (the form after a submit, kept under a reload)
         if not GlobalAuthState.is_logged_in():
             ui.notify(tr('Please login first'), type='negative')
             return
@@ -1767,16 +1856,20 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # Determine status based on role
         status = 'approved' if (GlobalAuthState.is_admin() or GlobalAuthState.is_editor()) else 'pending'
 
-        # Do the Supabase call BEFORE any UI rebuild
+        # Do the Supabase call BEFORE any UI rebuild, off the loop: the client
+        # is built here (a worker cannot read the visitor's storage and would
+        # write anonymously, refused by RLS).
+        client = get_user_client()
         try:
             if state.draft_id:
-                result = update_correction(state.draft_id, {
+                result = await run.io_bound(update_correction, state.draft_id, {
                     'corrected_text': state.edit_text,
                     'notes': state.edit_notes,
                     'status': status
-                })
+                }, client=client)
             else:
-                result = create_correction(
+                result = await run.io_bound(
+                    create_correction,
                     author_id=user_id,
                     sys_id=state.current_page.sys_id,
                     shelfmark=state.current_page.shelfmark or '',
@@ -1785,11 +1878,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     corrected_text=state.edit_text,
                     notes=state.edit_notes if state.edit_notes else '',
                     status=status,
-                    ie_id=state.volume_ie
+                    ie_id=state.volume_ie,
+                    client=client,
                 )
         except Exception as e:
             ui.notify(f'{tr("Error")}: {e}', type='negative')
             logger.error(f"Submit error: {e}")
+            return
+
+        if result is None:  # no answer: cancelled, or the app is stopping; stay in edit mode
+            ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')
             return
 
         if "error" in result:
@@ -1808,8 +1906,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         ui.notify(tr('Correction submitted successfully'), type='positive')
         await load_page(direction=0)
 
-    def handle_save_draft():
-        """Save draft locally (simulated for now, or use backend draft)."""
+    async def _save_draft_now():
+        """Save the draft to Supabase, off the loop (see _submit_correction_now)."""
+        if not state.edit_mode or state.is_loading:
+            return  # a stale button (the form after a submit, kept under a reload)
         if not GlobalAuthState.is_logged_in():
             ui.notify(tr('Please login to save drafts'), type='warning')
             return
@@ -1819,16 +1919,20 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             ui.notify(tr('User not found'), type='negative')
             return
 
+        client = get_user_client()
+        sent = (state.edit_text, state.edit_notes)  # what this write carries
+        load_gen = _load_generation['value']  # the page this draft belongs to
         if state.draft_id:
             # Update existing draft
-            result = update_correction(state.draft_id, {
+            result = await run.io_bound(update_correction, state.draft_id, {
                 'corrected_text': state.edit_text,
                 'notes': state.edit_notes,
                 'status': 'draft'
-            })
+            }, client=client)
         else:
             # Create new draft
-            result = create_correction(
+            result = await run.io_bound(
+                create_correction,
                 author_id=user_id,
                 sys_id=state.current_page.sys_id,
                 shelfmark=state.current_page.shelfmark or '',
@@ -1837,8 +1941,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 corrected_text=state.edit_text,
                 notes=state.edit_notes if state.edit_notes else '',
                 status='draft',
-                ie_id=state.volume_ie
+                ie_id=state.volume_ie,
+                client=client,
             )
+
+        if result is None:  # no answer: cancelled, or the app is stopping; stay in edit mode
+            ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')
+            return
 
         if "error" in result:
             error_msg = result["error"]
@@ -1847,12 +1956,33 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                           type='negative', timeout=10000)
             else:
                 ui.notify(error_msg, type='negative')
+        elif load_gen != _load_generation['value']:
+            # The reader moved to another page while the write ran: the draft is
+            # saved, but its id must not become the new page's draft (a later
+            # save would overwrite this draft with the other page's text).
+            ui.notify(tr('Draft saved'), type='positive')
         else:
-            state.draft_saved = True
+            # Text typed while the write ran is not in the draft: say "Saved"
+            # only when the editor still holds what was sent.
+            state.draft_saved = (state.edit_text, state.edit_notes) == sent
             correction = result.get('correction', {})
             state.draft_id = correction.get('id')
             ui.notify(tr('Draft saved'), type='positive')
             update_content()  # Update UI to show green border
+
+    # One correction write at a time per page. The write runs off the loop, so
+    # the loop serves a second click at once; it now WAITS for the first and
+    # then runs, as it did when the write blocked: a second Save Draft updates
+    # the draft the first created, and Submit during a draft save submits it.
+    # (Dropping it instead lost a Submit without a word.) The guard at the top
+    # of each is read after the wait: a stale Submit after a submit does nothing.
+    async def handle_submit_correction():
+        async with state.correction_lock:
+            await _submit_correction_now()
+
+    async def handle_save_draft():
+        async with state.correction_lock:
+            await _save_draft_now()
 
     def toggle_edit_mode():
         """Toggle edit mode with fetching existing corrections."""
@@ -1992,15 +2122,23 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # after the visitor navigated away (e.g. to the Joins Lab).
         if content_container.is_deleted or getattr(_client, '_deleted', False):
             return
+        if state.is_loading:
+            # The spinner is a row of its own above the content, shown and
+            # hidden in place: building it here cost a full clear of the page
+            # and a second full rebuild when Phase A landed. The old content
+            # stays, dimmed (.browse-loading) and `inert`, until the new page:
+            # `inert` also takes focus and Enter/Space from its buttons, which
+            # `pointer-events: none` does not (a focused Submit fired again).
+            loading_row.set_visibility(True)
+            content_container.classes(add='browse-loading')
+            content_container.props(add='inert')
+            return
+        loading_row.set_visibility(False)
+        content_container.classes(remove='browse-loading')
+        content_container.props(remove='inert')
         content_container.clear()
 
         with content_container:
-            if state.is_loading:
-                with ui.row().classes('w-full justify-center py-16'):
-                    ui.spinner(size='xl', color='green')
-                    ui.label(tr('Loading...')).classes('ml-3 text-lg').style('color: var(--text-secondary);')
-                return
-
             if state.error and not state.current_page:
                 with ui.card().classes('w-full p-8 text-center'):
                     ui.icon('error_outline', size='4rem').classes('text-red-400')
@@ -2055,7 +2193,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     ).props('flat round aria-label="Previous manuscript" data-action="prev-manuscript" data-ux="browse_page"').style('color: white !important;').tooltip(tr('Previous manuscript'))
 
                     # Shelfmark and Title
-                    with ui.row().classes('flex-1 items-center justify-center gap-4'):
+                    with ui.row().classes('flex-1 items-center justify-center gap-4 browse-header-center'):
                         # Shelfmark with Library Name - H2
                         display_shelfmark = page.shelfmark or f"ID: {page.sys_id}"
                         if page.library_name:
@@ -2093,7 +2231,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 _ol_st = {'showing_original': False}
                                 with ui.row().classes('items-center gap-0'):
                                     _ol_lbl = ui.label(short_title).classes(
-                                        _ol_dir
+                                        _ol_dir + ' browse-header-title'
                                     ).style(
                                         'color: #ffffff !important; opacity: 0.95;'
                                     )
@@ -2120,7 +2258,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     )
                             else:
                                 ui.label(short_title).classes(
-                                    _ol_dir
+                                    _ol_dir + ' browse-header-title'
                                 ).style(
                                     'color: #ffffff !important; opacity: 0.95;'
                                 ).tooltip(_overlay_title if len(words) > 5 else '')
@@ -2175,17 +2313,21 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         ).props(f'flat dense aria-label="{tr("Search for Parallels")}"').style(
                             'color: #ffffff !important; '
                             'background: rgba(255, 255, 255, 0.15);'
-                        ).tooltip(tr('Search for Parallels'))
+                        ).tooltip(tr('Search for Parallels')).classes('browse-icon-collapse')
 
-                        # Metadata button
+                        # Metadata button. One label for the text, the aria-label
+                        # and the tooltip: the aria-label replaces the text for a
+                        # screen reader, so a fixed "Show Metadata" named the
+                        # opposite action while the panel was open (Codex on #434).
+                        _meta_label = tr('Hide Metadata') if show_metadata['value'] else tr('Show Metadata')
                         ui.button(
-                            tr('Hide Metadata') if show_metadata['value'] else tr('Show Metadata'),
+                            _meta_label,
                             icon='info',
                             on_click=toggle_metadata
-                        ).props(f'flat dense aria-label="{tr("Show Metadata")}"').style(
+                        ).props(f'flat dense aria-label="{_meta_label}"').style(
                             'color: #ffffff !important; '
                             'background: rgba(255, 255, 255, 0.15);'
-                        ).tooltip(tr('Show Metadata'))
+                        ).tooltip(_meta_label).classes('browse-icon-collapse')
 
                         # Add manuscript to list (star button)
                         from web.state import state as app_state
@@ -4118,7 +4260,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # `print-hide`: source chips, external links and page controls
                 # are navigation, not content. The folio label they sit beside
                 # is reproduced by the print-only masthead instead.
-                with ui.card().classes('w-full mb-2 print-hide').style('background: var(--bg-tertiary);'):
+                with ui.card().classes('w-full mb-2 print-hide browse-controls-card').style('background: var(--bg-tertiary);'):
                     with ui.row().classes('w-full items-center flex-wrap gap-2 px-3 py-2'):
                         # -- Left group: folio label, page count, version badge, source chips --
                         with ui.row().classes('items-center gap-2'):
@@ -4353,7 +4495,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 tr('Hide Full Manuscript') if state.view_all else tr('Show Full Manuscript'),
                                 icon='view_agenda' if not state.view_all else 'view_day',
                                 on_click=toggle_view_all
-                            ).props(f'flat dense color=green size=sm aria-label="{tr("Hide Full Manuscript") if state.view_all else tr("Show Full Manuscript")}"')
+                            ).props(f'flat dense color=green size=sm aria-label="{tr("Hide Full Manuscript") if state.view_all else tr("Show Full Manuscript")}"').classes('browse-icon-collapse')
 
                             # Print / Save as PDF -- ON THE ALWAYS-VISIBLE TOOLBAR.
                             #
@@ -4488,7 +4630,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         tr('Edit'),
                                         icon='edit',
                                         on_click=toggle_edit_mode
-                                    ).props('flat dense size=sm').classes('text-xs').tooltip(tr('Edit Transcription'))
+                                    ).props(f'flat dense size=sm aria-label="{tr("Edit")}"').classes('text-xs browse-icon-collapse').tooltip(tr('Edit Transcription'))
                                 create_comment_button(
                                     document_id=page.sys_id,
                                     page_number=page.p_num,
@@ -4615,10 +4757,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         )
                         with image_panel_ref['container']:
                             # Image header with zoom controls
-                            with ui.row().classes('w-full items-center justify-between p-3 print-hide').style(
+                            with ui.row().classes('w-full items-center justify-between p-3 print-hide browse-image-head').style(
                                 'background: #1a1a1a; border-radius: 8px 8px 0 0;'
                             ):
-                                ui.label(tr('Manuscript Image')).classes('text-white font-semibold')
+                                ui.label(tr('Manuscript Image')).classes('text-white font-semibold browse-image-title')
                                 # 260902: direct link to the current folio side on the Genizah Fragments site.
                                 # The Bodleian fronts images with a JS bot-challenge that an <img> or a server
                                 # fetch cannot pass, but the reader's own browser can -- and the Oxford licence
@@ -4630,7 +4772,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     _ox_direct_link = _ox_direct_url(page.shelfmark, page_idx, folio_offset=max(0, (page.volume_suffix or 1) - 1)) or ''
                                     if _ox_direct_link:
                                         ui.link(tr('Open in Bodleian Libraries'), _ox_direct_link, new_tab=True).classes('text-xs').style('color: #9ecbff;').props('data-role="oxford-direct-link"')
-                                with ui.row().classes('gap-1'):
+                                with ui.row().classes('gap-1 browse-image-tools') as _image_tools_row:
                                     ui.button(icon='remove', on_click=zoom_out).props(f'flat round size=sm text-color=white aria-label="{tr("Zoom out")}" data-action="zoom-out"').tooltip(tr('Zoom out'))
                                     ui.label(f'{int(state.zoom_level * 100)}%').classes('zoom-level-label text-white text-sm px-2')
                                     ui.button(icon='add', on_click=zoom_in).props(f'flat round size=sm text-color=white aria-label="{tr("Zoom in")}" data-action="zoom-in"').tooltip(tr('Zoom in'))
@@ -4641,7 +4783,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     slider_refs['rotate'] = ui.slider(
                                         min=0, max=360, step=1, value=state.rotation,
                                         on_change=handle_rotation_slider
-                                    ).props(f'dark dense aria-label="{tr("Rotation")}"').classes('w-32 mx-2').style('transition: none;')
+                                    ).props(f'dark dense aria-label="{tr("Rotation")}"').classes('w-32 mx-2 browse-rotate-slider').style('transition: none;')
                                     
                                     ui.button(icon='rotate_right', on_click=rotate_right).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Right")}"').tooltip(tr('Rotate Right'))
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
@@ -4650,9 +4792,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     ui.button(icon='fullscreen', on_click=toggle_image_fullscreen).props(f'flat round size=sm text-color=white aria-label="{tr("Fullscreen Image")}" data-action="fullscreen"').tooltip(tr('Fullscreen Image'))
 
                             # Image adjustment controls row
-                            with ui.row().classes('w-full items-center gap-2 px-3 py-1 print-hide').style(
+                            with ui.row().classes('w-full items-center gap-2 px-3 py-1 print-hide browse-image-adjust').style(
                                 'background: #1a1a1a; border-top: 1px solid #333;'
-                            ):
+                            ) as _image_adjust_row:
                                 ui.icon('brightness_6').classes('text-white text-sm').tooltip(tr('Brightness'))
                                 slider_refs['brightness'] = ui.slider(
                                     min=-100, max=100, step=1, value=0,
@@ -4681,6 +4823,17 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     icon='restart_alt',
                                     on_click=_reset_image_adj
                                 ).props('flat round size=sm text-color=white').tooltip(tr('Reset Image'))
+
+                            # The slider row above is folded behind this one
+                            # button in the tools row at every width (owner's
+                            # mockups, 2026-10-22).
+                            with _image_tools_row:
+                                ui.button(
+                                    icon='tune',
+                                    on_click=lambda: _image_adjust_row.classes(toggle='is-open'),
+                                ).props(f'flat round size=sm text-color=white aria-label="{tr("Image adjustments")}"').classes(
+                                    'browse-adjust-toggle'
+                                ).tooltip(tr('Image adjustments'))
 
                             # Image display area - using div instead of scroll_area for drag support
                             with ui.element('div').classes('image-container w-full').style(
@@ -5396,14 +5549,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # Page title
         # Changed to H1
         if not embedded:
-            h1(tr('Browse Manuscripts'), classes='text-3xl font-bold mb-6 text-center text-green-800 print-hide')
+            h1(tr('Browse Manuscripts'), classes='text-3xl font-bold mb-6 text-center text-green-800 print-hide browse-page-title')
 
         # Shelfmark Search Box - Simple and Working
         # `print-hide`: a lookup form is furniture, not part of the sheet.
-        with ui.card().classes('w-full p-4 mb-6 print-hide').style('background: var(--bg-tertiary); border: 1px solid var(--border-light);') as _search_card:
-            with ui.row().classes('w-full gap-4 items-center'):
+        with ui.card().classes('w-full p-4 mb-6 print-hide browse-lookup-card').style('background: var(--bg-tertiary); border: 1px solid var(--border-light);') as _search_card:
+            with ui.row().classes('w-full gap-4 items-center browse-lookup-row'):
                 # Search icon
-                ui.icon('search', size='md').classes('text-green-600')
+                ui.icon('search', size='md').classes('text-green-600 browse-lookup-icon')
 
                 # Simple input that works
                 search_input = ui.input(
@@ -5446,6 +5599,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 with ui.row().classes('items-center gap-2'):
                     ui.icon('warning', color='orange')
                     ui.label(tr('Service not available')).classes('text-yellow-800')
+
+        # The loading spinner, built once and toggled by update_content(). A
+        # zero-height sticky row (.browse-loading-row): it floats over the top
+        # of the dimmed content and stays in view when the reader has scrolled,
+        # instead of pushing the content down while a page loads.
+        loading_row = ui.row().classes('w-full justify-center browse-loading-row')
+        with loading_row:
+            with ui.row().classes('items-center browse-loading-pill'):
+                ui.spinner(size='xl', color='green')
+                ui.label(tr('Loading...')).classes('ml-3 text-lg').style('color: var(--text-secondary);')
+        loading_row.set_visibility(False)
+        refs.loading_row = loading_row
 
         # Main content container
         content_container = ui.column().classes('w-full')
@@ -5536,6 +5701,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         ui.add_body_html('''
         <script>
             document.addEventListener('keydown', function(e) {
+                // A page is loading: the old content is inert, so no second load
+                // from its (still clickable, programmatically) navigation buttons.
+                if (document.querySelector('.browse-loading')) return;
                 // Ignore if focused on any text input element
                 const tag = document.activeElement.tagName;
                 if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement.isContentEditable) return;

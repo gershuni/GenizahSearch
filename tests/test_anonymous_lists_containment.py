@@ -50,7 +50,7 @@ SECRETS = (SECRET_LIST_NAME, SECRET_NOTE, SECRET_SYS_ID, SECRET_RECENT_SYS_ID, S
 # paths must never reach them; a stub that raises makes any accidental call loud.
 _SUPABASE_NAMES = (
     'get_user_lists', 'sb_create_list', 'sb_update_list', 'sb_delete_list',
-    'get_list_items', 'add_list_item', 'update_list_item', 'delete_list_item',
+    'get_list_items', 'add_list_item', 'add_list_items', 'update_list_item', 'delete_list_item',
     'get_recent_items', 'add_recent_item', 'get_projects', 'sb_create_project',
     'sb_update_project', 'sb_delete_project',
 )
@@ -115,6 +115,7 @@ def _drive_every_method(mgr, *, list_id='default', item_id='x', sys_id='x'):
     results['empty_trash'] = run(mgr.empty_trash())
     results['add_item'] = run(mgr.add_item(sys_id, list_id, note='n'))
     results['add_item_sync'] = mgr.add_item_sync(sys_id, list_id, note='n')
+    results['add_items'] = run(mgr.add_items([sys_id], list_id, note='n'))
     results['remove_item_from_list'] = run(mgr.remove_item_from_list(item_id, list_id))
     results['remove_item_from_list_sync'] = mgr.remove_item_from_list_sync(item_id, list_id)
     results['update_item_note'] = run(mgr.update_item_note(item_id, 'note'))
@@ -148,7 +149,7 @@ def _drive_every_method(mgr, *, list_id='default', item_id='x', sys_id='x'):
 _WRITES = (
     'create_list', 'create_list_sync', 'update_list', 'update_list_project',
     'delete_list', 'restore_list', 'permanently_delete_list', 'empty_trash',
-    'add_item', 'add_item_sync', 'remove_item_from_list',
+    'add_item', 'add_item_sync', 'add_items', 'remove_item_from_list',
     'remove_item_from_list_sync', 'update_item_note', 'update_item_tags',
     'create_project', 'create_project_sync', 'update_project',
     'delete_project', 'move_list_to_project', 'add_to_recent',

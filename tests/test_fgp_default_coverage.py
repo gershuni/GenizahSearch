@@ -187,6 +187,30 @@ class TestWholeDocBaseline:
         d = choose_default_source([row], "אבגד " * 300, full_htr_getter=lambda: self._FULL_MS)
         assert d["eligible"] is True and d["reason"] == "fgp_sufficient"
 
+    def test_whole_ms_letters_are_counted_once_across_calls(self, monkeypatch):
+        # The web version selector asks about the SAME whole-MS text on every
+        # rebuild of the page; its ~30k-letter count is remembered across calls
+        # (shared.fgp_service._heb_letter_count_cached), not recounted per call.
+        import shared.fgp_service as fgp
+
+        full_ms = "אבגד " * 7445 + "הו"  # distinct from the other tests' text
+        cached = getattr(fgp, "_heb_letter_count_cached", None)
+        if cached is not None:
+            cached.cache_clear()
+        counted = []
+        real = fgp._heb_letter_count
+
+        def counting(text):
+            counted.append(text)
+            return real(text)
+
+        monkeypatch.setattr(fgp, "_heb_letter_count", counting)
+        row = _edition("אבגד " * 7000)
+        decisions = [choose_default_source([row], "אבגד " * 300, full_htr_getter=lambda: full_ms)
+                     for _ in range(2)]
+        assert all(d["eligible"] is True and d["reason"] == "fgp_sufficient" for d in decisions)
+        assert counted.count(full_ms) == 1, "the whole-manuscript HTR was counted on every call"
+
     def test_foliated_row_uses_folio_baseline_not_full_ms(self):
         # A foliated row is this folio's transcription → judged against the folio
         # HTR, NOT the whole MS (else every foliated row would be demoted).
