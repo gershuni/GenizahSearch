@@ -34,7 +34,7 @@ from web.pages.search_state import (
     get_search_active_snapshot, restore_search_snapshot, responsa_note_of,
     compact_result_rows, preview_shows_final_rows, engine_mode,
     run_filter_state, apply_run_filter_state, save_post_filters_with_run,
-    live_search_run, start_search_run, url_stamp_of, apply_run_start_snapshot,
+    live_search_run, start_search_run, url_stamp_of, apply_run_start_snapshot, save_search_run,
 )
 from web import search_runs
 from web.pages.search_results import (
@@ -5332,6 +5332,49 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.printed_ids = set()
         search_state.search_generation += 1  # Invalidate stale background enrichment
 
+        # Get NOT filter words (merge manual filter + builder negated words)
+        not_words = not_filter.value.split() if not_filter.value else []
+        if search_state.builder_negated_words:
+            not_words = not_words + search_state.builder_negated_words
+
+        # Build Responsa options dict from mode selection
+        responsa_options = _responsa_options_from_controls()
+
+        _tp = text_position_select.value
+        search_state.last_run = {
+            'query': clean_query, 'mode': engine_mode(mode), 'page_mode': mode, 'gap': int(gap_input.value),
+            # Lab Mode is not in the address either: a page back on this run shows it.
+            'lab_mode': bool(lab_mode.value), 'deep_scan': bool(deep_scan.value),
+            'exclude_words': list(not_words), 'text_position': _tp if _tp != 'anywhere' else None,
+            'responsa_options': responsa_options, 'corpus_scope': 'genizah',
+            'variant_settings': dict(variant_settings),
+            # What a stamped Back restores with the rows (search_state.RUN_FILTER_FIELDS).
+            'pre_search_filters': run_filter_state(search_state),
+        }
+        if attach is not None:
+            # The run as it started (its gap, NOT-words, position and code are not in
+            # the address), and its clock.
+            search_state.last_run = dict(attach.snapshot.get('last_run') or search_state.last_run)
+            search_state.last_variant_settings = attach.snapshot.get('last_variant_settings')
+            search_state.search_start_time = attach.started
+
+        # This search's run (web/search_runs.py), registered before the first await:
+        # its code goes into the address now, so a Back while it prepares or runs finds
+        # it and follows it; a page that found it so follows it here. Whichever page
+        # reaches the job first starts it, the other follows that job (below).
+        # (search_run, never `run`: that name is NiceGUI's run module in this function.)
+        if attach is not None:
+            search_run = attach
+        else:
+            stamp = search_runs.new_stamp()
+            search_state.last_run = {**search_state.last_run, 'url_stamp': stamp}
+            search_run = start_search_run(search_state, stamp)
+            _show_search_url(clean_query, mode, stamp)
+        _page_run['run'] = search_run
+        # The page that started the run, or the page a Back brought to it later, saves
+        # it (its snapshot, the history entry); another page following it only shows it.
+        search_run.owner = search_state
+
         # The phone fold asks the browser for its width, so it is the first
         # await of this search -- and it must come AFTER is_running is set:
         # before it, a double-click or a repeated Enter suspended two calls
@@ -5392,32 +5435,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 elif total > 0:
                     shown.progress = current / total
                     shown.status = f"{current} / {total}"
-
-        # Get NOT filter words (merge manual filter + builder negated words)
-        not_words = not_filter.value.split() if not_filter.value else []
-        if search_state.builder_negated_words:
-            not_words = not_words + search_state.builder_negated_words
-
-        # Build Responsa options dict from mode selection
-        responsa_options = _responsa_options_from_controls()
-
-        _tp = text_position_select.value
-        search_state.last_run = {
-            'query': clean_query, 'mode': engine_mode(mode), 'page_mode': mode, 'gap': int(gap_input.value),
-            # Lab Mode is not in the address either: a page back on this run shows it.
-            'lab_mode': bool(lab_mode.value), 'deep_scan': bool(deep_scan.value),
-            'exclude_words': list(not_words), 'text_position': _tp if _tp != 'anywhere' else None,
-            'responsa_options': responsa_options, 'corpus_scope': 'genizah',
-            'variant_settings': dict(variant_settings),
-            # What a stamped Back restores with the rows (search_state.RUN_FILTER_FIELDS).
-            'pre_search_filters': run_filter_state(search_state),
-        }
-        if attach is not None:
-            # The run as it started (its gap, NOT-words, position and code are not in
-            # the address), and its clock.
-            search_state.last_run = dict(attach.snapshot.get('last_run') or search_state.last_run)
-            search_state.last_variant_settings = attach.snapshot.get('last_variant_settings')
-            search_state.search_start_time = attach.started
 
         # Phase 55: If not in refine mode, clear any stale refinement chain
         # A normal search should NOT be restricted by a previous refinement --
@@ -5658,25 +5675,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # Admission, FIFO waiting and process termination are shared by text,
         # parallels and API searches. Waiting does not occupy NiceGUI's pool.
-        # This search's run (web/search_runs.py): its code goes into the address now,
-        # so a Back while it runs finds it and waits for it; a page that found it so
-        # follows it here instead of starting it again.
-        # (search_run, never `run`: that name is NiceGUI's run module in this function.)
-        if attach is not None:
-            search_run = attach
-        else:
-            stamp = search_runs.new_stamp()
-            search_state.last_run = {**search_state.last_run, 'url_stamp': stamp}
-            search_run = start_search_run(search_state, stamp)
-            _show_search_url(clean_query, mode, stamp)
-        _page_run['run'] = search_run
-        # The page that started the run, or the page a Back brought to it later, saves
-        # it (its snapshot, the history entry); another page following it only shows it.
-        search_run.owner = search_state
         _painter = (asyncio.ensure_future(_paint_previews(search_state.search_generation, get_language()))
                     if _preview_wanted and attach is None else None)
         try:
             if search_run.job is None:
+                # The first page here starts the job (no await since the check).
                 search_run.cutoff = _run_cutoff
                 search_run.job = asyncio.ensure_future(run_research_call(run_core_search))
             search_run.watchers.append(search_state)
@@ -5837,6 +5840,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if search_run.owner is search_state:
                 try:
                     persist_search_snapshot(search_state)
+                    save_search_run(search_state)
                 except Exception:
                     pass  # Browser storage operation failed; snapshot not persisted
             return
@@ -5997,6 +6001,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if _owns_run:
             try:
                 persist_search_snapshot(search_state)
+                # The run's own save: its rows are on the page now (search_state).
+                save_search_run(search_state)
             except Exception:
                 pass  # Browser storage operation failed; preference not persisted
 

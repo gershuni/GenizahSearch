@@ -764,11 +764,12 @@ def test_restored_display_filters_are_checked_like_the_shared_ones(runs):
     assert page.word_search_excluded_ids == {'990004'}
 
 
-def test_a_live_run_is_found_until_a_page_saves_it(runs):
+def test_a_live_run_is_found_until_a_page_saves_it(runs, monkeypatch):
     ss = runs
+    monkeypatch.setattr(ss, 'safe_user_get', lambda key, default=None: default)
     page = _page_with_a_run(ss, rows=0)
     run = ss.start_search_run(page, _CODE)
-    assert ss.live_search_run(_CODE) is None             # no job yet
+    assert ss.live_search_run(_CODE) is run              # preparing: followed too
 
     class _Job:
         finished = False
@@ -786,7 +787,9 @@ def test_a_live_run_is_found_until_a_page_saves_it(runs):
     assert ss.live_search_run('other') is None
     run.job.finished = True
     assert ss.live_search_run(_CODE) is run              # ended, not saved: still followed
-    ss.persist_search_active_snapshot(page)              # saved: restored, not followed
+    ss.persist_search_active_snapshot(page)              # an incidental save: not the run's
+    assert ss.live_search_run(_CODE) is run and not run.done
+    ss.save_search_run(page)                             # the search's own save: restored now
     assert ss.live_search_run(_CODE) is None
     assert ss.get_search_active_snapshot(_CODE) != {}
 
@@ -914,3 +917,58 @@ def test_a_run_records_lab_mode_and_the_page_shows_it():
     shown = ast.unparse(_function(_search_page_tree(), '_show_run_controls'))
     assert "lab_mode.value = bool(run.get('lab_mode'))" in shown
     assert "deep_scan.value = bool(run.get('deep_scan'))" in shown
+
+
+def test_an_incidental_save_never_finishes_an_unfinished_run(runs, monkeypatch):
+    """Codex round 9 (P2): a filter dialog applied after the job ended but before the
+    search put its rows on the page would save the old rows as the run's, and the
+    search's own save would then be skipped (the owner is let go of on save)."""
+    ss = runs
+    monkeypatch.setattr(ss, 'safe_user_get', lambda key, default=None: default)
+    page = _page_with_a_run(ss, rows=0)
+    run = ss.start_search_run(page, _CODE)
+
+    class _Ended:
+        def done(self):
+            return True
+
+        def cancelled(self):
+            return False
+
+        def exception(self):
+            return None
+    run.job, run.owner = _Ended(), page
+    ss.persist_search_active_snapshot(page)
+    assert not run.done and run.owner is page
+    page.results = [{'display': {'id': '990001'}}]
+    ss.save_search_run(page)
+    assert run.done and ss.get_search_active_snapshot(_CODE)['results'] == [{'display': {'id': '990001'}}]
+
+
+def test_the_search_own_save_respects_session_persistence(runs, monkeypatch):
+    ss = runs
+    monkeypatch.setattr(ss, 'safe_user_get', lambda key, default=None: False
+                        if key == 'session_persistence_enabled' else default)
+    page = _page_with_a_run(ss, rows=1)
+    ss.save_search_run(page)
+    assert ss.get_search_active_snapshot(_CODE) == {}
+
+
+def test_the_run_is_registered_before_the_search_first_awaits():
+    """Codex round 9 (P1): leaving while the search prepares (the phone fold, the
+    filter lookup) must leave an address Back can follow."""
+    import ast
+    func = _function(_search_page_tree(), 'execute_search')
+    first_await = min(n.lineno for n in ast.walk(func) if isinstance(n, ast.Await))
+    started = [n.lineno for n in ast.walk(func) if isinstance(n, ast.Assign)
+               and ast.unparse(n).startswith('search_run = start_search_run(search_state, ')]
+    shown = [n.lineno for n in ast.walk(func) if isinstance(n, ast.Expr)
+             and ast.unparse(n).startswith('_show_search_url(clean_query, mode, ')]
+    assert len(started) == 1 and started[0] < first_await
+    assert shown and min(shown) < first_await
+
+
+def test_the_search_end_paths_save_its_run():
+    import ast
+    source = ast.unparse(_function(_search_page_tree(), 'execute_search'))
+    assert source.count('save_search_run(search_state)') == 2   # completed, and stopped

@@ -55,14 +55,15 @@ class SearchRun:
 
     @property
     def attachable(self) -> bool:
-        """A page reached by Back can follow it: it still runs, or it ended with a
-        result that no page has saved yet (the page that started it is still
-        finishing it, or died on its deleted elements) -- following it then takes
-        that result at once instead of searching again (Codex, PR #436). Not a
-        stopped run, nor one whose job failed."""
-        if self.done or self.job is None or self.cancelled:
+        """A page reached by Back can follow it: it is still preparing (no job yet --
+        whichever page reaches the job first starts it, the other follows it), it
+        still runs, or it ended with a result that no page has saved yet (the page
+        that started it is still finishing it, or died on its deleted elements) --
+        following it then takes that result at once instead of searching again
+        (Codex, PR #436). Not a stopped run, nor one whose job failed."""
+        if self.done or self.cancelled:
             return False
-        if not self.job.done():
+        if self.job is None or not self.job.done():
             return True
         return not self.job.cancelled() and self.job.exception() is None
 

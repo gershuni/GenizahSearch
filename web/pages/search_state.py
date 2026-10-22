@@ -517,14 +517,31 @@ def _settings_or_none(value):
 
 
 def persist_search_active_snapshot(state: 'SearchUIState') -> None:
-    """Save what the page shows as its run's snapshot (the run in its address)."""
+    """Save what the page shows as its run's snapshot (the run in its address) -- once
+    that run is saved. An unfinished run (preparing, running, or ended with rows not
+    on the page yet) is saved only by its own search (save_search_run): a filter
+    applied meanwhile would save the old rows as the run's (Codex, PR #436)."""
     stamp = url_stamp_of(state)
     if not stamp:
         return
     try:
         run = search_runs.get_run(_browser_id(), stamp)
-        if run is not None and run.running:
-            return  # mid-search (a filter applied while it runs): its end saves the run
+        if run is not None and not run.done:
+            return
+        search_runs.finish_run(_browser_id(), stamp, search_run_snapshot(state))
+    except Exception:
+        pass
+
+
+def save_search_run(state: 'SearchUIState') -> None:
+    """A search's own save at its end: its rows are in *state* now, so its run is done.
+    (Like the user-storage copy, nothing is kept when session persistence is off.)"""
+    if not safe_user_get('session_persistence_enabled', True):
+        return
+    stamp = url_stamp_of(state)
+    if not stamp:
+        return
+    try:
         search_runs.finish_run(_browser_id(), stamp, search_run_snapshot(state))
     except Exception:
         pass

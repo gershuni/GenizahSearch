@@ -42,7 +42,9 @@ def test_a_run_is_kept_for_its_browser_only():
 
 def test_running_attachable_done_and_failed():
     run = sr.start_run('b', 'c', {})
-    assert not run.running and not run.attachable and run.failed   # no job yet
+    # Preparing (no job yet): a Back follows it; the first page to reach the job
+    # starts it (Codex, PR #436, round 9).
+    assert not run.running and run.attachable and not run.failed
     run.job = _Job(done=False)
     assert run.running and run.attachable and not run.failed
     # Ended with a result no page has saved yet: a Back takes it instead of
