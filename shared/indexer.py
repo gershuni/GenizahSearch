@@ -95,17 +95,19 @@ def _add_reversed_words_field(builder):
                            index_option="basic")
 
 
-def build_seam_schema() -> tantivy.Schema:
+def build_seam_schema(reversed_words: bool = True) -> tantivy.Schema:
     """The seam index (``tantivy_db/seams``, §6.1): one document per junction of
     consecutive pages, its text stored with per-page provenance (``boundaries``: each
     slice's page and its ``offset`` in that page) and ``cut``, the junction's offset in
     the text. A separate index, so nothing that reads the main index can meet a seam.
-    ``sys_ids``: the manuscripts its pages belong to, for search-within."""
+    ``sys_ids``: the manuscripts its pages belong to, for search-within. *reversed_words*:
+    the reversed-words field, written when the main index gets it too."""
     builder = tantivy.SchemaBuilder()
     builder.add_text_field("unique_id", stored=True)
     builder.add_text_field("content", stored=True, tokenizer_name="hebword")
     builder.add_text_field("content_search", stored=False, tokenizer_name="hebword")
-    _add_reversed_words_field(builder)
+    if reversed_words:
+        _add_reversed_words_field(builder)
     builder.add_text_field("source", stored=True)
     builder.add_text_field("full_header", stored=True)
     builder.add_text_field("sys_ids", stored=False)
@@ -494,7 +496,7 @@ class Indexer:
         """The seam index (§6.1) from the pages the main build read: one document per
         junction of every chain (shared/index_seams.py). Returns its counts."""
         os.makedirs(seam_path, exist_ok=True)
-        index = tantivy.Index(build_seam_schema(), path=seam_path)
+        index = tantivy.Index(build_seam_schema(reversed_words=self._rev_analyzer is not None), path=seam_path)
         register_search_tokenizers(index)
         writer = index.writer(heap_size=500_000_000)
         csv_bank = getattr(self.meta_mgr, 'csv_bank', None) or {}

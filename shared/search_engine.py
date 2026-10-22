@@ -2455,11 +2455,16 @@ class SearchEngine:
         and Hebrew marks looked past), where ``regex_query('.*X')`` walks the whole term
         dictionary (§3.6.1: 0.14-1.8 s against 4.6-6.1 s). *seams*: on the seam index.
         None when that index has no such field (an old index): the caller keeps today's
-        route. Phase 3 builds its star lookups on this; nothing searches through it yet."""
-        if seams:
+        route. Phase 3 builds its star lookups on this; nothing searches through it yet.
+        The seams' field counts only when the build wrote the field (the marker, as for the
+        main index): a seam index built with --no-reversed-field has none to look in
+        (Codex review of PR #440)."""
+        if not getattr(self, '_has_reversed_words', False):
+            index = None
+        elif seams:
             index = self.seam_index if self.seam_searcher is not None else None
         else:
-            index = self.index if getattr(self, '_has_reversed_words', False) else None
+            index = self.index
         pattern = reversed_ending_pattern(ending)
         if index is None or pattern is None:
             return None

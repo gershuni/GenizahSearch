@@ -182,6 +182,21 @@ def test_a_marker_naming_a_field_the_schema_lacks_is_not_believed(built, tmp_pat
         eng.close_index()
 
 
+def test_seams_without_the_reversed_field_offer_no_reversed_lookup(tmp_path):
+    # build_index.py --no-reversed-field keeps the seams: their lookup must say "no field"
+    # (None, so a caller keeps today's route), not run an empty query (Codex review of
+    # PR #440).
+    root = build(tmp_path / "seams_only", reversed_field=False)
+    eng = engine(root)
+    try:
+        status = eng.index_format_status()
+        assert status["seams"] is True and status["reversed_words"] is False
+        assert eng.reversed_ending_query("כהנים") is None
+        assert eng.reversed_ending_query("כהנים", seams=True) is None
+    finally:
+        eng.close_index()
+
+
 def test_close_index_releases_the_seams_so_a_rebuild_can_delete_them(built, tmp_path):
     root = _copy(built["new"], tmp_path / "copy")
     eng = engine(root)
