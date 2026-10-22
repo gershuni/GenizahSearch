@@ -4,6 +4,124 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [9.8.3] - 2026-10-22 — A compact layout at every width
+
+The website was laid out for one width: on a phone the search controls took most of
+the screen and the results scrolled in a small pane, on a laptop the search form was
+three rows and each result card about 400 px. Search, browse, the expanded result and
+the quick view are now compact at every width, from the owner's mockups: one stylesheet,
+breakpoints at 640, 1023 and 1440, nothing a separate page. Measured on a 1280 px screen
+the search form went from 229 px to 94 px and a result row from about 400 px to 106 px;
+on a 390 px phone the browse image begins 619 px down the page instead of 958 px.
+Web-only: no installer and no GitHub Release; no What's New banner (owner: the change
+is visible). PR #434, with #431's test fix. Deployed from `master-main`.
+
+### A compact layout for phones, tablets, laptops and wide screens (web, PR #434)
+
+The site below 640px was the desktop layout stacked, not a phone layout
+(owner, 2026-10-22, with phone screenshots). Measured at 390x844 before this
+change: on `/browse` the manuscript image began 958px down the page (1,042px
+in English); on `/search` the open form and the toolbar left 300px of the
+screen to results and one result card was 400px; the English header wrapped
+its login group out of its 64px bar; `/catalog-browse` kept a 280px sidebar
+beside a results column about 60px wide.
+
+#### Header
+- The header row no longer wraps. Login and Register are icon buttons on a
+  phone (`phone-icon-only`, the name kept in `aria-label` and the tooltip);
+  wider screens see the same text buttons as before.
+
+#### Search
+- On a phone the page scrolls instead of a results pane inside a fixed-height
+  shell, so the header and the browser's address bar hide on scroll.
+- The form folds into its one-line strip when a search starts (the width check
+  runs in the browser; the strip's own button brings the form back).
+- The results toolbar is one line: count and filter buttons scroll sideways,
+  the export icons are a menu, a filter that is not yet available takes no
+  space (it still reserves its space on wide screens), the pagination
+  placeholder goes, and cards lose their desktop padding and spacing.
+
+#### Browse
+- Hidden on a phone: the page title, the lookup card's decorative icon, the
+  image panel's title, the zoom figure, the rotation slider and the
+  separators. Search for Parallels and Show Metadata are icon-only there
+  (`browse-icon-collapse`, text kept in the tree).
+- The image sets the height of its box (no dark bands above and below it);
+  the brightness/contrast/gamma sliders sit behind a `tune` button; the
+  transcription is part of the page instead of a pane that scrolls inside it.
+
+#### Catalog browse
+- Under 768px the filter sidebar is hidden behind a Filters button and stacks
+  above the results; the table keeps its columns and scrolls sideways.
+
+#### Every width (the owner's mockups, 2026-10-22)
+- Search: the form is one row on a laptop (two on a tablet) with Advanced
+  Options and "Search only in..." as buttons that open their panels; the
+  results toolbar carries a density toggle and one menu for the post-filters
+  and the exports. Rows are compact by default (one header line, a two-line
+  snippet, actions on hover), remembered per visitor; "comfortable" restores
+  the older card.
+- An expanded result shows the full text in the snippet's place beside a
+  150 px thumbnail, with one action line; on a phone the thumbnail drops
+  under the text.
+- Quick view: one info line on a laptop, the image sliders behind a `tune`
+  button, catalog and PGP details as collapsed bars at the foot; on a phone
+  the view is three tabs, Text, Image and Info, with prev and next in the
+  header.
+- Browse: the page title is for screen readers, the lookup is a slim row,
+  the green card is one line on a laptop when it fits (the title is cut to
+  the width; the rest wraps beside the drawer), the image sliders sit behind
+  `tune` at every width; a tablet gets the overlay drawer (breakpoint 1023).
+  Transcription type scales by width and content caps at 1600 px on wide
+  screens.
+- The manuscript viewer takes touch: two fingers pinch-zoom, one finger pans
+  a zoomed image (a pinch that drops to one finger goes on as a pan), and an
+  unzoomed image leaves the page free to scroll.
+
+#### Fixed in review (five Codex rounds on #434, each pinned in `tests/test_phone_layout_rules.py`)
+- A double-click or a repeated Enter could run two searches over one result
+  state: the phone fold awaited the browser before the running guard was set.
+- The expanded card's Browse Full Manuscript link dropped the matched folio
+  (`fl_id`, `volume_ie`, page, highlight) and opened the first folio of the
+  first volume.
+- The quick view's PGP / FJMS buttons did nothing on a phone, where their
+  sections are the Info tab; they now select the tab and open the section
+  from Python.
+- The browse metadata button's aria-label said "Show Metadata" while its
+  text said "Hide Metadata".
+- The "Search only in..." badge did not count measured materials or a text
+  position; it now names every filter the predicate and the chip bar know.
+- A fold of the search form left the "Search only in..." panel open with its
+  header hidden: every fold closes it, and the panel has a close button of
+  its own for the fold the browser performs on scroll.
+- The viewer added a fresh set of touch handlers on every `init()`; they are
+  bound once per viewer.
+- The green browse card, forced onto one line from 1024 px, overflowed beside
+  the 280 px drawer; it wraps when it must.
+- `common.css` gained two physical direction properties after the findings
+  mobile rule (CI's guard): now `margin-inline` and `padding-inline`.
+
+### The /browse correction tests stop depending on timing (ci, PR #431)
+
+`tests/test_browse_correction_off_loop.py` (from #430) failed in two ways that
+said nothing about the website:
+
+- **CI on 0fb81585**: `test_two_quick_save_draft_clicks...` raised
+  `IndexError: pop from empty list` at its own `with client:`. A page task an
+  earlier test left pending inside `with client:` on its closed loop (the log
+  names the joins button's `_runner`) was garbage-collected during this test,
+  and its `with` exit popped the slot stack of the task then running -- NiceGUI
+  keys slot stacks by task id. Reproduced with a probe; the `editor` fixture now
+  runs `gc.collect()` before the test opens any slot.
+- **Run alone on Windows with NiceGUI 3.18**, the typed-during-save test failed
+  every time: the loop was busy for ~0.35 s at the start of the save, so its
+  `sleep(0.1)` typed after a 0.3 s write. Every step that must happen "while the
+  write runs" (typing, a page turn, the second click) now waits until the fake
+  write is running in its worker, and the write answers only after that step.
+
+Each test still fails when the code it guards is broken: no lock on Save Draft
+or Submit, typed text marked Saved, a late draft id on the new page.
+
 ## [9.8.2] - 2026-10-22 — Downloads and thumbnails
 
 Desktop downloads (Excel, Word, text) write the page each result row shows, and the Source
