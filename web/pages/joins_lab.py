@@ -3935,6 +3935,8 @@ def create_joins_lab_page(
                             raise asyncio.TimeoutError  # see raw_results above
                         final_candidates = list(merge_result.candidates)
                     except asyncio.TimeoutError:
+                        if not _should_apply_results(my_gen, _search_generation):
+                            return   # a newer search owns the page (Codex review of PR #433)
                         # MED (CR): the final render hides search_status immediately,
                         # so surface the other-side timeout as a persistent notify
                         # instead (otherwise the user sees base candidates with no clue
@@ -3947,11 +3949,15 @@ def create_joins_lab_page(
                     except asyncio.CancelledError:
                         return
                     except ResponsaQueryRefused as exc:
+                        if not _should_apply_results(my_gen, _search_generation):
+                            return   # a newer search owns the page (Codex review of PR #433)
                         # The other side's query is refused: this side's results, and why.
                         ui.notify(tr(str(exc)), type='warning', close_button=True)
                         final_candidates = list(base_candidates)
                     except Exception as exc:
                         logger.exception('Joins Lab cross-side error: %s', exc)
+                        if not _should_apply_results(my_gen, _search_generation):
+                            return   # a newer search owns the page (Codex review of PR #433)
                         ui.notify(
                             tr('Could not resolve the other side of this leaf. '
                                'Try navigating to a specific folio first.'),

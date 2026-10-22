@@ -32,6 +32,8 @@ class SearchUIState:
         self.is_running = False
         self.is_cancelled = False  # For stop button functionality
         self.results = []
+        # The Responsa guard's downgrade of these results (shown on the count line)
+        self.responsa_warning = None
         self.selected_result = None
         self.total_count = 0
         self.current_page_idx = 0  # For browse within viewer

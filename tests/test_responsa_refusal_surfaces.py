@@ -6,9 +6,9 @@ import pytest
 
 from shared.responsa_match import ResponsaQueryRefused
 from tests.test_web_io_bound_none_findings import _click, _type_joins_query
-from tests.test_web_search_within_cutoff import _label_texts, _wait_for
+from tests.test_web_search_within_cutoff import WORD, _label_texts, _row, _wait_for, page  # noqa: F401
 from tests.test_web_variant_settings_per_visitor import (  # noqa: F401  (server is a fixture)
-    _element, run, server,
+    _element, run, server, submit, wait_for_payloads,
 )
 
 
@@ -191,3 +191,71 @@ def test_a_superseded_refused_web_search_stays_quiet(server, monkeypatch):  # no
 
     run(driver)
     assert shown == {'said': []}, shown
+
+
+def test_a_superseded_refusal_of_the_other_side_stays_quiet(server, monkeypatch):  # noqa: F811
+    """The other side's refusal landing after a newer search took the page must not apply
+    this run's candidates or say its message (Codex review of PR #433). The newer search
+    is simulated: the generation check says superseded once the other side has run."""
+    import asyncio
+
+    from nicegui import ui
+
+    from web.joins_executor import WebSearchExecutor
+    from web.pages import joins_lab
+    from web.state import state
+    monkeypatch.setattr(state, 'is_ready', lambda: True)
+    calls, superseded = [], []
+
+    def search(self, *args, **kwargs):
+        calls.append(args[:1])
+        if len(calls) == 1:
+            return _stale_rows()
+        superseded.append(True)                 # a newer Run Search took the page meanwhile
+        raise ResponsaQueryRefused()
+    monkeypatch.setattr(WebSearchExecutor, 'execute_search', search)
+    monkeypatch.setattr(joins_lab, '_should_apply_results', lambda my_gen, gen_ref: not superseded)
+    shown = {}
+
+    async def driver(a, b):
+        try:
+            await a.open('/joins-lab')
+            await _type_joins_query(a)              # both builders, this side and the other
+            other_side = _element(a, ui.checkbox, lambda e: e.text == 'Search the other side of the leaf')
+            with a._client:
+                other_side.value = True
+            _click(a, _element(a, ui.button, lambda e: e.text == 'Run Search'))
+            await _wait_for(lambda: len(calls) == 2)
+            await asyncio.sleep(0.5)                # the refusal has reached its handler
+            shown['said'] = [m for m in a.notify.messages if m.startswith('Responsa search takes a *')]
+            shown['cards'] = [t for t in _label_texts(a) if 'T-S STALE' in t]
+        except Exception as exc:                    # asserted below
+            shown['error'] = repr(exc)
+
+    run(driver)
+    assert shown == {'said': [], 'cards': []}, shown
+
+
+def test_a_downgrade_stays_on_the_count_line_after_a_filter(page):  # noqa: F811
+    """The guard's downgrade belongs to the results shown: a filter's re-render of the
+    count line dropped it (Codex review of PR #433)."""
+    from nicegui import ui
+    queue = page({(WORD, False): ([dict(_row('M1'), responsa_warning='Spelling variants disabled'),
+                                   _row('M2')], None)})
+    seen = {}
+
+    def counts(user):
+        return [t for t in _label_texts(user) if ' Results' in t]
+
+    async def driver(a, b):
+        await a.open('/search')
+        submit(a, WORD)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any('Spelling variants disabled' in t for t in counts(a)))
+        _click(a, _element(a, ui.button, lambda e: e.text == 'Apply Filters'))
+        await _wait_for(lambda: any(t.startswith('2 / 2 Results') for t in counts(a)))
+        seen['after'] = counts(a)
+
+    run(driver)
+    assert any(t.startswith('2 / 2 Results') and t.endswith('· Spelling variants disabled')
+               for t in seen['after']), seen
