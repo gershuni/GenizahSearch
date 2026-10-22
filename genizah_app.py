@@ -107,7 +107,7 @@ from desktop.variant_run_settings import (PreviewVariants, engine_with_variant_s
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared_export_utils import clean_text_single_line, coerce_img_page_cell
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
-from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter, chain_needs_completion, only_partial, step_partial
+from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter, chain_needs_completion, only_partial, step_partial, saved_cutoff
 from shared.document_service import select_pgp_page_entry
 from shared.exclusion_service import (
     ExclusionSource, compute_excluded_ids,
@@ -24486,20 +24486,6 @@ class GenizahGUI(QMainWindow):
         self._responsa_expanded_count = 0
         self._responsa_pattern_count = 0
 
-    def _saved_search_cutoff(self, kept):
-        """The cut-off signal the session keeps with the first *kept* rows: "+" when the
-        search was cut off or stopped, or the snapshot drops rows; and whether what it
-        left out is only what completing cannot add (``partial``, Codex round 3 on PR
-        #442) -- rows the snapshot drops are a limit completing does read (``limited``)."""
-        cutoff = getattr(self, '_search_cutoff', None) or {}
-        dropped = len(getattr(self, 'last_results', []) or []) > kept
-        saved = {'capped': bool(cutoff.get('capped')) or dropped,
-                 'interrupted': bool(cutoff.get('interrupted'))}
-        if cutoff.get('partial'):
-            saved['partial'] = True
-            saved['limited'] = bool(cutoff.get('limited')) or dropped
-        return saved
-
     def _search_status_summary(self, domains=0):
         """The Search results status line, from the table as it is now.
 
@@ -33939,7 +33925,8 @@ class GenizahGUI(QMainWindow):
                     'results': getattr(self, 'last_results', [])[:5000],
                     # D8: the restored count shows "+" if the search was cut off or the
                     # snapshot above drops rows.
-                    'search_cutoff': self._saved_search_cutoff(5000),
+                    'search_cutoff': saved_cutoff(getattr(self, '_search_cutoff', None),
+                                                  len(getattr(self, 'last_results', []) or []), 5000),
                     'domain_exclusions': sorted(getattr(self, '_domain_exclusions', set())),
                     'printed_filter': getattr(self, '_printed_filter_state', 'all'),
                     'local_filter': getattr(self, '_local_filter_state_search', 'all'),

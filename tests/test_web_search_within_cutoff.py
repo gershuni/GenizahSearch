@@ -919,7 +919,7 @@ def test_a_restored_history_entry_does_not_inherit_the_shown_searchs_partial_sta
     history entry that kept its rows (and says they were cut) is its own search, which
     Search within completes."""
     from tests.test_web_variant_settings_per_visitor import (
-        PLACEHOLDER, WORD3, _element, _legacy_history_entry, _restore_history, stored)
+        PLACEHOLDER, WORD3, _element, _legacy_history_entry, _restore_history)
     from nicegui import ui
     star = f'{WORD2}* טיכ*'
     partial = {'capped': True, 'interrupted': False, 'partial': True, 'limited': False}
