@@ -863,9 +863,18 @@ seam centred on its first break.
     at every letter. Bidirectional reverses the order, not the sum. `within_document` (`AND`),
     position searches and line searches never read seams: they keep the whole-manuscript
     documents (§6's table).
-  - **S <= K reads the seams; S > K reads the whole-manuscript documents**, today's route, with
-    today's false junctions. K = 30 covers a 31-word phrase at gap 0, 16 words at gap 1, 4 words
-    at gap 9, 3 words at gap 10 (S = 22), and Responsa's `a [10] b [10] c` (S = 22).
+  - **S <= K reads the seams.** K = 30 covers a 31-word phrase at gap 0, 16 words at gap 1, 4
+    words at gap 9, 3 words at gap 10 (S = 22), and Responsa's `a [10] b [10] c` (S = 22).
+  - **S > K, without a star word** (Exact, Variants, Fuzzy; Responsa with finite words only):
+    the whole-manuscript documents, today's route with today's false junctions.
+  - **S > K with a star word** (Phase 3): never the whole-manuscript documents, as decision 9
+    says of star crossings (Codex round 3: the aggregate route would bring back the false
+    junctions and the billions of characters seams were built to avoid). The pages and the seams
+    are searched as for S <= K; a crossing with more than K words on one side of its break is the
+    one thing they cannot hold, so the result is **marked incomplete**, through the same signal
+    as "N+" (the header, the API and MCP completeness field, and `complete_chain`), with a
+    note that matches across a page break longer than 30 words a side were not searched.
+    None of the 90 days of real queries below needed it.
 - **Real queries** (PostHog `search_executed`, website, the 90 days to 2026-10-22, bots
   excluded). Of about 13,300 Exact, Variants and Fuzzy searches, 20 had 16-30 words and none had
   more; 146 had 9-15. 62 Responsa queries carried a `[N]` gap, the largest `[10]`, all in 3-4
@@ -1282,6 +1291,9 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
   (16,325 on the full build, all present, each once). P2, gate (c)'s oracle left out the
   whole-manuscript and part documents, which carry the field for Phase 3's `AND`: they are in
   it now.
+- **Phase 2 design, round 3 (Codex on PR #438): one finding, folded in.** P2, the S > K rule sent
+  a star query's crossings back to the whole-manuscript documents, against decision 9. A star
+  query with S > K now reads pages and seams only and is marked incomplete (§6.1 point 2).
 - **Phase 0 round (Codex on PR #429, 2026-10-21): three findings, all folded in.** P1: the
   brute-force oracle's prefilter was a literal substring test, so a page whose ending held an
   internal bracket or mark (`נ[י]ם`, `נִים`) was skipped before the check ran; the prefilter now
