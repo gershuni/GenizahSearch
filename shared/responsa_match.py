@@ -201,15 +201,28 @@ def expand_stems(comp, variants_on, ja_on, variant_mode, var_mgr, budget=None):
     """The component's finite forms: its words, then plene/defective (``%``), the
     grammatical prefixes and suffixes (``#``), Judeo-Arabic, spelling variants --
     the order the main path always used, now the one order for retrieval and check.
-    For a star word these are the stems the star attaches to."""
-    forms = literal_forms(comp, budget.limit if budget is not None else None)
+    For a star word these are the stems the star attaches to.
+
+    Every step stops (_OverLimit) as soon as the forms pass what is left of the
+    guard's limit (*budget*; without one, ``Config.MAX_EXPANDED_TERMS``): each step
+    multiplies them -- ``#X#`` by about 600 -- so ``#א(ב/ג)...#`` with 12 groups
+    (4,096 forms) built some 2.5 million before they were counted (Codex review of
+    PR #432)."""
+    if budget is not None and budget.limit is not None:
+        room = budget.limit - budget.used
+    else:
+        room = Config.MAX_EXPANDED_TERMS
+    forms = literal_forms(comp, room)
 
     def step(fn):
         nonlocal forms
-        out = []
+        out = {}
         for w in forms:
-            out.extend(fn(w))
-        forms = list(dict.fromkeys(out))
+            for f in fn(w):
+                out[f] = None
+            if len(out) > room:
+                raise _OverLimit()
+        forms = list(out)
 
     if comp.plene_defective:
         step(expand_plene_defective)
@@ -220,17 +233,19 @@ def expand_stems(comp, variants_on, ja_on, variant_mode, var_mgr, budget=None):
     if ja_on:
         step(expand_judeo_arabic)
     if variants_on and var_mgr is not None:
-        out = []
+        out = {}
         for w in forms:
             try:
-                out.extend(_variants(var_mgr, w, variant_mode, 200))
+                found = _variants(var_mgr, w, variant_mode, 200)
             except MemoryError:
                 raise
             except Exception:
-                out.append(w)   # Variant expansion failed for this word; use original
-            if budget is not None and budget.limit is not None and len(out) > budget.limit:
+                found = [w]   # Variant expansion failed for this word; use original
+            for f in found:
+                out[f] = None
+            if len(out) > room:
                 raise _OverLimit()
-        forms = list(dict.fromkeys(out))
+        forms = list(out)
     if budget is not None:
         budget.take(len(retrieval_terms(comp, forms)))
     return forms
