@@ -21,6 +21,7 @@ MANUSCRIPTS = {
     "990105": [("e1", "פתיחה גדולים"), ("e2", "כהנים סוף")],                     # the reverse order
     "990106": [("f1", "פתיחה כהנים"), ("f2", "עמדו"), ("f3", "גדולים סוף")],      # over two breaks
     "990107": [("g1", "פתיחה של"), ("g2", "ום סוף")],                           # one word, flex spacing
+    "990108": [("h1", "פתיחה כה[נים"), ("h2", "גדולים סוף"), ("h3", "שם כהנים גדולים")],  # bracketed, then plain
 }
 
 
@@ -71,6 +72,17 @@ def test_one_flex_spaced_word_crosses_a_break(eng):
     row = _crossings(eng, "שלום", flex_spacing=True)["g1"]
     assert [h["uid"] for h in row["page_highlights"]] == ["g1", "g2"]
     assert "g1" not in _crossings(eng, "שלום")
+
+
+def test_a_bracketed_crossing_keeps_its_place_before_a_later_plain_match(eng):
+    # כה[נים | גדולים is the occurrence the check accepted; the later page's plain כהנים
+    # גדולים must not take its place, or the row is filed under h3 and its page row drops
+    # it (Codex review of PR #432). h3 is still found, as its own page row.
+    rows = eng.execute_search("כהנים גדולים", "literal", 0, responsa_options=R, corpus_scope="genizah")
+    row = {r["uid"]: r for r in rows if r.get("cross_page")}["h1"]
+    assert [h["uid"] for h in row["page_highlights"]] == ["h1", "h2"]
+    assert "*כה[נים\nגדולים*" in row["raw_file_hl"]
+    assert "h3" in {r["uid"] for r in rows}
 
 
 # --- Literal's word windows (_cross_page_spans): the joiner between windows -------------

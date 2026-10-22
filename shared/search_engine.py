@@ -3909,9 +3909,16 @@ class SearchEngine:
                     # preserve scholarly bracket notation in snippets.
                     orig_match_missing = False
                     stripped_match = match_obj           # in match_content's offsets
-                    if match_content is not content:
+                    if match_content is not content and _responsa is not None:
+                        # Responsa marks the occurrence its check accepted, where it
+                        # stands in the original text (plan §4: שלום finds של[ו]ם): a later
+                        # bracket-free occurrence must not take its place, or a crossing
+                        # (כה[נים | גדולים) is filed under that later page and its page row
+                        # drops it (Codex review of PR #432).
+                        match_obj = _Span(*_unstripped_span(content, match_obj.start(), match_obj.end()))
+                    elif match_content is not content:
                         first_orig = orig_match = regex.search(content)
-                        if orig_match and (_whole_words or _responsa is not None):
+                        if orig_match and _whole_words:
                             orig_match = _first_accepted_match(
                                 regex, content, orig_match,
                                 lambda m, _t=content: _accept(_t, m, True))
@@ -3931,10 +3938,8 @@ class SearchEngine:
                             # row mapped those onto the wrong characters and page).
                             match_obj = _Span(*_unstripped_span(content, match_obj.start(), match_obj.end()))
                             # A page row whose original text holds no match at all is
-                            # still dropped below, as before (membership unchanged) --
-                            # except in Responsa, whose one bracket rule keeps the row
-                            # (plan §4: שלום finds של[ו]ם, marked where it stands).
-                            orig_match_missing = first_orig is None and _responsa is None
+                            # still dropped below, as before (membership unchanged).
+                            orig_match_missing = first_orig is None
 
                     # Fuzzy: a page row shows the nearest spelling on the page.
                     if (isinstance(regex, _FuzzyMatcher) and scope == 'page' and not orig_match_missing
