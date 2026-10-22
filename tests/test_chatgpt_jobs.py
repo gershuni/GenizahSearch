@@ -94,10 +94,14 @@ def test_job_deadline_signals_worker_cancellation(monkeypatch):
     app, _ = make_app(monkeypatch, handler)
     with TestClient(app) as client:
         token = client.post('/api/chatgpt/search/jobs', json=BODY).json()['job_id']
-        for _ in range(10):
+        # Until the job is decided, within a time bound: ten polls in a row could all
+        # land before the 0.02 s deadline fired (failed 3 of 6 runs on Windows).
+        give_up = time.monotonic() + 5
+        while True:
             response = client.get('/api/chatgpt/jobs/' + token)
-            if response.status_code != 202:
+            if response.status_code != 202 or time.monotonic() > give_up:
                 break
+            time.sleep(0.01)
         assert response.status_code == 504
         assert response.json()['error']['code'] == 'research_job_timeout'
         assert cancelled[0].is_set()

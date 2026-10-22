@@ -106,10 +106,14 @@ class TestEmptyAndWhitespaceQueries:
         engine.searcher.search = MagicMock(return_value=mock_result)
 
         # Try various modifier-only queries -- none should crash
-        for query in ['#', '%', '*', '#%', '%#', '##']:
+        for query in ['#', '%', '#%', '%#', '##']:
             result = engine.execute_search(query, 'exact', 0,
                                             responsa_options=_default_responsa_options())
             assert isinstance(result, list), f"Query '{query}' did not return a list"
+        # A lone star matches any word: refused with a message (Phase 1), never a list.
+        from shared.responsa_match import ResponsaQueryRefused
+        with pytest.raises(ResponsaQueryRefused):
+            engine.execute_search('*', 'exact', 0, responsa_options=_default_responsa_options())
 
 
 # ============================================================================
@@ -331,9 +335,9 @@ class TestExplosionGuardEndToEnd:
         assert warning is not None, "Should have triggered cascade warning"
 
     def test_prefix_plus_suffix_cascades_down_instead_of_error(self):
-        """1 word with #prefix + #suffix (both) -> 24 prefixes * 25 suffixes = 600
-        which exceeds 500 even without variants. With expanded cascade, the guard
-        should disable suffixes (bringing it to 24*5=120) instead of raising ValueError."""
+        """1 word with #prefix + #suffix (both) -> 24 prefixes * 25 suffixes = 600, with
+        Judeo-Arabic (x8) 4,800, and with 2 variants per form 9,600 > 5,000. The
+        cascade turns variants off (4,800 fits): the suffixes stay, no ValueError."""
         components = [
             ResponsaComponent(
                 words=["shalom"],
@@ -341,22 +345,20 @@ class TestExplosionGuardEndToEnd:
                 grammatical_suffixes=True,
             ),
         ]
-        var_mgr = self._make_mock_var_mgr(variants_per_term=5)
+        var_mgr = self._make_mock_var_mgr(variants_per_term=2)
 
         expanded, warning, actual_opts = _apply_explosion_guard(
             components,
             variants_on=True,
-            ja_on=False,
+            ja_on=True,
             var_mgr=var_mgr,
             variant_mode='variants'
         )
-        # Cascade should have disabled suffixes (and possibly variants) instead of erroring
         assert warning is not None, "Should have triggered cascade warning"
-        assert "suffix" in warning.lower() or "סיומות" in warning, (
-            f"Warning should mention suffix disabling, got: {warning}"
-        )
-        # The component's grammatical_suffixes should be False after cascade
-        assert expanded[0].grammatical_suffixes is False
+        assert actual_opts['variants_on'] is False
+        assert actual_opts['ja_on'] is True
+        # #X# keeps its suffixes (plan §5.3)
+        assert expanded[0].grammatical_suffixes is True
 
     def test_two_words_prefix_only_no_variants_under_limit(self):
         """2 words with #prefix only, variants=False, ja=False ->

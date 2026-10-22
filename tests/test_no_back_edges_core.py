@@ -43,6 +43,7 @@ EXTRACTED_MODULES = [
     "shared/sefaria_utils.py",
     "shared/unified_variants.py",
     "shared/responsa.py",
+    "shared/responsa_match.py",      # Responsa Phase 1 (2026-10-21): the word compiler
     "shared/codicological.py",
     "shared/joins_manager.py",
     "shared/lists_manager.py",

@@ -144,7 +144,25 @@ class Config:
     VARIANT_GEN_LIMIT = 8000
     REGEX_VARIANTS_LIMIT = 8000
     WORD_TOKEN_PATTERN = r"[\w֐-׿\']+"
-    MAX_EXPANDED_TERMS = 500
+    # Responsa: the most terms one query's lookup may hold, counted as they are made
+    # (shared/responsa_match.py::expand_under_guard). Measured 2026-10-21 on the local
+    # index: 1,200 scored terms 0.6-0.8 s, 4,800 2.9-3.7 s, 9,600 5.5-6.0 s. It was
+    # 500 estimated forms, which cut #X#'s 600 (24 prefixes x 25 suffixes).
+    MAX_EXPANDED_TERMS = 5000
+    # Responsa: the largest check or highlight pattern a query may make. Each bounded
+    # word carries its edge classes (about 9 KB; three times inside AND), so a query of
+    # many short words made megabytes of pattern within the 1,000-character cap (500
+    # words: 12 MB, over 300 MB and 40 s to compile, which nothing interrupts). Measured
+    # 2026-10-22: 0.5 MB compiles in about 1.6 s with re and 2.3 s with regex (both run);
+    # the largest real queries make under 0.15 MB (#X# AND #Y#, 1,200 forms). The cap
+    # allows about 55 words in a row, 27 bidirectional, 18 under AND.
+    MAX_RESPONSA_PATTERN_CHARS = 600_000
+    # Responsa: the longest form (a word with its prefixes and suffixes) a query may
+    # hold. Its bracket-tolerant lookup is one regex_query, and tantivy-fst refuses
+    # one longer than 332 characters on content_search, 141 on content (measured
+    # 2026-10-22, the same for Hebrew, Latin and digits): past that the lookup lost
+    # the form's bracketed spellings, so the query is refused instead.
+    MAX_RESPONSA_FORM_CHARS = 120
     NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
     USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     HTTP_HEADERS = {"User-Agent": USER_AGENT}

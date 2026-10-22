@@ -2018,10 +2018,62 @@ moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `deskt
 - **Function** `expand_judeo_arabic` (Line 643) — Expand a Judeo-Arabic word with definite article and preposition forms.
 - **Function** `expand_grammatical_suffixes` (Line 702) — Expand a Hebrew word with all grammatical suffix combinations.
 - **Function** `expand_plene_defective` (Line 730) — Generate plene/defective spelling variants of a Hebrew word.
-- **Function** `_count_expanded_terms` (Line 777) — Estimate the total number of expanded terms for a set of Responsa components.
+- **Function** `_count_expanded_terms` (Line 777) — The number of terms the lookup of *components* holds: every form, and a star
 - **Function** `_apply_explosion_guard` (Line 835) — Apply the explosion guard to prevent combinatorial blowup in Responsa queries.
 - **Function** `_expand_inline_alternation` (Line 977) — Expand an inline alternation pattern into a regex.
 
+
+## shared/responsa_match.py
+
+- **Class** `ResponsaQueryRefused` (Line 64) — A query the engine does not search yet: refused with a message, never zero rows.
+    - Method `__init__` (Line 73)
+- **Function** `_star_word_ok` (Line 77) — One star at the start, one at the end, or one at each end of a word with
+- **Function** `refuse_unsupported_stars` (Line 90) — Raise ResponsaQueryRefused when a component holds a star shape Phase 1 cannot
+- **Function** `rewrite_both_end_stars` (Line 110) — ``*X*`` -> ``#X#`` in place (today's meaning until Phase 3); True if any was.
+- **Function** `_inline_forms` (Line 132) — ``אירו(ס/ש)ין`` -> ``['אירוסין', 'אירושין']``: every choice of every group, in
+- **Function** `literal_forms` (Line 153) — The component's own words: an OR group's words, or an inline alternation spelt
+- **Class** `_OverLimit` (Line 162) — The expansion passed the guard's limit (raised early, before it is complete).
+- **Class** `_Budget` (Line 166)
+    - Method `__init__` (Line 167)
+    - Method `take` (Line 171)
+- **Function** `_variants` (Line 177)
+- **Function** `expand_stems` (Line 183) — The component's finite forms: its words, then plene/defective (``%``), the
+- **Function** `_star_list` (Line 222) — Today's retrieval list of a star word (Phase 1; Phase 3 replaces it): ``*X``
+- **Function** `retrieval_terms` (Line 238) — Every form the lookup asks for: the stems, and a star word's list.
+- **Function** `expand_under_guard` (Line 247) — Expand *components* (positive ones; negated words are letters to exclude) under
+- **Function** `_class` (Line 318) — A character class of *points* (sorted code points), as ranges.
+- **Function** `edge_classes` (Line 333) — (continues, looked past): ``_continues_word``'s characters (letters, decimal
+- **Function** `start_edge` (Line 356) — Before a bounded word. Lenient (the check): rejects only a word whose
+- **Function** `end_edge` (Line 369) — After a bounded word: Exact's ``_ends_word`` exactly (a lookahead may be any
+- **Class** `WordPlan` (Line 381) — One positive component, compiled.
+    - Property `star` (Line 388)
+    - Property `bounds` (Line 392) — (start bounded, end bounded): a star relaxes only its own side (§4).
+    - Property `original_words` (Line 400)
+    - Method `terms` (Line 403)
+    - Method `tantivy_dict` (Line 406) — The component dict build_tantivy_query / component_query_string read.
+    - Method `body` (Line 419) — The word's own pattern, without edges.
+- **Function** `plans_from_dicts` (Line 433) — WordPlans from the component dicts build_regex_pattern has always taken
+- **Function** `_separator` (Line 456) — The text between two words: non-word characters, with up to *gap_val* words.
+- **Class** `CompiledResponsa` (Line 464) — A Responsa query compiled for retrieval, check and highlight.
+    - Property `expanded_count` (Line 477)
+    - Property `has_star` (Line 481)
+    - Method `compile_check` (Line 484)
+    - Method `accept` (Line 488) — Exact's whole-word predicate on every word the match holds (§5.2): the
+    - Method `retrieval` (Line 502) — The lookup on *index* (its own schema; plan §5.1, Codex 2.4): per word its
+- **Function** `_names` (Line 510)
+- **Function** `_word_piece` (Line 514)
+- **Function** `_sequence` (Line 523) — Words joined by separators. The first word gets no start lookbehind in the
+- **Function** `build_patterns` (Line 546) — (check pattern, highlight pattern, groups) for the word sequence *plans*.
+- **Function** `compile_components` (Line 597) — Compile parsed *components* (one query, no line groups) into a CompiledResponsa.
+- **Function** `_line_word_separator` (Line 636) — Between two words of one line (never crosses a line break): whitespace, with
+- **Function** `compile_line_groups` (Line 644) — Compile a line-break query (``_parse_line_break_query``'s groups) through the
+- **Function** `build_line_patterns` (Line 697) — (check, highlight, groups) of a line-break query: each group one line pattern,
+- **Function** `negated_words` (Line 738) — The letters a ``-word`` excludes: the word, and its plene/defective spellings
+- **Function** `component_query_string` (Line 756) — One component's scored clause, as the Responsa query string always had it: the
+- **Function** `_rust_escape` (Line 820)
+- **Function** `tolerant_patterns` (Line 824) — The tolerant lookup patterns of *forms* (already folded), each one alternation.
+- **Function** `tolerant_queries` (Line 829) — ``regex_query``s over *forms*, split until each fits tantivy-fst's size limit.
+- **Function** `retrieval_query` (Line 856) — The candidates for *plans* on *index*: per word, its scored clause on *field*,
 ## shared/joins_manager.py
 
 - **Class** `JoinsManager` (Line 25) — Manages fragment joins with offline-first caching.

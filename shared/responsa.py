@@ -13,8 +13,6 @@ from typing import List, Optional
 
 from shared.genizah_translations import TRANSLATIONS
 
-from shared.config import Config
-
 
 def _tr(text: str) -> str:
     """Translate text if current language is Hebrew.
@@ -798,10 +796,9 @@ def expand_plene_defective(word: str) -> List[str]:
 def _count_expanded_terms(components: List[ResponsaComponent],
                           variants_on: bool, ja_on: bool,
                           var_mgr, variant_mode: str) -> int:
-    """Estimate the total number of expanded terms for a set of Responsa components.
-
-    This counts without fully materializing the expansion, used by the explosion
-    guard to check limits before committing to a particular expansion level.
+    """The number of terms the lookup of *components* holds: every form, and a star
+    word's list, counted as they are made (shared/responsa_match.py) -- no longer an
+    estimate from the first word's variants.
 
     Args:
         components: List of ResponsaComponent objects
@@ -811,45 +808,16 @@ def _count_expanded_terms(components: List[ResponsaComponent],
         variant_mode: Variant mode string ('variants', 'variants_extended', 'variants_maximum')
 
     Returns:
-        Estimated total number of search terms that would be generated
+        The total number of search terms the components expand to
     """
+    from shared.config import Config  # noqa: PLC0415 -- kept with the other lazy import
+    from shared.responsa_match import _OverLimit, expand_stems, retrieval_terms  # noqa: PLC0415 -- it imports this module
     total = 0
-
-    for comp in components:
-        # Start with the base words count
-        base_words = comp.words
-
-        # If grammatical prefixes are on, each word becomes ~25 forms
-        if comp.grammatical_prefixes:
-            word_count = len(base_words) * len(GRAMMATICAL_PREFIXES)
-        else:
-            word_count = len(base_words)
-
-        # If grammatical suffixes are on, each form gets ~25 suffix forms
-        if comp.grammatical_suffixes:
-            word_count *= len(GRAMMATICAL_SUFFIXES)
-
-        # If plene/defective is on, estimate ~5 variants per form
-        if comp.plene_defective:
-            word_count *= 5
-
-        # If JA expansion is on, each form becomes 8 JA forms
-        if ja_on:
-            word_count *= 8
-
-        # If variants are on, each form gets variant expansions
-        if variants_on and var_mgr is not None:
-            # Estimate variant count from the first word as representative
-            sample_word = base_words[0] if base_words else "sample"
-            try:
-                sample_variants = var_mgr.get_variants(sample_word, variant_mode)
-                variant_multiplier = max(1, len(sample_variants))
-            except Exception:
-                variant_multiplier = 1  # Variant expansion failed; treat as single variant
-            word_count *= variant_multiplier
-
-        total += word_count
-
+    for c in components:
+        try:
+            total += len(retrieval_terms(c, expand_stems(c, variants_on, ja_on, variant_mode, var_mgr)))
+        except _OverLimit:   # an inline alternation stops being spelt out past the limit
+            return Config.MAX_EXPANDED_TERMS + 1
     return total
 
 
@@ -862,8 +830,9 @@ def _apply_explosion_guard(
 ) -> tuple:
     """Apply the explosion guard to prevent combinatorial blowup in Responsa queries.
 
-    Checks the estimated total expanded terms against MAX_EXPANDED_TERMS (500)
-    and progressively downgrades options until the query fits:
+    Counts the real terms of the lookup (``shared/responsa_match.py::expand_under_guard``,
+    the guard every Responsa path runs) against ``Config.MAX_EXPANDED_TERMS`` and
+    progressively downgrades options until the query fits:
 
     Cascade order:
       1. Downgrade variant mode to 'variants' (basic, 30 pairs)
@@ -874,17 +843,10 @@ def _apply_explosion_guard(
       6. Disable grammatical prefixes on all components
       7. If still over limit, raise ValueError
 
-    Args:
-        components: List of ResponsaComponent objects from parse_responsa_query
-        variants_on: Whether spelling variants are enabled
-        ja_on: Whether Judeo-Arabic expansion is enabled
-        var_mgr: VariantManager instance (or mock) for counting variant expansions
-        variant_mode: Current variant mode string
-
     Returns:
         Tuple of (components, warning_message, actual_options_dict)
-        - components: The components (may be modified in-place if cascade steps 4-6
-          disabled plene_defective, grammatical_suffixes, or grammatical_prefixes)
+        - components: The components (changed in place if steps 4-6 disabled
+          plene_defective, grammatical_suffixes, or grammatical_prefixes)
         - warning_message: str describing what was downgraded, or None if no changes
         - actual_options: dict with keys 'variants_on', 'ja_on', 'variant_mode'
           reflecting the actual options after any downgrades
@@ -892,107 +854,10 @@ def _apply_explosion_guard(
     Raises:
         ValueError: If the query exceeds MAX_EXPANDED_TERMS even after all downgrades
     """
-    limit = Config.MAX_EXPANDED_TERMS
-    warnings = []
+    from shared.responsa_match import expand_under_guard  # noqa: PLC0415 -- it imports this module
+    _stems, warning, state = expand_under_guard(components, variants_on, ja_on, variant_mode, var_mgr)
+    return components, warning, state
 
-    current_variants_on = variants_on
-    current_ja_on = ja_on
-    current_variant_mode = variant_mode
-
-    # Check initial count
-    count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
-
-    if count <= limit:
-        return components, None, {
-            'variants_on': current_variants_on,
-            'ja_on': current_ja_on,
-            'variant_mode': current_variant_mode,
-        }
-
-    # Cascade 1: Downgrade variant mode to basic ('variants')
-    if current_variants_on and current_variant_mode != 'variants':
-        current_variant_mode = 'variants'
-        count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
-        warnings.append(_tr("Variant mode downgraded to basic (30 pairs)"))
-        if count <= limit:
-            return components, '; '.join(warnings), {
-                'variants_on': current_variants_on,
-                'ja_on': current_ja_on,
-                'variant_mode': current_variant_mode,
-            }
-
-    # Cascade 2: Disable variants entirely
-    if current_variants_on:
-        current_variants_on = False
-        count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
-        warnings.append(_tr("Spelling variants disabled"))
-        if count <= limit:
-            return components, '; '.join(warnings), {
-                'variants_on': current_variants_on,
-                'ja_on': current_ja_on,
-                'variant_mode': current_variant_mode,
-            }
-
-    # Cascade 3: Disable Judeo-Arabic expansion
-    if current_ja_on:
-        current_ja_on = False
-        count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
-        warnings.append(_tr("Judeo-Arabic expansion disabled"))
-        if count <= limit:
-            return components, '; '.join(warnings), {
-                'variants_on': current_variants_on,
-                'ja_on': current_ja_on,
-                'variant_mode': current_variant_mode,
-            }
-
-    # Cascade 4: Disable plene/defective on all components
-    any_plene = any(c.plene_defective for c in components)
-    if any_plene:
-        for c in components:
-            c.plene_defective = False
-        count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
-        warnings.append(_tr("Plene/defective expansion disabled"))
-        if count <= limit:
-            return components, '; '.join(warnings), {
-                'variants_on': current_variants_on,
-                'ja_on': current_ja_on,
-                'variant_mode': current_variant_mode,
-            }
-
-    # Cascade 5: Disable grammatical suffixes on all components
-    any_suffixes = any(c.grammatical_suffixes for c in components)
-    if any_suffixes:
-        for c in components:
-            c.grammatical_suffixes = False
-        count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
-        warnings.append(_tr("Grammatical suffix expansion disabled"))
-        if count <= limit:
-            return components, '; '.join(warnings), {
-                'variants_on': current_variants_on,
-                'ja_on': current_ja_on,
-                'variant_mode': current_variant_mode,
-            }
-
-    # Cascade 6: Disable grammatical prefixes on all components
-    any_prefixes = any(c.grammatical_prefixes for c in components)
-    if any_prefixes:
-        for c in components:
-            c.grammatical_prefixes = False
-        count = _count_expanded_terms(components, current_variants_on, current_ja_on, var_mgr, current_variant_mode)
-        warnings.append(_tr("Grammatical prefix expansion disabled"))
-        if count <= limit:
-            return components, '; '.join(warnings), {
-                'variants_on': current_variants_on,
-                'ja_on': current_ja_on,
-                'variant_mode': current_variant_mode,
-            }
-
-    # Cascade 7: Still over limit -- nothing left to downgrade
-    raise ValueError(
-        _tr("Query exceeds the limit of {limit} expanded terms (estimated {count} terms). "
-           "Please simplify your query by using fewer OR-group alternatives or "
-           "removing the # (grammatical prefixes) modifier from some terms.").format(limit=limit, count=count)
-    )
 
 
 def _expand_inline_alternation(pattern_str: str) -> str:

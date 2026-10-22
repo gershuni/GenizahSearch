@@ -61,6 +61,13 @@ ERROR_CODES = frozenset({
     'sort_requires_multi_witness',        # 400 — sort='fused'/'witness_count' without witnesses[]
     # 2026-10-11: the website's Extended variant level runs only as a background job:
     'background_job_required',            # 400 — search_mode=variants_extended sent to synchronous /api/search; use /api/search/jobs
+    # 2026-10-21 (Responsa Phase 1, shared/responsa_match.py): a star shape the engine does
+    # not search yet -- inside a word, a word of stars only, several stars -- is refused
+    # with a message, never answered with an empty list.
+    'responsa_unsupported_star',          # 400
+    # 2026-10-22: a Responsa query still over Config.MAX_EXPANDED_TERMS after every step
+    # down (variants, Judeo-Arabic, %, #) -- it was a 500.
+    'responsa_query_too_large',           # 400
 })
 
 # Surfaced in top-level `warnings: []` arrays (D-07), NOT as errors.

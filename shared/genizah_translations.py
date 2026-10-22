@@ -2481,6 +2481,17 @@ TRANSLATIONS = {
     # --- Wildcard rewrite notice ---
     "*word* rewritten as #word# (prefix + suffix expansion)":
         "*word* שוכתב כ-#word# (הרחבת קידומות + סיומות)",
+    # --- Refused star shapes (shared/responsa_match.py, Responsa Phase 1) ---
+    "Responsa search takes a * only at the start or the end of a word (*word, word*, *word*). "
+    "A * inside a word, a word made only of *s, and other shapes with several *s are not "
+    "supported yet. For any one word, use a gap such as [1].":
+        "חיפוש שו\"ת מקבל כוכבית רק בתחילת מילה או בסופה (*מילה, מילה*, *מילה*). "
+        "כוכבית בתוך מילה, מילה שכולה כוכביות וצורות אחרות עם כמה כוכביות עדיין אינן "
+        "נתמכות. למילה אחת כלשהי השתמשו במרווח, למשל [1].",
+    "This query is too long for Responsa search. Use fewer or shorter words "
+    "(Composition Search takes a longer passage).":
+        "השאילתא ארוכה מדי לחיפוש שו\"ת. השתמשו במילים מעטות או קצרות יותר "
+        "(חיפוש חיבורים מקבל קטע ארוך יותר).",
 
     # --- Explosion guard warnings ---
     "Variant mode downgraded to basic (30 pairs)": "מצב וריאנטים הורד לרמה בסיסית (30 זוגות)",

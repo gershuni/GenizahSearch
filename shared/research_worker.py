@@ -281,7 +281,9 @@ def run_query(root, payload, report, *, native_matching=False, meta=None):
         # The limit stopped a part of the search that cannot return what it had.
         result = {'error': 'The search reached its time limit.', 'time_limit': True}
     except ValueError as exc:
-        result = {'error': str(exc), 'validation': True}
+        # *code*: a refused Responsa query's (shared/responsa_match.py), so the web side
+        # raises the same exception and the API answers with its code.
+        result = {'error': str(exc), 'validation': True, 'code': getattr(exc, 'code', None)}
         if type(exc).__name__ == 'NoWitnessesResolved':
             result.update(exception='NoWitnessesResolved', report=exc.report)
     except Exception:
