@@ -262,6 +262,9 @@ PHASE3 = PHASE1 + [
     Query('star-end', 'כהנ* גדול*'),
     Query('star-inside', 'כ*נים גדולים'),
     Query('star-several', 'כ*ה*נ*ים גדולים'),
+    # A gap: a crossing from an earlier page must not hide the next page's own (Codex
+    # review of PR #443).
+    Query('star-gap', 'כהנ* [1] גדול*'),
     Query('star-start', '*כהנים *גדולים'),
     Query('star-start-endings', '*נים *לים'),
     Query('star-start-several', '*כ*ה*נ*ים גדולים'),

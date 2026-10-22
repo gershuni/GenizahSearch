@@ -430,3 +430,41 @@ def test_a_star_line_query_gives_every_crossing_of_a_manuscript(line_engines, fm
     assert set(rows) == {uid(3301, 1), uid(3301, 2), uid(3301, 3)}
     assert rows[uid(3301, 1)]['scope'] == 'page'
     assert rows[uid(3301, 2)]['cross_page'] and rows[uid(3301, 3)]['cross_page']
+
+
+# --- Two crossings of one break, from different pages (Codex review of PR #443) ------------
+
+SHADOW_V08 = [(sid(401), 3401, p, text) for p, text in enumerate(["כהנים", "כהנים", "גדולים"], 1)]
+
+
+@pytest.fixture(scope='module')
+def shadow_engines(tmp_path_factory):
+    with formats(tmp_path_factory, 'shadowed_crossings', SHADOW_V08) as e:
+        yield e
+
+
+@pytest.mark.parametrize('fmt', ['2', '1'])
+def test_a_crossing_from_an_earlier_page_does_not_hide_the_next_pages_own(shadow_engines, fmt):
+    # כהנ* [1] גדול*: p1's כהנים runs over p2 into p3's גדולים, and p2's כהנים runs into
+    # p3. Both cross the p2 | p3 break; p1's is found at the break it crosses first
+    # (p1 | p2), so it cannot hide p2's.
+    rows = by_uid(search(shadow_engines[fmt], 'כהנ* [1] גדול*')[0])
+    assert set(rows) == {uid(3401, 1), uid(3401, 2)}
+    assert all(r['cross_page'] for r in rows.values())
+
+
+# --- My Library alone: the all-star order too (Codex round 6 on PR #442) ------------------
+
+def test_my_library_alone_orders_an_all_star_query_by_matches_on_the_page(engines, tmp_path):
+    from tests.test_search_cutoff_signal import _build as build_local
+    eng = engines['2']
+    local = build_local(str(tmp_path / 'local'), [('l1', 'שלום אבג', 'page', ''),
+                                                  ('l2', 'שלום שלומות שלומי', 'page', ''),
+                                                  ('l3', 'שלומך שלומות', 'page', '')])
+    saved = (getattr(eng, 'local_index', None), getattr(eng, 'local_searcher', None))
+    eng.local_index, eng.local_searcher = local, local.searcher()
+    try:
+        rows = eng.execute_search('שלו*', 'literal', 0, responsa_options=R, corpus_scope='local')
+    finally:
+        eng.local_index, eng.local_searcher = saved
+    assert [r['uid'] for r in rows] == ['l2', 'l3', 'l1']        # 3, 2 and 1 matches
