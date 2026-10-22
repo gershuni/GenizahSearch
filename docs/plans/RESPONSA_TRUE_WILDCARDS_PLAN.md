@@ -1,9 +1,11 @@
 # Responsa wildcards: `*` as any sequence, `#` as the grammatical list
 
 **Status:** **Phase 3 being built (2026-10-22) in two PRs** (the owner): PR #442 a star at the end of
-a word or inside it (`X*`, `X*Y`), deployable on today's format-1 index; a second PR leading stars
-and decision 10. The points the plan left open are settled in §7 ("Phase 3, settled before
-building"); the real-data gates are the local session's. **Phase 2 implemented (2026-10-22, PR #440 on the design PR #438)**: the index format,
+a word or inside it (`X*`, `X*Y`), deployable on today's format-1 index -- **implemented, with its
+fixture gates (the oracle run on format 2 and format 1 built by the Indexer; every new test red
+under a named mutation); its real-data gates (oracle, `verify_search_combinations.py`, timings on
+both formats) are the local session's, commands in the PR**; a second PR leading stars and decision
+10. The points the plan left open are settled in §7 ("Phase 3, settled before building"). **Phase 2 implemented (2026-10-22, PR #440 on the design PR #438)**: the index format,
 built locally and gated (§7 Phase 2); the server rebuild is the owner's, and today's page-break matches
 move to the seams in Phase 3 (decision 10, 2026-10-22).
 **Phase 1 implemented (2026-10-22)** -- the engine on
@@ -1171,7 +1173,8 @@ carries both:
   the open index lacks them (a desktop on an old index until the user re-indexes);
 - the server rebuild and the desktop re-index.
 
-**Phase 3: true `*`, on the new index.**
+**Phase 3: true `*`, on the new index.** *(First PR, #442: `X*` and `X*Y` on both formats,
+implemented 2026-10-22, real-data gates pending; the second PR: leading stars and decision 10.)*
 - Star retrieval and pages first (§5.4); a leading star through the reversed-words field,
   `*כהנ*` (both ends) through today's slow route.
 - Crossings read from seams, never from whole manuscripts (decision 9).
