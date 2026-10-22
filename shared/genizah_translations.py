@@ -5843,3 +5843,9 @@ TRANSLATIONS.update({
     "New in the Joins Lab and the Visual Similarity window: sort and filter by library and domain, image and card sizes, a link to share the screen, and a fuller Compare window":
         'חדש במעבדת הצירופים ובחלונית הדמיון החזותי: מיון וסינון לפי ספרייה ותחום, בחירת גודל לתמונות ולכרטיסים, קישור לשיתוף המסך וחלון השוואה מלא יותר',
 })
+
+# Phone layout (2026-10-22): the search toolbar's phone menu, the browse image
+# panel's slider toggle, and the catalog-browse sidebar toggle.
+TRANSLATIONS.update({
+    "More actions": "פעולות נוספות",
+})

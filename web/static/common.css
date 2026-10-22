@@ -2299,3 +2299,101 @@ body {
     margin-bottom: calc(-1 * var(--nicegui-default-gap, 1rem)); /* the column's gap: no 1rem shift either */ }
 .browse-loading-pill { margin-top: 2rem; padding: .5rem 1.25rem; border-radius: 9999px;
     background: var(--bg-card, #ffffff); box-shadow: 0 2px 10px rgba(0, 0, 0, .15); }
+
+
+/* ========================================================================
+   Phone layout (owner, 2026-10-22): "more compact on mobile"
+   ========================================================================
+   Below 640px the pages were the desktop layout stacked. Measured at 390x844
+   before this: the English header wrapped out of its 64px bar, /search left
+   300px of the screen to results with the form open and one result card was
+   400px, and /catalog-browse kept a 280px sidebar beside a 60px results
+   column. The classes named here are set in web/main.py, web/auth_state.py,
+   web/pages/search.py, web/pages/search_results.py and
+   web/pages/catalog_browse.py; the /browse rules live in that page's own
+   style block. Nothing here applies above 640px (catalog: 768px). */
+
+/* A button that keeps its name but not its label on a phone. The label stays
+   in the render tree (aria-label and the tooltip name the control); the icon
+   shows on phones only, so wider screens look exactly as they did. */
+@media (max-width: 640px) {
+    .phone-icon-only .q-btn__content > .block { font-size: 0; width: 0; overflow: hidden; }
+    .phone-icon-only .q-btn__content > .q-icon { margin: 0; }
+}
+@media (min-width: 641px) {
+    .phone-icon-only .q-btn__content > .q-icon { display: none; }
+}
+
+/* Header: the row is no-wrap (web/main.py); a long username is cut short. */
+@media (max-width: 640px) {
+    .app-header { gap: 4px; }
+    .app-header > .nicegui-row { min-width: 0; }
+    .auth-username .q-btn__content > .block {
+        display: block; max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+}
+
+/* Search page */
+@media (max-width: 640px) {
+    /* The page scrolls; the results pane does not. The shell loses its fixed
+       height and the Quasar scroll area is un-scrolled the way this file's
+       print rules do it (all of these are load-bearing, see there). */
+    .search-shell { height: auto !important; min-height: 0 !important; }
+    .results-scroll-area,
+    .results-scroll-area .q-scrollarea__container,
+    .results-scroll-area .q-scrollarea__content {
+        height: auto !important; max-height: none !important; min-height: 0 !important;
+        overflow: visible !important; position: static !important; transform: none !important;
+        contain: none !important;
+    }
+    .results-scroll-area .q-scrollarea__thumb, .results-scroll-area .q-scrollarea__bar { display: none !important; }
+
+    /* The form: the collapse chevron sits in the corner instead of on a row
+       of its own; padding and the Advanced Options gap come down. */
+    .search-panel-expanded { padding: 12px !important; position: relative; }
+    .search-collapse-row { position: absolute; top: 2px; inset-inline-end: 2px; width: auto !important; margin: 0 !important; z-index: 1; }
+    .search-panel-expanded .q-expansion-item { margin-top: 8px !important; }
+
+    /* The results toolbar is one line: the count and the filter buttons scroll
+       sideways in it, the export icons are a menu (.results-more-btn), and a
+       filter that is not yet available takes no space (.tb-hidden). */
+    .results-header { flex-wrap: nowrap !important; padding: 6px 8px !important; gap: 4px !important; }
+    .results-header .q-btn { min-height: 34px !important; }
+    .results-count-group {
+        flex: 1 1 auto; min-width: 0; flex-wrap: nowrap !important; overflow-x: auto; gap: 8px !important;
+        scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    }
+    .results-count-group::-webkit-scrollbar { display: none; }
+    .results-count-group > * { flex-shrink: 0; }
+    .results-count-group .q-btn { white-space: nowrap; }
+    .tb-hidden { display: none !important; }
+    .results-export-group { flex: 0 0 auto; }
+
+    /* Results: no reserved pagination row, a tighter list, cards about half
+       as tall. */
+    .pagination-placeholder { display: none !important; }
+    .results-list { padding: 8px !important; gap: 8px !important; }
+    .result-card { padding: 10px 12px !important; }
+    .result-card .q-btn { min-height: 32px !important; }
+    .result-card .result-shelfmark { order: -1; }
+    .result-card .result-actions { margin-top: 0 !important; }
+    .result-snippet { padding: 8px 10px !important; line-height: 1.55 !important; margin-top: 8px !important; }
+}
+
+/* Catalog browse: the sidebar stacks above the results and is hidden until the
+   Filters button (web/pages/catalog_browse.py) opens it; the table keeps its
+   columns and scrolls sideways. */
+@media (max-width: 768px) {
+    .catalog-layout { flex-wrap: wrap !important; }
+    .catalog-sidebar {
+        display: none; width: 100% !important; min-width: 0 !important;
+        padding: 0 0 8px 0 !important; position: static !important;
+    }
+    .catalog-sidebar.is-open { display: flex; }
+    .catalog-sidebar > .q-scrollarea { height: min(60vh, 480px) !important; }
+    .catalog-browse-table .q-table__middle { overflow-x: auto; }
+    .catalog-browse-table table { min-width: 640px; }
+}
+@media (min-width: 769px) {
+    .catalog-filters-toggle { display: none !important; }
+}

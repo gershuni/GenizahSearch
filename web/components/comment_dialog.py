@@ -309,8 +309,9 @@ def create_comment_button(
         )
         dialog.open()
 
+    # `browse-icon-collapse`: icon-only on a phone, the name kept in aria-label.
     return ui.button(
         tr('Send Comment'),
         icon='comment',
         on_click=open_comment_dialog
-    ).props(f'flat dense size={size}').classes('text-xs')
+    ).props(f'flat dense size={size} aria-label="{tr("Send Comment")}"').classes('text-xs browse-icon-collapse')

@@ -1956,7 +1956,14 @@ def create_layout():
     # === Build Header with correct DOM order ===
     # reveal: hide header on scroll down, show on scroll up (mobile-friendly)
     with ui.header().classes('q-py-none header-reveal-mobile').props('reveal').style('height: 64px;'):
-        with ui.row().classes('w-full h-full items-center justify-between px-6 app-header'):
+        # wrap=False: a NiceGUI row wraps by default, and this one sits in a
+        # 64px header. In the English UI at 390px (Hebrew at 360px) the auth
+        # group no longer fit beside the logo, wrapped to a second line and
+        # rendered OUTSIDE the header, as grey text over the page (owner's
+        # phone screenshots, 2026-10-22). `phone-icon-only` (common.css) on
+        # Login and Register makes the groups fit; no-wrap makes the failure
+        # mode clipping rather than a ghost row.
+        with ui.row(wrap=False).classes('w-full h-full items-center justify-between px-6 app-header'):
             if rtl_mode:
                 # RTL: Render Right -> Center -> Left for correct tab order
                 render_header_right()

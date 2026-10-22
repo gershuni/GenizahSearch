@@ -467,7 +467,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     }
     </script>''')
 
-    with ui.column().classes('w-full h-[calc(100vh-88px)] gap-0'):
+    # `search-shell`: a fixed-height shell on wide screens (the results scroll
+    # inside it); on a phone common.css lets the page scroll instead, so the
+    # header and the browser's address bar hide on scroll (owner, 2026-10-22).
+    with ui.column().classes('w-full h-[calc(100vh-88px)] gap-0 search-shell'):
 
         # === Search Header Panel (Collapsible) ===
         search_panel_container = ui.column().classes('w-full gap-0 search-panel-container')
@@ -513,11 +516,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             )
 
             with expanded_panel:
-                # Collapse toggle button (top-right corner)
-                with ui.row().classes('w-full justify-end mb-2'):
-                    def collapse_panel():
-                        search_state.is_panel_collapsed = True
-                        # Update collapsed view with current values
+                # Collapse toggle button (top-right corner). `search-collapse-row`:
+                # on a phone this row is pinned into the corner instead of
+                # costing a 44px line of its own (common.css).
+                with ui.row().classes('w-full justify-end mb-2 search-collapse-row'):
+                    def _fill_collapsed_strip():
+                        """Write the query and mode into the collapsed strip."""
                         query_val = query_input.value or ''
                         collapsed_query_label.text = query_val[:50] + ('...' if len(query_val) > 50 else '') if query_val else tr('Enter search query')
                         mode_val = mode_select.value
@@ -525,8 +529,33 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                      'variants_maximum': '???', 'fuzzy': '~', 'Regex': '/',
                                      'Shelfmark': '#', 'Title': '$', 'pgp_tags': 'PGP'}
                         collapsed_mode_badge.text = mode_names.get(mode_val, mode_val)
+
+                    def collapse_panel():
+                        search_state.is_panel_collapsed = True
+                        _fill_collapsed_strip()
                         expanded_panel.style('display: none !important;')
                         collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
+
+                    async def _collapse_panel_on_phone():
+                        """Fold the form away when a search starts on a phone.
+
+                        The open form is a third of a phone screen and stayed
+                        open through the whole search (owner's screenshots,
+                        2026-10-22): the auto-collapse keys off scrolling inside
+                        the results pane, which on a phone is too short to
+                        scroll. The width is asked of the browser and the fold
+                        is done from Python (collapse_panel), not by script in
+                        the page: a `display` set by script on the collapsed
+                        strip lasts only until the next render, when Vue
+                        re-applies the strip's own `display: none` (traced
+                        2026-10-22), so the strip's state has to live here.
+                        """
+                        try:
+                            width = await ui.run_javascript('window.innerWidth', timeout=1.0)
+                        except Exception:
+                            return  # no answer in time: leave the form as it is
+                        if isinstance(width, (int, float)) and width <= 640:
+                            collapse_panel()
 
                     ui.button(
                         icon='expand_less', on_click=collapse_panel
@@ -1673,11 +1702,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         with ui.column().classes('w-full flex-grow'):
 
-            results_header = ui.row().classes('w-full px-4 py-3 items-center justify-between').style(
+            # `results-header` / `results-count-group` / `results-export-group`:
+            # one line on a phone, the count and filter buttons scrolling
+            # sideways, the export icons folded into a menu (common.css).
+            results_header = ui.row().classes('w-full px-4 py-3 items-center justify-between results-header').style(
                 'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
             )
             with results_header:
-                with ui.row().classes('items-center gap-3'):
+                with ui.row().classes('items-center gap-3 results-count-group'):
                     # Select all checkbox
                     select_all_checkbox = ui.checkbox(on_change=lambda e: toggle_select_all(e.value)).props('dense')
                     results_count = ui.label(tr('Results')).classes('font-medium').style('color: var(--text-secondary);')
@@ -1685,7 +1717,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     selection_counter = ui.label('').classes('text-sm').style('color: var(--primary-600); display: none;')
                     # Helper: toggle CSS visibility (reserves layout space, prevents CLS)
                     def _set_btn_visible(btn, visible):
+                        # Wide screens reserve the space (no layout shift when a
+                        # filter appears); a phone cannot afford a blank row, so
+                        # `tb-hidden` removes the button there (common.css).
                         btn.style(f'visibility: {"visible" if visible else "hidden"};')
+                        if visible:
+                            btn.classes(remove='tb-hidden')
+                        else:
+                            btn.classes(add='tb-hidden')
 
                     # Domain filter button (hidden until search with domain data)
                     domain_filter_btn = ui.button(
@@ -2152,7 +2191,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     # alone conveys filter state (Filter PGP / Has PGP / No PGP); a chip on top of it
                     # was visual duplication. The _update_pgp_filter_chip no-op above keeps callers stable.
 
-                with ui.row().classes('gap-2'):
+                with ui.row().classes('gap-2 results-export-group'):
                     # Bulk actions (initially hidden)
                     bulk_actions_row = ui.row().classes('gap-2').style('display: none;')
                     with bulk_actions_row:
@@ -2166,17 +2205,28 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     # Filter toggle button
                     filter_btn = ui.button(icon='filter_list', on_click=lambda: toggle_filters()).props(
                         f'flat round dense size=sm aria-label="{tr("Toggle Filters")}"'
-                    ).tooltip(tr('Toggle Filters'))
+                    ).tooltip(tr('Toggle Filters')).classes('hide-mobile')
 
                     ui.button(icon='description', on_click=lambda: ui.download('/api/export/word')).props(
                         f'flat round dense size=sm aria-label="{tr("Export Word")}"'
-                    ).tooltip(tr('Export Word'))
+                    ).tooltip(tr('Export Word')).classes('hide-mobile')
                     ui.button(icon='table_view', on_click=lambda: ui.download('/api/export/excel')).props(
                         f'flat round dense size=sm aria-label="{tr("Export Excel")}"'
-                    ).tooltip(tr('Export Excel'))
+                    ).tooltip(tr('Export Excel')).classes('hide-mobile')
                     ui.button(icon='data_object', on_click=lambda: ui.download('/api/export/json')).props(
                         f'flat round dense size=sm aria-label="{tr("Export JSON")}"'
-                    ).tooltip(tr('Export JSON'))
+                    ).tooltip(tr('Export JSON')).classes('hide-mobile')
+
+                    # Phone: the four icons above are hidden under 640px and
+                    # this one menu stands in for them (owner, 2026-10-22).
+                    with ui.button(icon='more_vert').props(
+                        f'flat round dense size=sm aria-label="{tr("More actions")}"'
+                    ).classes('show-mobile-only results-more-btn').tooltip(tr('More actions')):
+                        with ui.menu().props('auto-close'):
+                            ui.menu_item(tr('Toggle Filters'), lambda: toggle_filters())
+                            ui.menu_item(tr('Export Word'), lambda: ui.download('/api/export/word'))
+                            ui.menu_item(tr('Export Excel'), lambda: ui.download('/api/export/excel'))
+                            ui.menu_item(tr('Export JSON'), lambda: ui.download('/api/export/json'))
 
             # SEED-026 (smoke 2026-06-29): the post-search library chip row was REMOVED.
             # Per-library chips proved noisy when many libraries were selected; the filter
@@ -5033,6 +5083,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if not state.is_ready():
             ui.notify(tr("Engine not ready."), type='warning')
             return
+
+        await _collapse_panel_on_phone()
 
         # Parse syntax shortcuts (Delegated to Core)
         # Skip prefix parsing in Responsa mode -- # is Responsa syntax, not Shelfmark

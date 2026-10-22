@@ -336,10 +336,10 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
                     on_change=on_page_change_top).props('max-pages=7 boundary-numbers')
         else:
             # Invisible placeholder reserving same height as pagination row
-            ui.element('div').style('height: 40px; visibility: hidden;')
+            ui.element('div').classes('pagination-placeholder').style('height: 40px; visibility: hidden;')
 
-        # Render only this page of results
-        with ui.column().classes('w-full gap-2 p-4'):
+        # Render only this page of results (`results-list`: tighter on a phone)
+        with ui.column().classes('w-full gap-2 p-4 results-list'):
             for i, res in enumerate(page_results):
                 create_result_card(search_state, refs, start + i, res)
 
@@ -356,7 +356,7 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
                 ui.pagination(1, total_pages, value=page_idx + 1,
                     on_change=on_page_change_bottom).props('max-pages=7 boundary-numbers')
         else:
-            ui.element('div').style('height: 40px; visibility: hidden;')
+            ui.element('div').classes('pagination-placeholder').style('height: 40px; visibility: hidden;')
 
         # Collapsible excluded results section (domain-excluded)
         excluded = search_state.domain_excluded_results
@@ -487,9 +487,13 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
     refs.update_search_within_btn()
     refs.update_refinement_strip()
 
-    # Scroll to top of results after page change
+    # Scroll to top of results after page change. On a phone the results pane
+    # does not scroll (the page does; common.css `.search-shell`), so the
+    # document is scrolled instead.
     if scroll_to_top:
         refs.results_container.run_method('setScrollPosition', 'vertical', 0)
+        with refs.results_container:
+            ui.run_javascript('if (window.innerWidth <= 640) window.scrollTo({top: 0});')
 
 
 
@@ -527,10 +531,14 @@ def create_result_card(search_state, refs, index, result):
     # Truncate title for display
     title_short = (title[:60] + '...') if title and len(title) > 60 else title
 
+    # `result-card` / `result-snippet`: a phone card loses its desktop padding,
+    # line height and reserved rows (common.css: 400px -> ~345px for a seven-line
+    # snippet); the top row never wraps, so the checkbox stays beside the badges
+    # instead of taking a line of its own.
     with ui.card().classes(
-        'w-full p-4 cursor-pointer transition-all hover:shadow-md'
+        'w-full p-4 cursor-pointer transition-all hover:shadow-md result-card'
     ).style('border-radius: 10px;') as card:
-        with ui.row().classes('w-full items-start justify-between'):
+        with ui.row(wrap=False).classes('w-full items-start justify-between'):
             # Checkbox for selection
             with ui.column().classes('justify-center'):
                 def toggle_card_selection(e, idx=index):
@@ -665,7 +673,8 @@ def create_result_card(search_state, refs, index, result):
                             f'flat dense round size=xs aria-label="{tr("Visual similarity partners")}"'
                         ).style('color: #ef6c00;').tooltip(tr('Visual similarity partners'))
 
-                    _isolated_label(shelfmark, classes='font-bold break-all', style='color: var(--primary-700);')
+                    # `result-shelfmark`: first in the row on a phone (common.css).
+                    _isolated_label(shelfmark, classes='font-bold break-all result-shelfmark', style='color: var(--primary-700);')
                     # Phase 999.1 (FOLIO-01): page/image number chip after shelfmark for desktop parity.
                     # Source: display['img'] — same field desktop COL_IMG renders (genizah_app.py:16111).
                     # D-02 / D-02a: just the number, no prefix, no separator char; falsy → render nothing.
@@ -781,7 +790,7 @@ def create_result_card(search_state, refs, index, result):
                         )
 
         # Action buttons row (on the card, always visible)
-        with ui.row().classes('gap-1 mt-1'):
+        with ui.row().classes('gap-1 mt-1 result-actions'):
             # Browse
             if sys_id:
                 # Page identity for the browse deep-link. A bare /browse?sys_id=
@@ -917,7 +926,7 @@ def create_result_card(search_state, refs, index, result):
             if search_state.refinement_chain:
                 snippet = enrich_snippet_with_chain_terms(snippet, search_state.refinement_chain, refs.query_input.value)
             snippet_html = SearchEngine.format_snippet(snippet)
-            with ui.element('div').classes('mt-3 p-3 rounded-lg text-sm').style(
+            with ui.element('div').classes('mt-3 p-3 rounded-lg text-sm result-snippet').style(
                 'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 1.8;'
             ):
                 ui.html(snippet_html, sanitize=False)
