@@ -14,10 +14,20 @@ intact.
 Harness: tests/test_browse_recents_off_loop.py -- a real /browse page on a fake
 service inside a NiceGUI Client, put into edit mode through its state and
 re-rendered through the page's own ``load_page``.
+
+Every test here holds ``with client:`` across awaits, and NiceGUI keeps one
+slot stack per asyncio task, keyed by the task's id. An earlier test can leave
+a page task pending inside its own ``with client:`` when its loop closes (the
+CI log names the joins button's ``_runner``); when the garbage collector later
+destroys it, its ``with`` exit pops the slot stack of
+whichever task is running, and the test's own ``with client:`` then fails with
+``IndexError: pop from empty list`` (CI on 0fb81585). The ``editor`` fixture
+collects that garbage before the test opens any slot.
 """
 from __future__ import annotations
 
 import asyncio
+import gc
 import itertools
 import threading
 import time
@@ -67,7 +77,14 @@ def editor(monkeypatch, supabase_offline):  # noqa: F811  (the imported fixture,
 
     ``answer`` is what the write returns (a dict, or None for no answer);
     ``calls`` the recorded writes; ``notes`` every ui.notify (message, type).
+    ``writing`` / ``hold`` (threading.Events): the write sets ``writing`` once
+    it runs in its worker, then waits for ``hold`` -- a step the test takes
+    while the write is provably in flight, whatever the loop's timing.
     """
+    # Destroy the pending page tasks earlier tests left on their closed loops
+    # now, before this test opens a slot they could pop (module docstring).
+    gc.collect()
+
     from web.services import BrowsePage
     import web.auth_state as auth_state
     import web.pages.browse as browse
@@ -95,14 +112,17 @@ def editor(monkeypatch, supabase_offline):  # noqa: F811  (the imported fixture,
             raise AssertionError('the recents write ran on the event loop')
 
     h = {'calls': [], 'client_threads': [], 'answer': {'success': True, 'correction': {'id': 41}},
-         'notes': [], 'states': [], 'loop_thread': None, 'pages': [], 'delay': 0.0}
+         'notes': [], 'states': [], 'loop_thread': None, 'pages': [],
+         'writing': None, 'hold': None}
 
     def recorder(name):
         def record(*args, client=None, **kwargs):
             h['calls'].append({'helper': name, 'thread': threading.get_ident(), 'client': client,
                                'args': args, 'kwargs': kwargs})
-            if h['delay']:
-                time.sleep(h['delay'])  # the round trip, in the worker
+            if h['writing'] is not None:
+                h['writing'].set()
+            if h['hold'] is not None and not h['hold'].wait(5):  # the round trip, in the worker
+                h['calls'][-1]['hold_timed_out'] = True
             return h['answer']
         record.__name__ = name
         return record
@@ -259,22 +279,43 @@ def test_save_draft_with_no_answer_toasts_a_failure_and_keeps_the_draft_unsaved(
 # waits for the first and then runs, as it did when the write blocked.
 # ---------------------------------------------------------------------------
 
-def _drive_twice(editor, first, second, *, between=0.0, during=None):
+async def _until_writing(editor, timeout=5.0):
+    """Wait, on the loop, until the fixture's write is running in its worker."""
+    deadline = time.monotonic() + timeout
+    while not editor['writing'].is_set():
+        assert time.monotonic() < deadline, 'the write never started'
+        await asyncio.sleep(0.01)
+
+
+def _drive_twice(editor, first, second):
+    """Click ``first``; once its write runs, click ``second``; then let the write answer.
+
+    The second click is tied to the first write, not to a clock: with sleeps,
+    a loop busy at the start of the save could serve it after the write, where
+    it passes without the lock it is here to test.
+    """
+    editor['writing'], editor['hold'] = threading.Event(), threading.Event()
+
     async def _run():
         client, state = await editor['open_in_edit_mode']()
         a, b = _handler(client, first), _handler(client, second)
 
         async def later():
-            await asyncio.sleep(between)
-            if during:
-                during(state)
-            await b()
+            await _until_writing(editor)
+            second_click = asyncio.ensure_future(b())
+            # One turn of the loop takes the second click to its first await:
+            # the lock, or (without one) its own write.
+            await asyncio.sleep(0.05)
+            editor['hold'].set()
+            await second_click
 
         with client:
             await asyncio.gather(a(), later())
         return client, state
 
-    return asyncio.run(_run())
+    result = asyncio.run(_run())
+    assert not any(c.get('hold_timed_out') for c in editor['calls']), editor['calls']
+    return result
 
 
 def _kinds(editor):
@@ -283,7 +324,6 @@ def _kinds(editor):
 
 
 def test_two_quick_save_draft_clicks_write_the_draft_then_update_it(editor):
-    editor['delay'] = 0.2
     _client, state = _drive_twice(editor, 'handle_save_draft', 'handle_save_draft')
 
     assert _kinds(editor) == [('create_correction', 'draft'), ('update_correction', 'draft')], editor['calls']
@@ -294,15 +334,13 @@ def test_two_quick_save_draft_clicks_write_the_draft_then_update_it(editor):
 def test_submit_during_a_draft_save_waits_and_submits_the_draft(editor):
     """Dropping the Submit (an in-flight flag) left the correction unsubmitted
     with no word to the reader; it waits for the draft and submits it."""
-    editor['delay'] = 0.2
-    _client, state = _drive_twice(editor, 'handle_save_draft', 'handle_submit_correction', between=0.05)
+    _client, state = _drive_twice(editor, 'handle_save_draft', 'handle_submit_correction')
 
     assert _kinds(editor) == [('create_correction', 'draft'), ('update_correction', 'pending')], editor['calls']
     assert state.edit_mode is False, 'the Submit did not run'
 
 
 def test_two_quick_submit_clicks_submit_once(editor):
-    editor['delay'] = 0.2
     _client, state = _drive_twice(editor, 'handle_submit_correction', 'handle_submit_correction')
 
     assert [c['helper'] for c in editor['calls']] == ['create_correction'], editor['calls']
@@ -310,21 +348,26 @@ def test_two_quick_submit_clicks_submit_once(editor):
 
 
 def test_text_typed_during_a_draft_save_is_not_marked_saved(editor):
-    editor['delay'] = 0.3
+    # Typing is tied to the write itself, not to a clock: a sleep(0.1) inside a
+    # 0.3 s write typed AFTER the write when the loop was busy for 0.35 s at the
+    # start of the save (a lone run of this test on Windows, NiceGUI 3.18).
+    editor['writing'], editor['hold'] = threading.Event(), threading.Event()
 
     async def _run():
         client, state = await editor['open_in_edit_mode']()
         save = _handler(client, 'handle_save_draft')
 
         async def type_more():
-            await asyncio.sleep(0.1)
+            await _until_writing(editor)
             state.edit_text = 'שלום עולם ומלואו'  # bind_value keeps writing while the save runs
+            editor['hold'].set()  # only now may the write answer
 
         with client:
             await asyncio.gather(save(), type_more())
         return state
 
     state = asyncio.run(_run())
+    assert 'hold_timed_out' not in editor['calls'][0], 'the write answered before the typing'
     assert editor['calls'][0]['kwargs']['corrected_text'] == 'שלום עולם'
     assert state.draft_id == 41
     assert state.draft_saved is False, 'text that is not in the draft was shown as Saved'
@@ -334,7 +377,7 @@ def test_a_draft_that_lands_after_a_page_turn_does_not_become_the_new_pages_draf
     """Save Draft, then a page turn while the write runs (Codex on #430): the
     old draft's id must not land in the state of the page now shown, or the
     next save would overwrite that draft with the other page's text."""
-    editor['delay'] = 0.3
+    editor['writing'], editor['hold'] = threading.Event(), threading.Event()
 
     async def _run():
         client, state = await editor['open_in_edit_mode']()
@@ -342,14 +385,16 @@ def test_a_draft_that_lands_after_a_page_turn_does_not_become_the_new_pages_draf
         load_page = _load_page_of(client)
 
         async def turn_page():
-            await asyncio.sleep(0.1)
+            await _until_writing(editor)  # the page turns while the write is in flight
             await load_page(direction=1)
+            editor['hold'].set()  # only now may the write answer
 
         with client:
             await asyncio.gather(save(), turn_page())
         return state
 
     state = asyncio.run(_run())
+    assert 'hold_timed_out' not in editor['calls'][0], 'the write answered before the page turn'
     assert [c['helper'] for c in editor['calls']] == ['create_correction'], editor['calls']
     assert state.current_page.p_num == 2
     assert state.draft_id is None, "the previous page's draft id became the new page's draft"
