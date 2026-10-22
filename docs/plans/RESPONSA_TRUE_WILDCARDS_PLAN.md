@@ -1224,7 +1224,8 @@ today's finite crossings to the seams (decision 10).
    `content_search` (the term-dictionary walk is pruned by its first letters), on both formats.
    (Second PR: a leading star and a letter at the end through the reversed-words field on format 2,
    else the `.*` scan; stars at both ends the scan on both formats.) Star lookups score a
-   constant, so the finite words' BM25 orders the rows (decision 2). A lookup past tantivy-fst's
+   constant, so the finite words' BM25 orders the rows (decision 2), and are case-insensitive
+   (`(?i)`), as the check is: the index keeps a token's case (Codex review of PR #442). A lookup past tantivy-fst's
    size limit is split by halving its largest run's alternation.
 7. **Where Responsa reads matches that run across pages** (pages are always read first, §5.4):
 

@@ -1405,7 +1405,9 @@ def star_pattern(sf, tolerance, fold=True):
     between letters, ``.*`` for a star -- wider than the check, which retrieval may be,
     never narrower (§4) -- and *tolerance* at an end that is a letter. *fold*: folded as
     ``content_search`` is. A word that begins with a letter is a pattern the term-
-    dictionary walk prunes by those letters (§3.1: cheap on every index format)."""
+    dictionary walk prunes by those letters (§3.1: cheap on every index format).
+    Case-insensitive (``(?i)``), as the check is: the index keeps a token's case
+    (Codex review of PR #442; Hebrew has none, so its patterns are unchanged)."""
     last = len(sf.runs) - 1
     pieces = []
     for i, run in enumerate(sf.runs):
@@ -1421,7 +1423,7 @@ def star_pattern(sf, tolerance, fold=True):
             out.append('.*')
         if forms:
             out.append('(?:' + '|'.join(tolerance.join(_rust_escape(c) for c in f) for f in forms) + ')')
-    return (tolerance if pieces[0] else '') + ''.join(out) + (tolerance if pieces[-1] else '')
+    return '(?i)' + (tolerance if pieces[0] else '') + ''.join(out) + (tolerance if pieces[-1] else '')
 
 
 def _split_largest_run(sf):

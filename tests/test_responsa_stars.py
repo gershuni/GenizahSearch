@@ -240,6 +240,7 @@ PAGES = {
     11: 'כה"נים גדולים',
     12: "שלומות רבות",
     13: "שלום רב",
+    14: "Moses spoke",                                 # a script with case
     16: "אמר מאמתי קורין את שמע",
     17: "מאמר קורא",
     18: "מאמ קור",
@@ -280,6 +281,9 @@ def _lookup_pages(eng, query):
     ('שלום*', {12, 13}),
     ('שלומ*', {12, 13}),
     ('מאמ*', {16, 17, 18, 20, 21}),
+    # Case-insensitive, as the check is (Codex review of PR #442): the index keeps case.
+    ('mos*', {14}),
+    ('MO*s', {14}),
 ])
 def test_the_lookup_of_each_shape_on_each_format(engines, fmt, query, want):
     assert _lookup_pages(engines[fmt], query) == {page(n) for n in want}
@@ -320,6 +324,7 @@ def _page_rows(eng, query, runtime, **opts):
     ('כהנ* גדול*', {1, 9, 11}),
     ('כ*ה*נ*ים גדולים', {1, 8, 11}),
     ('כהנ* גדול* -ני*א', {1, 11}),                       # a negated star word, on the page
+    ('mos* spo*', {14}),                                 # case-insensitive, lookup and check
 ])
 def test_trailing_and_middle_stars_end_to_end(engines, runtime, fmt, query, want):
     assert _page_rows(engines[fmt], query, runtime) == {page(n) for n in want}
