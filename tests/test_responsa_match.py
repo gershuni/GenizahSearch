@@ -12,10 +12,10 @@ import regex
 import shared.search_engine as se
 from shared.responsa import parse_responsa_query, extract_per_pair_gaps, _parse_line_break_query
 from shared.responsa_match import (
-    ResponsaQueryRefused, compile_components, compile_line_groups, refuse_unsupported_stars,
-    _inline_forms, expand_stems,
+    GUARD_REFUSAL_CODE, ResponsaQueryRefused, compile_components, compile_line_groups,
+    refuse_unsupported_stars, _inline_forms, _OverLimit, expand_stems,
 )
-from shared.search_regex import compile as compile_search_regex
+from shared.search_regex import compile as compile_search_regex, isolated_matching
 
 RUNTIMES = ['re', 'regex']
 
@@ -270,3 +270,94 @@ def test_the_token_only_boundaries_are_maqaf_and_sof_pasuq():
     # content_search, outside the lookup's Hebrew-mark tolerance (5 words, §3.6.2).
     from shared.responsa_match import _T_CONTENT_SEARCH
     assert 'َ' not in _T_CONTENT_SEARCH
+
+
+# --- Where the pattern places a word (Codex review of PR #432) -----------------------------
+# ו""""שמעון: a word glued to a letter through more quotes than the start lookbehinds read.
+# The fast check takes it and accept rejects it; the row's acceptable occurrence must still
+# be found, through compile_check on both runtimes.
+
+GLUED = 'ו""""שמעון'
+
+
+def checked(c, text, runtime):
+    """{group: text} of the match compile_check's search returns, or None."""
+    rx = c.compile_check()
+    if runtime == 're':
+        with isolated_matching(native=True):
+            m = rx.search(text)
+    else:
+        m = rx.search(text)
+    if m is None:
+        return None
+    assert c.accept(text, m)
+    return {name: m.group(name) for name, _s, _e in c.groups if m.span(name)[0] >= 0}
+
+
+def _line(query):
+    groups, gaps = _parse_line_break_query(query)
+    return compile_line_groups(groups, gaps, {'responsa_mode': True}, None)
+
+
+@pytest.mark.parametrize('runtime', RUNTIMES)
+def test_a_line_word_before_a_rejected_place_is_found(runtime):
+    # ^.* reaches the last שמעון first; the first one is the line's whole word.
+    text = f'שמעון {GLUED}\nלוי'
+    assert checked(_line('שמעון | לוי'), text, runtime) == {'rl0_0': 'שמעון', 'rl1_0': 'לוי'}
+    assert checked(_line('שמעון | לוי'), f'א{GLUED}\nלוי', runtime) is None
+
+
+@pytest.mark.parametrize('runtime', RUNTIMES)
+def test_an_and_word_before_a_rejected_place_is_found(runtime):
+    c = _compiled('ראובן AND שמעון', within_document=True)
+    got = checked(c, f'ראובן שמעון אמר {GLUED}', runtime)
+    assert got is not None and got['ra1'] == 'שמעון'
+    assert checked(c, f'ראובן אמר {GLUED}', runtime) is None
+
+
+@pytest.mark.parametrize('runtime', RUNTIMES)
+def test_a_gap_word_before_a_rejected_place_is_found(runtime):
+    # The greedy gap reaches the glued שמעון two words on; the one right after ראובן holds.
+    c = _compiled('ראובן [2] שמעון')
+    assert checked(c, f'ראובן שמעון לוי{GLUED[1:]}', runtime) == {'rf0': 'ראובן', 'rf1': 'שמעון'}
+    assert checked(c, f'ראובן לוי{GLUED[1:]}', runtime) is None
+
+
+def test_the_exact_pattern_waits_for_a_rejection():
+    c = _compiled('ראובן [2] שמעון')
+    rx = c.compile_check()
+    assert rx.search('ראובן שמעון') is not None
+    assert rx._exact is None, 'an accepted first match needs no exact pattern'
+    rx.search(f'ראובן שמעון לוי{GLUED[1:]}')
+    assert rx._exact is not None
+
+
+# --- The guard: inline alternation and its refusal (Codex review of PR #432) -------------
+
+def test_an_inline_alternation_stops_at_the_limit():
+    with pytest.raises(_OverLimit):
+        _inline_forms('א' + '(ב/ג)' * 20, limit=5000)      # 2**20 forms, never built
+    assert len(_inline_forms('א' + '(ב/ג)' * 12, limit=5000)) == 4096
+
+
+def test_a_query_over_the_guard_is_refused_with_its_code():
+    # 199 binary groups fit the 1,000-character cap; spelt out they are 2**199 forms.
+    for groups in (13, 199):
+        with pytest.raises(ResponsaQueryRefused) as info:
+            _compiled('א' + '(ב/ג)' * groups)
+        assert info.value.code == GUARD_REFUSAL_CODE
+        assert isinstance(info.value, ValueError)
+        assert '5000' in str(info.value)
+
+
+# --- Page rows win de-duplication, V0.8 and V0.7 (plan §5.4; Codex review of PR #432) ----
+
+@pytest.mark.parametrize('source', ['V0.8', 'V0.7'])
+@pytest.mark.parametrize('page_first', [True, False])
+def test_the_page_row_wins_over_the_whole_manuscript_row(source, page_first):
+    page = {'uid': 'p1', 'scope': 'page', 'display': {'source': source}, 'which': 'page'}
+    whole = {'uid': 'p1', 'scope': 'system', 'display': {'source': source}, 'which': 'whole'}
+    other = {'uid': 'p2', 'scope': 'page', 'display': {'source': source}, 'which': 'other'}
+    rows = [page, other, whole] if page_first else [whole, other, page]
+    kept = se.SearchEngine._deduplicate(None, rows, pages_win=True)
+    assert [r['which'] for r in kept] == ['page', 'other']
