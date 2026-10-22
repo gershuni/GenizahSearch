@@ -107,7 +107,7 @@ from desktop.variant_run_settings import (PreviewVariants, engine_with_variant_s
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared_export_utils import clean_text_single_line, coerce_img_page_cell
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
-from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter, chain_needs_completion, only_partial, step_partial
+from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter, chain_needs_completion, only_partial, step_partial, saved_cutoff
 from shared.document_service import select_pgp_page_entry
 from shared.exclusion_service import (
     ExclusionSource, compute_excluded_ids,
@@ -24482,11 +24482,13 @@ class GenizahGUI(QMainWindow):
 
     def _forget_responsa_notes(self):
         """The Responsa notes of the results shown -- the guard's downgrade and the
-        expanded-term count -- go when those results are replaced or cleared:
-        on_search_finished sets them only for a new set of rows, so a later tag
-        search's line said the previous query's downgrade (Codex review of PR #433)."""
+        expanded-term and pattern counts -- go when those results are replaced or
+        cleared: on_search_finished sets them only for a new set of rows, so a later
+        tag search's line said the previous query's downgrade (Codex review of PR
+        #433) or its patterns (Codex round 3 on PR #442)."""
         self._responsa_warning = None
         self._responsa_expanded_count = 0
+        self._responsa_pattern_count = 0
 
     def _search_status_summary(self, domains=0):
         """The Search results status line, from the table as it is now.
@@ -34002,10 +34004,8 @@ class GenizahGUI(QMainWindow):
                     'results': getattr(self, 'last_results', [])[:5000],
                     # D8: the restored count shows "+" if the search was cut off or the
                     # snapshot above drops rows.
-                    'search_cutoff': {
-                        'capped': bool((getattr(self, '_search_cutoff', None) or {}).get('capped'))
-                                  or len(getattr(self, 'last_results', [])) > 5000,
-                        'interrupted': bool((getattr(self, '_search_cutoff', None) or {}).get('interrupted'))},
+                    'search_cutoff': saved_cutoff(getattr(self, '_search_cutoff', None),
+                                                  len(getattr(self, 'last_results', []) or []), 5000),
                     'domain_exclusions': sorted(getattr(self, '_domain_exclusions', set())),
                     'printed_filter': getattr(self, '_printed_filter_state', 'all'),
                     'local_filter': getattr(self, '_local_filter_state_search', 'all'),

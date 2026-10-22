@@ -51,3 +51,44 @@ def test_a_new_step_inherits_what_its_parent_cannot_complete(parent, cutoff, mar
 def test_a_first_step_has_only_its_own_marks():
     assert _Host(PARTIAL, [])._new_step_marks() == (True, True)
     assert _Host(CLEAN, [])._new_step_marks() == (False, False)
+
+
+class _Session:
+    _forget_responsa_notes = APP._forget_responsa_notes
+
+
+@pytest.mark.parametrize('cutoff, rows, saved', [
+    (PARTIAL, 2, {'capped': True, 'interrupted': False, 'partial': True, 'limited': False}),
+    # The session keeps the first rows only: completing reads the rest (limited).
+    (PARTIAL, 6, {'capped': True, 'interrupted': False, 'partial': True, 'limited': True}),
+    (CLEAN, 2, {'capped': False, 'interrupted': False}),
+    (CLEAN, 6, {'capped': True, 'interrupted': False}),
+])
+def test_the_session_keeps_whether_completing_can_fix_the_list(cutoff, rows, saved):
+    # Codex round 3 on PR #442: a restored star search kept only "+", so a search within
+    # it ran it again with every candidate.
+    from shared.refinement import saved_cutoff
+    assert saved_cutoff(cutoff, rows, 5) == saved
+
+
+def test_the_pattern_count_goes_with_the_other_responsa_notes():
+    # Codex round 3 on PR #442: a tag search's line after an all-star search spoke of the
+    # star search's patterns.
+    host = _Session()
+    host._responsa_warning, host._responsa_expanded_count, host._responsa_pattern_count = 'w', 3, 2
+    host._forget_responsa_notes()
+    assert (host._responsa_warning, host._responsa_expanded_count, host._responsa_pattern_count) == (None, 0, 0)
+
+
+def test_the_saved_session_carries_the_partial_state(monkeypatch):
+    import types
+    import shared.session_persistence as session_persistence
+    written = []
+    monkeypatch.setattr(session_persistence, "save_session_state", lambda state: written.append(state) or True)
+    monkeypatch.setattr(genizah_app, "load_app_config", lambda: {"restore_mode": "ask"})
+    fake = types.SimpleNamespace(_restoring_session=False, _local_file_optouts=set(),
+                                 _search_corpus_scope="genizah", _is_browsing_local=lambda: False,
+                                 _search_cutoff=dict(PARTIAL), last_results=[{}])
+    APP._save_session(fake)
+    assert written and written[0]['regular_search']['search_cutoff'] == {
+        'capped': True, 'interrupted': False, 'partial': True, 'limited': False}

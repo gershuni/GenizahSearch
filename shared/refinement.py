@@ -121,6 +121,21 @@ def only_partial(cutoff) -> bool:
     return bool((cutoff or {}).get('partial') and not (cutoff or {}).get('limited'))
 
 
+def saved_cutoff(cutoff, rows: int, kept: int) -> dict:
+    """The cut-off signal a saved session keeps with the first *kept* of *rows* rows:
+    "+" when the search was cut off or stopped, or the snapshot drops rows; and whether
+    what it left out is only what completing cannot add (``partial``, Codex round 3 on PR
+    #442) -- rows the snapshot drops are a limit completing does read (``limited``)."""
+    cutoff = cutoff or {}
+    dropped = rows > kept
+    saved = {'capped': bool(cutoff.get('capped')) or dropped,
+             'interrupted': bool(cutoff.get('interrupted'))}
+    if cutoff.get('partial'):
+        saved['partial'] = True
+        saved['limited'] = bool(cutoff.get('limited')) or dropped
+    return saved
+
+
 def step_partial(cutoff, parent=None) -> bool:
     """A step's ``result_partial``: its "+" is one completing it cannot fix. Its own search
     left out only what reading every candidate cannot add (``only_partial``); or it was
