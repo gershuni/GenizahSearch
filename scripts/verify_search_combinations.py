@@ -122,7 +122,10 @@ def _a_copy_inside_matches(eng, meta, se, rx, uid, parent_ids):
     whole-word match (the one way a restricted search may find a page the
     unrestricted one kept outside the set)."""
     q = eng.index.parse_query(f'unique_id:"{uid}"', ["unique_id"])
-    for _score, addr in eng.searcher.search(q, 20).hits:
+    # Every copy: a printed book's page can be filed under 40 and more manuscripts in
+    # both sources, and the first 20 hits were all V0.8 copies outside the set
+    # (IE50232361_P000117, 2026-10-22) -- the copy inside was never looked at.
+    for _score, addr in eng.searcher.search(q, 10_000).hits:
         doc = eng.searcher.doc(addr)
         if meta.get_display_data(doc.get_first("full_header"), doc.get_first("source"))["id"] not in parent_ids:
             continue
