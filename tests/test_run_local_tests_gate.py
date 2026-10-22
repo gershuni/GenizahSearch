@@ -26,6 +26,8 @@ from __future__ import annotations
 import importlib.util
 import os
 import re
+import subprocess
+import time
 
 import pytest
 
@@ -471,3 +473,64 @@ def test_a_cp1252_console_shows_a_hebrew_failure_instead_of_crashing():
     print("FAILED tests/test_x.py::test_y - assert 'שלום' == 'עולם'", file=console)
     console.flush()
     assert b"FAILED tests/test_x.py::test_y" in raw.getvalue()
+
+
+# --- the lanes' temp files (2026-10-22: a full run left ~18 GB under %TEMP%) ---
+
+def _run_main(monkeypatch, tmp_path, rc, summary):
+    """main() end to end on one chunk, whose fake pytest writes a file into its basetemp.
+
+    Returns main's exit code and the shared lanes folder under the fake temp dir."""
+    monkeypatch.setattr(runner.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(runner, "_test_files",
+                        lambda markers: (["tests/test_a.py"], [], []))
+    monkeypatch.setattr(runner, "_durations", lambda: {})
+
+    def fake_pytest(cmd, **kwargs):
+        leaf = cmd[cmd.index("--basetemp") + 1]
+        os.makedirs(leaf, exist_ok=True)
+        with open(os.path.join(leaf, "left_by_a_test.txt"), "w") as fh:
+            fh.write("x")
+        return subprocess.CompletedProcess(cmd, rc, stdout=summary, stderr="")
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_pytest)
+    return runner.main(["-j", "1"]), os.path.join(str(tmp_path), runner.LANES_DIR_NAME)
+
+
+def _files_under(path):
+    return sorted(os.path.relpath(os.path.join(d, f), path)
+                  for d, _dirs, files in os.walk(path) for f in files)
+
+
+def test_a_passing_run_removes_its_temp_files(monkeypatch, tmp_path):
+    code, parent = _run_main(monkeypatch, tmp_path, 0, "1 passed in 0.10s")
+    assert code == 0
+    assert os.listdir(parent) == []
+
+
+def test_a_failing_run_keeps_its_temp_files_for_inspection(monkeypatch, tmp_path):
+    code, parent = _run_main(monkeypatch, tmp_path, 1, "1 failed in 0.10s")
+    assert code == 1
+    [run_dir] = os.listdir(parent)
+    assert run_dir.startswith("run-")
+    assert [os.path.basename(f) for f in _files_under(parent)] == ["left_by_a_test.txt"]
+
+
+def test_a_run_leaves_a_concurrent_run_alone_and_sweeps_day_old_ones(monkeypatch, tmp_path):
+    """Two runs at once used to delete each other's live tmp_path folders (133
+    errors, 2026-09-20): every run began by wiping the one shared folder."""
+    parent = os.path.join(str(tmp_path), runner.LANES_DIR_NAME)
+    now = int(time.time())
+    live = os.path.join(parent, "run-%d-4242" % now, "lane0", "c1")
+    stale = os.path.join(parent, "run-%d-1111" % (now - 2 * 24 * 3600), "lane0", "c1")
+    old_layout = os.path.join(parent, "lane0", "c1")
+    for d in (live, stale, old_layout):
+        os.makedirs(d)
+        with open(os.path.join(d, "f.txt"), "w") as fh:
+            fh.write("x")
+
+    code, _parent = _run_main(monkeypatch, tmp_path, 0, "1 passed in 0.10s")
+
+    assert code == 0
+    assert os.listdir(parent) == ["run-%d-4242" % now]
+    assert os.path.exists(os.path.join(live, "f.txt"))
