@@ -1132,6 +1132,15 @@ PHASE2_QUERIES = [
     ('כ*נים גדולים', {}),
     ('*כ*ה*נ*ים גדולים', {}),
 ]
+# Phase 3, first PR (§7, "Phase 3, settled before building"): a star at the end of a word or
+# inside it, on either index format.
+PHASE3_QUERIES = [
+    ('מאמ* קור*', {}),
+    ('כהנ* גדול*', {}),
+    ('כ*נים גדולים', {}),
+    ('כ*ה*נ*ים גדולים', {}),
+    ('כהנ* גדולים', {'variants': True, 'variant_mode': 'variants'}),
+]
 
 
 class _Deadline:
@@ -1177,7 +1186,8 @@ def cmd_desktop_timings(args):
         se.consume_last_search_cutoff()
         log(f'warm-up Exact ספר: {len(warm):,} rows')
         for engine_name in args.engines:
-            for phase, queries in (('phase1', PHASE1_QUERIES), ('phase2', PHASE2_QUERIES)):
+            for phase, queries in (('phase1', PHASE1_QUERIES), ('phase2', PHASE2_QUERIES),
+                                   ('phase3', PHASE3_QUERIES)):
                 for query, extra in queries:
                     options = {'responsa_mode': True, 'variants': False, 'ja': False, 'flex_spacing': False,
                                'bidirectional': False, 'variant_mode': 'exact'}
@@ -1186,6 +1196,7 @@ def cmd_desktop_timings(args):
                     row = {'engine': engine_name, 'phase': phase, 'query': query, 'options': extra}
                     se.consume_last_search_cutoff()
                     se._consume_last_responsa_downgrade_meta()
+                    se._consume_last_responsa_downgrade()
                     started = time.perf_counter()
                     try:
                         with engines[engine_name]():
@@ -1197,6 +1208,8 @@ def cmd_desktop_timings(args):
                     row['seconds'] = round(time.perf_counter() - started, 2)
                     cutoff = se.consume_last_search_cutoff()
                     row['capped_N_plus'] = bool(cutoff.get('capped'))
+                    row['partial'] = bool(cutoff.get('partial'))      # crossings left out by rule (Phase 3)
+                    row['note'] = se._consume_last_responsa_downgrade()
                     row['interrupted'] = bool(cutoff.get('interrupted'))
                     row['stopped_by_deadline'] = deadline.fired
                     row['downgrade'] = se._consume_last_responsa_downgrade_meta()
@@ -1204,7 +1217,8 @@ def cmd_desktop_timings(args):
                     log(f'{engine_name:5} {phase} {query!r} {extra or ""}: '
                         + (f'{row["rows"]:,} rows' if 'rows' in row else row['error'])
                         + f', {row["seconds"]} s, N+={row["capped_N_plus"]}, interrupted={row["interrupted"]}'
-                        + (f', downgrade={row["downgrade"]}' if row['downgrade'] else ''))
+                        + (f', downgrade={row["downgrade"]}' if row['downgrade'] else '')
+                        + (f', note={row["note"]!r}' if row['note'] else ''))
     log.finish({'index_dir': args.index_dir, 'search_limit': Config.SEARCH_LIMIT, 'query_timeout_s': args.query_timeout,
                 'engines': args.engines, 'runs': rows})
     return EXIT_OK
@@ -1660,17 +1674,11 @@ CROSSING_QUERIES_FREQUENT = [
 
 def responsa_side_words(compiled, query, gap, flex):
     """S of §6.1 point 2 for a Responsa query: the most chunks one side of a crossing can
-    hold (each word's most chunks, plus the gaps, minus 1)."""
+    hold (each word's most chunks, plus the gaps, minus 1) -- the engine's own rule
+    (SearchEngine._responsa_side_words; *flex* is the compiled query's)."""
     from shared.responsa import extract_per_pair_gaps
-    spans = []
-    for plan in compiled.plans:
-        n = max((len(f.split()) for f in plan.stems if f), default=1)
-        if flex:
-            n = max(n, max((len(w) for w in plan.component.words), default=1))
-        spans.append(n)
-    explicit = [g for g in extract_per_pair_gaps(query) if g is not None]
-    pairs = max(0, len(spans) - 1)
-    return sum(spans) + sum(explicit[:pairs]) + gap * max(0, pairs - len(explicit)) - 1
+    from shared.search_engine import SearchEngine
+    return SearchEngine._responsa_side_words(compiled, extract_per_pair_gaps(query), gap)
 
 
 def _sys_of(header):

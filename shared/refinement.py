@@ -43,6 +43,11 @@ class RefinementStep:
     # candidate limit or was stopped, or a step before it did (it was restricted to an
     # incomplete set). Its count shows as "N+".
     result_count_capped: bool = False
+    # Its search left matches across pages out by its own rule (a star query's crossings
+    # past the seams' window, or in more manuscripts than can be read in time; plan §7,
+    # Phase 3 point 8) and nothing else: reading every candidate leaves them out again,
+    # so it is not completed (_cannot_complete), only marked.
+    result_partial: bool = False
     # The variant settings the step was searched with (the website records them, so a
     # replay searches exactly as the step first did; None = not recorded).
     variant_settings: Optional[dict] = None
@@ -108,6 +113,12 @@ def truncate_chain(chain: list[RefinementStep], index: int) -> list[RefinementSt
     Removing a chip at position N removes it AND everything after it.
     """
     return chain[:index]
+
+
+def only_partial(cutoff) -> bool:
+    """The search the *cutoff* signal is of left out only what reading every candidate
+    cannot add (``_note_search_cutoff(partial=True)``, no candidate limit hit)."""
+    return bool((cutoff or {}).get('partial') and not (cutoff or {}).get('limited'))
 
 
 def _last_search_cutoff() -> dict:
@@ -182,14 +193,19 @@ def replay_chain(
         cutoff = _last_search_cutoff()
         incomplete = incomplete or bool(cutoff.get('capped') or cutoff.get('interrupted'))
         step.result_count_capped = incomplete
+        step.result_partial = only_partial(cutoff)
         accumulated_restrict = result_sys_ids if result_sys_ids else set()
 
     return accumulated_restrict
 
 
 def _cannot_complete(step: RefinementStep) -> bool:
-    """A Responsa line-break ('|') step: that search has no ids-only path, so running it
-    again reads the same cut-off list. It stays marked "+" (tracked for Phase 2)."""
+    """A step that running again with every candidate would not complete, so it stays
+    marked "+": a Responsa line-break ('|') step (that search has no ids-only path), and
+    a step whose search left out only matches across pages, by its own rule
+    (``result_partial``)."""
+    if step.result_partial:
+        return True
     if not (step.responsa_options or {}).get('responsa_mode'):
         return False
     from shared.responsa import _has_line_break_syntax
@@ -198,7 +214,8 @@ def _cannot_complete(step: RefinementStep) -> bool:
 
 def steps_that_cannot_complete(chain: list[RefinementStep], upto: int | None = None) -> list:
     """The cut-off steps of *chain* (of its first *upto*) that completing cannot read
-    in full (a Responsa line-break search), so a search within them stays "+"."""
+    in full (a Responsa line-break search, or one that left crossings out by its own
+    rule), so a search within them stays "+"."""
     return [s for s in chain[:upto] if s.result_count_capped and _cannot_complete(s)]
 
 
@@ -263,6 +280,7 @@ def complete_chain(
             step.result_count = len(rows)
             incomplete = incomplete or bool(cutoff.get('capped'))
             step.result_count_capped = incomplete
+            step.result_partial = only_partial(cutoff)
         accumulated = step._result_sys_ids if step._result_sys_ids else set()
     return {'restrict': accumulated, 'interrupted': False}
 

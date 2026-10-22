@@ -115,6 +115,9 @@ class SearchUIState:
         # limit, the list was restricted to a cut-off step, or the saved snapshot kept
         # only part of it. The count shows "N+", and search-within completes it first.
         self.result_count_capped: bool = False
+        # The shown results left out only crossings their search's own rule leaves out
+        # (shared/refinement.py::only_partial): a step built on them is not completed.
+        self.result_partial: bool = False
         self.running_label: str = None   # what the progress line says while running (default "Searching...")
         # What the last search sent ran with (query without its mode prefix, engine
         # mode, gap, NOT-words, position, Responsa options, scope, variant settings):

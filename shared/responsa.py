@@ -93,7 +93,8 @@ def parse_responsa_query(query_str: str) -> List[ResponsaComponent]:
     - Plain words: "שלום" -> single component
     - Suffix wildcard: "שלום*" -> wildcard='suffix'
     - Prefix wildcard: "*נדר" -> wildcard='prefix'
-    - Character pattern: "*פ*ט*ר*פ*" -> wildcard='pattern'
+    - Character pattern: any other star -- "כ*נים", "*כהנ*", "*פ*ט*ר*פ*" -> wildcard='pattern'
+      (Phase 3: a star is any letters inside one word, zero included)
     - Grammatical prefixes: "#שלום" -> grammatical_prefixes=True
     - Grammatical suffixes: "שלום#" -> grammatical_suffixes=True
     - Both prefix+suffix: "#שלום#" -> grammatical_prefixes=True, grammatical_suffixes=True
@@ -517,8 +518,9 @@ def _parse_single_token(token: str) -> ResponsaComponent:
     - Leading %: plene/defective spelling variants
     - Leading #: grammatical prefix expansion
     - Trailing #: grammatical suffix expansion
-    - Leading *: prefix wildcard (any chars before)
-    - Trailing *: suffix wildcard (any chars after)
+    - Leading *: prefix wildcard (any letters before)
+    - Trailing *: suffix wildcard (any letters after)
+    - Any other *: a character pattern (any letters there)
     - Combinable: %#word#, #word*, etc.
     """
     original = token
@@ -588,33 +590,20 @@ def _parse_single_token(token: str) -> ResponsaComponent:
                 negated=has_negation,
             )
 
-    # Wildcard detection
+    # Wildcard detection. A star at one end only (any number of them there) is the
+    # prefix or suffix wildcard; every other star -- inside the word, at both ends,
+    # several -- is a character pattern (Phase 3: any letters, as often as typed).
     wildcard = None
     wildcard_pattern = None
     stripped = token
 
     if '*' in token:
-        asterisk_count = token.count('*')
-
-        if asterisk_count >= 3:
-            wildcard = 'pattern'
-            wildcard_pattern = token
-            return ResponsaComponent(
-                words=[token],
-                grammatical_prefixes=has_leading_hash,
-                grammatical_suffixes=has_trailing_hash,
-                plene_defective=has_percent,
-                wildcard=wildcard,
-                wildcard_pattern=wildcard_pattern,
-                negated=has_negation,
-            )
-        elif token.endswith('*') and not token.startswith('*'):
-            wildcard = 'suffix'
-            stripped = token.rstrip('*')
-        elif token.startswith('*') and not token.endswith('*'):
-            wildcard = 'prefix'
-            stripped = token.lstrip('*')
-        elif token.startswith('*') and token.endswith('*') and asterisk_count == 2:
+        core = token.strip('*')
+        lead, trail = token.startswith('*'), token.endswith('*')
+        if core and '*' not in core and lead != trail:
+            wildcard = 'prefix' if lead else 'suffix'
+            stripped = core
+        else:
             wildcard = 'pattern'
             wildcard_pattern = token
             return ResponsaComponent(
@@ -796,9 +785,10 @@ def expand_plene_defective(word: str) -> List[str]:
 def _count_expanded_terms(components: List[ResponsaComponent],
                           variants_on: bool, ja_on: bool,
                           var_mgr, variant_mode: str) -> int:
-    """The number of terms the lookup of *components* holds: every form, and a star
-    word's list, counted as they are made (shared/responsa_match.py) -- no longer an
-    estimate from the first word's variants.
+    """The number of terms the lookup of *components* holds: every finite form, and
+    a star word's runs' forms (the stems of its pattern alternations), counted as they
+    are made (shared/responsa_match.py) -- no longer an estimate from the first word's
+    variants.
 
     Args:
         components: List of ResponsaComponent objects
@@ -811,11 +801,11 @@ def _count_expanded_terms(components: List[ResponsaComponent],
         The total number of search terms the components expand to
     """
     from shared.config import Config  # noqa: PLC0415 -- kept with the other lazy import
-    from shared.responsa_match import _OverLimit, expand_stems, retrieval_terms  # noqa: PLC0415 -- it imports this module
+    from shared.responsa_match import _OverLimit, expand_stems, term_cost  # noqa: PLC0415 -- it imports this module
     total = 0
     for c in components:
         try:
-            total += len(retrieval_terms(c, expand_stems(c, variants_on, ja_on, variant_mode, var_mgr)))
+            total += term_cost(expand_stems(c, variants_on, ja_on, variant_mode, var_mgr))
         except _OverLimit:   # an inline alternation stops being spelt out past the limit
             return Config.MAX_EXPANDED_TERMS + 1
     return total

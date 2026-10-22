@@ -136,6 +136,17 @@ class Config:
 
     # Settings
     SEARCH_LIMIT = 50000
+    # Responsa reads up to this many page candidates (owner, decision 3 of
+    # docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md, 2026-10-21): a true * scores every
+    # match alike, so a cut at 50,000 kept an arbitrary part (*נים *לים has about
+    # 100,000 candidate pages). The whole-manuscript documents and the seams each
+    # read up to SEARCH_LIMIT of their own. Beyond it the search says "N+".
+    RESPONSA_PAGE_LIMIT = 150_000
+    # A Responsa query with a star reads the whole-manuscript documents for its matches
+    # across pages only when at most this many hold its words; more, and those matches
+    # are not searched and the list says "N+" (plan §7, Phase 3 point 7). Under a broad
+    # star they would be billions of characters (§3.5), past the website's time limit.
+    RESPONSA_STAR_AGGREGATE_LIMIT = 2_000
     # A website search (and an API background job) stops after this many seconds
     # and returns what it had checked, marked "N+" (owner ruling 2026-09-28): the
     # website has one search worker, and a stuck search would hold every other

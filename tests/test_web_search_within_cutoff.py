@@ -135,6 +135,18 @@ def test_isolated_engine_hands_the_cut_off_to_the_calling_thread(page):
     assert consume_last_search_cutoff() == {'capped': True, 'interrupted': False}
 
 
+@pytest.mark.parametrize('limited', [False, True])
+def test_isolated_engine_hands_a_partial_cut_off_to_the_calling_thread(page, limited):
+    # Crossings a star search left out by rule travel from the worker with whether a
+    # candidate limit cut it too (Codex on PR #442, round 1).
+    from shared.search_engine import consume_last_search_cutoff
+    from web.state import state
+    cutoff = {'capped': True, 'interrupted': False, 'partial': True, 'limited': limited}
+    page({(WORD, False): ([_row('M1')], cutoff)})
+    state.searcher.execute_search(WORD, 'literal', 0)
+    assert consume_last_search_cutoff() == cutoff
+
+
 def test_a_failed_call_leaves_no_cut_off(page, monkeypatch):
     from shared.search_engine import _note_search_cutoff, consume_last_search_cutoff
     from web import research_jobs
@@ -803,8 +815,58 @@ def test_searching_within_a_cut_off_line_break_search_says_it_cannot_be_complete
     run(driver, count=1)
     assert queue.payloads[0]['arguments']['responsa_options']['responsa_mode'] is True
     assert len(queue.payloads) == 1, 'a line-break step is not run again to complete it'
-    assert ('A search with a line break cannot be completed; searching within the shown results.'
-            in seen['notes']), seen['notes']
+    assert ('A search with a line break, or one that leaves matches across pages out, cannot be '
+            'completed; searching within the shown results.' in seen['notes']), seen['notes']
+
+
+def test_searching_within_a_star_search_that_left_crossings_out_does_not_run_it_again(page):
+    """Codex on PR #442, round 1: a Responsa star search that left matches across pages
+    out by its own rule (past the seams' window, or too many manuscripts to read in time)
+    is "N+", but reading every candidate would leave them out again: Search within says
+    it searches within the shown results and does not run the step again."""
+    query = f'{WORD}* {WORD2}*'
+    partial = {'capped': True, 'interrupted': False, 'partial': True, 'limited': False}
+    queue = page({(query, False): ([_row('M1')], partial)})
+    seen = {}
+
+    async def driver(a):
+        await a.open('/search')
+        store(a, search_mode='responsa')
+        await a.open('/search')
+        submit(a, query)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
+        await _click_search_within(a)
+        await _wait_for(lambda: any('Searching within 1+ manuscripts' in t for t in _label_texts(a)), user=a)
+        seen['notes'] = list(a.notify.messages)
+
+    run(driver, count=1)
+    assert len(queue.payloads) == 1, 'a step that left crossings out by rule is not run again'
+    assert ('A search with a line break, or one that leaves matches across pages out, cannot be '
+            'completed; searching within the shown results.' in seen['notes']), seen['notes']
+
+
+def test_a_star_search_cut_by_its_page_limit_too_is_completed(page):
+    """The same search cut by a candidate limit as well ('limited'): reading every
+    candidate completes that part, so the step is run again with ids_only."""
+    query = f'{WORD}* {WORD2}*'
+    both = {'capped': True, 'interrupted': False, 'partial': True, 'limited': True}
+    queue = page({(query, False): ([_row('M1')], both),
+                  (query, True): ([_row('M1'), _row('M2')], {'capped': True, 'interrupted': False,
+                                                              'partial': True, 'limited': False})})
+
+    async def driver(a):
+        await a.open('/search')
+        store(a, search_mode='responsa')
+        await a.open('/search')
+        submit(a, query)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
+        await _click_search_within(a)
+        await wait_for_payloads(queue, 2)
+
+    run(driver, count=1)
+    assert [p['arguments'].get('ids_only') for p in queue.payloads] == [None, True]
 
 
 def test_the_all_terms_filter_stays_off_over_a_line_break_step(page):
