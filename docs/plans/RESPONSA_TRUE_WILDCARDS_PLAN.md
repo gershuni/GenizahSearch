@@ -5,7 +5,11 @@
 `claude/responsa-wildcards-phase1-surfaces` -- with its gates: the §8 oracle
 (`scripts/verify_responsa_wildcards.py`) agrees with the engine on all nine Phase 1 queries on the
 real data (0 differences) and its four named mutations each fail it; the "after" timings are in
-§3.6.6. Phases 2 and 3 are not implemented. Plan revision 6: **all nine §9 decisions taken (2026-10-21)** and the phases
+§3.6.6. **Phase 2 designed (2026-10-22, §6.1)**: the seams in their own index inside
+`tantivy_db/`, K = 30 words a side, runs plus Oxford part bridges (1,541,186 seams), the
+reversed-words field on every document, a format marker with today's routes as the fallback;
+measured at about +3.6 GB on 13.9 GB. Whether today's crossings move to the seams is asked of the
+owner with numbers (§6.1 point 7). Phase 3 is not implemented. Plan revision 6: **all nine §9 decisions taken (2026-10-21)** and the phases
 resequenced -- Phase 1 unchanged (whole words on every path, no rebuild), **Phase 2 is the index
 format** (seam documents and the reversed-words field on one rebuild, the engine's fallback for an
 old index, the server rebuild and the desktop re-index), **Phase 3 is true `*`** on the new index.
@@ -813,6 +817,205 @@ reversed-words field (Phase 2), before true `*` ships (Phase 3). The crossing st
 reads seams, never whole manuscripts. C's limits stay in the text as the record of why an interim
 without crossings was not chosen.
 
+### 6.1 Phase 2 design: the seam index and the reversed-words field (2026-10-22)
+
+Settled before building, from measurements on the real corpus files (`Transcriptions.txt` and
+`AllGenizah_OLD.txt`): `scripts/measure_responsa_wildcards.py seam-plan` (the seams of the whole
+corpus, without an index, 465 s) and `index-sample` (a 1/10 sample of the manuscripts, both
+files, built with and without each addition).
+
+**1. Where the seams live: a separate index, `tantivy_db/seams/`, not `scope:seam` in the main
+index.** §6 B asked for a new scope excluded from every unscoped consumer. A separate index gives
+that by construction, and it also covers three readers no exclusion list can reach:
+- **Today's code on the new index.** The web is not continuous-deploy: the index goes up first and
+  the code after it (CLAUDE.md). In that window today's code would meet `scope:seam` documents in
+  its unscoped queries: Responsa's mixed query, Regex mode's candidates, position searches,
+  composition's 50-candidate chunks, `_every_doc_has_scope` and the home-page count.
+- **An older desktop installer** opening a folder the new one re-indexed.
+- **Scripts** that open `tantivy_db` directly (a dozen under `scripts/`).
+
+The main index keeps exactly today's documents: pages, whole-manuscript documents and Oxford part
+documents. The only new thing in it is the reversed-words field (point 5). Each seam document
+still says `scope = "seam"`, so a seam is recognisable wherever it turns up. The seam index sits
+inside `tantivy_db/`, so the folder is built, copied, swapped and deleted as one unit. The
+desktop's Re-index (`shutil.rmtree(tantivy_db)`) removes the seams with it, and an older app's
+Re-index cannot leave a stale seam index beside a new main index. Tantivy's garbage collection
+deletes only the files listed in `.managed.json`, never a subfolder.
+
+**2. K = 30 words on each side of a junction.** "Words" are what `_cross_page_spans` counts:
+whitespace chunks that hold a word character, cut by the same `_left_window_start` and
+`_right_window_end`. A seam is that window with K = 30 on the text of its chain (point 3), so it
+crosses pages shorter than K. The three-page match of `tests/test_cross_page_spans.py` lies in the
+seam centred on its first break.
+- **Page lengths** (word chunks per page). V0.8: median 122; a quarter of the pages under 28, a
+  tenth under 4; 240,006 of 941,026 pages (25.5%) shorter than 30; 42,685 without a word. V0.7:
+  median 115; 287,189 of 1,043,211 pages shorter than 30. So many seams run over more than two
+  pages: at K = 30, 195,049 of 1,541,186 seams (12.7%), up to 13 pages and more.
+- **What a crossing needs.** A crossing match has at least one word on each side of the break, so
+  one side holds at most S chunks:
+  - Exact, Variants, Fuzzy: S = (n - 1) x (gap + 1), as `_cross_page_side_words` computes it
+    today (`MAX_WORD_GAP` is 10).
+  - Responsa (star words in Phase 3; finite words in Phase 2 only if the owner moves today's
+    crossings to seams, point 7): S = the sum over the words of the most chunks each can span,
+    plus the sum of the per-pair gaps (`[N]`, else the global gap), minus 1. A form spans one
+    chunk; under flex spacing a typed word spans up to its letter count, since `\s*` may split it
+    at every letter. Bidirectional reverses the order, not the sum. `within_document` (`AND`),
+    position searches and line searches never read seams: they keep the whole-manuscript
+    documents (§6's table).
+  - **S <= K reads the seams; S > K reads the whole-manuscript documents**, today's route, with
+    today's false junctions. K = 30 covers a 31-word phrase at gap 0, 16 words at gap 1, 4 words
+    at gap 9, 3 words at gap 10 (S = 22), and Responsa's `a [10] b [10] c` (S = 22).
+- **Real queries** (PostHog `search_executed`, website, the 90 days to 2026-10-22, bots
+  excluded). Of about 13,300 Exact, Variants and Fuzzy searches, 20 had 16-30 words and none had
+  more; 146 had 9-15. 62 Responsa queries carried a `[N]` gap, the largest `[10]`, all in 3-4
+  words. The website does not record Exact's gap setting, so the gap side of the rule rests on
+  `MAX_WORD_GAP`.
+- **Seam text per K** (all 1,541,186 seams, in characters): K = 10: 147M; K = 20: 287M;
+  **K = 30: 422M (274 per seam on average, 1,333 at most)**; K = 40: 553M; K = 50: 681M. The
+  index grows with it (point 8), so K = 40 or 50 would pay for queries no one has typed.
+
+**3. Which junctions get a seam: runs, bridges and chains.**
+- **A run** is pages that follow each other in one transcription of one volume: the same source
+  (V0.8 or V0.7), `sys_id` and IE, each page number one more than the last. A run breaks at the
+  V0.8 -> V0.7 restart, at a volume change, at a page-number jump (the missing page's text stands
+  between, so no seam) and at a page without a number. The corpus has 459,376 runs with
+  **1,524,861 junctions, exactly §3.6.5's consecutive count**, and none of §3.6.5's 226,926 false
+  junctions is a seam.
+- **Oxford parts.** A part document joins folio records (one `sys_id` each) in folio order. It
+  holds folio N's V0.8 pages, then its V0.7 pages, then folio N+1's; so its 8,244 junctions "V0.7
+  of one folio -> V0.8 of the next" are false, and **no part document ever puts folio N's last
+  V0.8 page beside folio N+1's first**. A **bridge** joins them, per source, when the two folios
+  are consecutive in the part with folio numbers N and N+1 (from the shelfmark,
+  `CodicologicalManager._get_folio_number`), each folio is one volume, N's run ends on N's last
+  page and N+1's run starts on page 1. Bridged runs form one **chain**, so a seam may cross from
+  folio to folio. **16,325 bridges**; 211 refused (206 folio numbers not consecutive, 4 a folio in
+  two volumes, 1 a missing first page). Their crossings are new: no index finds them today. Parts
+  over 1,000 pages are skipped, as their documents are today.
+- **1,541,186 seams in all** (1,524,861 + 16,325), in 443,051 chains.
+
+**4. A seam document: fields and provenance** (`shared/indexer.py::build_seam_schema`).
+- `content` (stored, `hebword`, with positions: the phrase candidate queries need them);
+  `content_search` (folded, not stored); `content_rev` (point 5); `source` and `full_header` of
+  the page before the junction; `sys_ids`, the manuscripts its slices belong to (indexed, for
+  search-within; a bridged seam has two); `scope = "seam"`; `cut`, the junction's offset in the
+  text; and `boundaries`, one slice per page: `{uid, p_num, full_header, source, sys_id, start,
+  end, offset}`. `start` and `end` are in the seam's text. **`offset` is where the slice starts in
+  its page**: a seam's first slice starts mid-page. `unique_id` is
+  `seam:<source>:<left uid>><right uid>`.
+- **Mapping a span back.** `_map_span_to_pages` adds each boundary's `offset` (0 for the
+  whole-manuscript documents, which carry none), so `page_highlights` and the primary page come
+  out in page coordinates, as they do for an aggregate today.
+- **Phase 1's bracket mapping** (`_unstripped_span`) works inside the text it is given. The check
+  runs on the seam's bracket-stripped text, the span is mapped back onto the seam's own text, and
+  then through the slices. A seam starts and ends on whitespace, so it never separates a bracket
+  from the letters of its chunk. `_cross_page_spans`' own `to_content` mapping is the same.
+- **What a crossing row from a seam carries** (only when a search reads seams, point 7):
+  `page_highlights` and the primary page as above; as `full_text`, the text of the pages its span
+  covers, fetched from the main index by uid and source (an aggregate's row carries the whole
+  manuscript today); and for an excluded word (decision 7), those same whole pages, never the
+  slices.
+
+**5. The reversed-words field, `content_rev`.**
+- Its text is every token the `hebword` tokenizer makes of the **`content_search`** text (folded:
+  marks, quotes and geresh out), each written backwards, space-separated, indexed with the
+  `whitespace` tokenizer. The tokens come from the `hebword` analyzer itself
+  (`tantivy.TextAnalyzer.analyze`), not from a Python copy of its class, so each reversed term is
+  exactly a `content_search` term written backwards. `content_search` is the field a star word is
+  looked up on (§5.1); the raw `content` field is not reversed.
+- `index_option = "basic"`: document ids only. A star lookup asks which documents hold such a
+  word; positions and frequencies would only make the field bigger. Not stored.
+- On **every document**: pages, whole-manuscript and part documents, and seams. Under decision 9
+  a star's crossings come from seams, but `AND` (`within_document`) still reads the
+  whole-manuscript documents (§6's table), and decision 1 leaves only `*X*` on the slow route.
+  On the aggregates the field costs about 0.37 GB (point 8), 2.4% of the index.
+- **Not in My Library's LOCAL index.** LOCAL is small, so `regex_query('.*X')` stays cheap there,
+  and a schema change would make its marker rebuild every user's library on the next start.
+  LOCAL keeps the scan route (§5.6 A).
+- The engine's helper, `SearchEngine.reversed_ending_query(ending, seams=False)`, is a prefix
+  `regex_query` on `content_rev`, or None when the index lacks the field. Phase 2 builds and tests
+  it; Phase 3 searches through it.
+
+**6. The format marker and the fallback.**
+- `tantivy_db/index_format.json` is written **last**, after both indexes commit:
+  `{"format": 2, "build_id", "created", "reversed_field": "content_rev", "seams": {"dir": "seams",
+  "words_each_side": 30, "count", ...}}`. `tantivy_db/seams/seam_format.json` repeats the build id
+  and K. No marker means format 1: every index built before this phase.
+- **At open** (`SearchEngine._open_index_format`) the engine believes the marker only where the
+  index agrees. The reversed field counts only if the schema has it. The seams count only if the
+  seam marker carries the same build id and a positive K, and the seam index opens with its
+  fields. Anything else is an old index, with a warning in the log. K is read from the marker,
+  never from the code, so a later K needs no code change to read an older build correctly.
+- **Fallback on every path.** Exact, Variants and Fuzzy crossings read the whole-manuscript
+  documents (today). Responsa keeps today's mixed query in Phase 2. In Phase 3 a leading star on an
+  old index keeps `regex_query('.*X')` on `content_search` (5-6 s per star word), and its
+  crossings the whole-manuscript documents. Nothing fails on an old index, and nothing re-indexes
+  by itself.
+- **What the desktop tells a user on an old index.** A line under Settings -> "Build / Rebuild
+  Index" says which format the index has. Once the new format gives the user something (the
+  crossing switch if approved, or Phase 3), a prompt after startup says what a rebuild brings and
+  how long it takes, with "Rebuild now" (the existing confirmation follows) and "Later"
+  (remembered for that index). Re-indexing is always the user's click: never from `__init__`,
+  the UI thread or a timer. The website's index is rebuilt by the owner (point 9).
+
+**7. What the engine uses in Phase 2.**
+- **Always:** the format detection and fallbacks above; the seam index opened beside the main one
+  and released by `close_index` (Windows keeps the files locked while a reader is open);
+  `reversed_ending_query`; and `_map_span_to_pages`' offsets. None of these changes a result.
+- **Isolation needs no exclusion list.** Nothing that reads the main index can meet a seam, and
+  gate (d) checks it consumer by consumer.
+- **The owner's decision, asked with numbers before it is built: should today's crossings move to
+  the seams?** Exact, Variants and Fuzzy (several words, no position) read crossings from the
+  whole-manuscript documents today, and Responsa reads them through its mixed query. Seams would
+  remove the crossings found only at a false junction (the end of a volume joined to its own V0.7
+  beginning, a volume change, a missing page), and add the part-bridge crossings no index finds
+  today. The rows removed and added on the §8 query set are counted on the full new index (gate
+  list below) and put to the owner. The switch is built only on a yes.
+
+**8. Size and build time.** Measured on a 1/10 sample (`index-sample`: the manuscripts whose
+`sys_id` has a CRC-32 of 0 mod 10, both files: 91,226 V0.8 and 100,030 V0.7 page headers, 190,521
+page documents, 9.6% of the index's 1,984,237), one build per variant, the laptop of §3.6, nothing
+else running:
+
+| Build (1/10 sample) | Size | Build time |
+|---|---|---|
+| today's format (no field, no seams) | 1,259.0 MB | 67.9 s |
+| + reversed-words field on pages | 1,377.2 MB (+118.3 MB, +9.4%) | 66.9 s |
+| + seams, K = 30 (145,462 seams; the field on pages and seams) | 1,575.5 MB, of which seams 193.6 MB (+316.5 MB, +25.1%) | 75.2 s |
+| the field on the 23,700 aggregate documents alone (a separate index of that field) | 35.6 MB | 21.3 s |
+
+Scaled by 10.4 (1,984,237 / 190,521 pages), the format-1 sample predicts 13.1 GB against the real
+index's 13.86 GB (13,861,494,833 bytes; "12.9 GB" elsewhere in this plan is GiB): the sample
+underestimates by 6%, largely because sampling folios breaks most Oxford parts. **Scaled the same
+way, the additions are +1.2 GB for the field on pages, +0.4 GB on the aggregates and +2.0 GB of
+seams: a full index of about 17.5 GB (+26%).** The seam index's bytes are mostly stored text
+(`.store` 37%) and postings (`.idx` 30%). The sample built 11% slower with both additions. The
+full build's own size and time are measured in Phase 2's rebuild (§7) and recorded there.
+
+**9. The server rebuild and the desktop re-index** are part of Phase 2 (§7) and written up in
+`docs/guides/DEPLOYMENT_TECHNICAL.md`: build into a new folder beside the live one
+(`build_index.py main --index-dir ...`), check it, swap the folders with the web app stopped, and
+keep the old folder to roll back. The owner runs it.
+
+**10. Gates for Phase 2**, each shown red under the named mutation:
+- (a) `measure_responsa_wildcards.py seam-topology`: every junction inside a seam is consecutive
+  or a bridge, and every consecutive junction of the whole-manuscript documents has exactly one
+  seam. Mutation: seams built over each manuscript's pages in file order (no runs).
+- (b) The Phase 1 oracle (`scripts/verify_responsa_wildcards.py`) on the new index: the same
+  counts on all nine queries.
+- (c) `measure_responsa_wildcards.py reversed-check`: the reversed lookup and the regex lookup give
+  the same documents for `כהנים` and `נים`, on the pages (both sources) and on the seams.
+  Mutation: the field built from `content` instead of `content_search`.
+- (d) Consumer isolation (`tests/test_index_format.py`): every search mode, the document counts,
+  the text fetches and composition give on a new fixture index what they give on an old one, and
+  never a seam. Mutation: the seams written into the main index.
+- (e) An old-index fixture runs every Responsa path on the fallback with today's results (the
+  same file, and the whole suite on today's fixtures).
+- (f) `scripts/verify_search_combinations.py` on the new index.
+- (g) `desktop-timings` on the new index, on an awake machine, against §3.6.6's Phase 1 numbers.
+- §8's "In Phase 2 the same cases run against seams": `tests/test_index_seams.py` checks that the
+  seams of a chain give exactly the crossings `_cross_page_spans` finds on the chain's whole text,
+  for every side up to K, on both gap paths, brackets included.
+
 ## 7. Phases
 
 **Phase 0: measurements, no product code.** **Measured 2026-10-21: items 1-5 and 7, and the
@@ -858,8 +1061,9 @@ contract for jobs.
 **Counts change.** For example, `כהנים גדול` goes from 264 rows to the 4 Exact finds. The owner's
 go-ahead is recorded (§9, decision 8, 2026-10-21); the release notes carry a sentence on it.
 
-**Phase 2: the index format (resequenced 2026-10-21, decisions 1 and 9).** One rebuild carries
-both:
+**Phase 2: the index format (resequenced 2026-10-21, decisions 1 and 9).** **Designed 2026-10-22:
+§6.1** (the seam index's place, K, runs and bridges, fields and provenance, the reversed field,
+the marker and the fallbacks, the gates). One rebuild carries both:
 - the seam documents (§6 B), built per source and per IE with consecutive page numbers, so none
   of §3.6.5's 226,926 false junctions survives;
 - the reversed-words field (§5.6 B), its size measured first (estimate: +2-3 GB on 12.9 GB,
