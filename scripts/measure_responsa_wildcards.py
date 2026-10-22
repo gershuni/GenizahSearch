@@ -1414,10 +1414,45 @@ def _open_seams(index_dir):
     return marker, idx, searcher
 
 
+def _expected_bridges(by_sys, part_to_folios, folio_number, max_part_pages=1000):
+    """The Oxford bridges §6.1 point 3 promises, derived here from the part metadata and
+    each manuscript's pages in file order (read from its whole-manuscript document), not
+    through shared/index_seams.py: {(source, left sys_id, left uid, right uid)}. Folios
+    consecutive in the part with folio numbers N and N+1; per source, each folio in one
+    volume, N's last page its highest-numbered one and N+1's first page page 1."""
+    ie_re = re.compile(r'(IE\d+)')
+
+    def volumes(pages):
+        return {m.group(1) if m else None for m in (ie_re.search(p.get('uid') or '') for p in pages)}
+
+    expected = set()
+    for folios in part_to_folios.values():
+        if sum(len(by_sys.get(f, ())) for f in folios) > max_part_pages:
+            continue
+        for a, b in zip(folios, folios[1:]):
+            if not (folio_number(a) > 0 and folio_number(b) == folio_number(a) + 1):
+                continue
+            for source in ('V0.8', 'V0.7'):
+                pa = [p for p in by_sys.get(a, ()) if p.get('source') == source]
+                pb = [p for p in by_sys.get(b, ()) if p.get('source') == source]
+                if not pa or not pb or len(volumes(pa)) != 1 or len(volumes(pb)) != 1:
+                    continue
+                last, first = pa[-1], pb[0]
+                if int(last.get('p_num') or 0) != max(int(p.get('p_num') or 0) for p in pa):
+                    continue
+                if int(first.get('p_num') or 0) != 1:
+                    continue
+                expected.add((source, a, last.get('uid'), first.get('uid')))
+    return expected
+
+
 def cmd_seam_topology(args):
     """Gate (a) of §6.1: every junction inside a seam is a reading-order junction (pages
-    of one volume and one transcription, page number + 1, or a part bridge), and every
-    consecutive junction of the whole-manuscript documents has exactly one seam."""
+    of one volume and one transcription, page number + 1, or an Oxford part bridge);
+    every consecutive junction of each whole-manuscript document has exactly one seam of
+    that manuscript; and every bridge the part metadata calls for (derived independently,
+    _expected_bridges) has exactly one seam, and no other bridge has one (Codex round 2
+    on PR #438: a build that dropped every bridge passed the first two)."""
     from shared.index_seams import follows
     log = Log(args.out_dir, 'seam-topology')
     idx, searcher = open_index(args.index_dir)
@@ -1427,14 +1462,31 @@ def cmd_seam_topology(args):
     # (source, sys_id, left uid, right uid) -> seams seen: 2,725 junctions repeat under a
     # second manuscript sharing the volume's images, and each manuscript has its own seam.
     expected = {}
+    by_sys = {}
     hits = searcher.search(tantivy.Query.term_query(idx.schema, 'scope', 'system'), 3_000_000).hits
     for _, addr in hits:
         doc = searcher.doc(addr).to_dict()
         bounds = json.loads(doc['boundaries'][0]) if doc.get('boundaries') and doc['boundaries'][0] else []
+        if bounds:
+            by_sys[bounds[0].get('sys_id')] = bounds
         for a, b in zip(bounds, bounds[1:]):
             if follows(a, b):
                 expected[(a.get('source'), a.get('sys_id'), a.get('uid'), b.get('uid'))] = 0
     log(f'system docs: {len(hits):,}; consecutive junctions: {len(expected):,} ({time.perf_counter() - started:.0f} s)')
+    # The part metadata, read with every Config path moved beside the output (never the
+    # live index folder).
+    from shared.config import Config
+    Config.relocate_index_dir(os.path.join(args.out_dir, 'seam_topology_index_dir'))
+    from shared.metadata_manager import MetadataManager
+    meta = MetadataManager()
+    meta._load_csv_bank()
+    meta.codico_mgr.load(csv_bank=meta.csv_bank)
+
+    def folio_number(sid):
+        return meta.codico_mgr._get_folio_number((meta.csv_bank.get(sid) or {}).get('shelfmark', ''))
+
+    bridges = {key: 0 for key in _expected_bridges(by_sys, meta.codico_mgr.part_to_folios, folio_number)}
+    log(f'bridges the part metadata calls for: {len(bridges):,}')
     seams = 0
     inner = {'consecutive': 0, 'part bridge': 0, 'not consecutive': 0}
     central = {'consecutive': 0, 'part bridge': 0, 'not consecutive': 0}
@@ -1447,10 +1499,10 @@ def cmd_seam_topology(args):
         slices = json.loads(doc['boundaries'][0])
         cut = doc['cut'][0]
         for a, b in zip(slices, slices[1:]):
+            key = (a.get('source'), a.get('sys_id'), a.get('uid'), b.get('uid'))
             if follows(a, b):
                 kind = 'consecutive'
-            elif (a.get('source') == b.get('source') and a.get('sys_id') != b.get('sys_id')
-                  and int(b.get('p_num') or 0) == 1):
+            elif key in bridges:
                 kind = 'part bridge'
             else:
                 kind = 'not consecutive'
@@ -1459,22 +1511,30 @@ def cmd_seam_topology(args):
             inner[kind] += 1
             if b.get('start') == cut:
                 central[kind] += 1
-                key = (a.get('source'), a.get('sys_id'), a.get('uid'), b.get('uid'))
                 if key in expected:
                     expected[key] += 1
-                elif kind != 'part bridge':
+                elif key in bridges:
+                    bridges[key] += 1
+                else:
                     extra += 1
         if seams % 250_000 == 0:
             log(f'  {seams:,} seams read, {time.perf_counter() - t:.0f} s')
     missing = sum(1 for v in expected.values() if v == 0)
     doubled = sum(1 for v in expected.values() if v > 1)
-    ok = inner['not consecutive'] == 0 and missing == 0 and doubled == 0 and extra == 0 and central['consecutive'] + central['part bridge'] == seams
+    bridges_missing = sum(1 for v in bridges.values() if v == 0)
+    bridges_doubled = sum(1 for v in bridges.values() if v > 1)
+    ok = (inner['not consecutive'] == 0 and missing == 0 and doubled == 0 and extra == 0
+          and bridges_missing == 0 and bridges_doubled == 0
+          and central['consecutive'] + central['part bridge'] == seams)
     log(f'seams: {seams:,}; junctions inside seams {inner}; central junctions {central}; '
         f'system junctions without a seam {missing:,}, with more than one {doubled:,}; '
-        f'central junctions that are no system junction and no bridge {extra:,}; '
+        f'bridges without a seam {bridges_missing:,}, with more than one {bridges_doubled:,}; '
+        f'central junctions that are no system junction and no expected bridge {extra:,}; '
         f'{time.perf_counter() - started:.0f} s in all -> {"PASS" if ok else "FAIL"}')
     record.update({'seams': seams, 'inner': inner, 'central': central, 'system_consecutive_junctions': len(expected),
-                   'missing': missing, 'doubled': doubled, 'extra': extra, 'examples': examples, 'pass': ok})
+                   'missing': missing, 'doubled': doubled, 'extra': extra, 'expected_bridges': len(bridges),
+                   'bridges_missing': bridges_missing, 'bridges_doubled': bridges_doubled,
+                   'examples': examples, 'pass': ok})
     log.finish(record)
     return EXIT_OK if ok else 1
 
@@ -1482,11 +1542,13 @@ def cmd_seam_topology(args):
 def cmd_reversed_check(args):
     """Gate (c) of §6.1: the reversed-words lookup (``reversed_ending_pattern``) finds
     exactly the documents an independent oracle names -- each page of the corpus files
-    (both sources), and each seam's stored text, cut by the hebword analyzer from its
-    folded text, holding a word that ends with the ending once brackets and Hebrew marks
-    are removed (Codex review of PR #438: compared with the semantic contract, not with
-    the plain `.*X` lookup, which misses `[כהנים]` too). Also counted: the plain prefix,
-    the plain regex, and the words a foreign mark interrupts (§4's documented gap)."""
+    (both sources), and each whole-manuscript, part and seam document's stored text, cut
+    by the hebword analyzer from its folded text, holding a word that ends with the
+    ending once brackets and Hebrew marks are removed (Codex review of PR #438: compared
+    with the semantic contract, not with the plain `.*X` lookup, which misses `[כהנים]`
+    too; and the aggregates, which Phase 3's AND searches read, round 2). Also counted:
+    the plain prefix, the plain regex, and the words a foreign mark interrupts (§4's
+    documented gap)."""
     log = Log(args.out_dir, 'reversed-check')
     from collections import Counter
     from shared.index_seams import hebword_analyzer, reversed_ending_pattern
@@ -1551,9 +1613,17 @@ def cmd_reversed_check(args):
         doc = ssearcher.doc(addr)
         oracle_hits(doc['content'][0], seams, (doc['unique_id'][0], doc['source'][0]))
     log(f'seams read and cut in {time.perf_counter() - started:.0f} s')
+    started = time.perf_counter()
+    aggregates = {e: {'oracle': Counter(), 'foreign_mark_gap': Counter()} for e in endings}
+    aggregate_q = idx.parse_query('scope:system OR scope:part', ['content'])
+    for _, addr in searcher.search(aggregate_q, 10_000_000).hits:
+        doc = searcher.doc(addr)
+        oracle_hits(doc['content'][0], aggregates, (doc['unique_id'][0], doc['source'][0]))
+    log(f'whole-manuscript and part documents read and cut in {time.perf_counter() - started:.0f} s')
     for e in endings:
         row = {}
         for name, (ix, s, extra, oracle) in {'pages': (idx, searcher, q_pages(idx), pages[e]),
+                                             'aggregates': (idx, searcher, aggregate_q, aggregates[e]),
                                              'seams': (sidx, ssearcher, None, seams[e])}.items():
             got = lookups(ix, s, extra, e)
             same = got['reversed'] == oracle['oracle']
@@ -1581,6 +1651,11 @@ CROSSING_QUERIES = (
     + [(mode, q, {}) for q in ('כהנים גדולים', 'שמעון הצדיק', 'אהרן הכהן', 'לי מי לי')
        for mode in ('literal', 'variants', 'fuzzy')]
 )
+# Frequent phrases, where crossings are many (crossing-diff --query-set frequent).
+CROSSING_QUERIES_FREQUENT = [
+    ('literal', 'ברוך אתה', {}), ('literal', 'אמר רבי', {}), ('literal', 'על פי', {}),
+    ('variants', 'ברוך אתה', {}), ('responsa', 'ברוך אתה', {}), ('responsa', 'אמר רבי', {}),
+]
 
 
 def responsa_side_words(compiled, query, gap, flex):
@@ -1735,7 +1810,7 @@ def cmd_crossing_diff(args):
             return kinds or ['consecutive only']
 
         results = []
-        for mode, query, extra in CROSSING_QUERIES:
+        for mode, query, extra in (CROSSING_QUERIES_FREQUENT if args.query_set == 'frequent' else CROSSING_QUERIES):
             if args.only and query not in args.only:
                 continue
             started = time.perf_counter()
@@ -1826,6 +1901,8 @@ def main(argv=None):
                     help='index-sample: also size the reversed-words field of the aggregate docs')
     ap.add_argument('--endings', nargs='+', default=['כהנים', 'נים'], help='reversed-check: the endings to look up')
     ap.add_argument('--only', nargs='+', help='crossing-diff: run only these queries')
+    ap.add_argument('--query-set', choices=['phase1', 'frequent'], default='phase1',
+                    help='crossing-diff: the §8 set and its Exact/Variants/Fuzzy pairs, or frequent phrases')
     args = ap.parse_args(argv)
     handler = {
         'scan': cmd_scan, 'punct': cmd_punct, 'marks': cmd_marks, 'token-only': cmd_token_only,
