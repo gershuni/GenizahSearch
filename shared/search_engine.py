@@ -3187,7 +3187,8 @@ class SearchEngine:
                 text = ''
                 try:
                     q = self.index.parse_query(f'unique_id:"{uid}" AND scope:page', ['content'])
-                    for _score, addr in self.searcher.search(q, 8).hits:
+                    found = self.searcher.search(q, 8)       # the page, under its V0.8 and V0.7 copies
+                    for _score, addr in found.hits:
                         doc = self.searcher.doc(addr)
                         if doc['unique_id'][0] == uid and doc['source'][0] == source:
                             text = doc['content'][0]

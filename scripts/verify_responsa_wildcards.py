@@ -359,13 +359,14 @@ def oracle_crossing(q, a_raw, b_raw):
     return None
 
 
-_PAGE_KEY_RE = re.compile(r'(99\d{16})_IE(\d+)_P(\d+)_FL')
+_PAGE_KEY_RE = re.compile(r'_IE(\d+)_P(\d+)_FL')
 
 
 def page_key(header):
     """(sys_id, IE, page number) of a V0.8 header, or None."""
-    m = _PAGE_KEY_RE.search(header)
-    return (m.group(1), m.group(2), int(m.group(3))) if m else None
+    from shared.sys_id_patterns import CORPUS_SYS_ID_RE
+    sid, m = CORPUS_SYS_ID_RE.search(header), _PAGE_KEY_RE.search(header)
+    return (sid.group(1), m.group(1), int(m.group(2))) if sid and m else None
 
 
 def follows(prev_header, header):

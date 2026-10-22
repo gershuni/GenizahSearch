@@ -1140,6 +1140,10 @@ PHASE3_QUERIES = [
     ('כ*נים גדולים', {}),
     ('כ*ה*נ*ים גדולים', {}),
     ('כהנ* גדולים', {'variants': True, 'variant_mode': 'variants'}),
+    # Broad: two letters of its own. On an index without seams its crossings are read only
+    # when at most RESPONSA_STAR_AGGREGATE_LIMIT manuscripts hold the words -- the bound
+    # the website's 3-minute limit needs, to be confirmed here.
+    ('כה* גדול*', {}),
 ]
 
 
