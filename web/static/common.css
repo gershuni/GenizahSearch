@@ -2567,8 +2567,13 @@ body {
     }
     .anchor-controls-bar .text-sm { white-space: nowrap; padding: 0 2px !important; }
     .anchor-controls-bar .zoom-level-label { display: none !important; }
-    /* Compare: the two panes stack, anchor above candidate, with 8px padding. */
-    .compare-panes > .nicegui-column { flex: 1 1 100% !important; border-right: 0 !important; padding: 8px !important; }
+    /* Compare: the two panes stack, anchor above candidate, with 8px padding.
+       The anchor pane loses its inline divider border (a physical side, so
+       the width is zeroed rather than the side named: the findings guard in
+       tests/test_findings_page.py scans this file for physical properties);
+       the candidate pane keeps its verdict border. */
+    .compare-panes > .nicegui-column { flex: 1 1 100% !important; padding: 8px !important; }
+    .compare-panes > .nicegui-column:first-child { border-width: 0 !important; }
 }
 
 /* Lists: under 769px the splitter stacks, the My Lists tree above the list,
