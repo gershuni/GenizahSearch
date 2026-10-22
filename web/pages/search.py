@@ -49,7 +49,7 @@ from web.pages.search_results import (
 )
 from genizah_core import generate_tabular_syntax
 from shared.browse_map_utils import get_library_display, LIBRARY_CODES, library_codes_with_manuscripts, sanitize_library_codes
-from shared.refinement import (RefinementStep, chain_needs_completion, complete_chain, compute_effective_restrict, only_partial,
+from shared.refinement import (RefinementStep, chain_needs_completion, complete_chain, compute_effective_restrict, step_partial,
                                needs_mode_labels, truncate_chain, replay_chain, scope_signature,
                                steps_that_cannot_complete)
 from shared.search_engine import _consume_last_responsa_downgrade, consume_last_search_cutoff
@@ -5736,7 +5736,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # would otherwise show a list the limit cut short as complete.
         search_state.result_count_capped = bool(_run_cutoff.get('capped') or _run_cutoff.get('interrupted')
                                                 or _time_limited or _restricted_to_incomplete)
-        search_state.result_partial = only_partial(_run_cutoff) and not (
+        # Searched within a step completing cannot fix, this one cannot be either (Codex
+        # round 2 on PR #442), unless its own candidate limit cut it.
+        _parent_step = (search_state.refinement_chain[-1]
+                        if search_state._refine_mode and search_state.refinement_chain else None)
+        search_state.result_partial = step_partial(_run_cutoff, _parent_step) and not (
             _run_cutoff.get('interrupted') or _time_limited)
         if _time_limited:
             ui.notify(tr('The search stopped after {minutes} minutes; showing the results found so far.').format(minutes=Config.WEB_SEARCH_TIME_LIMIT // 60),

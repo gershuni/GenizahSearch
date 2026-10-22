@@ -121,6 +121,20 @@ def only_partial(cutoff) -> bool:
     return bool((cutoff or {}).get('partial') and not (cutoff or {}).get('limited'))
 
 
+def step_partial(cutoff, parent=None) -> bool:
+    """A step's ``result_partial``: its "+" is one completing it cannot fix. Its own search
+    left out only what reading every candidate cannot add (``only_partial``); or it was
+    searched within a step that is so (*parent*) and nothing of its own cut it -- its
+    restriction stays incomplete whatever it reads, so running it again with every
+    candidate would give the same rows (Codex round 2 on PR #442). A step cut by its own
+    candidate limit, or stopped, is not: running it again completes that part."""
+    cutoff = cutoff or {}
+    if only_partial(cutoff):
+        return True
+    return bool(parent is not None and parent.result_partial
+                and not cutoff.get('capped') and not cutoff.get('interrupted'))
+
+
 def _last_search_cutoff() -> dict:
     """The cut-off signal of the search just run on this thread (none from a searcher
     that is not the real engine)."""
@@ -159,6 +173,7 @@ def replay_chain(
 
     accumulated_restrict = None  # None = no refinement restriction yet
     incomplete = False  # a step so far left matches out: every later one may too
+    parent = None
 
     for step in chain:
         effective = compute_effective_restrict(filter_restrict, accumulated_restrict)
@@ -193,7 +208,8 @@ def replay_chain(
         cutoff = _last_search_cutoff()
         incomplete = incomplete or bool(cutoff.get('capped') or cutoff.get('interrupted'))
         step.result_count_capped = incomplete
-        step.result_partial = only_partial(cutoff)
+        step.result_partial = step_partial(cutoff, parent)
+        parent = step
         accumulated_restrict = result_sys_ids if result_sys_ids else set()
 
     return accumulated_restrict
@@ -254,6 +270,7 @@ def complete_chain(
     """
     accumulated = None
     incomplete = False
+    parent = None
     for step in chain[:upto]:
         if step.result_count_capped and step._result_sys_ids is not None and _cannot_complete(step):
             incomplete = True
@@ -280,7 +297,8 @@ def complete_chain(
             step.result_count = len(rows)
             incomplete = incomplete or bool(cutoff.get('capped'))
             step.result_count_capped = incomplete
-            step.result_partial = only_partial(cutoff)
+            step.result_partial = step_partial(cutoff, parent)
+        parent = step
         accumulated = step._result_sys_ids if step._result_sys_ids else set()
     return {'restrict': accumulated, 'interrupted': False}
 

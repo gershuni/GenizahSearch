@@ -3509,6 +3509,40 @@ class SearchEngine:
         regex_filtered = 0
         was_interrupted = False
 
+        def _aggregate_row(doc, content, span, boundaries, scope):
+            """The row for a match *span* of a whole-manuscript / part document: shown as
+            the page it starts on, its pages' highlights in page coordinates."""
+            hl_c, hl_f = self._highlight_pair(content, span)
+            span_map = self._map_span_to_pages(span, boundaries)
+            primary = span_map.get('primary') or {}
+            display_header = primary.get('full_header', doc['full_header'][0])
+            source_label = primary.get('source', doc['source'][0])
+            meta = self.meta_mgr.get_display_data(display_header, source_label)
+            page_highlights = []
+            for ov in span_map.get('overlaps', []):
+                if 'span' in ov and ov.get('uid'):
+                    page_highlights.append({
+                        'uid': ov.get('uid'),
+                        'p_num': ov.get('p_num'),
+                        'span': ov.get('span'),
+                        'full_header': ov.get('full_header', ''),
+                        'source': ov.get('source', '')
+                    })
+            return {
+                'display': meta,
+                'snippet': hl_c or "",
+                'full_text': content,
+                'uid': primary.get('uid') or doc['unique_id'][0],
+                'raw_header': display_header,
+                'raw_file_hl': hl_f or "",
+                'highlight_pattern': pattern_str,
+                'page_highlights': page_highlights,
+                'cross_page': span_map.get('cross_page', False),
+                'scope': scope,
+                # The matched lines' pages, for the exclusion check.
+                '_page_text': _matched_page_text(content, span, boundaries),
+            }
+
         try:
             for i, (score, doc_addr) in enumerate(_pages_then_aggregates()):
                 if progress_callback and i % 5 == 0:
@@ -3527,6 +3561,32 @@ class SearchEngine:
                     # One bracket rule (plan §4): a bracket-free query matches the text
                     # with its brackets out, and the row is kept, marked in the original.
                     match_content = content if has_brackets else _strip_brackets(content)
+
+                    if scope != 'page' and crossings is not None and crossings.bounded:
+                        # A star query (plan §7, Phase 3 point 7): every match of the
+                        # manuscript that runs across a page break, each its own row --
+                        # not only its first match, which a page row may already show
+                        # (Codex round 2 on PR #442). Its matches inside one page are
+                        # the page documents' rows.
+                        boundaries = self._parse_boundaries(doc)
+                        kept = 0
+                        m = regex.search(match_content)
+                        while m is not None:
+                            if ok(match_content, m):
+                                s_w, e_w = compiled.word_span(m)
+                                span = (_unstripped_span(content, s_w, e_w) if match_content is not content
+                                        else (s_w, e_w))
+                                span_map = self._map_span_to_pages(span, boundaries)
+                                if span_map.get('cross_page') and (restrict_uids is None or any(
+                                        _page_in_restriction(o, restrict_uids, restrict_sids)
+                                        for o in span_map.get('overlaps') or [])):
+                                    results.append(_aggregate_row(doc, content, span, boundaries, scope))
+                                    kept += 1
+                            m = regex.search(match_content, m.start() + 1)
+                        if not kept:
+                            regex_filtered += 1
+                        continue
+
                     match_obj = regex.search(match_content)
                     if match_obj is not None:
                         match_obj = _first_accepted_match(
@@ -3553,39 +3613,11 @@ class SearchEngine:
                     else:
                         match_obj = to_original(match_obj)
                     span = match_obj.span()
-                    hl_c, hl_f = self._highlight_pair(content, span)
 
                     if boundaries:
-                        span_map = self._map_span_to_pages(span, boundaries)
-                        primary = span_map.get('primary') or {}
-                        display_header = primary.get('full_header', doc['full_header'][0])
-                        source_label = primary.get('source', doc['source'][0])
-                        meta = self.meta_mgr.get_display_data(display_header, source_label)
-                        page_highlights = []
-                        for ov in span_map.get('overlaps', []):
-                            if 'span' in ov and ov.get('uid'):
-                                page_highlights.append({
-                                    'uid': ov.get('uid'),
-                                    'p_num': ov.get('p_num'),
-                                    'span': ov.get('span'),
-                                    'full_header': ov.get('full_header', ''),
-                                    'source': ov.get('source', '')
-                                })
-                        results.append({
-                            'display': meta,
-                            'snippet': hl_c or "",
-                            'full_text': content,
-                            'uid': primary.get('uid') or doc['unique_id'][0],
-                            'raw_header': display_header,
-                            'raw_file_hl': hl_f or "",
-                            'highlight_pattern': pattern_str,
-                            'page_highlights': page_highlights,
-                            'cross_page': span_map.get('cross_page', False),
-                            'scope': scope,
-                            # The matched lines' pages, for the exclusion check.
-                            '_page_text': _matched_page_text(content, span, boundaries),
-                        })
+                        results.append(_aggregate_row(doc, content, span, boundaries, scope))
                     else:
+                        hl_c, hl_f = self._highlight_pair(content, span)
                         if hl_c:
                             meta = self.meta_mgr.get_display_data(doc['full_header'][0], doc['source'][0])
                             results.append({

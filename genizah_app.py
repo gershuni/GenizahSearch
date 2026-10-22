@@ -107,7 +107,7 @@ from desktop.variant_run_settings import (PreviewVariants, engine_with_variant_s
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared_export_utils import clean_text_single_line, coerce_img_page_cell
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
-from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter, chain_needs_completion, only_partial
+from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter, chain_needs_completion, only_partial, step_partial
 from shared.document_service import select_pgp_page_entry
 from shared.exclusion_service import (
     ExclusionSource, compute_excluded_ids,
@@ -23370,10 +23370,7 @@ class GenizahGUI(QMainWindow):
                 result_count=len(results),  # total results (matches display count)
             )
             self._apply_run_params(step)
-            # Restricted to the previous step's results: if those left matches out, so may this.
-            step.result_count_capped = self._run_left_matches_out() or bool(
-                self.refinement_chain and self.refinement_chain[-1].result_count_capped)
-            step.result_partial = self._run_only_partial()
+            step.result_count_capped, step.result_partial = self._new_step_marks()
             step._result_uids = {
                 r.get('uid') or r.get('display', {}).get('id')
                 for r in results
@@ -24459,6 +24456,15 @@ class GenizahGUI(QMainWindow):
         """The shown results were cut off or stopped: a step built on them is incomplete."""
         cutoff = getattr(self, '_search_cutoff', None) or {}
         return bool(cutoff.get('capped') or cutoff.get('interrupted'))
+
+    def _new_step_marks(self):
+        """(result_count_capped, result_partial) of a step just searched within the
+        chain's last step. Restricted to that step's results: if those left matches out,
+        so may this; and if those cannot be completed, neither can this, unless its own
+        candidate limit cut it (``step_partial``; Codex round 2 on PR #442)."""
+        parent = self.refinement_chain[-1] if self.refinement_chain else None
+        capped = self._run_left_matches_out() or bool(parent and parent.result_count_capped)
+        return capped, step_partial(getattr(self, '_search_cutoff', None), parent)
 
     def _run_only_partial(self):
         """The shown results left out only crossings their search's own rule leaves out

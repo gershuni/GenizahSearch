@@ -846,6 +846,40 @@ def test_searching_within_a_star_search_that_left_crossings_out_does_not_run_it_
             'completed; searching within the shown results.' in seen['notes']), seen['notes']
 
 
+def test_a_step_searched_within_a_partial_step_is_not_run_again_either(page):
+    """Codex on PR #442, round 2: searched within a star step that left crossings out by
+    its own rule, the next step is "+" too -- its restriction is incomplete -- and running
+    it again with every candidate would give the same rows. Searching within it again
+    runs nothing again: neither step is completed."""
+    query = f'{WORD}* {WORD2}*'
+    partial = {'capped': True, 'interrupted': False, 'partial': True, 'limited': False}
+    queue = page({(query, False): ([_row('M1')], partial),
+                  (WORD2, False): ([_row('M1')], None)})
+    notice = ('A search with a line break, or one that leaves matches across pages out, cannot be '
+              'completed; searching within the shown results.')
+    seen = {}
+
+    async def driver(a):
+        await a.open('/search')
+        store(a, search_mode='responsa')
+        await a.open('/search')
+        submit(a, query)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
+        await _click_search_within(a)
+        await _wait_for(lambda: any('Searching within 1+ manuscripts' in t for t in _label_texts(a)), user=a)
+        submit(a, WORD2)
+        await wait_for_payloads(queue, 2)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
+        await _click_search_within(a)
+        await _wait_for(lambda: list(a.notify.messages).count(notice) >= 2, user=a)
+        seen['payloads'] = [(p['arguments']['query_str'], bool(p['arguments'].get('ids_only')))
+                            for p in queue.payloads]
+
+    run(driver, count=1)
+    assert seen['payloads'] == [(query, False), (WORD2, False)], 'no step is run again to complete it'
+
+
 def test_a_star_search_cut_by_its_page_limit_too_is_completed(page):
     """The same search cut by a candidate limit as well ('limited'): reading every
     candidate completes that part, so the step is run again with ids_only."""

@@ -215,6 +215,36 @@ def test_a_step_that_left_crossings_out_by_rule_is_not_completed(short_seams):
     assert step.result_count_capped
 
 
+@pytest.mark.parametrize('child_cut, runs_again', [({}, []), ({'capped': True}, [('child', True)])])
+def test_a_step_searched_within_a_partial_step_is_not_completed_either(child_cut, runs_again):
+    # Codex round 2 on PR #442: the child of a step that left crossings out by rule is "+"
+    # (its restriction is incomplete) and, unless its own candidate limit cut it, running
+    # it again with every candidate gives the same rows: it is not completed either. Cut by
+    # its own limit, it is run again once; then it, too, has nothing left to complete.
+    from shared.refinement import RefinementStep, complete_chain, replay_chain
+    cuts = {'parent': {'partial': True}, 'child': child_cut}
+    calls = []
+
+    class Fake:
+        def execute_search(self, query, *args, **kwargs):
+            calls.append((query, bool(kwargs.get('ids_only'))))
+            if cuts[query] and not kwargs.get('ids_only'):
+                se._note_search_cutoff(**cuts[query])
+            return [{'display': {'id': sid(101)}, 'uid': page(101)}]
+    parent, child = (RefinementStep(query=q, mode='literal') for q in ('parent', 'child'))
+    se.consume_last_search_cutoff()
+    replay_chain([parent, child], Fake(), None)
+    assert parent.result_partial and child.result_count_capped
+    assert child.result_partial == (not child_cut)
+    calls.clear()
+    complete_chain([parent, child], Fake(), None)
+    assert calls == runs_again
+    assert child.result_partial and child.result_count_capped
+    calls.clear()
+    complete_chain([parent, child], Fake(), None)
+    assert calls == []
+
+
 def test_format_1_reads_the_long_crossing_through_the_whole_manuscript(engines):
     assert {page(107), page(108)} <= set(by_uid(search(engines['1'], 'כהנ* [3] גדול*')[0]))
 
@@ -304,3 +334,31 @@ def test_a_query_with_a_finite_word_keeps_the_score_order_pages_first(engines):
     rows = search(engines['2'], 'כהנ* גדולים')[0]
     scopes = [r['scope'] for r in rows]
     assert scopes == sorted(scopes, key=lambda s: s != 'page') and 'seam' in scopes
+
+
+# --- A line query with a star: every crossing of a manuscript (Codex round 2 on PR #442) ---
+
+LINE_MANUSCRIPTS = {
+    301: ["פתח מאמר\nקורא שם",          # p1: a match inside the page, before the crossings
+          "סוף מאמתי",                  # p2 | p3: מאמתי at a line's end, קורין the next line
+          "קורין כאן\nעוד מאמרי",       # p3 | p4: מאמרי, then קוראים
+          "קוראים סוף"],
+}
+LINE_V08 = [(sid(n), 3000 + n, p, text) for n, pages in LINE_MANUSCRIPTS.items()
+            for p, text in enumerate(pages, 1)]
+
+
+@pytest.fixture(scope='module')
+def line_engines(tmp_path_factory):
+    with formats(tmp_path_factory, 'line_crossings', LINE_V08) as e:
+        yield e
+
+
+@pytest.mark.parametrize('fmt', ['2', '1'])
+def test_a_star_line_query_gives_every_crossing_of_a_manuscript(line_engines, fmt):
+    # The manuscript's first match is inside p1 (its page row); its whole-manuscript
+    # document still gives both crossings, p2 | p3 and p3 | p4.
+    rows = by_uid(search(line_engines[fmt], 'מאמ* | קור*')[0])
+    assert set(rows) == {uid(3301, 1), uid(3301, 2), uid(3301, 3)}
+    assert rows[uid(3301, 1)]['scope'] == 'page'
+    assert rows[uid(3301, 2)]['cross_page'] and rows[uid(3301, 3)]['cross_page']
