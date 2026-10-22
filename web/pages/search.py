@@ -5256,9 +5256,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         except Exception:
             pass  # JavaScript execution failed; non-fatal UI glitch
 
+    # Run the search the controls describe; with *attach* (a run still running, found
+    # by Back), follow that run's search instead of starting it again. (No docstring:
+    # the double-submit guard stays the first statement -- tests/test_ux_timing.py.)
     async def execute_search(attach=None):
-        """Run the search the controls describe; with *attach* (a run still running,
-        found by Back), follow that run's search instead of starting it again."""
         # Guard against double-submit (rage-clicking while search is running)
         if search_state.is_running:
             ux_ignored(_page_client, 'search_results')
