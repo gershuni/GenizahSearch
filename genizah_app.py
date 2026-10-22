@@ -33198,7 +33198,8 @@ class GenizahGUI(QMainWindow):
     def _rebuild_offer_due(self):
         """Whether to offer a rebuild: an open index built by an earlier version, a build
         that can run, and no "Later" for this index. Fails closed (no offer) when the
-        config cannot be read."""
+        config cannot be read: the reader answers {} then, with its problem beside it
+        (Codex round 5 on PR #443)."""
         engine = getattr(self, 'searcher', None)
         if engine is None or getattr(engine, 'index', None) is None or not getattr(self, 'indexer', None):
             return False
@@ -33212,10 +33213,15 @@ class GenizahGUI(QMainWindow):
         if ident is None:
             return False
         try:
-            return load_app_config().get(self._REBUILD_LATER_KEY) != ident
+            from genizah_core import _read_app_config
+            cfg, problem = _read_app_config()
         except Exception:                                    # noqa: BLE001
             logger.exception("could not read the rebuild offer's answer")
             return False
+        if problem:
+            logger.warning("rebuild offer: the config is %s, so no offer this time", problem)
+            return False
+        return cfg.get(self._REBUILD_LATER_KEY) != ident
 
     def _ask_rebuild(self):
         """The offer itself: 'rebuild' or 'later' (closing the window is "Later")."""

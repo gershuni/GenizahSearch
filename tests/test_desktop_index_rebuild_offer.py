@@ -95,8 +95,15 @@ def test_the_offer_waits_while_another_window_waits_on_the_user(home):
     assert w.asked == [] and later.call_count == 1
 
 
-def test_an_unreadable_answer_means_no_offer(home):
+@pytest.mark.parametrize('problem', ['unreadable', 'busy'])
+def test_a_config_that_cannot_be_read_means_no_offer(home, problem):
+    # Codex round 5 on PR #443: the config reader answers {} for a config.pkl it cannot
+    # read, never an exception, so that {} read as "no Later" and the offer was shown.
+    (home.parent / "config.pkl").write_bytes(b"not a pickle")
     w = _window()
-    with patch("genizah_app.load_app_config", side_effect=OSError("busy")):
+    if problem == 'busy':                        # held by antivirus or the indexer
+        with patch("genizah_core.read_bytes", side_effect=PermissionError("in use")):
+            w._offer_index_rebuild()
+    else:
         w._offer_index_rebuild()
     assert w.asked == []
