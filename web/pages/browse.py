@@ -2310,15 +2310,19 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             'background: rgba(255, 255, 255, 0.15);'
                         ).tooltip(tr('Search for Parallels')).classes('browse-icon-collapse')
 
-                        # Metadata button
+                        # Metadata button. One label for the text, the aria-label
+                        # and the tooltip: the aria-label replaces the text for a
+                        # screen reader, so a fixed "Show Metadata" named the
+                        # opposite action while the panel was open (Codex on #434).
+                        _meta_label = tr('Hide Metadata') if show_metadata['value'] else tr('Show Metadata')
                         ui.button(
-                            tr('Hide Metadata') if show_metadata['value'] else tr('Show Metadata'),
+                            _meta_label,
                             icon='info',
                             on_click=toggle_metadata
-                        ).props(f'flat dense aria-label="{tr("Show Metadata")}"').style(
+                        ).props(f'flat dense aria-label="{_meta_label}"').style(
                             'color: #ffffff !important; '
                             'background: rgba(255, 255, 255, 0.15);'
-                        ).tooltip(tr('Show Metadata')).classes('browse-icon-collapse')
+                        ).tooltip(_meta_label).classes('browse-icon-collapse')
 
                         # Add manuscript to list (star button)
                         from web.state import state as app_state

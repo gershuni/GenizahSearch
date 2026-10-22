@@ -55,15 +55,49 @@ def test_login_and_register_are_named_icon_buttons_on_a_phone():
     assert '.phone-icon-only .q-btn__content > .block { font-size: 0;' in rules
 
 
-def test_the_search_form_folds_when_a_search_starts_after_the_readiness_check():
+def test_the_search_form_folds_once_the_search_is_marked_running():
+    """The fold is execute_search's first await, so it must sit behind the guard.
+
+    Before `search_state.is_running = True`, a double-click or a repeated Enter
+    suspended two calls at the same await with the guard still open, and both
+    searches ran over one result state (Codex on #434).
+    """
     search = _read('web/pages/search.py')
     body = search[search.index('    async def execute_search():'):]
     ready = body.index('if not state.is_ready():')
-    fold = body.index('_collapse_panel_on_phone()')
-    parse = body.index('state.searcher.parse_query_syntax(')
-    assert ready < fold < parse, 'the fold must come after the readiness check and before the engine is touched'
+    running = body.index('search_state.is_running = True')
+    fold = body.index('await _collapse_panel_on_phone()')
+    feedback = body.index("search_btn.style('display: none;')")
+    assert ready < running < fold < feedback, 'the fold must come after the running guard is set and before the search shows'
+    assert 'await' not in body[body.index('if search_state.is_running:'):running], 'no await may sit between the guard and the running flag'
     assert "await ui.run_javascript('window.innerWidth'" in search
     assert 'width <= 640' in search
+
+
+def test_the_expanded_result_browse_link_keeps_the_matched_folio():
+    results = _read('web/pages/search_results.py')
+    block = results[results.index("'w-full items-center expand-actions'"):results.index('def _render_full_text(')]
+    assert 'ui.link(target=_card_browse_url)' in block, 'the expanded card must reuse the deep link with fl_id, volume_ie and page'
+    assert "/browse?sys_id={sys_id}'" not in block, 'a bare sys_id opens the first folio of the first volume'
+
+
+def test_quick_view_info_shortcuts_select_the_info_tab_on_a_phone():
+    results = _read('web/pages/search_results.py')
+    for key in ('pgp', 'fjms'):
+        assert f"on_click=lambda: _open_info_section('{key}')" in results, key
+        assert f"_info_sections['{key}'] = " in results, key
+    assert 'q-expansion-item__toggle' not in results, 'the sections are toggled from Python, not by a DOM click'
+    handler = results[results.index('async def _open_info_section('):results.index('section.value = True if switched else not section.value')]
+    assert "width <= 640 and adv_tabs.value != 'info'" in handler
+    assert "adv_tabs.value = 'info'" in handler
+
+
+def test_browse_metadata_button_names_the_action_it_performs():
+    browse = _read('web/pages/browse.py')
+    assert "_meta_label = tr('Hide Metadata') if show_metadata['value'] else tr('Show Metadata')" in browse
+    assert 'aria-label="{_meta_label}"' in browse
+    assert '.tooltip(_meta_label)' in browse
+    assert 'aria-label="{tr("Show Metadata")}"' not in browse
 
 
 def test_the_viewer_handles_touch_pinch_and_drag():

@@ -5159,8 +5159,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             ui.notify(tr("Engine not ready."), type='warning')
             return
 
-        await _collapse_panel_on_phone()
-
         # Parse syntax shortcuts (Delegated to Core)
         # Skip prefix parsing in Responsa mode -- # is Responsa syntax, not Shelfmark
         clean_query = query
@@ -5210,6 +5208,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.manual_transcription_sys_ids = set()
         search_state.printed_ids = set()
         search_state.search_generation += 1  # Invalidate stale background enrichment
+
+        # The phone fold asks the browser for its width, so it is the first
+        # await of this search -- and it must come AFTER is_running is set:
+        # before it, a double-click or a repeated Enter suspended two calls
+        # at the same await with the guard still open, and both searches ran
+        # over one result state (Codex on #434). Its failure is swallowed.
+        await _collapse_panel_on_phone()
 
         # ux_timing (web/ux_timing.py): report this search's first visible rows, once.
         _ux = {'sent': False, 'nav': _ux_url_start['nav'], 'generation': search_state.search_generation}

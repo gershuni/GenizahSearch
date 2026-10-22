@@ -1030,7 +1030,12 @@ def create_result_card(search_state, refs, index, result):
                     on_click=lambda idx=index, r=result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, idx, r),
                 ).props('outline dense no-caps size=sm color=primary data-ux=result_quick_view')
                 if sys_id:
-                    with ui.link(target=f'/browse?sys_id={sys_id}').classes('no-underline'):
+                    # The same deep link as the card's menu_book icon: fl_id,
+                    # volume_ie, page and the matched phrase. A bare sys_id
+                    # opens the first folio of the first volume, which in a
+                    # multi-IE manuscript is not the one that matched (Codex
+                    # on #434; the comment at _card_browse_url says why).
+                    with ui.link(target=_card_browse_url).classes('no-underline'):
                         ui.button(tr('Browse Full Manuscript'), icon='menu_book').props(
                             'outline dense no-caps size=sm color=primary'
                         )
@@ -1488,6 +1493,29 @@ def open_advanced_dialog(search_state, refs, index, result):
         """Render the main content area."""
         adv_state.content_container.clear()
 
+        # The PGP and FJMS sections are collapsed bars at the foot of the
+        # text (`adv-info`), filled in below; the info bar's PGP / FJMS
+        # buttons open them. On a phone those bars are the Info tab, so the
+        # shortcut selects that tab first -- under 640px the old JS click
+        # toggled a hidden section and seemed to do nothing (Codex on #434).
+        _info_sections = {}
+
+        async def _open_info_section(key):
+            section = _info_sections.get(key)
+            if section is None:
+                return
+            switched = False
+            try:
+                width = await ui.run_javascript('window.innerWidth', timeout=1.0)
+            except Exception:
+                width = None  # no answer in time: behave as on a wide screen
+            if isinstance(width, (int, float)) and width <= 640 and adv_tabs.value != 'info':
+                adv_tabs.value = 'info'  # fires _set_adv_tab
+                switched = True
+            # Switching to the tab shows the section open; on the tab already,
+            # or on a wide screen, the button toggles it as it always did.
+            section.value = True if switched else not section.value
+
         display = result.get('display', {})
         shelfmark = display.get('shelfmark', 'Unknown')
         title = display.get('title', '')
@@ -1920,7 +1948,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                             if pgp_metadata:
                                 ui.button(
                                     'PGP', icon='verified',
-                                    on_click=lambda: ui.run_javascript("document.querySelector('.pgp-expand .q-expansion-item__toggle')?.click()"),
+                                    on_click=lambda: _open_info_section('pgp'),
                                 ).props('outline dense size=sm color=green').classes('text-xs')
 
                             # FJMS expander button
@@ -1928,7 +1956,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                             if catalog_records:
                                 ui.button(
                                     'FJMS', icon='library_books',
-                                    on_click=lambda: ui.run_javascript("document.querySelector('.fjms-expand .q-expansion-item__toggle')?.click()"),
+                                    on_click=lambda: _open_info_section('fjms'),
                                 ).props('outline dense size=sm color=purple').classes('text-xs')
 
                     # Row 2: Chips (source, page, result#, domains)
@@ -1997,7 +2025,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                 remove='adv-tab-text adv-tab-image adv-tab-info', add=f'adv-tab-{_active_tab}')
             with ui.tabs(value=_active_tab, on_change=lambda e: _set_adv_tab(e.value)).classes(
                 'w-full adv-tabs'
-            ).props('dense no-caps active-color=primary indicator-color=primary align=justify'):
+            ).props('dense no-caps active-color=primary indicator-color=primary align=justify') as adv_tabs:
                 ui.tab('text', label=tr('Text'), icon='notes')
                 if adv_state.show_image_panel and has_image and img_url:
                     ui.tab('image', label=tr('Image'), icon='image')
@@ -2384,7 +2412,8 @@ def open_advanced_dialog(search_state, refs, index, result):
             if pgp_metadata:
                 with ui.expansion(group='enrichment').classes('w-full pgp-expand adv-info').style(
                     'border-left: 3px solid #27ae60; border-radius: 8px; margin-bottom: 4px;'
-                ).props(f'dense header-class="text-xs font-bold" label="{tr("PGP Details")}"'):
+                ).props(f'dense header-class="text-xs font-bold" label="{tr("PGP Details")}"') as _pgp_section:
+                    _info_sections['pgp'] = _pgp_section
                     with ui.row().classes('gap-6 flex-wrap'):
                         doc_type = pgp_metadata.get('document_type')
                         lang_primary = pgp_metadata.get('languages_primary')
@@ -2503,7 +2532,8 @@ def open_advanced_dialog(search_state, refs, index, result):
             if catalog_records:
                 with ui.expansion(group='enrichment').classes('w-full fjms-expand adv-info').style(
                     'border-left: 3px solid #9b59b6; border-radius: 8px; margin-bottom: 4px;'
-                ).props(f'dense header-class="text-xs font-bold" label="{tr("FJMS Details")}"'):
+                ).props(f'dense header-class="text-xs font-bold" label="{tr("FJMS Details")}"') as _fjms_section:
+                    _info_sections['fjms'] = _fjms_section
                     merged = merge_catalog_records(catalog_records)
                     lang = get_language()
 
