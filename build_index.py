@@ -10,7 +10,7 @@ Usage:
 Building the main index into a NEW folder, while the live one keeps serving
 (docs/guides/DEPLOYMENT_TECHNICAL.md, "Rebuild the main index (format 2)"):
     python build_index.py main --index-dir /home/ubuntu/GenizahSearch/Genizah_Index.next \\
-        --corpus-v8 Transcriptions.txt --corpus-v7 AllGenizah_OLD.txt \\
+        --corpus-v8 Transcriptions.txt --v08-only \\
         --caches-from Genizah_Index
 
 --index-dir moves every path the build writes (tantivy_db, browse_map.pkl, caches)
@@ -98,6 +98,8 @@ def main():
     ap.add_argument('--index-dir', help='build into this folder instead of Config.INDEX_DIR')
     ap.add_argument('--corpus-v8', help='Transcriptions.txt (default: next to the code)')
     ap.add_argument('--corpus-v7', help='AllGenizah_OLD.txt (default: next to the code)')
+    ap.add_argument('--v08-only', action='store_true',
+                    help='leave the V0.7 file out even if it exists (production publishes V0.8 only)')
     ap.add_argument('--caches-from',
                     help="with --index-dir: copy metadata_cache.pkl and nli_cache.pkl from this folder "
                          "(the live Genizah_Index) first; they decide the shelfmark field")
@@ -114,6 +116,8 @@ def main():
         Config.FILE_V8 = os.path.abspath(args.corpus_v8)
     if args.corpus_v7:
         Config.FILE_V7 = os.path.abspath(args.corpus_v7)
+    if args.v08_only:
+        Config.FILE_V7 = ''
 
     print("=" * 60)
     print("  Genizah Search Index Builder")

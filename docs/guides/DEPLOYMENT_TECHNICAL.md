@@ -743,22 +743,22 @@ opens `seams/` and ignores the field), and the new code reads a format-1 index o
 So the rebuild needs no code deploy around it, and rolling back either one never needs the other.
 The owner runs it; nothing here is automatic.
 
-**What it costs** (measured on the laptop, §6.1 point 8 and Phase 2 in §7; production's index is
-V0.8-only, so its numbers are the V0.8 build's):
+**What it costs** (measured on the laptop, 2026-10-22, plan §6.1 point 8; production's index is
+V0.8-only, so its column is the laptop's V0.8-only builds, each format built the same way):
 
 | | Production (V0.8 only) | Laptop (V0.8 + V0.7) |
 |---|---|---|
-| Index today (format 1) | ~7.8 GB | 13.9 GB |
-| Format 2 | V08_SIZE | FULL_SIZE |
-| Build time | V08_TIME on the laptop; production took 869 s for format 1 (2026-08-16) | FULL_TIME |
-| Peak build memory (Python + Tantivy writer) | V08_RSS | FULL_RSS |
+| Index today (format 1) | ~7.8 GB live; 6.31 GB when rebuilt with merges | 13.86 GB |
+| Format 2 | 7.74 GB (main 6.81 GB + seams 0.94 GB): +1.43 GB on the same build | 15.30 GB (main 13.35 GB + seams 1.96 GB) |
+| Build time on the laptop | 12.1 min, against 6.1 min for format 1: about twice. Production took 869 s for format 1 (2026-08-16), so expect about 30 min | 21.7 min |
+| Peak build memory | 7.0 GB working set, 5.5 GB private (format 1: 6.4 / 5.6 GB) | 12.4 / 10.1 GB |
 
-**Disk:** the new index is built beside the live one, so the box needs the new index's size free
-plus 2 GB (`df -h /home/ubuntu`), and the old index stays until the owner deletes it. **RAM:** the
-build holds every page's text in Python while it writes; run it in the quiet hour (01:00 UTC) and
-under `nice`/`ionice`, as `scripts/rebuild_index.sh` does: the 2026-08-16 rebuild showed that the
-build's reads and writes evict the live index from the page cache (`materialize_ms` 1.2 s ->
-62.6 s while it ran), not that anything breaks.
+**Disk:** the new index is built beside the live one, so the box needs about 10 GB free
+(`df -h /home/ubuntu`), and the old index stays until the owner deletes it. **RAM:** the build's
+private memory is the same as today's format-1 build (5.5 GB); the rest is file cache. Run it in
+the quiet hour (01:00 UTC) and under `nice`/`ionice`, as `scripts/rebuild_index.sh` does: the
+2026-08-16 rebuild showed that the build's reads and writes evict the live index from the page
+cache (`materialize_ms` 1.2 s -> 62.6 s while it ran), not that anything breaks.
 
 **1. Build into a new folder** (the live `Genizah_Index` is not touched; the shelfmark caches are
 copied from it so the new index's `shelfmark` field matches):
@@ -769,13 +769,13 @@ sha256sum Transcriptions.txt     # the repaired corpus: 0ac792ad3963ab5a39ce7de7
 df -h /home/ubuntu
 setsid nice -n 19 ionice -c 3 nohup ./venv/bin/python build_index.py main \
     --index-dir /home/ubuntu/GenizahSearch/Genizah_Index.next \
-    --corpus-v8 Transcriptions.txt --corpus-v7 /nonexistent \
+    --corpus-v8 Transcriptions.txt --v08-only \
     --caches-from /home/ubuntu/GenizahSearch/Genizah_Index \
     > /home/ubuntu/index_next.log 2>&1 &
 ```
 
-`--corpus-v7 /nonexistent` keeps production V0.8-only (owner, 2026-08-14: V0.7 text is not
-published); the build skips a missing V0.7 file. The last line of the log is a `Build: {...}`
+`--v08-only` keeps production V0.8-only (owner, 2026-08-14: V0.7 text is not published), even
+if an `AllGenizah_OLD.txt` lies beside the code. The last line of the log is a `Build: {...}`
 record with the seam count and timings.
 
 **2. Check it before swapping** (read-only, while the site keeps serving):
@@ -831,7 +831,7 @@ Genizah_Index/browse_map.pkl.format1 Genizah_Index.next`.
 Index"); it is never shipped. On an index built before this version, Settings shows "Search index:
 built by an earlier version. It works as before; rebuilding it adds what the wildcard search (*)
 of coming versions uses." Rebuilding is the user's click and nothing else: the app never starts
-it from startup, a timer or the UI thread. The rebuild needs about FULL_SIZE free and FULL_TIME
+it from startup, a timer or the UI thread. The rebuild needs about 16 GB free and 21.5 minutes
 on the laptop of §3.6.
 
 ---

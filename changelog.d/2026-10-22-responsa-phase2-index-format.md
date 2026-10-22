@@ -16,7 +16,7 @@ through them yet, so results are unchanged.
   index built before this) is searched exactly as today; the desktop's Settings says which
   format the index has, and rebuilding stays the user's click.
 - `build_index.py main --index-dir <folder>` builds into a new folder beside the live one (with
-  `--corpus-v8`, `--corpus-v7`, `--caches-from`, `--no-seams`, `--no-reversed-field`);
+  `--corpus-v8`, `--corpus-v7`, `--v08-only`, `--caches-from`, `--no-seams`, `--no-reversed-field`);
   `docs/guides/DEPLOYMENT_TECHNICAL.md` has the server's rebuild, swap and rollback.
 - New checks in `scripts/measure_responsa_wildcards.py`: `seam-plan`, `index-sample`,
   `seam-topology`, `reversed-check`, `crossing-diff`.
