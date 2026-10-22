@@ -542,8 +542,12 @@ class TestSchemaSourceGuards:
             assert f'add_text_field("{field}", stored=False, tokenizer_name="whitespace")' in src
 
     def test_create_index_populates_content_search(self):
-        src = inspect.getsource(Indexer.create_index)
-        assert src.count("content_search=strip_search_diacritics(") >= 2
+        # Page, whole-manuscript and seam documents take their folded field (and the
+        # reversed words, Responsa plan §6.1) from one helper.
+        assert "self._search_fields(page_content)" in inspect.getsource(Indexer.create_index)
+        assert "self._search_fields(" in inspect.getsource(Indexer._add_continuous_document)
+        src = inspect.getsource(Indexer._search_fields)
+        assert "folded = strip_search_diacritics(text)" in src and "'content_search': folded" in src
 
     def test_add_bracket_variants_is_bracket_gated(self):
         src = inspect.getsource(_add_bracket_variants)

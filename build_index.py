@@ -6,15 +6,29 @@ Usage:
     python build_index.py          # Build both indexes
     python build_index.py main     # Build main index only
     python build_index.py lab      # Build lab index only
+
+Building the main index into a NEW folder, while the live one keeps serving
+(docs/guides/DEPLOYMENT_TECHNICAL.md, "Rebuild the main index (format 2)"):
+    python build_index.py main --index-dir /home/ubuntu/GenizahSearch/Genizah_Index.next \\
+        --corpus-v8 Transcriptions.txt --corpus-v7 AllGenizah_OLD.txt \\
+        --caches-from Genizah_Index
+
+--index-dir moves every path the build writes (tantivy_db, browse_map.pkl, caches)
+into that folder; the live Genizah_Index is not touched. --no-seams and
+--no-reversed-field build today's format-1 index (no marker).
 """
+import argparse
+import json
 import os
 import sys
+import time
 
 # Set up the index directory before importing genizah_core
 # This ensures the portable path is used
 os.makedirs(os.path.join(os.path.dirname(__file__), "Genizah_Index"), exist_ok=True)
 
 from genizah_core import Indexer, MetadataManager, VariantManager, LabEngine, Config
+
 
 def progress_callback(current, total, message=""):
     """Print progress to console."""
@@ -24,7 +38,7 @@ def progress_callback(current, total, message=""):
     else:
         print(f"\r{message}", end="", flush=True)
 
-def build_main_index():
+def build_main_index(seams=True, reversed_field=True, seam_words=None):
     """Build the main Tantivy search index."""
     print("=" * 60)
     print("  Building MAIN Index (tantivy_db)")
@@ -35,11 +49,15 @@ def build_main_index():
     indexer = Indexer(meta_mgr)
 
     try:
-        indexer.create_index(progress_callback=progress_callback)
+        kwargs = {'seams': seams, 'reversed_field': reversed_field}
+        if seam_words:
+            kwargs['seam_words'] = seam_words
+        indexer.create_index(progress_callback=progress_callback, **kwargs)
         print()
         print()
         print("Main index completed!")
         print(f"Location: {os.path.join(Config.INDEX_DIR, 'tantivy_db')}")
+        print("Build: " + json.dumps(indexer.last_build, ensure_ascii=False))
         return True
     except Exception as e:
         print()
@@ -75,6 +93,28 @@ def build_lab_index():
         return False
 
 def main():
+    ap = argparse.ArgumentParser(description="Build the GenizahSearch Tantivy indexes.")
+    ap.add_argument('which', nargs='?', default='both', choices=['both', 'main', 'lab'])
+    ap.add_argument('--index-dir', help='build into this folder instead of Config.INDEX_DIR')
+    ap.add_argument('--corpus-v8', help='Transcriptions.txt (default: next to the code)')
+    ap.add_argument('--corpus-v7', help='AllGenizah_OLD.txt (default: next to the code)')
+    ap.add_argument('--caches-from',
+                    help="with --index-dir: copy metadata_cache.pkl and nli_cache.pkl from this folder "
+                         "(the live Genizah_Index) first; they decide the shelfmark field")
+    ap.add_argument('--no-seams', action='store_true', help='no seam index (format 1 unless the field is on)')
+    ap.add_argument('--no-reversed-field', action='store_true', help='no reversed-words field')
+    ap.add_argument('--seam-words', type=int, default=None, help='words on each side of a seam')
+    args = ap.parse_args()
+
+    if args.index_dir:
+        Config.relocate_index_dir(args.index_dir)
+        if args.caches_from:
+            Config.copy_shelfmark_caches(args.caches_from)
+    if args.corpus_v8:
+        Config.FILE_V8 = os.path.abspath(args.corpus_v8)
+    if args.corpus_v7:
+        Config.FILE_V7 = os.path.abspath(args.corpus_v7)
+
     print("=" * 60)
     print("  Genizah Search Index Builder")
     print("=" * 60)
@@ -102,20 +142,15 @@ def main():
         print("V0.7 file not found (optional, skipping)")
 
     # Determine which indexes to build
-    build_main = True
-    build_lab = True
-
-    if len(sys.argv) > 1:
-        arg = sys.argv[1].lower()
-        if arg == "main":
-            build_lab = False
-        elif arg == "lab":
-            build_main = False
+    build_main = args.which in ('both', 'main')
+    build_lab = args.which in ('both', 'lab')
 
     success = True
+    started = time.time()
 
     if build_main:
-        if not build_main_index():
+        if not build_main_index(seams=not args.no_seams, reversed_field=not args.no_reversed_field,
+                                seam_words=args.seam_words):
             success = False
 
     if build_lab:
@@ -125,7 +160,7 @@ def main():
     print()
     print("=" * 60)
     if success:
-        print("  All indexes built successfully!")
+        print(f"  All indexes built successfully! ({time.time() - started:.0f} s)")
     else:
         print("  Some indexes failed to build.")
     print("=" * 60)
