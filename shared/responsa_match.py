@@ -405,6 +405,19 @@ class WordPlan:
     def terms(self):
         return retrieval_terms(self.component, self.stems)
 
+    def first_chars(self, flex_spacing=False):
+        """The characters the word's own pattern can begin with (its forms'; with flex
+        spacing, its typed words' too), or None when it can begin with anything."""
+        if self.star == 'pattern':
+            pattern = self.component.wildcard_pattern or ''
+            return {pattern[0]} if pattern and pattern[0] != '*' else None
+        if self.star == 'prefix':
+            return None
+        chars = {f[0] for f in self.stems if f}
+        if flex_spacing:
+            chars |= {w[0] for w in self.component.words if w}
+        return chars or None
+
     def tantivy_dict(self):
         """The component dict build_tantivy_query / component_query_string read."""
         return {
@@ -524,7 +537,16 @@ def _names(prefix, n):
 
 def _word_piece(plan, name, flex, bound_start, bound_end, strict, inserter=None):
     body = plan.body(flex, inserter=inserter)
-    piece = start_edge(strict) if bound_start else ''
+    piece = ''
+    if bound_start:
+        # The start lookbehinds' classes are large: try them only where the word can
+        # begin. In the regex module a line query (^.*word) and an AND lookahead
+        # ([\s\S]*word) reach them at every position they backtrack through
+        # (2026-10-22: 6.8 -> 85.6 s and 11.3 -> 103.3 s on the desktop without this).
+        first = plan.first_chars(flex)
+        if first:
+            piece += '(?=[' + ''.join(re.escape(c) for c in sorted(first)) + '])'
+        piece += start_edge(strict)
     piece += f'(?P<{name}>{body})' if name else f'(?:{body})'
     if bound_end:
         piece += end_edge()
@@ -705,6 +727,12 @@ def compile_line_groups(line_groups, line_gaps, responsa_options, var_mgr, query
                             groups=groups, flags=re.IGNORECASE | re.MULTILINE)
 
 
+# The looked-past characters a line's edge word commonly carries: brackets, quotes,
+# U+0300-036F and the Hebrew block's marks (build_line_patterns).
+_LINE_EDGE_PAST = ("[\\[\\]\"'\u05F3\u05F4\u2018\u2019\u0300-\u036F"
+                   "\u0591-\u05BD\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7]")
+
+
 def build_line_patterns(line_groups, plans_by_group, line_gaps, query_has_brackets=False):
     """(check, highlight, groups) of a line-break query: each group one line pattern,
     its words bounded and named, joined by line breaks with the [|N] gaps."""
@@ -727,9 +755,13 @@ def build_line_patterns(line_groups, plans_by_group, line_gaps, query_has_bracke
                 if name:
                     groups.append((name, bs, be))
             # A | anchor is the line's start or end; the quotes, brackets and marks of
-            # the edge word are part of it (Exact's predicate looks past them).
-            lead = r'^\s*' + past + '*' if group.line_start else r'^.*'
-            tail = past + r'*\s*$' if group.line_end else r'.*$'
+            # the edge word are part of it (Exact's predicate looks past them). The
+            # check spells out the common ones: with the full class there, the regex
+            # module (the desktop) scanned every position (a line query: 6.8 -> 85.6 s,
+            # 2026-10-22); a line opened by another script's mark is the cost.
+            edge = past if strict else _LINE_EDGE_PAST
+            lead = r'^\s*' + edge + '*' if group.line_start else r'^.*'
+            tail = edge + r'*\s*$' if group.line_end else r'.*$'
             line_patterns.append(lead + word_pat + tail)
         parts = [line_patterns[0]] if line_patterns else []
         for i in range(1, len(line_patterns)):
