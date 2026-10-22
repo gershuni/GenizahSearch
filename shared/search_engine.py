@@ -3686,8 +3686,11 @@ class SearchEngine:
                     return []
                 # One word cannot cross a page break: a whole-manuscript doc would only
                 # repeat a page's own match, so the page docs are the whole answer, as
-                # for Exact's single word (plan §5.4; ספר read every manuscript).
+                # for Exact's single word (plan §5.4; ספר read every manuscript). With
+                # flex spacing it can (של at a page's end, ום at the next one's start),
+                # so the whole-manuscript docs stay (Codex review of PR #432).
                 if (len(_responsa.plans) == 1 and not responsa_options.get('within_document')
+                        and not responsa_options.get('flex_spacing')
                         and not text_position and self._every_doc_has_scope()):
                     t_query_obj = self._and_query(t_query_obj, 'scope:page')
             # Page docs first, then whole-manuscript / part docs, within the same
