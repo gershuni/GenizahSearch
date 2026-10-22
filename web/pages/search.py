@@ -1860,6 +1860,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         current_idx = states.index(search_state.printed_filter)
                         search_state.printed_filter = states[(current_idx + 1) % 3]
                         persist_value('search_printed_filter', search_state.printed_filter)
+                        save_tab_post_filters(search_state)
                         _update_printed_filter_btn()
                         # Re-apply filters and re-render (manuscript exclusions first if active)
                         if search_state.exclusion_sources:
@@ -4493,6 +4494,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         """Remove a single exclusion source (D-06 per-source clear)."""
         search_state.exclusion_sources = [s for s in search_state.exclusion_sources if s.source_id != source.source_id]
         persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+        save_tab_post_filters(search_state)
         _apply_manuscript_exclusions()
         _update_exclude_btn()
 
@@ -4530,6 +4532,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     def _clear_all_exclusions():
                         search_state.exclusion_sources = []
                         persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+                        save_tab_post_filters(search_state)
                         _apply_manuscript_exclusions()
                         _update_exclude_btn()
                         dlg.close()
@@ -4589,6 +4592,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         )
                         search_state.exclusion_sources.append(source)
                         persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+                        save_tab_post_filters(search_state)
                         dlg.close()
                         _apply_manuscript_exclusions()
                         _update_exclude_btn()
@@ -4704,6 +4708,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     ui.notify(tr('Select a list first'), type='warning')
                                     return
                                 persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+                                save_tab_post_filters(search_state)
                                 dlg.close()
                                 _apply_manuscript_exclusions()
                                 _update_exclude_btn()
@@ -4805,6 +4810,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         )
                         search_state.exclusion_sources.append(source)
                         persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+                        save_tab_post_filters(search_state)
                         dlg.close()
                         _apply_manuscript_exclusions()
                         _update_exclude_btn()

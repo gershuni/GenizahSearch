@@ -421,7 +421,13 @@ _PGP_FILTER_STATES = ('all', 'only_pgp', 'hide_pgp')
 
 
 def _tab_post_filters(state: 'SearchUIState') -> dict:
+    """The display filters a change after the search updates in this tab's snapshot
+    (the printed filter and the manuscript exclusions were saved with the rows only
+    at the end of a search, so a later change left them stale -- Codex, round 4)."""
     return {
+        'printed_filter': state.printed_filter,
+        'domain_exclusions': list(state.domain_exclusions or []),
+        'search_exclusion_sources': list(state.exclusion_sources or []),
         'pgp_filter': state.pgp_filter,
         'library_filter': {'mode': state.library_mode, 'codes': list(state.library_filter or [])},
         'word_search_excluded_ids': list(state.word_search_excluded_ids or []),
@@ -477,10 +483,7 @@ def persist_search_active_snapshot(state: 'SearchUIState') -> None:
             'results': _compact_result_rows((state.results or [])[:1000]),
             # A list longer than what is kept here comes back as a cut-off one.
             'result_count_capped': bool(state.result_count_capped or len(state.results or []) > 1000),
-            'printed_filter': state.printed_filter,
-            'domain_exclusions': list(state.domain_exclusions or []),
             'search_refinement_chain': [s.to_dict() for s in (state.refinement_chain or [])],
-            'search_exclusion_sources': list(state.exclusion_sources or []),
             'last_variant_settings': state.last_variant_settings,
             'last_run': state.last_run,
             **_tab_post_filters(state),

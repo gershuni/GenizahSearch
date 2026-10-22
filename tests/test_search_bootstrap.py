@@ -650,11 +650,20 @@ def test_a_display_filter_change_reaches_the_tab_snapshot(monkeypatch):
     ss.persist_search_active_snapshot(page)
     page.pgp_filter = 'hide_pgp'
     page.word_search_excluded_ids.add('990003')
+    page.printed_filter = 'hide_printed'
+    page.exclusion_sources = ['an exclusion source']
     ss.save_tab_post_filters(page)
     saved = tab[ss._SEARCH_ACTIVE_TAB_KEY]
     assert saved['pgp_filter'] == 'hide_pgp'
     assert saved['word_search_excluded_ids'] == ['990003']
+    assert saved['printed_filter'] == 'hide_printed'                        # Codex round 4
+    assert saved['search_exclusion_sources'] == ['an exclusion source']     # Codex round 4
     assert saved['results'] == [{'display': {'id': '990001'}}]  # the rest is untouched
+
+    back = ss.SearchUIState()
+    ss.restore_search_active_snapshot(back)
+    assert back.printed_filter == 'hide_printed'
+    assert back.exclusion_sources == ['an exclusion source']
 
 
 def test_restored_display_filters_are_checked_like_the_shared_ones(monkeypatch):
@@ -692,10 +701,12 @@ def _module_tree(relative):
 
 
 def _display_filter_saves(tree):
-    """(saved, followed): persist_value calls for the three shared display-filter keys,
-    and how many are followed in their own block by save_tab_post_filters(search_state)."""
+    """(saved, followed): persist_value calls for the shared display-filter keys a
+    change after the search writes, and how many are followed in their own block by
+    save_tab_post_filters(search_state)."""
     import ast
-    keys = {'search_pgp_filter', 'search_library_filter', 'word_search_excluded_ids'}
+    keys = {'search_pgp_filter', 'search_library_filter', 'word_search_excluded_ids',
+            'search_printed_filter', 'search_exclusion_sources'}
     saved = followed = 0
     for node in ast.walk(tree):
         body = getattr(node, 'body', None)
@@ -712,7 +723,8 @@ def _display_filter_saves(tree):
 
 
 def test_every_display_filter_save_also_updates_the_tab_snapshot():
-    for module, expected in (('web/pages/search.py', 2), ('web/pages/search_results.py', 2)):
+    # search.py: PGP, library, printed, and five manuscript-exclusion changes.
+    for module, expected in (('web/pages/search.py', 8), ('web/pages/search_results.py', 2)):
         saved, followed = _display_filter_saves(_module_tree(module))
         assert saved == expected, f'{module}: {saved} saves; update this test'
         assert followed == saved, module
