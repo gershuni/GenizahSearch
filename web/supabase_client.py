@@ -1147,10 +1147,18 @@ def get_deleted_lists(user_id: str) -> List[Dict]:
 
 
 def create_list(user_id: str, name: str, name_en: str = None, color: str = '#FFD700',
-                project_id: int = None, is_default: bool = False) -> Dict:
-    """Create a new list."""
+                project_id: int = None, is_default: bool = False, *, client=None) -> Dict:
+    """Create a new list.
+
+    `client` (2026-10-21, keyword-only, default None = unchanged behaviour): see
+    `add_recent_item`. The list, project, correction and comment writers below
+    all take it, because UserListsManager, the comment dialog and the browse
+    correction editor now run them in a worker thread, where `get_user_client()`
+    would hand back the anonymous client and RLS would refuse the row silently.
+    """
     try:
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         data = {
             'user_id': user_id,
             'name': name,
@@ -1170,10 +1178,11 @@ def create_list(user_id: str, name: str, name_en: str = None, color: str = '#FFD
         return {'error': str(e)}
 
 
-def update_list(list_id: int, data: Dict) -> Dict:
-    """Update a list."""
+def update_list(list_id: int, data: Dict, *, client=None) -> Dict:
+    """Update a list. `client`: see `create_list`."""
     try:
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         response = client.table('user_lists').update(data).eq('id', list_id).execute()
         if response.data:
             return {'success': True, 'list': response.data[0]}
@@ -1182,18 +1191,20 @@ def update_list(list_id: int, data: Dict) -> Dict:
         return {'error': str(e)}
 
 
-def delete_list(list_id: int, permanent: bool = False) -> Dict:
+def delete_list(list_id: int, permanent: bool = False, *, client=None) -> Dict:
     """Soft-delete a list (move to trash).
 
     Args:
         list_id: The list ID
         permanent: If True, permanently delete (no recovery). Default is soft delete.
+        client: see `create_list`.
 
     Returns ``{'success': True}`` only when a row was changed; 0 rows (the list
     is already gone, or RLS filtered it) is ``{'error': ..., 'no_rows': True}``.
     """
     try:
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         if permanent:
             # Permanent delete - also deletes items via CASCADE
             response = client.table('user_lists').delete().eq('id', list_id).execute()
@@ -1217,10 +1228,11 @@ def delete_list(list_id: int, permanent: bool = False) -> Dict:
         return {'error': str(e)}
 
 
-def restore_list(list_id: int) -> Dict:
-    """Restore a soft-deleted list from trash."""
+def restore_list(list_id: int, *, client=None) -> Dict:
+    """Restore a soft-deleted list from trash. `client`: see `create_list`."""
     try:
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         response = client.table('user_lists').update({
             'deleted_at': None
         }).eq('id', list_id).execute()
@@ -1234,17 +1246,18 @@ def restore_list(list_id: int) -> Dict:
         return {'error': str(e)}
 
 
-def empty_trash(user_id: str) -> Dict:
+def empty_trash(user_id: str, *, client=None) -> Dict:
     """Permanently delete all soft-deleted lists for a user.
 
     Reads the trash itself rather than through ``get_deleted_lists``, which
     turns a read error into ``[]``: a failed read must not look like an empty
     trash. ``deleted_count`` counts only the rows really deleted; if any
     listed row was not deleted (RLS, or already gone) the result is an error
-    that still carries the count.
+    that still carries the count. `client`: see `create_list`.
     """
     try:
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         listed = client.table('user_lists').select('id').eq('user_id', user_id).not_.is_(
             'deleted_at', 'null').execute().data or []
         deleted = 0
@@ -1284,10 +1297,11 @@ def get_list_items(list_id: int, *, client=None) -> List[Dict]:
 
 
 def add_list_item(list_id: int, sys_id: str, shelfmark: str = None, title: str = None,
-                  fl_id: str = None, note: str = '', tags: List[str] = None) -> Dict:
-    """Add an item to a list."""
+                  fl_id: str = None, note: str = '', tags: List[str] = None, *, client=None) -> Dict:
+    """Add an item to a list. `client`: see `create_list`."""
     try:
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         data = {
             'list_id': list_id,
             'sys_id': sys_id,
@@ -1305,10 +1319,44 @@ def add_list_item(list_id: int, sys_id: str, shelfmark: str = None, title: str =
         return {'error': str(e)}
 
 
-def update_list_item(item_id: int, data: Dict) -> Dict:
-    """Update a list item."""
+def add_list_items(list_id: int, rows: List[Dict], *, client=None) -> Dict:
+    """Add several items to one list in ONE insert (the search page's bulk add).
+
+    ``rows``: one dict per item with ``sys_id`` and, optionally, ``shelfmark``,
+    ``title``, ``fl_id``, ``note`` and ``tags`` -- the same seven columns
+    ``add_list_item`` writes (``page`` stays NULL). PostgREST runs the batch as
+    one statement, so it is all or nothing: ``{'success': True, 'added': n}``
+    or ``{'error': ...}``. RLS is checked per row and ``list_items`` has no
+    UNIQUE constraint, so a batch is never partly refused. An empty batch adds
+    0 without a round trip. `client`: see `create_list`.
+    """
     try:
-        client = get_user_client()
+        data = [{
+            'list_id': list_id,
+            'sys_id': row.get('sys_id'),
+            'shelfmark': row.get('shelfmark'),
+            'title': row.get('title'),
+            'fl_id': row.get('fl_id'),
+            'note': row.get('note') or '',
+            'tags': row.get('tags') or [],
+        } for row in rows]
+        if not data:
+            return {'success': True, 'added': 0}
+        if client is None:
+            client = get_user_client()
+        response = client.table('list_items').insert(data).execute()
+        if response.data:
+            return {'success': True, 'added': len(response.data)}
+        return {'error': 'Failed to add items'}
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def update_list_item(item_id: int, data: Dict, *, client=None) -> Dict:
+    """Update a list item. `client`: see `create_list`."""
+    try:
+        if client is None:
+            client = get_user_client()
         response = client.table('list_items').update(data).eq('id', item_id).execute()
         if response.data:
             return {'success': True, 'item': response.data[0]}
@@ -1317,10 +1365,14 @@ def update_list_item(item_id: int, data: Dict) -> Dict:
         return {'error': str(e)}
 
 
-def delete_list_item(item_id: int) -> Dict:
-    """Delete a list item; 0 deleted rows is ``{'error': ..., 'no_rows': True}``, never success."""
+def delete_list_item(item_id: int, *, client=None) -> Dict:
+    """Delete a list item; 0 deleted rows is ``{'error': ..., 'no_rows': True}``, never success.
+
+    `client`: see `create_list`.
+    """
     try:
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         response = client.table('list_items').delete().eq('id', item_id).execute()
         if response.data:
             return {'success': True}
@@ -1395,12 +1447,22 @@ def add_recent_item(user_id: str, sys_id: str, shelfmark: str = None,
 # PROJECTS OPERATIONS
 # ============================================================================
 
-def get_projects(user_id: str) -> List[Dict]:
-    """Get all projects for a user."""
+def get_projects(user_id: str, *, client=None) -> List[Dict]:
+    """Get all projects for a user.
+
+    `client` (2026-10-21, keyword-only, default None = unchanged behaviour): see
+    `get_user_lists`. The JWT-expiry retry below deliberately builds a fresh
+    client: a passed one still carries the expired token. In a `run.io_bound`
+    worker the refresh cannot read the visitor's session, so the retry reads as
+    anonymous and returns [] (the WARNING below still names the expiry); the
+    loop-side `get_user_client()` refreshes a token near expiry before handing
+    the client over, which keeps that window small.
+    """
     try:
         # READER-01 (Phase 92.1): projects SELECT RLS is `TO authenticated`; projects panel
         # was empty for logged-in users before this migration (same bug class as user_lists).
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         _t = time.perf_counter()
         response = client.table('projects').select('*').eq('user_id', user_id).order('created_at').execute()
         _inst_record_query((time.perf_counter() - _t) * 1000.0)  # Phase 92.2 D-VER-01
@@ -1421,10 +1483,11 @@ def get_projects(user_id: str) -> List[Dict]:
         return []
 
 
-def create_project(user_id: str, name: str, color: str = '#4CAF50') -> Dict:
-    """Create a new project."""
+def create_project(user_id: str, name: str, color: str = '#4CAF50', *, client=None) -> Dict:
+    """Create a new project. `client`: see `create_list`."""
     try:
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         data = {
             'user_id': user_id,
             'name': name,
@@ -1438,10 +1501,11 @@ def create_project(user_id: str, name: str, color: str = '#4CAF50') -> Dict:
         return {'error': str(e)}
 
 
-def update_project(project_id: int, data: Dict) -> Dict:
-    """Update a project."""
+def update_project(project_id: int, data: Dict, *, client=None) -> Dict:
+    """Update a project. `client`: see `create_list`."""
     try:
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         response = client.table('projects').update(data).eq('id', project_id).execute()
         if response.data:
             return {'success': True, 'project': response.data[0]}
@@ -1450,10 +1514,14 @@ def update_project(project_id: int, data: Dict) -> Dict:
         return {'error': str(e)}
 
 
-def delete_project(project_id: int) -> Dict:
-    """Delete a project; 0 deleted rows (already gone, or RLS) is ``{'error': ..., 'no_rows': True}``."""
+def delete_project(project_id: int, *, client=None) -> Dict:
+    """Delete a project; 0 deleted rows (already gone, or RLS) is ``{'error': ..., 'no_rows': True}``.
+
+    `client`: see `create_list`.
+    """
     try:
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         response = client.table('projects').delete().eq('id', project_id).execute()
         if response.data:
             return {'success': True}
@@ -1527,10 +1595,11 @@ def get_corrections(sys_id: str = None, author_id: str = None, status: str = Non
 
 def create_correction(author_id: str, sys_id: str, shelfmark: str, page_number: int,
                       original_text: str, corrected_text: str, notes: str = '',
-                      status: str = 'pending', ie_id: str = None) -> Dict:
-    """Create a new correction."""
+                      status: str = 'pending', ie_id: str = None, *, client=None) -> Dict:
+    """Create a new correction. `client`: see `create_list`."""
     try:
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         data = {
             'author_id': author_id,
             'sys_id': sys_id,
@@ -1551,10 +1620,11 @@ def create_correction(author_id: str, sys_id: str, shelfmark: str, page_number: 
         return {'error': str(e)}
 
 
-def update_correction(correction_id: int, data: Dict) -> Dict:
-    """Update a correction."""
+def update_correction(correction_id: int, data: Dict, *, client=None) -> Dict:
+    """Update a correction. `client`: see `create_list`."""
     try:
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         response = client.table('corrections').update(data).eq('id', correction_id).execute()
         if response.data:
             return {'success': True, 'correction': response.data[0]}
@@ -1674,10 +1744,11 @@ def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = Tr
 
 def create_comment(author_id: str, sys_id: str, content: str, shelfmark: str = None,
                    page_number: int = None, scope: str = 'page', is_public: bool = True,
-                   parent_id: int = None, ie_id: str = None) -> Dict:
-    """Create a new comment."""
+                   parent_id: int = None, ie_id: str = None, *, client=None) -> Dict:
+    """Create a new comment. `client`: see `create_list`."""
     try:
-        client = get_user_client()
+        if client is None:
+            client = get_user_client()
         data = {
             'author_id': author_id,
             'sys_id': sys_id,

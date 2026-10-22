@@ -23,7 +23,7 @@ def test_refresh_data_authenticated_returns_dict(monkeypatch):
 
     mgr = UserListsManager()
     fake_data = {'lists': {'1': {'name': 'Test'}}, 'projects': {}, 'items': {}, 'recent': []}
-    monkeypatch.setattr(mgr, '_get_cached_data', lambda: fake_data)
+    monkeypatch.setattr(mgr, '_get_cached_data', lambda **_kwargs: fake_data)  # client=/user_id= since 2026-10-21
     monkeypatch.setattr(mgr, 'invalidate_cache', lambda: None)
 
     result = asyncio.run(mgr.refresh_data())

@@ -13,11 +13,11 @@ Supports shelfmark mentions in format: [[shelfmark:T-S 8J6.1|id:123456]]
 import asyncio
 import time
 
-from nicegui import ui
+from nicegui import ui, run
 from web.translations import tr, is_rtl
 from web.ux_timing import ux_done
 from web.auth_state import GlobalAuthState
-from web.supabase_client import create_comment
+from web.supabase_client import create_comment, get_user_client
 from web.state import state
 from typing import Optional, Callable
 
@@ -202,7 +202,13 @@ def create_comment_dialog(
             with ui.row().classes('w-full justify-end gap-2 mt-4'):
                 ui.button(tr('Cancel'), on_click=dialog.close).props('flat')
 
+                # A write is in flight: it runs off the loop, so a second click
+                # would otherwise post the comment twice.
+                submitting = {'busy': False}
+
                 async def submit_comment():
+                    if submitting['busy']:
+                        return
                     if not GlobalAuthState.is_logged_in():
                         error_label.text = tr('Please login first')
                         error_label.classes('visible', remove='hidden')
@@ -223,17 +229,30 @@ def create_comment_dialog(
                     # Determine page number based on scope
                     comment_page = page_number if scope_select.value == 'page' else None
 
-                    # Submit to Supabase
+                    # Submit to Supabase, off the event loop: the client is built
+                    # HERE (a worker cannot read the visitor's storage and would
+                    # write anonymously), and the element values are read before
+                    # the await, as the call's arguments.
+                    client = get_user_client()
                     ux_client, ux_t0 = ui.context.client, time.perf_counter()
-                    result = create_comment(
-                        author_id=user_id,
-                        sys_id=document_id,
-                        content=comment_text.value.strip(),
-                        page_number=comment_page,
-                        scope=scope_select.value,
-                        is_public=not private_check.value,
-                        ie_id=ie_id
-                    )
+                    submitting['busy'] = True
+                    try:
+                        result = await run.io_bound(
+                            create_comment,
+                            author_id=user_id,
+                            sys_id=document_id,
+                            content=comment_text.value.strip(),
+                            page_number=comment_page,
+                            scope=scope_select.value,
+                            is_public=not private_check.value,
+                            ie_id=ie_id,
+                            client=client,
+                        )
+                    finally:
+                        submitting['busy'] = False
+                    if result is None:  # no answer: cancelled, or the app is stopping
+                        result = {'error': tr(
+                            'The change could not be saved. Check your connection and try again.')}
 
                     ux_done(ux_client, 'save_comment', 'error' if "error" in result else 'ok',
                             server_ms=(time.perf_counter() - ux_t0) * 1000)

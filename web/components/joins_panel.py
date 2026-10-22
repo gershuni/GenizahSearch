@@ -640,6 +640,8 @@ def create_joins_button(
         )
         if data is None:
             return  # cancelled or app stopping
+        if button_ref['btn'] is not None and button_ref['btn'].is_deleted:
+            return  # the page turned while the count was fetched: the button is gone
         join_count['value'] = data.get('total_fragments', 1)
         total = join_count['value']
         if button_ref['btn']:

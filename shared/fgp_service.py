@@ -44,6 +44,7 @@ The service still DISCOVERS the source table + columns at connect time (see
 refreshed/renamed schema; Phase C should still smoke-test against the live DB.
 """
 
+import functools
 import json
 import logging
 import os
@@ -600,6 +601,19 @@ def _heb_letter_count(text: Optional[str]) -> int:
     return sum(len(w) for w in _HEBWORD_RE.findall(_NIKUD_RE.sub("", text)))
 
 
+@functools.lru_cache(maxsize=8)
+def _heb_letter_count_cached(text: Optional[str]) -> int:
+    """``_heb_letter_count`` of a whole-manuscript HTR, remembered across calls.
+
+    The web reading view asks :func:`choose_default_source` about the same
+    whole-manuscript text more than once per page (the version selector is
+    built per rebuild of the page), and each ask re-counted every letter of
+    the manuscript. Used only for the ``full_htr_getter`` text, which is one
+    string per manuscript; a few manuscripts' counts cover a browsing session.
+    """
+    return _heb_letter_count(text)
+
+
 def _fgp_is_whole_doc(source: Dict[str, Any]) -> bool:
     """A whole-document FGP row: NO per-image alignment key at all — neither a
     folio label (``_fgp_match_folio``) nor a c-number image id
@@ -717,7 +731,7 @@ def choose_default_source(
     def _full_htr_len() -> int:
         if "v" not in _full_len_cache:
             txt = full_htr_getter() if full_htr_getter else None
-            _full_len_cache["v"] = _heb_letter_count(txt)
+            _full_len_cache["v"] = _heb_letter_count_cached(txt)
         return _full_len_cache["v"]
 
     # ── SEED-033 Option A: search-scoped override ──────────────────────────

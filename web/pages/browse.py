@@ -83,7 +83,7 @@ from web.translations import tr, is_rtl, get_language, using_language, in_visito
 from web.ux_timing import ux_done
 from web.auth_state import GlobalAuthState
 from web.feature_flags import WEB_PUZZLE_ENABLED
-from web.supabase_client import create_correction, update_correction, get_corrections
+from web.supabase_client import create_correction, update_correction, get_corrections, get_user_client
 from web.components.typography import h1, h2, h3
 from web.components.joins_panel import peek_connected_fragments, load_connected_fragments_into
 from web.components.shelfmark_picker import items_from_manuscripts, open_shelfmark_picker
@@ -1747,8 +1747,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             }});
         ''')
 
-    async def handle_submit_correction():
+    async def _submit_correction_now():
         """Submit the correction to the backend."""
+        if not state.edit_mode or state.is_loading:
+            return  # a stale button (the form after a submit, kept under a reload)
         if not GlobalAuthState.is_logged_in():
             ui.notify(tr('Please login first'), type='negative')
             return
@@ -1767,16 +1769,20 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # Determine status based on role
         status = 'approved' if (GlobalAuthState.is_admin() or GlobalAuthState.is_editor()) else 'pending'
 
-        # Do the Supabase call BEFORE any UI rebuild
+        # Do the Supabase call BEFORE any UI rebuild, off the loop: the client
+        # is built here (a worker cannot read the visitor's storage and would
+        # write anonymously, refused by RLS).
+        client = get_user_client()
         try:
             if state.draft_id:
-                result = update_correction(state.draft_id, {
+                result = await run.io_bound(update_correction, state.draft_id, {
                     'corrected_text': state.edit_text,
                     'notes': state.edit_notes,
                     'status': status
-                })
+                }, client=client)
             else:
-                result = create_correction(
+                result = await run.io_bound(
+                    create_correction,
                     author_id=user_id,
                     sys_id=state.current_page.sys_id,
                     shelfmark=state.current_page.shelfmark or '',
@@ -1785,11 +1791,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     corrected_text=state.edit_text,
                     notes=state.edit_notes if state.edit_notes else '',
                     status=status,
-                    ie_id=state.volume_ie
+                    ie_id=state.volume_ie,
+                    client=client,
                 )
         except Exception as e:
             ui.notify(f'{tr("Error")}: {e}', type='negative')
             logger.error(f"Submit error: {e}")
+            return
+
+        if result is None:  # no answer: cancelled, or the app is stopping; stay in edit mode
+            ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')
             return
 
         if "error" in result:
@@ -1808,8 +1819,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         ui.notify(tr('Correction submitted successfully'), type='positive')
         await load_page(direction=0)
 
-    def handle_save_draft():
-        """Save draft locally (simulated for now, or use backend draft)."""
+    async def _save_draft_now():
+        """Save the draft to Supabase, off the loop (see _submit_correction_now)."""
+        if not state.edit_mode or state.is_loading:
+            return  # a stale button (the form after a submit, kept under a reload)
         if not GlobalAuthState.is_logged_in():
             ui.notify(tr('Please login to save drafts'), type='warning')
             return
@@ -1819,16 +1832,20 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             ui.notify(tr('User not found'), type='negative')
             return
 
+        client = get_user_client()
+        sent = (state.edit_text, state.edit_notes)  # what this write carries
+        load_gen = _load_generation['value']  # the page this draft belongs to
         if state.draft_id:
             # Update existing draft
-            result = update_correction(state.draft_id, {
+            result = await run.io_bound(update_correction, state.draft_id, {
                 'corrected_text': state.edit_text,
                 'notes': state.edit_notes,
                 'status': 'draft'
-            })
+            }, client=client)
         else:
             # Create new draft
-            result = create_correction(
+            result = await run.io_bound(
+                create_correction,
                 author_id=user_id,
                 sys_id=state.current_page.sys_id,
                 shelfmark=state.current_page.shelfmark or '',
@@ -1837,8 +1854,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 corrected_text=state.edit_text,
                 notes=state.edit_notes if state.edit_notes else '',
                 status='draft',
-                ie_id=state.volume_ie
+                ie_id=state.volume_ie,
+                client=client,
             )
+
+        if result is None:  # no answer: cancelled, or the app is stopping; stay in edit mode
+            ui.notify(tr('The change could not be saved. Check your connection and try again.'), type='negative')
+            return
 
         if "error" in result:
             error_msg = result["error"]
@@ -1847,12 +1869,33 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                           type='negative', timeout=10000)
             else:
                 ui.notify(error_msg, type='negative')
+        elif load_gen != _load_generation['value']:
+            # The reader moved to another page while the write ran: the draft is
+            # saved, but its id must not become the new page's draft (a later
+            # save would overwrite this draft with the other page's text).
+            ui.notify(tr('Draft saved'), type='positive')
         else:
-            state.draft_saved = True
+            # Text typed while the write ran is not in the draft: say "Saved"
+            # only when the editor still holds what was sent.
+            state.draft_saved = (state.edit_text, state.edit_notes) == sent
             correction = result.get('correction', {})
             state.draft_id = correction.get('id')
             ui.notify(tr('Draft saved'), type='positive')
             update_content()  # Update UI to show green border
+
+    # One correction write at a time per page. The write runs off the loop, so
+    # the loop serves a second click at once; it now WAITS for the first and
+    # then runs, as it did when the write blocked: a second Save Draft updates
+    # the draft the first created, and Submit during a draft save submits it.
+    # (Dropping it instead lost a Submit without a word.) The guard at the top
+    # of each is read after the wait: a stale Submit after a submit does nothing.
+    async def handle_submit_correction():
+        async with state.correction_lock:
+            await _submit_correction_now()
+
+    async def handle_save_draft():
+        async with state.correction_lock:
+            await _save_draft_now()
 
     def toggle_edit_mode():
         """Toggle edit mode with fetching existing corrections."""
@@ -1992,15 +2035,23 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         # after the visitor navigated away (e.g. to the Joins Lab).
         if content_container.is_deleted or getattr(_client, '_deleted', False):
             return
+        if state.is_loading:
+            # The spinner is a row of its own above the content, shown and
+            # hidden in place: building it here cost a full clear of the page
+            # and a second full rebuild when Phase A landed. The old content
+            # stays, dimmed (.browse-loading) and `inert`, until the new page:
+            # `inert` also takes focus and Enter/Space from its buttons, which
+            # `pointer-events: none` does not (a focused Submit fired again).
+            loading_row.set_visibility(True)
+            content_container.classes(add='browse-loading')
+            content_container.props(add='inert')
+            return
+        loading_row.set_visibility(False)
+        content_container.classes(remove='browse-loading')
+        content_container.props(remove='inert')
         content_container.clear()
 
         with content_container:
-            if state.is_loading:
-                with ui.row().classes('w-full justify-center py-16'):
-                    ui.spinner(size='xl', color='green')
-                    ui.label(tr('Loading...')).classes('ml-3 text-lg').style('color: var(--text-secondary);')
-                return
-
             if state.error and not state.current_page:
                 with ui.card().classes('w-full p-8 text-center'):
                     ui.icon('error_outline', size='4rem').classes('text-red-400')
@@ -5447,6 +5498,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     ui.icon('warning', color='orange')
                     ui.label(tr('Service not available')).classes('text-yellow-800')
 
+        # The loading spinner, built once and toggled by update_content(). A
+        # zero-height sticky row (.browse-loading-row): it floats over the top
+        # of the dimmed content and stays in view when the reader has scrolled,
+        # instead of pushing the content down while a page loads.
+        loading_row = ui.row().classes('w-full justify-center browse-loading-row')
+        with loading_row:
+            with ui.row().classes('items-center browse-loading-pill'):
+                ui.spinner(size='xl', color='green')
+                ui.label(tr('Loading...')).classes('ml-3 text-lg').style('color: var(--text-secondary);')
+        loading_row.set_visibility(False)
+        refs.loading_row = loading_row
+
         # Main content container
         content_container = ui.column().classes('w-full')
         # Expose it on refs so deferred enrichment (Phase B) can check page
@@ -5536,6 +5599,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         ui.add_body_html('''
         <script>
             document.addEventListener('keydown', function(e) {
+                // A page is loading: the old content is inert, so no second load
+                // from its (still clickable, programmatically) navigation buttons.
+                if (document.querySelector('.browse-loading')) return;
                 // Ignore if focused on any text input element
                 const tag = document.activeElement.tagName;
                 if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement.isContentEditable) return;
