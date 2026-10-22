@@ -3107,7 +3107,9 @@ class SearchEngine:
             # tolerant pattern are looked up: the line fields hold a line's first or
             # last whitespace token raw (שלום, with its comma), which is narrower than
             # what the check accepts (plan §4: retrieval never narrower).
-            query = compiled.retrieval(self.index, has_content_search=getattr(self, '_has_content_search', False))
+            # With flex spacing, a split word's halves too (של ום for שלום).
+            query = compiled.retrieval(self.index, has_content_search=getattr(self, '_has_content_search', False),
+                                       flex_spacing=compiled.flex_spacing)
             if query is None:
                 return []
             if restrict_sys_ids is not None:   # in the query at any size: see execute_search
@@ -3681,7 +3683,9 @@ class SearchEngine:
                 t_query_obj = _responsa.retrieval(
                     self.index, field=search_field,
                     has_content_search=getattr(self, '_has_content_search', False),
-                    flex_spacing=responsa_options.get('flex_spacing', False))
+                    flex_spacing=responsa_options.get('flex_spacing', False),
+                    bidirectional=bool(responsa_options.get('bidirectional')),
+                    within_document=bool(responsa_options.get('within_document')))
                 if t_query_obj is None:
                     return []
                 # One word cannot cross a page break: a whole-manuscript doc would only
