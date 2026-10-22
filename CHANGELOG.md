@@ -4,6 +4,178 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [9.8.2] - 2026-10-22 — Downloads and thumbnails
+
+Desktop downloads (Excel, Word, text) write the page each result row shows, and the Source
+column marks V0.7 transcriptions in the installed app. On the website, NLI page thumbnails are
+kept on the server's disk and the NLI image-id cache keeps its 30 days, so Visual Similarity
+grids load steadily; saves run off the event loop, /browse page turns keep the page in view, and
+open tabs reload spread out after a restart. Also the Responsa true-wildcard plan with its Phase 0
+measurements, and new tracker rows as fragment files. Desktop: installer 9.8.2. PRs #426-#430.
+
+### Desktop downloads write the page, and the Source column shows V0.7 (desktop, PR #426)
+
+Two desktop-only faults found by comparing the same Responsa search,
+`*כהנים *גדולים`, on the desktop and on the website. Each fix has a
+regression test that fails on the old code.
+
+#### Fixed
+- **Excel "Full Text"** is the text of the page the row shows, as on the
+  website. A row found through a whole manuscript held that manuscript's whole
+  text, cut at 32,000 characters.
+  The **Word and text** downloads had the same fault: the passage around a hit
+  could come from another page of the manuscript.
+- **Excel line breaks** no longer glue the words on either side together. The
+  Snippet marks a line break with ` ‖ ` and Full Text replaces it with a space,
+  as the website does.
+- **The Source (מקור) column** shows whenever a result is a V0.7 transcription
+  (or a My Library hit). It was shown only when `AllGenizah_OLD.txt` sat beside
+  the program, which the installed app's folder does not have, although its
+  index holds V0.7 pages. V0.8-only results now hide it.
+
+### NLI thumbnails kept on the server, image ids kept 30 days (web, PR #427)
+
+Owner report: in the Visual Similarity thumbnail grid some cards showed the
+crossed-out image icon, and different ones after each size switch. The images
+exist. Each card whose manuscript the server had not resolved needed an NLI
+manifest download, only 8 run at once with a 1-second wait, and the rest
+answered 404; a failure is not cached, so each redraw asked again for exactly
+the failed cards. Reproduced: 12 of 20 cards lost when a manifest takes 1.5 s.
+
+#### Fixed
+- **The NLI image-id cache keeps 30 days, as it was meant to.** Every save
+  rewrote `nli_fl_ids_cache.json` from the memory cache, which keeps an entry 5
+  minutes, so the "30-day" file held the last 5 minutes. It is now a SQLite file,
+  `<INDEX_DIR>/nli_fl_ids.db`, written one entry at a time and read when memory
+  misses: a manuscript anyone opened in the last 30 days needs no manifest and
+  takes none of the 8 slots. A list from the MARC fallback (used when the
+  manifest fails; it usually names only the first image) stays in memory for 5
+  minutes as before and is never stored, or later pages would show the first
+  image for a month. For the same reason the old JSON file is not read: it
+  mixes the two kinds of list (Codex review). It is safe to delete.
+
+#### Added
+- **Thumbnails on disk** (`web/nli_image_store.py`): the NLI image proxy keeps
+  each page image it gets from NLI's IIIF server at the grid width (300 px) in
+  `<INDEX_DIR>/nli_thumbs/` and serves it from there afterwards, also during an
+  NLI outage (it is read before the circuit breaker). Only the requested page's
+  own IIIF JPEG is kept, never a Rosetta stand-in or another page's image; the
+  folder stops at 10 GB, and at 2 GB of free disk. After a restart nothing is
+  written until the folder has been measured, and two requests for one thumbnail
+  write and count it once (Codex review). Settings:
+  `NLI_THUMB_CACHE_DIR`, `NLI_THUMB_CACHE_WIDTHS`, `NLI_THUMB_CACHE_MAX_MB`,
+  `NLI_THUMB_CACHE_MIN_FREE_MB`, `NLI_FL_ID_STORE_FILE` (docs/guides/ENV_VARS.md). Counters in
+  `/_internal/memstat` under `nli_image_store`.
+
+#### Not yet
+- The first view of manuscripts nobody opened in 30 days can still lose cards
+  in a large grid. Fetching thumbnails ahead of time, and whether the desktop
+  asks the server for thumbnails: docs/plans/NLI_THUMBNAIL_PREFETCH_PLAN.md.
+
+### A freer event loop: saves off the loop, lighter /browse page turns, one GC freeze, spread-out reloads after a restart (web, PR #430)
+
+The website serves every visitor from one event loop, and the 2026-10-20
+reliability review measured four things that held it: Supabase writes made on
+the loop, /browse rebuilding its whole content area two or three times per page
+turn, full garbage collections walking the startup data, and the reload burst
+open tabs set off after a restart. Each is changed here; none of it touches
+search.
+
+#### Fixed
+- **Saving no longer stops the site for everyone else.** List writes (create,
+  rename, move, delete, restore, empty trash, add, remove, notes, tags,
+  projects), comments, and /browse corrections and drafts ran their Supabase
+  round trip (~150 ms, Oregon to Frankfurt) on the event loop. They now run in
+  a worker with the visitor's own client, built on the loop. "Add all results to
+  a list" is one insert instead of one per row. A second Save Draft or Submit
+  waits for the first save and then runs, so a double click no longer writes two
+  drafts; a double-clicked comment posts once.
+- **A /browse page turn rebuilds the page twice, not three or four times.** The
+  spinner no longer clears the page: the previous page stays under it, dimmed
+  and inert, and the spinner floats over it without moving it. Phase B fills its
+  placeholders once (the version selector and its default-source choice ran
+  twice), and the whole manuscript's letters are counted once. Measured on the
+  test page: opening /browse cleared the content area 4 times, now 2; a Next
+  click 3 times, now 2. The line-number button no longer disappears when Phase
+  B lands.
+- **Element builds about a third faster on NiceGUI 3.18.** NiceGUI asked
+  `inspect.signature` for the same three functions on every element it built;
+  the answer is now remembered (1,204 elements: 102-110 ms to 64-67 ms median on
+  the dev box).
+- **Full garbage collections stop walking the startup data.** Once the startup
+  loaders finish, the site runs `gc.collect(); gc.freeze()` once, so the 0.6-0.84
+  M startup objects leave the collector (a full collection took 465-534 ms on
+  the loop in a real /browse run). `GENIZAH_GC_FREEZE=0` turns it off;
+  `/_internal/objgraph` reports the freeze count and can unfreeze for a leak
+  hunt (docs/guides/ENV_VARS.md).
+
+#### Added
+- **Reconnect backoff.** After a restart every open tab used to reload within
+  the same 5 seconds. A small script in every page's head now delays the reload
+  after a refused handshake, or after a second connect timeout, by a jittered
+  1.5 s, doubling per consecutive reload up to 60 s; a background tab waits
+  until it is viewed. NiceGUI's first timeout, its switch to long polling, is
+  untouched, and a page that reconnects is not reloaded for an old timeout.
+  Checked in headless Chromium against socket.io 4.8.1 with NiceGUI's own
+  connection code: with websockets hanging, 30 of 30 tabs connect over polling
+  with no reload, as without the script; hidden tabs whose handshake is refused
+  all reload when viewed. Settings: `RECONNECT_BACKOFF_ENABLED`,
+  `RECONNECT_BACKOFF_BASE_MS`, `RECONNECT_BACKOFF_CAP_MS`,
+  `RECONNECT_DELAY_MAX_MS` (unset: socket.io's own retry schedule). Handshake
+  outcomes are counted in `/_internal/memstat` under `handshakes` (a warning
+  when more than 30 unknown clients arrive in a minute), and the browser sends
+  a PostHog `reload_scheduled` event when it schedules a reload.
+
+#### Not yet
+- Phase B of a /browse page still rebuilds the whole content area once, instead
+  of filling only its own containers.
+- The /corrections page's save, approve and reject, the lists' `*_sync` helpers
+  and the comment dialog's shelfmark picker still call Supabase on the loop.
+- Found while reviewing, not changed: after a page turn in edit mode, the
+  correction editor keeps the previous page's text and draft (tracker, P2).
+- None of the above has been measured on the server yet. After the deploy: the
+  `[init] gc.freeze:` line, perf_watch's loop-lag lines, and, during the next
+  restart, `handshakes` in `/_internal/memstat` and `/browse` latency.
+
+### Responsa wildcard plan; new tracker rows as fragment files (ci, PR #428)
+
+- `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md` (Codex SHIP after four rounds): Responsa `*` as any
+  sequence of letters inside a word through the index's pattern lookup, `#` kept as the grammatical
+  list, whole words at the query's edges, `#word#` keeping its suffixes, pages first. Measured on
+  the local index. Decided by the owner: counts may change, and excluded words are checked on the
+  matched page only, in every mode; still provisional, pending Phase 0's numbers: how a word that starts with a star is
+  looked up (accept the cost, a reversed field, or a word list beside the index) and where
+  page-break matches come from under a star (seam documents, or none with a notice). No product
+  code.
+- `docs/open_issues.d/`: a newly found P1/P2/P3 bug is written as a file of its own, as
+  `changelog.d/` does for the changelog, so open PRs stop conflicting on the tracker's counts and
+  notes. `scripts/collect_open_issues.py --apply` folds the files in (rows, Quick Summary counts,
+  one count note); `tests/test_open_issues_fragments.py` validates every file; `scripts/init.ps1`
+  lists the pending ones. First fragment: the website's expanded result text highlights after
+  HTML-escaping (P3).
+- `scripts/run_local_tests.py` no longer crashes printing a failing chunk's Hebrew output on a
+  cp1252 console (the Windows CI runner), which had hidden the name of the failing test.
+
+### Responsa wildcards, Phase 0: the measurements (ci, PR #429)
+
+- `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md` gains §3.6, "Phase 0 results": a number, the command
+  that produced it, the machine and the wall time for each of the seven items of §7 Phase 0 -- the
+  reversed word list beside the index, bracket- and mark-tolerant pattern lookups and the pattern
+  size limit, scored term queries with 600 and 1,200 forms, the pages a brute-force scan finds for
+  `*נים *לים` that the index path misses, the junctions inside whole-manuscript and part documents
+  that are not consecutive pages, today's desktop timings for the §8 query set on both regex
+  engines, and the Hebrew-block punctuation kept inside index tokens. §9 records the owner's answers
+  to all nine decisions (2026-10-21, from those numbers): the reversed-words field and the seam
+  documents on one index rebuild, seams before true `*`; results ordered by the finite words' score;
+  150,000 candidate pages; bare stars refused; variants apply to star words; a star matches zero
+  letters. §7 is resequenced: Phase 1 whole words, Phase 2 the index format, Phase 3 true `*`. No
+  product code: nothing under `shared/`, `web/` or `desktop/` changes.
+- `scripts/measure_responsa_wildcards.py`: the measurement script, one subcommand per item, so the
+  owner can rerun it on a Linux worker (`--index-dir`, `--corpus-file`). Read-only on the index and
+  the corpus file; Hebrew goes to UTF-8 files, never to the console; the `*נים *לים` oracle is written
+  by hand (Exact's word predicate, a letters-only star) and imports neither `build_regex_pattern` nor
+  the compiler, as §8 gate 1 requires.
+
 ## [9.8.1] - 2026-10-21 — Reliability and sign-up
 
 Sign-up follows email confirmation on both apps, and a new account's username is never its

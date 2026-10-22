@@ -1,2 +1,0 @@
-### P3 - Low Priority
-| **Web: the expanded result text highlights after HTML-escaping, so words with ASCII quotes are not highlighted** | `web/pages/search_results.py:1007-1014` | ❌ Open (2026-10-21; found by Codex, reproduced) | `html.escape` runs before the pattern, so `"`/`'` are `&quot;`/`&#x27;` when matched: the mark-tolerant pattern for `רת` matches `ר"ת` in the raw text, not in the escaped one. Fix: match the raw text, escape around the spans. A prerequisite of `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md` Phase 1. |
