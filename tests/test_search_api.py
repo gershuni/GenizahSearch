@@ -535,6 +535,40 @@ def test_warnings_surfaced_at_top_level(monkeypatch, mock_meta_mgr, clean_env):
         state.searcher = saved
 
 
+def test_a_star_search_that_left_crossings_out_says_so_and_keeps_its_rows_clean(mock_meta_mgr, clean_env):
+    """Responsa Phase 3 (plan §7, point 8): crossings a star search left out by rule are
+    `results_cut_off` with the note under `query_downgraded:`, and the first row's own
+    markers (the term and pattern counts) never reach the response (the serializer picks
+    its fields; the endpoint also drops them, as it drops the term count)."""
+    from shared.search_engine import _note_search_cutoff, _set_last_responsa_downgrade
+    from web.state import state
+    note = 'Matches across a page break with more than 30 words on one side of it were not searched'
+
+    def search(*args, **kwargs):
+        _note_search_cutoff(partial=True)
+        _set_last_responsa_downgrade(note)
+        return [{'uid': 'uid_001',
+                 'display': {'shelfmark': 'X', 'title': 'Y', 'id': '9912345678901234', 'library_code': 'CUL'},
+                 'raw_header': 'header_9912345678901234_IE99_P7', 'snippet': 's', 'full_text': 't',
+                 'sort_score': 0.5, 'responsa_expanded_count': 1, 'responsa_pattern_count': 1}]
+    saved = state.searcher
+    fake = MagicMock()
+    fake.execute_search.side_effect = search
+    state.searcher = fake
+    try:
+        bare = FastAPI()
+        init_search_api(app_override=bare)
+        with TestClient(bare) as c:
+            r = c.post('/api/search', json={'query': 'מאמ* קור*', 'search_mode': 'responsa'})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert 'results_cut_off' in body['warnings']
+        assert f'query_downgraded: {note}' in body['warnings']
+        assert 'responsa_pattern_count' not in json.dumps(body['results'])
+    finally:
+        state.searcher = saved
+
+
 def test_zero_result_responsa_downgrade_warning_still_surfaced(monkeypatch, mock_meta_mgr, clean_env):
     """Concern #6: surface query_downgraded warnings even when results == [].
     The warning cannot live on results[0] because there is no results[0]."""

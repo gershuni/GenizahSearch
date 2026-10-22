@@ -3201,12 +3201,14 @@ class SearchEngine:
             out.append(cache[key])
         return out
 
-    def _seam_pages_text(self, span_map, content, cache):
+    def _seam_pages_text(self, span, slices, content, cache):
         """The text a crossing row from a seam stands for: the whole pages its span covers,
         joined by line breaks (a page not found keeps the seam's slice of it)."""
-        overlaps = span_map.get('overlaps') or []
-        texts = self._page_texts([(o.get('uid'), o.get('source', '')) for o in overlaps], cache)
-        return '\n'.join(t or '' for t in texts)
+        s, e = span
+        covered = [b for b in slices if not (e <= b.get('start', 0) or s >= b.get('end', 0))]
+        texts = self._page_texts([(b.get('uid'), b.get('source', '')) for b in covered], cache)
+        return '\n'.join(t or content[b.get('start', 0):b.get('end', 0)].rstrip('\n')
+                         for t, b in zip(texts, covered))
 
     def _seam_result_row(self, content, span, slices, pattern_str, score, cache, page_text=False):
         """The result row for a crossing found in a seam (scope 'seam'): shown as the page
@@ -3216,7 +3218,7 @@ class SearchEngine:
         primary = span_map.get('primary') or {}
         hl_c, hl_f = self._highlight_pair(content, span)
         meta = self.meta_mgr.get_display_data(primary.get('full_header', ''), primary.get('source', ''))
-        full_text = self._seam_pages_text(span_map, content, cache)
+        full_text = self._seam_pages_text(span, slices, content, cache)
         page_highlights = [{'uid': ov.get('uid'), 'p_num': ov.get('p_num'), 'span': ov.get('span'),
                             'full_header': ov.get('full_header', ''), 'source': ov.get('source', '')}
                            for ov in span_map.get('overlaps', []) if 'span' in ov and ov.get('uid')]
@@ -3240,8 +3242,8 @@ class SearchEngine:
         """Decision 2: a query whose every word holds a star has no score to order by, so
         its rows go by the matches on the row's page, most first (a row read through a
         whole manuscript or a seam counts one; a page row's count set as it was built,
-        ``_matches``, else counted on its text),
-        then by shelfmark. Stable: equal rows keep their order."""
+        ``_matches``, else counted on its text), then by shelfmark. Stable: equal rows keep
+        their order."""
         def matches(row):
             n = row.pop('_matches', None)
             if n is None:
@@ -4255,7 +4257,7 @@ class SearchEngine:
                     row = {'uid': primary.get('uid'), 'display': {'id': sys_id, 'source': source},
                            'scope': SEAM_SCOPE}
                     if _excluded is not None:
-                        row['_excluded'] = _excluded(self._seam_pages_text(span_map, content, _seam_pages))
+                        row['_excluded'] = _excluded(self._seam_pages_text(span, slices, content, _seam_pages))
                     results.append(row)
                 else:
                     results.append(self._seam_result_row(content, span, slices, pattern_str, score, _seam_pages,

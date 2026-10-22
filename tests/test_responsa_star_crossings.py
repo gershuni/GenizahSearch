@@ -103,6 +103,13 @@ def test_a_seam_row_carries_the_pages_it_covers_whole(engines):
     assert row['raw_header'] == f"{sid(101)}_{page(101)}"
 
 
+def test_a_page_the_main_index_does_not_give_keeps_the_seams_slice_of_it(engines, monkeypatch):
+    eng = engines['2']
+    monkeypatch.setattr(eng, '_page_texts', lambda pages, cache: ['', 'קורין סוף'])
+    row = by_uid(search(eng, 'מאמ* קור*')[0])[page(101)]
+    assert row['full_text'] == "פתיחה מאמתי\nקורין סוף"
+
+
 def test_seams_join_only_consecutive_pages_the_whole_manuscript_also_joins_the_v07_restart(engines):
     # Manuscript 105: its V0.8 page then its V0.7 copy, one whole-manuscript document.
     # Format 1 reads that junction (today's false junction, §3.6.5); the seams do not hold it.
