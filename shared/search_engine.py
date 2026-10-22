@@ -3842,6 +3842,10 @@ class SearchEngine:
                     # A -word excludes its letters from the page the row is (LOCAL rows
                     # are pages), as on the main index.
                     rows = _without_excluded(rows, list(exclude_words or []) + _local_compiled.negated_words)
+                    if _local_compiled.all_star and not ids_only:
+                        # Decision 2, as on the main path (Codex round 6 on PR #442).
+                        rows = self._order_all_star(rows, _local_compiled.compile_check(),
+                                                    not _query_has_brackets(query_str))
                     if _local_compiled.warning:
                         _set_last_responsa_downgrade(_local_compiled.warning)
                         if rows:

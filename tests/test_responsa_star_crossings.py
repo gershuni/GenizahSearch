@@ -383,3 +383,20 @@ def test_a_crossing_from_an_earlier_page_does_not_hide_the_next_pages_own(shadow
     rows = by_uid(search(shadow_engines[fmt], 'כהנ* [1] גדול*')[0])
     assert set(rows) == {uid(3401, 1), uid(3401, 2)}
     assert all(r['cross_page'] for r in rows.values())
+
+
+# --- My Library alone: the all-star order too (Codex round 6 on PR #442) ------------------
+
+def test_my_library_alone_orders_an_all_star_query_by_matches_on_the_page(engines, tmp_path):
+    from tests.test_search_cutoff_signal import _build as build_local
+    eng = engines['2']
+    local = build_local(str(tmp_path / 'local'), [('l1', 'שלום אבג', 'page', ''),
+                                                  ('l2', 'שלום שלומות שלומי', 'page', ''),
+                                                  ('l3', 'שלומך שלומות', 'page', '')])
+    saved = (getattr(eng, 'local_index', None), getattr(eng, 'local_searcher', None))
+    eng.local_index, eng.local_searcher = local, local.searcher()
+    try:
+        rows = eng.execute_search('שלו*', 'literal', 0, responsa_options=R, corpus_scope='local')
+    finally:
+        eng.local_index, eng.local_searcher = saved
+    assert [r['uid'] for r in rows] == ['l2', 'l3', 'l1']        # 3, 2 and 1 matches
