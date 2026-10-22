@@ -8,7 +8,8 @@ real data (0 differences) and its four named mutations each fail it; the "after"
 §3.6.6. **Phase 2 designed (2026-10-22, §6.1)**: the seams in their own index inside
 `tantivy_db/`, K = 30 words a side, runs plus Oxford part bridges (1,541,186 seams), the
 reversed-words field on every document, a format marker with today's routes as the fallback;
-**built locally 2026-10-22**: the whole index with both in 21.5 min, 15.10 GB (today's: 13.86 GB). Whether
+**built locally 2026-10-22**: the whole index with both in 21.7 min, 15.30 GB (today's: 13.86 GB);
+V0.8 only, as production holds it, 7.74 GB against 6.31 GB for format 1 built the same way. Whether
 today's crossings move to the seams is asked of the owner with numbers (§6.1 point 7). Phase 3 is not
 implemented. Plan revision 6: **all nine §9 decisions taken (2026-10-21)** and the phases
 resequenced -- Phase 1 unchanged (whole words on every path, no rebuild), **Phase 2 is the index
@@ -1007,7 +1008,8 @@ Scaled by 10.4 (1,984,237 / 190,521 pages), the format-1 sample predicts 13.1 GB
 index's 13.86 GB (13,861,494,833 bytes; "12.9 GB" elsewhere in this plan is GiB): the sample
 underestimates by 6%, largely because sampling folios breaks most Oxford parts. **Scaled the same
 way, the additions are +1.2 GB for the field on pages, +0.4 GB on the aggregates and +2.0 GB of
-seams: a full index of about 17.5 GB (+26%).** The seam index's bytes are mostly stored text
+seams: a full index of about 17.5 GB (+26%).** That was the prediction; the builds below measured
+less, because they also merge their segments. The seam index's bytes are mostly stored text
 (`.store` 37%) and postings (`.idx` 30%). The sample built 11% slower with both additions.
 
 **The full build** (2026-10-22, `build_index.py main --index-dir C:\Users\gersh\GenizahPhase2\index_v2`,
@@ -1022,6 +1024,18 @@ segment's term dictionary. So the field's own cost is the sample's (+1.6 GB scal
 whole format change costs +1.24 GB (+9%) against today's index as it stands. 1,984,237 page
 documents and 1,541,186 seams, as `seam-plan` counted; `browse_map.pkl` is byte-for-byte the size of
 today's (133,440,543 bytes).
+
+**The final build** (the code of the code PR, after the seam ids took the `sys_id`; 13:49:03 ->
+14:10:48, **21.7 min**, nothing else running, memory sampled every 2 s): **15.30 GB** (main 13.35 GB
+in 30 segments, seams 1.96 GB), peak working set 12.4 GB, private 10.1 GB. Two builds of the same
+code merge to different segment counts (19 and 30), so their sizes differ by 0.2 GB.
+
+**Like for like, V0.8 only** (production publishes V0.8 only; `build_index.py --v08-only`, each
+format built the same way, one after the other): **format 1 6.31 GB in 6.1 min; format 2 7.74 GB
+(main 6.81 + seams 0.94 GB) in 12.1 min.** The format costs **+1.43 GB (+23%)** and doubles the
+build time (the reversal of every document's words and the seams); private memory is the same
+(5.6 and 5.5 GB). Production's format-1 build took 869 s on 2026-08-16, so about 30 min is to be
+expected there (`DEPLOYMENT_TECHNICAL.md`, "Rebuild the main index in format 2").
 
 **9. The server rebuild and the desktop re-index** are part of Phase 2 (§7) and written up in
 `docs/guides/DEPLOYMENT_TECHNICAL.md`: build into a new folder beside the live one
@@ -1294,6 +1308,9 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
 - **Phase 2 design, round 3 (Codex on PR #438): one finding, folded in.** P2, the S > K rule sent
   a star query's crossings back to the whole-manuscript documents, against decision 9. A star
   query with S > K now reads pages and seams only and is marked incomplete (§6.1 point 2).
+- **Phase 2 design, round 4 (Codex on PR #438): one finding, folded in.** P2, the plans index still
+  gave the sample's +3.6 GB after the full build had measured less; it now gives the full build
+  and the like-for-like V0.8-only builds (+1.43 GB, +23%).
 - **Phase 0 round (Codex on PR #429, 2026-10-21): three findings, all folded in.** P1: the
   brute-force oracle's prefilter was a literal substring test, so a page whose ending held an
   internal bracket or mark (`נ[י]ם`, `נִים`) was skipped before the check ran; the prefilter now
