@@ -49,6 +49,8 @@ EXTRACTED_MODULES = [
     "shared/lists_manager.py",
     "shared/metadata_manager.py",
     "shared/indexer.py",             # Phase 124
+    "shared/index_seams.py",         # Responsa Phase 2 (2026-10-22): seams, reversed words
+    "shared/index_format.py",        # Responsa Phase 2 (2026-10-22): the format marker
     "shared/lab_settings.py",        # Phase 125b
     "shared/lab_engine.py",          # Phase 125c
     "shared/search_engine.py",       # Phase 125d
