@@ -1307,12 +1307,15 @@ def create_joins_lab_page(
     page_container = ui.column().classes('w-full flex-grow min-h-0')
 
     with page_container:
-        # Outer two-column flex (direction-aware)
-        with ui.element('div').classes(f'flex {direction_class} w-full min-h-0 flex-grow').style(
-            'align-items: flex-start;'
-        ) as two_col:
+        # Outer two-column flex (direction-aware). Under 1024px the three
+        # joins-lab-* classes stack it (common.css, "Joins Lab"): the anchor
+        # pane above the work column, each at the full width, the pane no
+        # longer sticky. The inline styles below are the desktop layout.
+        with ui.element('div').classes(
+            f'flex {direction_class} w-full min-h-0 flex-grow joins-lab-layout'
+        ).style('align-items: flex-start;') as two_col:
             # -- Anchor pane (sticky, 380 px wide) --
-            anchor_pane = ui.column().classes('gap-2').style(
+            anchor_pane = ui.column().classes('gap-2 joins-lab-anchor').style(
                 'width: 380px; flex-shrink: 0; position: sticky; top: 64px;'
                 ' max-height: calc(100vh - 80px); overflow-y: auto;'
             )
@@ -1321,7 +1324,7 @@ def create_joins_lab_page(
             # D-04: plain ui.column with NO hardcoded child structure so Phase
             # 118/119 can insert panels (known-joins, other-side builder, table)
             # without forcing a re-layout.
-            work_column = ui.column().classes('gap-4 p-4').style(
+            work_column = ui.column().classes('gap-4 p-4 joins-lab-work').style(
                 'flex: 1; min-width: 0;'
             )
 
@@ -1384,13 +1387,9 @@ def create_joins_lab_page(
         # (UI-SPEC §4)
         known_joins_container = ui.column().classes('w-full')
 
-    # -----------------------------------------------------------------------
-    # Narrow-screen collapsible anchor strip (D-03)
-    # Below 768 px the sticky pane is hidden and this strip replaces it.
-    # -----------------------------------------------------------------------
-    anchor_chip_label = ui.label('').classes('text-sm font-mono').style(
-        'color: var(--text-secondary);'
-    )
+    # The D-03 narrow-screen anchor strip was never built: its label rendered
+    # empty below the page, then the sys_id in monospace once an anchor
+    # loaded. Narrow screens now stack the real pane (see two_col above).
 
     # -----------------------------------------------------------------------
     # Builder: row-based builder (BLD-03) + Advanced options + Run Search
@@ -2657,9 +2656,6 @@ def create_joins_lab_page(
         if _vs_on['value']:
             # Schedule a re-fetch for the NEW anchor (fire-and-forget)
             asyncio.ensure_future(_do_vs_fetch_and_update(sys_id))
-
-        # Update anchor chip label (narrow screens)
-        anchor_chip_label.set_text(sys_id)
 
         # Build AnchorViewer in the anchor pane
         anchor_viewer_container.clear()

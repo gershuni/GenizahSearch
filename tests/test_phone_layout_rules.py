@@ -161,7 +161,66 @@ def test_the_search_toolbar_density_is_remembered_and_toggled_live():
     assert 'refs.results_list = _results_list' in results
 
 
+def test_joins_lab_stacks_its_anchor_pane_under_1024px():
+    """The anchor pane is a 380px sticky column by inline style, so only an
+    !important rule reaches it; under 1024px the stylesheet stacks it above
+    the work column (owner's screenshots, 2026-10-22: at 390px the builder
+    had 10px and its controls lay across the pane). The Compare window's two
+    panes stack on a phone the same way."""
+    src = _read('web/pages/joins_lab.py')
+    assert "'width: 380px; flex-shrink: 0; position: sticky; top: 64px;'" in src
+    assert 'anchor_chip_label' not in src, 'the never-built narrow-screen strip is gone'
+    rules = _phone_rules(_read('web/static/common.css'))
+    assert '.joins-lab-layout { flex-direction: column !important; align-items: stretch !important; }' in rules
+    anchor = rules[rules.index('.joins-lab-anchor {'):]
+    anchor = anchor[:anchor.index('}')]
+    for decl in ('position: static !important;', 'width: 100% !important;',
+                 'max-height: none !important;', 'overflow: visible !important;'):
+        assert decl in anchor, decl
+    assert '.joins-lab-work { flex: none !important;' in rules
+    assert '.joins-lab-anchor .anchor-transcription-panel { max-height: 45vh;' in rules
+    assert '.anchor-controls-bar .zoom-level-label { display: none !important; }' in rules
+    assert '.compare-panes > .nicegui-column { flex: 1 1 100% !important;' in rules
+
+
+def test_lists_stacks_its_sidebar_under_769px_and_scrolls_to_the_chosen_list():
+    """The My Lists tree is the splitter's 25% panel (97px on a 390px phone).
+    Under 769px the splitter stacks and the page scrolls; a tap on a list
+    then brings the list, rendered below the tree, into view."""
+    src = _read('web/pages/lists.py')
+    assert "ui.splitter(value=25).classes('w-full flex-grow lists-splitter')" in src
+    rules = _phone_rules(_read('web/static/common.css'), max_width=768)
+    assert '.lists-shell { height: auto !important;' in rules
+    assert '.lists-splitter.q-splitter--vertical { flex-direction: column !important; }' in rules
+    assert '.lists-splitter > .q-splitter__separator { display: none !important; }' in rules
+    panel = rules[rules.index('.lists-splitter > .q-splitter__panel {'):]
+    panel = panel[:panel.index('}')]
+    for decl in ('width: 100% !important;', 'height: auto !important;', 'flex: none !important;'):
+        assert decl in panel, decl
+    handler = src[src.index('def select_list('):src.index('def render_list_content(')]
+    render = handler.index('render_list_content(lists_mgr=lists_mgr, data=data, counts=counts)')
+    scroll = handler.index('scrollIntoView')
+    assert render < scroll, 'the list is rendered before it is scrolled to'
+    assert 'window.innerWidth <= 768' in handler
+    assert 'scroll-margin-top' in rules, 'the sticky header must not cover the list'
+    assert '.lists-item-actions { flex-direction: row !important;' in rules
+
+
+def test_dialog_cards_drop_their_minimum_width_on_a_small_phone():
+    """lists.py and project_tree.py give their dialogs min-w-[400px] and
+    min-w-[500px]; the 480px rule that makes a dialog full-screen must clear
+    that minimum too, or the card is wider than the screen."""
+    rules = _phone_rules(_read('web/static/common.css'), max_width=480)
+    card = rules[rules.index('.q-dialog .q-card {'):]
+    card = card[:card.index('}')]
+    assert 'min-width: 0 !important;' in card
+
+
 SHARED_HOOKS = {
+    'web/pages/joins_lab.py': ['joins-lab-layout', 'joins-lab-anchor', 'joins-lab-work'],
+    'web/components/compare_modal.py': ['compare-panes'],
+    'web/pages/lists.py': ['lists-shell', 'lists-splitter', 'lists-sidebar', 'lists-content',
+                           'lists-item-card', 'lists-item-actions'],
     'web/pages/search.py': ['search-shell', 'search-main-row', 'search-row-btn', 'search-adv-panel',
                             'search-filters-panel', 'results-header', 'results-count-group',
                             'results-export-group', 'results-more-btn', 'tb-hidden', 'density-toggle'],

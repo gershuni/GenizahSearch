@@ -645,6 +645,13 @@ def create_lists_page():
         _lists_task_probe('list_select_callback', list_id=list_id)
         page_state.selected_list_id = list_id
         render_list_content(lists_mgr=lists_mgr, data=data, counts=counts)
+        # Under 769px the list renders below the stacked tree (common.css,
+        # "Lists"), out of sight of the tap that chose it: bring it up.
+        ui.run_javascript(
+            'if (window.innerWidth <= 768) {'
+            f" const el = document.getElementById('c{list_content_container.id}');"
+            " if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'}); }"
+        )
 
     # --- Render List Content ---
     def render_list_content(lists_mgr=None, data=None, counts=None):
@@ -788,7 +795,10 @@ def create_lists_page():
                     if library_name:
                         display_shelfmark = f"{library_name}, {shelfmark}"
 
-                    with ui.card().classes('w-full p-4 hover:shadow-lg transition-shadow'):
+                    # lists-item-card / lists-item-actions: on a phone the action
+                    # icons are a row under the text, not a column beside it
+                    # (common.css, "Lists").
+                    with ui.card().classes('w-full p-4 hover:shadow-lg transition-shadow lists-item-card'):
                         with ui.row().classes('w-full justify-between items-start'):
                             # Main content
                             with ui.column().classes('flex-grow gap-2'):
@@ -812,7 +822,7 @@ def create_lists_page():
                                             ui.badge(tag).classes('bg-blue-100 text-blue-700')
 
                             # Actions
-                            with ui.column().classes('gap-1'):
+                            with ui.column().classes('gap-1 lists-item-actions'):
                                 # Browse button (at the item's page, when it is one page)
                                 ui.button(
                                     icon='menu_book',
@@ -971,7 +981,10 @@ def create_lists_page():
     # Signed-in only: anonymous visitors returned early above (sweep C2).
     # The "Move to account" card and dialog are gone: they copied the whole
     # server-wide anonymous store into one account and then wiped it.
-    with ui.column().classes('w-full h-[calc(100vh-120px)]'):
+    # lists-shell / lists-splitter / lists-sidebar / lists-content: under 769px
+    # the stylesheet stacks the splitter, the My Lists tree above the list,
+    # and lets the page scroll (common.css, "Lists").
+    with ui.column().classes('w-full h-[calc(100vh-120px)] lists-shell'):
         # Page Title
         with ui.row().classes('w-full items-center justify-between mb-4'):
             # Changed to H1
@@ -1004,14 +1017,14 @@ def create_lists_page():
         ui.label(tr('Your lists are synced across all your devices')).classes('mb-4').style('color: var(--text-secondary);')
 
         # Main Content: Sidebar + Content
-        with ui.splitter(value=25).classes('w-full flex-grow') as splitter:
+        with ui.splitter(value=25).classes('w-full flex-grow lists-splitter') as splitter:
             # Left: Lists Sidebar
             with splitter.before:
-                lists_sidebar_container = ui.column().classes('w-full h-full p-2')
+                lists_sidebar_container = ui.column().classes('w-full h-full p-2 lists-sidebar')
 
             # Right: List Content
             with splitter.after:
-                list_content_container = ui.column().classes('w-full h-full p-4')
+                list_content_container = ui.column().classes('w-full h-full p-4 lists-content')
 
     # Initial render
     render_lists_sidebar()

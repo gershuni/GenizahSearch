@@ -903,7 +903,9 @@ def create_compare_modal(
             # per-transcription inner scroll).  align-items:flex-start keeps the
             # panes at their natural heights (not stretched) so the row's scroll
             # length is the taller pane's content.
-            with ui.row().classes("w-full flex-grow min-h-0").style(
+            # compare-panes: below 641px the two panes stack, anchor above
+            # candidate (common.css, "Joins Lab").
+            with ui.row().classes("w-full flex-grow min-h-0 compare-panes").style(
                 "overflow-y:auto; flex:1; align-items:flex-start;"
             ):
                 # ── Anchor pane (left) ────────────────────────────────────────
