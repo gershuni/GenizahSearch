@@ -764,7 +764,7 @@ def test_restored_display_filters_are_checked_like_the_shared_ones(runs):
     assert page.word_search_excluded_ids == {'990004'}
 
 
-def test_a_live_run_is_found_only_while_it_runs(runs):
+def test_a_live_run_is_found_until_a_page_saves_it(runs):
     ss = runs
     page = _page_with_a_run(ss, rows=0)
     run = ss.start_search_run(page, _CODE)
@@ -775,11 +775,20 @@ def test_a_live_run_is_found_only_while_it_runs(runs):
 
         def done(self):
             return self.finished
+
+        def cancelled(self):
+            return False
+
+        def exception(self):
+            return None
     run.job = _Job()
     assert ss.live_search_run(_CODE) is run
     assert ss.live_search_run('other') is None
     run.job.finished = True
+    assert ss.live_search_run(_CODE) is run              # ended, not saved: still followed
+    ss.persist_search_active_snapshot(page)              # saved: restored, not followed
     assert ss.live_search_run(_CODE) is None
+    assert ss.get_search_active_snapshot(_CODE) != {}
 
 
 def test_a_rejoining_page_takes_the_runs_starting_state(runs):
@@ -792,3 +801,84 @@ def test_a_rejoining_page_takes_the_runs_starting_state(runs):
     assert back.pgp_filter == 'only_pgp' and back.printed_filter == 'hide_printed'
     assert back.exclusion_sources == ['a source']
     assert back.last_run['url_stamp'] == _CODE and back.last_run['page_mode'] == 'exact'
+
+
+def test_a_finished_run_no_page_saved_is_followed_not_searched_again(runs):
+    """Codex round 7 (P1): the job ended, the page that started it has not saved it
+    (or died on its deleted elements): Back takes its result instead of searching."""
+    ss = runs
+    run = ss.start_search_run(_page_with_a_run(ss, rows=0), _CODE)
+
+    class _Ended:
+        def done(self):
+            return True
+
+        def cancelled(self):
+            return False
+
+        def exception(self):
+            return None
+    run.job = _Ended()
+    assert ss.live_search_run(_CODE) is run
+    run.cancelled = True                     # stopped: its rows are not the list
+    assert ss.live_search_run(_CODE) is None
+
+
+def test_a_downgraded_run_with_no_rows_keeps_its_warning(runs):
+    """Codex round 7 (P2): with no rows, no first row carries the Responsa downgrade."""
+    ss = runs
+    page = _page_with_a_run(ss, rows=0)
+    page.responsa_warning = 'Spelling variants disabled'
+    ss.persist_search_active_snapshot(page)
+    back = ss.SearchUIState()
+    assert ss.restore_search_active_snapshot(back, _CODE)
+    assert back.results == [] and back.responsa_warning == 'Spelling variants disabled'
+
+
+def test_a_run_without_a_saved_warning_takes_its_first_rows():
+    from web.pages.search_state import SearchUIState, restore_search_active_snapshot
+    from web import search_runs
+    import web.pages.search_state as ss
+    search_runs.clear()
+    rows = [{'display': {'id': 'r'}, 'responsa_warning': 'from the row'}]
+    search_runs.finish_run('browser-1', _CODE, {'version': ss._SEARCH_RUN_SNAPSHOT_VERSION, 'results': rows})
+    try:
+        from unittest.mock import patch
+        with patch.object(ss, '_browser_id', lambda: 'browser-1'):
+            page = SearchUIState()
+            assert restore_search_active_snapshot(page, _CODE)
+        assert page.responsa_warning == 'from the row'
+    finally:
+        search_runs.clear()
+
+
+def test_a_page_back_on_a_run_shows_that_runs_controls():
+    """Codex round 7 (P2): gap, NOT-words, position and variant level are not in the
+    address; restored or followed, the page shows the run's, not the shared ones."""
+    import ast
+    func = _function(_search_page_tree(), 'create_search_page')
+    guarded = [node for node in func.body
+               if isinstance(node, ast.If) and ast.unparse(node.test) == "bootstrap_state['restore_run_filters']"
+               and any(ast.unparse(s).strip() == '_show_run_controls(search_state.last_run)' for s in node.body)]
+    assert len(guarded) == 1
+    shown = ast.unparse(_function(_search_page_tree(), '_show_run_controls'))
+    for control in ('gap_input.value', 'not_filter.value', 'text_position_select.value',
+                    'variant_slider.value', 'max_changes_select.value', "current_preset['value']"):
+        assert control in shown, control
+    source = ast.unparse(func)
+    assert ("results_count.text = f\"0 {tr('Results')}{_downgrade_suffix()}\"" in source
+            or "results_count.text = f'0 {tr('Results')}{_downgrade_suffix()}'" in source)
+
+
+def test_the_page_restore_keeps_a_zero_row_runs_warning(runs):
+    """Through restore_search_snapshot (what the page calls), not only the helper."""
+    from unittest.mock import patch
+    ss = runs
+    page = _page_with_a_run(ss, rows=0)
+    page.responsa_warning = 'Spelling variants disabled'
+    ss.persist_search_active_snapshot(page)
+    with patch.object(ss, 'safe_user_get', lambda key, default=None: {'search_snapshot_schema_version': 1}.get(key, default)), \
+            patch.object(ss, 'safe_user_set', lambda key, value: True):
+        back = ss.SearchUIState()
+        ss.restore_search_snapshot(back, _CODE)
+    assert back.results == [] and back.responsa_warning == 'Spelling variants disabled'

@@ -50,13 +50,26 @@ class SearchRun:
 
     @property
     def running(self) -> bool:
-        """The search is still running: a page may wait for it."""
+        """The search is still running."""
         return not self.done and self.job is not None and not self.job.done()
 
     @property
+    def attachable(self) -> bool:
+        """A page reached by Back can follow it: it still runs, or it ended with a
+        result that no page has saved yet (the page that started it is still
+        finishing it, or died on its deleted elements) -- following it then takes
+        that result at once instead of searching again (Codex, PR #436). Not a
+        stopped run, nor one whose job failed."""
+        if self.done or self.job is None or self.cancelled:
+            return False
+        if not self.job.done():
+            return True
+        return not self.job.cancelled() and self.job.exception() is None
+
+    @property
     def failed(self) -> bool:
-        """It ended without a snapshot (an error, or a page that never finished it)."""
-        return not self.done and (self.job is None or self.job.done())
+        """It ended without a snapshot and cannot be followed."""
+        return not self.done and not self.attachable
 
 
 _runs: 'OrderedDict[tuple[str, str], SearchRun]' = OrderedDict()

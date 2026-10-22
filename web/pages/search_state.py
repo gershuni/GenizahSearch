@@ -397,6 +397,8 @@ def search_run_snapshot(state: 'SearchUIState', *, with_results: bool = True) ->
         'search_refinement_chain': [s.to_dict() for s in (state.refinement_chain or [])],
         'last_variant_settings': state.last_variant_settings,
         'last_run': dict(state.last_run) if isinstance(state.last_run, dict) else None,
+        # The Responsa guard's downgrade: with no rows, no first row carries it.
+        'responsa_warning': state.responsa_warning,
         **_post_filters(state),
     }
 
@@ -414,9 +416,10 @@ def get_search_active_snapshot(stamp: Optional[str] = None) -> dict:
 
 
 def live_search_run(stamp: Optional[str]) -> Optional['search_runs.SearchRun']:
-    """This browser's run *stamp* while its search is still running, else None."""
+    """This browser's run *stamp* while a page can follow it (still running, or
+    ended with a result not saved yet: SearchRun.attachable), else None."""
     run = search_runs.get_run(_browser_id(), stamp)
-    return run if run is not None and run.running else None
+    return run if run is not None and run.attachable else None
 
 
 def start_search_run(state: 'SearchUIState', stamp: str) -> 'search_runs.SearchRun':
@@ -456,6 +459,8 @@ def restore_search_active_snapshot(state: 'SearchUIState', stamp: Optional[str] 
     state.exclusion_sources = raw.get('search_exclusion_sources', []) or []
     state.last_variant_settings = _settings_or_none(raw.get('last_variant_settings'))
     state.last_run = _settings_or_none(raw.get('last_run'))
+    warning = raw.get('responsa_warning')
+    state.responsa_warning = warning if isinstance(warning, str) and warning else responsa_note_of(state.results)
     restore_post_filters(state, raw)
     return True
 
@@ -564,8 +569,7 @@ def restore_search_snapshot(state: 'SearchUIState', stamp: Optional[str] = None)
         # A restored result set brings its downgrade note back with it, on either
         # path (Codex review of PR #433).
         if restore_search_active_snapshot(state, stamp):
-            state.responsa_warning = responsa_note_of(state.results)
-            return
+            return  # the run's snapshot set responsa_warning (kept even with no rows)
         state.results = safe_user_get('search_results', []) or []
         state.responsa_warning = responsa_note_of(state.results)
         state.result_count_capped = bool(safe_user_get('search_result_count_capped', False))

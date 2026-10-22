@@ -6293,6 +6293,32 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if initial_bidirectional:
             bidirectional_cb.value = True
 
+    def _show_run_controls(run):
+        """The controls a run was searched with that its address does not carry -- gap,
+        NOT-words, text position, variant level and Num Changes -- so a page restoring
+        or following it shows (and, on Search, runs) that run, not the shared settings
+        (Codex, PR #436). No change event: the shared preferences stay as they were."""
+        if not isinstance(run, dict):
+            return
+        try:
+            gap_input.value = int(run.get('gap') or 0)
+        except (TypeError, ValueError):
+            pass
+        not_filter.value = ' '.join(str(w) for w in (run.get('exclude_words') or []))
+        text_position_select.value = run.get('text_position') or 'anywhere'
+        settings = run.get('variant_settings') if isinstance(run.get('variant_settings'), dict) else {}
+        pairs = settings.get('variant_pairs_count')
+        if isinstance(pairs, int):
+            current_preset['value'] = pairs
+            if variant_slider:
+                variant_slider.value = pairs
+        if max_changes_select and isinstance(settings.get('variant_max_changes'), int):
+            max_changes_select.value = settings['variant_max_changes']
+
+    # A Back to a run (restored, or followed while it runs): its own controls.
+    if bootstrap_state['restore_run_filters']:
+        _show_run_controls(search_state.last_run)
+
     # Handle tag search — switch UI to PGP Tags mode and show the selected tag
     if initial_tag:
         mode_select.value = 'pgp_tags'
@@ -6450,7 +6476,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         ui.notify(tr('Session restored'), type='info', timeout=3000, position='top')
     elif restore_saved_results and bootstrap_state['restore_run_filters']:
         # Back to a run that found nothing: it ran, and it is shown as it was.
-        results_count.text = f"0 {tr('Results')}"
+        results_count.text = f"0 {tr('Results')}{_downgrade_suffix()}"
         render_results([])
     elif initial_query:
         _ux_url_start['nav'] = True

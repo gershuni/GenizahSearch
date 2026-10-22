@@ -18,11 +18,18 @@ def _empty():
 
 
 class _Job:
-    def __init__(self, done=False):
-        self._done = done
+    """A job as SearchRun reads it: done(), and how it ended."""
+    def __init__(self, done=False, error=None, cancelled=False):
+        self._done, self._error, self._cancelled = done, error, cancelled
 
     def done(self):
         return self._done
+
+    def cancelled(self):
+        return self._cancelled
+
+    def exception(self):
+        return self._error
 
 
 def test_a_run_is_kept_for_its_browser_only():
@@ -33,15 +40,24 @@ def test_a_run_is_kept_for_its_browser_only():
     assert sr.get_run(None, 'code1') is None and sr.get_run('browser-a', None) is None
 
 
-def test_running_done_and_failed():
+def test_running_attachable_done_and_failed():
     run = sr.start_run('b', 'c', {})
-    assert not run.running and run.failed            # no job yet: nothing to wait for
+    assert not run.running and not run.attachable and run.failed   # no job yet
     run.job = _Job(done=False)
-    assert run.running and not run.failed
-    run.job = _Job(done=True)                        # ended without a snapshot
-    assert not run.running and run.failed
+    assert run.running and run.attachable and not run.failed
+    # Ended with a result no page has saved yet: a Back takes it instead of
+    # searching again (Codex, PR #436, round 7).
+    run.job = _Job(done=True)
+    assert not run.running and run.attachable and not run.failed
+    run.job = _Job(done=True, error=RuntimeError('worker died'))
+    assert not run.attachable and run.failed
+    run.job = _Job(done=True, cancelled=True)
+    assert not run.attachable and run.failed
+    run.job = _Job(done=True)
+    run.cancelled = True                                # Stop: its rows are not the list
+    assert not run.attachable and run.failed
     sr.finish_run('b', 'c', {'results': [1]})
-    assert run.done and not run.running and not run.failed
+    assert run.done and not run.running and not run.attachable and not run.failed
     assert sr.get_run('b', 'c').snapshot == {'results': [1]}
 
 
@@ -109,12 +125,23 @@ def test_codes_are_random_and_url_safe():
     assert all(c and all(ch.isalnum() or ch in '-_' for ch in c) for c in codes)
 
 
-def test_a_real_future_drives_running():
+def test_real_futures_drive_running_and_attachable():
     async def scenario():
         loop = asyncio.get_running_loop()
         run = sr.start_run('b', 'c', {})
         run.job = loop.create_future()
-        assert run.running
+        assert run.running and run.attachable
         run.job.set_result([])
-        assert not run.running and run.failed     # done, but no page saved it
+        assert not run.running and run.attachable     # done, no page saved it yet
+
+        failed = sr.start_run('b', 'd', {})
+        failed.job = loop.create_future()
+        failed.job.set_exception(RuntimeError('boom'))
+        assert failed.failed and not failed.attachable
+        failed.job.exception()                        # retrieved: no "never retrieved" warning
+
+        gone = sr.start_run('b', 'e', {})
+        gone.job = loop.create_future()
+        gone.job.cancel()
+        assert gone.failed and not gone.attachable
     asyncio.run(scenario())
