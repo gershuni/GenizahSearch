@@ -1037,10 +1037,14 @@ build time (the reversal of every document's words and the seams); private memor
 (5.6 and 5.5 GB). Production's format-1 build took 869 s on 2026-08-16, so about 30 min is to be
 expected there (`DEPLOYMENT_TECHNICAL.md`, "Rebuild the main index in format 2").
 
-**9. The server rebuild and the desktop re-index** are part of Phase 2 (§7) and written up in
-`docs/guides/DEPLOYMENT_TECHNICAL.md`: build into a new folder beside the live one
-(`build_index.py main --index-dir ...`), check it, swap the folders with the web app stopped, and
-keep the old folder to roll back. The owner runs it.
+**9. The server rebuild and the desktop re-index** are part of Phase 2 (§7), written up in
+`docs/guides/DEPLOYMENT_TECHNICAL.md` ("Rebuild the main index in format 2") by the code PR,
+#440: build into a new folder beside the live one (`build_index.py main --index-dir ...
+--v08-only`), check it, swap the folders with the restart, and keep the old folder to roll back.
+The owner runs it. **These options and the runbook arrive with #440:** until it lands,
+`build_index.py` has no `--index-dir` (it reads only its first argument) and rebuilds the live
+`Genizah_Index/tantivy_db` in place, so nothing here is to be run from this PR alone (Codex
+round 5). The builds measured in point 8 used #440's code.
 
 **10. Gates for Phase 2**, each shown red under the named mutation:
 - (a) `measure_responsa_wildcards.py seam-topology`: every junction inside a seam is consecutive
@@ -1311,6 +1315,10 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
 - **Phase 2 design, round 4 (Codex on PR #438): one finding, folded in.** P2, the plans index still
   gave the sample's +3.6 GB after the full build had measured less; it now gives the full build
   and the like-for-like V0.8-only builds (+1.43 GB, +23%).
+- **Round 5: one finding, folded in.** P2, point 9 named `build_index.py --index-dir`, which
+  exists only in the code PR (#440): run from this PR alone, `build_index.py` would ignore the
+  option and rebuild the live index in place. Point 9 now says the options and the runbook arrive
+  with #440.
 - **Phase 0 round (Codex on PR #429, 2026-10-21): three findings, all folded in.** P1: the
   brute-force oracle's prefilter was a literal substring test, so a page whose ending held an
   internal bracket or mark (`נ[י]ם`, `נִים`) was skipped before the check ran; the prefilter now
