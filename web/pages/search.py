@@ -35,6 +35,7 @@ from web.pages.search_state import (
     compact_result_rows, preview_shows_final_rows, engine_mode,
     run_filter_state, apply_run_filter_state, save_post_filters_with_run,
     live_search_run, start_search_run, url_stamp_of, apply_run_start_snapshot, save_search_run,
+    discard_search_run,
 )
 from web import search_runs
 from web.pages.search_results import (
@@ -214,10 +215,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _safe_get('search_last_run', None)
     )
     # The run in the address while its search still runs (left before it finished):
-    # the page waits for it instead of starting it again. A search within is not
-    # rejoined: its chain is not part of what a run keeps when it starts.
+    # the page waits for it instead of starting it again. A scoped run (a search within,
+    # a visual-similarity set) is not followed: its scope is not in the address.
     _live_run = live_search_run(initial_run)
-    if _live_run is not None and _live_run.refine:
+    if _live_run is not None and _live_run.scoped:
         _live_run = None
 
     bootstrap_state = resolve_search_bootstrap(
@@ -5369,7 +5370,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             stamp = search_runs.new_stamp()
             search_state.last_run = {**search_state.last_run, 'url_stamp': stamp}
             search_run = start_search_run(search_state, stamp)
-            _show_search_url(clean_query, mode, stamp)
+            if not search_run.scoped:
+                # A scoped run's address is stamped when it is saved (the end of the
+                # search): a Back before that returns to the address it was started from.
+                _show_search_url(clean_query, mode, stamp)
         _page_run['run'] = search_run
         # The page that started the run, or the page a Back brought to it later, saves
         # it (its snapshot, the history entry); another page following it only shows it.
@@ -5507,6 +5511,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             def _stop_before_running():
                 # Undo the "searching" UI set above: no run will clear it.
+                discard_search_run(search_state)
                 search_state.is_running = False
                 search_state.is_cancelled = False
                 search_btn.style('display: inline-flex;')
@@ -5548,6 +5553,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # If effective restriction matches nothing, show message and return
         if effective_restrict is not None and len(effective_restrict) == 0:
             ui.notify(tr("No manuscripts match the current filters."), type='warning')
+            discard_search_run(search_state)
             search_state.is_running = False
             search_state.is_cancelled = False
             search_btn.style('display: inline-flex;')
@@ -5715,6 +5721,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Handle validation errors from explosion guard (returned as sentinel dict
         # because run_core_search runs in io_bound thread and cannot call ui.notify)
         if isinstance(results, dict) and 'error' in results:
+            discard_search_run(search_state)  # nothing to come back to: Back searches again
             error_msg = results['error']
             if error_msg == 'search_budget_exceeded':
                 error_msg = (

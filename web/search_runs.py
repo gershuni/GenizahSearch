@@ -43,7 +43,10 @@ class SearchRun:
     done: bool = False
     job: Any = None                   # the research call's future while the search runs
     cutoff: Optional[dict] = None     # the run's cut-off signals, filled when the job ends
-    refine: bool = False              # a search within: its page state is not rebuilt for a rejoin
+    # Searched within a scope its address does not carry (a search within, a visual-
+    # similarity set): never followed by a page reached by Back -- that page could not
+    # rebuild the scope -- and its address is stamped only once it is saved (Codex, PR #436).
+    scoped: bool = False
     cancelled: bool = False           # Stop from any page following the run
     watchers: list = field(default_factory=list)   # search states shown this run's progress
     owner: Any = None                 # the search state that saves the run (the last to take it)
@@ -61,7 +64,7 @@ class SearchRun:
         that started it is still finishing it, or died on its deleted elements) --
         following it then takes that result at once instead of searching again
         (Codex, PR #436). Not a stopped run, nor one whose job failed."""
-        if self.done or self.cancelled:
+        if self.done or self.cancelled or self.scoped:
             return False
         if self.job is None or not self.job.done():
             return True
@@ -81,9 +84,9 @@ def new_stamp() -> str:
     return secrets.token_urlsafe(6)
 
 
-def start_run(browser_id: str, stamp: str, snapshot: dict, *, refine: bool = False) -> SearchRun:
+def start_run(browser_id: str, stamp: str, snapshot: dict, *, scoped: bool = False) -> SearchRun:
     """Register a run as it starts; *snapshot* holds what is known then (its search)."""
-    run = SearchRun(browser_id=browser_id, stamp=stamp, snapshot=dict(snapshot), refine=refine)
+    run = SearchRun(browser_id=browser_id, stamp=stamp, snapshot=dict(snapshot), scoped=scoped)
     _runs[(browser_id, stamp)] = run
     _runs.move_to_end((browser_id, stamp))
     _prune()
@@ -123,6 +126,13 @@ def finish_run(browser_id: Optional[str], stamp: Optional[str], snapshot: dict) 
     _runs.move_to_end((browser_id, stamp))
     _prune()
     return run
+
+
+def discard_run(browser_id: Optional[str], stamp: Optional[str]) -> None:
+    """Forget a run that ended without being saved (stopped before it ran, an error, or
+    session persistence off): nothing of it -- its job's rows, its page -- stays kept."""
+    if browser_id and stamp:
+        _runs.pop((browser_id, stamp), None)
 
 
 def update_run(browser_id: Optional[str], stamp: Optional[str], **fields) -> bool:

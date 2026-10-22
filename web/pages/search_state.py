@@ -425,7 +425,7 @@ def live_search_run(stamp: Optional[str]) -> Optional['search_runs.SearchRun']:
 def start_search_run(state: 'SearchUIState', stamp: str) -> 'search_runs.SearchRun':
     """Register the search *state* is starting under *stamp* (already in its last_run)."""
     return search_runs.start_run(_browser_id() or '', stamp, search_run_snapshot(state, with_results=False),
-                                 refine=bool(state._refine_mode))
+                                 scoped=bool(state._refine_mode or state.vs_restrict_sys_ids))
 
 
 def apply_run_start_snapshot(state: 'SearchUIState', raw: dict) -> None:
@@ -533,10 +533,20 @@ def persist_search_active_snapshot(state: 'SearchUIState') -> None:
         pass
 
 
+def discard_search_run(state: 'SearchUIState') -> None:
+    """The search *state* shows ended without a save: forget its run (web/search_runs.py)."""
+    try:
+        search_runs.discard_run(_browser_id(), url_stamp_of(state))
+    except Exception:
+        pass
+
+
 def save_search_run(state: 'SearchUIState') -> None:
     """A search's own save at its end: its rows are in *state* now, so its run is done.
-    (Like the user-storage copy, nothing is kept when session persistence is off.)"""
+    With session persistence off nothing is kept, as for the user-storage copy: the
+    run is forgotten (its job's rows and its page are let go of too -- Codex, PR #436)."""
     if not safe_user_get('session_persistence_enabled', True):
+        discard_search_run(state)
         return
     stamp = url_stamp_of(state)
     if not stamp:

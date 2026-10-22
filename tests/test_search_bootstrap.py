@@ -946,12 +946,17 @@ def test_an_incidental_save_never_finishes_an_unfinished_run(runs, monkeypatch):
 
 
 def test_the_search_own_save_respects_session_persistence(runs, monkeypatch):
+    """Persistence off: nothing kept -- and the run is forgotten, not left unfinished
+    holding its job's rows and its page for 30 minutes (Codex, PR #436, round 10)."""
+    from web import search_runs
     ss = runs
     monkeypatch.setattr(ss, 'safe_user_get', lambda key, default=None: False
                         if key == 'session_persistence_enabled' else default)
     page = _page_with_a_run(ss, rows=1)
+    ss.start_search_run(page, _CODE)
     ss.save_search_run(page)
     assert ss.get_search_active_snapshot(_CODE) == {}
+    assert search_runs.get_run('browser-1', _CODE) is None
 
 
 def test_the_run_is_registered_before_the_search_first_awaits():
@@ -972,3 +977,32 @@ def test_the_search_end_paths_save_its_run():
     import ast
     source = ast.unparse(_function(_search_page_tree(), 'execute_search'))
     assert source.count('save_search_run(search_state)') == 2   # completed, and stopped
+
+
+def test_search_within_and_visual_similarity_runs_are_scoped(runs):
+    """Codex round 10 (P1 x2): neither scope is in the address, so such a run is never
+    followed (a Back page would search without it)."""
+    ss = runs
+    within = _page_with_a_run(ss, rows=0)
+    within._refine_mode = True
+    assert ss.start_search_run(within, 'w').scoped is True
+    similar = _page_with_a_run(ss, rows=0)
+    similar.vs_restrict_sys_ids = {'990001'}
+    assert ss.start_search_run(similar, 'v').scoped is True
+    plain = _page_with_a_run(ss, rows=0)
+    run = ss.start_search_run(plain, _CODE)
+    assert run.scoped is False and ss.live_search_run(_CODE) is run
+    assert ss.live_search_run('w') is None and ss.live_search_run('v') is None
+
+
+def test_a_scoped_run_stamps_its_address_only_when_saved_and_early_ends_forget_runs():
+    import ast
+    func = _function(_search_page_tree(), 'execute_search')
+    guarded = [node for node in ast.walk(func)
+               if isinstance(node, ast.If) and ast.unparse(node.test) == 'not search_run.scoped']
+    assert len(guarded) == 1
+    assert any(ast.unparse(s).startswith('_show_search_url(clean_query, mode, stamp)') for s in guarded[0].body)
+    source = ast.unparse(func)
+    assert source.count('discard_search_run(search_state)') == 3   # stopped before running, no match, error
+    stop = ast.unparse(_function(_search_page_tree(), '_stop_before_running'))
+    assert 'discard_search_run(search_state)' in stop

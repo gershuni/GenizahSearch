@@ -159,3 +159,20 @@ def test_a_saved_run_lets_go_of_its_job_and_page():
     assert run.job is None and run.owner is None and run.watchers == []
     assert run.cutoff == {'capped': True}       # a page still finishing it reads these
     assert run.done and not run.attachable and not run.failed
+
+
+def test_a_scoped_run_is_never_followed():
+    """Codex round 10: a search within, or a visual-similarity set, is a scope the
+    address does not carry; a page reached by Back could not rebuild it."""
+    run = sr.start_run('b', 'c', {}, scoped=True)
+    assert not run.attachable
+    run.job = _Job(done=False)
+    assert run.running and not run.attachable
+
+
+def test_a_discarded_run_is_gone():
+    sr.start_run('b', 'c', {})
+    sr.discard_run('b', 'c')
+    assert sr.get_run('b', 'c') is None
+    sr.discard_run('b', 'missing')        # nothing to forget: no error
+    sr.discard_run(None, None)
