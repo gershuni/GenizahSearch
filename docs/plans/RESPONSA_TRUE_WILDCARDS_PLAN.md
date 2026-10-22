@@ -1217,7 +1217,9 @@ today's finite crossings to the seams (decision 10).
 4. **OR groups and inline alternation take stars**: `(כהנ*/לוי)`, `(כהנ/גדול)*`, `כה(נ/ן)*`;
    each alternative is its own form, finite or starred.
 5. **A negated star word** (`-כ*נים`) excludes a page whose text holds letters matching it
-   anywhere (decision 7's letters-anywhere rule, the star as letters): `-כהנ*` is `-כהנ`.
+   anywhere (decision 7's letters-anywhere rule, the star as letters): `-כהנ*` is `-כהנ`. With
+   `%` each run takes its plene/defective spellings, as in a positive word (`-%כ*נים` excludes
+   `כנם` too; Codex review of PR #443).
 6. **Retrieval per form.** A word that begins with a letter: a forward pattern on
    `content_search` (the term-dictionary walk is pruned by its first letters), on both formats.
    (Second PR: a leading star and a letter at the end through the reversed-words field on format 2,

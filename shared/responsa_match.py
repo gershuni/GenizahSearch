@@ -47,6 +47,7 @@ star is refused with a message, as is a word made of stars alone (decision 4).
 
 import functools
 import re
+import sys
 import unicodedata
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -603,12 +604,13 @@ def exact_start(first=None):
 @functools.lru_cache(maxsize=1)
 def star_class():
     """What a star takes (plan §4): letters of any script and the looked-past
-    characters (marks, in-word quotes, brackets), over the Basic Multilingual Plane, as
-    one explicit class -- never a digit, ``_``, space or punctuation, which Exact's
-    predicate would let a word go on through or end it at. The same in ``re`` and the
-    ``regex`` module (their ``\\w`` differ)."""
+    characters (marks, in-word quotes, brackets), over all of Unicode (the planes past
+    the first too: Codex review of PR #443), as one explicit class -- never a digit,
+    ``_``, space or punctuation, which Exact's predicate would let a word go on through
+    or end it at. The same in ``re`` and the ``regex`` module (their ``\\w`` differ).
+    Built once, in about 0.1 s."""
     points = set()
-    for cp in range(0x10000):
+    for cp in range(sys.maxunicode + 1):
         cat = unicodedata.category(chr(cp))
         if cat[0] in ('L', 'M'):
             points.add(cp)
@@ -1251,13 +1253,20 @@ class StarExclusion(str):
     """A negated word with a star inside (``-כ*נים``): a page is excluded where letters
     matching it stand anywhere, inside a word or not (decision 7's letters-anywhere
     rule, the star as letters; plan §7, Phase 3 point 5). A str, so the lists of
-    excluded words it travels in still print and join."""
+    excluded words it travels in still print and join. *runs*: each run's forms (with
+    ``%``, its plene/defective spellings), the typed run alone by default."""
+
+    def __new__(cls, value, runs=None):
+        obj = super().__new__(cls, value)
+        obj.runs = tuple(runs) if runs is not None else tuple((seg,) for seg in value.split('*'))
+        return obj
 
     def found_in(self, text):
         rx = getattr(self, '_rx', None)
         if rx is None:
-            rx = self._rx = re.compile((star_class() + '*').join(re.escape(seg) for seg in self.split('*')),
-                                       re.IGNORECASE)
+            pieces = ['(?:' + '|'.join(re.escape(f) for f in sorted(forms, key=len, reverse=True)) + ')'
+                      for forms in self.runs]
+            rx = self._rx = re.compile((star_class() + '*').join(pieces), re.IGNORECASE)
         return rx.search(text) is not None
 
 
@@ -1275,7 +1284,12 @@ def negated_words(components):
             if not core:
                 continue
             if '*' in core:
-                out.append(StarExclusion(core))
+                # %'s spellings on every run between the stars, as for a positive star
+                # word (point 2; Codex review of PR #443).
+                runs = [tuple(dict.fromkeys([seg] + (expand_plene_defective(seg)
+                                                     if comp.plene_defective and seg else [])))
+                        for seg in core.split('*')]
+                out.append(StarExclusion(core, runs))
                 continue
             out.append(core)
             if comp.plene_defective:

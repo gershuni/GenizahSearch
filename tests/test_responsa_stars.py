@@ -190,6 +190,7 @@ def test_star_word_is_the_prefix_list_and_star_word_star_is_hash_word_hash():
     ('שלום*', 'שלומות רבות', 'שלומות'),                         # a final letter before a star
     ('שלומ*', 'שלום רב', 'שלום'),                               # and a medial one
     ('כ*נ*', 'שם כאנות שם', 'כאנות'),
+    ('כ*נים', 'שם כ\U00010400נים שם', 'כ\U00010400נים'),     # a letter past the first plane
     ('(כהנ*/לוי) גדול', 'לוי גדול', 'לוי גדול'),
     ('(כהנ*/לוי) גדול', 'כהניא גדול', 'כהניא גדול'),
 ])
@@ -202,6 +203,14 @@ def test_the_highlight_marks_the_star_word(runtime):
     c = _compiled('מאמ* קור*')
     rx = re.compile(c.highlight_pattern, re.I) if runtime == 're' else regex.compile(c.highlight_pattern, regex.I)
     assert [m.group(0) for m in rx.finditer('אמר מאמתי קורין את')] == ['מאמתי קורין']
+
+
+def test_a_negated_star_word_takes_its_plene_and_defective_spellings_with_percent():
+    # Codex review of PR #443: -%כ*נים excludes כנם too, as %כ*נים finds it (point 2).
+    ex, = _compiled('כהנים -%כ*נים').negated_words
+    assert ex.found_in('שם כנם') and ex.found_in('שם כוהנים')
+    plain, = _compiled('כהנים -כ*נים').negated_words
+    assert not plain.found_in('שם כנם') and plain.found_in('שם כוהנים')
 
 
 def test_a_negated_star_word_excludes_letters_matching_it_anywhere():
