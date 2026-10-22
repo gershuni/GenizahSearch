@@ -3232,6 +3232,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Phase 56: Clear exclusion sources
         search_state.exclusion_sources = []
         _update_exclude_btn()
+        # The run the page showed is forgotten and the address loses it, so a refresh
+        # or a Back cannot bring the cleared results back (Codex, PR #436).
+        discard_search_run(search_state)
+        search_state.last_run = None
+        try:
+            ui.run_javascript("history.replaceState(null, '', '/search')")
+        except Exception:
+            pass  # JavaScript execution failed; non-fatal UI glitch
         # Reset persistent storage to clean defaults (Phase 74: via helper).
         # search_query/search_mode are bootstrap-input keys NOT owned by the helper;
         # keep their UX-driven writes here to wipe the query bar on New Search.
@@ -5858,6 +5866,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if search_run.owner is search_state:
                 try:
                     persist_search_snapshot(search_state)
+                    # Its query with its rows, as a completed search saves them: the
+                    # query-only Back pairs the two (it matched these rows to an older
+                    # query -- found in the browser, 2026-10-22).
+                    _safe_set('search_query', clean_query)
                     if save_search_run(search_state) and search_run.scoped:
                         # Kept: a scoped run's address is stamped now (Back returns here).
                         _show_search_url(clean_query, mode, url_stamp_of(search_state))

@@ -1060,3 +1060,27 @@ def test_a_stopped_run_is_stopped_on_every_page_following_it():
     partial = [n.lineno for n in ast.walk(func) if isinstance(n, ast.If)
                and ast.unparse(n.test) == 'search_state.is_cancelled or _forced_stop']
     assert awaited[0] < stopped[0].lineno < partial[0]
+
+
+def test_new_search_forgets_the_run_and_its_address():
+    """Codex round 15 (P2): after New Search, a refresh or a Back with the old run code
+    restored the cleared results for up to 30 minutes."""
+    import ast
+    source = ast.unparse(_function(_search_page_tree(), '_reset_search'))
+    discard = source.index('discard_search_run(search_state)')
+    cleared = source.index('search_state.last_run = None')
+    unstamped = source.index("ui.run_javascript(\"history.replaceState(null, '', '/search')\")")
+    assert discard < cleared < unstamped < source.index('clear_search_snapshot()')
+
+
+def test_a_stopped_search_saves_its_query_with_its_rows():
+    """The stopped path saves its rows to the shared copy; the query-only Back pairs
+    them with `search_query`, so the query goes with them (found in the browser:
+    a stopped search's rows came back under an older query)."""
+    import ast
+    func = _function(_search_page_tree(), 'execute_search')
+    stopped = [node for node in ast.walk(func)
+               if isinstance(node, ast.If) and ast.unparse(node.test) == 'search_run.owner is search_state']
+    assert len(stopped) == 1
+    body = ast.unparse(stopped[0])
+    assert body.index('persist_search_snapshot(search_state)') < body.index("_safe_set('search_query', clean_query)")
