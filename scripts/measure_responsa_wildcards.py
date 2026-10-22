@@ -1809,13 +1809,18 @@ def cmd_crossing_diff(args):
                                             bidirectional=bool(opts['bidirectional']), within_document=False)
                 regex = compiled.compile_check()
 
-                def crossings(text, cut):
+                def crossings(text, cut, page_start):
+                    # The first accepted match that starts on the page just before the break
+                    # (a crossing from an earlier page is found at the break it crosses
+                    # first), as the engine reads a seam.
                     t = se._strip_brackets(text) if strip else text
                     cs = len(se._strip_brackets(text[:cut])) if strip else cut
                     m = regex.search(t)
                     while m is not None and m.start() < cs:
                         if m.end() > cs and compiled.accept(t, m):
-                            return [se._unstripped_span(text, m.start(), m.end()) if strip else m.span()]
+                            span = se._unstripped_span(text, m.start(), m.end()) if strip else m.span()
+                            if page_start is None or span[0] >= page_start:
+                                return [span]
                         m = regex.search(t, m.start() + 1)
                     return []
             else:
@@ -1837,7 +1842,7 @@ def cmd_crossing_diff(args):
                     first, last = engine._cross_page_term(terms[0], mode), engine._cross_page_term(terms[-1], mode)
                     regex = se._fuzzy_matcher(terms, gap) if mode == 'fuzzy' else engine.build_regex_pattern(terms, mode, gap)
 
-                def crossings(text, cut):
+                def crossings(text, cut, page_start):
                     return engine._cross_page_spans(regex, text, [{'start': 0}, {'start': cut}], first, last,
                                                     side, gap, strip, whole_words=True)
             rows = {}
@@ -1846,7 +1851,8 @@ def cmd_crossing_diff(args):
                 doc = ss.doc(addr)
                 text, cut = doc['content'][0], doc['cut'][0]
                 slices = json.loads(doc['boundaries'][0])
-                for span in crossings(text, cut):
+                for span in crossings(text, cut, max([b['start'] for b in slices if b['start'] < cut],
+                                                      default=None)):
                     mapped = engine._map_span_to_pages(span, slices)
                     primary = mapped.get('primary') or {}
                     overlaps = [(o['uid'], o['source'], o['p_num'], o.get('sys_id') or _sys_of(o.get('full_header')),

@@ -109,10 +109,10 @@ def config_restored():
     SearchEngine._shared_browse_map = None
 
 
-def _crossing_diff(tmp_path, monkeypatch):
-    root = build(tmp_path / 'crossings', CROSSING_V08, CROSSING_V07)
-    monkeypatch.setattr(measure, 'CROSSING_QUERIES', [(mode, 'כהנים גדולים', {})
-                                                      for mode in ('literal', 'variants', 'fuzzy', 'responsa')])
+def _crossing_diff(tmp_path, monkeypatch, v08=CROSSING_V08, v07=CROSSING_V07, queries=None):
+    root = build(tmp_path / 'crossings', v08, v07)
+    monkeypatch.setattr(measure, 'CROSSING_QUERIES', queries or [
+        (mode, 'כהנים גדולים', {}) for mode in ('literal', 'variants', 'fuzzy', 'responsa')])
     with patch('shared.metadata_manager.MetadataManager', _Meta), \
             patch.object(SearchEngine, 'start_fl_id_index_build'):
         SearchEngine._shared_browse_map = None
@@ -141,3 +141,15 @@ def test_crossing_diff_catches_an_engine_that_kept_todays_route(tmp_path, monkey
     monkeypatch.setattr(SearchEngine, '_seams_ready', lambda self: False)
     _rc, rows = _crossing_diff(tmp_path, monkeypatch)
     assert all(row['engine_vs_simulation']['engine_only'] == 1 for row in rows)
+
+
+def test_crossing_diff_reads_a_seam_as_the_engine_does_past_an_earlier_pages_crossing(tmp_path, monkeypatch,
+                                                                                    config_restored):
+    # Pages כהנים | כהנים | גדולים, Responsa `כהנים [1] גדולים`: p1's match runs into p3 and
+    # p2's own crossing into p3 starts on the page before that break. The simulation reads
+    # each seam as the engine does (Codex review of PR #443), so both say p1 and p2.
+    v08 = [(sid(303), 5303, p, text) for p, text in enumerate(["כהנים", "כהנים", "גדולים"], 1)]
+    _rc, (row,) = _crossing_diff(tmp_path, monkeypatch, v08, (), [('responsa', 'כהנים [1] גדולים', {})])
+    assert row['seam_crossing_rows'] == 2 and row['engine_after_rows'] == 2, row
+    assert row['engine_vs_simulation']['engine_only'] == 0, row
+    assert row['engine_vs_simulation']['simulation_only'] == 0, row
