@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-22 (Responsa Phase 1, web + desktop, `claude/responsa-wildcards-phase1-36d505`) -- one word compiler on every Responsa path: whole words, `#word#` keeps its suffixes, one bracket rule, unsupported star shapes refused with a message; excluded words read the matched page only, in every mode. Two P2 rows fixed and archived, and the web highlight row the same branch fixes (P3; its fragment was folded by a release while the branch deleted it) closed: P2 50 -> 48, P3 153 -> 152. 241 open.
+> **Last Updated:** 2026-10-22 (test runner, `claude/test-lanes-cleanup`) -- `scripts/run_local_tests.py` gives each run its own temp folder and removes it when the run passes (a full run left ~18 GB under %TEMP%); two runs at once no longer delete each other's files. One Code Quality Debt row fixed and archived: 20 -> 19. 240 open.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
@@ -69,12 +69,12 @@ Move to "Completed Issues" section at bottom with date
 | P2 Medium Bugs | 48 |
 | P3 Low Priority | 152 |
 | Documentation Issues | 2 |
-| Code Quality Debt | 20 |
+| Code Quality Debt | 19 |
 | Untested Areas | 5 |
 | Deferred to v7.15+ | 6 |
 | 2026-05-29 audit follow-up | 2 |
 | FGP integration (§4.5) | 5 |
-| **Total open** | **241** |
+| **Total open** | **240** |
 
 > Counts here exclude closed items (recomputed 2026-08-14 by counting rows carrying ❌/⏸/⏳); closed history lives in docs/archive/OPEN_ISSUES_ARCHIVE.md.
 > Count notes from 2026-09-25 to 2026-10-05 moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-06.
@@ -477,7 +477,6 @@ Surfaced while writing `docs/architecture/DATA_LIFECYCLE.md` (every row verified
 | **Desktop Supabase refresh token stored as plaintext JSON with default permissions** | `supabase_corrections_client.py` (`~/.genizah_corrections/supabase_credentials.json`) | ❌ Open | The password goes to the OS keyring but the long-lived refresh token does not. Owner decision on whether to move the token to the keyring too. |
 | **Stale operational facts in the guides and CI comments** | `docs/guides/DEPLOYMENT_TECHNICAL.md`, `docs/guides/ENV_VARS.md`, `.github/workflows/ci.yml`, `scripts/ci_materialize_discovery_fixture.py` | ❌ Open | `libraries.csv` "~15 MB / ~217K" (49.5 MB / 255,723), `fjms_enrichment.db` "941 MB" (1.6 GB), `Genizah_OLD.txt` (code: `AllGenizah_OLD.txt`), an `extension/store/` that does not exist; all three CI-side texts credit `tests/test_cert01_grading_validator.py` with resolving the real artifact through `discovery_data/manifest.json`, which `scripts/cert01_freeze.py` does. |
 | **Small hygiene gaps found by the inventory** | `.gitignore`, `desktop/settings_dialogs.py` + `genizah_app.py`, `version.py` + `version_info.txt`, `scripts/verify_passage_index.py`, `scripts/build_cudl_fixture.py`, `scripts/build_residue_patterns_artifact.py` | ❌ Open | `.server.pid` is not gitignored; `icon.ico` is resolved by two different rules (`Config.BASE_DIR` vs `resource_path()`); nothing checks `version.py` against `version_info.txt`; `verify_passage_index.py` is run by no test or job (audit M32); the two scripts read untracked `reports/*` inputs (`cudl_orphans_all.csv`, `synthetic_ambiguity_residue_dryrun.csv`). |
-| **Two concurrent `run_local_tests.py` runs destroy each other's temp dirs** | `scripts/run_local_tests.py:440-441` | ❌ Open | Line 441 does `shutil.rmtree(tmp_root)` on the SHARED `%TEMP%/genizah-test-lanes` root at startup, so a second invocation (e.g. the default lane and `-m render_smoke` at once) deletes the first run's live lane directories: measured 2026-09-20, **133 errors, 0 failures**, every one a `FileNotFoundError` from pytest's `tmp_path` factory on `lane2/c8`. The runs individually pass. Fix options: a per-invocation root (PID-suffixed) or a lock file; until then, never run two lanes at the same time. |
 | **The Stable-Citations gate cannot see bare shorthand line references** | `scripts/check_docs.py` (`LINE_CITATION_RE`), `.planning/milestones/v9.0.0-MILESTONE-AUDIT.md` | ❌ Open | The regex needs the filename immediately before the number, so `the tracker (:211)` and `§5 (:100)` -- the same stale-pointer disease, written without the filename -- pass the gate. Both known instances were repaired by hand on 2026-09-20 (Codex, PR #350). A rule for the bare form needs care: `(:\d+)` also matches legitimate prose, so it would have to be scoped (e.g. only in files that cite a moving document elsewhere) or the audit format changed to forbid the shorthand outright. |
 | **`tests/test_browse_map_atomic_write.py` can overwrite a developer's real `browse_map.pkl`** | `tests/test_browse_map_atomic_write.py` (`_fresh_engine`; the `dedupe_browse_map` patches) | ❌ Open (2026-09-20; reshaped 2026-10-05) | Each test patches `dedupe_browse_map` before `_fresh_engine` waits on `SearchEngine._browse_map_lock` and redirects `Config.BROWSE_MAP`, so a background FL-ID load left by an earlier test can run the fake dedupe and `os.replace` the fixture over the real file (reproduced 10 of 10 on a stand-in map, 2026-10-05). Fix: do the lock wait and the redirect before patching, or a tmp `BROWSE_MAP` in an autouse fixture. Full text archived 2026-10-19. |
 | **`tests/test_translations_no_duplicate_keys.py` is committed with `\r\r\n` on every line** | `tests/test_translations_no_duplicate_keys.py` | ❌ Open (2026-09-21) | The only tracked `.py` whose blob carries `\r\r\n`; Python reads each as two newlines, so interpreter, AST and traceback line numbers are about double what `git grep -n` prints. It runs correctly, and `git status` shows it clean (`core.autocrlf`). Fix: `git add --renormalize` in its own commit, with an AST comparison proving nothing else changed. Full text archived 2026-10-19. |

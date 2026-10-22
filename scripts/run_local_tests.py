@@ -80,6 +80,11 @@ MAX_FILES_PER_CHUNK = 30        # process lifetime cap -- the thing that fixed i
 ISOLATE_ABOVE_SECONDS = 45.0    # a heavy module gets a lane to itself
 DEFAULT_DURATION = 1.0          # unmeasured module: assume cheap, not free
 
+# Lanes' temp files, under the system temp dir: one folder per run (_lanes_root).
+LANES_DIR_NAME = "genizah-test-lanes"
+_RUN_DIR_RE = re.compile(r"run-(\d+)-\d+$")
+_STALE_RUN_SECONDS = 24 * 3600   # no run lasts a day; a failed run's files stay that long
+
 # One INDEPENDENT search per category, because pytest does not emit them in a
 # fixed order. A real chunk line from this suite's own failing run reads
 #   "426 passed, 2 skipped, 53 deselected, 2 warnings, 200 errors in 24.15s"
@@ -480,10 +485,9 @@ def main(argv=None) -> int:
     # `tmp_path` a directory INSIDE a git working tree, and two masking-scan
     # tests assert behaviour in a NON-git directory -- they failed on the first
     # run of this script for exactly that reason. pytest's own default lives in
-    # the system temp dir; lanes live beside it.
-    tmp_root = os.path.join(tempfile.gettempdir(), "genizah-test-lanes")
-    shutil.rmtree(tmp_root, ignore_errors=True)
-    os.makedirs(tmp_root, exist_ok=True)
+    # the system temp dir; lanes live beside it, in a folder of this run's own
+    # (_lanes_root), removed again when the run passes (_clean_lanes).
+    tmp_root = _lanes_root()
 
     work = queue.Queue()
     for i, (chunk, load) in enumerate(plan, 1):
@@ -571,10 +575,47 @@ def main(argv=None) -> int:
             if (r["stderr"] or "").strip():
                 print("--- stderr ---")
                 print("\n".join(r["stderr"].splitlines()[-20:]))
+        _clean_lanes(tmp_root, passed=False)
         return 1
 
     print("\nAll chunks passed.")
+    _clean_lanes(tmp_root, passed=True)
     return 0
+
+
+def _lanes_root(now=None):
+    """A temp folder of this run's own, `genizah-test-lanes/run-<start>-<pid>`.
+
+    The folder used to be shared, and every run began by deleting it, so a second
+    run started meanwhile destroyed the first one's live `tmp_path` folders: 133
+    errors, measured 2026-09-20. Now a run deletes only runs that started more than
+    _STALE_RUN_SECONDS ago (a failed run's files are kept that long for inspection),
+    and anything not named like a run (the old shared layout's `lane<N>`)."""
+    now = time.time() if now is None else now
+    parent = os.path.join(tempfile.gettempdir(), LANES_DIR_NAME)
+    os.makedirs(parent, exist_ok=True)
+    for name in os.listdir(parent):
+        m = _RUN_DIR_RE.match(name)
+        if m is None or now - int(m.group(1)) > _STALE_RUN_SECONDS:
+            shutil.rmtree(os.path.join(parent, name), ignore_errors=True)
+    root = os.path.join(parent, "run-%d-%d" % (int(now), os.getpid()))
+    os.makedirs(root)
+    return root
+
+
+def _clean_lanes(tmp_root, passed):
+    """Remove the lanes' temp files after a run that passed; keep them after one that failed.
+
+    A full run leaves ~18 GB of `tmp_path` output under *tmp_root*, which the next run
+    wiped only when it started, so the disk carried it between runs (2026-10-22). A failed
+    run keeps it: a failing test's files are what one looks at next."""
+    if not passed:
+        print(" lane temp files kept for inspection: %s" % tmp_root)
+        return
+    shutil.rmtree(tmp_root, ignore_errors=True)
+    if os.path.exists(tmp_root):
+        print(" ! some lane temp files could not be removed (a file still open?): %s"
+              % tmp_root)
 
 
 def _record_durations(results):
