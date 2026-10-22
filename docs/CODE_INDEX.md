@@ -21,7 +21,7 @@ below alongside the other `shared/` service modules.
   `desktop/viewers.py`, `desktop/puzzle.py`, `desktop/vs_cache.py`
 - Web: `web/pages/search_state.py`, `web/pages/search_results.py`,
   `web/pages/browse_state.py`, `web/pages/browse_enrichment.py`,
-  `web/search_bootstrap.py`
+  `web/search_bootstrap.py` (and, since PR #436, `web/search_runs.py`)
 
 (The `## genizah_app.py` and `## genizah_core.py` sections were since refreshed by
 the v8.3.0 pass below; `web/pages/search.py` / `web/pages/browse.py` are large and
@@ -1941,7 +1941,14 @@ Variant and Lab preferences of one website visitor, kept in that visitor's stora
 
 ## web/search_bootstrap.py
 
-- **Function** `resolve_search_bootstrap` (Line 22) — Resolve whether persisted search UI state should be reused for this request.
+- **Function** `matches_saved_run` — True when a stamped URL (`run=` code, query, mode, Responsa options) is the address of a saved run.
+- **Function** `resolve_search_bootstrap` — Resolve whether persisted search UI state should be reused for this request (Back by run code; rejoin a running search).
+
+## web/search_runs.py
+
+What a search page left, kept on the server for Back: one entry per run, keyed by browser and run code (PR #436).
+- **Class** `SearchRun` — the running job (followed by a page reached by Back) or the page's snapshot once it ran.
+- **Function** `new_stamp` / `start_run` / `get_run` / `finish_run` / `update_run` — register, find, save and update a run; bounded by age, per browser and in total.
 
 ## v8.3.0 Decomposed Modules
 

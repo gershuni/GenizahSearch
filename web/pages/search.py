@@ -24,7 +24,7 @@ from web.components.filter_panel import (
     load_filter_state, consume_incoming_filters, recompute_filter_count,
     create_filter_handlers, filter_unavailable_message,
 )
-from web.search_bootstrap import resolve_search_bootstrap
+from web.search_bootstrap import resolve_search_bootstrap, VALID_SEARCH_MODES
 from web.pages.search_state import (
     SearchUIState, SearchPageRefs,
     get_search_history, add_to_search_history,
@@ -33,7 +33,11 @@ from web.pages.search_state import (
     persist_search_snapshot, clear_search_snapshot, clear_search_filters,
     get_search_active_snapshot, restore_search_snapshot, responsa_note_of,
     compact_result_rows, preview_shows_final_rows, engine_mode,
+    run_filter_state, apply_run_filter_state, save_post_filters_with_run,
+    live_search_run, start_search_run, url_stamp_of, apply_run_start_snapshot, save_search_run,
+    discard_search_run,
 )
+from web import search_runs
 from web.pages.search_results import (
     toggle_expansion as _toggle_expansion,
     render_results as _render_results,
@@ -68,6 +72,7 @@ from shared.search_regex import SearchBudgetExceeded
 from shared.transcription_service import union_manual_transcriptions
 from urllib.parse import quote
 import logging
+import json
 import html
 import asyncio
 import time
@@ -128,7 +133,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                        initial_ja: int = None, initial_flex_spaces: int = None,
                        initial_bidirectional: int = None, initial_domain: str = None,
                        from_browse: int = None,
-                       vs_src: str = None, vs_mode: str = None, vs_browse: int = None):
+                       vs_src: str = None, vs_mode: str = None, vs_browse: int = None,
+                       initial_run: str = None):
     """Create the advanced search page."""
 
 
@@ -148,6 +154,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     _page_client = ui.context.client
     # ux_timing: the next search was started by this page's URL, not a click.
     _ux_url_start = {'nav': False}
+    _page_run = {'run': None}  # the run this page's search is (web/search_runs.py)
 
     async def _after_delay(delay, coro_func, *args):
         """Schedule an async callback after a delay, with NiceGUI client context."""
@@ -190,7 +197,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # count combined with URL `q` matching saved_query means the browser restored
     # a URL this session stamped via history.replaceState at end of a successful
     # search. Without this signal, Back would fire a fresh search and lose state.
-    _saved_active_snapshot = get_search_active_snapshot()
+    _saved_active_snapshot = get_search_active_snapshot(initial_run)
     _saved_results = (
         _saved_active_snapshot.get('results', [])
         if _saved_active_snapshot else
@@ -200,6 +207,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _saved_results_count = len(_saved_results)
     except TypeError:
         _saved_results_count = 0
+    # The run those results came from, from the same snapshot: a Responsa search's
+    # URL carries its mode, options and run stamp, and Back is told apart by this.
+    _saved_run = (
+        _saved_active_snapshot.get('last_run')
+        if _saved_active_snapshot else
+        _safe_get('search_last_run', None)
+    )
+    # The run in the address while its search still runs (left before it finished):
+    # the page waits for it instead of starting it again. A scoped run (a search within,
+    # a visual-similarity set) is not followed: its scope is not in the address.
+    _live_run = live_search_run(initial_run)
+    if _live_run is not None and _live_run.scoped:
+        _live_run = None
 
     bootstrap_state = resolve_search_bootstrap(
         initial_query=initial_query,
@@ -211,7 +231,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         saved_query=raw_saved_query,
         saved_results_count=_saved_results_count,
         use_slider=use_slider,
+        initial_responsa={
+            'variants': initial_variants, 'ja': initial_ja,
+            'flex_spacing': initial_flex_spaces, 'bidirectional': initial_bidirectional,
+        },
+        initial_run=initial_run,
+        saved_run=_saved_run,
+        live_run=_live_run.snapshot.get('last_run') if _live_run is not None else None,
     )
+    if not bootstrap_state['rejoin_run']:
+        _live_run = None
     saved_mode = bootstrap_state['mode']
     saved_query = bootstrap_state['query']
     restore_saved_results = bootstrap_state['restore_saved_results']
@@ -272,6 +301,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # #17: a saved measurement filter the catalog is known to lack.
             ui.notify(tr('Some saved filters were removed: this catalog data is not available.'),
                       type='info')
+    # A stamped Responsa Back: the filters its rows were searched with, from its own
+    # run -- not the shared current filter keys another tab may have changed.
+    if bootstrap_state['restore_run_filters']:
+        _matched_run = _live_run.snapshot.get('last_run') if _live_run is not None else _saved_run
+        apply_run_filter_state(search_state, _matched_run.get('pre_search_filters'))
+    if _live_run is not None:
+        # What the page showed with the search when it started: its display filters
+        # and exclusions, and the run itself (its code, for the address and the save).
+        apply_run_start_snapshot(search_state, _live_run.snapshot)
 
     # Restore word search excluded ids from session
     if restore_saved_exclusions:
@@ -393,7 +431,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # Restore previous results (transcription lookup deferred to after UI renders)
     if restore_saved_results:
         try:
-            restore_search_snapshot(search_state)
+            restore_search_snapshot(search_state, initial_run)
         except Exception:
             pass  # Snapshot restore failed; page starts empty
 
@@ -1840,6 +1878,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         current_idx = states.index(search_state.printed_filter)
                         search_state.printed_filter = states[(current_idx + 1) % 3]
                         persist_value('search_printed_filter', search_state.printed_filter)
+                        save_post_filters_with_run(search_state)
                         _update_printed_filter_btn()
                         # Re-apply filters and re-render (manuscript exclusions first if active)
                         if search_state.exclusion_sources:
@@ -1877,6 +1916,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         current_idx = states.index(search_state.pgp_filter)
                         search_state.pgp_filter = states[(current_idx + 1) % 3]
                         persist_value('search_pgp_filter', search_state.pgp_filter)  # D-10
+                        save_post_filters_with_run(search_state)
                         _update_pgp_filter_btn()
                         _update_pgp_filter_chip()  # D-08 (real impl lands in Task 4; stub below until then)
                         # Re-apply filters and re-render — same cascade as _toggle_printed_filter.
@@ -2233,6 +2273,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                 'mode': search_state.library_mode,
                                                 'codes': search_state.library_filter,
                                             })
+                                            save_post_filters_with_run(search_state)
                                             _update_library_btn()
                                             if search_state.exclusion_sources:
                                                 _apply_manuscript_exclusions()
@@ -3191,6 +3232,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Phase 56: Clear exclusion sources
         search_state.exclusion_sources = []
         _update_exclude_btn()
+        # The run the page showed is forgotten and the address loses it, so a refresh
+        # or a Back cannot bring the cleared results back (Codex, PR #436).
+        discard_search_run(search_state)
+        search_state.last_run = None
+        try:
+            ui.run_javascript("history.replaceState(null, '', '/search')")
+        except Exception:
+            pass  # JavaScript execution failed; non-fatal UI glitch
         # Reset persistent storage to clean defaults (Phase 74: via helper).
         # search_query/search_mode are bootstrap-input keys NOT owned by the helper;
         # keep their UX-driven writes here to wipe the query bar on New Search.
@@ -3442,6 +3491,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     def cancel_search():
         """Cancel the current search and show partial results."""
         search_state.is_cancelled = True
+        if _page_run['run'] is not None and search_state.is_running:
+            _page_run['run'].cancelled = True
         search_state.status = tr('Cancelling...')
 
     def update_progress_ui():
@@ -4471,6 +4522,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         """Remove a single exclusion source (D-06 per-source clear)."""
         search_state.exclusion_sources = [s for s in search_state.exclusion_sources if s.source_id != source.source_id]
         persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+        save_post_filters_with_run(search_state)
         _apply_manuscript_exclusions()
         _update_exclude_btn()
 
@@ -4508,6 +4560,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     def _clear_all_exclusions():
                         search_state.exclusion_sources = []
                         persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+                        save_post_filters_with_run(search_state)
                         _apply_manuscript_exclusions()
                         _update_exclude_btn()
                         dlg.close()
@@ -4567,6 +4620,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         )
                         search_state.exclusion_sources.append(source)
                         persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+                        save_post_filters_with_run(search_state)
                         dlg.close()
                         _apply_manuscript_exclusions()
                         _update_exclude_btn()
@@ -4682,6 +4736,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     ui.notify(tr('Select a list first'), type='warning')
                                     return
                                 persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+                                save_post_filters_with_run(search_state)
                                 dlg.close()
                                 _apply_manuscript_exclusions()
                                 _update_exclude_btn()
@@ -4783,6 +4838,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         )
                         search_state.exclusion_sources.append(source)
                         persist_value('search_exclusion_sources', serialize_sources(search_state.exclusion_sources))
+                        save_post_filters_with_run(search_state)
                         dlg.close()
                         _apply_manuscript_exclusions()
                         _update_exclude_btn()
@@ -5041,6 +5097,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Nor are they the shown search's rows: their search is the restored one,
             # as the controls now describe it, and cut off only if the entry says so.
             search_state.last_run = None
+            # No search runs here: the address keeps the code of the search shown
+            # before, and Back to it would bring that run back over these rows.
+            ui.run_javascript("(function(){var u=new URL(location.href);"
+                              "if(u.searchParams.has('run')){u.searchParams.delete('run');"
+                              "history.replaceState(null,'',u.pathname+u.search);}})()")
             search_state.result_count_capped = bool(state_snapshot.get('result_count_capped'))
             search_state.domain_exclusions = set(state_snapshot.get('domain_exclusions', []))
             search_state.printed_filter = state_snapshot.get('printed_filter', 'all')
@@ -5178,7 +5239,36 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in search_state.domain_name_map:
                     search_state.domain_name_map[d['parent_domain']] = d['parent_domain_heb']
 
-    async def execute_search():
+    def _search_url(clean_query, mode, stamp=None):
+        """The address of a search: its query, mode, Responsa options and run code.
+        Back to it finds the run (web/search_bootstrap.py); a link without the code
+        searches again, in the same mode."""
+        params = f'?q={quote(clean_query)}'
+        tag_value = tag_select.value if mode_select.value == 'pgp_tags' else None
+        if tag_value:
+            params += f'&tag={quote(str(tag_value))}'
+        if mode in VALID_SEARCH_MODES and mode != 'pgp_tags':
+            params += f'&mode={quote(mode)}'
+        if mode == 'responsa':
+            if responsa_variants_cb.value: params += '&variants=1'
+            if responsa_ja_cb.value: params += '&ja=1'
+            if responsa_flex_cb.value: params += '&flex_spaces=1'
+            if bidirectional_cb.value: params += '&bidirectional=1'
+        if stamp:
+            params += f'&run={stamp}'
+        return f'/search{params}'
+
+    def _show_search_url(clean_query, mode, stamp=None):
+        try:
+            url = _search_url(clean_query, mode, stamp)
+            ui.run_javascript(f"history.replaceState(null, '', {json.dumps(url)})")
+        except Exception:
+            pass  # JavaScript execution failed; non-fatal UI glitch
+
+    # Run the search the controls describe; with *attach* (a run still running, found
+    # by Back), follow that run's search instead of starting it again. (No docstring:
+    # the double-submit guard stays the first statement -- tests/test_ux_timing.py.)
+    async def execute_search(attach=None):
         # Guard against double-submit (rage-clicking while search is running)
         if search_state.is_running:
             ux_ignored(_page_client, 'search_results')
@@ -5251,6 +5341,52 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.printed_ids = set()
         search_state.search_generation += 1  # Invalidate stale background enrichment
 
+        # Get NOT filter words (merge manual filter + builder negated words)
+        not_words = not_filter.value.split() if not_filter.value else []
+        if search_state.builder_negated_words:
+            not_words = not_words + search_state.builder_negated_words
+
+        # Build Responsa options dict from mode selection
+        responsa_options = _responsa_options_from_controls()
+
+        _tp = text_position_select.value
+        search_state.last_run = {
+            'query': clean_query, 'mode': engine_mode(mode), 'page_mode': mode, 'gap': int(gap_input.value),
+            # Lab Mode is not in the address either: a page back on this run shows it.
+            'lab_mode': bool(lab_mode.value), 'deep_scan': bool(deep_scan.value),
+            'exclude_words': list(not_words), 'text_position': _tp if _tp != 'anywhere' else None,
+            'responsa_options': responsa_options, 'corpus_scope': 'genizah',
+            'variant_settings': dict(variant_settings),
+            # What a stamped Back restores with the rows (search_state.RUN_FILTER_FIELDS).
+            'pre_search_filters': run_filter_state(search_state),
+        }
+        if attach is not None:
+            # The run as it started (its gap, NOT-words, position and code are not in
+            # the address), and its clock.
+            search_state.last_run = dict(attach.snapshot.get('last_run') or search_state.last_run)
+            search_state.last_variant_settings = attach.snapshot.get('last_variant_settings')
+            search_state.search_start_time = attach.started
+
+        # This search's run (web/search_runs.py), registered before the first await:
+        # its code goes into the address now, so a Back while it prepares or runs finds
+        # it and follows it; a page that found it so follows it here. Whichever page
+        # reaches the job first starts it, the other follows that job (below).
+        # (search_run, never `run`: that name is NiceGUI's run module in this function.)
+        if attach is not None:
+            search_run = attach
+        else:
+            stamp = search_runs.new_stamp()
+            search_state.last_run = {**search_state.last_run, 'url_stamp': stamp}
+            search_run = start_search_run(search_state, stamp)
+            if not search_run.scoped:
+                # A scoped run's address is stamped when it is saved (the end of the
+                # search): a Back before that returns to the address it was started from.
+                _show_search_url(clean_query, mode, stamp)
+        _page_run['run'] = search_run
+        # The page that started the run, or the page a Back brought to it later, saves
+        # it (its snapshot, the history entry); another page following it only shows it.
+        search_run.owner = search_state
+
         # The phone fold asks the browser for its width, so it is the first
         # await of this search -- and it must come AFTER is_running is set:
         # before it, a double-click or a repeated Enter suspended two calls
@@ -5298,33 +5434,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         render_results([])
 
         def progress_cb(current, total):
-            # Check if search was cancelled
-            if search_state.is_cancelled:
+            # Check if search was cancelled -- here, or on a page that followed this
+            # run after a Back (web/search_runs.py)
+            followed = _page_run['run']
+            if search_state.is_cancelled or (followed is not None and followed.cancelled):
                 raise InterruptedError("Search cancelled")
-            if current < 0:
-                search_state.status = (
-                    f'ממתין בתור: {-current}' if get_language() == 'he'
-                    else f'Queued: {-current}')
-                return
-            if total > 0:
-                search_state.progress = current / total
-                search_state.status = f"{current} / {total}"
-
-        # Get NOT filter words (merge manual filter + builder negated words)
-        not_words = not_filter.value.split() if not_filter.value else []
-        if search_state.builder_negated_words:
-            not_words = not_words + search_state.builder_negated_words
-
-        # Build Responsa options dict from mode selection
-        responsa_options = _responsa_options_from_controls()
-
-        _tp = text_position_select.value
-        search_state.last_run = {
-            'query': clean_query, 'mode': engine_mode(mode), 'gap': int(gap_input.value),
-            'exclude_words': list(not_words), 'text_position': _tp if _tp != 'anywhere' else None,
-            'responsa_options': responsa_options, 'corpus_scope': 'genizah',
-            'variant_settings': dict(variant_settings),
-        }
+            for shown in (list(followed.watchers) if followed is not None else []) or [search_state]:
+                if current < 0:
+                    shown.status = (
+                        f'ממתין בתור: {-current}' if get_language() == 'he'
+                        else f'Queued: {-current}')
+                elif total > 0:
+                    shown.progress = current / total
+                    shown.status = f"{current} / {total}"
 
         # Phase 55: If not in refine mode, clear any stale refinement chain
         # A normal search should NOT be restricted by a previous refinement --
@@ -5397,6 +5519,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             def _stop_before_running():
                 # Undo the "searching" UI set above: no run will clear it.
+                discard_search_run(search_state)
                 search_state.is_running = False
                 search_state.is_cancelled = False
                 search_btn.style('display: inline-flex;')
@@ -5438,6 +5561,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # If effective restriction matches nothing, show message and return
         if effective_restrict is not None and len(effective_restrict) == 0:
             ui.notify(tr("No manuscripts match the current filters."), type='warning')
+            discard_search_run(search_state)
             search_state.is_running = False
             search_state.is_cancelled = False
             search_btn.style('display: inline-flex;')
@@ -5461,6 +5585,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         def preview_cb(rows):
             # Runs on the thread waiting for the worker: hand over to the loop.
             _preview_box['rows'] = rows
+            # And on the run: a page that follows it after a Back keeps them for a Stop or
+            # the time limit, as this page would (Codex, PR #436).
+            search_run.preview_rows = rows
             _loop.call_soon_threadsafe(_preview_ready.set)
 
         async def _paint_previews(generation, lang):
@@ -5566,12 +5693,31 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Admission, FIFO waiting and process termination are shared by text,
         # parallels and API searches. Waiting does not occupy NiceGUI's pool.
         _painter = (asyncio.ensure_future(_paint_previews(search_state.search_generation, get_language()))
-                    if _preview_wanted else None)
+                    if _preview_wanted and attach is None else None)
         try:
-            results = await run_research_call(run_core_search)
+            if search_run.job is None:
+                # The first page here starts the job (no await since the check).
+                search_run.cutoff = _run_cutoff
+                search_run.job = asyncio.ensure_future(run_research_call(run_core_search))
+            search_run.watchers.append(search_state)
+            # Shielded: this page going away never stops a search a Back may return to.
+            results = await asyncio.shield(search_run.job)
         finally:
             if _painter is not None:
                 _painter.cancel()
+            if search_state in search_run.watchers:
+                search_run.watchers.remove(search_state)
+        if attach is not None:
+            # Its cut-off signals and early rows were recorded by the page that started it.
+            _run_cutoff.update(search_run.cutoff or {})
+            if not _preview_box['rows'] and search_run.preview_rows:
+                _preview_box['rows'] = list(search_run.preview_rows)
+        if search_run.cancelled:
+            # Stop on any page following this run stopped it for all of them: each one
+            # shows (and its owner saves) the partial rows (Codex, PR #436).
+            search_state.is_cancelled = True
+            if not _preview_box['rows'] and search_run.preview_rows:
+                _preview_box['rows'] = list(search_run.preview_rows)
         # The web side stopped a worker that had not stopped itself at its time limit
         # (TIME_LIMIT_GRACE_SECONDS later), or the limit stopped a part of the search
         # that returns no rows: the early rows it had handed over are verified rows,
@@ -5594,6 +5740,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Handle validation errors from explosion guard (returned as sentinel dict
         # because run_core_search runs in io_bound thread and cannot call ui.notify)
         if isinstance(results, dict) and 'error' in results:
+            discard_search_run(search_state)  # nothing to come back to: Back searches again
             error_msg = results['error']
             if error_msg == 'search_budget_exceeded':
                 error_msg = (
@@ -5715,6 +5862,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Render what we have (no enrichment badges -- acceptable for partial results)
             render_results(results, page=0)
             _ux_first_rows('partial')
+            # Back to this address shows these rows, cut off ("+"), as the page did.
+            if search_run.owner is search_state:
+                try:
+                    persist_search_snapshot(search_state)
+                    # Its query with its rows, as a completed search saves them: the
+                    # query-only Back pairs the two (it matched these rows to an older
+                    # query -- found in the browser, 2026-10-22).
+                    _safe_set('search_query', clean_query)
+                    if save_search_run(search_state) and search_run.scoped:
+                        # Kept: a scoped run's address is stamped now (Back returns here).
+                        _show_search_url(clean_query, mode, url_stamp_of(search_state))
+                except Exception:
+                    pass  # Browser storage operation failed; snapshot not persisted
             return
 
         # --- Staged enrichment: render fast, enrich progressively ---
@@ -5859,39 +6019,38 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             'was_cancelled': False,
         })
 
-        # URL state persistence
-        try:
-            params = f'?q={quote(clean_query)}'
-            tag_value = tag_select.value if mode_select.value == 'pgp_tags' else None
-            if tag_value:
-                params += f'&tag={quote(str(tag_value))}'
-            if mode_select.value == 'responsa':
-                params += '&mode=responsa'
-                if responsa_variants_cb.value: params += '&variants=1'
-                if responsa_ja_cb.value: params += '&ja=1'
-                if responsa_flex_cb.value: params += '&flex_spaces=1'
-                if bidirectional_cb.value: params += '&bidirectional=1'
-            ui.run_javascript(f"history.replaceState(null, '', '/search{params}')")
-        except Exception:
-            pass  # JavaScript execution failed; non-fatal UI glitch
+        # URL state persistence: the address the search got when it started, again
+        # (a Back finds this run by its code: web/search_bootstrap.py). A scoped run's
+        # address carries no scope, so it is stamped only once the run is kept (below):
+        # one not kept would bring Back to an unscoped search (Codex, PR #436).
+        if not search_run.scoped:
+            _show_search_url(clean_query, mode, url_stamp_of(search_state))
+
+        # Only the run's owner saves it: a page that a Back took over from (left,
+        # and gone) still finishes the search, and must not save it a second time.
+        _owns_run = search_run.owner is search_state
 
         # Storage persistence via snapshot helper (Phase 74).
         # The helper handles capping at 1000 and stripping full_text fields
         # internally (matches pre-Phase-74 inline behavior).
-        try:
-            persist_search_snapshot(search_state)
-        except Exception:
-            pass  # Browser storage operation failed; preference not persisted
+        if _owns_run:
+            try:
+                persist_search_snapshot(search_state)
+                # The run's own save: its rows are on the page now (search_state).
+                if save_search_run(search_state) and search_run.scoped:
+                    _show_search_url(clean_query, mode, url_stamp_of(search_state))
+            except Exception:
+                pass  # Browser storage operation failed; preference not persisted
 
-        # 75-03 Edit 2b: write search_query at search-execute time so back-nav
-        # detection (saved_query == URL q) works reliably. Without this, the
-        # blur-only write at search.py:~401 misses Enter-to-search flows, and the
-        # is_back_navigation guard in resolve_search_bootstrap silently fails.
-        # This mirrors the query that history.replaceState just stamped into the URL.
-        _safe_set('search_query', clean_query)
+            # 75-03 Edit 2b: write search_query at search-execute time so back-nav
+            # detection (saved_query == URL q) works reliably. Without this, the
+            # blur-only write at search.py:~401 misses Enter-to-search flows, and the
+            # is_back_navigation guard in resolve_search_bootstrap silently fails.
+            # This mirrors the query that history.replaceState just stamped into the URL.
+            _safe_set('search_query', clean_query)
 
         # Search history -- D-15: Refined searches don't enter history
-        if not search_state.refinement_chain:
+        if _owns_run and not search_state.refinement_chain:
             try:
                 add_to_search_history(
                     query=query_input.value or '',
@@ -6178,6 +6337,35 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if initial_bidirectional:
             bidirectional_cb.value = True
 
+    def _show_run_controls(run):
+        """The controls a run was searched with that its address does not carry -- gap,
+        NOT-words, text position, variant level, Num Changes and Lab Mode -- so a page restoring
+        or following it shows (and, on Search, runs) that run, not the shared settings
+        (Codex, PR #436). No change event: the shared preferences stay as they were."""
+        if not isinstance(run, dict):
+            return
+        try:
+            gap_input.value = int(run.get('gap') or 0)
+        except (TypeError, ValueError):
+            pass
+        not_filter.value = ' '.join(str(w) for w in (run.get('exclude_words') or []))
+        text_position_select.value = run.get('text_position') or 'anywhere'
+        settings = run.get('variant_settings') if isinstance(run.get('variant_settings'), dict) else {}
+        pairs = settings.get('variant_pairs_count')
+        if isinstance(pairs, int):
+            current_preset['value'] = pairs
+            if variant_slider:
+                variant_slider.value = pairs
+        if max_changes_select and isinstance(settings.get('variant_max_changes'), int):
+            max_changes_select.value = settings['variant_max_changes']
+        # Lab Mode and Deep Scan: the algorithm that produced the rows (Codex, PR #436).
+        lab_mode.value = bool(run.get('lab_mode'))
+        deep_scan.value = bool(run.get('deep_scan'))
+
+    # A Back to a run (restored, or followed while it runs): its own controls.
+    if bootstrap_state['restore_run_filters']:
+        _show_run_controls(search_state.last_run)
+
     # Handle tag search — switch UI to PGP Tags mode and show the selected tag
     if initial_tag:
         mode_select.value = 'pgp_tags'
@@ -6314,6 +6502,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Next tick, not a fixed wait: everything execute_search sends is held in
         # the outbox until the socket connects (tests/test_search_url_start_delay.py).
         asyncio.ensure_future(_after_delay(0, execute_search))
+    elif _live_run is not None:
+        # Back to a search still running: wait for that run, never a second one.
+        asyncio.ensure_future(_after_delay(0, execute_search, _live_run))
     elif search_state.results:
         results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}{_downgrade_suffix()}"
         render_results(search_state.results, page=0)
@@ -6330,6 +6521,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         except Exception:
             logger.exception("SEED-026: filter button reveal on session restore failed (non-fatal)")
         ui.notify(tr('Session restored'), type='info', timeout=3000, position='top')
+    elif restore_saved_results and bootstrap_state['restore_run_filters']:
+        # Back to a run that found nothing: it ran, and it is shown as it was.
+        results_count.text = f"0 {tr('Results')}{_downgrade_suffix()}"
+        render_results([])
     elif initial_query:
         _ux_url_start['nav'] = True
         # Next tick, not a fixed wait: a 0.5 s wait here delayed every homepage-box

@@ -35,7 +35,6 @@ def test_persist_and_restore_round_trip():
 
         persist_search_snapshot(state)
         assert storage['search_results'] == [{'display': {'id': 'abc'}}]
-        assert tab_storage['search_active_snapshot']['results'] == [{'display': {'id': 'abc'}}]
 
         fresh_state = SearchUIState()
         fresh_state.is_running = False
@@ -74,7 +73,6 @@ def test_clear_snapshot_wipes_all_keys():
         # Snapshot fields are reset to safe defaults:
         assert storage.get('search_results') == []
         assert storage.get('domain_exclusions') == []
-        assert 'search_active_snapshot' not in tab_storage
         # Bootstrap-input keys are NOT touched by the helper:
         assert storage.get('search_query') == 'survives'
         assert storage.get('search_mode') == 'exact'
@@ -181,59 +179,68 @@ def test_stale_version_discards_snapshot():
         assert state.results == []
 
 
-def test_restore_prefers_tab_snapshot_over_legacy_user_results():
-    """Active same-tab snapshot wins over compacted legacy user storage."""
+def test_restore_prefers_the_runs_snapshot_over_legacy_user_results():
+    """The snapshot the run in the address left wins over the compacted, shared user
+    storage copy (web/search_runs.py)."""
+    from web import search_runs
     storage = {
         'search_results': [{'display': {'id': 'legacy'}}],
         'search_snapshot_schema_version': 1,
     }
-    tab_storage = {
-        'search_active_snapshot': {
-            'version': 1,
-            'results': [{'display': {'id': 'tab'}}],
-            'printed_filter': 'only_printed',
-            'domain_exclusions': ['foo'],
-            'search_refinement_chain': [],
-            'search_exclusion_sources': [],
-        }
-    }
-    with patch('web.pages.search_state.app') as mock_app, \
-         patch('web.safe_storage.app') as mock_safe_app:
-        mock_app.storage.user = storage
-        mock_app.storage.tab = tab_storage
-        mock_safe_app.storage.user = storage
-        from web.pages.search_state import SearchUIState, restore_search_snapshot
+    search_runs.clear()
+    search_runs.finish_run('browser-1', 'code', {
+        'version': 1,
+        'results': [{'display': {'id': 'run'}}],
+        'printed_filter': 'only_printed',
+        'domain_exclusions': ['foo'],
+        'search_refinement_chain': [],
+        'search_exclusion_sources': [],
+    })
+    try:
+        with patch('web.pages.search_state.app') as mock_app, \
+             patch('web.safe_storage.app') as mock_safe_app, \
+             patch('web.pages.search_state._browser_id', lambda: 'browser-1'):
+            mock_app.storage.user = storage
+            mock_safe_app.storage.user = storage
+            from web.pages.search_state import SearchUIState, restore_search_snapshot
 
-        state = SearchUIState()
-        restore_search_snapshot(state)
+            state = SearchUIState()
+            restore_search_snapshot(state, 'code')
+            assert state.results == [{'display': {'id': 'run'}}]
+            assert state.printed_filter == 'only_printed'
+            assert state.domain_exclusions == {'foo'}
 
-        assert state.results == [{'display': {'id': 'tab'}}]
-        assert state.printed_filter == 'only_printed'
-        assert state.domain_exclusions == {'foo'}
+            other = SearchUIState()
+            restore_search_snapshot(other)              # no run in the address
+            assert other.results == [{'display': {'id': 'legacy'}}]
+    finally:
+        search_runs.clear()
 
 
-@pytest.mark.parametrize('path', ['tab snapshot', 'user snapshot'])
+@pytest.mark.parametrize('path', ['run snapshot', 'user snapshot'])
 def test_a_restored_result_set_brings_its_responsa_downgrade_back(path):
     """The count line shows the downgrade from search_state: a back-navigation or a
     reload installed the rows without it (Codex review of PR #433)."""
+    from web import search_runs
     rows = [{'display': {'id': 'r'}, 'responsa_warning': 'Spelling variants disabled'}]
     storage = {'search_snapshot_schema_version': 1}
-    tab_storage = {}
-    if path == 'tab snapshot':
-        tab_storage['search_active_snapshot'] = {
+    search_runs.clear()
+    if path == 'run snapshot':
+        search_runs.finish_run('browser-1', 'code', {
             'version': 1, 'results': rows, 'search_refinement_chain': [],
-            'search_exclusion_sources': []}
+            'search_exclusion_sources': []})
     else:
         storage['search_results'] = rows
     with patch('web.pages.search_state.app') as mock_app, \
-         patch('web.safe_storage.app') as mock_safe_app:
+         patch('web.safe_storage.app') as mock_safe_app, \
+         patch('web.pages.search_state._browser_id', lambda: 'browser-1'):
         mock_app.storage.user = storage
-        mock_app.storage.tab = tab_storage
         mock_safe_app.storage.user = storage
         from web.pages.search_state import SearchUIState, restore_search_snapshot
 
         state = SearchUIState()
-        restore_search_snapshot(state)
+        restore_search_snapshot(state, 'code')
+        search_runs.clear()
 
         assert state.results == rows
         assert state.responsa_warning == 'Spelling variants disabled'

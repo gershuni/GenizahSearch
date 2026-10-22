@@ -447,25 +447,28 @@ def test_the_shown_results_settings_survive_a_reload():
     state = ss.SearchUIState()
     state.last_variant_settings = dict(sent)
     with patch.object(ss, 'safe_user_get', lambda key, default=None: saved.get(key, default)), \
-            patch.object(ss, 'safe_user_set', lambda key, value: saved.__setitem__(key, value) or True), \
-            patch.object(ss, '_get_tab_storage', lambda: None):
+            patch.object(ss, 'safe_user_set', lambda key, value: saved.__setitem__(key, value) or True):
         ss.persist_search_snapshot(state)
         restored = ss.SearchUIState()
         ss.restore_search_snapshot(restored)
     assert restored.last_variant_settings == sent
 
-    tab = {}
-    with patch.object(ss, '_get_tab_storage', lambda: tab):
+    # The run's own snapshot (web/search_runs.py) keeps them too.
+    from web import search_runs
+    search_runs.clear()
+    state.last_run = {'url_stamp': 'code'}
+    with patch.object(ss, '_browser_id', lambda: 'browser-1'):
         ss.persist_search_active_snapshot(state)
         restored = ss.SearchUIState()
-        assert ss.restore_search_active_snapshot(restored)
+        assert ss.restore_search_active_snapshot(restored, 'code')
+    search_runs.clear()
+    state.last_run = None
     assert restored.last_variant_settings == sent
 
     # New Search clears them with the rest of the snapshot.
     with patch.object(ss, 'safe_user_get', lambda key, default=None: saved.get(key, default)), \
             patch.object(ss, 'safe_user_set', lambda key, value: saved.__setitem__(key, value) or True), \
-            patch.object(ss, 'safe_user_pop', lambda key, default=None: saved.pop(key, default)), \
-            patch.object(ss, '_get_tab_storage', lambda: None):
+            patch.object(ss, 'safe_user_pop', lambda key, default=None: saved.pop(key, default)):
         ss.clear_search_snapshot()
         cleared = ss.SearchUIState()
         ss.restore_search_snapshot(cleared)

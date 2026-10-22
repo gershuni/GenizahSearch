@@ -63,7 +63,7 @@ def test_the_search_form_folds_once_the_search_is_marked_running():
     searches ran over one result state (Codex on #434).
     """
     search = _read('web/pages/search.py')
-    body = search[search.index('    async def execute_search():'):]
+    body = search[search.index('    async def execute_search('):]
     ready = body.index('if not state.is_ready():')
     running = body.index('search_state.is_running = True')
     fold = body.index('await _collapse_panel_on_phone()')

@@ -70,7 +70,10 @@ def test_cancelled_ui_awaiter_signals_its_isolated_job(monkeypatch):
 
 def test_search_ui_uses_bounded_background_enrichment_and_core_permit():
     source = Path('web/pages/search.py').read_text(encoding='utf-8')
-    assert 'await run_research_call(run_core_search)' in source
+    # Started once per run and awaited shielded, so a page reached by Back can follow
+    # it (web/search_runs.py) -- still through the bounded research call.
+    assert 'asyncio.ensure_future(run_research_call(run_core_search))' in source
+    assert 'await asyncio.shield(search_run.job)' in source
     assert 'async with enrichment_batch_slot()' in source
     assert 'asyncio.ensure_future(_run_remaining_enrichment())' in source
 
