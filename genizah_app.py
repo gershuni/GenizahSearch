@@ -33134,7 +33134,9 @@ class GenizahGUI(QMainWindow):
         what this version builds (the seam documents and the reversed-words field,
         docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md §6.1). An older index keeps working as
         before; rebuilding it is the user's click, never started from here."""
-        label = getattr(self, 'lbl_index_format', None)
+        # The label lives on this window but is made by the Settings dialog
+        # (desktop/settings_dialogs.py), which may not exist yet.
+        label = self.lbl_index_format if hasattr(self, 'lbl_index_format') else None
         engine = getattr(self, 'searcher', None)
         if label is None or engine is None or getattr(engine, 'index', None) is None:
             return

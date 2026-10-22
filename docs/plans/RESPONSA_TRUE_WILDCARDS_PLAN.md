@@ -1,6 +1,8 @@
 # Responsa wildcards: `*` as any sequence, `#` as the grammatical list
 
-**Status:** **Phase 1 implemented (2026-10-22)** -- the engine on
+**Status:** **Phase 2 implemented (2026-10-22, PR #440 on the design PR #438)**: the index format,
+built locally and gated (§7 Phase 2); the server rebuild and the crossing switch are the owner's.
+**Phase 1 implemented (2026-10-22)** -- the engine on
 `claude/responsa-wildcards-phase1-36d505`, the surfaces stacked on it on
 `claude/responsa-wildcards-phase1-surfaces` -- with its gates: the §8 oracle
 (`scripts/verify_responsa_wildcards.py`) agrees with the engine on all nine Phase 1 queries on the
@@ -1122,7 +1124,38 @@ go-ahead is recorded (§9, decision 8, 2026-10-21); the release notes carry a se
 
 **Phase 2: the index format (resequenced 2026-10-21, decisions 1 and 9).** **Designed 2026-10-22:
 §6.1** (the seam index's place, K, runs and bridges, fields and provenance, the reversed field,
-the marker and the fallbacks, the gates). One rebuild carries both:
+the marker and the fallbacks, the gates). **Implemented 2026-10-22 (PR #440), and every gate of
+§6.1 point 10 run on a full local build** (21.7 min, 15.30 GB; point 8):
+- (a) `seam-topology` PASS: 1,541,186 seams, no junction inside one out of reading order, each
+  of the 1,524,861 consecutive junctions once per manuscript, each of the 16,325 bridges the part
+  metadata calls for once. Red on 1/10 samples: seams in file order (22,418 central junctions
+  not consecutive); no bridges (257 missing).
+- (b) the Phase 1 oracle: 9/9 PASSED, the same counts on today's index and the new one; red under
+  `accept-off` on the new index.
+- (c) `reversed-check` PASS against the token oracle: `כהנים` 53,240 pages, 10,177 aggregates,
+  16,868 seams; `נים` 519,402, 80,455 and 212,840 (the plain prefix finds 13-1,350 fewer in each).
+  Red: the field missing on aggregates (a sample built before they got it), the field from
+  `content`, a plain prefix.
+- (d) and (e): `tests/test_index_format.py` (40 tests) and the whole local suite
+  (`run_local_tests.py`: 16,904 passed, 3 failed -- one getattr-guard finding, fixed; a browse
+  timeout test that passes alone; and a Config test failing only because `build_index.py` makes
+  `Genizah_Index/` in the checkout it runs from); `seams-in-main-index` and `offset-default-1`
+  red.
+- (f) `verify_search_combinations.py` VERIFIED on the new index (and on today's), after two fixes
+  of the gate itself, both exposed by the new document order: its completion check takes the
+  restriction check's rule for a page filed under two manuscripts, and its copy check reads every
+  copy (a printed book's page is filed under 40 and more). Which manuscript such a page is shown
+  under follows document order: an uncapped `ישראל` reaches 44,055 / 44,056 / 44,061 manuscripts
+  on three builds of one corpus (tracker fragment).
+- (g) `desktop-timings`: every row count as in §3.6.6's Phase 1 run. Timed back to back the new
+  index looked 1.3-2x slower on the `regex` route; interleaved in one process (two rounds,
+  alternating), old and new are equal within noise (`#כהנים #גדולים` 78.9/79.6 s new against
+  78.5/82.1 s today's; the other four within 1 s). The laptop's mixed fast and compact cores and
+  two Modern Standby spells (13:13-13:19, 13:34-13:50) make single runs unreliable.
+
+Not done here: the server rebuild (the owner's; `DEPLOYMENT_TECHNICAL.md`, "Rebuild the main index
+in format 2"), and moving today's crossings to the seams (the owner's decision, §6.1 point 7;
+measured in #440). One rebuild carries both:
 - the seam documents (§6 B), built per source and per IE with consecutive page numbers, so none
   of §3.6.5's 226,926 false junctions survives;
 - the reversed-words field (§5.6 B), its size measured first (estimate: +2-3 GB on 12.9 GB,
