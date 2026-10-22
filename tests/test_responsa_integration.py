@@ -54,6 +54,18 @@ def _make_search_engine():
     return engine
 
 
+def _real_engine(tmp_path, manuscripts):
+    """A SearchEngine on a real fixture index (tests/responsa_fixture.py)."""
+    from tests.responsa_fixture import build_main, make_engine
+    build_main(tmp_path, manuscripts)
+    return make_engine(tmp_path)
+
+
+def _release(engine):
+    from tests.responsa_fixture import release
+    release(engine)
+
+
 # ============================================================================
 # build_tantivy_query — Responsa branch
 # ============================================================================
@@ -220,9 +232,10 @@ class TestBuildRegexResponsa:
             responsa_components=components, responsa_options={}
         )
         assert result is not None
-        pattern = result.pattern
-        # Should contain word[ab]end or word(a|b)end
-        assert 'word' in pattern and 'end' in pattern
+        # Both spellings, as whole words; no other letter in the slot.
+        assert result.search('x wordaend y') and result.search('wordbend')
+        assert not result.search('wordcend')
+        assert not result.search('wordaendx')
 
     def test_inline_alternation_multi_char(self):
         """Inline alternation with multi-char uses alternation group."""
@@ -242,9 +255,10 @@ class TestBuildRegexResponsa:
             responsa_components=components, responsa_options={}
         )
         assert result is not None
-        pattern = result.pattern
-        # Should contain alternation
-        assert 'pre' in pattern and 'post' in pattern
+        # Every alternative spelt out, as whole words.
+        assert result.search('preabcpost') and result.search('predepost')
+        assert not result.search('preapost')
+        assert not result.search('predepostx')
 
     def test_flex_spacing(self):
         """Flex spacing adds \\s* between chars of original terms as alternatives."""
@@ -494,36 +508,29 @@ class TestExecuteSearchResponsa:
         ('ראובן בלבד', False),
         ('שמעון בלבד', False),
     ], ids=['distant', 'reversed', 'alternatives', 'missing-second', 'missing-first'])
-    def test_builder_document_and_execution(self, content, expected):
+    def test_builder_document_and_execution(self, content, expected, tmp_path):
         from shared.responsa import generate_tabular_syntax
 
         query, _ = generate_tabular_syntax([
             {'words': [{'text': 'ראובן'}]},
             {'words': [{'text': 'שמעון'}, {'text': 'לוי'}]},
         ], [0], scope='within_document')
-        engine = _make_search_engine()
-        engine.index = MagicMock()
-        engine.searcher = MagicMock()
-        engine.searcher.search.return_value.hits = [(1.0, 'doc')]
-        engine.searcher.doc.return_value = {
-            'content': [content], 'full_header': ['test'], 'source': ['V0.8'],
-            'unique_id': ['uid1'], 'scope': ['page'], 'boundaries': ['[]'],
-        }
-        engine.meta_mgr.get_display_data.return_value = {
-            'shelfmark': 'T-S 12.1', 'source': 'V0.8'}
-        engine.meta_mgr.parse_header_smart.return_value = ('sys1', '1')
-        opts = {'responsa_mode': True}
-        results = engine.execute_search(query, 'exact', 0,
-                                        responsa_options=opts, corpus_scope='genizah')
-        assert bool(results) is expected
-        assert opts == {'responsa_mode': True}
-        tantivy_query = engine.index.parse_query.call_args.args[0]
-        assert '"AND"' not in tantivy_query
+        # A real index: the lookup is a query object built on its schema, and a
+        # builder AND is an operator there, never a term the page must hold.
+        engine = _real_engine(tmp_path, {'990001': [('uid1', content)]})
+        try:
+            opts = {'responsa_mode': True}
+            results = engine.execute_search(query, 'exact', 0,
+                                            responsa_options=opts, corpus_scope='genizah')
+            assert bool(results) is expected
+            assert opts == {'responsa_mode': True}
 
-        # Local-library searches must interpret the same portable syntax.
-        _, local_regex = engine._build_local_responsa_query_and_regex(
-            query, 'exact', 0, opts)
-        assert bool(local_regex.search(content)) is expected
+            # Local-library searches must interpret the same portable syntax.
+            _, local_regex = engine._build_local_responsa_query_and_regex(
+                query, 'exact', 0, opts)
+            assert bool(local_regex.search(content)) is expected
+        finally:
+            _release(engine)
 
     def test_document_and_does_not_change_word_range(self):
         engine = _make_search_engine()
@@ -542,15 +549,16 @@ class TestExecuteSearchResponsa:
             assert not pattern.search('מילה ' * 20000)
 
     @pytest.mark.parametrize('failure_site', ['search', 'doc'])
-    def test_memory_exhaustion_never_becomes_successful_empty_results(self, failure_site):
-        engine = _make_search_engine()
-        engine.index = MagicMock()
-        engine.searcher = MagicMock()
-        engine.searcher.search.return_value.hits = [(1.0, 'doc')]
-        getattr(engine.searcher, failure_site).side_effect = MemoryError('worker allocation exhausted')
-        with pytest.raises(MemoryError):
-            engine.execute_search('ראובן AND שמעון', 'exact', 0,
-                                  responsa_options={'responsa_mode': True}, corpus_scope='genizah')
+    def test_memory_exhaustion_never_becomes_successful_empty_results(self, failure_site, tmp_path):
+        engine = _real_engine(tmp_path, {'990001': [('uid1', 'ראובן ואחריו שמעון')]})
+        try:
+            engine.searcher = MagicMock(wraps=engine.searcher)
+            getattr(engine.searcher, failure_site).side_effect = MemoryError('worker allocation exhausted')
+            with pytest.raises(MemoryError):
+                engine.execute_search('ראובן AND שמעון', 'exact', 0,
+                                      responsa_options={'responsa_mode': True}, corpus_scope='genizah')
+        finally:
+            _release(engine)
 
     def test_accepts_responsa_options_parameter(self):
         """execute_search accepts responsa_options parameter without error."""
@@ -578,63 +586,24 @@ class TestExecuteSearchResponsa:
         )
         assert isinstance(result, list)
 
-    def test_explosion_warning_propagated(self):
-        """When explosion guard returns a warning, it appears in first result."""
-        engine = _make_search_engine()
-
-        # Set up a mock index and searcher for the Responsa path
-        engine.index = MagicMock()
-        engine.searcher = MagicMock()
-
-        # Mock parse_query to return something
-        mock_query = MagicMock()
-        engine.index.parse_query = MagicMock(return_value=mock_query)
-
-        # Mock search to return hits with content that matches our regex
-        mock_doc_addr = MagicMock()
-        mock_search_result = MagicMock()
-        mock_search_result.hits = [(1.0, mock_doc_addr)]
-        engine.searcher.search = MagicMock(return_value=mock_search_result)
-
-        # Mock doc retrieval
-        mock_doc = {
-            'content': ['some text with word1 word2 more text here'],
-            'full_header': ['test_header'],
-            'source': ['V0.8'],
-            'unique_id': ['uid1'],
-            'scope': ['page'],
-            'boundaries': ['[]'],
-        }
-        engine.searcher.doc = MagicMock(return_value=mock_doc)
-
-        # Mock meta_mgr
-        engine.meta_mgr.get_display_data = MagicMock(return_value={
-            'shelfmark': 'T-S 12.1', 'source': 'V0.8'
-        })
-        engine.meta_mgr.parse_header_smart = MagicMock(return_value=('sys1', '1'))
-
-        # Use a query with many words that will trigger explosion guard warning
-        # We'll patch _apply_explosion_guard to return a warning
-        with patch('shared.search_engine._apply_explosion_guard') as mock_guard:
-            mock_guard.return_value = (
-                [ResponsaComponent(words=["word1"]), ResponsaComponent(words=["word2"])],
-                "Variant mode downgraded to basic (30 pairs)",
-                {'variants_on': True, 'ja_on': False, 'variant_mode': 'variants'}
-            )
-
-            results = engine.execute_search(
-                'word1 word2', 'exact', 0,
-                responsa_options={
-                    'responsa_mode': True, 'variants': True, 'ja': False,
-                    'flex_spacing': False, 'bidirectional': False,
-                    'variant_mode': 'variants_maximum'
-                }
-            )
-
-            # If there are results, the first one should have the warning
-            if results:
-                assert results[0].get('responsa_warning') is not None
-                assert 'downgraded' in results[0]['responsa_warning'].lower() or 'basic' in results[0]['responsa_warning'].lower()
+    def test_explosion_warning_propagated(self, tmp_path):
+        """When the guard steps down, the warning reaches the first row and the
+        thread-local channel the API reads (a real search, a small limit)."""
+        from shared.config import Config
+        from shared.search_engine import _consume_last_responsa_downgrade
+        engine = _real_engine(tmp_path, {'990001': [('uid1', 'אמר ושלום עולם')]})
+        try:
+            with patch.object(Config, 'MAX_EXPANDED_TERMS', 100):
+                # #שלום# is 600 forms: over 100, so the suffixes go and 24 remain.
+                results = engine.execute_search(
+                    '#שלום# עולם', 'exact', 0,
+                    responsa_options={'responsa_mode': True}, corpus_scope='genizah')
+            assert [r['uid'] for r in results] == ['uid1']
+            warning = results[0].get('responsa_warning')
+            assert warning and ('suffix' in warning.lower() or 'סיומות' in warning)
+            assert _consume_last_responsa_downgrade() == warning
+        finally:
+            _release(engine)
 
     def test_responsa_pipeline_calls_parse_responsa_query(self):
         """Responsa path calls parse_responsa_query, not str.split()."""
@@ -673,7 +642,7 @@ class TestExecuteSearchResponsa:
         engine.searcher.search = MagicMock(return_value=mock_search_result)
 
         with patch('shared.search_engine.parse_responsa_query') as mock_parse, \
-             patch('shared.search_engine.expand_grammatical_suffixes') as mock_suffix:
+             patch('shared.responsa_match.expand_grammatical_suffixes') as mock_suffix:
             mock_parse.return_value = [
                 ResponsaComponent(words=["stem"], grammatical_suffixes=True)
             ]
@@ -703,7 +672,7 @@ class TestExecuteSearchResponsa:
         engine.searcher.search = MagicMock(return_value=mock_search_result)
 
         with patch('shared.search_engine.parse_responsa_query') as mock_parse, \
-             patch('shared.search_engine.expand_plene_defective') as mock_plene:
+             patch('shared.responsa_match.expand_plene_defective') as mock_plene:
             mock_parse.return_value = [
                 ResponsaComponent(words=["shalom"], plene_defective=True)
             ]
@@ -735,10 +704,9 @@ class TestExecuteSearchResponsa:
         call_order = []
 
         with patch('shared.search_engine.parse_responsa_query') as mock_parse, \
-             patch('shared.search_engine.expand_plene_defective') as mock_plene, \
-             patch('shared.search_engine.expand_grammatical_prefixes') as mock_prefix, \
-             patch('shared.search_engine.expand_grammatical_suffixes') as mock_suffix, \
-             patch('shared.search_engine._apply_explosion_guard') as mock_guard:
+             patch('shared.responsa_match.expand_plene_defective') as mock_plene, \
+             patch('shared.responsa_match.expand_grammatical_prefixes') as mock_prefix, \
+             patch('shared.responsa_match.expand_grammatical_suffixes') as mock_suffix:
 
             comp = ResponsaComponent(
                 words=["word"],
@@ -747,11 +715,6 @@ class TestExecuteSearchResponsa:
                 grammatical_suffixes=True,
             )
             mock_parse.return_value = [comp]
-            # Bypass the explosion guard so expansion proceeds normally
-            mock_guard.return_value = (
-                [comp], None,
-                {'variants_on': False, 'ja_on': False, 'variant_mode': 'exact'}
-            )
 
             def track_plene(w):
                 call_order.append('plene')
@@ -924,7 +887,8 @@ class TestPerPairGapRegex:
 
     def test_execute_search_passes_per_pair_gaps(self):
         """Query '#\u05e9\u05dc\u05d5\u05dd [3] \u05e2\u05d5\u05dc\u05dd' through execute_search with
-        responsa_options -> verify regex pattern contains per-pair gap separators."""
+        responsa_options -> the compiler gets the per-pair gaps."""
+        import shared.search_engine as se
         engine = _make_search_engine()
         engine.index = MagicMock()
         engine.searcher = MagicMock()
@@ -934,7 +898,7 @@ class TestPerPairGapRegex:
         mock_search_result.hits = []
         engine.searcher.search = MagicMock(return_value=mock_search_result)
 
-        with patch.object(engine, 'build_regex_pattern', wraps=engine.build_regex_pattern) as mock_build_regex:
+        with patch.object(se, 'compile_responsa_components', wraps=se.compile_responsa_components) as compiler:
             engine.execute_search(
                 '#\u05e9\u05dc\u05d5\u05dd [3] \u05e2\u05d5\u05dc\u05dd', 'exact', 1,
                 responsa_options={
@@ -944,13 +908,5 @@ class TestPerPairGapRegex:
                 }
             )
 
-            # build_regex_pattern should have been called with per_pair_gaps
-            mock_build_regex.assert_called_once()
-            call_kwargs = mock_build_regex.call_args
-            # Check that per_pair_gaps was passed (either as kwarg or in args)
-            if call_kwargs.kwargs:
-                assert 'per_pair_gaps' in call_kwargs.kwargs
-                assert call_kwargs.kwargs['per_pair_gaps'] == [3]
-            else:
-                # Positional args: check the last one
-                assert [3] in call_kwargs.args
+            compiler.assert_called_once()
+            assert compiler.call_args.args[4] == [3]

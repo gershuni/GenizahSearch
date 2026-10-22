@@ -58,6 +58,7 @@ from web.api_hardening import (
 from shared.api_errors import APIError
 from shared.responsa import _MAX_GAP_TOKEN
 from shared.search_engine import MAX_WORD_GAP
+from shared.responsa_match import ResponsaQueryRefused
 from shared.search_regex import SearchBudgetExceeded, search_budget
 from web.research_jobs import api_engine, wait_executor, with_request_settings, ResearchJobError
 from web.variant_preferences import default_search
@@ -1842,6 +1843,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                         results, downgrade_msg, cascade_meta, search_cutoff = _search_fut.result()
                     except ResearchJobError as exc:
                         raise APIError('research_worker_stopped', str(exc), http_status=503) from exc
+                    except ResponsaQueryRefused as exc:
+                        # A star shape not searched yet, or a query over the guard's
+                        # limit: the caller's query, answered with its code (a 400),
+                        # never a 500 or an empty list.
+                        raise APIError(exc.code, str(exc), http_status=400) from exc
                     except SearchBudgetExceeded as exc:
                         raise APIError(
                             'core_timeout',

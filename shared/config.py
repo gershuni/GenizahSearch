@@ -144,7 +144,11 @@ class Config:
     VARIANT_GEN_LIMIT = 8000
     REGEX_VARIANTS_LIMIT = 8000
     WORD_TOKEN_PATTERN = r"[\w֐-׿\']+"
-    MAX_EXPANDED_TERMS = 500
+    # Responsa: the most terms one query's lookup may hold, counted as they are made
+    # (shared/responsa_match.py::expand_under_guard). Measured 2026-10-21 on the local
+    # index: 1,200 scored terms 0.6-0.8 s, 4,800 2.9-3.7 s, 9,600 5.5-6.0 s. It was
+    # 500 estimated forms, which cut #X#'s 600 (24 prefixes x 25 suffixes).
+    MAX_EXPANDED_TERMS = 5000
     NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
     USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     HTTP_HEADERS = {"User-Agent": USER_AGENT}

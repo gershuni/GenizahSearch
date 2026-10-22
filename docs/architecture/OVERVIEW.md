@@ -55,7 +55,9 @@ Curated pointers, not a listing. For a symbol-level index see
 [docs/CODE_INDEX.md](../CODE_INDEX.md).
 
 - **Search and metadata (`shared/`).** The Tantivy search, variant expansion
-  ([shared/variants.py](../../shared/variants.py)), codicological and responsa helpers,
+  ([shared/variants.py](../../shared/variants.py)), codicological and responsa helpers (the
+  Responsa word compiler, one meaning of a query on every search path, is
+  [shared/responsa_match.py](../../shared/responsa_match.py)),
   metadata and shelfmark handling ([shared/shelfmark_bridge.py](../../shared/shelfmark_bridge.py),
   [shared/sys_id_patterns.py](../../shared/sys_id_patterns.py) -- the single definition of a
   sys_id pattern), and the sidecar services (`shared/*_service.py`: PGP documents, FJMS

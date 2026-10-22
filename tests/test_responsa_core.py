@@ -583,8 +583,9 @@ class TestApplyExplosionGuard:
         assert warning is not None
 
     def test_over_limit_disables_ja(self):
-        """If disabling variants is not enough, disable JA."""
-        words = [f"word{i}" for i in range(20)]
+        """If disabling variants is not enough, disable JA: 30 words x 24 prefixes x 8
+        Judeo-Arabic forms = 5,760 terms > 5,000; without JA, 720."""
+        words = [f"word{i}" for i in range(30)]
         components = [
             ResponsaComponent(words=words, grammatical_prefixes=True),
         ]
@@ -599,13 +600,14 @@ class TestApplyExplosionGuard:
         assert warning is not None
 
     def test_still_over_raises_error(self):
-        """If all downgrades exhausted and still over limit, raise ValueError."""
-        words = [f"word{i}" for i in range(600)]
+        """If all downgrades exhausted and still over limit, raise ValueError: 6,000
+        words are over 5,000 even with no prefix left."""
+        words = [f"word{i}" for i in range(6000)]
         components = [
             ResponsaComponent(words=words, grammatical_prefixes=True),
         ]
         var_mgr = self._make_mock_var_mgr(variants_per_term=0)
-        with pytest.raises(ValueError, match="500|too many|limit|explosion"):
+        with pytest.raises(ValueError, match="5000|too many|limit|explosion"):
             _apply_explosion_guard(
                 components,
                 variants_on=False,
@@ -615,22 +617,23 @@ class TestApplyExplosionGuard:
             )
 
     def test_max_expanded_terms_in_config(self):
-        """MAX_EXPANDED_TERMS = 500 is in Config class."""
+        """MAX_EXPANDED_TERMS = 5,000 real lookup terms (plan §5.3; measured 2026-10-21:
+        1,200 scored terms 0.6-0.8 s, 4,800 2.9-3.7 s). It was 500 estimated forms,
+        which cut #X#'s 600 (24 prefixes x 25 suffixes): changed on purpose."""
         assert hasattr(Config, 'MAX_EXPANDED_TERMS')
-        assert Config.MAX_EXPANDED_TERMS == 500
+        assert Config.MAX_EXPANDED_TERMS == 5000
 
     def test_suffixes_counted_in_explosion_guard(self):
-        """Suffix expansion is counted when estimating explosion.
+        """Suffix expansion is counted, and #X# keeps its suffixes (plan §5.3).
 
-        1 word * 24 prefixes * 25 suffixes * 5 variants = 3000 >> 500.
-        After disabling variants: 1 * 24 * 25 = 600 > 500 still.
-        With expanded cascade, the guard disables suffixes (bringing to 24*1=24)
-        instead of raising ValueError.
+        1 word * 24 prefixes * 25 suffixes * 10 variants = 6,000 > 5,000. The cascade
+        turns variants off first; the 600 grammatical forms then fit, so the suffixes
+        stay (the old 500-term guard dropped them).
         """
         components = [
             ResponsaComponent(words=["שלום"], grammatical_prefixes=True, grammatical_suffixes=True),
         ]
-        var_mgr = self._make_mock_var_mgr(variants_per_term=5)
+        var_mgr = self._make_mock_var_mgr(variants_per_term=10)
         expanded, warning, actual_opts = _apply_explosion_guard(
             components,
             variants_on=True,
@@ -638,10 +641,25 @@ class TestApplyExplosionGuard:
             var_mgr=var_mgr,
             variant_mode='variants'
         )
-        # Cascade should have disabled suffixes instead of erroring
         assert warning is not None, "Should have triggered cascade warning"
-        assert "suffix" in warning.lower() or "סיומות" in warning, f"Warning should mention suffix disabling, got: {warning}"
+        assert actual_opts['variants_on'] is False
+        assert expanded[0].grammatical_suffixes is True
+        assert expanded[0].grammatical_prefixes is True
+
+    def test_suffixes_go_when_the_forms_alone_are_over_the_limit(self):
+        """Nine words with #...#: 9 * 600 = 5,400 terms > 5,000, with no variant or
+        Judeo-Arabic step to take; dropping the suffixes leaves 9 * 24 = 216."""
+        components = [
+            ResponsaComponent(words=[f"word{i}" for i in range(9)],
+                              grammatical_prefixes=True, grammatical_suffixes=True),
+        ]
+        expanded, warning, actual_opts = _apply_explosion_guard(
+            components, variants_on=False, ja_on=False,
+            var_mgr=self._make_mock_var_mgr(variants_per_term=0), variant_mode='variants')
+        assert warning is not None
+        assert "suffix" in warning.lower() or "סיומות" in warning, f"got: {warning}"
         assert expanded[0].grammatical_suffixes is False
+        assert expanded[0].grammatical_prefixes is True
 
     def test_suffixes_with_manageable_count(self):
         """Suffix expansion only (no prefixes) stays under limit without cascading."""

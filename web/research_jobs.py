@@ -74,6 +74,26 @@ class ResearchJobError(RuntimeError):
     """A computation stopped without returning misleading partial results."""
 
 
+def raise_worker_error(result):
+    """Raise the exception a research worker's error *result* stands for, as the
+    search would have raised it in this process: the time limit, an unresolved
+    witness list, a validation error (a refused Responsa query keeps its type and
+    code -- shared/responsa_match.py -- so the API answers it with that code), or
+    else ResearchJobError."""
+    if result.get('time_limit'):
+        from shared.search_regex import SearchBudgetExceeded
+        raise SearchBudgetExceeded()
+    if result.get('exception') == 'NoWitnessesResolved':
+        from shared.passage_parallels import NoWitnessesResolved
+        raise NoWitnessesResolved(result['report'])
+    if result.get('validation'):
+        if result.get('code'):
+            from shared.responsa_match import ResponsaQueryRefused
+            raise ResponsaQueryRefused(result['error'], code=result['code'])
+        raise ValueError(result['error'])
+    raise ResearchJobError(result['error'])
+
+
 def snapshot_settings(engine, overrides=None):
     """The engine's settings as a worker rebuilds them, with *overrides* on top."""
     settings = getattr(engine, 'settings', None)
@@ -409,15 +429,7 @@ class ResearchQueue:
                 result = pickle.load(stream)
             log.info('Research result transferred: %d compressed bytes, %d expanded bytes', output_bytes, expanded_bytes)
             if result.get('error'):
-                if result.get('time_limit'):
-                    from shared.search_regex import SearchBudgetExceeded
-                    raise SearchBudgetExceeded()
-                if result.get('exception') == 'NoWitnessesResolved':
-                    from shared.passage_parallels import NoWitnessesResolved
-                    raise NoWitnessesResolved(result['report'])
-                if result.get('validation'):
-                    raise ValueError(result['error'])
-                raise ResearchJobError(result['error'])
+                raise_worker_error(result)
             return result
         finally:
             job.process = None

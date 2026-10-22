@@ -40,13 +40,20 @@ from shared.browse_map_utils import natural_sort_key, dedupe_browse_map, _extrac
 from shared.search_tokenizer import register_search_tokenizers
 from shared.indexer import Indexer
 from shared.responsa import (
-    expand_grammatical_prefixes, expand_grammatical_suffixes,
-    expand_judeo_arabic, expand_plene_defective,
     parse_responsa_query, _parse_line_break_query,
     ResponsaComponent, _apply_explosion_guard,  # noqa: F401
-    extract_per_pair_gaps, has_document_and, _expand_inline_alternation,
+    extract_per_pair_gaps, has_document_and,
 )
 from shared.responsa import _SOFIT_TO_NORMAL, _MAX_GAP_TOKEN
+from shared.responsa_match import (
+    WordPlan as ResponsaWordPlan,
+    build_line_patterns as build_responsa_line_patterns,
+    build_patterns as build_responsa_patterns,
+    compile_components as compile_responsa_components,
+    compile_line_groups as compile_responsa_line_groups,
+    component_query_string, expand_stems as expand_responsa_stems, plans_from_dicts,
+    refuse_unsupported_stars,
+)
 
 LOGGER = logging.getLogger("genizah." + __name__)
 
@@ -440,6 +447,40 @@ def _page_in_restriction(page, page_uids, sys_ids):
     return page.get('uid') in page_uids or (sys_ids is not None and page.get('sys_id') in sys_ids)
 
 
+def _matched_page_text(content, span, boundaries):
+    """The text of the pages *span* covers in a whole-manuscript / part doc (its page, or
+    for a match across a break, every page the span touches): what an excluded word is
+    looked for in (owner, 2026-10-21, decision 7 of docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md).
+    The whole document when the span touches no page."""
+    s, e = span
+    parts = [content[b.get('start', 0):b.get('end', 0)] for b in boundaries
+             if not (e <= b.get('start', 0) or s >= b.get('end', 0))]
+    return '\n'.join(parts) if parts else content
+
+
+def _without_excluded(rows, words):
+    """*rows* without those whose matched page holds the letters of one of *words*,
+    anywhere inside a word (decision 7, every mode). The page: a page row's own text;
+    a whole-manuscript row's matched page(s) (``_page_text``, set when the row is
+    built); an ids_only row decided as it was built (``_excluded``). It was the
+    row's snippet and full_text -- for a row found through its whole manuscript, the
+    whole manuscript, so `-X` hid a row whose page never held X. The private keys go."""
+    lowered = [w.lower() for w in words or [] if w]
+    out = []
+    for r in rows:
+        if '_excluded' in r:
+            if not r.pop('_excluded'):
+                out.append(r)
+            continue
+        text = r.pop('_page_text', None)
+        if text is None:
+            text = r.get('full_text') or ''
+        if lowered and any(w in text.lower() for w in lowered):
+            continue
+        out.append(r)
+    return out
+
+
 def _first_accepted_match(regex, text, first_match, accept):
     """The first occurrence of *regex* in *text*, from *first_match* on, that *accept*
     takes, or None. Repeated ``search(pos=...)``: the budgeted Pattern has no finditer."""
@@ -653,7 +694,7 @@ def content_search_staleness_messages(genizah_present: bool,
 MARK_TOLERANT_INSERTER = '[\u0300-\u036F\u0022\u0027\u05F3\u05F4\u2018\u2019]*'
 
 
-def make_mark_tolerant_pattern(escaped_term: str) -> str:
+def make_mark_tolerant_pattern(escaped_term: str, inserter: str = MARK_TOLERANT_INSERTER) -> str:
     """Insert optional combining mark matchers between characters of an escaped regex term.
 
     Takes an already-escaped regex term (from re.escape) and inserts optional
@@ -666,16 +707,17 @@ def make_mark_tolerant_pattern(escaped_term: str) -> str:
         return escaped_term
     # Split escaped string into tokens: \\X (escape sequences) or single chars
     tokens = re.findall(r'\\.|.', escaped_term)
-    return MARK_TOLERANT_INSERTER.join(tokens)
+    return inserter.join(tokens)
 
 
 _PREFIX_TREE_MAX_FORM = 64
 
 
-def _prefix_tree(forms):
+def _prefix_tree(forms, inserter=MARK_TOLERANT_INSERTER):
     """The alternation of *forms*, all of one length (each mark-tolerant), as a
     prefix tree: forms that begin with the same characters share their branch.
-    Being of one length, a form ends only where no other continues."""
+    Being of one length, a form ends only where no other continues. *inserter*:
+    what may stand between two letters (a Responsa highlight lets brackets too)."""
     tree = {}
     for form in forms:
         node = tree
@@ -688,13 +730,13 @@ def _prefix_tree(forms):
         branches = [re.escape(char) + after(node[char]) for char in sorted(node)]
         if not branches:
             return ''
-        return MARK_TOLERANT_INSERTER + (branches[0] if len(branches) == 1
-                                         else '(?:' + '|'.join(branches) + ')')
+        return inserter + (branches[0] if len(branches) == 1
+                           else '(?:' + '|'.join(branches) + ')')
 
     return '|'.join(re.escape(char) + after(tree[char]) for char in sorted(tree))
 
 
-def _variant_alternation(forms):
+def _variant_alternation(forms, inserter=MARK_TOLERANT_INSERTER):
     """build_regex_pattern's alternation of *forms* -- each mark-tolerant, longest
     first -- written as one prefix tree per form length, longest first.
 
@@ -714,11 +756,11 @@ def _variant_alternation(forms):
     character, so a tree would match it differently).
     """
     if _tree_falls_back(forms):
-        return '|'.join(make_mark_tolerant_pattern(re.escape(form)) for form in forms)
+        return '|'.join(make_mark_tolerant_pattern(re.escape(form), inserter) for form in forms)
     by_length = {}
     for form in forms:
         by_length.setdefault(len(form), []).append(form)
-    return '|'.join(_prefix_tree(by_length[n]) for n in sorted(by_length, reverse=True))
+    return '|'.join(_prefix_tree(by_length[n], inserter) for n in sorted(by_length, reverse=True))
 
 
 def _tree_falls_back(forms):
@@ -1598,7 +1640,7 @@ class SearchEngine:
     def _query_local_index(self, query_str: str, mode: str, gap: int,
                            limit=None, regex=None, tantivy_query_str=None,
                            progress_callback=None, phase_callback=None, tantivy_query=None,
-                           accept=None):
+                           accept=None, pattern_str=None, strip_brackets=False):
         """Query the LOCAL side-index. Returns [] if local_searcher is None (D-37).
 
         MEDIUM-1 note: this uses a simplified parse_query (not the full Responsa
@@ -1682,7 +1724,9 @@ class SearchEngine:
             search_limit = limit or Config.SEARCH_LIMIT
             hits, capped = _top_hits(self.local_searcher, tantivy_q, search_limit)
             _note_search_cutoff(capped=capped)
-            pattern_str = regex.pattern if regex is not None else ""
+            # *pattern_str*: the rows' highlight pattern when it is not the check's
+            # own (Responsa); *strip_brackets*: match the text with its brackets out.
+            pattern_str = pattern_str or (regex.pattern if regex is not None else "")
             # The LOCAL pass is a distinct phase, not more of the Genizah one: its
             # hit counts are unrelated, so reporting them on the same numeric
             # channel would rewind the bar. Announce the phase and let the UI go
@@ -1718,7 +1762,8 @@ class SearchEngine:
                             pass  # progress is advisory; cancellation is not
                     doc = self.local_searcher.doc(doc_address)
                     hit = self._build_local_result_dict(
-                        doc, score, regex=regex, pattern_str=pattern_str, accept=accept
+                        doc, score, regex=regex, pattern_str=pattern_str, accept=accept,
+                        strip_brackets=strip_brackets,
                     )
                     # D-04.1 filter-out: skip candidates whose regex didn't match.
                     # _build_local_result_dict returns None for those.
@@ -1745,7 +1790,8 @@ class SearchEngine:
             LOGGER.warning("LOCAL index query failed: %r", e)
             return []
 
-    def _build_local_result_dict(self, doc, score, regex=None, pattern_str=None, accept=None):
+    def _build_local_result_dict(self, doc, score, regex=None, pattern_str=None, accept=None,
+                                 strip_brackets=False):
         """Construct a result row from a LOCAL Tantivy doc per D-34 shape.
 
         Phase 96 D-F5: when `regex` is provided, populate snippet + raw_file_hl
@@ -1765,6 +1811,10 @@ class SearchEngine:
 
         *accept* (_local_match_accept): with a regex, the row needs a match it takes
         -- a whole word at the text position -- not just any match.
+
+        *strip_brackets* (Responsa, a bracket-free query): the match is made on the
+        text with its brackets out and marked where it stands in the original, as
+        on the main index -- one bracket rule (plan §4; LOCAL read the raw text).
 
         Returns:
             - dict (the hit) when regex matches OR regex is None
@@ -1792,15 +1842,18 @@ class SearchEngine:
         # Phase 96 D-F5: compute snippet via self.highlight when regex provided.
         # D-04.1: filter-out signal when regex doesn't match (return None).
         if regex is not None:
-            if accept is not None:
-                first = regex.search(content)
-                accepted = first and _first_accepted_match(
-                    regex, content, first, lambda m: accept(content, m))
+            if accept is not None or strip_brackets:
+                text = _strip_brackets(content) if strip_brackets else content
+                first = regex.search(text)
+                accepted = first and (first if accept is None else _first_accepted_match(
+                    regex, text, first, lambda m: accept(text, m)))
                 if not accepted:
                     return None
                 # Mark the occurrence accepted, not the first one -- which may sit
                 # inside a longer word or away from the position (Codex review).
-                hl_c, hl_f = self._highlight_pair(content, (accepted.start(), accepted.end()))
+                span = ((accepted.start(), accepted.end()) if text is content
+                        else _unstripped_span(content, accepted.start(), accepted.end()))
+                hl_c, hl_f = self._highlight_pair(content, span)
             else:
                 hl_c = self.highlight(content, regex, for_file=False)
                 hl_f = self.highlight(content, regex, for_file=True) if hl_c else None
@@ -2110,134 +2163,63 @@ class SearchEngine:
             if regex_mode != mode:
                 self.var_mgr.get_variants(term, regex_mode, limit=max_limit)
 
-    def _build_local_responsa_query_and_regex(self, query_str, mode, gap, responsa_options):
-        """Build a Tantivy query string + filter regex for a Responsa query, for
-        use against the LOCAL My-Library index.
-
-        Mirrors the component expansion the main (genizah) path runs inline in
-        execute_search — grammatical ``#prefix``/``suffix#``, ``*`` wildcards,
-        ``%`` plene/defective, ``(a/b)`` alternation, Judeo-Arabic + spelling-
-        variant expansion — but is self-contained so it never disturbs the
-        load-bearing main search path. It reuses the SAME index-agnostic
-        ``build_tantivy_query`` / ``build_regex_pattern`` the main path uses, so
-        the returned query string drops straight onto ``local_index.parse_query``.
-
-        Closes the Phase-95 MEDIUM-1 deferral (95-05): LOCAL search used a
-        simplified ``parse_query`` that stripped operator metacharacters, so
-        Responsa queries returned nothing. The line-break (``|``) operator is NOT
-        handled here — it runs through the separate ``_execute_line_break_search``
-        (main index only); callers get ``(None, None)`` and fall back.
-
-        Parity with the main path is pinned by
-        ``tests/test_local_reload_after_refresh.py::test_query_semantics_*``.
-
-        Returns ``(t_query_str, regex)``, or ``(None, None)`` when the query can't
-        be expressed for LOCAL (no components, line-break query, or no positive
-        components) so the caller falls back to the simplified path.
-        """
-        responsa_options = dict(responsa_options, within_document=has_document_and(query_str))
+    def _compile_responsa(self, query_str, responsa_options, gap):
+        """The compiled Responsa query (shared/responsa_match.py) for a query without
+        line-break syntax, or None when it has no components. Raises
+        ResponsaQueryRefused for a star shape not searched yet, and ValueError when
+        the guard cannot bring it under its limit -- on every path, before any
+        handler that would turn an error into no results."""
         components = parse_responsa_query(query_str)
         if not components:
-            return None, None
-        # Line-break ('|') is a separate, main-index-only path. Bail to fallback.
+            return None
+        return compile_responsa_components(
+            components, responsa_options, self.var_mgr, gap, extract_per_pair_gaps(query_str),
+            query_has_brackets=_query_has_brackets(query_str))
+
+    def _local_responsa_hits(self, compiled, query_str, mode, gap, text_position, *,
+                             progress_callback=None, phase_callback=None, limit=None, regex=None):
+        """*compiled*'s rows in the LOCAL index: its lookup on LOCAL's own schema,
+        the same check, the same whole-word rule and the same bracket rule as the
+        main index (a bracket-free query matches the text with its brackets out)."""
+        position = _local_match_accept(False, text_position, query_str)
+
+        def accept(text, m):
+            return compiled.accept(text, m) and (position is None or position(text, m))
+
+        query = compiled.retrieval(
+            self.local_index, has_content_search=getattr(self, '_local_has_content_search', False),
+            flex_spacing=bool(compiled.flex_spacing))
+        if query is None:
+            return []
+        return self._query_local_index(
+            query_str, mode, gap, regex=regex or compiled.compile_check(), tantivy_query=query,
+            progress_callback=progress_callback, phase_callback=phase_callback, limit=limit,
+            accept=accept, pattern_str=compiled.highlight_pattern,
+            strip_brackets=not _query_has_brackets(query_str))
+
+    def _build_local_responsa_query_and_regex(self, query_str, mode, gap, responsa_options):
+        """The LOCAL index's lookup and the check regex for a Responsa query, from the
+        word compiler (shared/responsa_match.py) -- the same one the main index uses.
+
+        Returns ``(query, regex)``, or ``(None, None)`` when the query has no positive
+        components or uses line-break (``|``) syntax, whose search runs on the main
+        index only. Raises ResponsaQueryRefused for an unsupported star shape.
+        """
+        responsa_options = dict(responsa_options, within_document=has_document_and(query_str))
         line_groups, _ = _parse_line_break_query(query_str)
         if line_groups is not None:
             return None, None
-        per_pair_gaps = extract_per_pair_gaps(query_str)
-
-        variants_on = responsa_options.get('variants', False)
-        ja_on = responsa_options.get('ja', False)
-        flex_spacing = responsa_options.get('flex_spacing', False)
-        variant_mode = responsa_options.get('variant_mode', 'exact')
-
-        # Rewrite *word* -> #word# (both-side wildcard = prefix+suffix expansion;
-        # true substring search isn't expressible in Tantivy). Mirrors main path.
-        for comp in components:
-            if (comp.wildcard == 'pattern' and comp.wildcard_pattern
-                    and comp.wildcard_pattern.startswith('*')
-                    and comp.wildcard_pattern.endswith('*')
-                    and comp.wildcard_pattern.count('*') == 2):
-                stem = comp.wildcard_pattern.strip('*')
-                if stem:
-                    comp.words = [stem]
-                    comp.wildcard = None
-                    comp.wildcard_pattern = None
-                    comp.grammatical_prefixes = True
-                    comp.grammatical_suffixes = True
-
-        # Explosion guard (same as main path) so a huge LOCAL expansion can't hang.
-        _components, _guard_warning, actual_opts = _apply_explosion_guard(
-            components, variants_on=variants_on, ja_on=ja_on,
-            var_mgr=self.var_mgr, variant_mode=variant_mode,
-        )
-        if _guard_warning:
-            variants_on = actual_opts['variants_on']
-            ja_on = actual_opts['ja_on']
-            variant_mode = actual_opts['variant_mode']
-
-        positive_components = [c for c in components if not c.negated]
-        if not positive_components:
+        compiled = self._compile_responsa(query_str, responsa_options, gap)
+        if compiled is None or not compiled.plans:
             return None, None
+        local = getattr(self, 'local_index', None)
+        index = local if local is not None else getattr(self, 'index', None)
+        has_cs = (getattr(self, '_local_has_content_search', False) if local is not None
+                  else getattr(self, '_has_content_search', False))
+        query = compiled.retrieval(index, has_content_search=has_cs,
+                                   flex_spacing=bool(compiled.flex_spacing)) if index is not None else None
+        return query, compiled.compile_check()
 
-        component_dicts = []
-        for comp in positive_components:
-            expanded_words = list(comp.words)
-            if comp.plene_defective:
-                pe = []
-                for w in expanded_words:
-                    pe.extend(expand_plene_defective(w))
-                expanded_words = list(dict.fromkeys(pe))
-            if comp.grammatical_prefixes:
-                pe = []
-                for w in expanded_words:
-                    pe.extend(expand_grammatical_prefixes(w))
-                expanded_words = list(dict.fromkeys(pe))
-            if comp.grammatical_suffixes:
-                se = []
-                for w in expanded_words:
-                    se.extend(expand_grammatical_suffixes(w))
-                expanded_words = list(dict.fromkeys(se))
-            if ja_on:
-                je = []
-                for w in expanded_words:
-                    je.extend(expand_judeo_arabic(w))
-                expanded_words = list(dict.fromkeys(je))
-            if variants_on and self.var_mgr:
-                ve = []
-                for w in expanded_words:
-                    try:
-                        ve.extend(_variants_noting_cutoff(self.var_mgr, w, variant_mode, 200))
-                    except MemoryError:
-                        raise
-                    except Exception:
-                        ve.append(w)
-                expanded_words = list(dict.fromkeys(ve))
-            flex_patterns = []
-            if flex_spacing:
-                for w in comp.words:
-                    flex_patterns.append(_make_flex_spacing_pattern(w))
-            component_dicts.append({
-                'tantivy_terms': expanded_words,
-                'regex_terms': expanded_words,
-                'original_words': comp.words,
-                'wildcard': comp.wildcard,
-                'wildcard_pattern': comp.wildcard_pattern,
-                'flex_patterns': flex_patterns,
-                'inline_pattern': comp.inline_pattern,
-            })
-
-        if not component_dicts:
-            return None, None
-        t_query_str = self.build_tantivy_query(
-            terms=None, mode=mode,
-            responsa_components=component_dicts, responsa_options=responsa_options,
-        )
-        regex = self.build_regex_pattern(
-            terms=None, mode=mode, max_gap=gap,
-            responsa_components=component_dicts, responsa_options=responsa_options,
-            per_pair_gaps=per_pair_gaps,
-        )
-        return t_query_str, regex
 
     def build_tantivy_query(self, terms, mode, responsa_components=None, responsa_options=None,
                             content_search_field=None, note_cutoff=True):
@@ -2252,79 +2234,11 @@ class SearchEngine:
         # doc carrying the original form still ranks above a fold-only match.
         # --- Responsa branch ---
         if responsa_components is not None:
+            # One clause per component (shared/responsa_match.py, the word compiler,
+            # builds the same clause into each index's query object).
             flex_spacing = responsa_options.get('flex_spacing', False) if responsa_options else False
-            parts = []
-            for comp in responsa_components:
-                tantivy_terms = comp.get('tantivy_terms', [])
-                original_words = set(comp.get('original_words', []))
-                if not tantivy_terms:
-                    continue
-
-                clean_vars = []
-                seen = set()
-                for t in tantivy_terms:
-                    t_clean = t.replace('"', '')
-                    if not t_clean or t_clean in seen:
-                        continue
-                    seen.add(t_clean)
-
-                    if t_clean in original_words:
-                        # Original / exact term gets highest boost
-                        clean_vars.append(f'"{t_clean}"^5')
-                    elif any(len(t_clean) != len(ow) for ow in original_words):
-                        # Different length from any original -> medium boost
-                        clean_vars.append(f'"{t_clean}"^3')
-                    else:
-                        clean_vars.append(f'"{t_clean}"')
-
-                # For suffix wildcards, expand with grammatical suffixes so Tantivy
-                # finds documents containing derived forms (e.g., שלומו for שלום*).
-                # Also add sofit-converted stem as fallback.
-                wildcard = comp.get('wildcard')
-                if wildcard == 'suffix':
-                    for w in comp.get('original_words', []):
-                        for sfx in expand_grammatical_suffixes(w):
-                            if sfx not in seen:
-                                seen.add(sfx)
-                                clean_vars.append(f'"{sfx}"')
-                        if w and w[-1] in _SOFIT_TO_NORMAL:
-                            converted = w[:-1] + _SOFIT_TO_NORMAL[w[-1]]
-                            if converted not in seen:
-                                seen.add(converted)
-                                clean_vars.append(f'"{converted}"')
-                elif wildcard == 'prefix':
-                    for w in comp.get('original_words', []):
-                        for pfx in expand_grammatical_prefixes(w):
-                            if pfx not in seen:
-                                seen.add(pfx)
-                                clean_vars.append(f'"{pfx}"')
-
-                # Bracket variants: add bracket-adorned forms of each
-                # original word so Tantivy returns bracketed tokens.
-                for w in comp.get('original_words', []):
-                    for bv in _add_bracket_variants(w):
-                        if bv != w and bv not in seen:
-                            seen.add(bv)
-                            clean_vars.append(f'"{bv}"')
-
-                # Flex spacing: add split alternatives so Tantivy finds
-                # documents where a word appears with spaces (e.g., "בן דוד"
-                # for query "בןדוד"). Each split produces an AND pair;
-                # regex phase then verifies adjacency.
-                flex_split_clauses = []
-                if flex_spacing:
-                    for w in comp.get('original_words', []):
-                        if len(w) >= 3:  # only split words with 3+ chars
-                            for i in range(1, len(w)):
-                                left, right = w[:i], w[i:]
-                                if len(left) >= 1 and len(right) >= 1:
-                                    flex_split_clauses.append(f'("{left}" AND "{right}")')
-
-                if clean_vars or flex_split_clauses:
-                    all_alternatives = clean_vars + flex_split_clauses
-                    parts.append(f'({" OR ".join(all_alternatives)})')
-
-            return " AND ".join(parts)
+            parts = [component_query_string(comp, flex_spacing) for comp in responsa_components]
+            return " AND ".join(p for p in parts if p)
 
         if mode == 'Regex':
             # A query string cannot hold Regex mode's candidates without losing
@@ -2632,98 +2546,18 @@ class SearchEngine:
     def build_regex_pattern(self, terms, mode, max_gap, responsa_components=None, responsa_options=None, per_pair_gaps=None):
         # --- Responsa branch ---
         if responsa_components is not None:
+            # The word compiler's check pattern (shared/responsa_match.py): every word
+            # bounded by Exact's whole-word edges, #X#'s forms as length-grouped trees.
             opts = responsa_options or {}
-            flex_spacing = opts.get('flex_spacing', False)
-            bidirectional = opts.get('bidirectional', False)
-
-            parts = []
-            for comp in responsa_components:
-                wildcard = comp.get('wildcard')
-                inline_pattern = comp.get('inline_pattern')
-
-                if inline_pattern:
-                    # Inline alternation: word(a/b)end
-                    part = _expand_inline_alternation(inline_pattern)
-                    parts.append(f"({part})")
-                    continue
-
-                if wildcard == 'pattern':
-                    # Character pattern: *a*b*c*
-                    part = _build_wildcard_regex(comp)
-                    parts.append(f"({part})")
-                    continue
-
-                if wildcard in ('suffix', 'prefix'):
-                    # Wildcard suffix/prefix
-                    part = _build_wildcard_regex(comp)
-                    if part:
-                        parts.append(part)
-                    continue
-
-                # Regular terms: build alternation group
-                regex_terms = comp.get('regex_terms', [])
-                flex_patterns = comp.get('flex_patterns', [])
-
-                all_alternatives = []
-
-                # Add regex terms (sorted by length descending, escaped)
-                unique_terms = sorted(set(regex_terms), key=len, reverse=True)
-                for t in unique_terms:
-                    all_alternatives.append(make_mark_tolerant_pattern(re.escape(t)))
-
-                # Add flex spacing patterns (already regex, NOT escaped)
-                if flex_spacing and flex_patterns:
-                    for fp in flex_patterns:
-                        if fp not in all_alternatives:
-                            all_alternatives.append(fp)
-
-                if all_alternatives:
-                    parts.append(f"({'|'.join(all_alternatives)})")
-
-            if not parts:
+            plans = plans_from_dicts(responsa_components)
+            if not plans:
                 return None
-
-            def _make_sep_for_gap(gap_val, flex):
-                """Build regex separator for a specific gap value."""
-                if gap_val == 0:
-                    if flex:
-                        return r'[^\w\u0590-\u05FF\']*'
-                    else:
-                        return r'[^\w\u0590-\u05FF\']+'
-                else:
-                    return rf'(?:[^\w\u0590-\u05FF\']+{Config.WORD_TOKEN_PATTERN}){{0,{gap_val}}}[^\w\u0590-\u05FF\']+'
-
-            def _join_parts_with_gaps(parts_list, gaps_list, default_gap, flex):
-                """Join regex parts with per-pair or uniform gap separators."""
-                if len(parts_list) == 1:
-                    return parts_list[0]
-                result = parts_list[0]
-                for i in range(1, len(parts_list)):
-                    gap = gaps_list[i-1] if gaps_list and i-1 < len(gaps_list) and gaps_list[i-1] is not None else default_gap
-                    result += _make_sep_for_gap(gap, flex) + parts_list[i]
-                return result
-
-            forward = _join_parts_with_gaps(parts, per_pair_gaps, max_gap, flex_spacing)
-
-            if opts.get('within_document'):
-                # At the earliest matching term, every required component must
-                # occur somewhere in the remaining transcription. This permits
-                # any order/distance (including newlines) and returns a real
-                # term span for snippets rather than a zero-width match.
-                required = ''.join(r'(?=[\s\S]*' + part + ')' for part in parts)
-                term = '(?:' + '|'.join(parts) + ')'
-                # Reject non-term positions before scanning the remaining
-                # document, especially during finditer/highlighting.
-                pattern_str = '(?=' + term + ')' + required + term
-            elif bidirectional and len(parts) >= 2:
-                reversed_gaps = list(reversed(per_pair_gaps)) if per_pair_gaps else per_pair_gaps
-                backward = _join_parts_with_gaps(list(reversed(parts)), reversed_gaps, max_gap, flex_spacing)
-                pattern_str = f"({forward})|({backward})"
-            else:
-                pattern_str = forward
-
+            check, _highlight, _groups = build_responsa_patterns(
+                plans, max_gap, per_pair_gaps, flex_spacing=opts.get('flex_spacing', False),
+                bidirectional=opts.get('bidirectional', False),
+                within_document=opts.get('within_document', False))
             try:
-                return compile_search_regex(pattern_str, re.IGNORECASE)
+                return compile_search_regex(check, re.IGNORECASE)
             except SearchBudgetExceeded:
                 raise
             except MemoryError:
@@ -2863,9 +2697,11 @@ class SearchEngine:
             LOGGER.warning("Failed to parse boundaries for doc %s: %s", uid_val, e)
             return []
 
-    def _aggregate_result_row(self, doc, content, span, boundaries, pattern_str, scope, score):
+    def _aggregate_result_row(self, doc, content, span, boundaries, pattern_str, scope, score,
+                              page_text=False):
         """The result row for a match in a whole-manuscript / part doc: shown as
-        the page the match starts on, with per-page highlight spans."""
+        the page the match starts on, with per-page highlight spans. *page_text*:
+        keep the matched pages' text for the exclusion check (_without_excluded)."""
         span_map = self._map_span_to_pages(span, boundaries)
         primary = span_map.get('primary') or {}
         display_header = primary.get('full_header', doc['full_header'][0])
@@ -2896,6 +2732,7 @@ class SearchEngine:
             # Phase 77 D-01: surface Tantivy relevance score so
             # serialize_search_payload emits non-zero scores.
             'score': float(score),
+            **({'_page_text': _matched_page_text(content, span, boundaries)} if page_text else {}),
         }
 
     def _cross_page_spans(self, regex, content, boundaries, first_term, last_term, side_words, gap, strip,
@@ -3021,7 +2858,7 @@ class SearchEngine:
         return sorted(set(spans))
 
     def _first_match_in_pages(self, regex, text, first_match, boundaries, page_uids, accept=None,
-                              sys_ids=None, to_original=None):
+                              sys_ids=None, to_original=None, accept_raw=None):
         """First match (from *first_match* on) on a page inside the restriction, or None.
 
         Search-within over an aggregate (scope system/part) hit: the doc's own
@@ -3038,14 +2875,15 @@ class SearchEngine:
         *accept* use) and returned mapped. The scan goes on in *text*: in the
         original, an occurrence that needs its brackets out (של[ו]ם) is never found
         again, so a row whose first match fell outside the restriction was lost
-        (Codex review of PR #375).
+        (Codex review of PR #375). *accept_raw* tests the match itself, in *text*,
+        before it is mapped (a Responsa match: its words' groups are read).
         """
         if not boundaries or not any(_page_in_restriction(b, page_uids, sys_ids) for b in boundaries):
             return None  # no page of this aggregate is in the restriction
         match = first_match
         while match is not None:
             found = match if to_original is None else to_original(match)
-            if accept is None or accept(found):
+            if (accept_raw is None or accept_raw(match)) and (accept is None or accept(found)):
                 overlaps = self._map_span_to_pages(found.span(), boundaries).get('overlaps') or []
                 if any(_page_in_restriction(o, page_uids, sys_ids) for o in overlaps):
                     return found
@@ -3187,147 +3025,30 @@ class SearchEngine:
         return None, query
 
     def _expand_responsa_component(self, comp, responsa_options):
-        """Expand a single ResponsaComponent through the full Responsa expansion pipeline.
-
-        Returns list of expanded words (lowercase strings).
-        """
-        variants_on = responsa_options.get('variants', False)
-        ja_on = responsa_options.get('ja', False)
-        variant_mode = responsa_options.get('variant_mode', 'exact')
-
-        expanded = list(comp.words)
-
-        if comp.plene_defective:
-            plene = []
-            for w in expanded:
-                plene.extend(expand_plene_defective(w))
-            expanded = list(dict.fromkeys(plene))
-
-        if comp.grammatical_prefixes:
-            pfx = []
-            for w in expanded:
-                pfx.extend(expand_grammatical_prefixes(w))
-            expanded = list(dict.fromkeys(pfx))
-
-        if comp.grammatical_suffixes:
-            sfx = []
-            for w in expanded:
-                sfx.extend(expand_grammatical_suffixes(w))
-            expanded = list(dict.fromkeys(sfx))
-
-        if ja_on:
-            ja = []
-            for w in expanded:
-                ja.extend(expand_judeo_arabic(w))
-            expanded = list(dict.fromkeys(ja))
-
-        if variants_on and self.var_mgr:
-            var = []
-            for w in expanded:
-                try:
-                    var.extend(_variants_noting_cutoff(self.var_mgr, w, variant_mode, 200))
-                except MemoryError:
-                    raise
-                except Exception:
-                    var.append(w)  # Variant expansion failed for this word; use original
-            expanded = list(dict.fromkeys(var))
-
-        return expanded
+        """A component's finite forms through the one Responsa expansion
+        (shared/responsa_match.py::expand_stems): its words, %, #, Judeo-Arabic,
+        spelling variants, in that order. Returns the list of forms."""
+        return expand_responsa_stems(
+            comp, responsa_options.get('variants', False), responsa_options.get('ja', False),
+            responsa_options.get('variant_mode', 'exact'), self.var_mgr)
 
     @staticmethod
     def _build_line_break_regex(line_groups, line_gaps, expanded_groups):
-        """Build a regex pattern for line-break search.
-
-        Each group becomes a line pattern, joined by newline separators with gap support.
-        Returns compiled regex or None.
+        """The line-break check regex for *line_groups* whose words are already
+        expanded (*expanded_groups*: per group, per component, its forms): the word
+        compiler's line patterns (shared/responsa_match.py::build_line_patterns),
+        every word bounded by Exact's whole-word edges. Returns compiled regex or None.
         """
-        def _line_word_sep(gap):
-            """Separator between two words on the SAME line (never crosses \\n).
-
-            gap None/0 -> adjacent words (whitespace only). gap N>0 -> up to N
-            intervening words on the line (CR HIGH-6 — [N] word gaps in line mode).
-            """
-            if not gap:
-                return r'[^\S\n]+'
-            return r'(?:[^\S\n]+\S+){0,' + str(int(gap)) + r'}[^\S\n]+'
-
-        line_patterns = []
+        plans_by_group = []
         for gi, group in enumerate(line_groups):
-            # Build per-component alternatives, tracking the [N] word gap that
-            # precedes each part so the separators below can honor it.
-            comp_parts = []  # list of (pattern, gap_before)
-            grp_word_gaps = getattr(group, 'word_gaps', None) or []
-            for ci, word_set in enumerate(expanded_groups[gi]):
-                gap_before = (
-                    grp_word_gaps[ci - 1]
-                    if ci > 0 and (ci - 1) < len(grp_word_gaps)
-                    else None
-                )
-                # Check if component has a wildcard — dispatch to wildcard regex builder
-                comp = group.components[ci] if ci < len(group.components) else None
-                pat = None
-                if comp and comp.wildcard:
-                    comp_dict = {
-                        'wildcard': comp.wildcard,
-                        'wildcard_pattern': comp.wildcard_pattern,
-                        'regex_terms': sorted(word_set, key=len, reverse=True),
-                        'original_words': comp.words,
-                    }
-                    pat = _build_wildcard_regex(comp_dict)
-                # Plain word path (non-wildcard or wildcard fallback)
-                if pat is None:
-                    sorted_words = sorted(word_set, key=len, reverse=True)
-                    escaped = [make_mark_tolerant_pattern(re.escape(w)) for w in sorted_words]
-                    if not escaped:
-                        continue
-                    pat = f"({'|'.join(escaped)})"
-                comp_parts.append((pat, gap_before))
-
-            if not comp_parts:
-                continue
-
-            # Build line pattern based on position constraints
-            is_first_start = group.line_start
-            is_last_end = group.line_end
-
-            if len(comp_parts) == 1:
-                word_pat = comp_parts[0][0]
-            else:
-                # Multiple words on same line: join with per-pair gap separators
-                word_pat = comp_parts[0][0]
-                for pat, gap_before in comp_parts[1:]:
-                    word_pat += _line_word_sep(gap_before) + pat
-
-            if is_first_start and is_last_end:
-                # Entire line must be just these words
-                line_pat = r'^\s*' + word_pat + r'\s*$'
-            elif is_first_start:
-                line_pat = r'^\s*' + word_pat + r'.*$'
-            elif is_last_end:
-                line_pat = r'^.*' + word_pat + r'\s*$'
-            else:
-                # Word anywhere on line
-                line_pat = r'^.*' + word_pat + r'.*$'
-
-            line_patterns.append(line_pat)
-
-        if not line_patterns:
+            plans_by_group.append([
+                ResponsaWordPlan(component=comp, stems=sorted(expanded_groups[gi][ci], key=len, reverse=True))
+                for ci, comp in enumerate(group.components) if expanded_groups[gi][ci]])
+        check, _highlight, _groups = build_responsa_line_patterns(line_groups, plans_by_group, line_gaps)
+        if not check:
             return None
-
-        # Join line patterns with newline separators respecting gaps
-        parts = [line_patterns[0]]
-        for i in range(1, len(line_patterns)):
-            gap = line_gaps[i - 1] if i - 1 < len(line_gaps) and line_gaps[i - 1] is not None else 0
-            if gap == 0:
-                parts.append(r'\n')
-            else:
-                # Skip exactly `gap` lines
-                parts.append(r'\n(?:.*\n){' + str(gap) + r'}')
-            parts.append(line_patterns[i])
-
-        pattern_str = ''.join(parts)
         try:
-            return compile_search_regex(pattern_str, re.IGNORECASE | re.MULTILINE)
+            return compile_search_regex(check, re.IGNORECASE | re.MULTILINE)
         except re.error as e:
             LOGGER.warning("Line-break regex failed to compile: %s", e)
             return None
@@ -3339,7 +3060,9 @@ class SearchEngine:
                                     text_position=None):
         """Execute a line-break search using | syntax.
 
-        Uses regex for both matching and highlighting (fast + correct highlights).
+        Compiled by the word compiler (shared/responsa_match.py::compile_line_groups):
+        the same refused stars, guard, whole words and bracket rule as the main path.
+        Uses regex for both matching and highlighting.
         """
         if not self.searcher:
             return []
@@ -3354,79 +3077,37 @@ class SearchEngine:
         elif text_position == 'line_end' and line_groups:
             line_groups[-1].line_end = True
 
-        # Expand each component in each group
-        expanded_groups = []
-        tantivy_parts = []
-        for group in line_groups:
-            group_expanded = []
-            for comp in group.components:
-                expanded = self._expand_responsa_component(comp, opts)
-                word_set = {w.lower() for w in expanded}
-                group_expanded.append(word_set)
-
-                is_first = (comp == group.components[0])
-                is_last = (comp == group.components[-1])
-
-                if is_first and group.line_start:
-                    field = 'line_starts'
-                elif is_last and group.line_end:
-                    field = 'line_ends'
-                else:
-                    field = 'content'
-
-                # Wildcard components: use content field (not positional)
-                # since the matched word may differ from the base stem.
-                # Expand with grammatical suffixes/prefixes for Tantivy recall.
-                if comp.wildcard in ('suffix', 'prefix', 'pattern'):
-                    wc_terms = []
-                    for w in comp.words:
-                        wc_terms.append(f'content:"{w}"')
-                        if comp.wildcard == 'suffix':
-                            for sfx in expand_grammatical_suffixes(w):
-                                wc_terms.append(f'content:"{sfx}"')
-                            if w and w[-1] in _SOFIT_TO_NORMAL:
-                                converted = w[:-1] + _SOFIT_TO_NORMAL[w[-1]]
-                                wc_terms.append(f'content:"{converted}"')
-                        elif comp.wildcard == 'prefix':
-                            for pfx in expand_grammatical_prefixes(w):
-                                wc_terms.append(f'content:"{pfx}"')
-                    tantivy_parts.append(f'({" OR ".join(wc_terms)})')
-                else:
-                    # Use expanded terms (plene, grammatical, JA, variants)
-                    # for better Tantivy recall, matching the normal path strategy.
-                    # Boost original words higher for scoring.
-                    original_set = set(comp.words)
-                    tantivy_clause_terms = []
-                    seen = set()
-                    for w in expanded:
-                        w_clean = w.replace('"', '')
-                        if not w_clean or w_clean in seen:
-                            continue
-                        seen.add(w_clean)
-                        if w_clean in original_set:
-                            tantivy_clause_terms.append(f'{field}:"{w_clean}"^5')
-                        else:
-                            tantivy_clause_terms.append(f'{field}:"{w_clean}"')
-                    if tantivy_clause_terms:
-                        tantivy_parts.append(f'({" OR ".join(tantivy_clause_terms)})')
-
-            expanded_groups.append(group_expanded)
-
-        if not tantivy_parts:
+        has_brackets = _query_has_brackets(query_str)
+        compiled = compile_responsa_line_groups(line_groups, line_gaps, opts, self.var_mgr,
+                                                query_has_brackets=has_brackets)
+        if compiled.negated_words:
+            exclude_words = list(exclude_words or []) + compiled.negated_words
+        if not compiled.plans:
             return []
+        regex = compiled.compile_check()
+        pattern_str = compiled.highlight_pattern
+        LOGGER.debug(f"Line-break regex: {compiled.check_pattern[:500]}")
 
-        # Build regex for matching + highlighting
-        regex = SearchEngine._build_line_break_regex(line_groups, line_gaps, expanded_groups)
-        if not regex:
-            return []
-
-        t_query_str = " AND ".join(tantivy_parts)
-        pattern_str = regex.pattern
-        LOGGER.debug(f"Line-break search, Tantivy: {t_query_str[:500]}")
-        LOGGER.debug(f"Line-break regex: {pattern_str[:500]}")
+        def ok(text, m):
+            """Every word a whole word, and the text position when one is set."""
+            if not compiled.accept(text, m):
+                return False
+            if text_position == 'start':
+                pre = text[:m.start()]
+                return not (pre if has_brackets else _strip_brackets(pre)).strip()
+            if text_position == 'end':
+                post = text[m.end():]
+                return not (post if has_brackets else _strip_brackets(post)).strip()
+            return True
 
         try:
-            query = self.index.parse_query(t_query_str, ['content'])
+            # Every word on the content field, where its forms and the bracket-
+            # tolerant pattern are looked up: the line fields hold a line's first or
+            # last whitespace token raw (שלום, with its comma), which is narrower than
+            # what the check accepts (plan §4: retrieval never narrower).
+            query = compiled.retrieval(self.index, has_content_search=getattr(self, '_has_content_search', False))
+            if query is None:
+                return []
             if restrict_sys_ids is not None:   # in the query at any size: see execute_search
                 query = tantivy.Query.boolean_query([(tantivy.Occur.Must, query), (
                     tantivy.Occur.Must, self._restriction_query(restrict_sys_ids))])
@@ -3469,70 +3150,36 @@ class SearchEngine:
 
                     content = self._get_field(doc, 'content', [""])[0]
 
-                    # Bracket handling: strip brackets for bracket-free queries
-                    match_content = content if _query_has_brackets(query_str) else _strip_brackets(content)
-
-                    # Regex match — fast filter + provides highlight span
+                    # One bracket rule (plan §4): a bracket-free query matches the text
+                    # with its brackets out, and the row is kept, marked in the original.
+                    match_content = content if has_brackets else _strip_brackets(content)
                     match_obj = regex.search(match_content)
-                    if not match_obj:
+                    if match_obj is not None:
+                        match_obj = _first_accepted_match(
+                            regex, match_content, match_obj, lambda m, _t=match_content: ok(_t, m))
+                    if match_obj is None:
                         regex_filtered += 1
                         continue
 
-                    # Re-search on original content for highlighting
-                    span_text = match_content
-                    if match_content is not content:
-                        orig_match = regex.search(content)
-                        if orig_match:
-                            match_obj = orig_match
-                            span_text = content
-                    else:
-                        span_text = content
-
-                    # Text position filter — strip brackets from
-                    # prefix/suffix only for bracket-free queries
-                    _brackets_in_query = _query_has_brackets(query_str)
-                    if text_position == 'start' and match_obj.start() > 0:
-                        prefix = content[:match_obj.start()]
-                        cleaned = prefix.strip() if _brackets_in_query else _strip_brackets(prefix).strip()
-                        if cleaned:
-                            regex_filtered += 1
-                            continue
-                    elif text_position == 'end':
-                        # The LAST occurrence may be the one that ends the text.
-                        match_obj = _first_position_valid_match(
-                            regex, span_text, match_obj, 'end', None,
-                            strip_brackets=not _brackets_in_query)
-                        if match_obj is None:
-                            regex_filtered += 1
-                            continue
-
-                    # Use standard highlight helpers with the match span
                     boundaries = self._parse_boundaries(doc) if scope != 'page' else []
+                    # The row marks the matched words (the match itself is whole lines),
+                    # where they stand in the original text.
+
+                    def to_original(m, _t=content, _stripped=match_content is not content):
+                        s, e = compiled.word_span(m)
+                        return _Span(*_unstripped_span(_t, s, e)) if _stripped else _Span(s, e)
                     if restrict_uids is not None and scope != 'page':
-                        def position_ok(m, _t=span_text, _b=_brackets_in_query):
-                            if text_position == 'start':
-                                pre = _t[:m.start()]
-                                return not (pre.strip() if _b else _strip_brackets(pre).strip())
-                            if text_position == 'end':
-                                post = _t[m.end():]
-                                return not (post.strip() if _b else _strip_brackets(post).strip())
-                            return True
                         match_obj = self._first_match_in_pages(
-                            regex, span_text, match_obj, boundaries, restrict_uids, position_ok,
-                            sys_ids=restrict_sids)
+                            regex, match_content, match_obj, boundaries, restrict_uids,
+                            sys_ids=restrict_sids, to_original=to_original,
+                            accept_raw=lambda m, _t=match_content: ok(_t, m))
                         if match_obj is None:
                             regex_filtered += 1
                             continue
-                    span = match_obj.span()
-
-                    # Highlight the occurrence kept above (it may be a later one that
-                    # meets the position), not a fresh first match. With no match in
-                    # the original text, highlight() finds none either, as before.
-                    if span_text is content:
-                        hl_c, hl_f = self._highlight_pair(content, span)
                     else:
-                        hl_c = self.highlight(content, regex, False)
-                        hl_f = self.highlight(content, regex, True)
+                        match_obj = to_original(match_obj)
+                    span = match_obj.span()
+                    hl_c, hl_f = self._highlight_pair(content, span)
 
                     if boundaries:
                         span_map = self._map_span_to_pages(span, boundaries)
@@ -3560,7 +3207,9 @@ class SearchEngine:
                             'highlight_pattern': pattern_str,
                             'page_highlights': page_highlights,
                             'cross_page': span_map.get('cross_page', False),
-                            'scope': scope
+                            'scope': scope,
+                            # The matched lines' pages, for the exclusion check.
+                            '_page_text': _matched_page_text(content, span, boundaries),
                         })
                     else:
                         if hl_c:
@@ -3583,18 +3232,25 @@ class SearchEngine:
             _note_search_cutoff(interrupted=True)
 
         LOGGER.debug(f"Line-break search: {len(results)} results, filtered: {regex_filtered}, interrupted: {was_interrupted}")
-        deduped = self._deduplicate(results)
+        deduped = self._deduplicate(results, pages_win=True)
 
-        if exclude_words and deduped:
-            filtered = []
-            for r in deduped:
-                text_content = (r.get('snippet', '') + ' ' + r.get('full_text', '')).lower()
-                should_exclude = any(w.lower() in text_content for w in exclude_words)
-                if not should_exclude:
-                    filtered.append(r)
-            deduped = filtered
+        deduped = _without_excluded(deduped, exclude_words)
 
+        # The guard's downgrade, reported as on the main path (plan §5.3).
+        if compiled.warning:
+            _set_last_responsa_downgrade(compiled.warning)
+            _set_last_responsa_downgrade_meta({
+                'variants': bool(compiled.options['variants_on']),
+                'ja': bool(compiled.options['ja_on']),
+                'flex_spacing': bool(opts.get('flex_spacing', False)),
+                'bidirectional': bool(opts.get('bidirectional', False)),
+            })
+            if deduped:
+                deduped[0]['responsa_warning'] = compiled.warning
+        if deduped:
+            deduped[0]['responsa_expanded_count'] = compiled.expanded_count
         return deduped
+
 
     def _execute_metadata_search(self, query_str, mode, progress_callback=None, restrict_sys_ids=None):
         """Search by title or shelfmark via csv_bank. Returns results even for metadata-only records."""
@@ -3735,35 +3391,45 @@ class SearchEngine:
         if corpus_scope == "local":
             if getattr(self, "local_searcher", None) is None:
                 return []
+            # SEED-006: strip diacritics here (the 'all' path strips at the
+            # shared site below) so the LOCAL regex is built mark-tolerant
+            # AND content_search retrieval folds צ'מאן -> צמאן. Mirrors the
+            # main path; Regex mode is left untouched (user owns the pattern).
+            if mode != 'Regex':
+                query_str = strip_search_diacritics(query_str)
+            # Responsa: the word compiler, as on the main index -- compiled out here,
+            # before the handler below, so a refused star or a query over the guard's
+            # limit is an error the user sees, not an empty list. Line-break (|) is
+            # main-index only: the simplified path below runs instead.
+            _local_compiled = None
+            if responsa_options and responsa_options.get('responsa_mode'):
+                _local_opts = dict(responsa_options, within_document=has_document_and(query_str))
+                _local_lines = _parse_line_break_query(query_str)[0]
+                if _local_lines is None:
+                    _local_compiled = self._compile_responsa(query_str, _local_opts, gap)
+                    if _local_compiled is None or not _local_compiled.plans:
+                        return []
+                else:
+                    refuse_unsupported_stars([c for g in _local_lines for c in g.components])
             try:
-                # SEED-006: strip diacritics here (the 'all' path strips at the
-                # shared site below) so the LOCAL regex is built mark-tolerant
-                # AND content_search retrieval folds צ'מאן -> צמאן. Mirrors the
-                # main path; Regex mode is left untouched (user owns the pattern).
-                if mode != 'Regex':
-                    query_str = strip_search_diacritics(query_str)
-                # Phase 95-05 follow-up: Responsa operators (#/*/%/(a/b)) need the
-                # full component expansion; the simplified path below strips them and
-                # returns nothing. Build the same candidate query + components-aware
-                # regex the main index uses, then run it against LOCAL. Line-break (|)
-                # is main-index only -> helper returns None -> simplified fallback.
-                _responsa = bool(responsa_options and responsa_options.get('responsa_mode'))
                 # ids_only (complete_chain completing a My Library step): every candidate.
                 _local_limit = (max(Config.SEARCH_LIMIT, self.local_searcher.num_docs + 1)
                                 if ids_only else None)
-                if _responsa:
-                    _resp_q, _resp_regex = self._build_local_responsa_query_and_regex(
-                        query_str, mode, gap, responsa_options
-                    )
-                    if _resp_q is not None and _resp_regex is not None:
-                        return self._query_local_index(
-                            query_str, mode, gap,
-                            regex=_resp_regex, tantivy_query_str=_resp_q,
-                            progress_callback=progress_callback,
-                            phase_callback=phase_callback,
-                            limit=_local_limit,
-                            accept=_local_match_accept(False, text_position, query_str),
-                        )
+                if _local_compiled is not None:
+                    rows = self._local_responsa_hits(
+                        _local_compiled, query_str, mode, gap, text_position,
+                        progress_callback=progress_callback, phase_callback=phase_callback,
+                        limit=_local_limit)
+                    # A -word excludes its letters from the page the row is (LOCAL rows
+                    # are pages), as on the main index.
+                    rows = _without_excluded(rows, list(exclude_words or []) + _local_compiled.negated_words)
+                    if _local_compiled.warning:
+                        _set_last_responsa_downgrade(_local_compiled.warning)
+                        if rows:
+                            rows[0]['responsa_warning'] = _local_compiled.warning
+                    if rows:
+                        rows[0]['responsa_expanded_count'] = _local_compiled.expanded_count
+                    return rows
                 # Phase 96 D-F5: build regex here so LOCAL-only path also gets
                 # D-04.1 filter-out + highlight_pattern, same as the RRF merge path.
                 if mode == 'Regex':
@@ -3772,14 +3438,16 @@ class SearchEngine:
                     _local_terms = query_str.split()
                 _local_regex = (_fuzzy_matcher(_local_terms, gap) if mode == 'fuzzy'
                                 else self.build_regex_pattern(_local_terms, mode, gap))
-                return self._query_local_index(
+                # Excluded words, on the row's page (LOCAL rows are pages): the
+                # LOCAL-only search used to return before the exclusion step.
+                return _without_excluded(self._query_local_index(
                     query_str, mode, gap, regex=_local_regex or None,
                     progress_callback=progress_callback,
                     phase_callback=phase_callback,
                     tantivy_query=self._local_forms_query(query_str, mode),
                     limit=_local_limit,
                     accept=_local_match_accept(mode in _WHOLE_WORD_MODES, text_position, query_str),
-                )
+                ), exclude_words)
             except SearchBudgetExceeded:
                 raise
             except MemoryError:
@@ -3803,25 +3471,17 @@ class SearchEngine:
 
         # --- Responsa Pipeline ---
         responsa_warning = None
-        # Phase 95-05: the clean (pre-restrict) Responsa candidate query, captured
-        # so the LOCAL RRF merge can reuse it without re-parsing/expanding (keeps the
-        # single parse_responsa_query/build_regex_pattern contract the tests pin).
-        # Stays None for non-Responsa searches.
-        _local_responsa_query = None
+        # The compiled Responsa query (shared/responsa_match.py): one check and one
+        # whole-word rule for every index, its retrieval built per index -- the main
+        # one below, the LOCAL one in the merge (plan §5.1). None outside Responsa.
+        _responsa = None
         if responsa_options and responsa_options.get('responsa_mode'):
             # a. Bypass prefix shortcuts
             responsa_options = dict(responsa_options, within_document=has_document_and(query_str))
             self.parse_query_syntax(query_str, responsa_mode=True)
 
-            # b. Parse Responsa query into components
-            components = parse_responsa_query(query_str)
-            if not components:
-                return []
-
-            # b2. Extract per-pair gap values from [N] tokens
-            per_pair_gaps = extract_per_pair_gaps(query_str)
-
-            # b3. Check for line-break syntax (| separators)
+            # b. Line-break syntax (| separators) has its own search, through the
+            #    same compiler.
             line_groups, line_gaps = _parse_line_break_query(query_str)
             if line_groups is not None:
                 return self._execute_line_break_search(
@@ -3833,154 +3493,28 @@ class SearchEngine:
                     text_position=text_position,
                 )
 
-            # c. Expand each component
-            variants_on = responsa_options.get('variants', False)
-            ja_on = responsa_options.get('ja', False)
+            # c. Parse, refuse what is not searched yet, expand under the guard.
+            _responsa = self._compile_responsa(query_str, responsa_options, gap)
+            if _responsa is None:
+                return []
+            responsa_warning = _responsa.warning
+            variants_on = _responsa.options['variants_on']
+            ja_on = _responsa.options['ja_on']
             flex_spacing = responsa_options.get('flex_spacing', False)
             bidirectional = responsa_options.get('bidirectional', False)
-            variant_mode = responsa_options.get('variant_mode', 'exact')
 
-            # Rewrite simple *word* patterns to #word# (prefix+suffix expansion).
-            # Both-side wildcards can't be executed as true substring searches in
-            # Tantivy, so we convert to grammatical expansion which is more useful.
-            rewritten_patterns = []
-            for comp in components:
-                if (comp.wildcard == 'pattern' and comp.wildcard_pattern
-                        and comp.wildcard_pattern.startswith('*')
-                        and comp.wildcard_pattern.endswith('*')
-                        and comp.wildcard_pattern.count('*') == 2):
-                    stem = comp.wildcard_pattern.strip('*')
-                    if stem:
-                        rewritten_patterns.append(f'*{stem}*')
-                        comp.words = [stem]
-                        comp.wildcard = None
-                        comp.wildcard_pattern = None
-                        comp.grammatical_prefixes = True
-                        comp.grammatical_suffixes = True
-            if rewritten_patterns:
-                rewrite_msg = _tr("*word* rewritten as #word# (prefix + suffix expansion)")
-                responsa_warning = rewrite_msg
-
-            # Apply explosion guard (estimates before materializing)
-            _components, guard_warning, actual_opts = _apply_explosion_guard(
-                components,
-                variants_on=variants_on,
-                ja_on=ja_on,
-                var_mgr=self.var_mgr,
-                variant_mode=variant_mode,
-            )
-            if guard_warning:
-                responsa_warning = f"{responsa_warning}; {guard_warning}" if responsa_warning else guard_warning
-                variants_on = actual_opts['variants_on']
-                ja_on = actual_opts['ja_on']
-                variant_mode = actual_opts['variant_mode']
-
-            # d. Separate negated components from positive ones
-            positive_components = [c for c in components if not c.negated]
-            negated_components = [c for c in components if c.negated]
-
-            # Extract negated words and add to exclude_words
-            if negated_components:
-                negated_word_list = []
-                for nc in negated_components:
-                    for w in nc.words:
-                        negated_word_list.append(w)
-                        # Also expand plene/defective for negated words
-                        if nc.plene_defective:
-                            negated_word_list.extend(expand_plene_defective(w))
-                if negated_word_list:
-                    if exclude_words is None:
-                        exclude_words = []
-                    exclude_words = list(exclude_words) + negated_word_list
-
-            if not positive_components:
+            # d. Negated words are letters to exclude (on the matched page).
+            if _responsa.negated_words:
+                exclude_words = list(exclude_words or []) + _responsa.negated_words
+            if not _responsa.plans:
                 return []
+            _has_wildcard_component = _responsa.has_star
+            total_expanded = _responsa.expanded_count
+            regex = _responsa.compile_check()
+            # The query object is built per index once the field is known (below).
+            t_query_str = '(Responsa: ' + ' | '.join(
+                component_query_string(p.tantivy_dict(), flex_spacing)[:200] for p in _responsa.plans) + ')'
 
-            # Build per-component dicts with expanded terms
-            component_dicts = []
-            for comp in positive_components:
-                # Start with component.words
-                expanded_words = list(comp.words)
-
-                # 1. Plene/defective expansion (before prefix/suffix to generate base variants)
-                if comp.plene_defective:
-                    plene_expanded = []
-                    for w in expanded_words:
-                        plene_expanded.extend(expand_plene_defective(w))
-                    expanded_words = list(dict.fromkeys(plene_expanded))  # dedupe preserving order
-
-                # 2. Grammatical prefix expansion
-                if comp.grammatical_prefixes:
-                    prefix_expanded = []
-                    for w in expanded_words:
-                        prefix_expanded.extend(expand_grammatical_prefixes(w))
-                    expanded_words = list(dict.fromkeys(prefix_expanded))
-
-                # 3. Grammatical suffix expansion
-                if comp.grammatical_suffixes:
-                    suffix_expanded = []
-                    for w in expanded_words:
-                        suffix_expanded.extend(expand_grammatical_suffixes(w))
-                    expanded_words = list(dict.fromkeys(suffix_expanded))
-
-                # 4. Judeo-Arabic expansion
-                if ja_on:
-                    ja_expanded = []
-                    for w in expanded_words:
-                        ja_expanded.extend(expand_judeo_arabic(w))
-                    expanded_words = list(dict.fromkeys(ja_expanded))
-
-                # 5. Spelling variants expansion
-                if variants_on and self.var_mgr:
-                    var_expanded = []
-                    for w in expanded_words:
-                        try:
-                            variants = _variants_noting_cutoff(self.var_mgr, w, variant_mode, 200)
-                            var_expanded.extend(variants)
-                        except MemoryError:
-                            raise
-                        except Exception:
-                            var_expanded.append(w)  # Variant expansion failed for this word; use original
-                    expanded_words = list(dict.fromkeys(var_expanded))
-
-                # Build flex spacing patterns for original words only
-                flex_patterns = []
-                if flex_spacing:
-                    for w in comp.words:
-                        flex_patterns.append(_make_flex_spacing_pattern(w))
-
-                component_dicts.append({
-                    'tantivy_terms': expanded_words,
-                    'regex_terms': expanded_words,
-                    'original_words': comp.words,
-                    'wildcard': comp.wildcard,
-                    'wildcard_pattern': comp.wildcard_pattern,
-                    'flex_patterns': flex_patterns,
-                    'inline_pattern': comp.inline_pattern,
-                })
-                if comp.wildcard:
-                    _has_wildcard_component = True
-
-            # Calculate total expanded terms for UI display
-            total_expanded = sum(len(cd['tantivy_terms']) for cd in component_dicts)
-
-            # e. Build Tantivy query
-            t_query_str = self.build_tantivy_query(
-                terms=None, mode=mode,
-                responsa_components=component_dicts,
-                responsa_options=responsa_options,
-            )
-            # f. Build regex pattern
-            regex = self.build_regex_pattern(
-                terms=None, mode=mode, max_gap=gap,
-                responsa_components=component_dicts,
-                responsa_options=responsa_options,
-                per_pair_gaps=per_pair_gaps,
-            )
-            # Phase 95-05: capture the clean Responsa candidate query for the LOCAL
-            # RRF merge below — BEFORE any restrict_sys_ids augmentation (which adds
-            # genizah-only full_header clauses that don't apply to LOCAL docs).
-            _local_responsa_query = t_query_str
         else:
             # --- Existing path (unchanged) ---
             if mode == 'Regex': terms = [query_str]
@@ -4083,8 +3617,9 @@ class SearchEngine:
         LOGGER.debug(f"Tantivy query: {t_query_str[:500]}")
         LOGGER.debug(f"Regex pattern: {regex.pattern[:500]}")
 
-        # Save pattern string for passing to results
-        pattern_str = regex.pattern
+        # Save pattern string for passing to results. A Responsa row carries the
+        # highlight pattern: the check's words with fixed-width edges (plan §5.2).
+        pattern_str = _responsa.highlight_pattern if _responsa is not None else regex.pattern
         # Fuzzy's regex differs per text (_FuzzyMatcher): each row gets its own.
         def _row_pattern(text):
             return regex.pattern_for(text) if isinstance(regex, _FuzzyMatcher) else pattern_str
@@ -4096,7 +3631,7 @@ class SearchEngine:
             """ids_only's row for a match: the identity a full row would carry -- the
             page the match falls in (an aggregate's primary page), its manuscript as
             get_display_data gives it -- and whether a NOT-word is in the text the full
-            row's exclusion check reads (its full_text: this doc's content)."""
+            row's exclusion check reads (the page the match is on: decision 7)."""
             header, source, uid = doc['full_header'][0], doc['source'][0], doc['unique_id'][0]
             if boundaries:
                 primary = self._map_span_to_pages(span, boundaries).get('primary') or {}
@@ -4107,7 +3642,8 @@ class SearchEngine:
                       else self.meta_mgr.get_display_data(header, source).get('id'))
             row = {'uid': uid, 'display': {'id': sys_id, 'source': source}, 'scope': scope}
             if _excluded_words:
-                lowered = content.lower()
+                page = _matched_page_text(content, span, boundaries) if boundaries else content
+                lowered = page.lower()
                 row['_excluded'] = any(w in lowered for w in _excluded_words)
             return row
 
@@ -4137,6 +3673,21 @@ class SearchEngine:
 
         tantivy_started = time.perf_counter()
         try:
+            if _responsa is not None:
+                # This index's lookup: scored terms on the search field, ORed on the
+                # content field with the bracket-tolerant pattern of every form.
+                t_query_obj = _responsa.retrieval(
+                    self.index, field=search_field,
+                    has_content_search=getattr(self, '_has_content_search', False),
+                    flex_spacing=responsa_options.get('flex_spacing', False))
+                if t_query_obj is None:
+                    return []
+                # One word cannot cross a page break: a whole-manuscript doc would only
+                # repeat a page's own match, so the page docs are the whole answer, as
+                # for Exact's single word (plan §5.4; ספר read every manuscript).
+                if (len(_responsa.plans) == 1 and not responsa_options.get('within_document')
+                        and not text_position and self._every_doc_has_scope()):
+                    t_query_obj = self._and_query(t_query_obj, 'scope:page')
             # Page docs first, then whole-manuscript / part docs, within the same
             # total limit. In score order the long aggregate docs often came first
             # and took seconds before the first row (they rarely add one); now the
@@ -4225,9 +3776,12 @@ class SearchEngine:
                         and not (responsa_options and responsa_options.get('responsa_mode')))
 
         def _accept(text, m, strip_br):
-            """A match the row may use: a whole-word one (Exact, Variants) that
-            meets the text position, when one is set."""
+            """A match the row may use: a whole-word one (Exact, Variants; in
+            Responsa every word of it, by the same predicate) that meets the text
+            position, when one is set."""
             if _whole_words and not _whole_word_span(text, m.start(), m.end()):
+                return False
+            if _responsa is not None and not _responsa.accept(text, m):
                 return False
             return (not text_position or Indexer._validate_position_match(
                 text, m, text_position, _line_constraints or None, strip_brackets=strip_br))
@@ -4309,7 +3863,8 @@ class SearchEngine:
                             results.append(
                                 _id_row_of_span(doc, content, span, boundaries, scope) if ids_only else
                                 self._aggregate_result_row(
-                                    doc, content, span, boundaries, _row_pattern(content), scope, score))
+                                    doc, content, span, boundaries, _row_pattern(content), scope, score,
+                                    page_text=bool(exclude_words)))
                             kept += 1
                         if not kept:
                             regex_filtered_count += 1
@@ -4333,7 +3888,7 @@ class SearchEngine:
                     # validate exact position (first word, last word, line boundary)
                     # against the first occurrence that satisfies it, not just the first.
                     # Whole words: the first occurrence that is not inside a longer word.
-                    if _whole_words:
+                    if _whole_words or _responsa is not None:
                         match_obj = _first_accepted_match(
                             regex, match_content, match_obj,
                             lambda m, _t=match_content: _accept(_t, m, not _query_has_brackets(query_str)))
@@ -4351,7 +3906,7 @@ class SearchEngine:
                     stripped_match = match_obj           # in match_content's offsets
                     if match_content is not content:
                         first_orig = orig_match = regex.search(content)
-                        if orig_match and _whole_words:
+                        if orig_match and (_whole_words or _responsa is not None):
                             orig_match = _first_accepted_match(
                                 regex, content, orig_match,
                                 lambda m, _t=content: _accept(_t, m, True))
@@ -4371,8 +3926,10 @@ class SearchEngine:
                             # row mapped those onto the wrong characters and page).
                             match_obj = _Span(*_unstripped_span(content, match_obj.start(), match_obj.end()))
                             # A page row whose original text holds no match at all is
-                            # still dropped below, as before (membership unchanged).
-                            orig_match_missing = first_orig is None
+                            # still dropped below, as before (membership unchanged) --
+                            # except in Responsa, whose one bracket rule keeps the row
+                            # (plan §4: שלום finds של[ו]ם, marked where it stands).
+                            orig_match_missing = first_orig is None and _responsa is None
 
                     # Fuzzy: a page row shows the nearest spelling on the page.
                     if (isinstance(regex, _FuzzyMatcher) and scope == 'page' and not orig_match_missing
@@ -4384,8 +3941,13 @@ class SearchEngine:
                     boundaries = self._parse_boundaries(doc) if scope != 'page' else []
                     if restrict_uids is not None and scope != 'page':
                         # Pages and acceptance are read in the original text's offsets.
-                        position_ok = None
-                        if text_position or _whole_words:
+                        position_ok = raw_ok = None
+                        if _responsa is not None and match_content is not content:
+                            # Responsa reads each word's group: accept the match itself,
+                            # in the stripped text it was found in, before mapping it.
+                            def raw_ok(m, _t=match_content):
+                                return _accept(_t, m, True)
+                        elif text_position or _whole_words or _responsa is not None:
                             def position_ok(m, _t=content):
                                 return _accept(_t, m, not _query_has_brackets(query_str))
                         if match_content is content:
@@ -4398,7 +3960,8 @@ class SearchEngine:
                             match_obj = self._first_match_in_pages(
                                 regex, match_content, stripped_match, boundaries, restrict_uids,
                                 position_ok, sys_ids=restrict_sids,
-                                to_original=lambda m, _t=content: _Span(*_unstripped_span(_t, m.start(), m.end())))
+                                to_original=lambda m, _t=content: _Span(*_unstripped_span(_t, m.start(), m.end())),
+                                accept_raw=raw_ok)
                         if match_obj is None:
                             regex_filtered_count += 1
                             continue
@@ -4410,7 +3973,8 @@ class SearchEngine:
                             results.append(_id_row_of_span(doc, content, span, boundaries, scope))
                     elif boundaries:
                         results.append(self._aggregate_result_row(
-                            doc, content, span, boundaries, _row_pattern(content), scope, score))
+                            doc, content, span, boundaries, _row_pattern(content), scope, score,
+                            page_text=bool(exclude_words)))
                     else:
                         # match_obj already IS regex.search(content) here, except
                         # when brackets were stripped and the original text had no
@@ -4448,7 +4012,7 @@ class SearchEngine:
         materialize_elapsed_ms = (time.perf_counter() - materialize_started) * 1000.0
         LOGGER.debug(f"Regex filtered out: {regex_filtered_count}, Results before dedup: {len(results)}, interrupted: {was_interrupted}")
         deduped = self._deduplicate(
-            results, first_wins=not (responsa_options and responsa_options.get('responsa_mode')))
+            results, first_wins=_responsa is None, pages_win=_responsa is not None)
 
         # Phase 95 D-08 (Codex P0): LOCAL hits merge AFTER _deduplicate.
         # The dedup body at _deduplicate() whitelists V0.8/V0.7 only and would
@@ -4459,22 +4023,16 @@ class SearchEngine:
         if corpus_scope != "genizah" and getattr(self, "local_searcher", None) is not None:
             local_merge_started = time.perf_counter()
             try:
-                # Phase 95-05 follow-up: reuse the main path's already-built,
-                # operator-expanded Responsa candidate query (captured above, pre-
-                # restrict) so merged LOCAL hits aren't dropped by the simplified
-                # path — WITHOUT re-running parse/expand (preserves the single
-                # parse_responsa_query/build_regex_pattern call the tests pin). The
-                # main `regex` is already components-aware. Non-Responsa: stays None
-                # -> simplified path, unchanged. Line-break (|) returned early above.
-                if _local_responsa_query is not None:
-                    local_hits = self._query_local_index(
-                        query_str, mode, gap, regex=regex,
-                        tantivy_query_str=_local_responsa_query,
-                        progress_callback=progress_callback,
-                        phase_callback=phase_callback,
+                # Responsa: the same compiled query, its lookup built on the LOCAL
+                # index's own schema (a query string cannot be reparsed against
+                # another schema; Codex 2.4), its check and whole-word rule unchanged.
+                # Non-Responsa: the simplified path. Line-break (|) returned early above.
+                if _responsa is not None:
+                    local_hits = self._local_responsa_hits(
+                        _responsa, query_str, mode, gap, text_position,
+                        progress_callback=progress_callback, phase_callback=phase_callback,
                         limit=(max(Config.SEARCH_LIMIT, self.local_searcher.num_docs + 1) if ids_only else None),
-                        accept=_local_match_accept(_whole_words, text_position, query_str),
-                    )
+                        regex=regex)
                 else:
                     local_hits = self._query_local_index(
                         query_str, mode, gap, regex=regex,
@@ -4506,28 +4064,8 @@ class SearchEngine:
             local_merge_elapsed_ms = (time.perf_counter() - local_merge_started) * 1000.0
         # End Phase 95 D-08 LOCAL merge.
 
-        # --- Apply Exclusion Filter (NOT Filter) ---
-        if exclude_words and deduped:
-            filtered = []
-            for r in deduped:
-                # Combine text fields for checking
-                # We check snippet and full_text to be safe
-                if '_excluded' in r:             # an ids_only row: decided from its text
-                    if not r.pop('_excluded'):
-                        filtered.append(r)
-                    continue
-                text_content = (r.get('snippet', '') + ' ' + r.get('full_text', '')).lower()
-
-                # Check if ANY excluded word is present
-                should_exclude = False
-                for w in exclude_words:
-                    if w.lower() in text_content:
-                        should_exclude = True
-                        break
-
-                if not should_exclude:
-                    filtered.append(r)
-            deduped = filtered
+        # --- Apply Exclusion Filter (NOT Filter): on the page the match is on ---
+        deduped = _without_excluded(deduped, exclude_words)
 
         LOGGER.debug(f"Results after dedup & filtering: {len(deduped)}")
         LOGGER.info(
@@ -4568,7 +4106,7 @@ class SearchEngine:
 
         return deduped
 
-    def _deduplicate(self, results, first_wins=False):
+    def _deduplicate(self, results, first_wins=False, pages_win=False):
         # V0.8 wins outright on a uid collision. V0.7 rows must ALSO dedupe against
         # each other: the same uid arrives twice for one page -- once from the
         # aggregated scope='system' continuous doc and once from its scope='page'
@@ -4576,14 +4114,26 @@ class SearchEngine:
         # identical folio as two separate results.
         # A V0.8 uid keeps its FIRST position either way; *first_wins* also keeps
         # its first row (page docs are read before aggregates, so the page row),
-        # instead of the last one. Responsa keeps the last-row rule.
+        # instead of the last one. Responsa keeps the last-row rule, except that
+        # with *pages_win* a page doc's row is never replaced by a row a whole-
+        # manuscript doc gives for the same page (a match across a break, or one
+        # whose snippet reads the whole manuscript): the page's own match, on the
+        # page's own text (plan §5.4, "first wins: the page row").
         if first_wins:
             v8 = {}
             for r in results:
                 if r['display']['source'] == "V0.8":
                     v8.setdefault(r['uid'], r)
         else:
-            v8 = {r['uid']: r for r in results if r['display']['source'] == "V0.8"}
+            v8 = {}
+            for r in results:
+                if r['display']['source'] != "V0.8":
+                    continue
+                kept = v8.get(r['uid'])
+                if (pages_win and kept is not None and kept.get('scope') == 'page'
+                        and r.get('scope') != 'page'):
+                    continue
+                v8[r['uid']] = r
         final = list(v8.values())
         seen_v7 = set()
         for r in results:
