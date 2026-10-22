@@ -127,6 +127,24 @@ def test_the_filter_badge_counts_every_pre_search_filter_the_predicate_knows():
     assert len(names) >= 20, names
     missing = [n for n in names if n not in counter]
     assert not missing, f'the badge does not count {missing}'
+    # ...and the one constraint the chip bar shows that the predicate does not hold.
+    assert "(text_position_select.value or 'anywhere') != 'anywhere'" in counter
+
+
+def test_every_fold_closes_the_filters_panel_and_the_panel_can_close_itself():
+    """The "Search only in..." expansion is a sibling of the form with a hidden
+    header, so a fold that leaves it open leaves it with no close control
+    (Codex on #434). The server-side folds close it; the panel has its own
+    close button for the fold the browser performs on scroll."""
+    search = _read('web/pages/search.py')
+    start = search.index('def _close_filters_panel(')
+    helper = search[start:search.index('def ', start + 1)]
+    assert 'panel.value = False' in helper and '_update_filters_toggle_btn()' in helper
+    chevron_fold = search[search.index('def collapse_panel('):search.index('async def _collapse_panel_on_phone(')]
+    assert '_close_filters_panel()' in chevron_fold
+    escape_fold = search[search.index('def toggle_search_panel('):search.index('def handle_keyboard_shortcut(')]
+    assert '_close_filters_panel()' in escape_fold
+    assert "ui.button(icon='close', on_click=lambda: _toggle_filters_panel())" in search
 
 
 def test_the_search_toolbar_density_is_remembered_and_toggled_live():

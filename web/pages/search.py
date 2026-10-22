@@ -350,6 +350,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         n = len(s.filter_domains or []) + len(s.filter_authors or []) + len(s.filter_works or [])
         n += len(s.filter_material_exclude or [])
         n += len(s.filter_measurement_material or [])  # Codex on #434: the chips showed it, the badge did not
+        # Text position is not in has_active_filters (it changes the search's
+        # semantics rather than its scope) but the chip bar shows it, so the
+        # badge counts it too (Codex on #434). The select exists before the
+        # first call: _panel_toggles['ready'] is set after the form is built.
+        n += 1 if (text_position_select.value or 'anywhere') != 'anywhere' else 0
         n += 1 if (s.filter_date_from is not None or s.filter_date_to is not None) else 0
         n += 1 if (s.filter_text_all or s.filter_text_any or s.filter_text_not) else 0
         n += 1 if any(getattr(s, k, None) is not None for k in (
@@ -549,6 +554,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         _fill_collapsed_strip()
                         expanded_panel.style('display: none !important;')
                         collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
+                        _close_filters_panel()
 
                     async def _collapse_panel_on_phone():
                         """Fold the form away when a search starts on a phone.
@@ -809,6 +815,22 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         filters_badge.text = str(n)
                         filters_badge.set_visibility(n > 0)
 
+                    def _close_filters_panel():
+                        """Fold the "Search only in..." panel with the form.
+
+                        The panel is a sibling of the form, not part of it, and its
+                        own header is hidden at every width: its toggle is a button
+                        in the form. Folded with the panel open, it stayed open with
+                        no close control in sight (Codex on #434), so every fold the
+                        server performs closes it; the chips keep showing what is
+                        active, and the panel also carries a close button of its own
+                        for the fold the browser performs on scroll.
+                        """
+                        panel = _panel_toggles.get('filters')
+                        if panel is not None and panel.value:
+                            panel.value = False
+                            _update_filters_toggle_btn()
+
                     with ui.column().classes('items-center gap-0'):
                         adv_toggle_btn = ui.button(
                             tr('Advanced Options'), icon='tune', on_click=lambda: _toggle_adv_panel(),
@@ -1008,6 +1030,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         with adv_filters_panel:
             with ui.column().classes('w-full px-4 py-3 gap-4'):
+                # The panel's own title and close button: its expansion header
+                # is hidden and its toggle sits in the form, which the scroll
+                # fold hides from script without telling Python (Codex on #434).
+                with ui.row().classes('w-full items-center justify-between'):
+                    ui.label(tr('Search only in...')).classes('text-subtitle2 text-weight-medium')
+                    ui.button(icon='close', on_click=lambda: _toggle_filters_panel()).props(
+                        f'flat round dense size=sm aria-label="{tr("Close")}"'
+                    ).tooltip(tr('Close'))
 
                 # Include/Exclude toggle
                 with ui.row().classes('w-full items-center gap-2'):
@@ -2855,6 +2885,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                          'Shelfmark': '#', 'Title': '$'}
             collapsed_mode_badge.text = mode_names.get(mode_val, mode_val)
             expanded_panel.style('display: none !important;')
+            _close_filters_panel()
             collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
 
     # === Keyboard Shortcut Handler ===
