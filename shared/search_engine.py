@@ -4137,15 +4137,20 @@ class SearchEngine:
                     continue
                 v8[r['uid']] = r
         final = list(v8.values())
-        seen_v7 = set()
+        # V0.7: the first row of a uid, at its first position -- with *pages_win*, its
+        # page row when one arrives (Responsa reads page and whole-manuscript docs in
+        # one query, so either may come first; Codex review of PR #432).
+        v7 = {}
         for r in results:
             if r['display']['source'] != "V0.7":
                 continue
             uid = r['uid']
-            if uid in v8 or uid in seen_v7:
+            if uid in v8:
                 continue
-            seen_v7.add(uid)
-            final.append(r)
+            kept = v7.get(uid)
+            if kept is None or (pages_win and kept.get('scope') != 'page' and r.get('scope') == 'page'):
+                v7[uid] = r
+        final.extend(v7.values())
         return final
 
     @bounded_search

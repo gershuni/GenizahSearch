@@ -65,6 +65,9 @@ ERROR_CODES = frozenset({
     # not search yet -- inside a word, a word of stars only, several stars -- is refused
     # with a message, never answered with an empty list.
     'responsa_unsupported_star',          # 400
+    # 2026-10-22: a Responsa query still over Config.MAX_EXPANDED_TERMS after every step
+    # down (variants, Judeo-Arabic, %, #) -- it was a 500.
+    'responsa_query_too_large',           # 400
 })
 
 # Surfaced in top-level `warnings: []` arrays (D-07), NOT as errors.

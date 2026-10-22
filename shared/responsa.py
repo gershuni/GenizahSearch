@@ -810,9 +810,15 @@ def _count_expanded_terms(components: List[ResponsaComponent],
     Returns:
         The total number of search terms the components expand to
     """
-    from shared.responsa_match import expand_stems, retrieval_terms  # noqa: PLC0415 -- it imports this module
-    return sum(len(retrieval_terms(c, expand_stems(c, variants_on, ja_on, variant_mode, var_mgr)))
-               for c in components)
+    from shared.config import Config  # noqa: PLC0415 -- kept with the other lazy import
+    from shared.responsa_match import _OverLimit, expand_stems, retrieval_terms  # noqa: PLC0415 -- it imports this module
+    total = 0
+    for c in components:
+        try:
+            total += len(retrieval_terms(c, expand_stems(c, variants_on, ja_on, variant_mode, var_mgr)))
+        except _OverLimit:   # an inline alternation stops being spelt out past the limit
+            return Config.MAX_EXPANDED_TERMS + 1
+    return total
 
 
 def _apply_explosion_guard(

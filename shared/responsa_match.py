@@ -24,7 +24,10 @@ the regex engine backtrack to an acceptable occurrence: its end lookahead is the
 predicate itself, its start lookbehinds are a lenient approximation (they never reject
 what the predicate accepts), and the first word has none, so the pattern keeps re's
 fast scan for its first characters (a leading lookbehind made a search 5x slower,
-2026-10-21).
+2026-10-21). Where the pattern itself places a word -- a line's ``.*``, an ``AND``
+lookahead, a ``[N]`` gap -- a place the predicate rejects would hide one it accepts
+(the regex commits to one place and only ``accept`` sees the edge), so after such a
+rejection the text is searched on with the exact pattern (``_CheckPattern``).
 
 Stars keep today's meaning in Phase 1 (the fixed lists of ``#X`` / ``X#`` in retrieval,
 ``\\S*`` in the check); the shapes that cannot mean what the help says are refused here,
@@ -47,6 +50,7 @@ from shared.responsa import (
     expand_judeo_arabic,
     expand_plene_defective,
 )
+from shared.search_regex import Pattern, compile as compile_search_regex
 
 
 # ==============================================================================
@@ -131,9 +135,18 @@ def rewrite_both_end_stars(components):
 #  Expansion: the literal part first, in one order for retrieval and check
 # ==============================================================================
 
-def _inline_forms(pattern):
+class _OverLimit(Exception):
+    """The expansion passed the guard's limit (raised early, before it is complete)."""
+
+
+def _inline_forms(pattern, limit=None):
     """``אירו(ס/ש)ין`` -> ``['אירוסין', 'אירושין']``: every choice of every group, in
-    order (an empty alternative is the group left out)."""
+    order (an empty alternative is the group left out). Raises _OverLimit as soon as
+    there are more than *limit* forms (default ``Config.MAX_EXPANDED_TERMS``): each
+    group multiplies them, so ``a(a/b)(a/b)...`` within the 1,000-character query cap
+    spelt out would exhaust the process's memory before the guard counted it (Codex
+    review of PR #432)."""
+    limit = Config.MAX_EXPANDED_TERMS if limit is None else limit
     forms = ['']
     i = 0
     while i < len(pattern):
@@ -143,8 +156,14 @@ def _inline_forms(pattern):
                 forms = [f + pattern[i] for f in forms]
                 i += 1
                 continue
-            alternatives = pattern[i + 1:close].split('/')
-            forms = [f + a for f in forms for a in alternatives]
+            alternatives = list(dict.fromkeys(pattern[i + 1:close].split('/')))
+            out = {}
+            for f in forms:
+                for a in alternatives:
+                    out[f + a] = None
+                    if len(out) > limit:
+                        raise _OverLimit()
+            forms = list(out)
             i = close + 1
         else:
             forms = [f + pattern[i] for f in forms]
@@ -152,17 +171,13 @@ def _inline_forms(pattern):
     return list(dict.fromkeys(f for f in forms if f))
 
 
-def literal_forms(comp: ResponsaComponent) -> List[str]:
+def literal_forms(comp: ResponsaComponent, limit=None) -> List[str]:
     """The component's own words: an OR group's words, or an inline alternation spelt
     out -- the compiler expands both on both sides (plan §4; today the inline branch
     returned before every other expansion, Codex 2.16)."""
     if comp.inline_pattern:
-        return _inline_forms(comp.inline_pattern)
+        return _inline_forms(comp.inline_pattern, limit)
     return [w for w in comp.words if w]
-
-
-class _OverLimit(Exception):
-    """The expansion passed the guard's limit (raised early, before it is complete)."""
 
 
 class _Budget:
@@ -187,7 +202,7 @@ def expand_stems(comp, variants_on, ja_on, variant_mode, var_mgr, budget=None):
     grammatical prefixes and suffixes (``#``), Judeo-Arabic, spelling variants --
     the order the main path always used, now the one order for retrieval and check.
     For a star word these are the stems the star attaches to."""
-    forms = literal_forms(comp)
+    forms = literal_forms(comp, budget.limit if budget is not None else None)
 
     def step(fn):
         nonlocal forms
@@ -302,12 +317,24 @@ def expand_under_guard(components, variants_on, ja_on, variant_mode, var_mgr):
         warnings.append(text)
         stems = try_now()
     if stems is None:
-        raise ValueError(
-            _tr("Query exceeds the limit of {limit} expanded terms (estimated {count} terms). "
-                "Please simplify your query by using fewer OR-group alternatives or "
-                "removing the # (grammatical prefixes) modifier from some terms.").format(
-                    limit=limit, count=f'{limit}+'))
+        raise guard_refusal(limit)
     return stems, ('; '.join(warnings) if warnings else None), state
+
+
+GUARD_REFUSAL_CODE = 'responsa_query_too_large'
+
+
+def guard_refusal(limit=None):
+    """The query is over the guard's limit after every step down: refused with its
+    message and its code -- a 400 on the API, not the 500 a plain ValueError became
+    there (Codex review of PR #432). Still a ValueError for the apps' handlers."""
+    limit = Config.MAX_EXPANDED_TERMS if limit is None else limit
+    return ResponsaQueryRefused(
+        _tr("Query exceeds the limit of {limit} expanded terms (estimated {count} terms). "
+            "Please simplify your query by using fewer OR-group alternatives or "
+            "removing the # (grammatical prefixes) modifier from some terms.").format(
+                limit=limit, count=f'{limit}+'),
+        code=GUARD_REFUSAL_CODE)
 
 
 # ==============================================================================
@@ -373,6 +400,19 @@ def end_edge():
     length)."""
     cont, past = edge_classes()
     return '(?!' + past + '*' + cont + ')'
+
+
+def exact_start(first=None):
+    """Before a bounded word, exactly: Exact's ``_starts_word`` as text the pattern
+    reads -- the run of looked-past characters before the word (part of the match), and
+    before the run a character that neither continues a word nor is looked past, or
+    none. For the exact pattern only (``_CheckPattern``): its large classes are tried
+    wherever the pattern backtracks. *first*: the characters the word can begin with,
+    tried first."""
+    cont, past = edge_classes()
+    guard = ('(?=' + past + '*[' + ''.join(re.escape(c) for c in sorted(first)) + '])'
+             if first else '')
+    return guard + '(?<![' + cont[1:-1] + past[1:-1] + '])' + past + '*'
 
 
 # ==============================================================================
@@ -456,7 +496,10 @@ def plans_from_dicts(component_dicts):
                                  wildcard_pattern=d.get('wildcard_pattern'),
                                  inline_pattern=d.get('inline_pattern'))
         if comp.inline_pattern:
-            stems = _inline_forms(comp.inline_pattern)
+            try:
+                stems = _inline_forms(comp.inline_pattern)
+            except _OverLimit:
+                raise guard_refusal() from None
         else:
             stems = [t for t in (d.get('regex_terms') or []) if t]
         if comp.wildcard == 'pattern' and not comp.wildcard_pattern:
@@ -487,6 +530,7 @@ class CompiledResponsa:
     groups: list                           # (group name, start bounded, end bounded)
     flex_spacing: bool = False
     flags: int = re.IGNORECASE
+    exact_pattern: str = ''                # the check with exact starts (_CheckPattern)
 
     @property
     def expanded_count(self):
@@ -497,8 +541,9 @@ class CompiledResponsa:
         return any(p.star for p in self.plans)
 
     def compile_check(self):
-        from shared.search_regex import compile as compile_search_regex
-        return compile_search_regex(self.check_pattern, self.flags)
+        """The check pattern, compiled: its ``search`` returns only a match ``accept``
+        takes (``_CheckPattern``)."""
+        return _CheckPattern(self)
 
     def accept(self, text, m):
         """Exact's whole-word predicate on every word the match holds (§5.2): the
@@ -531,11 +576,46 @@ class CompiledResponsa:
                                has_content_search=has_content_search, flex_spacing=flex_spacing)
 
 
+class _CheckPattern(Pattern):
+    """The check pattern, as shared/search_regex.py compiles it, whose ``search``
+    returns the first match ``accept`` takes, or None.
+
+    The fast pattern matches every place the predicate accepts (its start lookbehinds
+    are lenient), so nothing acceptable starts before its first match. Where it places
+    a word itself -- a line's ``.*``, an ``AND`` lookahead, a ``[N]`` gap -- it commits
+    to one place: a rejected one (``beta x[[[[beta``, a run of brackets longer than the
+    lookbehinds read) hid the acceptable ``beta`` before it (Codex review of PR #432).
+    So once ``accept`` rejects a match, the text is searched on from that match with
+    the exact pattern, which backtracks past such a place. A sequence's first word is
+    unbounded in both: the scan's next start reaches its next occurrence."""
+
+    def __init__(self, compiled):
+        self.__dict__.update(compile_search_regex(compiled.check_pattern, compiled.flags).__dict__)
+        self._responsa = compiled
+        self._exact = None
+
+    def _exact_regex(self):
+        if self._exact is None:
+            self._exact = compile_search_regex(
+                self._responsa.exact_pattern or self._responsa.check_pattern, self._responsa.flags)
+        return self._exact
+
+    def search(self, string, pos=0, endpos=None):
+        m = super().search(string, pos, endpos)
+        if m is None or self._responsa.accept(string, m):
+            return m
+        exact = self._exact_regex()
+        m = exact.search(string, m.start(), endpos)
+        while m is not None and not self._responsa.accept(string, m):
+            m = exact.search(string, m.start() + 1, endpos)
+        return m
+
+
 def _names(prefix, n):
     return [f'{prefix}{i}' for i in range(n)]
 
 
-def _word_piece(plan, name, flex, bound_start, bound_end, strict, inserter=None):
+def _word_piece(plan, name, flex, bound_start, bound_end, strict, inserter=None, exact=False):
     body = plan.body(flex, inserter=inserter)
     piece = ''
     if bound_start:
@@ -544,16 +624,19 @@ def _word_piece(plan, name, flex, bound_start, bound_end, strict, inserter=None)
         # ([\s\S]*word) reach them at every position they backtrack through
         # (2026-10-22: 6.8 -> 85.6 s and 11.3 -> 103.3 s on the desktop without this).
         first = plan.first_chars(flex)
-        if first:
-            piece += '(?=[' + ''.join(re.escape(c) for c in sorted(first)) + '])'
-        piece += start_edge(strict)
+        if exact:
+            piece += exact_start(first)
+        else:
+            if first:
+                piece += '(?=[' + ''.join(re.escape(c) for c in sorted(first)) + '])'
+            piece += start_edge(strict)
     piece += f'(?P<{name}>{body})' if name else f'(?:{body})'
     if bound_end:
         piece += end_edge()
     return piece
 
 
-def _sequence(plans, names, gaps, max_gap, flex, strict, inserter=None):
+def _sequence(plans, names, gaps, max_gap, flex, strict, inserter=None, exact=False):
     """Words joined by separators. The first word gets no start lookbehind in the
     check (*strict* False): ``accept`` tests it, and a leading lookbehind would cost
     re its fast scan. With flex spacing only the joined unit's outer edges are
@@ -570,24 +653,25 @@ def _sequence(plans, names, gaps, max_gap, flex, strict, inserter=None):
             gap = gaps[i - 1] if gaps and i - 1 < len(gaps) and gaps[i - 1] is not None else max_gap
             out.append(_separator(gap, flex))
         name = names[i] if names else None
-        out.append(_word_piece(plan, name, flex, bs and (strict or i > 0), be, strict, inserter))
+        out.append(_word_piece(plan, name, flex, bs and (strict or i > 0), be, strict, inserter, exact))
         if name:
             groups.append((name, bs, be))
     return ''.join(out), groups
 
 
 def build_patterns(plans, max_gap, per_pair_gaps=None, *, flex_spacing=False, bidirectional=False,
-                   within_document=False, highlight_brackets=False):
+                   within_document=False, highlight_brackets=False, exact_starts=False):
     """(check pattern, highlight pattern, groups) for the word sequence *plans*.
 
     *highlight_brackets*: the query has no brackets of its own, so the row's text is
     matched with its brackets out; the highlight -- run on the original text by the
     viewers -- then lets brackets stand between letters too, so ``של[ו]ם`` is marked
-    for ``שלום``."""
+    for ``שלום``. *exact_starts*: the check's exact pattern instead (``exact_start``
+    before every bounded word the check bounds; ``_CheckPattern``), and no highlight."""
     from shared.search_engine import _FUZZY_INSERTER
     hl_inserter = _FUZZY_INSERTER if highlight_brackets else None
 
-    def one(strict, named):
+    def one(strict, named, exact=False):
         inserter = hl_inserter if strict else None
         if within_document:
             # At the earliest acceptable word, every word must occur in the rest of the
@@ -597,7 +681,7 @@ def build_patterns(plans, max_gap, per_pair_gaps=None, *, flex_spacing=False, bi
             for i, plan in enumerate(plans):
                 bs, be = plan.bounds
                 name = f'ra{i}' if named else None
-                req.append(r'(?=[\s\S]*' + _word_piece(plan, name, flex_spacing, bs, be, strict, inserter) + ')')
+                req.append(r'(?=[\s\S]*' + _word_piece(plan, name, flex_spacing, bs, be, strict, inserter, exact) + ')')
                 if name:
                     groups.append((name, bs, be))
             term_alts = []
@@ -605,23 +689,26 @@ def build_patterns(plans, max_gap, per_pair_gaps=None, *, flex_spacing=False, bi
             for i, plan in enumerate(plans):
                 bs, be = plan.bounds
                 name = f'rt{i}' if named else None
-                term_alts.append(_word_piece(plan, name, flex_spacing, bs, be, strict, inserter))
-                plain_alts.append(_word_piece(plan, None, flex_spacing, bs, be, strict, inserter))
+                term_alts.append(_word_piece(plan, name, flex_spacing, bs, be, strict, inserter, exact))
+                plain_alts.append(_word_piece(plan, None, flex_spacing, bs, be, strict, inserter, exact))
                 if name:
                     groups.append((name, bs, be))
             term = '(?:' + '|'.join(term_alts) + ')'
             lead = '(?:' + '|'.join(plain_alts) + ')'
             return '(?=' + lead + ')' + ''.join(req) + term, groups
         forward, groups = _sequence(plans, _names('rf', len(plans)) if named else None,
-                                    per_pair_gaps, max_gap, flex_spacing, strict, inserter)
+                                    per_pair_gaps, max_gap, flex_spacing, strict, inserter, exact)
         if bidirectional and len(plans) >= 2:
             reversed_gaps = list(reversed(per_pair_gaps)) if per_pair_gaps else per_pair_gaps
             backward, back_groups = _sequence(list(reversed(plans)),
                                               _names('rb', len(plans)) if named else None,
-                                              reversed_gaps, max_gap, flex_spacing, strict, inserter)
+                                              reversed_gaps, max_gap, flex_spacing, strict, inserter, exact)
             return f'(?:{forward})|(?:{backward})', groups + back_groups
         return forward, groups
 
+    if exact_starts:
+        exact, groups = one(strict=False, named=True, exact=True)
+        return exact, None, groups
     check, groups = one(strict=False, named=True)
     highlight, _ = one(strict=True, named=False)
     return check, highlight, groups
@@ -654,16 +741,17 @@ def compile_components(components, responsa_options, var_mgr, max_gap, per_pair_
                               flex_patterns=[_make_flex_spacing_pattern(w) for w in comp.words] if flex else []))
     check = highlight = ''
     groups = []
+    exact = ''
     if plans:
+        shape = dict(flex_spacing=flex, bidirectional=bool(opts.get('bidirectional', False)),
+                     within_document=bool(opts.get('within_document', False)))
         check, highlight, groups = build_patterns(
-            plans, max_gap, per_pair_gaps, flex_spacing=flex,
-            bidirectional=bool(opts.get('bidirectional', False)),
-            within_document=bool(opts.get('within_document', False)),
-            highlight_brackets=not query_has_brackets)
+            plans, max_gap, per_pair_gaps, highlight_brackets=not query_has_brackets, **shape)
+        exact = build_patterns(plans, max_gap, per_pair_gaps, exact_starts=True, **shape)[0]
     return CompiledResponsa(plans=plans, negated_words=negated,
                             warning='; '.join(warnings) if warnings else None,
                             options=state, check_pattern=check, highlight_pattern=highlight,
-                            groups=groups, flex_spacing=flex)
+                            groups=groups, flex_spacing=flex, exact_pattern=exact)
 
 
 def _line_word_separator(gap):
@@ -721,10 +809,11 @@ def compile_line_groups(line_groups, line_gaps, responsa_options, var_mgr, query
         by_group.append(plans[k:k + len(group.components)])
         k += len(group.components)
     check, highlight, groups = build_line_patterns(kept_groups, by_group, kept_gaps, query_has_brackets)
+    exact = build_line_patterns(kept_groups, by_group, kept_gaps, query_has_brackets, exact_starts=True)[0]
     return CompiledResponsa(plans=plans, negated_words=negated,
                             warning='; '.join(warnings) if warnings else None,
                             options=state, check_pattern=check, highlight_pattern=highlight,
-                            groups=groups, flags=re.IGNORECASE | re.MULTILINE)
+                            groups=groups, flags=re.IGNORECASE | re.MULTILINE, exact_pattern=exact)
 
 
 # The looked-past characters a line's edge word commonly carries: brackets, quotes,
@@ -733,15 +822,18 @@ _LINE_EDGE_PAST = ("[\\[\\]\"'\u05F3\u05F4\u2018\u2019\u0300-\u036F"
                    "\u0591-\u05BD\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7]")
 
 
-def build_line_patterns(line_groups, plans_by_group, line_gaps, query_has_brackets=False):
+def build_line_patterns(line_groups, plans_by_group, line_gaps, query_has_brackets=False,
+                        exact_starts=False):
     """(check, highlight, groups) of a line-break query: each group one line pattern,
-    its words bounded and named, joined by line breaks with the [|N] gaps."""
+    its words bounded and named, joined by line breaks with the [|N] gaps.
+    *exact_starts*: the check's exact pattern instead, and no highlight (as
+    build_patterns)."""
     from shared.search_engine import _FUZZY_INSERTER
     hl_inserter = None if query_has_brackets else _FUZZY_INSERTER
     kept_groups, by_group, kept_gaps = line_groups, plans_by_group, line_gaps
     past = edge_classes()[1]
 
-    def one(strict, named):
+    def one(strict, named, exact=False):
         groups = []
         line_patterns = []
         for gi, (group, gplans) in enumerate(zip(kept_groups, by_group)):
@@ -751,7 +843,7 @@ def build_line_patterns(line_groups, plans_by_group, line_gaps, query_has_bracke
                     word_pat += _line_word_separator(group.word_gaps[ci - 1] if ci - 1 < len(group.word_gaps) else None)
                 bs, be = plan.bounds
                 name = f'rl{gi}_{ci}' if named else None
-                word_pat += _word_piece(plan, name, False, bs, be, strict, hl_inserter if strict else None)
+                word_pat += _word_piece(plan, name, False, bs, be, strict, hl_inserter if strict else None, exact)
                 if name:
                     groups.append((name, bs, be))
             # A | anchor is the line's start or end; the quotes, brackets and marks of
@@ -772,6 +864,9 @@ def build_line_patterns(line_groups, plans_by_group, line_gaps, query_has_bracke
 
     if not any(by_group):
         return '', '', []
+    if exact_starts:
+        exact, groups = one(strict=False, named=True, exact=True)
+        return exact, None, groups
     check, groups = one(strict=False, named=True)
     # The viewers compile a row's pattern without flags: MULTILINE goes with it.
     highlight = '(?m:' + one(strict=True, named=False)[0] + ')'
