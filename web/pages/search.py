@@ -31,7 +31,7 @@ from web.pages.search_state import (
     delete_search_history_entry, clear_search_history,
     domain_display_name,
     persist_search_snapshot, clear_search_snapshot, clear_search_filters,
-    get_search_active_snapshot, restore_search_snapshot,
+    get_search_active_snapshot, restore_search_snapshot, responsa_note_of,
     compact_result_rows, preview_shows_final_rows, engine_mode,
 )
 from web.pages.search_results import (
@@ -120,12 +120,6 @@ def _bulk_add_items(lists_mgr, sys_ids, list_id):
     else:
         ui.notify(f"{added} {tr('items added to list')}", type='positive')
     return added
-
-
-def _responsa_note_of(results):
-    """The Responsa guard's downgrade a result set came with (its first row
-    carries it), or None."""
-    return results[0].get('responsa_warning') if results else None
 
 
 def create_search_page(initial_query: str = None, initial_tag: str = None,
@@ -4864,7 +4858,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Restore results and state from snapshot
         if state_snapshot.get('results'):
             search_state.results = state_snapshot['results']
-            search_state.responsa_warning = _responsa_note_of(state_snapshot['results'])
+            search_state.responsa_warning = responsa_note_of(state_snapshot['results'])
             # An entry from a build that kept the rows: their variant settings are
             # unknown, never those of the search shown before (a step recorded from
             # them replays with the website defaults at its level).
@@ -5452,7 +5446,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.is_cancelled = False
             search_state.progress = 1.0
             search_state.results = results
-            search_state.responsa_warning = _responsa_note_of(results)
+            search_state.responsa_warning = responsa_note_of(results)
             search_state.domain_excluded_results = []
 
             # Phase 88: populate per-session export payload on the cancelled-partial path so
@@ -5497,7 +5491,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             )
             results = compact_result_rows(results)
             search_state.results = results
-            search_state.responsa_warning = _responsa_note_of(results)
+            search_state.responsa_warning = responsa_note_of(results)
             # A stopped search within results is still the chain's next step: marked
             # "+", it is completed before anything searches within it.
             if search_state._refine_mode and results:
@@ -5661,7 +5655,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         expanded_count = results[0].get('responsa_expanded_count', 0) if results else 0
         # A Responsa downgrade (the guard turned an option off) is part of the count's
         # line, for as long as these results show (plan §5.3: not a 5-second toast).
-        search_state.responsa_warning = _responsa_note_of(results)
+        search_state.responsa_warning = responsa_note_of(results)
         if expanded_count > 0:
             results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str} ({tr('searching')} {expanded_count} {tr('expanded terms')}){_filter_suffix}{_downgrade_suffix()}"
         else:

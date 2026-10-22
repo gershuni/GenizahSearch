@@ -415,6 +415,12 @@ def clear_search_active_snapshot() -> None:
         pass
 
 
+def responsa_note_of(results):
+    """The Responsa guard's downgrade a result set came with (its first row
+    carries it, in a snapshot too), or None."""
+    return results[0].get('responsa_warning') if results and isinstance(results[0], dict) else None
+
+
 def restore_search_snapshot(state: 'SearchUIState') -> None:
     """Hydrate page-scoped state from app.storage.user snapshot.
 
@@ -448,9 +454,13 @@ def restore_search_snapshot(state: 'SearchUIState') -> None:
     # does not short-circuit the domain_exclusions read.
     try:
         # Restorable scalar/list fields (match RESEARCH §1.1 bucket).
+        # A restored result set brings its downgrade note back with it, on either
+        # path (Codex review of PR #433).
         if restore_search_active_snapshot(state):
+            state.responsa_warning = responsa_note_of(state.results)
             return
         state.results = safe_user_get('search_results', []) or []
+        state.responsa_warning = responsa_note_of(state.results)
         state.result_count_capped = bool(safe_user_get('search_result_count_capped', False))
         state.printed_filter = safe_user_get('search_printed_filter', 'all')
         _de = safe_user_get('domain_exclusions')

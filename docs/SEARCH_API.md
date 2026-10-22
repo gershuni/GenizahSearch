@@ -333,8 +333,9 @@ Notes:
 - Wildcard expansion can be expensive; the Responsa cascade may downgrade noisy patterns
   and surface a `query_downgraded` warning in `warnings[]`. It counts the real terms the
   lookup holds (at most 5,000; measured 2026-10-21: 1,200 terms in under a second). A
-  query still over that after every step down is refused with 400
-  `responsa_query_too_large`.
+  query still over that after every step down -- or one with too many words to search in
+  good time (about 55 in a row, 18 under `AND`), or a word longer than 120 characters -- is
+  refused with 400 `responsa_query_too_large`.
 - A `*` inside a word (`כ*נים`), a word made only of `*`, and other shapes with several
   `*` are not searched yet: the request is refused with 400 `responsa_unsupported_star`,
   never answered with an empty list.
@@ -351,7 +352,7 @@ Notes:
 | Top-level `mode` key (legacy Phase 78 shape) | `invalid_request` | 400 | message includes hint `"unknown field 'mode' — use search_mode instead"` per Phase 81A D-13 |
 | `regex` value for `search_mode` | `invalid_request` | 400 | structurally rejected by Literal enum; never part of this API's public surface (dropped before the initial public release, Phase 81A D-09) |
 | `search_mode="responsa"` with a `*` inside a word, a word of `*` only, or several `*` in a word (other than `*word*`) | `responsa_unsupported_star` | 400 | 2026-10-21; on `/api/search/jobs` the job's result carries the same error |
-| `search_mode="responsa"` whose words expand to more than 5,000 terms after every step down (for example many `(a/b)` groups in one word) | `responsa_query_too_large` | 400 | 2026-10-22 (it was a 500); on `/api/search/jobs` the job's result carries the same error |
+| `search_mode="responsa"` whose words expand to more than 5,000 terms after every step down (for example many `(a/b)` groups in one word), too many words to search in good time, or a word longer than 120 characters | `responsa_query_too_large` | 400 | 2026-10-22 (it was a 500); on `/api/search/jobs` the job's result carries the same error |
 
 ### Response example
 

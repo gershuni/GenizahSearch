@@ -259,3 +259,23 @@ def test_a_downgrade_stays_on_the_count_line_after_a_filter(page):  # noqa: F811
     run(driver)
     assert any(t.startswith('2 / 2 Results') and t.endswith('· Spelling variants disabled')
                for t in seen['after']), seen
+
+
+def test_a_downgrade_comes_back_with_its_results_after_a_reload(page):  # noqa: F811
+    """A reload restores the results from the snapshot: their downgrade comes back with
+    them (Codex review of PR #433)."""
+    queue = page({(WORD, False): ([dict(_row('M1'), responsa_warning='Spelling variants disabled')],
+                                  None)})
+
+    def noted(user):
+        return [t for t in _label_texts(user) if ' Results' in t and 'Spelling variants disabled' in t]
+
+    async def driver(a, b):
+        await a.open('/search')
+        submit(a, WORD)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: noted(a))
+        await a.open('/search')
+        await _wait_for(lambda: noted(a))
+
+    run(driver)

@@ -1,6 +1,8 @@
 """Round-trip tests for search snapshot helpers (Phase 74, D-18)."""
 from unittest.mock import patch
 
+import pytest
+
 
 def _make_storage():
     """Create a simple dict that mimics app.storage.user."""
@@ -208,6 +210,33 @@ def test_restore_prefers_tab_snapshot_over_legacy_user_results():
         assert state.results == [{'display': {'id': 'tab'}}]
         assert state.printed_filter == 'only_printed'
         assert state.domain_exclusions == {'foo'}
+
+
+@pytest.mark.parametrize('path', ['tab snapshot', 'user snapshot'])
+def test_a_restored_result_set_brings_its_responsa_downgrade_back(path):
+    """The count line shows the downgrade from search_state: a back-navigation or a
+    reload installed the rows without it (Codex review of PR #433)."""
+    rows = [{'display': {'id': 'r'}, 'responsa_warning': 'Spelling variants disabled'}]
+    storage = {'search_snapshot_schema_version': 1}
+    tab_storage = {}
+    if path == 'tab snapshot':
+        tab_storage['search_active_snapshot'] = {
+            'version': 1, 'results': rows, 'search_refinement_chain': [],
+            'search_exclusion_sources': []}
+    else:
+        storage['search_results'] = rows
+    with patch('web.pages.search_state.app') as mock_app, \
+         patch('web.safe_storage.app') as mock_safe_app:
+        mock_app.storage.user = storage
+        mock_app.storage.tab = tab_storage
+        mock_safe_app.storage.user = storage
+        from web.pages.search_state import SearchUIState, restore_search_snapshot
+
+        state = SearchUIState()
+        restore_search_snapshot(state)
+
+        assert state.results == rows
+        assert state.responsa_warning == 'Spelling variants disabled'
 
 
 def test_restore_falls_back_to_compact_user_snapshot_when_tab_missing():
