@@ -10,8 +10,9 @@ anchor's transcription while the page scrolled under it, and the Personal Lists 
   sticky column with its own scroll at every width, which left the builder and the candidates
   10px on a phone. The pane now sits above the work column, each at the full width and the pane
   no longer sticky; on a phone the transcription keeps a bounded scroll (45vh) so the builder
-  stays within reach, the viewer's control bar is one row of 34px buttons (in the page and in
-  Compare), and the Compare window's two panes stack, anchor above candidate. The
+  stays within reach, the viewer's control bar is one row of 32px buttons (in the page and in
+  Compare; on a 320px phone its zoom group takes a second row rather than being clipped), and
+  the Compare window's two panes stack, anchor above candidate. The
   label the page rendered below everything for a narrow-screen anchor strip that was never
   built (empty, then the sys_id in monospace) is gone.
 - **Personal Lists under 769px.** The My Lists tree was the splitter's 25% panel. The splitter

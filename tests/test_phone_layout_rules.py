@@ -180,6 +180,11 @@ def test_joins_lab_stacks_its_anchor_pane_under_1024px():
     assert '.joins-lab-work { flex: none !important;' in rules
     assert '.joins-lab-anchor .anchor-transcription-panel { max-height: 45vh;' in rules
     assert '.anchor-controls-bar .zoom-level-label { display: none !important; }' in rules
+    # The bar wraps when it must: at 320px its groups do not fit one row, and
+    # a no-wrap bar had its trailing buttons clipped (Codex on #439).
+    bar = rules[rules.index('.anchor-controls-bar {'):]
+    bar = bar[:bar.index('}')]
+    assert 'nowrap' not in bar, bar
     assert '.compare-panes > .nicegui-column { flex: 1 1 100% !important;' in rules
 
 

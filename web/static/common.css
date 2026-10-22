@@ -2553,17 +2553,22 @@ body {
     .joins-lab-anchor .anchor-transcription-panel { max-height: 45vh; padding: 12px 14px; }
     .joins-lab-work { padding: 8px 0 !important; }
     /* The viewer's control bar (the anchor pane and both Compare panes,
-       web/components/anchor_viewer.py) is one row of 34px buttons, as on
-       /browse; the zoom figure goes and the folio counter never wraps. */
-    .anchor-controls-bar { padding: 4px 6px !important; gap: 2px !important; flex-wrap: nowrap !important; }
+       web/components/anchor_viewer.py) is one row of 32px buttons; the
+       zoom figure goes and the folio counter never wraps. The bar itself
+       still wraps: its two groups need about 290px, which a 360px phone
+       has and a 320px phone has not, where the zoom group takes a second
+       row with each button whole and reachable (Codex on #439: with
+       wrapping off, the trailing buttons were clipped by the hidden body
+       overflow). */
+    .anchor-controls-bar { padding: 4px !important; gap: 2px !important; }
     .anchor-controls-bar > .nicegui-row { gap: 0 !important; flex-wrap: nowrap !important; }
     .anchor-controls-bar .q-btn {
-        min-width: 34px !important; min-height: 34px !important; width: 34px; height: 34px; padding: 0 !important;
+        min-width: 32px !important; min-height: 32px !important; width: 32px; height: 32px; padding: 0 !important;
     }
-    .anchor-controls-bar .text-sm { white-space: nowrap; padding: 0 4px !important; }
+    .anchor-controls-bar .text-sm { white-space: nowrap; padding: 0 2px !important; }
     .anchor-controls-bar .zoom-level-label { display: none !important; }
-    /* Compare: the two panes stack, anchor above candidate. */
-    .compare-panes > .nicegui-column { flex: 1 1 100% !important; border-right: 0 !important; }
+    /* Compare: the two panes stack, anchor above candidate, with 8px padding. */
+    .compare-panes > .nicegui-column { flex: 1 1 100% !important; border-right: 0 !important; padding: 8px !important; }
 }
 
 /* Lists: under 769px the splitter stacks, the My Lists tree above the list,
