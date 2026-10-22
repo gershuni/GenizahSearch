@@ -51,6 +51,7 @@ class _Label:
 class _Host:
     on_search_finished = APP.on_search_finished
     _run_left_matches_out = APP._run_left_matches_out
+    _forget_responsa_notes = APP._forget_responsa_notes
 
     def __init__(self, cutoff, cancelled=False):
         self._search_cutoff = cutoff

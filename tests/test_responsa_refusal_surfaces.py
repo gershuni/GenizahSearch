@@ -155,3 +155,39 @@ def test_a_refused_web_search_does_not_bring_the_previous_cards_back(server, mon
 
     run(driver)
     assert shown == {'first': True, 'after': []}, shown
+
+
+def test_a_superseded_refused_web_search_stays_quiet(server, monkeypatch):  # noqa: F811
+    """A refusal that lands after a newer search took the page -- the cancel lost the
+    race -- must not clear that search's candidates or show its message (Codex review
+    of PR #433). The newer search is simulated: the generation check says superseded."""
+    import asyncio
+
+    from nicegui import ui
+
+    from web.joins_executor import WebSearchExecutor
+    from web.pages import joins_lab
+    from web.state import state
+    monkeypatch.setattr(state, 'is_ready', lambda: True)
+    calls = []
+
+    def search(self, *args, **kwargs):
+        calls.append(args[:1])
+        raise ResponsaQueryRefused()
+    monkeypatch.setattr(WebSearchExecutor, 'execute_search', search)
+    monkeypatch.setattr(joins_lab, '_should_apply_results', lambda my_gen, gen_ref: False)
+    shown = {}
+
+    async def driver(a, b):
+        try:
+            await a.open('/joins-lab')
+            await _type_joins_query(a)
+            _click(a, _element(a, ui.button, lambda e: e.text == 'Run Search'))
+            await _wait_for(lambda: calls)
+            await asyncio.sleep(0.5)                 # the refusal has reached its handler
+            shown['said'] = [t for t in _label_texts(a) if t.startswith('Responsa search takes a *')]
+        except Exception as exc:                    # asserted below
+            shown['error'] = repr(exc)
+
+    run(driver)
+    assert shown == {'said': []}, shown

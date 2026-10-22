@@ -22349,6 +22349,7 @@ class GenizahGUI(QMainWindow):
         # view rendered them under the new query.
         self.last_results = []
         self.results_loaded = 0
+        self._forget_responsa_notes()
         self._printed_filter_state = 'all'
         self.chk_search_header.set_filter_active(self.COL_PRINTED, False)
         for b in self.export_buttons: b.setEnabled(False)
@@ -22737,6 +22738,7 @@ class GenizahGUI(QMainWindow):
         # that ends empty -- the launch already cleared the previous results.
         self.last_results = []
         self.results_loaded = 0
+        self._forget_responsa_notes()
         self._preview_thread = None
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
@@ -22793,6 +22795,7 @@ class GenizahGUI(QMainWindow):
         self.results_table.setRowCount(0)
         self.result_row_by_sys_id = {}
         self.last_results = []
+        self._forget_responsa_notes()
         self._last_search_params = None   # these results came from no search run here
         self._search_cutoff = None
         self.last_search_query = ""
@@ -23286,6 +23289,7 @@ class GenizahGUI(QMainWindow):
             else:
                 self.status_label.setText(tr("No results found."))
             self.last_results = []
+            self._forget_responsa_notes()
             for b in self.export_buttons: b.setEnabled(False)
             self.results_table.setRowCount(0)
             # A preview of this run turned sorting off; no batch load turns it on here.
@@ -24441,6 +24445,14 @@ class GenizahGUI(QMainWindow):
         text = f"{n:,}" if sep else str(n)
         return text + "+" if capped else text
 
+    def _forget_responsa_notes(self):
+        """The Responsa notes of the results shown -- the guard's downgrade and the
+        expanded-term count -- go when those results are replaced or cleared:
+        on_search_finished sets them only for a new set of rows, so a later tag
+        search's line said the previous query's downgrade (Codex review of PR #433)."""
+        self._responsa_warning = None
+        self._responsa_expanded_count = 0
+
     def _search_status_summary(self, domains=0):
         """The Search results status line, from the table as it is now.
 
@@ -24929,8 +24941,10 @@ class GenizahGUI(QMainWindow):
         emit helper so a stale slot from a superseded PGP-tag worker is skipped.
         """
         # A tag search is never LOCAL and does not pass through start_search,
-        # so it clears the hint itself.
+        # so it clears the hint itself -- and the Responsa notes of the results it
+        # replaces.
         self._set_local_scope_strip_visible(False)
+        self._forget_responsa_notes()
         if not results:
             # Phase 114 USAGE-03: zero-result completed tag search (D-07).
             # `tag` is the search term — MUST NOT appear in props (D-04).

@@ -81,6 +81,7 @@ class _Host:
     # to the file.
     _save_session = APP._save_session
     reset_ui = APP.reset_ui
+    _forget_responsa_notes = APP._forget_responsa_notes
     reset_comp_ui = APP.reset_comp_ui
     _set_local_scope_strip_visible = APP._set_local_scope_strip_visible
     _is_browsing_local = APP._is_browsing_local

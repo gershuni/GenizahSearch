@@ -3813,6 +3813,11 @@ def create_joins_lab_page(
                 return
 
             except ResponsaQueryRefused as exc:
+                # A newer search owns the page: a refusal that lost the race to the
+                # cancel stays quiet, as a superseded result does (Codex review of
+                # PR #433).
+                if not _should_apply_results(my_gen, _search_generation):
+                    return
                 # A query shape the engine does not search yet: say so, never show it
                 # as no results (shared/responsa_match.py). The previous search's
                 # candidates go: its enrichment, landing later, or a filter change
