@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-22 (9.8.2 release, both: PRs #426-#430) -- the P3 fragment folded (the website highlights after HTML-escaping); branch references replaced by PR numbers. 243 open.
+> **Last Updated:** 2026-10-22 (folded 1 fragment(s) from `docs/open_issues.d/`: 2026-10-22-web-phone-viewer-touch.md) -- P3 +1. 244 open.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
@@ -67,14 +67,14 @@ Move to "Completed Issues" section at bottom with date
 |----------|------|
 | P1 Critical Bugs | 0 |
 | P2 Medium Bugs | 50 |
-| P3 Low Priority | 152 |
+| P3 Low Priority | 153 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 20 |
 | Untested Areas | 5 |
 | Deferred to v7.15+ | 6 |
 | 2026-05-29 audit follow-up | 2 |
 | FGP integration (§4.5) | 5 |
-| **Total open** | **243** |
+| **Total open** | **244** |
 
 > Counts here exclude closed items (recomputed 2026-08-14 by counting rows carrying ❌/⏸/⏳); closed history lives in docs/archive/OPEN_ISSUES_ARCHIVE.md.
 > Count notes from 2026-09-25 to 2026-10-05 moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-06.
@@ -116,6 +116,7 @@ Move to "Completed Issues" section at bottom with date
 > 2026-10-21 (web event-loop reliability, PR #430): P2 -2 (GC freeze; Supabase writes on the loop: fixed, archived) +1 (a correction draft follows the reader to the next page, pre-existing); P3 +1 (Supabase calls still on the loop); the /browse rebuild and restart reload-loop rows narrowed, stay open -- 242.
 > 2026-10-22 (folded from `docs/open_issues.d/`: 2026-10-21-web-highlight-after-escaping.md): P3 +1 -- 243.
 > 2026-10-22 (9.8.2 release, both: PRs #426-#430): branch references replaced by PR numbers, no row opened or closed -- 243.
+> 2026-10-22 (folded from `docs/open_issues.d/`: 2026-10-22-web-phone-viewer-touch.md): P3 +1 -- 244.
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 
@@ -234,6 +235,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **Catalog browse table scrolls sideways on a phone** | `web/pages/catalog_browse.py` | ❌ Open (2026-10-22) | Under 768px the five-column table keeps a 640px minimum width and scrolls horizontally (common.css `.catalog-browse-table`); a card list per row would read better. The sidebar already stacks behind a Filters button. |
 | **Web: the expanded result text highlights after HTML-escaping, so words with ASCII quotes are not highlighted** | `web/pages/search_results.py:1007-1014` | ❌ Open (2026-10-21; found by Codex, reproduced) | `html.escape` runs before the pattern, so `"`/`'` are `&quot;`/`&#x27;` when matched: the mark-tolerant pattern for `רת` matches `ר"ת` in the raw text, not in the escaped one. Fix: match the raw text, escape around the spans. A prerequisite of `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md` Phase 1. |
 | **Supabase calls still on the event loop: /corrections save, approve and reject; `create_list_sync` in "add all"; the comment dialog's shelfmark picker; the edit-mode corrections read** | `web/pages/corrections.py` (save, approve, reject), `web/pages/search.py::create_and_add_all`, `web/components/comment_dialog.py` (`load_recent`, `load_lists`), `web/user_lists.py::get_items_in_list`, `web/pages/browse.py::toggle_edit_mode` (`get_corrections`) | ❌ Open (2026-10-21) | Left by the fix that moved the list, comment and /browse correction writes off the loop (archived 2026-10-21): each is a ~150 ms Oregon->Frankfurt round trip during which no visitor is served. Same pattern: `get_user_client()` on the loop, `run.io_bound(..., client=)`. `web/pages/search.py` is in the Responsa work's path: move `create_list_sync` with it or after. |
 | **Desktop image cache: a 400 px thumbnail and the 2000 px viewer image of the same page share one file** | `desktop/image_loader.py::ImageLoaderThread.run` (cache name `FL<id>_v2.jpg` from the FL id alone); thumbnails from `shared/metadata_manager.py::_resolve_thumbnail` (`/full/400,`) | ❌ Open (found 2026-10-21 by reading the code; not reproduced) | Every `ImageLoaderThread` names its cache file by FL id only, whatever the requested width. A thumbnail loaded first (Joins Lab grid, result-dialog thumbnail, Lists preview, Browse thumbnails) is saved as the file the manuscript viewer then reads for its 2000 px image, so page 1 can show enlarged and blurry. Fix: key the file by FL id and width (or by URL). Fold into the desktop phase of [docs/plans/NLI_THUMBNAIL_PREFETCH_PLAN.md](plans/NLI_THUMBNAIL_PREFETCH_PLAN.md) section 7. ✋ *By hand:* open a manuscript's thumbnail in the Joins Lab, then the same manuscript in the viewer, with an empty `images_cache/`. |
