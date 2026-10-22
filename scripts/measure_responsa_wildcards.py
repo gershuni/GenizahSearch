@@ -908,36 +908,79 @@ def diagnose_missing(idx, searcher, uid, header, file_text, pair):
     return out
 
 
+def _engine_star_pages(args, log):
+    """``--via-engine``: the V0.8 page rows the engine itself gives for ``*נים *לים`` (Responsa,
+    nothing cut, the website worker's stdlib-re route), as ``{uid: {'header', 'pair'}}``, and
+    the seconds it took. Rows across a page break are left out: the brute force reads pages."""
+    from unittest.mock import patch
+    from shared.config import Config
+    with patch.object(Config, 'INDEX_DIR', os.path.dirname(args.index_dir.rstrip('/\\'))):
+        from shared.metadata_manager import MetadataManager
+        from shared.variants import VariantManager
+        import shared.search_engine as se
+        from shared.search_regex import isolated_matching
+        meta = MetadataManager()
+        meta._load_heavy_caches_bg()
+        engine = se.SearchEngine(meta, VariantManager(), worker_mode=True, open_local=False)
+        log(f'engine index format: {engine.index_format_status()}')
+        options = {'responsa_mode': True, 'variants': False, 'ja': False, 'flex_spacing': False,
+                   'bidirectional': False, 'variant_mode': 'exact'}
+        se.consume_last_search_cutoff()
+        started = time.perf_counter()
+        with patch.object(Config, 'SEARCH_LIMIT', 5_000_000), \
+                patch.object(Config, 'RESPONSA_PAGE_LIMIT', 5_000_000), isolated_matching(native=True):
+            rows = engine.execute_search(f'{STAR_WORD_1} {STAR_WORD_2}', 'literal', 0,
+                                         responsa_options=options, corpus_scope='genizah')
+        seconds = time.perf_counter() - started
+        log(f'engine: {len(rows):,} rows in {seconds:.1f} s; cut-off signal {se.consume_last_search_cutoff()}')
+        engine.close_index()
+    found = {}
+    for r in rows:
+        if r.get('scope', 'page') != 'page' or (r.get('display') or {}).get('source') != 'V0.8':
+            continue
+        text = r.get('full_text') or ''
+        found[r['uid']] = {'header': r.get('raw_header', ''),
+                           'pair': first_pair(strip_search_diacritics(text), STAR_WORD_1, STAR_WORD_2)}
+    return found, seconds
+
+
 def cmd_missing_pages(args):
-    log = Log(args.out_dir, 'missing-pages')
+    log = Log(args.out_dir, 'missing-pages' + ('-engine' if args.via_engine else ''))
     require(args.corpus_file, 'corpus file (Transcriptions.txt)')
     idx, searcher = open_index(args.index_dir)
     schema = idx.schema
-    # Stage 1: two leading-star lookups ANDed, V0.8 page docs.
-    q = q_and(tantivy.Query.regex_query(schema, 'content_search', '.*' + STAR_WORD_1[1:]),
-              tantivy.Query.regex_query(schema, 'content_search', '.*' + STAR_WORD_2[1:]),
-              q_pages(idx), q_v08(idx))
-    result, t_stage1 = timed(searcher.search, q, 3_000_000)
-    hits = result.hits
-    log(f'stage 1: {len(hits):,} candidate V0.8 pages in {t_stage1:.2f} s')
-    # Stage 2: fetch each page and run the letters-only check.
-    index_found = {}
-    chars = 0
-    started = time.perf_counter()
-    t_fetch = 0.0
-    for i, (_, addr) in enumerate(hits):
-        t0 = time.perf_counter()
-        doc = searcher.doc(addr).to_dict()
-        t_fetch += time.perf_counter() - t0
-        content = doc['content'][0]
-        chars += len(content)
-        pair = first_pair(strip_search_diacritics(content), STAR_WORD_1, STAR_WORD_2)
-        if pair is not None:
-            index_found[doc['unique_id'][0]] = {'header': doc['full_header'][0], 'pair': pair}
-        if (i + 1) % 20_000 == 0:
-            log(f'  stage 2: {i + 1:,} checked, {len(index_found):,} pass, {time.perf_counter() - started:.0f} s')
-    t_stage2 = time.perf_counter() - started
-    log(f'stage 2: {len(index_found):,} pages pass, {chars:,} chars read, {t_stage2:.1f} s (fetch {t_fetch:.1f} s)')
+    if args.via_engine:
+        # --via-engine: the engine's own answer (Phase 3: the reversed-words field on a format-2 index, the
+        # scan on an older one), not the raw two-stage lookup below.
+        index_found, t_stage1 = _engine_star_pages(args, log)
+        hits, t_stage2, t_fetch, chars = [], 0.0, 0.0, 0
+        log(f'engine: {len(index_found):,} V0.8 page rows')
+    else:
+        # Stage 1: two leading-star lookups ANDed, V0.8 page docs.
+        q = q_and(tantivy.Query.regex_query(schema, 'content_search', '.*' + STAR_WORD_1[1:]),
+                  tantivy.Query.regex_query(schema, 'content_search', '.*' + STAR_WORD_2[1:]),
+                  q_pages(idx), q_v08(idx))
+        result, t_stage1 = timed(searcher.search, q, 3_000_000)
+        hits = result.hits
+        log(f'stage 1: {len(hits):,} candidate V0.8 pages in {t_stage1:.2f} s')
+        # Stage 2: fetch each page and run the letters-only check.
+        index_found = {}
+        chars = 0
+        started = time.perf_counter()
+        t_fetch = 0.0
+        for i, (_, addr) in enumerate(hits):
+            t0 = time.perf_counter()
+            doc = searcher.doc(addr).to_dict()
+            t_fetch += time.perf_counter() - t0
+            content = doc['content'][0]
+            chars += len(content)
+            pair = first_pair(strip_search_diacritics(content), STAR_WORD_1, STAR_WORD_2)
+            if pair is not None:
+                index_found[doc['unique_id'][0]] = {'header': doc['full_header'][0], 'pair': pair}
+            if (i + 1) % 20_000 == 0:
+                log(f'  stage 2: {i + 1:,} checked, {len(index_found):,} pass, {time.perf_counter() - started:.0f} s')
+        t_stage2 = time.perf_counter() - started
+        log(f'stage 2: {len(index_found):,} pages pass, {chars:,} chars read, {t_stage2:.1f} s (fetch {t_fetch:.1f} s)')
     # Brute force over the file. The prefilter must not be narrower than the oracle: it looks for
     # the two endings in the page's text with every looked-past character removed (marks, quotes,
     # brackets), exactly what star_word compares against -- a literal test would skip `נ[י]ם` and
@@ -975,9 +1018,11 @@ def cmd_missing_pages(args):
     causes = {}
     for d in diagnoses:
         causes[d['cause']] = causes.get(d['cause'], 0) + 1
-    extra_rows = [{'uid': u, 'header': index_found[u]['header'], 'pair': list(index_found[u]['pair'])} for u in extra[:20]]
+    extra_rows = [{'uid': u, 'header': index_found[u]['header'], 'pair': list(index_found[u]['pair'] or [])}
+                  for u in extra[:20]]
     log.finish({
         'index_dir': args.index_dir, 'corpus_file': args.corpus_file, 'query': f'{STAR_WORD_1} {STAR_WORD_2}',
+        'route': 'engine (execute_search)' if args.via_engine else 'two-stage lookup',
         'stage1': {'candidates': len(hits), 'seconds': round(t_stage1, 2)},
         'stage2': {'pages': len(index_found), 'seconds': round(t_stage2, 1), 'fetch_seconds': round(t_fetch, 1), 'chars': chars},
         'brute_force': {'pages_scanned': pages, 'prefiltered': prefiltered, 'pages': len(brute), 'duplicate_uids': duplicates,
@@ -1144,6 +1189,12 @@ PHASE3_QUERIES = [
     # when at most RESPONSA_STAR_AGGREGATE_LIMIT manuscripts hold the words -- the bound
     # the website's 3-minute limit needs, to be confirmed here.
     ('כה* גדול*', {}),
+    # A star at the start of a word (the second PR): the reversed-words field on a format-2
+    # index, the `.*` scan on an older one; stars at both ends the scan on both.
+    ('*כהנים *גדולים', {}),
+    ('*נים *לים', {}),
+    ('*כ*ה*נ*ים גדולים', {}),
+    ('*כהנ* גדולים', {}),
 ]
 
 
@@ -1691,12 +1742,15 @@ def _sys_of(header):
 
 
 def cmd_crossing_diff(args):
-    """§6.1 point 7, the owner's decision: what moving today's crossings to the seams would
-    change. For each query, today's rows (execute_search on the new index, uncapped)
-    against the same rows with every whole-manuscript row replaced by the seams' crossings
-    (each seam at its central break, the row's page decided as the engine's de-duplication
-    decides it, excluded words read on the whole matched pages). Removed rows are
-    classified by the junctions they cross; added rows by run or part bridge."""
+    """§6.1 point 7 and decision 10: what moving today's crossings to the seams changes. For
+    each query, the rows of the routes before decision 10 (execute_search on the new index
+    with its seams set aside, uncapped) against the same rows with every whole-manuscript
+    row replaced by the seams' crossings (each seam at its central break, the row's page
+    decided as the engine's de-duplication decides it, excluded words read on the whole
+    matched pages). Removed rows are classified by the junctions they cross; added rows by
+    run or part bridge. Then the engine itself, with its seams (Phase 3, decision 10), is
+    compared with that simulation: ``engine_vs_simulation`` counts the uids in one and not
+    the other (0 and 0 when the engine does what was measured)."""
     log = Log(args.out_dir, 'crossing-diff')
     from unittest.mock import patch
     from shared.config import Config
@@ -1825,15 +1879,18 @@ def cmd_crossing_diff(args):
         for mode, query, extra in (CROSSING_QUERIES_FREQUENT if args.query_set == 'frequent' else CROSSING_QUERIES):
             if args.only and query not in args.only:
                 continue
+            def run():
+                if mode == 'responsa':
+                    opts = {'responsa_mode': True, 'variants': False, 'ja': False, 'flex_spacing': False,
+                            'bidirectional': False, 'variant_mode': 'exact'}
+                    opts.update(extra)
+                    return engine.execute_search(query, 'exact', 0, responsa_options=opts, corpus_scope='genizah')
+                return engine.execute_search(query, mode, 0, corpus_scope='genizah')
             started = time.perf_counter()
             se.consume_last_search_cutoff()
-            if mode == 'responsa':
-                opts = {'responsa_mode': True, 'variants': False, 'ja': False, 'flex_spacing': False,
-                        'bidirectional': False, 'variant_mode': 'exact'}
-                opts.update(extra)
-                today = engine.execute_search(query, 'exact', 0, responsa_options=opts, corpus_scope='genizah')
-            else:
-                today = engine.execute_search(query, mode, 0, corpus_scope='genizah')
+            # "Today": the routes before decision 10 (the engine without its seams).
+            with patch.object(engine, '_seams_ready', lambda: False):
+                today = run()
             capped = bool(se.consume_last_search_cutoff().get('capped'))
             today_s = time.perf_counter() - started
             page_uids = {r['uid'] for r in today if r.get('scope') == 'page'}
@@ -1867,6 +1924,18 @@ def cmd_crossing_diff(args):
                 if key == 'consecutive only':
                     key = 'a run junction today\'s search did not report'
                 added_kinds[key] = added_kinds.get(key, 0) + 1
+            # The engine with decision 10 (its crossings from the seams), against the simulation.
+            started = time.perf_counter()
+            after = run()
+            se.consume_last_search_cutoff()
+            row['engine_after_s'] = round(time.perf_counter() - started, 1)
+            after_uids = {r['uid'] for r in after}
+            simulated = (today_uids - {r['uid'] for r in removed}) | set(added)
+            row['engine_after_rows'] = len(after)
+            row['engine_vs_simulation'] = {
+                'engine_only': len(after_uids - simulated), 'simulation_only': len(simulated - after_uids),
+                'engine_only_examples': sorted(after_uids - simulated)[:10],
+                'simulation_only_examples': sorted(simulated - after_uids)[:10]}
             row.update({'seam_crossing_rows': len(seam_new), 'removed': len(removed), 'added': len(added),
                         'after_rows': len(today) - len(removed) + len(added),
                         'removed_kinds': removed_kinds, 'added_kinds': added_kinds,
@@ -1878,7 +1947,10 @@ def cmd_crossing_diff(args):
             log(f'{mode:8} {query!r} {extra or ""}: {len(today):,} rows today ({row["today_crossing_rows"]} crossings, '
                 f'{len(agg)} from aggregates); seams: {len(seam_new)} crossing rows; removed {len(removed)} '
                 f'{removed_kinds}; added {len(added)} {added_kinds}; after {row["after_rows"]:,}; '
-                f'{today_s:.1f} s + {row["seams_s"]} s')
+                f'the engine after decision 10: {len(after):,} rows, '
+                f'{row["engine_vs_simulation"]["engine_only"]} not in the simulation, '
+                f'{row["engine_vs_simulation"]["simulation_only"]} missing from it; '
+                f'{today_s:.1f} s + {row["seams_s"]} s + {row["engine_after_s"]} s')
             results.append(row)
     log.finish({'index_dir': args.index_dir, 'seam_words': K, 'queries': results})
     return EXIT_OK
@@ -1912,6 +1984,9 @@ def main(argv=None):
     ap.add_argument('--aggregate-reversed', action='store_true',
                     help='index-sample: also size the reversed-words field of the aggregate docs')
     ap.add_argument('--endings', nargs='+', default=['כהנים', 'נים'], help='reversed-check: the endings to look up')
+    ap.add_argument('--via-engine', action='store_true',
+                    help='missing-pages: compare the engine\'s own rows (execute_search, Responsa) '
+                         'with the brute force, not the raw two-stage lookup')
     ap.add_argument('--only', nargs='+', help='crossing-diff: run only these queries')
     ap.add_argument('--query-set', choices=['phase1', 'frequent'], default='phase1',
                     help='crossing-diff: the §8 set and its Exact/Variants/Fuzzy pairs, or frequent phrases')

@@ -339,7 +339,11 @@ TRANSLATIONS = {
     "Download Transcriptions (Zenodo)": "הורד תעתיקים (Zenodo)",
     "Build / Rebuild Index": "בנייה / בנייה מחדש של אינדקס",
     "Search index: current format.": "אינדקס החיפוש: בפורמט העדכני.",
-    "Search index: built by an earlier version. It works as before; rebuilding it adds what the wildcard search (*) of coming versions uses.": "אינדקס החיפוש נבנה בגרסה קודמת. הוא פועל כמו קודם; בנייה מחדש תוסיף לו את מה שחיפוש התו הכללי (*) בגרסאות הבאות ישתמש בו.",
+    "Search index: built by an earlier version. It works as before; rebuilding it makes a * at the start of a word fast in Responsa search.": "אינדקס החיפוש נבנה בגרסה קודמת. הוא פועל כמו קודם; בנייה מחדש תאיץ בחיפוש השו\"ת כוכבית בתחילת מילה.",
+    "Search index": "אינדקס החיפוש",
+    "The search index on this computer was built by an earlier version. It works as before.": "אינדקס החיפוש במחשב זה נבנה בגרסה קודמת. הוא פועל כמו קודם.",
+    "Rebuilding it makes Responsa search fast for a * at the start of a word, and reads matches that run across a page break from the pages that follow each other in each manuscript. A rebuild takes about 20-25 minutes on a recent laptop; searching waits until it is done.": "בנייה מחדש תאיץ בחיפוש השו\"ת כוכבית בתחילת מילה, ותקרא התאמות שעוברות מעמוד לעמוד מן העמודים הסמוכים זה לזה בכל כתב יד. הבנייה נמשכת כ-20-25 דקות במחשב נייד חדש; החיפוש ימתין עד שתסתיים.",
+    "Rebuild now": "לבנות מחדש עכשיו",
     "AI Configuration": "הגדרות AI",
     "Provider:": "ספק:",
     "Model:": "מודל:",
@@ -2495,12 +2499,6 @@ TRANSLATIONS = {
         "יותר מ-{limit:,} שאפשר לקרוא בזמן סביר.",
     "Matches across a page break could not be searched; the list may be incomplete.":
         "לא ניתן היה לחפש התאמות שעוברות מעמוד לעמוד; ייתכן שהרשימה חסרה.",
-    "A * at the start of a word works as *word, and *word* as #word#, for now; a word "
-    "that begins with * and holds another * is not searched yet. A * inside a word or at "
-    "its end works anywhere: word*, wo*rd.":
-        "כוכבית בתחילת מילה פועלת כעת כ-*מילה, ו-*מילה* כ-#מילה#; מילה שמתחילה בכוכבית "
-        "ויש בה כוכבית נוספת עדיין אינה נחפשת. כוכבית בתוך מילה או בסופה פועלת בכל מקום: "
-        "מילה*, מי*לה.",
     "A * alone, or a word made only of *s, matches every word. "
     "For any one word, use a gap such as [1].":
         "כוכבית לבדה, או מילה שכולה כוכביות, מתאימה לכל מילה. "

@@ -2001,6 +2001,10 @@ class GenizahGUI(QMainWindow):
             # and consent-dialog (500ms) timers have resolved.  Idempotent; best-effort.
             QTimer.singleShot(700, self._run_startup_telemetry_coordinator)
 
+            # An index of an earlier format: offer a rebuild once (Responsa plan §6.1),
+            # after the startup prompts above; the rebuild itself is the user's click.
+            QTimer.singleShot(1500, self._offer_index_rebuild)
+
         except Exception as e:
             QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to finalize initialization:\n{}").format(e))
 
@@ -33163,7 +33167,82 @@ class GenizahGUI(QMainWindow):
             label.setText(tr("Search index: current format."))
         else:
             label.setText(tr("Search index: built by an earlier version. It works as before; "
-                             "rebuilding it adds what the wildcard search (*) of coming versions uses."))
+                             "rebuilding it makes a * at the start of a word fast in Responsa search."))
+
+    # --- the offer to rebuild an index of an earlier format (Responsa plan §6.1) -------------
+    # Asked once per index after startup; "Later" is remembered for THAT index (its folder
+    # and its last commit), so a rebuilt or replaced index is a new question. Re-indexing is
+    # always the user's click: "Rebuild now" opens run_indexing, whose confirmation follows.
+
+    _REBUILD_LATER_KEY = 'index_rebuild_later'
+    _REBUILD_OFFER_TRIES = 20          # 3 s apart, while another window waits on the user
+
+    def _index_identity(self):
+        """The index on this computer as the "Later" answer names it: its folder and when
+        its main index was last committed (``meta.json``), or None."""
+        db = os.path.join(Config.INDEX_DIR, "tantivy_db")
+        try:
+            stamp = int(os.path.getmtime(os.path.join(db, "meta.json")))
+        except OSError:
+            return None
+        return f"{os.path.normcase(os.path.abspath(db))}|{stamp}"
+
+    def _rebuild_offer_due(self):
+        """Whether to offer a rebuild: an open index built by an earlier version, a build
+        that can run, and no "Later" for this index. Fails closed (no offer) when the
+        config cannot be read."""
+        engine = getattr(self, 'searcher', None)
+        if engine is None or getattr(engine, 'index', None) is None or not getattr(self, 'indexer', None):
+            return False
+        try:
+            if engine.index_format_status().get('current'):
+                return False
+        except Exception:
+            logger.debug("_rebuild_offer_due: no index format", exc_info=True)
+            return False
+        ident = self._index_identity()
+        if ident is None:
+            return False
+        try:
+            return load_app_config().get(self._REBUILD_LATER_KEY) != ident
+        except Exception:                                    # noqa: BLE001
+            logger.exception("could not read the rebuild offer's answer")
+            return False
+
+    def _ask_rebuild(self):
+        """The offer itself: 'rebuild' or 'later' (closing the window is "Later")."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle(tr("Search index"))
+        box.setText(tr("The search index on this computer was built by an earlier version. "
+                       "It works as before."))
+        box.setInformativeText(tr(
+            "Rebuilding it makes Responsa search fast for a * at the start of a word, and reads "
+            "matches that run across a page break from the pages that follow each other in "
+            "each manuscript. A rebuild takes about 20-25 minutes on a recent laptop; "
+            "searching waits until it is done."))
+        rebuild = box.addButton(tr("Rebuild now"), QMessageBox.ButtonRole.AcceptRole)
+        later = box.addButton(tr("Later"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(later)
+        box.exec()
+        return 'rebuild' if box.clickedButton() is rebuild else 'later'
+
+    def _offer_index_rebuild(self, tries=0):
+        """After startup: offer a rebuild once for an index of an earlier format, when no
+        other window is waiting on the user (the citation reminder, the consent prompt)."""
+        if not self._rebuild_offer_due():
+            return
+        if QApplication.activeModalWidget() is not None:
+            if tries < self._REBUILD_OFFER_TRIES:
+                QTimer.singleShot(3000, lambda: self._offer_index_rebuild(tries + 1))
+            return
+        if self._ask_rebuild() == 'rebuild':
+            self.run_indexing()
+        else:
+            try:
+                save_app_config({self._REBUILD_LATER_KEY: self._index_identity()})
+            except Exception:                                # noqa: BLE001
+                logger.exception("could not record the rebuild offer's answer")
 
     def on_index_error(self, err):
         self.index_progress.setFormat(tr("Indexing failed"))

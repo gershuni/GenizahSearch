@@ -312,8 +312,8 @@ characters are matched literally. Tokens are whitespace-separated; modifiers sta
 | plain word | `שלום` | the word as a whole word (since 2026-10-21 the first and last words of a query too: `כהנים גדול` no longer matches `כהנים גדולים`); a bracket inside the word in the text is passed over (`שלום` matches `של[ו]ם`) |
 | star at the end | `שלום*` | a whole word that begins with the letters, then any letters, none included (`שלום`, `שלומות`; a final letter before a `*` also takes its medial form). Since Phase 3 (2026-10-22) any letters: it was the 25 grammatical suffixes in the lookup |
 | star inside | `כ*נים`, `כ*ה*נים*` | any letters inside the word, none included, as many `*` as typed (`כהנים`, `כוהנים`, `כנים`); never a space, digit, `_` or punctuation (Phase 3, 2026-10-22) |
-| star at the start | `*נדר` | for now the word with a grammatical prefix (the 24 prefix forms in the lookup, as `#נדר`); any letters before a word come with the rebuilt index |
-| both-side wildcard | `*שלום*` | for now searched as `#שלום#`, with a `query_downgraded` warning |
+| star at the start | `*נים`, `*כ*ה*נים` | a whole word that ends with the letters, any letters before them, none included (`כהנים`, `בנים`, `נים`). Since Phase 3's second part (2026-10-22): it was the word with the 24 grammatical prefixes, as `#` gives them |
+| stars at both ends | `*כהנ*` | every whole word that holds the letters (`כהנים`, `ואלכהנות`). It was searched as `#כהנ#`, with a `query_downgraded` warning |
 | grammatical prefixes | `#שלום` | match plus all Hebrew grammatical prefix expansions (`ה`, `ב`, `ל`, `מ`, `ש`, `ו`, `כ`, plus 2-letter combos `וה`, `שב`, …) |
 | grammatical suffixes | `שלום#` | match plus Hebrew grammatical suffix expansions |
 | both prefixes + suffixes | `#שלום#` | every combination of the two above (600 forms; before 2026-10-21 the suffixes were dropped with a warning) |
@@ -343,15 +343,17 @@ Notes:
   its `*` carries a `query_downgraded` note that its list may be cut (`results_cut_off`
   when it is).
 - Refused with 400 `responsa_unsupported_star`, never answered with an empty list: a word
-  made only of `*` (it matches every word; use a gap such as `[1]`), a `*` word whose
-  letters hold punctuation, and -- until leading stars are searched -- a word that begins
-  with `*` and holds another `*` (`*כ*נים`).
-- Matches across a page break: a query with `*` reads them from the seams of a format-2
-  index, or, on an older index, from the whole-manuscript documents' page breaks when at most
-  2,000 manuscripts hold its words. When some were not searched (more manuscripts than that,
-  or a crossing with more than the seams' 30 words on one side), `warnings[]` holds
-  `results_cut_off` and a `query_downgraded:` note that says which. `AND`, line and position
-  queries with `*` read whole manuscripts on the same terms.
+  made only of `*` (it matches every word; use a gap such as `[1]`) and a `*` word whose
+  letters hold punctuation. Every other position and number of `*` is searched.
+- Matches across a page break: a format-2 index reads them from its seams, for a sequence of
+  words up to 30 a side (Exact, Variants and Fuzzy with several words and no position too);
+  only the pages that follow each other in a manuscript are joined. A longer sequence of
+  plain words reads the whole-manuscript documents, as before. On an older index a query
+  with `*` reads the whole-manuscript documents' page breaks when at most 2,000 manuscripts
+  hold its words. When some were not searched (more manuscripts than that, or a crossing
+  with more than the seams' 30 words on one side), `warnings[]` holds `results_cut_off` and a
+  `query_downgraded:` note that says which. `AND`, line and position queries with `*` read
+  whole manuscripts on the same terms.
 - Responsa reads up to 150,000 candidate pages (other modes 50,000), and its
   whole-manuscript documents or seams up to 50,000 of their own. A query whose every word
   holds a `*` is ordered by the matches on each page, then by shelfmark.

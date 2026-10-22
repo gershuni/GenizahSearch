@@ -96,7 +96,7 @@ SEARCH_MODES = (
     'edit adds, drops or changes a letter, or swaps two neighbours); prefixed forms included; slow, '
     'for damaged or uncertain readings. '
     'responsa = the Responsa-Project query syntax, every word a whole word: a * is any letters '
-    'inside one word, none included (word*, wo*rd; *word is for now a Hebrew prefix, as #word; a '
+    'inside one word, none included, anywhere and as often as typed (word*, wo*rd, *word, *wo*rd*; a '
     'word of * only is refused: responsa_unsupported_star, use [1] for any one word), #word for Hebrew '
     'prefixes and word# for suffixes, %word for plene/defective spelling, (a/b) alternatives, -word '
     'to exclude, word1 [3] word2 for up to three words between; responsa_options adds letter '

@@ -167,12 +167,12 @@ class TestBuildRegexResponsa:
         assert found('a shalom1 b') is None
 
     def test_prefix_wildcard(self):
-        """Prefix wildcard: Phase 1's \\S* before the term until leading stars are searched
-        (plan §7, Phase 3 point 14)."""
+        """Prefix wildcard *X: any letters before the term inside one word, none included
+        (Phase 3); never a digit (Phase 1's \\S* took one)."""
         found = self._star('prefix', ['neder'])
         assert found('x haneder y') == 'haneder'
         assert found('x neder y') == 'neder'
-        assert found('x 1neder y') == '1neder'
+        assert found('x 1neder y') is None
         assert found('x nederim y') is None
 
     def test_character_pattern(self):

@@ -907,7 +907,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         ui.label('#מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('prefix'))
                         ui.label('מילה#').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('suffix'))
                         ui.label('%מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('plene'))
-                        ui.label('מילה* / מי*לה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('wildcard'))
+                        ui.label('מילה* / *מילה / מי*לה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('wildcard'))
                         ui.label('(א/ב)').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('OR'))
                         ui.label('-מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Exclude'))
                         ui.label('|מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Line starts'))

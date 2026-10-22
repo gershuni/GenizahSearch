@@ -4,8 +4,11 @@
 a word or inside it (`X*`, `X*Y`), deployable on today's format-1 index -- **implemented, with its
 fixture gates (the oracle run on format 2 and format 1 built by the Indexer; every new test red
 under a named mutation); its real-data gates (oracle, `verify_search_combinations.py`, timings on
-both formats) are the local session's, commands in the PR**; a second PR leading stars and decision
-10. The points the plan left open are settled in §7 ("Phase 3, settled before building"). **Phase 2 implemented (2026-10-22, PR #440 on the design PR #438)**: the index format,
+both formats) are the local session's, commands in the PR**; the second PR (stacked on it) leading
+stars and decision 10 -- **implemented too, with its fixture gates; its real-data gates (the oracle's
+leading-star queries, `missing-pages --via-engine`, `crossing-diff`, the timings) are the local
+session's, commands in that PR**. The points the plan left open are settled in §7 ("Phase 3, settled
+before building"). **Phase 2 implemented (2026-10-22, PR #440 on the design PR #438)**: the index format,
 built locally and gated (§7 Phase 2); the server rebuild is the owner's, and today's page-break matches
 move to the seams in Phase 3 (decision 10, 2026-10-22).
 **Phase 1 implemented (2026-10-22)** -- the engine on
@@ -1174,7 +1177,10 @@ carries both:
 - the server rebuild and the desktop re-index.
 
 **Phase 3: true `*`, on the new index.** *(First PR, #442: `X*` and `X*Y` on both formats,
-implemented 2026-10-22, real-data gates pending; the second PR: leading stars and decision 10.)*
+implemented 2026-10-22, real-data gates pending. Second PR, stacked on it: leading stars (the
+reversed-words field on format 2, the scan on format 1; points 6 and 14), decision 10 (points 7
+and 12), and the desktop's offer to rebuild an old index (§6.1), implemented 2026-10-22,
+real-data gates pending.)*
 - Star retrieval and pages first (§5.4); a leading star through the reversed-words field,
   `*כהנ*` (both ends) through today's slow route.
 - Crossings read from seams, never from whole manuscripts (decision 9).

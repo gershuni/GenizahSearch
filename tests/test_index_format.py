@@ -7,7 +7,10 @@ small corpus, and how the engine opens them.
 - the reversed-words lookup finds the documents a ``.*X`` regex lookup finds;
 - isolation (gate d): every reader of the main index -- searches in every mode, the
   document counts, the text fetches, composition -- gives on the new index exactly
-  what it gives on the old one, and never a seam.
+  what it gives on the old one, and never a seam; except the matches across a page break
+  of a phrase (Exact, Variants, Fuzzy, a Responsa sequence), which come from the seams on
+  the new index (decision 10, Phase 3): the same rows, read from a seam, and none at a
+  junction no seam holds.
 """
 import json
 import os
@@ -279,28 +282,37 @@ RESPONSA = {"responsa_mode": True, "variants": False, "ja": False, "flex_spacing
 
 SEARCHES = [
     ("exact one word", "כהנים", "literal", {}),
-    ("exact across a break", "כהנים גדולים", "literal", {}),
-    ("exact across the V0.8 -> V0.7 restart", "שלום ישן", "literal", {}),
-    ("variants", "כהנים גדולים", "variants", {}),
-    ("fuzzy", "כהנים גדולים", "fuzzy", {}),
     ("regex", "כהנים\\s+גדולים", "Regex", {}),
-    ("responsa", "כהנים גדולים", "literal", {"responsa_options": RESPONSA}),
-    ("responsa star", "*כהנים גדולים", "literal", {"responsa_options": RESPONSA}),
     ("responsa and", "שלום AND ישן", "literal", {"responsa_options": RESPONSA}),
     ("responsa line", "|כהנים", "literal", {"responsa_options": RESPONSA}),
+    ("position start", "פתיחה", "literal", {"text_position": "start"}),
+]
+# Decision 10 (plan §7, Phase 3 points 7 and 12): a phrase's matches across a page break
+# come from the seams on the new index. Each of these finds A's p1 | p2 crossing.
+CROSSINGS = [
+    ("exact across a break", "כהנים גדולים", "literal", {}),
+    ("variants", "כהנים גדולים", "variants", {}),
+    ("fuzzy", "כהנים גדולים", "fuzzy", {}),
+    ("responsa", "כהנים גדולים", "literal", {"responsa_options": RESPONSA}),
+    ("responsa star", "*כהנים גדולים", "literal", {"responsa_options": RESPONSA}),
     ("responsa bidirectional", "גדולים כהנים", "literal",
      {"responsa_options": dict(RESPONSA, bidirectional=True)}),
-    ("position start", "פתיחה", "literal", {"text_position": "start"}),
     ("ids_only", "כהנים גדולים", "literal", {"ids_only": True}),
 ]
 
 
-def _rows(eng, query, mode, kwargs):
+def _row_keys(eng, query, mode, kwargs):
     """The rows, as a sorted list: documents of equal score come in segment order, and
     which segment a document lands in is up to the writer's threads, build by build."""
     rows = eng.execute_search(query, mode, 0, corpus_scope="genizah", **kwargs)
-    return sorted(repr((r.get("uid"), (r.get("display") or {}).get("source"), r.get("scope"),
-                        r.get("snippet"), r.get("cross_page"), r.get("page_highlights"))) for r in rows)
+    return sorted((r.get("uid"), (r.get("display") or {}).get("source"), r.get("scope"),
+                   r.get("snippet"), r.get("cross_page"),
+                   repr([(h.get("uid"), h.get("span")) for h in r.get("page_highlights") or []]))
+                  for r in rows)
+
+
+def _rows(eng, query, mode, kwargs):
+    return [repr(k) for k in _row_keys(eng, query, mode, kwargs)]
 
 
 @pytest.mark.parametrize("name, query, mode, kwargs", SEARCHES, ids=[s[0] for s in SEARCHES])
@@ -311,11 +323,33 @@ def test_every_search_gives_on_the_new_index_what_it_gives_on_the_old(built, nam
     assert not any("seam" in row for row in new)
 
 
+@pytest.mark.parametrize("name, query, mode, kwargs", CROSSINGS, ids=[s[0] for s in CROSSINGS])
+def test_a_crossing_comes_from_a_seam_on_the_new_index_and_nothing_else_changes(built, name, query, mode,
+                                                                                 kwargs):
+    old = _row_keys(built["engines"]["old"], query, mode, kwargs)
+    new = _row_keys(built["engines"]["new"], query, mode, kwargs)
+    assert [k[2] for k in old].count("system") == 1          # A's p1 | p2, its whole manuscript
+    # The same rows, the crossing's scope a seam; and its snippet the seam's text, which
+    # ends with A's V0.8 pages (the whole manuscript ran on into its V0.7 copy).
+    assert [k[:3] + k[4:] for k in new] == sorted(
+        k[:2] + ("seam" if k[2] == "system" else k[2],) + k[4:] for k in old)
+    seam_row = next(k for k in new if k[2] == "seam")
+    if seam_row[3]:                                          # ids_only rows carry no snippet
+        assert seam_row[3].endswith("סוף [כהנים] שלום")
+
+
+def test_the_seams_leave_out_the_false_junction_of_the_v07_restart(built):
+    # A's last V0.8 page and its V0.7 copy's first page: one whole-manuscript document on
+    # the old index, a junction no seam holds (§6.1 point 3).
+    assert [k[2] for k in _row_keys(built["engines"]["old"], "שלום ישן", "literal", {})] == ["system"]
+    assert _row_keys(built["engines"]["new"], "שלום ישן", "literal", {}) == []
+
+
 def test_the_cases_find_something(built):
-    # The comparisons above are not of empty lists: the crossing ones find their rows.
+    # The comparisons above are not of empty lists.
     eng = built["engines"]["new"]
-    assert _rows(eng, "כהנים גדולים", "literal", {})
-    assert _rows(eng, "שלום ישן", "literal", {})          # today's false crossing, kept in Phase 2
+    assert _rows(eng, "כהנים", "literal", {})
+    assert _rows(eng, "שלום AND ישן", "literal", {"responsa_options": RESPONSA})
 
 
 def test_document_counts_and_scopes_are_unchanged(built):

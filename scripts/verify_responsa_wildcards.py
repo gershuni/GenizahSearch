@@ -32,8 +32,9 @@ line break -- a crossing row only where the first page has no match of its own (
 The engine's crossing rows are compared both ways; the rows a whole-manuscript document makes at
 a junction the seams do not hold (into the V0.7 copy, between pages that do not follow each
 other) and a match over more than two pages are listed by count. A crossing the engine lacks
-fails for a star query; for finite words it is listed (they read whole manuscripts, first match
-only, until decision 10).
+fails for a star query, and on an index with seams for finite words too (decision 10: they read
+the seams); on an index without seams, finite words read whole manuscripts, first match only,
+and it is listed.
 
 A synthetic crossing fixture, ordered pages of one manuscript with their physical order and
 source, is indexed in a temporary directory and checked the same way, crossing witnesses
@@ -44,7 +45,9 @@ by the real Indexer, as format 2 and as format 1.
 fail (each must exit 1): accept-off (no whole-word acceptance), raw-prefix-tree (one prefix
 tree for forms of different lengths), guard-500 (the old 500-term limit), no-crossing (whole-
 manuscript documents and seams skipped), star-list (star retrieval back to Phase 1's fixed
-suffix list), no-star-windows (a star query's whole manuscripts read whole, first match only).
+suffix list), no-star-windows (a star query's whole manuscripts read whole, first match only),
+leading-prefix-list (a leading star back to Phase 1's 24-prefix list), finite-crossings-whole
+(finite words' crossings back to the whole-manuscript documents on an index with seams).
 
 Run (Phase 1; `--phase 3` for the star queries; the index of either format):
   python -I -X utf8 scripts/verify_responsa_wildcards.py ^
@@ -252,13 +255,17 @@ PHASE1 = [
     Query('line-start', '|כהנים גדולים'),
     Query('negation', 'כהנים גדולים -אהרן'),
 ]
-# Phase 3, first PR (plan §7, "Phase 3, settled before building"): a star at the end of a word
-# or inside it. A leading star keeps Phase 1's meaning there; its queries come with the second.
+# Phase 3 (plan §7, "Phase 3, settled before building"): a star anywhere in a word -- at its
+# end or inside it (the first PR), at its start and at both ends (the second).
 PHASE3 = PHASE1 + [
     Query('star-end-pair', 'מאמ* קור*'),
     Query('star-end', 'כהנ* גדול*'),
     Query('star-inside', 'כ*נים גדולים'),
     Query('star-several', 'כ*ה*נ*ים גדולים'),
+    Query('star-start', '*כהנים *גדולים'),
+    Query('star-start-endings', '*נים *לים'),
+    Query('star-start-several', '*כ*ה*נ*ים גדולים'),
+    Query('star-both-ends', '*כהנ* גדולים'),
 ]
 QUERY_SETS = {1: PHASE1, 3: PHASE3}
 
@@ -582,7 +589,8 @@ def _span_from_snippet(hl, text):
     return letters_trim(text, s, s + len(marked))
 
 
-MUTATIONS = ('accept-off', 'raw-prefix-tree', 'guard-500', 'no-crossing', 'star-list', 'no-star-windows')
+MUTATIONS = ('accept-off', 'raw-prefix-tree', 'guard-500', 'no-crossing', 'star-list', 'no-star-windows',
+             'leading-prefix-list', 'finite-crossings-whole')
 
 
 def mutation_patches(name, se, rm):
@@ -614,11 +622,36 @@ def mutation_patches(name, se, rm):
         import tantivy
         from shared.responsa import expand_grammatical_suffixes
 
-        def fixed_list(star_forms, schema, field, tolerance):
+        def fixed_list(star_forms, schema, field, tolerance, reversed_field=None):
             terms = [f for sf in star_forms if len(sf.runs) == 2 and sf.runs[1] == ('',)
                      for stem in sf.runs[0] for f in expand_grammatical_suffixes(stem)]
             return [tantivy.Query.term_set_query(schema, field, terms)] if terms else []
         return [patch.object(rm, 'star_queries', fixed_list)]
+    if name == 'leading-prefix-list':
+        # A leading star back to Phase 1's meaning: `*X` looks up X with its 24 grammatical
+        # prefixes (a word that begins with a star and holds another looks up nothing).
+        # Loses every `*נים *לים` witness and `*כהנים`'s words outside the list.
+        import tantivy
+        from shared.responsa import expand_grammatical_prefixes
+        real = rm.star_queries
+
+        def prefix_list(star_forms, schema, field, tolerance, reversed_field=None):
+            out = real([sf for sf in star_forms if not sf.leading], schema, field, tolerance, reversed_field)
+            terms = [f for sf in star_forms if sf.leading and len(sf.runs) == 2 and sf.runs[0] == ('',)
+                     for stem in sf.runs[1] for f in expand_grammatical_prefixes(stem)]
+            return out + ([tantivy.Query.term_set_query(schema, field, terms)] if terms else [])
+        return [patch.object(rm, 'star_queries', prefix_list)]
+    if name == 'finite-crossings-whole':
+        # Finite words' crossings back to the whole-manuscript documents on an index with
+        # seams (before decision 10): a manuscript gives its first match only.
+        real = se.SearchEngine._responsa_crossings
+
+        def whole(self, compiled, *args, **kwargs):
+            plan = real(self, compiled, *args, **kwargs)
+            if plan.route == 'seams' and not compiled.has_star:
+                return se._CrossingPlan('aggregates')
+            return plan
+        return [patch.object(se.SearchEngine, '_responsa_crossings', whole)]
     if name == 'no-star-windows':
         # A star query's crossings on an index without seams read whole, first match only
         # (today's route for finite words), not break by break: loses a crossing that
@@ -655,15 +688,16 @@ def _p_num(uid):
     return int(m.group(1)) if m else -1
 
 
-def compare_crossings(q, crosses, crossing, result):
+def compare_crossings(q, crosses, crossing, result, seams=False):
     """Engine crossing rows (V0.8) against the oracle's crossings between pages that follow
     each other (seam-aware, ``oracle_crossing``), in both directions. A row the oracle has
     no pair for is a documented kind when the whole-manuscript document made it: a junction
     into the V0.7 copy, between pages that do not follow each other (§3.6.5: the seams hold
     neither), or a match over more than two pages (the oracle reads pairs); listed by count.
-    A crossing the engine lacks fails for a star query; for finite words it is listed: they
-    read the whole-manuscript documents, which give their first match only (today's route
-    until decision 10 moves them to the seams)."""
+    A crossing the engine lacks fails for a star query, and on an index with *seams* for
+    finite words too (decision 10: they read the seams); on an index without seams finite
+    words read the whole-manuscript documents, which give their first match only, so it is
+    listed there."""
     seen = set()
     for r in crossing:
         hl = r.get('page_highlights') or []
@@ -694,14 +728,14 @@ def compare_crossings(q, crosses, crossing, result):
     for uid, (pages, _raws) in crosses.items():
         if uid in seen:
             continue
-        if star:
+        if star or seams:
             result['failures']['missing crossing'].append({'uid': uid, 'oracle': pages})
         else:
             result['expected']['a crossing finite words did not reach (a whole-manuscript document '
                                'gives its first match only)'] += 1
 
 
-def compare(q, oracle, rows, terms=None, crosses=None):
+def compare(q, oracle, rows, terms=None, crosses=None, seams=False):
     """The query's verdict: matched, missing, extra and wrong-span witnesses, by class."""
     within, crossing, unlocated = row_witnesses(rows)
     result = {'oracle': len(oracle), 'engine_within_page': len(within), 'engine_crossing': len(crossing),
@@ -734,7 +768,7 @@ def compare(q, oracle, rows, terms=None, crosses=None):
     for uid in unlocated:
         result['failures']['span not located in the row'].append({'uid': uid})
     if crosses is not None:
-        compare_crossings(q, crosses, crossing, result)
+        compare_crossings(q, crosses, crossing, result, seams)
     elif crossing:
         result['expected']['a match across a page break (not compared: not a sequence)'] += len(crossing)
     result['failures'] = dict(result['failures'])
@@ -906,13 +940,14 @@ def main(argv=None, meta_factory=None):
             else:
                 meta = meta_factory()
             engine = se.SearchEngine(meta, _variant_manager(), worker_mode=True, open_local=False)
-            log(f'index format: {engine.index_format_status()}')
+            status = engine.index_format_status()
+            log(f'index format: {status}')
         results = {}
         failed = bool(fixture['failures'])
         for q in queries:
             rows, secs, cutoff = run_engine(engine, q, se, log)
             verdict = compare(q, oracle[q.name], rows, oracle.get('_terms_' + q.name),
-                              oracle.get('_cross_' + q.name))
+                              oracle.get('_cross_' + q.name), seams=status['seams'])
             verdict.update({'query': q.text, 'options': q.options, 'seconds': round(secs, 1),
                             'rows': len(rows), 'cutoff': cutoff})
             n_fail = sum(len(v) for v in verdict['failures'].values())
