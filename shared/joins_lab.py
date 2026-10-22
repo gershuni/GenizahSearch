@@ -19,6 +19,7 @@ import dataclasses
 import html
 import re
 from shared.search_regex import compile as compile_search_regex, SearchBudgetExceeded, search_budget
+from shared.responsa_match import ResponsaQueryRefused
 from dataclasses import dataclass
 from typing import Optional, Protocol, runtime_checkable
 
@@ -399,6 +400,8 @@ def apply_cross_side(
             )
             or []
         )
+    except ResponsaQueryRefused:
+        raise   # the other side's query is refused: a message, not an empty side
     except Exception:
         bres = []
 

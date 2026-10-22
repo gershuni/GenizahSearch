@@ -69,6 +69,7 @@ from nicegui import run, ui
 from shared.export_dossier import build_image_url_for_row
 from shared.fjms_service import get_fjms_service
 from shared.fragment_details import fetch_fragment_details
+from shared.responsa_match import ResponsaQueryRefused
 from shared.joins_lab import (
     BuilderRow, Candidate, SideQuery, apply_cross_side, compose, dedup_candidates,
     detect_self_match, merge_candidates, normalize_order, primary_domain,
@@ -690,13 +691,24 @@ def create_joins_lab_page(
         """Reconstruct a frozen Candidate from a snapshot dict (tolerant of schema drift)."""
         return Candidate(**{k: v for k, v in d.items() if k in _CANDIDATE_FIELDS})
 
+    # True from a refused search until a search's results are shown or New Search:
+    # the page then holds no result set, and a restore must search again (and say
+    # why) rather than show the previous query's candidates, or none, under the
+    # refused query (Codex review of PR #433).
+    _refused: dict = {'value': False}
+
     def _persist_results_snapshot() -> None:
         """Persist the current candidate result set to per-tab storage (best-effort).
 
         Called from every point where the underlying result data changes: search
         completion, enrichment update, and VS fetch/toggle.  NEVER inside
         run.io_bound (Pitfall 4) — all call sites run on the event loop.
+        After a refusal it drops the snapshot instead: the previous search's
+        enrichment, landing later, must not save one again.
         """
+        if _refused['value']:
+            clear_results_snapshot()
+            return
         persist_results_snapshot(
             anchor_sys_id=_anchor_state.get('sys_id') or '',
             raw_text_candidates=_raw_text_candidates,
@@ -3498,6 +3510,7 @@ def create_joins_lab_page(
         # (same anchor, so the restore anchor-match guard would NOT catch it) and
         # clear the selection + bulk toolbar.
         clear_results_snapshot()
+        _refused['value'] = False
         _raw_text_candidates.clear()
         _all_candidates.clear()
         _filtered_candidates.clear()
@@ -3811,6 +3824,28 @@ def create_joins_lab_page(
                 # (latest-wins path).  The newer run owns the UI — return quietly.
                 return
 
+            except ResponsaQueryRefused as exc:
+                # A newer search owns the page: a refusal that lost the race to the
+                # cancel stays quiet, as a superseded result does (Codex review of
+                # PR #433).
+                if not _should_apply_results(my_gen, _search_generation):
+                    return
+                # A query shape the engine does not search yet: say so, never show it
+                # as no results (shared/responsa_match.py). The previous search's
+                # candidates go: its enrichment, landing later, or a filter change
+                # re-renders from them, under this message (Codex review of PR #433).
+                # So does the saved snapshot, which a back-navigation or a reload
+                # would restore under the refused query.
+                _refused['value'] = True
+                clear_results_snapshot()
+                _raw_text_candidates.clear()
+                _all_candidates.clear()
+                _filtered_candidates.clear()
+                _selected.clear()
+                _refresh_bulk_toolbar()
+                search_status.set_text(tr(str(exc)))
+                return
+
             except Exception as exc:
                 logger.exception('Joins Lab search error: %s', exc)
                 search_status.set_text(
@@ -3916,6 +3951,8 @@ def create_joins_lab_page(
                             raise asyncio.TimeoutError  # see raw_results above
                         final_candidates = list(merge_result.candidates)
                     except asyncio.TimeoutError:
+                        if not _should_apply_results(my_gen, _search_generation):
+                            return   # a newer search owns the page (Codex review of PR #433)
                         # MED (CR): the final render hides search_status immediately,
                         # so surface the other-side timeout as a persistent notify
                         # instead (otherwise the user sees base candidates with no clue
@@ -3927,8 +3964,16 @@ def create_joins_lab_page(
                         final_candidates = list(base_candidates)
                     except asyncio.CancelledError:
                         return
+                    except ResponsaQueryRefused as exc:
+                        if not _should_apply_results(my_gen, _search_generation):
+                            return   # a newer search owns the page (Codex review of PR #433)
+                        # The other side's query is refused: this side's results, and why.
+                        ui.notify(tr(str(exc)), type='warning', close_button=True)
+                        final_candidates = list(base_candidates)
                     except Exception as exc:
                         logger.exception('Joins Lab cross-side error: %s', exc)
+                        if not _should_apply_results(my_gen, _search_generation):
+                            return   # a newer search owns the page (Codex review of PR #433)
                         ui.notify(
                             tr('Could not resolve the other side of this leaf. '
                                'Try navigating to a specific folio first.'),
@@ -3984,6 +4029,7 @@ def create_joins_lab_page(
             # is still in flight — _do_enrich_and_update re-persists with dims once
             # it lands).  A back-navigation now restores candidates without a
             # slow fuzzy/variants re-run.
+            _refused['value'] = False
             _persist_results_snapshot()
 
             # Fire enrichment off-loop for ALL candidates (D-16, Pitfall 7) -- not

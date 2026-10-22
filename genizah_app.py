@@ -22349,6 +22349,7 @@ class GenizahGUI(QMainWindow):
         # view rendered them under the new query.
         self.last_results = []
         self.results_loaded = 0
+        self._forget_responsa_notes()
         self._printed_filter_state = 'all'
         self.chk_search_header.set_filter_active(self.COL_PRINTED, False)
         for b in self.export_buttons: b.setEnabled(False)
@@ -22402,6 +22403,7 @@ class GenizahGUI(QMainWindow):
                 # its step searches with them, not with what a later search left.
                 variant_settings=variant_settings_now(self._lab_settings(), getattr(self, 'var_mgr', None)))
         self._search_cutoff = None    # this run's arrives (cutoff_signal) before its results
+        self._run_responsa_downgrade = None    # and so does its downgrade (downgrade_signal)
         # The previous run's enrichment (domains, measurements) arrives again only after
         # this run ends (_launch_enrichment_workers). Until then a preview row must not be
         # judged by it: a manuscript absent from the old domain map was hidden as
@@ -22419,6 +22421,8 @@ class GenizahGUI(QMainWindow):
         _live = partial(self._discardable, '_search_new_generation')
         if hasattr(self.search_thread, 'cutoff_signal'):
             self.search_thread.cutoff_signal.connect(_live(self._on_search_cutoff))
+        if hasattr(self.search_thread, 'downgrade_signal'):
+            self.search_thread.downgrade_signal.connect(_live(self._on_responsa_downgrade))
         self.search_thread.results_signal.connect(_live(self.on_search_finished))
         if hasattr(self.search_thread, 'preview_signal'):
             self.search_thread.preview_signal.connect(
@@ -22737,6 +22741,7 @@ class GenizahGUI(QMainWindow):
         # that ends empty -- the launch already cleared the previous results.
         self.last_results = []
         self.results_loaded = 0
+        self._forget_responsa_notes()
         self._preview_thread = None
         self.shelfmark_items_by_sid = {}
         self.title_items_by_sid = {}
@@ -22793,6 +22798,7 @@ class GenizahGUI(QMainWindow):
         self.results_table.setRowCount(0)
         self.result_row_by_sys_id = {}
         self.last_results = []
+        self._forget_responsa_notes()
         self._last_search_params = None   # these results came from no search run here
         self._search_cutoff = None
         self.last_search_query = ""
@@ -23281,11 +23287,15 @@ class GenizahGUI(QMainWindow):
             self._update_local_scope_strip(0, cancelled=was_cancelled)
             # A run cut off at the candidate limit checked only some candidates (a Regex
             # with no prefilter: the first 50,000 pages): finding none there is not "none".
+            # A downgraded query that matched nothing still says what was turned off
+            # (plan §5.3; Codex review of PR #433).
             if was_cancelled or self._run_left_matches_out():
-                self.status_label.setText(f"{tr('No results found.')} ({tr('Partial results')})")
+                self.status_label.setText(f"{tr('No results found.')} ({tr('Partial results')})"
+                                          + self._downgrade_note())
             else:
-                self.status_label.setText(tr("No results found."))
+                self.status_label.setText(tr("No results found.") + self._downgrade_note())
             self.last_results = []
+            self._forget_responsa_notes()
             for b in self.export_buttons: b.setEnabled(False)
             self.results_table.setRowCount(0)
             # A preview of this run turned sorting off; no batch load turns it on here.
@@ -23314,7 +23324,7 @@ class GenizahGUI(QMainWindow):
                 if was_cancelled or self._run_left_matches_out():
                     # Cut off or stopped: nothing found among the pages it read.
                     zero_in_scope = f"{zero_in_scope} ({tr('Partial results')})"
-                self.status_label.setText(zero_in_scope)
+                self.status_label.setText(zero_in_scope + self._downgrade_note())
                 if hasattr(self, '_update_refinement_strip'):
                     self._update_refinement_strip()
                 if hasattr(self, '_zero_result_back_btn'):
@@ -23393,15 +23403,10 @@ class GenizahGUI(QMainWindow):
         # Track Responsa expanded term count for status label
         self._responsa_expanded_count = results[0].get('responsa_expanded_count', 0) if results else 0
 
-        # Display explosion guard warning if present
-        if results and results[0].get('responsa_warning'):
-            warning = results[0]['responsa_warning']
-            self.status_label.setText(warning)
-            self.status_label.setStyleSheet("color: #f39c12; font-weight: bold;")
-            def _restore_status():
-                self.status_label.setText(self._search_status_summary())
-                self.status_label.setStyleSheet("")
-            QTimer.singleShot(5000, _restore_status)
+        # A Responsa downgrade (the guard turned an option off) stays in the status
+        # line for as long as these results show (plan §5.3; it was a 5-second flash).
+        self._responsa_warning = ((results[0].get('responsa_warning') if results else None)
+                                  or getattr(self, '_run_responsa_downgrade', None))
 
         for b in self.export_buttons: b.setEnabled(True)
 
@@ -24432,6 +24437,14 @@ class GenizahGUI(QMainWindow):
     def _on_search_cutoff(self, cutoff):
         self._search_cutoff = dict(cutoff)
 
+    def _on_responsa_downgrade(self, note):
+        self._run_responsa_downgrade = note
+
+    def _downgrade_note(self):
+        """' · <the guard's downgrade>' of the run whose results arrive, or ''."""
+        note = getattr(self, '_run_responsa_downgrade', None)
+        return f" · {note}" if note else ''
+
     def _shown_results_capped(self):
         """Whether the shown results leave matches out because the search reached its
         50,000-candidate limit (D8; Stop has its own "Partial results" note)."""
@@ -24446,6 +24459,14 @@ class GenizahGUI(QMainWindow):
         """A result count as shown: "25,000+" when the list was cut off (D8)."""
         text = f"{n:,}" if sep else str(n)
         return text + "+" if capped else text
+
+    def _forget_responsa_notes(self):
+        """The Responsa notes of the results shown -- the guard's downgrade and the
+        expanded-term count -- go when those results are replaced or cleared:
+        on_search_finished sets them only for a new set of rows, so a later tag
+        search's line said the previous query's downgrade (Codex review of PR #433)."""
+        self._responsa_warning = None
+        self._responsa_expanded_count = 0
 
     def _search_status_summary(self, domains=0):
         """The Search results status line, from the table as it is now.
@@ -24470,6 +24491,8 @@ class GenizahGUI(QMainWindow):
         text += self._search_excluded_note()
         if getattr(self, '_search_was_cancelled', False):
             text += f" ({tr('Partial results')})"
+        if getattr(self, '_responsa_warning', None):
+            text += f" · {self._responsa_warning}"
         return text
 
     def _with_search_summary(self, message):
@@ -24933,8 +24956,10 @@ class GenizahGUI(QMainWindow):
         emit helper so a stale slot from a superseded PGP-tag worker is skipped.
         """
         # A tag search is never LOCAL and does not pass through start_search,
-        # so it clears the hint itself.
+        # so it clears the hint itself -- and the Responsa notes of the results it
+        # replaces.
         self._set_local_scope_strip_visible(False)
+        self._forget_responsa_notes()
         if not results:
             # Phase 114 USAGE-03: zero-result completed tag search (D-07).
             # `tag` is the search term — MUST NOT appear in props (D-04).

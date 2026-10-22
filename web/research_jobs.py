@@ -555,8 +555,9 @@ class IsolatedEngine:
             preview = arguments.pop('preview_callback', None)
             # The cut-off and Responsa downgrade signals are per thread: this call's
             # answer replaces any older one, and a call that fails or is stopped leaves
-            # none. A website search never reads the downgrade signal (it has results[0]),
-            # so without this the next caller on this wait thread would report it.
+            # none. Not every caller reads the downgrade signal (a search with rows has
+            # it on results[0]), so without this the next caller on this wait thread
+            # would report it.
             from shared.search_engine import (consume_last_search_cutoff,
                                               _consume_last_responsa_downgrade,
                                               _consume_last_responsa_downgrade_meta)

@@ -51,6 +51,9 @@ class _Label:
 class _Host:
     on_search_finished = APP.on_search_finished
     _run_left_matches_out = APP._run_left_matches_out
+    _forget_responsa_notes = APP._forget_responsa_notes
+    _on_responsa_downgrade = APP._on_responsa_downgrade
+    _downgrade_note = APP._downgrade_note
 
     def __init__(self, cutoff, cancelled=False):
         self._search_cutoff = cutoff
@@ -141,3 +144,47 @@ def test_a_cut_off_search_within_results_with_no_match_says_partial(lang):
     complete._refine_mode = True
     complete.on_search_finished([])
     assert complete.status_label.text == tr('0 results within current scope')
+
+
+# --- A downgraded Responsa query that matched nothing (Codex review of PR #433) -----
+
+NOTE = "Spelling variants disabled"
+
+
+def test_a_downgraded_search_with_no_match_says_what_was_turned_off(lang):
+    """With no rows there is no first row to carry the guard's downgrade: it comes on
+    the thread's own signal, and the zero-result line keeps it."""
+    tr = genizah_app.tr
+    host = _Host({"capped": False, "interrupted": False})
+    host._on_responsa_downgrade(NOTE)
+    host.on_search_finished([])
+    assert host.status_label.text == f"{tr('No results found.')} · {NOTE}"
+    within = _Host({"capped": False, "interrupted": False})
+    within._refine_mode = True
+    within._on_responsa_downgrade(NOTE)
+    within.on_search_finished([])
+    assert within.status_label.text == f"{tr('0 results within current scope')} · {NOTE}"
+
+
+def test_the_search_thread_sends_its_downgrade():
+    """The engine records the downgrade on the thread that searched; the thread sends
+    it on before the rows, with none for a search without one."""
+    from desktop.gui_threads import SearchThread
+    from shared.search_engine import _set_last_responsa_downgrade
+
+    class Fake:
+        def __init__(self, note):
+            self.note = note
+
+        def execute_search(self, *a, **kw):
+            if self.note:
+                _set_last_responsa_downgrade(self.note)
+            return []
+
+    for note in (NOTE, None):
+        t = SearchThread(Fake(note), "q", "literal", 0)
+        got = []
+        t.downgrade_signal.connect(lambda n: got.append(('downgrade', n)))
+        t.results_signal.connect(lambda rows: got.append(('rows', rows)))
+        t.run()                   # same thread: the signals are delivered directly
+        assert got == [('downgrade', note), ('rows', [])]

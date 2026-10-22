@@ -52,6 +52,36 @@ import time
 
 logger = logging.getLogger(__name__)
 
+# Sentinels around a match while the text is still raw (as shared/joins_lab.py marks it):
+# the pattern must see the text's own quotes, which escaping would turn into entities.
+_HL_START, _HL_END = '\x01', '\x02'
+
+
+def highlight_full_text_html(text, pattern):
+    """(html, stopped): *text* HTML-escaped, every match of *pattern* in a highlight span.
+
+    The pattern runs over the RAW text and the result is escaped around the marks: run
+    over escaped text, ``"`` and ``'`` were ``&quot;`` / ``&#x27;`` when matched, so the
+    mark-tolerant pattern for ``רת`` never marked ``ר"ת`` (2026-10-21, Codex). *stopped*:
+    the highlighting hit its time limit; the text is then shown unmarked."""
+    raw = text.replace(_HL_START, '').replace(_HL_END, '')
+    if not pattern:
+        return html.escape(raw), False
+    flags = re.IGNORECASE
+    if '\\n' in pattern or pattern.startswith('^'):
+        flags |= re.MULTILINE
+    try:
+        with search_budget(seconds=0.25):
+            marked = compile_search_regex(pattern, flags).sub(
+                lambda m: _HL_START + m.group(0) + _HL_END if m.group(0) else '', raw)
+    except SearchBudgetExceeded:
+        return html.escape(raw), True
+    except re.error:
+        return html.escape(raw), False
+    return (html.escape(marked).replace(_HL_START, '<span class="highlight-match">')
+            .replace(_HL_END, '</span>')), False
+
+
 # ---------------------------------------------------------------------------
 # SEED-033 Option A — search-scoped source selection
 # ---------------------------------------------------------------------------
@@ -1050,22 +1080,10 @@ def create_result_card(search_state, refs, index, result):
                 text_col.clear()
                 with text_col:
                     if text:
-                        escaped = html.escape(text)
-                        if pattern:
-                            try:
-                                flags = re.IGNORECASE
-                                if '\\n' in pattern or pattern.startswith('^'):
-                                    flags |= re.MULTILINE
-                                with search_budget(seconds=0.25):
-                                    escaped = compile_search_regex(f'({pattern})', flags).sub(
-                                        r'<span class="highlight-match">\1</span>',
-                                        escaped
-                                    )
-                            except SearchBudgetExceeded:
-                                ui.label('ההדגשה הופסקה מפני שחרגה ממגבלת הזמן.' if is_rtl()
-                                         else 'Highlighting stopped because it exceeded the time limit.')
-                            except re.error:
-                                pass
+                        escaped, stopped = highlight_full_text_html(text, pattern)
+                        if stopped:
+                            ui.label('ההדגשה הופסקה מפני שחרגה ממגבלת הזמן.' if is_rtl()
+                                     else 'Highlighting stopped because it exceeded the time limit.')
                         with ui.scroll_area().classes('w-full').style('max-height: 250px;'):
                             with ui.element('div').classes('p-3 rounded-lg text-sm whitespace-pre-wrap expand-text').style(
                                 'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 2; font-size: 0.95rem;'

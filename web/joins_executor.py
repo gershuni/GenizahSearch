@@ -18,6 +18,7 @@ caller (e.g. ``web/pages/joins_lab.py``) and NEVER directly on the NiceGUI event
 """
 
 from shared.joins_lab import SearchExecutor  # noqa: F401 — referenced in docstring/isinstance
+from shared.responsa_match import ResponsaQueryRefused
 from web.state import state
 
 
@@ -79,6 +80,8 @@ class WebSearchExecutor:
                 text_position=text_position,
                 corpus_scope=corpus_scope,
             ) or []
+        except ResponsaQueryRefused:
+            raise   # the caller shows it: a refused query is not "no results"
         except Exception:
             return []
 

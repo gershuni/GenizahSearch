@@ -955,7 +955,9 @@ def test_the_all_terms_rerender_keeps_the_excluded_note(window, monkeypatch):
         _showing(1, 3, excluded=1) + f" ({tr('Only results with all terms')})")
 
 
-def test_the_responsa_warning_timer_writes_an_honest_line(window, monkeypatch):
+def test_the_responsa_warning_stays_in_an_honest_line(window, monkeypatch):
+    """A Responsa downgrade stays in the status line with the results (plan §5.3:
+    it was a 5-second flash) -- after the honest summary, which it never replaces."""
     timers = []
     monkeypatch.setattr(app.QTimer, "singleShot",
                         staticmethod(lambda ms, fn: timers.append((ms, fn))))
@@ -963,9 +965,42 @@ def test_the_responsa_warning_timer_writes_an_honest_line(window, monkeypatch):
     w.word_excluded_sys_ids = {A}
     first = dict(_res(A, 1), responsa_warning="too many terms")
     _search(w, [first, _res(B, 1)])
-    [restore_status] = [fn for ms, fn in timers if ms == 5000]
-    restore_status()
-    assert w.status_label.text() == _showing(1, 2, excluded=1)
+    assert not [fn for ms, fn in timers if ms == 5000]
+    assert w._search_status_summary() == _showing(1, 2, excluded=1) + " · too many terms"
+    _search(w, [_res(A, 1), _res(B, 1)])
+    assert w._search_status_summary() == _showing(1, 2, excluded=1)
+
+
+@pytest.mark.parametrize("then", ["tag search", "error", "New", "a search with no rows"])
+def test_the_responsa_notes_go_with_their_results(window, monkeypatch, then):
+    """The downgrade and the expanded-term count belong to the Responsa results: a later
+    tag search's line said the previous query's downgrade (Codex review of PR #433)."""
+    import shared.document_service as ds
+    import shared.transcription_service as ts
+    monkeypatch.setattr(ts, "get_sys_ids_with_manual_transcriptions", lambda ids: set())
+    monkeypatch.setattr(ds, "get_pgp_urls_for_pgpids", lambda ids: {})
+    w = window
+    w.word_excluded_sys_ids = {A}                       # standing: the tag line keeps the summary
+    first = dict(_res(A, 1), responsa_warning="too many terms", responsa_expanded_count=4)
+    _search(w, [first, _res(B, 1)])
+    assert "too many terms" in w.status_label.text()
+    if then == "tag search":
+        w._on_tag_search_results("letters", [{"sys_id": A, "pgpid": 1},
+                                             {"sys_id": B, "pgpid": 2}])
+        assert w.status_label.text() == (
+            tr("Tag: {} - {} results").format("letters", 2) + ". " + _showing(1, 2, excluded=1))
+        return
+    if then == "error":
+        monkeypatch.setattr(app.QMessageBox, "critical", staticmethod(lambda *a, **k: None))
+        w.on_error("bad pattern")
+    elif then == "New":
+        w._reset_search()
+    else:
+        _search(w, [])
+    summary = w._search_status_summary()
+    assert "too many terms" not in summary, summary
+    # The plain line, not "(searching 4 expanded terms)"
+    assert summary == tr("Showing {} of {} results").format(0, 0) + w._search_excluded_note(), summary
 
 
 @pytest.mark.parametrize("finish", ["loaded", "cancelled", "already loaded"])

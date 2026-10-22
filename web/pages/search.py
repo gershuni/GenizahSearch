@@ -31,7 +31,7 @@ from web.pages.search_state import (
     delete_search_history_entry, clear_search_history,
     domain_display_name,
     persist_search_snapshot, clear_search_snapshot, clear_search_filters,
-    get_search_active_snapshot, restore_search_snapshot,
+    get_search_active_snapshot, restore_search_snapshot, responsa_note_of,
     compact_result_rows, preview_shows_final_rows, engine_mode,
 )
 from web.pages.search_results import (
@@ -48,7 +48,7 @@ from shared.browse_map_utils import get_library_display, LIBRARY_CODES, library_
 from shared.refinement import (RefinementStep, chain_needs_completion, complete_chain, compute_effective_restrict,
                                needs_mode_labels, truncate_chain, replay_chain, scope_signature,
                                steps_that_cannot_complete)
-from shared.search_engine import consume_last_search_cutoff
+from shared.search_engine import _consume_last_responsa_downgrade, consume_last_search_cutoff
 from shared.exclusion_service import (
     ExclusionSource, parse_shelfmark_file, parse_csv_shelfmarks,
     resolve_shelfmarks, build_shelf_map, compute_excluded_ids, catalog_fallback,
@@ -2744,7 +2744,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.running_label = None
             search_state.is_running = was_running
             if not was_running:
-                results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}"
+                results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}{_downgrade_suffix()}"
         if stopped['time_limit'] and notify_failure:
             # The time limit stopped the completion: the search within uses the shown rows.
             ui.notify(tr('Could not complete the cut-off results; searching within the shown ones.'),
@@ -2762,7 +2762,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # out would hide shown rows (the shown step only filters what is shown).
             completed = await _complete_chain(len(search_state.refinement_chain) - 1,
                                               notify_failure=False)
-            results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}"
+            results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}{_downgrade_suffix()}"
             earlier = len(search_state.refinement_chain) - 1
             if ((completed and completed['interrupted'])
                     or steps_that_cannot_complete(search_state.refinement_chain, earlier)):
@@ -2795,6 +2795,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     def _total_text(n):
         """A result total as shown: "N+" when the list leaves matches out (D8)."""
         return f"{n}+" if search_state.result_count_capped else f"{n}"
+
+    def _downgrade_suffix():
+        """The Responsa guard's downgrade of the results shown, on every line that
+        counts them: it stays while they show (plan §5.3) -- a filter or exclusion
+        re-render dropped it (Codex review of PR #433)."""
+        note = search_state.responsa_warning
+        return (" · " + '; '.join(tr(part) for part in note.split('; '))) if note else ''
 
     def _update_search_within_btn():
         """D-01: Show/hide search within button based on result availability."""
@@ -3089,7 +3096,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         render_results(filtered, page=0)
         shown = len(filtered)
-        results_count.text = f"{shown} / {_total_text(len(search_state.results))} {tr('Results')}"
+        results_count.text = f"{shown} / {_total_text(len(search_state.results))} {tr('Results')}{_downgrade_suffix()}"
         ui.notify(f"{len(filtered)} {tr('results match filters')}", type='info')
 
     def clear_filters():
@@ -3114,7 +3121,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         if search_state.results:
             render_results(search_state.results, page=0)
-            results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}"
+            results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}{_downgrade_suffix()}"
             ui.notify(tr('Filters cleared'), type='info')
 
     # === Reset Search ===
@@ -3127,6 +3134,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         mode_select.value = 'exact'
         # Clear results
         search_state.results = []
+        search_state.responsa_warning = None
         search_state.displayed_results = []
         search_state.selected_indices.clear()
         search_state.transcription_sys_ids = set()
@@ -4378,9 +4386,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if search_state.library_filter:  # SEED-026 (LIBFILTER-01)
             count_parts.append(tr('Library filter'))
         if count_parts:
-            results_count.text = f"{showing} {tr('of')} {_total_text(total)} {tr('Results')} ({', '.join(count_parts)})"
+            results_count.text = f"{showing} {tr('of')} {_total_text(total)} {tr('Results')} ({', '.join(count_parts)}){_downgrade_suffix()}"
         else:
-            results_count.text = f"{_total_text(total)} {tr('Results')}"
+            results_count.text = f"{_total_text(total)} {tr('Results')}{_downgrade_suffix()}"
         render_results(filtered, page=0, reset_expansion=reset_expansion)
 
     def _apply_manuscript_exclusions(reset_expansion=True):
@@ -4827,7 +4835,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             count_parts = [f"{n_excl} {tr('excluded')}"]
             if search_state.library_filter:  # SEED-026 (WR-04 / Codex): indicator in the library-active branch
                 count_parts.append(tr('Library filter'))
-            results_count.text = f"{showing} {tr('of')} {_total_text(total)} {tr('Results')} ({', '.join(count_parts)})"
+            results_count.text = f"{showing} {tr('of')} {_total_text(total)} {tr('Results')} ({', '.join(count_parts)}){_downgrade_suffix()}"
             render_results(filtered, page=0)
         else:
             filtered = _apply_library_filter(filtered)  # SEED-026 (LIBFILTER-01): library-only post-word-search
@@ -4838,7 +4846,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             count_parts = [f"{n_excl} {tr('excluded')}"]
             if search_state.library_filter:  # SEED-026 (WR-04): show indicator when library filter active
                 count_parts.append(tr('Library filter'))
-            results_count.text = f"{showing} {tr('of')} {_total_text(total)} {tr('Results')} ({', '.join(count_parts)})"
+            results_count.text = f"{showing} {tr('of')} {_total_text(total)} {tr('Results')} ({', '.join(count_parts)}){_downgrade_suffix()}"
             render_results(filtered, page=0)
 
     def _apply_domain_exclusions(reset_expansion=True):
@@ -4902,9 +4910,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if search_state.library_filter:  # SEED-026 (LIBFILTER-01)
             count_parts.append(tr('Library filter'))
         if count_parts:
-            results_count.text = f"{showing} {tr('of')} {_total_text(total)} {tr('Results')} ({', '.join(count_parts)})"
+            results_count.text = f"{showing} {tr('of')} {_total_text(total)} {tr('Results')} ({', '.join(count_parts)}){_downgrade_suffix()}"
         else:
-            results_count.text = f"{_total_text(total)} {tr('Results')}"
+            results_count.text = f"{_total_text(total)} {tr('Results')}{_downgrade_suffix()}"
 
         # Update result_domains for badge rendering (use visible page slice)
         page_start = search_state.current_page * PAGE_SIZE
@@ -5025,6 +5033,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Restore results and state from snapshot
         if state_snapshot.get('results'):
             search_state.results = state_snapshot['results']
+            search_state.responsa_warning = responsa_note_of(state_snapshot['results'])
             # An entry from a build that kept the rows: their variant settings are
             # unknown, never those of the search shown before (a step recorded from
             # them replays with the website defaults at its level).
@@ -5075,7 +5084,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 result_domains={},
             )
             # Update count display
-            results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}"
+            results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}{_downgrade_suffix()}"
             # Re-render with restored exclusions (manuscript exclusions first if active)
             if search_state.exclusion_sources:
                 _apply_manuscript_exclusions()
@@ -5232,6 +5241,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.status = tr("Starting...")
         search_state.search_start_time = time.time()
         search_state.results = []
+        search_state.responsa_warning = None
         # SEED-022 (Codex #303 review): clear enrichment presence sets at new-search
         # START, not only at the later common reset (~line 4460) which a cancelled/
         # partial render path can skip — otherwise the prior search's PGP / manual-
@@ -5498,13 +5508,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _run_cutoff = {'capped': False, 'interrupted': False}
 
         def run_core_search():
-            # The engine's cut-off signal arrives on this thread (IsolatedEngine).
+            # The engine's cut-off signal arrives on this thread (IsolatedEngine), and
+            # so does the Responsa guard's downgrade: with no rows there is no first
+            # row to carry it (Codex review of PR #433).
             consume_last_search_cutoff()
+            _consume_last_responsa_downgrade()
             try:
                 return _run_core_search()
             finally:
                 _run_cutoff.update(consume_last_search_cutoff())
                 _run_cutoff['time_limit'] = consume_time_limit_stop()
+                _run_cutoff['downgrade'] = _consume_last_responsa_downgrade()
 
         def _run_core_search():
             try:
@@ -5587,6 +5601,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     if get_language() == 'he' else
                     'The search exceeded its time limit and was stopped. Try a narrower query or search scope.'
                 )
+            # tr(): a refused Responsa query (shared/responsa_match.py) or the guard's
+            # message arrives in English from the worker; the key translates it.
+            error_msg = tr(error_msg)
             ui.notify(error_msg, type='warning', timeout=8000, close_button=True)
             search_state.is_running = False
             search_state.is_cancelled = False
@@ -5594,7 +5611,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_btn.style('display: inline-flex;')
             stop_btn.style('display: none;')
             progress_bar.classes('opacity-0')
-            status_label.text = ''
+            # The message stays on the status line: a refused query is not "0 results".
+            status_label.text = error_msg
             results_count.text = f"0 {tr('Results')}"
             render_results([])
             _ux_first_rows('error')
@@ -5614,6 +5632,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.is_cancelled = False
             search_state.progress = 1.0
             search_state.results = results
+            search_state.responsa_warning = responsa_note_of(results) or _run_cutoff.get('downgrade')
             search_state.domain_excluded_results = []
 
             # Phase 88: populate per-session export payload on the cancelled-partial path so
@@ -5658,6 +5677,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             )
             results = compact_result_rows(results)
             search_state.results = results
+            search_state.responsa_warning = responsa_note_of(results) or _run_cutoff.get('downgrade')
             # A stopped search within results is still the chain's next step: marked
             # "+", it is completed before anything searches within it.
             if search_state._refine_mode and results:
@@ -5672,7 +5692,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             else:
                 total_elapsed_str = f"{int(total_elapsed // 60)}:{int(total_elapsed % 60):02d}"
 
-            results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str} ({tr('partial')})"
+            results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str} ({tr('partial')}){_downgrade_suffix()}"
             status_label.text = ''
             if not _forced_stop:  # the time-limit notice above already says so
                 ui.notify(tr('Showing partial results'), type='warning', timeout=3000)
@@ -5819,15 +5839,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # Merged status: results count + time + filter info in one label
         expanded_count = results[0].get('responsa_expanded_count', 0) if results else 0
+        # A Responsa downgrade (the guard turned an option off) is part of the count's
+        # line, for as long as these results show (plan §5.3: not a 5-second toast) --
+        # "0 Results" too, from the engine's own signal.
+        search_state.responsa_warning = responsa_note_of(results) or _run_cutoff.get('downgrade')
         if expanded_count > 0:
-            results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str} ({tr('searching')} {expanded_count} {tr('expanded terms')}){_filter_suffix}"
+            results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str} ({tr('searching')} {expanded_count} {tr('expanded terms')}){_filter_suffix}{_downgrade_suffix()}"
         else:
-            results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str}{_filter_suffix}"
+            results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str}{_filter_suffix}{_downgrade_suffix()}"
         status_label.text = ''
-
-        # Responsa explosion guard warning
-        if results and results[0].get('responsa_warning'):
-            ui.notify(results[0]['responsa_warning'], type='warning', timeout=5000)
 
         # PostHog event
         from web.analytics import posthog_capture
@@ -6295,7 +6315,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # the outbox until the socket connects (tests/test_search_url_start_delay.py).
         asyncio.ensure_future(_after_delay(0, execute_search))
     elif search_state.results:
-        results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}"
+        results_count.text = f"{_total_text(len(search_state.results))} {tr('Results')}{_downgrade_suffix()}"
         render_results(search_state.results, page=0)
         # SEED-026 (smoke 2026-06-29): on session restore (e.g. after a UI-language
         # change rebuilds the page from the snapshot), reveal the buttons whose data is
