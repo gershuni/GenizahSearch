@@ -73,6 +73,13 @@ if (Test-Path $oi) {
     }
     Write-Host "  (read the Quick Summary + the one relevant section. Grep the rest." -ForegroundColor DarkGray
     Write-Host "   Closed history is docs/archive/OPEN_ISSUES_ARCHIVE.md - grep only.)" -ForegroundColor DarkGray
+    # New rows wait as fragments until scripts/collect_open_issues.py folds them in.
+    $frags = @(Get-ChildItem 'docs\open_issues.d' -Filter '*.md' -ErrorAction SilentlyContinue |
+               Where-Object { $_.Name -ne 'README.md' })
+    if ($frags.Count) {
+        Write-Host ("  not yet in the tracker: {0} fragment(s) in docs/open_issues.d/" -f $frags.Count)
+        $frags | ForEach-Object { Write-Host ("    " + $_.Name) -ForegroundColor Gray }
+    }
 }
 
 # ------------------------------------------------------- working notes ----

@@ -23,7 +23,10 @@ edit rather than leaving it here with a ✅. If this file passes ~150 KB again, 
 ### When to Update This Document
 
 1. **After fixing any issue** - Mark it fixed with the date **and move it to the archive**
-2. **After discovering new issues** - Add to appropriate section
+2. **After discovering new issues** - Write a new P1/P2/P3 row as a file in
+   [`docs/open_issues.d/`](open_issues.d/README.md), **not here**: rows added to this file conflict
+   across open PRs. `scripts/collect_open_issues.py --apply` folds them in (rows, counts, header).
+   Rows for the other sections are still added here
 3. **After completing a work session** - Review and update status
 4. **When starting work** - Check current status first
 5. **Never cite an entry of this file by line number** (`docs/OPEN_ISSUES.md:<line>`) - rows move
@@ -41,8 +44,9 @@ edit rather than leaving it here with a ✅. If this file passes ~150 KB again, 
 ↓
 | Old text | ✅ Fixed (2026-02-03) | Description |
 
-# When adding new issue:
-| **NEW: Issue description** | ❌ Open | Details |
+# When adding a new P1/P2/P3 issue: a file in docs/open_issues.d/ (see its README):
+### P2 - Medium
+| **Issue description** | `file.py` | ❌ Open (2026-10-21) | Details |
 
 # When removing (only after verified in production):
 Move to "Completed Issues" section at bottom with date
@@ -50,11 +54,10 @@ Move to "Completed Issues" section at bottom with date
 
 ### Update Checklist (run after each session)
 
-- [ ] Update "Last Updated" timestamp at top
+- [ ] Newly discovered P1/P2/P3 issues: one fragment file in `docs/open_issues.d/`, nothing here
 - [ ] Mark any fixed issues with date
-- [ ] Add any newly discovered issues
 - [ ] Move verified-complete items to archive section
-- [ ] Update summary counts if changed
+- [ ] Only if you edited this file itself: update "Last Updated" at top and the summary counts
 
 ---
 
