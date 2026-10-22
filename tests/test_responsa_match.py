@@ -370,6 +370,26 @@ def test_the_variant_step_stops_at_what_is_left_of_the_limit(monkeypatch):
     assert len(calls) == 6, len(calls)         # 6 x 200 > the 1,000 left
 
 
+def test_a_query_of_too_many_words_is_refused_before_it_compiles():
+    # 300 two-letter words fit the 1,000-character query cap and the term limit, and each
+    # carries its edge classes: megabytes of pattern (Codex review of PR #432).
+    letters = 'אבגדהוזחטיכלמנסעפצקרשת'
+    words = [letters[i % 22] + letters[i // 22 % 22] for i in range(300)]
+    for query, opts in ((' '.join(words), {}),
+                        (' AND '.join(words[:30]), {'within_document': True})):
+        assert len(query) < 1000
+        with pytest.raises(ResponsaQueryRefused) as info:
+            _compiled(query, **opts)
+        assert info.value.code == GUARD_REFUSAL_CODE
+    with pytest.raises(ResponsaQueryRefused):
+        _line('|' + ' '.join(words[:100]))
+    # Real queries stay far below it
+    _compiled(' '.join(words[:20]))
+    _compiled(' AND '.join(words[:10]), within_document=True)
+    _compiled('#כהנ# AND #גדול#', within_document=True)
+    _line('|' + ' '.join(words[:20]) + ' | ' + ' '.join(words[20:30]))
+
+
 def test_a_query_over_the_guard_is_refused_with_its_code():
     # 199 binary groups fit the 1,000-character cap; spelt out they are 2**199 forms.
     for groups in (13, 199):
