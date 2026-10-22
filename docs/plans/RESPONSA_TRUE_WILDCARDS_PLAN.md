@@ -1236,7 +1236,7 @@ today's finite crossings to the seams (decision 10).
    |---|---|---|
    | one word (no flex spacing), or a star word alone | none: a word cannot cross a break | none |
    | finite words: `AND`, a text position, a line, a sequence | whole-manuscript documents, as today (the seams take the sequences in the second PR, decision 10) | the same |
-   | a star word: `AND`, a text position, a line | whole-manuscript documents, each checked whole, **only when at most `RESPONSA_STAR_AGGREGATE_LIMIT` of them hold the words**; else none, marked | the same |
+   | a star word: `AND`, a text position, a line | whole-manuscript documents, each checked whole (a line query: every match that runs across a page break, not only the first; Codex round 2), **only when at most `RESPONSA_STAR_AGGREGATE_LIMIT` of them hold the words**; else none, marked | the same |
    | a star word in a sequence, S <= K | seams | the whole-manuscript documents' page breaks, a window of S words a side, **bounded as above** |
    | a star word in a sequence, S > K | seams, marked (a crossing with more than K words a side) | the same as S <= K: windows of S words |
 
@@ -1256,7 +1256,9 @@ today's finite crossings to the seams (decision 10).
    `partial` (and `limited` when a candidate limit cut the search too): reading every candidate
    (`ids_only`) would leave them out again, so `complete_chain` does not run such a step again
    (`RefinementStep.result_partial`, `_cannot_complete`), it stays "+" and Search within says so
-   (Codex round 1 on PR #442). A crossing step that fails is `capped` only, never silent.
+   (Codex round 1 on PR #442). A step searched within such a step inherits it unless its own
+   candidate limit cut it (`step_partial`: its restriction stays incomplete whatever it reads;
+   Codex round 2). A crossing step that fails is `capped` only, never silent.
 9. **Limits** (decision 3): `Config.RESPONSA_PAGE_LIMIT` = 150,000 page candidates on the main,
    line-break and My Library Responsa paths; the whole-manuscript documents and the seams each
    read up to `Config.SEARCH_LIMIT` (50,000) of their own. `ids_only` reads every candidate on
