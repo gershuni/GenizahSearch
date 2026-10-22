@@ -104,7 +104,9 @@ def test_a_refused_desktop_search_clears_the_previous_candidates():
 
 def test_a_refused_web_search_does_not_bring_the_previous_cards_back(server, monkeypatch):  # noqa: F811
     """The previous search's enrichment lands after the refusal and re-renders from the
-    page's candidate lists: they must be empty by then."""
+    page's candidate lists: they must be empty by then. Nor may a saved snapshot be left
+    for a back-navigation or a reload to restore under the refused query -- neither the
+    previous search's, nor one its late enrichment saves again (Codex review of PR #433)."""
     import asyncio
     import threading
 
@@ -118,9 +120,9 @@ def test_a_refused_web_search_does_not_bring_the_previous_cards_back(server, mon
 
     def search(self, *args, **kwargs):
         calls.append(args[:1])
-        if len(calls) == 1:
-            return _stale_rows()
-        raise ResponsaQueryRefused()
+        if len(calls) == 2:
+            raise ResponsaQueryRefused()
+        return _stale_rows()
     monkeypatch.setattr(WebSearchExecutor, 'execute_search', search)
     release = threading.Event()
     enriching = []
@@ -131,6 +133,10 @@ def test_a_refused_web_search_does_not_bring_the_previous_cards_back(server, mon
             await asyncio.sleep(0.02)
         return {}
     monkeypatch.setattr(joins_lab, '_enrich_candidates', slow_enrich)
+    saved = {}                                       # the tab's results snapshot
+    monkeypatch.setattr(joins_lab, 'persist_results_snapshot',
+                        lambda **snap: saved.update(snapshot=snap) or True)
+    monkeypatch.setattr(joins_lab, 'clear_results_snapshot', lambda: saved.pop('snapshot', None))
     shown = {}
 
     def stale(user):
@@ -143,18 +149,25 @@ def test_a_refused_web_search_does_not_bring_the_previous_cards_back(server, mon
             _click(a, _element(a, ui.button, lambda e: e.text == 'Run Search'))
             await _wait_for(lambda: stale(a) and enriching)
             shown['first'] = bool(stale(a))
+            shown['saved'] = len(saved['snapshot']['raw_text_candidates'])
             _click(a, _element(a, ui.button, lambda e: e.text == 'Run Search'))
             await _wait_for(lambda: any(t.startswith('Responsa search takes a *') for t in _label_texts(a)))
+            shown['at_refusal'] = saved.get('snapshot')
             release.set()
             await asyncio.sleep(0.5)                 # the first search's enrichment re-renders
             shown['after'] = stale(a)
+            shown['kept'] = saved.get('snapshot')
+            _click(a, _element(a, ui.button, lambda e: e.text == 'Run Search'))
+            await _wait_for(lambda: stale(a) and saved.get('snapshot'))
+            shown['next'] = len(saved['snapshot']['raw_text_candidates'])   # saved again
         except Exception as exc:                    # asserted below
             shown['error'] = repr(exc)
         finally:
             release.set()
 
     run(driver)
-    assert shown == {'first': True, 'after': []}, shown
+    assert shown == {'first': True, 'saved': 3, 'at_refusal': None, 'after': [], 'kept': None,
+                     'next': 3}, shown
 
 
 def test_a_superseded_refused_web_search_stays_quiet(server, monkeypatch):  # noqa: F811

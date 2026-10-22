@@ -691,13 +691,24 @@ def create_joins_lab_page(
         """Reconstruct a frozen Candidate from a snapshot dict (tolerant of schema drift)."""
         return Candidate(**{k: v for k, v in d.items() if k in _CANDIDATE_FIELDS})
 
+    # True from a refused search until a search's results are shown or New Search:
+    # the page then holds no result set, and a restore must search again (and say
+    # why) rather than show the previous query's candidates, or none, under the
+    # refused query (Codex review of PR #433).
+    _refused: dict = {'value': False}
+
     def _persist_results_snapshot() -> None:
         """Persist the current candidate result set to per-tab storage (best-effort).
 
         Called from every point where the underlying result data changes: search
         completion, enrichment update, and VS fetch/toggle.  NEVER inside
         run.io_bound (Pitfall 4) — all call sites run on the event loop.
+        After a refusal it drops the snapshot instead: the previous search's
+        enrichment, landing later, must not save one again.
         """
+        if _refused['value']:
+            clear_results_snapshot()
+            return
         persist_results_snapshot(
             anchor_sys_id=_anchor_state.get('sys_id') or '',
             raw_text_candidates=_raw_text_candidates,
@@ -3499,6 +3510,7 @@ def create_joins_lab_page(
         # (same anchor, so the restore anchor-match guard would NOT catch it) and
         # clear the selection + bulk toolbar.
         clear_results_snapshot()
+        _refused['value'] = False
         _raw_text_candidates.clear()
         _all_candidates.clear()
         _filtered_candidates.clear()
@@ -3822,6 +3834,10 @@ def create_joins_lab_page(
                 # as no results (shared/responsa_match.py). The previous search's
                 # candidates go: its enrichment, landing later, or a filter change
                 # re-renders from them, under this message (Codex review of PR #433).
+                # So does the saved snapshot, which a back-navigation or a reload
+                # would restore under the refused query.
+                _refused['value'] = True
+                clear_results_snapshot()
                 _raw_text_candidates.clear()
                 _all_candidates.clear()
                 _filtered_candidates.clear()
@@ -4013,6 +4029,7 @@ def create_joins_lab_page(
             # is still in flight — _do_enrich_and_update re-persists with dims once
             # it lands).  A back-navigation now restores candidates without a
             # slow fuzzy/variants re-run.
+            _refused['value'] = False
             _persist_results_snapshot()
 
             # Fire enrichment off-loop for ALL candidates (D-16, Pitfall 7) -- not
