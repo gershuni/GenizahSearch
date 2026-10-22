@@ -408,7 +408,56 @@ def restore_search_active_snapshot(state: 'SearchUIState') -> bool:
     state.exclusion_sources = raw.get('search_exclusion_sources', []) or []
     state.last_variant_settings = _settings_or_none(raw.get('last_variant_settings'))
     state.last_run = _settings_or_none(raw.get('last_run'))
+    _restore_tab_post_filters(state, raw)
     return True
+
+
+# The display filters applied to the shown rows that otherwise live only in storage
+# shared by every tab (search_pgp_filter, search_library_filter,
+# word_search_excluded_ids). This tab's snapshot keeps its own copy, updated as they
+# change (save_tab_post_filters), so a restore shows this tab's rows under this
+# tab's filters, not those another tab set since (Codex, PR #436, round 3).
+_PGP_FILTER_STATES = ('all', 'only_pgp', 'hide_pgp')
+
+
+def _tab_post_filters(state: 'SearchUIState') -> dict:
+    return {
+        'pgp_filter': state.pgp_filter,
+        'library_filter': {'mode': state.library_mode, 'codes': list(state.library_filter or [])},
+        'word_search_excluded_ids': list(state.word_search_excluded_ids or []),
+    }
+
+
+def _restore_tab_post_filters(state: 'SearchUIState', raw: dict) -> None:
+    """This tab's display filters from its snapshot, checked as the shared keys are
+    on load; a snapshot saved before it kept them leaves the loaded values."""
+    if raw.get('pgp_filter') in _PGP_FILTER_STATES:
+        state.pgp_filter = raw['pgp_filter']
+    library = raw.get('library_filter')
+    if isinstance(library, dict):
+        from shared.browse_map_utils import sanitize_library_codes
+        codes = sanitize_library_codes(library.get('codes'))
+        mode = library.get('mode') if library.get('mode') in ('show_only', 'hide') else 'hide'
+        if mode == 'show_only' and not codes:
+            mode = 'hide'  # show-only nothing is never meant: the neutral show-all
+        state.library_mode, state.library_filter = mode, codes
+    excluded = raw.get('word_search_excluded_ids')
+    if isinstance(excluded, list):
+        state.word_search_excluded_ids = set(excluded)
+
+
+def save_tab_post_filters(state: 'SearchUIState') -> None:
+    """Copy *state*'s display filters into this tab's snapshot, if it has one.
+    Called wherever they change, next to their shared-storage save."""
+    tab = _get_tab_storage()
+    if tab is None:
+        return
+    try:
+        raw = tab.get(_SEARCH_ACTIVE_TAB_KEY)
+        if isinstance(raw, dict) and raw.get('version') == _SEARCH_ACTIVE_TAB_VERSION:
+            tab[_SEARCH_ACTIVE_TAB_KEY] = {**raw, **_tab_post_filters(state)}
+    except Exception:
+        pass
 
 
 def _settings_or_none(value):
@@ -434,6 +483,7 @@ def persist_search_active_snapshot(state: 'SearchUIState') -> None:
             'search_exclusion_sources': list(state.exclusion_sources or []),
             'last_variant_settings': state.last_variant_settings,
             'last_run': state.last_run,
+            **_tab_post_filters(state),
         }
     except Exception:
         pass

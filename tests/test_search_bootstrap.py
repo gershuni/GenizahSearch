@@ -607,3 +607,132 @@ def test_the_page_applies_the_runs_filters_on_a_stamped_back():
     calls = [ast.unparse(node) for node in ast.walk(guarded[0])
              if isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'apply_run_filter_state']
     assert calls == ["apply_run_filter_state(search_state, _saved_run.get('pre_search_filters'))"]
+
+
+# --- This tab's display filters (Codex round 3) -------------------------------
+# PGP, library and word-search exclusions lived only in storage every tab shares;
+# a restore of this tab's rows took another tab's values for them.
+
+def _fake_tab(monkeypatch):
+    import web.pages.search_state as ss
+    tab = {}
+    monkeypatch.setattr(ss, '_get_tab_storage', lambda: tab)
+    return ss, tab
+
+
+def test_the_tab_snapshot_keeps_its_own_display_filters(monkeypatch):
+    ss, tab = _fake_tab(monkeypatch)
+    page = ss.SearchUIState()
+    page.results = [{'display': {'id': '990001'}}]
+    page.pgp_filter = 'only_pgp'
+    page.library_mode, page.library_filter = 'show_only', ['CUL', 'JTS']
+    page.word_search_excluded_ids = {'990002'}
+    ss.persist_search_active_snapshot(page)
+
+    # Another tab's values, as the shared keys load them before the snapshot.
+    back = ss.SearchUIState()
+    back.pgp_filter = 'hide_pgp'
+    back.library_mode, back.library_filter = 'hide', ['BL']
+    back.word_search_excluded_ids = {'990009'}
+    assert ss.restore_search_active_snapshot(back) is True
+    assert back.pgp_filter == 'only_pgp'
+    assert (back.library_mode, back.library_filter) == ('show_only', ['CUL', 'JTS'])
+    assert back.word_search_excluded_ids == {'990002'}
+
+
+def test_a_display_filter_change_reaches_the_tab_snapshot(monkeypatch):
+    ss, tab = _fake_tab(monkeypatch)
+    page = ss.SearchUIState()
+    ss.save_tab_post_filters(page)
+    assert tab == {}  # no snapshot yet: nothing is created
+
+    page.results = [{'display': {'id': '990001'}}]
+    ss.persist_search_active_snapshot(page)
+    page.pgp_filter = 'hide_pgp'
+    page.word_search_excluded_ids.add('990003')
+    ss.save_tab_post_filters(page)
+    saved = tab[ss._SEARCH_ACTIVE_TAB_KEY]
+    assert saved['pgp_filter'] == 'hide_pgp'
+    assert saved['word_search_excluded_ids'] == ['990003']
+    assert saved['results'] == [{'display': {'id': '990001'}}]  # the rest is untouched
+
+
+def test_restored_display_filters_are_checked_like_the_shared_ones(monkeypatch):
+    ss, tab = _fake_tab(monkeypatch)
+    tab[ss._SEARCH_ACTIVE_TAB_KEY] = {
+        'version': ss._SEARCH_ACTIVE_TAB_VERSION, 'results': [],
+        'pgp_filter': 'everything', 'library_filter': {'mode': 'show_only', 'codes': ['LOCAL', 3]},
+        'word_search_excluded_ids': 'not a list',
+    }
+    page = ss.SearchUIState()
+    page.pgp_filter, page.word_search_excluded_ids = 'only_pgp', {'990004'}
+    ss.restore_search_active_snapshot(page)
+    assert page.pgp_filter == 'only_pgp'  # an unknown value leaves the loaded one
+    assert (page.library_mode, page.library_filter) == ('hide', [])  # LOCAL dropped; show-only nothing = show all
+    assert page.word_search_excluded_ids == {'990004'}
+
+
+def test_a_snapshot_without_display_filters_keeps_the_loaded_ones(monkeypatch):
+    ss, tab = _fake_tab(monkeypatch)
+    tab[ss._SEARCH_ACTIVE_TAB_KEY] = {'version': ss._SEARCH_ACTIVE_TAB_VERSION, 'results': []}
+    page = ss.SearchUIState()
+    page.pgp_filter = 'only_pgp'
+    page.library_mode, page.library_filter = 'show_only', ['CUL']
+    page.word_search_excluded_ids = {'990005'}
+    ss.restore_search_active_snapshot(page)
+    assert page.pgp_filter == 'only_pgp'
+    assert (page.library_mode, page.library_filter) == ('show_only', ['CUL'])
+    assert page.word_search_excluded_ids == {'990005'}
+
+
+def _module_tree(relative):
+    import ast
+    from pathlib import Path
+    return ast.parse((Path(__file__).resolve().parents[1] / relative).read_text(encoding='utf-8'))
+
+
+def _display_filter_saves(tree):
+    """(saved, followed): persist_value calls for the three shared display-filter keys,
+    and how many are followed in their own block by save_tab_post_filters(search_state)."""
+    import ast
+    keys = {'search_pgp_filter', 'search_library_filter', 'word_search_excluded_ids'}
+    saved = followed = 0
+    for node in ast.walk(tree):
+        body = getattr(node, 'body', None)
+        if not isinstance(body, list):
+            continue
+        for i, stmt in enumerate(body):
+            call = stmt.value if isinstance(stmt, ast.Expr) else None
+            if (isinstance(call, ast.Call) and getattr(call.func, 'id', None) == 'persist_value'
+                    and call.args and isinstance(call.args[0], ast.Constant) and call.args[0].value in keys):
+                saved += 1
+                if any(ast.unparse(later).strip() == 'save_tab_post_filters(search_state)' for later in body[i + 1:]):
+                    followed += 1
+    return saved, followed
+
+
+def test_every_display_filter_save_also_updates_the_tab_snapshot():
+    for module, expected in (('web/pages/search.py', 2), ('web/pages/search_results.py', 2)):
+        saved, followed = _display_filter_saves(_module_tree(module))
+        assert saved == expected, f'{module}: {saved} saves; update this test'
+        assert followed == saved, module
+
+
+def test_the_display_filter_check_can_fail():
+    import ast
+    tree = ast.parse("def f():\n    persist_value('search_pgp_filter', 1)\n    other()\n")
+    assert _display_filter_saves(tree) == (1, 0)
+
+
+def test_restoring_a_history_entrys_rows_drops_the_stamp():
+    """Codex round 3: this path shows rows without running a search, so the stamp of
+    the search shown before must be dropped here too."""
+    import ast
+    func = _function(_search_page_tree(), '_on_history_item_clicked')
+    guarded = [node for node in ast.walk(func)  # the block that takes the entry's rows
+               if isinstance(node, ast.If) and ast.unparse(node.test) == "state_snapshot.get('results')"
+               and any(isinstance(s, ast.Assign) and ast.unparse(s).strip() == 'search_state.last_run = None'
+                       for s in node.body)]
+    assert len(guarded) == 1
+    assert any(isinstance(s, ast.Expr) and ast.unparse(s).strip() == 'drop_saved_url_stamp()'
+               for s in guarded[0].body)

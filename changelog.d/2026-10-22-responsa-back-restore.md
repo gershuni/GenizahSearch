@@ -23,7 +23,14 @@ and a stamped Back restores those (`apply_run_filter_state`), not the shared
 current filter keys another tab may have changed; a saved run without them is
 not Back. A new search drops the saved stamp when it starts
 (`drop_saved_url_stamp`), so a search that is stopped, fails or never finishes
-cannot leave the previous run matching the address.
+cannot leave the previous run matching the address; so does showing a search
+history entry's saved rows, which runs no search.
+
+The tab's snapshot also keeps the display filters that otherwise live only in
+storage every tab shares -- PGP, library and word-search exclusions -- and
+updates them as they change (`save_tab_post_filters`), so a restore of this
+tab's rows shows them under this tab's filters, not another tab's. This applies
+to every restore from the tab snapshot, not only Responsa Back.
 
 Tests: `tests/test_search_bootstrap.py` (the match and each way it must not
 match, the run's own filters, the stamp dropped at a new search, and the call

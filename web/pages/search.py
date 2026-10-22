@@ -33,7 +33,7 @@ from web.pages.search_state import (
     persist_search_snapshot, clear_search_snapshot, clear_search_filters,
     get_search_active_snapshot, restore_search_snapshot, responsa_note_of,
     compact_result_rows, preview_shows_final_rows, engine_mode,
-    run_filter_state, apply_run_filter_state, drop_saved_url_stamp,
+    run_filter_state, apply_run_filter_state, drop_saved_url_stamp, save_tab_post_filters,
 )
 from web.pages.search_results import (
     toggle_expansion as _toggle_expansion,
@@ -1897,6 +1897,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         current_idx = states.index(search_state.pgp_filter)
                         search_state.pgp_filter = states[(current_idx + 1) % 3]
                         persist_value('search_pgp_filter', search_state.pgp_filter)  # D-10
+                        save_tab_post_filters(search_state)
                         _update_pgp_filter_btn()
                         _update_pgp_filter_chip()  # D-08 (real impl lands in Task 4; stub below until then)
                         # Re-apply filters and re-render — same cascade as _toggle_printed_filter.
@@ -2253,6 +2254,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                 'mode': search_state.library_mode,
                                                 'codes': search_state.library_filter,
                                             })
+                                            save_tab_post_filters(search_state)
                                             _update_library_btn()
                                             if search_state.exclusion_sources:
                                                 _apply_manuscript_exclusions()
@@ -5061,6 +5063,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Nor are they the shown search's rows: their search is the restored one,
             # as the controls now describe it, and cut off only if the entry says so.
             search_state.last_run = None
+            # No search runs here, so nothing else drops the stamp of the search shown
+            # before: Back to its address would bring that search back over these rows.
+            drop_saved_url_stamp()
             search_state.result_count_capped = bool(state_snapshot.get('result_count_capped'))
             search_state.domain_exclusions = set(state_snapshot.get('domain_exclusions', []))
             search_state.printed_filter = state_snapshot.get('printed_filter', 'all')
