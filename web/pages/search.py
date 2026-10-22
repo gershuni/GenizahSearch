@@ -5704,6 +5704,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             _run_cutoff.update(search_run.cutoff or {})
             if not _preview_box['rows'] and search_run.preview_rows:
                 _preview_box['rows'] = list(search_run.preview_rows)
+        if search_run.cancelled:
+            # Stop on any page following this run stopped it for all of them: each one
+            # shows (and its owner saves) the partial rows (Codex, PR #436).
+            search_state.is_cancelled = True
+            if not _preview_box['rows'] and search_run.preview_rows:
+                _preview_box['rows'] = list(search_run.preview_rows)
         # The web side stopped a worker that had not stopped itself at its time limit
         # (TIME_LIMIT_GRACE_SECONDS later), or the limit stopped a part of the search
         # that returns no rows: the early rows it had handed over are verified rows,

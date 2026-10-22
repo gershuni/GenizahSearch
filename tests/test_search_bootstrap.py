@@ -1042,3 +1042,21 @@ def test_a_page_following_a_run_keeps_its_early_rows():
                 and any("_run_cutoff.update(search_run.cutoff or {})" in ast.unparse(s) for s in node.body)]
     assert len(followed) == 1
     assert "_preview_box['rows'] = list(search_run.preview_rows)" in ast.unparse(followed[0])
+
+
+def test_a_stopped_run_is_stopped_on_every_page_following_it():
+    """Codex round 14: Stop in one tab stops the shared job; another tab owning the run
+    must take the partial-results path too (its own flag is not set)."""
+    import ast
+    func = _function(_search_page_tree(), 'execute_search')
+    stopped = [node for node in ast.walk(func)
+               if isinstance(node, ast.If) and ast.unparse(node.test) == 'search_run.cancelled']
+    assert len(stopped) == 1
+    body = ast.unparse(stopped[0])
+    assert 'search_state.is_cancelled = True' in body
+    assert "_preview_box['rows'] = list(search_run.preview_rows)" in body
+    awaited = [n.lineno for n in ast.walk(func) if isinstance(n, ast.Await)
+               and ast.unparse(n.value) == 'asyncio.shield(search_run.job)']
+    partial = [n.lineno for n in ast.walk(func) if isinstance(n, ast.If)
+               and ast.unparse(n.test) == 'search_state.is_cancelled or _forced_stop']
+    assert awaited[0] < stopped[0].lineno < partial[0]
