@@ -197,6 +197,18 @@ def test_seams_without_the_reversed_field_offer_no_reversed_lookup(tmp_path):
         eng.close_index()
 
 
+@pytest.mark.parametrize("words", [0, -1, True, 2.5])
+def test_a_seam_window_that_is_not_a_positive_number_is_refused_before_anything_is_deleted(
+        built, tmp_path, words):
+    # A window under 1 would build seams the marker then calls invalid (Codex review of
+    # PR #440); the refusal comes before the old index is removed.
+    root = _copy(built["new"], tmp_path / "copy")
+    before = sorted(os.listdir(os.path.join(root, "tantivy_db")))
+    with pytest.raises(ValueError):
+        build(root, seam_words=words)
+    assert sorted(os.listdir(os.path.join(root, "tantivy_db"))) == before
+
+
 def test_close_index_releases_the_seams_so_a_rebuild_can_delete_them(built, tmp_path):
     root = _copy(built["new"], tmp_path / "copy")
     eng = engine(root)

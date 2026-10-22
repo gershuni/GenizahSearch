@@ -30,6 +30,14 @@ os.makedirs(os.path.join(os.path.dirname(__file__), "Genizah_Index"), exist_ok=T
 from genizah_core import Indexer, MetadataManager, VariantManager, LabEngine, Config
 
 
+def positive_int(text):
+    """An argparse type: a whole number of at least 1."""
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, not {value}")
+    return value
+
+
 def progress_callback(current, total, message=""):
     """Print progress to console."""
     if total > 0:
@@ -105,7 +113,7 @@ def main():
                          "(the live Genizah_Index) first; they decide the shelfmark field")
     ap.add_argument('--no-seams', action='store_true', help='no seam index (format 1 unless the field is on)')
     ap.add_argument('--no-reversed-field', action='store_true', help='no reversed-words field')
-    ap.add_argument('--seam-words', type=int, default=None, help='words on each side of a seam')
+    ap.add_argument('--seam-words', type=positive_int, default=None, help='words on each side of a seam')
     args = ap.parse_args()
 
     if args.index_dir:

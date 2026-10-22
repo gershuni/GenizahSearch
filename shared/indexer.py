@@ -358,7 +358,9 @@ class Indexer:
         today's (format 1, no marker). ``self.last_build`` holds the counts and timings. The
         build waits for Tantivy's merges before it returns (19 segments on the full corpus,
         where an index left merging had about 150)."""
-        # Validation
+        # Validation (before the old index is removed)
+        if seams and (not isinstance(seam_words, int) or isinstance(seam_words, bool) or seam_words < 1):
+            raise ValueError(f"seam_words must be a positive number of words, not {seam_words!r}")
         if not os.path.exists(Config.FILE_V8):
             raise FileNotFoundError(_tr("Input file not found: {}\nPlease place 'Transcriptions.txt' next to the executable.").format(Config.FILE_V8))
 
