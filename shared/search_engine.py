@@ -1761,9 +1761,11 @@ class SearchEngine:
                         except Exception:
                             pass  # progress is advisory; cancellation is not
                     doc = self.local_searcher.doc(doc_address)
+                    # strip_brackets only when set (a Responsa row), so a stand-in
+                    # with the old signature still serves every other search.
                     hit = self._build_local_result_dict(
                         doc, score, regex=regex, pattern_str=pattern_str, accept=accept,
-                        strip_brackets=strip_brackets,
+                        **({'strip_brackets': True} if strip_brackets else {}),
                     )
                     # D-04.1 filter-out: skip candidates whose regex didn't match.
                     # _build_local_result_dict returns None for those.
