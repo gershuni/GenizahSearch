@@ -48,7 +48,7 @@ from shared.browse_map_utils import get_library_display, LIBRARY_CODES, library_
 from shared.refinement import (RefinementStep, chain_needs_completion, complete_chain, compute_effective_restrict,
                                needs_mode_labels, truncate_chain, replay_chain, scope_signature,
                                steps_that_cannot_complete)
-from shared.search_engine import consume_last_search_cutoff
+from shared.search_engine import _consume_last_responsa_downgrade, consume_last_search_cutoff
 from shared.exclusion_service import (
     ExclusionSource, parse_shelfmark_file, parse_csv_shelfmarks,
     resolve_shelfmarks, build_shelf_map, compute_excluded_ids, catalog_fallback,
@@ -5326,13 +5326,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _run_cutoff = {'capped': False, 'interrupted': False}
 
         def run_core_search():
-            # The engine's cut-off signal arrives on this thread (IsolatedEngine).
+            # The engine's cut-off signal arrives on this thread (IsolatedEngine), and
+            # so does the Responsa guard's downgrade: with no rows there is no first
+            # row to carry it (Codex review of PR #433).
             consume_last_search_cutoff()
+            _consume_last_responsa_downgrade()
             try:
                 return _run_core_search()
             finally:
                 _run_cutoff.update(consume_last_search_cutoff())
                 _run_cutoff['time_limit'] = consume_time_limit_stop()
+                _run_cutoff['downgrade'] = _consume_last_responsa_downgrade()
 
         def _run_core_search():
             try:
@@ -5446,7 +5450,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.is_cancelled = False
             search_state.progress = 1.0
             search_state.results = results
-            search_state.responsa_warning = responsa_note_of(results)
+            search_state.responsa_warning = responsa_note_of(results) or _run_cutoff.get('downgrade')
             search_state.domain_excluded_results = []
 
             # Phase 88: populate per-session export payload on the cancelled-partial path so
@@ -5491,7 +5495,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             )
             results = compact_result_rows(results)
             search_state.results = results
-            search_state.responsa_warning = responsa_note_of(results)
+            search_state.responsa_warning = responsa_note_of(results) or _run_cutoff.get('downgrade')
             # A stopped search within results is still the chain's next step: marked
             # "+", it is completed before anything searches within it.
             if search_state._refine_mode and results:
@@ -5654,8 +5658,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Merged status: results count + time + filter info in one label
         expanded_count = results[0].get('responsa_expanded_count', 0) if results else 0
         # A Responsa downgrade (the guard turned an option off) is part of the count's
-        # line, for as long as these results show (plan §5.3: not a 5-second toast).
-        search_state.responsa_warning = responsa_note_of(results)
+        # line, for as long as these results show (plan §5.3: not a 5-second toast) --
+        # "0 Results" too, from the engine's own signal.
+        search_state.responsa_warning = responsa_note_of(results) or _run_cutoff.get('downgrade')
         if expanded_count > 0:
             results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str} ({tr('searching')} {expanded_count} {tr('expanded terms')}){_filter_suffix}{_downgrade_suffix()}"
         else:

@@ -6,7 +6,9 @@ import pytest
 
 from shared.responsa_match import ResponsaQueryRefused
 from tests.test_web_io_bound_none_findings import _click, _type_joins_query
-from tests.test_web_search_within_cutoff import WORD, _label_texts, _row, _wait_for, page  # noqa: F401
+from tests.test_web_search_within_cutoff import (  # noqa: F401  (page is a fixture)
+    WORD, AnsweringQueue, _label_texts, _row, _wait_for, page,
+)
 from tests.test_web_variant_settings_per_visitor import (  # noqa: F401  (server is a fixture)
     _element, run, server, submit, wait_for_payloads,
 )
@@ -272,6 +274,45 @@ def test_a_downgrade_stays_on_the_count_line_after_a_filter(page):  # noqa: F811
     run(driver)
     assert any(t.startswith('2 / 2 Results') and t.endswith('· Spelling variants disabled')
                for t in seen['after']), seen
+
+
+class _DowngradingQueue(AnsweringQueue):
+    """Answers as AnsweringQueue does, with the worker's downgrade signal."""
+
+    def __init__(self, answers, downgrade):
+        super().__init__(answers)
+        self.downgrade = downgrade
+
+    def submit(self, payload):
+        from web.research_jobs import Job
+        answered = super().submit(payload).future.result()
+        job = Job(payload)
+        job.future.set_result(dict(answered, downgrade=self.downgrade))
+        return job
+
+
+def test_a_downgrade_with_no_rows_stays_on_the_count_line(page, monkeypatch):  # noqa: F811
+    """No rows, so no first row carries the downgrade: the page reads the engine's own
+    signal, which the worker sends with the result (Codex review of PR #433)."""
+    from web import research_jobs
+    page({})
+    queue = _DowngradingQueue({}, 'Spelling variants disabled')
+    monkeypatch.setattr(research_jobs, 'get_queue', lambda: queue)
+    seen = {}
+
+    def counts(user):
+        return [t for t in _label_texts(user) if ' Results' in t]
+
+    async def driver(a, b):
+        await a.open('/search')
+        submit(a, WORD)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('0 Results') for t in counts(a)))
+        seen['line'] = counts(a)
+
+    run(driver)
+    assert any(t.startswith('0 Results') and t.endswith('· Spelling variants disabled')
+               for t in seen['line']), seen
 
 
 def test_a_downgrade_comes_back_with_its_results_after_a_reload(page):  # noqa: F811

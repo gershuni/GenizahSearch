@@ -260,6 +260,16 @@ def _last_search_cutoff():
     return consume_last_search_cutoff()
 
 
+def _last_responsa_downgrade():
+    """The Responsa guard's downgrade of the search just run on this thread, or None
+    (a searcher that is not the real engine has none)."""
+    try:
+        from shared.search_engine import _consume_last_responsa_downgrade
+    except ImportError:
+        return None
+    return _consume_last_responsa_downgrade()
+
+
 class SearchThread(PausableSearchMixin, QThread):
     """Execute a search query asynchronously."""
 
@@ -282,6 +292,9 @@ class SearchThread(PausableSearchMixin, QThread):
     # Whether the result leaves matches out ({'capped', 'interrupted'}), emitted just
     # before results_signal (D8: the count shows "N+").
     cutoff_signal = pyqtSignal(dict)
+    # The Responsa guard's downgrade of this run (a message, or None), emitted just
+    # before results_signal: with no rows there is no first row to carry it.
+    downgrade_signal = pyqtSignal(object)
     def __init__(self, searcher, query, mode, gap, exclude_words=None, responsa_options=None, restrict_sys_ids=None, text_position=None, corpus_scope="all", run_id=0):
         super().__init__()
         self.searcher = searcher; self.query = query; self.mode = mode; self.gap = gap
@@ -323,6 +336,7 @@ class SearchThread(PausableSearchMixin, QThread):
                 )
 
             self.cutoff_signal.emit(_last_search_cutoff())
+            self.downgrade_signal.emit(_last_responsa_downgrade())
             self.results_signal.emit(results)
             # Phase 115: emit perf signal — ONLY on success path (D-08 / Pitfall 3)
             # Phase 115 D-08 says perf is emitted for COMPLETED runs only, but the
