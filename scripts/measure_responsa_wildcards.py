@@ -1844,7 +1844,7 @@ def cmd_crossing_diff(args):
 
                 def crossings(text, cut, page_start):
                     return engine._cross_page_spans(regex, text, [{'start': 0}, {'start': cut}], first, last,
-                                                    side, gap, strip, whole_words=True)
+                                                    side, gap, strip, whole_words=True, page_start=page_start)
             rows = {}
             lowered = [w.lower() for w in excluded if w]
             for _, addr in ss.search(hits_q, 10_000_000).hits:

@@ -453,6 +453,16 @@ def test_a_crossing_from_an_earlier_page_does_not_hide_the_next_pages_own(shadow
     assert all(r['cross_page'] for r in rows.values())
 
 
+@pytest.mark.parametrize('mode', ['literal', 'variants', 'fuzzy'])
+def test_a_seam_gives_the_next_pages_own_exact_crossing_too(shadow_engines, mode):
+    # כהנים גדולים with a gap of 1 (Codex round 3 on PR #443): the same two crossings of
+    # the p2 | p3 seam. A seam counts the one that starts on the page before its break,
+    # as Responsa's do.
+    rows = by_uid(evf(shadow_engines['2'], 'כהנים גדולים', mode, 1)[0])
+    assert set(rows) == {uid(3401, 1), uid(3401, 2)}
+    assert all(r['scope'] == 'seam' and r['cross_page'] for r in rows.values())
+
+
 # --- My Library alone: the all-star order too (Codex round 6 on PR #442) ------------------
 
 def test_my_library_alone_orders_an_all_star_query_by_matches_on_the_page(engines, tmp_path):

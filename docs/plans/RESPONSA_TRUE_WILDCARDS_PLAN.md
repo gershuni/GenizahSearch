@@ -1279,6 +1279,11 @@ today's finite crossings to the seams (decision 10).
 12. **Exact, Variants and Fuzzy** (second PR, decision 10) read crossings from the seams when the
     query has several words, no text position, the crossing-window path (`_cross_page_terms`),
     S = (n - 1)(gap + 1) <= K and the index has seams; otherwise today's whole-manuscript route.
+    A seam counts the first crossing that starts on the page just before its break, as Responsa's
+    do (point 7; Codex round 3 on PR #443). The whole-manuscript route still takes the first match
+    across each break, so there a match that spans a whole page can hide the next page's own
+    crossing: a tracker row (`docs/open_issues.d/2026-10-22-exact-whole-manuscript-crossing-shadow.md`),
+    since changing it changes today's rows.
 13. **The results line counts a star word as a pattern**: "searching N expanded terms + M
     patterns" (§5.7).
 14. **A star at the start of a word, in the first PR**: `*X` keeps Phase 1's meaning (X with its

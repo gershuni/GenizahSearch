@@ -2890,7 +2890,7 @@ class SearchEngine:
         }
 
     def _cross_page_spans(self, regex, content, boundaries, first_term, last_term, side_words, gap, strip,
-                          whole_words=False):
+                          whole_words=False, page_start=None):
         """Spans (in *content* coordinates) of every match that runs across a page
         break of a whole-manuscript / part doc.
 
@@ -2900,6 +2900,9 @@ class SearchEngine:
         a (forms, others) pair (``_cross_page_term``) also looks for *others* --
         forms with a Latin letter or a digit -- as text in the window.
         *whole_words*: a match must also pass ``_whole_word_span``.
+        *page_start* (a seam, one break): only a match that starts there or later, on
+        the page just before the break, counts; one from an earlier page crossed an
+        earlier break first and is that break's (Codex round 3 on PR #443).
 
         For a multi-word Literal query the page docs already give every match
         inside one page, so an aggregate adds only the matches that cross a
@@ -3004,7 +3007,8 @@ class SearchEngine:
                 # The first match that crosses the break (and is a whole-word match,
                 # when asked); one that starts after the break cannot cross it.
                 while m is not None and m.start() < cs and not (
-                        cs < m.end() and (not whole_words or _whole_word_span(text, m.start(), m.end()))):
+                        cs < m.end() and (not whole_words or _whole_word_span(text, m.start(), m.end()))
+                        and (page_start is None or to_content(piece, m.start(), m.end())[0] >= page_start)):
                     m = regex.search(text, m.start() + 1)
                 if m is not None and m.start() < cs < m.end():
                     spans.append(to_content(piece, m.start(), m.end()))
@@ -4322,6 +4326,8 @@ class SearchEngine:
             content = self._get_field(doc, 'content', [""])[0]
             cut = int(self._get_field(doc, 'cut', [0])[0])
             slices = self._parse_boundaries(doc)
+            # The page just before the break: a crossing that starts earlier is another seam's.
+            page_start = max([b.get('start', 0) for b in slices if b.get('start', 0) < cut], default=None)
             match_started = time.perf_counter()
             try:
                 if _responsa is None:
@@ -4329,11 +4335,10 @@ class SearchEngine:
                     # central break only.
                     spans = self._cross_page_spans(
                         regex, content, [{'start': 0}, {'start': cut}], _cross_page_terms[0],
-                        _cross_page_terms[1], _crossings.side, gap, strip=_strip_q, whole_words=_whole_words)
+                        _cross_page_terms[1], _crossings.side, gap, strip=_strip_q, whole_words=_whole_words,
+                        page_start=page_start)
                 else:
-                    spans = self._seam_crossing_spans(
-                        regex, content, cut, _crossings.side, _strip_q,
-                        max([b.get('start', 0) for b in slices if b.get('start', 0) < cut], default=None))
+                    spans = self._seam_crossing_spans(regex, content, cut, _crossings.side, _strip_q, page_start)
             finally:
                 candidate_match_seconds += time.perf_counter() - match_started
             kept = 0

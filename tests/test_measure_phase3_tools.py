@@ -153,3 +153,19 @@ def test_crossing_diff_reads_a_seam_as_the_engine_does_past_an_earlier_pages_cro
     assert row['seam_crossing_rows'] == 2 and row['engine_after_rows'] == 2, row
     assert row['engine_vs_simulation']['engine_only'] == 0, row
     assert row['engine_vs_simulation']['simulation_only'] == 0, row
+
+
+@pytest.mark.parametrize('mode', ['literal', 'variants', 'fuzzy'])
+def test_crossing_diff_reads_an_exact_seam_as_the_engine_does_past_an_earlier_pages_crossing(
+        tmp_path, monkeypatch, config_restored, mode):
+    # Pages כהנים | גדולים כהנים | גדולים כהנים גדולים, `כהנים גדולים כהנים גדולים`: p1's match
+    # runs into p3, and p2's own starts on the page before that break (Codex round 3 on PR
+    # #443). Today's whole manuscript gives p1 only; the engine's seams and the simulation
+    # both give p1 and p2.
+    v08 = [(sid(304), 5304, p, text)
+           for p, text in enumerate(["כהנים", "גדולים כהנים", "גדולים כהנים גדולים"], 1)]
+    _rc, (row,) = _crossing_diff(tmp_path, monkeypatch, v08, (), [(mode, 'כהנים גדולים כהנים גדולים', {})])
+    assert row['today_rows'] == 1 and row['added'] == 1, row
+    assert row['seam_crossing_rows'] == 2 and row['engine_after_rows'] == 2, row
+    assert row['engine_vs_simulation']['engine_only'] == 0, row
+    assert row['engine_vs_simulation']['simulation_only'] == 0, row
