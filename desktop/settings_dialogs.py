@@ -1339,6 +1339,14 @@ class SettingsDialog(QDialog):
         btn_row2.addWidget(self.main_win.btn_build_index)
         btn_row2.addStretch()
         layout.addLayout(btn_row2)
+        # Which format the index on this computer has (Responsa plan §6.1): filled once
+        # the index is open, and again after a rebuild (GenizahGUI._show_index_format).
+        self.main_win.lbl_index_format = QLabel("")
+        self.main_win.lbl_index_format.setWordWrap(True)
+        self.main_win.lbl_index_format.setStyleSheet(f"color: {self._muted}; font-size: 11px;")
+        layout.addWidget(self.main_win.lbl_index_format)
+        if hasattr(self.main_win, '_show_index_format'):
+            self.main_win._show_index_format()
         layout.addSpacing(4)
 
         # Phase 146: the letter-level (passage) index. Modelled on

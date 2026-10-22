@@ -122,7 +122,10 @@ def _a_copy_inside_matches(eng, meta, se, rx, uid, parent_ids):
     whole-word match (the one way a restricted search may find a page the
     unrestricted one kept outside the set)."""
     q = eng.index.parse_query(f'unique_id:"{uid}"', ["unique_id"])
-    for _score, addr in eng.searcher.search(q, 20).hits:
+    # Every copy: a printed book's page can be filed under 40 and more manuscripts in
+    # both sources, and the first 20 hits were all V0.8 copies outside the set
+    # (IE50232361_P000117, 2026-10-22) -- the copy inside was never looked at.
+    for _score, addr in eng.searcher.search(q, 10_000).hits:
         doc = eng.searcher.doc(addr)
         if meta.get_display_data(doc.get_first("full_header"), doc.get_first("source"))["id"] not in parent_ids:
             continue
@@ -165,9 +168,16 @@ def check_completion(eng, se, parent_ids, report):
     report.check("completion: the parent holds every manuscript", s0._result_sys_ids == parent_ids,
                  f"{len(s0._result_sys_ids):,} (oracle {len(parent_ids):,})")
     missing, extra = brute - s1._result_uids, s1._result_uids - brute
-    report.check("completion: the child holds every page within them", not missing and not extra,
+    # The restriction check's rule: a page catalogued under two manuscripts may come in
+    # through its copy inside the set while the unrestricted search kept the copy outside
+    # it (which copy a search keeps follows the index's document order: a rebuilt index
+    # gave 1 such page here, 2026-10-22).
+    rx = eng.build_regex_pattern([CHILD], "literal", 0)
+    unexplained = {uid for uid in extra
+                   if not _a_copy_inside_matches(eng, eng.meta_mgr, se, rx, uid, parent_ids)}
+    report.check("completion: the child holds every page within them", not missing and not unexplained,
                  f"{len(s1._result_uids):,} (oracle {len(brute):,}; missing {len(missing)}, "
-                 f"extra {len(extra)}); {took:.0f}s")
+                 f"extra {len(extra)} ({len(extra) - len(unexplained)} verified copies)); {took:.0f}s")
     report.check("completion: hands on the child's manuscripts, nothing left cut off",
                  result == {"restrict": s1._result_sys_ids, "interrupted": False}
                  and not s0.result_count_capped and not s1.result_count_capped)

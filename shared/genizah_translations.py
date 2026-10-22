@@ -338,6 +338,8 @@ TRANSLATIONS = {
     "Data & Index": "נתונים ואינדקס",
     "Download Transcriptions (Zenodo)": "הורד תעתיקים (Zenodo)",
     "Build / Rebuild Index": "בנייה / בנייה מחדש של אינדקס",
+    "Search index: current format.": "אינדקס החיפוש: בפורמט העדכני.",
+    "Search index: built by an earlier version. It works as before; rebuilding it adds what the wildcard search (*) of coming versions uses.": "אינדקס החיפוש נבנה בגרסה קודמת. הוא פועל כמו קודם; בנייה מחדש תוסיף לו את מה שחיפוש התו הכללי (*) בגרסאות הבאות ישתמש בו.",
     "AI Configuration": "הגדרות AI",
     "Provider:": "ספק:",
     "Model:": "מודל:",

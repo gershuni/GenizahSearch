@@ -734,6 +734,106 @@ python build_index.py lab     # Lab/parallels index only
 sudo systemctl restart genizah-web
 ```
 
+### Rebuild the main index in format 2 (Responsa Phase 2: seams and reversed words)
+
+Format 2 (`docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md` §6.1) adds the seam index
+(`tantivy_db/seams/`), the `content_rev` field and `tantivy_db/index_format.json`. **Either order
+of code and index is safe**: today's code reads a format-2 index exactly as before (it never
+opens `seams/` and ignores the field), and the new code reads a format-1 index on today's routes.
+So the rebuild needs no code deploy around it, and rolling back either one never needs the other.
+The owner runs it; nothing here is automatic.
+
+**What it costs** (measured on the laptop, 2026-10-22, plan §6.1 point 8; production's index is
+V0.8-only, so its column is the laptop's V0.8-only builds, each format built the same way):
+
+| | Production (V0.8 only) | Laptop (V0.8 + V0.7) |
+|---|---|---|
+| Index today (format 1) | ~7.8 GB live; 6.31 GB when rebuilt with merges | 13.86 GB |
+| Format 2 | 7.74 GB (main 6.81 GB + seams 0.94 GB): +1.43 GB on the same build | 15.30 GB (main 13.35 GB + seams 1.96 GB) |
+| Build time on the laptop | 12.1 min, against 6.1 min for format 1: about twice. Production took 869 s for format 1 (2026-08-16), so expect about 30 min | 21.7 min |
+| Peak build memory | 7.0 GB working set, 5.5 GB private (format 1: 6.4 / 5.6 GB) | 12.4 / 10.1 GB |
+
+**Disk:** the new index is built beside the live one, so the box needs about 10 GB free
+(`df -h /home/ubuntu`), and the old index stays until the owner deletes it. **RAM:** the build's
+private memory is the same as today's format-1 build (5.5 GB); the rest is file cache. Run it in
+the quiet hour (01:00 UTC) and under `nice`/`ionice`, as `scripts/rebuild_index.sh` does: the
+2026-08-16 rebuild showed that the build's reads and writes evict the live index from the page
+cache (`materialize_ms` 1.2 s -> 62.6 s while it ran), not that anything breaks.
+
+**1. Build into a new folder** (the live `Genizah_Index` is not touched; the shelfmark caches are
+copied from it so the new index's `shelfmark` field matches):
+
+```bash
+cd /home/ubuntu/GenizahSearch
+sha256sum Transcriptions.txt     # the repaired corpus: 0ac792ad3963ab5a39ce7de792f0c6065fe4c8a6528bd2663fec209d8d8bb528
+df -h /home/ubuntu
+setsid nice -n 19 ionice -c 3 nohup ./venv/bin/python build_index.py main \
+    --index-dir /home/ubuntu/GenizahSearch/Genizah_Index.next \
+    --corpus-v8 Transcriptions.txt --v08-only \
+    --caches-from /home/ubuntu/GenizahSearch/Genizah_Index \
+    > /home/ubuntu/index_next.log 2>&1 &
+```
+
+`--v08-only` keeps production V0.8-only (owner, 2026-08-14: V0.7 text is not published), even
+if an `AllGenizah_OLD.txt` lies beside the code. The last line of the log is a `Build: {...}`
+record with the seam count and timings.
+
+**2. Check it before swapping** (read-only, while the site keeps serving):
+
+```bash
+cat Genizah_Index.next/tantivy_db/index_format.json        # "format": 2, "seams": {... "count": N}
+./venv/bin/python -I -X utf8 scripts/measure_responsa_wildcards.py seam-topology \
+    --index-dir Genizah_Index.next/tantivy_db --out-dir /home/ubuntu/index_next_checks
+./venv/bin/python -I -X utf8 scripts/measure_responsa_wildcards.py reversed-check \
+    --index-dir Genizah_Index.next/tantivy_db --out-dir /home/ubuntu/index_next_checks
+./venv/bin/python - <<'PY'
+import tantivy
+for name in ("Genizah_Index/tantivy_db", "Genizah_Index.next/tantivy_db"):
+    ix = tantivy.Index.open(name); ix.reload()
+    print("%-32s num_docs=%d" % (name, ix.searcher().num_docs))
+PY
+```
+
+Both checks must print `PASS` (exit 0). The two `num_docs` must be equal when the corpus is the
+same: format 2 adds no document to the main index (the seams are in their own index).
+
+**3. Swap, in the quiet hour.** The web app's processes (the service and its research workers)
+hold the old index open; renaming under them is safe on Linux, and the restart makes every
+process open the new one:
+
+```bash
+cd /home/ubuntu/GenizahSearch
+mv Genizah_Index/tantivy_db Genizah_Index/tantivy_db.format1
+mv Genizah_Index/browse_map.pkl Genizah_Index/browse_map.pkl.format1
+mv Genizah_Index.next/tantivy_db Genizah_Index/tantivy_db
+cp Genizah_Index.next/browse_map.pkl Genizah_Index/browse_map.pkl
+sudo systemctl restart genizah-web
+sudo journalctl -u genizah-web -n 200 --no-pager | grep -i "seam\|index format"   # expect nothing
+```
+
+A warning containing "searching without seams" means the engine did not believe the new index's
+seams (it searches on today's routes, so nothing is broken); check the two markers' `build_id`.
+
+**4. Roll back** (the same in reverse; works with either code version):
+
+```bash
+sudo systemctl stop genizah-web
+mv Genizah_Index/tantivy_db Genizah_Index/tantivy_db.format2-failed
+mv Genizah_Index/tantivy_db.format1 Genizah_Index/tantivy_db
+mv Genizah_Index/browse_map.pkl.format1 Genizah_Index/browse_map.pkl
+sudo systemctl start genizah-web
+```
+
+**5. Clean up** once the owner is satisfied: `rm -rf Genizah_Index/tantivy_db.format1
+Genizah_Index/browse_map.pkl.format1 Genizah_Index.next`.
+
+**The desktop.** A desktop's index is built on the user's computer (Settings -> "Build / Rebuild
+Index"); it is never shipped. On an index built before this version, Settings shows "Search index:
+built by an earlier version. It works as before; rebuilding it adds what the wildcard search (*)
+of coming versions uses." Rebuilding is the user's click and nothing else: the app never starts
+it from startup, a timer or the UI thread. The rebuild needs about 16 GB free and 21.5 minutes
+on the laptop of §3.6.
+
 ---
 
 ## Supabase Management

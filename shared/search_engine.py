@@ -39,6 +39,8 @@ from shared.text_normalize import strip_nikud, strip_search_diacritics
 from shared.browse_map_utils import natural_sort_key, dedupe_browse_map, _extract_ie_from_header
 from shared.search_tokenizer import register_search_tokenizers
 from shared.indexer import Indexer
+from shared.index_format import read_index_format, seam_index_path
+from shared.index_seams import REVERSED_WORDS_FIELD, reversed_ending_pattern
 from shared.responsa import (
     parse_responsa_query, _parse_line_break_query,
     ResponsaComponent, _apply_explosion_guard,  # noqa: F401
@@ -1272,6 +1274,13 @@ class SearchEngine:
         self.var_mgr = variants_mgr
         self.index = None
         self.searcher = None
+        # Responsa plan §6.1: the seam index and the reversed-words field, when the
+        # open index has them (_open_index_format); off for an old index.
+        self.index_format = None
+        self.seam_index = None
+        self.seam_searcher = None
+        self.seam_words = 0
+        self._has_reversed_words = False
         # SEED-006 compat gate: whether the on-disk main / LOCAL indexes carry
         # the additive content_search field. Set at open time; gates the Stage 2
         # OR-fallback so the NEW query code never crashes against an OLD index
@@ -2005,8 +2014,57 @@ class SearchEngine:
         """Release Tantivy index and searcher to unlock files (required before rebuild on Windows)."""
         self.searcher = None
         self.index = None
+        self.seam_searcher = None
+        self.seam_index = None
         import gc
         gc.collect()
+
+    def _open_index_format(self, db_path):
+        """What the open index holds beyond format 1 (Responsa plan §6.1): the
+        reversed-words field (in the schema) and the seam index (the marker, the seam
+        marker of the same build, and the seam index opening with its fields). Anything
+        less is an old index: the attributes stay off and every search keeps today's
+        route. Never raises."""
+        self.index_format = None
+        self.seam_index = self.seam_searcher = None
+        self.seam_words = 0
+        self._has_reversed_words = False
+        try:
+            self.index_format = read_index_format(db_path)
+            field = (self.index_format or {}).get('reversed_field')
+            self._has_reversed_words = bool(field == REVERSED_WORDS_FIELD
+                                            and _index_has_field(self.index, REVERSED_WORDS_FIELD))
+            seam_path = seam_index_path(db_path, self.index_format)
+            if seam_path is not None:
+                seam_index = tantivy.Index.open(seam_path)
+                register_search_tokenizers(seam_index)
+                if all(_index_has_field(seam_index, f) for f in ('content', 'content_search', 'sys_ids')):
+                    self.seam_index = seam_index
+                    self.seam_searcher = seam_index.searcher()
+                    self.seam_words = int(self.index_format['seams']['words_each_side'])
+                else:
+                    LOGGER.warning("Seam index [%s] lacks its fields; searching without seams", seam_path)
+            elif (self.index_format or {}).get('seams'):
+                LOGGER.warning("Index [%s] names seams that do not open (missing, or another build's); "
+                               "searching without seams", db_path)
+        except MemoryError:
+            raise
+        except Exception as e:
+            LOGGER.warning("Index format of %s not read; searching without seams: %r", db_path, e)
+            self.seam_index = self.seam_searcher = None
+            self.seam_words = 0
+
+    def index_format_status(self) -> dict:
+        """The open main index's format (§6.1), for the desktop's Settings line and the
+        logs: ``{'format': 1 | 2, 'reversed_words': bool, 'seams': bool,
+        'seam_words': int, 'current': bool}``. ``current``: everything this version
+        builds is there; False means a rebuild (the user's click) would add it."""
+        seams = self.seam_searcher is not None
+        reversed_words = bool(getattr(self, '_has_reversed_words', False))
+        fmt = (getattr(self, 'index_format', None) or {}).get('format', 1)
+        return {'format': fmt, 'reversed_words': reversed_words, 'seams': seams,
+                'seam_words': getattr(self, 'seam_words', 0) if seams else 0,
+                'current': bool(seams and reversed_words)}
 
     def reload_index(self):
         db_path = os.path.join(Config.INDEX_DIR, "tantivy_db")
@@ -2029,6 +2087,7 @@ class SearchEngine:
                         LOGGER.warning("Stale index [%s]: %s", db_path, _msg)
                 self.searcher = self.index.searcher()
                 self._page_scope_complete = None  # re-checked for the new index
+                self._open_index_format(db_path)
                 return True
             except MemoryError:
                 raise
@@ -2389,6 +2448,27 @@ class SearchEngine:
                 + [(tantivy.Occur.MustNot, self.index.parse_query(f'scope:{scope}', ['content']))
                    for scope in ('part', 'system')])
         return query
+
+    def reversed_ending_query(self, ending, *, seams=False):
+        """The documents holding a word that ends with *ending* (plan §5.6 B, decision 1):
+        a prefix lookup on the reversed-words field (``reversed_ending_pattern``: brackets
+        and Hebrew marks looked past), where ``regex_query('.*X')`` walks the whole term
+        dictionary (§3.6.1: 0.14-1.8 s against 4.6-6.1 s). *seams*: on the seam index.
+        None when that index has no such field (an old index): the caller keeps today's
+        route. Phase 3 builds its star lookups on this; nothing searches through it yet.
+        The seams' field counts only when the build wrote the field (the marker, as for the
+        main index): a seam index built with --no-reversed-field has none to look in
+        (Codex review of PR #440)."""
+        if not getattr(self, '_has_reversed_words', False):
+            index = None
+        elif seams:
+            index = self.seam_index if self.seam_searcher is not None else None
+        else:
+            index = self.index
+        pattern = reversed_ending_pattern(ending)
+        if index is None or pattern is None:
+            return None
+        return tantivy.Query.regex_query(index.schema, REVERSED_WORDS_FIELD, pattern)
 
     def _and_query(self, query, extra):
         """*query* (a Query object) AND the query string *extra*."""
@@ -2909,8 +2989,9 @@ class SearchEngine:
             overlap_end = min(e, b_end)
             if overlap_start >= overlap_end:
                 continue
-            rel_start = overlap_start - b_start
-            rel_end = overlap_end - b_start
+            # A seam's slice may start inside its page: 'offset' is where (§6.1).
+            rel_start = overlap_start - b_start + b.get('offset', 0)
+            rel_end = overlap_end - b_start + b.get('offset', 0)
             overlaps.append({
                 'uid': b.get('uid'),
                 'p_num': b.get('p_num'),

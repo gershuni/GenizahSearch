@@ -171,3 +171,33 @@ class Config:
     def resource_path(relative_path: str) -> str:
         """Return absolute path to bundled resources."""
         return os.path.join(Config.INTERNAL_DIR, relative_path)
+
+    @staticmethod
+    def relocate_index_dir(new_dir: str) -> str:
+        """Point INDEX_DIR and every path under it (browse map, caches, side indexes) at
+        *new_dir* (created), so a build or a measurement writes nothing into the live
+        index folder (build_index.py --index-dir). Returns the absolute *new_dir*."""
+        old = Config.INDEX_DIR
+        new_dir = os.path.abspath(new_dir)
+        os.makedirs(new_dir, exist_ok=True)
+        for key, value in list(vars(Config).items()):
+            if key.startswith('_') or not isinstance(value, str):
+                continue
+            if value == old or value.startswith(old + os.sep):
+                setattr(Config, key, new_dir + value[len(old):])
+        return new_dir
+
+    @staticmethod
+    def copy_shelfmark_caches(from_dir: str) -> list:
+        """Copy metadata_cache.pkl and nli_cache.pkl from *from_dir* to CACHE_META and
+        CACHE_NLI (after relocate_index_dir): the index's shelfmark field is read from
+        them, so a build in a new folder matches one in the live folder. Returns the
+        files copied; a missing one is skipped."""
+        import shutil
+        copied = []
+        for target in (Config.CACHE_META, Config.CACHE_NLI):
+            source = os.path.join(from_dir, os.path.basename(target))
+            if os.path.isfile(source) and os.path.abspath(source) != os.path.abspath(target):
+                shutil.copyfile(source, target)
+                copied.append(source)
+        return copied

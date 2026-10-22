@@ -1920,6 +1920,7 @@ class GenizahGUI(QMainWindow):
             self.btn_comp_run.setEnabled(True)
             self.btn_browse_go.setEnabled(True)
             self.btn_build_index.setEnabled(True)
+            self._show_index_format()
             # Was read by `run_passage_index_build` and set by nobody, so
             # that guard refused every build. `getattr(..., False)` turns an
             # attribute that does not exist into a silent False rather than
@@ -33125,7 +33126,30 @@ class GenizahGUI(QMainWindow):
         self.index_progress.setValue(self.index_progress.maximum())
         self.index_progress.setFormat(tr("Indexing complete"))
         self.searcher.reload_index()
+        self._show_index_format()
         QMessageBox.information(self, tr("Done"), tr("Indexing complete. Documents indexed: {}").format(total_docs))
+
+    def _show_index_format(self):
+        """The line under Build / Rebuild Index: whether the index on this computer has
+        what this version builds (the seam documents and the reversed-words field,
+        docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md §6.1). An older index keeps working as
+        before; rebuilding it is the user's click, never started from here."""
+        # The label lives on this window but is made by the Settings dialog
+        # (desktop/settings_dialogs.py), which may not exist yet.
+        label = self.lbl_index_format if hasattr(self, 'lbl_index_format') else None
+        engine = getattr(self, 'searcher', None)
+        if label is None or engine is None or getattr(engine, 'index', None) is None:
+            return
+        try:
+            status = engine.index_format_status()
+        except Exception:
+            logger.debug("_show_index_format: no index format", exc_info=True)
+            return
+        if status.get('current'):
+            label.setText(tr("Search index: current format."))
+        else:
+            label.setText(tr("Search index: built by an earlier version. It works as before; "
+                             "rebuilding it adds what the wildcard search (*) of coming versions uses."))
 
     def on_index_error(self, err):
         self.index_progress.setFormat(tr("Indexing failed"))

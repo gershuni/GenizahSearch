@@ -1211,12 +1211,676 @@ def cmd_desktop_timings(args):
 
 
 # --------------------------------------------------------------------------------------
+# Phase 2 (plan §6.1): the seams and the reversed-words field
+# --------------------------------------------------------------------------------------
+
+def _corpus_reader(corpus_v8, corpus_v7, index_dir, caches_from=None):
+    """An Indexer over the corpus files, with every Config path the metadata manager may
+    write moved to *index_dir* (never the live index folder); *caches_from*: the folder
+    whose shelfmark caches are copied in (read only). Returns (indexer, meta)."""
+    from shared.config import Config
+    Config.relocate_index_dir(index_dir)
+    if caches_from:
+        Config.copy_shelfmark_caches(caches_from)
+    Config.FILE_V8, Config.FILE_V7 = corpus_v8, corpus_v7
+    from shared.metadata_manager import MetadataManager
+    from shared.indexer import Indexer
+    meta = MetadataManager()
+    meta._load_csv_bank()
+    meta.codico_mgr.load(csv_bank=meta.csv_bank)
+    return Indexer(meta), meta
+
+
+def _word_chunks(text):
+    """Whitespace chunks holding a word character: what a seam's K counts."""
+    from shared.search_engine import _WCH
+    return sum(1 for c in text.split() if re.search(f'[{_WCH}]', c))
+
+
+def cmd_seam_plan(args):
+    """The seams of the whole corpus without building an index: junctions, chains,
+    bridges, page lengths, and the seam text for several K."""
+    log = Log(args.out_dir, 'seam-plan')
+    require(args.corpus_file, 'Transcriptions.txt')
+    require(args.corpus_v7, 'AllGenizah_OLD.txt')
+    from shared.index_seams import ChainStats, chains_for, seams_of
+    indexer, meta = _corpus_reader(args.corpus_file, args.corpus_v7, os.path.join(args.out_dir, 'seam_plan_index_dir'),
+                                   args.caches_from)
+    started = time.perf_counter()
+    system_pages = {}
+    lengths = {'V0.8': [], 'V0.7': []}
+    seq = 0
+    for cid, chead, label, text in indexer.iter_corpus_pages():
+        lengths[label].append(_word_chunks(text))
+        page = indexer.system_page(cid, chead, label, text, seq)
+        if page is not None:
+            system_pages.setdefault(page['sys_id'], []).append(page)
+            seq += 1
+    log(f'read {sum(len(v) for v in lengths.values()):,} pages ({seq:,} with a sys_id) in {time.perf_counter() - started:.0f} s')
+    record = {'pages': {}, 'k': {}}
+    for label, ls in lengths.items():
+        ls.sort()
+        n = len(ls)
+        pct = {p: ls[min(n - 1, int(n * p / 100))] for p in (1, 5, 10, 25, 50, 75, 90, 99)} if n else {}
+        shorter = {k: sum(1 for x in ls if x < k) for k in (10, 20, 30, 40, 50)}
+        record['pages'][label] = {'pages': n, 'word_chunks_percentiles': pct, 'shorter_than_k': shorter,
+                                  'empty': sum(1 for x in ls if x == 0)}
+        log(f'{label}: {n:,} pages; word chunks per page p1..p99 {pct}; shorter than K {shorter}')
+    csv_bank = meta.csv_bank
+    codico = meta.codico_mgr
+
+    def folio_number(sid):
+        return codico._get_folio_number((csv_bank.get(sid) or {}).get('shelfmark', ''))
+
+    stats = ChainStats()
+    t = time.perf_counter()
+    chains = chains_for(system_pages, codico.part_to_folios, folio_number, stats=stats)
+    log(f'chains: {len(chains):,} from {stats.runs:,} runs ({stats.run_junctions:,} run junctions); '
+        f'{stats.bridges:,} part bridges; refused {stats.bridges_refused}; {time.perf_counter() - t:.1f} s')
+    record['chains'] = {'chains': len(chains), 'runs': stats.runs, 'run_junctions': stats.run_junctions,
+                        'bridges': stats.bridges, 'bridges_refused': stats.bridges_refused}
+    for k in args.seam_words:
+        t = time.perf_counter()
+        count = chars = beyond_two = 0
+        biggest = 0
+        pages_hist = {}
+        for chain in chains:
+            for seam in seams_of(chain, k):
+                count += 1
+                chars += len(seam.text)
+                biggest = max(biggest, len(seam.text))
+                n = len(seam.slices)
+                pages_hist[n] = pages_hist.get(n, 0) + 1
+                beyond_two += n > 2
+        record['k'][k] = {'seams': count, 'chars': chars, 'mean_chars': round(chars / max(count, 1), 1),
+                          'max_chars': biggest, 'seams_over_two_pages': beyond_two,
+                          'pages_per_seam': dict(sorted(pages_hist.items())[:12]), 'seconds': round(time.perf_counter() - t, 1)}
+        log(f'K={k}: {count:,} seams, {chars:,} chars (mean {chars / max(count, 1):.0f}, max {biggest:,}), '
+            f'{beyond_two:,} over two pages, {time.perf_counter() - t:.0f} s')
+    log.finish(record)
+    return EXIT_OK
+
+
+def _dir_sizes(path):
+    """{extension: bytes} under *path* (recursively), and the total."""
+    sizes = {}
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            size = os.path.getsize(os.path.join(root, name))
+            ext = os.path.splitext(name)[1] or name
+            sizes[ext] = sizes.get(ext, 0) + size
+            total += size
+    return dict(sorted(sizes.items(), key=lambda kv: -kv[1])), total
+
+
+def _sample_corpus(src, dst, keep, header_prefix):
+    """Copy the pages of *src* whose header's sys_id passes *keep* into *dst*."""
+    kept = pages = 0
+    with open(src, encoding='utf-8') as f, open(dst, 'w', encoding='utf-8') as out:
+        writing = False
+        for line in f:
+            if line.startswith(header_prefix):
+                pages += 1
+                m = CORPUS_SYS_ID_RE.search(line)
+                writing = bool(m and keep(m.group(1)))
+                kept += writing
+            if writing:
+                out.write(line)
+    return kept, pages
+
+
+def cmd_index_sample(args):
+    """Size and build time of the index with and without each addition, on a sample of
+    the manuscripts (every sys_id whose CRC-32 is 0 mod N, both files), extrapolated.
+    (Not int(sys_id) % N: every corpus sys_id ends in the same institution digits.)"""
+    log = Log(args.out_dir, 'index-sample')
+    require(args.corpus_file, 'Transcriptions.txt')
+    require(args.corpus_v7, 'AllGenizah_OLD.txt')
+    root = os.path.abspath(os.path.join(args.out_dir, 'index_sample'))
+    os.makedirs(root, exist_ok=True)
+    mod = args.sample_mod
+    v8, v7 = os.path.join(root, 'Transcriptions.txt'), os.path.join(root, 'AllGenizah_OLD.txt')
+    import zlib
+
+    def keep(sys_id):
+        return zlib.crc32(sys_id.encode('ascii')) % mod == 0
+
+    k8 = _sample_corpus(args.corpus_file, v8, keep, '==>')
+    k7 = _sample_corpus(args.corpus_v7, v7, keep, '###')
+    log(f'sample 1/{mod}: V0.8 {k8[0]:,} of {k8[1]:,} pages, V0.7 {k7[0]:,} of {k7[1]:,} pages')
+    record = {'sample_mod': mod, 'v8_pages': k8, 'v7_pages': k7, 'variants': {}}
+    variants = {'base': dict(seams=False, reversed_field=False),
+                'reversed': dict(seams=False, reversed_field=True),
+                'proposal': dict(seams=True, reversed_field=True, seam_words=args.seam_words[0])}
+    for name in args.variants:
+        index_dir = os.path.join(root, name)
+        indexer, _meta = _corpus_reader(v8, v7, index_dir, args.caches_from)
+        started = time.perf_counter()
+        indexer.create_index(**variants[name])
+        seconds = time.perf_counter() - started
+        db = os.path.join(index_dir, 'tantivy_db')
+        sizes, total = _dir_sizes(db)
+        seam_sizes, seam_total = _dir_sizes(os.path.join(db, 'seams')) if os.path.isdir(os.path.join(db, 'seams')) else ({}, 0)
+        record['variants'][name] = {'options': variants[name], 'seconds': round(seconds, 1), 'build': indexer.last_build,
+                                    'bytes_total': total, 'bytes_by_ext': sizes,
+                                    'seam_bytes_total': seam_total, 'seam_bytes_by_ext': seam_sizes}
+        log(f'{name}: {seconds:.0f} s, {total / 2**20:,.0f} MiB (seams {seam_total / 2**20:,.0f} MiB); '
+            f'by ext {dict((k, round(v / 2**20)) for k, v in sizes.items())}; build {indexer.last_build}')
+    if 'proposal' in record['variants'] and args.aggregate_reversed:
+        # What the field would add on the whole-manuscript and part docs too: their
+        # reversed words alone, in an index of that one field.
+        from shared.index_seams import hebword_analyzer, reversed_words
+        from shared.indexer import _add_reversed_words_field
+        db = os.path.join(root, 'proposal', 'tantivy_db')
+        idx, searcher = open_index(db)
+        builder = tantivy.SchemaBuilder()
+        _add_reversed_words_field(builder)
+        path = os.path.join(root, 'aggregate_reversed_only')
+        if os.path.isdir(path):
+            import shutil
+            shutil.rmtree(path)
+        os.makedirs(path)
+        only = tantivy.Index(builder.build(), path=path)
+        register_search_tokenizers(only)
+        w = only.writer(heap_size=500_000_000)
+        analyzer = hebword_analyzer()
+        started = time.perf_counter()
+        n = 0
+        for scope in ('system', 'part'):
+            for _, addr in searcher.search(tantivy.Query.term_query(idx.schema, 'scope', scope), 10_000_000).hits:
+                text = searcher.doc(addr)['content'][0]
+                w.add_document(tantivy.Document(content_rev=reversed_words(strip_search_diacritics(text), analyzer)))
+                n += 1
+        w.commit()
+        w.wait_merging_threads()
+        sizes, total = _dir_sizes(path)
+        record['aggregate_reversed_only'] = {'docs': n, 'bytes_total': total, 'bytes_by_ext': sizes,
+                                             'seconds': round(time.perf_counter() - started, 1)}
+        log(f'reversed words of {n:,} aggregate docs alone: {total / 2**20:,.0f} MiB, {time.perf_counter() - started:.0f} s')
+    log.finish(record)
+    return EXIT_OK
+
+
+def _open_seams(index_dir):
+    """The seam index the main index's marker names (shared/index_format.py), or exit 2."""
+    from shared.index_format import read_index_format, seam_index_path
+    marker = read_index_format(index_dir)
+    path = seam_index_path(index_dir, marker)
+    if path is None:
+        print(f'MISSING  seam index (marker {marker!r}) under {index_dir}', flush=True)
+        sys.exit(EXIT_MISSING_DATA)
+    idx, searcher = open_index(path)
+    return marker, idx, searcher
+
+
+def _expected_bridges(by_sys, part_to_folios, folio_number, max_part_pages=1000):
+    """The Oxford bridges §6.1 point 3 promises, derived here from the part metadata and
+    each manuscript's pages in file order (read from its whole-manuscript document), not
+    through shared/index_seams.py: {(source, left sys_id, left uid, right uid)}. Folios
+    consecutive in the part with folio numbers N and N+1; per source, each folio in one
+    volume, N's last page its highest-numbered one and N+1's first page page 1."""
+    ie_re = re.compile(r'(IE\d+)')
+
+    def volumes(pages):
+        return {m.group(1) if m else None for m in (ie_re.search(p.get('uid') or '') for p in pages)}
+
+    expected = set()
+    for folios in part_to_folios.values():
+        if sum(len(by_sys.get(f, ())) for f in folios) > max_part_pages:
+            continue
+        for a, b in zip(folios, folios[1:]):
+            if not (folio_number(a) > 0 and folio_number(b) == folio_number(a) + 1):
+                continue
+            for source in ('V0.8', 'V0.7'):
+                pa = [p for p in by_sys.get(a, ()) if p.get('source') == source]
+                pb = [p for p in by_sys.get(b, ()) if p.get('source') == source]
+                if not pa or not pb or len(volumes(pa)) != 1 or len(volumes(pb)) != 1:
+                    continue
+                last, first = pa[-1], pb[0]
+                if int(last.get('p_num') or 0) != max(int(p.get('p_num') or 0) for p in pa):
+                    continue
+                if int(first.get('p_num') or 0) != 1:
+                    continue
+                expected.add((source, a, last.get('uid'), first.get('uid')))
+    return expected
+
+
+def cmd_seam_topology(args):
+    """Gate (a) of §6.1: every junction inside a seam is a reading-order junction (pages
+    of one volume and one transcription, page number + 1, or an Oxford part bridge);
+    every consecutive junction of each whole-manuscript document has exactly one seam of
+    that manuscript; and every bridge the part metadata calls for (derived independently,
+    _expected_bridges) has exactly one seam, and no other bridge has one (Codex round 2
+    on PR #438: a build that dropped every bridge passed the first two)."""
+    from shared.index_seams import follows
+    log = Log(args.out_dir, 'seam-topology')
+    idx, searcher = open_index(args.index_dir)
+    marker, sidx, ssearcher = _open_seams(args.index_dir)
+    record = {'index_dir': args.index_dir, 'marker': marker}
+    started = time.perf_counter()
+    # (source, sys_id, left uid, right uid) -> seams seen: 2,725 junctions repeat under a
+    # second manuscript sharing the volume's images, and each manuscript has its own seam.
+    expected = {}
+    by_sys = {}
+    hits = searcher.search(tantivy.Query.term_query(idx.schema, 'scope', 'system'), 3_000_000).hits
+    for _, addr in hits:
+        doc = searcher.doc(addr).to_dict()
+        bounds = json.loads(doc['boundaries'][0]) if doc.get('boundaries') and doc['boundaries'][0] else []
+        if bounds:
+            by_sys[bounds[0].get('sys_id')] = bounds
+        for a, b in zip(bounds, bounds[1:]):
+            if follows(a, b):
+                expected[(a.get('source'), a.get('sys_id'), a.get('uid'), b.get('uid'))] = 0
+    log(f'system docs: {len(hits):,}; consecutive junctions: {len(expected):,} ({time.perf_counter() - started:.0f} s)')
+    # The part metadata, read with every Config path moved beside the output (never the
+    # live index folder).
+    from shared.config import Config
+    Config.relocate_index_dir(os.path.join(args.out_dir, 'seam_topology_index_dir'))
+    from shared.metadata_manager import MetadataManager
+    meta = MetadataManager()
+    meta._load_csv_bank()
+    meta.codico_mgr.load(csv_bank=meta.csv_bank)
+
+    def folio_number(sid):
+        return meta.codico_mgr._get_folio_number((meta.csv_bank.get(sid) or {}).get('shelfmark', ''))
+
+    bridges = {key: 0 for key in _expected_bridges(by_sys, meta.codico_mgr.part_to_folios, folio_number)}
+    log(f'bridges the part metadata calls for: {len(bridges):,}')
+    seams = 0
+    inner = {'consecutive': 0, 'part bridge': 0, 'not consecutive': 0}
+    central = {'consecutive': 0, 'part bridge': 0, 'not consecutive': 0}
+    examples = []
+    extra = 0
+    t = time.perf_counter()
+    for _, addr in ssearcher.search(tantivy.Query.all_query(), 10_000_000).hits:
+        doc = ssearcher.doc(addr).to_dict()
+        seams += 1
+        slices = json.loads(doc['boundaries'][0])
+        cut = doc['cut'][0]
+        for a, b in zip(slices, slices[1:]):
+            key = (a.get('source'), a.get('sys_id'), a.get('uid'), b.get('uid'))
+            if follows(a, b):
+                kind = 'consecutive'
+            elif key in bridges:
+                kind = 'part bridge'
+            else:
+                kind = 'not consecutive'
+                if len(examples) < 5:
+                    examples.append({'seam': doc['unique_id'][0], 'from': a, 'to': b})
+            inner[kind] += 1
+            if b.get('start') == cut:
+                central[kind] += 1
+                if key in expected:
+                    expected[key] += 1
+                elif key in bridges:
+                    bridges[key] += 1
+                else:
+                    extra += 1
+        if seams % 250_000 == 0:
+            log(f'  {seams:,} seams read, {time.perf_counter() - t:.0f} s')
+    missing = sum(1 for v in expected.values() if v == 0)
+    doubled = sum(1 for v in expected.values() if v > 1)
+    bridges_missing = sum(1 for v in bridges.values() if v == 0)
+    bridges_doubled = sum(1 for v in bridges.values() if v > 1)
+    ok = (inner['not consecutive'] == 0 and missing == 0 and doubled == 0 and extra == 0
+          and bridges_missing == 0 and bridges_doubled == 0
+          and central['consecutive'] + central['part bridge'] == seams)
+    log(f'seams: {seams:,}; junctions inside seams {inner}; central junctions {central}; '
+        f'system junctions without a seam {missing:,}, with more than one {doubled:,}; '
+        f'bridges without a seam {bridges_missing:,}, with more than one {bridges_doubled:,}; '
+        f'central junctions that are no system junction and no expected bridge {extra:,}; '
+        f'{time.perf_counter() - started:.0f} s in all -> {"PASS" if ok else "FAIL"}')
+    record.update({'seams': seams, 'inner': inner, 'central': central, 'system_consecutive_junctions': len(expected),
+                   'missing': missing, 'doubled': doubled, 'extra': extra, 'expected_bridges': len(bridges),
+                   'bridges_missing': bridges_missing, 'bridges_doubled': bridges_doubled,
+                   'examples': examples, 'pass': ok})
+    log.finish(record)
+    return EXIT_OK if ok else 1
+
+
+def cmd_reversed_check(args):
+    """Gate (c) of §6.1: the reversed-words lookup (``reversed_ending_pattern``) finds
+    exactly the documents an independent oracle names -- each page of the corpus files
+    (both sources), and each whole-manuscript, part and seam document's stored text, cut
+    by the hebword analyzer from its folded text, holding a word that ends with the
+    ending once brackets and Hebrew marks are removed (Codex review of PR #438: compared
+    with the semantic contract, not with the plain `.*X` lookup, which misses `[כהנים]`
+    too; and the aggregates, which Phase 3's AND searches read, round 2). Also counted:
+    the plain prefix, the plain regex, and the words a foreign mark interrupts (§4's
+    documented gap)."""
+    log = Log(args.out_dir, 'reversed-check')
+    from collections import Counter
+    from shared.index_seams import hebword_analyzer, reversed_ending_pattern
+    from shared.responsa_match import _T_CONTENT_SEARCH, _rust_escape
+    require(args.corpus_file, 'Transcriptions.txt')
+    idx, searcher = open_index(args.index_dir)
+    _marker, sidx, ssearcher = _open_seams(args.index_dir)
+    endings = [strip_search_diacritics(e) for e in args.endings]
+    looked_past = re.compile(_T_CONTENT_SEARCH)
+    all_marks = regex.compile(r'[\[\]\p{M}]+')
+    analyzer = hebword_analyzer()
+
+    def oracle_hits(text, counters, key):
+        tokens = analyzer.analyze(strip_search_diacritics(text))
+        stripped = [looked_past.sub('', t) for t in tokens]
+        loose = None
+        for e in endings:
+            if any(t.endswith(e) for t in stripped):
+                counters[e]['oracle'][key] += 1
+            else:
+                loose = loose if loose is not None else [all_marks.sub('', t) for t in tokens]
+                if any(t.endswith(e) for t in loose):
+                    counters[e]['foreign_mark_gap'][key] += 1
+
+    def lookups(ix, s, extra, e):
+        def run(q):
+            q = q_and(q, extra) if extra is not None else q
+            out = Counter()
+            for _, addr in s.search(q, 10_000_000).hits:
+                doc = s.doc(addr)
+                out[(doc['unique_id'][0], doc['source'][0])] += 1
+            return out
+        esc = ''.join(_rust_escape(c) for c in e)
+        rev_esc = ''.join(_rust_escape(c) for c in reversed(e))
+        t0 = time.perf_counter()
+        rev = run(tantivy.Query.regex_query(ix.schema, 'content_rev', reversed_ending_pattern(e)))
+        rev_s = time.perf_counter() - t0
+        return {'reversed': rev, 'reversed_s': rev_s,
+                'plain_prefix': run(tantivy.Query.regex_query(ix.schema, 'content_rev', rev_esc + '.*')),
+                'plain_regex': run(tantivy.Query.regex_query(ix.schema, 'content_search', '.*' + esc))}
+
+    record = {'index_dir': args.index_dir, 'endings': {}}
+    ok = True
+    started = time.perf_counter()
+    pages = {e: {'oracle': Counter(), 'foreign_mark_gap': Counter()} for e in endings}
+    from types import SimpleNamespace
+    from shared.config import Config
+    from shared.indexer import Indexer
+    from shared.metadata_manager import MetadataManager
+    # The pages as the index holds them (Indexer.iter_corpus_pages); a V0.8-only index
+    # (production) is checked with a --corpus-v7 that does not exist.
+    Config.FILE_V8 = args.corpus_file
+    Config.FILE_V7 = args.corpus_v7 if args.corpus_v7 and os.path.exists(args.corpus_v7) else ''
+    log(f'oracle corpus: {Config.FILE_V8}' + (f' + {Config.FILE_V7}' if Config.FILE_V7 else ' (V0.8 only)'))
+    meta = SimpleNamespace(extract_unique_id=lambda line: MetadataManager.extract_unique_id(None, line))
+    for cid, _head, label, text in Indexer(meta).iter_corpus_pages():
+        oracle_hits(text, pages, (cid, label))
+    log(f'corpus pages read and cut in {time.perf_counter() - started:.0f} s')
+    started = time.perf_counter()
+    seams = {e: {'oracle': Counter(), 'foreign_mark_gap': Counter()} for e in endings}
+    for _, addr in ssearcher.search(tantivy.Query.all_query(), 10_000_000).hits:
+        doc = ssearcher.doc(addr)
+        oracle_hits(doc['content'][0], seams, (doc['unique_id'][0], doc['source'][0]))
+    log(f'seams read and cut in {time.perf_counter() - started:.0f} s')
+    started = time.perf_counter()
+    aggregates = {e: {'oracle': Counter(), 'foreign_mark_gap': Counter()} for e in endings}
+    aggregate_q = idx.parse_query('scope:system OR scope:part', ['content'])
+    for _, addr in searcher.search(aggregate_q, 10_000_000).hits:
+        doc = searcher.doc(addr)
+        oracle_hits(doc['content'][0], aggregates, (doc['unique_id'][0], doc['source'][0]))
+    log(f'whole-manuscript and part documents read and cut in {time.perf_counter() - started:.0f} s')
+    for e in endings:
+        row = {}
+        for name, (ix, s, extra, oracle) in {'pages': (idx, searcher, q_pages(idx), pages[e]),
+                                             'aggregates': (idx, searcher, aggregate_q, aggregates[e]),
+                                             'seams': (sidx, ssearcher, None, seams[e])}.items():
+            got = lookups(ix, s, extra, e)
+            same = got['reversed'] == oracle['oracle']
+            ok = ok and same and bool(oracle['oracle'])
+            row[name] = {'oracle': sum(oracle['oracle'].values()), 'reversed': sum(got['reversed'].values()),
+                         'same': same, 'reversed_s': round(got['reversed_s'], 2),
+                         'only_reversed': sum((got['reversed'] - oracle['oracle']).values()),
+                         'only_oracle': sum((oracle['oracle'] - got['reversed']).values()),
+                         'plain_prefix': sum(got['plain_prefix'].values()),
+                         'plain_regex': sum(got['plain_regex'].values()),
+                         'foreign_mark_gap': sum(oracle['foreign_mark_gap'].values())}
+            log(f'{e}: {name}: oracle {row[name]["oracle"]:,}, reversed {row[name]["reversed"]:,} in '
+                f'{got["reversed_s"]:.2f} s -> {"SAME" if same else "DIFFERENT"}; plain prefix '
+                f'{row[name]["plain_prefix"]:,}, plain regex {row[name]["plain_regex"]:,}; '
+                f'a foreign mark inside the ending: {row[name]["foreign_mark_gap"]:,}')
+        record['endings'][e] = row
+    record['pass'] = ok
+    log(('PASS' if ok else 'FAIL') + ': the reversed lookup against the oracle')
+    log.finish(record)
+    return EXIT_OK if ok else 1
+
+
+CROSSING_QUERIES = (
+    [('responsa', q, extra) for q, extra in PHASE1_QUERIES]
+    + [(mode, q, {}) for q in ('כהנים גדולים', 'שמעון הצדיק', 'אהרן הכהן', 'לי מי לי')
+       for mode in ('literal', 'variants', 'fuzzy')]
+)
+# Frequent phrases, where crossings are many (crossing-diff --query-set frequent).
+CROSSING_QUERIES_FREQUENT = [
+    ('literal', 'ברוך אתה', {}), ('literal', 'אמר רבי', {}), ('literal', 'על פי', {}),
+    ('variants', 'ברוך אתה', {}), ('responsa', 'ברוך אתה', {}), ('responsa', 'אמר רבי', {}),
+]
+
+
+def responsa_side_words(compiled, query, gap, flex):
+    """S of §6.1 point 2 for a Responsa query: the most chunks one side of a crossing can
+    hold (each word's most chunks, plus the gaps, minus 1)."""
+    from shared.responsa import extract_per_pair_gaps
+    spans = []
+    for plan in compiled.plans:
+        n = max((len(f.split()) for f in plan.stems if f), default=1)
+        if flex:
+            n = max(n, max((len(w) for w in plan.component.words), default=1))
+        spans.append(n)
+    explicit = [g for g in extract_per_pair_gaps(query) if g is not None]
+    pairs = max(0, len(spans) - 1)
+    return sum(spans) + sum(explicit[:pairs]) + gap * max(0, pairs - len(explicit)) - 1
+
+
+def _sys_of(header):
+    m = CORPUS_SYS_ID_RE.search(header or '')
+    return m.group(1) if m else ''
+
+
+def cmd_crossing_diff(args):
+    """§6.1 point 7, the owner's decision: what moving today's crossings to the seams would
+    change. For each query, today's rows (execute_search on the new index, uncapped)
+    against the same rows with every whole-manuscript row replaced by the seams' crossings
+    (each seam at its central break, the row's page decided as the engine's de-duplication
+    decides it, excluded words read on the whole matched pages). Removed rows are
+    classified by the junctions they cross; added rows by run or part bridge."""
+    log = Log(args.out_dir, 'crossing-diff')
+    from unittest.mock import patch
+    from shared.config import Config
+    from shared.index_seams import follows
+    # Every path under the index folder moves with it: the metadata manager reads (and
+    # could write) its caches there, never in the live index folder.
+    Config.relocate_index_dir(os.path.dirname(os.path.abspath(args.index_dir)))
+    with patch.object(Config, 'SEARCH_LIMIT', 3_000_000):
+        from shared.metadata_manager import MetadataManager
+        from shared.variants import VariantManager
+        import shared.search_engine as se
+        from shared.responsa import has_document_and, _parse_line_break_query
+        meta = MetadataManager()
+        meta._load_heavy_caches_bg()
+        engine = se.SearchEngine(meta, VariantManager(), worker_mode=True, open_local=False)
+        status = engine.index_format_status()
+        log(f'index format {status}')
+        if not status['seams']:
+            log('no seam index: nothing to compare')
+            return EXIT_MISSING_DATA
+        K = engine.seam_words
+        sidx, ss = engine.seam_index, engine.seam_searcher
+
+        def page_text(uid, source):
+            q = q_and(engine.index.parse_query(f'unique_id:"{uid}"', ['unique_id']),
+                      engine.index.parse_query(f'source:"{source}"', ['content']),
+                      engine.index.parse_query('scope:page', ['content']))
+            hits = engine.searcher.search(q, 1).hits
+            return engine.searcher.doc(hits[0][1])['content'][0] if hits else ''
+
+        def seam_rows(mode, query, extra):
+            """{uid: (source, overlaps)} of the seams' crossings, or a reason string."""
+            gap = 0
+            excluded = []
+            strip = not se._query_has_brackets(query)
+            hits_q = None
+            if mode == 'responsa':
+                opts = {'responsa_mode': True, 'variants': False, 'ja': False, 'flex_spacing': False,
+                        'bidirectional': False, 'variant_mode': 'exact'}
+                opts.update(extra)
+                folded = strip_search_diacritics(query)
+                if has_document_and(folded):
+                    return 'AND: keeps the whole-manuscript documents'
+                if _parse_line_break_query(folded)[0] is not None:
+                    return 'line query: keeps the whole-manuscript documents'
+                opts['within_document'] = False
+                compiled = engine._compile_responsa(folded, opts, gap)
+                if compiled is None or len(compiled.plans) < 2:
+                    return 'one word: cannot cross'
+                side = responsa_side_words(compiled, folded, gap, opts['flex_spacing'])
+                if side > K:
+                    return f'S = {side} > K: keeps the whole-manuscript documents'
+                excluded = list(compiled.negated_words)
+                hits_q = compiled.retrieval(sidx, field='content', has_content_search=True,
+                                            flex_spacing=opts['flex_spacing'],
+                                            bidirectional=bool(opts['bidirectional']), within_document=False)
+                regex = compiled.compile_check()
+
+                def crossings(text, cut):
+                    t = se._strip_brackets(text) if strip else text
+                    cs = len(se._strip_brackets(text[:cut])) if strip else cut
+                    m = regex.search(t)
+                    while m is not None and m.start() < cs:
+                        if m.end() > cs and compiled.accept(t, m):
+                            return [se._unstripped_span(text, m.start(), m.end()) if strip else m.span()]
+                        m = regex.search(t, m.start() + 1)
+                    return []
+            else:
+                terms = query.split()
+                if len(terms) < 2:
+                    return 'one word: cannot cross'
+                side = (len(terms) - 1) * (gap + 1)
+                if side > K:
+                    return f'S = {side} > K'
+                if mode == 'literal':
+                    text_q = engine.build_phrase_candidate_query(terms, gap, content_search_field='content_search')
+                    hits_q = sidx.parse_query(text_q, ['content'])
+                    first, last = terms[0], terms[-1]
+                    regex = engine.build_regex_pattern(terms, mode, gap)
+                else:
+                    if mode != 'fuzzy':
+                        engine._get_or_compute_variants(terms, mode)
+                    hits_q = engine.build_variant_query(terms, mode, content_search_field='content_search', index=sidx)
+                    first, last = engine._cross_page_term(terms[0], mode), engine._cross_page_term(terms[-1], mode)
+                    regex = se._fuzzy_matcher(terms, gap) if mode == 'fuzzy' else engine.build_regex_pattern(terms, mode, gap)
+
+                def crossings(text, cut):
+                    return engine._cross_page_spans(regex, text, [{'start': 0}, {'start': cut}], first, last,
+                                                    side, gap, strip, whole_words=True)
+            rows = {}
+            lowered = [w.lower() for w in excluded if w]
+            for _, addr in ss.search(hits_q, 10_000_000).hits:
+                doc = ss.doc(addr)
+                text, cut = doc['content'][0], doc['cut'][0]
+                slices = json.loads(doc['boundaries'][0])
+                for span in crossings(text, cut):
+                    mapped = engine._map_span_to_pages(span, slices)
+                    primary = mapped.get('primary') or {}
+                    overlaps = [(o['uid'], o['source'], o['p_num'], o.get('sys_id') or _sys_of(o.get('full_header')),
+                                o.get('full_header', '')) for o in mapped.get('overlaps') or []]
+                    if lowered:
+                        pages = '\n'.join(page_text(o[0], o[1]) for o in overlaps).lower()
+                        if any(w in pages for w in lowered):
+                            continue
+                    uid, source = primary.get('uid'), primary.get('source')
+                    # De-duplication as the engine's: one row per uid, V0.8 first.
+                    kept = rows.get(uid)
+                    if kept is None or (kept[0] != 'V0.8' and source == 'V0.8'):
+                        rows[uid] = (source, overlaps)
+            return rows
+
+        def junction_kinds(overlaps):
+            kinds = []
+            for a, b in zip(overlaps, overlaps[1:]):
+                pa = {'uid': a[0], 'source': a[1], 'p_num': a[2], 'sys_id': a[3], 'full_header': a[4]}
+                pb = {'uid': b[0], 'source': b[1], 'p_num': b[2], 'sys_id': b[3], 'full_header': b[4]}
+                if follows(pa, pb):
+                    continue
+                if pa['source'] == pb['source'] and pa['sys_id'] != pb['sys_id'] and int(pb['p_num'] or 0) == 1:
+                    kinds.append('part bridge')
+                else:
+                    kinds.append(' + '.join(_junction_kinds(pa, pb)) or 'other')
+            return kinds or ['consecutive only']
+
+        results = []
+        for mode, query, extra in (CROSSING_QUERIES_FREQUENT if args.query_set == 'frequent' else CROSSING_QUERIES):
+            if args.only and query not in args.only:
+                continue
+            started = time.perf_counter()
+            se.consume_last_search_cutoff()
+            if mode == 'responsa':
+                opts = {'responsa_mode': True, 'variants': False, 'ja': False, 'flex_spacing': False,
+                        'bidirectional': False, 'variant_mode': 'exact'}
+                opts.update(extra)
+                today = engine.execute_search(query, 'exact', 0, responsa_options=opts, corpus_scope='genizah')
+            else:
+                today = engine.execute_search(query, mode, 0, corpus_scope='genizah')
+            capped = bool(se.consume_last_search_cutoff().get('capped'))
+            today_s = time.perf_counter() - started
+            page_uids = {r['uid'] for r in today if r.get('scope') == 'page'}
+            agg = [r for r in today if r.get('scope') != 'page']
+            row = {'mode': mode, 'query': query, 'options': extra, 'today_rows': len(today), 'capped': capped,
+                   'today_page_rows': len(page_uids), 'today_aggregate_rows': len(agg),
+                   'today_crossing_rows': sum(1 for r in agg if r.get('cross_page')),
+                   'today_s': round(today_s, 1)}
+            started = time.perf_counter()
+            seams = seam_rows(mode, query, extra)
+            row['seams_s'] = round(time.perf_counter() - started, 1)
+            if isinstance(seams, str):
+                row['seams'] = seams
+                log(f'{mode:8} {query!r} {extra or ""}: {len(today):,} rows today; seams n/a ({seams})')
+                results.append(row)
+                continue
+            seam_new = {uid: v for uid, v in seams.items() if uid not in page_uids}
+            today_uids = {r['uid'] for r in today}
+            removed = [r for r in agg if r['uid'] not in seam_new]
+            added = {uid: v for uid, v in seam_new.items() if uid not in today_uids}
+            removed_kinds = {}
+            for r in removed:
+                overlaps = [(h['uid'], h['source'], h['p_num'], _sys_of(h.get('full_header')), h.get('full_header', ''))
+                            for h in r.get('page_highlights') or []]
+                key = ('not a crossing (a match inside one page, read through its manuscript)'
+                       if not r.get('cross_page') else ' / '.join(junction_kinds(overlaps)))
+                removed_kinds[key] = removed_kinds.get(key, 0) + 1
+            added_kinds = {}
+            for uid, (source, overlaps) in added.items():
+                key = ' / '.join(junction_kinds(overlaps))
+                if key == 'consecutive only':
+                    key = 'a run junction today\'s search did not report'
+                added_kinds[key] = added_kinds.get(key, 0) + 1
+            row.update({'seam_crossing_rows': len(seam_new), 'removed': len(removed), 'added': len(added),
+                        'after_rows': len(today) - len(removed) + len(added),
+                        'removed_kinds': removed_kinds, 'added_kinds': added_kinds,
+                        'removed_examples': [{'uid': r['uid'], 'source': r['display'].get('source'),
+                                              'header': r.get('raw_header'), 'snippet': r.get('snippet')}
+                                             for r in removed[:4]],
+                        'added_examples': [{'uid': uid, 'source': v[0], 'pages': [o[4] for o in v[1]]}
+                                           for uid, v in list(added.items())[:4]]})
+            log(f'{mode:8} {query!r} {extra or ""}: {len(today):,} rows today ({row["today_crossing_rows"]} crossings, '
+                f'{len(agg)} from aggregates); seams: {len(seam_new)} crossing rows; removed {len(removed)} '
+                f'{removed_kinds}; added {len(added)} {added_kinds}; after {row["after_rows"]:,}; '
+                f'{today_s:.1f} s + {row["seams_s"]} s')
+            results.append(row)
+    log.finish({'index_dir': args.index_dir, 'seam_words': K, 'queries': results})
+    return EXIT_OK
+
+
+# --------------------------------------------------------------------------------------
 
 def main(argv=None):
     from shared.config import Config
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('item', choices=['scan', 'punct', 'marks', 'token-only', 'wordlist', 'patterns', 'scored-terms',
-                                     'missing-pages', 'verify-tolerant', 'topology', 'desktop-timings'])
+                                     'missing-pages', 'verify-tolerant', 'topology', 'desktop-timings',
+                                     'seam-plan', 'index-sample', 'seam-topology', 'reversed-check',
+                                     'crossing-diff'])
     ap.add_argument('--index-dir', default=os.path.join(Config.INDEX_DIR, 'tantivy_db'))
     ap.add_argument('--corpus-file', default=os.environ.get('GENIZAH_CORPUS_FILE') or Config.FILE_V8)
     ap.add_argument('--browse-map', default=Config.BROWSE_MAP)
@@ -1225,12 +1889,29 @@ def main(argv=None):
     ap.add_argument('--engines', nargs='+', choices=['regex', 're'], default=['regex', 're'],
                     help='desktop-timings: regex = the desktop route, re = the production worker route')
     ap.add_argument('--query-timeout', type=float, default=600.0, help='desktop-timings: stop a query after this many seconds')
+    ap.add_argument('--corpus-v7', default=os.environ.get('GENIZAH_CORPUS_V7_FILE') or Config.FILE_V7,
+                    help='seam-plan, index-sample: AllGenizah_OLD.txt')
+    ap.add_argument('--seam-words', type=int, nargs='+', default=[30, 10, 20, 40, 50],
+                    help='seam-plan: the K values to size; index-sample: the first one is built')
+    ap.add_argument('--caches-from', help='seam-plan, index-sample: copy the shelfmark caches from this index folder')
+    ap.add_argument('--sample-mod', type=int, default=10, help='index-sample: keep the sys_ids whose CRC-32 is 0 mod N')
+    ap.add_argument('--variants', nargs='+', default=['base', 'reversed', 'proposal'],
+                    choices=['base', 'reversed', 'proposal'], help='index-sample: the builds to make')
+    ap.add_argument('--aggregate-reversed', action='store_true',
+                    help='index-sample: also size the reversed-words field of the aggregate docs')
+    ap.add_argument('--endings', nargs='+', default=['כהנים', 'נים'], help='reversed-check: the endings to look up')
+    ap.add_argument('--only', nargs='+', help='crossing-diff: run only these queries')
+    ap.add_argument('--query-set', choices=['phase1', 'frequent'], default='phase1',
+                    help='crossing-diff: the §8 set and its Exact/Variants/Fuzzy pairs, or frequent phrases')
     args = ap.parse_args(argv)
     handler = {
         'scan': cmd_scan, 'punct': cmd_punct, 'marks': cmd_marks, 'token-only': cmd_token_only,
         'wordlist': cmd_wordlist, 'patterns': cmd_patterns,
         'scored-terms': cmd_scored_terms, 'missing-pages': cmd_missing_pages, 'verify-tolerant': cmd_verify_tolerant,
         'topology': cmd_topology, 'desktop-timings': cmd_desktop_timings,
+        'seam-plan': cmd_seam_plan, 'index-sample': cmd_index_sample,
+        'seam-topology': cmd_seam_topology, 'reversed-check': cmd_reversed_check,
+        'crossing-diff': cmd_crossing_diff,
     }[args.item]
     return handler(args)
 

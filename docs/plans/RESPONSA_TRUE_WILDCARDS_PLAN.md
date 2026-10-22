@@ -1,6 +1,9 @@
 # Responsa wildcards: `*` as any sequence, `#` as the grammatical list
 
-**Status:** **Phase 1 implemented (2026-10-22)** -- the engine on
+**Status:** **Phase 2 implemented (2026-10-22, PR #440 on the design PR #438)**: the index format,
+built locally and gated (§7 Phase 2); the server rebuild is the owner's, and today's page-break matches
+move to the seams in Phase 3 (decision 10, 2026-10-22).
+**Phase 1 implemented (2026-10-22)** -- the engine on
 `claude/responsa-wildcards-phase1-36d505`, the surfaces stacked on it on
 `claude/responsa-wildcards-phase1-surfaces` -- with its gates: the §8 oracle
 (`scripts/verify_responsa_wildcards.py`) agrees with the engine on all nine Phase 1 queries on the
@@ -9,9 +12,9 @@ real data (0 differences) and its four named mutations each fail it; the "after"
 `tantivy_db/`, K = 30 words a side, runs plus Oxford part bridges (1,541,186 seams), the
 reversed-words field on every document, a format marker with today's routes as the fallback;
 **built locally 2026-10-22**: the whole index with both in 21.7 min, 15.30 GB (today's: 13.86 GB);
-V0.8 only, as production holds it, 7.74 GB against 6.31 GB for format 1 built the same way. Whether
-today's crossings move to the seams is asked of the owner with numbers (§6.1 point 7). Phase 3 is not
-implemented. Plan revision 6: **all nine §9 decisions taken (2026-10-21)** and the phases
+V0.8 only, as production holds it, 7.74 GB against 6.31 GB for format 1 built the same way.
+**Decided 2026-10-22 (decision 10): today's page-break matches move to the seams in Phase 3**,
+together with Responsa's pages-first change. Phase 3 is not implemented. Plan revision 6: **all nine §9 decisions taken (2026-10-21)** and the phases
 resequenced -- Phase 1 unchanged (whole words on every path, no rebuild), **Phase 2 is the index
 format** (seam documents and the reversed-words field on one rebuild, the engine's fallback for an
 old index, the server rebuild and the desktop re-index), **Phase 3 is true `*`** on the new index.
@@ -857,8 +860,7 @@ seam centred on its first break.
   one side holds at most S chunks:
   - Exact, Variants, Fuzzy: S = (n - 1) x (gap + 1), as `_cross_page_side_words` computes it
     today (`MAX_WORD_GAP` is 10).
-  - Responsa (star words in Phase 3; finite words in Phase 2 only if the owner moves today's
-    crossings to seams, point 7): S = the sum over the words of the most chunks each can span,
+  - Responsa (star words and, by decision 10, finite words, both in Phase 3; point 7): S = the sum over the words of the most chunks each can span,
     plus the sum of the per-pair gaps (`[N]`, else the global gap), minus 1. A form spans one
     chunk; under flex spacing a typed word spans up to its letter count, since `\s*` may split it
     at every letter. Bidirectional reverses the order, not the sum. `within_document` (`AND`),
@@ -972,8 +974,8 @@ seam centred on its first break.
   crossings the whole-manuscript documents. Nothing fails on an old index, and nothing re-indexes
   by itself.
 - **What the desktop tells a user on an old index.** A line under Settings -> "Build / Rebuild
-  Index" says which format the index has. Once the new format gives the user something (the
-  crossing switch if approved, or Phase 3), a prompt after startup says what a rebuild brings and
+  Index" says which format the index has. Once the new format gives the user something (Phase 3:
+  true `*` and, by decision 10, today's crossings on the seams), a prompt after startup says what a rebuild brings and
   how long it takes, with "Rebuild now" (the existing confirmation follows) and "Later"
   (remembered for that index). Re-indexing is always the user's click: never from `__init__`,
   the UI thread or a timer. The website's index is rebuilt by the owner (point 9).
@@ -984,13 +986,17 @@ seam centred on its first break.
   `reversed_ending_query`; and `_map_span_to_pages`' offsets. None of these changes a result.
 - **Isolation needs no exclusion list.** Nothing that reads the main index can meet a seam, and
   gate (d) checks it consumer by consumer.
-- **The owner's decision, asked with numbers before it is built: should today's crossings move to
-  the seams?** Exact, Variants and Fuzzy (several words, no position) read crossings from the
-  whole-manuscript documents today, and Responsa reads them through its mixed query. Seams would
-  remove the crossings found only at a false junction (the end of a volume joined to its own V0.7
-  beginning, a volume change, a missing page), and add the part-bridge crossings no index finds
-  today. The rows removed and added on the §8 query set are counted on the full new index (gate
-  list below) and put to the owner. The switch is built only on a yes.
+- **Today's crossings stay on the whole-manuscript documents in Phase 2.** Exact, Variants and
+  Fuzzy (several words, no position) read crossings from them today, and Responsa reads them
+  through its mixed query. Seams remove the crossings found only at a false junction (the end of
+  a volume joined to its own V0.7 beginning, a volume change, a missing page) and add the
+  part-bridge crossings no index finds today. Measured on the full new index (`crossing-diff`, 21
+  queries of the §8 set and its Exact/Variants/Fuzzy pairs, and 6 frequent phrases): 1-3 rows
+  removed per query where anything changes, all at false junctions but one in-page Fuzzy row read
+  only through its manuscript; none added for Exact, Variants and Fuzzy; +2 for Responsa
+  `ברוך אתה`, whose search today checks only each manuscript's first match. **Decided 2026-10-22
+  (decision 10): the switch is made in Phase 3, together with Responsa's pages-first change** (§7
+  Phase 3).
 
 **8. Size and build time.** Measured on a 1/10 sample (`index-sample`: the manuscripts whose
 `sys_id` has a CRC-32 of 0 mod 10, both files: 91,226 V0.8 and 100,030 V0.7 page headers, 190,521
@@ -1122,7 +1128,38 @@ go-ahead is recorded (§9, decision 8, 2026-10-21); the release notes carry a se
 
 **Phase 2: the index format (resequenced 2026-10-21, decisions 1 and 9).** **Designed 2026-10-22:
 §6.1** (the seam index's place, K, runs and bridges, fields and provenance, the reversed field,
-the marker and the fallbacks, the gates). One rebuild carries both:
+the marker and the fallbacks, the gates). **Implemented 2026-10-22 (PR #440), and every gate of
+§6.1 point 10 run on a full local build** (21.7 min, 15.30 GB; point 8):
+- (a) `seam-topology` PASS: 1,541,186 seams, no junction inside one out of reading order, each
+  of the 1,524,861 consecutive junctions once per manuscript, each of the 16,325 bridges the part
+  metadata calls for once. Red on 1/10 samples: seams in file order (22,418 central junctions
+  not consecutive); no bridges (257 missing).
+- (b) the Phase 1 oracle: 9/9 PASSED, the same counts on today's index and the new one; red under
+  `accept-off` on the new index.
+- (c) `reversed-check` PASS against the token oracle: `כהנים` 53,240 pages, 10,177 aggregates,
+  16,868 seams; `נים` 519,402, 80,455 and 212,840 (the plain prefix finds 13-1,350 fewer in each).
+  Red: the field missing on aggregates (a sample built before they got it), the field from
+  `content`, a plain prefix.
+- (d) and (e): `tests/test_index_format.py` (40 tests) and the whole local suite
+  (`run_local_tests.py`: 16,904 passed, 3 failed -- one getattr-guard finding, fixed; a browse
+  timeout test that passes alone; and a Config test failing only because `build_index.py` makes
+  `Genizah_Index/` in the checkout it runs from); `seams-in-main-index` and `offset-default-1`
+  red.
+- (f) `verify_search_combinations.py` VERIFIED on the new index (and on today's), after two fixes
+  of the gate itself, both exposed by the new document order: its completion check takes the
+  restriction check's rule for a page filed under two manuscripts, and its copy check reads every
+  copy (a printed book's page is filed under 40 and more). Which manuscript such a page is shown
+  under follows document order: an uncapped `ישראל` reaches 44,055 / 44,056 / 44,061 manuscripts
+  on three builds of one corpus (tracker fragment).
+- (g) `desktop-timings`: every row count as in §3.6.6's Phase 1 run. Timed back to back the new
+  index looked 1.3-2x slower on the `regex` route; interleaved in one process (two rounds,
+  alternating), old and new are equal within noise (`#כהנים #גדולים` 78.9/79.6 s new against
+  78.5/82.1 s today's; the other four within 1 s). The laptop's mixed fast and compact cores and
+  two Modern Standby spells (13:13-13:19, 13:34-13:50) make single runs unreliable.
+
+Not done here: the server rebuild (the owner's; `DEPLOYMENT_TECHNICAL.md`, "Rebuild the main index
+in format 2"), and moving today's crossings to the seams (decision 10: Phase 3). One rebuild
+carries both:
 - the seam documents (§6 B), built per source and per IE with consecutive page numbers, so none
   of §3.6.5's 226,926 false junctions survives;
 - the reversed-words field (§5.6 B), its size measured first (estimate: +2-3 GB on 12.9 GB,
@@ -1135,6 +1172,11 @@ the marker and the fallbacks, the gates). One rebuild carries both:
 - Star retrieval and pages first (§5.4); a leading star through the reversed-words field,
   `*כהנ*` (both ends) through today's slow route.
 - Crossings read from seams, never from whole manuscripts (decision 9).
+- **Today's page-break matches move to the seams too (decision 10, 2026-10-22)**: Exact, Variants
+  and Fuzzy with several words and no position, and Responsa's finite words through its
+  pages-first change, by §6.1 point 2's routes (S <= K: seams; S > K without a star: the
+  whole-manuscript documents; S > K with a star: pages and seams, marked incomplete). The rows it
+  changes are measured in §6.1 point 7; a desktop on an old index keeps today's route.
 - The Responsa page limit, 150,000 candidate pages (§5.5, decision 3); bare stars refused and
   one- or two-letter star words warned (decision 4); variants and Judeo-Arabic on star words
   through several `regex_query`s ORed (decision 5); order by the finite words' score (decision 2);
@@ -1273,6 +1315,13 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
    consecutive page numbers so that none of the 226,926 false junctions of §3.6.5 survives, are
    built before true `*` ships (Phase 2, with the reversed-words field of decision 1). The crossing
    step of star searches reads seams, never whole manuscripts.
+10. **Today's page-break matches** (Exact, Variants, Fuzzy, and Responsa's finite words) read the
+    whole-manuscript documents, false junctions included. Move them to the seams now (a third
+    Phase 2 PR, Exact/Variants/Fuzzy first), or in Phase 3 with Responsa's pages-first change?
+    Measured (§6.1 point 7): 1-3 rows removed per affected query, all at false junctions but one;
+    none added for Exact, Variants and Fuzzy; +2 for Responsa `ברוך אתה`.
+    **Decided 2026-10-22: in Phase 3** (the owner: "In phase 3"), together with Responsa's
+    pages-first change, so one behaviour change ships with one release note.
 
 ## 10. What this does not change
 

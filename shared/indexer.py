@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import json
+import time
 import pickle
 from collections import defaultdict
 
@@ -31,6 +32,10 @@ from shared.config import Config
 from shared.search_tokenizer import register_search_tokenizers
 from shared.text_normalize import strip_search_diacritics
 from shared.browse_map_utils import dedupe_browse_map
+from shared.index_format import write_index_format
+from shared.index_seams import (
+    REVERSED_WORDS_FIELD, SEAM_SCOPE, SEAM_WORDS_EACH_SIDE, SEAMS_SUBDIR, ChainStats,
+    chains_for, hebword_analyzer, reversed_words, seams_of)
 
 LOGGER = logging.getLogger("genizah." + __name__)
 
@@ -53,9 +58,10 @@ def _strip_brackets(text: str) -> str:
     return text.replace('[', '').replace(']', '')
 
 
-def build_main_schema() -> tantivy.Schema:
+def build_main_schema(reversed_words: bool = True) -> tantivy.Schema:
     """The main (Genizah) index schema. Register the search tokenizers
-    (shared.search_tokenizer.register_search_tokenizers) on any index built from it."""
+    (shared.search_tokenizer.register_search_tokenizers) on any index built from it.
+    *reversed_words*: the reversed-words field (Responsa plan §5.6 B, §6.1)."""
     builder = tantivy.SchemaBuilder()
     builder.add_text_field("unique_id", stored=True)
     # SEED-006 Stage 1: hebword tokenizer makes punctuation-attached words
@@ -76,6 +82,38 @@ def build_main_schema() -> tantivy.Schema:
     builder.add_text_field("shelfmark", stored=True)
     builder.add_text_field("scope", stored=True)
     builder.add_text_field("boundaries", stored=True)
+    if reversed_words:
+        _add_reversed_words_field(builder)
+    return builder.build()
+
+
+def _add_reversed_words_field(builder):
+    # Every content_search token written backwards (shared/index_seams.py::reversed_words),
+    # so a word's ending is a prefix lookup. Pre-tokenized, so whitespace splits it;
+    # 'basic': doc ids only -- a star lookup asks which documents hold such a word.
+    builder.add_text_field(REVERSED_WORDS_FIELD, stored=False, tokenizer_name="whitespace",
+                           index_option="basic")
+
+
+def build_seam_schema(reversed_words: bool = True) -> tantivy.Schema:
+    """The seam index (``tantivy_db/seams``, §6.1): one document per junction of
+    consecutive pages, its text stored with per-page provenance (``boundaries``: each
+    slice's page and its ``offset`` in that page) and ``cut``, the junction's offset in
+    the text. A separate index, so nothing that reads the main index can meet a seam.
+    ``sys_ids``: the manuscripts its pages belong to, for search-within. *reversed_words*:
+    the reversed-words field, written when the main index gets it too."""
+    builder = tantivy.SchemaBuilder()
+    builder.add_text_field("unique_id", stored=True)
+    builder.add_text_field("content", stored=True, tokenizer_name="hebword")
+    builder.add_text_field("content_search", stored=False, tokenizer_name="hebword")
+    if reversed_words:
+        _add_reversed_words_field(builder)
+    builder.add_text_field("source", stored=True)
+    builder.add_text_field("full_header", stored=True)
+    builder.add_text_field("sys_ids", stored=False)
+    builder.add_text_field("scope", stored=True)
+    builder.add_text_field("boundaries", stored=True)
+    builder.add_unsigned_field("cut", stored=True)
     return builder.build()
 
 
@@ -83,6 +121,8 @@ class Indexer:
     """Create or update the Tantivy index and keep browse maps in sync."""
     def __init__(self, meta_mgr):
         self.meta_mgr = meta_mgr
+        self._rev_analyzer = None
+        self.last_build = None
 
     @staticmethod
     def _extract_position_fields(content, head_words=10):
@@ -252,8 +292,75 @@ class Indexer:
 
         return _find_assignment(0, -1)
 
-    def create_index(self, progress_callback=None):
-        # Validation
+    def _search_fields(self, text):
+        """The folded field of a document, and its reversed words when this build writes
+        them (``self._rev_analyzer``, set by create_index)."""
+        folded = strip_search_diacritics(text)
+        fields = {'content_search': folded}
+        if self._rev_analyzer is not None:
+            fields[REVERSED_WORDS_FIELD] = reversed_words(folded, self._rev_analyzer)
+        return fields
+
+    def iter_corpus_pages(self, progress_callback=None):
+        """Every page of the corpus files (V0.8, then V0.7) in file order, as the index
+        holds it: (uid, header, source, text). A page's lines are joined by line breaks,
+        except a file's last page, whose lines are joined by spaces (as they always were)."""
+        def count_lines(fname):
+            if not os.path.exists(fname): return 0
+            with open(fname, 'r', encoding='utf-8') as f: return sum(1 for line in f)
+
+        total_lines = count_lines(Config.FILE_V8) + count_lines(Config.FILE_V7)
+        processed_lines = 0
+
+        for fpath, label in [(Config.FILE_V8, "V0.8"), (Config.FILE_V7, "V0.7")]:
+            if not os.path.exists(fpath): continue
+            with open(fpath, 'r', encoding='utf-8') as f:
+                cid, chead, ctext = None, None, []
+                for line in f:
+                    processed_lines += 1
+                    line = line.strip()
+                    is_sep = (label == "V0.8" and line.startswith("==>")) or (label == "V0.7" and line.startswith("###"))
+
+                    if is_sep:
+                        if cid and ctext:
+                            yield cid, chead, label, "\n".join(ctext)
+                        chead = line.replace("==>", "").replace("<==", "").strip() if label == "V0.8" else line
+                        cid = self.meta_mgr.extract_unique_id(line)
+                        ctext = []
+                    else: ctext.append(line)
+                    if progress_callback and processed_lines % 1000 == 0:
+                        progress_callback(processed_lines, total_lines)
+
+                if cid and ctext:
+                    yield cid, chead, label, " ".join(ctext)
+
+    def system_page(self, cid, chead, label, page_content, seq_index):
+        """The page's entry in its manuscript's list (whole-manuscript docs, seams), or
+        None when its header names no sys_id."""
+        parsed = self.meta_mgr.parse_full_id_components(chead)
+        if not parsed['sys_id']:
+            return None
+        return {
+            'p_num': int(parsed['p_num']) if parsed['p_num'] else 0,
+            'uid': cid,
+            'full_header': chead,
+            'source': label,
+            'content': page_content,
+            'sys_id': parsed['sys_id'],
+            'seq_index': seq_index,
+        }
+
+    def create_index(self, progress_callback=None, *, seams=True, reversed_field=True,
+                     seam_words=SEAM_WORDS_EACH_SIDE):
+        """Build the main index in ``Config.INDEX_DIR/tantivy_db`` (replacing it) and the
+        browse map. *seams*: the seam index in ``tantivy_db/seams`` (§6.1); *reversed_field*:
+        the reversed-words field on every document (§5.6 B). With both off the index is
+        today's (format 1, no marker). ``self.last_build`` holds the counts and timings. The
+        build waits for Tantivy's merges before it returns (19 segments on the full corpus,
+        where an index left merging had about 150)."""
+        # Validation (before the old index is removed)
+        if seams and (not isinstance(seam_words, int) or isinstance(seam_words, bool) or seam_words < 1):
+            raise ValueError(f"seam_words must be a positive number of words, not {seam_words!r}")
         if not os.path.exists(Config.FILE_V8):
             raise FileNotFoundError(_tr("Input file not found: {}\nPlease place 'Transcriptions.txt' next to the executable.").format(Config.FILE_V8))
 
@@ -267,7 +374,10 @@ class Indexer:
             shutil.rmtree(db_path)
         os.makedirs(db_path)
 
-        schema = build_main_schema()
+        started = time.perf_counter()
+        self.last_build = build = {'seams': None, 'reversed_field': bool(reversed_field)}
+        self._rev_analyzer = hebword_analyzer() if reversed_field else None
+        schema = build_main_schema() if reversed_field else build_main_schema(reversed_words=False)
 
         index = tantivy.Index(schema, path=db_path)
         # SEED-006: register hebword (+ builtins) before the writer tokenizes content.
@@ -291,84 +401,24 @@ class Indexer:
         except Exception as e:
             LOGGER.warning("Failed to load codicological manager before indexing: %s", e)
 
-        def count_lines(fname):
-            if not os.path.exists(fname): return 0
-            with open(fname, 'r', encoding='utf-8') as f: return sum(1 for line in f)
-
-        total_lines = count_lines(Config.FILE_V8) + count_lines(Config.FILE_V7)
-        processed_lines = 0
-
-        for fpath, label in [(Config.FILE_V8, "V0.8"), (Config.FILE_V7, "V0.7")]:
-            if not os.path.exists(fpath): continue
-            with open(fpath, 'r', encoding='utf-8') as f:
-                cid, chead, ctext = None, None, []
-                for line in f:
-                    processed_lines += 1
-                    line = line.strip()
-                    is_sep = (label == "V0.8" and line.startswith("==>")) or (label == "V0.7" and line.startswith("###"))
-
-                    if is_sep:
-                        if cid and ctext:
-                            page_content = "\n".join(ctext)
-                            pos = self._extract_position_fields(page_content)
-                            shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
-                            writer.add_document(tantivy.Document(
-                                unique_id=str(cid), content=page_content, source=str(label),
-                                content_search=strip_search_diacritics(page_content),  # SEED-006 Stage 2
-                                full_header=str(chead), shelfmark=str(shelfmark),
-                                scope="page", boundaries="",
-                                content_head=pos['content_head'], content_tail=pos['content_tail'],
-                                line_starts=pos['line_starts'], line_ends=pos['line_ends'],
-                            ))
-                            parsed = self.meta_mgr.parse_full_id_components(chead)
-                            if parsed['sys_id']:
-                                if parsed['p_num']:
-                                    browse_map[parsed['sys_id']].append({'p_num': int(parsed['p_num']), 'uid': cid, 'full_header': chead})
-                                system_pages[parsed['sys_id']].append({
-                                    'p_num': int(parsed['p_num']) if parsed['p_num'] else 0,
-                                    'uid': cid,
-                                    'full_header': chead,
-                                    'source': label,
-                                    'content': "\n".join(ctext),
-                                    'sys_id': parsed['sys_id'],
-                                    'seq_index': global_seq_index
-                                })
-                                global_seq_index += 1
-                            total_docs += 1
-                        chead = line.replace("==>", "").replace("<==", "").strip() if label == "V0.8" else line
-                        cid = self.meta_mgr.extract_unique_id(line)
-                        ctext = []
-                    else: ctext.append(line)
-                    if progress_callback and processed_lines % 1000 == 0:
-                        progress_callback(processed_lines, total_lines)
-
-                if cid and ctext:
-                    page_content = " ".join(ctext)
-                    pos = self._extract_position_fields(page_content)
-                    shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
-                    writer.add_document(tantivy.Document(
-                        unique_id=str(cid), content=page_content, source=str(label),
-                        content_search=strip_search_diacritics(page_content),  # SEED-006 Stage 2
-                        full_header=str(chead), shelfmark=str(shelfmark),
-                        scope="page", boundaries="",
-                        content_head=pos['content_head'], content_tail=pos['content_tail'],
-                        line_starts=pos['line_starts'], line_ends=pos['line_ends'],
-                    ))
-                    parsed = self.meta_mgr.parse_full_id_components(chead)
-                    if parsed['sys_id']:
-                        if parsed['p_num']:
-                            browse_map[parsed['sys_id']].append({'p_num': int(parsed['p_num']), 'uid': cid, 'full_header': chead})
-                        system_pages[parsed['sys_id']].append({
-                            'p_num': int(parsed['p_num']) if parsed['p_num'] else 0,
-                            'uid': cid,
-                            'full_header': chead,
-                            'source': label,
-                            'content': " ".join(ctext),
-                            'sys_id': parsed['sys_id'],
-                            'seq_index': global_seq_index
-                        })
-                        global_seq_index += 1
-                    total_docs += 1
+        for cid, chead, label, page_content in self.iter_corpus_pages(progress_callback):
+            pos = self._extract_position_fields(page_content)
+            shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
+            writer.add_document(tantivy.Document(
+                unique_id=str(cid), content=page_content, source=str(label),
+                **self._search_fields(page_content),  # SEED-006 Stage 2; §5.6 B
+                full_header=str(chead), shelfmark=str(shelfmark),
+                scope="page", boundaries="",
+                content_head=pos['content_head'], content_tail=pos['content_tail'],
+                line_starts=pos['line_starts'], line_ends=pos['line_ends'],
+            ))
+            page = self.system_page(cid, chead, label, page_content, global_seq_index)
+            if page is not None:
+                if page['p_num']:
+                    browse_map[page['sys_id']].append({'p_num': page['p_num'], 'uid': cid, 'full_header': chead})
+                system_pages[page['sys_id']].append(page)
+                global_seq_index += 1
+            total_docs += 1
 
         # Build continuous documents per System ID
         for sid, pages in system_pages.items():
@@ -416,7 +466,16 @@ class Indexer:
                     self._add_continuous_document(writer, part_pages, scope="part", unique_id=f"part:{part_id}")
 
         LOGGER.info("Committing index (this may take a moment)...")
+        build['pages_and_aggregates_s'] = round(time.perf_counter() - started, 1)
         writer.commit()
+        writer.wait_merging_threads()
+        build['main_committed_s'] = round(time.perf_counter() - started, 1)
+
+        if seams:
+            build['seams'] = self._build_seam_index(os.path.join(db_path, SEAMS_SUBDIR),
+                                                    system_pages, seam_words)
+            build['seams_committed_s'] = round(time.perf_counter() - started, 1)
+
         for sid in browse_map: browse_map[sid].sort(key=lambda x: x['p_num'])
 
         total_before = sum(len(v) for v in browse_map.values())
@@ -427,7 +486,48 @@ class Indexer:
             LOGGER.info("Removed %d duplicate browse-map entries during indexing", total_before - total_after)
 
         with open(Config.BROWSE_MAP, 'wb') as f: pickle.dump(browse_map, f)
+        # Last: the marker says the index is complete in this format (shared/index_format.py).
+        if seams or reversed_field:
+            write_index_format(db_path, reversed_field=reversed_field, seams=build['seams'])
+        build['total_s'] = round(time.perf_counter() - started, 1)
+        build['page_docs'] = total_docs
+        self._rev_analyzer = None
         return total_docs
+
+    def _build_seam_index(self, seam_path, system_pages, seam_words):
+        """The seam index (§6.1) from the pages the main build read: one document per
+        junction of every chain (shared/index_seams.py). Returns its counts."""
+        os.makedirs(seam_path, exist_ok=True)
+        index = tantivy.Index(build_seam_schema(reversed_words=self._rev_analyzer is not None), path=seam_path)
+        register_search_tokenizers(index)
+        writer = index.writer(heap_size=500_000_000)
+        csv_bank = getattr(self.meta_mgr, 'csv_bank', None) or {}
+        codico = getattr(self.meta_mgr, 'codico_mgr', None)
+        part_to_folios = getattr(codico, 'part_to_folios', None) or {}
+
+        def folio_number(sid):
+            return codico._get_folio_number((csv_bank.get(sid) or {}).get('shelfmark', ''))
+
+        stats = ChainStats()
+        for pages in system_pages.values():
+            pages.sort(key=lambda p: p['seq_index'])
+        chains = chains_for(system_pages, part_to_folios, folio_number if codico else None, stats=stats)
+        count = chars = 0
+        for chain in chains:
+            for seam in seams_of(chain, seam_words):
+                writer.add_document(tantivy.Document(
+                    unique_id=seam.unique_id, content=seam.text, **self._search_fields(seam.text),
+                    source=str(seam.left.get('source', '')), full_header=str(seam.left.get('full_header', '')),
+                    sys_ids=' '.join(sorted({s['sys_id'] for s in seam.slices if s.get('sys_id')})),
+                    scope=SEAM_SCOPE, boundaries=json.dumps(seam.slices, ensure_ascii=False), cut=seam.cut))
+                count += 1
+                chars += len(seam.text)
+        LOGGER.info("Committing %d seam documents...", count)
+        writer.commit()
+        writer.wait_merging_threads()
+        return {'words_each_side': seam_words, 'count': count, 'chars': chars, 'chains': len(chains),
+                'runs': stats.runs, 'run_junctions': stats.run_junctions, 'bridges': stats.bridges,
+                'bridges_refused': dict(stats.bridges_refused)}
 
     def _add_continuous_document(self, writer, pages, scope, unique_id):
         """Add an aggregated document (system/part) with boundary metadata."""
@@ -463,7 +563,7 @@ class Indexer:
         writer.add_document(tantivy.Document(
             unique_id=str(unique_id),
             content=str(content),
-            content_search=strip_search_diacritics(str(content)),  # SEED-006 Stage 2
+            **self._search_fields(str(content)),  # SEED-006 Stage 2; §5.6 B
             source=str(first_source),
             full_header=str(first_header),
             shelfmark=str(shelfmark),
