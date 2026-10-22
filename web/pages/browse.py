@@ -439,14 +439,19 @@ VIEWER_STYLES = '''
     /* The rotation slider needs a wide panel; below 1440px the two rotate
        buttons do the job and the toolbar stays one row. */
     @media (max-width: 1439px) { .browse-rotate-slider { display: none !important; } }
-    /* Laptop and up: the lookup is a short row, the green card is ONE line
-       with the title cut to the width, the two panels get the height. */
+    /* Laptop and up: the lookup is a short row, the green card is one line
+       WHEN IT FITS, with the title cut to the width, and the two panels get
+       the height. Nothing forces the line: beside the 280px drawer a 1024px
+       screen leaves 744px, and the shelfmark, links and buttons alone can
+       need more (Codex on #434), so the row still wraps. The title's box has
+       a zero flex basis and a 160px floor: it fills what is left of the first
+       line and drops to a line of its own only when less than that is left. */
     @media (min-width: 1024px) {
         .browse-lookup-card { max-width: 560px; }
-        .browse-header-center { flex-wrap: nowrap !important; gap: 8px !important; min-width: 0; }
+        .browse-header-center { gap: 8px !important; min-width: 0; }
         .browse-header-center > h2 { white-space: nowrap; font-size: 1.15rem !important; }
         .browse-header-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .browse-header-center > *:has(> .browse-header-title) { flex: 1 1 auto; min-width: 0; }
+        .browse-header-center > *:has(> .browse-header-title) { flex: 1 1 0%; min-width: 160px; }
         .browse-header-center .q-btn { white-space: nowrap; }
     }
     /* Transcription type by width (the owner's screen-size table). */

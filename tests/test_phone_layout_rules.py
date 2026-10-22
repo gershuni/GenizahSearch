@@ -212,3 +212,10 @@ def test_browse_rules_name_every_class_the_page_sets_and_reach_the_inline_image_
     assert '.image-container { height: auto !important;' in rules
     # The transcription pane is un-scrolled the way the print rules do it.
     assert 'contain: none !important;' in rules
+    # From 1024px the green card is one line only when it fits: beside the
+    # 280px drawer a 1024px screen leaves 744px (Codex on #434), so the row
+    # may wrap and the title's box has a zero basis with a floor.
+    laptop = page_css[page_css.index('@media (min-width: 1024px) {'):]
+    laptop = laptop[:laptop.index('\n    }')]
+    assert '.browse-header-center {' in laptop and 'flex-wrap: nowrap' not in laptop
+    assert '.browse-header-center > *:has(> .browse-header-title) { flex: 1 1 0%; min-width: 160px; }' in laptop
