@@ -1323,7 +1323,9 @@ def star_pattern(sf, tolerance, fold=True, reverse=False):
     never narrower (§4) -- and *tolerance* at an end that is a letter. *fold*: folded as
     ``content_search`` is. *reverse*: on the reversed-words field, every form written
     backwards and the runs in reverse order, so a leading star becomes a trailing one
-    and the term-dictionary walk is pruned by the word's last letters (§6.1 point 5)."""
+    and the term-dictionary walk is pruned by the word's last letters (§6.1 point 5).
+    Case-insensitive (``(?i)``), as the check is: the index keeps a token's case
+    (Codex review of PR #442; Hebrew has none, so its patterns are unchanged)."""
     last = len(sf.runs) - 1
     pieces = []
     for i, run in enumerate(sf.runs):
@@ -1341,7 +1343,7 @@ def star_pattern(sf, tolerance, fold=True, reverse=False):
             out.append('.*')
         if forms:
             out.append('(?:' + '|'.join(tolerance.join(_rust_escape(c) for c in f) for f in forms) + ')')
-    return (tolerance if pieces[0] else '') + ''.join(out) + (tolerance if pieces[-1] else '')
+    return '(?i)' + (tolerance if pieces[0] else '') + ''.join(out) + (tolerance if pieces[-1] else '')
 
 
 def _split_largest_run(sf):
