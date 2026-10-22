@@ -337,6 +337,10 @@ def expand_under_guard(components, variants_on, ja_on, variant_mode, var_mgr):
 
 
 GUARD_REFUSAL_CODE = 'responsa_query_too_large'
+PATTERN_REFUSAL_TEXT = (
+    "This query is too long for Responsa search. Use fewer words "
+    "(Composition Search takes a longer passage)."
+)
 
 
 def guard_refusal(limit=None):
@@ -626,6 +630,16 @@ class _CheckPattern(Pattern):
         return m
 
 
+def _bounded(*patterns):
+    """Refuse a query whose patterns are too large to compile in good time
+    (``Config.MAX_RESPONSA_PATTERN_CHARS``): compiling cannot be interrupted, and 500
+    one-letter words fit the query and term limits yet made 12 MB of pattern (Codex
+    review of PR #432). Checked after the strings are built (milliseconds), before
+    anything compiles them."""
+    if max(len(p or '') for p in patterns) > Config.MAX_RESPONSA_PATTERN_CHARS:
+        raise ResponsaQueryRefused(_tr(PATTERN_REFUSAL_TEXT), code=GUARD_REFUSAL_CODE)
+
+
 def _names(prefix, n):
     return [f'{prefix}{i}' for i in range(n)]
 
@@ -723,9 +737,11 @@ def build_patterns(plans, max_gap, per_pair_gaps=None, *, flex_spacing=False, bi
 
     if exact_starts:
         exact, groups = one(strict=False, named=True, exact=True)
+        _bounded(exact)
         return exact, None, groups
     check, groups = one(strict=False, named=True)
     highlight, _ = one(strict=True, named=False)
+    _bounded(check, highlight)
     return check, highlight, groups
 
 
@@ -881,10 +897,12 @@ def build_line_patterns(line_groups, plans_by_group, line_gaps, query_has_bracke
         return '', '', []
     if exact_starts:
         exact, groups = one(strict=False, named=True, exact=True)
+        _bounded(exact)
         return exact, None, groups
     check, groups = one(strict=False, named=True)
     # The viewers compile a row's pattern without flags: MULTILINE goes with it.
     highlight = '(?m:' + one(strict=True, named=False)[0] + ')'
+    _bounded(check, highlight)
     return check, highlight, groups
 
 
