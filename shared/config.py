@@ -157,6 +157,12 @@ class Config:
     # the largest real queries make under 0.15 MB (#X# AND #Y#, 1,200 forms). The cap
     # allows about 55 words in a row, 27 bidirectional, 18 under AND.
     MAX_RESPONSA_PATTERN_CHARS = 600_000
+    # Responsa: the longest form (a word with its prefixes and suffixes) a query may
+    # hold. Its bracket-tolerant lookup is one regex_query, and tantivy-fst refuses
+    # one longer than 332 characters on content_search, 141 on content (measured
+    # 2026-10-22, the same for Hebrew, Latin and digits): past that the lookup lost
+    # the form's bracketed spellings, so the query is refused instead.
+    MAX_RESPONSA_FORM_CHARS = 120
     NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
     USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     HTTP_HEADERS = {"User-Agent": USER_AGENT}

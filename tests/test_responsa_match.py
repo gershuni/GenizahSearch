@@ -390,6 +390,25 @@ def test_a_query_of_too_many_words_is_refused_before_it_compiles():
     _line('|' + ' '.join(words[:20]) + ' | ' + ' '.join(words[20:30]))
 
 
+def test_a_form_too_long_for_the_tolerant_lookup_is_refused():
+    # Past tantivy-fst's size limit the tolerant lookup of a form cannot be built, and the
+    # bare term alone misses its bracketed spellings: refused, not zero rows (Codex review
+    # of PR #432). The cap sits below the limit on both fields the lookup reads.
+    from shared.config import Config
+    from shared.indexer import build_main_schema
+    from shared.responsa_match import _T_CONTENT, _T_CONTENT_SEARCH, tolerant_queries
+    cap = Config.MAX_RESPONSA_FORM_CHARS
+    with pytest.raises(ResponsaQueryRefused) as info:
+        _compiled('א' * (cap + 1))
+    assert info.value.code == GUARD_REFUSAL_CODE
+    with pytest.raises(ResponsaQueryRefused):
+        _line('|' + 'א' * (cap + 1))
+    assert _compiled('א' * cap).plans
+    schema = build_main_schema()
+    for field, tolerance in (('content_search', _T_CONTENT_SEARCH), ('content', _T_CONTENT)):
+        assert len(tolerant_queries(['א' * cap], schema, field, tolerance)) == 1, field
+
+
 def test_a_query_over_the_guard_is_refused_with_its_code():
     # 199 binary groups fit the 1,000-character cap; spelt out they are 2**199 forms.
     for groups in (13, 199):

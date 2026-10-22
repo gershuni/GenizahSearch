@@ -338,7 +338,7 @@ def expand_under_guard(components, variants_on, ja_on, variant_mode, var_mgr):
 
 GUARD_REFUSAL_CODE = 'responsa_query_too_large'
 PATTERN_REFUSAL_TEXT = (
-    "This query is too long for Responsa search. Use fewer words "
+    "This query is too long for Responsa search. Use fewer or shorter words "
     "(Composition Search takes a longer passage)."
 )
 
@@ -630,6 +630,16 @@ class _CheckPattern(Pattern):
         return m
 
 
+def _bounded_forms(plans):
+    """Refuse a query with a form longer than ``Config.MAX_RESPONSA_FORM_CHARS``:
+    its tolerant lookup cannot be built (tantivy-fst's size limit), and without it
+    the bare form's scored term misses its bracketed spellings, which the check
+    accepts -- zero rows, not the page (Codex review of PR #432). Checked when the
+    query is compiled, before any handler that would turn an error into no rows."""
+    if any(len(t) > Config.MAX_RESPONSA_FORM_CHARS for p in plans for t in p.terms()):
+        raise ResponsaQueryRefused(_tr(PATTERN_REFUSAL_TEXT), code=GUARD_REFUSAL_CODE)
+
+
 def _bounded(*patterns):
     """Refuse a query whose patterns are too large to compile in good time
     (``Config.MAX_RESPONSA_PATTERN_CHARS``): compiling cannot be interrupted, and 500
@@ -772,6 +782,7 @@ def compile_components(components, responsa_options, var_mgr, max_gap, per_pair_
                               flex_patterns=[_make_flex_spacing_pattern(w) for w in comp.words] if flex else []))
     check = highlight = ''
     groups = []
+    _bounded_forms(plans)
     exact = ''
     if plans:
         shape = dict(flex_spacing=flex, bidirectional=bool(opts.get('bidirectional', False)),
@@ -835,6 +846,7 @@ def compile_line_groups(line_groups, line_gaps, responsa_options, var_mgr, query
     if guard_warning:
         warnings.append(guard_warning)
     plans = [WordPlan(component=c, stems=f) for c, f in zip(positive, stems)]
+    _bounded_forms(plans)
     by_group, k = [], 0
     for group in kept_groups:
         by_group.append(plans[k:k + len(group.components)])
@@ -1013,7 +1025,9 @@ def tolerant_queries(forms, schema, field, tolerance):
         except ValueError as exc:
             if 'size limit' not in str(exc) or len(chunk) == 1:
                 if len(chunk) == 1:
-                    return      # its scored term still finds the bare form
+                    # Past the size limit alone: compile refuses such a form
+                    # (_bounded_forms), so only a longer cap would reach this.
+                    return
                 raise
             mid = len(chunk) // 2
             build(chunk[:mid])
