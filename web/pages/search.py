@@ -200,6 +200,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _saved_results_count = len(_saved_results)
     except TypeError:
         _saved_results_count = 0
+    # The run those results came from, from the same snapshot: a Responsa search's
+    # stamped URL carries its mode and options, and Back is told apart by this.
+    _saved_run = (
+        _saved_active_snapshot.get('last_run')
+        if _saved_active_snapshot else
+        _safe_get('search_last_run', None)
+    )
 
     bootstrap_state = resolve_search_bootstrap(
         initial_query=initial_query,
@@ -211,6 +218,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         saved_query=raw_saved_query,
         saved_results_count=_saved_results_count,
         use_slider=use_slider,
+        initial_responsa={
+            'variants': initial_variants, 'ja': initial_ja,
+            'flex_spacing': initial_flex_spaces, 'bidirectional': initial_bidirectional,
+        },
+        saved_run=_saved_run,
     )
     saved_mode = bootstrap_state['mode']
     saved_query = bootstrap_state['query']

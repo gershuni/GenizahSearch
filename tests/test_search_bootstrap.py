@@ -220,3 +220,165 @@ def test_back_navigation_restores_saved_mode_when_saved_mode_is_title():
 
     assert state['restore_saved_results'] is True
     assert state['mode'] == 'Title'
+
+
+# --- Back to a Responsa search (2026-10-22) ---------------------------------
+# A finished Responsa search stamps q=..&mode=responsa plus its option flags into
+# the URL, so its Back carries a mode. It was treated as a fresh link and the whole
+# search ran again (production 2026-10-22: one 45 s search ran three times). Back
+# is now recognised by the saved run: same query, same options.
+
+_RESPONSA_QUERY = '(מאמתי/מאימתי) (קורין/קוריין)'
+
+
+def _responsa_run(query=_RESPONSA_QUERY, mode='responsa', **options):
+    return {
+        'query': query, 'mode': mode, 'gap': 0, 'exclude_words': [], 'text_position': None,
+        'responsa_options': {
+            'responsa_mode': True,
+            'variants': options.get('variants', True),
+            'ja': options.get('ja', False),
+            'flex_spacing': options.get('flex_spacing', True),
+            'bidirectional': options.get('bidirectional', False),
+            'variant_mode': 'variants' if options.get('variants', True) else 'exact',
+        },
+        'corpus_scope': 'genizah', 'variant_settings': {},
+    }
+
+
+def _responsa_back(*, initial_query=_RESPONSA_QUERY, initial_responsa=None, saved_run=None,
+                   saved_results_count=81, saved_mode='exact', saved_query=_RESPONSA_QUERY):
+    # The URL search.py stamps for variants + flexible spacing: &variants=1&flex_spaces=1
+    # (the route's ints, by the engine's option names).
+    if initial_responsa is None:
+        initial_responsa = {'variants': 1, 'ja': None, 'flex_spacing': 1, 'bidirectional': None}
+    return resolve_search_bootstrap(
+        initial_query=initial_query,
+        initial_tag=None,
+        initial_mode='responsa',
+        initial_domain=None,
+        from_browse=None,
+        saved_mode=saved_mode,
+        saved_query=saved_query,
+        saved_results_count=saved_results_count,
+        use_slider=False,
+        initial_responsa=initial_responsa,
+        saved_run=_responsa_run() if saved_run is None else saved_run,
+    )
+
+
+def test_back_to_a_responsa_search_restores_its_results():
+    state = _responsa_back()
+
+    assert state == {
+        'mode': 'responsa',
+        'query': _RESPONSA_QUERY,
+        'restore_saved_results': True,
+        'restore_saved_filters': False,
+        'restore_saved_exclusions': True,
+    }
+
+
+def test_responsa_back_does_not_depend_on_the_saved_mode_preference():
+    """A Responsa search started from a /search?mode=responsa link sets the mode in
+    code, which writes no `search_mode`: the saved run decides, not that preference."""
+    assert _responsa_back(saved_mode='Title', saved_query='')['restore_saved_results'] is True
+
+
+def test_responsa_link_with_other_options_than_the_saved_run_searches_again():
+    for name in ('variants', 'ja', 'flex_spacing', 'bidirectional'):
+        url = {'variants': 1, 'ja': None, 'flex_spacing': 1, 'bidirectional': None}
+        url[name] = None if url[name] else 1
+        state = _responsa_back(initial_responsa=url)
+        assert state['restore_saved_results'] is False, name
+        assert state['restore_saved_exclusions'] is False, name
+        assert state['mode'] == 'responsa'
+
+
+def test_responsa_link_with_another_query_searches_again():
+    state = _responsa_back(initial_query='מאימתי קורין')
+
+    assert state['restore_saved_results'] is False
+    assert state['query'] == 'מאימתי קורין'
+
+
+def test_responsa_link_when_the_saved_run_was_not_responsa_searches_again():
+    state = _responsa_back(saved_run=_responsa_run(mode='literal'))
+
+    assert state['restore_saved_results'] is False
+
+
+def test_responsa_link_without_a_saved_run_searches_again():
+    """A snapshot saved before searches were saved with their run has nothing to
+    match the options against: a fresh search, as before."""
+    for saved_run in ({}, {'query': _RESPONSA_QUERY, 'mode': 'responsa'},
+                      {'query': _RESPONSA_QUERY, 'mode': 'responsa', 'responsa_options': None}):
+        assert _responsa_back(saved_run=saved_run)['restore_saved_results'] is False, saved_run
+
+
+def test_responsa_link_with_no_saved_results_searches_again():
+    assert _responsa_back(saved_results_count=0)['restore_saved_results'] is False
+
+
+def test_other_explicit_modes_in_the_url_still_search_again():
+    """Only Responsa stamps a mode; any other mode in the URL came from a link."""
+    state = resolve_search_bootstrap(
+        initial_query='שלום',
+        initial_tag=None,
+        initial_mode='variants',
+        initial_domain=None,
+        from_browse=None,
+        saved_mode='variants',
+        saved_query='שלום',
+        saved_results_count=12,
+        use_slider=False,
+        saved_run={'query': 'שלום', 'mode': 'variants', 'responsa_options': None},
+    )
+
+    assert state['restore_saved_results'] is False
+    assert state['mode'] == 'variants'
+
+
+def _search_page_tree():
+    import ast
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / 'web' / 'pages' / 'search.py').read_text(encoding='utf-8')
+    return ast.parse(source)
+
+
+def test_search_page_passes_the_stamped_responsa_options_and_the_saved_run():
+    """The call site: the four URL flags reach the bootstrap under the names the
+    saved run uses, and the saved run is passed. A renamed key would quietly turn
+    Back to Responsa into a fresh search again."""
+    import ast
+    from web.search_bootstrap import RESPONSA_URL_OPTIONS
+
+    calls = [node for node in ast.walk(_search_page_tree())
+             if isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'resolve_search_bootstrap']
+    assert len(calls) == 1, 'expected one bootstrap call in search.py; update this test'
+    keywords = {kw.arg: kw.value for kw in calls[0].keywords}
+    assert 'saved_run' in keywords
+    passed = keywords['initial_responsa']
+    assert isinstance(passed, ast.Dict)
+    mapping = {key.value: value.id for key, value in zip(passed.keys, passed.values)}
+    assert mapping == {
+        'variants': 'initial_variants', 'ja': 'initial_ja',
+        'flex_spacing': 'initial_flex_spaces', 'bidirectional': 'initial_bidirectional',
+    }
+    assert set(mapping) == set(RESPONSA_URL_OPTIONS)
+
+
+def test_the_saved_run_names_every_stamped_responsa_option():
+    """The saved run's options come from _responsa_options_from_controls; each
+    option the URL carries must be one of its keys, or nothing ever matches."""
+    import ast
+    from web.search_bootstrap import RESPONSA_URL_OPTIONS
+
+    funcs = [node for node in ast.walk(_search_page_tree())
+             if isinstance(node, ast.FunctionDef) and node.name == '_responsa_options_from_controls']
+    assert len(funcs) == 1
+    returned = [node.value for node in ast.walk(funcs[0])
+                if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict)]
+    assert len(returned) == 1
+    keys = {key.value for key in returned[0].keys}
+    assert set(RESPONSA_URL_OPTIONS) <= keys

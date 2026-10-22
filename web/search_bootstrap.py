@@ -18,6 +18,29 @@ VALID_SEARCH_MODES = {
     'pgp_tags',
 }
 
+# The Responsa options a finished search stamps into its URL (search.py's
+# history.replaceState), as the engine's option names.
+RESPONSA_URL_OPTIONS = ('variants', 'ja', 'flex_spacing', 'bidirectional')
+
+
+def _matches_saved_responsa_run(initial_query: str | None, initial_responsa: Dict[str, Any] | None,
+                                saved_run: Dict[str, Any] | None) -> bool:
+    """True when a Responsa URL is the one the saved run stamped: same query, same options.
+
+    A Responsa search stamps ``mode=responsa`` and its option flags into the URL,
+    so its Back carries a mode; the saved run (``SearchUIState.last_run``) is what
+    tells that URL apart from a shared or typed Responsa link.
+    """
+    if not isinstance(saved_run, dict) or saved_run.get('mode') != 'responsa':
+        return False
+    if saved_run.get('query') != initial_query:
+        return False
+    options = saved_run.get('responsa_options')
+    if not isinstance(options, dict):
+        return False
+    url_options = initial_responsa or {}
+    return all(bool(options.get(name)) == bool(url_options.get(name)) for name in RESPONSA_URL_OPTIONS)
+
 
 def resolve_search_bootstrap(
     *,
@@ -30,6 +53,8 @@ def resolve_search_bootstrap(
     saved_query: str | None,
     saved_results_count: int = 0,
     use_slider: bool,
+    initial_responsa: Dict[str, Any] | None = None,
+    saved_run: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Resolve whether persisted search UI state should be reused for this request.
 
@@ -37,6 +62,10 @@ def resolve_search_bootstrap(
     /browse to /search?q=<stamped-query>: when positive and the URL query
     matches ``saved_query``, the saved snapshot is restored (see 75-03-PLAN.md).
     Defaults to 0 so pre-fix callers fall back to the has_route_context path.
+
+    A Responsa search's URL also carries ``mode=responsa`` and its options
+    (``initial_responsa``, by the engine's option names); it is Back when they
+    and the query match the saved run (``saved_run``, the snapshot's last_run).
     """
     explicit_mode = initial_mode if initial_mode in VALID_SEARCH_MODES else None
 
@@ -52,15 +81,22 @@ def resolve_search_bootstrap(
     # /search?q=X requests (shared links, homepage nav, different query than
     # saved) do NOT inherit stale filters/exclusions — those paths fall through
     # to the existing has_route_context branch below.
+    #
+    # A Responsa search stamps its mode and options too (q=..&mode=responsa&variants=1),
+    # so its Back is recognised by the saved run instead: same query, same options.
+    if explicit_mode is None:
+        url_is_the_saved_search = saved_query is not None and initial_query == saved_query
+    elif explicit_mode == 'responsa':
+        url_is_the_saved_search = _matches_saved_responsa_run(initial_query, initial_responsa, saved_run)
+    else:
+        url_is_the_saved_search = False
     is_back_navigation = (
         not from_browse
         and initial_tag in (None, '')
-        and explicit_mode is None
         and (initial_domain in (None, ''))
         and initial_query is not None
         and initial_query != ''
-        and saved_query is not None
-        and initial_query == saved_query
+        and url_is_the_saved_search
         and saved_results_count > 0
     )
 
