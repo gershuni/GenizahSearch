@@ -21,11 +21,14 @@ from shared.refinement import RefinementStep  # noqa: E402
 APP = genizah_app.GenizahGUI
 CLEAN = {'capped': False, 'interrupted': False}
 PARTIAL = {'capped': True, 'interrupted': False, 'partial': True, 'limited': False}
+# Stopped after it had left crossings out by rule: the stop left candidates out too.
+STOPPED_PARTIAL = {'capped': False, 'interrupted': True, 'partial': True, 'limited': False}
 
 
 class _Host:
     _new_step_marks = APP._new_step_marks
     _run_left_matches_out = APP._run_left_matches_out
+    _run_only_partial = APP._run_only_partial
 
     def __init__(self, cutoff, chain):
         self._search_cutoff = cutoff
@@ -42,6 +45,7 @@ def _step(capped, partial):
     (_step(True, True), {'capped': False, 'interrupted': True}, (True, False)),   # stopped: not partial
     (_step(True, False), CLEAN, (True, False)),                       # within a completable step
     (_step(False, False), PARTIAL, (True, True)),                     # its own crossings left out
+    (_step(False, False), STOPPED_PARTIAL, (True, False)),            # ...and then stopped: completable
     (_step(False, False), CLEAN, (False, False)),
 ])
 def test_a_new_step_inherits_what_its_parent_cannot_complete(parent, cutoff, marks):
@@ -51,6 +55,16 @@ def test_a_new_step_inherits_what_its_parent_cannot_complete(parent, cutoff, mar
 def test_a_first_step_has_only_its_own_marks():
     assert _Host(PARTIAL, [])._new_step_marks() == (True, True)
     assert _Host(CLEAN, [])._new_step_marks() == (False, False)
+
+
+@pytest.mark.parametrize('cutoff, partial', [(PARTIAL, True), (STOPPED_PARTIAL, False), (CLEAN, False)])
+def test_a_stopped_star_search_can_be_completed(cutoff, partial):
+    # Codex round 3 on PR #443: a star search that left crossings out and was then
+    # stopped kept result_partial, so Search within did not run it again, though the
+    # stop left out candidates completing reads. The chain's first step
+    # (_run_only_partial) and a step within it (_new_step_marks) both say so.
+    assert _Host(cutoff, [])._run_only_partial() is partial
+    assert _Host(cutoff, [])._new_step_marks()[1] is partial
 
 
 class _Session:

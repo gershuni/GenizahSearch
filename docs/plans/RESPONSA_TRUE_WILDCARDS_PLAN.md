@@ -1263,7 +1263,9 @@ today's finite crossings to the seams (decision 10).
    (`RefinementStep.result_partial`, `_cannot_complete`), it stays "+" and Search within says so
    (Codex round 1 on PR #442). A step searched within such a step inherits it unless its own
    candidate limit cut it (`step_partial`: its restriction stays incomplete whatever it reads;
-   Codex round 2). A crossing step that fails is `capped` only, never silent.
+   Codex round 2). A stopped search is never `result_partial`, whatever it had left out by rule:
+   the stop left candidates out too, and running it again reads them (`only_partial`; Codex round
+   3 on PR #443). A crossing step that fails is `capped` only, never silent.
 9. **Limits** (decision 3): `Config.RESPONSA_PAGE_LIMIT` = 150,000 page candidates on the main,
    line-break and My Library Responsa paths; the whole-manuscript documents and the seams each
    read up to `Config.SEARCH_LIMIT` (50,000) of their own. `ids_only` reads every candidate on

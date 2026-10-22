@@ -9,6 +9,9 @@ the recording job queue of tests/test_web_variant_settings_per_visitor.py.
 """
 from __future__ import annotations
 
+import asyncio
+import gc
+
 import httpx
 
 from tests.test_web_variant_settings_per_visitor import (  # noqa: F401  (server is a fixture)
@@ -20,13 +23,33 @@ def _sent(queue):
     return {queue.query_of(p): p['settings']['variant_max_changes'] for p in queue.payloads}
 
 
+def _search_pages():
+    from web.pages.search_state import SearchUIState
+    return [o for o in gc.get_objects() if isinstance(o, SearchUIState)]
+
+
+async def wait_for_the_first_search(earlier, timeout=15.0):
+    """The page ignores a search submitted while one runs (its double-submit guard),
+    so the second search waits for the first to finish, as a person would. Its job
+    reaching the queue is not that: the page still has to take the answer back,
+    which a loaded runner can do after the next submit. *earlier* are the pages
+    there before this test's: one an earlier test left can still say it runs."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while any(p.is_running for p in _search_pages() if not any(p is e for e in earlier)):
+        assert loop.time() < deadline, 'the first search never finished'
+        await asyncio.sleep(0.02)
+
+
 def test_an_old_saved_value_seeds_extended_and_maximum_only(server):  # noqa: F811 (the imported fixture)
     async def driver(a, b):
+        earlier = _search_pages()
         await a.open('/search')
         store(a, search_max_changes=2)          # saved before levels had their own
         await a.open('/search')
         submit(a, f'? {WORD}')
         await wait_for_payloads(server.queue, 1)
+        await wait_for_the_first_search(earlier)
         submit(a, f'?? {WORD2}')
         await wait_for_payloads(server.queue, 2)
 
@@ -36,11 +59,13 @@ def test_an_old_saved_value_seeds_extended_and_maximum_only(server):  # noqa: F8
 
 def test_each_level_runs_with_its_own_value(server):  # noqa: F811 (the imported fixture)
     async def driver(a, b):
+        earlier = _search_pages()
         await a.open('/search')
         store(a, search_max_changes_by_level={'basic': 2, 'extended': 3, 'maximum': 1})
         await a.open('/search')
         submit(a, f'?? {WORD}')
         await wait_for_payloads(server.queue, 1)
+        await wait_for_the_first_search(earlier)
         submit(a, f'??? {WORD2}')
         await wait_for_payloads(server.queue, 2)
 

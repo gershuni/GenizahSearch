@@ -549,7 +549,7 @@ def _parse_single_token(token: str) -> ResponsaComponent:
         has_trailing_hash = True
         token = token[:-1]
 
-    # Check for OR group: token is entirely "(word1/word2/...)" possibly with trailing *
+    # Check for OR group: token is entirely "(word1/word2/...)" possibly with trailing star(s)
     if token.startswith('(') and ')' in token:
         close_idx = token.rindex(')')
         inner = token[1:close_idx]
@@ -559,7 +559,7 @@ def _parse_single_token(token: str) -> ResponsaComponent:
             words = [w.strip() for w in inner.split('/') if w.strip()]
 
             wildcard = None
-            if after == '*':
+            if after and not after.strip('*'):    # stars in a row are one, as after a word
                 wildcard = 'suffix'
             # Check for trailing # after OR group close
             trailing_hash_or = has_trailing_hash

@@ -117,8 +117,10 @@ def truncate_chain(chain: list[RefinementStep], index: int) -> list[RefinementSt
 
 def only_partial(cutoff) -> bool:
     """The search the *cutoff* signal is of left out only what reading every candidate
-    cannot add (``_note_search_cutoff(partial=True)``, no candidate limit hit)."""
-    return bool((cutoff or {}).get('partial') and not (cutoff or {}).get('limited'))
+    cannot add (``_note_search_cutoff(partial=True)``, no candidate limit hit, not
+    stopped: a stop leaves candidates out too, Codex round 3 on PR #443)."""
+    cutoff = cutoff or {}
+    return bool(cutoff.get('partial') and not cutoff.get('limited') and not cutoff.get('interrupted'))
 
 
 def saved_cutoff(cutoff, rows: int, kept: int) -> dict:
