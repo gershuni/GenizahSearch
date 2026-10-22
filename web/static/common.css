@@ -1161,13 +1161,30 @@ body {
     from { opacity: 0; max-height: 0; }
     to { opacity: 1; max-height: 500px; }
 }
-/* On mobile, the side-by-side expansion layout stacks vertically via flex-wrap. */
+/* The expanded result (owner's mockup, 2026-10-22): the full text in the
+   snippet's place, a 150px thumbnail beside it, one line of actions under
+   them. On a phone the thumbnail drops under the text at 56px. */
+.result-inline-expand { border-top: 0 !important; margin-top: 2px !important; padding-top: 0 !important; }
+.result-card.is-expanded .result-snippet { display: none !important; }
+.result-card.is-expanded { border-color: #a7f3d0 !important; box-shadow: 0 2px 10px rgba(4, 120, 87, .10); }
+.expand-row { gap: 12px !important; align-items: stretch; }
+.expand-thumb { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.result-inline-expand .expand-thumb img {
+    width: 150px !important; height: 186px !important; object-fit: contain; border-radius: 6px; background: #1a1a1a;
+}
+.expand-caption { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.result-inline-expand .q-scrollarea { max-height: 220px !important; }
+.result-inline-expand .expand-text {
+    font-size: 15px !important; line-height: 1.75 !important; padding: 8px 12px !important;
+    background: #fffdf5 !important; border: 1px solid #efe9d6;
+}
+[data-theme="dark"] .result-inline-expand .expand-text { background: var(--bg-tertiary) !important; border-color: var(--border-light); }
+.expand-actions { gap: 8px !important; padding-top: 6px; }
 @media (max-width: 640px) {
-    .result-inline-expand img {
-        width: 100% !important;
-        max-width: 300px;
-        max-height: 200px;
-    }
+    .expand-row { flex-direction: column; }
+    .expand-thumb { flex-direction: row; align-items: center; gap: 8px; order: 2; }
+    .result-inline-expand .expand-thumb img { width: 56px !important; height: 70px !important; }
+    .result-inline-expand .q-scrollarea { max-height: 300px !important; }
 }
 
 /* Collapsible Search Panel */
@@ -1296,15 +1313,18 @@ body {
 }
 
 /* Header reveal only on mobile - disable on desktop */
-@media (min-width: 769px) {
+@media (min-width: 1024px) {
     .q-header {
         transform: translateY(0) !important;
     }
 }
 
-/* Mobile drawer - CSS only, hide on phones/tablets */
+/* Mobile drawer - CSS only, hide on phones/tablets. Up to 1023px since
+   2026-10-22 (the owner's screen-size table): a tablet gets the overlay
+   drawer, so the content keeps the width. The drawer's own breakpoint prop in
+   web/main.py says the same. */
 /* Handles both LTR (left drawer) and RTL (right drawer) modes */
-@media (max-width: 768px) {
+@media (max-width: 1023px) {
     .q-drawer--left:not(.q-drawer--on-top) {
         transform: translateX(-100%) !important;
     }
@@ -2351,12 +2371,30 @@ body {
     /* The form: the collapse chevron sits in the corner instead of on a row
        of its own; padding and the Advanced Options gap come down. */
     .search-panel-expanded { padding: 12px !important; position: relative; }
-    .search-collapse-row { position: absolute; top: 2px; inset-inline-end: 2px; width: auto !important; margin: 0 !important; z-index: 1; }
     .search-panel-expanded .q-expansion-item { margin-top: 8px !important; }
 
-    /* The results toolbar is one line: the count and the filter buttons scroll
-       sideways in it, the export icons are a menu (.results-more-btn), and a
-       filter that is not yet available takes no space (.tb-hidden). */
+    /* Results: no reserved pagination row, a tighter list, cards about half
+       as tall. */
+    .pagination-placeholder { display: none !important; }
+    .results-list { padding: 8px !important; gap: 8px !important; }
+    .result-card { padding: 10px 12px !important; }
+    .result-card .q-btn { min-height: 32px !important; }
+    /* The actions sit beside the badges on wide screens; on a phone they
+       drop to a line of their own under the title. */
+    .result-card > .nicegui-row:first-child { flex-wrap: wrap !important; }
+    .result-card .result-head { flex: 1 1 0% !important; min-width: 0; }
+    .result-card .result-actions { margin-top: 0 !important; flex: 1 1 100%; order: 10; opacity: 1; }
+    .result-snippet {
+        padding: 8px 10px !important; line-height: 1.55 !important; margin-top: 8px !important;
+        display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+    }
+}
+
+/* Under 1024px the results toolbar is one line: the count and the filter
+   buttons scroll sideways in it, the export icons are a menu
+   (.results-more-btn), and a filter that is not yet available takes no space
+   (.tb-hidden; wider screens reserve its space so nothing shifts). */
+@media (max-width: 1023px) {
     .results-header { flex-wrap: nowrap !important; padding: 6px 8px !important; gap: 4px !important; }
     .results-header .q-btn { min-height: 34px !important; }
     .results-count-group {
@@ -2368,16 +2406,117 @@ body {
     .results-count-group .q-btn { white-space: nowrap; }
     .tb-hidden { display: none !important; }
     .results-export-group { flex: 0 0 auto; }
+}
 
-    /* Results: no reserved pagination row, a tighter list, cards about half
-       as tall. */
-    .pagination-placeholder { display: none !important; }
-    .results-list { padding: 8px !important; gap: 8px !important; }
-    .result-card { padding: 10px 12px !important; }
-    .result-card .q-btn { min-height: 32px !important; }
-    .result-card .result-shelfmark { order: -1; }
-    .result-card .result-actions { margin-top: 0 !important; }
-    .result-snippet { padding: 8px 10px !important; line-height: 1.55 !important; margin-top: 8px !important; }
+/* ========================================================================
+   Wide screens (the owner's screen-size table, 2026-10-22)
+   ======================================================================== */
+@media (min-width: 1440px) {
+    .main-content > .max-w-7xl { max-width: 1600px !important; }
+    .results-list { max-width: 1100px; margin-left: auto; margin-right: auto; }
+}
+
+/* ========================================================================
+   Quick view (owner's mockups, 2026-10-22)
+   ======================================================================== */
+
+.adv-scroll .q-scrollarea__content { width: 100%; min-width: 0; box-sizing: border-box; }
+
+/* The info bar is one line on a laptop: shelfmark, title, chips, actions.
+   On a phone it is two: the title line never wraps (the title is cut), the
+   icons and chips share the second. */
+.adv-info-bar > .nicegui-column { padding: 4px 16px !important; gap: 4px !important; }
+@media (min-width: 1024px) {
+    .adv-info-bar > .nicegui-column { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 12px !important; }
+    .adv-info-bar > .nicegui-column > .nicegui-row:first-child { flex: 1 1 auto; min-width: 0; width: auto !important; }
+    .adv-info-bar > .nicegui-column > .nicegui-row:last-child { flex: none; }
+}
+@media (max-width: 640px) {
+    .adv-info-bar > .nicegui-column { padding: 4px 8px !important; gap: 2px !important; }
+    .adv-info-bar > .nicegui-column > .nicegui-row:first-child { flex-wrap: nowrap !important; }
+    .adv-info-bar > .nicegui-column > .nicegui-row:first-child > .nicegui-row:first-child { flex-wrap: nowrap !important; min-width: 0; }
+    .adv-info-bar .truncate { max-width: 100% !important; }
+}
+/* The actions at the foot keep their buttons and lose their heading and padding. */
+.adv-actions-card { padding: 8px 12px !important; gap: 0 !important; }
+.adv-actions-card h3 { display: none; }
+.adv-actions-card .btn-primary { padding: 6px 12px; }
+/* The image panel: one toolbar row, sliders behind `tune`. */
+.adv-image-head { padding: 4px 8px !important; }
+.adv-image-adjust { display: none !important; }
+.adv-image-adjust.is-open { display: flex !important; }
+/* Transcription type by width, as on /browse. */
+.adv-text-col .transcription-text { font-size: 17px !important; line-height: 1.8 !important; }
+@media (min-width: 641px) { .adv-text-col .transcription-text { font-size: 18px !important; line-height: 1.9 !important; } }
+@media (min-width: 1024px) { .adv-text-col .transcription-text { font-size: 19px !important; line-height: 2 !important; } }
+@media (min-width: 1440px) { .adv-text-col .transcription-text { font-size: 20px !important; max-width: 760px; } }
+/* Tabs exist only on a phone. */
+.adv-tabs { display: none; }
+@media (max-width: 640px) {
+    .adv-tabs { display: flex; position: sticky; top: 0; z-index: 3; background: var(--bg-secondary); }
+    .adv-tab-text .adv-image-col, .adv-tab-text .adv-info { display: none !important; }
+    .adv-tab-image .adv-text-col, .adv-tab-image .adv-info { display: none !important; }
+    .adv-tab-info .adv-text-col, .adv-tab-info .adv-image-col { display: none !important; }
+    .adv-content { padding-left: 8px !important; padding-right: 8px !important; }
+    .adv-image-title { display: none; }
+    /* The text panel scrolls with the dialog, not inside it. */
+    .adv-text-col .q-scrollarea,
+    .adv-text-col .q-scrollarea__container,
+    .adv-text-col .q-scrollarea__content {
+        height: auto !important; max-height: none !important; min-height: 0 !important;
+        overflow: visible !important; position: static !important; transform: none !important;
+        contain: none !important;
+    }
+    .adv-text-col .q-scrollarea__thumb, .adv-text-col .q-scrollarea__bar { display: none !important; }
+    .adv-text-col .q-scrollarea .p-6 { padding: 12px !important; }
+}
+
+/* ========================================================================
+   Search at every width (owner's mockups, 2026-10-22)
+   ======================================================================== */
+
+/* The form is one row: the field headings stay in the tree for screen
+   readers, Quasar's own field labels show instead; the two option panels
+   open from buttons in the row, so their expansion headers are hidden. */
+.search-field-label {
+    position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.search-panel-expanded { padding: 12px 16px !important; }
+.search-adv-panel > .q-expansion-item__container > .q-item,
+.search-filters-panel > .q-expansion-item__container > .q-item { display: none; }
+.search-row-btn { height: 36px; }
+.results-header { padding: 6px 12px !important; }
+.density-toggle { gap: 0 !important; }
+.density-toggle .q-btn { min-width: 30px; }
+/* Tablet: the query box shares its line with mode and gap, so the form is two
+   lines, not three. */
+@media (min-width: 641px) and (max-width: 1023px) {
+    .search-main-row > .min-w-80 { min-width: 240px !important; }
+}
+
+/* Result rows. One DOM, two densities on the list: `density-compact` is one
+   header line (shelfmark, badges, the title cut to the width, the actions)
+   over a two-line snippet; `density-comfortable` is the older card. */
+.results-list { gap: 6px !important; padding: 8px 16px !important; }
+.result-card { padding: 8px 12px !important; gap: 4px !important; }
+.result-card .result-head { gap: 6px !important; }
+.result-badges .result-index { order: 99; }
+.result-actions { flex: none; opacity: .45; transition: opacity .15s; }
+.result-card:hover .result-actions,
+.result-card:focus-within .result-actions { opacity: 1; }
+.result-snippet { margin-top: 6px !important; padding: 6px 10px !important; line-height: 1.6 !important; }
+@media (min-width: 641px) {
+    .density-compact .result-head { flex-direction: row; align-items: center; flex-wrap: nowrap; }
+    .density-compact .result-badges { flex: none; flex-wrap: nowrap !important; }
+    .density-compact .result-title { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; flex-wrap: nowrap !important; }
+    .density-compact .result-title > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .density-compact .result-snippet {
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+        padding: 4px 8px !important; line-height: 1.5 !important; margin-top: 2px !important;
+    }
+    .density-comfortable .result-card { padding: 14px 16px !important; }
+    .density-comfortable .result-actions { opacity: 1; }
 }
 
 /* Catalog browse: the sidebar stacks above the results and is hidden until the

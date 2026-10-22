@@ -5848,4 +5848,6 @@ TRANSLATIONS.update({
 # panel's slider toggle, and the catalog-browse sidebar toggle.
 TRANSLATIONS.update({
     "More actions": "פעולות נוספות",
+    "Compact rows": "שורות צפופות",
+    "Comfortable rows": "שורות מרווחות",
 })

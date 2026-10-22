@@ -319,6 +319,14 @@ function createManuscriptViewer(options) {
             // Mouse wheel zoom - attach to image
             this.el.onwheel = this.onWheel.bind(this);
 
+            // Touch (2026-10-22): two fingers pinch-zoom; one finger pans once
+            // the image is zoomed in. A single finger on an unzoomed image is
+            // left to the page, so a phone can still scroll past the picture.
+            this.el.addEventListener('touchstart', this.onTouchStart.bind(this), { passive: false });
+            this.el.addEventListener('touchmove', this.onTouchMove.bind(this), { passive: false });
+            this.el.addEventListener('touchend', this.onTouchEnd.bind(this));
+            this.el.addEventListener('touchcancel', this.onTouchEnd.bind(this));
+
             // Set initial cursor on the image
             this.el.style.cursor = 'grab';
         },
@@ -378,6 +386,51 @@ function createManuscriptViewer(options) {
             // SEED-010: detach this drag's document listeners (paired with onMouseDown).
             if (this._boundMove) document.removeEventListener('mousemove', this._boundMove);
             if (this._boundUp) document.removeEventListener('mouseup', this._boundUp);
+        },
+
+        _touchDistance: function(touches) {
+            var dx = touches[0].clientX - touches[1].clientX;
+            var dy = touches[0].clientY - touches[1].clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        },
+
+        onTouchStart: function(e) {
+            if (e.touches.length === 2) {
+                e.preventDefault();
+                this._pinch = { distance: this._touchDistance(e.touches), scale: this.state.scale };
+                this.state.isDragging = false;
+            } else if (e.touches.length === 1 && this.state.scale > 1.01) {
+                e.preventDefault();
+                this.state.isDragging = true;
+                this.state.startX = e.touches[0].clientX - this.state.x;
+                this.state.startY = e.touches[0].clientY - this.state.y;
+            }
+        },
+
+        onTouchMove: function(e) {
+            var self = this;
+            if (this._pinch && e.touches.length === 2) {
+                e.preventDefault();
+                var distance = this._touchDistance(e.touches);
+                if (this._pinch.distance > 0) {
+                    this.state.scale = Math.max(0.25, Math.min(maxZoom, this._pinch.scale * distance / this._pinch.distance));
+                    requestAnimationFrame(function() {
+                        self.applyTransform();
+                        var label = zoomLabelSelector ? document.querySelector(zoomLabelSelector) : null;
+                        if (label) label.textContent = Math.round(self.state.scale * 100) + '%';
+                    });
+                }
+            } else if (this.state.isDragging && e.touches.length === 1) {
+                e.preventDefault();
+                this.state.x = e.touches[0].clientX - this.state.startX;
+                this.state.y = e.touches[0].clientY - this.state.startY;
+                requestAnimationFrame(function() { self.applyTransform(); });
+            }
+        },
+
+        onTouchEnd: function(e) {
+            if (e.touches.length < 2) this._pinch = null;
+            if (e.touches.length === 0) this.state.isDragging = false;
         },
 
         applyTransform: function() {

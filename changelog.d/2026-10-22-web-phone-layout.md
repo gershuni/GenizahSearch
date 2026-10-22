@@ -35,3 +35,25 @@ beside a results column about 60px wide.
 ### Catalog browse
 - Under 768px the filter sidebar is hidden behind a Filters button and stacks
   above the results; the table keeps its columns and scrolls sideways.
+
+### Every width (the owner's mockups, 2026-10-22)
+- Search: the form is one row on a laptop (two on a tablet) with Advanced
+  Options and "Search only in..." as buttons that open their panels; the
+  results toolbar carries a density toggle and one menu for the post-filters
+  and the exports. Rows are compact by default (one header line, a two-line
+  snippet, actions on hover), remembered per visitor; "comfortable" restores
+  the older card.
+- An expanded result shows the full text in the snippet's place beside a
+  150 px thumbnail, with one action line; on a phone the thumbnail drops
+  under the text.
+- Quick view: one info line on a laptop, the image sliders behind a `tune`
+  button, catalog and PGP details as collapsed bars at the foot; on a phone
+  the view is three tabs, Text, Image and Info, with prev and next in the
+  header.
+- Browse: the page title is for screen readers, the lookup is a slim row,
+  the green card is one line on a laptop with the title cut to the width,
+  the image sliders sit behind `tune` at every width; a tablet gets the
+  overlay drawer (breakpoint 1023). Transcription type scales by width and
+  content caps at 1600 px on wide screens.
+- The manuscript viewer takes touch: two fingers pinch-zoom, one finger pans
+  a zoomed image, and an unzoomed image leaves the page free to scroll.

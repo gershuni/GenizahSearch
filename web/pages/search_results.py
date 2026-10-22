@@ -230,11 +230,22 @@ def toggle_expansion(search_state, refs, index):
     #25: visibility is driven through NiceGUI state (set_visibility) instead of
     imperative inline display:none/block, and aria-expanded is kept in sync (#26).
     """
+    def _mark_card(ref, expanded: bool):
+        # `is-expanded` on the card: common.css hides the snippet while the
+        # full text is open in its place (owner's mockup, 2026-10-22).
+        card = getattr(getattr(ref, 'parent_slot', None), 'parent', None)
+        if card is not None and not card.is_deleted:
+            if expanded:
+                card.classes(add='is-expanded')
+            else:
+                card.classes(remove='is-expanded')
+
     if search_state.expanded_index == index:
         # Collapse current
         ref = search_state.expansion_refs.get(index)
         if ref and not ref.is_deleted:
             ref.set_visibility(False)
+            _mark_card(ref, False)
         _set_expansion_aria(search_state, index, False)
         search_state.expanded_index = None
     else:
@@ -243,11 +254,13 @@ def toggle_expansion(search_state, refs, index):
             old_ref = search_state.expansion_refs.get(search_state.expanded_index)
             if old_ref and not old_ref.is_deleted:
                 old_ref.set_visibility(False)
+                _mark_card(old_ref, False)
             _set_expansion_aria(search_state, search_state.expanded_index, False)
         # Expand new
         ref = search_state.expansion_refs.get(index)
         if ref and not ref.is_deleted:
             ref.set_visibility(True)
+            _mark_card(ref, True)
         _set_expansion_aria(search_state, index, True)
         search_state.expanded_index = index
         # Trigger lazy text loading if registered for this card
@@ -338,8 +351,11 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
             # Invisible placeholder reserving same height as pagination row
             ui.element('div').classes('pagination-placeholder').style('height: 40px; visibility: hidden;')
 
-        # Render only this page of results (`results-list`: tighter on a phone)
-        with ui.column().classes('w-full gap-2 p-4 results-list'):
+        # Render only this page of results. `density-compact` / `density-comfortable`
+        # (common.css) is this visitor's row density, toggled live from the toolbar.
+        _density = _safe_get('search_density', 'compact') or 'compact'
+        with ui.column().classes(f'w-full gap-2 p-4 results-list density-{_density}') as _results_list:
+            refs.results_list = _results_list
             for i, res in enumerate(page_results):
                 create_result_card(search_state, refs, start + i, res)
 
@@ -531,10 +547,11 @@ def create_result_card(search_state, refs, index, result):
     # Truncate title for display
     title_short = (title[:60] + '...') if title and len(title) > 60 else title
 
-    # `result-card` / `result-snippet`: a phone card loses its desktop padding,
-    # line height and reserved rows (common.css: 400px -> ~345px for a seven-line
-    # snippet); the top row never wraps, so the checkbox stays beside the badges
-    # instead of taking a line of its own.
+    # `result-card` / `result-snippet` (common.css): the compact density is one
+    # header line -- checkbox, shelfmark, badges, the title cut to the width, the
+    # actions -- over a two-line snippet (three on a phone); the comfortable
+    # density is the older card. The top row never wraps, so the checkbox stays
+    # beside the badges instead of taking a line of its own.
     with ui.card().classes(
         'w-full p-4 cursor-pointer transition-all hover:shadow-md result-card'
     ).style('border-radius: 10px;') as card:
@@ -563,7 +580,9 @@ def create_result_card(search_state, refs, index, result):
             # aria-expanded reflects state; aria-controls points at the expansion panel.
             # The expansion panel below uses the matching id (see _expand_panel_id).
             _expand_panel_id = f'result-expand-{index}'
-            _content_col = ui.column().classes('flex-grow min-w-0 gap-1 cursor-pointer')
+            # `result-head`: on wide screens in the compact density this column
+            # lays out as ONE line (badges, then the title cut to the width).
+            _content_col = ui.column().classes('flex-grow min-w-0 gap-1 cursor-pointer result-head')
             _content_col.props(
                 f'role=button tabindex=0 aria-expanded=false aria-controls="{_expand_panel_id}" '
                 f'aria-label="{tr("Toggle full text and image")}"'
@@ -580,8 +599,11 @@ def create_result_card(search_state, refs, index, result):
             _content_col.on('keydown.enter.self', lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx))
             _content_col.on('keydown.space.self.prevent', lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx))
             with _content_col:
-                with ui.row().classes('items-center gap-2 flex-wrap'):
-                    ui.label(f"#{index + 1}").classes('text-xs px-2 py-0.5 rounded shrink-0').style(
+                with ui.row().classes('items-center gap-2 flex-wrap result-badges'):
+                    # Shelfmark first (owner's mockup, 2026-10-22); the index chip
+                    # goes last through CSS order (`result-index`).
+                    _isolated_label(shelfmark, classes='font-bold break-all result-shelfmark', style='color: var(--primary-700);')
+                    ui.label(f"#{index + 1}").classes('text-xs px-2 py-0.5 rounded shrink-0 result-index').style(
                         'background: var(--bg-tertiary); color: var(--text-muted);'
                     )
                     # Library badge (if available)
@@ -673,8 +695,6 @@ def create_result_card(search_state, refs, index, result):
                             f'flat dense round size=xs aria-label="{tr("Visual similarity partners")}"'
                         ).style('color: #ef6c00;').tooltip(tr('Visual similarity partners'))
 
-                    # `result-shelfmark`: first in the row on a phone (common.css).
-                    _isolated_label(shelfmark, classes='font-bold break-all result-shelfmark', style='color: var(--primary-700);')
                     # Phase 999.1 (FOLIO-01): page/image number chip after shelfmark for desktop parity.
                     # Source: display['img'] — same field desktop COL_IMG renders (genizah_app.py:16111).
                     # D-02 / D-02a: just the number, no prefix, no separator char; falsy → render nothing.
@@ -726,7 +746,7 @@ def create_result_card(search_state, refs, index, result):
                     _desc_short = (_desc_he[:80] + '...') if len(_desc_he) > 80 else _desc_he
                     _orig = _resolved_short if _resolved_short else ''
                     _ts = {'showing_original': False}
-                    with ui.row().classes('items-center gap-1'):
+                    with ui.row().classes('items-center gap-1 result-title'):
                         _tl = ui.label(_desc_short).classes('text-xs').style(
                             'color: var(--text-tertiary); direction: rtl; word-wrap: break-word;'
                         )
@@ -763,7 +783,7 @@ def create_result_card(search_state, refs, index, result):
                     _orig_short = (title[:60] + '...') if title and len(title) > 60 else (title or '')
                     if _title_info and _orig_short and _orig_short != _resolved_short:
                         _tt_st = {'showing_original': False}
-                        with ui.row().classes('items-center gap-0'):
+                        with ui.row().classes('items-center gap-0 result-title'):
                             _tt_lbl = ui.label(_resolved_short).classes('text-xs').props('dir="auto"').style(
                                 f'color: var(--text-tertiary); direction: {_dir}; unicode-bidi: isolate; word-wrap: break-word;'
                             )
@@ -785,143 +805,143 @@ def create_result_card(search_state, refs, index, result):
                                 'click.stop', _make_title_toggle(_tt_lbl, _orig_short, _resolved_short, 'rtl', _dir, _tt_st)
                             )
                     else:
-                        ui.label(_resolved_short).classes('text-xs').props('dir="auto"').style(
+                        ui.label(_resolved_short).classes('text-xs result-title').props('dir="auto"').style(
                             f'color: var(--text-tertiary); direction: {_dir}; unicode-bidi: isolate; word-wrap: break-word;'
                         )
 
         # Action buttons row (on the card, always visible)
-        with ui.row().classes('gap-1 mt-1 result-actions'):
-            # Browse
-            if sys_id:
-                # Page identity for the browse deep-link. A bare /browse?sys_id=
-                # is NOT a harmless degradation: browse then resolves the first
-                # p_num==1 page of the FIRST volume, which for a multi-IE
-                # manuscript is a different folio than the one that matched.
-                # So derive each component independently, and fall back from
-                # raw_header to uid -- the uid ('IE..._P..._FL...') carries
-                # ie_id/p_num/fl_id on its own even when raw_header is missing,
-                # empty, or unparseable.
-                _card_fl_id = None
-                _card_ie_id = None
-                _card_p_num = None
-                if state.meta_mgr:
-                    for _id_src in (result.get('raw_header'), result.get('uid')):
-                        if not _id_src or (_card_fl_id and _card_ie_id and _card_p_num):
-                            continue
+            with ui.row().classes('gap-1 result-actions'):
+                # Browse
+                if sys_id:
+                    # Page identity for the browse deep-link. A bare /browse?sys_id=
+                    # is NOT a harmless degradation: browse then resolves the first
+                    # p_num==1 page of the FIRST volume, which for a multi-IE
+                    # manuscript is a different folio than the one that matched.
+                    # So derive each component independently, and fall back from
+                    # raw_header to uid -- the uid ('IE..._P..._FL...') carries
+                    # ie_id/p_num/fl_id on its own even when raw_header is missing,
+                    # empty, or unparseable.
+                    _card_fl_id = None
+                    _card_ie_id = None
+                    _card_p_num = None
+                    if state.meta_mgr:
+                        for _id_src in (result.get('raw_header'), result.get('uid')):
+                            if not _id_src or (_card_fl_id and _card_ie_id and _card_p_num):
+                                continue
+                            try:
+                                _parsed = state.meta_mgr.parse_full_id_components(_id_src)
+                            except Exception:
+                                continue  # unparseable source; try the next one
+                            _card_fl_id = _card_fl_id or _parsed.get('fl_id')
+                            _card_ie_id = _card_ie_id or _parsed.get('ie_id')
+                            _card_p_num = _card_p_num or _parsed.get('p_num')
+                    _card_browse_url = f'/browse?sys_id={sys_id}'
+                    if _card_fl_id:
+                        _card_browse_url += f'&fl_id={_card_fl_id}'
+                    if _card_ie_id:
+                        _card_browse_url += f'&volume_ie={_card_ie_id}'
+                    if _card_p_num:
+                        _card_browse_url += f'&page={_card_p_num}'
+                    # SEED-033 Option A: carry the matched phrase so the browse
+                    # page's version chooser can default to whichever source
+                    # actually contains it.
+                    _card_phrase = _snippet_match_phrase(snippet)
+                    if _card_phrase:
+                        _card_browse_url += f'&highlight={quote(_card_phrase)}'
+                    with ui.link(target=_card_browse_url).classes('no-underline'):
+                        ui.button(icon='menu_book').props(f'flat round dense size=sm color=green aria-label="{tr("Browse Full Manuscript")}"').tooltip(tr('Browse Full Manuscript'))
+
+                # Quick View (was Advanced View)
+                ui.button(
+                    icon='open_in_full',
+                    on_click=lambda idx=index, r=result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, idx, r)
+                ).props(f'flat round dense size=sm data-ux=result_quick_view aria-label="{tr("Quick View")}"').tooltip(tr('Quick View'))
+
+                # Add to List
+                def make_star_handler(r):
+                    def handler():
+                        show_add_to_list_dialog(r)
+                    return handler
+                result_sys_id = result.get('display', {}).get('id')
+                result_in_list = state.lists_mgr and result_sys_id and state.lists_mgr.is_item_in_any_list(result_sys_id)
+                ui.button(
+                    icon='star' if result_in_list else 'star_border',
+                    on_click=make_star_handler(result)
+                ).props(f'flat round dense size=sm aria-label="{tr("In List") if result_in_list else tr("Add to List")}"').style('color: var(--accent-amber);').tooltip(tr('In List') if result_in_list else tr('Add to List'))
+
+                # Catalog Records
+                if sys_id:
+                    cat_count = search_state.catalog_source_counts.get(sys_id, 0)
+                    from web.components.catalog_dialog import show_catalog_dialog
+                    cat_btn = ui.button(
+                        icon='description',
+                        on_click=lambda s=sys_id, sm=shelfmark: show_catalog_dialog(s, sm),
+                    ).props(f'flat round dense size=sm aria-label="{tr("Catalog Records")}"').tooltip(f'{tr("Catalog Records")} ({cat_count})')
+                    if cat_count == 0:
+                        cat_btn.disable()
+
+                # Joins icon (FND-04, D-20/D-21)
+                if sys_id:
+                    # Build deep link — reuse _card_ie_id parsed above (guarded inside Browse block at :587-598)
+                    _joins_url = f'/joins-lab?sys_id={sys_id}'
+                    # Re-parse _card_ie_id here in case Browse block was not entered (e.g. no sys_id in Browse)
+                    _joins_ie_id = None
+                    if 'raw_header' in result and state.meta_mgr:
                         try:
-                            _parsed = state.meta_mgr.parse_full_id_components(_id_src)
+                            _joins_parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
+                            _joins_ie_id = _joins_parsed.get('ie_id')
                         except Exception:
-                            continue  # unparseable source; try the next one
-                        _card_fl_id = _card_fl_id or _parsed.get('fl_id')
-                        _card_ie_id = _card_ie_id or _parsed.get('ie_id')
-                        _card_p_num = _card_p_num or _parsed.get('p_num')
-                _card_browse_url = f'/browse?sys_id={sys_id}'
-                if _card_fl_id:
-                    _card_browse_url += f'&fl_id={_card_fl_id}'
-                if _card_ie_id:
-                    _card_browse_url += f'&volume_ie={_card_ie_id}'
-                if _card_p_num:
-                    _card_browse_url += f'&page={_card_p_num}'
-                # SEED-033 Option A: carry the matched phrase so the browse
-                # page's version chooser can default to whichever source
-                # actually contains it.
-                _card_phrase = _snippet_match_phrase(snippet)
-                if _card_phrase:
-                    _card_browse_url += f'&highlight={quote(_card_phrase)}'
-                with ui.link(target=_card_browse_url).classes('no-underline'):
-                    ui.button(icon='menu_book').props(f'flat round dense size=sm color=green aria-label="{tr("Browse Full Manuscript")}"').tooltip(tr('Browse Full Manuscript'))
+                            pass
+                    if _joins_ie_id:
+                        _joins_url += f'&volume_ie={_joins_ie_id}'
 
-            # Quick View (was Advanced View)
-            ui.button(
-                icon='open_in_full',
-                on_click=lambda idx=index, r=result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, idx, r)
-            ).props(f'flat round dense size=sm data-ux=result_quick_view aria-label="{tr("Quick View")}"').tooltip(tr('Quick View'))
-
-            # Add to List
-            def make_star_handler(r):
-                def handler():
-                    show_add_to_list_dialog(r)
-                return handler
-            result_sys_id = result.get('display', {}).get('id')
-            result_in_list = state.lists_mgr and result_sys_id and state.lists_mgr.is_item_in_any_list(result_sys_id)
-            ui.button(
-                icon='star' if result_in_list else 'star_border',
-                on_click=make_star_handler(result)
-            ).props(f'flat round dense size=sm aria-label="{tr("In List") if result_in_list else tr("Add to List")}"').style('color: var(--accent-amber);').tooltip(tr('In List') if result_in_list else tr('Add to List'))
-
-            # Catalog Records
-            if sys_id:
-                cat_count = search_state.catalog_source_counts.get(sys_id, 0)
-                from web.components.catalog_dialog import show_catalog_dialog
-                cat_btn = ui.button(
-                    icon='description',
-                    on_click=lambda s=sys_id, sm=shelfmark: show_catalog_dialog(s, sm),
-                ).props(f'flat round dense size=sm aria-label="{tr("Catalog Records")}"').tooltip(f'{tr("Catalog Records")} ({cat_count})')
-                if cat_count == 0:
-                    cat_btn.disable()
-
-            # Joins icon (FND-04, D-20/D-21)
-            if sys_id:
-                # Build deep link — reuse _card_ie_id parsed above (guarded inside Browse block at :587-598)
-                _joins_url = f'/joins-lab?sys_id={sys_id}'
-                # Re-parse _card_ie_id here in case Browse block was not entered (e.g. no sys_id in Browse)
-                _joins_ie_id = None
-                if 'raw_header' in result and state.meta_mgr:
-                    try:
-                        _joins_parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
-                        _joins_ie_id = _joins_parsed.get('ie_id')
-                    except Exception:
-                        pass
-                if _joins_ie_id:
-                    _joins_url += f'&volume_ie={_joins_ie_id}'
-
-                # WR-06: thread the result's pgpid through to create_joins_dialog
-                # so fetch_connected_fragments does not have to resolve it from
-                # document_id via an extra Supabase round-trip on every open. Use
-                # the same translation_data lookup the rest of this module uses
-                # (e.g. the PGP report button at :548). None when unavailable —
-                # the dialog then falls back to the document_id resolution path.
-                _joins_pgpid = None
-                try:
-                    _td = search_state.translation_data.get(sys_id, {}) if sys_id else {}
-                    _joins_pgpid = _td.get('pgpid')
-                except Exception:
+                    # WR-06: thread the result's pgpid through to create_joins_dialog
+                    # so fetch_connected_fragments does not have to resolve it from
+                    # document_id via an extra Supabase round-trip on every open. Use
+                    # the same translation_data lookup the rest of this module uses
+                    # (e.g. the PGP report button at :548). None when unavailable —
+                    # the dialog then falls back to the document_id resolution path.
                     _joins_pgpid = None
-
-                async def _open_joins_for_card(s=sys_id, sm=shelfmark, url=_joins_url,
-                                                pid=_joins_pgpid):
-                    """Fetch optional joins only after a visitor requests this card."""
                     try:
-                        data = await run.io_bound(
-                            fetch_connected_fragments,
-                            shelfmark=sm,
-                            document_id=s,
-                            pgpid=pid,
-                        )
+                        _td = search_state.translation_data.get(sys_id, {}) if sys_id else {}
+                        _joins_pgpid = _td.get('pgpid')
                     except Exception:
-                        # The Lab remains useful when the optional lookup is unavailable.
-                        ui.navigate.to(url, new_tab=True)
-                        return
-                    if data is None:
-                        return  # cancelled or app stopping
-                    if data.get('total_joins', 0) > 0:
-                        create_joins_dialog(
-                            shelfmark=sm,
-                            document_id=s,
-                            pgpid=pid,
-                            find_joins_url=url,
-                        )
-                    else:
-                        ui.navigate.to(url, new_tab=True)
+                        _joins_pgpid = None
 
-                joins_btn = ui.button(
-                    icon='link',
-                    on_click=_open_joins_for_card,
-                ).props(f'flat round dense size=sm aria-label="{tr("Find Joins in the Joins Lab")}"').style(
-                    'color: var(--neutral-400);'
-                ).tooltip(tr('Find Joins in the Joins Lab'))
+                    async def _open_joins_for_card(s=sys_id, sm=shelfmark, url=_joins_url,
+                                                    pid=_joins_pgpid):
+                        """Fetch optional joins only after a visitor requests this card."""
+                        try:
+                            data = await run.io_bound(
+                                fetch_connected_fragments,
+                                shelfmark=sm,
+                                document_id=s,
+                                pgpid=pid,
+                            )
+                        except Exception:
+                            # The Lab remains useful when the optional lookup is unavailable.
+                            ui.navigate.to(url, new_tab=True)
+                            return
+                        if data is None:
+                            return  # cancelled or app stopping
+                        if data.get('total_joins', 0) > 0:
+                            create_joins_dialog(
+                                shelfmark=sm,
+                                document_id=s,
+                                pgpid=pid,
+                                find_joins_url=url,
+                            )
+                        else:
+                            ui.navigate.to(url, new_tab=True)
 
-        # Snippet — enrich with earlier chain terms if refinement is active
+                    joins_btn = ui.button(
+                        icon='link',
+                        on_click=_open_joins_for_card,
+                    ).props(f'flat round dense size=sm aria-label="{tr("Find Joins in the Joins Lab")}"').style(
+                        'color: var(--neutral-400);'
+                    ).tooltip(tr('Find Joins in the Joins Lab'))
+
+            # Snippet — enrich with earlier chain terms if refinement is active
         if snippet:
             if search_state.refinement_chain:
                 snippet = enrich_snippet_with_chain_terms(snippet, search_state.refinement_chain, refs.query_input.value)
@@ -978,35 +998,47 @@ def create_result_card(search_state, refs, index, result):
                     _img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"  # Enrichment failed; continue with available data
 
         with expand_container:
-            # #26: visible boundary + explicit Collapse control so the expanded
-            # panel reads as a distinct region and is dismissable without hunting
-            # for the (also-clickable) header. (The redundant visible title was
-            # dropped per UAT; the region still carries an aria-label for SR users.)
-            with ui.row().classes('w-full items-center justify-end mt-2 pt-2').style(
-                'border-top: 1px solid var(--border-light);'
-            ):
+            # The full text takes the snippet's place (common.css hides the
+            # snippet while the card `is-expanded`), a 150px thumbnail beside it
+            # opens the quick view, and the actions sit on one line under them;
+            # on a phone the thumbnail drops under the text (owner's mockup,
+            # 2026-10-22). The old layout kept the snippet, spent a line on
+            # Collapse alone and put a 250px thumbnail beside a 250px text box.
+            # The region still carries an aria-label for screen readers (#26).
+            _expand_row = ui.row().classes('w-full flex-wrap expand-row')
+            with _expand_row:
+                if _img_url:
+                    with ui.element('div').classes('cursor-pointer expand-thumb').props('data-ux=result_quick_view').on(
+                        'click', lambda idx=index, r=result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, idx, r)
+                    ):
+                        ui.html(
+                            f'<img src="{_img_url}" loading="lazy" decoding="async" alt="" '
+                            f'onerror="this.style.display=\'none\'" />',
+                            sanitize=False
+                        )
+                        _img_num = display.get('img')
+                        ui.label(
+                            (f"{tr('Page')} {_img_num} · " if _img_num else '') + tr('Quick View')
+                        ).classes('expand-caption')
+
+                # Right: full text container (populated immediately or lazy-loaded)
+                _text_col = ui.column().classes('flex-1 min-w-[200px] gap-2')
+
+            with ui.row().classes('w-full items-center expand-actions'):
+                ui.button(
+                    tr('Quick View'), icon='open_in_full',
+                    on_click=lambda idx=index, r=result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, idx, r),
+                ).props('outline dense no-caps size=sm color=primary data-ux=result_quick_view')
+                if sys_id:
+                    with ui.link(target=f'/browse?sys_id={sys_id}').classes('no-underline'):
+                        ui.button(tr('Browse Full Manuscript'), icon='menu_book').props(
+                            'outline dense no-caps size=sm color=primary'
+                        )
+                ui.space()
                 ui.button(
                     tr('Collapse'), icon='expand_less',
                     on_click=lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx),
                 ).props(f'flat dense no-caps size=sm aria-label="{tr("Collapse")}"')
-
-            # Content row: image + text
-            _expand_row = ui.row().classes('gap-4 flex-wrap w-full')
-            with _expand_row:
-                # Left: manuscript image thumbnail (click opens Quick View)
-                if _img_url:
-                    with ui.element('div').classes('cursor-pointer').props('data-ux=result_quick_view').on(
-                        'click', lambda idx=index, r=result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, idx, r)
-                    ):
-                        ui.html(
-                            f'<img src="{_img_url}" loading="lazy" decoding="async" '
-                            f'onerror="this.style.display=\'none\'" '
-                            f'style="width: 200px; height: 250px; object-fit: contain; border-radius: 8px;" />',
-                            sanitize=False
-                        )
-
-                # Right: full text container (populated immediately or lazy-loaded)
-                _text_col = ui.column().classes('flex-1 min-w-[200px] gap-2')
 
             def _render_full_text(text_col, text, pattern):
                 """Render highlighted full text into the given column."""
@@ -1030,7 +1062,7 @@ def create_result_card(search_state, refs, index, result):
                             except re.error:
                                 pass
                         with ui.scroll_area().classes('w-full').style('max-height: 250px;'):
-                            with ui.element('div').classes('p-3 rounded-lg text-sm whitespace-pre-wrap').style(
+                            with ui.element('div').classes('p-3 rounded-lg text-sm whitespace-pre-wrap expand-text').style(
                                 'background: var(--bg-tertiary); direction: rtl; text-align: right; line-height: 2; font-size: 0.95rem;'
                             ):
                                 ui.html(escaped, sanitize=False)
@@ -1194,13 +1226,16 @@ def open_advanced_dialog(search_state, refs, index, result):
                     ).props(f'flat round color=white size=sm aria-label="{tr("Fullscreen")}"').tooltip(tr('Fullscreen'))
 
             # === Info Bar (shelfmark, buttons, chips — rendered in render_content) ===
-            adv_state.info_bar_container = ui.element('div').classes('w-full shrink-0').style(
+            adv_state.info_bar_container = ui.element('div').classes('w-full shrink-0 adv-info-bar').style(
                 'background: var(--bg-primary); border-bottom: 1px solid var(--border-light);'
             )
 
             # === Main Content (refreshable container) ===
-            with ui.scroll_area().classes('flex-grow'):
-                adv_state.content_container = ui.column().classes('w-full max-w-6xl mx-auto px-4 py-2 gap-2')
+            # `adv-scroll`: the scroll area's content box takes the dialog's
+            # width (common.css); Quasar sizes it to its content otherwise, and
+            # on a phone the panels ran 48px past the right edge (2026-10-22).
+            with ui.scroll_area().classes('flex-grow adv-scroll'):
+                adv_state.content_container = ui.column().classes('w-full max-w-6xl mx-auto px-4 py-2 gap-2 adv-content adv-tab-text')
 
     def navigate_result(direction: int):
         """Navigate to prev/next result with in-place update (no dialog close/reopen)."""
@@ -1946,205 +1981,27 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 ui.icon('print').classes('text-xs')
                                 ui.label(_plabel).classes('text-xs font-medium')
 
-            # === Expandable PGP Metadata (inside scroll area, collapsed) ===
-            if pgp_metadata:
-                with ui.expansion(group='enrichment').classes('w-full pgp-expand').style(
-                    'border-left: 3px solid #27ae60; border-radius: 8px; margin-bottom: 4px;'
-                ).props(f'dense header-class="text-xs font-bold" label="{tr("PGP Details")}"'):
-                    with ui.row().classes('gap-6 flex-wrap'):
-                        doc_type = pgp_metadata.get('document_type')
-                        lang_primary = pgp_metadata.get('languages_primary')
-                        if doc_type or lang_primary:
-                            with ui.column().classes('gap-1'):
-                                ui.label(tr('Document Type')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                type_parts = [p for p in [doc_type, lang_primary, pgp_metadata.get('languages_secondary')] if p]
-                                _type_text = ' \u00b7 '.join(type_parts)
-                                # Phase 46-06: Show pre-computed document_type_he when UI is Hebrew
-                                _adv_type_he = None
-                                _pgpid_for_type = pgp_metadata.get('pgpid')
-                                _show_type_trans = _safe_get('show_translations', False)
-                                _type_lang = get_language()
-                                if _show_type_trans and _type_lang == 'he' and _pgpid_for_type and search_state.translation_data:
-                                    _type_trans = search_state.translation_data.get(sys_id)
-                                    if _type_trans:
-                                        _adv_type_he = _type_trans.get('document_type_he')
-                                if _adv_type_he:
-                                    _type_st = {'showing_original': False, 'label': None, 'badge': None}
-                                    def _make_type_toggle(st, orig, trans):
-                                        def handler():
-                                            st['showing_original'] = not st['showing_original']
-                                            if st['showing_original']:
-                                                st['label'].set_text(orig)
-                                                st['label'].style('color: var(--text-primary); direction: ltr;')
-                                                st['badge'].set_text(tr('Original'))
-                                            else:
-                                                st['label'].set_text(trans)
-                                                st['label'].style('color: var(--text-primary); direction: rtl;')
-                                                st['badge'].set_text(tr('Translated'))
-                                        return handler
-                                    _type_handler = _make_type_toggle(_type_st, _type_text, _adv_type_he)
-                                    with ui.row().classes('items-center gap-1'):
-                                        _type_st['label'] = ui.label(_adv_type_he).classes('text-sm').style('color: var(--text-primary); direction: rtl;')
-                                        _type_st['badge'] = ui.button(tr('Translated'), on_click=_type_handler).props('flat dense no-caps size=xs').classes('text-xs px-1 py-0 rounded shrink-0').style(
-                                            'background: #e0f2fe; color: #0369a1; font-style: italic; font-size: 0.65rem; min-height: 0; line-height: 1.2;'
-                                        )
-                                else:
-                                    ui.label(_type_text).classes('text-sm').style('color: var(--text-primary);')
+            # Phone (owner's mockup, 2026-10-22): one panel at a time -- Text,
+            # Image, Info -- from tabs that common.css shows under 640px only;
+            # wider screens keep text and image side by side and never see them.
+            _active_tab = getattr(adv_state, 'active_tab', 'text') or 'text'
+            if _active_tab == 'image' and not (adv_state.show_image_panel and has_image and img_url):
+                _active_tab = 'text'
 
-                        inferred_display = pgp_metadata.get('inferred_date_display')
-                        doc_date_standard = pgp_metadata.get('doc_date_standard')
-                        doc_date_original = pgp_metadata.get('doc_date_original')
-                        if inferred_display or doc_date_standard or doc_date_original:
-                            with ui.column().classes('gap-1'):
-                                ui.label(tr('Date')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                primary_date = inferred_display or doc_date_standard
-                                if primary_date:
-                                    ui.label(primary_date).classes('text-sm').style('color: var(--text-primary);')
-                                if doc_date_original and doc_date_original != primary_date:
-                                    ui.label(f"({doc_date_original})").classes('text-xs').style('color: var(--text-tertiary);')
+            def _set_adv_tab(value):
+                adv_state.active_tab = value
+                adv_state.content_container.classes(
+                    remove='adv-tab-text adv-tab-image adv-tab-info', add=f'adv-tab-{value}')
 
-                    tags = pgp_metadata.get('tags', [])
-                    if tags:
-                        with ui.row().classes('gap-1 flex-wrap mt-2'):
-                            for tag in tags:
-                                ui.badge(tag, color='green').props('outline clickable').classes(
-                                    'text-xs cursor-pointer'
-                                ).on('click', lambda t=tag: (dialog.close(), ui.navigate.to(f'/search?tag={quote(t)}')))
-
-                    description = (pgp_metadata.get('description') or '').strip()
-                    if description:
-                        with ui.column().classes('gap-1 mt-2'):
-                            ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                            # Phase 46: Show translated description when toggle is on and UI is Hebrew
-                            _show_trans_adv = _safe_get('show_translations', False)
-                            _adv_pgpid = pgp_metadata.get('pgpid')
-                            _adv_trans_he = None
-                            _adv_lang = get_language()
-                            if _show_trans_adv and _adv_lang == 'he' and _adv_pgpid:
-                                try:
-                                    from shared.translation_service import TranslationService
-                                    _tsvc_adv = TranslationService(thread_safe=True)
-                                    _adv_trans_he = _tsvc_adv.get_pgp_description_he(_adv_pgpid)
-                                    _tsvc_adv.close()
-                                except Exception:
-                                    pass  # Translation lookup failed; continue without translation
-                            if _adv_trans_he:
-                                _adv_st = {'showing_original': False, 'label': None, 'badge': None}
-                                def _make_adv_toggle(st, orig, trans):
-                                    def handler():
-                                        st['showing_original'] = not st['showing_original']
-                                        if st['showing_original']:
-                                            st['label'].set_text(orig)
-                                            st['label'].style('color: var(--text-primary); direction: ltr; white-space: pre-wrap;')
-                                            st['badge'].set_text(tr('Original'))
-                                        else:
-                                            st['label'].set_text(trans)
-                                            st['label'].style('color: var(--text-primary); direction: rtl; white-space: pre-wrap;')
-                                            st['badge'].set_text(tr('Translated'))
-                                    return handler
-                                _adv_handler = _make_adv_toggle(_adv_st, description, _adv_trans_he)
-                                with ui.row().classes('w-full items-start gap-1'):
-                                    _adv_st['label'] = ui.label(_adv_trans_he).classes('flex-1 text-sm whitespace-pre-wrap').style(
-                                        'color: var(--text-primary); direction: rtl;'
-                                    )
-                                    _adv_st['badge'] = ui.button(tr('Translated'), on_click=_adv_handler).props('flat dense no-caps size=xs').classes('text-xs px-1 py-0 rounded shrink-0 self-start mt-1').style(
-                                        'background: #e0f2fe; color: #0369a1; font-style: italic; font-size: 0.65rem; min-height: 0; line-height: 1.2;'
-                                    )
-                                    from web.components.translation_report import create_report_button
-                                    create_report_button(
-                                        dataset='pgp', record_id=str(_adv_pgpid),
-                                        field_name='description', direction='en2he',
-                                        source_text=description, translated_text=_adv_trans_he,
-                                    )
-                            else:
-                                ui.label(description).classes('text-sm whitespace-pre-wrap').style('color: var(--text-primary);')
-
-                    if pgp_metadata.get('pgp_url'):
-                        ui.link(tr('View on PGP'), pgp_metadata['pgp_url'], new_tab=True).classes(
-                            'text-xs mt-2'
-                        ).style('color: var(--primary-600);')
-
-            # === Expandable FJMS Catalog (inside scroll area, collapsed) ===
-            catalog_records = fjms_data.get('catalog_records')
-            if catalog_records:
-                with ui.expansion(group='enrichment').classes('w-full fjms-expand').style(
-                    'border-left: 3px solid #9b59b6; border-radius: 8px; margin-bottom: 4px;'
-                ).props(f'dense header-class="text-xs font-bold" label="{tr("FJMS Details")}"'):
-                    merged = merge_catalog_records(catalog_records)
-                    lang = get_language()
-
-                    fjms_title = merged.get('title_heb') if lang == 'he' else merged.get('title')
-                    if fjms_title and fjms_title.strip():
-                        with ui.row().classes('gap-1 items-baseline'):
-                            ui.label(tr('Title')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                            ui.label(fjms_title).classes('text-sm').style('color: var(--text-primary);')
-
-                    if merged.get('author_text') and merged['author_text'].strip():
-                        with ui.row().classes('gap-1 items-baseline'):
-                            ui.label(tr('Author')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                            ui.label(merged['author_text']).classes('text-sm').style('color: var(--text-primary);')
-
-                    date_val = merged.get('copy_date')
-                    place_val = merged.get('copy_place')
-                    if date_val or place_val:
-                        with ui.row().classes('gap-4'):
-                            if date_val:
-                                with ui.row().classes('gap-1 items-baseline'):
-                                    ui.label(tr('Copy Date')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                    ui.label(str(date_val)).classes('text-sm').style('color: var(--text-primary);')
-                            if place_val:
-                                with ui.row().classes('gap-1 items-baseline'):
-                                    ui.label(tr('Place')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                                    ui.label(place_val).classes('text-sm').style('color: var(--text-primary);')
-
-                    frames = merged.get('textual_frames', [])
-                    if frames:
-                        ui.label(tr('Content Identification')).classes('text-xs font-bold mt-2').style('color: var(--text-secondary);')
-                        max_initial = 10
-                        show_frames = frames[:max_initial] if len(frames) > max_initial else frames
-                        for frame in show_frames:
-                            text_f = frame.get('heb') if lang == 'he' else frame.get('eng')
-                            if not text_f or not text_f.strip():
-                                text_f = frame.get('eng') if lang == 'he' else frame.get('heb')
-                            if text_f and text_f.strip():
-                                category, content = parse_textual_frame(text_f)
-                                source_name = frame.get('source_name_heb') if lang == 'he' else frame.get('source_name')
-                                with ui.row().classes('gap-1 items-baseline'):
-                                    if category:
-                                        ui.label(category).classes('text-xs font-bold').style('color: #9b59b6;')
-                                        ui.label(content).classes('text-sm').style('color: var(--text-primary);')
-                                    else:
-                                        ui.label(text_f).classes('text-sm').style('color: var(--text-primary);')
-                                    if source_name and source_name.strip():
-                                        ui.label(f'({source_name})').classes('text-xs').style('color: var(--text-tertiary);')
-                        if len(frames) > max_initial:
-                            remaining = frames[max_initial:]
-                            with ui.expansion(f'{tr("Show all")} {len(frames)} {tr("identifications")}').classes('text-xs'):
-                                for frame in remaining:
-                                    text_f = frame.get('heb') if lang == 'he' else frame.get('eng')
-                                    if not text_f or not text_f.strip():
-                                        text_f = frame.get('eng') if lang == 'he' else frame.get('heb')
-                                    if text_f and text_f.strip():
-                                        category, content = parse_textual_frame(text_f)
-                                        source_name = frame.get('source_name_heb') if lang == 'he' else frame.get('source_name')
-                                        with ui.row().classes('gap-1 items-baseline'):
-                                            if category:
-                                                ui.label(category).classes('text-xs font-bold').style('color: #9b59b6;')
-                                                ui.label(content).classes('text-sm').style('color: var(--text-primary);')
-                                            else:
-                                                ui.label(text_f).classes('text-sm').style('color: var(--text-primary);')
-                                            if source_name and source_name.strip():
-                                                ui.label(f'({source_name})').classes('text-xs').style('color: var(--text-tertiary);')
-
-                    cat_refs = fjms_data.get('catalog_refs')
-                    if cat_refs:
-                        ui.label(tr('Catalog References')).classes('text-xs font-bold mt-2').style('color: var(--text-secondary);')
-                        with ui.row().classes('gap-2 flex-wrap'):
-                            for ref in cat_refs:
-                                acronym = ref.get('cat_acronym', '')
-                                cat_entry = ref.get('catalog_entry', '')
-                                ref_display = f"{acronym} #{cat_entry}" if cat_entry else acronym
-                                ui.label(ref_display).classes('text-xs').style('color: var(--text-primary);')
+            adv_state.content_container.classes(
+                remove='adv-tab-text adv-tab-image adv-tab-info', add=f'adv-tab-{_active_tab}')
+            with ui.tabs(value=_active_tab, on_change=lambda e: _set_adv_tab(e.value)).classes(
+                'w-full adv-tabs'
+            ).props('dense no-caps active-color=primary indicator-color=primary align=justify'):
+                ui.tab('text', label=tr('Text'), icon='notes')
+                if adv_state.show_image_panel and has_image and img_url:
+                    ui.tab('image', label=tr('Image'), icon='image')
+                ui.tab('info', label=tr('Info'), icon='info')
 
             # === Two-Panel Layout: Text + Image ===
             with ui.row().classes('w-full gap-4 flex-wrap lg:flex-nowrap'):
@@ -2156,7 +2013,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                 if adv_state.edit_mode:
                     panel_border = 'border: 3px solid #27ae60;' if adv_state.draft_saved else 'border: 3px solid #f39c12;'
 
-                with ui.column().classes(text_panel_classes + ' gap-4'):
+                with ui.column().classes(text_panel_classes + ' gap-4 adv-text-col'):
 
                     # Define text container and render function at this scope for version switching
                     text_content_container = None
@@ -2369,14 +2226,15 @@ def open_advanced_dialog(search_state, refs, index, result):
 
                 # Right Panel: Image viewer (toggleable)
                 if adv_state.show_image_panel and has_image and img_url:
-                    with ui.column().classes('flex-1 min-w-[300px]'):
+                    with ui.column().classes('flex-1 min-w-[300px] adv-image-col'):
                         with ui.card().classes('w-full').style('border-radius: 16px; overflow: hidden;'):
-                            # Image controls header
-                            with ui.row().classes('w-full items-center justify-between p-3').style(
+                            # Image controls header: one row; the sliders sit
+                            # behind the `tune` button (owner's mockup, 2026-10-22).
+                            with ui.row().classes('w-full items-center justify-between p-3 adv-image-head').style(
                                 'background: #1a1a1a; border-radius: 8px 8px 0 0;'
                             ):
-                                ui.label(tr('Manuscript Image')).classes('text-white font-semibold')
-                                with ui.row().classes('gap-1'):
+                                ui.label(tr('Manuscript Image')).classes('text-white font-semibold adv-image-title')
+                                with ui.row().classes('gap-1') as _adv_tools_row:
                                     ui.button(icon='remove', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomOut()')).props(f'flat round size=sm text-color=white aria-label="{tr("Zoom out")}"').tooltip(tr('Zoom out'))
                                     ui.label('100%').classes('adv-zoom-label text-white text-sm px-2')
                                     ui.button(icon='add', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomIn()')).props(f'flat round size=sm text-color=white aria-label="{tr("Zoom in")}"').tooltip(tr('Zoom in'))
@@ -2386,10 +2244,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
                                     ui.button(icon='restart_alt', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.reset()')).props(f'flat round size=sm text-color=white aria-label="{tr("Reset View")}"').tooltip(tr('Reset View'))
 
-                            # Image adjustment controls
-                            with ui.row().classes('w-full items-center gap-2 px-3 py-1').style(
+                            # Image adjustment controls (hidden until `tune`)
+                            with ui.row().classes('w-full items-center gap-2 px-3 py-1 adv-image-adjust').style(
                                 'background: #1a1a1a; border-top: 1px solid #333;'
-                            ):
+                            ) as _adv_adjust_row:
                                 ui.icon('brightness_6').classes('text-white text-sm').tooltip(tr('Brightness'))
                                 adv_state.brightness_sl = ui.slider(
                                     min=-100, max=100, step=1, value=0,
@@ -2418,6 +2276,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                                     icon='restart_alt',
                                     on_click=_adv_reset_adj
                                 ).props(f'flat round size=sm text-color=white aria-label="{tr("Reset Image")}"').tooltip(tr('Reset Image'))
+                            with _adv_tools_row:
+                                ui.button(
+                                    icon='tune', on_click=lambda: _adv_adjust_row.classes(toggle='is-open'),
+                                ).props(f'flat round size=sm text-color=white aria-label="{tr("Image adjustments")}"').tooltip(tr('Image adjustments'))
 
                             # Image display
                             safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
@@ -2473,7 +2335,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                                     )
 
             # === Actions Section ===
-            with ui.card().classes('w-full p-6').style('border-radius: 16px; background: var(--bg-tertiary);'):
+            with ui.card().classes('w-full p-6 adv-actions-card adv-info').style('border-radius: 16px; background: var(--bg-tertiary);'):
                 h3(tr('Actions'), classes='text-lg font-bold mb-4', style='color: var(--text-primary);')
 
                 with ui.row().classes('gap-4 flex-wrap'):
@@ -2516,6 +2378,208 @@ def open_advanced_dialog(search_state, refs, index, result):
                         ).props('outline')
 
     # Initial load (use current_result_idx which handles standalone mode)
+
+            # (moved below the panels, owner's mockup 2026-10-22: catalog info is a collapsed bar at the foot; on a phone it is the Info tab)
+            # === Expandable PGP Metadata (inside scroll area, collapsed) ===
+            if pgp_metadata:
+                with ui.expansion(group='enrichment').classes('w-full pgp-expand adv-info').style(
+                    'border-left: 3px solid #27ae60; border-radius: 8px; margin-bottom: 4px;'
+                ).props(f'dense header-class="text-xs font-bold" label="{tr("PGP Details")}"'):
+                    with ui.row().classes('gap-6 flex-wrap'):
+                        doc_type = pgp_metadata.get('document_type')
+                        lang_primary = pgp_metadata.get('languages_primary')
+                        if doc_type or lang_primary:
+                            with ui.column().classes('gap-1'):
+                                ui.label(tr('Document Type')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                type_parts = [p for p in [doc_type, lang_primary, pgp_metadata.get('languages_secondary')] if p]
+                                _type_text = ' \u00b7 '.join(type_parts)
+                                # Phase 46-06: Show pre-computed document_type_he when UI is Hebrew
+                                _adv_type_he = None
+                                _pgpid_for_type = pgp_metadata.get('pgpid')
+                                _show_type_trans = _safe_get('show_translations', False)
+                                _type_lang = get_language()
+                                if _show_type_trans and _type_lang == 'he' and _pgpid_for_type and search_state.translation_data:
+                                    _type_trans = search_state.translation_data.get(sys_id)
+                                    if _type_trans:
+                                        _adv_type_he = _type_trans.get('document_type_he')
+                                if _adv_type_he:
+                                    _type_st = {'showing_original': False, 'label': None, 'badge': None}
+                                    def _make_type_toggle(st, orig, trans):
+                                        def handler():
+                                            st['showing_original'] = not st['showing_original']
+                                            if st['showing_original']:
+                                                st['label'].set_text(orig)
+                                                st['label'].style('color: var(--text-primary); direction: ltr;')
+                                                st['badge'].set_text(tr('Original'))
+                                            else:
+                                                st['label'].set_text(trans)
+                                                st['label'].style('color: var(--text-primary); direction: rtl;')
+                                                st['badge'].set_text(tr('Translated'))
+                                        return handler
+                                    _type_handler = _make_type_toggle(_type_st, _type_text, _adv_type_he)
+                                    with ui.row().classes('items-center gap-1'):
+                                        _type_st['label'] = ui.label(_adv_type_he).classes('text-sm').style('color: var(--text-primary); direction: rtl;')
+                                        _type_st['badge'] = ui.button(tr('Translated'), on_click=_type_handler).props('flat dense no-caps size=xs').classes('text-xs px-1 py-0 rounded shrink-0').style(
+                                            'background: #e0f2fe; color: #0369a1; font-style: italic; font-size: 0.65rem; min-height: 0; line-height: 1.2;'
+                                        )
+                                else:
+                                    ui.label(_type_text).classes('text-sm').style('color: var(--text-primary);')
+
+                        inferred_display = pgp_metadata.get('inferred_date_display')
+                        doc_date_standard = pgp_metadata.get('doc_date_standard')
+                        doc_date_original = pgp_metadata.get('doc_date_original')
+                        if inferred_display or doc_date_standard or doc_date_original:
+                            with ui.column().classes('gap-1'):
+                                ui.label(tr('Date')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                primary_date = inferred_display or doc_date_standard
+                                if primary_date:
+                                    ui.label(primary_date).classes('text-sm').style('color: var(--text-primary);')
+                                if doc_date_original and doc_date_original != primary_date:
+                                    ui.label(f"({doc_date_original})").classes('text-xs').style('color: var(--text-tertiary);')
+
+                    tags = pgp_metadata.get('tags', [])
+                    if tags:
+                        with ui.row().classes('gap-1 flex-wrap mt-2'):
+                            for tag in tags:
+                                ui.badge(tag, color='green').props('outline clickable').classes(
+                                    'text-xs cursor-pointer'
+                                ).on('click', lambda t=tag: (dialog.close(), ui.navigate.to(f'/search?tag={quote(t)}')))
+
+                    description = (pgp_metadata.get('description') or '').strip()
+                    if description:
+                        with ui.column().classes('gap-1 mt-2'):
+                            ui.label(tr('Description')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            # Phase 46: Show translated description when toggle is on and UI is Hebrew
+                            _show_trans_adv = _safe_get('show_translations', False)
+                            _adv_pgpid = pgp_metadata.get('pgpid')
+                            _adv_trans_he = None
+                            _adv_lang = get_language()
+                            if _show_trans_adv and _adv_lang == 'he' and _adv_pgpid:
+                                try:
+                                    from shared.translation_service import TranslationService
+                                    _tsvc_adv = TranslationService(thread_safe=True)
+                                    _adv_trans_he = _tsvc_adv.get_pgp_description_he(_adv_pgpid)
+                                    _tsvc_adv.close()
+                                except Exception:
+                                    pass  # Translation lookup failed; continue without translation
+                            if _adv_trans_he:
+                                _adv_st = {'showing_original': False, 'label': None, 'badge': None}
+                                def _make_adv_toggle(st, orig, trans):
+                                    def handler():
+                                        st['showing_original'] = not st['showing_original']
+                                        if st['showing_original']:
+                                            st['label'].set_text(orig)
+                                            st['label'].style('color: var(--text-primary); direction: ltr; white-space: pre-wrap;')
+                                            st['badge'].set_text(tr('Original'))
+                                        else:
+                                            st['label'].set_text(trans)
+                                            st['label'].style('color: var(--text-primary); direction: rtl; white-space: pre-wrap;')
+                                            st['badge'].set_text(tr('Translated'))
+                                    return handler
+                                _adv_handler = _make_adv_toggle(_adv_st, description, _adv_trans_he)
+                                with ui.row().classes('w-full items-start gap-1'):
+                                    _adv_st['label'] = ui.label(_adv_trans_he).classes('flex-1 text-sm whitespace-pre-wrap').style(
+                                        'color: var(--text-primary); direction: rtl;'
+                                    )
+                                    _adv_st['badge'] = ui.button(tr('Translated'), on_click=_adv_handler).props('flat dense no-caps size=xs').classes('text-xs px-1 py-0 rounded shrink-0 self-start mt-1').style(
+                                        'background: #e0f2fe; color: #0369a1; font-style: italic; font-size: 0.65rem; min-height: 0; line-height: 1.2;'
+                                    )
+                                    from web.components.translation_report import create_report_button
+                                    create_report_button(
+                                        dataset='pgp', record_id=str(_adv_pgpid),
+                                        field_name='description', direction='en2he',
+                                        source_text=description, translated_text=_adv_trans_he,
+                                    )
+                            else:
+                                ui.label(description).classes('text-sm whitespace-pre-wrap').style('color: var(--text-primary);')
+
+                    if pgp_metadata.get('pgp_url'):
+                        ui.link(tr('View on PGP'), pgp_metadata['pgp_url'], new_tab=True).classes(
+                            'text-xs mt-2'
+                        ).style('color: var(--primary-600);')
+
+            # === Expandable FJMS Catalog (inside scroll area, collapsed) ===
+            catalog_records = fjms_data.get('catalog_records')
+            if catalog_records:
+                with ui.expansion(group='enrichment').classes('w-full fjms-expand adv-info').style(
+                    'border-left: 3px solid #9b59b6; border-radius: 8px; margin-bottom: 4px;'
+                ).props(f'dense header-class="text-xs font-bold" label="{tr("FJMS Details")}"'):
+                    merged = merge_catalog_records(catalog_records)
+                    lang = get_language()
+
+                    fjms_title = merged.get('title_heb') if lang == 'he' else merged.get('title')
+                    if fjms_title and fjms_title.strip():
+                        with ui.row().classes('gap-1 items-baseline'):
+                            ui.label(tr('Title')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            ui.label(fjms_title).classes('text-sm').style('color: var(--text-primary);')
+
+                    if merged.get('author_text') and merged['author_text'].strip():
+                        with ui.row().classes('gap-1 items-baseline'):
+                            ui.label(tr('Author')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                            ui.label(merged['author_text']).classes('text-sm').style('color: var(--text-primary);')
+
+                    date_val = merged.get('copy_date')
+                    place_val = merged.get('copy_place')
+                    if date_val or place_val:
+                        with ui.row().classes('gap-4'):
+                            if date_val:
+                                with ui.row().classes('gap-1 items-baseline'):
+                                    ui.label(tr('Copy Date')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    ui.label(str(date_val)).classes('text-sm').style('color: var(--text-primary);')
+                            if place_val:
+                                with ui.row().classes('gap-1 items-baseline'):
+                                    ui.label(tr('Place')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                    ui.label(place_val).classes('text-sm').style('color: var(--text-primary);')
+
+                    frames = merged.get('textual_frames', [])
+                    if frames:
+                        ui.label(tr('Content Identification')).classes('text-xs font-bold mt-2').style('color: var(--text-secondary);')
+                        max_initial = 10
+                        show_frames = frames[:max_initial] if len(frames) > max_initial else frames
+                        for frame in show_frames:
+                            text_f = frame.get('heb') if lang == 'he' else frame.get('eng')
+                            if not text_f or not text_f.strip():
+                                text_f = frame.get('eng') if lang == 'he' else frame.get('heb')
+                            if text_f and text_f.strip():
+                                category, content = parse_textual_frame(text_f)
+                                source_name = frame.get('source_name_heb') if lang == 'he' else frame.get('source_name')
+                                with ui.row().classes('gap-1 items-baseline'):
+                                    if category:
+                                        ui.label(category).classes('text-xs font-bold').style('color: #9b59b6;')
+                                        ui.label(content).classes('text-sm').style('color: var(--text-primary);')
+                                    else:
+                                        ui.label(text_f).classes('text-sm').style('color: var(--text-primary);')
+                                    if source_name and source_name.strip():
+                                        ui.label(f'({source_name})').classes('text-xs').style('color: var(--text-tertiary);')
+                        if len(frames) > max_initial:
+                            remaining = frames[max_initial:]
+                            with ui.expansion(f'{tr("Show all")} {len(frames)} {tr("identifications")}').classes('text-xs'):
+                                for frame in remaining:
+                                    text_f = frame.get('heb') if lang == 'he' else frame.get('eng')
+                                    if not text_f or not text_f.strip():
+                                        text_f = frame.get('eng') if lang == 'he' else frame.get('heb')
+                                    if text_f and text_f.strip():
+                                        category, content = parse_textual_frame(text_f)
+                                        source_name = frame.get('source_name_heb') if lang == 'he' else frame.get('source_name')
+                                        with ui.row().classes('gap-1 items-baseline'):
+                                            if category:
+                                                ui.label(category).classes('text-xs font-bold').style('color: #9b59b6;')
+                                                ui.label(content).classes('text-sm').style('color: var(--text-primary);')
+                                            else:
+                                                ui.label(text_f).classes('text-sm').style('color: var(--text-primary);')
+                                            if source_name and source_name.strip():
+                                                ui.label(f'({source_name})').classes('text-xs').style('color: var(--text-tertiary);')
+
+                    cat_refs = fjms_data.get('catalog_refs')
+                    if cat_refs:
+                        ui.label(tr('Catalog References')).classes('text-xs font-bold mt-2').style('color: var(--text-secondary);')
+                        with ui.row().classes('gap-2 flex-wrap'):
+                            for ref in cat_refs:
+                                acronym = ref.get('cat_acronym', '')
+                                cat_entry = ref.get('catalog_entry', '')
+                                ref_display = f"{acronym} #{cat_entry}" if cat_entry else acronym
+                                ui.label(ref_display).classes('text-xs').style('color: var(--text-primary);')
+
     load_result(adv_state.current_result_idx)
     dialog.open()
 

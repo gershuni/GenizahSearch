@@ -418,32 +418,58 @@ VIEWER_STYLES = '''
        of zoom and slider rows above a 406px image letterboxed in a fixed-height
        box, and the transcription scrolled inside a 426px pane of its own.
        Nothing here applies above 640px. */
+    /* At every width (owner's mockups, 2026-10-22): the page title is for
+       screen readers only, the lookup is a slim row, the image panel is one
+       toolbar row with the sliders behind the `tune` button. */
+    .browse-page-title {
+        position: absolute !important; width: 1px; height: 1px; margin: -1px; padding: 0;
+        overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+    }
+    .browse-lookup-card { padding: 6px 10px !important; margin-bottom: 8px !important; gap: 0 !important; }
+    .browse-lookup-row { gap: 8px !important; flex-wrap: nowrap !important; }
+    .browse-lookup-icon { display: none; }
+    .browse-header-card { padding: 8px 10px !important; margin-bottom: 8px !important; }
+    /* The card's own 16px padding and gap go; its row carries the padding. */
+    .browse-controls-card { margin-bottom: 8px !important; padding: 0 !important; gap: 0 !important; }
+    .browse-controls-card > .nicegui-row { gap: 4px 8px !important; padding: 6px 10px !important; }
+    .browse-image-head { padding: 4px 8px !important; }
+    .browse-image-title { display: none; }
+    .browse-image-adjust { display: none !important; padding: 4px 8px !important; }
+    .browse-image-adjust.is-open { display: flex !important; }
+    /* The rotation slider needs a wide panel; below 1440px the two rotate
+       buttons do the job and the toolbar stays one row. */
+    @media (max-width: 1439px) { .browse-rotate-slider { display: none !important; } }
+    /* Laptop and up: the lookup is a short row, the green card is ONE line
+       with the title cut to the width, the two panels get the height. */
+    @media (min-width: 1024px) {
+        .browse-lookup-card { max-width: 560px; }
+        .browse-header-center { flex-wrap: nowrap !important; gap: 8px !important; min-width: 0; }
+        .browse-header-center > h2 { white-space: nowrap; font-size: 1.15rem !important; }
+        .browse-header-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .browse-header-center > *:has(> .browse-header-title) { flex: 1 1 auto; min-width: 0; }
+        .browse-header-center .q-btn { white-space: nowrap; }
+    }
+    /* Transcription type by width (the owner's screen-size table). */
+    .viewer-panels .transcription-text { font-size: 17px !important; line-height: 1.8 !important; }
+    @media (min-width: 641px) { .viewer-panels .transcription-text { font-size: 18px !important; line-height: 1.9 !important; } }
+    @media (min-width: 1024px) { .viewer-panels .transcription-text { font-size: 19px !important; line-height: 2 !important; } }
+    @media (min-width: 1440px) { .viewer-panels .transcription-text { font-size: 20px !important; line-height: 2 !important; max-width: 760px; } }
+
     @media (max-width: 640px) {
-        .browse-page-title { display: none; }
-        .browse-lookup-card { padding: 8px !important; margin-bottom: 8px !important; }
-        .browse-lookup-row { gap: 8px !important; flex-wrap: nowrap !important; }
-        .browse-lookup-icon { display: none; }
-        .browse-header-card { padding: 8px !important; margin-bottom: 8px !important; }
         .browse-header-card h2 { font-size: 1.1rem !important; }
         .browse-header-center { gap: 4px 6px !important; }
         .browse-header-card .q-btn { min-height: 36px; }
-        .browse-controls-card { margin-bottom: 8px !important; }
-        .browse-controls-card > .nicegui-row { gap: 4px 6px !important; padding: 6px 8px !important; }
         .browse-controls-card .q-btn { min-height: 36px; }
         .shortcuts-hint { display: none !important; }
 
         /* Image panel: one row of 34px icon buttons. The rotation slider, the
-           zoom figure and the separators go; the adjustment sliders sit behind
-           the `tune` button (.browse-adjust-toggle). */
+           zoom figure and the separators go. */
         .browse-image-head { padding: 4px 6px !important; }
-        .browse-image-title { display: none; }
         .browse-image-tools { gap: 2px !important; flex-wrap: nowrap !important; }
         .browse-image-tools .q-separator, .browse-rotate-slider, .zoom-level-label { display: none !important; }
         .browse-image-head .q-btn, .browse-image-adjust .q-btn {
             min-width: 34px !important; min-height: 34px !important; width: 34px; height: 34px; padding: 0 !important;
         }
-        .browse-image-adjust { display: none !important; padding: 4px 8px !important; }
-        .browse-image-adjust.is-open { display: flex !important; }
 
         /* The image sets the height of its box: no dark band above or below
            it. The box's inline `height: calc(60vh - 100px)` beat every earlier
@@ -466,9 +492,6 @@ VIEWER_STYLES = '''
         }
         .viewer-panels .q-scrollarea { padding: 10px !important; }
         .viewer-panels .q-scrollarea__thumb, .viewer-panels .q-scrollarea__bar { display: none !important; }
-    }
-    @media (min-width: 641px) {
-        .browse-adjust-toggle { display: none !important; }
     }
 
     @media (max-width: 480px) {
@@ -2203,7 +2226,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 _ol_st = {'showing_original': False}
                                 with ui.row().classes('items-center gap-0'):
                                     _ol_lbl = ui.label(short_title).classes(
-                                        _ol_dir
+                                        _ol_dir + ' browse-header-title'
                                     ).style(
                                         'color: #ffffff !important; opacity: 0.95;'
                                     )
@@ -2230,7 +2253,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     )
                             else:
                                 ui.label(short_title).classes(
-                                    _ol_dir
+                                    _ol_dir + ' browse-header-title'
                                 ).style(
                                     'color: #ffffff !important; opacity: 0.95;'
                                 ).tooltip(_overlay_title if len(words) > 5 else '')
@@ -4792,9 +4815,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     on_click=_reset_image_adj
                                 ).props('flat round size=sm text-color=white').tooltip(tr('Reset Image'))
 
-                            # Phone: the slider row above is folded behind this
-                            # one button in the tools row; the page CSS shows
-                            # the button under 640px only (owner, 2026-10-22).
+                            # The slider row above is folded behind this one
+                            # button in the tools row at every width (owner's
+                            # mockups, 2026-10-22).
                             with _image_tools_row:
                                 ui.button(
                                     icon='tune',

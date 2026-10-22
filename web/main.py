@@ -1996,10 +1996,12 @@ def create_layout():
 
     # Set drawer side based on RTL mode - Quasar will handle page padding correctly
     drawer_side = 'right' if rtl_mode else 'left'
+    # breakpoint=1023 (was 768, 2026-10-22): a tablet gets the overlay drawer
+    # and keeps the width for the page; the sidebar stays open from 1024px.
     main_drawer = (
         ui.drawer(side=drawer_side, value=False, bordered=True)
         .classes('shadow-xl')
-        .props('width=280 breakpoint=768')
+        .props('width=280 breakpoint=1023')
     )
     if drawer_open:
         # Only when the reader has not explicitly closed it. An explicit close
@@ -2018,7 +2020,7 @@ def create_layout():
         safe_user_set('drawer_open', not safe_user_get('drawer_open', True))
 
     def nav_to(path):
-        """Navigate to path. Drawer auto-hides on mobile via breakpoint=768."""
+        """Navigate to path. Drawer auto-hides on mobile via breakpoint=1023."""
         ui.navigate.to(path)
 
     # Connect menu button to toggle function (using refs dictionary)
