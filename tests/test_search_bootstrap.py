@@ -1000,9 +1000,31 @@ def test_a_scoped_run_stamps_its_address_only_when_saved_and_early_ends_forget_r
     func = _function(_search_page_tree(), 'execute_search')
     guarded = [node for node in ast.walk(func)
                if isinstance(node, ast.If) and ast.unparse(node.test) == 'not search_run.scoped']
-    assert len(guarded) == 1
-    assert any(ast.unparse(s).startswith('_show_search_url(clean_query, mode, stamp)') for s in guarded[0].body)
+    assert len(guarded) == 2   # at the start, and the end's re-stamp
+    assert all(any(ast.unparse(s).startswith('_show_search_url(clean_query, mode, ') for s in g.body)
+               for g in guarded)
+    # Codex round 11: a scoped run's address is stamped only once its save succeeded,
+    # completed or stopped -- never for a run that is not kept (persistence off).
+    kept = [node for node in ast.walk(func)
+            if isinstance(node, ast.If)
+            and ast.unparse(node.test) == 'save_search_run(search_state) and search_run.scoped']
+    assert len(kept) == 2
+    assert all(any(ast.unparse(s).startswith('_show_search_url(clean_query, mode, url_stamp_of(search_state))')
+                   for s in k.body) for k in kept)
     source = ast.unparse(func)
     assert source.count('discard_search_run(search_state)') == 3   # stopped before running, no match, error
     stop = ast.unparse(_function(_search_page_tree(), '_stop_before_running'))
     assert 'discard_search_run(search_state)' in stop
+
+
+def test_save_search_run_says_whether_it_kept_the_run(runs, monkeypatch):
+    ss = runs
+    page = _page_with_a_run(ss, rows=1)
+    monkeypatch.setattr(ss, 'safe_user_get', lambda key, default=None: default)
+    assert ss.save_search_run(page) is True
+    monkeypatch.setattr(ss, 'safe_user_get', lambda key, default=None: False
+                        if key == 'session_persistence_enabled' else default)
+    assert ss.save_search_run(page) is False
+    page.last_run = None
+    monkeypatch.setattr(ss, 'safe_user_get', lambda key, default=None: default)
+    assert ss.save_search_run(page) is False

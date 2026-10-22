@@ -541,20 +541,21 @@ def discard_search_run(state: 'SearchUIState') -> None:
         pass
 
 
-def save_search_run(state: 'SearchUIState') -> None:
+def save_search_run(state: 'SearchUIState') -> bool:
     """A search's own save at its end: its rows are in *state* now, so its run is done.
     With session persistence off nothing is kept, as for the user-storage copy: the
-    run is forgotten (its job's rows and its page are let go of too -- Codex, PR #436)."""
+    run is forgotten (its job's rows and its page are let go of too -- Codex, PR #436).
+    True when the run was saved (a scoped run's address is stamped only then)."""
     if not safe_user_get('session_persistence_enabled', True):
         discard_search_run(state)
-        return
+        return False
     stamp = url_stamp_of(state)
     if not stamp:
-        return
+        return False
     try:
-        search_runs.finish_run(_browser_id(), stamp, search_run_snapshot(state))
+        return search_runs.finish_run(_browser_id(), stamp, search_run_snapshot(state)) is not None
     except Exception:
-        pass
+        return False
 
 
 def responsa_note_of(results):

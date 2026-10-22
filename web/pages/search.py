@@ -5847,7 +5847,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if search_run.owner is search_state:
                 try:
                     persist_search_snapshot(search_state)
-                    save_search_run(search_state)
+                    if save_search_run(search_state) and search_run.scoped:
+                        # Kept: a scoped run's address is stamped now (Back returns here).
+                        _show_search_url(clean_query, mode, url_stamp_of(search_state))
                 except Exception:
                     pass  # Browser storage operation failed; snapshot not persisted
             return
@@ -5995,8 +5997,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         })
 
         # URL state persistence: the address the search got when it started, again
-        # (a Back finds this run by its code: web/search_bootstrap.py).
-        _show_search_url(clean_query, mode, url_stamp_of(search_state))
+        # (a Back finds this run by its code: web/search_bootstrap.py). A scoped run's
+        # address carries no scope, so it is stamped only once the run is kept (below):
+        # one not kept would bring Back to an unscoped search (Codex, PR #436).
+        if not search_run.scoped:
+            _show_search_url(clean_query, mode, url_stamp_of(search_state))
 
         # Only the run's owner saves it: a page that a Back took over from (left,
         # and gone) still finishes the search, and must not save it a second time.
@@ -6009,7 +6014,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             try:
                 persist_search_snapshot(search_state)
                 # The run's own save: its rows are on the page now (search_state).
-                save_search_run(search_state)
+                if save_search_run(search_state) and search_run.scoped:
+                    _show_search_url(clean_query, mode, url_stamp_of(search_state))
             except Exception:
                 pass  # Browser storage operation failed; preference not persisted
 
