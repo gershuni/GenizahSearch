@@ -5106,6 +5106,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                               "if(u.searchParams.has('run')){u.searchParams.delete('run');"
                               "history.replaceState(null,'',u.pathname+u.search);}})()")
             search_state.result_count_capped = bool(state_snapshot.get('result_count_capped'))
+            # Nor do they carry the shown search's "cannot be completed" (Codex round 3
+            # on PR #442): an entry that says it was cut is completed by its own search.
+            search_state.result_partial = False
             search_state.domain_exclusions = set(state_snapshot.get('domain_exclusions', []))
             search_state.printed_filter = state_snapshot.get('printed_filter', 'all')
             # Phase 88: populate per-session export payload after history restore so JSON
@@ -5782,8 +5785,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if not results and _preview_box['rows']:
                 results = list(_preview_box['rows'])
             # Stopped, the rows are the start of the list, never all of it: "+", and a
-            # search within them completes the step first (D8).
+            # search within them completes the step first (D8) -- even within a step
+            # that cannot be completed itself (step_partial).
             search_state.result_count_capped = True
+            search_state.result_partial = False
             search_state.is_running = False
             search_state.is_cancelled = False
             search_state.progress = 1.0

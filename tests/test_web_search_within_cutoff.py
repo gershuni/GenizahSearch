@@ -880,6 +880,71 @@ def test_a_step_searched_within_a_partial_step_is_not_run_again_either(page):
     assert seen['payloads'] == [(query, False), (WORD2, False)], 'no step is run again to complete it'
 
 
+def test_a_stopped_step_within_a_partial_step_is_completed(page, monkeypatch):
+    """The other side of the rule above: a step the user stopped is the start of its
+    list, whatever its parent -- searching within it again completes it (ids_only)."""
+    from nicegui import ui
+    from web import research_jobs
+    parent = f'{WORD2}* טיכ*'
+    partial = {'capped': True, 'interrupted': False, 'partial': True, 'limited': False}
+    queue = StoppableQueue({(parent, False): ([_row('M1'), _row('M2')], partial),
+                            (WORD, True): ([_row('M1'), _row('M2')], None)},
+                           early_rows=[_row('M1')])
+    monkeypatch.setattr(research_jobs, 'get_queue', lambda: queue)
+
+    async def driver(a):
+        # Exact mode, where a search hands its first rows over early (the queue answers
+        # each job by its query; the parent's cut-off signal is a star search's).
+        await a.open('/search')
+        submit(a, parent)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('2+ Results') for t in _label_texts(a)), user=a)
+        await _click_search_within(a)
+        await _wait_for(lambda: any('Searching within 2+ manuscripts' in t for t in _label_texts(a)), user=a)
+        submit(a, WORD)
+        await wait_for_payloads(queue, 2)
+        await _wait_for(lambda: queue.held is not None and queue.held.handed, user=a)
+        await asyncio.sleep(0.3)                   # the caller hands them to the page
+        _click(a, ui.button, lambda e: e.text == 'Stop')
+        await _wait_for(lambda: any('(partial)' in t for t in _label_texts(a)), user=a)
+        await _click_search_within(a)
+        await wait_for_payloads(queue, 3)          # the stopped step's completion
+
+    run(driver, count=1)
+    assert (queue.payloads[2]['arguments']['query_str'], queue.payloads[2]['arguments'].get('ids_only')) == (WORD, True)
+
+
+def test_a_restored_history_entry_does_not_inherit_the_shown_searchs_partial_state(page):
+    """Codex round 3 on PR #442: after a star search that cannot be completed, an old
+    history entry that kept its rows (and says they were cut) is its own search, which
+    Search within completes."""
+    from tests.test_web_variant_settings_per_visitor import (
+        PLACEHOLDER, WORD3, _element, _legacy_history_entry, _restore_history, stored)
+    from nicegui import ui
+    star = f'{WORD2}* טיכ*'
+    partial = {'capped': True, 'interrupted': False, 'partial': True, 'limited': False}
+    queue = page({(star, False): ([_row('M1')], partial),
+                  (WORD3, True): ([_row('990000000000099')], None)})
+    entry = _legacy_history_entry(WORD3, '990000000000099')
+    entry['state']['result_count_capped'] = True
+
+    async def driver(a):
+        await a.open('/search')
+        submit(a, star)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
+        store(a, search_history=[entry])
+        _restore_history(a, WORD3)
+        box = _element(a, ui.input, lambda e: e.props.get('placeholder') == PLACEHOLDER)
+        await _wait_for(lambda: box.value == WORD3, user=a)
+        await _click_search_within(a)
+        await wait_for_payloads(queue, 2)          # the restored search's completion
+
+    run(driver, count=1)
+    completion = queue.payloads[1]['arguments']
+    assert (completion['query_str'], completion.get('ids_only')) == (WORD3, True)
+
+
 def test_a_star_search_cut_by_its_page_limit_too_is_completed(page):
     """The same search cut by a candidate limit as well ('limited'): reading every
     candidate completes that part, so the step is run again with ids_only."""

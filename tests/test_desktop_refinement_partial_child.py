@@ -51,3 +51,34 @@ def test_a_new_step_inherits_what_its_parent_cannot_complete(parent, cutoff, mar
 def test_a_first_step_has_only_its_own_marks():
     assert _Host(PARTIAL, [])._new_step_marks() == (True, True)
     assert _Host(CLEAN, [])._new_step_marks() == (False, False)
+
+
+class _Session:
+    _saved_search_cutoff = APP._saved_search_cutoff
+    _forget_responsa_notes = APP._forget_responsa_notes
+
+    def __init__(self, cutoff, rows):
+        self._search_cutoff = cutoff
+        self.last_results = [{}] * rows
+
+
+@pytest.mark.parametrize('cutoff, rows, saved', [
+    (PARTIAL, 2, {'capped': True, 'interrupted': False, 'partial': True, 'limited': False}),
+    # The session keeps the first rows only: completing reads the rest (limited).
+    (PARTIAL, 6, {'capped': True, 'interrupted': False, 'partial': True, 'limited': True}),
+    (CLEAN, 2, {'capped': False, 'interrupted': False}),
+    (CLEAN, 6, {'capped': True, 'interrupted': False}),
+])
+def test_the_session_keeps_whether_completing_can_fix_the_list(cutoff, rows, saved):
+    # Codex round 3 on PR #442: a restored star search kept only "+", so a search within
+    # it ran it again with every candidate.
+    assert _Session(cutoff, rows)._saved_search_cutoff(5) == saved
+
+
+def test_the_pattern_count_goes_with_the_other_responsa_notes():
+    # Codex round 3 on PR #442: a tag search's line after an all-star search spoke of the
+    # star search's patterns.
+    host = _Session(CLEAN, 0)
+    host._responsa_warning, host._responsa_expanded_count, host._responsa_pattern_count = 'w', 3, 2
+    host._forget_responsa_notes()
+    assert (host._responsa_warning, host._responsa_expanded_count, host._responsa_pattern_count) == (None, 0, 0)
