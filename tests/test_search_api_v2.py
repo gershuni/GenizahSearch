@@ -177,10 +177,17 @@ def _reset_heavy_semaphore():
 
 
 @pytest.fixture
-def stub_searcher():
-    """Replace state.searcher with a fresh StubSearcher; restore after."""
+def stub_searcher(monkeypatch):
+    """Replace state.searcher with a fresh StubSearcher; restore after.
+
+    Through monkeypatch, not save/restore: a test that monkeypatches
+    state.searcher again shares the one undo stack, which unwinds in order.
+    The autouse fixtures above create monkeypatch BEFORE this fixture, so its
+    undo ran after a save/restore teardown and put the stub back on the
+    shared state for the rest of the process (2026-10-22: the next file's
+    browse core timeout widened to the warm-up budget, since
+    GenizahService.is_warm() is False while a searcher is set)."""
     from web.state import state
-    saved = state.searcher
     fake = StubSearcher()
     fake.results = [{
         'uid': 'uid_001',
@@ -195,15 +202,13 @@ def stub_searcher():
         'full_text': 'lorem ipsum',
         'sort_score': 0.5,
     }]
-    state.searcher = fake
-    yield fake
-    state.searcher = saved
+    monkeypatch.setattr(state, 'searcher', fake)
+    return fake
 
 
 @pytest.fixture
-def stub_meta_mgr():
+def stub_meta_mgr(monkeypatch):
     from web.state import state
-    saved = state.meta_mgr
     mgr = MagicMock()
     mgr.get_meta_for_id.return_value = ('T-S 12.345', 'Test Title')
     mgr.get_library_for_id.return_value = 'CUL'
@@ -213,9 +218,8 @@ def stub_meta_mgr():
         'p_num': '7',
         'fl_id': None,
     }
-    state.meta_mgr = mgr
-    yield mgr
-    state.meta_mgr = saved
+    monkeypatch.setattr(state, 'meta_mgr', mgr)
+    return mgr
 
 
 @pytest.fixture
