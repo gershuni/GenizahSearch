@@ -268,6 +268,41 @@ _SEARCH_FILTER_MEASUREMENT_KEYS = (
     'search_filter_measurement_material',
 )
 
+# The pre-search filters a search ran with, as SearchUIState attribute names. They
+# are saved with its run (last_run['pre_search_filters']) so that a stamped Back
+# restores the filters ITS rows were searched with -- not the shared current filter
+# keys, which another tab may have changed since (Codex, PR #436).
+RUN_FILTER_FIELDS = tuple(key[len('search_'):] for key in _SEARCH_FILTER_KEYS + _SEARCH_FILTER_MEASUREMENT_KEYS)
+_LIST_FILTER_FIELDS = frozenset({
+    'filter_domains', 'filter_authors', 'filter_works', 'filter_material_exclude',
+    'filter_text_all', 'filter_text_any', 'filter_text_not', 'filter_measurement_material',
+})
+
+
+def _filter_value(name: str, value):
+    """A copy of a filter value (a saved run never shares a list with the page),
+    or the field's default when it is absent."""
+    if name in _LIST_FILTER_FIELDS:
+        return list(value) if isinstance(value, (list, tuple, set, frozenset)) else []
+    if name == 'filter_include_mode':
+        return True if value is None else bool(value)
+    return value
+
+
+def run_filter_state(state: 'SearchUIState') -> dict:
+    """The pre-search filters *state* searches with now, for its run."""
+    return {name: _filter_value(name, getattr(state, name, None)) for name in RUN_FILTER_FIELDS}
+
+
+def apply_run_filter_state(state: 'SearchUIState', filters) -> bool:
+    """Set *state*'s pre-search filters to a run's saved ones (absent fields take
+    their defaults). False, and nothing changed, when *filters* is not a dict."""
+    if not isinstance(filters, dict):
+        return False
+    for name in RUN_FILTER_FIELDS:
+        setattr(state, name, _filter_value(name, filters.get(name)))
+    return True
+
 
 def _get_tab_storage():
     """Return tab storage when available, else None."""
@@ -413,6 +448,32 @@ def clear_search_active_snapshot() -> None:
         tab.pop(_SEARCH_ACTIVE_TAB_KEY, None)
     except Exception:
         pass
+
+
+def _without_url_stamp(run):
+    return {k: v for k, v in run.items() if k != 'url_stamp'}
+
+
+def drop_saved_url_stamp() -> None:
+    """Make the address of the shown search stop matching its saved run.
+
+    Called when a new search starts. Only a COMPLETED search stamps the address and
+    saves its run again; one that is stopped, fails or never finishes leaves the
+    previous run saved under the previous stamp, and a Back would restore that run
+    instead of what the page showed when it was left (Codex, PR #436). Without its
+    stamp the saved run matches no address, so such a Back searches again.
+    """
+    tab = _get_tab_storage()
+    if tab is not None:
+        try:
+            raw = tab.get(_SEARCH_ACTIVE_TAB_KEY)
+            if isinstance(raw, dict) and isinstance(raw.get('last_run'), dict) and 'url_stamp' in raw['last_run']:
+                tab[_SEARCH_ACTIVE_TAB_KEY] = {**raw, 'last_run': _without_url_stamp(raw['last_run'])}
+        except Exception:
+            pass
+    run = safe_user_get('search_last_run', None)
+    if isinstance(run, dict) and 'url_stamp' in run:
+        safe_user_set('search_last_run', _without_url_stamp(run))
 
 
 def responsa_note_of(results):

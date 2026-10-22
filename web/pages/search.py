@@ -33,6 +33,7 @@ from web.pages.search_state import (
     persist_search_snapshot, clear_search_snapshot, clear_search_filters,
     get_search_active_snapshot, restore_search_snapshot, responsa_note_of,
     compact_result_rows, preview_shows_final_rows, engine_mode,
+    run_filter_state, apply_run_filter_state, drop_saved_url_stamp,
 )
 from web.pages.search_results import (
     toggle_expansion as _toggle_expansion,
@@ -287,6 +288,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # #17: a saved measurement filter the catalog is known to lack.
             ui.notify(tr('Some saved filters were removed: this catalog data is not available.'),
                       type='info')
+    # A stamped Responsa Back: the filters its rows were searched with, from its own
+    # run -- not the shared current filter keys another tab may have changed.
+    if bootstrap_state['restore_run_filters']:
+        apply_run_filter_state(search_state, _saved_run.get('pre_search_filters'))
 
     # Restore word search excluded ids from session
     if restore_saved_exclusions:
@@ -5334,11 +5339,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         responsa_options = _responsa_options_from_controls()
 
         _tp = text_position_select.value
+        # The address of the search shown so far stops being Back to anything: only
+        # this search's completion stamps one again (search_state.drop_saved_url_stamp).
+        drop_saved_url_stamp()
         search_state.last_run = {
             'query': clean_query, 'mode': engine_mode(mode), 'gap': int(gap_input.value),
             'exclude_words': list(not_words), 'text_position': _tp if _tp != 'anywhere' else None,
             'responsa_options': responsa_options, 'corpus_scope': 'genizah',
             'variant_settings': dict(variant_settings),
+            # What a stamped Back restores with the rows (search_state.RUN_FILTER_FIELDS).
+            'pre_search_filters': run_filter_state(search_state),
         }
 
         # Phase 55: If not in refine mode, clear any stale refinement chain

@@ -19,6 +19,7 @@ def test_restores_saved_state_without_route_context():
         'query': 'ישן',
         'restore_saved_results': True,
         'restore_saved_filters': True,
+        'restore_run_filters': False,
         'restore_saved_exclusions': True,
     }
 
@@ -41,6 +42,7 @@ def test_query_route_uses_clean_default_state():
         'query': 'בלי ירח',
         'restore_saved_results': False,
         'restore_saved_filters': False,
+        'restore_run_filters': False,
         'restore_saved_exclusions': False,
     }
 
@@ -81,6 +83,7 @@ def test_tag_route_forces_tag_mode_and_clears_saved_query():
         'query': '',
         'restore_saved_results': False,
         'restore_saved_filters': False,
+        'restore_run_filters': False,
         'restore_saved_exclusions': False,
     }
 
@@ -103,6 +106,7 @@ def test_browse_navigation_disables_saved_state_restore():
         'query': '',
         'restore_saved_results': False,
         'restore_saved_filters': False,
+        'restore_run_filters': False,
         'restore_saved_exclusions': False,
     }
 
@@ -232,9 +236,12 @@ def test_back_navigation_restores_saved_mode_when_saved_mode_is_title():
 
 _RESPONSA_QUERY = '(מאמתי/מאימתי) (קורין/קוריין)'
 _STAMP = 'k3J9xQ_a'
+_RUN_FILTERS = {'filter_domains': ['Halakha'], 'filter_include_mode': True, 'filter_date_from': 1000}
+_ABSENT = object()
 
 
-def _responsa_run(query=_RESPONSA_QUERY, mode='responsa', url_stamp=_STAMP, **options):
+def _responsa_run(query=_RESPONSA_QUERY, mode='responsa', url_stamp=_STAMP,
+                  pre_search_filters=_ABSENT, **options):
     run = {
         'query': query, 'mode': mode, 'gap': 0, 'exclude_words': [], 'text_position': None,
         'responsa_options': {
@@ -246,6 +253,7 @@ def _responsa_run(query=_RESPONSA_QUERY, mode='responsa', url_stamp=_STAMP, **op
             'variant_mode': 'variants' if options.get('variants', True) else 'exact',
         },
         'corpus_scope': 'genizah', 'variant_settings': {},
+        'pre_search_filters': dict(_RUN_FILTERS) if pre_search_filters is _ABSENT else pre_search_filters,
     }
     if url_stamp is not None:
         run['url_stamp'] = url_stamp
@@ -275,18 +283,32 @@ def _responsa_back(*, initial_query=_RESPONSA_QUERY, initial_responsa=None, init
     )
 
 
-def test_back_to_a_responsa_search_restores_its_results_and_filters():
-    """The stamp ties the snapshot to this address, so its filters come back with
-    its rows (Codex, PR #436): no restricted result under empty filter chips."""
+def test_back_to_a_responsa_search_restores_its_results_and_its_runs_filters():
+    """The stamp ties the snapshot to this address, so the filters saved WITH its run
+    come back with its rows (Codex, PR #436, rounds 1-2): no restricted result under
+    empty filter chips, nor under the shared current ones another tab may have set."""
     state = _responsa_back()
 
     assert state == {
         'mode': 'responsa',
         'query': _RESPONSA_QUERY,
         'restore_saved_results': True,
-        'restore_saved_filters': True,
+        'restore_saved_filters': False,
+        'restore_run_filters': True,
         'restore_saved_exclusions': True,
     }
+
+
+def test_responsa_back_without_the_runs_filters_searches_again():
+    """A saved run without its filters (stamped before they were saved with it) could
+    only show its rows under the wrong chips: no Back, a fresh search."""
+    for missing in (None, [], 'x'):
+        state = _responsa_back(saved_run=_responsa_run(pre_search_filters=missing))
+        assert state['restore_saved_results'] is False, missing
+        assert state['restore_run_filters'] is False, missing
+    run = _responsa_run()
+    del run['pre_search_filters']
+    assert _responsa_back(saved_run=run)['restore_saved_results'] is False
 
 
 def test_responsa_link_without_the_stamp_searches_again():
@@ -296,6 +318,7 @@ def test_responsa_link_without_the_stamp_searches_again():
         state = _responsa_back(initial_run=initial_run)
         assert state['restore_saved_results'] is False, initial_run
         assert state['restore_saved_filters'] is False, initial_run
+        assert state['restore_run_filters'] is False, initial_run
         assert state['restore_saved_exclusions'] is False, initial_run
 
 
@@ -343,9 +366,10 @@ def test_responsa_link_when_the_saved_run_was_not_responsa_searches_again():
 def test_responsa_link_without_a_saved_run_searches_again():
     """A snapshot saved before searches were saved with their run has nothing to
     match the options against: a fresh search, as before."""
-    for saved_run in ({}, {'query': _RESPONSA_QUERY, 'mode': 'responsa', 'url_stamp': _STAMP},
+    for saved_run in ({}, {'query': _RESPONSA_QUERY, 'mode': 'responsa', 'url_stamp': _STAMP,
+                           'pre_search_filters': {}},
                       {'query': _RESPONSA_QUERY, 'mode': 'responsa', 'url_stamp': _STAMP,
-                       'responsa_options': None}):
+                       'pre_search_filters': {}, 'responsa_options': None}):
         assert _responsa_back(saved_run=saved_run)['restore_saved_results'] is False, saved_run
 
 
@@ -358,6 +382,7 @@ def test_responsa_link_from_browse_is_never_back():
 
     assert state['restore_saved_results'] is False
     assert state['restore_saved_filters'] is False
+    assert state['restore_run_filters'] is False
 
 
 def test_other_explicit_modes_in_the_url_still_search_again():
@@ -479,3 +504,106 @@ def test_the_route_hands_run_to_the_search_page():
     assert len(calls) == 1
     keywords = {kw.arg: kw.value for kw in calls[0].keywords}
     assert getattr(keywords.get('initial_run'), 'id', None) == 'run'
+
+
+# --- The run's own filters, and the stamp dropped at a new search (Codex round 2) ---
+
+def test_a_runs_filters_round_trip_as_copies():
+    from web.pages.search_state import (
+        RUN_FILTER_FIELDS, SearchUIState, apply_run_filter_state, run_filter_state)
+
+    page = SearchUIState()
+    for name in RUN_FILTER_FIELDS:
+        assert hasattr(page, name), name  # every saved field is a real page field
+    page.filter_domains = ['Halakha']
+    page.filter_include_mode = False
+    page.filter_date_from = 1000
+    page.filter_width_min = 12.5
+    saved = run_filter_state(page)
+    page.filter_domains.append('Liturgy')  # the page changes after the search
+    assert saved['filter_domains'] == ['Halakha']
+
+    restored = SearchUIState()
+    assert apply_run_filter_state(restored, saved) is True
+    assert {name: getattr(restored, name) for name in RUN_FILTER_FIELDS} == saved
+    restored.filter_domains.append('Bible')
+    assert saved['filter_domains'] == ['Halakha']
+
+
+def test_applying_a_runs_filters_resets_the_fields_it_lacks():
+    """Another tab's filters on this page are replaced field by field, absent ones
+    with their defaults; a non-dict changes nothing."""
+    from web.pages.search_state import SearchUIState, apply_run_filter_state
+
+    page = SearchUIState()
+    page.filter_authors = ['other tab']
+    page.filter_include_mode = False
+    page.filter_height_max = 30
+    assert apply_run_filter_state(page, {'filter_domains': ['Halakha']}) is True
+    assert page.filter_domains == ['Halakha']
+    assert page.filter_authors == []
+    assert page.filter_include_mode is True
+    assert page.filter_height_max is None
+
+    page.filter_authors = ['kept']
+    assert apply_run_filter_state(page, None) is False
+    assert page.filter_authors == ['kept']
+
+
+def test_a_new_search_drops_the_saved_stamp(monkeypatch):
+    """Only a completed search stamps again: a stopped or failed one must leave no
+    saved run that the previous address still matches (Codex, PR #436, round 2)."""
+    import web.pages.search_state as ss
+
+    run = {'query': 'q', 'mode': 'responsa', 'url_stamp': _STAMP, 'pre_search_filters': {}}
+    tab = {ss._SEARCH_ACTIVE_TAB_KEY: {'version': ss._SEARCH_ACTIVE_TAB_VERSION, 'results': [1], 'last_run': run}}
+    user = {'search_last_run': dict(run)}
+    monkeypatch.setattr(ss, '_get_tab_storage', lambda: tab)
+    monkeypatch.setattr(ss, 'safe_user_get', lambda key, default=None: user.get(key, default))
+    monkeypatch.setattr(ss, 'safe_user_set', lambda key, value: user.__setitem__(key, value))
+
+    ss.drop_saved_url_stamp()
+
+    assert 'url_stamp' not in tab[ss._SEARCH_ACTIVE_TAB_KEY]['last_run']
+    assert 'url_stamp' not in user['search_last_run']
+    assert tab[ss._SEARCH_ACTIVE_TAB_KEY]['results'] == [1]  # nothing else touched
+    assert user['search_last_run']['query'] == 'q'
+    assert run['url_stamp'] == _STAMP  # copied, not edited in place
+    # The saved run no longer matches the address it stamped.
+    assert _responsa_back(saved_run=tab[ss._SEARCH_ACTIVE_TAB_KEY]['last_run'])['restore_saved_results'] is False
+
+
+def _function(tree, name):
+    import ast
+    found = [node for node in ast.walk(tree)
+             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name]
+    assert len(found) == 1, name
+    return found[0]
+
+
+def test_a_search_saves_its_filters_and_drops_the_old_stamp_before_its_run():
+    """Call sites in execute_search: the stamp is dropped before the new run is
+    recorded, and the run records the page's filters."""
+    import ast
+    func = _function(_search_page_tree(), 'execute_search')
+    drops = [node.lineno for node in ast.walk(func)
+             if isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'drop_saved_url_stamp']
+    runs = [node for node in ast.walk(func)  # the run as recorded (not the stamp's update)
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)
+            and any(ast.unparse(t) == 'search_state.last_run' for t in node.targets)
+            and any(isinstance(k, ast.Constant) and k.value == 'query' for k in node.value.keys)]
+    assert len(drops) == 1 and len(runs) == 1
+    assert drops[0] < runs[0].lineno
+    values = {k.value: v for k, v in zip(runs[0].value.keys, runs[0].value.values) if isinstance(k, ast.Constant)}
+    assert ast.unparse(values['pre_search_filters']) == 'run_filter_state(search_state)'
+
+
+def test_the_page_applies_the_runs_filters_on_a_stamped_back():
+    import ast
+    func = _function(_search_page_tree(), 'create_search_page')
+    guarded = [node for node in ast.walk(func)
+               if isinstance(node, ast.If) and ast.unparse(node.test) == "bootstrap_state['restore_run_filters']"]
+    assert len(guarded) == 1
+    calls = [ast.unparse(node) for node in ast.walk(guarded[0])
+             if isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'apply_run_filter_state']
+    assert calls == ["apply_run_filter_state(search_state, _saved_run.get('pre_search_filters'))"]

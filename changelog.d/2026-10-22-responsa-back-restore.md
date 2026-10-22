@@ -11,13 +11,23 @@ A finished Responsa search now also writes a random `run=<stamp>` into the
 address and keeps the same stamp in its saved run (`last_run['url_stamp']`).
 `web/search_bootstrap.py::resolve_search_bootstrap` treats a Responsa address as
 Back only when the stamp, the query and the options all match the saved run from
-the same snapshot as the results; that Back restores the saved filters with the
-rows. A typed or pasted link without the stamp, another run's stamp (another
-tab, an older search), or any other mismatch still searches, as a link should --
-equal values alone could hide a gap, NOT-words, filters or a refinement the
-address does not carry (Codex, PR #436). Other modes are unchanged.
+the same snapshot as the results. A typed or pasted link without the stamp,
+another run's stamp (another tab, an older search), or any other mismatch still
+searches, as a link should -- equal values alone could hide a gap, NOT-words,
+filters or a refinement the address does not carry (Codex, PR #436). Other modes
+are unchanged.
+
+The run also saves the pre-search filters it ran with
+(`last_run['pre_search_filters']`, `web/pages/search_state.py::run_filter_state`),
+and a stamped Back restores those (`apply_run_filter_state`), not the shared
+current filter keys another tab may have changed; a saved run without them is
+not Back. A new search drops the saved stamp when it starts
+(`drop_saved_url_stamp`), so a search that is stopped, fails or never finishes
+cannot leave the previous run matching the address.
 
 Tests: `tests/test_search_bootstrap.py` (the match and each way it must not
-match, filters on the stamped Back, and the call sites: the route hands `run` to
-the page, the page hands it and the four options to the bootstrap, and the URL
-and the saved run get the same stamp).
+match, the run's own filters, the stamp dropped at a new search, and the call
+sites: the route hands `run` to the page, the page hands it and the four options
+to the bootstrap, the URL and the saved run get the same stamp, `execute_search`
+drops the old stamp before recording the run with its filters, and the page
+applies the run's filters on a stamped Back).

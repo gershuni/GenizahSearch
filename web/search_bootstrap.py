@@ -39,6 +39,9 @@ def _matches_saved_responsa_run(initial_query: str | None, initial_responsa: Dic
         return False
     if not isinstance(initial_run, str) or not initial_run or saved_run.get('url_stamp') != initial_run:
         return False
+    # Its rows come back with the filters they were searched with, or not at all.
+    if not isinstance(saved_run.get('pre_search_filters'), dict):
+        return False
     if saved_run.get('query') != initial_query:
         return False
     options = saved_run.get('responsa_options')
@@ -74,7 +77,8 @@ def resolve_search_bootstrap(
     (``initial_responsa``, by the engine's option names) and its run stamp
     (``initial_run``); it is Back when the stamp, the query and the options match
     the saved run (``saved_run``, the snapshot's last_run). That Back restores the
-    snapshot's filters too: the stamp ties them to this address.
+    filters saved with the run (``restore_run_filters``), never the shared current
+    ones (``restore_saved_filters``).
     """
     explicit_mode = initial_mode if initial_mode in VALID_SEARCH_MODES else None
 
@@ -146,16 +150,16 @@ def resolve_search_bootstrap(
     else:
         resolved_query = ''
 
-    # The q-only Back keeps 829cd7cf's rule (the URL holds no proof the filters
-    # belong to it). A stamped Responsa Back has that proof: its rows come back with
-    # the saved filters (saved as they change), so the page is the one that was left
-    # and no restricted result shows under empty filter chips.
+    # The q-only Back keeps 829cd7cf's rule: no filters (the URL holds no proof they
+    # belong to it). A stamped Responsa Back restores the filters saved WITH its run,
+    # so no restricted result shows under empty or another tab's filter chips; the
+    # shared current filter keys (restore_saved_filters) stay out of it.
     stamped_back = is_back_navigation and explicit_mode == 'responsa'
     return {
         'mode': resolved_mode,
         'query': resolved_query,
         'restore_saved_results': restore_saved_state,
-        'restore_saved_filters': restore_saved_state and not bool(from_browse)
-                                 and (not is_back_navigation or stamped_back),
+        'restore_saved_filters': restore_saved_state and not bool(from_browse) and not is_back_navigation,
+        'restore_run_filters': stamped_back,
         'restore_saved_exclusions': restore_saved_state,
     }
