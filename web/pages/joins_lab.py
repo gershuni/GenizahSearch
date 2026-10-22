@@ -69,6 +69,7 @@ from nicegui import run, ui
 from shared.export_dossier import build_image_url_for_row
 from shared.fjms_service import get_fjms_service
 from shared.fragment_details import fetch_fragment_details
+from shared.responsa_match import ResponsaQueryRefused
 from shared.joins_lab import (
     BuilderRow, Candidate, SideQuery, apply_cross_side, compose, dedup_candidates,
     detect_self_match, merge_candidates, normalize_order, primary_domain,
@@ -3811,6 +3812,12 @@ def create_joins_lab_page(
                 # (latest-wins path).  The newer run owns the UI — return quietly.
                 return
 
+            except ResponsaQueryRefused as exc:
+                # A query shape the engine does not search yet: say so, never show it
+                # as no results (shared/responsa_match.py).
+                search_status.set_text(tr(str(exc)))
+                return
+
             except Exception as exc:
                 logger.exception('Joins Lab search error: %s', exc)
                 search_status.set_text(
@@ -3927,6 +3934,10 @@ def create_joins_lab_page(
                         final_candidates = list(base_candidates)
                     except asyncio.CancelledError:
                         return
+                    except ResponsaQueryRefused as exc:
+                        # The other side's query is refused: this side's results, and why.
+                        ui.notify(tr(str(exc)), type='warning', close_button=True)
+                        final_candidates = list(base_candidates)
                     except Exception as exc:
                         logger.exception('Joins Lab cross-side error: %s', exc)
                         ui.notify(

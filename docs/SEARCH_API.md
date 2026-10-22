@@ -309,18 +309,18 @@ characters are matched literally. Tokens are whitespace-separated; modifiers sta
 
 | Syntax | Example | Meaning |
 | ------ | ------- | ------- |
-| plain word | `שלום` | exact word match |
+| plain word | `שלום` | the word as a whole word (since 2026-10-21 the first and last words of a query too: `כהנים גדול` no longer matches `כהנים גדולים`); a bracket inside the word in the text is passed over (`שלום` matches `של[ו]ם`) |
 | suffix wildcard | `שלום*` | word starts with the prefix |
 | prefix wildcard | `*נדר` | word ends with the suffix |
-| character pattern | `*פ*ט*ר*פ*` | letters appear in order, any chars between |
+| both-side wildcard | `*שלום*` | searched as `#שלום#`, with a `query_downgraded` warning |
 | grammatical prefixes | `#שלום` | match plus all Hebrew grammatical prefix expansions (`ה`, `ב`, `ל`, `מ`, `ש`, `ו`, `כ`, plus 2-letter combos `וה`, `שב`, …) |
 | grammatical suffixes | `שלום#` | match plus Hebrew grammatical suffix expansions |
-| both prefixes + suffixes | `#שלום#` | combine the two above |
+| both prefixes + suffixes | `#שלום#` | every combination of the two above (600 forms; before 2026-10-21 the suffixes were dropped with a warning) |
 | plene/defective | `%שלום` | tolerate plene/defective spelling variants |
 | stacked modifiers | `%#שלום#` | plene/defective + prefixes + suffixes (any order of `%` and leading `#`) |
 | OR group | `(עץ/אילן)` | match any of the alternatives at that position |
 | modifier + OR | `#(שלום/שלומות)` | grammatical prefixes applied to each alternative |
-| negation | `-word` | exclude results containing this token (modifier prefix `-` may combine with `%`/`#`) |
+| negation | `-word` | exclude results whose matched page holds these letters, anywhere inside a word (since 2026-10-21 the page only, never the rest of the manuscript; modifier prefix `-` may combine with `%`/`#`) |
 | per-pair gap | `word1 [3] word2` | allow up to 3 intervening tokens between the surrounding pair (overrides top-level `gap` for that pair) |
 | line constraint | `\|word` / `word\|` | token must be at the start / end of a manuscript line |
 | line gap | `word1 [\|2] word2` | allow up to 2 line breaks between the pair |
@@ -331,7 +331,11 @@ Notes:
 - `[N]` and `[\|N]` tokens are gap markers, not search tokens — they do not count toward
   the proximity slop and do not appear in `responsa_options_effective`.
 - Wildcard expansion can be expensive; the Responsa cascade may downgrade noisy patterns
-  and surface a `query_downgraded` warning in `warnings[]`.
+  and surface a `query_downgraded` warning in `warnings[]`. It counts the real terms the
+  lookup holds (at most 5,000; measured 2026-10-21: 1,200 terms in under a second).
+- A `*` inside a word (`כ*נים`), a word made only of `*`, and other shapes with several
+  `*` are not searched yet: the request is refused with 400 `responsa_unsupported_star`,
+  never answered with an empty list.
 - The `query` length cap (`QUERY_LENGTH_CAP=1000`) applies to the raw string, not the
   post-expansion form.
 
@@ -344,6 +348,7 @@ Notes:
 | `gap > 10` AND `search_mode != 'responsa'` | `invalid_combination` | 400 | Responsa `[N]` gaps have no limit (2026-10-12) |
 | Top-level `mode` key (legacy Phase 78 shape) | `invalid_request` | 400 | message includes hint `"unknown field 'mode' — use search_mode instead"` per Phase 81A D-13 |
 | `regex` value for `search_mode` | `invalid_request` | 400 | structurally rejected by Literal enum; never part of this API's public surface (dropped before the initial public release, Phase 81A D-09) |
+| `search_mode="responsa"` with a `*` inside a word, a word of `*` only, or several `*` in a word (other than `*word*`) | `responsa_unsupported_star` | 400 | 2026-10-21; on `/api/search/jobs` the job's result carries the same error |
 
 ### Response example
 

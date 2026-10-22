@@ -183,7 +183,7 @@
     <ul>
         <li><b><code>#word</code></b> — Prefix expansion: adds 24 Hebrew prefix forms (&#1493;, &#1492;, &#1489;, &#1499;, &#1500;, &#1502;, &#1513; + compounds). Example: <code>#&#1513;&#1500;&#1493;&#1501;</code> finds &#1493;&#1513;&#1500;&#1493;&#1501;, &#1492;&#1513;&#1500;&#1493;&#1501;, &#1489;&#1513;&#1500;&#1493;&#1501;, etc.</li>
         <li><b><code>word#</code></b> — Suffix expansion: adds 25 Hebrew suffix forms (&#1497;, &#1493;, &#1501;, &#1503;, &#1492;, &#1498;, &#1499;&#1501;, &#1499;&#1503;, etc.). Example: <code>&#1513;&#1500;&#1493;&#1501;#</code> finds &#1513;&#1500;&#1493;&#1502;&#1501;, &#1513;&#1500;&#1493;&#1502;&#1493;, &#1513;&#1500;&#1493;&#1502;&#1498;, etc.</li>
-        <li><b><code>#word#</code></b> — Both prefix and suffix expansion. Example: <code>#&#1513;&#1500;&#1493;&#1501;#</code> finds all prefix+suffix combinations.</li>
+        <li><b><code>#word#</code></b> — Both prefix and suffix expansion. Example: <code>#&#1513;&#1500;&#1493;&#1501;#</code> finds all 600 prefix+suffix combinations.</li>
         <li><b><code>*word</code></b> — Wildcard prefix: any characters before the word. Example: <code>*&#1513;&#1500;&#1493;&#1501;</code> matches &#1499;&#1489;&#1513;&#1500;&#1493;&#1501;, etc.</li>
         <li><b><code>word*</code></b> — Wildcard suffix: any characters after the word. Example: <code>&#1513;&#1500;&#1493;&#1501;*</code> matches &#1513;&#1500;&#1493;&#1502;&#1493;&#1514;, etc.</li>
         <li><b><code>%word</code></b> — Plene/defective variants: inserts/removes &#1493;/&#1497; for spelling variants. Example: <code>%&#1513;&#1500;&#1493;&#1501;</code> finds &#1513;&#1500;&#1493;&#1501;, &#1513;&#1500;&#1501;.</li>
@@ -191,7 +191,8 @@
         <li><b><code>[N]</code></b> — Gap of N words between terms. Example: <code>&#1513;&#1500;&#1493;&#1501; [3] &#1506;&#1493;&#1500;&#1501;</code> = up to 3 words between.</li>
     </ul>
     <p><b>Tip:</b> Modifiers can be combined, e.g. <code>#%word*</code> applies prefix expansion + plene variants + wildcard suffix.</p>
-    <p><i>Note:</i> You cannot search with wildcards on both sides (<code>*word*</code>) due to search engine limitations; such a query is automatically converted to <code>#word#</code> (grammatical prefixes and suffixes).</p>
+    <p><b>Whole words:</b> every word of the query is matched as a whole word, the first and the last too: <code>&#1499;&#1492;&#1504;&#1497;&#1501; &#1490;&#1491;&#1493;&#1500;</code> does not find <code>&#1499;&#1492;&#1504;&#1497;&#1501; &#1490;&#1491;&#1493;&#1500;&#1497;&#1501;</code>. Brackets inside a word of the text do not get in the way: <code>&#1513;&#1500;&#1493;&#1501;</code> finds <code>&#1513;&#1500;[&#1493;]&#1501;</code>.</p>
+    <p><i>Note:</i> You cannot search with wildcards on both sides (<code>*word*</code>) due to search engine limitations; such a query is automatically converted to <code>#word#</code> (grammatical prefixes and suffixes). A <code>*</code> inside a word (<code>&#1499;*&#1504;&#1497;&#1501;</code>), or a word made only of <code>*</code>, is not supported yet: the search says so instead of running.</p>
 
     <h3>Sub-Options</h3>
     <p>When Responsa mode is active, four checkboxes appear below the search field:</p>
@@ -988,7 +989,7 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
     <ul>
         <li><b><code><bdi dir="ltr">#word</bdi></code></b> — הרחבת תחיליות: מוסיף 24 צורות תחילית עבריות (ו, ה, ב, כ, ל, מ, ש + צירופים). דוגמה: <code>#שלום</code> מוצא ושלום, השלום, בשלום וכו'.</li>
         <li><b><code><bdi dir="ltr">word#</bdi></code></b> — הרחבת סיומות: מוסיף 25 צורות סיומת עבריות (י, ו, ם, ן, ה, ך, כם, כן וכו'). דוגמה: <code>שלום#</code> מוצא שלומם, שלומו, שלומך וכו'.</li>
-        <li><b><code><bdi dir="ltr">#word#</bdi></code></b> — הרחבת תחיליות וסיומות יחד. דוגמה: <code>#שלום#</code> מוצא את כל הצירופים.</li>
+        <li><b><code><bdi dir="ltr">#word#</bdi></code></b> — הרחבת תחיליות וסיומות יחד. דוגמה: <code>#שלום#</code> מוצא את כל 600 הצירופים.</li>
         <li><b><code><bdi dir="ltr">*word</bdi></code></b> — תו כללי בתחילת מילה: כל תווים לפני המילה. דוגמה: <code>*שלום</code> מתאים לכבשלום וכו'.</li>
         <li><b><code><bdi dir="ltr">word*</bdi></code></b> — תו כללי בסוף מילה: כל תווים אחרי המילה. דוגמה: <code>שלום*</code> מתאים לשלומות וכו'.</li>
         <li><b><code><bdi dir="ltr">%word</bdi></code></b> — חלופות כתיב מלא/חסר: הוספת/הסרת ו/י. דוגמה: <code>%שלום</code> מוצא שלום, שלם.</li>
@@ -996,7 +997,8 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
         <li><b><code><bdi dir="ltr">[N]</bdi></code></b> — מרווח של N מילים בין מונחים. דוגמה: <code>שלום [3] עולם</code> = עד 3 מילים ביניהם.</li>
     </ul>
     <p><b>טיפ:</b> ניתן לשלב מגדירים, למשל <code><bdi dir="ltr">#%word*</bdi></code> מפעיל הרחבת תחיליות + חלופות כתיב + תו כללי בסוף.</p>
-    <p><i>הערה:</i> לא ניתן לחפש מילה עם כוכביות משני צידיה (<code>*מילה*</code>) בגלל מגבלות מנוע החיפוש; שאילתא כזו תומר אוטומטית ל-<code>#מילה#</code> (תוספות דקדוקיות לפני ואחרי).</p>
+    <p><b>מילים שלמות:</b> כל מילה בשאילתא נמצאת כמילה שלמה, גם הראשונה והאחרונה: <code>כהנים גדול</code> אינו מוצא <code>כהנים גדולים</code>. סוגריים בתוך מילה בטקסט אינם מפריעים: <code>שלום</code> מוצא <code>של[ו]ם</code>.</p>
+    <p><i>הערה:</i> לא ניתן לחפש מילה עם כוכביות משני צידיה (<code>*מילה*</code>) בגלל מגבלות מנוע החיפוש; שאילתא כזו תומר אוטומטית ל-<code>#מילה#</code> (תוספות דקדוקיות לפני ואחרי). כוכבית בתוך מילה (<code>כ*נים</code>), או מילה שכולה כוכביות, עדיין אינה נתמכת: החיפוש מודיע על כך ואינו רץ.</p>
 
     <h3>אפשרויות משנה</h3>
     <p>כאשר מצב זה פעיל, מופיעות ארבע תיבות סימון מתחת לשדה החיפוש:</p>

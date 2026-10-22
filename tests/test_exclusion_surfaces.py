@@ -955,7 +955,9 @@ def test_the_all_terms_rerender_keeps_the_excluded_note(window, monkeypatch):
         _showing(1, 3, excluded=1) + f" ({tr('Only results with all terms')})")
 
 
-def test_the_responsa_warning_timer_writes_an_honest_line(window, monkeypatch):
+def test_the_responsa_warning_stays_in_an_honest_line(window, monkeypatch):
+    """A Responsa downgrade stays in the status line with the results (plan §5.3:
+    it was a 5-second flash) -- after the honest summary, which it never replaces."""
     timers = []
     monkeypatch.setattr(app.QTimer, "singleShot",
                         staticmethod(lambda ms, fn: timers.append((ms, fn))))
@@ -963,9 +965,10 @@ def test_the_responsa_warning_timer_writes_an_honest_line(window, monkeypatch):
     w.word_excluded_sys_ids = {A}
     first = dict(_res(A, 1), responsa_warning="too many terms")
     _search(w, [first, _res(B, 1)])
-    [restore_status] = [fn for ms, fn in timers if ms == 5000]
-    restore_status()
-    assert w.status_label.text() == _showing(1, 2, excluded=1)
+    assert not [fn for ms, fn in timers if ms == 5000]
+    assert w._search_status_summary() == _showing(1, 2, excluded=1) + " · too many terms"
+    _search(w, [_res(A, 1), _res(B, 1)])
+    assert w._search_status_summary() == _showing(1, 2, excluded=1)
 
 
 @pytest.mark.parametrize("finish", ["loaded", "cancelled", "already loaded"])

@@ -23393,15 +23393,9 @@ class GenizahGUI(QMainWindow):
         # Track Responsa expanded term count for status label
         self._responsa_expanded_count = results[0].get('responsa_expanded_count', 0) if results else 0
 
-        # Display explosion guard warning if present
-        if results and results[0].get('responsa_warning'):
-            warning = results[0]['responsa_warning']
-            self.status_label.setText(warning)
-            self.status_label.setStyleSheet("color: #f39c12; font-weight: bold;")
-            def _restore_status():
-                self.status_label.setText(self._search_status_summary())
-                self.status_label.setStyleSheet("")
-            QTimer.singleShot(5000, _restore_status)
+        # A Responsa downgrade (the guard turned an option off) stays in the status
+        # line for as long as these results show (plan §5.3; it was a 5-second flash).
+        self._responsa_warning = results[0].get('responsa_warning') if results else None
 
         for b in self.export_buttons: b.setEnabled(True)
 
@@ -24470,6 +24464,8 @@ class GenizahGUI(QMainWindow):
         text += self._search_excluded_note()
         if getattr(self, '_search_was_cancelled', False):
             text += f" ({tr('Partial results')})"
+        if getattr(self, '_responsa_warning', None):
+            text += f" · {self._responsa_warning}"
         return text
 
     def _with_search_summary(self, message):

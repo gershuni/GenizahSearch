@@ -906,7 +906,7 @@ This mode offers two search methods inspired by the Bar-Ilan Responsa Project: a
         syntax_data = [
             ('#word', 'Prefixes (24 forms: \u05d5, \u05d4, \u05d1, \u05db, \u05dc, \u05de, \u05e9 + compounds)', '#\u05e9\u05dc\u05d5\u05dd \u2192 \u05d5\u05e9\u05dc\u05d5\u05dd, \u05d4\u05e9\u05dc\u05d5\u05dd, \u05d1\u05e9\u05dc\u05d5\u05dd...'),
             ('word#', 'Suffixes (25 forms: \u05d9, \u05d5, \u05dd, \u05df, \u05d4, \u05da, \u05db\u05dd, \u05db\u05df...)', '\u05e9\u05dc\u05d5\u05dd# \u2192 \u05e9\u05dc\u05d5\u05de\u05dd, \u05e9\u05dc\u05d5\u05de\u05d5, \u05e9\u05dc\u05d5\u05de\u05da...'),
-            ('#word#', 'Both prefixes + suffixes', '#\u05e9\u05dc\u05d5\u05dd# \u2192 all combinations'),
+            ('#word#', 'Both prefixes + suffixes (all 600 combinations)', '#\u05e9\u05dc\u05d5\u05dd# \u2192 all combinations'),
             ('*word', 'Wildcard before', '*\u05e9\u05dc\u05d5\u05dd \u2192 \u05db\u05d1\u05e9\u05dc\u05d5\u05dd...'),
             ('word*', 'Wildcard after', '\u05e9\u05dc\u05d5\u05dd* \u2192 \u05e9\u05dc\u05d5\u05de\u05d5\u05ea...'),
             ('%word', 'Plene/defective spelling (insert/remove \u05d5/\u05d9)', '%\u05e9\u05dc\u05d5\u05dd \u2192 \u05e9\u05dc\u05d5\u05dd, \u05e9\u05dc\u05dd'),
@@ -933,7 +933,9 @@ This mode offers two search methods inspired by the Bar-Ilan Responsa Project: a
 
         ui.markdown('Modifiers can be combined, e.g. `#%word*` = prefix expansion + plene variants + wildcard suffix.').style('color: var(--text-secondary);').classes('mb-2')
 
-        ui.markdown('*Note:* You cannot search with wildcards on both sides (`*word*`) due to search engine limitations; such a query is automatically converted to `#word#` (grammatical prefixes and suffixes).').style('color: var(--text-secondary);').classes('mb-4')
+        ui.markdown('*Whole words:* every word of the query is matched as a whole word, the first and the last too: `\u05db\u05d4\u05e0\u05d9\u05dd \u05d2\u05d3\u05d5\u05dc` does not find `\u05db\u05d4\u05e0\u05d9\u05dd \u05d2\u05d3\u05d5\u05dc\u05d9\u05dd`. Brackets inside a word of the text do not get in the way: `\u05e9\u05dc\u05d5\u05dd` finds `\u05e9\u05dc[\u05d5]\u05dd`.').style('color: var(--text-secondary);').classes('mb-2')
+
+        ui.markdown('*Note:* You cannot search with wildcards on both sides (`*word*`) due to search engine limitations; such a query is automatically converted to `#word#` (grammatical prefixes and suffixes). A `*` inside a word (`\u05db*\u05e0\u05d9\u05dd`), or a word made only of `*`, is not supported yet: the search says so instead of running.').style('color: var(--text-secondary);').classes('mb-4')
 
         h3('Sub-Options', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary);')
         ui.markdown('''
@@ -1710,7 +1712,7 @@ def _create_hebrew_content(precision=None, band_counts=None):
         syntax_data = [
             ('#מילה', 'תחיליות (24 צורות: ו, ה, ב, כ, ל, מ, ש + צירופים)', '#שלום \u2190 ושלום, השלום, בשלום...'),
             ('מילה#', 'סיומות (25 צורות: י, ו, ם, ן, ה, ך, כם, כן...)', 'שלום# \u2190 שלומם, שלומו, שלומך...'),
-            ('#מילה#', 'תחיליות + סיומות יחד', '#שלום# \u2190 כל הצירופים'),
+            ('#מילה#', 'תחיליות + סיומות יחד (כל 600 הצירופים)', '#שלום# \u2190 כל הצירופים'),
             ('*מילה', 'תו כללי לפני', '*שלום \u2190 כבשלום...'),
             ('מילה*', 'תו כללי אחרי', 'שלום* \u2190 שלומות...'),
             ('%מילה', 'כתיב מלא/חסר (הוספת/הסרת ו/י)', '%שלום \u2190 שלום, שלם'),
@@ -1738,7 +1740,9 @@ def _create_hebrew_content(precision=None, band_counts=None):
 
         ui.markdown('ניתן לשלב מגדירים, למשל `#%מילה*` = תחיליות + כתיב מלא/חסר + תו כללי בסוף.', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-2')
 
-        ui.markdown('*הערה:* לא ניתן לחפש מילה עם כוכביות משני צידיה (`*מילה*`) בגלל מגבלות מנוע החיפוש; שאילתא כזו תומר אוטומטית ל-`#מילה#` (תוספות דקדוקיות לפני ואחרי).', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
+        ui.markdown('*מילים שלמות:* כל מילה בשאילתא נמצאת כמילה שלמה, גם הראשונה והאחרונה: `כהנים גדול` אינו מוצא `כהנים גדולים`. סוגריים בתוך מילה בטקסט אינם מפריעים: `שלום` מוצא `של[ו]ם`.', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-2')
+
+        ui.markdown('*הערה:* לא ניתן לחפש מילה עם כוכביות משני צידיה (`*מילה*`) בגלל מגבלות מנוע החיפוש; שאילתא כזו תומר אוטומטית ל-`#מילה#` (תוספות דקדוקיות לפני ואחרי). כוכבית בתוך מילה (`כ*נים`), או מילה שכולה כוכביות, עדיין אינה נתמכת: החיפוש מודיע על כך ואינו רץ.', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
 
         h3('אפשרויות משנה', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary); direction: rtl; text-align: right;')
         ui.markdown('''

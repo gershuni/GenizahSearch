@@ -5405,6 +5405,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     if get_language() == 'he' else
                     'The search exceeded its time limit and was stopped. Try a narrower query or search scope.'
                 )
+            # tr(): a refused Responsa query (shared/responsa_match.py) or the guard's
+            # message arrives in English from the worker; the key translates it.
+            error_msg = tr(error_msg)
             ui.notify(error_msg, type='warning', timeout=8000, close_button=True)
             search_state.is_running = False
             search_state.is_cancelled = False
@@ -5412,7 +5415,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_btn.style('display: inline-flex;')
             stop_btn.style('display: none;')
             progress_bar.classes('opacity-0')
-            status_label.text = ''
+            # The message stays on the status line: a refused query is not "0 results".
+            status_label.text = error_msg
             results_count.text = f"0 {tr('Results')}"
             render_results([])
             _ux_first_rows('error')
@@ -5637,15 +5641,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # Merged status: results count + time + filter info in one label
         expanded_count = results[0].get('responsa_expanded_count', 0) if results else 0
+        # A Responsa downgrade (the guard turned an option off) is part of the count's
+        # line, for as long as these results show (plan §5.3: not a 5-second toast).
+        _downgrade = results[0].get('responsa_warning') if results else None
+        _downgrade_suffix = (" · " + '; '.join(tr(part) for part in _downgrade.split('; '))
+                             if _downgrade else '')
         if expanded_count > 0:
-            results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str} ({tr('searching')} {expanded_count} {tr('expanded terms')}){_filter_suffix}"
+            results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str} ({tr('searching')} {expanded_count} {tr('expanded terms')}){_filter_suffix}{_downgrade_suffix}"
         else:
-            results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str}{_filter_suffix}"
+            results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str}{_filter_suffix}{_downgrade_suffix}"
         status_label.text = ''
-
-        # Responsa explosion guard warning
-        if results and results[0].get('responsa_warning'):
-            ui.notify(results[0]['responsa_warning'], type='warning', timeout=5000)
 
         # PostHog event
         from web.analytics import posthog_capture

@@ -1,6 +1,11 @@
 # Responsa wildcards: `*` as any sequence, `#` as the grammatical list
 
-**Status:** plan, revision 6: **all nine §9 decisions taken (2026-10-21)** and the phases
+**Status:** **Phase 1 implemented (2026-10-22)** -- the engine on
+`claude/responsa-wildcards-phase1-36d505`, the surfaces stacked on it on
+`claude/responsa-wildcards-phase1-surfaces` -- with its gates: the §8 oracle
+(`scripts/verify_responsa_wildcards.py`) agrees with the engine on all nine Phase 1 queries on the
+real data (0 differences) and its four named mutations each fail it; the "after" timings are in
+§3.6.6. Phases 2 and 3 are not implemented. Plan revision 6: **all nine §9 decisions taken (2026-10-21)** and the phases
 resequenced -- Phase 1 unchanged (whole words on every path, no rebuild), **Phase 2 is the index
 format** (seam documents and the reversed-words field on one rebuild, the engine's fallback for an
 old index, the server rebuild and the desktop re-index), **Phase 3 is true `*`** on the new index.
@@ -8,7 +13,7 @@ old index, the server rebuild and the desktop re-index), **Phase 3 is true `*`**
 item 6 that cannot run yet: the "after" timings, which run with Phase 1 and Phase 3 through the
 same subcommand, and the Linux-worker run, which is the owner's (§3.6.6 holds today's desktop
 timings on both regex routes, on the laptop). Revision 4 was **Codex SHIP** (four rounds on
-2026-10-21: DO NOT SHIP, DO NOT SHIP, SHIP WITH FIXES, SHIP; §12). Not implemented. Decisions 7
+2026-10-21: DO NOT SHIP, DO NOT SHIP, SHIP WITH FIXES, SHIP; §12). Decisions 7
 and 8 were taken first (exclusion on the page only; counts may change); decisions 1-6 and 9 were
 taken from Phase 0's numbers: 1 from §3.6.1 (identical page sets, 0.14-1.8 s against 4.6-6.1 s
 per leading-star lookup), 2 from §3.6.3 (an OR of 600 or 1,200 scored term queries keeps distinct
@@ -446,6 +451,40 @@ The same queries on the production worker's stdlib `re` route (`--engines re`, a
   on `regex` against 26.0 s on `re`**. `*נים *לים`: 23,609 candidates, 2,459 kept, 1,848 rows;
   loading 7.5 s, matching 60.9 s against 18.7 s. The matching time is the aggregate documents'
   text (§3.5), which pages first (§5.4) and §6's crossing source address.
+**After Phase 1** (2026-10-22, the same subcommand, the same laptop, nothing else running;
+`_tmp/responsa_after/desktop-timings.json`, 06:09-06:23; awake but for 16 s). Rows are the same on both routes:
+
+| Query | Rows before | Rows after | `regex` before | `regex` after | `re` before | `re` after | Note |
+|---|---|---|---|---|---|---|---|
+| `#כהנים #גדולים` | 401 | 392 | 166.8 s | 88.7 s | 35.0 s | 16.4 s |  |
+| `#כהנ# גדולים` | 2 | 374 | 20.4 s | 225.7 s | 6.1 s | 31.8 s | the suffixes are kept now: 600 forms (before, the guard dropped them) |
+| `כהנים גדול` | 264 | 4 | 9.7 s | 6.9 s | 8.3 s | 5.0 s | whole words (Exact's 4) |
+| `ספר` | 24,653 | 25,041 | 2.9 s | 1.8 s | 2.6 s | 1.8 s | whole words: the same 25,041 as Exact; page docs only, no longer cut off |
+| `כהנים [2] גדולים` | 355 | 317 | 7.5 s | 4.8 s | 6.2 s | 3.6 s |  |
+| `כהנים גדולים, bidirectional` | 350 | 316 | 10.7 s | 6.7 s | 16.5 s | 8.4 s |  |
+| `כהנים AND גדולים` | 1,462 | 1,395 | 11.3 s | 103.3 s | 30.0 s | 26.3 s |  |
+| `\|כהנים גדולים` | 41 | 39 | 6.8 s | 85.6 s | 4.4 s | 6.6 s |  |
+| `כהנים גדולים -אהרן` | 138 | 204 | 6.8 s | 4.4 s | 6.3 s | 3.6 s | the excluded word is read on the matched page only (decision 7) |
+| `*כהנים *גדולים` | 405 | 405 | 60.9 s | 42.9 s | 23.8 s | 15.1 s |  |
+| `*נים *לים` | 1,848 | 1,849 | 92.0 s | 68.4 s | 36.4 s | 23.3 s |  |
+| `כ*נים גדולים` | 0 | refused | 0.4 s | -- | 0.2 s | -- | refused with a message |
+| `*כ*ה*נ*ים גדולים` | 0 | refused | 0.3 s | -- | 0.04 s | -- | refused with a message |
+
+- The `|` line query and `AND` rows above are from before a fix made the same morning (commit
+  `9d9a8248`): the large start-lookbehind classes and the looked-past class at a `|` anchor were
+  tried at every position the `regex` module backtracked through. Re-measured after it, single runs
+  whose standby state was not checked, so upper bounds: `כהנים AND גדולים` 25.4 s and `|כהנים
+  גדולים` 13.0 s on `regex`, 5.6 s on `re`. The oracle re-ran on the fixed engine: still 0
+  differences.
+- `#כהנ# גדולים` is now the slow one on the desktop route (225.7 s, 31.8 s on `re`): it searches
+  the 600 forms the guard dropped before, over the whole-manuscript documents. That is the
+  `regex`-module cost §10 leaves out of scope; pages first (§5.4, Phase 3) is what removes it.
+- A second "after" run (06:52-07:11) is **not** used: Windows' Kernel-Power events show the laptop
+  in Modern Standby (event 506 at 06:35:57, no 507 before the run ended), where desktop processes
+  are throttled, and every query ran 1.0-1.9x slower than in this run. Two outliers during
+  development (`#כהנ# גדולים` 4,512 s; a bidirectional query 2,952 s) were standby too (19:07-20:19
+  and 21:05-21:54 on 2026-10-21). A clean re-run on an awake machine is the owner's, with the
+  same subcommand, as is the Linux-worker run.
 
 #### 3.6.7 Hebrew-block punctuation kept inside tokens -- `scan`
 
@@ -794,7 +833,14 @@ subcommand when Phase 1 and Phase 3 land) and the Linux-worker run (the owner's)
 7. Hebrew-block punctuation kept inside tokens besides maqaf (paseq, sof pasuq, nun hafukha): a
    count, to size the §4 exception.
 
-**Phase 1: one meaning on every path, for finite words.** It covers the main path, line-break, the
+**Phase 1: one meaning on every path, for finite words.** **Implemented 2026-10-22**
+(`shared/responsa_match.py`; the status line names the branches). Choices made while building it,
+for review: `*X*` keeps today's meaning (`#X#`, with the warning) rather than being refused;
+every word of a line query is looked up on the content field (the line fields hold a line's first
+or last whitespace token raw, narrower than the check); a page doc's row wins de-duplication over a
+whole-manuscript row for the same page (§5.4's "first wins: the page row"); a lone word reads page
+docs only, as Exact's does; a line row marks its words, not whole lines; a negated word inside a
+line group is excluded, not required (it was). It covers the main path, line-break, the
 LOCAL-only path, ALL and `ids_only`, all through the compiler (§5.1):
 - whole words by Exact's predicate (§5.2), including every `within_document` component, both
   `bidirectional` branches and the `flex_spacing` rule;

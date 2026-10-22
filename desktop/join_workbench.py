@@ -12,6 +12,7 @@ from shared.joins_lab import htmlify, page_of, snippet_html, snippet_plain  # D-
 from shared.joins_lab import (
     counted_options, domain_label, normalize_order, order_candidates, primary_domain,
 )
+from shared.responsa_match import ResponsaQueryRefused
 from shared.web_links import web_browse_url
 from desktop.variant_run_settings import basic_changes_searcher
 
@@ -1816,6 +1817,8 @@ if _QT_AVAILABLE:
                     text_position=text_position,
                     corpus_scope=corpus_scope,
                 ) or []
+            except ResponsaQueryRefused:
+                raise   # shown by the caller: a refused query is not "no results"
             except Exception:
                 return []
 
@@ -1904,10 +1907,12 @@ if _QT_AVAILABLE:
         Receives an ALREADY-MERGED b_ro (the pane merges the other_builder's
         ja/flex/bidir into it before starting this worker — RR-14).
 
-        Signal: done(MergeResult)
+        Signals: done(MergeResult); refused(message) when the other side's query is
+        refused (a star shape not searched yet), before done with this side's rows.
         """
 
         done = pyqtSignal(object)
+        refused = pyqtSignal(str)
 
         def __init__(self, executor, base_candidates: list, b_query,
                      b_ro: dict, combine: str, a_pattern):
@@ -1959,6 +1964,10 @@ if _QT_AVAILABLE:
                     progress_callback=self._check_cancel,
                     text_position=b_pos,
                 )
+            except ResponsaQueryRefused as exc:
+                # The other side's query is refused: this side's candidates, and why.
+                self.refused.emit(str(exc))
+                result = MergeResult(candidates=tuple(self.base), note="")
             except Exception as exc:
                 logger.warning("_CrossSideWorker error: %s", exc)
                 result = MergeResult(candidates=tuple(self.base), note="")
@@ -3108,7 +3117,22 @@ if _QT_AVAILABLE:
             self._search_thread.results_signal.connect(
                 lambda raw, g=_gen: self._on_results(raw, g)
             )
+            # A query the engine refuses (a star shape not searched yet) or cannot
+            # run: its message, not an endless "Searching" (it was never connected).
+            self._search_thread.error_signal.connect(
+                lambda msg, g=_gen: self._on_search_error(msg, g)
+            )
             self._search_thread.start()
+
+        def _on_search_error(self, message: str, gen=None):
+            """The search raised (SearchThread.error_signal): leave the searching
+            state and show the message in the status line."""
+            if gen is not None and gen != self._search_gen:
+                return
+            self._is_searching = False
+            self._search_cancelled = False
+            self._set_find_button_searching(False)
+            self.status.setText(message)
 
         def _on_results(self, raw: list, gen=None):
             """Handle raw engine results; dedup and optionally start cross-side worker."""
@@ -3167,6 +3191,13 @@ if _QT_AVAILABLE:
                     )
                     self._cross_worker.done.connect(
                         lambda res, g=self._cross_gen: self._on_cross_done(res, g)
+                    )
+                    # This side's candidates still show (done follows); the status
+                    # line is rewritten when they do, so the refusal is a dialog.
+                    self._cross_worker.refused.connect(
+                        lambda msg, g=self._cross_gen: (
+                            QMessageBox.warning(self, tr("Other side"), msg)
+                            if g == self._cross_gen else None)
                     )
                     self._cross_worker.start()
                     return
