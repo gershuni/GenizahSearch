@@ -70,24 +70,33 @@ def _ancestors(element):
 # ---------------------------------------------------------------- I: Joins Lab
 
 def _joins_lab(monkeypatch):
+    """Fake the page's seams; returns the sys_ids the page built a viewer for.
+
+    A loaded anchor shows as the AnchorViewer built for it. Until PR #439 these
+    tests read the sys_id off a monospace label the page rendered below
+    everything for a narrow-screen strip that was never built; the label is
+    gone, and the real viewer (faked here) shows the shelfmark, not the sys_id.
+    """
     from web.pages import joins_lab
     monkeypatch.setattr(joins_lab, 'get_service', lambda: SimpleNamespace(
         search_by_shelfmark=lambda q, limit=20: (_manuscripts(), False)))
+    built = []
 
     class FakeViewer:
         def __init__(self, **kwargs):
-            pass
+            built.append(kwargs.get('sys_id'))
 
         async def update_content(self, **kwargs):
             return None
     monkeypatch.setattr(joins_lab, 'AnchorViewer', FakeViewer)
     monkeypatch.setattr(joins_lab, 'write_anchor', lambda *a, **k: True)
+    return built
 
 
 @pytest.mark.parametrize('choice', ['second', 'close'])
 def test_joins_lab_two_matches_open_the_picker(server, monkeypatch, choice):  # noqa: F811
     from nicegui import ui
-    _joins_lab(monkeypatch)
+    built = _joins_lab(monkeypatch)
     shown = {}
 
     async def driver(a, b):
@@ -100,7 +109,7 @@ def test_joins_lab_two_matches_open_the_picker(server, monkeypatch, choice):  # 
         shown['cards'] = [c.props['data-sys-id'] for c in _cards(a)]
         if choice == 'second':
             _click(a, _cards(a)[1])
-            await _wait_for(lambda: TWO in _label_texts(a))
+            await _wait_for(lambda: built)
         else:
             _close_picker(a)
             await asyncio.sleep(0.3)
@@ -109,22 +118,23 @@ def test_joins_lab_two_matches_open_the_picker(server, monkeypatch, choice):  # 
     run(driver)
     assert shown['cards'] == [ONE, TWO]
     if choice == 'second':
-        assert TWO in shown['texts'] and ONE not in shown['texts']
+        assert built == [TWO]
     else:
-        assert ONE not in shown['texts'] and TWO not in shown['texts']
+        assert built == []
     assert not any('Fragment not found' in t for t in shown['texts'])
 
 
 def test_joins_lab_deep_link_still_loads_the_first_match(server, monkeypatch):  # noqa: F811
-    _joins_lab(monkeypatch)
+    built = _joins_lab(monkeypatch)
     shown = {}
 
     async def driver(a, b):
         await a.open('/joins-lab?shelfmark=Mosseri%2C%20Jacques%2C%20Ms.%20VIII.402')
-        await _wait_for(lambda: ONE in _label_texts(a))
+        await _wait_for(lambda: built)
         shown['cards'] = _cards(a)
 
     run(driver)
+    assert built == [ONE]
     assert shown['cards'] == []          # no picker on the deep link
 
 

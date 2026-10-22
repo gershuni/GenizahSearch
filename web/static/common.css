@@ -1120,11 +1120,13 @@ body {
     .main-content { padding: 8px; }
     .page-title { font-size: 1.25rem; }
 
-    /* Dialogs fullscreen */
+    /* Dialogs fullscreen. The minimum goes too: lists.py and project_tree.py
+       give their cards min-w-[400px] / min-w-[500px], wider than the screen. */
     .q-dialog__inner { padding: 0 !important; }
     .q-dialog .q-card {
         width: 100vw !important;
         max-width: 100vw !important;
+        min-width: 0 !important;
         border-radius: 0 !important;
     }
 }
@@ -1278,12 +1280,6 @@ body {
 @media (max-width: 768px) {
     .browse-container { flex-direction: column !important; }
     .image-panel, .transcription-panel { width: 100% !important; max-height: 50vh !important; }
-}
-
-/* Lists page */
-@media (max-width: 768px) {
-    .lists-layout { flex-direction: column !important; }
-    .lists-sidebar { width: 100% !important; max-height: 200px !important; }
 }
 
 /* Header mobile adjustments */
@@ -2535,4 +2531,70 @@ body {
 }
 @media (min-width: 769px) {
     .catalog-filters-toggle { display: none !important; }
+}
+
+/* Joins Lab: under 1024px the anchor pane (image, transcription, known
+   joins) sits above the builder and the candidates, each at the full width.
+   The pane's inline style (web/pages/joins_lab.py) makes it a 380px sticky
+   column with its own scroll; a 390px phone left 10px to the builder, whose
+   controls spilled across the pane while the page scrolled under it (owner's
+   screenshots, 2026-10-22). Only !important reaches an inline style. The
+   transcription keeps a bounded scroll of its own so the builder stays
+   within reach. */
+@media (max-width: 1023px) {
+    .joins-lab-layout { flex-direction: column !important; align-items: stretch !important; }
+    .joins-lab-anchor {
+        position: static !important; width: 100% !important;
+        max-height: none !important; overflow: visible !important;
+    }
+    .joins-lab-work { flex: none !important; width: 100%; padding: 12px 0 !important; }
+}
+@media (max-width: 640px) {
+    .joins-lab-anchor .anchor-transcription-panel { max-height: 45vh; padding: 12px 14px; }
+    .joins-lab-work { padding: 8px 0 !important; }
+    /* The viewer's control bar (the anchor pane and both Compare panes,
+       web/components/anchor_viewer.py) is one row of 32px buttons; the
+       zoom figure goes and the folio counter never wraps. The bar itself
+       still wraps: its two groups need about 290px, which a 360px phone
+       has and a 320px phone has not, where the zoom group takes a second
+       row with each button whole and reachable (Codex on #439: with
+       wrapping off, the trailing buttons were clipped by the hidden body
+       overflow). */
+    .anchor-controls-bar { padding: 4px !important; gap: 2px !important; }
+    .anchor-controls-bar > .nicegui-row { gap: 0 !important; flex-wrap: nowrap !important; }
+    .anchor-controls-bar .q-btn {
+        min-width: 32px !important; min-height: 32px !important; width: 32px; height: 32px; padding: 0 !important;
+    }
+    .anchor-controls-bar .text-sm { white-space: nowrap; padding: 0 2px !important; }
+    .anchor-controls-bar .zoom-level-label { display: none !important; }
+    /* Compare: the two panes stack, anchor above candidate, with 8px padding.
+       The anchor pane loses its inline divider border (a physical side, so
+       the width is zeroed rather than the side named: the findings guard in
+       tests/test_findings_page.py scans this file for physical properties);
+       the candidate pane keeps its verdict border. */
+    .compare-panes > .nicegui-column { flex: 1 1 100% !important; padding: 8px !important; }
+    .compare-panes > .nicegui-column:first-child { border-width: 0 !important; }
+}
+
+/* Lists: under 769px the splitter stacks, the My Lists tree above the list,
+   each at the full width, the tree with a bounded scroll. The tree is the
+   splitter's 25% panel (web/pages/lists.py): 97px on a 390px phone, its
+   heading wrapped and its three buttons stacked. The shell's fixed height
+   goes so the page scrolls, and the panels lose the splitter's 100% height
+   and its own overflow. */
+@media (max-width: 768px) {
+    .lists-shell { height: auto !important; min-height: 0 !important; }
+    .lists-splitter.q-splitter--vertical { flex-direction: column !important; }
+    .lists-splitter > .q-splitter__panel {
+        width: 100% !important; height: auto !important; flex: none !important; overflow: visible;
+    }
+    .lists-splitter > .q-splitter__before { max-height: 45vh; overflow-y: auto; }
+    .lists-splitter > .q-splitter__separator { display: none !important; }
+    .lists-sidebar { padding: 0 0 8px 0 !important; }
+    .lists-content { padding: 8px 0 !important; scroll-margin-top: 72px; }
+    /* An item card: the action icons are a row under the text. As a column
+       beside it they were one icon per line, and the card 700px tall. */
+    .lists-item-card { padding: 12px !important; }
+    .lists-item-card > .nicegui-row:first-child { flex-wrap: wrap !important; }
+    .lists-item-actions { flex-direction: row !important; flex: 1 1 100%; order: 10; gap: 0 !important; }
 }
