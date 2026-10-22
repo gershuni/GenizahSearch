@@ -1242,7 +1242,9 @@ today's finite crossings to the seams (decision 10).
    the manuscripts holding the words are few enough to read in time:
    `Config.RESPONSA_STAR_AGGREGATE_LIMIT` = 2,000 (counted before reading; a starting value for the
    local gates to confirm against the website's 3-minute limit). Reading break by break also finds
-   every crossing of a manuscript, not only its first match. The format-1 windows keep today's
+   every crossing of a manuscript, not only its first match: at each break (and at each seam) the
+   first match that starts on the page before it, so a crossing from an earlier page -- found at
+   the break it crosses first -- cannot hide it (Codex review of PR #443). The format-1 windows keep today's
    false junctions (the V0.8 -> V0.7 restart); the seams do not (§6.1 point 3). `AND`, line and
    position queries read whole manuscripts because the seams hold no line or position fields and
    `AND` is not a crossing (§6's table); a star there is bounded the same way.

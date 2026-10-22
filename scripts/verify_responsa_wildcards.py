@@ -259,6 +259,9 @@ PHASE3 = PHASE1 + [
     Query('star-end', 'כהנ* גדול*'),
     Query('star-inside', 'כ*נים גדולים'),
     Query('star-several', 'כ*ה*נ*ים גדולים'),
+    # A gap: a crossing from an earlier page must not hide the next page's own (Codex
+    # review of PR #443).
+    Query('star-gap', 'כהנ* [1] גדול*'),
 ]
 QUERY_SETS = {1: PHASE1, 3: PHASE3}
 

@@ -3133,13 +3133,17 @@ class SearchEngine:
         return tantivy.Query.boolean_query(clauses)
 
     @staticmethod
-    def _seam_crossing_spans(regex, content, cut, side_words, strip):
+    def _seam_crossing_spans(regex, content, cut, side_words, strip, page_start=None):
         """The first match of *regex* (a Responsa check: its search returns accepted
         matches only) that runs across the seam's central break *cut*, within
         *side_words* word chunks on each side: ``[(start, end)]`` in *content*'s
         coordinates, or ``[]``. The seam centred on the first break a match crosses holds
-        it (§6.1 point 2), so each crossing is found at that seam. *strip*: matched on the
-        text with its brackets out, the span mapped back (_unstripped_span)."""
+        it (§6.1 point 2), so each crossing is found at that seam. *page_start*: where the
+        page just before *cut* begins in *content* -- only a match that starts on it
+        counts here, so one from an earlier page (found at the earlier break, which it
+        crossed first) cannot hide one that starts on this page (Codex review of PR
+        #443). *strip*: matched on the text with its brackets out, the span mapped back
+        (_unstripped_span)."""
         lo = _left_window_start(content, cut, side_words)
         hi = _right_window_end(content, cut, side_words)
         window = content[lo:hi]
@@ -3151,19 +3155,21 @@ class SearchEngine:
         while m is not None and m.start() < cs:
             if m.end() > cs:
                 s, e = _unstripped_span(window, m.start(), m.end()) if strip else m.span()
-                return [(lo + s, lo + e)]
+                if page_start is None or lo + s >= page_start:
+                    return [(lo + s, lo + e)]
             m = regex.search(text, m.start() + 1)
         return []
 
     def _break_crossing_spans(self, regex, content, boundaries, side_words, strip):
         """Every match of *regex* (a Responsa check) that runs across a page break of a
-        whole-manuscript / part document: at each break the first one, within
-        *side_words* word chunks a side (``_seam_crossing_spans``), so a match inside a
-        page earlier in the manuscript cannot hide one (a star query on an index without
-        seams). Sorted, each once (a match over two breaks is found at both)."""
+        whole-manuscript / part document: at each break the first one that starts on the
+        page before it, within *side_words* word chunks a side (``_seam_crossing_spans``),
+        so a match inside a page earlier in the manuscript cannot hide one (a star query
+        on an index without seams), nor can a crossing from an earlier page. Sorted."""
         spans = set()
-        for b in boundaries[1:]:
-            spans.update(self._seam_crossing_spans(regex, content, b.get('start', 0), side_words, strip))
+        for prev, b in zip(boundaries, boundaries[1:]):
+            spans.update(self._seam_crossing_spans(regex, content, b.get('start', 0), side_words, strip,
+                                                   prev.get('start', 0)))
         return sorted(spans)
 
     def _responsa_seam_query(self, compiled, options, restrict_sys_ids):
@@ -4272,7 +4278,9 @@ class SearchEngine:
             slices = self._parse_boundaries(doc)
             match_started = time.perf_counter()
             try:
-                spans = self._seam_crossing_spans(regex, content, cut, _crossings.side, _strip_q)
+                spans = self._seam_crossing_spans(
+                    regex, content, cut, _crossings.side, _strip_q,
+                    max([b.get('start', 0) for b in slices if b.get('start', 0) < cut], default=None))
             finally:
                 candidate_match_seconds += time.perf_counter() - match_started
             kept = 0

@@ -362,3 +362,24 @@ def test_a_star_line_query_gives_every_crossing_of_a_manuscript(line_engines, fm
     assert set(rows) == {uid(3301, 1), uid(3301, 2), uid(3301, 3)}
     assert rows[uid(3301, 1)]['scope'] == 'page'
     assert rows[uid(3301, 2)]['cross_page'] and rows[uid(3301, 3)]['cross_page']
+
+
+# --- Two crossings of one break, from different pages (Codex review of PR #443) ------------
+
+SHADOW_V08 = [(sid(401), 3401, p, text) for p, text in enumerate(["כהנים", "כהנים", "גדולים"], 1)]
+
+
+@pytest.fixture(scope='module')
+def shadow_engines(tmp_path_factory):
+    with formats(tmp_path_factory, 'shadowed_crossings', SHADOW_V08) as e:
+        yield e
+
+
+@pytest.mark.parametrize('fmt', ['2', '1'])
+def test_a_crossing_from_an_earlier_page_does_not_hide_the_next_pages_own(shadow_engines, fmt):
+    # כהנ* [1] גדול*: p1's כהנים runs over p2 into p3's גדולים, and p2's כהנים runs into
+    # p3. Both cross the p2 | p3 break; p1's is found at the break it crosses first
+    # (p1 | p2), so it cannot hide p2's.
+    rows = by_uid(search(shadow_engines[fmt], 'כהנ* [1] גדול*')[0])
+    assert set(rows) == {uid(3401, 1), uid(3401, 2)}
+    assert all(r['cross_page'] for r in rows.values())
