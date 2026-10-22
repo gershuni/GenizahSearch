@@ -5,6 +5,11 @@ Phase 1). The engine and the API sides are tests/test_responsa_api_refusal.py.
 import pytest
 
 from shared.responsa_match import ResponsaQueryRefused
+from tests.test_web_io_bound_none_findings import _click, _type_joins_query
+from tests.test_web_search_within_cutoff import _label_texts, _wait_for
+from tests.test_web_variant_settings_per_visitor import (  # noqa: F401  (server is a fixture)
+    _element, run, server,
+)
 
 
 class _RefusingSearcher:
@@ -63,3 +68,90 @@ def test_the_desktop_other_side_worker_reports_the_refusal():
     worker.run()
     assert refused and '*' in refused[0]
     assert [c.page for c in done[0].candidates] == [3]   # this side's rows still show
+
+
+# --- A refused search leaves no candidates of the previous one (Codex review of PR #433) ---
+
+def _stale_rows(n=3):
+    return [{'display': {'id': f'9900000000999900{i:02d}', 'shelfmark': f'T-S STALE {i}', 'title': '',
+                         'library_code': 'CUL', 'img': 1},
+             'uid': f'9900000000999900{i:02d}_P0001', 'full_text': 'x'} for i in range(n)]
+
+
+@pytest.mark.gui
+def test_a_refused_desktop_search_clears_the_previous_candidates():
+    import sys
+    from unittest.mock import MagicMock
+
+    from PyQt6.QtWidgets import QApplication
+    QApplication.instance() or QApplication(sys.argv)
+    from desktop.join_workbench import JoinCandidatePane
+    from shared.joins_lab import normalize_candidate
+    wb = MagicMock()
+    wb.meta_mgr = None          # no ThumbResolver thread
+    wb._pick_callback = None
+    wb.triage = {}
+    wb.filtered = []
+    pane = JoinCandidatePane(wb=wb, executor=None)
+    pane.results = [normalize_candidate(r) for r in _stale_rows()]
+    pane.apply_filters()
+    assert len(pane.wb.filtered) == 3 and pane.cards
+    pane._search_gen = 7
+    pane._on_search_error('refused', 7)
+    assert pane.results == [] and pane.wb.filtered == [] and not pane.cards
+    assert pane.status.text() == 'refused'
+
+
+def test_a_refused_web_search_does_not_bring_the_previous_cards_back(server, monkeypatch):  # noqa: F811
+    """The previous search's enrichment lands after the refusal and re-renders from the
+    page's candidate lists: they must be empty by then."""
+    import asyncio
+    import threading
+
+    from nicegui import ui
+
+    from web.joins_executor import WebSearchExecutor
+    from web.pages import joins_lab
+    from web.state import state
+    monkeypatch.setattr(state, 'is_ready', lambda: True)
+    calls = []
+
+    def search(self, *args, **kwargs):
+        calls.append(args[:1])
+        if len(calls) == 1:
+            return _stale_rows()
+        raise ResponsaQueryRefused()
+    monkeypatch.setattr(WebSearchExecutor, 'execute_search', search)
+    release = threading.Event()
+    enriching = []
+
+    async def slow_enrich(sys_ids):
+        enriching.append(sys_ids)
+        while not release.is_set():
+            await asyncio.sleep(0.02)
+        return {}
+    monkeypatch.setattr(joins_lab, '_enrich_candidates', slow_enrich)
+    shown = {}
+
+    def stale(user):
+        return [t for t in _label_texts(user) if 'T-S STALE' in t]
+
+    async def driver(a, b):
+        try:
+            await a.open('/joins-lab')
+            await _type_joins_query(a)
+            _click(a, _element(a, ui.button, lambda e: e.text == 'Run Search'))
+            await _wait_for(lambda: stale(a) and enriching)
+            shown['first'] = bool(stale(a))
+            _click(a, _element(a, ui.button, lambda e: e.text == 'Run Search'))
+            await _wait_for(lambda: any(t.startswith('Responsa search takes a *') for t in _label_texts(a)))
+            release.set()
+            await asyncio.sleep(0.5)                 # the first search's enrichment re-renders
+            shown['after'] = stale(a)
+        except Exception as exc:                    # asserted below
+            shown['error'] = repr(exc)
+        finally:
+            release.set()
+
+    run(driver)
+    assert shown == {'first': True, 'after': []}, shown

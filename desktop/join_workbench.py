@@ -3126,12 +3126,20 @@ if _QT_AVAILABLE:
 
         def _on_search_error(self, message: str, gen=None):
             """The search raised (SearchThread.error_signal): leave the searching
-            state and show the message in the status line."""
+            state, drop the previous search's candidates -- they do not answer this
+            query (Codex review of PR #433) -- and show the message in the status
+            line."""
             if gen is not None and gen != self._search_gen:
                 return
             self._is_searching = False
             self._search_cancelled = False
             self._set_find_button_searching(False)
+            self.results = []
+            self._text_cands = None
+            self._page = 0
+            self.wb._cancel_images()
+            self.apply_filters()
+            self._update_pagination_visibility()
             self.status.setText(message)
 
         def _on_results(self, raw: list, gen=None):

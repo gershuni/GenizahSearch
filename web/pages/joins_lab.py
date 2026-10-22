@@ -3814,7 +3814,14 @@ def create_joins_lab_page(
 
             except ResponsaQueryRefused as exc:
                 # A query shape the engine does not search yet: say so, never show it
-                # as no results (shared/responsa_match.py).
+                # as no results (shared/responsa_match.py). The previous search's
+                # candidates go: its enrichment, landing later, or a filter change
+                # re-renders from them, under this message (Codex review of PR #433).
+                _raw_text_candidates.clear()
+                _all_candidates.clear()
+                _filtered_candidates.clear()
+                _selected.clear()
+                _refresh_bulk_toolbar()
                 search_status.set_text(tr(str(exc)))
                 return
 
