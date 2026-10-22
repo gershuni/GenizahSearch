@@ -68,6 +68,7 @@ from shared.search_regex import SearchBudgetExceeded
 from shared.transcription_service import union_manual_transcriptions
 from urllib.parse import quote
 import logging
+import secrets
 import html
 import asyncio
 import time
@@ -128,7 +129,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                        initial_ja: int = None, initial_flex_spaces: int = None,
                        initial_bidirectional: int = None, initial_domain: str = None,
                        from_browse: int = None,
-                       vs_src: str = None, vs_mode: str = None, vs_browse: int = None):
+                       vs_src: str = None, vs_mode: str = None, vs_browse: int = None,
+                       initial_run: str = None):
     """Create the advanced search page."""
 
 
@@ -201,7 +203,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     except TypeError:
         _saved_results_count = 0
     # The run those results came from, from the same snapshot: a Responsa search's
-    # stamped URL carries its mode and options, and Back is told apart by this.
+    # URL carries its mode, options and run stamp, and Back is told apart by this.
     _saved_run = (
         _saved_active_snapshot.get('last_run')
         if _saved_active_snapshot else
@@ -222,6 +224,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             'variants': initial_variants, 'ja': initial_ja,
             'flex_spacing': initial_flex_spaces, 'bidirectional': initial_bidirectional,
         },
+        initial_run=initial_run,
         saved_run=_saved_run,
     )
     saved_mode = bootstrap_state['mode']
@@ -5883,6 +5886,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 if responsa_ja_cb.value: params += '&ja=1'
                 if responsa_flex_cb.value: params += '&flex_spaces=1'
                 if bidirectional_cb.value: params += '&bidirectional=1'
+                # Which run this address is: Back restores the saved results only when
+                # the saved run carries the same stamp (web/search_bootstrap.py), so a
+                # typed or pasted link with the same query still searches.
+                if search_state.last_run is not None:
+                    url_stamp = secrets.token_urlsafe(6)
+                    search_state.last_run = {**search_state.last_run, 'url_stamp': url_stamp}
+                    params += f'&run={url_stamp}'
             ui.run_javascript(f"history.replaceState(null, '', '/search{params}')")
         except Exception:
             pass  # JavaScript execution failed; non-fatal UI glitch

@@ -225,14 +225,17 @@ def test_back_navigation_restores_saved_mode_when_saved_mode_is_title():
 # --- Back to a Responsa search (2026-10-22) ---------------------------------
 # A finished Responsa search stamps q=..&mode=responsa plus its option flags into
 # the URL, so its Back carries a mode. It was treated as a fresh link and the whole
-# search ran again (production 2026-10-22: one 45 s search ran three times). Back
-# is now recognised by the saved run: same query, same options.
+# search ran again (production 2026-10-22: one 45 s search ran three times). It now
+# also stamps a random run=<stamp>, kept in the saved run, and Back is that stamp
+# with the same query and options (Codex, PR #436: equal values alone would let a
+# typed link or another tab's snapshot pass).
 
 _RESPONSA_QUERY = '(מאמתי/מאימתי) (קורין/קוריין)'
+_STAMP = 'k3J9xQ_a'
 
 
-def _responsa_run(query=_RESPONSA_QUERY, mode='responsa', **options):
-    return {
+def _responsa_run(query=_RESPONSA_QUERY, mode='responsa', url_stamp=_STAMP, **options):
+    run = {
         'query': query, 'mode': mode, 'gap': 0, 'exclude_words': [], 'text_position': None,
         'responsa_options': {
             'responsa_mode': True,
@@ -244,12 +247,16 @@ def _responsa_run(query=_RESPONSA_QUERY, mode='responsa', **options):
         },
         'corpus_scope': 'genizah', 'variant_settings': {},
     }
+    if url_stamp is not None:
+        run['url_stamp'] = url_stamp
+    return run
 
 
-def _responsa_back(*, initial_query=_RESPONSA_QUERY, initial_responsa=None, saved_run=None,
-                   saved_results_count=81, saved_mode='exact', saved_query=_RESPONSA_QUERY):
-    # The URL search.py stamps for variants + flexible spacing: &variants=1&flex_spaces=1
-    # (the route's ints, by the engine's option names).
+def _responsa_back(*, initial_query=_RESPONSA_QUERY, initial_responsa=None, initial_run=_STAMP,
+                   saved_run=None, saved_results_count=81, saved_mode='exact',
+                   saved_query=_RESPONSA_QUERY, from_browse=None):
+    # The URL search.py stamps for variants + flexible spacing:
+    # &variants=1&flex_spaces=1&run=<stamp> (the route's ints, by the engine's option names).
     if initial_responsa is None:
         initial_responsa = {'variants': 1, 'ja': None, 'flex_spacing': 1, 'bidirectional': None}
     return resolve_search_bootstrap(
@@ -257,26 +264,51 @@ def _responsa_back(*, initial_query=_RESPONSA_QUERY, initial_responsa=None, save
         initial_tag=None,
         initial_mode='responsa',
         initial_domain=None,
-        from_browse=None,
+        from_browse=from_browse,
         saved_mode=saved_mode,
         saved_query=saved_query,
         saved_results_count=saved_results_count,
         use_slider=False,
         initial_responsa=initial_responsa,
+        initial_run=initial_run,
         saved_run=_responsa_run() if saved_run is None else saved_run,
     )
 
 
-def test_back_to_a_responsa_search_restores_its_results():
+def test_back_to_a_responsa_search_restores_its_results_and_filters():
+    """The stamp ties the snapshot to this address, so its filters come back with
+    its rows (Codex, PR #436): no restricted result under empty filter chips."""
     state = _responsa_back()
 
     assert state == {
         'mode': 'responsa',
         'query': _RESPONSA_QUERY,
         'restore_saved_results': True,
-        'restore_saved_filters': False,
+        'restore_saved_filters': True,
         'restore_saved_exclusions': True,
     }
+
+
+def test_responsa_link_without_the_stamp_searches_again():
+    """A typed or pasted link with the same query and options is not Back: the saved
+    run may have used a gap, NOT-words, filters or a refinement the URL lacks."""
+    for initial_run in (None, ''):
+        state = _responsa_back(initial_run=initial_run)
+        assert state['restore_saved_results'] is False, initial_run
+        assert state['restore_saved_filters'] is False, initial_run
+        assert state['restore_saved_exclusions'] is False, initial_run
+
+
+def test_responsa_link_with_another_runs_stamp_searches_again():
+    """Another tab's (or an older) run in the snapshot: its stamp is not this URL's."""
+    assert _responsa_back(initial_run='Zz9_other')['restore_saved_results'] is False
+
+
+def test_responsa_link_when_the_saved_run_has_no_stamp_searches_again():
+    """A run saved before stamps (or a run that never finished) matches no URL."""
+    for stamp in (None, ''):
+        state = _responsa_back(saved_run=_responsa_run(url_stamp=stamp), initial_run=stamp)
+        assert state['restore_saved_results'] is False, stamp
 
 
 def test_responsa_back_does_not_depend_on_the_saved_mode_preference():
@@ -311,13 +343,21 @@ def test_responsa_link_when_the_saved_run_was_not_responsa_searches_again():
 def test_responsa_link_without_a_saved_run_searches_again():
     """A snapshot saved before searches were saved with their run has nothing to
     match the options against: a fresh search, as before."""
-    for saved_run in ({}, {'query': _RESPONSA_QUERY, 'mode': 'responsa'},
-                      {'query': _RESPONSA_QUERY, 'mode': 'responsa', 'responsa_options': None}):
+    for saved_run in ({}, {'query': _RESPONSA_QUERY, 'mode': 'responsa', 'url_stamp': _STAMP},
+                      {'query': _RESPONSA_QUERY, 'mode': 'responsa', 'url_stamp': _STAMP,
+                       'responsa_options': None}):
         assert _responsa_back(saved_run=saved_run)['restore_saved_results'] is False, saved_run
 
 
 def test_responsa_link_with_no_saved_results_searches_again():
     assert _responsa_back(saved_results_count=0)['restore_saved_results'] is False
+
+
+def test_responsa_link_from_browse_is_never_back():
+    state = _responsa_back(from_browse=1)
+
+    assert state['restore_saved_results'] is False
+    assert state['restore_saved_filters'] is False
 
 
 def test_other_explicit_modes_in_the_url_still_search_again():
@@ -358,6 +398,7 @@ def test_search_page_passes_the_stamped_responsa_options_and_the_saved_run():
     assert len(calls) == 1, 'expected one bootstrap call in search.py; update this test'
     keywords = {kw.arg: kw.value for kw in calls[0].keywords}
     assert 'saved_run' in keywords
+    assert getattr(keywords.get('initial_run'), 'id', None) == 'initial_run'
     passed = keywords['initial_responsa']
     assert isinstance(passed, ast.Dict)
     mapping = {key.value: value.id for key, value in zip(passed.keys, passed.values)}
@@ -382,3 +423,59 @@ def test_the_saved_run_names_every_stamped_responsa_option():
     assert len(returned) == 1
     keys = {key.value for key in returned[0].keys}
     assert set(RESPONSA_URL_OPTIONS) <= keys
+
+
+def _stamp_names(tree):
+    """Names X with `search_state.last_run = {..., 'url_stamp': X}` and an f-string
+    `params += f'..&run={X}'` in the same function: the URL and the saved run get
+    the same stamp."""
+    import ast
+    found = set()
+    for func in ast.walk(tree):
+        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        saved, stamped = set(), set()
+        for node in ast.walk(func):
+            if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)
+                    and any(ast.unparse(t) == 'search_state.last_run' for t in node.targets)):
+                saved |= {v.id for k, v in zip(node.value.keys, node.value.values)
+                          if isinstance(k, ast.Constant) and k.value == 'url_stamp'
+                          and isinstance(v, ast.Name)}
+            if (isinstance(node, ast.AugAssign) and getattr(node.target, 'id', None) == 'params'
+                    and isinstance(node.value, ast.JoinedStr)):
+                parts = node.value.values
+                for i, part in enumerate(parts[:-1]):
+                    nxt = parts[i + 1]
+                    if (isinstance(part, ast.Constant) and str(part.value).endswith('&run=')
+                            and isinstance(nxt, ast.FormattedValue) and isinstance(nxt.value, ast.Name)):
+                        stamped.add(nxt.value.id)
+        found |= saved & stamped
+    return found
+
+
+def test_the_url_and_the_saved_run_get_the_same_stamp():
+    assert _stamp_names(_search_page_tree()), 'no run stamp found in search.py; update this test'
+
+
+def test_the_stamp_check_can_fail():
+    import ast
+    one = ast.parse("def f():\n    s = 1\n    search_state.last_run = {'url_stamp': s}\n    params += f'&run={s}'\n")
+    two = ast.parse("def f():\n    s = 1; t = 2\n    search_state.last_run = {'url_stamp': s}\n    params += f'&run={t}'\n")
+    assert _stamp_names(one) == {'s'}
+    assert _stamp_names(two) == set()
+
+
+def test_the_route_hands_run_to_the_search_page():
+    """`run` must reach create_search_page as initial_run, or no Back ever matches."""
+    import ast
+    from pathlib import Path
+    tree = ast.parse((Path(__file__).resolve().parents[1] / 'web' / 'main.py').read_text(encoding='utf-8'))
+    routes = [node for node in ast.walk(tree)
+              if isinstance(node, ast.FunctionDef) and node.name == 'search_page_route']
+    assert len(routes) == 1
+    assert 'run' in [a.arg for a in routes[0].args.args + routes[0].args.kwonlyargs]
+    calls = [node for node in ast.walk(routes[0])
+             if isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'create_search_page']
+    assert len(calls) == 1
+    keywords = {kw.arg: kw.value for kw in calls[0].keywords}
+    assert getattr(keywords.get('initial_run'), 'id', None) == 'run'

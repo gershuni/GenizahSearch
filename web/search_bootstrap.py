@@ -24,14 +24,20 @@ RESPONSA_URL_OPTIONS = ('variants', 'ja', 'flex_spacing', 'bidirectional')
 
 
 def _matches_saved_responsa_run(initial_query: str | None, initial_responsa: Dict[str, Any] | None,
-                                saved_run: Dict[str, Any] | None) -> bool:
-    """True when a Responsa URL is the one the saved run stamped: same query, same options.
+                                initial_run: str | None, saved_run: Dict[str, Any] | None) -> bool:
+    """True when a Responsa URL is the one the saved run stamped.
 
-    A Responsa search stamps ``mode=responsa`` and its option flags into the URL,
-    so its Back carries a mode; the saved run (``SearchUIState.last_run``) is what
-    tells that URL apart from a shared or typed Responsa link.
+    A Responsa search stamps ``mode=responsa``, its option flags and a random
+    ``run=`` stamp into the URL, and keeps the stamp in the saved run
+    (``SearchUIState.last_run['url_stamp']``). Equal values alone are not enough: a
+    typed or pasted link with the same query and options, or the snapshot of
+    another tab, could have been searched with settings the URL does not carry
+    (gap, NOT-words, filters, a refinement). The stamp says it is this run; the
+    query and options must still agree with it.
     """
     if not isinstance(saved_run, dict) or saved_run.get('mode') != 'responsa':
+        return False
+    if not isinstance(initial_run, str) or not initial_run or saved_run.get('url_stamp') != initial_run:
         return False
     if saved_run.get('query') != initial_query:
         return False
@@ -54,6 +60,7 @@ def resolve_search_bootstrap(
     saved_results_count: int = 0,
     use_slider: bool,
     initial_responsa: Dict[str, Any] | None = None,
+    initial_run: str | None = None,
     saved_run: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Resolve whether persisted search UI state should be reused for this request.
@@ -63,9 +70,11 @@ def resolve_search_bootstrap(
     matches ``saved_query``, the saved snapshot is restored (see 75-03-PLAN.md).
     Defaults to 0 so pre-fix callers fall back to the has_route_context path.
 
-    A Responsa search's URL also carries ``mode=responsa`` and its options
-    (``initial_responsa``, by the engine's option names); it is Back when they
-    and the query match the saved run (``saved_run``, the snapshot's last_run).
+    A Responsa search's URL also carries ``mode=responsa``, its options
+    (``initial_responsa``, by the engine's option names) and its run stamp
+    (``initial_run``); it is Back when the stamp, the query and the options match
+    the saved run (``saved_run``, the snapshot's last_run). That Back restores the
+    snapshot's filters too: the stamp ties them to this address.
     """
     explicit_mode = initial_mode if initial_mode in VALID_SEARCH_MODES else None
 
@@ -82,12 +91,14 @@ def resolve_search_bootstrap(
     # saved) do NOT inherit stale filters/exclusions — those paths fall through
     # to the existing has_route_context branch below.
     #
-    # A Responsa search stamps its mode and options too (q=..&mode=responsa&variants=1),
-    # so its Back is recognised by the saved run instead: same query, same options.
+    # A Responsa search stamps its mode, options and a run stamp too
+    # (q=..&mode=responsa&variants=1&run=..), so its Back is recognised by the
+    # saved run instead: the same stamp, query and options.
     if explicit_mode is None:
         url_is_the_saved_search = saved_query is not None and initial_query == saved_query
     elif explicit_mode == 'responsa':
-        url_is_the_saved_search = _matches_saved_responsa_run(initial_query, initial_responsa, saved_run)
+        url_is_the_saved_search = _matches_saved_responsa_run(
+            initial_query, initial_responsa, initial_run, saved_run)
     else:
         url_is_the_saved_search = False
     is_back_navigation = (
@@ -135,10 +146,16 @@ def resolve_search_bootstrap(
     else:
         resolved_query = ''
 
+    # The q-only Back keeps 829cd7cf's rule (the URL holds no proof the filters
+    # belong to it). A stamped Responsa Back has that proof: its rows come back with
+    # the saved filters (saved as they change), so the page is the one that was left
+    # and no restricted result shows under empty filter chips.
+    stamped_back = is_back_navigation and explicit_mode == 'responsa'
     return {
         'mode': resolved_mode,
         'query': resolved_query,
         'restore_saved_results': restore_saved_state,
-        'restore_saved_filters': restore_saved_state and not bool(from_browse) and not is_back_navigation,
+        'restore_saved_filters': restore_saved_state and not bool(from_browse)
+                                 and (not is_back_navigation or stamped_back),
         'restore_saved_exclusions': restore_saved_state,
     }
