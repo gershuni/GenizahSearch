@@ -5404,6 +5404,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _tp = text_position_select.value
         search_state.last_run = {
             'query': clean_query, 'mode': engine_mode(mode), 'page_mode': mode, 'gap': int(gap_input.value),
+            # Lab Mode is not in the address either: a page back on this run shows it.
+            'lab_mode': bool(lab_mode.value), 'deep_scan': bool(deep_scan.value),
             'exclude_words': list(not_words), 'text_position': _tp if _tp != 'anywhere' else None,
             'responsa_options': responsa_options, 'corpus_scope': 'genizah',
             'variant_settings': dict(variant_settings),
@@ -6295,7 +6297,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     def _show_run_controls(run):
         """The controls a run was searched with that its address does not carry -- gap,
-        NOT-words, text position, variant level and Num Changes -- so a page restoring
+        NOT-words, text position, variant level, Num Changes and Lab Mode -- so a page restoring
         or following it shows (and, on Search, runs) that run, not the shared settings
         (Codex, PR #436). No change event: the shared preferences stay as they were."""
         if not isinstance(run, dict):
@@ -6314,6 +6316,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 variant_slider.value = pairs
         if max_changes_select and isinstance(settings.get('variant_max_changes'), int):
             max_changes_select.value = settings['variant_max_changes']
+        # Lab Mode and Deep Scan: the algorithm that produced the rows (Codex, PR #436).
+        lab_mode.value = bool(run.get('lab_mode'))
+        deep_scan.value = bool(run.get('deep_scan'))
 
     # A Back to a run (restored, or followed while it runs): its own controls.
     if bootstrap_state['restore_run_filters']:

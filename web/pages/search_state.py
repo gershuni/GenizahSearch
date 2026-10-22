@@ -522,6 +522,9 @@ def persist_search_active_snapshot(state: 'SearchUIState') -> None:
     if not stamp:
         return
     try:
+        run = search_runs.get_run(_browser_id(), stamp)
+        if run is not None and run.running:
+            return  # mid-search (a filter applied while it runs): its end saves the run
         search_runs.finish_run(_browser_id(), stamp, search_run_snapshot(state))
     except Exception:
         pass

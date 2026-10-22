@@ -111,6 +111,13 @@ def finish_run(browser_id: Optional[str], stamp: Optional[str], snapshot: dict) 
         _runs[(browser_id, stamp)] = run
     run.snapshot = dict(snapshot)
     run.done = True
+    # Saved: what it kept for Back is the compact snapshot. The finished job still
+    # holds the search's full rows (an asyncio.Task keeps its result) and the owner
+    # its page, so neither stays referenced here for the run's 30 minutes (Codex,
+    # PR #436). The cut-off signals stay: a page still finishing it reads them.
+    run.job = None
+    run.owner = None
+    run.watchers = []
     run.touched = time.monotonic()
     _runs.move_to_end((browser_id, stamp))
     _prune()

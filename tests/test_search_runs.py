@@ -145,3 +145,15 @@ def test_real_futures_drive_running_and_attachable():
         gone.job.cancel()
         assert gone.failed and not gone.attachable
     asyncio.run(scenario())
+
+
+def test_a_saved_run_lets_go_of_its_job_and_page():
+    """Codex round 8 (P1): the finished job holds the full rows (a Task keeps its
+    result) and the owner its page; only the compact snapshot stays for 30 minutes."""
+    run = sr.start_run('b', 'c', {})
+    run.job, run.owner, run.watchers = _Job(done=True), object(), [object()]
+    run.cutoff = {'capped': True}
+    sr.finish_run('b', 'c', {'results': [1]})
+    assert run.job is None and run.owner is None and run.watchers == []
+    assert run.cutoff == {'capped': True}       # a page still finishing it reads these
+    assert run.done and not run.attachable and not run.failed

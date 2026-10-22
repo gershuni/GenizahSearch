@@ -882,3 +882,35 @@ def test_the_page_restore_keeps_a_zero_row_runs_warning(runs):
         back = ss.SearchUIState()
         ss.restore_search_snapshot(back, _CODE)
     assert back.results == [] and back.responsa_warning == 'Spelling variants disabled'
+
+
+def test_a_save_while_the_search_runs_does_not_finish_its_run(runs):
+    """A filter applied mid-search saves the page: that must not mark the run done
+    with no rows (it would also let go of its owner, and the end would not save)."""
+    ss = runs
+    page = _page_with_a_run(ss, rows=0)
+    run = ss.start_search_run(page, _CODE)
+
+    class _Running:
+        def done(self):
+            return False
+    run.job = _Running()
+    ss.persist_search_active_snapshot(page)
+    assert not run.done and ss.live_search_run(_CODE) is run
+
+
+def test_a_run_records_lab_mode_and_the_page_shows_it():
+    """Codex round 8 (P2): Lab Mode and Deep Scan are not in the address."""
+    import ast
+    func = _function(_search_page_tree(), 'execute_search')
+    recorded = [node for node in ast.walk(func)
+                if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)
+                and any(ast.unparse(t) == 'search_state.last_run' for t in node.targets)
+                and any(isinstance(k, ast.Constant) and k.value == 'query' for k in node.value.keys)]
+    values = {k.value: ast.unparse(v) for k, v in zip(recorded[0].value.keys, recorded[0].value.values)
+              if isinstance(k, ast.Constant)}
+    assert values['lab_mode'] == 'bool(lab_mode.value)'
+    assert values['deep_scan'] == 'bool(deep_scan.value)'
+    shown = ast.unparse(_function(_search_page_tree(), '_show_run_controls'))
+    assert "lab_mode.value = bool(run.get('lab_mode'))" in shown
+    assert "deep_scan.value = bool(run.get('deep_scan'))" in shown
