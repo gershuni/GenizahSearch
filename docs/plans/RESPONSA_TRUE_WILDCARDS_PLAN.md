@@ -1021,14 +1021,18 @@ keep the old folder to roll back. The owner runs it.
 
 **10. Gates for Phase 2**, each shown red under the named mutation:
 - (a) `measure_responsa_wildcards.py seam-topology`: every junction inside a seam is consecutive
-  or a bridge, and every consecutive junction of each whole-manuscript document has exactly one
-  seam of that manuscript. Mutation: seams built over each manuscript's pages in file order (no
-  runs).
+  or a bridge; every consecutive junction of each whole-manuscript document has exactly one
+  seam of that manuscript; and every bridge the part metadata calls for, derived by the gate
+  itself from the parts' folio lists and each manuscript's pages (not through
+  `shared/index_seams.py`), has exactly one seam, and no other bridge has one (Codex round 2: a
+  build that dropped every bridge passed the first two). Mutations: seams built over each
+  manuscript's pages in file order (no runs); no bridges.
 - (b) The Phase 1 oracle (`scripts/verify_responsa_wildcards.py`) on the new index: the same
   counts on all nine queries.
 - (c) `measure_responsa_wildcards.py reversed-check`: for `כהנים` and `נים`, the reversed lookup
   gives exactly the documents an independent oracle names: every page of the corpus files (both
-  sources) and every seam's stored text, cut by the `hebword` analyzer from its folded text,
+  sources), and every whole-manuscript, part and seam document's stored text (the aggregates
+  carry the field for Phase 3's `AND`, Codex round 2), cut by the `hebword` analyzer from its folded text,
   holding a word that ends with the ending once brackets and Hebrew marks are removed. Not the
   plain `.*X` lookup, which shares the bracket blind spot (Codex round 1). The plain prefix, the
   plain regex and the words a foreign mark interrupts are counted beside it. Mutations: the
@@ -1272,6 +1276,12 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
   repeat the omission on both sides. The lookup now looks past the `content_search` tolerance
   class (§6.1 point 5), and gate (c) compares it with a token oracle over the corpus files and
   the seams.
+- **Phase 2 design, round 2 (Codex on PR #438): two findings, folded in.** P2, gate (a) proved the
+  created seams valid and the ordinary junctions complete, but not that every eligible Oxford
+  bridge produced a seam: it now derives the expected bridges itself from the part metadata
+  (16,325 on the full build, all present, each once). P2, gate (c)'s oracle left out the
+  whole-manuscript and part documents, which carry the field for Phase 3's `AND`: they are in
+  it now.
 - **Phase 0 round (Codex on PR #429, 2026-10-21): three findings, all folded in.** P1: the
   brute-force oracle's prefilter was a literal substring test, so a page whose ending held an
   internal bracket or mark (`נ[י]ם`, `נִים`) was skipped before the check ran; the prefilter now
