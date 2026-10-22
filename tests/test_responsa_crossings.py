@@ -20,6 +20,7 @@ MANUSCRIPTS = {
     "990104": [("d1", "פתיחה כהנים רבים"), ("d2", "גדולים סוף")],                 # [1] across the break
     "990105": [("e1", "פתיחה גדולים"), ("e2", "כהנים סוף")],                     # the reverse order
     "990106": [("f1", "פתיחה כהנים"), ("f2", "עמדו"), ("f3", "גדולים סוף")],      # over two breaks
+    "990107": [("g1", "פתיחה של"), ("g2", "ום סוף")],                           # one word, flex spacing
 }
 
 
@@ -62,6 +63,14 @@ def test_the_reverse_order_crosses_too(eng):
 def test_a_span_over_two_breaks(eng):
     row = _crossings(eng, "כהנים [1] גדולים")["f1"]
     assert [h["uid"] for h in row["page_highlights"]] == ["f1", "f2", "f3"]
+
+
+def test_one_flex_spaced_word_crosses_a_break(eng):
+    # של | ום: with flex spacing שלום spans the break, so the lone word keeps the whole-
+    # manuscript docs (Codex review of PR #432); without it, it is two words.
+    row = _crossings(eng, "שלום", flex_spacing=True)["g1"]
+    assert [h["uid"] for h in row["page_highlights"]] == ["g1", "g2"]
+    assert "g1" not in _crossings(eng, "שלום")
 
 
 # --- Literal's word windows (_cross_page_spans): the joiner between windows -------------
