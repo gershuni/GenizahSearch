@@ -1,9 +1,24 @@
 # Responsa wildcards: `*` as any sequence, `#` as the grammatical list
 
-**Status:** plan, revision 4, **Codex SHIP** (four rounds on 2026-10-21: DO NOT SHIP, DO NOT SHIP,
-SHIP WITH FIXES, SHIP; §12). It is the basis for Phase 0 and Phase 1. Not implemented. Decisions 7
-and 8 in §9 were taken on 2026-10-21 (exclusion on the page only; counts may change), so Phase 0 and Phase 1
-may start; decisions 1-6 and 9 wait for Phase 0's numbers.
+**Status:** plan, revision 6: **all nine §9 decisions taken (2026-10-21)** and the phases
+resequenced -- Phase 1 unchanged (whole words on every path, no rebuild), **Phase 2 is the index
+format** (seam documents and the reversed-words field on one rebuild, the engine's fallback for an
+old index, the server rebuild and the desktop re-index), **Phase 3 is true `*`** on the new index.
+**Phase 0 measured (2026-10-21, §3.6)** -- every item has its numbers except the two halves of
+item 6 that cannot run yet: the "after" timings, which run with Phase 1 and Phase 3 through the
+same subcommand, and the Linux-worker run, which is the owner's (§3.6.6 holds today's desktop
+timings on both regex routes, on the laptop). Revision 4 was **Codex SHIP** (four rounds on
+2026-10-21: DO NOT SHIP, DO NOT SHIP, SHIP WITH FIXES, SHIP; §12). Not implemented. Decisions 7
+and 8 were taken first (exclusion on the page only; counts may change); decisions 1-6 and 9 were
+taken from Phase 0's numbers: 1 from §3.6.1 (identical page sets, 0.14-1.8 s against 4.6-6.1 s
+per leading-star lookup), 2 from §3.6.3 (an OR of 600 or 1,200 scored term queries keeps distinct
+BM25 scores in under a second), 3 from §3.6.4 (99,981 candidate pages, 100,392 with bracket
+tolerance), 5 from §3.6.2 (one `regex_query` holds at most 60-120 stems: the 1,000-state limit),
+9 from §3.6.5 (12.95% of whole-manuscript junctions and 45.95% of part junctions are not
+consecutive pages of one volume and one transcription), 4 and 6 on their own terms. Phase 0 also
+fixed §4's open question: the seven pages stage 1 missed are all edge brackets, which the contract
+already covers; sof pasuq joins maqaf, and a foreign mark inside a Hebrew word is a third, counted
+gap (§3.6.4, §3.6.7, §3.6.2).
 **Tracker rows (P2, `docs/OPEN_ISSUES.md`, 2026-10-21; they reach `master-main` with PR #426):**
 - "Responsa `*word` misses pages, and reads every whole-manuscript doc"
 - "Responsa: `#word#` never keeps its suffixes; a star inside a word returns nothing"
@@ -163,6 +178,301 @@ scanning the file:
 - Every junction counts as a page break, with no check that the two pages are neighbours. No false
   crossing was seen in the 28 rows checked.
 
+### 3.6 Phase 0 results (2026-10-21)
+
+**Machine and method.** Every number below was measured on 2026-10-21 on the owner's laptop (ASUS ROG
+Zephyrus G14, AMD Ryzen AI 9 HX 370: 12 cores / 24 threads, 63.1 GiB RAM, WD SN5000S NVMe SSD,
+Windows 11 Home 10.0.26300, Python 3.11.9, tantivy-py 0.25.0, `regex` 2026.9.10) against the local
+index (`C:\Users\gersh\Genizah_Tantivy_Index\tantivy_db`: 2,220,293 docs in 150 segments; 1,984,237
+page docs of which 941,026 are V0.8; 232,450 whole-manuscript docs of which 216,911 start in V0.8;
+3,606 part docs of which 3,519 start in V0.8) and `C:\GenizahSearch\Transcriptions.txt`
+(1,470,391,571 bytes). The script is `scripts/measure_responsa_wildcards.py`, one subcommand per
+item; each writes `<item>.json` and `<item>.log` under `--out-dir` (`_tmp/responsa_wildcards_phase0/`
+here, gitignored). Times are `time.perf_counter()` wall times of one run unless a second run is
+named; the items ran one after another, nothing else on the machine. "Pages" are page docs
+(`scope:page`, V0.8 and V0.7) unless "V0.8 pages" is said (`AND source:"V0.8"`). "Search+collect"
+fetches every hit's address (a set comparison needs them); "count" is `search(limit=1,
+count=True)`. Opening the index (6 s) is not counted. The index times here are lower than §3.1's
+(same machine, same index: `.*נים` 5.4-6.1 s against 10.62 s); §3.1 was measured with the desktop
+app and other work running. Both are kept. Linux worker (the owner's run):
+`python -I -X utf8 scripts/measure_responsa_wildcards.py <item> --index-dir /path/tantivy_db --corpus-file /path/Transcriptions.txt`
+for `scan`, `wordlist`, `patterns`, `scored-terms`, `missing-pages`, `verify-tolerant`, `topology`,
+`desktop-timings` (the last takes `--engines re` for the production route alone).
+
+#### 3.6.1 The reversed word list (§5.6 C) -- `scan` (336 s), then `wordlist` (28 s)
+
+- **Build.** One pass over `Transcriptions.txt`: 941,026 pages (every one with a uid; the same
+  count as the index's V0.8 page docs), 796,066,613 characters, **159,793,249 tokens** after
+  `strip_search_diacritics` (159,805,602 before folding; §4's 160,171,128 was counted another way,
+  0.2% apart), **7,284,528 distinct words** under the tokenizer's class (the `regex` module's `\w`
+  agrees with the Rust crate's: Alphabetic, marks, decimal digits, connector punctuation). Scan **313.8 s**, reverse + sort **9.8 s**, write
+  **2.2 s**: **325.8 s in all** (§3.4's "16 s" collected one ending only).
+- **Size.** 99,508,668 bytes (**94.9 MiB**) on disk as UTF-8 lines; loading it into a Python list
+  takes **0.40 s** and **725 MiB** of process RSS (29 -> 754 MiB; 7.3 M `str` objects). The build
+  process peaked at 1,682 MiB (the set and the sorted list together).
+- **Lookups** (second run of `wordlist`; the first, colder run had the term sets at 0.78 s and
+  4.52 s):
+
+| Ending | Words | Binary search | `term_set_query`, pages | `regex_query('.*X')`, pages | V0.8 pages, count only |
+|---|---|---|---|---|---|
+| `כהנים` (narrow) | 246 | 0.1 ms | 53,010 in 0.17 s | 53,180 in 4.56 s | 26,170 both: **0.14 s** vs **5.54 s** |
+| `נים` (broad) | 29,663 | 2.2 ms | 511,430 in 2.22 s | 518,052 in 6.11 s | 252,395 both: **1.76 s** vs **5.43 s** |
+
+- **The page sets are identical on V0.8 pages** for both endings (26,170 and 252,395; §3.4 had
+  252,380 with a 29,725-word list). On all pages the regex finds 170 and 6,622 more: V0.7 pages
+  whose words are not in a V0.8-built list. The list must be built from every file the index holds
+  (the V0.7 file is 1.6 GB more), or the regex stays for V0.7.
+- The saving per leading-star word is 3.7 s for the broadest ending (1.8 s against 5.4 s) and
+  5.4 s for a narrow one (0.14 s against 5.5 s, 40x).
+
+#### 3.6.2 Bracket- and mark-tolerant patterns, and the pattern size limit -- `patterns` (46-70 s), `marks` (4 s)
+
+Tolerance classes between letters (and at both edges): **brackets** `[\[\]]*`; **brackets+Hebrew
+marks** `[\[\]...]*` over the Hebrew block's category-M code points only (U+0591-05BD, 05BF, 05C1-05C2, 05C4-05C5, 05C7: te'amim and points, not the block's punctuation, which the oracle treats as word boundaries); **brackets+all marks** `[\[\]\p{M}]*`,
+every Unicode mark, which is the class the oracle looks past (`content_search` keeps all marks
+outside U+0300-036F; a Hebrew-only class would miss a Hebrew word carrying an Arabic mark, Codex
+round 2 on PR #429). All on `content_search` AND `scope:page`; "plain" is the lookup the forms get
+without tolerance (one `regex_query` for a star word, one `term_set_query` of the bare forms for a
+finite word; today's query also adds edge-bracket terms, which the plain column here does not).
+
+| Case | Pattern chars | Build | Count | Pages | Plain | Pattern-only pages |
+|---|---|---|---|---|---|---|
+| (a) `כ[\[\]]*ה[\[\]]*נ[\[\]]*.*` (star at the end) | 26 | 0.3 ms | 0.02 s | 38,698 | `כהנ.*`: 38,697 in 0.01 s | 1 |
+| (a) the same, brackets+Hebrew marks | 173 | 0.4 ms | 0.01 s | 38,703 | 38,697 | 6 |
+| (a) the same, brackets+all marks | 41 | **23-27 ms** | 0.01-0.02 s | 38,703 | 38,697 | 6 |
+| (a) `.*כ[\[\]]*ה[\[\]]*נ[\[\]]*י[\[\]]*ם[\[\]]*` (star at the start) | 42 | 0.6 ms | **3.8-4.3 s** | 53,239 | `.*כהנים`: 53,180 in 5.2-5.7 s | 59 |
+| (a) the same, brackets+Hebrew marks | 287 | 1.0-1.1 ms | 5.2-5.5 s | 53,240 | 53,180 | 60 |
+| (a) the same, brackets+all marks | 67 | **49-70 ms** | 4.0-5.5 s | 53,240 | 53,180 | 60 |
+| (b) 24 prefix forms of `כהנים`, brackets+Hebrew marks | 7,915 | 3.6-4.4 ms | 0.03-0.04 s | 45,242 | `term_set` 24: 45,086 in 0.03 s | 156: 154 edge bracket, 1 in-word bracket, 1 mark |
+| (b) the same, brackets+all marks | -- | **refused: 1,000 states** | | | | |
+| (c) 200 spelling variants of `כהנים` (`variants_extended`), either mark class | -- | **refused** (Hebrew marks: 1,000 states; all marks: 10,485,760 bytes) | | | | |
+| (d) 600 forms of `#כהנ#`, brackets+Hebrew marks | 189,643 | 42-68 ms | 0.04 s | 63,633 | `term_set` 600: 63,233 in 0.03 s | 400: 393 edge bracket, 3 in-word bracket, 4 mark |
+| (d) the same, brackets+all marks | -- | **refused: 10,485,760 bytes** | | | | |
+| (d) 600 forms of `#כהנ#`, brackets only | 27,649 | 22 ms | 0.04 s | 63,629 | 63,233 | 396 |
+
+- **A tolerant pattern costs what the plain one costs at search time**: nothing measurable for a
+  pattern that starts with a letter (the term-dictionary walk is pruned), and the same 4-6 s for a
+  leading star. Build time is where the class shows: a 189,643-character pattern of 600 forms with
+  the Hebrew class builds in 68 ms; the all-marks class makes a single-branch pattern cost 23-70 ms.
+- **What tolerance adds is small and almost all edge brackets**, which today's query already
+  reaches through its extra terms: of the 400 pages only the 600-form pattern reaches, 393 are
+  `כהנ[` / `]הכהנ`-style edge brackets, **3 have a bracket inside the word** and **4 a mark**. For
+  `*נים *לים` the edge bracket is exactly what stage 1 misses today (3.6.4).
+- **Two size limits, neither a character count.** The first is
+  `ValueError: An invalid argument was passed: 'RegexQueryError: Compiled regex exceeds size limit of 1000 states'`
+  (tantivy-fst's hard-coded DFA `STATE_LIMIT`; the DFA is built eagerly); the second, reached only
+  with the all-marks class, is `... Compiled regex exceeds size limit of 10485760 bytes` (the
+  compiled program). The largest alternation that builds, found by doubling from 8 and bisecting
+  to the exact count:
+
+| List | brackets+all marks | brackets+Hebrew marks | brackets | no tolerance |
+|---|---|---|---|---|
+| distinct corpus words ending in `נים` (29,663 available) | **1** | **69** | 108 | 127 |
+| spelling variants of `כהנים` (200 from `VariantManager`) | **0** | **125** | 186 | 186 |
+| grammatical forms, `#כהנ#` then `#גדול#` (1,200) | **1** | **616** | 935 | 935 |
+
+  So with the Hebrew class one word's 600 `#X#` forms fit (they share prefixes and suffixes, so
+  the DFA stays small), but **200 spelling variants in one `regex_query` do not, and neither do two
+  words' forms in one pattern**; unrelated words cost about 8-16 states each. **The all-marks class
+  (about 2,400 code points, many UTF-8 byte ranges) spends the whole budget on one branch**: it
+  fits a single star word (3.6.4 used it) and nothing with an alternation.
+- **How much the mark classes are worth** (`marks` subcommand, 4 s over the 7,284,528 distinct
+  folded words): **200** words hold a Hebrew mark; **93,673** hold a mark of another script, of
+  which **5** also hold a Hebrew letter (HTR noise); the rest are Arabic-script words (hamza above
+  U+0654 in 80,028 words, hamza below U+0655 in 10,915, maddah U+0653 in 3,815). The HTR text carries
+  almost no nikud, so for Hebrew queries the mark question is about 205 words in 7.3 million;
+  brackets are the tolerance that matters (56,131 tokens, §5.1).
+- Implication for §5.1: "all expanded stems in one alternation" must be split into several
+  `regex_query`s ORed (each under the limit), or the variant forms stay scored term queries (3.6.3)
+  and the pattern carries only the star and the bracket tolerance of the literal part, with the
+  Hebrew mark class at most; the all-marks class fits a lone star word only. **A finite-word
+  lookup without the all-marks class therefore misses a Hebrew word carrying a non-Hebrew mark**
+  (stage 1 runs first, so the oracle never sees such a page): that is a retrieval gap of the same
+  kind as maqaf's, 5 distinct words in the corpus, and §4 names it with that count; the word list
+  (§5.6 C) closes it, because it maps each word, by Exact's predicate, to the index tokens that
+  hold it. Decision 5 (stars with variants on) now has its cost: one pattern per 60-120 stems with
+  the Hebrew class, 100-190 without marks.
+
+#### 3.6.3 Scored term queries with 600 and 1,200 forms -- `scored-terms` (3 s)
+
+Boolean `Should` of one `term_query` per form (the 600 forms of `#כהנ#`: 24 prefixes x 25
+suffixes from `shared/responsa.py`), ANDed with `scope:page`; `search(limit=10, count=True)`:
+
+| Query | Build | Search | Candidates | Top-10 scores |
+|---|---|---|---|---|
+| OR of 600 `term_query` (`#כהנ#`) | 0.3 ms | **1.007 s** cold, **0.133 s** second run | 63,233 | 59.87, 49.46, 48.17, 47.46, 46.81, 46.76, 45.42, 44.81, 44.76, 43.39 (10 distinct) |
+| `term_set_query`, the same 600 | 0.2 ms | 0.237 s | 63,233 | 1.1124 x 10 (constant) |
+| OR 600 (`#כהנ#`) AND OR 600 (`#גדול#`): 1,200 `term_query` | 0.7 ms | **0.820 s** | 16,270 | 73.70, 62.92, 62.09, 61.40, 60.09, 58.97, 57.18, 51.33, 49.39, 49.28 (10 distinct) |
+| OR of 1,200 `term_query` (both lists) | 0.6 ms | 0.357 s | 255,345 | 73.70 ... 51.33 (10 distinct) |
+| `term_set_query`, 1,200 | 0.2 ms | 0.081 s | 255,345 | constant |
+
+**The top hits keep distinct BM25 scores at 600 and at 1,200 clauses, in under a second**, so the
+guard that downgrades `#X#` (`MAX_EXPANDED_TERMS` = 500) is not needed for retrieval cost, and the
+scored form can serve decision 2 (order star results by the score of the query's finite words).
+
+#### 3.6.4 The pages the index path misses for `*נים *לים` -- `missing-pages` (247 s), `verify-tolerant` (11 s)
+
+The oracle here is the §8 one: fold with `strip_search_diacritics`, segment into whole words by
+Exact's predicate (letters, decimal digits and connector punctuation continue a word; marks,
+quotes and brackets are passed over; a run of brackets alone, `][`, is not a word), then `*` =
+any letters, never a digit or `_`, applied to the two consecutive words. It is stricter than the
+check §3.2 used (which gave 4,217 / 4,231), so the counts differ; the comparison is between the two
+paths under one check.
+
+- **Stage 1** (`regex_query('.*נים')` AND `regex_query('.*לים')` AND `scope:page` AND
+  `source:"V0.8"`): **99,981** candidate pages in **10.24 s** (§3.2: 99,964).
+- **Stage 2** (fetch each candidate, run the oracle): **3,865** pages pass; 193,552,137 characters
+  read; 100.9-116.4 s over two runs, of which the fetches are 3.3-13.2 s and the pure-Python oracle
+  the rest (the product's compiled regex did the same in 8.4 s in §3.2).
+- **Brute force** over all 941,026 pages of the file. The prefilter looks for `נים` and `לים` in
+  the page's text with every looked-past character removed (marks, quotes, brackets), so it is
+  exactly as permissive as the oracle (`נ[י]ם` and `נִים` pass; a literal test, the first run's,
+  skipped them -- Codex on PR #429 -- and gave the same 7 pages below): **101,087** pages
+  prefiltered; **3,872** distinct page uids match; 130.2 s. (343 further matches were a second copy
+  of a uid already matched: the file holds some pages twice, and both sides here count by uid.)
+- **Difference: 7 pages the index path misses, 0 the other way.** All seven have one cause, **a
+  bracket glued to the end of the token** (`נתקנים[`, `פנים[`, `כלשונים[`, `ובנים[`, `אדונים[` for the
+  first word; `בקולים[`, `גדולים[` for the second): `.*נים` does not match a term that ends in `[`,
+  while the word predicate looks past it. The seven (sys_id, page): 990000893670205171 p43,
+  990001442940205171 p47, 990001562970205171 p115, 990001935620205171 p1, 990052073290205171 p2,
+  990053164840205171 p1, 990053520270205171 p1. For each the index holds exactly one V0.8 page doc
+  whose text equals the file's. **No maqaf, digit, Hebrew punctuation or tokenizer split is among
+  them.**
+- **The §4 contract covers this and is complete for this query**: §5.1's tolerant stage 1
+  (`.*נ[\[\]\p{M}]*י[\[\]\p{M}]*ם[\[\]\p{M}]*` AND the same for `לים`)
+  returns **100,392** candidates in **9.67 s** (411 more than the plain lookup, at the same cost)
+  and **admits all seven** (`verify-tolerant`); the Hebrew-marks class gave the same 100,392, and
+  the end-only form `.*נים[\[\]]*` gave 100,373, both admitting all seven.
+
+#### 3.6.5 Aggregate topology -- `topology` (27 s)
+
+Read from each aggregate document's stored `boundaries` (what the engine's `_map_span_to_pages`
+sees), not from `browse_map.pkl`: that file (133,440,543 bytes here, the real one) is rewritten
+deduplicated by `(ie_id, p_num)` on load, so it no longer holds file order. A junction is
+"consecutive" when both pages share source, `sys_id` and IE and the page number rises by one.
+
+| | Whole-manuscript docs (`scope:system`) | Part docs (`scope:part`) |
+|---|---|---|
+| Documents | 232,450 (216,911 start in V0.8, 15,539 in V0.7) | 3,606 (3,519 / 87) |
+| Page slots | 1,984,237 (max 2,643 in one doc) | 47,388 (max 544) |
+| Junctions | 1,751,787 | 43,782 |
+| Consecutive | 1,524,861 | 23,662 |
+| **Not consecutive** | **226,926 (12.95%)**, in 216,981 docs | **20,120 (45.95%)**, in 3,546 docs |
+
+Kinds (system docs): **213,566** V0.8 -> V0.7 inside one document (the V0.7 copy of the *same*
+volume restarts at page 1 after the last V0.8 page, so the junction joins a manuscript's last page
+to its own first page, and every page's text sits in the document twice); **8,113** IE (volume)
+changes within one `sys_id`; **3,345** both at once; **1,902** page-number jumps forward (missing
+pages). Kinds (part docs): **11,759** V0.8 -> V0.7 inside one `sys_id`; **8,244** V0.7 of one
+`sys_id` -> V0.8 of the next (a part's folio order, but with the previous shelfmark's V0.7 text at
+the seam); 104 `sys_id` changes in V0.7-only runs; 6 IE changes; 4 page jumps; 3 mixed.
+
+Examples. V0.8 -> V0.7: `sys:990000571860205171` page 23 (V0.8) -> page 1 (V0.7), same
+IE47676359; `sys:990000617200205171` page 64 -> page 1; `sys:990000622310205171` page 14 -> page 1.
+IE change: `sys:990000465330205171` IE16012604 p3 -> IE160700818 p1, then IE160700818 p5 ->
+IE169376719 p1, then IE169376719 p3 -> IE37436063 p1. Page jump: `sys:990000432020205171` p2 -> p4
+(in V0.8 and again in V0.7); `sys:990000432000205171` p1 -> p3. Parts: `part:MS. Heb. a. 1/2` runs
+990053385800205171 V0.8 p1-2, V0.7 p1-2, 990053385810205171 V0.8 p1-2, V0.7 p1-2, ...;
+`part:MS. Heb. b. 18/5` p1 -> p4 -> p6.
+
+So **one junction in eight of a whole-manuscript document is not a page break of the reading
+order**, and the V0.8 -> V0.7 restart is nearly all of it: a crossing found there is the end of
+the text joined to its own beginning. Seam documents (§6 B) built per source and per IE, with
+page-number continuity, remove every kind above. This bears on decision 9.
+
+#### 3.6.6 Desktop timings today for the §8 query set -- `desktop-timings` (442 s): the "before" half of item 6
+
+This is the "before" of item 6, on the laptop. The "after" is the same subcommand once Phase 1 and
+Phase 3 land; the Linux-worker run is the owner's and is **not** replaced by the stdlib-`re` column
+below, which is the worker's matching route measured on this Windows laptop.
+
+Method: `SearchEngine.execute_search(query, 'exact', 0, responsa_options={'responsa_mode': True,
+'variants': False, 'ja': False, 'flex_spacing': False, 'bidirectional': False, 'variant_mode':
+'exact'}, corpus_scope='genizah')`, the desktop's own call (`genizah_app.py::start_search`,
+`desktop/gui_threads.py::SearchThread.run`), `Config.SEARCH_LIMIT` 50,000, the engine built with
+`worker_mode=True` (no background fl_id build competing; the desktop's finishes before the user
+searches) and `open_local=False`; one warm-up Exact search first (`ספר`, 25,041 rows, 6.8 s). "N+"
+is `consume_last_search_cutoff()['capped']`. Each query ran once per engine: the desktop's `regex`
+module route, and the production worker's stdlib `re` route (`isolated_matching(native=True)`),
+which `shared/search_regex.py` lets a caller choose. A 600 s stop per query was armed and never fired.
+
+| Query | Rows | `regex` (desktop) | N+ | Note |
+|---|---|---|---|---|
+| `#כהנים #גדולים` | 401 | **166.8 s** | no | 24 x 24 forms; aggregates read in full |
+| `#כהנ# גדולים` | 2 | 20.4 s | no | the guard (600 > 500) drops the suffix list: 2 rows, not the 401+ a kept list gives |
+| `כהנים גדול` | 264 | 9.7 s | no | the 264 of §1 (4 are whole words) |
+| `ספר` | 24,653 | 2.9 s | **yes** | |
+| `כהנים [2] גדולים` | 355 | 7.5 s | no | |
+| `כהנים גדולים`, bidirectional | 350 | 10.7 s | no | |
+| `כהנים AND גדולים` | 1,462 | 11.3 s | no | |
+| `\|כהנים גדולים` (line start) | 41 | 6.8 s | no | |
+| `כהנים גדולים -אהרן` | 138 | 6.8 s | no | |
+| `*כהנים *גדולים` | 405 | **60.9 s** | no | today `*X` = the 24-prefix list |
+| `*נים *לים` | 1,848 | **92.0 s** | no | today the 24 prefixes of `נים` and `לים` (`בנים`, `שנים`, ...) |
+| `כ*נים גדולים` | 0 | 0.4 s | no | a star inside a word returns nothing (§2) |
+| `*כ*ה*נ*ים גדולים` | 0 | 0.3 s | no | the same |
+
+The same queries on the production worker's stdlib `re` route (`--engines re`, a separate run of
+184 s; every row count was the same):
+
+| Query | `regex` (desktop) | `re` (worker route) | `regex` / `re` |
+|---|---|---|---|
+| `#כהנים #גדולים` | 166.8 s | **35.0 s** | 4.8x |
+| `#כהנ# גדולים` | 20.4 s | 6.1 s | 3.3x |
+| `כהנים גדול` | 9.7 s | 8.3 s | 1.2x |
+| `ספר` | 2.9 s | 2.6 s | 1.1x |
+| `כהנים [2] גדולים` | 7.5 s | 6.2 s | 1.2x |
+| `כהנים גדולים`, bidirectional | 10.7 s | **16.5 s** | 0.65x |
+| `כהנים AND גדולים` | 11.3 s | **30.0 s** | 0.38x |
+| `\|כהנים גדולים` | 6.8 s | 4.4 s | 1.5x |
+| `כהנים גדולים -אהרן` | 6.8 s | 6.3 s | 1.1x |
+| `*כהנים *גדולים` | 60.9 s | **23.8 s** | 2.6x |
+| `*נים *לים` | 92.0 s | **36.4 s** | 2.5x |
+| `כ*נים גדולים` | 0.4 s | 0.2 s | |
+| `*כ*ה*נ*ים גדולים` | 0.3 s | 0.04 s | |
+
+- **The big Responsa alternations are 2.5-4.8x slower on the desktop's `regex` route**, not the
+  ~60x of Exact's generated patterns (§10's "desktop speed is out of scope" stands; the 167 s for
+  `#כהנים #גדולים` is the number a desktop user sees today). The two paths that run lookaheads or
+  reversed branches over whole-manuscript text (`AND`, bidirectional) are **slower on stdlib `re`**
+  (2.7x and 1.5x), so a Linux worker is not faster on every query.
+- Every heavy query here spends its time in the aggregate documents (§3.5): the same set after
+  pages first (§5.4) is what Phase 1 and Phase 3 are measured against, with the same subcommand
+  ("before and after", §7 item 6). The Linux-worker run is the owner's: the same command with
+  `--index-dir`, `--corpus-file` and `--engines re`.
+- Where the time goes (the engine's own `search_perf` line): `#כהנים #גדולים` reads 3,723
+  candidate docs (pages and aggregates), keeps 983 after the regex check, 401 after
+  de-duplication; the index query took 1.3 s, loading the documents 4.1 s, and **matching 148.6 s
+  on `regex` against 26.0 s on `re`**. `*נים *לים`: 23,609 candidates, 2,459 kept, 1,848 rows;
+  loading 7.5 s, matching 60.9 s against 18.7 s. The matching time is the aggregate documents'
+  text (§3.5), which pages first (§5.4) and §6's crossing source address.
+
+#### 3.6.7 Hebrew-block punctuation kept inside tokens -- `scan`
+
+Counted on the folded tokens (`content_search`'s terms) of the whole V0.8 file:
+
+| Character | Token occurrences | Distinct terms | Pages | Samples |
+|---|---|---|---|---|
+| maqaf U+05BE (baseline; §4 said 196) | **193** | 95 | 121 | `k־`, `־`, `х־`, `׃μ־`, `־ِ־` |
+| paseq U+05C0 | **0** | 0 | 0 | -- |
+| sof pasuq U+05C3 | **271** | 121 | 120 | `صب׃ב`, `׃`, `׃ְֶֶ`, runs of `ײ׃ײ׃...` |
+| nun hafukha U+05C6 | **0** | 0 | 0 | -- |
+
+Every sample is HTR noise (Cyrillic, Arabic and Yiddish-ligature characters glued to the mark), not
+a Hebrew word split by punctuation. Sof pasuq is the one other character of the four the tokenizer
+keeps inside tokens, at the same order of magnitude as maqaf (271 against 193 of 159.8 M tokens).
+**§4's exception now names both** (maqaf and sof pasuq; Exact's predicate ends a word at either,
+the token keeps both), and Phase 1's pinning test covers both; paseq and nun hafukha do not occur.
+
+**The list is exhaustive** (`token-only`, 5 s over the 7,284,528 distinct folded words): every
+character the tokenizer keeps inside a token that Exact's predicate neither continues a word
+through (letters, decimal digits, connector punctuation) nor looks past (marks, quotes, brackets)
+was counted, which covers whatever else the tokenizer's `\w` admits (join controls U+200C/U+200D,
+letter-numbers such as U+2160, alphabetic symbols such as U+24B6; Codex round 3 on PR #429). Only
+**two** such characters occur: sof pasuq (247 occurrences in 121 words) and maqaf (161 in 95
+words); **165** distinct words hold one, **6** of them with a Hebrew letter. Join controls in
+particular: **0** bytes of U+200C or U+200D in the whole corpus file (1.5 s byte count).
+
 ## 4. The contract (proposed)
 
 - **Whole word = Exact's predicate.** `_starts_word` / `_ends_word` (`shared/search_engine.py:397`,
@@ -178,17 +488,26 @@ scanning the file:
   - Every stage-1 lookup must return every document the stage-2 check could accept.
   - A lookup tolerates brackets and marks inside tokens, so it never drops a page the check would
     keep.
-  - **Words and tokens differ in one place: maqaf (U+05BE).** Exact's predicate ends a word at a
-    maqaf (category Pd), but `hebword` keeps it inside the token. So `abc` inside `abc־def` is a
-    whole word to the check, but not an indexed token, and a finite lookup misses it (Codex round 2,
-    2.1, reproduced).
-  - Measured: **196 of 160,171,128** V0.8 tokens contain a maqaf, and the samples are HTR noise.
-    Underscore (Pc, 970 tokens) continues a word under both rules.
-  - Phase 0 counts the other Hebrew-block punctuation kept inside tokens (paseq U+05C0, sof pasuq
-    U+05C3, nun hafukha U+05C6).
-  - Phase 1 accepts this gap explicitly: a test pins it, and the contract names it. The word list
-    (§5.6 C) closes it, because it maps each word, by Exact's predicate, to the index tokens that
-    hold it.
+  - **Words and tokens differ in two places: maqaf (U+05BE) and sof pasuq (U+05C3).** Exact's
+    predicate ends a word at either (categories Pd and Po), but `hebword` keeps both inside the
+    token. So `abc` inside `abc־def` is a whole word to the check, but not an indexed token, and a
+    finite lookup misses it (Codex round 2, 2.1, reproduced); `abc׃def` is the same case.
+  - Measured (Phase 0, §3.6.7): **193 tokens hold a maqaf and 271 a sof pasuq, of 159,793,249**
+    V0.8 tokens; paseq (U+05C0) and nun hafukha (U+05C6) do not occur; every sample is HTR noise.
+    Underscore (Pc, 970 tokens) continues a word under both rules. **The two are the whole list:**
+    of every character the tokenizer keeps inside a token that the predicate neither continues a
+    word through nor looks past (the tokenizer's `\w` also admits join controls U+200C/U+200D,
+    letter-numbers and alphabetic symbols), only these two occur in the 7,284,528 distinct indexed
+    words (165 words, 6 of them with a Hebrew letter; `token-only`, §3.6.7).
+  - **A third, smaller gap is marks of another script inside a Hebrew word** (`אَב`): the predicate
+    looks past every mark, `content_search` keeps marks outside U+0300-036F, and a finite lookup
+    cannot carry the all-marks tolerance class (one pattern of it exhausts the 1,000-state limit,
+    §3.6.2), so such a token is missed by the bare term query and by a bracket- or Hebrew-mark-
+    tolerant pattern. Measured: **5** distinct indexed words hold a non-Hebrew mark and a Hebrew
+    letter, all HTR noise (`marks`, §3.6.2).
+  - Phase 1 accepts these gaps explicitly: one test pins the two characters and the foreign-mark
+    case, and the contract names them with their counts. The word list (§5.6 C) closes all three,
+    because it maps each word, by Exact's predicate, to the index tokens that hold it.
 - **Brackets: one acceptance rule for every path.** Today the main path strips brackets from the
   text for a bracket-free query, then drops the page if the match does not reproduce on the
   original text. LOCAL checks the raw text instead (Codex 6.6).
@@ -342,7 +661,7 @@ Where crossings come from under a true star is §6.
   keep an arbitrary half.
 - Reading page candidates costs about 85 µs each here.
 - The Responsa page limit is an owner decision (§9, decision 3), and it must hold on every path
-  above.
+  above. **Decided 2026-10-21: 150,000 candidate pages; aggregates and seams get their own limit.**
 
 ### 5.6 The leading-star cost
 
@@ -358,8 +677,12 @@ Each word that starts with a star costs 7-10 s in stage 1, on both apps. Options
   change, but the list must stay in step with the index. LOCAL keeps option A, since its index is
   small and changes file by file.
 
-Recommendation: A in Phase 2, then C. If §6's seams are chosen, they need a rebuild anyway, and B
-can ride the same rebuild.
+Recommendation was: A first, then C; B if §6's seams are chosen, on the same rebuild.
+**Decided 2026-10-21 (decision 1): B**, the reversed-words field, on the same rebuild as the seam
+documents (Phase 2); C is not pursued; A stays for a desktop on an old index until the user
+re-indexes, and for `*כהנ*` (stars at both ends). The rebuild step measures the field's size first
+(estimate: +2-3 GB on 12.9 GB, without positions). §3.6.1 measured the lookup side: identical page
+sets, 0.14-1.8 s against 4.6-6.1 s per leading-star lookup.
 
 ### 5.7 Texts that change with the behaviour (same PR as the behaviour)
 
@@ -441,13 +764,22 @@ true star it dominates: about 4.7 billion characters loaded for 12 crossings.
 - **Page pairs** (pages i and i+1 whole) avoid the K limit within two pages, but index each page's
   text twice and retrieve less precisely than seams. They lose to B.
 
-Recommendation: C in Phase 2 (with the limits above), then B in one index-format change, together
-with §5.6 B or C, so that users rebuild once. Owner decision 9. Codex round 2 judged the seam
-direction sound, with these corrections.
+Recommendation was: C as the interim (with the limits above), then B in one index-format change,
+together with §5.6 B or C, so that users rebuild once. Codex round 2 judged the seam direction
+sound, with these corrections.
+**Decided 2026-10-21 (decision 9): B first, no interim.** The seam documents are built per source
+and per IE with consecutive page numbers, so none of §3.6.5's 226,926 false junctions survives
+(the V0.8 -> V0.7 restart inside one document above all), on the same rebuild as the
+reversed-words field (Phase 2), before true `*` ships (Phase 3). The crossing step of star searches
+reads seams, never whole manuscripts. C's limits stay in the text as the record of why an interim
+without crossings was not chosen.
 
 ## 7. Phases
 
-**Phase 0: measurements, no product code.**
+**Phase 0: measurements, no product code.** **Measured 2026-10-21: items 1-5 and 7, and the
+"before" half of item 6, have their numbers in §3.6 (item N in §3.6.N), from
+`scripts/measure_responsa_wildcards.py`. Still open in item 6: the "after" timings (run the same
+subcommand when Phase 1 and Phase 3 land) and the Linux-worker run (the owner's).**
 1. The full reversed word list (§5.6 C): build time and size, and lookup plus `term_set_query` time
    for narrow and broad stems.
 2. Bracket- and mark-tolerant patterns, for star words and for finite words (§5.1): DFA size and
@@ -480,14 +812,25 @@ contract for jobs.
 **Counts change.** For example, `כהנים גדול` goes from 264 rows to the 4 Exact finds. The owner's
 go-ahead is recorded (§9, decision 8, 2026-10-21); the release notes carry a sentence on it.
 
-**Phase 2: true `*`.**
-- Star retrieval and pages first (§5.4).
-- The crossing source decided in §6 (recommended: C, no crossings for star words, with a notice).
-- The Responsa page limit (§5.5).
-- Every text in §5.7.
+**Phase 2: the index format (resequenced 2026-10-21, decisions 1 and 9).** One rebuild carries
+both:
+- the seam documents (§6 B), built per source and per IE with consecutive page numbers, so none
+  of §3.6.5's 226,926 false junctions survives;
+- the reversed-words field (§5.6 B), its size measured first (estimate: +2-3 GB on 12.9 GB,
+  without positions);
+- the indexer changes for both; the engine's use of both, with a fallback to today's routes when
+  the open index lacks them (a desktop on an old index until the user re-indexes);
+- the server rebuild and the desktop re-index.
 
-**Phase 3: the index format.** Seam documents (§6 B) and the leading-star speed-up (§5.6 B or C) in
-one rebuild, after the owner decides.
+**Phase 3: true `*`, on the new index.**
+- Star retrieval and pages first (§5.4); a leading star through the reversed-words field,
+  `*כהנ*` (both ends) through today's slow route.
+- Crossings read from seams, never from whole manuscripts (decision 9).
+- The Responsa page limit, 150,000 candidate pages (§5.5, decision 3); bare stars refused and
+  one- or two-letter star words warned (decision 4); variants and Judeo-Arabic on star words
+  through several `regex_query`s ORed (decision 5); order by the finite words' score (decision 2);
+  a star matches zero letters (decision 6).
+- Every text in §5.7.
 
 ## 8. Gates (each with the mutation that must turn it red)
 
@@ -522,7 +865,7 @@ phase.** It FAILS, never skips, when `Transcriptions.txt` or the index is missin
 - **Query set.**
   - Phase 1: `#כהנים #גדולים`, `#כהנ# גדולים`, `כהנים גדול`, a lone `ספר`, a `[2]` gap, a
     bidirectional pair, an `AND` query, a `|` line query, a negation, a crossing fixture.
-  - Phase 2 adds `*כהנים *גדולים`, `*נים *לים`, `כ*נים גדולים` and `*כ*ה*נ*ים גדולים`.
+  - Phase 3 adds `*כהנים *גדולים`, `*נים *לים`, `כ*נים גדולים` and `*כ*ה*נ*ים גדולים`.
 
 **2. Unit tests with expectations written by hand,** never generated by the compiler:
 - the parser (every star position; `#`, `%` and `-` combinations; OR groups; inline alternation);
@@ -551,7 +894,7 @@ the same builder twice and compares counts; Codex 5.3):
   `tests/test_cross_page_spans.py:93`;
 - a match beside the `²` joiner.
 
-In Phase 3 the same cases run against seams.
+In Phase 2 the same cases run against seams.
 
 **5. Existing pins, updated deliberately:**
 - `tests/test_responsa_core.py:617-622` (`MAX_EXPANDED_TERMS == 500` and the cascade);
@@ -559,7 +902,7 @@ In Phase 3 the same cases run against seams.
 - `tests/test_join_workbench_builder.py`, which tests a copy of the builder, so a live-widget test is
   needed too.
 
-There is no dedicated test of the `*word*` rewrite warning. Phase 2 adds one that asserts a
+There is no dedicated test of the `*word*` rewrite warning. Phase 3 adds one that asserts a
 supported true star is **no longer rewritten**, rather than preserving the obsolete warning.
 
 ## 9. Decisions for the owner
@@ -570,16 +913,34 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
      server and on every desktop computer.
    - Keep a separate word list beside the index: no rebuild, and measured at 3 seconds instead of 9
      for the broadest ending.
+   **Decided 2026-10-21: the reversed-words field in the index (§5.6 B), on the same rebuild as
+   the seam documents (decision 9; Phase 2).** The word list (C) is not pursued. A desktop on an
+   old index keeps today's slow route (A) until the user re-indexes, and `*כהנ*` (stars at both
+   ends) keeps the slow route too. The rebuild step measures the field's size first (estimate given
+   to the owner: +2-3 GB on 12.9 GB, without positions). From §3.6.1: identical page sets, 0.14-1.8 s
+   against 4.6-6.1 s per leading-star lookup.
 2. **Order of results for star searches.** The index gives every star match the same score. Order
    them by shelfmark, by how often the words occur on the page, or by the score of the query's other,
    non-star words?
+   **Decided 2026-10-21: by the score of the query's non-star words** (the scored term OR of
+   §3.6.3, which keeps distinct BM25 scores at 600 and 1,200 forms). A query whose words all carry
+   stars is ordered by the number of matches on the page, then by shelfmark.
 3. **How many candidate pages a search may read before it says "N+".** Today 50,000. `*נים *לים`
    has about 100,000; reading all of them took 8 seconds here.
+   **Decided 2026-10-21: 150,000 candidate pages** (§3.6.4 measured 99,981, 100,392 with bracket
+   tolerance); aggregates and seams get their own limit (§5.5); beyond it the search says "N+".
 4. **Very short or bare stars.** `*` alone matches every word; `*ים` reaches 1.35 million pages.
    Allow, warn, or refuse with a message suggesting a gap `[1]`?
+   **Decided 2026-10-21: a bare star (`*` alone, or a word made only of stars) is refused** with a
+   message suggesting a gap `[1]`; a star word with one or two letters of its own runs, with a
+   warning that the list will be cut ("N+").
 5. **Stars with spelling variants or Judeo-Arabic on.** Allowed (slower; one bigger pattern per
    word), or the star word is searched without them?
+   **Decided 2026-10-21: they apply.** The expanded stems are split into several `regex_query`s
+   ORed, each under the 1,000-state limit (§3.6.2: 60-120 stems per query with the Hebrew mark
+   class).
 6. **Does a star match zero letters?** Recommended yes: `*כהנים` includes `כהנים` itself.
+   **Decided 2026-10-21: yes**, `*כהנים` includes `כהנים`.
 7. **Negated words.** Today `-כהנים` hides a result when the letters `כהנים` appear anywhere in
    the text it was found in, even inside `אלכהנים`. Sometimes that text is the page, sometimes the
    whole manuscript, depending on how the result was found. Recommended: a whole word, checked on
@@ -599,11 +960,16 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
      complete. "Anywhere in the manuscript" (`AND`) searches are never cut this way.
    - Or add small "seam" documents at every page break: precise and fast, but it needs one rebuild
      on the server and on every desktop computer.
+   **Decided 2026-10-21: seams first.** The seam documents (§6 B), built per source and per IE with
+   consecutive page numbers so that none of the 226,926 false junctions of §3.6.5 survives, are
+   built before true `*` ships (Phase 2, with the reversed-words field of decision 1). The crossing
+   step of star searches reads seams, never whole manuscripts.
 
 ## 10. What this does not change
 
-- Exact, Variants, Fuzzy and Regex modes, apart from §6's shared crossing source if B is chosen and
-  the exclusion domain (decision 7: the matched page, in every mode).
+- Exact, Variants, Fuzzy and Regex modes, apart from §6's seam documents as the shared crossing
+  source (decision 9, Phase 2) and the exclusion domain (decision 7: the matched page, in every
+  mode).
 - Composition and letter-level (passage) search.
 - The lists themselves (24 prefixes, 25 suffixes).
 - The desktop's `regex`-module speed is out of scope. If the desktop is still slow after pages
@@ -622,6 +988,25 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
 
 ## 12. Review history
 
+- **Phase 0 round (Codex on PR #429, 2026-10-21): three findings, all folded in.** P1: the
+  brute-force oracle's prefilter was a literal substring test, so a page whose ending held an
+  internal bracket or mark (`נ[י]ם`, `נִים`) was skipped before the check ran; the prefilter now
+  removes the looked-past characters first, and item 4 was re-measured (§3.6.4). P2: sof pasuq
+  joins maqaf in §4's exception and in Phase 1's pinning test. P2: Phase 0 is "measured", not
+  "done": item 6's "after" timings and its Linux-worker run are still open (status line, §7).
+  **Round 2 (same PR):** P2, the mark-tolerance class of the probes covered Hebrew marks only
+  (U+0591-05C7) while the oracle looks past every Unicode mark; both classes are now measured
+  (§3.6.2), and the all-marks class turned out to fit one star word and no alternation.
+  **Round 3 (same PR):** P2, join controls (U+200C/U+200D) are kept by the tokenizer's `\w` but end
+  a word for Exact's predicate, like maqaf; the `token-only` subcommand now counts every such
+  character over the distinct indexed words, and §4's exception says the list is exhaustive.
+  **Round 4:** P2, `token-only` and `marks` counted occurrences under a "words" label; both count
+  distinct words now. **Round 5:** P2, the Hebrew-marks class `U+0591-05C7` also swallowed the
+  block's punctuation (maqaf, paseq, sof pasuq, nun hafukha), which the oracle treats as word
+  boundaries; the class is now the block's category-M code points only, and §3.6.2 was re-run.
+  **Round 6:** P2, "left to the oracle's side" was wrong for the 5 Hebrew words with a foreign
+  mark: stage 1 runs first, so they are a retrieval gap; §4 now names it with its count, pinned in
+  Phase 1 and closed by the word list like maqaf's.
 - **Round 1 (Codex, 2026-10-21): DO NOT SHIP.** Four HIGH findings, all folded in:
   - the raw `_prefix_tree` drops forms (§5.1);
   - "whole word" was two conflicting definitions, and outer bounds did not bound `AND` operands
@@ -640,7 +1025,7 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
   - Round-1 status: 6.1, 6.3, 6.5, 6.7, 6.9 and 6.10 fixed; 6.2, 6.4, 6.6 and 6.8 partly fixed.
   - New: maqaf words vs index tokens (HIGH; measured at 196 of 160M tokens and documented as a
     pinned exception, §4); `_first_accepted_match` instead of `closest` (§5.2); a wider
-    approximation case list (§5.2); seams across short pages (HIGH, Phase 3; §6); seam consumer
+    approximation case list (§5.2); seams across short pages (HIGH, Phase 2; §6); seam consumer
     isolation and provenance (§6); the main/LOCAL parity domain (§8); the interim's reach into the
     API, MCP and refinement, and its exclusion of `within_document` (§6).
   - Decided in the plan: the bracket rule (§4) and the de-duplication rule (§5.4).
