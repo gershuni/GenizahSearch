@@ -272,7 +272,6 @@ def test_a_snapshot_that_kept_part_of_the_list_restores_as_cut_off(monkeypatch):
     stored = {}
     monkeypatch.setattr(ss, 'safe_user_set', lambda k, v: stored.__setitem__(k, v) or True)
     monkeypatch.setattr(ss, 'safe_user_get', lambda k, d=None: stored.get(k, d))
-    monkeypatch.setattr(ss, '_get_tab_storage', lambda: None)
     monkeypatch.setattr(ss, '_SEARCH_ACTIVE_USER_FALLBACK_LIMIT', 2)
     state = ss.SearchUIState()
     state.results = [_row(f'M{i}') for i in range(3)]

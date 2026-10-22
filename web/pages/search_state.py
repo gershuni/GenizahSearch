@@ -19,6 +19,7 @@ from nicegui import app
 from web.safe_storage import safe_user_get, safe_user_set, safe_user_pop
 from web.translations import tr, get_language
 from web.services import BrowsePage
+from web import search_runs
 
 
 # ---------------------------------------------------------------------------
@@ -231,8 +232,7 @@ class SearchPageRefs:
 # Phase 74 (D-03, D-05, D-08).
 
 _SEARCH_SNAPSHOT_VERSION = 1
-_SEARCH_ACTIVE_TAB_VERSION = 1
-_SEARCH_ACTIVE_TAB_KEY = 'search_active_snapshot'
+_SEARCH_RUN_SNAPSHOT_VERSION = 1  # the shape of a run's snapshot (web/search_runs.py)
 _SEARCH_ACTIVE_USER_FALLBACK_LIMIT = 250
 _SEARCH_RESULT_EXCERPT_CHARS = 500
 
@@ -304,12 +304,21 @@ def apply_run_filter_state(state: 'SearchUIState', filters) -> bool:
     return True
 
 
-def _get_tab_storage():
-    """Return tab storage when available, else None."""
+def _browser_id() -> Optional[str]:
+    """This visitor's browser (NiceGUI's browser-storage id), or None outside a request.
+    Runs are kept per browser: another visitor's address never restores them."""
     try:
-        return app.storage.tab
+        value = app.storage.browser.get('id')
     except Exception:
         return None
+    return str(value) if value else None
+
+
+def url_stamp_of(state: 'SearchUIState') -> Optional[str]:
+    """The run code of the search *state* shows (in its address as ``run=``), if any."""
+    run = state.last_run
+    stamp = run.get('url_stamp') if isinstance(run, dict) else None
+    return stamp if isinstance(stamp, str) and stamp else None
 
 
 def _compact_result_rows(results: list) -> list:
@@ -376,22 +385,61 @@ def preview_shows_final_rows(state: 'SearchUIState') -> bool:
                    for name in _MEASUREMENT_POST_FILTERS)
 
 
-def get_search_active_snapshot() -> dict:
-    """Return the current same-tab active search snapshot, if present."""
-    tab = _get_tab_storage()
-    if tab is None:
+def search_run_snapshot(state: 'SearchUIState', *, with_results: bool = True) -> dict:
+    """What a run keeps for Back: its rows (up to 1,000) and the state shown with them.
+    Without results, what is known when the search starts (its search and filters)."""
+    rows = (state.results or []) if with_results else []
+    return {
+        'version': _SEARCH_RUN_SNAPSHOT_VERSION,
+        'results': _compact_result_rows(rows[:1000]),
+        # A list longer than what is kept here comes back as a cut-off one.
+        'result_count_capped': bool(state.result_count_capped or len(rows) > 1000),
+        'search_refinement_chain': [s.to_dict() for s in (state.refinement_chain or [])],
+        'last_variant_settings': state.last_variant_settings,
+        'last_run': dict(state.last_run) if isinstance(state.last_run, dict) else None,
+        **_post_filters(state),
+    }
+
+
+def get_search_active_snapshot(stamp: Optional[str] = None) -> dict:
+    """The snapshot this browser's run *stamp* left, once that search has run; {}
+    otherwise (no such run, another browser's, still running, or failed)."""
+    run = search_runs.get_run(_browser_id(), stamp)
+    if run is None or not run.done:
         return {}
-    raw = tab.get(_SEARCH_ACTIVE_TAB_KEY)
-    if not isinstance(raw, dict):
-        return {}
-    if raw.get('version') != _SEARCH_ACTIVE_TAB_VERSION:
+    raw = run.snapshot
+    if not isinstance(raw, dict) or raw.get('version') != _SEARCH_RUN_SNAPSHOT_VERSION:
         return {}
     return raw
 
 
-def restore_search_active_snapshot(state: 'SearchUIState') -> bool:
-    """Restore active same-tab search state from tab storage."""
-    raw = get_search_active_snapshot()
+def live_search_run(stamp: Optional[str]) -> Optional['search_runs.SearchRun']:
+    """This browser's run *stamp* while its search is still running, else None."""
+    run = search_runs.get_run(_browser_id(), stamp)
+    return run if run is not None and run.running else None
+
+
+def start_search_run(state: 'SearchUIState', stamp: str) -> 'search_runs.SearchRun':
+    """Register the search *state* is starting under *stamp* (already in its last_run)."""
+    return search_runs.start_run(_browser_id() or '', stamp, search_run_snapshot(state, with_results=False),
+                                 refine=bool(state._refine_mode))
+
+
+def apply_run_start_snapshot(state: 'SearchUIState', raw: dict) -> None:
+    """What a page showed with a search when it started (a run still running): its
+    display filters, exclusions and the run itself. Its rows come when it ends."""
+    state.printed_filter = raw.get('printed_filter', 'all')
+    _de = raw.get('domain_exclusions')
+    state.domain_exclusions = set(_de) if _de else set()
+    state.exclusion_sources = raw.get('search_exclusion_sources', []) or []
+    state.last_variant_settings = _settings_or_none(raw.get('last_variant_settings'))
+    state.last_run = _settings_or_none(raw.get('last_run'))
+    restore_post_filters(state, raw)
+
+
+def restore_search_active_snapshot(state: 'SearchUIState', stamp: Optional[str] = None) -> bool:
+    """Restore the state run *stamp* left (see get_search_active_snapshot)."""
+    raw = get_search_active_snapshot(stamp)
     if not raw:
         return False
     state.results = raw.get('results', []) or []
@@ -408,22 +456,18 @@ def restore_search_active_snapshot(state: 'SearchUIState') -> bool:
     state.exclusion_sources = raw.get('search_exclusion_sources', []) or []
     state.last_variant_settings = _settings_or_none(raw.get('last_variant_settings'))
     state.last_run = _settings_or_none(raw.get('last_run'))
-    _restore_tab_post_filters(state, raw)
+    restore_post_filters(state, raw)
     return True
 
 
-# The display filters applied to the shown rows that otherwise live only in storage
-# shared by every tab (search_pgp_filter, search_library_filter,
-# word_search_excluded_ids). This tab's snapshot keeps its own copy, updated as they
-# change (save_tab_post_filters), so a restore shows this tab's rows under this
-# tab's filters, not those another tab set since (Codex, PR #436, round 3).
+# The display filters applied to the shown rows. Their shared user-storage keys are
+# what every tab reads; the run's snapshot keeps the values this page showed, and is
+# updated as they change (save_post_filters_with_run), so Back shows this run's rows
+# under its own filters, not those another tab set since (Codex, PR #436).
 _PGP_FILTER_STATES = ('all', 'only_pgp', 'hide_pgp')
 
 
-def _tab_post_filters(state: 'SearchUIState') -> dict:
-    """The display filters a change after the search updates in this tab's snapshot
-    (the printed filter and the manuscript exclusions were saved with the rows only
-    at the end of a search, so a later change left them stale -- Codex, round 4)."""
+def _post_filters(state: 'SearchUIState') -> dict:
     return {
         'printed_filter': state.printed_filter,
         'domain_exclusions': list(state.domain_exclusions or []),
@@ -434,9 +478,9 @@ def _tab_post_filters(state: 'SearchUIState') -> dict:
     }
 
 
-def _restore_tab_post_filters(state: 'SearchUIState', raw: dict) -> None:
-    """This tab's display filters from its snapshot, checked as the shared keys are
-    on load; a snapshot saved before it kept them leaves the loaded values."""
+def restore_post_filters(state: 'SearchUIState', raw: dict) -> None:
+    """The display filters a run's snapshot holds, checked as the shared keys are on
+    load; a snapshot without them leaves the loaded values."""
     if raw.get('pgp_filter') in _PGP_FILTER_STATES:
         state.pgp_filter = raw['pgp_filter']
     library = raw.get('library_filter')
@@ -452,16 +496,11 @@ def _restore_tab_post_filters(state: 'SearchUIState', raw: dict) -> None:
         state.word_search_excluded_ids = set(excluded)
 
 
-def save_tab_post_filters(state: 'SearchUIState') -> None:
-    """Copy *state*'s display filters into this tab's snapshot, if it has one.
+def save_post_filters_with_run(state: 'SearchUIState') -> None:
+    """Copy *state*'s display filters into its run's snapshot, if that run has run.
     Called wherever they change, next to their shared-storage save."""
-    tab = _get_tab_storage()
-    if tab is None:
-        return
     try:
-        raw = tab.get(_SEARCH_ACTIVE_TAB_KEY)
-        if isinstance(raw, dict) and raw.get('version') == _SEARCH_ACTIVE_TAB_VERSION:
-            tab[_SEARCH_ACTIVE_TAB_KEY] = {**raw, **_tab_post_filters(state)}
+        search_runs.update_run(_browser_id(), url_stamp_of(state), **_post_filters(state))
     except Exception:
         pass
 
@@ -473,60 +512,14 @@ def _settings_or_none(value):
 
 
 def persist_search_active_snapshot(state: 'SearchUIState') -> None:
-    """Persist active same-tab search results outside long-lived user storage."""
-    tab = _get_tab_storage()
-    if tab is None:
+    """Save what the page shows as its run's snapshot (the run in its address)."""
+    stamp = url_stamp_of(state)
+    if not stamp:
         return
     try:
-        tab[_SEARCH_ACTIVE_TAB_KEY] = {
-            'version': _SEARCH_ACTIVE_TAB_VERSION,
-            'results': _compact_result_rows((state.results or [])[:1000]),
-            # A list longer than what is kept here comes back as a cut-off one.
-            'result_count_capped': bool(state.result_count_capped or len(state.results or []) > 1000),
-            'search_refinement_chain': [s.to_dict() for s in (state.refinement_chain or [])],
-            'last_variant_settings': state.last_variant_settings,
-            'last_run': state.last_run,
-            **_tab_post_filters(state),
-        }
+        search_runs.finish_run(_browser_id(), stamp, search_run_snapshot(state))
     except Exception:
         pass
-
-
-def clear_search_active_snapshot() -> None:
-    """Drop transient same-tab search state."""
-    tab = _get_tab_storage()
-    if tab is None:
-        return
-    try:
-        tab.pop(_SEARCH_ACTIVE_TAB_KEY, None)
-    except Exception:
-        pass
-
-
-def _without_url_stamp(run):
-    return {k: v for k, v in run.items() if k != 'url_stamp'}
-
-
-def drop_saved_url_stamp() -> None:
-    """Make the address of the shown search stop matching its saved run.
-
-    Called when a new search starts. Only a COMPLETED search stamps the address and
-    saves its run again; one that is stopped, fails or never finishes leaves the
-    previous run saved under the previous stamp, and a Back would restore that run
-    instead of what the page showed when it was left (Codex, PR #436). Without its
-    stamp the saved run matches no address, so such a Back searches again.
-    """
-    tab = _get_tab_storage()
-    if tab is not None:
-        try:
-            raw = tab.get(_SEARCH_ACTIVE_TAB_KEY)
-            if isinstance(raw, dict) and isinstance(raw.get('last_run'), dict) and 'url_stamp' in raw['last_run']:
-                tab[_SEARCH_ACTIVE_TAB_KEY] = {**raw, 'last_run': _without_url_stamp(raw['last_run'])}
-        except Exception:
-            pass
-    run = safe_user_get('search_last_run', None)
-    if isinstance(run, dict) and 'url_stamp' in run:
-        safe_user_set('search_last_run', _without_url_stamp(run))
 
 
 def responsa_note_of(results):
@@ -535,8 +528,8 @@ def responsa_note_of(results):
     return results[0].get('responsa_warning') if results and isinstance(results[0], dict) else None
 
 
-def restore_search_snapshot(state: 'SearchUIState') -> None:
-    """Hydrate page-scoped state from app.storage.user snapshot.
+def restore_search_snapshot(state: 'SearchUIState', stamp: Optional[str] = None) -> None:
+    """Hydrate page-scoped state from the run *stamp* left, else app.storage.user.
 
     Called once at page mount. After this call, SearchUIState is authoritative -
     direct app.storage.user reads for snapshot keys are forbidden (D-03).
@@ -545,9 +538,9 @@ def restore_search_snapshot(state: 'SearchUIState') -> None:
     Does NOT hydrate filter_* keys - callers still use
     filter_panel.load_filter_state(state, 'search') for those.
 
-    NOTE (tab stomping limitation): the version stamp prevents cross-version
-    corruption but does NOT prevent Tab B overwriting Tab A's snapshot.
-    True per-tab isolation is deferred (Codex W3).
+    The run's snapshot (web/search_runs.py) is this browser's, for that address
+    only; the user-storage copy is shared by every tab (the last search of any of
+    them wins) and keeps 250 rows -- the fallback when the run is not kept.
     """
     stored_version = safe_user_get('search_snapshot_schema_version', 0)
     if stored_version == 0:
@@ -570,7 +563,7 @@ def restore_search_snapshot(state: 'SearchUIState') -> None:
         # Restorable scalar/list fields (match RESEARCH §1.1 bucket).
         # A restored result set brings its downgrade note back with it, on either
         # path (Codex review of PR #433).
-        if restore_search_active_snapshot(state):
+        if restore_search_active_snapshot(state, stamp):
             state.responsa_warning = responsa_note_of(state.results)
             return
         state.results = safe_user_get('search_results', []) or []
@@ -674,7 +667,6 @@ def clear_search_snapshot() -> None:
                 'search_last_run',
                 'search_all_terms_filter', 'search_snapshot_schema_version'):
         safe_user_pop(key, None)
-    clear_search_active_snapshot()
     # Filter keys (match search.py:806-832 reset block).
     # Defaults match LIVE field types verified in web/pages/search_state.py:60, :82
     # and web/components/filter_panel.py:248, :271 (review-revision: Codex HIGH #2):

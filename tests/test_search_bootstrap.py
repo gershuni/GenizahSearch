@@ -1,3 +1,5 @@
+import pytest
+
 from web.search_bootstrap import resolve_search_bootstrap
 
 
@@ -21,6 +23,7 @@ def test_restores_saved_state_without_route_context():
         'restore_saved_filters': True,
         'restore_run_filters': False,
         'restore_saved_exclusions': True,
+        'rejoin_run': False,
     }
 
 
@@ -44,6 +47,7 @@ def test_query_route_uses_clean_default_state():
         'restore_saved_filters': False,
         'restore_run_filters': False,
         'restore_saved_exclusions': False,
+        'rejoin_run': False,
     }
 
 
@@ -85,6 +89,7 @@ def test_tag_route_forces_tag_mode_and_clears_saved_query():
         'restore_saved_filters': False,
         'restore_run_filters': False,
         'restore_saved_exclusions': False,
+        'rejoin_run': False,
     }
 
 
@@ -108,6 +113,7 @@ def test_browse_navigation_disables_saved_state_restore():
         'restore_saved_filters': False,
         'restore_run_filters': False,
         'restore_saved_exclusions': False,
+        'rejoin_run': False,
     }
 
 
@@ -226,24 +232,26 @@ def test_back_navigation_restores_saved_mode_when_saved_mode_is_title():
     assert state['mode'] == 'Title'
 
 
-# --- Back to a Responsa search (2026-10-22) ---------------------------------
-# A finished Responsa search stamps q=..&mode=responsa plus its option flags into
-# the URL, so its Back carries a mode. It was treated as a fresh link and the whole
-# search ran again (production 2026-10-22: one 45 s search ran three times). It now
-# also stamps a random run=<stamp>, kept in the saved run, and Back is that stamp
-# with the same query and options (Codex, PR #436: equal values alone would let a
-# typed link or another tab's snapshot pass).
+# --- Back by run code, in every mode (2026-10-22, PR #436) ---------------------
+# Every search stamps its address when it starts: q, the page's mode, the Responsa
+# options and a random run=<code> kept in its run (last_run['url_stamp']). Back is
+# that code with the same query, mode and options. Measured before this: Back
+# re-ran a Responsa search (its URL carried a mode the old check refused), cut a
+# finished list to 250 rows in every mode (the per-tab copy cannot be read while the
+# page is built), and ran a search again when it was left before it finished.
+
 
 _RESPONSA_QUERY = '(מאמתי/מאימתי) (קורין/קוריין)'
-_STAMP = 'k3J9xQ_a'
+_CODE = 'k3J9xQ_a'
 _RUN_FILTERS = {'filter_domains': ['Halakha'], 'filter_include_mode': True, 'filter_date_from': 1000}
 _ABSENT = object()
 
 
-def _responsa_run(query=_RESPONSA_QUERY, mode='responsa', url_stamp=_STAMP,
-                  pre_search_filters=_ABSENT, **options):
+def _run(query=_RESPONSA_QUERY, page_mode='responsa', url_stamp=_CODE,
+         pre_search_filters=_ABSENT, **options):
     run = {
-        'query': query, 'mode': mode, 'gap': 0, 'exclude_words': [], 'text_position': None,
+        'query': query, 'mode': page_mode, 'page_mode': page_mode, 'gap': 0, 'exclude_words': [],
+        'text_position': None,
         'responsa_options': {
             'responsa_mode': True,
             'variants': options.get('variants', True),
@@ -251,7 +259,7 @@ def _responsa_run(query=_RESPONSA_QUERY, mode='responsa', url_stamp=_STAMP,
             'flex_spacing': options.get('flex_spacing', True),
             'bidirectional': options.get('bidirectional', False),
             'variant_mode': 'variants' if options.get('variants', True) else 'exact',
-        },
+        } if page_mode == 'responsa' else None,
         'corpus_scope': 'genizah', 'variant_settings': {},
         'pre_search_filters': dict(_RUN_FILTERS) if pre_search_filters is _ABSENT else pre_search_filters,
     }
@@ -260,17 +268,18 @@ def _responsa_run(query=_RESPONSA_QUERY, mode='responsa', url_stamp=_STAMP,
     return run
 
 
-def _responsa_back(*, initial_query=_RESPONSA_QUERY, initial_responsa=None, initial_run=_STAMP,
-                   saved_run=None, saved_results_count=81, saved_mode='exact',
-                   saved_query=_RESPONSA_QUERY, from_browse=None):
-    # The URL search.py stamps for variants + flexible spacing:
-    # &variants=1&flex_spaces=1&run=<stamp> (the route's ints, by the engine's option names).
-    if initial_responsa is None:
+def _back(*, initial_query=_RESPONSA_QUERY, initial_mode='responsa', initial_responsa=None,
+          initial_run=_CODE, saved_run=_ABSENT, live_run=None, saved_results_count=81,
+          saved_mode='exact', saved_query=_RESPONSA_QUERY, from_browse=None):
+    # The URL search.py stamps for Responsa with variants + flexible spacing:
+    # &mode=responsa&variants=1&flex_spaces=1&run=<code> (the route's ints, by the
+    # engine's option names).
+    if initial_responsa is None and initial_mode == 'responsa':
         initial_responsa = {'variants': 1, 'ja': None, 'flex_spacing': 1, 'bidirectional': None}
     return resolve_search_bootstrap(
         initial_query=initial_query,
         initial_tag=None,
-        initial_mode='responsa',
+        initial_mode=initial_mode,
         initial_domain=None,
         from_browse=from_browse,
         saved_mode=saved_mode,
@@ -279,15 +288,13 @@ def _responsa_back(*, initial_query=_RESPONSA_QUERY, initial_responsa=None, init
         use_slider=False,
         initial_responsa=initial_responsa,
         initial_run=initial_run,
-        saved_run=_responsa_run() if saved_run is None else saved_run,
+        saved_run=_run() if saved_run is _ABSENT else saved_run,
+        live_run=live_run,
     )
 
 
 def test_back_to_a_responsa_search_restores_its_results_and_its_runs_filters():
-    """The stamp ties the snapshot to this address, so the filters saved WITH its run
-    come back with its rows (Codex, PR #436, rounds 1-2): no restricted result under
-    empty filter chips, nor under the shared current ones another tab may have set."""
-    state = _responsa_back()
+    state = _back()
 
     assert state == {
         'mode': 'responsa',
@@ -296,113 +303,135 @@ def test_back_to_a_responsa_search_restores_its_results_and_its_runs_filters():
         'restore_saved_filters': False,
         'restore_run_filters': True,
         'restore_saved_exclusions': True,
+        'rejoin_run': False,
     }
 
 
-def test_responsa_back_without_the_runs_filters_searches_again():
-    """A saved run without its filters (stamped before they were saved with it) could
-    only show its rows under the wrong chips: no Back, a fresh search."""
-    for missing in (None, [], 'x'):
-        state = _responsa_back(saved_run=_responsa_run(pre_search_filters=missing))
-        assert state['restore_saved_results'] is False, missing
-        assert state['restore_run_filters'] is False, missing
-    run = _responsa_run()
-    del run['pre_search_filters']
-    assert _responsa_back(saved_run=run)['restore_saved_results'] is False
+@pytest.mark.parametrize('page_mode', ['exact', 'variants', 'variants_extended', 'fuzzy', 'Regex', 'Title'])
+def test_back_by_run_code_works_in_every_mode(page_mode):
+    state = _back(initial_query='שלום', initial_mode=page_mode,
+                  saved_run=_run(query='שלום', page_mode=page_mode))
+    assert state['restore_saved_results'] is True
+    assert state['restore_run_filters'] is True
+    assert state['mode'] == page_mode
 
 
-def test_responsa_link_without_the_stamp_searches_again():
-    """A typed or pasted link with the same query and options is not Back: the saved
-    run may have used a gap, NOT-words, filters or a refinement the URL lacks."""
+def test_a_stamped_run_with_no_rows_is_restored_not_searched_again():
+    """Codex round 5 (P2): a completed search that found nothing ran; Back shows it."""
+    state = _back(saved_results_count=0)
+    assert state['restore_saved_results'] is True
+    assert state['restore_run_filters'] is True
+
+
+def test_back_does_not_depend_on_the_saved_mode_preference():
+    """A search started from a /search?mode= link sets the mode in code, which writes
+    no `search_mode`: the run decides, not that preference."""
+    assert _back(saved_mode='Title', saved_query='')['restore_saved_results'] is True
+
+
+def test_a_link_without_the_code_searches_again():
+    """A typed or pasted link with the same query and mode is not Back: the run may
+    have used a gap, NOT-words, filters or a refinement the URL lacks."""
     for initial_run in (None, ''):
-        state = _responsa_back(initial_run=initial_run)
+        state = _back(initial_run=initial_run)
         assert state['restore_saved_results'] is False, initial_run
         assert state['restore_saved_filters'] is False, initial_run
         assert state['restore_run_filters'] is False, initial_run
         assert state['restore_saved_exclusions'] is False, initial_run
+        assert state['rejoin_run'] is False, initial_run
 
 
-def test_responsa_link_with_another_runs_stamp_searches_again():
-    """Another tab's (or an older) run in the snapshot: its stamp is not this URL's."""
-    assert _responsa_back(initial_run='Zz9_other')['restore_saved_results'] is False
+def test_another_runs_code_searches_again():
+    assert _back(initial_run='Zz9_other')['restore_saved_results'] is False
 
 
-def test_responsa_link_when_the_saved_run_has_no_stamp_searches_again():
-    """A run saved before stamps (or a run that never finished) matches no URL."""
-    for stamp in (None, ''):
-        state = _responsa_back(saved_run=_responsa_run(url_stamp=stamp), initial_run=stamp)
-        assert state['restore_saved_results'] is False, stamp
+def test_a_saved_run_without_a_code_matches_nothing():
+    for code in (None, ''):
+        assert _back(saved_run=_run(url_stamp=code), initial_run=code)['restore_saved_results'] is False
 
 
-def test_responsa_back_does_not_depend_on_the_saved_mode_preference():
-    """A Responsa search started from a /search?mode=responsa link sets the mode in
-    code, which writes no `search_mode`: the saved run decides, not that preference."""
-    assert _responsa_back(saved_mode='Title', saved_query='')['restore_saved_results'] is True
+def test_a_saved_run_without_its_filters_searches_again():
+    """Its rows could only show under the wrong chips: no Back, a fresh search."""
+    for missing in (None, [], 'x'):
+        state = _back(saved_run=_run(pre_search_filters=missing))
+        assert state['restore_saved_results'] is False, missing
+        assert state['restore_run_filters'] is False, missing
+    run = _run()
+    del run['pre_search_filters']
+    assert _back(saved_run=run)['restore_saved_results'] is False
 
 
-def test_responsa_link_with_other_options_than_the_saved_run_searches_again():
+def test_another_mode_in_the_url_than_the_runs_searches_again():
+    state = _back(initial_query='שלום', initial_mode='variants', saved_run=_run(query='שלום', page_mode='exact'))
+    assert state['restore_saved_results'] is False
+    assert state['mode'] == 'variants'
+
+
+def test_responsa_options_other_than_the_runs_search_again():
     for name in ('variants', 'ja', 'flex_spacing', 'bidirectional'):
         url = {'variants': 1, 'ja': None, 'flex_spacing': 1, 'bidirectional': None}
         url[name] = None if url[name] else 1
-        state = _responsa_back(initial_responsa=url)
+        state = _back(initial_responsa=url)
         assert state['restore_saved_results'] is False, name
-        assert state['restore_saved_exclusions'] is False, name
         assert state['mode'] == 'responsa'
 
 
-def test_responsa_link_with_another_query_searches_again():
-    state = _responsa_back(initial_query='מאימתי קורין')
-
+def test_another_query_searches_again():
+    state = _back(initial_query='מאימתי קורין')
     assert state['restore_saved_results'] is False
     assert state['query'] == 'מאימתי קורין'
 
 
-def test_responsa_link_when_the_saved_run_was_not_responsa_searches_again():
-    state = _responsa_back(saved_run=_responsa_run(mode='literal'))
-
-    assert state['restore_saved_results'] is False
-
-
-def test_responsa_link_without_a_saved_run_searches_again():
-    """A snapshot saved before searches were saved with their run has nothing to
-    match the options against: a fresh search, as before."""
-    for saved_run in ({}, {'query': _RESPONSA_QUERY, 'mode': 'responsa', 'url_stamp': _STAMP,
-                           'pre_search_filters': {}},
-                      {'query': _RESPONSA_QUERY, 'mode': 'responsa', 'url_stamp': _STAMP,
-                       'pre_search_filters': {}, 'responsa_options': None}):
-        assert _responsa_back(saved_run=saved_run)['restore_saved_results'] is False, saved_run
+def test_a_responsa_run_without_its_options_matches_nothing():
+    run = _run()
+    run['responsa_options'] = None
+    assert _back(saved_run=run)['restore_saved_results'] is False
 
 
-def test_responsa_link_with_no_saved_results_searches_again():
-    assert _responsa_back(saved_results_count=0)['restore_saved_results'] is False
-
-
-def test_responsa_link_from_browse_is_never_back():
-    state = _responsa_back(from_browse=1)
-
+def test_a_url_from_browse_is_never_back():
+    state = _back(from_browse=1)
     assert state['restore_saved_results'] is False
     assert state['restore_saved_filters'] is False
     assert state['restore_run_filters'] is False
 
 
-def test_other_explicit_modes_in_the_url_still_search_again():
-    """Only Responsa stamps a mode; any other mode in the URL came from a link."""
-    state = resolve_search_bootstrap(
-        initial_query='שלום',
-        initial_tag=None,
-        initial_mode='variants',
-        initial_domain=None,
-        from_browse=None,
-        saved_mode='variants',
-        saved_query='שלום',
-        saved_results_count=12,
-        use_slider=False,
-        saved_run={'query': 'שלום', 'mode': 'variants', 'responsa_options': None},
-    )
+def test_back_to_a_search_still_running_rejoins_it():
+    """Left before it finished: the page waits for that run, with its filters, and
+    restores nothing else (its rows come when it ends)."""
+    state = _back(saved_run=None, live_run=_run(), saved_results_count=0)
+    assert state == {
+        'mode': 'responsa',
+        'query': _RESPONSA_QUERY,
+        'restore_saved_results': False,
+        'restore_saved_filters': False,
+        'restore_run_filters': True,
+        'restore_saved_exclusions': False,
+        'rejoin_run': True,
+    }
 
-    assert state['restore_saved_results'] is False
-    assert state['mode'] == 'variants'
 
+def test_a_running_search_is_rejoined_only_at_its_own_address():
+    assert _back(saved_run=None, live_run=_run(url_stamp='other'))['rejoin_run'] is False
+    assert _back(saved_run=None, live_run=_run(), initial_run=None)['rejoin_run'] is False
+    assert _back(saved_run=None, live_run=_run(), initial_query='אחר')['rejoin_run'] is False
+    assert _back(saved_run=None, live_run=_run(), from_browse=1)['rejoin_run'] is False
+
+
+def test_a_finished_run_wins_over_rejoining():
+    state = _back(live_run=_run())
+    assert state['restore_saved_results'] is True and state['rejoin_run'] is False
+
+
+def test_an_address_without_a_mode_keeps_the_query_only_back():
+    """Addresses stamped before runs had codes: Back by query, no filters (829cd7cf)."""
+    state = _back(initial_mode=None, initial_query='שלום', saved_query='שלום', initial_run=None,
+                  saved_run=None)
+    assert state['restore_saved_results'] is True
+    assert state['restore_saved_filters'] is False
+    assert state['restore_run_filters'] is False
+
+
+# --- What runs keep, and the page's call sites ---------------------------------
 
 def _search_page_tree():
     import ast
@@ -411,10 +440,24 @@ def _search_page_tree():
     return ast.parse(source)
 
 
-def test_search_page_passes_the_stamped_responsa_options_and_the_saved_run():
-    """The call site: the four URL flags reach the bootstrap under the names the
-    saved run uses, and the saved run is passed. A renamed key would quietly turn
-    Back to Responsa into a fresh search again."""
+def _module_tree(relative):
+    import ast
+    from pathlib import Path
+    return ast.parse((Path(__file__).resolve().parents[1] / relative).read_text(encoding='utf-8'))
+
+
+def _function(tree, name):
+    import ast
+    found = [node for node in ast.walk(tree)
+             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name]
+    assert len(found) == 1, name
+    return found[0]
+
+
+def test_search_page_passes_the_url_and_the_runs_to_the_bootstrap():
+    """The four URL flags reach the bootstrap under the names the run uses, with the
+    code, the run found and a live run. A renamed key would quietly turn Back into a
+    fresh search again."""
     import ast
     from web.search_bootstrap import RESPONSA_URL_OPTIONS
 
@@ -422,7 +465,7 @@ def test_search_page_passes_the_stamped_responsa_options_and_the_saved_run():
              if isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'resolve_search_bootstrap']
     assert len(calls) == 1, 'expected one bootstrap call in search.py; update this test'
     keywords = {kw.arg: kw.value for kw in calls[0].keywords}
-    assert 'saved_run' in keywords
+    assert {'saved_run', 'live_run'} <= set(keywords)
     assert getattr(keywords.get('initial_run'), 'id', None) == 'initial_run'
     passed = keywords['initial_responsa']
     assert isinstance(passed, ast.Dict)
@@ -434,79 +477,169 @@ def test_search_page_passes_the_stamped_responsa_options_and_the_saved_run():
     assert set(mapping) == set(RESPONSA_URL_OPTIONS)
 
 
-def test_the_saved_run_names_every_stamped_responsa_option():
-    """The saved run's options come from _responsa_options_from_controls; each
-    option the URL carries must be one of its keys, or nothing ever matches."""
+def test_the_run_names_every_stamped_responsa_option():
+    """The run's options come from _responsa_options_from_controls; each option the
+    URL carries must be one of its keys, or nothing ever matches."""
     import ast
     from web.search_bootstrap import RESPONSA_URL_OPTIONS
 
-    funcs = [node for node in ast.walk(_search_page_tree())
-             if isinstance(node, ast.FunctionDef) and node.name == '_responsa_options_from_controls']
-    assert len(funcs) == 1
-    returned = [node.value for node in ast.walk(funcs[0])
+    func = _function(_search_page_tree(), '_responsa_options_from_controls')
+    returned = [node.value for node in ast.walk(func)
                 if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict)]
     assert len(returned) == 1
-    keys = {key.value for key in returned[0].keys}
-    assert set(RESPONSA_URL_OPTIONS) <= keys
+    assert set(RESPONSA_URL_OPTIONS) <= {key.value for key in returned[0].keys}
 
 
-def _stamp_names(tree):
-    """Names X with `search_state.last_run = {..., 'url_stamp': X}` and an f-string
-    `params += f'..&run={X}'` in the same function: the URL and the saved run get
-    the same stamp."""
+def test_a_search_records_its_mode_and_filters_and_stamps_its_address_before_it_runs():
+    """execute_search: the run records the page's mode and filters; a new code goes
+    into last_run, the run is registered and the address shown with that same code,
+    all before the job is awaited -- so a Back while it runs finds it."""
     import ast
-    found = set()
-    for func in ast.walk(tree):
-        if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+    func = _function(_search_page_tree(), 'execute_search')
+    recorded = [node for node in ast.walk(func)
+                if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)
+                and any(ast.unparse(t) == 'search_state.last_run' for t in node.targets)
+                and any(isinstance(k, ast.Constant) and k.value == 'query' for k in node.value.keys)]
+    assert len(recorded) == 1
+    values = {k.value: ast.unparse(v) for k, v in zip(recorded[0].value.keys, recorded[0].value.values)
+              if isinstance(k, ast.Constant)}
+    assert values['page_mode'] == 'mode'
+    assert values['pre_search_filters'] == 'run_filter_state(search_state)'
+
+    code = [node for node in ast.walk(func)
+            if isinstance(node, ast.Assign) and ast.unparse(node.value) == 'search_runs.new_stamp()']
+    assert len(code) == 1
+    name = code[0].targets[0].id
+    lines = {ast.unparse(n): n.lineno for n in ast.walk(func) if isinstance(n, (ast.Assign, ast.Expr))}
+    stamped = lines[f"search_state.last_run = {{**search_state.last_run, 'url_stamp': {name}}}"]
+    started = lines[f'search_run = start_search_run(search_state, {name})']
+    shown = lines[f'_show_search_url(clean_query, mode, {name})']
+    awaited = [n.lineno for n in ast.walk(func) if isinstance(n, ast.Await)
+               and ast.unparse(n.value) == 'asyncio.shield(search_run.job)']
+    assert len(awaited) == 1
+    assert code[0].lineno < stamped < started < awaited[0] and started < shown < awaited[0]
+
+
+def test_search_page_never_binds_the_name_run():
+    """`run` is NiceGUI's run module (run.io_bound) throughout search.py; a local named
+    `run` in execute_search broke every search's enrichment (found in the browser,
+    2026-10-22)."""
+    import ast
+    bound = [(f.name, n.lineno) for f in ast.walk(_search_page_tree())
+             if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
+             for n in ast.walk(f) if isinstance(n, ast.Name) and n.id == 'run' and isinstance(n.ctx, ast.Store)]
+    assert bound == []
+
+
+def test_the_url_carries_the_mode_and_the_code():
+    import ast
+    func = _function(_search_page_tree(), '_search_url')
+    source = ast.unparse(func)
+    assert "params += f'&mode={quote(mode)}'" in source
+    assert "params += f'&run={stamp}'" in source
+
+
+def test_the_page_follows_a_live_run_and_restores_an_empty_stamped_one():
+    import ast
+    func = _function(_search_page_tree(), 'create_search_page')
+    source = ast.unparse(func)
+    assert 'asyncio.ensure_future(_after_delay(0, execute_search, _live_run))' in source
+    assert "elif restore_saved_results and bootstrap_state['restore_run_filters']:" in source
+    assert 'restore_search_snapshot(search_state, initial_run)' in source
+    assert 'get_search_active_snapshot(initial_run)' in source
+
+
+def test_stop_on_a_page_following_a_run_stops_the_run():
+    import ast
+    func = _function(_search_page_tree(), 'cancel_search')
+    assert "_page_run['run'].cancelled = True" in ast.unparse(func)
+    progress = _function(_search_page_tree(), 'progress_cb')
+    assert 'followed.cancelled' in ast.unparse(progress)
+
+
+def test_only_the_runs_owner_saves_it():
+    """A left page still finishes a run a Back took over; it must not save it twice."""
+    import ast
+    source = ast.unparse(_function(_search_page_tree(), 'execute_search'))
+    assert 'search_run.owner = search_state' in source
+    assert '_owns_run = search_run.owner is search_state' in source
+    assert 'if _owns_run and (not search_state.refinement_chain):' in source
+
+
+def test_restoring_a_history_entrys_rows_removes_the_code_from_the_address():
+    """Codex round 3: this path shows rows without running a search, so the address
+    must lose the code of the search shown before (Back to it would restore that)."""
+    import ast
+    func = _function(_search_page_tree(), '_on_history_item_clicked')
+    guarded = [node for node in ast.walk(func)
+               if isinstance(node, ast.If) and ast.unparse(node.test) == "state_snapshot.get('results')"
+               and any(isinstance(s, ast.Assign) and ast.unparse(s).strip() == 'search_state.last_run = None'
+                       for s in node.body)]
+    assert len(guarded) == 1
+    assert "u.searchParams.delete('run')" in ast.unparse(guarded[0])
+
+
+def _display_filter_saves(tree):
+    """(saved, followed): persist_value calls for the shared display-filter keys a
+    change after the search writes, and how many are followed in their own block by
+    save_post_filters_with_run(search_state)."""
+    import ast
+    keys = {'search_pgp_filter', 'search_library_filter', 'word_search_excluded_ids',
+            'search_printed_filter', 'search_exclusion_sources'}
+    saved = followed = 0
+    for node in ast.walk(tree):
+        body = getattr(node, 'body', None)
+        if not isinstance(body, list):
             continue
-        saved, stamped = set(), set()
-        for node in ast.walk(func):
-            if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)
-                    and any(ast.unparse(t) == 'search_state.last_run' for t in node.targets)):
-                saved |= {v.id for k, v in zip(node.value.keys, node.value.values)
-                          if isinstance(k, ast.Constant) and k.value == 'url_stamp'
-                          and isinstance(v, ast.Name)}
-            if (isinstance(node, ast.AugAssign) and getattr(node.target, 'id', None) == 'params'
-                    and isinstance(node.value, ast.JoinedStr)):
-                parts = node.value.values
-                for i, part in enumerate(parts[:-1]):
-                    nxt = parts[i + 1]
-                    if (isinstance(part, ast.Constant) and str(part.value).endswith('&run=')
-                            and isinstance(nxt, ast.FormattedValue) and isinstance(nxt.value, ast.Name)):
-                        stamped.add(nxt.value.id)
-        found |= saved & stamped
-    return found
+        for i, stmt in enumerate(body):
+            call = stmt.value if isinstance(stmt, ast.Expr) else None
+            if (isinstance(call, ast.Call) and getattr(call.func, 'id', None) == 'persist_value'
+                    and call.args and isinstance(call.args[0], ast.Constant) and call.args[0].value in keys):
+                saved += 1
+                if any(ast.unparse(later).strip() == 'save_post_filters_with_run(search_state)'
+                       for later in body[i + 1:]):
+                    followed += 1
+    return saved, followed
 
 
-def test_the_url_and_the_saved_run_get_the_same_stamp():
-    assert _stamp_names(_search_page_tree()), 'no run stamp found in search.py; update this test'
+def test_every_display_filter_save_also_updates_the_run():
+    # search.py: PGP, library, printed, and five manuscript-exclusion changes.
+    for module, expected in (('web/pages/search.py', 8), ('web/pages/search_results.py', 2)):
+        saved, followed = _display_filter_saves(_module_tree(module))
+        assert saved == expected, f'{module}: {saved} saves; update this test'
+        assert followed == saved, module
 
 
-def test_the_stamp_check_can_fail():
+def test_the_display_filter_check_can_fail():
     import ast
-    one = ast.parse("def f():\n    s = 1\n    search_state.last_run = {'url_stamp': s}\n    params += f'&run={s}'\n")
-    two = ast.parse("def f():\n    s = 1; t = 2\n    search_state.last_run = {'url_stamp': s}\n    params += f'&run={t}'\n")
-    assert _stamp_names(one) == {'s'}
-    assert _stamp_names(two) == set()
+    tree = ast.parse("def f():\n    persist_value('search_pgp_filter', 1)\n    other()\n")
+    assert _display_filter_saves(tree) == (1, 0)
 
 
 def test_the_route_hands_run_to_the_search_page():
     """`run` must reach create_search_page as initial_run, or no Back ever matches."""
     import ast
-    from pathlib import Path
-    tree = ast.parse((Path(__file__).resolve().parents[1] / 'web' / 'main.py').read_text(encoding='utf-8'))
-    routes = [node for node in ast.walk(tree)
-              if isinstance(node, ast.FunctionDef) and node.name == 'search_page_route']
-    assert len(routes) == 1
-    assert 'run' in [a.arg for a in routes[0].args.args + routes[0].args.kwonlyargs]
-    calls = [node for node in ast.walk(routes[0])
+    func = _function(_module_tree('web/main.py'), 'search_page_route')
+    assert 'run' in [a.arg for a in func.args.args + func.args.kwonlyargs]
+    calls = [node for node in ast.walk(func)
              if isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'create_search_page']
     assert len(calls) == 1
     keywords = {kw.arg: kw.value for kw in calls[0].keywords}
     assert getattr(keywords.get('initial_run'), 'id', None) == 'run'
 
 
-# --- The run's own filters, and the stamp dropped at a new search (Codex round 2) ---
+# --- The run's filters and snapshot (web/pages/search_state.py) -------------------
+
+@pytest.fixture
+def runs(monkeypatch):
+    """The run registry, empty, for one fake browser."""
+    from web import search_runs
+    import web.pages.search_state as ss
+    search_runs.clear()
+    monkeypatch.setattr(ss, '_browser_id', lambda: 'browser-1')
+    yield ss
+    search_runs.clear()
+
 
 def test_a_runs_filters_round_trip_as_copies():
     from web.pages.search_state import (
@@ -531,8 +664,6 @@ def test_a_runs_filters_round_trip_as_copies():
 
 
 def test_applying_a_runs_filters_resets_the_fields_it_lacks():
-    """Another tab's filters on this page are replaced field by field, absent ones
-    with their defaults; a non-dict changes nothing."""
     from web.pages.search_state import SearchUIState, apply_run_filter_state
 
     page = SearchUIState()
@@ -550,201 +681,114 @@ def test_applying_a_runs_filters_resets_the_fields_it_lacks():
     assert page.filter_authors == ['kept']
 
 
-def test_a_new_search_drops_the_saved_stamp(monkeypatch):
-    """Only a completed search stamps again: a stopped or failed one must leave no
-    saved run that the previous address still matches (Codex, PR #436, round 2)."""
-    import web.pages.search_state as ss
-
-    run = {'query': 'q', 'mode': 'responsa', 'url_stamp': _STAMP, 'pre_search_filters': {}}
-    tab = {ss._SEARCH_ACTIVE_TAB_KEY: {'version': ss._SEARCH_ACTIVE_TAB_VERSION, 'results': [1], 'last_run': run}}
-    user = {'search_last_run': dict(run)}
-    monkeypatch.setattr(ss, '_get_tab_storage', lambda: tab)
-    monkeypatch.setattr(ss, 'safe_user_get', lambda key, default=None: user.get(key, default))
-    monkeypatch.setattr(ss, 'safe_user_set', lambda key, value: user.__setitem__(key, value))
-
-    ss.drop_saved_url_stamp()
-
-    assert 'url_stamp' not in tab[ss._SEARCH_ACTIVE_TAB_KEY]['last_run']
-    assert 'url_stamp' not in user['search_last_run']
-    assert tab[ss._SEARCH_ACTIVE_TAB_KEY]['results'] == [1]  # nothing else touched
-    assert user['search_last_run']['query'] == 'q'
-    assert run['url_stamp'] == _STAMP  # copied, not edited in place
-    # The saved run no longer matches the address it stamped.
-    assert _responsa_back(saved_run=tab[ss._SEARCH_ACTIVE_TAB_KEY]['last_run'])['restore_saved_results'] is False
-
-
-def _function(tree, name):
-    import ast
-    found = [node for node in ast.walk(tree)
-             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name]
-    assert len(found) == 1, name
-    return found[0]
-
-
-def test_a_search_saves_its_filters_and_drops_the_old_stamp_before_its_run():
-    """Call sites in execute_search: the stamp is dropped before the new run is
-    recorded, and the run records the page's filters."""
-    import ast
-    func = _function(_search_page_tree(), 'execute_search')
-    drops = [node.lineno for node in ast.walk(func)
-             if isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'drop_saved_url_stamp']
-    runs = [node for node in ast.walk(func)  # the run as recorded (not the stamp's update)
-            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)
-            and any(ast.unparse(t) == 'search_state.last_run' for t in node.targets)
-            and any(isinstance(k, ast.Constant) and k.value == 'query' for k in node.value.keys)]
-    assert len(drops) == 1 and len(runs) == 1
-    assert drops[0] < runs[0].lineno
-    values = {k.value: v for k, v in zip(runs[0].value.keys, runs[0].value.values) if isinstance(k, ast.Constant)}
-    assert ast.unparse(values['pre_search_filters']) == 'run_filter_state(search_state)'
-
-
-def test_the_page_applies_the_runs_filters_on_a_stamped_back():
-    import ast
-    func = _function(_search_page_tree(), 'create_search_page')
-    guarded = [node for node in ast.walk(func)
-               if isinstance(node, ast.If) and ast.unparse(node.test) == "bootstrap_state['restore_run_filters']"]
-    assert len(guarded) == 1
-    calls = [ast.unparse(node) for node in ast.walk(guarded[0])
-             if isinstance(node, ast.Call) and getattr(node.func, 'id', None) == 'apply_run_filter_state']
-    assert calls == ["apply_run_filter_state(search_state, _saved_run.get('pre_search_filters'))"]
-
-
-# --- This tab's display filters (Codex round 3) -------------------------------
-# PGP, library and word-search exclusions lived only in storage every tab shares;
-# a restore of this tab's rows took another tab's values for them.
-
-def _fake_tab(monkeypatch):
-    import web.pages.search_state as ss
-    tab = {}
-    monkeypatch.setattr(ss, '_get_tab_storage', lambda: tab)
-    return ss, tab
-
-
-def test_the_tab_snapshot_keeps_its_own_display_filters(monkeypatch):
-    ss, tab = _fake_tab(monkeypatch)
+def _page_with_a_run(ss, rows=1000 + 5):
     page = ss.SearchUIState()
-    page.results = [{'display': {'id': '990001'}}]
+    page.results = [{'display': {'id': f'99{i:07d}'}} for i in range(rows)]
+    page.last_run = _run(query='שבת', page_mode='exact')
     page.pgp_filter = 'only_pgp'
     page.library_mode, page.library_filter = 'show_only', ['CUL', 'JTS']
     page.word_search_excluded_ids = {'990002'}
+    page.printed_filter = 'hide_printed'
+    page.exclusion_sources = ['a source']
+    return page
+
+
+def test_a_run_keeps_a_thousand_rows_and_its_display_filters(runs):
+    """Back after a 25,320-row search showed 250 (the shared copy); a run keeps 1,000."""
+    ss = runs
+    page = _page_with_a_run(ss)
     ss.persist_search_active_snapshot(page)
 
-    # Another tab's values, as the shared keys load them before the snapshot.
     back = ss.SearchUIState()
-    back.pgp_filter = 'hide_pgp'
+    back.pgp_filter = 'hide_pgp'                       # another tab's, from shared storage
     back.library_mode, back.library_filter = 'hide', ['BL']
-    back.word_search_excluded_ids = {'990009'}
-    assert ss.restore_search_active_snapshot(back) is True
+    assert ss.restore_search_active_snapshot(back, _CODE) is True
+    assert len(back.results) == 1000 and back.result_count_capped is True
     assert back.pgp_filter == 'only_pgp'
     assert (back.library_mode, back.library_filter) == ('show_only', ['CUL', 'JTS'])
     assert back.word_search_excluded_ids == {'990002'}
-
-
-def test_a_display_filter_change_reaches_the_tab_snapshot(monkeypatch):
-    ss, tab = _fake_tab(monkeypatch)
-    page = ss.SearchUIState()
-    ss.save_tab_post_filters(page)
-    assert tab == {}  # no snapshot yet: nothing is created
-
-    page.results = [{'display': {'id': '990001'}}]
-    ss.persist_search_active_snapshot(page)
-    page.pgp_filter = 'hide_pgp'
-    page.word_search_excluded_ids.add('990003')
-    page.printed_filter = 'hide_printed'
-    page.exclusion_sources = ['an exclusion source']
-    ss.save_tab_post_filters(page)
-    saved = tab[ss._SEARCH_ACTIVE_TAB_KEY]
-    assert saved['pgp_filter'] == 'hide_pgp'
-    assert saved['word_search_excluded_ids'] == ['990003']
-    assert saved['printed_filter'] == 'hide_printed'                        # Codex round 4
-    assert saved['search_exclusion_sources'] == ['an exclusion source']     # Codex round 4
-    assert saved['results'] == [{'display': {'id': '990001'}}]  # the rest is untouched
-
-    back = ss.SearchUIState()
-    ss.restore_search_active_snapshot(back)
     assert back.printed_filter == 'hide_printed'
-    assert back.exclusion_sources == ['an exclusion source']
+    assert back.exclusion_sources == ['a source']
+    assert back.last_run['url_stamp'] == _CODE
 
 
-def test_restored_display_filters_are_checked_like_the_shared_ones(monkeypatch):
-    ss, tab = _fake_tab(monkeypatch)
-    tab[ss._SEARCH_ACTIVE_TAB_KEY] = {
-        'version': ss._SEARCH_ACTIVE_TAB_VERSION, 'results': [],
+def test_a_run_is_restored_only_for_its_browser_and_code(runs, monkeypatch):
+    ss = runs
+    ss.persist_search_active_snapshot(_page_with_a_run(ss, rows=3))
+    assert ss.get_search_active_snapshot('other-code') == {}
+    assert ss.get_search_active_snapshot(None) == {}
+    monkeypatch.setattr(ss, '_browser_id', lambda: 'another-browser')
+    assert ss.get_search_active_snapshot(_CODE) == {}
+
+
+def test_a_page_without_a_run_code_saves_no_run(runs):
+    ss = runs
+    page = _page_with_a_run(ss, rows=3)
+    page.last_run = None                      # e.g. rows taken from a history entry
+    ss.persist_search_active_snapshot(page)
+    from web import search_runs
+    assert search_runs._runs == {}
+
+
+def test_a_display_filter_change_reaches_the_run(runs):
+    ss = runs
+    page = _page_with_a_run(ss, rows=3)
+    ss.save_post_filters_with_run(page)
+    assert ss.get_search_active_snapshot(_CODE) == {}   # not run yet: nothing is created
+
+    ss.persist_search_active_snapshot(page)
+    page.pgp_filter = 'all'
+    page.printed_filter = 'only_printed'
+    page.exclusion_sources = []
+    ss.save_post_filters_with_run(page)
+    saved = ss.get_search_active_snapshot(_CODE)
+    assert saved['pgp_filter'] == 'all'
+    assert saved['printed_filter'] == 'only_printed'
+    assert saved['search_exclusion_sources'] == []
+    assert len(saved['results']) == 3                    # the rest is untouched
+
+
+def test_restored_display_filters_are_checked_like_the_shared_ones(runs):
+    ss = runs
+    from web import search_runs
+    search_runs.finish_run('browser-1', _CODE, {
+        'version': ss._SEARCH_RUN_SNAPSHOT_VERSION, 'results': [],
         'pgp_filter': 'everything', 'library_filter': {'mode': 'show_only', 'codes': ['LOCAL', 3]},
         'word_search_excluded_ids': 'not a list',
-    }
+    })
     page = ss.SearchUIState()
     page.pgp_filter, page.word_search_excluded_ids = 'only_pgp', {'990004'}
-    ss.restore_search_active_snapshot(page)
+    ss.restore_search_active_snapshot(page, _CODE)
     assert page.pgp_filter == 'only_pgp'  # an unknown value leaves the loaded one
     assert (page.library_mode, page.library_filter) == ('hide', [])  # LOCAL dropped; show-only nothing = show all
     assert page.word_search_excluded_ids == {'990004'}
 
 
-def test_a_snapshot_without_display_filters_keeps_the_loaded_ones(monkeypatch):
-    ss, tab = _fake_tab(monkeypatch)
-    tab[ss._SEARCH_ACTIVE_TAB_KEY] = {'version': ss._SEARCH_ACTIVE_TAB_VERSION, 'results': []}
-    page = ss.SearchUIState()
-    page.pgp_filter = 'only_pgp'
-    page.library_mode, page.library_filter = 'show_only', ['CUL']
-    page.word_search_excluded_ids = {'990005'}
-    ss.restore_search_active_snapshot(page)
-    assert page.pgp_filter == 'only_pgp'
-    assert (page.library_mode, page.library_filter) == ('show_only', ['CUL'])
-    assert page.word_search_excluded_ids == {'990005'}
+def test_a_live_run_is_found_only_while_it_runs(runs):
+    ss = runs
+    page = _page_with_a_run(ss, rows=0)
+    run = ss.start_search_run(page, _CODE)
+    assert ss.live_search_run(_CODE) is None             # no job yet
+
+    class _Job:
+        finished = False
+
+        def done(self):
+            return self.finished
+    run.job = _Job()
+    assert ss.live_search_run(_CODE) is run
+    assert ss.live_search_run('other') is None
+    run.job.finished = True
+    assert ss.live_search_run(_CODE) is None
 
 
-def _module_tree(relative):
-    import ast
-    from pathlib import Path
-    return ast.parse((Path(__file__).resolve().parents[1] / relative).read_text(encoding='utf-8'))
-
-
-def _display_filter_saves(tree):
-    """(saved, followed): persist_value calls for the shared display-filter keys a
-    change after the search writes, and how many are followed in their own block by
-    save_tab_post_filters(search_state)."""
-    import ast
-    keys = {'search_pgp_filter', 'search_library_filter', 'word_search_excluded_ids',
-            'search_printed_filter', 'search_exclusion_sources'}
-    saved = followed = 0
-    for node in ast.walk(tree):
-        body = getattr(node, 'body', None)
-        if not isinstance(body, list):
-            continue
-        for i, stmt in enumerate(body):
-            call = stmt.value if isinstance(stmt, ast.Expr) else None
-            if (isinstance(call, ast.Call) and getattr(call.func, 'id', None) == 'persist_value'
-                    and call.args and isinstance(call.args[0], ast.Constant) and call.args[0].value in keys):
-                saved += 1
-                if any(ast.unparse(later).strip() == 'save_tab_post_filters(search_state)' for later in body[i + 1:]):
-                    followed += 1
-    return saved, followed
-
-
-def test_every_display_filter_save_also_updates_the_tab_snapshot():
-    # search.py: PGP, library, printed, and five manuscript-exclusion changes.
-    for module, expected in (('web/pages/search.py', 8), ('web/pages/search_results.py', 2)):
-        saved, followed = _display_filter_saves(_module_tree(module))
-        assert saved == expected, f'{module}: {saved} saves; update this test'
-        assert followed == saved, module
-
-
-def test_the_display_filter_check_can_fail():
-    import ast
-    tree = ast.parse("def f():\n    persist_value('search_pgp_filter', 1)\n    other()\n")
-    assert _display_filter_saves(tree) == (1, 0)
-
-
-def test_restoring_a_history_entrys_rows_drops_the_stamp():
-    """Codex round 3: this path shows rows without running a search, so the stamp of
-    the search shown before must be dropped here too."""
-    import ast
-    func = _function(_search_page_tree(), '_on_history_item_clicked')
-    guarded = [node for node in ast.walk(func)  # the block that takes the entry's rows
-               if isinstance(node, ast.If) and ast.unparse(node.test) == "state_snapshot.get('results')"
-               and any(isinstance(s, ast.Assign) and ast.unparse(s).strip() == 'search_state.last_run = None'
-                       for s in node.body)]
-    assert len(guarded) == 1
-    assert any(isinstance(s, ast.Expr) and ast.unparse(s).strip() == 'drop_saved_url_stamp()'
-               for s in guarded[0].body)
+def test_a_rejoining_page_takes_the_runs_starting_state(runs):
+    ss = runs
+    page = _page_with_a_run(ss, rows=0)
+    run = ss.start_search_run(page, _CODE)
+    back = ss.SearchUIState()
+    ss.apply_run_start_snapshot(back, run.snapshot)
+    assert back.results == []
+    assert back.pgp_filter == 'only_pgp' and back.printed_filter == 'hide_printed'
+    assert back.exclusion_sources == ['a source']
+    assert back.last_run['url_stamp'] == _CODE and back.last_run['page_mode'] == 'exact'

@@ -21,7 +21,7 @@ from web.ux_timing import ux_done
 from web.feature_flags import WEB_PUZZLE_ENABLED, web_fgp_enabled
 from web.components.filter_panel import persist_value
 from web.pages.search_state import (
-    AdvancedViewState, domain_display_name, save_tab_post_filters,
+    AdvancedViewState, domain_display_name, save_post_filters_with_run,
 )
 from web.services import (
     get_service,
@@ -465,7 +465,7 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
                         def _restore_word_result(sid=excl_sys_id):
                             search_state.word_search_excluded_ids.discard(sid)
                             persist_value('word_search_excluded_ids', list(search_state.word_search_excluded_ids))
-                            save_tab_post_filters(search_state)
+                            save_post_filters_with_run(search_state)
                             refs.apply_word_search_exclusions_and_render()
                         ui.button(icon='add_circle_outline', on_click=_restore_word_result).props(
                             f'flat round dense size=xs aria-label="{tr("Restore")}"'
@@ -490,7 +490,7 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
                     def _clear_word_exclusions():
                         search_state.word_search_excluded_ids.clear()
                         persist_value('word_search_excluded_ids', [])
-                        save_tab_post_filters(search_state)
+                        save_post_filters_with_run(search_state)
                         refs.apply_word_search_exclusions_and_render()
                     ui.button(tr('Clear All Exclusions'), icon='clear_all',
                               on_click=_clear_word_exclusions).props('flat dense no-caps size=sm')

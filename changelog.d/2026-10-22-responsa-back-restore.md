@@ -1,40 +1,43 @@
-## [Unreleased] -- Back to a Responsa search shows its results instead of searching again (web, branch `claude/responsa-back-restore`)
+## [Unreleased] -- Back to a search shows what the page showed, in every mode (web, branch `claude/responsa-back-restore`)
 
-A finished Responsa search writes `q=..&mode=responsa` and its option flags
-(`variants`, `ja`, `flex_spaces`, `bidirectional`) into the address bar. The
-page recognised Back only for an address with no `mode` in it, so opening a
-result and pressing Back ran the whole Responsa search again. In production on
-2026-10-22 one 45 s search (2,456 candidates, 81 results) ran three times for
-one visitor.
+Measured before (local server, built-in browser, open a result in the same tab,
+press Back): a Responsa search ran again from scratch (in production on
+2026-10-22 one 45 s search ran three times for one visitor); a finished
+25,320-row Exact search came back as 250 rows ("250+"); a search left before it
+finished started again, while the abandoned one ran on and the new one waited
+behind it. Causes: the Back check refused any address with a `mode`; the page
+reads its saved state while it is built, before the browser's socket connects,
+so NiceGUI's per-tab storage was never readable there and every restore fell
+back to the 250-row copy every tab shares; and the address was stamped only when
+a search completed.
 
-A finished Responsa search now also writes a random `run=<stamp>` into the
-address and keeps the same stamp in its saved run (`last_run['url_stamp']`).
-`web/search_bootstrap.py::resolve_search_bootstrap` treats a Responsa address as
-Back only when the stamp, the query and the options all match the saved run from
-the same snapshot as the results. A typed or pasted link without the stamp,
-another run's stamp (another tab, an older search), or any other mismatch still
-searches, as a link should -- equal values alone could hide a gap, NOT-words,
-filters or a refinement the address does not carry (Codex, PR #436). Other modes
-are unchanged.
+Now every search writes its address when it starts: the query, the page's mode,
+the Responsa options and a random run code (`run=`). `web/search_runs.py` keeps,
+per browser and code, the running search and then the page's snapshot (up to
+1,000 rows and the filters shown with them), in memory and bounded (30 minutes
+after last use, 5 runs per browser, 100 in all). Back to the address:
 
-The run also saves the pre-search filters it ran with
-(`last_run['pre_search_filters']`, `web/pages/search_state.py::run_filter_state`),
-and a stamped Back restores those (`apply_run_filter_state`), not the shared
-current filter keys another tab may have changed; a saved run without them is
-not Back. A new search drops the saved stamp when it starts
-(`drop_saved_url_stamp`), so a search that is stopped, fails or never finishes
-cannot leave the previous run matching the address; so does showing a search
-history entry's saved rows, which runs no search.
+* a finished run is restored from it -- all its rows up to 1,000, its own
+  pre-search filters (saved with the run) and display filters (PGP, library,
+  printed, exclusions; updated as they change), never another tab's; a run that
+  found nothing shows "0 results" instead of searching again;
+* a run still running is followed: the page shows its progress and clock and
+  its rows when it ends, and Stop stops it -- no second search;
+* a stopped run comes back as the partial rows the page showed;
+* with the run not kept (a restart), the shared copy is used when it is that
+  run's, else the address searches again, in its mode.
 
-The tab's snapshot also keeps the display filters that otherwise live only in
-storage every tab shares -- PGP, library and word-search exclusions -- and
-updates them as they change (`save_tab_post_filters`), so a restore of this
-tab's rows shows them under this tab's filters, not another tab's. This applies
-to every restore from the tab snapshot, not only Responsa Back.
+`web/search_bootstrap.py::matches_saved_run` is the match (code, query, mode,
+Responsa options, and the run's filters); a typed or pasted link without the code
+searches again, as a link should. Only the page that owns a run saves it (a page
+left mid-search still finishes it, and must not add a second history entry).
+Addresses without a mode, stamped before this, keep the old query-only Back.
+NiceGUI's tab storage is no longer used by the search page.
 
-Tests: `tests/test_search_bootstrap.py` (the match and each way it must not
-match, the run's own filters, the stamp dropped at a new search, and the call
-sites: the route hands `run` to the page, the page hands it and the four options
-to the bootstrap, the URL and the saved run get the same stamp, `execute_search`
-drops the old stamp before recording the run with its filters, and the page
-applies the run's filters on a stamped Back).
+Tests: `tests/test_search_runs.py` (the registry: per browser, bounds, running /
+done / failed), `tests/test_search_bootstrap.py` (the match in every mode, rejoin,
+an empty run, each way it must not match, the run's snapshot and filters, and the
+page's call sites: the address stamped before the job is awaited, Stop on a page
+following a run, the owner-only save, no local named `run` -- that shadowed
+NiceGUI's `run` module and broke every search's enrichment until the browser
+check caught it). Checked in the browser on a local server: the five cases above.
