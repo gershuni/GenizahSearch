@@ -50,6 +50,7 @@ class SearchRun:
     cancelled: bool = False           # Stop from any page following the run
     watchers: list = field(default_factory=list)   # search states shown this run's progress
     owner: Any = None                 # the search state that saves the run (the last to take it)
+    preview_rows: Any = None          # the early rows the job handed over (kept for a follower's Stop)
 
     @property
     def running(self) -> bool:
@@ -122,6 +123,7 @@ def finish_run(browser_id: Optional[str], stamp: Optional[str], snapshot: dict) 
     run.job = None
     run.owner = None
     run.watchers = []
+    run.preview_rows = None
     run.touched = time.monotonic()
     _runs.move_to_end((browser_id, stamp))
     _prune()

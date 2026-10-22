@@ -155,8 +155,10 @@ def test_a_saved_run_lets_go_of_its_job_and_page():
     run = sr.start_run('b', 'c', {})
     run.job, run.owner, run.watchers = _Job(done=True), object(), [object()]
     run.cutoff = {'capped': True}
+    run.preview_rows = [{'display': {'id': 'early'}}]
     sr.finish_run('b', 'c', {'results': [1]})
     assert run.job is None and run.owner is None and run.watchers == []
+    assert run.preview_rows is None
     assert run.cutoff == {'capped': True}       # a page still finishing it reads these
     assert run.done and not run.attachable and not run.failed
 

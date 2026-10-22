@@ -5577,6 +5577,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         def preview_cb(rows):
             # Runs on the thread waiting for the worker: hand over to the loop.
             _preview_box['rows'] = rows
+            # And on the run: a page that follows it after a Back keeps them for a Stop or
+            # the time limit, as this page would (Codex, PR #436).
+            search_run.preview_rows = rows
             _loop.call_soon_threadsafe(_preview_ready.set)
 
         async def _paint_previews(generation, lang):
@@ -5697,8 +5700,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if search_state in search_run.watchers:
                 search_run.watchers.remove(search_state)
         if attach is not None:
-            # Its cut-off signals were recorded by the page that started it.
+            # Its cut-off signals and early rows were recorded by the page that started it.
             _run_cutoff.update(search_run.cutoff or {})
+            if not _preview_box['rows'] and search_run.preview_rows:
+                _preview_box['rows'] = list(search_run.preview_rows)
         # The web side stopped a worker that had not stopped itself at its time limit
         # (TIME_LIMIT_GRACE_SECONDS later), or the limit stopped a part of the search
         # that returns no rows: the early rows it had handed over are verified rows,

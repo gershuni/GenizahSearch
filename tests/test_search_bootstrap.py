@@ -1028,3 +1028,17 @@ def test_save_search_run_says_whether_it_kept_the_run(runs, monkeypatch):
     page.last_run = None
     monkeypatch.setattr(ss, 'safe_user_get', lambda key, default=None: default)
     assert ss.save_search_run(page) is False
+
+
+def test_a_page_following_a_run_keeps_its_early_rows():
+    """Codex round 13: the early rows lived only in the starting page's call; a Stop
+    or the time limit on a page that followed the run after Back showed none."""
+    import ast
+    func = _function(_search_page_tree(), 'execute_search')
+    preview = ast.unparse(_function(_search_page_tree(), 'preview_cb'))
+    assert 'search_run.preview_rows = rows' in preview
+    followed = [node for node in ast.walk(func)
+                if isinstance(node, ast.If) and ast.unparse(node.test) == 'attach is not None'
+                and any("_run_cutoff.update(search_run.cutoff or {})" in ast.unparse(s) for s in node.body)]
+    assert len(followed) == 1
+    assert "_preview_box['rows'] = list(search_run.preview_rows)" in ast.unparse(followed[0])
