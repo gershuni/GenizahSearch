@@ -587,12 +587,15 @@ class CompiledResponsa:
             return m.span()
         return min(s for s, _e in spans), max(e for _s, e in spans)
 
-    def retrieval(self, index, field='content', has_content_search=False, flex_spacing=False):
+    def retrieval(self, index, field='content', has_content_search=False, flex_spacing=False,
+                  bidirectional=False, within_document=False):
         """The lookup on *index* (its own schema; plan §5.1, Codex 2.4): per word its
-        scored terms on *field*, ORed -- on the content field -- with a bracket- and
-        mark-tolerant pattern of its forms; the words ANDed."""
+        scored terms ORed with a bracket- and mark-tolerant pattern of its forms, the
+        words ANDed; a position *field* also requires its edge word there
+        (retrieval_query)."""
         return retrieval_query(self.plans, index, field=field,
-                               has_content_search=has_content_search, flex_spacing=flex_spacing)
+                               has_content_search=has_content_search, flex_spacing=flex_spacing,
+                               bidirectional=bidirectional, within_document=within_document)
 
 
 class _CheckPattern(Pattern):
@@ -796,12 +799,19 @@ def compile_components(components, responsa_options, var_mgr, max_gap, per_pair_
                             groups=groups, flex_spacing=flex, exact_pattern=exact)
 
 
-def _line_word_separator(gap):
+def _line_word_separator(gap, flex=False):
     """Between two words of one line (never crosses a line break): whitespace, with
-    up to *gap* words between (CR HIGH-6, [N] word gaps in line mode)."""
+    up to *gap* words between (CR HIGH-6, [N] word gaps in line mode); with flex
+    spacing and no gap, none at all (שלוםעולם, as _separator)."""
     if not gap:
-        return r'[^\S\n]+'
+        return r'[^\S\n]*' if flex else r'[^\S\n]+'
     return r'(?:[^\S\n]+\S+){0,' + str(int(gap)) + r'}[^\S\n]+'
+
+
+def _line_flex_pattern(word):
+    """_make_flex_spacing_pattern for a line query: spaces between the letters, never
+    a line break -- a word split over two lines is not on one line."""
+    return r'[^\S\n]*'.join(re.escape(ch) for ch in word)
 
 
 def compile_line_groups(line_groups, line_gaps, responsa_options, var_mgr, query_has_brackets=False):
@@ -845,18 +855,25 @@ def compile_line_groups(line_groups, line_gaps, responsa_options, var_mgr, query
         opts.get('variant_mode', 'exact'), var_mgr)
     if guard_warning:
         warnings.append(guard_warning)
-    plans = [WordPlan(component=c, stems=f) for c, f in zip(positive, stems)]
+    # Flex spacing holds in a line query too (Codex review of PR #432).
+    flex = bool(opts.get('flex_spacing', False))
+    plans = [WordPlan(component=c, stems=f,
+                      flex_patterns=[_line_flex_pattern(w) for w in c.words] if flex else [])
+             for c, f in zip(positive, stems)]
     _bounded_forms(plans)
     by_group, k = [], 0
     for group in kept_groups:
         by_group.append(plans[k:k + len(group.components)])
         k += len(group.components)
-    check, highlight, groups = build_line_patterns(kept_groups, by_group, kept_gaps, query_has_brackets)
-    exact = build_line_patterns(kept_groups, by_group, kept_gaps, query_has_brackets, exact_starts=True)[0]
+    check, highlight, groups = build_line_patterns(kept_groups, by_group, kept_gaps, query_has_brackets,
+                                                   flex_spacing=flex)
+    exact = build_line_patterns(kept_groups, by_group, kept_gaps, query_has_brackets, exact_starts=True,
+                                flex_spacing=flex)[0]
     return CompiledResponsa(plans=plans, negated_words=negated,
                             warning='; '.join(warnings) if warnings else None,
                             options=state, check_pattern=check, highlight_pattern=highlight,
-                            groups=groups, flags=re.IGNORECASE | re.MULTILINE, exact_pattern=exact)
+                            groups=groups, flex_spacing=flex, flags=re.IGNORECASE | re.MULTILINE,
+                            exact_pattern=exact)
 
 
 # The looked-past characters a line's edge word commonly carries: brackets, quotes,
@@ -866,11 +883,12 @@ _LINE_EDGE_PAST = ("[\\[\\]\"'\u05F3\u05F4\u2018\u2019\u0300-\u036F"
 
 
 def build_line_patterns(line_groups, plans_by_group, line_gaps, query_has_brackets=False,
-                        exact_starts=False):
+                        exact_starts=False, flex_spacing=False):
     """(check, highlight, groups) of a line-break query: each group one line pattern,
     its words bounded and named, joined by line breaks with the [|N] gaps.
     *exact_starts*: the check's exact pattern instead, and no highlight (as
-    build_patterns)."""
+    build_patterns). *flex_spacing*: a group's words as _sequence joins them -- only
+    its outer edges bounded, spaces optional within and between them."""
     from shared.search_engine import _FUZZY_INSERTER
     hl_inserter = None if query_has_brackets else _FUZZY_INSERTER
     kept_groups, by_group, kept_gaps = line_groups, plans_by_group, line_gaps
@@ -881,12 +899,18 @@ def build_line_patterns(line_groups, plans_by_group, line_gaps, query_has_bracke
         line_patterns = []
         for gi, (group, gplans) in enumerate(zip(kept_groups, by_group)):
             word_pat = ''
+            last = len(gplans) - 1
             for ci, plan in enumerate(gplans):
                 if ci:
-                    word_pat += _line_word_separator(group.word_gaps[ci - 1] if ci - 1 < len(group.word_gaps) else None)
+                    word_pat += _line_word_separator(
+                        group.word_gaps[ci - 1] if ci - 1 < len(group.word_gaps) else None, flex_spacing)
                 bs, be = plan.bounds
+                if flex_spacing:
+                    bs = bs and ci == 0
+                    be = be and ci == last
                 name = f'rl{gi}_{ci}' if named else None
-                word_pat += _word_piece(plan, name, False, bs, be, strict, hl_inserter if strict else None, exact)
+                word_pat += _word_piece(plan, name, flex_spacing, bs, be, strict,
+                                        hl_inserter if strict else None, exact)
                 if name:
                     groups.append((name, bs, be))
             # A | anchor is the line's start or end; the quotes, brackets and marks of
@@ -1004,12 +1028,14 @@ def _rust_escape(ch):
     return '\\' + ch if ch in _RUST_META else ch
 
 
-def tolerant_patterns(forms, tolerance):
-    """The tolerant lookup patterns of *forms* (already folded), each one alternation."""
-    return tolerance + '(?:' + '|'.join(tolerance.join(_rust_escape(c) for c in f) for f in forms) + ')' + tolerance
+def tolerant_patterns(forms, tolerance, edges=None):
+    """The tolerant lookup patterns of *forms* (already folded), each one alternation;
+    *edges* (lead, trail) before and after it in place of *tolerance*."""
+    lead, trail = (tolerance, tolerance) if edges is None else edges
+    return lead + '(?:' + '|'.join(tolerance.join(_rust_escape(c) for c in f) for f in forms) + ')' + trail
 
 
-def tolerant_queries(forms, schema, field, tolerance):
+def tolerant_queries(forms, schema, field, tolerance, edges=None):
     """``regex_query``s over *forms*, split until each fits tantivy-fst's size limit."""
     import tantivy
     from shared.text_normalize import strip_search_diacritics
@@ -1021,7 +1047,7 @@ def tolerant_queries(forms, schema, field, tolerance):
         if not chunk:
             return
         try:
-            out.append(tantivy.Query.regex_query(schema, field, tolerant_patterns(chunk, tolerance)))
+            out.append(tantivy.Query.regex_query(schema, field, tolerant_patterns(chunk, tolerance, edges)))
         except ValueError as exc:
             if 'size limit' not in str(exc) or len(chunk) == 1:
                 if len(chunk) == 1:
@@ -1038,25 +1064,69 @@ def tolerant_queries(forms, schema, field, tolerance):
     return out
 
 
-def retrieval_query(plans, index, field='content', has_content_search=False, flex_spacing=False):
-    """The candidates for *plans* on *index*: per word, its scored clause on *field*,
-    ORed (on the content field only -- position fields hold whitespace tokens) with
-    the tolerant pattern of its forms on content_search, or on content when the
-    index has no content_search field; the words ANDed."""
+# The position fields whose edge word is a query's first word (the others: its last).
+_FIRST_WORD_FIELDS = ('content_head', 'line_starts')
+# A position field's token around its edge word (Indexer._validate_position_match):
+# at a start only brackets come before the word, at an end only brackets after it;
+# on the other side, whatever the token goes on with. Anchored, the lookup walks
+# only the tokens that begin so (line_starts holds every line's first token twice,
+# L3:word too: an unanchored .*word.* took 13-20 s there on the real index). The
+# end side's lead is the punctuation a token opens with, not any text: אחר,שלום at
+# a line's end is missed, as the position field always missed it.
+_FIRST_WORD_EDGES = (r'[\[\]]*', '.*')
+_LAST_WORD_EDGES = ('[\\[\\]()<>{}"\'״׳‘’.,:;!?\\-־׃׀/|*+=_#%$@·…]*', r'[\[\]]*')
+
+
+def retrieval_query(plans, index, field='content', has_content_search=False, flex_spacing=False,
+                    bidirectional=False, within_document=False):
+    """The candidates for *plans* on *index*: per word, its scored clause on the
+    content field, ORed with the tolerant pattern of its forms on content_search (or
+    on content when the index has no content_search field); the words ANDed.
+
+    A position search (*field* one of the position fields) also requires its edge
+    word there: the first word at a start, the last at an end, either one when the
+    order may be reversed. Only that word: the others need not be any line's first
+    or last token (כהנים גדולים opening a line: 3 rows -> 39 on the real index). A
+    position field holds raw whitespace tokens (שלום, and של[ו]ם), so its pattern
+    takes the form with what may stand beside it there (_FIRST_WORD_EDGES); the
+    position and the whole word are checked on each candidate (Codex review of PR
+    #432). The content lookup alone would read every page with the words: כהנים at
+    a page's end took 0.1 -> 15.7 s for the same 54 rows."""
     import tantivy
     should, must = tantivy.Occur.Should, tantivy.Occur.Must
-    per_word = []
-    for plan in plans:
+
+    def lookup(plan, on_field):
         clause = component_query_string(plan.tantivy_dict(), flex_spacing)
         if not clause:
-            continue
-        alternatives = [(should, index.parse_query(clause, [field]))]
-        if field == 'content':
+            return None
+        alternatives = [(should, index.parse_query(clause, [on_field]))]
+        if on_field == 'content':
             pfield = 'content_search' if has_content_search else 'content'
-            tolerance = _T_CONTENT_SEARCH if has_content_search else _T_CONTENT
-            for q in tolerant_queries(plan.terms(), index.schema, pfield, tolerance):
-                alternatives.append((should, tantivy.Query.const_score_query(q, PATTERN_SCORE)))
-        per_word.append((must, tantivy.Query.boolean_query(alternatives)))
+            patterns = tolerant_queries(plan.terms(), index.schema, pfield,
+                                        _T_CONTENT_SEARCH if has_content_search else _T_CONTENT)
+        else:
+            patterns = tolerant_queries(
+                plan.terms(), index.schema, on_field, _T_CONTENT,
+                _FIRST_WORD_EDGES if on_field in _FIRST_WORD_FIELDS else _LAST_WORD_EDGES)
+        for q in patterns:
+            alternatives.append((should, tantivy.Query.const_score_query(q, PATTERN_SCORE)))
+        return tantivy.Query.boolean_query(alternatives)
+
+    per_word = [(must, q) for q in (lookup(p, 'content') for p in plans) if q is not None]
     if not per_word:
         return None
+    if field != 'content' and not within_document:
+        first = field in _FIRST_WORD_FIELDS
+        edges = [plans[0] if first else plans[-1]]
+        if bidirectional and len(plans) > 1:
+            edges.append(plans[-1] if first else plans[0])
+        edge_queries = [q for q in (lookup(p, field) for p in edges) if q is not None]
+        if edge_queries and field in ('line_starts', 'line_ends'):
+            # A line opened (or closed) by a lacuna, "] שלום", keeps only "]" there:
+            # any bracket-only token lets the page through to the check.
+            edge_queries.append(tantivy.Query.regex_query(index.schema, field, r'[\[\]]+'))
+        if len(edge_queries) == 1:
+            per_word.append((must, edge_queries[0]))
+        elif edge_queries:
+            per_word.append((must, tantivy.Query.boolean_query([(should, q) for q in edge_queries])))
     return tantivy.Query.boolean_query(per_word)
