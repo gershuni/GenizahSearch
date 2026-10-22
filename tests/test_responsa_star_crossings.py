@@ -330,6 +330,15 @@ def test_an_all_star_query_goes_by_matches_on_the_page_then_shelfmark(engines, f
                                         page(111, 1), page(111, 2)]
 
 
+def test_equal_matches_go_by_shelfmark_in_its_natural_order():
+    # Codex round 4 on PR #443: the tie-break compared shelfmarks as strings, so T-S 10
+    # came before T-S 2. It is the natural order the other shelfmark sort uses.
+    rows = [{'display': {'shelfmark': s}, '_matches': n}
+            for s, n in (('T-S 10', 1), ('T-S 2', 1), ('T-S 10.5', 2), ('T-S 9', 1))]
+    ordered = se.SearchEngine._order_all_star(rows, None, True)
+    assert [r['display']['shelfmark'] for r in ordered] == ['T-S 10.5', 'T-S 2', 'T-S 9', 'T-S 10']
+
+
 def test_a_query_with_a_finite_word_keeps_the_score_order_pages_first(engines):
     rows = search(engines['2'], 'כהנ* גדולים')[0]
     scopes = [r['scope'] for r in rows]

@@ -1268,7 +1268,8 @@ today's finite crossings to the seams (decision 10).
    Variants and Fuzzy keep 50,000 pages.
 10. **Order** (decision 2): the page candidates' score order, as today; a query whose every word
     holds a star is sorted after the merge with My Library by the accepted matches on the row's
-    page (a row read through a whole manuscript or a seam counts one), then by shelfmark.
+    page (a row read through a whole manuscript or a seam counts one), then by shelfmark in its
+    natural order, T-S 2 before T-S 10 (`natural_sort_key`; Codex round 4 on PR #443).
 11. **A crossing row from a seam** has `scope` `seam`; its `full_text` is the whole pages its span
     covers, read from the main index by uid and source (§6.1 point 4); its excluded words are
     read on those pages; its `page_highlights` are in page coordinates.

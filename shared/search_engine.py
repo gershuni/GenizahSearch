@@ -3248,8 +3248,9 @@ class SearchEngine:
         """Decision 2: a query whose every word holds a star has no score to order by, so
         its rows go by the matches on the row's page, most first (a row read through a
         whole manuscript or a seam counts one; a page row's count set as it was built,
-        ``_matches``, else counted on its text), then by shelfmark. Stable: equal rows keep
-        their order."""
+        ``_matches``, else counted on its text), then by shelfmark in its natural order
+        (T-S 2 before T-S 10, as the other shelfmark sort; Codex round 4 on PR #443).
+        Stable: equal rows keep their order."""
         def matches(row):
             n = row.pop('_matches', None)
             if n is None:
@@ -3257,7 +3258,7 @@ class SearchEngine:
                     return 1
                 n = _count_matches(regex, row.get('full_text') or '', strip)
             return n
-        keyed = [(-matches(r), str((r.get('display') or {}).get('shelfmark') or ''), i, r)
+        keyed = [(-matches(r), natural_sort_key(str((r.get('display') or {}).get('shelfmark') or '')), i, r)
                  for i, r in enumerate(rows)]
         keyed.sort(key=lambda k: k[:3])
         return [k[3] for k in keyed]
