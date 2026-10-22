@@ -340,6 +340,36 @@ def test_an_inline_alternation_stops_at_the_limit():
     assert len(_inline_forms('א' + '(ב/ג)' * 12, limit=5000)) == 4096
 
 
+def test_every_expansion_step_stops_at_the_limit(monkeypatch):
+    # #א(ב/ג)x12#: 4,096 inline forms, about 600 # forms each -- some 2.5 million had a
+    # step run to its end before the count. Each step stops once past the limit, and
+    # the cascade still steps down (suffixes, then prefixes) to the 4,096 forms.
+    import shared.responsa_match as rm
+    calls = []
+    real = rm.expand_grammatical_prefixes
+    monkeypatch.setattr(rm, 'expand_grammatical_prefixes', lambda w: calls.append(w) or real(w))
+    c = _compiled('#א' + '(ב/ג)' * 12 + '#')
+    assert c.warning and len(c.plans[0].stems) == 4096
+    assert len(calls) < 1000, len(calls)       # two attempts read ~210 words each, not 4,096
+
+
+def test_the_variant_step_stops_at_what_is_left_of_the_limit(monkeypatch):
+    import shared.responsa_match as rm
+    calls = []
+
+    def two_hundred(var_mgr, word, mode, limit):
+        calls.append(word)
+        return [word + str(i) for i in range(200)]
+    monkeypatch.setattr(rm, '_variants', two_hundred)
+    words = [f'כהן{chr(0x05D0 + i % 22)}{chr(0x05D0 + i // 22)}' for i in range(100)]
+    comp, = parse_responsa_query('(' + '/'.join(words) + ')')
+    budget = rm._Budget(5000)
+    budget.used = 4000                         # another word already holds 4,000 terms
+    with pytest.raises(_OverLimit):
+        rm.expand_stems(comp, True, False, 'variants', object(), budget)
+    assert len(calls) == 6, len(calls)         # 6 x 200 > the 1,000 left
+
+
 def test_a_query_over_the_guard_is_refused_with_its_code():
     # 199 binary groups fit the 1,000-character cap; spelt out they are 2**199 forms.
     for groups in (13, 199):
