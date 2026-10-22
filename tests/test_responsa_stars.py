@@ -69,6 +69,8 @@ def accepted(query, text, runtime='re', **opts):
     ('-כ*נים', 'pattern', ['כ*נים'], '-'),
     ('(כהנ*/לוי)', None, ['כהנ*', 'לוי'], ''),           # an OR group with a star word
     ('(כהנ/גדול)*', 'suffix', ['כהנ*', 'גדול*'], ''),     # the group's trailing star
+    ('(כהנ/גדול)**', 'suffix', ['כהנ*', 'גדול*'], ''),    # ...stars in a row there too (Codex
+                                                          # round 3 on PR #443)
     ('כה(נ/ן)*', None, ['כהנ*', 'כהן*'], ''),             # an inline alternation
 ])
 def test_the_parser_reads_every_star_position(query, wildcard, typed, flags):
