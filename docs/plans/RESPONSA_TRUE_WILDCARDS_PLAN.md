@@ -8,8 +8,9 @@ real data (0 differences) and its four named mutations each fail it; the "after"
 §3.6.6. **Phase 2 designed (2026-10-22, §6.1)**: the seams in their own index inside
 `tantivy_db/`, K = 30 words a side, runs plus Oxford part bridges (1,541,186 seams), the
 reversed-words field on every document, a format marker with today's routes as the fallback;
-measured at about +3.6 GB on 13.9 GB. Whether today's crossings move to the seams is asked of the
-owner with numbers (§6.1 point 7). Phase 3 is not implemented. Plan revision 6: **all nine §9 decisions taken (2026-10-21)** and the phases
+**built locally 2026-10-22**: the whole index with both in 21.5 min, 15.10 GB (today's: 13.86 GB). Whether
+today's crossings move to the seams is asked of the owner with numbers (§6.1 point 7). Phase 3 is not
+implemented. Plan revision 6: **all nine §9 decisions taken (2026-10-21)** and the phases
 resequenced -- Phase 1 unchanged (whole words on every path, no rebuild), **Phase 2 is the index
 format** (seam documents and the reversed-words field on one rebuild, the engine's fallback for an
 old index, the server rebuild and the desktop re-index), **Phase 3 is true `*`** on the new index.
@@ -901,7 +902,9 @@ seam centred on its first break.
   text; and `boundaries`, one slice per page: `{uid, p_num, full_header, source, sys_id, start,
   end, offset}`. `start` and `end` are in the seam's text. **`offset` is where the slice starts in
   its page**: a seam's first slice starts mid-page. `unique_id` is
-  `seam:<source>:<left uid>><right uid>`.
+  `seam:<source>:<sys_id>:<left uid>><right uid>`: 2,725 junctions of the corpus repeat under a
+  second manuscript that shares the same volume's images (one IE filed under two `sys_id`s), and
+  each manuscript keeps its own seam, as it keeps its own whole-manuscript document.
 - **Mapping a span back.** `_map_span_to_pages` adds each boundary's `offset` (0 for the
   whole-manuscript documents, which carry none), so `page_highlights` and the primary page come
   out in page coordinates, as they do for an aggregate today.
@@ -931,7 +934,15 @@ seam centred on its first break.
 - **Not in My Library's LOCAL index.** LOCAL is small, so `regex_query('.*X')` stays cheap there,
   and a schema change would make its marker rebuild every user's library on the next start.
   LOCAL keeps the scan route (§5.6 A).
-- The engine's helper, `SearchEngine.reversed_ending_query(ending, seams=False)`, is a prefix
+- **The lookup looks past what the forward lookups look past** (Codex round 1 on PR #438).
+  `content_search` keeps brackets and Hebrew points inside a token, so `נתקנים[` is the reversed
+  token `[םינקתנ` and `[כהנים]` is `]םינהכ[`: a plain prefix `םינ.*` misses both, as the plain
+  `.*נים` misses them today (§3.6.4). The pattern (`shared/index_seams.py::reversed_ending_pattern`)
+  is the tolerance class of the `content_search` lookups (`_T_CONTENT_SEARCH`: brackets and the
+  Hebrew block's marks) before the reversed ending and between its letters, then `.*`. So a token
+  matches exactly when, with those characters removed, it ends with the ending. A mark of another
+  script inside the ending stays §4's documented gap, counted by gate (c).
+- The engine's helper, `SearchEngine.reversed_ending_query(ending, seams=False)`, is that
   `regex_query` on `content_rev`, or None when the index lacks the field. Phase 2 builds and tests
   it; Phase 3 searches through it.
 
@@ -988,8 +999,20 @@ index's 13.86 GB (13,861,494,833 bytes; "12.9 GB" elsewhere in this plan is GiB)
 underestimates by 6%, largely because sampling folios breaks most Oxford parts. **Scaled the same
 way, the additions are +1.2 GB for the field on pages, +0.4 GB on the aggregates and +2.0 GB of
 seams: a full index of about 17.5 GB (+26%).** The seam index's bytes are mostly stored text
-(`.store` 37%) and postings (`.idx` 30%). The sample built 11% slower with both additions. The
-full build's own size and time are measured in Phase 2's rebuild (§7) and recorded there.
+(`.store` 37%) and postings (`.idx` 30%). The sample built 11% slower with both additions.
+
+**The full build** (2026-10-22, `build_index.py main --index-dir C:\Users\gersh\GenizahPhase2\index_v2`,
+both corpus files, the laptop of §3.6 with this session's other work running beside it, kept
+awake): **12:59:17 -> 13:20:54, 21.5 min** (pages and aggregates 954.5 s, main commit and merges to
+1,096.4 s, seams to 1,280.9 s). **15.10 GB in all: the main index 13.18 GB** (`.idx` 3.52, `.store`
+3.48, `.pos` 3.08, `.term` 3.06 GB) **and the seams 1.92 GB** (`.store` 0.76, `.idx` 0.59, `.pos`
+0.29, `.term` 0.27 GB), against today's 13.86 GB. The main index came out smaller than today's
+although it holds the new field, because the build now waits for Tantivy's merges
+(`writer.wait_merging_threads()`): 19 segments, where today's index has 155 and repeats each
+segment's term dictionary. So the field's own cost is the sample's (+1.6 GB scaled), and the
+whole format change costs +1.24 GB (+9%) against today's index as it stands. 1,984,237 page
+documents and 1,541,186 seams, as `seam-plan` counted; `browse_map.pkl` is byte-for-byte the size of
+today's (133,440,543 bytes).
 
 **9. The server rebuild and the desktop re-index** are part of Phase 2 (§7) and written up in
 `docs/guides/DEPLOYMENT_TECHNICAL.md`: build into a new folder beside the live one
@@ -998,13 +1021,18 @@ keep the old folder to roll back. The owner runs it.
 
 **10. Gates for Phase 2**, each shown red under the named mutation:
 - (a) `measure_responsa_wildcards.py seam-topology`: every junction inside a seam is consecutive
-  or a bridge, and every consecutive junction of the whole-manuscript documents has exactly one
-  seam. Mutation: seams built over each manuscript's pages in file order (no runs).
+  or a bridge, and every consecutive junction of each whole-manuscript document has exactly one
+  seam of that manuscript. Mutation: seams built over each manuscript's pages in file order (no
+  runs).
 - (b) The Phase 1 oracle (`scripts/verify_responsa_wildcards.py`) on the new index: the same
   counts on all nine queries.
-- (c) `measure_responsa_wildcards.py reversed-check`: the reversed lookup and the regex lookup give
-  the same documents for `כהנים` and `נים`, on the pages (both sources) and on the seams.
-  Mutation: the field built from `content` instead of `content_search`.
+- (c) `measure_responsa_wildcards.py reversed-check`: for `כהנים` and `נים`, the reversed lookup
+  gives exactly the documents an independent oracle names: every page of the corpus files (both
+  sources) and every seam's stored text, cut by the `hebword` analyzer from its folded text,
+  holding a word that ends with the ending once brackets and Hebrew marks are removed. Not the
+  plain `.*X` lookup, which shares the bracket blind spot (Codex round 1). The plain prefix, the
+  plain regex and the words a foreign mark interrupts are counted beside it. Mutations: the
+  field built from `content` instead of `content_search`; the lookup as a plain prefix.
 - (d) Consumer isolation (`tests/test_index_format.py`): every search mode, the document counts,
   the text fetches and composition give on a new fixture index what they give on an old one, and
   never a seam. Mutation: the seams written into the main index.
@@ -1238,6 +1266,12 @@ supported true star is **no longer rewritten**, rather than preserving the obsol
 
 ## 12. Review history
 
+- **Phase 2 design, round 1 (Codex on PR #438, 2026-10-22): one finding, folded in.** P2, a plain
+  prefix on the reversed field misses a word whose ending carries a bracket or a Hebrew point
+  (`נתקנים[` reversed is `[םינקתנ`), and a gate comparing it with the plain `.*X` lookup would
+  repeat the omission on both sides. The lookup now looks past the `content_search` tolerance
+  class (§6.1 point 5), and gate (c) compares it with a token oracle over the corpus files and
+  the seams.
 - **Phase 0 round (Codex on PR #429, 2026-10-21): three findings, all folded in.** P1: the
   brute-force oracle's prefilter was a literal substring test, so a page whose ending held an
   internal bracket or mark (`נ[י]ם`, `נִים`) was skipped before the check ran; the prefilter now
