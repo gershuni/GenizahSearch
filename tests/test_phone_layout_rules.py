@@ -107,6 +107,26 @@ def test_the_viewer_handles_touch_pinch_and_drag():
         assert f"this.{handler}.bind(this)" in js, f'{handler} is not attached'
     assert "{ passive: false }" in js, 'touch listeners must be able to preventDefault'
     assert 'this.state.scale > 1.01' in js, 'one finger must leave an unzoomed image to the page'
+    # init() runs more than once per image: the handlers are bound once and
+    # moved off the previous element, never stacked (Codex on #434).
+    assert 'if (!this._touch) {' in js
+    assert "this.el.addEventListener('touchstart', this._touch.start, { passive: false })" in js
+    assert "this._touchEl.removeEventListener('touchstart', this._touch.start)" in js
+    assert "addEventListener('touchstart', this.onTouchStart.bind(this)" not in js, 'a fresh bind per init stacks handlers'
+
+
+def test_the_filter_badge_counts_every_pre_search_filter_the_predicate_knows():
+    """`_active_filter_count` (the badge) must name every filter `has_active_filters`
+    names, or a search can be filtered with a grey, badge-less button (Codex on
+    #434: measured materials were in the chips and not in the count)."""
+    panel = _read('web/components/filter_panel.py')
+    predicate = panel[panel.index('def has_active_filters('):panel.index('def persist_value(')]
+    search = _read('web/pages/search.py')
+    counter = search[search.index('def _active_filter_count('):search.index('def _domain_display_name(')]
+    names = sorted(set(re.findall(r"filter_[a-z_]+", predicate)))
+    assert len(names) >= 20, names
+    missing = [n for n in names if n not in counter]
+    assert not missing, f'the badge does not count {missing}'
 
 
 def test_the_search_toolbar_density_is_remembered_and_toggled_live():

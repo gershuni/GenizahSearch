@@ -349,6 +349,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         s = search_state
         n = len(s.filter_domains or []) + len(s.filter_authors or []) + len(s.filter_works or [])
         n += len(s.filter_material_exclude or [])
+        n += len(s.filter_measurement_material or [])  # Codex on #434: the chips showed it, the badge did not
         n += 1 if (s.filter_date_from is not None or s.filter_date_to is not None) else 0
         n += 1 if (s.filter_text_all or s.filter_text_any or s.filter_text_not) else 0
         n += 1 if any(getattr(s, k, None) is not None for k in (
