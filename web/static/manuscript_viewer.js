@@ -450,7 +450,18 @@ function createManuscriptViewer(options) {
         },
 
         onTouchEnd: function(e) {
-            if (e.touches.length < 2) this._pinch = null;
+            if (e.touches.length < 2 && this._pinch) {
+                this._pinch = null;
+                // A pinch that drops to one finger goes on as a pan of the
+                // zoomed image from where that finger is (Codex on #434):
+                // without this hand-off the remaining finger moved nothing
+                // until it was lifted and put down again.
+                if (e.touches.length === 1 && this.state.scale > 1.01) {
+                    this.state.isDragging = true;
+                    this.state.startX = e.touches[0].clientX - this.state.x;
+                    this.state.startY = e.touches[0].clientY - this.state.y;
+                }
+            }
             if (e.touches.length === 0) this.state.isDragging = false;
         },
 

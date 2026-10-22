@@ -113,6 +113,10 @@ def test_the_viewer_handles_touch_pinch_and_drag():
     assert "this.el.addEventListener('touchstart', this._touch.start, { passive: false })" in js
     assert "this._touchEl.removeEventListener('touchstart', this._touch.start)" in js
     assert "addEventListener('touchstart', this.onTouchStart.bind(this)" not in js, 'a fresh bind per init stacks handlers'
+    # A pinch that drops to one finger hands over to a pan (Codex on #434).
+    end = js[js.index('onTouchEnd: function'):js.index('applyTransform: function')]
+    assert 'e.touches.length === 1 && this.state.scale > 1.01' in end
+    assert 'this.state.isDragging = true' in end
 
 
 def test_the_filter_badge_counts_every_pre_search_filter_the_predicate_knows():
