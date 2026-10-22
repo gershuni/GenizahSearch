@@ -344,6 +344,26 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         """Check if any pre-search filters are active."""
         return has_active_filters(search_state)
 
+    def _active_filter_count() -> int:
+        """How many pre-search filters are set: the badge on the "Search only in..." button."""
+        s = search_state
+        n = len(s.filter_domains or []) + len(s.filter_authors or []) + len(s.filter_works or [])
+        n += len(s.filter_material_exclude or [])
+        n += len(s.filter_measurement_material or [])  # Codex on #434: the chips showed it, the badge did not
+        # Text position is not in has_active_filters (it changes the search's
+        # semantics rather than its scope) but the chip bar shows it, so the
+        # badge counts it too (Codex on #434). The select exists before the
+        # first call: _panel_toggles['ready'] is set after the form is built.
+        n += 1 if (text_position_select.value or 'anywhere') != 'anywhere' else 0
+        n += 1 if (s.filter_date_from is not None or s.filter_date_to is not None) else 0
+        n += 1 if (s.filter_text_all or s.filter_text_any or s.filter_text_not) else 0
+        n += 1 if any(getattr(s, k, None) is not None for k in (
+            'filter_width_min', 'filter_width_max', 'filter_height_min', 'filter_height_max',
+            'filter_line_count_min', 'filter_line_count_max', 'filter_line_height_min',
+            'filter_line_height_max', 'filter_text_density_min', 'filter_text_density_max',
+        )) else 0
+        return n
+
     # _domain_display_name closure wrapper (delegates to module-level function with search_state)
     def _domain_display_name(en_name: str) -> str:
         return domain_display_name(search_state, en_name)
@@ -467,7 +487,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     }
     </script>''')
 
-    with ui.column().classes('w-full h-[calc(100vh-88px)] gap-0'):
+    # `search-shell`: a fixed-height shell on wide screens (the results scroll
+    # inside it); on a phone common.css lets the page scroll instead, so the
+    # header and the browser's address bar hide on scroll (owner, 2026-10-22).
+    with ui.column().classes('w-full h-[calc(100vh-88px)] gap-0 search-shell'):
 
         # === Search Header Panel (Collapsible) ===
         search_panel_container = ui.column().classes('w-full gap-0 search-panel-container')
@@ -513,11 +536,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             )
 
             with expanded_panel:
-                # Collapse toggle button (top-right corner)
-                with ui.row().classes('w-full justify-end mb-2'):
-                    def collapse_panel():
-                        search_state.is_panel_collapsed = True
-                        # Update collapsed view with current values
+                # The collapse handlers. The button itself sits at the end of the
+                # main row (owner's mockup, 2026-10-22); this element draws nothing.
+                with ui.element('div').classes('hidden'):
+                    def _fill_collapsed_strip():
+                        """Write the query and mode into the collapsed strip."""
                         query_val = query_input.value or ''
                         collapsed_query_label.text = query_val[:50] + ('...' if len(query_val) > 50 else '') if query_val else tr('Enter search query')
                         mode_val = mode_select.value
@@ -525,20 +548,43 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                      'variants_maximum': '???', 'fuzzy': '~', 'Regex': '/',
                                      'Shelfmark': '#', 'Title': '$', 'pgp_tags': 'PGP'}
                         collapsed_mode_badge.text = mode_names.get(mode_val, mode_val)
+
+                    def collapse_panel():
+                        search_state.is_panel_collapsed = True
+                        _fill_collapsed_strip()
                         expanded_panel.style('display: none !important;')
                         collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
+                        _close_filters_panel()
 
-                    ui.button(
-                        icon='expand_less', on_click=collapse_panel
-                    ).props(f'flat round dense size=sm aria-label="{tr("Collapse search panel")}"').tooltip(tr('Collapse search panel'))
+                    async def _collapse_panel_on_phone():
+                        """Fold the form away when a search starts on a phone.
 
-                # Main Search Row
-                with ui.row().classes('w-full items-end gap-4 flex-wrap'):
+                        The open form is a third of a phone screen and stayed
+                        open through the whole search (owner's screenshots,
+                        2026-10-22): the auto-collapse keys off scrolling inside
+                        the results pane, which on a phone is too short to
+                        scroll. The width is asked of the browser and the fold
+                        is done from Python (collapse_panel), not by script in
+                        the page: a `display` set by script on the collapsed
+                        strip lasts only until the next render, when Vue
+                        re-applies the strip's own `display: none` (traced
+                        2026-10-22), so the strip's state has to live here.
+                        """
+                        try:
+                            width = await ui.run_javascript('window.innerWidth', timeout=1.0)
+                        except Exception:
+                            return  # no answer in time: leave the form as it is
+                        if isinstance(width, (int, float)) and width <= 640:
+                            collapse_panel()
+
+
+                # Main Search Row: one line on wide screens (owner's mockup, 2026-10-22)
+                with ui.row().classes('w-full items-center gap-2 flex-wrap search-main-row'):
 
                     # Search Input (Main) — swaps between text input and tag select
                     with ui.column().classes('flex-grow min-w-80 gap-1') as query_column:
                         # Changed to H2 semantic label
-                        query_label = h2(tr('Search Query'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                        query_label = h2(tr('Search Query'), classes='text-sm font-medium search-field-label', style='color: var(--text-secondary);')
                         query_input = ui.input(
                             placeholder=tr('Enter Hebrew text to search'),
                             value=saved_query
@@ -597,7 +643,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                     # Tag Select (for PGP Tags mode) — hidden by default
                     with ui.column().classes('flex-grow min-w-80 gap-1') as tag_column:
-                        h2(tr('PGP Tags'), classes='text-sm font-medium', style='color: var(--success-600);')
+                        h2(tr('PGP Tags'), classes='text-sm font-medium search-field-label', style='color: var(--success-600);')
                         tag_select = ui.select(
                             [], with_input=True, value=None
                         ).classes('w-full text-lg').props('outlined dense clearable use-input input-debounce="200"')
@@ -628,7 +674,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                     # Mode Selector - includes variant levels when not using slider
                     with ui.column().classes('gap-1'):
-                        h3(tr('Mode'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                        h3(tr('Mode'), classes='text-sm font-medium search-field-label', style='color: var(--text-secondary);')
 
                         _responsa_label = tr('Responsa') + ' (R)'
 
@@ -662,7 +708,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         mode_select = ui.select(
                             mode_options,
                             value=saved_mode
-                        ).classes('w-48').props('outlined dense')
+                        ).classes('w-48').props(f'outlined dense label="{tr("Mode")}"')
 
 
                     # Track current preset level based on mode
@@ -685,7 +731,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                     # Max Changes selector (visible for all variant modes in non-slider mode)
                     with ui.column().classes('gap-1') as max_changes_col:
-                        h3(tr('Num Changes'), classes='text-sm font-medium', style='color: var(--text-secondary);')
+                        h3(tr('Num Changes'), classes='text-sm font-medium search-field-label', style='color: var(--text-secondary);')
                         max_changes_select = ui.select({1: '×1', 2: '×2', 3: '×3'}, value=saved_max_changes).classes('w-16').props('outlined dense')
                         ui.tooltip(tr('Letter changes per word at this level (1-3)'))
 
@@ -702,8 +748,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     # Gap Control - restore from storage
                     with ui.column().classes('gap-1'):
                         # Changed to H3 semantic label
-                        h3(tr('Gap'), classes='text-sm font-medium', style='color: var(--text-secondary);')
-                        gap_input = ui.number(value=saved_gap, min=0, max=10).classes('w-20').props('outlined dense')
+                        h3(tr('Gap'), classes='text-sm font-medium search-field-label', style='color: var(--text-secondary);')
+                        gap_input = ui.number(value=saved_gap, min=0, max=10).classes('w-20').props(f'outlined dense label="{tr("Gap")}"')
                         ui.tooltip(tr('Gap description'))
 
                         def save_gap():
@@ -738,6 +784,67 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         )).props(f'flat dense aria-label="{tr("Search History")}"').tooltip(tr('Search History'))
 
                         history_menu = ui.menu()
+
+                    # Advanced Options and "Search only in..." open from two buttons
+                    # here instead of two full-width bars (owner's mockup,
+                    # 2026-10-22). The panels keep every control they had; only
+                    # their headers are hidden (common.css `.search-adv-panel`,
+                    # `.search-filters-panel`). The collapse chevron sits at the
+                    # row's end instead of on a 44px line of its own.
+                    _panel_toggles = {}
+
+                    def _toggle_adv_panel():
+                        panel = _panel_toggles.get('adv')
+                        if panel is None:
+                            return
+                        panel.value = not panel.value
+                        adv_toggle_btn.props(f'color={"primary" if panel.value else "grey-8"}')
+
+                    def _toggle_filters_panel():
+                        panel = _panel_toggles.get('filters')
+                        if panel is None:
+                            return
+                        panel.value = not panel.value
+                        _update_filters_toggle_btn()
+
+                    def _update_filters_toggle_btn():
+                        panel = _panel_toggles.get('filters')
+                        is_open = bool(panel.value) if panel is not None else False
+                        n = _active_filter_count()
+                        filters_toggle_btn.props(f'color={"primary" if (is_open or n) else "grey-8"}')
+                        filters_badge.text = str(n)
+                        filters_badge.set_visibility(n > 0)
+
+                    def _close_filters_panel():
+                        """Fold the "Search only in..." panel with the form.
+
+                        The panel is a sibling of the form, not part of it, and its
+                        own header is hidden at every width: its toggle is a button
+                        in the form. Folded with the panel open, it stayed open with
+                        no close control in sight (Codex on #434), so every fold the
+                        server performs closes it; the chips keep showing what is
+                        active, and the panel also carries a close button of its own
+                        for the fold the browser performs on scroll.
+                        """
+                        panel = _panel_toggles.get('filters')
+                        if panel is not None and panel.value:
+                            panel.value = False
+                            _update_filters_toggle_btn()
+
+                    with ui.column().classes('items-center gap-0'):
+                        adv_toggle_btn = ui.button(
+                            tr('Advanced Options'), icon='tune', on_click=lambda: _toggle_adv_panel(),
+                        ).props('outline dense no-caps color=grey-8').classes('search-row-btn')
+                    with ui.column().classes('items-center gap-0'):
+                        with ui.button(
+                            tr('Search only in...'), icon='filter_alt', on_click=lambda: _toggle_filters_panel(),
+                        ).props('outline dense no-caps color=grey-8').classes('search-row-btn') as filters_toggle_btn:
+                            filters_badge = ui.badge('0').props('floating rounded color=primary')
+                            filters_badge.set_visibility(False)
+                    with ui.column().classes('items-center gap-0'):
+                        ui.button(
+                            icon='expand_less', on_click=collapse_panel
+                        ).props(f'flat round dense size=sm aria-label="{tr("Collapse search panel")}"').tooltip(tr('Collapse search panel'))
 
                 # === Responsa Sub-Options (visible only when mode is 'responsa') ===
                 responsa_sub_row = ui.row().classes('w-full items-center gap-4 px-2 flex-wrap')
@@ -777,10 +884,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # Initially hide if mode is not responsa
                 responsa_sub_row.set_visibility(saved_mode == 'responsa')
 
-                # Advanced Options Row (inside expanded_panel, collapses with search bar)
-                with ui.expansion(tr('Advanced Options'), icon='tune').classes('w-full mt-4').style(
+                # Advanced Options panel (inside expanded_panel, collapses with search bar);
+                # opened from the row's button, its own header hidden.
+                with ui.expansion(tr('Advanced Options'), icon='tune').classes('w-full mt-2 search-adv-panel').style(
                     'background: var(--bg-tertiary); border-radius: 12px;'
-                ):
+                ) as adv_expansion:
+                    _panel_toggles['adv'] = adv_expansion
                     with ui.column().classes('w-full p-4 gap-6'):
                         # Options Grid
                         with ui.row().classes('w-full gap-8 flex-wrap'):
@@ -909,14 +1018,26 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             text=tr('Search only in...'),
             icon='filter_alt',
             value=_adv_filters_expanded,
-        ).classes('w-full').style(
+        ).classes('w-full search-filters-panel').style(
             'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
         ).props('dense header-class="text-subtitle2 text-weight-medium"')
+        # Opened from the search row's button; the header above is hidden (common.css).
+        _panel_toggles['filters'] = adv_filters_panel
+        _panel_toggles['ready'] = True
+        _update_filters_toggle_btn()
 
         _filter_refs = {}
 
         with adv_filters_panel:
             with ui.column().classes('w-full px-4 py-3 gap-4'):
+                # The panel's own title and close button: its expansion header
+                # is hidden and its toggle sits in the form, which the scroll
+                # fold hides from script without telling Python (Codex on #434).
+                with ui.row().classes('w-full items-center justify-between'):
+                    ui.label(tr('Search only in...')).classes('text-subtitle2 text-weight-medium')
+                    ui.button(icon='close', on_click=lambda: _toggle_filters_panel()).props(
+                        f'flat round dense size=sm aria-label="{tr("Close")}"'
+                    ).tooltip(tr('Close'))
 
                 # Include/Exclude toggle
                 with ui.row().classes('w-full items-center gap-2'):
@@ -1300,6 +1421,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # chip_bar_container only shows filters that apply during search construction.
             has_any = _has_active_filters() or _pos_active
             chip_bar_container.set_visibility(has_any)
+            if _panel_toggles.get('ready'):
+                _update_filters_toggle_btn()
             if not has_any:
                 return
 
@@ -1673,11 +1796,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         with ui.column().classes('w-full flex-grow'):
 
-            results_header = ui.row().classes('w-full px-4 py-3 items-center justify-between').style(
+            # `results-header` / `results-count-group` / `results-export-group`:
+            # one line on a phone, the count and filter buttons scrolling
+            # sideways, the export icons folded into a menu (common.css).
+            results_header = ui.row().classes('w-full px-3 py-2 items-center justify-between results-header').style(
                 'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light);'
             )
             with results_header:
-                with ui.row().classes('items-center gap-3'):
+                with ui.row().classes('items-center gap-3 results-count-group'):
                     # Select all checkbox
                     select_all_checkbox = ui.checkbox(on_change=lambda e: toggle_select_all(e.value)).props('dense')
                     results_count = ui.label(tr('Results')).classes('font-medium').style('color: var(--text-secondary);')
@@ -1685,7 +1811,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     selection_counter = ui.label('').classes('text-sm').style('color: var(--primary-600); display: none;')
                     # Helper: toggle CSS visibility (reserves layout space, prevents CLS)
                     def _set_btn_visible(btn, visible):
+                        # Wide screens reserve the space (no layout shift when a
+                        # filter appears); a phone cannot afford a blank row, so
+                        # `tb-hidden` removes the button there (common.css).
                         btn.style(f'visibility: {"visible" if visible else "hidden"};')
+                        if visible:
+                            btn.classes(remove='tb-hidden')
+                        else:
+                            btn.classes(add='tb-hidden')
 
                     # Domain filter button (hidden until search with domain data)
                     domain_filter_btn = ui.button(
@@ -2152,7 +2285,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     # alone conveys filter state (Filter PGP / Has PGP / No PGP); a chip on top of it
                     # was visual duplication. The _update_pgp_filter_chip no-op above keeps callers stable.
 
-                with ui.row().classes('gap-2'):
+                with ui.row().classes('gap-2 results-export-group'):
                     # Bulk actions (initially hidden)
                     bulk_actions_row = ui.row().classes('gap-2').style('display: none;')
                     with bulk_actions_row:
@@ -2164,19 +2297,42 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         ).tooltip(tr('Copy Selected Text'))
 
                     # Filter toggle button
-                    filter_btn = ui.button(icon='filter_list', on_click=lambda: toggle_filters()).props(
-                        f'flat round dense size=sm aria-label="{tr("Toggle Filters")}"'
-                    ).tooltip(tr('Toggle Filters'))
+                    # Row density (owner's mockup, 2026-10-22): compact rows by
+                    # default, remembered per visitor; comfortable is the older card.
+                    # The list's class switches live; no re-render.
+                    _density = {'value': _safe_get('search_density', 'compact') or 'compact'}
 
-                    ui.button(icon='description', on_click=lambda: ui.download('/api/export/word')).props(
-                        f'flat round dense size=sm aria-label="{tr("Export Word")}"'
-                    ).tooltip(tr('Export Word'))
-                    ui.button(icon='table_view', on_click=lambda: ui.download('/api/export/excel')).props(
-                        f'flat round dense size=sm aria-label="{tr("Export Excel")}"'
-                    ).tooltip(tr('Export Excel'))
-                    ui.button(icon='data_object', on_click=lambda: ui.download('/api/export/json')).props(
-                        f'flat round dense size=sm aria-label="{tr("Export JSON")}"'
-                    ).tooltip(tr('Export JSON'))
+                    def _update_density_buttons():
+                        compact = _density['value'] == 'compact'
+                        density_compact_btn.props(f'color={"primary" if compact else "grey-7"}')
+                        density_comfortable_btn.props(f'color={"grey-7" if compact else "primary"}')
+
+                    def _set_density(value):
+                        _density['value'] = value
+                        _safe_set('search_density', value)
+                        lst = getattr(refs, 'results_list', None)
+                        if lst is not None:
+                            lst.classes(remove='density-compact density-comfortable', add=f'density-{value}')
+                        _update_density_buttons()
+
+                    with ui.row().classes('items-center gap-0 density-toggle'):
+                        density_compact_btn = ui.button(icon='view_headline', on_click=lambda: _set_density('compact')).props(
+                            f'flat dense size=sm aria-label="{tr("Compact rows")}"'
+                        ).tooltip(tr('Compact rows'))
+                        density_comfortable_btn = ui.button(icon='view_agenda', on_click=lambda: _set_density('comfortable')).props(
+                            f'flat dense size=sm aria-label="{tr("Comfortable rows")}"'
+                        ).tooltip(tr('Comfortable rows'))
+                    _update_density_buttons()
+
+                    # One menu for the post-filters and the three exports, at every width.
+                    with ui.button(icon='more_vert').props(
+                        f'flat round dense size=sm aria-label="{tr("More actions")}"'
+                    ).classes('results-more-btn').tooltip(tr('More actions')):
+                        with ui.menu().props('auto-close'):
+                            ui.menu_item(tr('Toggle Filters'), lambda: toggle_filters())
+                            ui.menu_item(tr('Export Word'), lambda: ui.download('/api/export/word'))
+                            ui.menu_item(tr('Export Excel'), lambda: ui.download('/api/export/excel'))
+                            ui.menu_item(tr('Export JSON'), lambda: ui.download('/api/export/json'))
 
             # SEED-026 (smoke 2026-06-29): the post-search library chip row was REMOVED.
             # Per-library chips proved noisy when many libraries were selected; the filter
@@ -2729,6 +2885,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                          'Shelfmark': '#', 'Title': '$'}
             collapsed_mode_badge.text = mode_names.get(mode_val, mode_val)
             expanded_panel.style('display: none !important;')
+            _close_filters_panel()
             collapsed_panel.style('background: var(--bg-card); border-color: var(--border-light) !important; display: block !important;')
 
     # === Keyboard Shortcut Handler ===
@@ -5083,6 +5240,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.manual_transcription_sys_ids = set()
         search_state.printed_ids = set()
         search_state.search_generation += 1  # Invalidate stale background enrichment
+
+        # The phone fold asks the browser for its width, so it is the first
+        # await of this search -- and it must come AFTER is_running is set:
+        # before it, a double-click or a repeated Enter suspended two calls
+        # at the same await with the guard still open, and both searches ran
+        # over one result state (Codex on #434). Its failure is swallowed.
+        await _collapse_panel_on_phone()
 
         # ux_timing (web/ux_timing.py): report this search's first visible rows, once.
         _ux = {'sent': False, 'nav': _ux_url_start['nav'], 'generation': search_state.search_generation}

@@ -662,7 +662,7 @@ def create_auth_buttons():
             ui.icon('account_circle').classes('text-2xl text-white/80')
 
             # User info with dropdown menu
-            with ui.button(username, icon='arrow_drop_down').props('flat text-color=white dense').classes('text-sm'):
+            with ui.button(username, icon='arrow_drop_down').props('flat text-color=white dense').classes('text-sm auth-username'):
                 with ui.menu().classes('min-w-40').style('background: var(--bg-card); color: var(--text-primary);'):
                     ui.menu_item(f"Role: {role.title()}", auto_close=False).props('disable')
                     ui.separator()
@@ -698,8 +698,15 @@ def create_auth_buttons():
             d.tabs.set_value(d.register_tab)
             d.open()
 
-        ui.button(tr('Login'), on_click=open_login).props('flat text-color=white dense').classes('text-sm')
-        ui.button(tr('Register'), on_click=open_register).props('outline text-color=white dense').classes('text-sm')
+        # `phone-icon-only` (common.css): at phone width the label goes and the
+        # icon stays, the name living on in aria-label and the tooltip; on wider
+        # screens the icon is hidden and the buttons look as they always did.
+        ui.button(tr('Login'), icon='login', on_click=open_login).props(
+            f'flat text-color=white dense aria-label="{tr("Login")}"'
+        ).classes('text-sm phone-icon-only').tooltip(tr('Login'))
+        ui.button(tr('Register'), icon='person_add', on_click=open_register).props(
+            f'outline text-color=white dense aria-label="{tr("Register")}"'
+        ).classes('text-sm phone-icon-only').tooltip(tr('Register'))
 
 
 # ============================================================================

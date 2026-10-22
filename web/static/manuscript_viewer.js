@@ -319,6 +319,35 @@ function createManuscriptViewer(options) {
             // Mouse wheel zoom - attach to image
             this.el.onwheel = this.onWheel.bind(this);
 
+            // Touch (2026-10-22): two fingers pinch-zoom; one finger pans once
+            // the image is zoomed in. A single finger on an unzoomed image is
+            // left to the page, so a phone can still scroll past the picture.
+            // init() runs again whenever the image reloads or is replaced (the
+            // inline onload, the scheduled init, the progressive-load swap), so
+            // the handlers are bound ONCE and taken off the previous element
+            // first: adding the same function to the same element is a no-op,
+            // where a fresh bind() per call stacked a handler set per init
+            // (Codex on #434). The mouse handlers are assigned, not added, so
+            // they never stacked.
+            if (!this._touch) {
+                this._touch = {
+                    start: this.onTouchStart.bind(this),
+                    move: this.onTouchMove.bind(this),
+                    end: this.onTouchEnd.bind(this)
+                };
+            }
+            if (this._touchEl && this._touchEl !== this.el) {
+                this._touchEl.removeEventListener('touchstart', this._touch.start);
+                this._touchEl.removeEventListener('touchmove', this._touch.move);
+                this._touchEl.removeEventListener('touchend', this._touch.end);
+                this._touchEl.removeEventListener('touchcancel', this._touch.end);
+            }
+            this._touchEl = this.el;
+            this.el.addEventListener('touchstart', this._touch.start, { passive: false });
+            this.el.addEventListener('touchmove', this._touch.move, { passive: false });
+            this.el.addEventListener('touchend', this._touch.end);
+            this.el.addEventListener('touchcancel', this._touch.end);
+
             // Set initial cursor on the image
             this.el.style.cursor = 'grab';
         },
@@ -378,6 +407,62 @@ function createManuscriptViewer(options) {
             // SEED-010: detach this drag's document listeners (paired with onMouseDown).
             if (this._boundMove) document.removeEventListener('mousemove', this._boundMove);
             if (this._boundUp) document.removeEventListener('mouseup', this._boundUp);
+        },
+
+        _touchDistance: function(touches) {
+            var dx = touches[0].clientX - touches[1].clientX;
+            var dy = touches[0].clientY - touches[1].clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        },
+
+        onTouchStart: function(e) {
+            if (e.touches.length === 2) {
+                e.preventDefault();
+                this._pinch = { distance: this._touchDistance(e.touches), scale: this.state.scale };
+                this.state.isDragging = false;
+            } else if (e.touches.length === 1 && this.state.scale > 1.01) {
+                e.preventDefault();
+                this.state.isDragging = true;
+                this.state.startX = e.touches[0].clientX - this.state.x;
+                this.state.startY = e.touches[0].clientY - this.state.y;
+            }
+        },
+
+        onTouchMove: function(e) {
+            var self = this;
+            if (this._pinch && e.touches.length === 2) {
+                e.preventDefault();
+                var distance = this._touchDistance(e.touches);
+                if (this._pinch.distance > 0) {
+                    this.state.scale = Math.max(0.25, Math.min(maxZoom, this._pinch.scale * distance / this._pinch.distance));
+                    requestAnimationFrame(function() {
+                        self.applyTransform();
+                        var label = zoomLabelSelector ? document.querySelector(zoomLabelSelector) : null;
+                        if (label) label.textContent = Math.round(self.state.scale * 100) + '%';
+                    });
+                }
+            } else if (this.state.isDragging && e.touches.length === 1) {
+                e.preventDefault();
+                this.state.x = e.touches[0].clientX - this.state.startX;
+                this.state.y = e.touches[0].clientY - this.state.startY;
+                requestAnimationFrame(function() { self.applyTransform(); });
+            }
+        },
+
+        onTouchEnd: function(e) {
+            if (e.touches.length < 2 && this._pinch) {
+                this._pinch = null;
+                // A pinch that drops to one finger goes on as a pan of the
+                // zoomed image from where that finger is (Codex on #434):
+                // without this hand-off the remaining finger moved nothing
+                // until it was lifted and put down again.
+                if (e.touches.length === 1 && this.state.scale > 1.01) {
+                    this.state.isDragging = true;
+                    this.state.startX = e.touches[0].clientX - this.state.x;
+                    this.state.startY = e.touches[0].clientY - this.state.y;
+                }
+            }
+            if (e.touches.length === 0) this.state.isDragging = false;
         },
 
         applyTransform: function() {

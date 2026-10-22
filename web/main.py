@@ -1956,7 +1956,14 @@ def create_layout():
     # === Build Header with correct DOM order ===
     # reveal: hide header on scroll down, show on scroll up (mobile-friendly)
     with ui.header().classes('q-py-none header-reveal-mobile').props('reveal').style('height: 64px;'):
-        with ui.row().classes('w-full h-full items-center justify-between px-6 app-header'):
+        # wrap=False: a NiceGUI row wraps by default, and this one sits in a
+        # 64px header. In the English UI at 390px (Hebrew at 360px) the auth
+        # group no longer fit beside the logo, wrapped to a second line and
+        # rendered OUTSIDE the header, as grey text over the page (owner's
+        # phone screenshots, 2026-10-22). `phone-icon-only` (common.css) on
+        # Login and Register makes the groups fit; no-wrap makes the failure
+        # mode clipping rather than a ghost row.
+        with ui.row(wrap=False).classes('w-full h-full items-center justify-between px-6 app-header'):
             if rtl_mode:
                 # RTL: Render Right -> Center -> Left for correct tab order
                 render_header_right()
@@ -1989,10 +1996,12 @@ def create_layout():
 
     # Set drawer side based on RTL mode - Quasar will handle page padding correctly
     drawer_side = 'right' if rtl_mode else 'left'
+    # breakpoint=1023 (was 768, 2026-10-22): a tablet gets the overlay drawer
+    # and keeps the width for the page; the sidebar stays open from 1024px.
     main_drawer = (
         ui.drawer(side=drawer_side, value=False, bordered=True)
         .classes('shadow-xl')
-        .props('width=280 breakpoint=768')
+        .props('width=280 breakpoint=1023')
     )
     if drawer_open:
         # Only when the reader has not explicitly closed it. An explicit close
@@ -2011,7 +2020,7 @@ def create_layout():
         safe_user_set('drawer_open', not safe_user_get('drawer_open', True))
 
     def nav_to(path):
-        """Navigate to path. Drawer auto-hides on mobile via breakpoint=768."""
+        """Navigate to path. Drawer auto-hides on mobile via breakpoint=1023."""
         ui.navigate.to(path)
 
     # Connect menu button to toggle function (using refs dictionary)
