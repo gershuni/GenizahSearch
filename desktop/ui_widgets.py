@@ -474,9 +474,13 @@ class MatchCentredSnippet(QWidget):
         w = area.width()
         if text_w <= w:
             x = (w - text_w) // 2
+            self._slid = 0
         else:
-            x = round(w / 2 - centre) + self._slid
-            x = max(w - text_w, min(0, x))
+            centred = round(w / 2 - centre)
+            x = max(w - text_w, min(0, centred + self._slid))
+            # Keep the slide at what is shown: wheeling on past an end must
+            # not bank turns the other way has to pay off first (Codex, PR #445).
+            self._slid = x - centred
         self._label.setGeometry(x, 0, text_w, area.height())
 
 

@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import pytest
 from PyQt6.QtCore import QPoint, QPointF, Qt
-from PyQt6.QtGui import QImage, QWheelEvent
+from PyQt6.QtGui import QFont, QImage, QWheelEvent
 from PyQt6.QtWidgets import QApplication, QMainWindow, QTreeWidget, QTreeWidgetItem
 
 from desktop.ui_widgets import ContextSnippet, MatchCentredSnippet
@@ -39,6 +39,23 @@ from tests.test_exclusion_surfaces import (A, _personal_state_in_tmp,  # noqa: F
 pytestmark = pytest.mark.gui  # imports genizah_app, which imports PyQt6
 
 _APP = QApplication.instance() or QApplication([])
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _text_rendered_aliased():
+    """Every pixel is the text's colour or the background's. With subpixel
+    (LCD) antialiasing, which CI's runners and most desktops render with,
+    the fringes of BLACK glyphs are pure red or blue pixels and read as the
+    mark (gui-tests on PR #445: a 12-letter match "470 px wide"). The cells
+    measure with the same font they paint with, so what they centre is what
+    the app centres; only the edges of the letters differ."""
+    before = QApplication.font()
+    aliased = QFont(before)
+    aliased.setStyleStrategy(QFont.StyleStrategy.NoAntialias)
+    QApplication.setFont(aliased)
+    yield
+    QApplication.setFont(before)
+
 
 _HEBREW = "אבגדהוזחטיכלמנסעפצקרשת "
 MATCH = "*שלום שלום לך*"
@@ -280,6 +297,12 @@ def test_the_wheel_slides_the_context_text_no_further_than_its_ends():
     assert cell.label().geometry().x() == x0 + 120
     QApplication.sendEvent(cell, _wheel_up(cell, notches=50))
     assert cell.label().geometry().x() == 0, "slid past the text's start"
+    # Wheeling on past the end banked nothing: one turn back moves the text
+    # at once (Codex on PR #445: the old scrollbar clamped its value too).
+    QApplication.sendEvent(cell, _wheel_up(cell, notches=-1))
+    assert cell.label().geometry().x() == -120
+    QApplication.sendEvent(cell, _wheel_up(cell, notches=1))
+    assert cell.label().geometry().x() == 0
     # And the start is held when the column grows (resizing re-places it).
     cell.resize(500, HEIGHT)
     QApplication.processEvents()
