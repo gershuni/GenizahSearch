@@ -33262,14 +33262,15 @@ class GenizahGUI(QMainWindow):
         """The workers reading the open index right now, by name: the install waits for
         them (close_index would take the index from under a running one, and on Windows
         their maps keep the old files from being renamed). The main search and the
-        search-within completion (search_thread), Composition, grouping, and the Join
+        search-within completion (search_thread), Composition, grouping, the saved
+        refinement chain's restore replay (_replay_restore_thread), and the Join
         Workbench's candidate and cross-side searches, which share self.searcher
-        (desktop/join_workbench.py; Codex round 3 on PR #446)."""
+        (desktop/join_workbench.py; Codex rounds 3-4 on PR #446)."""
         busy = []
         if getattr(self, 'is_searching', False):
             busy.append('search')
         for name, attr in (('search', 'search_thread'), ('composition', 'comp_thread'),
-                           ('grouping', 'group_thread')):
+                           ('grouping', 'group_thread'), ('restore replay', '_replay_restore_thread')):
             th = getattr(self, attr, None)
             if th is not None and th.isRunning() and name not in busy:
                 busy.append(name)

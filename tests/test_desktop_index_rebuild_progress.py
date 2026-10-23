@@ -199,13 +199,15 @@ def _reader(window, kind):
         window.comp_thread = _Running()
     elif kind == 'grouping':
         window.group_thread = _Running()
+    elif kind == 'restore replay':
+        window._replay_restore_thread = _Running()
     elif kind == 'join candidates':
         window._join_workbench = types.SimpleNamespace(_search_thread=_Running(), _cross_worker=None)
     elif kind == 'join cross-side':
         window._join_workbench = types.SimpleNamespace(_search_thread=None, _cross_worker=_Running())
 
 
-@pytest.mark.parametrize('kind', ['search', 'composition', 'grouping', 'join candidates', 'join cross-side'])
+@pytest.mark.parametrize('kind', ['search', 'composition', 'grouping', 'restore replay', 'join candidates', 'join cross-side'])
 def test_the_swap_waits_while_a_search_holds_the_index(window, kind):
     th = _started(window, 'beside')
     _reader(window, kind)
