@@ -37,6 +37,7 @@ MANUSCRIPTS = {
     211: ["אמר מאמתי קורין את"],                       # מאמ* קור*: inside a page
     212: ["כהנים שם הכהנים גדול."],                    # כהנים גדול: no (the first word began before)
     213: ["כהנים", "כהנים", "גדולים"],                 # כהנ* [1] גדול*: p1 | p3, and p2 | p3 apart
+    214: ["שם כהן גדול עמד"],                            # כהנ* גדול*: the singular (final nun); the pre-test must not skip it
 }
 V08 = [(sid(n), 3000 + n, p, text) for n, pages in MANUSCRIPTS.items() for p, text in enumerate(pages, 1)]
 V07 = [(sid(208), 3208, 1, "קוראים כאן")]          # format 1 joins it to 208's V0.8 page
@@ -118,3 +119,10 @@ def test_the_oracle_reads_a_star_by_the_contract():
     assert 'כֹּהֲנִים' not in w                       # a literal run is typed letters only
     assert 'כֹּהֲנִים' in gate.StarWord('כ*ה*נ*ים')      # a star takes marks
     assert 'שלומות' in gate.StarWord('שלום*') and 'שלום' in gate.StarWord('שלומ*')
+def test_the_pre_test_asks_for_a_run_before_a_star_without_its_last_letter():
+    """The page pre-test (letters_needed) must admit a page where the run before a star stands
+    in its other form: on the real index `כהנ*` asked for `כהנ` and skipped every `כהן גדול` page."""
+    assert gate.Query('x', 'כהנ* גדול*').letters_needed() == ['כה', 'גדול']
+    assert gate.Query('x', 'שלום* ספר').letters_needed() == ['שלו', 'ספר']
+    assert gate.Query('x', 'כ*ה*נ*ים גדולים').letters_needed() == ['ים', 'גדולים']
+    assert gate.Query('x', 'כ*נים').letters_needed() == ['נים']   # the last run keeps its last letter

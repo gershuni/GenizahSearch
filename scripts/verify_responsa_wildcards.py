@@ -230,7 +230,13 @@ class Query:
         out = []
         for forms in self.words:
             if isinstance(forms, StarWord):
-                out.append(max(forms.runs, key=len))
+                # A run a star follows may stand in its final or medial form on the page
+                # (StarWord), so the pre-test asks for that run without its last letter:
+                # on the real index `כהנ*` skipped every `כהן גדול` page before this.
+                runs = re.sub(r'\*+', '*', forms.token).split('*')
+                cands = [r[:-1] if (i < len(runs) - 1 and r and r[-1] in _FINAL_MEDIAL) else r
+                         for i, r in enumerate(runs)]
+                out.append(max(cands, key=len))
                 continue
             common = min(forms, key=len)
             # the stem: the longest substring every form shares, found by shrinking the shortest
