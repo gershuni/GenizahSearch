@@ -6,7 +6,9 @@ Provides four top-level widget subclasses moved verbatim out of the
 
   - ShelfmarkTableWidgetItem(QTableWidgetItem) — natural-sort shelfmark cells
   - CheckBoxHeader(QHeaderView) — header with a master checkbox + filter/star glyphs
-  - HiddenScrollArea(QScrollArea) — single-line RTL snippet with marker highlighting
+  - MatchCentredSnippet(QWidget) — a one-line RTL snippet cell, the *...* marks centred
+  - ContextSnippet(MatchCentredSnippet) — the Composition tab's Context / MS Context cells
+    (replaced HiddenScrollArea, a QScrollArea, on 2026-10-23)
   - ListsTreeWidget(QTreeWidget) — drag-reorderable lists sidebar tree
 
 ZERO behavior change vs. the originals. ``genizah_app.py`` re-exports these
@@ -20,22 +22,22 @@ GUARD-01: NO module-level ``import genizah_app`` — shared symbols come from th
 from __future__ import annotations
 
 import re
+from html import escape as html_escape
 
 from PyQt6.QtGui import QFontMetrics
 from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QHeaderView,
-    QScrollArea,
     QTreeWidget,
-    QFrame,
     QLabel,
     QStyle,
     QStyleOptionButton,
     QToolTip,
     QAbstractItemView,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, QRect, QEvent, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QPalette, QPen, QBrush, QPainterPath
+from PyQt6.QtCore import Qt, QRect, QEvent, pyqtSignal
+from PyQt6.QtGui import QColor, QPalette, QPen, QBrush, QPainterPath, QTextDocument
 
 from genizah_core import natural_sort_key, tr
 
@@ -354,81 +356,185 @@ class CheckBoxHeader(QHeaderView):
 
         return super().event(event)
 
-class HiddenScrollArea(QScrollArea):
-    def __init__(self, text_with_markers="", anchor_text=None, parent=None):
+class MatchCentredSnippet(QWidget):
+    """A one-line snippet cell with the found words in the middle of the cell:
+    the Search tab's Snippet column, and (ContextSnippet) the Composition
+    tab's Context and MS Context columns.
+
+    The Search cell was a QLabel holding the snippet as one centred RTL
+    paragraph. A paragraph is centred only while it fits: a line wider than
+    the label is laid out from the label's left edge, which for Hebrew is the
+    END of the snippet, so the cell showed the last 600 px of the text and the
+    match -- cut 60 characters from either side, so in the middle of the
+    string -- only when the whole string was under twice the cell's width. In
+    the app's font it seldom was: the match sat at the cell's right edge, cut,
+    or past it (owner, 2026-10-23).
+
+    The label is laid out at its natural width inside this clipping widget and
+    slid so that the marked words (``*...*`` in the snippet, *mark_colour* in
+    *html*) are centred in the cell's contents rect; several marks are centred
+    as one span, from the first to the last, unless *anchor_text* names the
+    one to centre on and it is marked. Never past either end of the text, as a
+    scroll area would not: a snippet that fits is shown whole, centred as
+    before, and a match near the start of a page is shown with the text's
+    start at the cell's edge. The label is still a QLabel, so the text can be
+    selected with the mouse as before. The contents margins are a gap the
+    text is clipped to, between columns.
+    """
+
+    #: The colour ``SearchEngine.format_snippet(style='html_inline')`` gives a
+    #: ``*...*`` mark; the marks are found in the laid-out text by it.
+    MATCH_COLOUR = QColor('#ff0000')
+
+    def __init__(self, html, parent=None, *, mark_colour=None, anchor_text=None):
         super().__init__(parent)
-        self._raw_text = text_with_markers
-        self._anchor_text = anchor_text
+        self._html = html or ""
+        self._mark_colour = QColor(mark_colour) if mark_colour is not None else self.MATCH_COLOUR
+        self._anchor_text = anchor_text or None
+        self._clip = QWidget(self)      # the contents rect; clips the label to it
+        self._label = QLabel(self._html, self._clip)
+        self._label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        # (text width, x of the marks' centre) in the cell's font. Measured at
+        # the first paint, not on insertion: a batch is 500 rows, and laying
+        # out every row's text costs about as much as the old label's layout
+        # again, which that label only paid for the rows that came on screen.
+        self._metrics = None
+        self._slid = 0      # px the reader slid the text by (ContextSnippet's wheel)
 
-        # Hide scrollbars
-        self.setWidgetResizable(True)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setFrameShape(QFrame.Shape.NoFrame)
+    def text(self):
+        """The label's text, for the filter rule's fallback."""
+        return self._label.text()
 
-        # Add horizontal margins to create a gap between columns (5px on each side = 10px total gap)
-        # We also ensure the background is transparent to show the row selection color
-        self.setStyleSheet("QScrollArea { background: transparent; margin-left: 5px; margin-right: 5px; }")
+    def label(self):
+        return self._label
 
-        # Keep height strictly slim
-        self.setFixedHeight(self.fontMetrics().lineSpacing() + 4)
+    def slide(self, dx):
+        """Move the text *dx* px to the right (a negative *dx*: to the left),
+        no further than its ends; a text that fits does not move."""
+        self._slid += dx
+        if self._metrics is not None:
+            self._place()
 
-        self.label = QLabel()
-        self.label.setTextFormat(Qt.TextFormat.RichText)
-        self.label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        # Ensure label background is transparent
-        self.label.setStyleSheet("background: transparent;")
-        self.setWidget(self.label)
-
-        self._update_content()
-
-    def _update_content(self):
-        if not self._raw_text:
-            self.label.setText(""); return
-
-        # Apply coloring to markers
-        processed = re.sub(r'\*(.*?)\*', r"<b style='color:#c0392b;'>\1</b>", self._raw_text)
-        processed = re.sub(r'\*([^*]+)$', r"<b style='color:#c0392b;'>\1</b>", processed)
-        processed = re.sub(r'^([^*]+)\*', r"<b style='color:#c0392b;'>\1</b>", processed)
-        final_html = processed.replace("*", "")
-
-        # Enforce non-breaking text
-        self.label.setText(f"<div dir='rtl' style='white-space:nowrap; padding: 0 5px;'>{final_html}</div>")
-        self.setToolTip(self._raw_text.replace("*", ""))
-
-        # Position highlight in view initially
-        QTimer.singleShot(10, self._center_on_match)
-
-    def _center_on_match(self):
-        target_pos = -1
-        if self._anchor_text:
-            target_pos = self._raw_text.find(f"*{self._anchor_text}*")
-        if target_pos == -1:
-            target_pos = self._raw_text.find('*')
-
-        if target_pos != -1:
-            bar = self.horizontalScrollBar()
-            max_val = bar.maximum()
-            if max_val > 0:
-                # Calculate center ratio for RTL scrollbar
-                ratio = (len(self._raw_text) - target_pos) / len(self._raw_text)
-                bar.setValue(int(max_val * ratio))
-
-    def wheelEvent(self, event):
-        # Convert vertical wheel movement to horizontal scroll
-        if event.angleDelta().y() != 0:
-            bar = self.horizontalScrollBar()
-            # Sensitivity adjustment
-            bar.setValue(bar.value() - event.angleDelta().y())
-            event.accept()
-        else:
-            super().wheelEvent(event)
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.FontChange:
+            # The cell takes the table's font on insertion; measure in it.
+            self._metrics = None
+            self.update()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # Maintain highlight focus when column width changes
-        QTimer.singleShot(10, self._center_on_match)
+        if self._metrics is not None:
+            self._place()
+
+    def paintEvent(self, event):
+        if self._metrics is None:
+            self._place()      # the label, a child, is painted after this, where put
+        super().paintEvent(event)
+
+    def _measure(self):
+        """(width of the whole text, x of the centre of the marked span), in
+        the label's own coordinates: the label is given exactly its natural
+        width, so its one line starts at its left edge, as it does in a
+        document laid out at that width."""
+        width = self._label.sizeHint().width()
+        # No mark to centre on: the start of the text, which for a right-to-left
+        # paragraph is its right end (a scroll area's home position).
+        centre = float(width)
+        doc = QTextDocument()
+        doc.setDefaultFont(self._label.font())
+        doc.setDocumentMargin(0)
+        doc.setHtml(self._html)
+        doc.setTextWidth(width)
+        doc.documentLayout().documentSize()     # the layout is lazy; lines exist after this
+        block = doc.firstBlock()
+        marks = []      # (start, end, text) of each run in the mark colour, in order
+        it = block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            if frag.isValid() and frag.charFormat().foreground().color() == self._mark_colour:
+                pos = frag.position() - block.position()
+                marks.append((pos, pos + frag.length(), frag.text()))
+            it += 1
+        layout = block.layout()
+        if marks and layout is not None and layout.lineCount() > 0:
+            anchored = [m for m in marks if m[2] == self._anchor_text] if self._anchor_text else []
+            start, end = (anchored[0][0], anchored[0][1]) if anchored else (marks[0][0], marks[-1][1])
+            line = layout.lineAt(0)
+            x0 = layout.position().x()
+            centre = (line.cursorToX(start)[0] + line.cursorToX(end)[0]) / 2 + x0
+        return width, centre
+
+    def _place(self):
+        if self._metrics is None:
+            self._metrics = self._measure()
+        text_w, centre = self._metrics
+        area = self.contentsRect()
+        self._clip.setGeometry(area)
+        w = area.width()
+        if text_w <= w:
+            x = (w - text_w) // 2
+            self._slid = 0
+        else:
+            centred = round(w / 2 - centre)
+            x = max(w - text_w, min(0, centred + self._slid))
+            # Keep the slide at what is shown: wheeling on past an end must
+            # not bank turns the other way has to pay off first (Codex, PR #445).
+            self._slid = x - centred
+        self._label.setGeometry(x, 0, text_w, area.height())
+
+
+class ContextSnippet(MatchCentredSnippet):
+    """The Composition tab's Context and MS Context cells, built from the
+    marked text: a mark is bold dark red (the tab's colour), an unbalanced
+    marker at either end marks to that end, and HTML in the text is text. The
+    whole text is the tooltip, a 5 px margin keeps the two columns' texts
+    apart, the mouse wheel slides the text sideways, and the MS cell centres
+    on the chunk the Context cell shows (*anchor_text*) when it is marked
+    there.
+
+    Until 2026-10-23 this was HiddenScrollArea, a QScrollArea whose scrollbar
+    was set from the mark's share of the text's CHARACTERS, so the match stood
+    near the middle only as the letters' widths allowed, and after a 10 ms
+    timer per cell and per column resize. The mark is now centred by
+    measurement, with no timer, at the cell's first paint.
+    """
+
+    MARK_COLOUR = QColor('#c0392b')
+    MARGIN = 5
+
+    def __init__(self, text_with_markers="", anchor_text=None, parent=None):
+        text = text_with_markers or ""
+        super().__init__(self.marked_html(text), parent,
+                         mark_colour=self.MARK_COLOUR, anchor_text=anchor_text)
+        self.setContentsMargins(self.MARGIN, 0, self.MARGIN, 0)
+        self.setToolTip(text.replace("*", ""))
+        # Keep the tree's rows slim: a row is as tall as its cells ask.
+        self.setFixedHeight(self.fontMetrics().lineSpacing() + 4)
+
+    @classmethod
+    def marked_html(cls, text):
+        """The cell's HTML: ``*...*`` as bold MARK_COLOUR runs. The old cell's
+        rules for a marker left without a pair are kept: one followed by text
+        marks from it to the end of the text (a mark cut off by the end of
+        the context), one that ends the text marks from the start to it; any
+        other stray marker is dropped."""
+        mark = f"<b style='color:{cls.MARK_COLOUR.name()};'>\\1</b>"
+        processed = html_escape(text or "")
+        processed = re.sub(r'\*(.*?)\*', mark, processed)
+        processed = re.sub(r'\*([^*]+)$', mark, processed)
+        processed = re.sub(r'^([^*]+)\*', mark, processed)
+        return f"<div dir='rtl'>{processed.replace('*', '')}</div>"
+
+    def wheelEvent(self, event):
+        # Vertical wheel movement slides the text sideways (as the scroll
+        # area did); the tree does not scroll under it.
+        dy = event.angleDelta().y()
+        if dy:
+            self.slide(dy)
+            event.accept()
+        else:
+            super().wheelEvent(event)
 
 
 class ListsTreeWidget(QTreeWidget):
