@@ -2624,6 +2624,14 @@ body {
     .compare-panes:not(.compare-text-shown) .anchor-image-pane:not(:fullscreen) .image-container {
         max-height: calc(100vh - 200px) !important; max-height: calc(100dvh - 200px) !important;
     }
+    /* A phone up to 640px wide on its side (640x360, 568x320) matched the
+       phone block above as well, which stacked the panes, so with the image
+       cap sized for one pane beside the other the two images were taller
+       than the screen together (Codex on #444). Side by side here too, two
+       312px panes (basis 0, as the desktop's flex-1: a 50% basis plus the
+       row's 1rem gap wrapped), and the cap holds. Later in the file than
+       the phone rule, at the same specificity, so this one wins. */
+    .compare-panes > .nicegui-column { flex: 1 1 0% !important; min-width: 0; }
 }
 
 /* Joins Lab anchor strip (owner, 2026-10-23). Under 1024px the anchor pane

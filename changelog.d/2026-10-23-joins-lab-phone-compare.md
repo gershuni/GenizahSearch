@@ -14,10 +14,11 @@ several screens below the anchor's and the two were never on the screen together
   brings the transcriptions and details back for as long as the window is open. The header
   stays one row on a phone: the "Compare" title goes, and Add as Join and Add to Puzzle go
   icon-only and dense.
-- **A phone on its side compares side by side.** Above 640px the panes already sit side by side
-  (two 420px panes on an 844px phone, wider than the desktop's 380px anchor pane); on any screen
-  under 521px tall the text hides the same way and each image takes the height the window
-  header, the head, the control bar and the verdict bar leave.
+- **A phone on its side compares side by side.** On any screen under 521px tall the panes sit
+  beside each other (two 420px panes on an 844px phone, wider than the desktop's 380px anchor
+  pane; two 312px panes on a 640px-wide phone, where the phone rule had stacked them), the text
+  hides the same way, and each image takes the height the window header, the head, the control
+  bar and the verdict bar leave.
 - **The anchor stays in view while candidates scroll.** Under 1024px the anchor pane stacks above
   the work column and scrolled away with the candidates. Once it has left the screen, a strip
   under the header shows the anchor's thumbnail and shelfmark, moves to the top while the

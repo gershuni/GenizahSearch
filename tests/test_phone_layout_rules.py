@@ -336,6 +336,12 @@ def test_compare_shows_the_two_images_alone_on_a_phone():
     landscape = _media_block(css, '@media (max-height: 520px) and (orientation: landscape) {')
     assert ('max-height: calc(100vh - 200px) !important; '
             'max-height: calc(100dvh - 200px) !important;') in landscape
+    # A 640x360 or 568x320 phone on its side matches the phone block too, which
+    # stacks the panes; this block puts them back beside each other (Codex on
+    # #444), and must come after the phone rule to win at equal specificity.
+    assert '.compare-panes > .nicegui-column { flex: 1 1 0% !important; min-width: 0; }' in landscape
+    assert css.index('.compare-panes > .nicegui-column { flex: 1 1 100% !important;') < css.index(
+        '.compare-panes > .nicegui-column { flex: 1 1 0% !important;')
     # The header stays one row on a 390px phone: the title goes, the gaps and
     # side padding shrink, and the icon-only buttons go dense.
     assert 'px-4 py-2 compare-header"' in src
