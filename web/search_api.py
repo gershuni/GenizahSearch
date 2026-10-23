@@ -1905,6 +1905,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             if results:
                 results[0].pop('responsa_warning', None)
                 results[0].pop('responsa_expanded_count', None)
+                results[0].pop('responsa_pattern_count', None)
 
             # 81A D-04/D-05/D-06 — build request echo for the response envelope.
             # search_mode is ECHOED VERBATIM (never silently downgraded — D-04).

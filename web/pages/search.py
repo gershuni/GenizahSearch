@@ -49,7 +49,7 @@ from web.pages.search_results import (
 )
 from genizah_core import generate_tabular_syntax
 from shared.browse_map_utils import get_library_display, LIBRARY_CODES, library_codes_with_manuscripts, sanitize_library_codes
-from shared.refinement import (RefinementStep, chain_needs_completion, complete_chain, compute_effective_restrict,
+from shared.refinement import (RefinementStep, chain_needs_completion, complete_chain, compute_effective_restrict, step_partial,
                                needs_mode_labels, truncate_chain, replay_chain, scope_signature,
                                steps_that_cannot_complete)
 from shared.search_engine import _consume_last_responsa_downgrade, consume_last_search_cutoff
@@ -907,7 +907,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         ui.label('#מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('prefix'))
                         ui.label('מילה#').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('suffix'))
                         ui.label('%מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('plene'))
-                        ui.label('*מילה / מילה*').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('wildcard'))
+                        ui.label('מילה* / מי*לה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('wildcard'))
                         ui.label('(א/ב)').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('OR'))
                         ui.label('-מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Exclude'))
                         ui.label('|מילה').classes('text-xs').style('color: var(--primary-600);').tooltip(tr('Line starts'))
@@ -2598,7 +2598,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             return
         step = RefinementStep(**_shown_run(),
                               result_count=len(rows),  # total results (matches display count)
-                              result_count_capped=search_state.result_count_capped)
+                              result_count_capped=search_state.result_count_capped,
+                              result_partial=search_state.result_partial)
         step._result_sys_ids = set(raw_ids)
         # Capture page-level uids for "all terms" filter
         step._result_uids = {r.get('uid') or r.get('display', {}).get('id') for r in rows
@@ -2626,6 +2627,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 **_shown_run(),
                 result_count=len(search_state.results),
                 result_count_capped=search_state.result_count_capped,
+                result_partial=search_state.result_partial,
             )
             step0._result_sys_ids = set(raw_ids)
             # Capture page-level uids for "all terms" filter
@@ -2648,7 +2650,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 raw_ids = set(known)
                 search_state.refinement_restrict_sys_ids = raw_ids
         if steps_that_cannot_complete(search_state.refinement_chain):
-            ui.notify(tr('A search with a line break cannot be completed; searching within the shown results.'), type='warning')
+            ui.notify(tr('A search with a line break, or one that leaves matches across pages out, cannot be '
+                         'completed; searching within the shown results.'), type='warning')
         if completed and not completed['interrupted'] and completed['restrict'] is not None:
             if raw_ids <= completed['restrict']:
                 raw_ids = completed['restrict']
@@ -5103,6 +5106,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                               "if(u.searchParams.has('run')){u.searchParams.delete('run');"
                               "history.replaceState(null,'',u.pathname+u.search);}})()")
             search_state.result_count_capped = bool(state_snapshot.get('result_count_capped'))
+            # Nor do they carry the shown search's "cannot be completed" (Codex round 3
+            # on PR #442): an entry that says it was cut is completed by its own search.
+            search_state.result_partial = False
             search_state.domain_exclusions = set(state_snapshot.get('domain_exclusions', []))
             search_state.printed_filter = state_snapshot.get('printed_filter', 'all')
             # Phase 88: populate per-session export payload after history restore so JSON
@@ -5733,6 +5739,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # would otherwise show a list the limit cut short as complete.
         search_state.result_count_capped = bool(_run_cutoff.get('capped') or _run_cutoff.get('interrupted')
                                                 or _time_limited or _restricted_to_incomplete)
+        # Searched within a step completing cannot fix, this one cannot be either (Codex
+        # round 2 on PR #442), unless its own candidate limit cut it.
+        _parent_step = (search_state.refinement_chain[-1]
+                        if search_state._refine_mode and search_state.refinement_chain else None)
+        search_state.result_partial = step_partial(_run_cutoff, _parent_step) and not (
+            _run_cutoff.get('interrupted') or _time_limited)
         if _time_limited:
             ui.notify(tr('The search stopped after {minutes} minutes; showing the results found so far.').format(minutes=Config.WEB_SEARCH_TIME_LIMIT // 60),
                       type='warning', timeout=10000, close_button=True)
@@ -5773,8 +5785,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if not results and _preview_box['rows']:
                 results = list(_preview_box['rows'])
             # Stopped, the rows are the start of the list, never all of it: "+", and a
-            # search within them completes the step first (D8).
+            # search within them completes the step first (D8) -- even within a step
+            # that cannot be completed itself (step_partial).
             search_state.result_count_capped = True
+            search_state.result_partial = False
             search_state.is_running = False
             search_state.is_cancelled = False
             search_state.progress = 1.0
@@ -5999,12 +6013,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # Merged status: results count + time + filter info in one label
         expanded_count = results[0].get('responsa_expanded_count', 0) if results else 0
+        # A star word is one pattern, not a list of terms (plan §5.7).
+        pattern_count = results[0].get('responsa_pattern_count', 0) if results else 0
         # A Responsa downgrade (the guard turned an option off) is part of the count's
         # line, for as long as these results show (plan §5.3: not a 5-second toast) --
         # "0 Results" too, from the engine's own signal.
         search_state.responsa_warning = responsa_note_of(results) or _run_cutoff.get('downgrade')
-        if expanded_count > 0:
-            results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str} ({tr('searching')} {expanded_count} {tr('expanded terms')}){_filter_suffix}{_downgrade_suffix()}"
+        if expanded_count > 0 or pattern_count > 0:
+            _searched = ' + '.join(
+                ([f"{expanded_count} {tr('expanded terms')}"] if expanded_count else [])
+                + ([f"{pattern_count} {tr('patterns')}"] if pattern_count else []))
+            results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str} ({tr('searching')} {_searched}){_filter_suffix}{_downgrade_suffix()}"
         else:
             results_count.text = f"{_total_text(len(results))} {tr('Results')} · {total_elapsed_str}{_filter_suffix}{_downgrade_suffix()}"
         status_label.text = ''

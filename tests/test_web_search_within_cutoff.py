@@ -135,6 +135,18 @@ def test_isolated_engine_hands_the_cut_off_to_the_calling_thread(page):
     assert consume_last_search_cutoff() == {'capped': True, 'interrupted': False}
 
 
+@pytest.mark.parametrize('limited', [False, True])
+def test_isolated_engine_hands_a_partial_cut_off_to_the_calling_thread(page, limited):
+    # Crossings a star search left out by rule travel from the worker with whether a
+    # candidate limit cut it too (Codex on PR #442, round 1).
+    from shared.search_engine import consume_last_search_cutoff
+    from web.state import state
+    cutoff = {'capped': True, 'interrupted': False, 'partial': True, 'limited': limited}
+    page({(WORD, False): ([_row('M1')], cutoff)})
+    state.searcher.execute_search(WORD, 'literal', 0)
+    assert consume_last_search_cutoff() == cutoff
+
+
 def test_a_failed_call_leaves_no_cut_off(page, monkeypatch):
     from shared.search_engine import _note_search_cutoff, consume_last_search_cutoff
     from web import research_jobs
@@ -803,8 +815,157 @@ def test_searching_within_a_cut_off_line_break_search_says_it_cannot_be_complete
     run(driver, count=1)
     assert queue.payloads[0]['arguments']['responsa_options']['responsa_mode'] is True
     assert len(queue.payloads) == 1, 'a line-break step is not run again to complete it'
-    assert ('A search with a line break cannot be completed; searching within the shown results.'
-            in seen['notes']), seen['notes']
+    assert ('A search with a line break, or one that leaves matches across pages out, cannot be '
+            'completed; searching within the shown results.' in seen['notes']), seen['notes']
+
+
+def test_searching_within_a_star_search_that_left_crossings_out_does_not_run_it_again(page):
+    """Codex on PR #442, round 1: a Responsa star search that left matches across pages
+    out by its own rule (past the seams' window, or too many manuscripts to read in time)
+    is "N+", but reading every candidate would leave them out again: Search within says
+    it searches within the shown results and does not run the step again."""
+    query = f'{WORD}* {WORD2}*'
+    partial = {'capped': True, 'interrupted': False, 'partial': True, 'limited': False}
+    queue = page({(query, False): ([_row('M1')], partial)})
+    seen = {}
+
+    async def driver(a):
+        await a.open('/search')
+        store(a, search_mode='responsa')
+        await a.open('/search')
+        submit(a, query)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
+        await _click_search_within(a)
+        await _wait_for(lambda: any('Searching within 1+ manuscripts' in t for t in _label_texts(a)), user=a)
+        seen['notes'] = list(a.notify.messages)
+
+    run(driver, count=1)
+    assert len(queue.payloads) == 1, 'a step that left crossings out by rule is not run again'
+    assert ('A search with a line break, or one that leaves matches across pages out, cannot be '
+            'completed; searching within the shown results.' in seen['notes']), seen['notes']
+
+
+def test_a_step_searched_within_a_partial_step_is_not_run_again_either(page):
+    """Codex on PR #442, round 2: searched within a star step that left crossings out by
+    its own rule, the next step is "+" too -- its restriction is incomplete -- and running
+    it again with every candidate would give the same rows. Searching within it again
+    runs nothing again: neither step is completed."""
+    query = f'{WORD}* {WORD2}*'
+    partial = {'capped': True, 'interrupted': False, 'partial': True, 'limited': False}
+    queue = page({(query, False): ([_row('M1')], partial),
+                  (WORD2, False): ([_row('M1')], None)})
+    notice = ('A search with a line break, or one that leaves matches across pages out, cannot be '
+              'completed; searching within the shown results.')
+    seen = {}
+
+    async def driver(a):
+        await a.open('/search')
+        store(a, search_mode='responsa')
+        await a.open('/search')
+        submit(a, query)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
+        await _click_search_within(a)
+        await _wait_for(lambda: any('Searching within 1+ manuscripts' in t for t in _label_texts(a)), user=a)
+        submit(a, WORD2)
+        await wait_for_payloads(queue, 2)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
+        await _click_search_within(a)
+        await _wait_for(lambda: list(a.notify.messages).count(notice) >= 2, user=a)
+        seen['payloads'] = [(p['arguments']['query_str'], bool(p['arguments'].get('ids_only')))
+                            for p in queue.payloads]
+
+    run(driver, count=1)
+    assert seen['payloads'] == [(query, False), (WORD2, False)], 'no step is run again to complete it'
+
+
+def test_a_stopped_step_within_a_partial_step_is_completed(page, monkeypatch):
+    """The other side of the rule above: a step the user stopped is the start of its
+    list, whatever its parent -- searching within it again completes it (ids_only)."""
+    from nicegui import ui
+    from web import research_jobs
+    parent = f'{WORD2}* טיכ*'
+    partial = {'capped': True, 'interrupted': False, 'partial': True, 'limited': False}
+    queue = StoppableQueue({(parent, False): ([_row('M1'), _row('M2')], partial),
+                            (WORD, True): ([_row('M1'), _row('M2')], None)},
+                           early_rows=[_row('M1')])
+    monkeypatch.setattr(research_jobs, 'get_queue', lambda: queue)
+
+    async def driver(a):
+        # Exact mode, where a search hands its first rows over early (the queue answers
+        # each job by its query; the parent's cut-off signal is a star search's).
+        await a.open('/search')
+        submit(a, parent)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('2+ Results') for t in _label_texts(a)), user=a)
+        await _click_search_within(a)
+        await _wait_for(lambda: any('Searching within 2+ manuscripts' in t for t in _label_texts(a)), user=a)
+        submit(a, WORD)
+        await wait_for_payloads(queue, 2)
+        await _wait_for(lambda: queue.held is not None and queue.held.handed, user=a)
+        await asyncio.sleep(0.3)                   # the caller hands them to the page
+        _click(a, ui.button, lambda e: e.text == 'Stop')
+        await _wait_for(lambda: any('(partial)' in t for t in _label_texts(a)), user=a)
+        await _click_search_within(a)
+        await wait_for_payloads(queue, 3)          # the stopped step's completion
+
+    run(driver, count=1)
+    assert (queue.payloads[2]['arguments']['query_str'], queue.payloads[2]['arguments'].get('ids_only')) == (WORD, True)
+
+
+def test_a_restored_history_entry_does_not_inherit_the_shown_searchs_partial_state(page):
+    """Codex round 3 on PR #442: after a star search that cannot be completed, an old
+    history entry that kept its rows (and says they were cut) is its own search, which
+    Search within completes."""
+    from tests.test_web_variant_settings_per_visitor import (
+        PLACEHOLDER, WORD3, _element, _legacy_history_entry, _restore_history)
+    from nicegui import ui
+    star = f'{WORD2}* טיכ*'
+    partial = {'capped': True, 'interrupted': False, 'partial': True, 'limited': False}
+    queue = page({(star, False): ([_row('M1')], partial),
+                  (WORD3, True): ([_row('990000000000099')], None)})
+    entry = _legacy_history_entry(WORD3, '990000000000099')
+    entry['state']['result_count_capped'] = True
+
+    async def driver(a):
+        await a.open('/search')
+        submit(a, star)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
+        store(a, search_history=[entry])
+        _restore_history(a, WORD3)
+        box = _element(a, ui.input, lambda e: e.props.get('placeholder') == PLACEHOLDER)
+        await _wait_for(lambda: box.value == WORD3, user=a)
+        await _click_search_within(a)
+        await wait_for_payloads(queue, 2)          # the restored search's completion
+
+    run(driver, count=1)
+    completion = queue.payloads[1]['arguments']
+    assert (completion['query_str'], completion.get('ids_only')) == (WORD3, True)
+
+
+def test_a_star_search_cut_by_its_page_limit_too_is_completed(page):
+    """The same search cut by a candidate limit as well ('limited'): reading every
+    candidate completes that part, so the step is run again with ids_only."""
+    query = f'{WORD}* {WORD2}*'
+    both = {'capped': True, 'interrupted': False, 'partial': True, 'limited': True}
+    queue = page({(query, False): ([_row('M1')], both),
+                  (query, True): ([_row('M1'), _row('M2')], {'capped': True, 'interrupted': False,
+                                                              'partial': True, 'limited': False})})
+
+    async def driver(a):
+        await a.open('/search')
+        store(a, search_mode='responsa')
+        await a.open('/search')
+        submit(a, query)
+        await wait_for_payloads(queue, 1)
+        await _wait_for(lambda: any(t.startswith('1+ Results') for t in _label_texts(a)), user=a)
+        await _click_search_within(a)
+        await wait_for_payloads(queue, 2)
+
+    run(driver, count=1)
+    assert [p['arguments'].get('ids_only') for p in queue.payloads] == [None, True]
 
 
 def test_the_all_terms_filter_stays_off_over_a_line_break_step(page):

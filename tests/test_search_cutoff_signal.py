@@ -112,9 +112,12 @@ def test_whole_manuscript_docs_that_reach_their_limit_are_capped(engine):
 
 
 def test_the_line_break_search_reports_its_limit(engine):
+    # Responsa reads pages up to its own limit (decision 3 of the true-wildcards plan).
     opts = {"responsa_mode": True}
-    assert _cutoff(engine, f"{W} | {C}", 2, responsa_options=opts)["capped"]
-    assert not _cutoff(engine, f"{W} | {C}", 50, responsa_options=opts)["capped"]
+    with patch.object(Config, "RESPONSA_PAGE_LIMIT", 2):
+        assert _cutoff(engine, f"{W} | {C}", 2, responsa_options=opts)["capped"]
+    with patch.object(Config, "RESPONSA_PAGE_LIMIT", 50):
+        assert not _cutoff(engine, f"{W} | {C}", 50, responsa_options=opts)["capped"]
 
 
 def test_stop_is_reported(engine):
@@ -271,9 +274,11 @@ def test_exactly_the_limit_of_whole_manuscript_docs_is_not_a_cut(engine):
 def test_exactly_the_limit_of_the_line_break_search_is_not_a_cut(engine):
     opts = {"responsa_mode": True}
     n = len(PAGES)
-    rows, cut = _run(engine, f"{W} | {C}", n, corpus_scope="genizah", responsa_options=opts)
+    with patch.object(Config, "RESPONSA_PAGE_LIMIT", n):
+        rows, cut = _run(engine, f"{W} | {C}", n, corpus_scope="genizah", responsa_options=opts)
     assert len(rows) == n and not cut["capped"]
-    rows, cut = _run(engine, f"{W} | {C}", n - 1, corpus_scope="genizah", responsa_options=opts)
+    with patch.object(Config, "RESPONSA_PAGE_LIMIT", n - 1):
+        rows, cut = _run(engine, f"{W} | {C}", n - 1, corpus_scope="genizah", responsa_options=opts)
     assert len(rows) == n - 1 and cut["capped"]
 
 

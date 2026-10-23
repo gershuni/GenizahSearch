@@ -2480,16 +2480,39 @@ TRANSLATIONS = {
     "Go to Joins Lab to find more joins": "עברו למעבדת הצירופים לאיתור צירופים נוספים",
     "Find more joins": "איתור צירופים נוספים",
 
-    # --- Wildcard rewrite notice ---
-    "*word* rewritten as #word# (prefix + suffix expansion)":
-        "*word* שוכתב כ-#word# (הרחבת קידומות + סיומות)",
-    # --- Refused star shapes (shared/responsa_match.py, Responsa Phase 1) ---
-    "Responsa search takes a * only at the start or the end of a word (*word, word*, *word*). "
-    "A * inside a word, a word made only of *s, and other shapes with several *s are not "
-    "supported yet. For any one word, use a gap such as [1].":
-        "חיפוש שו\"ת מקבל כוכבית רק בתחילת מילה או בסופה (*מילה, מילה*, *מילה*). "
-        "כוכבית בתוך מילה, מילה שכולה כוכביות וצורות אחרות עם כמה כוכביות עדיין אינן "
-        "נתמכות. למילה אחת כלשהי השתמשו במרווח, למשל [1].",
+    # --- Refused star shapes and short star words (shared/responsa_match.py, Responsa Phase 3) ---
+    "Showing {} of {} results (searching {} expanded terms + {} patterns)":
+        "מציג {} מתוך {} תוצאות (מחפש {} ביטויים מורחבים + {} תבניות)",
+    "patterns": "תבניות",
+    # --- Matches across pages not searched (shared/search_engine.py, Responsa Phase 3) ---
+    "Matches across a page break with more than {k} words on one side of it "
+    "were not searched (a query with *).":
+        "התאמות שעוברות מעמוד לעמוד ובהן יותר מ-{k} מילים בצד אחד של המעבר "
+        "לא נחפשו (שאילתא עם *).",
+    "Matches that run across pages were not searched: a query with * reached "
+    "{n:,} manuscripts, more than the {limit:,} that can be read in time.":
+        "התאמות שעוברות בין עמודים לא נחפשו: שאילתא עם * הגיעה ל-{n:,} כתבי יד, "
+        "יותר מ-{limit:,} שאפשר לקרוא בזמן סביר.",
+    "Matches across a page break could not be searched; the list may be incomplete.":
+        "לא ניתן היה לחפש התאמות שעוברות מעמוד לעמוד; ייתכן שהרשימה חסרה.",
+    "A * at the start of a word works as *word, and *word* as #word#, for now; a word "
+    "that begins with * and holds another * is not searched yet. A * inside a word or at "
+    "its end works anywhere: word*, wo*rd.":
+        "כוכבית בתחילת מילה פועלת כעת כ-*מילה, ו-*מילה* כ-#מילה#; מילה שמתחילה בכוכבית "
+        "ויש בה כוכבית נוספת עדיין אינה נחפשת. כוכבית בתוך מילה או בסופה פועלת בכל מקום: "
+        "מילה*, מי*לה.",
+    "A * alone, or a word made only of *s, matches every word. "
+    "For any one word, use a gap such as [1].":
+        "כוכבית לבדה, או מילה שכולה כוכביות, מתאימה לכל מילה. "
+        "למילה אחת כלשהי השתמשו במרווח, למשל [1].",
+    "A word with * holds letters only: a * never reaches past a space or punctuation. "
+    "Write the punctuation as a separate word, or leave it out.":
+        "מילה עם כוכבית מכילה אותיות בלבד: כוכבית אינה עוברת רווח או סימן פיסוק. "
+        "כתבו את סימן הפיסוק כמילה נפרדת, או השמיטו אותו.",
+    "A * word with only one or two letters of its own matches very many words: "
+    "the list may be cut short (N+).":
+        "מילה עם כוכבית ובה רק אות אחת או שתיים משלה מתאימה למילים רבות מאוד: "
+        "הרשימה עשויה להיקטע (N+).",
     "This query is too long for Responsa search. Use fewer or shorter words "
     "(Composition Search takes a longer passage).":
         "השאילתא ארוכה מדי לחיפוש שו\"ת. השתמשו במילים מעטות או קצרות יותר "
@@ -3287,7 +3310,10 @@ TRANSLATIONS = {
     "The search stopped after {minutes} minutes; showing the results found so far.": "החיפוש נעצר אחרי {minutes} דקות; מוצגות התוצאות שנמצאו עד כה.",
     "Could not complete the cut-off results; searching within the shown ones.": "לא ניתן היה להשלים את התוצאות שנקטעו; החיפוש יתבצע בתוך התוצאות המוצגות.",
     "Could not complete the cut-off results; the \"Only results with all terms\" filter was not applied.": "לא ניתן היה להשלים את התוצאות שנקטעו; המסנן \"רק תוצאות עם כל המונחים\" לא הוחל.",
-    "A search with a line break cannot be completed; searching within the shown results.": "לא ניתן להשלים חיפוש עם מעבר שורה; החיפוש יתבצע בתוך התוצאות המוצגות.",
+    "A search with a line break, or one that leaves matches across pages out, cannot be "
+    "completed; searching within the shown results.":
+        "לא ניתן להשלים חיפוש עם מעבר שורה, או חיפוש שמשאיר בחוץ התאמות החוצות עמודים; "
+        "החיפוש יתבצע בתוך התוצאות המוצגות.",
     "Back to previous step": "חזרה לשלב הקודם",
     "Scope changed \u2014 results will update on next search": "הטווח השתנה \u2014 התוצאות יתעדכנו בחיפוש הבא",
     "0 results within current scope": "0 תוצאות בטווח הנוכחי",

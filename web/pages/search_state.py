@@ -115,6 +115,9 @@ class SearchUIState:
         # limit, the list was restricted to a cut-off step, or the saved snapshot kept
         # only part of it. The count shows "N+", and search-within completes it first.
         self.result_count_capped: bool = False
+        # The shown results left out only crossings their search's own rule leaves out
+        # (shared/refinement.py::only_partial): a step built on them is not completed.
+        self.result_partial: bool = False
         self.running_label: str = None   # what the progress line says while running (default "Searching...")
         # What the last search sent ran with (query without its mode prefix, engine
         # mode, gap, NOT-words, position, Responsa options, scope, variant settings):
@@ -248,8 +251,8 @@ _SEARCH_SNAPSHOT_KEYS = (
     'domain_exclusions', 'search_printed_filter',
     'word_search_excluded_ids', 'search_exclusion_sources',
     'search_refinement_chain', 'search_results',
-    'search_all_terms_filter', 'search_result_count_capped', 'search_last_variant_settings',
-    'search_last_run',
+    'search_all_terms_filter', 'search_result_count_capped', 'search_result_partial',
+    'search_last_variant_settings', 'search_last_run',
 )
 
 # Filter keys cleared by clear_search_snapshot (read/written by filter_panel).
@@ -394,6 +397,9 @@ def search_run_snapshot(state: 'SearchUIState', *, with_results: bool = True) ->
         'results': _compact_result_rows(rows[:1000]),
         # A list longer than what is kept here comes back as a cut-off one.
         'result_count_capped': bool(state.result_count_capped or len(rows) > 1000),
+        # Completing cannot add what it left out (Codex round 3 on PR #442) -- unless rows
+        # were dropped here, which completing does read.
+        'result_partial': bool(state.result_partial and len(rows) <= 1000),
         'search_refinement_chain': [s.to_dict() for s in (state.refinement_chain or [])],
         'last_variant_settings': state.last_variant_settings,
         'last_run': dict(state.last_run) if isinstance(state.last_run, dict) else None,
@@ -450,6 +456,7 @@ def restore_search_active_snapshot(state: 'SearchUIState', stamp: Optional[str] 
     _de = raw.get('domain_exclusions')
     state.domain_exclusions = set(_de) if _de else set()
     state.result_count_capped = bool(raw.get('result_count_capped'))
+    state.result_partial = bool(raw.get('result_partial'))
     from shared.refinement import RefinementStep
     raw_chain = raw.get('search_refinement_chain', []) or []
     try:
@@ -604,6 +611,7 @@ def restore_search_snapshot(state: 'SearchUIState', stamp: Optional[str] = None)
         state.results = safe_user_get('search_results', []) or []
         state.responsa_warning = responsa_note_of(state.results)
         state.result_count_capped = bool(safe_user_get('search_result_count_capped', False))
+        state.result_partial = bool(safe_user_get('search_result_partial', False))
         state.printed_filter = safe_user_get('search_printed_filter', 'all')
         _de = safe_user_get('domain_exclusions')
         state.domain_exclusions = set(_de) if _de else set()
@@ -648,6 +656,8 @@ def persist_search_snapshot(state: 'SearchUIState') -> None:
         ))
         safe_user_set('search_result_count_capped', bool(
             state.result_count_capped or len(state.results or []) > _SEARCH_ACTIVE_USER_FALLBACK_LIMIT))
+        safe_user_set('search_result_partial', bool(
+            state.result_partial and len(state.results or []) <= _SEARCH_ACTIVE_USER_FALLBACK_LIMIT))
         safe_user_set('search_printed_filter', state.printed_filter)
         safe_user_set('domain_exclusions', list(state.domain_exclusions or []))
         # refinement_chain (list[RefinementStep] -> list[dict])
@@ -698,8 +708,8 @@ def clear_search_snapshot() -> None:
         # Class A try/except collapsed — safe_user_set absorbs AssertionError.
         safe_user_set(key, value)
     # Remaining snapshot keys: drop them.
-    for key in ('search_refinement_chain', 'search_result_count_capped', 'search_last_variant_settings',
-                'search_last_run',
+    for key in ('search_refinement_chain', 'search_result_count_capped', 'search_result_partial',
+                'search_last_variant_settings', 'search_last_run',
                 'search_all_terms_filter', 'search_snapshot_schema_version'):
         safe_user_pop(key, None)
     # Filter keys (match search.py:806-832 reset block).

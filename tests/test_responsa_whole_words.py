@@ -170,15 +170,25 @@ def test_a_crossing_is_main_only_by_design(engines):
     assert "cross_a" not in local and "cross_b" not in local
 
 
-# --- Refused star shapes (Phase 1) -------------------------------------------------------
+# --- Refused star shapes (decision 4: a bare star; Phase 1 refused more) -------------------
 
-@pytest.mark.parametrize("query", ["כ*נים", "*", "**", "*כ*ה*נ*ים", "כהנים *א*ב", "(כ*ן/לוי)", "ראשונה | כ*ן"])
+@pytest.mark.parametrize("query", ["*", "**", "כהנים **", "(*/לוי)", "ראשונה | *"])
 @pytest.mark.parametrize("scope", ["genizah", "local", "all"])
-def test_an_unsupported_star_is_refused_with_a_message_on_every_path(engines, query, scope):
+def test_a_bare_star_is_refused_with_a_message_on_every_path(engines, query, scope):
     with pytest.raises(ResponsaQueryRefused) as info:
         _search(engines, query, scope=scope)
     assert info.value.code == "responsa_unsupported_star"
-    assert str(info.value)
+    assert "[1]" in str(info.value)
+
+
+@pytest.mark.parametrize("query, uid", [("כ*נים גדול", "edge_yes"), ("כ*ה*נ*ים גדול", "edge_yes"),
+                                        ("(כ*ן/לוי) כאן", None), ("ראשונה | שני*", "line")])
+@pytest.mark.parametrize("scope", ["genizah", "local", "all"])
+def test_the_shapes_phase_1_refused_are_searched_on_every_path(engines, query, uid, scope):
+    rows = _search(engines, query, scope=scope)
+    if scope == "local" and "|" in query:
+        return          # a line query is main-index only
+    assert uid is None or uid in _uids(rows)
 
 
 @pytest.mark.parametrize("query", ["*כהנים", "גדול*", "*כהנ*"])

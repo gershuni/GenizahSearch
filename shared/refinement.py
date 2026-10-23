@@ -43,6 +43,11 @@ class RefinementStep:
     # candidate limit or was stopped, or a step before it did (it was restricted to an
     # incomplete set). Its count shows as "N+".
     result_count_capped: bool = False
+    # Its search left matches across pages out by its own rule (a star query's crossings
+    # past the seams' window, or in more manuscripts than can be read in time; plan §7,
+    # Phase 3 point 8) and nothing else: reading every candidate leaves them out again,
+    # so it is not completed (_cannot_complete), only marked.
+    result_partial: bool = False
     # The variant settings the step was searched with (the website records them, so a
     # replay searches exactly as the step first did; None = not recorded).
     variant_settings: Optional[dict] = None
@@ -110,6 +115,43 @@ def truncate_chain(chain: list[RefinementStep], index: int) -> list[RefinementSt
     return chain[:index]
 
 
+def only_partial(cutoff) -> bool:
+    """The search the *cutoff* signal is of left out only what reading every candidate
+    cannot add (``_note_search_cutoff(partial=True)``, no candidate limit hit, not
+    stopped: a stop leaves candidates out too, Codex round 3 on PR #443)."""
+    cutoff = cutoff or {}
+    return bool(cutoff.get('partial') and not cutoff.get('limited') and not cutoff.get('interrupted'))
+
+
+def saved_cutoff(cutoff, rows: int, kept: int) -> dict:
+    """The cut-off signal a saved session keeps with the first *kept* of *rows* rows:
+    "+" when the search was cut off or stopped, or the snapshot drops rows; and whether
+    what it left out is only what completing cannot add (``partial``, Codex round 3 on PR
+    #442) -- rows the snapshot drops are a limit completing does read (``limited``)."""
+    cutoff = cutoff or {}
+    dropped = rows > kept
+    saved = {'capped': bool(cutoff.get('capped')) or dropped,
+             'interrupted': bool(cutoff.get('interrupted'))}
+    if cutoff.get('partial'):
+        saved['partial'] = True
+        saved['limited'] = bool(cutoff.get('limited')) or dropped
+    return saved
+
+
+def step_partial(cutoff, parent=None) -> bool:
+    """A step's ``result_partial``: its "+" is one completing it cannot fix. Its own search
+    left out only what reading every candidate cannot add (``only_partial``); or it was
+    searched within a step that is so (*parent*) and nothing of its own cut it -- its
+    restriction stays incomplete whatever it reads, so running it again with every
+    candidate would give the same rows (Codex round 2 on PR #442). A step cut by its own
+    candidate limit, or stopped, is not: running it again completes that part."""
+    cutoff = cutoff or {}
+    if only_partial(cutoff):
+        return True
+    return bool(parent is not None and parent.result_partial
+                and not cutoff.get('capped') and not cutoff.get('interrupted'))
+
+
 def _last_search_cutoff() -> dict:
     """The cut-off signal of the search just run on this thread (none from a searcher
     that is not the real engine)."""
@@ -148,6 +190,7 @@ def replay_chain(
 
     accumulated_restrict = None  # None = no refinement restriction yet
     incomplete = False  # a step so far left matches out: every later one may too
+    parent = None
 
     for step in chain:
         effective = compute_effective_restrict(filter_restrict, accumulated_restrict)
@@ -182,14 +225,20 @@ def replay_chain(
         cutoff = _last_search_cutoff()
         incomplete = incomplete or bool(cutoff.get('capped') or cutoff.get('interrupted'))
         step.result_count_capped = incomplete
+        step.result_partial = step_partial(cutoff, parent)
+        parent = step
         accumulated_restrict = result_sys_ids if result_sys_ids else set()
 
     return accumulated_restrict
 
 
 def _cannot_complete(step: RefinementStep) -> bool:
-    """A Responsa line-break ('|') step: that search has no ids-only path, so running it
-    again reads the same cut-off list. It stays marked "+" (tracked for Phase 2)."""
+    """A step that running again with every candidate would not complete, so it stays
+    marked "+": a Responsa line-break ('|') step (that search has no ids-only path), and
+    a step whose search left out only matches across pages, by its own rule
+    (``result_partial``)."""
+    if step.result_partial:
+        return True
     if not (step.responsa_options or {}).get('responsa_mode'):
         return False
     from shared.responsa import _has_line_break_syntax
@@ -198,7 +247,8 @@ def _cannot_complete(step: RefinementStep) -> bool:
 
 def steps_that_cannot_complete(chain: list[RefinementStep], upto: int | None = None) -> list:
     """The cut-off steps of *chain* (of its first *upto*) that completing cannot read
-    in full (a Responsa line-break search), so a search within them stays "+"."""
+    in full (a Responsa line-break search, or one that left crossings out by its own
+    rule), so a search within them stays "+"."""
     return [s for s in chain[:upto] if s.result_count_capped and _cannot_complete(s)]
 
 
@@ -237,6 +287,7 @@ def complete_chain(
     """
     accumulated = None
     incomplete = False
+    parent = None
     for step in chain[:upto]:
         if step.result_count_capped and step._result_sys_ids is not None and _cannot_complete(step):
             incomplete = True
@@ -263,6 +314,8 @@ def complete_chain(
             step.result_count = len(rows)
             incomplete = incomplete or bool(cutoff.get('capped'))
             step.result_count_capped = incomplete
+            step.result_partial = step_partial(cutoff, parent)
+        parent = step
         accumulated = step._result_sys_ids if step._result_sys_ids else set()
     return {'restrict': accumulated, 'interrupted': False}
 

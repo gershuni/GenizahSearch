@@ -69,21 +69,38 @@ def test_the_parser_reads_every_supported_shape(query, wildcard, words):
     refuse_unsupported_stars([comp])        # supported: no refusal
 
 
-@pytest.mark.parametrize('query', ['כ*נים', '*', '**', '***', '*כ*נים', 'כ*נים*', '*כ*ה*נ*ים*',
-                                   '(כ*ן/לוי)', 'א(ב/ג)*ד', '#כ*נים', '-כ*נים', '%כ*ן'])
-def test_every_unsupported_star_shape_is_refused(query):
+@pytest.mark.parametrize('query', ['*', '**', '***', '(*/לוי)', '#*', '-*', '%*', 'כהנים **'])
+def test_a_bare_star_is_refused(query):
+    # Decision 4: a word of stars alone matches every word; the message suggests [1].
+    with pytest.raises(ResponsaQueryRefused) as info:
+        _compiled(query)
+    assert info.value.code == 'responsa_unsupported_star'
+    assert '[1]' in str(info.value)
+
+
+@pytest.mark.parametrize('query', ['כ*נים', 'כ*נים*', 'כ*ה*נ*ים*', '(כ*ן/לוי)', 'א(ב/ג)*ד', '#כ*נים',
+                                   '-כ*נים', '%כ*ן'])
+def test_the_shapes_phase_1_refused_are_searched(query):
+    # Phase 3 lifted Phase 1's refusals for a star inside a word or at its end (plan §7).
+    _compiled(query)
+
+
+@pytest.mark.parametrize('query', ['*כ*נים', '*כ*ה*נ*ים*', '(*נים/לוי)'])
+def test_a_leading_star_with_another_star_is_still_refused(query):
+    # Until leading stars are searched (plan §7, Phase 3 point 14).
     with pytest.raises(ResponsaQueryRefused) as info:
         _compiled(query)
     assert info.value.code == 'responsa_unsupported_star'
 
 
 def test_the_refusal_covers_line_groups():
-    groups, gaps = _parse_line_break_query('|א | כ*ן')
+    groups, gaps = _parse_line_break_query('|א | *')
     with pytest.raises(ResponsaQueryRefused):
         compile_line_groups(groups, gaps, {'responsa_mode': True}, None)
 
 
 def test_both_end_stars_are_still_hash_both_sides():
+    # Until leading stars are searched (plan §7, Phase 3 point 14).
     c = _compiled('*כהנ*')
     assert c.warning and c.plans[0].component.grammatical_prefixes and c.plans[0].component.grammatical_suffixes
 

@@ -629,8 +629,9 @@ class IsolatedEngine:
             from shared.search_engine import (_note_search_cutoff, _set_last_responsa_downgrade,
                                               _set_last_responsa_downgrade_meta)
             cutoff = result.get('cutoff') or {}
-            _note_search_cutoff(capped=bool(cutoff.get('capped')),
-                                interrupted=bool(cutoff.get('interrupted')))
+            partial = bool(cutoff.get('partial'))
+            _note_search_cutoff(capped=bool(cutoff.get('limited') if partial else cutoff.get('capped')),
+                                interrupted=bool(cutoff.get('interrupted')), partial=partial)
             _time_limit_stop.value = bool(result.get('time_limit'))
             if result.get('downgrade'):
                 _set_last_responsa_downgrade(result['downgrade'])

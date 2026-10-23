@@ -28,7 +28,7 @@ def test_the_web_joins_lab_executor_lets_a_refusal_through(monkeypatch):
     from web.joins_executor import WebSearchExecutor
     monkeypatch.setattr(state, 'searcher', _RefusingSearcher())
     with pytest.raises(ResponsaQueryRefused):
-        WebSearchExecutor().execute_search('כ*נים', 'exact', 0)
+        WebSearchExecutor().execute_search('*', 'exact', 0)
 
     class _Broken:
         def execute_search(self, *a, **k):
@@ -41,7 +41,7 @@ def test_the_other_side_of_the_leaf_lets_a_refusal_through():
     from shared.joins_lab import apply_cross_side, normalize_candidate
     base = [normalize_candidate({'display': {'id': '990000000010205171', 'img': 3}, 'uid': 'u', 'full_text': ''})]
     with pytest.raises(ResponsaQueryRefused):
-        apply_cross_side(_RefusingSearcher(), base, 'כ*נים', {'responsa_mode': True}, 'AND', None)
+        apply_cross_side(_RefusingSearcher(), base, '*', {'responsa_mode': True}, 'AND', None)
 
 
 def test_the_web_full_text_highlight_matches_before_escaping():
@@ -63,7 +63,7 @@ def test_the_desktop_other_side_worker_reports_the_refusal():
     from desktop.join_workbench import _CrossSideWorker
     from shared.joins_lab import BuilderRow, SideQuery, normalize_candidate
     base = [normalize_candidate({'display': {'id': '990000000010205171', 'img': 3}, 'uid': 'u', 'full_text': ''})]
-    worker = _CrossSideWorker(_RefusingSearcher(), base, SideQuery(rows=(BuilderRow(term='כ*נים'),)), {}, 'AND', None)
+    worker = _CrossSideWorker(_RefusingSearcher(), base, SideQuery(rows=(BuilderRow(term='*'),)), {}, 'AND', None)
     refused, done = [], []
     worker.refused.connect(refused.append)
     worker.done.connect(done.append)
@@ -153,7 +153,7 @@ def test_a_refused_web_search_does_not_bring_the_previous_cards_back(server, mon
             shown['first'] = bool(stale(a))
             shown['saved'] = len(saved['snapshot']['raw_text_candidates'])
             _click(a, _element(a, ui.button, lambda e: e.text == 'Run Search'))
-            await _wait_for(lambda: any(t.startswith('Responsa search takes a *') for t in _label_texts(a)))
+            await _wait_for(lambda: any(t.startswith('A * alone') for t in _label_texts(a)))
             shown['at_refusal'] = saved.get('snapshot')
             release.set()
             await asyncio.sleep(0.5)                 # the first search's enrichment re-renders
@@ -200,7 +200,7 @@ def test_a_superseded_refused_web_search_stays_quiet(server, monkeypatch):  # no
             _click(a, _element(a, ui.button, lambda e: e.text == 'Run Search'))
             await _wait_for(lambda: calls)
             await asyncio.sleep(0.5)                 # the refusal has reached its handler
-            shown['said'] = [t for t in _label_texts(a) if t.startswith('Responsa search takes a *')]
+            shown['said'] = [t for t in _label_texts(a) if t.startswith('A * alone')]
         except Exception as exc:                    # asserted below
             shown['error'] = repr(exc)
 
@@ -242,7 +242,7 @@ def test_a_superseded_refusal_of_the_other_side_stays_quiet(server, monkeypatch)
             _click(a, _element(a, ui.button, lambda e: e.text == 'Run Search'))
             await _wait_for(lambda: len(calls) == 2)
             await asyncio.sleep(0.5)                # the refusal has reached its handler
-            shown['said'] = [m for m in a.notify.messages if m.startswith('Responsa search takes a *')]
+            shown['said'] = [m for m in a.notify.messages if m.startswith('A * alone')]
             shown['cards'] = [t for t in _label_texts(a) if 'T-S STALE' in t]
         except Exception as exc:                    # asserted below
             shown['error'] = repr(exc)

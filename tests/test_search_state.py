@@ -308,3 +308,62 @@ def test_compact_result_rows_strips_heavy_text_and_keeps_excerpt():
     assert row['full_text_excerpt'] == 'x' * 500
     assert 'full_text' not in row['display']
     assert 'content' not in row['display']
+
+
+@pytest.mark.parametrize('path, rows, partial', [
+    ('run snapshot', 1, True),
+    ('user snapshot', 1, True),
+    ('user snapshot', 3, False),      # it keeps 2 rows here: completing reads the rest
+])
+def test_a_restored_search_keeps_its_partial_state(path, rows, partial):
+    """Codex round 3 on PR #442: a star search that left crossings out by its own rule is
+    "+" that completing cannot fix (result_partial). A restored search keeps that, or
+    Search within would run it again with every candidate -- unless the snapshot dropped
+    rows, which completing does read."""
+    from web import search_runs
+    from web.pages import search_state as ss
+    storage = {'search_snapshot_schema_version': 1}
+    search_runs.clear()
+    with patch('web.pages.search_state.app') as mock_app, \
+         patch('web.safe_storage.app') as mock_safe_app, \
+         patch('web.pages.search_state._browser_id', lambda: 'browser-1'), \
+         patch.object(ss, '_SEARCH_ACTIVE_USER_FALLBACK_LIMIT', 2):
+        mock_app.storage.user = storage
+        mock_safe_app.storage.user = storage
+        state = ss.SearchUIState()
+        state.results = [{'display': {'id': f'M{i}'}} for i in range(rows)]
+        state.result_count_capped = True
+        state.result_partial = True
+        if path == 'run snapshot':
+            search_runs.finish_run('browser-1', 'code', dict(ss.search_run_snapshot(state),
+                                                             search_exclusion_sources=[]))
+        else:
+            ss.persist_search_snapshot(state)
+            search_runs.clear()
+        restored = ss.SearchUIState()
+        ss.restore_search_snapshot(restored, 'code')
+        search_runs.clear()
+    assert restored.result_count_capped is True
+    assert restored.result_partial is partial
+
+
+def test_the_run_snapshot_drops_the_partial_state_with_its_rows():
+    from web.pages import search_state as ss
+    state = ss.SearchUIState()
+    state.result_partial = True
+    state.results = [{'display': {'id': 'M'}}]
+    assert ss.search_run_snapshot(state)['result_partial'] is True
+    state.results = [{'display': {'id': f'M{i}'}} for i in range(1001)]
+    snapshot = ss.search_run_snapshot(state)
+    assert snapshot['result_partial'] is False and snapshot['result_count_capped'] is True
+
+
+def test_clearing_the_snapshot_drops_the_partial_state():
+    storage = {'search_result_partial': True}
+    with patch('web.pages.search_state.app') as mock_app, \
+         patch('web.safe_storage.app') as mock_safe_app:
+        mock_app.storage.user = storage
+        mock_safe_app.storage.user = storage
+        from web.pages.search_state import clear_search_snapshot
+        clear_search_snapshot()
+    assert 'search_result_partial' not in storage

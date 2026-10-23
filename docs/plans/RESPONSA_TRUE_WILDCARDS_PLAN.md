@@ -1,6 +1,11 @@
 # Responsa wildcards: `*` as any sequence, `#` as the grammatical list
 
-**Status:** **Phase 2 implemented (2026-10-22, PR #440 on the design PR #438)**: the index format,
+**Status:** **Phase 3 being built (2026-10-22) in two PRs** (the owner): PR #442 a star at the end of
+a word or inside it (`X*`, `X*Y`), deployable on today's format-1 index -- **implemented, with its
+fixture gates (the oracle run on format 2 and format 1 built by the Indexer; every new test red
+under a named mutation); its real-data gates (oracle, `verify_search_combinations.py`, timings on
+both formats) are the local session's, commands in the PR**; a second PR leading stars and decision
+10. The points the plan left open are settled in §7 ("Phase 3, settled before building"). **Phase 2 implemented (2026-10-22, PR #440 on the design PR #438)**: the index format,
 built locally and gated (§7 Phase 2); the server rebuild is the owner's, and today's page-break matches
 move to the seams in Phase 3 (decision 10, 2026-10-22).
 **Phase 1 implemented (2026-10-22)** -- the engine on
@@ -1168,7 +1173,8 @@ carries both:
   the open index lacks them (a desktop on an old index until the user re-indexes);
 - the server rebuild and the desktop re-index.
 
-**Phase 3: true `*`, on the new index.**
+**Phase 3: true `*`, on the new index.** *(First PR, #442: `X*` and `X*Y` on both formats,
+implemented 2026-10-22, real-data gates pending; the second PR: leading stars and decision 10.)*
 - Star retrieval and pages first (§5.4); a leading star through the reversed-words field,
   `*כהנ*` (both ends) through today's slow route.
 - Crossings read from seams, never from whole manuscripts (decision 9).
@@ -1182,6 +1188,100 @@ carries both:
   through several `regex_query`s ORed (decision 5); order by the finite words' score (decision 2);
   a star matches zero letters (decision 6).
 - Every text in §5.7.
+
+**Phase 3, settled before building (2026-10-22, plan amendment; Codex review on PR #442).**
+What the sections above leave open, decided so the code, the oracle and the help say one thing.
+
+**Two PRs (the owner, 2026-10-22).** The first (PR #442) ships a star **at the end of a word or
+inside it** (`X*`, `X*Y`), working on today's format-1 index, so it can be deployed before the
+server rebuild: those lookups are patterns that begin with the word's first letters, cheap on
+either format (§3.1). A star **at the start of a word** keeps Phase 1's meaning there (point 14).
+The second PR, stacked on it, searches leading stars through the reversed-words field and moves
+today's finite crossings to the seams (decision 10).
+
+1. **A star word is a whole word, bounded at both ends.** The star takes letters of any script and
+   the looked-past characters (marks, in-word quotes, brackets), never a digit, `_`, a space or
+   punctuation, so it reaches the word's own edge: `כהנ*` is a word that begins with `כהנ`, and
+   Exact's predicate checks both of its ends like any other word's (§4). `*` alone or a word of
+   stars only is refused (decision 4), in a positive or a negated word and in an OR group; so is
+   a star word whose letters hold punctuation (`כ*נ.ים`: the lookup reads one token per word).
+2. **Expansion runs letter-run by letter-run.** The letters between stars are runs. `%` and
+   spelling variants expand every run; `#`'s prefixes and Judeo-Arabic expand the first run when
+   the word begins with a letter, `#`'s suffixes the last run when it ends with one (a leading
+   star already covers every prefix, a trailing one every suffix). The word's forms are every
+   combination of its runs' forms, written in the check and the lookup as one alternation per
+   run between the stars, so their size is the sum of the runs' forms, not the product; the guard
+   counts that sum (§5.3: stems in one pattern alternation).
+3. **A letter right before a star takes its final or its medial form**: `שלום*` finds `שלומות`
+   (Phase 1's rule for `word*`), and `שלומ*` finds `שלום`.
+4. **OR groups and inline alternation take stars**: `(כהנ*/לוי)`, `(כהנ/גדול)*`, `כה(נ/ן)*`;
+   each alternative is its own form, finite or starred.
+5. **A negated star word** (`-כ*נים`) excludes a page whose text holds letters matching it
+   anywhere (decision 7's letters-anywhere rule, the star as letters): `-כהנ*` is `-כהנ`. With
+   `%` each run takes its plene/defective spellings, as in a positive word (`-%כ*נים` excludes
+   `כנם` too; Codex review of PR #443).
+6. **Retrieval per form.** A word that begins with a letter: a forward pattern on
+   `content_search` (the term-dictionary walk is pruned by its first letters), on both formats.
+   (Second PR: a leading star and a letter at the end through the reversed-words field on format 2,
+   else the `.*` scan; stars at both ends the scan on both formats.) Star lookups score a
+   constant, so the finite words' BM25 orders the rows (decision 2), and are case-insensitive
+   (`(?i)`), as the check is: the index keeps a token's case (Codex review of PR #442). A lookup past tantivy-fst's
+   size limit is split by halving its largest run's alternation.
+7. **Where Responsa reads matches that run across pages** (pages are always read first, §5.4):
+
+   | Query | Format 2 (seams) | Format 1 (today's index) |
+   |---|---|---|
+   | one word (no flex spacing), or a star word alone | none: a word cannot cross a break | none |
+   | finite words: `AND`, a text position, a line, a sequence | whole-manuscript documents, as today (the seams take the sequences in the second PR, decision 10) | the same |
+   | a star word: `AND`, a text position, a line | whole-manuscript documents, each checked whole (a line query: every match that runs across a page break, not only the first; Codex round 2), **only when at most `RESPONSA_STAR_AGGREGATE_LIMIT` of them hold the words**; else none, marked | the same |
+   | a star word in a sequence, S <= K | seams | the whole-manuscript documents' page breaks, a window of S words a side, **bounded as above** |
+   | a star word in a sequence, S > K | seams, marked (a crossing with more than K words a side) | the same as S <= K: windows of S words |
+
+   **This amends §6.1 point 6** for star words on format 1: not the whole manuscripts read whole
+   (§3.5's 4.7 billion characters for 12 crossings), but their page breaks only, and only when
+   the manuscripts holding the words are few enough to read in time:
+   `Config.RESPONSA_STAR_AGGREGATE_LIMIT` = 2,000 (counted before reading; a starting value for the
+   local gates to confirm against the website's 3-minute limit). Reading break by break also finds
+   every crossing of a manuscript, not only its first match: at each break (and at each seam) the
+   first match that starts on the page before it, so a crossing from an earlier page -- found at
+   the break it crosses first -- cannot hide it (Codex review of PR #443). The format-1 windows keep today's
+   false junctions (the V0.8 -> V0.7 restart); the seams do not (§6.1 point 3). `AND`, line and
+   position queries read whole manuscripts because the seams hold no line or position fields and
+   `AND` is not a crossing (§6's table); a star there is bounded the same way.
+8. **"Marked incomplete"** is the cut-off signal: `capped` ("N+", the API's `results_cut_off`),
+   with a sentence that says which matches were not searched and why, in the Responsa note of the
+   results line (the API carries it as `query_downgraded: ...`, as it carried the guard's
+   downgrades and Phase 1's `*word*` note). Crossings left out by these rules also set
+   `partial` (and `limited` when a candidate limit cut the search too): reading every candidate
+   (`ids_only`) would leave them out again, so `complete_chain` does not run such a step again
+   (`RefinementStep.result_partial`, `_cannot_complete`), it stays "+" and Search within says so
+   (Codex round 1 on PR #442). A step searched within such a step inherits it unless its own
+   candidate limit cut it (`step_partial`: its restriction stays incomplete whatever it reads;
+   Codex round 2). A stopped search is never `result_partial`, whatever it had left out by rule:
+   the stop left candidates out too, and running it again reads them (`only_partial`; Codex round
+   3 on PR #443). A crossing step that fails is `capped` only, never silent.
+9. **Limits** (decision 3): `Config.RESPONSA_PAGE_LIMIT` = 150,000 page candidates on the main,
+   line-break and My Library Responsa paths; the whole-manuscript documents and the seams each
+   read up to `Config.SEARCH_LIMIT` (50,000) of their own. `ids_only` reads every candidate on
+   the paths that have it (main and My Library). **The line search has none** (as today): a
+   cut-off line step stays "+" and is not completed (`_cannot_complete`; Codex round 1). Exact,
+   Variants and Fuzzy keep 50,000 pages.
+10. **Order** (decision 2): the page candidates' score order, as today; a query whose every word
+    holds a star is sorted after the merge with My Library by the accepted matches on the row's
+    page (a row read through a whole manuscript or a seam counts one), then by shelfmark in its
+    natural order, T-S 2 before T-S 10 (`natural_sort_key`; Codex round 4 on PR #443).
+11. **A crossing row from a seam** has `scope` `seam`; its `full_text` is the whole pages its span
+    covers, read from the main index by uid and source (§6.1 point 4); its excluded words are
+    read on those pages; its `page_highlights` are in page coordinates.
+12. **Exact, Variants and Fuzzy** (second PR, decision 10) read crossings from the seams when the
+    query has several words, no text position, the crossing-window path (`_cross_page_terms`),
+    S = (n - 1)(gap + 1) <= K and the index has seams; otherwise today's whole-manuscript route.
+13. **The results line counts a star word as a pattern**: "searching N expanded terms + M
+    patterns" (§5.7).
+14. **A star at the start of a word, in the first PR**: `*X` keeps Phase 1's meaning (X with its
+    24 grammatical prefixes in the lookup, `\S*X` in the check), `*X*` is still rewritten as
+    `#X#` with its warning, and any other word that begins with a star (`*כ*נים`, `(*נים/לוי)`)
+    is refused with a message that says which shapes work. The second PR searches them all.
 
 ## 8. Gates (each with the mutation that must turn it red)
 

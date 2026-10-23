@@ -107,7 +107,7 @@ from desktop.variant_run_settings import (PreviewVariants, engine_with_variant_s
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
 from shared_export_utils import clean_text_single_line, coerce_img_page_cell
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
-from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter, chain_needs_completion
+from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter, chain_needs_completion, only_partial, step_partial, saved_cutoff
 from shared.document_service import select_pgp_page_entry
 from shared.exclusion_service import (
     ExclusionSource, compute_excluded_ids,
@@ -790,10 +790,11 @@ def _format_list_star(in_list=False):
 # ---------------------------------------------------------------------------
 
 
-# The index's continuous docs (shared/indexer.py). A row found through one
-# carries the doc's whole text in 'full_text', while its 'uid' is the page the
-# row is shown as (search_engine._aggregate_result_row).
-_AGGREGATE_SCOPES = frozenset(('system', 'part'))
+# The index's continuous docs (shared/indexer.py), and the seams (a crossing row
+# found through one carries the pages it covers). A row found through one carries
+# more than its page in 'full_text', while its 'uid' is the page the row is shown
+# as (search_engine._aggregate_result_row, _seam_result_row).
+_AGGREGATE_SCOPES = frozenset(('system', 'part', 'seam'))
 
 
 def _page_text_for_export(res, fetcher=None):
@@ -23369,9 +23370,7 @@ class GenizahGUI(QMainWindow):
                 result_count=len(results),  # total results (matches display count)
             )
             self._apply_run_params(step)
-            # Restricted to the previous step's results: if those left matches out, so may this.
-            step.result_count_capped = self._run_left_matches_out() or bool(
-                self.refinement_chain and self.refinement_chain[-1].result_count_capped)
+            step.result_count_capped, step.result_partial = self._new_step_marks()
             step._result_uids = {
                 r.get('uid') or r.get('display', {}).get('id')
                 for r in results
@@ -23403,6 +23402,7 @@ class GenizahGUI(QMainWindow):
 
         # Track Responsa expanded term count for status label
         self._responsa_expanded_count = results[0].get('responsa_expanded_count', 0) if results else 0
+        self._responsa_pattern_count = results[0].get('responsa_pattern_count', 0) if results else 0
 
         # A Responsa downgrade (the guard turned an option off) stays in the status
         # line for as long as these results show (plan §5.3; it was a 5-second flash).
@@ -23738,6 +23738,7 @@ class GenizahGUI(QMainWindow):
             )
             self._apply_run_params(step0)
             step0.result_count_capped = self._run_left_matches_out()
+            step0.result_partial = self._run_only_partial()
             step0._result_uids = {
                 r.get('uid') or r.get('display', {}).get('id')
                 for r in getattr(self, 'last_results', [])
@@ -24456,6 +24457,20 @@ class GenizahGUI(QMainWindow):
         cutoff = getattr(self, '_search_cutoff', None) or {}
         return bool(cutoff.get('capped') or cutoff.get('interrupted'))
 
+    def _new_step_marks(self):
+        """(result_count_capped, result_partial) of a step just searched within the
+        chain's last step. Restricted to that step's results: if those left matches out,
+        so may this; and if those cannot be completed, neither can this, unless its own
+        candidate limit cut it (``step_partial``; Codex round 2 on PR #442)."""
+        parent = self.refinement_chain[-1] if self.refinement_chain else None
+        capped = self._run_left_matches_out() or bool(parent and parent.result_count_capped)
+        return capped, step_partial(getattr(self, '_search_cutoff', None), parent)
+
+    def _run_only_partial(self):
+        """The shown results left out only crossings their search's own rule leaves out
+        (a star query, plan §7 Phase 3 point 8): completing the step would not add them."""
+        return only_partial(getattr(self, '_search_cutoff', None))
+
     def _count_text(self, n, capped, sep=False):
         """A result count as shown: "25,000+" when the list was cut off (D8)."""
         text = f"{n:,}" if sep else str(n)
@@ -24463,11 +24478,13 @@ class GenizahGUI(QMainWindow):
 
     def _forget_responsa_notes(self):
         """The Responsa notes of the results shown -- the guard's downgrade and the
-        expanded-term count -- go when those results are replaced or cleared:
-        on_search_finished sets them only for a new set of rows, so a later tag
-        search's line said the previous query's downgrade (Codex review of PR #433)."""
+        expanded-term and pattern counts -- go when those results are replaced or
+        cleared: on_search_finished sets them only for a new set of rows, so a later
+        tag search's line said the previous query's downgrade (Codex review of PR
+        #433) or its patterns (Codex round 3 on PR #442)."""
         self._responsa_warning = None
         self._responsa_expanded_count = 0
+        self._responsa_pattern_count = 0
 
     def _search_status_summary(self, domains=0):
         """The Search results status line, from the table as it is now.
@@ -24481,9 +24498,14 @@ class GenizahGUI(QMainWindow):
         total = self._count_text(len(self.last_results) if self.last_results else 0,
                                  self._shown_results_capped())
         expanded = getattr(self, '_responsa_expanded_count', 0)
+        patterns = getattr(self, '_responsa_pattern_count', 0)
         if domains:
             text = tr("Showing {} of {} results (filtering {} domains)").format(
                 visible, total, domains)
+        elif patterns > 0:
+            # A star word is one pattern, not a list of terms (plan §5.7).
+            text = tr("Showing {} of {} results (searching {} expanded terms + {} patterns)").format(
+                visible, total, expanded, patterns)
         elif expanded > 0:
             text = tr("Showing {} of {} results (searching {} expanded terms)").format(
                 visible, total, expanded)
@@ -33903,10 +33925,8 @@ class GenizahGUI(QMainWindow):
                     'results': getattr(self, 'last_results', [])[:5000],
                     # D8: the restored count shows "+" if the search was cut off or the
                     # snapshot above drops rows.
-                    'search_cutoff': {
-                        'capped': bool((getattr(self, '_search_cutoff', None) or {}).get('capped'))
-                                  or len(getattr(self, 'last_results', [])) > 5000,
-                        'interrupted': bool((getattr(self, '_search_cutoff', None) or {}).get('interrupted'))},
+                    'search_cutoff': saved_cutoff(getattr(self, '_search_cutoff', None),
+                                                  len(getattr(self, 'last_results', []) or []), 5000),
                     'domain_exclusions': sorted(getattr(self, '_domain_exclusions', set())),
                     'printed_filter': getattr(self, '_printed_filter_state', 'all'),
                     'local_filter': getattr(self, '_local_filter_state_search', 'all'),

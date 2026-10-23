@@ -10,7 +10,6 @@ Tests cover:
 - Suffix expansion and plene/defective through the pipeline
 """
 
-import re
 import sys
 import pytest
 from unittest.mock import MagicMock, patch
@@ -147,71 +146,42 @@ class TestBuildTantivyQueryResponsa:
 class TestBuildRegexResponsa:
     """Tests for the Responsa branch of build_regex_pattern."""
 
-    def test_suffix_wildcard(self):
-        """Suffix wildcard produces \\S* pattern."""
+    @staticmethod
+    def _star(wildcard, terms=(), pattern=None):
         engine = _make_search_engine()
-        components = [
-            {
-                'regex_terms': ['shalom'],
-                'wildcard': 'suffix',
-                'wildcard_pattern': None,
-                'flex_patterns': [],
-                'inline_pattern': None,
-                'original_words': ['shalom'],
-            },
-        ]
         result = engine.build_regex_pattern(
             terms=None, mode='exact', max_gap=0,
-            responsa_components=components, responsa_options={}
-        )
+            responsa_components=[{'regex_terms': list(terms), 'wildcard': wildcard,
+                                  'wildcard_pattern': pattern, 'flex_patterns': [],
+                                  'inline_pattern': None, 'original_words': list(terms)}],
+            responsa_options={})
         assert result is not None
-        pattern = result.pattern
-        # Should contain shalom followed by \S*
-        assert r'shalom\S*' in pattern or r'shalom\\S*' in pattern or re.search(r'shalom\\S\*', pattern) or 'shalom' in pattern
+        return lambda text: (m.group(0) if (m := result.search(text)) else None)
+
+    def test_suffix_wildcard(self):
+        """Suffix wildcard: any letters after the term, inside the word (Phase 3: no
+        longer \\S*, which took digits and punctuation too)."""
+        found = self._star('suffix', ['shalom'])
+        assert found('a shalomot b') == 'shalomot'
+        assert found('a shalom b') == 'shalom'
+        assert found('a shalom1 b') is None
 
     def test_prefix_wildcard(self):
-        """Prefix wildcard produces \\S* before the term."""
-        engine = _make_search_engine()
-        components = [
-            {
-                'regex_terms': ['neder'],
-                'wildcard': 'prefix',
-                'wildcard_pattern': None,
-                'flex_patterns': [],
-                'inline_pattern': None,
-                'original_words': ['neder'],
-            },
-        ]
-        result = engine.build_regex_pattern(
-            terms=None, mode='exact', max_gap=0,
-            responsa_components=components, responsa_options={}
-        )
-        assert result is not None
-        pattern = result.pattern
-        # Should contain \S* before neder
-        assert r'\S*neder' in pattern or r'\\S*neder' in pattern or 'neder' in pattern
+        """Prefix wildcard: Phase 1's \\S* before the term until leading stars are searched
+        (plan §7, Phase 3 point 14)."""
+        found = self._star('prefix', ['neder'])
+        assert found('x haneder y') == 'haneder'
+        assert found('x neder y') == 'neder'
+        assert found('x 1neder y') == '1neder'
+        assert found('x nederim y') is None
 
     def test_character_pattern(self):
-        """Character pattern *a*b*c* produces \\S*a\\S*b\\S*c\\S* regex."""
-        engine = _make_search_engine()
-        components = [
-            {
-                'regex_terms': [],
-                'wildcard': 'pattern',
-                'wildcard_pattern': '*a*b*c*',
-                'flex_patterns': [],
-                'inline_pattern': None,
-                'original_words': [],
-            },
-        ]
-        result = engine.build_regex_pattern(
-            terms=None, mode='exact', max_gap=0,
-            responsa_components=components, responsa_options={}
-        )
-        assert result is not None
-        pattern = result.pattern
-        # Should contain \S*a\S*b\S*c\S* (with regex escaping)
-        assert re.search(r'\\S\*a\\S\*b\\S\*c\\S\*', pattern) or r'\S*a\S*b\S*c\S*' in pattern
+        """Character pattern *a*b*c*: the letters in order inside one word."""
+        found = self._star('pattern', pattern='*a*b*c*')
+        assert found('w xaybzc w') == 'xaybzc'
+        assert found('w abc w') == 'abc'
+        assert found('w a b c w') is None
+        assert found('w a1bc w') is None
 
     def test_inline_alternation_single_char(self):
         """Inline alternation with single chars uses character class."""

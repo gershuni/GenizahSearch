@@ -40,7 +40,7 @@ from shared.browse_map_utils import natural_sort_key, dedupe_browse_map, _extrac
 from shared.search_tokenizer import register_search_tokenizers
 from shared.indexer import Indexer
 from shared.index_format import read_index_format, seam_index_path
-from shared.index_seams import REVERSED_WORDS_FIELD, reversed_ending_pattern
+from shared.index_seams import REVERSED_WORDS_FIELD, SEAM_SCOPE, reversed_ending_pattern
 from shared.responsa import (
     parse_responsa_query, _parse_line_break_query,
     ResponsaComponent, _apply_explosion_guard,  # noqa: F401
@@ -54,7 +54,7 @@ from shared.responsa_match import (
     compile_components as compile_responsa_components,
     compile_line_groups as compile_responsa_line_groups,
     component_query_string, expand_stems as expand_responsa_stems, plans_from_dicts,
-    refuse_unsupported_stars,
+    refuse_unsupported_stars, ResponsaQueryRefused, StarExclusion,
 )
 
 LOGGER = logging.getLogger("genizah." + __name__)
@@ -131,15 +131,26 @@ def _consume_last_responsa_downgrade() -> Optional[str]:
 _LAST_SEARCH_CUTOFF = threading.local()
 
 
-def _note_search_cutoff(capped=False, interrupted=False) -> None:
-    """Add to the current search's cut-off signal (any part of it can say so)."""
+def _note_search_cutoff(capped=False, interrupted=False, partial=False) -> None:
+    """Add to the current search's cut-off signal (any part of it can say so).
+    *partial*: matches across pages were left out by the search's own rule (a star
+    query's crossings past the seams' K words, or in more manuscripts than can be read
+    in time; plan §7, Phase 3 point 8) -- "N+" like a cut, but reading every candidate
+    (``ids_only``) would leave them out again, so a search-within does not try."""
     cur = getattr(_LAST_SEARCH_CUTOFF, 'value', None) or {'capped': False, 'interrupted': False}
-    _LAST_SEARCH_CUTOFF.value = {'capped': cur['capped'] or bool(capped),
-                                 'interrupted': cur['interrupted'] or bool(interrupted)}
+    value = {'capped': cur['capped'] or bool(capped) or bool(partial),
+             'interrupted': cur['interrupted'] or bool(interrupted)}
+    if partial or cur.get('partial'):
+        # 'limited': a candidate limit cut it too, which reading every candidate completes.
+        value['partial'] = True
+        value['limited'] = bool(cur.get('limited', cur['capped'] and not cur.get('partial')) or capped)
+    _LAST_SEARCH_CUTOFF.value = value
 
 
 def consume_last_search_cutoff() -> dict:
-    """Read and clear the cut-off signal of the last search on this thread."""
+    """Read and clear the cut-off signal of the last search on this thread:
+    ``{'capped', 'interrupted'}``, and ``'partial'`` / ``'limited'`` when the search left
+    crossings out by its own rule (_note_search_cutoff)."""
     value = getattr(_LAST_SEARCH_CUTOFF, 'value', None)
     _LAST_SEARCH_CUTOFF.value = None
     return value or {'capped': False, 'interrupted': False}
@@ -212,6 +223,15 @@ _PROGRESS_TICK_SECONDS = 0.5
 # variants/fuzzy search may find only a few rows over a long run).
 _PREVIEW_ROWS = 50
 _PREVIEW_AFTER_S = 0.5
+
+# Why a Responsa search did not read every match across a page break (plan §7, "Phase 3,
+# settled before building", points 7-8). Each one marks the search incomplete ("N+")
+# and is said in the results line beside the guard's downgrades.
+CROSSING_NOTE_LONG = ("Matches across a page break with more than {k} words on one side of it "
+                      "were not searched (a query with *).")
+CROSSING_NOTE_TOO_MANY = ("Matches that run across pages were not searched: a query with * reached "
+                          "{n:,} manuscripts, more than the {limit:,} that can be read in time.")
+CROSSING_NOTE_FAILED = "Matches across a page break could not be searched; the list may be incomplete."
 
 
 def _count_unique_chunks(chunk_hits):
@@ -460,6 +480,22 @@ def _matched_page_text(content, span, boundaries):
     return '\n'.join(parts) if parts else content
 
 
+def _exclusion_test(words):
+    """A test of a text for the excluded *words* (decision 7: their letters anywhere),
+    or None when there are none. A Responsa ``-כ*נים`` (StarExclusion) is matched with
+    its star as letters; any other word is a substring, as it always was (the "Exclude
+    Words" box of Exact, Variants and Fuzzy has no wildcards)."""
+    plain = [w.lower() for w in words or [] if w and not isinstance(w, StarExclusion)]
+    stars = [w for w in words or [] if isinstance(w, StarExclusion)]
+    if not (plain or stars):
+        return None
+
+    def excluded(text):
+        lowered = text.lower()
+        return any(w in lowered for w in plain) or any(w.found_in(lowered) for w in stars)
+    return excluded
+
+
 def _without_excluded(rows, words):
     """*rows* without those whose matched page holds the letters of one of *words*,
     anywhere inside a word (decision 7, every mode). The page: a page row's own text;
@@ -467,7 +503,7 @@ def _without_excluded(rows, words):
     built); an ids_only row decided as it was built (``_excluded``). It was the
     row's snippet and full_text -- for a row found through its whole manuscript, the
     whole manuscript, so `-X` hid a row whose page never held X. The private keys go."""
-    lowered = [w.lower() for w in words or [] if w]
+    excluded = _exclusion_test(words)
     out = []
     for r in rows:
         if '_excluded' in r:
@@ -477,7 +513,7 @@ def _without_excluded(rows, words):
         text = r.pop('_page_text', None)
         if text is None:
             text = r.get('full_text') or ''
-        if lowered and any(w in text.lower() for w in lowered):
+        if excluded is not None and excluded(text):
             continue
         out.append(r)
     return out
@@ -492,6 +528,18 @@ def _first_accepted_match(regex, text, first_match, accept):
             return match
         match = regex.search(text, pos=match.start() + 1)
     return None
+
+
+def _count_matches(regex, text, strip):
+    """The accepted matches of *regex* (a Responsa check) on *text*, one after another
+    (decision 2's order for an all-star query). *strip*: the text with its brackets out."""
+    if strip:
+        text = _strip_brackets(text)
+    n, m = 0, regex.search(text)
+    while m is not None:
+        n += 1
+        m = regex.search(text, max(m.end(), m.start() + 1))
+    return n
 
 
 def _add_bracket_variants(term: str) -> list:
@@ -1264,6 +1312,17 @@ def mark_word_highlights(snippet, highlights):
         result = (result[:word_start] + '*' + result[word_start:word_end]
                   + '*' + result[word_end:])
     return result
+
+
+@dataclass
+class _CrossingPlan:
+    """Where a Responsa search reads the matches that run across pages, after its page
+    documents (SearchEngine._responsa_crossings)."""
+    route: Optional[str] = None     # 'aggregates' (whole-manuscript / part docs), 'seams', or None
+    side: int = 0                   # word chunks each side of a break: the seams' window, or *windows*'
+    windows: bool = False           # aggregates: only the matches across a break, break by break
+    bounded: bool = False           # aggregates: read only when at most RESPONSA_STAR_AGGREGATE_LIMIT
+    note: Optional[str] = None      # why some were not searched (the search is marked "N+")
 
 
 class SearchEngine:
@@ -3005,6 +3064,205 @@ class SearchEngine:
         cross_page = len({o.get('uid') for o in overlaps if o.get('uid')}) > 1
         return {'primary': primary or (boundaries[0] if boundaries else None), 'overlaps': overlaps, 'cross_page': cross_page}
 
+    # --- Crossings (plan §6.1 point 2, §7 Phase 3 points 7-12) --------------------------
+
+    def _seams_ready(self):
+        """The open index has its seam index (format 2): crossings can come from it."""
+        return getattr(self, 'seam_searcher', None) is not None and getattr(self, 'seam_words', 0) > 0
+
+    @staticmethod
+    def _responsa_side_words(compiled, per_pair_gaps, gap):
+        """S of §6.1 point 2: the most word chunks one side of a crossing can hold -- each
+        word's most chunks (a form one, a star word one, a typed word under flex spacing
+        its letter count), plus every pair's effective gap (``[N]``, else the global
+        gap), minus 1. Bidirectional reverses the order, not the sum."""
+        spans = []
+        for plan in compiled.plans:
+            n = max([len(f.split()) for f in plan.finite if f] + [1])
+            if compiled.flex_spacing:
+                n = max([n] + [len(w) for w in plan.original_words])
+            spans.append(n)
+        pairs = max(0, len(spans) - 1)
+        gaps = list(per_pair_gaps or [])[:pairs]
+        gaps += [None] * (pairs - len(gaps))
+        return sum(spans) + sum(gap if g is None else g for g in gaps) - 1
+
+    def _responsa_crossings(self, compiled, options, text_position, per_pair_gaps, gap, line=False):
+        """Where a Responsa query's matches across pages come from, after its pages (plan
+        §7, Phase 3 point 7): a _CrossingPlan.
+
+        - one word without flex spacing (or a star word alone): none -- it cannot cross;
+        - ``AND``, a text position or a line query: the whole-manuscript and part
+          documents, each checked whole; with a star word only when they are few enough
+          to read in time (*bounded*: ``Config.RESPONSA_STAR_AGGREGATE_LIMIT``);
+        - a sequence with a star word, on format 2: the seams when S <= K; past K the
+          seams too, marked incomplete;
+        - a sequence with a star word, on format 1: the whole-manuscript documents'
+          page breaks, a window of S words each side (*windows*), *bounded* -- §3.5's
+          billions of characters are what a broad star would read otherwise;
+        - a sequence of finite words: today's whole-manuscript documents (the seams
+          take them in the next PR, decision 10)."""
+        star = compiled.has_true_star
+        flex = bool(options.get('flex_spacing'))
+        if len(compiled.plans) == 1 and not (flex and compiled.plans[0].original_words):
+            return _CrossingPlan()
+        if options.get('within_document') or line or text_position:
+            return _CrossingPlan('aggregates', bounded=star)
+        if not star:
+            return _CrossingPlan('aggregates')
+        side = self._responsa_side_words(compiled, per_pair_gaps, gap)
+        if self._seams_ready():
+            if side <= self.seam_words:
+                return _CrossingPlan('seams', side)
+            return _CrossingPlan('seams', self.seam_words,
+                                 note=_tr(CROSSING_NOTE_LONG).format(k=self.seam_words))
+        return _CrossingPlan('aggregates', side, windows=True, bounded=True)
+
+    def _seam_restriction(self, restrict_sys_ids):
+        """The seams of these manuscripts: a seam's ``sys_ids`` names every manuscript its
+        pages belong to (a part bridge, two). Each crossing is then tested by the pages
+        its span covers (_page_in_restriction), as an aggregate's is."""
+        sids = sorted({str(s).lower() for s in restrict_sys_ids})
+        should = tantivy.Occur.Should
+        clauses = [(should, tantivy.Query.term_set_query(self.seam_index.schema, 'sys_ids',
+                                                         [s for s in sids if s.isalnum()]))]
+        odd = [s for s in sids if not s.isalnum() and '"' not in s]
+        if odd:
+            clauses.append((should, self.seam_index.parse_query(
+                ' OR '.join(f'sys_ids:"{s}"' for s in odd), ['sys_ids'])))
+        return tantivy.Query.boolean_query(clauses)
+
+    @staticmethod
+    def _seam_crossing_spans(regex, content, cut, side_words, strip, page_start=None):
+        """The first match of *regex* (a Responsa check: its search returns accepted
+        matches only) that runs across the seam's central break *cut*, within
+        *side_words* word chunks on each side: ``[(start, end)]`` in *content*'s
+        coordinates, or ``[]``. The seam centred on the first break a match crosses holds
+        it (§6.1 point 2), so each crossing is found at that seam. *page_start*: where the
+        page just before *cut* begins in *content* -- only a match that starts on it
+        counts here, so one from an earlier page (found at the earlier break, which it
+        crossed first) cannot hide one that starts on this page (Codex review of PR
+        #443). *strip*: matched on the text with its brackets out, the span mapped back
+        (_unstripped_span)."""
+        lo = _left_window_start(content, cut, side_words)
+        hi = _right_window_end(content, cut, side_words)
+        window = content[lo:hi]
+        if strip:
+            text, cs = _strip_brackets(window), len(_strip_brackets(window[:cut - lo]))
+        else:
+            text, cs = window, cut - lo
+        m = regex.search(text)
+        while m is not None and m.start() < cs:
+            if m.end() > cs:
+                s, e = _unstripped_span(window, m.start(), m.end()) if strip else m.span()
+                if page_start is None or lo + s >= page_start:
+                    return [(lo + s, lo + e)]
+            m = regex.search(text, m.start() + 1)
+        return []
+
+    def _break_crossing_spans(self, regex, content, boundaries, side_words, strip):
+        """Every match of *regex* (a Responsa check) that runs across a page break of a
+        whole-manuscript / part document: at each break the first one that starts on the
+        page before it, within *side_words* word chunks a side (``_seam_crossing_spans``),
+        so a match inside a page earlier in the manuscript cannot hide one (a star query
+        on an index without seams), nor can a crossing from an earlier page. Sorted."""
+        spans = set()
+        for prev, b in zip(boundaries, boundaries[1:]):
+            spans.update(self._seam_crossing_spans(regex, content, b.get('start', 0), side_words, strip,
+                                                   prev.get('start', 0)))
+        return sorted(spans)
+
+    def _responsa_seam_query(self, compiled, options, restrict_sys_ids):
+        """*compiled*'s lookup on the seam index (its own schema), within the restriction."""
+        query = compiled.retrieval(self.seam_index, has_content_search=True,
+                                   flex_spacing=bool(options.get('flex_spacing')),
+                                   bidirectional=bool(options.get('bidirectional')))
+        if restrict_sys_ids is not None:
+            query = tantivy.Query.boolean_query([(tantivy.Occur.Must, query),
+                                                 (tantivy.Occur.Must, self._seam_restriction(restrict_sys_ids))])
+        return query
+
+    def _page_texts(self, pages, cache):
+        """The stored text of each (uid, source) page of the main index, in order -- a
+        crossing row from a seam carries its pages whole, never the seam's slices (§6.1
+        point 4). *cache*: {(uid, source): text} for the search. '' for a page not found."""
+        out = []
+        for uid, source in pages:
+            key = (uid, source)
+            if key not in cache:
+                text = ''
+                try:
+                    q = self.index.parse_query(f'unique_id:"{uid}" AND scope:page', ['content'])
+                    found = self.searcher.search(q, 8)       # the page, under its V0.8 and V0.7 copies
+                    for _score, addr in found.hits:
+                        doc = self.searcher.doc(addr)
+                        if doc['unique_id'][0] == uid and doc['source'][0] == source:
+                            text = doc['content'][0]
+                            break
+                except MemoryError:
+                    raise
+                except Exception as e:
+                    LOGGER.warning("Page text of %s (%s) not read: %r", uid, source, e)
+                cache[key] = text
+            out.append(cache[key])
+        return out
+
+    def _seam_pages_text(self, span, slices, content, cache):
+        """The text a crossing row from a seam stands for: the whole pages its span covers,
+        joined by line breaks (a page not found keeps the seam's slice of it)."""
+        s, e = span
+        covered = [b for b in slices if not (e <= b.get('start', 0) or s >= b.get('end', 0))]
+        texts = self._page_texts([(b.get('uid'), b.get('source', '')) for b in covered], cache)
+        return '\n'.join(t or content[b.get('start', 0):b.get('end', 0)].rstrip('\n')
+                         for t, b in zip(texts, covered))
+
+    def _seam_result_row(self, content, span, slices, pattern_str, score, cache, page_text=False):
+        """The result row for a crossing found in a seam (scope 'seam'): shown as the page
+        the match starts on, its ``page_highlights`` in page coordinates (each slice's
+        ``offset``), its ``full_text`` the whole pages the span covers (§6.1 point 4)."""
+        span_map = self._map_span_to_pages(span, slices)
+        primary = span_map.get('primary') or {}
+        hl_c, hl_f = self._highlight_pair(content, span)
+        meta = self.meta_mgr.get_display_data(primary.get('full_header', ''), primary.get('source', ''))
+        full_text = self._seam_pages_text(span, slices, content, cache)
+        page_highlights = [{'uid': ov.get('uid'), 'p_num': ov.get('p_num'), 'span': ov.get('span'),
+                            'full_header': ov.get('full_header', ''), 'source': ov.get('source', '')}
+                           for ov in span_map.get('overlaps', []) if 'span' in ov and ov.get('uid')]
+        return {
+            'display': meta,
+            'snippet': hl_c or "",
+            'full_text': full_text,
+            'uid': primary.get('uid'),
+            'raw_header': primary.get('full_header', ''),
+            'raw_file_hl': hl_f or "",
+            'highlight_pattern': pattern_str,
+            'page_highlights': page_highlights,
+            'cross_page': span_map.get('cross_page', False),
+            'scope': SEAM_SCOPE,
+            'score': float(score),
+            **({'_page_text': full_text} if page_text else {}),
+        }
+
+    @staticmethod
+    def _order_all_star(rows, regex, strip):
+        """Decision 2: a query whose every word holds a star has no score to order by, so
+        its rows go by the matches on the row's page, most first (a row read through a
+        whole manuscript or a seam counts one; a page row's count set as it was built,
+        ``_matches``, else counted on its text), then by shelfmark in its natural order
+        (T-S 2 before T-S 10, as the other shelfmark sort; Codex round 4 on PR #443).
+        Stable: equal rows keep their order."""
+        def matches(row):
+            n = row.pop('_matches', None)
+            if n is None:
+                if row.get('cross_page') or row.get('scope', 'page') != 'page':
+                    return 1
+                n = _count_matches(regex, row.get('full_text') or '', strip)
+            return n
+        keyed = [(-matches(r), natural_sort_key(str((r.get('display') or {}).get('shelfmark') or '')), i, r)
+                 for i, r in enumerate(rows)]
+        keyed.sort(key=lambda k: k[:3])
+        return [k[3] for k in keyed]
+
     def _get_field(self, doc, field, default=None):
         try:
             return doc[field]
@@ -3196,8 +3454,20 @@ class SearchEngine:
             if restrict_sys_ids is not None:   # in the query at any size: see execute_search
                 query = tantivy.Query.boolean_query([(tantivy.Occur.Must, query), (
                     tantivy.Occur.Must, self._restriction_query(restrict_sys_ids))])
-            hits, capped = _top_hits(self.searcher, query, Config.SEARCH_LIMIT)
-        except MemoryError:
+            # Pages first (plan §5.4), up to the Responsa page limit (decision 3); then the
+            # whole-manuscript documents for lines across a page break, with a limit of
+            # their own (a star query: only when few enough to read in time).
+            crossings = (self._responsa_crossings(compiled, opts, text_position, [], 0, line=True)
+                         if self._every_doc_has_scope() else None)
+            if crossings is not None:
+                hits, capped = _top_hits(self.searcher, self._and_query(query, 'scope:page'),
+                                         Config.RESPONSA_PAGE_LIMIT)
+                agg_q = (self._and_query(query, 'scope:system OR scope:part')
+                         if crossings.route == 'aggregates' else None)
+            else:
+                hits, capped = _top_hits(self.searcher, query, Config.RESPONSA_PAGE_LIMIT)
+                agg_q = None
+        except (MemoryError, ResponsaQueryRefused):
             raise
         except Exception as e:
             LOGGER.warning("Line-break search query failed: %s", e)
@@ -3206,6 +3476,32 @@ class SearchEngine:
         total_hits = len(hits)
         _note_search_cutoff(capped=capped)
         LOGGER.debug(f"Line-break Tantivy returned {total_hits} hits")
+        crossing_notes = []
+
+        def _pages_then_aggregates():
+            nonlocal total_hits
+            yield from hits
+            if agg_q is None:
+                return
+            try:
+                if crossings.bounded:
+                    found = self.searcher.search(agg_q, 1, count=True).count
+                    if found > Config.RESPONSA_STAR_AGGREGATE_LIMIT:
+                        crossing_notes.append(_tr(CROSSING_NOTE_TOO_MANY).format(
+                            n=found, limit=Config.RESPONSA_STAR_AGGREGATE_LIMIT))
+                        _note_search_cutoff(partial=True)
+                        return
+                more, more_capped = _top_hits(self.searcher, agg_q, Config.SEARCH_LIMIT)
+                _note_search_cutoff(capped=more_capped)
+            except MemoryError:
+                raise
+            except Exception as e:
+                LOGGER.warning("Line-break crossing query failed; page results kept, marked N+: %s", e)
+                _note_search_cutoff(capped=True)
+                crossing_notes.append(_tr(CROSSING_NOTE_FAILED))
+                return
+            total_hits += len(more)
+            yield from more
 
         restrict_uids = None
         restrict_sids = None if restrict_sys_ids is None else {str(s) for s in restrict_sys_ids}
@@ -3220,8 +3516,42 @@ class SearchEngine:
         regex_filtered = 0
         was_interrupted = False
 
+        def _aggregate_row(doc, content, span, boundaries, scope):
+            """The row for a match *span* of a whole-manuscript / part document: shown as
+            the page it starts on, its pages' highlights in page coordinates."""
+            hl_c, hl_f = self._highlight_pair(content, span)
+            span_map = self._map_span_to_pages(span, boundaries)
+            primary = span_map.get('primary') or {}
+            display_header = primary.get('full_header', doc['full_header'][0])
+            source_label = primary.get('source', doc['source'][0])
+            meta = self.meta_mgr.get_display_data(display_header, source_label)
+            page_highlights = []
+            for ov in span_map.get('overlaps', []):
+                if 'span' in ov and ov.get('uid'):
+                    page_highlights.append({
+                        'uid': ov.get('uid'),
+                        'p_num': ov.get('p_num'),
+                        'span': ov.get('span'),
+                        'full_header': ov.get('full_header', ''),
+                        'source': ov.get('source', '')
+                    })
+            return {
+                'display': meta,
+                'snippet': hl_c or "",
+                'full_text': content,
+                'uid': primary.get('uid') or doc['unique_id'][0],
+                'raw_header': display_header,
+                'raw_file_hl': hl_f or "",
+                'highlight_pattern': pattern_str,
+                'page_highlights': page_highlights,
+                'cross_page': span_map.get('cross_page', False),
+                'scope': scope,
+                # The matched lines' pages, for the exclusion check.
+                '_page_text': _matched_page_text(content, span, boundaries),
+            }
+
         try:
-            for i, (score, doc_addr) in enumerate(hits):
+            for i, (score, doc_addr) in enumerate(_pages_then_aggregates()):
                 if progress_callback and i % 5 == 0:
                     progress_callback(i, total_hits)
                 try:
@@ -3238,6 +3568,32 @@ class SearchEngine:
                     # One bracket rule (plan §4): a bracket-free query matches the text
                     # with its brackets out, and the row is kept, marked in the original.
                     match_content = content if has_brackets else _strip_brackets(content)
+
+                    if scope != 'page' and crossings is not None and crossings.bounded:
+                        # A star query (plan §7, Phase 3 point 7): every match of the
+                        # manuscript that runs across a page break, each its own row --
+                        # not only its first match, which a page row may already show
+                        # (Codex round 2 on PR #442). Its matches inside one page are
+                        # the page documents' rows.
+                        boundaries = self._parse_boundaries(doc)
+                        kept = 0
+                        m = regex.search(match_content)
+                        while m is not None:
+                            if ok(match_content, m):
+                                s_w, e_w = compiled.word_span(m)
+                                span = (_unstripped_span(content, s_w, e_w) if match_content is not content
+                                        else (s_w, e_w))
+                                span_map = self._map_span_to_pages(span, boundaries)
+                                if span_map.get('cross_page') and (restrict_uids is None or any(
+                                        _page_in_restriction(o, restrict_uids, restrict_sids)
+                                        for o in span_map.get('overlaps') or [])):
+                                    results.append(_aggregate_row(doc, content, span, boundaries, scope))
+                                    kept += 1
+                            m = regex.search(match_content, m.start() + 1)
+                        if not kept:
+                            regex_filtered += 1
+                        continue
+
                     match_obj = regex.search(match_content)
                     if match_obj is not None:
                         match_obj = _first_accepted_match(
@@ -3264,39 +3620,11 @@ class SearchEngine:
                     else:
                         match_obj = to_original(match_obj)
                     span = match_obj.span()
-                    hl_c, hl_f = self._highlight_pair(content, span)
 
                     if boundaries:
-                        span_map = self._map_span_to_pages(span, boundaries)
-                        primary = span_map.get('primary') or {}
-                        display_header = primary.get('full_header', doc['full_header'][0])
-                        source_label = primary.get('source', doc['source'][0])
-                        meta = self.meta_mgr.get_display_data(display_header, source_label)
-                        page_highlights = []
-                        for ov in span_map.get('overlaps', []):
-                            if 'span' in ov and ov.get('uid'):
-                                page_highlights.append({
-                                    'uid': ov.get('uid'),
-                                    'p_num': ov.get('p_num'),
-                                    'span': ov.get('span'),
-                                    'full_header': ov.get('full_header', ''),
-                                    'source': ov.get('source', '')
-                                })
-                        results.append({
-                            'display': meta,
-                            'snippet': hl_c or "",
-                            'full_text': content,
-                            'uid': primary.get('uid') or doc['unique_id'][0],
-                            'raw_header': display_header,
-                            'raw_file_hl': hl_f or "",
-                            'highlight_pattern': pattern_str,
-                            'page_highlights': page_highlights,
-                            'cross_page': span_map.get('cross_page', False),
-                            'scope': scope,
-                            # The matched lines' pages, for the exclusion check.
-                            '_page_text': _matched_page_text(content, span, boundaries),
-                        })
+                        results.append(_aggregate_row(doc, content, span, boundaries, scope))
                     else:
+                        hl_c, hl_f = self._highlight_pair(content, span)
                         if hl_c:
                             meta = self.meta_mgr.get_display_data(doc['full_header'][0], doc['source'][0])
                             results.append({
@@ -3317,13 +3645,18 @@ class SearchEngine:
             _note_search_cutoff(interrupted=True)
 
         LOGGER.debug(f"Line-break search: {len(results)} results, filtered: {regex_filtered}, interrupted: {was_interrupted}")
-        deduped = self._deduplicate(results, pages_win=True)
+        # First wins (plan §5.4): pages are read first.
+        deduped = self._deduplicate(results, first_wins=crossings is not None, pages_win=crossings is None)
 
         deduped = _without_excluded(deduped, exclude_words)
+        if compiled.all_star:
+            deduped = self._order_all_star(deduped, regex, not has_brackets)
 
-        # The guard's downgrade, reported as on the main path (plan §5.3).
-        if compiled.warning:
-            _set_last_responsa_downgrade(compiled.warning)
+        # The guard's downgrade, reported as on the main path (plan §5.3), with what was
+        # not searched across pages (plan §7, Phase 3 point 8).
+        warning = '; '.join(([compiled.warning] if compiled.warning else []) + crossing_notes) or None
+        if warning:
+            _set_last_responsa_downgrade(warning)
             _set_last_responsa_downgrade_meta({
                 'variants': bool(compiled.options['variants_on']),
                 'ja': bool(compiled.options['ja_on']),
@@ -3331,9 +3664,10 @@ class SearchEngine:
                 'bidirectional': bool(opts.get('bidirectional', False)),
             })
             if deduped:
-                deduped[0]['responsa_warning'] = compiled.warning
+                deduped[0]['responsa_warning'] = warning
         if deduped:
             deduped[0]['responsa_expanded_count'] = compiled.expanded_count
+            deduped[0]['responsa_pattern_count'] = compiled.pattern_count
         return deduped
 
 
@@ -3497,9 +3831,10 @@ class SearchEngine:
                 else:
                     refuse_unsupported_stars([c for g in _local_lines for c in g.components])
             try:
-                # ids_only (complete_chain completing a My Library step): every candidate.
-                _local_limit = (max(Config.SEARCH_LIMIT, self.local_searcher.num_docs + 1)
-                                if ids_only else None)
+                # ids_only (complete_chain completing a My Library step): every candidate;
+                # Responsa: its page limit (decision 3).
+                _local_limit = (max(Config.SEARCH_LIMIT, self.local_searcher.num_docs + 1) if ids_only
+                                else Config.RESPONSA_PAGE_LIMIT if _local_compiled is not None else None)
                 if _local_compiled is not None:
                     rows = self._local_responsa_hits(
                         _local_compiled, query_str, mode, gap, text_position,
@@ -3508,12 +3843,17 @@ class SearchEngine:
                     # A -word excludes its letters from the page the row is (LOCAL rows
                     # are pages), as on the main index.
                     rows = _without_excluded(rows, list(exclude_words or []) + _local_compiled.negated_words)
+                    if _local_compiled.all_star and not ids_only:
+                        # Decision 2, as on the main path (Codex round 6 on PR #442).
+                        rows = self._order_all_star(rows, _local_compiled.compile_check(),
+                                                    not _query_has_brackets(query_str))
                     if _local_compiled.warning:
                         _set_last_responsa_downgrade(_local_compiled.warning)
                         if rows:
                             rows[0]['responsa_warning'] = _local_compiled.warning
                     if rows:
                         rows[0]['responsa_expanded_count'] = _local_compiled.expanded_count
+                        rows[0]['responsa_pattern_count'] = _local_compiled.pattern_count
                     return rows
                 # Phase 96 D-F5: build regex here so LOCAL-only path also gets
                 # D-04.1 filter-out + highlight_pattern, same as the RRF merge path.
@@ -3710,7 +4050,7 @@ class SearchEngine:
             return regex.pattern_for(text) if isinstance(regex, _FuzzyMatcher) else pattern_str
 
         _parse_header = getattr(type(self.meta_mgr), 'parse_header_smart', None) if ids_only else None
-        _excluded_words = [w.lower() for w in exclude_words or []]
+        _excluded = _exclusion_test(exclude_words)
 
         def _id_row_of_span(doc, content, span, boundaries, scope):
             """ids_only's row for a match: the identity a full row would carry -- the
@@ -3726,10 +4066,9 @@ class SearchEngine:
             sys_id = (_parse_header(self.meta_mgr, header)[0] if _parse_header is not None
                       else self.meta_mgr.get_display_data(header, source).get('id'))
             row = {'uid': uid, 'display': {'id': sys_id, 'source': source}, 'scope': scope}
-            if _excluded_words:
+            if _excluded is not None:
                 page = _matched_page_text(content, span, boundaries) if boundaries else content
-                lowered = page.lower()
-                row['_excluded'] = any(w in lowered for w in _excluded_words)
+                row['_excluded'] = _excluded(page)
             return row
 
         # Search within manuscripts: the restriction is part of every query, at any
@@ -3755,12 +4094,22 @@ class SearchEngine:
         # Candidates read per query: the display's cut-off, or every doc (ids_only) --
         # one more than there are, so a query every doc matches is not reported cut off.
         _limit = max(Config.SEARCH_LIMIT, self.searcher.num_docs + 1) if ids_only else Config.SEARCH_LIMIT
+        # Responsa's page candidates (decision 3): a true * scores every match alike, so
+        # a cut at 50,000 kept an arbitrary part. Its whole-manuscript documents and
+        # seams read up to _limit of their own.
+        _page_limit = _limit if (ids_only or _responsa is None) else Config.RESPONSA_PAGE_LIMIT
+        # Where a Responsa search reads its matches across pages, after its pages
+        # (_responsa_crossings); None outside Responsa, and on an index whose documents
+        # do not all carry a scope (the one mixed query, as before).
+        _crossings = None
+        crossing_notes = []     # what was not searched across pages, and why (said with "N+")
 
         tantivy_started = time.perf_counter()
         try:
             if _responsa is not None:
                 # This index's lookup: scored terms on the search field, ORed on the
-                # content field with the bracket-tolerant pattern of every form.
+                # content field with the bracket-tolerant pattern of every form, and the
+                # star words' patterns.
                 t_query_obj = _responsa.retrieval(
                     self.index, field=search_field,
                     has_content_search=getattr(self, '_has_content_search', False),
@@ -3769,23 +4118,28 @@ class SearchEngine:
                     within_document=bool(responsa_options.get('within_document')))
                 if t_query_obj is None:
                     return []
-                # One word cannot cross a page break: a whole-manuscript doc would only
-                # repeat a page's own match, so the page docs are the whole answer, as
-                # for Exact's single word (plan §5.4; ספר read every manuscript). With
-                # flex spacing it can (של at a page's end, ום at the next one's start),
-                # so the whole-manuscript docs stay (Codex review of PR #432).
-                if (len(_responsa.plans) == 1 and not responsa_options.get('within_document')
-                        and not responsa_options.get('flex_spacing')
-                        and not text_position and self._every_doc_has_scope()):
-                    t_query_obj = self._and_query(t_query_obj, 'scope:page')
+                if self._every_doc_has_scope():
+                    _crossings = self._responsa_crossings(
+                        _responsa, responsa_options, text_position, extract_per_pair_gaps(query_str), gap)
+                    if _crossings.note:          # some crossings cannot be read: "N+"
+                        crossing_notes.append(_crossings.note)
+                        _note_search_cutoff(partial=True)
+            agg_q = None
+            if _crossings is not None:
+                # Responsa reads pages first (plan §5.4), as Exact does: every match inside
+                # one page, then -- only now, with a limit of their own -- the documents
+                # that hold its matches across pages. One word cannot cross a page break,
+                # so for it the pages are the whole answer (ספר read every manuscript).
+                hits, capped = _top_hits(self.searcher, _restricted(self._and_query(t_query_obj, 'scope:page')),
+                                         _page_limit)
+                _note_search_cutoff(capped=capped)
+                if _crossings.route == 'aggregates':
+                    agg_q = _restricted(self._and_query(t_query_obj, 'scope:system OR scope:part'))
             # Page docs first, then whole-manuscript / part docs, within the same
             # total limit. In score order the long aggregate docs often came first
             # and took seconds before the first row (they rarely add one); now the
-            # rows only an aggregate gives come after the page rows. Responsa keeps
-            # the single mixed query.
-            agg_q = None
-            if (not _page_only and not (responsa_options and responsa_options.get('responsa_mode'))
-                    and self._every_doc_has_scope()):
+            # rows only an aggregate gives come after the page rows.
+            elif (not _page_only and _responsa is None and self._every_doc_has_scope()):
                 if t_query_obj is not None:
                     page_q = self._and_query(t_query_obj, 'scope:page')
                 else:
@@ -3801,13 +4155,13 @@ class SearchEngine:
                         f'({t_query_str}) AND (scope:system OR scope:part)', [search_field])
                 agg_q = _restricted(agg_q)
             elif t_query_obj is not None:
-                hits, capped = _top_hits(self.searcher, _restricted(t_query_obj), _limit)
+                hits, capped = _top_hits(self.searcher, _restricted(t_query_obj), _page_limit)
                 _note_search_cutoff(capped=capped)
             else:
                 query = self.index.parse_query(t_query_str, [search_field])
                 hits, capped = _top_hits(self.searcher, _restricted(query), _limit)
                 _note_search_cutoff(capped=capped)
-        except MemoryError:
+        except (MemoryError, ResponsaQueryRefused):
             raise
         except Exception as e:
             if text_position and search_field != 'content':
@@ -3820,32 +4174,50 @@ class SearchEngine:
         tantivy_elapsed_ms = (time.perf_counter() - tantivy_started) * 1000.0
         total_hits = len(hits)
         LOGGER.debug(f"Tantivy returned {total_hits} hits")
+        _from_seams = _crossings is not None and _crossings.route == 'seams'
 
         def _page_hits_then_aggregates():
-            """The page hits, then -- fetched only now -- the whole-manuscript /
-            part hits, with a limit of their own: they are the only source of a
-            phrase's page-break matches, so page hits that fill the limit must not
-            leave them no room (Codex review of PR #375)."""
+            """(score, address, from a seam) of the page hits, then -- fetched only now --
+            the whole-manuscript / part hits or the seams, with a limit of their own:
+            they are the only source of a phrase's page-break matches, so page hits that
+            fill the limit must not leave them no room (Codex review of PR #375). A step
+            that fails, or that a star query may not read in time, leaves the search
+            marked "N+" -- never silently (plan §5.4)."""
             nonlocal total_hits, tantivy_elapsed_ms
-            yield from hits
-            room = _limit
-            if agg_q is None:
+            for score, addr in hits:
+                yield score, addr, False
+            if agg_q is None and not _from_seams:
                 return
             if progress_callback:
                 # A checkpoint before the second query, which cannot be stopped.
                 progress_callback(len(hits), total_hits)
             started = time.perf_counter()
             try:
-                more, more_capped = _top_hits(self.searcher, agg_q, room)
+                if _from_seams:
+                    searcher = self.seam_searcher
+                    query = self._responsa_seam_query(_responsa, responsa_options, restrict_sys_ids)
+                else:
+                    searcher, query = self.searcher, agg_q
+                    if _crossings is not None and _crossings.bounded:
+                        found = searcher.search(query, 1, count=True).count
+                        if found > Config.RESPONSA_STAR_AGGREGATE_LIMIT:
+                            crossing_notes.append(_tr(CROSSING_NOTE_TOO_MANY).format(
+                                n=found, limit=Config.RESPONSA_STAR_AGGREGATE_LIMIT))
+                            _note_search_cutoff(partial=True)
+                            return
+                more, more_capped = _top_hits(searcher, query, _limit)
                 _note_search_cutoff(capped=more_capped)
-            except MemoryError:
+            except (MemoryError, ResponsaQueryRefused):
                 raise
             except Exception as e:
-                LOGGER.warning("Aggregate-doc query failed; page results kept: %s", e)
+                LOGGER.warning("Crossing query failed; page results kept, marked N+: %s", e)
+                _note_search_cutoff(capped=True)
+                crossing_notes.append(_tr(CROSSING_NOTE_FAILED))
                 return
             tantivy_elapsed_ms += (time.perf_counter() - started) * 1000.0
             total_hits += len(more)
-            yield from more
+            for score, addr in more:
+                yield score, addr, _from_seams
         results = []
         regex_filtered_count = 0
         was_interrupted = False
@@ -3892,9 +4264,55 @@ class SearchEngine:
         document_load_seconds = 0.0
         candidate_match_seconds = 0.0
         last_tick = time.monotonic()
+        _strip_q = not _query_has_brackets(query_str)
+        # Responsa rows whose every word holds a star are ordered by their matches on the
+        # page (decision 2): a page row counts them as it is built.
+        _count_rows = _responsa is not None and _responsa.all_star and not ids_only
+        _seam_pages = {}     # (uid, source) -> page text: a seam row carries its pages whole
+
+        def _seam_hit(score, doc_addr):
+            """The rows of one seam: the first match across its central break (plan §6.1
+            point 2), shown as the page it starts on, carrying the pages it covers whole.
+            Returns how many it gave."""
+            nonlocal document_load_seconds, candidate_match_seconds
+            load_started = time.perf_counter()
+            doc = self.seam_searcher.doc(doc_addr)
+            document_load_seconds += time.perf_counter() - load_started
+            content = self._get_field(doc, 'content', [""])[0]
+            cut = int(self._get_field(doc, 'cut', [0])[0])
+            slices = self._parse_boundaries(doc)
+            match_started = time.perf_counter()
+            try:
+                spans = self._seam_crossing_spans(
+                    regex, content, cut, _crossings.side, _strip_q,
+                    max([b.get('start', 0) for b in slices if b.get('start', 0) < cut], default=None))
+            finally:
+                candidate_match_seconds += time.perf_counter() - match_started
+            kept = 0
+            for span in spans:
+                span_map = self._map_span_to_pages(span, slices)
+                if restrict_uids is not None and not any(
+                        _page_in_restriction(o, restrict_uids, restrict_sids) for o in span_map.get('overlaps') or []):
+                    continue
+                if ids_only:
+                    primary = span_map.get('primary') or {}
+                    header, source = primary.get('full_header', ''), primary.get('source', '')
+                    sys_id = (_parse_header(self.meta_mgr, header)[0] if _parse_header is not None
+                              else self.meta_mgr.get_display_data(header, source).get('id'))
+                    row = {'uid': primary.get('uid'), 'display': {'id': sys_id, 'source': source},
+                           'scope': SEAM_SCOPE}
+                    if _excluded is not None:
+                        row['_excluded'] = _excluded(self._seam_pages_text(span, slices, content, _seam_pages))
+                    results.append(row)
+                else:
+                    results.append(self._seam_result_row(content, span, slices, pattern_str, score, _seam_pages,
+                                                         page_text=bool(exclude_words)))
+                kept += 1
+            return kept
+
         i = 0       # read below when the checkpoint before the aggregates stops an empty run
         try:
-            for i, (score, doc_addr) in enumerate(_page_hits_then_aggregates()):
+            for i, (score, doc_addr, from_seam) in enumerate(_page_hits_then_aggregates()):
                 if progress_callback and (i % _PROGRESS_TICK_EVERY == 0
                                           or time.monotonic() - last_tick >= _PROGRESS_TICK_SECONDS):
                     progress_callback(i, total_hits)
@@ -3915,6 +4333,10 @@ class SearchEngine:
                             _preview(list(_preview_rows.values()))
                             _preview_sent, _preview_last = len(_preview_rows), now
                 try:
+                    if from_seam:
+                        if not _seam_hit(score, doc_addr):
+                            regex_filtered_count += 1
+                        continue
                     load_started = time.perf_counter()
                     doc = self.searcher.doc(doc_addr)
                     document_load_seconds += time.perf_counter() - load_started
@@ -3931,16 +4353,21 @@ class SearchEngine:
 
                     content = self._get_field(doc, 'content', [""])[0]
 
-                    # Multi-word Literal: a whole-manuscript / part doc adds only the
-                    # matches that cross a page break (page docs give the rest).
-                    if _cross_page_terms is not None and scope != 'page':
+                    # Multi-word Literal, and a Responsa sequence with a star on an index
+                    # without seams: a whole-manuscript / part doc adds only the matches
+                    # that cross a page break (page docs give the rest).
+                    if scope != 'page' and (_cross_page_terms is not None
+                                            or (_crossings is not None and _crossings.windows)):
                         boundaries = self._parse_boundaries(doc)
                         match_started = time.perf_counter()
                         try:
-                            spans = self._cross_page_spans(
-                                regex, content, boundaries, _cross_page_terms[0], _cross_page_terms[1],
-                                _cross_page_side_words, gap, strip=not _query_has_brackets(query_str),
-                                whole_words=_whole_words)
+                            if _cross_page_terms is not None:
+                                spans = self._cross_page_spans(
+                                    regex, content, boundaries, _cross_page_terms[0], _cross_page_terms[1],
+                                    _cross_page_side_words, gap, strip=_strip_q, whole_words=_whole_words)
+                            else:
+                                spans = self._break_crossing_spans(regex, content, boundaries,
+                                                                   _crossings.side, _strip_q)
                         finally:
                             candidate_match_seconds += time.perf_counter() - match_started
                         kept = 0
@@ -4089,6 +4516,8 @@ class SearchEngine:
                                 'scope': scope,
                                 # Phase 77 D-01: Tantivy relevance score for JSON.
                                 'score': float(score),
+                                **({'_matches': _count_matches(regex, match_content, False)}
+                                   if _count_rows else {}),
                             })
                 except (SearchBudgetExceeded, InterruptedError):
                     # InterruptedError is an OSError: a Stop raised inside a native
@@ -4106,8 +4535,11 @@ class SearchEngine:
 
         materialize_elapsed_ms = (time.perf_counter() - materialize_started) * 1000.0
         LOGGER.debug(f"Regex filtered out: {regex_filtered_count}, Results before dedup: {len(results)}, interrupted: {was_interrupted}")
+        # First wins (plan §5.4): pages are read first, so a page's own row; Responsa on
+        # an index without scopes keeps its one mixed query, where the page row wins.
         deduped = self._deduplicate(
-            results, first_wins=_responsa is None, pages_win=_responsa is not None)
+            results, first_wins=_responsa is None or _crossings is not None,
+            pages_win=_responsa is not None and _crossings is None)
 
         # Phase 95 D-08 (Codex P0): LOCAL hits merge AFTER _deduplicate.
         # The dedup body at _deduplicate() whitelists V0.8/V0.7 only and would
@@ -4126,7 +4558,8 @@ class SearchEngine:
                     local_hits = self._local_responsa_hits(
                         _responsa, query_str, mode, gap, text_position,
                         progress_callback=progress_callback, phase_callback=phase_callback,
-                        limit=(max(Config.SEARCH_LIMIT, self.local_searcher.num_docs + 1) if ids_only else None),
+                        limit=(max(Config.SEARCH_LIMIT, self.local_searcher.num_docs + 1) if ids_only
+                               else Config.RESPONSA_PAGE_LIMIT),
                         regex=regex)
                 else:
                     local_hits = self._query_local_index(
@@ -4161,6 +4594,14 @@ class SearchEngine:
 
         # --- Apply Exclusion Filter (NOT Filter): on the page the match is on ---
         deduped = _without_excluded(deduped, exclude_words)
+        # An all-star query has no score to order by (decision 2): matches on the page,
+        # then shelfmark.
+        if _count_rows:
+            deduped = self._order_all_star(deduped, regex, _strip_q)
+        # What was not searched across pages joins the guard's note (plan §7, Phase 3
+        # point 8): the results line, the API, MCP.
+        if crossing_notes and _responsa is not None:
+            responsa_warning = '; '.join(([responsa_warning] if responsa_warning else []) + crossing_notes)
 
         LOGGER.debug(f"Results after dedup & filtering: {len(deduped)}")
         LOGGER.info(
@@ -4198,6 +4639,7 @@ class SearchEngine:
         # --- Attach Responsa expanded term count to first result ---
         if responsa_options and responsa_options.get('responsa_mode') and deduped:
             deduped[0]['responsa_expanded_count'] = total_expanded
+            deduped[0]['responsa_pattern_count'] = _responsa.pattern_count
 
         return deduped
 

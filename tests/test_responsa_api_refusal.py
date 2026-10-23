@@ -1,5 +1,5 @@
 """A refused Responsa query is an API error with its code, never zero results
-(docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md, Phase 1: unsupported star shapes).
+(docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md: since Phase 3, a bare star; Phase 1 refused more).
 
 The engine raises ResponsaQueryRefused (shared/responsa_match.py, code
 `responsa_unsupported_star`, or `responsa_query_too_large` for a query still over the
@@ -62,7 +62,7 @@ def test_the_code_is_in_the_contract():
 
 def test_the_api_answers_a_refused_query_with_its_code(client):
     with client:
-        r = client.post('/api/search', json={'query': 'כ*נים', 'search_mode': 'responsa'})
+        r = client.post('/api/search', json={'query': '*', 'search_mode': 'responsa'})
     assert r.status_code == 400, r.text
     error = r.json()['error']
     assert error['code'] == STAR_REFUSAL_CODE
@@ -82,7 +82,7 @@ def _job_result(client, query):
 
 
 def test_a_job_answers_a_refused_query_with_its_code(client):
-    result = _job_result(client, 'כ*נים')
+    result = _job_result(client, '*')
     body = result.json()
     assert result.status_code == 400, result.text
     assert body['error']['code'] == STAR_REFUSAL_CODE
