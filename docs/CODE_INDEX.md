@@ -2703,6 +2703,12 @@ reads shelfmarks as the NLI catalogue writes them (`Cambridge University Library
     - Method `_center_on_match` (Line 332)
     - Method `wheelEvent` (Line 347)
     - Method `resizeEvent` (Line 357)
+- **Class** `MatchCentredSnippet` (Line 436) — The Search tab's Snippet cell: a QLabel at its natural width inside a clipping widget, slid so the `*...*` marks (red) are centred in the cell, never past either end of the text; a mark-less snippet shows its start.
+    - Method `text` (Line 471)
+    - Method `changeEvent` (Line 478)
+    - Method `resizeEvent` (Line 485)
+    - Method `_measure` (Line 489)
+    - Method `_place` (Line 523)
 - **Class** `ListsTreeWidget` (Line 363)
     - Method `__init__` (Line 364)
     - Method `dropEvent` (Line 374)

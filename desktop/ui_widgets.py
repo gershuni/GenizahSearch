@@ -33,9 +33,10 @@ from PyQt6.QtWidgets import (
     QStyleOptionButton,
     QToolTip,
     QAbstractItemView,
+    QWidget,
 )
 from PyQt6.QtCore import Qt, QRect, QEvent, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QPalette, QPen, QBrush, QPainterPath
+from PyQt6.QtGui import QColor, QPalette, QPen, QBrush, QPainterPath, QTextDocument
 
 from genizah_core import natural_sort_key, tr
 
@@ -429,6 +430,112 @@ class HiddenScrollArea(QScrollArea):
         super().resizeEvent(event)
         # Maintain highlight focus when column width changes
         QTimer.singleShot(10, self._center_on_match)
+
+
+class MatchCentredSnippet(QWidget):
+    """A result row's Snippet cell: the found words in the middle of the cell.
+
+    The cell was a QLabel holding the snippet as one centred RTL paragraph.
+    A paragraph is centred only while it fits: a line wider than the label is
+    laid out from the label's left edge, which for Hebrew is the END of the
+    snippet, so the cell showed the last 600 px of the text and the match --
+    cut 60 characters from either side, so in the middle of the string -- only
+    when the whole string was under twice the cell's width. In the app's font
+    it seldom was: the match sat at the cell's right edge, cut, or past it
+    (owner, 2026-10-23).
+
+    The label is laid out at its natural width inside this clipping widget and
+    slid so that the marked words (``*...*`` in the snippet, red in *html*)
+    are centred in the cell; several marks are centred as one span, from the
+    first to the last. Never past either end of the text, as a scroll area
+    would not: a snippet that fits is shown whole, centred as before, and a
+    match near the start of a page is shown with the text's start at the
+    cell's edge. The label is still a QLabel, so the text can be selected
+    with the mouse as before.
+    """
+
+    #: The colour ``SearchEngine.format_snippet(style='html_inline')`` gives a
+    #: ``*...*`` mark; the marks are found in the laid-out text by it.
+    MATCH_COLOUR = QColor('#ff0000')
+
+    def __init__(self, html, parent=None):
+        super().__init__(parent)
+        self._html = html or ""
+        self._label = QLabel(self._html, self)
+        self._label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        # (text width, x of the marks' centre) in the cell's font. Measured at
+        # the first paint, not on insertion: a batch is 500 rows, and laying
+        # out every row's text costs about as much as the old label's layout
+        # again, which that label only paid for the rows that came on screen.
+        self._metrics = None
+
+    def text(self):
+        """The label's text, for the filter rule's fallback."""
+        return self._label.text()
+
+    def label(self):
+        return self._label
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.FontChange:
+            # The cell takes the table's font on insertion; measure in it.
+            self._metrics = None
+            self.update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._metrics is not None:
+            self._place()
+
+    def paintEvent(self, event):
+        if self._metrics is None:
+            self._place()      # the label, a child, is painted after this, where put
+        super().paintEvent(event)
+
+    def _measure(self):
+        """(width of the whole text, x of the centre of the marked span), in
+        the label's own coordinates: the label is given exactly its natural
+        width, so its one line starts at its left edge, as it does in a
+        document laid out at that width."""
+        width = self._label.sizeHint().width()
+        # No mark to centre on: the start of the text, which for a right-to-left
+        # paragraph is its right end (a scroll area's home position).
+        centre = float(width)
+        doc = QTextDocument()
+        doc.setDefaultFont(self._label.font())
+        doc.setDocumentMargin(0)
+        doc.setHtml(self._html)
+        doc.setTextWidth(width)
+        doc.documentLayout().documentSize()     # the layout is lazy; lines exist after this
+        block = doc.firstBlock()
+        start = end = None
+        it = block.begin()
+        while not it.atEnd():
+            frag = it.fragment()
+            if frag.isValid() and frag.charFormat().foreground().color() == self.MATCH_COLOUR:
+                pos = frag.position() - block.position()
+                start = pos if start is None else min(start, pos)
+                end = pos + frag.length() if end is None else max(end, pos + frag.length())
+            it += 1
+        layout = block.layout()
+        if start is not None and layout is not None and layout.lineCount() > 0:
+            line = layout.lineAt(0)
+            x0 = layout.position().x()
+            centre = (line.cursorToX(start)[0] + line.cursorToX(end)[0]) / 2 + x0
+        return width, centre
+
+    def _place(self):
+        if self._metrics is None:
+            self._metrics = self._measure()
+        text_w, centre = self._metrics
+        w = self.width()
+        if text_w <= w:
+            x = (w - text_w) // 2
+        else:
+            x = round(w / 2 - centre)
+            x = max(w - text_w, min(0, x))
+        self._label.setGeometry(x, 0, text_w, self.height())
 
 
 class ListsTreeWidget(QTreeWidget):
