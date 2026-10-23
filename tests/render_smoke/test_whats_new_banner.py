@@ -133,8 +133,11 @@ def test_toast_advertises_the_new_entry_and_letter_level_parallels():
         assert _banner(elements) is not None
         assert _parallels_hrefs(elements), 'the toast advertised no parallels link'
         text = _texts(elements)
-        assert "shelfmarks in the NLI catalogue's style" in text      # v9.7.0
+        assert 'Better wildcard search in Responsa style' in text      # v9.9.0
+        assert 'The Joins Lab and Personal Lists now fit a phone' in text      # v9.9.0
         assert 'Letter-level parallels search' in text
+        # Dropped with the v9.9.0 texts (2026-10-23).
+        assert "shelfmarks in the NLI catalogue's style" not in text
         # Dropped with the v9.7.0 texts (owner, 2026-10-18).
         assert 'textual witnesses' not in text
         assert 'further improvements to search quality' not in text
@@ -175,7 +178,7 @@ def test_the_parallels_entry_is_gated_on_its_own_predicate():
     async def passage_down(user):
         await user.open('/search')
         text = _texts(_elements(user))
-        assert "shelfmarks in the NLI catalogue's style" in text
+        assert 'Better wildcard search in Responsa style' in text
         assert 'Letter-level parallels search' not in text
 
     _run(passage_up, passage_on=True)
@@ -211,8 +214,8 @@ def test_a_box_without_the_index_announces_only_what_it_actually_has():
         # v9.2.1: the always-available entry is the GPT / AI tools one.
         assert 'ChatGPT' in text, (
             'the toast does not name the always-available entry: %r' % text[:400])
-        # v9.7.0: the new entry is ungated too.
-        assert "shelfmarks in the NLI catalogue's style" in text, text[:400]
+        # v9.9.0: the new entries are ungated too.
+        assert 'Better wildcard search in Responsa style' in text, text[:400]
         assert 'Letter-level' not in text, (
             'a GATED surface is advertised on a box whose index never opened')
 
@@ -264,9 +267,9 @@ def test_toast_is_translated_rather_than_leaking_english_into_the_hebrew_ui():
         text = _texts(_elements(user))
         assert 'תכונות חדשות!' in text
         assert 'חיפוש מקבילות ברמת האות' in text
-        assert 'בסגנון קטלוג הספרייה הלאומית' in text      # v9.7.0
+        assert 'בסגנון פרויקט השו"ת (שימוש באופרטור *)' in text      # v9.9.0
         assert 'Letter-level parallels search' not in text
-        assert "NLI catalogue's style" not in text
+        assert 'Better wildcard search in Responsa style' not in text
         assert 'New Features!' not in text
 
     _run(driver, lang='he')
