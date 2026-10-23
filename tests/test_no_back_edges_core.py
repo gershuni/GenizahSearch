@@ -51,6 +51,8 @@ EXTRACTED_MODULES = [
     "shared/indexer.py",             # Phase 124
     "shared/index_seams.py",         # Responsa Phase 2 (2026-10-22): seams, reversed words
     "shared/index_format.py",        # Responsa Phase 2 (2026-10-22): the format marker
+    "shared/index_swap.py",          # Index rebuild beside the live one (2026-10-23): staging, swap, recovery
+    "shared/index_build_progress.py",  # Index rebuild (2026-10-23): one fraction and estimate for the bar
     "shared/lab_settings.py",        # Phase 125b
     "shared/lab_engine.py",          # Phase 125c
     "shared/search_engine.py",       # Phase 125d

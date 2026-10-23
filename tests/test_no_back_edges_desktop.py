@@ -45,6 +45,7 @@ DESKTOP_MODULES = [
     "desktop/title_helpers.py",
     "desktop/ui_widgets.py",
     "desktop/update_ui.py",   # Phase 127 (pre-registered; skip-until-exists guard)
+    "desktop/index_rebuild_bar.py",   # Index rebuild beside the live one (2026-10-23): the main-window line
     "desktop/viewers.py",
     "desktop/vs_cache.py",
     # Registered 2026-09-18 (repo-structure Round 1): these five had no guard before the

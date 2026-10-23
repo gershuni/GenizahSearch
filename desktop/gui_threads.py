@@ -4,11 +4,15 @@
 import ctypes
 import os
 import platform
+import threading
 import time
 import weakref
 import requests
 from PyQt6.QtCore import QThread, pyqtSignal
 from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager, get_logger
+from shared.config import Config
+from shared.indexer import IndexBuildCancelled
+from shared.index_swap import delete_leftovers_in_background, recover_index_dirs
 from shared.pause_gate import PauseGate  # noqa: F401 — re-exported for callers/tests
 from shared.search_regex import cancel_check
 
@@ -109,20 +113,35 @@ def _allow_sleep():
             logger.debug("_allow_sleep: SetThreadExecutionState failed", exc_info=True)
 
 class IndexerThread(QThread):
-    """Build or refresh the index without blocking the UI."""
+    """Build or refresh the index without blocking the UI. *beside*: build beside the
+    live index, which keeps serving (shared/index_swap.py; the caller swaps the result
+    in). ``request_cancel`` stops the build at its next check: ``cancelled_signal``, and
+    a build beside the live index has removed what it wrote."""
 
-    progress_signal = pyqtSignal(int, int)
+    progress_signal = pyqtSignal(int, int)        # corpus lines read, total
+    phase_signal = pyqtSignal(str, int, int)      # the phases after the lines (Indexer.create_index)
     finished_signal = pyqtSignal(int)
+    cancelled_signal = pyqtSignal()
     error_signal = pyqtSignal(str)
-    def __init__(self, meta_mgr):
+
+    def __init__(self, meta_mgr, *, beside=False):
         super().__init__()
         self.indexer = Indexer(meta_mgr)
+        self.beside = beside
+        self._cancel = threading.Event()
+
+    def request_cancel(self):
+        self._cancel.set()
 
     def run(self):
         try:
             def callback(curr, total): self.progress_signal.emit(curr, total)
-            total_docs = self.indexer.create_index(progress_callback=callback)
+            def phase(name, done, total): self.phase_signal.emit(name, done, total)
+            total_docs = self.indexer.create_index(progress_callback=callback, phase_callback=phase,
+                                                   beside=self.beside, cancel=self._cancel.is_set)
             self.finished_signal.emit(total_docs)
+        except IndexBuildCancelled:
+            self.cancelled_signal.emit()
         except Exception as e: self.error_signal.emit(str(e))
 
 class RefinementReplayThread(QThread):
@@ -1367,6 +1386,10 @@ class StartupThread(QThread):
         try:
             meta_mgr = MetadataManager()
             var_mgr = VariantManager()
+            # A rebuild that a crash or a shutdown interrupted (shared/index_swap.py):
+            # its swap is finished, or its leftovers moved aside, before the index opens.
+            recover_index_dirs(Config.INDEX_DIR, Config.BROWSE_MAP)
+            delete_leftovers_in_background(Config.INDEX_DIR)
             searcher = SearchEngine(meta_mgr, var_mgr)
             indexer = Indexer(meta_mgr)
 

@@ -1349,6 +1349,9 @@ class SearchEngine:
         self._fl_id_index = None  # dict: fl_digits_str -> list of (sys_id, page_idx)
         self._fl_id_index_building = False
         self._fl_id_index_lock = threading.Lock()
+        # Bumped by browse_map_replaced(): a build that started from the old map stores
+        # nothing and goes again from the new one.
+        self._fl_id_index_generation = 0
         self.reload_index()
         if not worker_mode:
             self.start_fl_id_index_build()
@@ -2009,10 +2012,13 @@ class SearchEngine:
     #  FL ID Index (background build for O(1) browse-by-FL lookup)
     # ------------------------------------------------------------------
     def _build_fl_id_index(self):
-        """Build FL ID -> (sys_id, page_idx) index from browse_map. Called in background thread."""
+        """Build FL ID -> (sys_id, page_idx) index from browse_map. Called in background thread.
+        Returns False when the browse map was replaced meanwhile (browse_map_replaced), in
+        which case nothing was stored and the caller builds again."""
+        generation = self._fl_id_index_generation
         browse_map = self._load_browse_map()
         if not browse_map:
-            return
+            return True
         index = {}
         for sys_id, pages in browse_map.items():
             for idx, page in enumerate(pages):
@@ -2025,8 +2031,12 @@ class SearchEngine:
                             index[fl_digits] = []
                         index[fl_digits].append((sys_id, idx))
         with self._fl_id_index_lock:
+            if generation != self._fl_id_index_generation:
+                LOGGER.info("FL ID index built from a browse map since replaced; building again")
+                return False
             self._fl_id_index = index
         LOGGER.info("FL ID index built: %d entries", len(index))
+        return True
 
     def start_fl_id_index_build(self):
         """Start building FL ID index in background. Non-blocking."""
@@ -2036,9 +2046,26 @@ class SearchEngine:
         t = threading.Thread(target=self._build_fl_id_index_thread, daemon=True)
         t.start()
 
+    def browse_map_replaced(self):
+        """After an index rebuild replaced browse_map.pkl (shared/index_swap.py, or the
+        in-place build): forget the map in memory, both caches, and the FL-id lookup built
+        from it, and build that lookup again. A build running from the old map stores
+        nothing and goes again (Codex round 2 on PR #446: Browse by FL id answered from
+        the old map's offsets until a restart)."""
+        SearchEngine._shared_browse_map = None
+        self._browse_map_cache = None
+        # The cross-manuscript order Browse walks (get_browse_page / the neighbour lookup)
+        # is the old map's key order: forgotten too (Codex round 3 on PR #446).
+        self._ordered_sys_ids = []
+        with self._fl_id_index_lock:
+            self._fl_id_index_generation += 1
+            self._fl_id_index = None
+        self.start_fl_id_index_build()
+
     def _build_fl_id_index_thread(self):
         try:
-            self._build_fl_id_index()
+            while self._build_fl_id_index() is False:
+                pass                          # the browse map changed under it: once more
         except MemoryError:
             raise
         except Exception as e:
