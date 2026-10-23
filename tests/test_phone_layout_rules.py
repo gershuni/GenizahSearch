@@ -222,8 +222,12 @@ def test_dialog_cards_drop_their_minimum_width_on_a_small_phone():
 
 
 SHARED_HOOKS = {
-    'web/pages/joins_lab.py': ['joins-lab-layout', 'joins-lab-anchor', 'joins-lab-work'],
-    'web/components/compare_modal.py': ['compare-panes'],
+    'web/pages/joins_lab.py': ['joins-lab-layout', 'joins-lab-anchor', 'joins-lab-work',
+                               'joins-lab-anchor-strip', 'joins-lab-anchor-strip-thumb'],
+    'web/components/compare_modal.py': ['compare-panes', 'compare-panes-rtl', 'compare-header', 'compare-header-title',
+                                        'compare-pane-head',
+                                        'compare-pane-title', 'compare-pane-details', 'compare-pane-info',
+                                        'compare-text-toggle', 'compare-text-shown'],
     'web/pages/lists.py': ['lists-shell', 'lists-splitter', 'lists-sidebar', 'lists-content',
                            'lists-item-card', 'lists-item-actions'],
     'web/pages/search.py': ['search-shell', 'search-main-row', 'search-row-btn', 'search-adv-panel',
@@ -283,3 +287,92 @@ def test_browse_rules_name_every_class_the_page_sets_and_reach_the_inline_image_
     laptop = laptop[:laptop.index('\n    }')]
     assert '.browse-header-center {' in laptop and 'flex-wrap: nowrap' not in laptop
     assert '.browse-header-center > *:has(> .browse-header-title) { flex: 1 1 0%; min-width: 160px; }' in laptop
+
+
+def _media_block(css: str, prefix: str) -> str:
+    """The text of the one ``@media`` block that opens with ``prefix`` exactly."""
+    assert css.count(prefix) == 1, prefix
+    start = css.index(prefix) + len(prefix)
+    depth, i = 1, start
+    while depth and i < len(css):
+        depth += {'{': 1, '}': -1}.get(css[i], 0)
+        i += 1
+    return css[start:i]
+
+
+def test_compare_shows_the_two_images_alone_on_a_phone():
+    """Stacked, each Compare pane was a head, a 40vh image and the whole
+    transcription, so the candidate's image sat several screens below the
+    anchor's (owner, 2026-10-23). Below 641px, and on a phone on its side, the
+    panes show the two images alone with each head one row, until the header's
+    "Show text" button toggles compare-text-shown on the panes row."""
+    src = _read('web/components/compare_modal.py')
+    for cls in ('compare-pane-head', 'compare-pane-title', 'compare-pane-details', 'compare-pane-info'):
+        assert src.count(cls) == 2, f'{cls} must be set on both pane heads'
+    assert 'panes_row.classes(toggle="compare-text-shown")' in src
+    assert '.classes("text-white compare-text-toggle")' in src
+    assert src.count('.classes("phone-icon-only")') == 2, 'Add as Join and Add to Puzzle go icon-only'
+    assert '" compare-panes-rtl" if is_rtl() else ""' in src
+    css = _read('web/static/common.css')
+    assert '.compare-text-toggle.q-btn { display: none; }' in css
+    compact = _media_block(
+        css, '@media (max-width: 640px), (max-height: 520px) and (orientation: landscape) {')
+    assert '.compare-text-toggle { display: inline-flex !important; }' in compact
+    hidden = compact[compact.index('.compare-panes:not(.compare-text-shown) .anchor-transcription-panel'):]
+    hidden = hidden[:hidden.index('}')]
+    for cls in ('.compare-pane-title', '.compare-pane-details', '.compare-pane-info'):
+        assert f'.compare-panes:not(.compare-text-shown) {cls}' in hidden, cls
+    assert 'display: none !important;' in hidden
+    assert '.compare-panes:not(.compare-text-shown) .compare-pane-head {' in compact
+    assert ('.compare-panes-rtl:not(.compare-text-shown) .compare-pane-head '
+            '{ flex-direction: row-reverse; }') in compact
+    # Upright: two images of at most 32vh fit an 844px phone with the chrome
+    # around them; the viewer's fullscreen rule is left alone.
+    rules = _phone_rules(css)
+    assert ('.compare-panes:not(.compare-text-shown) .anchor-image-pane:not(:fullscreen) .image-container {\n'
+            '        max-height: 32vh !important; max-height: 31dvh !important;') in rules
+    # On its side: the panes are side by side above 640px already; the image
+    # takes the height the header, head, control bar and verdict bar leave.
+    landscape = _media_block(css, '@media (max-height: 520px) and (orientation: landscape) {')
+    assert ('max-height: calc(100vh - 200px) !important; '
+            'max-height: calc(100dvh - 200px) !important;') in landscape
+    # The header stays one row on a 390px phone: the title goes, the gaps and
+    # side padding shrink, and the icon-only buttons go dense.
+    assert 'px-4 py-2 compare-header"' in src
+    assert '.classes("text-lg font-semibold compare-header-title")' in src
+    assert '.compare-header { gap: 8px !important; padding-inline: 8px !important; }' in rules
+    assert '.compare-header-title { display: none !important; }' in rules
+    assert '.compare-header .phone-icon-only { padding: 4px 8px !important; min-width: 0 !important; }' in rules
+
+
+def test_joins_lab_keeps_the_anchor_in_a_strip_once_the_pane_scrolls_off():
+    """Under 1024px the anchor pane stacks above the candidates and scrolls away
+    with them. A fixed strip under the header (thumbnail, shelfmark, a tap
+    scrolls back up) shows while the pane is off the screen: its script sets
+    is-visible from an IntersectionObserver on the pane, copies the pane's
+    image, and follows the header's reveal (q-header--hidden)."""
+    src = _read('web/pages/joins_lab.py')
+    assert "items-center gap-2 joins-lab-anchor-strip'" in src
+    assert "ui.element('img').classes('joins-lab-anchor-strip-thumb')" in src
+    assert 'ui.add_head_html(_ANCHOR_STRIP_HEAD)' in src
+    assert '<script src="/static/js/joins_lab_anchor_strip.js" defer></script>' in src
+    assert 'anchor_strip_shelfmark.set_text(shelfmark or sys_id)' in src
+    assert 'anchor_strip.set_visibility(True)' in src
+    assert src.count('anchor_strip.set_visibility(False)') == 2, 'hidden at build and on Change anchor'
+    assert 'window.scrollTo({top: 0, behavior: "smooth"})' in src
+    js = _read('web/static/js/joins_lab_anchor_strip.js')
+    for needle in ("querySelector('.joins-lab-anchor-strip')", "querySelector('.joins-lab-anchor')",
+                   'new IntersectionObserver(', "classList.toggle('is-visible', away)",
+                   "classList.contains('q-header--hidden')",
+                   "classList.toggle('under-hidden-header', hidden)",
+                   "pane.addEventListener('load', syncThumb, true)"):
+        assert needle in js, needle
+    css = _read('web/static/common.css')
+    assert '.joins-lab-anchor-strip { display: none; }' in css
+    rules = _phone_rules(css, max_width=1023)
+    strip = rules[rules.index('.joins-lab-anchor-strip.is-visible:not(.hidden) {'):]
+    strip = strip[:strip.index('}')]
+    for decl in ('display: flex;', 'position: fixed;', 'top: 64px;', 'inset-inline: 0;', 'z-index: 900;'):
+        assert decl in strip, decl
+    assert '.joins-lab-anchor-strip.is-visible.under-hidden-header { top: 0; }' in rules
+    assert '.joins-lab-anchor-strip-thumb {' in rules

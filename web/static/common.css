@@ -2576,6 +2576,81 @@ body {
     .compare-panes > .nicegui-column:first-child { border-width: 0 !important; }
 }
 
+/* Compare on a phone (owner, 2026-10-23). The window's job is "anchor vs
+   candidate", and once its panes stack each pane is a head, an image capped
+   at 40vh and the whole transcription, so the candidate's image sat several
+   screens below the anchor's and the two were never on the screen together.
+   Below 641px, and on any screen too short for two images with text under
+   them (a phone on its side), the panes show the two images alone: each head
+   is one row of role + shelfmark (+ badges), the title, details and info rows
+   hide, and the transcriptions hide. The header's "Show text" button
+   (web/components/compare_modal.py) toggles compare-text-shown on the panes
+   row and brings everything back. :not(:fullscreen) leaves the viewer's own
+   fullscreen rule in charge of a fullscreen image. */
+.compare-text-toggle.q-btn { display: none; }
+@media (max-width: 640px), (max-height: 520px) and (orientation: landscape) {
+    .compare-text-toggle { display: inline-flex !important; }
+    .compare-text-toggle.is-on { background: rgba(255, 255, 255, 0.18) !important; }
+    .compare-panes:not(.compare-text-shown) .anchor-transcription-panel,
+    .compare-panes:not(.compare-text-shown) .compare-pane-title,
+    .compare-panes:not(.compare-text-shown) .compare-pane-details,
+    .compare-panes:not(.compare-text-shown) .compare-pane-info { display: none !important; }
+    .compare-panes:not(.compare-text-shown) .compare-pane-head {
+        flex-direction: row; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 2px;
+    }
+    .compare-panes-rtl:not(.compare-text-shown) .compare-pane-head { flex-direction: row-reverse; }
+}
+/* Upright phone: the two images one above the other, each at most 32vh, so
+   both are on the screen with the window header, the two heads, the two
+   control bars and the verdict bar (the sum fits 844px; 31dvh where the
+   browser's own bars take part of the height). */
+@media (max-width: 640px) {
+    .compare-panes:not(.compare-text-shown) .anchor-image-pane:not(:fullscreen) .image-container {
+        max-height: 32vh !important; max-height: 31dvh !important;
+    }
+    /* The header stays one row: the title goes (the window is plainly Compare;
+       the counter and the buttons need the width), the row's 1rem gaps become
+       8px, its side padding 8px, and the icon-only buttons drop the 16px side
+       padding a labelled button has: counter + six buttons, 285px of 390. */
+    .compare-header { gap: 8px !important; padding-inline: 8px !important; }
+    .compare-header-title { display: none !important; }
+    .compare-header .phone-icon-only { padding: 4px 8px !important; min-width: 0 !important; }
+}
+/* A phone on its side (844x390): above 640px the panes are already side by
+   side, two 420px panes, wider than the desktop's 380px anchor pane; each
+   image takes what the height leaves after the window header, the head, the
+   control bar and the verdict bar (200px). */
+@media (max-height: 520px) and (orientation: landscape) {
+    .compare-panes:not(.compare-text-shown) .anchor-image-pane:not(:fullscreen) .image-container {
+        max-height: calc(100vh - 200px) !important; max-height: calc(100dvh - 200px) !important;
+    }
+}
+
+/* Joins Lab anchor strip (owner, 2026-10-23). Under 1024px the anchor pane
+   stacks above the candidates and scrolls away with them; once it has left
+   the screen, this strip keeps the anchor's thumbnail and shelfmark under the
+   header, and a tap scrolls back up. web/static/js/joins_lab_anchor_strip.js
+   sets is-visible from an IntersectionObserver on the pane, copies the pane's
+   image into the thumbnail, and sets under-hidden-header while the header's
+   reveal has hidden it (phones hide the header on scroll down). Fixed, not
+   sticky, so it takes no space in the work column and nothing jumps when it
+   appears; z-index below the drawer (1000). :not(.hidden) leaves
+   set_visibility(False) -- no anchor loaded -- in charge. */
+.joins-lab-anchor-strip { display: none; }
+@media (max-width: 1023px) {
+    .joins-lab-anchor-strip.is-visible:not(.hidden) {
+        display: flex; position: fixed; top: 64px; inset-inline: 0; z-index: 900;
+        min-height: 56px; padding: 6px 12px;
+        background: var(--bg-secondary); border-block-end: 1px solid var(--border-light);
+        box-shadow: var(--shadow-md); cursor: pointer; transition: top 0.3s ease;
+    }
+    .joins-lab-anchor-strip.is-visible.under-hidden-header { top: 0; }
+    .joins-lab-anchor-strip-thumb {
+        height: 44px; width: 60px; flex: none; object-fit: cover;
+        border-radius: 4px; background: #1a1a1a;
+    }
+}
+
 /* Lists: under 769px the splitter stacks, the My Lists tree above the list,
    each at the full width, the tree with a bounded scroll. The tree is the
    splitter's 25% panel (web/pages/lists.py): 97px on a 390px phone, its

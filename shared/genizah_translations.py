@@ -4493,6 +4493,11 @@ TRANSLATIONS.update({
         "פתח עוגן בדפדפן (לשונית חדשה)",
     "Open candidate in Browse (new tab)":
         "פתח מועמד בדפדפן (לשונית חדשה)",
+    # --- Phone (2026-10-23): the Compare "Show text" toggle, the Lab's anchor strip ---
+    "Show text":
+        "הצג טקסט",
+    "Back to the anchor":
+        "חזרה לעוגן",
     # --- D-09: Compare pane info buttons ---
     "FJMS Catalog":
         "קטלוג FJMS",

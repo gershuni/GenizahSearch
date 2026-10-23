@@ -140,6 +140,7 @@ Phase 118+ can expose it as an env knob if needed.
 """
 
 _CARD_SIZE_STORAGE_KEY = 'joins_lab_card_size'   # the visitor's grid card size (S/M/L)
+_ANCHOR_STRIP_HEAD = '<script src="/static/js/joins_lab_anchor_strip.js" defer></script>'
 _PENDING_ACTION_TTL_SECONDS = 900  # 15 minutes — pending Add-as-Join expires after this
 """TTL for the 'joins_lab_pending' add-as-join descriptor stored before login.
 
@@ -567,6 +568,9 @@ def create_joins_lab_page(
     # "Load Anchor", and scripts injected into a live SPA page do not run — so
     # the viewer MUST be created here, before any anchor loads (zoom/pan fix).
     inject_viewer_assets()
+    # The narrow-screen anchor strip's script (web/static/js/joins_lab_anchor_strip.js)
+    # goes into the head here for the same reason; it waits for the elements.
+    ui.add_head_html(_ANCHOR_STRIP_HEAD)
 
     # -----------------------------------------------------------------------
     # Per-render transient state (mutable-dict containers — NOT safe_storage;
@@ -1328,6 +1332,35 @@ def create_joins_lab_page(
                 'flex: 1; min-width: 0;'
             )
 
+        # The narrow-screen anchor strip (owner, 2026-10-23). Under 1024px the
+        # anchor pane stacks above the work column and scrolls away with the
+        # candidates; once it has left the screen this strip holds the anchor's
+        # thumbnail and shelfmark under the header, and a tap scrolls back up.
+        # web/static/js/joins_lab_anchor_strip.js shows it (is-visible) from an
+        # IntersectionObserver on the pane and copies the pane's image into the
+        # thumbnail; the stylesheet keeps it off every wider screen, where the
+        # pane itself is sticky. Hidden until an anchor loads (load_anchor), and
+        # again when the picker returns (_reset_to_picker).
+        anchor_strip = ui.row(wrap=False).classes(
+            f'{direction_class} items-center gap-2 joins-lab-anchor-strip'
+        ).mark('joins-anchor-strip')
+        with anchor_strip:
+            ui.element('img').classes('joins-lab-anchor-strip-thumb').props('alt=""')
+            with ui.column().classes('gap-0 min-w-0 flex-grow'):
+                ui.label(tr('Anchor')).classes('text-xs font-bold uppercase').style(
+                    'color: var(--text-muted);'
+                )
+                anchor_strip_shelfmark = ui.label('').classes(
+                    'text-sm font-semibold truncate'
+                ).style('color: var(--primary-700);')
+            ui.button(icon='arrow_upward').props(
+                f'flat dense round aria-label="{tr("Back to the anchor")}"'
+            ).tooltip(tr('Back to the anchor'))
+        anchor_strip.on(
+            'click', js_handler='() => window.scrollTo({top: 0, behavior: "smooth"})'
+        )
+        anchor_strip.set_visibility(False)
+
     # -----------------------------------------------------------------------
     # Empty-state panel (shown until an anchor is loaded)
     # -----------------------------------------------------------------------
@@ -1387,9 +1420,10 @@ def create_joins_lab_page(
         # (UI-SPEC §4)
         known_joins_container = ui.column().classes('w-full')
 
-    # The D-03 narrow-screen anchor strip was never built: its label rendered
-    # empty below the page, then the sys_id in monospace once an anchor
-    # loaded. Narrow screens now stack the real pane (see two_col above).
+    # The D-03 narrow-screen anchor strip was never built as designed: its label
+    # rendered empty below the page, then the sys_id in monospace once an anchor
+    # loaded. Narrow screens now stack the real pane (see two_col above) and
+    # keep the anchor in anchor_strip once the pane has scrolled off.
 
     # -----------------------------------------------------------------------
     # Builder: row-based builder (BLD-03) + Advanced options + Run Search
@@ -2701,6 +2735,10 @@ def create_joins_lab_page(
         _anchor_state['page'] = page  # page arg is the resolved folio (or None for first)
         _anchor_state['shelfmark'] = shelfmark
 
+        # The narrow-screen strip names the anchor; its script copies the image.
+        anchor_strip_shelfmark.set_text(shelfmark or sys_id)
+        anchor_strip.set_visibility(True)
+
         # Fire-and-forget the known-joins load (non-blocking for the anchor swap).
         # Pass the captured anchor generation so a slow fetch for THIS anchor is
         # discarded if a newer anchor is loaded before it returns (MED, CR).
@@ -3449,6 +3487,7 @@ def create_joins_lab_page(
         anchor_viewer_container.clear()
         known_joins_container.clear()
         candidates_container.clear()
+        anchor_strip.set_visibility(False)
         # Restore the builder to visible (cancel any collapse)
         anchor_builder['container'].set_visibility(True)
         summary_bar_container.set_visibility(False)
