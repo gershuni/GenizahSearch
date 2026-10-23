@@ -86,11 +86,10 @@ def test_the_shapes_phase_1_refused_are_searched(query):
 
 
 @pytest.mark.parametrize('query', ['*כ*נים', '*כ*ה*נ*ים*', '(*נים/לוי)'])
-def test_a_leading_star_with_another_star_is_still_refused(query):
-    # Until leading stars are searched (plan §7, Phase 3 point 14).
-    with pytest.raises(ResponsaQueryRefused) as info:
-        _compiled(query)
-    assert info.value.code == 'responsa_unsupported_star'
+def test_a_leading_star_is_searched_with_another_star_too(query):
+    # Phase 3's second PR lifted the last of Phase 1's refusals: only a word of stars alone
+    # is refused (decision 4).
+    _compiled(query)
 
 
 def test_the_refusal_covers_line_groups():
@@ -99,10 +98,12 @@ def test_the_refusal_covers_line_groups():
         compile_line_groups(groups, gaps, {'responsa_mode': True}, None)
 
 
-def test_both_end_stars_are_still_hash_both_sides():
-    # Until leading stars are searched (plan §7, Phase 3 point 14).
+def test_both_end_stars_are_searched_as_typed_not_as_hash_both_sides():
+    # Phase 1 rewrote *X* as #X#; a true star is searched as typed (§8; the dedicated test
+    # is in tests/test_responsa_stars.py).
     c = _compiled('*כהנ*')
-    assert c.warning and c.plans[0].component.grammatical_prefixes and c.plans[0].component.grammatical_suffixes
+    assert c.warning is None
+    assert not c.plans[0].component.grammatical_prefixes and not c.plans[0].component.grammatical_suffixes
 
 
 # --- Expansion: one order, OR groups and inline alternation spelt out --------------------

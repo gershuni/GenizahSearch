@@ -36,8 +36,9 @@ MANUSCRIPTS = {
     210: ["ואהרן כהנים גדולים"],                       # -אהרן hides it
     211: ["אמר מאמתי קורין את"],                       # מאמ* קור*: inside a page
     212: ["כהנים שם הכהנים גדול."],                    # כהנים גדול: no (the first word began before)
-    213: ["כהנים", "כהנים", "גדולים"],                 # כהנ* [1] גדול*: p1 | p3, and p2 | p3 apart
-    214: ["שם כהן גדול עמד"],                            # כהנ* גדול*: the singular (final nun); the pre-test must not skip it
+    213: ["שם אלכהנים אלגדולים"],                      # *כהנים *גדולים: letters no prefix list has
+    214: ["כהנים", "כהנים", "גדולים"],                 # כהנ* [1] גדול*: p1 | p3, and p2 | p3 apart
+    215: ["שם כהן גדול עמד"],                            # כהנ* גדול*: the singular (final nun); the pre-test must not skip it
 }
 V08 = [(sid(n), 3000 + n, p, text) for n, pages in MANUSCRIPTS.items() for p, text in enumerate(pages, 1)]
 V07 = [(sid(208), 3208, 1, "קוראים כאן")]          # format 1 joins it to 208's V0.8 page
@@ -80,18 +81,26 @@ def test_the_gate_compares_the_crossings_and_lists_the_known_kinds(indexes, tmp_
     assert v['star-end-pair']['matched'] == 1 and v['star-end-pair']['crossing_matched'] == 1
     v07 = v['star-end-pair']['expected'].get('a crossing into the V0.7 copy (whole-manuscript document)', 0)
     assert v07 == (1 if fmt == '1' else 0)
-    # כהנ* גדול*: 207's, 209's p2 | p3 and 213's p2 | p3 crossings; finite words reach
-    # 207's and 213's but not 209's (a whole manuscript gives its first match only), listed
-    # by count.
+    # כהנ* גדול*: 207's, 209's p2 | p3 and 214's p2 | p3 crossings.
     assert v['star-end']['crossing_matched'] == 3
-    assert v['hash-hash']['crossing_matched'] == 2
-    assert v['hash-hash']['expected'] == {
-        'a crossing finite words did not reach (a whole-manuscript document gives its first match only)': 1}
-    assert v['star-several']['crossing_matched'] == 4          # 206, 207, 209's and 213's p2 | p3
-    # כהנ* [1] גדול*: 213's p1 runs over p2 into p3 (more than two pages, listed) and its
+    # Finite words: on format 2 the seams give 207's, 209's p2 | p3 and 214's (decision 10);
+    # on format 1 a whole manuscript gives its first match only, so 209's is listed by count.
+    if fmt == '2':
+        assert v['hash-hash']['crossing_matched'] == 3 and v['hash-hash']['expected'] == {}
+    else:
+        assert v['hash-hash']['crossing_matched'] == 2
+        assert v['hash-hash']['expected'] == {
+            'a crossing finite words did not reach (a whole-manuscript document gives its first match only)': 1}
+    assert v['star-several']['crossing_matched'] == 4          # 206, 207, 209's and 214's p2 | p3
+    # כהנ* [1] גדול*: 214's p1 runs over p2 into p3 (more than two pages, listed) and its
     # p2's own crossing into p3 is still found (Codex review of PR #443); 207 and 209 too.
     assert v['star-gap']['crossing_matched'] == 3
     assert v['star-gap']['expected'] == {'a match over more than two pages (the oracle reads pairs)': 1}
+    # Leading stars: 202, 205, 209's p1, 210 and 213 inside a page; 207, 209's and 214's
+    # p2 | p3 across a break (206's כוהנים is not *כהנים).
+    assert v['star-start']['matched'] == 5 and v['star-start']['crossing_matched'] == 3
+    assert v['star-start-endings']['crossing_matched'] == 4    # 206, 207, 209's and 214's p2 | p3
+    assert v['star-start-several']['crossing_matched'] == 4
 
 
 @pytest.mark.parametrize('fmt, mutation', [
@@ -99,6 +108,8 @@ def test_the_gate_compares_the_crossings_and_lists_the_known_kinds(indexes, tmp_
     ('2', 'no-crossing'), ('1', 'no-crossing'),
     ('1', 'no-star-windows'),
     ('2', 'accept-off'),
+    ('2', 'leading-prefix-list'), ('1', 'leading-prefix-list'),
+    ('2', 'finite-crossings-whole'),
 ])
 def test_the_gate_fails_under_each_mutation(indexes, tmp_path, fmt, mutation):
     assert run_gate(indexes, fmt, tmp_path, '--phase', '3', '--mutation', mutation) == gate.EXIT_FAILED

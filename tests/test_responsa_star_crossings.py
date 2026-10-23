@@ -1,5 +1,6 @@
-"""Responsa reads pages first, and a star query's matches across pages come from the seams
-on format 2 and, bounded, from the whole-manuscript documents on format 1
+"""Responsa reads pages first, and its matches across pages come from the seams on format 2
+(a star query's always, finite words' when S <= K: decision 10) and from the
+whole-manuscript documents on format 1, a star query's bounded
 (docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md §5.4, §6.1 point 2, §7 Phase 3 points 7-11).
 
 One corpus, built by the real Indexer as format 2 (seams, K = 30) and as format 1
@@ -145,12 +146,25 @@ def test_pages_first_and_the_first_row_wins(engines, fmt):
     assert not row.get('cross_page')
 
 
-def test_finite_words_keep_todays_whole_manuscripts_in_this_pr(engines):
-    # Decision 10 (finite words to the seams) is the next PR: on format 2 too, today's route.
-    for fmt in ('2', '1'):
-        row = by_uid(search(engines[fmt], 'כהנים גדולים')[0])[page(109)]
-        assert row['scope'] == 'system' and row['cross_page']
-    assert by_uid(search(engines['2'], 'כהנ* גדולים')[0])[page(109)]['scope'] == 'seam'
+def test_finite_words_read_the_seams_on_format_2_and_whole_manuscripts_on_format_1(engines):
+    # Decision 10 (plan §7, Phase 3 point 7): a finite sequence with S <= K reads the seams;
+    # format 1 keeps today's whole-manuscript documents.
+    assert by_uid(search(engines['2'], 'כהנים גדולים')[0])[page(109)]['scope'] == 'seam'
+    row = by_uid(search(engines['1'], 'כהנים גדולים')[0])[page(109)]
+    assert row['scope'] == 'system' and row['cross_page']
+    # Manuscript 111: a match inside p1, then a crossing p2 | p3. A whole manuscript gives
+    # its first match only, which p1's own row already shows; the seams give the crossing.
+    assert page(111, 2) in by_uid(search(engines['2'], 'כהנים גדולים')[0])
+    assert page(111, 2) not in by_uid(search(engines['1'], 'כהנים גדולים')[0])
+
+
+def test_finite_words_past_k_keep_the_whole_manuscripts_unmarked(short_seams):
+    # S = 1 + 1 + 3 - 1 = 4 > K = 2: without a star, today's whole-manuscript documents, so
+    # nothing is left out and nothing is marked (a star word would read the seams, marked).
+    rows, cutoff, note = search(short_seams, 'כהנים [3] גדולים')
+    row = by_uid(rows)[page(107)]
+    assert row['scope'] == 'system' and row['cross_page']
+    assert not cutoff.get('partial') and not cutoff['capped'] and not note
 
 
 @pytest.mark.parametrize('fmt', ['2', '1'])
@@ -345,6 +359,60 @@ def test_a_query_with_a_finite_word_keeps_the_score_order_pages_first(engines):
     assert scopes == sorted(scopes, key=lambda s: s != 'page') and 'seam' in scopes
 
 
+# --- Exact, Variants and Fuzzy: their crossings from the seams (decision 10, point 12) -----
+
+def evf(eng, query, mode, gap=0, **kwargs):
+    se.consume_last_search_cutoff()
+    rows = eng.execute_search(query, mode, gap, corpus_scope='genizah', **kwargs)
+    return rows, se.consume_last_search_cutoff()
+
+
+@pytest.mark.parametrize('mode', ['literal', 'variants', 'fuzzy'])
+@pytest.mark.parametrize('fmt, scope', [('2', 'seam'), ('1', 'system')])
+def test_exact_variants_and_fuzzy_read_their_crossings_from_the_seams_on_format_2(engines, mode, fmt, scope):
+    rows, cutoff = evf(engines[fmt], 'כהנים גדולים', mode)
+    found = by_uid(rows)
+    row = found[page(109)]                       # ראשית כהנים | גדולים סופית
+    assert row['scope'] == scope and row['cross_page']
+    assert found[page(108)]['scope'] == scope    # ראשון כהנים | גדולים אחרון
+    assert found[page(102)]['scope'] == 'page'   # inside its page: the page row
+    assert not cutoff['capped'] and not cutoff.get('partial')
+
+
+def test_the_seams_do_not_hold_the_v07_restart_the_whole_manuscript_joins(engines):
+    # Manuscript 105: its V0.8 page, then its V0.7 copy -- one whole-manuscript document on
+    # either format, a junction no seam holds (§6.1 point 3).
+    assert page(105) in by_uid(evf(engines['1'], 'מאמרו קוראים', 'literal')[0])
+    assert page(105) not in by_uid(evf(engines['2'], 'מאמרו קוראים', 'literal')[0])
+
+
+@pytest.mark.parametrize('fmt', ['2', '1'])
+def test_exact_seam_crossings_honour_the_restriction(engines, fmt):
+    assert page(109) in by_uid(evf(engines[fmt], 'כהנים גדולים', 'literal', restrict_sys_ids={sid(109)})[0])
+    assert page(109) not in by_uid(evf(engines[fmt], 'כהנים גדולים', 'literal', restrict_sys_ids={sid(108)})[0])
+
+
+@pytest.mark.parametrize('fmt', ['2', '1'])
+@pytest.mark.parametrize('word, excluded', [('סוף', True), ('פתיחה', True), ('אחרון', False)])
+def test_an_exact_crossing_reads_its_excluded_words_on_the_pages_it_covers(engines, fmt, word, excluded):
+    rows, _ = evf(engines[fmt], 'מאמתי קורין', 'literal', exclude_words=[word])
+    assert (page(101) not in by_uid(rows)) == excluded
+
+
+@pytest.mark.parametrize('fmt, scope', [('2', 'seam'), ('1', 'system')])
+def test_exact_ids_only_gives_the_seam_crossing(engines, fmt, scope):
+    rows, _ = evf(engines[fmt], 'מאמתי קורין', 'literal', ids_only=True)
+    assert by_uid(rows)[page(101)]['scope'] == scope
+
+
+@pytest.mark.parametrize('gap, scope', [(1, 'seam'), (3, 'system')])
+def test_exact_past_k_keeps_the_whole_manuscripts(short_seams, gap, scope):
+    # S = (2 - 1) x (gap + 1): 2 <= K = 2 reads the seams, 4 > K the whole manuscripts.
+    rows, cutoff = evf(short_seams, 'כהנים גדולים', 'literal', gap)
+    assert by_uid(rows)[page(109)]['scope'] == scope
+    assert not cutoff['capped'] and not cutoff.get('partial')
+
+
 # --- A line query with a star: every crossing of a manuscript (Codex round 2 on PR #442) ---
 
 LINE_MANUSCRIPTS = {
@@ -392,6 +460,16 @@ def test_a_crossing_from_an_earlier_page_does_not_hide_the_next_pages_own(shadow
     rows = by_uid(search(shadow_engines[fmt], 'כהנ* [1] גדול*')[0])
     assert set(rows) == {uid(3401, 1), uid(3401, 2)}
     assert all(r['cross_page'] for r in rows.values())
+
+
+@pytest.mark.parametrize('mode', ['literal', 'variants', 'fuzzy'])
+def test_a_seam_gives_the_next_pages_own_exact_crossing_too(shadow_engines, mode):
+    # כהנים גדולים with a gap of 1 (Codex round 3 on PR #443): the same two crossings of
+    # the p2 | p3 seam. A seam counts the one that starts on the page before its break,
+    # as Responsa's do.
+    rows = by_uid(evf(shadow_engines['2'], 'כהנים גדולים', mode, 1)[0])
+    assert set(rows) == {uid(3401, 1), uid(3401, 2)}
+    assert all(r['scope'] == 'seam' and r['cross_page'] for r in rows.values())
 
 
 # --- My Library alone: the all-star order too (Codex round 6 on PR #442) ------------------

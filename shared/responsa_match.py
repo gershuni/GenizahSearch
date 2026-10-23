@@ -30,19 +30,15 @@ lookahead, a ``[N]`` gap -- a place the predicate rejects would hide one it acce
 rejection the text is searched on with the exact pattern (``_CheckPattern``).
 
 **Stars** (Phase 3, plan §4 and §7 "Phase 3, settled before building"): ``*`` is any
-letters of any script inside one word, zero included, at the end of a word or inside it,
-as often as typed (``כהנ*``, ``כ*נים``, ``כ*ה*נים*``). A star word is a whole word bounded
-at both ends: the star takes the letters (and the looked-past marks, quotes and brackets)
-up to the word's own edge, never a digit, ``_``, space or punctuation. Its letters between
-stars are *runs*, each expanded on its own (``StarForm``); the check and the lookup write
-one alternation per run, so a word's size is the sum of its runs' forms, and the lookup
-is a pattern that begins with the word's first letters (cheap on every index format).
-
-**A star at the start of a word keeps Phase 1's meaning** until leading stars are
-searched, which needs the reversed-words field of the rebuilt index (plan §7, Phase 3
-point 14): ``*X`` is X with the 24 grammatical prefixes in the lookup and ``\\S*X`` in the
-check; ``*X*`` is rewritten as ``#X#``, with a warning; any other word that begins with a
-star is refused with a message, as is a word made of stars alone (decision 4).
+letters of any script inside one word, zero included, anywhere in the word and as often as
+typed (``*נים``, ``כ*נים``, ``*כ*ה*נ*ים``). A star word is a whole word bounded at both ends:
+the star takes the letters (and the looked-past marks, quotes and brackets) up to the
+word's own edge, never a digit, ``_``, space or punctuation. Its letters between stars are
+*runs*, each expanded on its own (``StarForm``); the check and the lookup write one
+alternation per run, so a word's size is the sum of its runs' forms. Retrieval per form:
+a forward pattern when the word begins with a letter, the reversed-words field when it
+begins with a star and ends with a letter (format 2), else the slow ``.*`` pattern. Only a
+word made of stars alone is refused (``refuse_unsupported_stars``, decision 4).
 """
 
 import functools
@@ -78,11 +74,6 @@ STAR_REFUSAL_TEXT = (
 STAR_PUNCTUATION_TEXT = (
     "A word with * holds letters only: a * never reaches past a space or punctuation. "
     "Write the punctuation as a separate word, or leave it out."
-)
-LEADING_STAR_TEXT = (
-    "A * at the start of a word works as *word, and *word* as #word#, for now; a word "
-    "that begins with * and holds another * is not searched yet. A * inside a word or at "
-    "its end works anywhere: word*, wo*rd."
 )
 SHORT_STAR_TEXT = (
     "A * word with only one or two letters of its own matches very many words: "
@@ -125,25 +116,13 @@ def _typed_or_raw(comp):
         return list(comp.words)
 
 
-def _leading_star_ok(comp, form):
-    """A word that begins with a star, searched with Phase 1's meaning for now: ``*X``
-    (the parser's prefix wildcard, X without a star) and ``*X*`` (rewritten as #X#)."""
-    if comp.wildcard == 'prefix':
-        return True
-    core = form.strip('*')
-    return (comp.wildcard == 'pattern' and form == comp.wildcard_pattern and form.endswith('*')
-            and form.count('*') == 2 and bool(core))
-
-
 def refuse_unsupported_stars(components):
     """Raise ResponsaQueryRefused for a star shape the engine does not search: a word
     of stars alone, positive or negated, alone or in an OR group (decision 4: it
-    matches every word; the message suggests a gap such as ``[1]``); a star word whose
-    letters hold punctuation (a star never reaches past it, and the lookup reads one
-    index token per word); and, until leading stars are searched, a word that begins
-    with a star other than ``*X`` and ``*X*``. A star inside a word or at its end is
-    searched in every position and number (Phase 3; Phase 1 refused all but ``*X``,
-    ``X*`` and ``*X*`` here)."""
+    matches every word; the message suggests a gap such as ``[1]``), and a star word
+    whose letters hold punctuation (a star never reaches past it, and the lookup reads
+    one index token per word). Every other position and number of stars is searched
+    (Phase 3; Phase 1 refused all but ``*X``, ``X*`` and ``*X*`` here)."""
     for comp in components:
         for form in _typed_or_raw(comp):
             if is_bare_star(form):
@@ -151,27 +130,6 @@ def refuse_unsupported_stars(components):
             if '*' in form and any(run and not _TOKEN_RE.fullmatch(strip_search_diacritics(run) or 'x')
                                    for run in form.split('*')):
                 raise ResponsaQueryRefused(_tr(STAR_PUNCTUATION_TEXT))
-            if form.startswith('*') and not _leading_star_ok(comp, form):
-                raise ResponsaQueryRefused(_tr(LEADING_STAR_TEXT))
-
-
-def rewrite_both_end_stars(components):
-    """``*X*`` -> ``#X#`` in place (Phase 1's meaning, kept until leading stars are
-    searched); True if any was."""
-    rewritten = False
-    for comp in components:
-        if (comp.wildcard == 'pattern' and comp.wildcard_pattern
-                and comp.wildcard_pattern.startswith('*') and comp.wildcard_pattern.endswith('*')
-                and comp.wildcard_pattern.count('*') == 2):
-            stem = comp.wildcard_pattern.strip('*')
-            if stem:
-                comp.words = [stem]
-                comp.wildcard = None
-                comp.wildcard_pattern = None
-                comp.grammatical_prefixes = True
-                comp.grammatical_suffixes = True
-                rewritten = True
-    return rewritten
 
 
 def short_star_warning(plans):
@@ -363,14 +321,9 @@ def expand_stems(comp, variants_on, ja_on, variant_mode, var_mgr, budget=None):
         room = budget.limit - budget.used
     else:
         room = Config.MAX_EXPANDED_TERMS
-    if comp.wildcard == 'prefix':
-        # *X keeps Phase 1's meaning for now: X's forms, the 24 prefixes added in the
-        # lookup (retrieval_terms) and \S* in the check (WordPlan.legacy_prefix).
-        forms, starred = literal_forms(comp, room), []
-    else:
-        typed = typed_forms(comp, room)
-        forms = [f for f in typed if '*' not in f]
-        starred = [f for f in typed if '*' in f]
+    typed = typed_forms(comp, room)
+    forms = [f for f in typed if '*' not in f]
+    starred = [f for f in typed if '*' in f]
 
     def step(fn):
         nonlocal forms
@@ -412,7 +365,7 @@ def expand_stems(comp, variants_on, ja_on, variant_mode, var_mgr, budget=None):
         stars.append(sf)
     result = forms + stars
     if budget is not None:
-        budget.take(term_cost(retrieval_terms(comp, result)))
+        budget.take(term_cost(result))
     return result
 
 
@@ -422,20 +375,10 @@ def term_cost(forms):
     return sum(f.cost if isinstance(f, StarForm) else 1 for f in forms)
 
 
-def _star_list(comp, stems):
-    """The lookup's list for ``*X`` (Phase 1's meaning, kept until leading stars are
-    searched): the 24 prefix forms of every stem, not only the typed word (Codex 2.17:
-    the check accepted a variant's prefixed form the lookup never asked for)."""
-    if comp.wildcard != 'prefix':
-        return []
-    return [f for w in stems if isinstance(w, str) for f in expand_grammatical_prefixes(w)]
-
-
 def retrieval_terms(comp, stems):
-    """Every form the lookup asks for (finite forms and StarForms), once each, and for
-    ``*X`` its prefix list. A star inside or at the end of a word is a pattern (Phase
-    3); Phase 1 also listed ``X*``'s 25 suffixes here."""
-    return list(dict.fromkeys(list(stems) + _star_list(comp, stems)))
+    """Every form the lookup asks for (finite forms and StarForms), once each. Phase 1
+    added a star word's fixed prefix or suffix list here; a star is a pattern now."""
+    return list(dict.fromkeys(stems))
 
 
 # ==============================================================================
@@ -680,31 +623,21 @@ class WordPlan:
         return [f for f in self.stems if isinstance(f, StarForm)]
 
     @property
-    def legacy_prefix(self):
-        """``*X``, searched with Phase 1's meaning until leading stars are (plan §7,
-        Phase 3 point 14): its lookup adds the 24 prefixes, its check is ``\\S*X``."""
-        return self.component.wildcard == 'prefix'
-
-    @property
     def star(self) -> bool:
-        """Whether a form of the word holds a star (``*X`` included)."""
-        return self.legacy_prefix or any(isinstance(f, StarForm) for f in self.stems)
+        """Whether a form of the word holds a star."""
+        return any(isinstance(f, StarForm) for f in self.stems)
 
     @property
     def bounds(self):
-        """(start bounded, end bounded): both, for every word with a true star too -- a
-        star takes the letters up to the word's own edge, so ``כהנ*`` is a word that
-        begins with כהנ and both its ends are checked like any word's (plan §7, Phase 3
-        point 1). ``*X`` keeps Phase 1's open start."""
-        return not self.legacy_prefix, True
+        """(start bounded, end bounded): both, always. A star takes the letters up to
+        the word's own edge, so ``*נים`` is a word that ends in נים and both its ends are
+        checked like any word's (plan §7, Phase 3 point 1)."""
+        return True, True
 
     @property
     def original_words(self):
-        """The words typed without a star: the scored clause boosts them (``*X``'s X,
-        as in Phase 1)."""
-        if self.legacy_prefix:
-            return list(self.component.words)
-        if self.component.wildcard in ('suffix', 'pattern'):
+        """The words typed without a star: the scored clause boosts them."""
+        if self.component.wildcard in ('prefix', 'suffix', 'pattern'):
             return []
         return [w for w in self.component.words if '*' not in w]
 
@@ -714,8 +647,6 @@ class WordPlan:
     def first_chars(self, flex_spacing=False):
         """The characters the word's own pattern can begin with (its forms'; with flex
         spacing, its typed words' too), or None when it can begin with anything."""
-        if self.legacy_prefix:
-            return None
         chars = {f[0] for f in self.finite if f}
         for sf in self.starred:
             if sf.leading:
@@ -729,15 +660,14 @@ class WordPlan:
 
     def tantivy_dict(self):
         """The component dict build_tantivy_query / component_query_string read: the
-        finite forms (a star word is looked up by its pattern, ``star_queries``; ``*X``
-        by its prefix list, as in Phase 1)."""
+        finite forms (a star word is looked up by its pattern, ``star_queries``)."""
         finite = self.finite
         return {
             'tantivy_terms': finite,
             'regex_terms': finite,
             'original_words': self.original_words,
             'wildcard_stems': finite,
-            'wildcard': 'prefix' if self.legacy_prefix else None,
+            'wildcard': None,
             'wildcard_pattern': None,
             'flex_patterns': self.flex_patterns,
             'inline_pattern': None,
@@ -746,10 +676,7 @@ class WordPlan:
     def body(self, flex_spacing, inserter=None, anchor=True):
         """The word's own pattern, without edges. *anchor*: its start is a word's start
         (``star_body``)."""
-        from shared.search_engine import _build_wildcard_regex, _variant_alternation, MARK_TOLERANT_INSERTER
-        if self.legacy_prefix:
-            return _build_wildcard_regex({'wildcard': 'prefix',
-                                          'regex_terms': sorted(set(self.finite), key=len, reverse=True)})
+        from shared.search_engine import _variant_alternation, MARK_TOLERANT_INSERTER
         inserter = inserter or MARK_TOLERANT_INSERTER
         alternatives = []
         forms = sorted(set(self.finite), key=len, reverse=True)
@@ -765,6 +692,8 @@ def _dict_star_forms(d):
     """The StarForms of a legacy component dict (``wildcard`` prefix / suffix / pattern
     and its ``regex_terms``)."""
     wildcard, terms = d.get('wildcard'), [t for t in (d.get('regex_terms') or []) if t]
+    if wildcard == 'prefix' and terms:
+        return [StarForm(typed='*' + terms[0], runs=(('',), tuple(terms)))]
     if wildcard == 'suffix' and terms:
         return [StarForm(typed=terms[0] + '*', runs=(tuple(terms), ('',)))]
     if wildcard == 'pattern' and d.get('wildcard_pattern'):
@@ -780,14 +709,13 @@ def plans_from_dicts(component_dicts):
     plans = []
     for d in component_dicts:
         comp = ResponsaComponent(words=list(d.get('original_words') or []),
-                                 inline_pattern=d.get('inline_pattern'),
-                                 wildcard='prefix' if d.get('wildcard') == 'prefix' else None)
+                                 inline_pattern=d.get('inline_pattern'))
         if comp.inline_pattern:
             try:
                 stems = _inline_forms(comp.inline_pattern)
             except _OverLimit:
                 raise guard_refusal() from None
-        elif d.get('wildcard') in ('suffix', 'pattern'):
+        elif d.get('wildcard') in ('prefix', 'suffix', 'pattern'):
             stems = _dict_star_forms(d)
         else:
             stems = [t for t in (d.get('regex_terms') or []) if t]
@@ -832,15 +760,7 @@ class CompiledResponsa:
 
     @property
     def has_star(self):
-        """A word holds a star, ``*X`` included (the position fields hold whole tokens:
-        such a query is looked up on the content field)."""
         return any(p.star for p in self.plans)
-
-    @property
-    def has_true_star(self):
-        """A word holds a star searched as any letters (Phase 3): where its crossings
-        come from follows plan §7, Phase 3 point 7, not today's route."""
-        return any(p.starred for p in self.plans)
 
     @property
     def all_star(self):
@@ -877,14 +797,16 @@ class CompiledResponsa:
         return min(s for s, _e in spans), max(e for _s, e in spans)
 
     def retrieval(self, index, field='content', has_content_search=False, flex_spacing=False,
-                  bidirectional=False, within_document=False):
+                  bidirectional=False, within_document=False, reversed_field=None):
         """The lookup on *index* (its own schema; plan §5.1, Codex 2.4): per word its
-        scored terms ORed with a bracket- and mark-tolerant pattern of its forms, and its
-        star forms' patterns, the words ANDed; a position *field* also requires its edge
-        word there (retrieval_query)."""
+        scored terms ORed with a bracket- and mark-tolerant pattern of its forms, the
+        words ANDed; a position *field* also requires its edge word there
+        (retrieval_query). *reversed_field*: the index's reversed-words field, when it
+        has one (a leading star is looked up there)."""
         return retrieval_query(self.plans, index, field=field,
                                has_content_search=has_content_search, flex_spacing=flex_spacing,
-                               bidirectional=bidirectional, within_document=within_document)
+                               bidirectional=bidirectional, within_document=within_document,
+                               reversed_field=reversed_field)
 
 
 class _CheckPattern(Pattern):
@@ -1056,16 +978,13 @@ def compile_components(components, responsa_options, var_mgr, max_gap, per_pair_
                        query_has_brackets=False):
     """Compile parsed *components* (one query, no line groups) into a CompiledResponsa.
 
-    Refuses a bare star (decision 4) and the leading-star shapes not searched yet,
-    rewrites ``*X*`` as ``#X#`` (with Phase 1's warning, until leading stars are
-    searched), splits off the negated words (letters to exclude), and expands the rest
-    under the guard."""
+    Refuses a bare star (decision 4), splits off the negated words (letters to
+    exclude), and expands the rest under the guard. A star word is searched as typed:
+    ``*X*`` is no longer rewritten as ``#X#`` (Phase 1 did, with a warning)."""
     from shared.search_engine import _make_flex_spacing_pattern
     opts = responsa_options or {}
     refuse_unsupported_stars(components)
     warnings = []
-    if rewrite_both_end_stars(components):
-        warnings.append(_tr("*word* rewritten as #word# (prefix + suffix expansion)"))
     positive = [c for c in components if not c.negated]
     negated = negated_words(components)
     stems, guard_warning, state = expand_under_guard(
@@ -1117,7 +1036,7 @@ def _line_flex_pattern(word):
 
 def compile_line_groups(line_groups, line_gaps, responsa_options, var_mgr, query_has_brackets=False):
     """Compile a line-break query (``_parse_line_break_query``'s groups) through the
-    same steps as compile_components: the refused star shapes, ``*X*`` -> ``#X#``,
+    same steps as compile_components: a bare star refused, star words searched as typed,
     negated words split off as letters to exclude, one guard over every word, and
     every word bounded by Exact's predicate -- each group's edges included, while a
     ``|`` anchor still means the line's start or end (§4). Its pattern is MULTILINE.
@@ -1128,8 +1047,6 @@ def compile_line_groups(line_groups, line_gaps, responsa_options, var_mgr, query
     every = [c for g in line_groups for c in g.components]
     refuse_unsupported_stars(every)
     warnings = []
-    if rewrite_both_end_stars(every):
-        warnings.append(_tr("*word* rewritten as #word# (prefix + suffix expansion)"))
     negated = negated_words(every)
     kept_groups, kept_gaps = [], []
     for gi, group in enumerate(line_groups):
@@ -1399,13 +1316,14 @@ def tolerant_queries(forms, schema, field, tolerance, edges=None):
     return out
 
 
-def star_pattern(sf, tolerance, fold=True):
+def star_pattern(sf, tolerance, fold=True, reverse=False):
     """The ``regex_query`` pattern of StarForm *sf* over whole tokens: each run's forms
     (a run a star follows also with its last letter's other form) with *tolerance*
     between letters, ``.*`` for a star -- wider than the check, which retrieval may be,
     never narrower (§4) -- and *tolerance* at an end that is a letter. *fold*: folded as
-    ``content_search`` is. A word that begins with a letter is a pattern the term-
-    dictionary walk prunes by those letters (§3.1: cheap on every index format).
+    ``content_search`` is. *reverse*: on the reversed-words field, every form written
+    backwards and the runs in reverse order, so a leading star becomes a trailing one
+    and the term-dictionary walk is pruned by the word's last letters (§6.1 point 5).
     Case-insensitive (``(?i)``), as the check is: the index keeps a token's case
     (Codex review of PR #442; Hebrew has none, so its patterns are unchanged)."""
     last = len(sf.runs) - 1
@@ -1417,6 +1335,8 @@ def star_pattern(sf, tolerance, fold=True):
         if fold:
             forms = [strip_search_diacritics(f) for f in forms]
         pieces.append(list(dict.fromkeys(f for f in forms if f)))
+    if reverse:
+        pieces = [[f[::-1] for f in p] for p in reversed(pieces)]
     out = []
     for i, forms in enumerate(pieces):
         if i:
@@ -1437,18 +1357,36 @@ def _split_largest_run(sf):
     return [StarForm(sf.typed, sf.runs[:i] + (half,) + sf.runs[i + 1:]) for half in (run[:mid], run[mid:])]
 
 
-def star_queries(star_forms, schema, field, tolerance):
+def star_route(sf, reversed_field):
+    """How StarForm *sf* is looked up (plan §7, Phase 3 point 6): 'forward' when it
+    begins with a letter (the walk is pruned by it), 'reversed' when it begins with a
+    star and ends with a letter and the index has the reversed-words field, else 'scan'
+    (``.*`` first: the whole term dictionary; both ends starred, or no reversed field)."""
+    if not sf.leading:
+        return 'forward'
+    if not sf.trailing and reversed_field:
+        return 'reversed'
+    return 'scan'
+
+
+def star_queries(star_forms, schema, field, tolerance, reversed_field=None):
     """``regex_query``s that find every document holding a token one of *star_forms*
     can be, each within tantivy-fst's size limit: a form whose pattern is too large is
     split by halving its largest run (decision 5: several queries, ORed by the caller).
-    *field*: content_search (or content on an index without it)."""
+    *field*: content_search (or content on an index without it); *reversed_field*: the
+    index's reversed-words field (built from content_search), or None."""
     import tantivy
     out = []
 
     def build(sf):
-        pattern = star_pattern(sf, tolerance, fold=field == 'content_search')
+        route = star_route(sf, reversed_field)
+        if route == 'reversed':
+            on_field, pattern = reversed_field, star_pattern(sf, _T_CONTENT_SEARCH, True, reverse=True)
+        else:
+            on_field = field
+            pattern = star_pattern(sf, tolerance, fold=field == 'content_search')
         try:
-            out.append(tantivy.Query.regex_query(schema, field, pattern))
+            out.append(tantivy.Query.regex_query(schema, on_field, pattern))
         except ValueError as exc:
             halves = _split_largest_run(sf) if 'size limit' in str(exc) else None
             if halves is None:
@@ -1483,12 +1421,13 @@ _LAST_WORD_EDGES = ('[\\[\\]()<>{}"\'״׳‘’.,:;!?\\-־׃׀/|*+=_#%$@·…]*'
 
 
 def retrieval_query(plans, index, field='content', has_content_search=False, flex_spacing=False,
-                    bidirectional=False, within_document=False):
+                    bidirectional=False, within_document=False, reversed_field=None):
     """The candidates for *plans* on *index*: per word, its scored clause on the
     content field, ORed with the tolerant pattern of its forms on content_search (or
     on content when the index has no content_search field), and its star forms'
-    patterns (``star_queries``); the words ANDed. Star patterns score a constant, so
-    the finite words' scores order the rows (decision 2).
+    patterns (``star_queries``; *reversed_field*: the index's reversed-words field,
+    where a leading star is looked up, or None); the words ANDed. Star patterns score
+    a constant, so the finite words' scores order the rows (decision 2).
 
     A position search (*field* one of the position fields) also requires its edge
     word there: the first word at a start, the last at an end, either one when the
@@ -1509,14 +1448,14 @@ def retrieval_query(plans, index, field='content', has_content_search=False, fle
         if on_field == 'content':
             pfield = 'content_search' if has_content_search else 'content'
             tolerance = _T_CONTENT_SEARCH if has_content_search else _T_CONTENT
-            finite = [t for t in plan.terms() if isinstance(t, str)]
-            patterns = tolerant_queries(finite, index.schema, pfield, tolerance)
-            patterns += star_queries(plan.starred, index.schema, pfield, tolerance)
+            patterns = tolerant_queries(plan.finite, index.schema, pfield, tolerance)
+            patterns += star_queries(plan.starred, index.schema, pfield, tolerance,
+                                     reversed_field if has_content_search else None)
         elif not clause:
             return None
         else:
             patterns = tolerant_queries(
-                [t for t in plan.terms() if isinstance(t, str)], index.schema, on_field, _T_CONTENT,
+                plan.finite, index.schema, on_field, _T_CONTENT,
                 _FIRST_WORD_EDGES if on_field in _FIRST_WORD_FIELDS else _LAST_WORD_EDGES)
         for q in patterns:
             alternatives.append((should, tantivy.Query.const_score_query(q, PATTERN_SCORE)))

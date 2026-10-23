@@ -909,7 +909,7 @@ This mode offers two search methods inspired by the Bar-Ilan Responsa Project: a
             ('#word#', 'Both prefixes + suffixes (all 600 combinations)', '#\u05e9\u05dc\u05d5\u05dd# \u2192 all combinations'),
             ('word*', 'Any letters after the word, none included', '\u05e9\u05dc\u05d5\u05dd* \u2192 \u05e9\u05dc\u05d5\u05dd, \u05e9\u05dc\u05d5\u05de\u05d5\u05ea, \u05e9\u05dc\u05d5\u05de\u05e0\u05d5...'),
             ('wo*rd', 'Any letters inside the word, none included, as many * as you like', '\u05db*\u05e0\u05d9\u05dd \u2192 \u05db\u05d4\u05e0\u05d9\u05dd, \u05db\u05d5\u05d4\u05e0\u05d9\u05dd, \u05db\u05e0\u05d9\u05dd...'),
-            ('*word', 'A grammatical prefix before the word, as #word', '*\u05e9\u05dc\u05d5\u05dd \u2192 \u05d5\u05e9\u05dc\u05d5\u05dd, \u05d1\u05e9\u05dc\u05d5\u05dd...'),
+            ('*word', 'Any letters before the word, none included', '*\u05e0\u05d9\u05dd \u2192 \u05db\u05d4\u05e0\u05d9\u05dd, \u05d1\u05e0\u05d9\u05dd, \u05e0\u05d9\u05dd...'),
             ('%word', 'Plene/defective spelling (insert/remove \u05d5/\u05d9)', '%\u05e9\u05dc\u05d5\u05dd \u2192 \u05e9\u05dc\u05d5\u05dd, \u05e9\u05dc\u05dd'),
             ('(a/b)', 'OR alternatives', '(\u05e9\u05dc\u05d5\u05dd/\u05e9\u05dc\u05d5\u05de\u05d5\u05ea)'),
             ('[N]', 'Gap of N words', '\u05e8\u05d0\u05d5\u05d1\u05df [3] \u05e9\u05de\u05e2\u05d5\u05df'),
@@ -936,9 +936,9 @@ This mode offers two search methods inspired by the Bar-Ilan Responsa Project: a
 
         ui.markdown('*Whole words:* every word of the query is matched as a whole word, the first and the last too: `\u05db\u05d4\u05e0\u05d9\u05dd \u05d2\u05d3\u05d5\u05dc` does not find `\u05db\u05d4\u05e0\u05d9\u05dd \u05d2\u05d3\u05d5\u05dc\u05d9\u05dd`. Brackets inside a word of the text do not get in the way: `\u05e9\u05dc\u05d5\u05dd` finds `\u05e9\u05dc[\u05d5]\u05dd`.').style('color: var(--text-secondary);').classes('mb-2')
 
-        ui.markdown('*Stars:* a `*` stands for any letters inside one word, none included -- never a space, a digit or punctuation: `\u05de\u05d0\u05de* \u05e7\u05d5\u05e8*` finds `\u05de\u05d0\u05de\u05ea\u05d9 \u05e7\u05d5\u05e8\u05d9\u05df`, and spelling variants and Judeo-Arabic apply to the letters around it. At the start of a word a `*` stands for a grammatical prefix (`*word`, as `#word`), and `*word*` is searched as `#word#`; a word that begins with `*` and holds another `*` is not searched yet, and the search says so. A `*` alone matches every word: for any one word, use a gap such as `[1]`. A word with only one or two letters besides its `*` (`\u05db\u05d4*`) matches very many words, so its list may end with "+".').style('color: var(--text-secondary);').classes('mb-2')
+        ui.markdown('*Stars:* a `*` stands for any letters inside one word, none included -- never a space, a digit or punctuation: `\u05de\u05d0\u05de* \u05e7\u05d5\u05e8*` finds `\u05de\u05d0\u05de\u05ea\u05d9 \u05e7\u05d5\u05e8\u05d9\u05df`, and spelling variants and Judeo-Arabic apply to the letters around it. A `*` can stand anywhere in a word, as often as you like: `*\u05e0\u05d9\u05dd *\u05dc\u05d9\u05dd` finds `\u05db\u05d4\u05e0\u05d9\u05dd \u05d2\u05d3\u05d5\u05dc\u05d9\u05dd`, and `*\u05db\u05d4\u05e0*` finds every word that holds `\u05db\u05d4\u05e0`. A `*` alone matches every word: for any one word, use a gap such as `[1]`. A word with only one or two letters besides its `*` (`\u05db\u05d4*`) matches very many words, so its list may end with "+".').style('color: var(--text-secondary);').classes('mb-2')
 
-        ui.markdown('*Across pages:* matches that run from one page into the next are found too. When a search with `*` cannot read all of them in good time, the count shows "+" and the results line says which were not searched.').style('color: var(--text-secondary);').classes('mb-4')
+        ui.markdown('*Across pages:* matches that run from one page into the next are found too, read from the pages that follow each other in the manuscript. When a search with `*` cannot read all of them in good time, the count shows "+" and the results line says which were not searched.').style('color: var(--text-secondary);').classes('mb-4')
 
         h3('Sub-Options', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary);')
         ui.markdown('''
@@ -1718,7 +1718,7 @@ def _create_hebrew_content(precision=None, band_counts=None):
             ('#מילה#', 'תחיליות + סיומות יחד (כל 600 הצירופים)', '#שלום# \u2190 כל הצירופים'),
             ('מילה*', 'אותיות כלשהן אחרי המילה, גם אף אחת', 'שלום* \u2190 שלום, שלומות, שלומנו...'),
             ('מי*לה', 'אותיות כלשהן בתוך המילה, גם אף אחת, בכמה כוכביות שתרצו', 'כ*נים \u2190 כהנים, כוהנים, כנים...'),
-            ('*מילה', 'תחילית דקדוקית לפני המילה, כמו #מילה', '*שלום \u2190 ושלום, בשלום...'),
+            ('*מילה', 'אותיות כלשהן לפני המילה, גם אף אחת', '*נים \u2190 כהנים, בנים, נים...'),
             ('%מילה', 'כתיב מלא/חסר (הוספת/הסרת ו/י)', '%שלום \u2190 שלום, שלם'),
             ('(א/ב)', 'חלופות OR', '(שלום/שלומות)'),
             ('[N]', 'מרווח של N מילים', 'ראובן [3] שמעון'),
@@ -1746,9 +1746,9 @@ def _create_hebrew_content(precision=None, band_counts=None):
 
         ui.markdown('*מילים שלמות:* כל מילה בשאילתא נמצאת כמילה שלמה, גם הראשונה והאחרונה: `כהנים גדול` אינו מוצא `כהנים גדולים`. סוגריים בתוך מילה בטקסט אינם מפריעים: `שלום` מוצא `של[ו]ם`.', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-2')
 
-        ui.markdown('*כוכביות:* `*` עומדת לאותיות כלשהן בתוך מילה אחת, גם לאף אחת -- לעולם לא לרווח, לספרה או לסימן פיסוק: `מאמ* קור*` מוצא `מאמתי קורין`, ווריאנטים כתיביים ויהודית-ערבית חלים על האותיות שסביבה. בתחילת מילה `*` עומדת לתחילית דקדוקית (`*מילה`, כמו `#מילה`), ו-`*מילה*` נחפשת כ-`#מילה#`; מילה שמתחילה ב-`*` ויש בה כוכבית נוספת עדיין אינה נחפשת, והחיפוש מודיע על כך. `*` לבדה מתאימה לכל מילה: למילה אחת כלשהי השתמשו במרווח, למשל `[1]`. מילה שיש בה רק אות אחת או שתיים מלבד הכוכבית (`כה*`) מתאימה למילים רבות מאוד, ולכן הרשימה עשויה להסתיים ב-"+".', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-2')
+        ui.markdown('*כוכביות:* `*` עומדת לאותיות כלשהן בתוך מילה אחת, גם לאף אחת -- לעולם לא לרווח, לספרה או לסימן פיסוק: `מאמ* קור*` מוצא `מאמתי קורין`, ווריאנטים כתיביים ויהודית-ערבית חלים על האותיות שסביבה. `*` יכולה לעמוד בכל מקום במילה, ככל שתרצו: `*נים *לים` מוצא `כהנים גדולים`, ו-`*כהנ*` מוצא כל מילה שיש בה `כהנ`. `*` לבדה מתאימה לכל מילה: למילה אחת כלשהי השתמשו במרווח, למשל `[1]`. מילה שיש בה רק אות אחת או שתיים מלבד הכוכבית (`כה*`) מתאימה למילים רבות מאוד, ולכן הרשימה עשויה להסתיים ב-"+".', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-2')
 
-        ui.markdown('*בין עמודים:* גם התאמות שעוברות מעמוד לעמוד שאחריו נמצאות. כשחיפוש עם `*` אינו מספיק לקרוא את כולן בזמן סביר, הספירה מסתיימת ב-"+" ושורת התוצאות אומרת מה לא נחפש.', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
+        ui.markdown('*בין עמודים:* גם התאמות שעוברות מעמוד לעמוד שאחריו נמצאות, מן העמודים הסמוכים זה לזה בכתב היד. כשחיפוש עם `*` אינו מספיק לקרוא את כולן בזמן סביר, הספירה מסתיימת ב-"+" ושורת התוצאות אומרת מה לא נחפש.', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
 
         h3('אפשרויות משנה', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary); direction: rtl; text-align: right;')
         ui.markdown('''

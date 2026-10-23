@@ -2508,6 +2508,19 @@ class SearchEngine:
                    for scope in ('part', 'system')])
         return query
 
+    def _reversed_words_field(self, index):
+        """The reversed-words field of *index* (the main index or the seam index), where a
+        Responsa word that begins with a star and ends with a letter is looked up (plan §7,
+        Phase 3 point 6), or None: an old index, a seam index built without the field, and
+        My Library's LOCAL index keep the ``.*`` scan (§6.1: LOCAL is small)."""
+        if index is None or not getattr(self, '_has_reversed_words', False):
+            return None
+        if index is getattr(self, 'index', None):
+            return REVERSED_WORDS_FIELD
+        if index is getattr(self, 'seam_index', None) and _index_has_field(index, REVERSED_WORDS_FIELD):
+            return REVERSED_WORDS_FIELD
+        return None
+
     def reversed_ending_query(self, ending, *, seams=False):
         """The documents holding a word that ends with *ending* (plan §5.6 B, decision 1):
         a prefix lookup on the reversed-words field (``reversed_ending_pattern``: brackets
@@ -2877,7 +2890,7 @@ class SearchEngine:
         }
 
     def _cross_page_spans(self, regex, content, boundaries, first_term, last_term, side_words, gap, strip,
-                          whole_words=False):
+                          whole_words=False, page_start=None):
         """Spans (in *content* coordinates) of every match that runs across a page
         break of a whole-manuscript / part doc.
 
@@ -2887,6 +2900,9 @@ class SearchEngine:
         a (forms, others) pair (``_cross_page_term``) also looks for *others* --
         forms with a Latin letter or a digit -- as text in the window.
         *whole_words*: a match must also pass ``_whole_word_span``.
+        *page_start* (a seam, one break): only a match that starts there or later, on
+        the page just before the break, counts; one from an earlier page crossed an
+        earlier break first and is that break's (Codex round 3 on PR #443).
 
         For a multi-word Literal query the page docs already give every match
         inside one page, so an aggregate adds only the matches that cross a
@@ -2991,7 +3007,8 @@ class SearchEngine:
                 # The first match that crosses the break (and is a whole-word match,
                 # when asked); one that starts after the break cannot cross it.
                 while m is not None and m.start() < cs and not (
-                        cs < m.end() and (not whole_words or _whole_word_span(text, m.start(), m.end()))):
+                        cs < m.end() and (not whole_words or _whole_word_span(text, m.start(), m.end()))
+                        and (page_start is None or to_content(piece, m.start(), m.end())[0] >= page_start)):
                     m = regex.search(text, m.start() + 1)
                 if m is not None and m.start() < cs < m.end():
                     spans.append(to_content(piece, m.start(), m.end()))
@@ -3095,27 +3112,27 @@ class SearchEngine:
         - ``AND``, a text position or a line query: the whole-manuscript and part
           documents, each checked whole; with a star word only when they are few enough
           to read in time (*bounded*: ``Config.RESPONSA_STAR_AGGREGATE_LIMIT``);
-        - a sequence with a star word, on format 2: the seams when S <= K; past K the
-          seams too, marked incomplete;
-        - a sequence with a star word, on format 1: the whole-manuscript documents'
-          page breaks, a window of S words each side (*windows*), *bounded* -- §3.5's
-          billions of characters are what a broad star would read otherwise;
-        - a sequence of finite words: today's whole-manuscript documents (the seams
-          take them in the next PR, decision 10)."""
-        star = compiled.has_true_star
+        - a sequence on format 2: the seams when S <= K (finite words too: decision 10);
+          past K, finite words today's whole-manuscript documents, and a star word the
+          seams, marked incomplete (decision 9: never the whole manuscripts);
+        - a sequence on format 1: finite words today's whole-manuscript documents; a star
+          word their page breaks, a window of S words each side (*windows*), *bounded* --
+          §3.5's billions of characters are what a broad star would read otherwise."""
+        star = compiled.has_star
         flex = bool(options.get('flex_spacing'))
         if len(compiled.plans) == 1 and not (flex and compiled.plans[0].original_words):
             return _CrossingPlan()
         if options.get('within_document') or line or text_position:
             return _CrossingPlan('aggregates', bounded=star)
-        if not star:
-            return _CrossingPlan('aggregates')
         side = self._responsa_side_words(compiled, per_pair_gaps, gap)
         if self._seams_ready():
             if side <= self.seam_words:
                 return _CrossingPlan('seams', side)
-            return _CrossingPlan('seams', self.seam_words,
-                                 note=_tr(CROSSING_NOTE_LONG).format(k=self.seam_words))
+            if star:
+                return _CrossingPlan('seams', self.seam_words,
+                                     note=_tr(CROSSING_NOTE_LONG).format(k=self.seam_words))
+        if not star:
+            return _CrossingPlan('aggregates')
         return _CrossingPlan('aggregates', side, windows=True, bounded=True)
 
     def _seam_restriction(self, restrict_sys_ids):
@@ -3172,11 +3189,26 @@ class SearchEngine:
                                                    prev.get('start', 0)))
         return sorted(spans)
 
+    def _evf_seam_query(self, terms, mode, query_str, by_forms, content_search_field, restrict_sys_ids):
+        """Exact's, Variants' or Fuzzy's lookup on the seam index (its own schema), within
+        the restriction: the phrase-pair query string Exact parses there, or the forms
+        query Variants and Fuzzy build (*by_forms*) on the seam index's fields."""
+        if by_forms:
+            query = self.build_variant_query(terms, mode, content_search_field=content_search_field,
+                                             index=self.seam_index)
+        else:
+            query = self.seam_index.parse_query(query_str, ['content'])
+        if restrict_sys_ids is not None:
+            query = tantivy.Query.boolean_query([(tantivy.Occur.Must, query),
+                                                 (tantivy.Occur.Must, self._seam_restriction(restrict_sys_ids))])
+        return query
+
     def _responsa_seam_query(self, compiled, options, restrict_sys_ids):
         """*compiled*'s lookup on the seam index (its own schema), within the restriction."""
         query = compiled.retrieval(self.seam_index, has_content_search=True,
                                    flex_spacing=bool(options.get('flex_spacing')),
-                                   bidirectional=bool(options.get('bidirectional')))
+                                   bidirectional=bool(options.get('bidirectional')),
+                                   reversed_field=self._reversed_words_field(self.seam_index))
         if restrict_sys_ids is not None:
             query = tantivy.Query.boolean_query([(tantivy.Occur.Must, query),
                                                  (tantivy.Occur.Must, self._seam_restriction(restrict_sys_ids))])
@@ -3448,7 +3480,8 @@ class SearchEngine:
             # what the check accepts (plan §4: retrieval never narrower).
             # With flex spacing, a split word's halves too (של ום for שלום).
             query = compiled.retrieval(self.index, has_content_search=getattr(self, '_has_content_search', False),
-                                       flex_spacing=compiled.flex_spacing)
+                                       flex_spacing=compiled.flex_spacing,
+                                       reversed_field=self._reversed_words_field(self.index))
             if query is None:
                 return []
             if restrict_sys_ids is not None:   # in the query at any size: see execute_search
@@ -4099,9 +4132,11 @@ class SearchEngine:
         # seams read up to _limit of their own.
         _page_limit = _limit if (ids_only or _responsa is None) else Config.RESPONSA_PAGE_LIMIT
         # Where a Responsa search reads its matches across pages, after its pages
-        # (_responsa_crossings); None outside Responsa, and on an index whose documents
-        # do not all carry a scope (the one mixed query, as before).
+        # (_responsa_crossings), and Exact's, Variants' or Fuzzy's when they come from
+        # the seams (decision 10); otherwise None, as on an index whose documents do not
+        # all carry a scope (the one mixed query, as before).
         _crossings = None
+        _evf_seam_q = None      # Exact / Variants / Fuzzy: their lookup on the seam index
         crossing_notes = []     # what was not searched across pages, and why (said with "N+")
 
         tantivy_started = time.perf_counter()
@@ -4115,7 +4150,8 @@ class SearchEngine:
                     has_content_search=getattr(self, '_has_content_search', False),
                     flex_spacing=responsa_options.get('flex_spacing', False),
                     bidirectional=bool(responsa_options.get('bidirectional')),
-                    within_document=bool(responsa_options.get('within_document')))
+                    within_document=bool(responsa_options.get('within_document')),
+                    reversed_field=self._reversed_words_field(self.index))
                 if t_query_obj is None:
                     return []
                 if self._every_doc_has_scope():
@@ -4148,12 +4184,21 @@ class SearchEngine:
                 _note_search_cutoff(capped=capped)
                 # Parsed now (a bad query fails here, as before) but run only after
                 # the page hits: the first rows need not wait for it.
-                if t_query_obj is not None:
+                if (_cross_page_terms is not None and not text_position and self._seams_ready()
+                        and _cross_page_side_words <= self.seam_words):
+                    # Decision 10 (plan §7, Phase 3 point 12): the matches across a page
+                    # break from the seams, which hold every true junction and none of
+                    # the false ones (the V0.8 -> V0.7 restart, a volume change).
+                    _evf_seam_q = self._evf_seam_query(terms, mode, t_query_str, t_query_obj is not None,
+                                                       _cs_field, restrict_sys_ids)
+                    _crossings = _CrossingPlan('seams', _cross_page_side_words)
+                elif t_query_obj is not None:
                     agg_q = self._and_query(t_query_obj, 'scope:system OR scope:part')
                 else:
                     agg_q = self.index.parse_query(
                         f'({t_query_str}) AND (scope:system OR scope:part)', [search_field])
-                agg_q = _restricted(agg_q)
+                if agg_q is not None:
+                    agg_q = _restricted(agg_q)
             elif t_query_obj is not None:
                 hits, capped = _top_hits(self.searcher, _restricted(t_query_obj), _page_limit)
                 _note_search_cutoff(capped=capped)
@@ -4195,7 +4240,8 @@ class SearchEngine:
             try:
                 if _from_seams:
                     searcher = self.seam_searcher
-                    query = self._responsa_seam_query(_responsa, responsa_options, restrict_sys_ids)
+                    query = (_evf_seam_q if _responsa is None
+                             else self._responsa_seam_query(_responsa, responsa_options, restrict_sys_ids))
                 else:
                     searcher, query = self.searcher, agg_q
                     if _crossings is not None and _crossings.bounded:
@@ -4281,11 +4327,19 @@ class SearchEngine:
             content = self._get_field(doc, 'content', [""])[0]
             cut = int(self._get_field(doc, 'cut', [0])[0])
             slices = self._parse_boundaries(doc)
+            # The page just before the break: a crossing that starts earlier is another seam's.
+            page_start = max([b.get('start', 0) for b in slices if b.get('start', 0) < cut], default=None)
             match_started = time.perf_counter()
             try:
-                spans = self._seam_crossing_spans(
-                    regex, content, cut, _crossings.side, _strip_q,
-                    max([b.get('start', 0) for b in slices if b.get('start', 0) < cut], default=None))
+                if _responsa is None:
+                    # Exact / Variants / Fuzzy: their own crossing test, at the seam's
+                    # central break only.
+                    spans = self._cross_page_spans(
+                        regex, content, [{'start': 0}, {'start': cut}], _cross_page_terms[0],
+                        _cross_page_terms[1], _crossings.side, gap, strip=_strip_q, whole_words=_whole_words,
+                        page_start=page_start)
+                else:
+                    spans = self._seam_crossing_spans(regex, content, cut, _crossings.side, _strip_q, page_start)
             finally:
                 candidate_match_seconds += time.perf_counter() - match_started
             kept = 0
@@ -4305,8 +4359,8 @@ class SearchEngine:
                         row['_excluded'] = _excluded(self._seam_pages_text(span, slices, content, _seam_pages))
                     results.append(row)
                 else:
-                    results.append(self._seam_result_row(content, span, slices, pattern_str, score, _seam_pages,
-                                                         page_text=bool(exclude_words)))
+                    results.append(self._seam_result_row(content, span, slices, _row_pattern(content), score,
+                                                         _seam_pages, page_text=bool(exclude_words)))
                 kept += 1
             return kept
 
