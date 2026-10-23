@@ -7,6 +7,8 @@ and translations are the values. Supports RTL languages.
 """
 
 import functools
+import re
+import string
 import weakref
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -231,6 +233,66 @@ def tr(text: str) -> str:
         return text
 
     return TRANSLATIONS.get(text, text)
+
+
+_FILLED_PATTERNS = None  # (template, regex) pairs, built on first use
+
+
+def _filled_message_patterns():
+    """(template, regex) for each message the engine writes with its numbers filled in."""
+    global _FILLED_PATTERNS
+    if _FILLED_PATTERNS is None:
+        from shared.search_engine import FILLED_MESSAGE_TEMPLATES  # lazy: the engine is heavy
+        patterns = []
+        for template in FILLED_MESSAGE_TEMPLATES:
+            regex = ''.join(re.escape(literal) + (f'(?P<{field}>.+?)' if field else '')
+                            for literal, field, _spec, _conv in string.Formatter().parse(template))
+            patterns.append((template, re.compile(regex)))
+        _FILLED_PATTERNS = patterns
+    return _FILLED_PATTERNS
+
+
+def _translate_engine_note(text):
+    """One note in the visitor's language, or None when it is not a known message."""
+    if text in TRANSLATIONS:
+        return TRANSLATIONS[text]
+    for template, regex in _filled_message_patterns():
+        match = regex.fullmatch(text)
+        if match is None or template not in TRANSLATIONS:
+            continue
+        values = match.groupdict()
+        parts = []
+        for literal, field, _spec, _conv in string.Formatter().parse(TRANSLATIONS[template]):
+            if field and field not in values:
+                return None
+            parts.append(literal + (values[field] if field else ''))
+        return ''.join(parts)
+    return None
+
+
+def tr_engine_message(text: str) -> str:
+    """tr() for what the search engine wrote: one note, or several joined with "; ",
+    their numbers already filled in.
+
+    tr() looks a text up as it is, so it misses a note once "{n:,}" has become "5,252",
+    and a note with "; " inside it once the line is split there. The numbers are kept
+    exactly as written; a text that is not a known message is left as it is.
+    """
+    if not text or get_language() == 'en':
+        return text
+    pieces = text.split('; ')
+    out, i = [], 0
+    while i < len(pieces):
+        for j in range(len(pieces), i, -1):  # the longest run of pieces that is one message
+            done = _translate_engine_note('; '.join(pieces[i:j]))
+            if done is not None:
+                out.append(done)
+                i = j
+                break
+        else:
+            out.append(pieces[i])
+            i += 1
+    return '; '.join(out)
 
 
 def get_dir() -> str:

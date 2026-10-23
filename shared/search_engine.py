@@ -54,7 +54,7 @@ from shared.responsa_match import (
     compile_components as compile_responsa_components,
     compile_line_groups as compile_responsa_line_groups,
     component_query_string, expand_stems as expand_responsa_stems, plans_from_dicts,
-    refuse_unsupported_stars, ResponsaQueryRefused, StarExclusion,
+    refuse_unsupported_stars, ResponsaQueryRefused, StarExclusion, GUARD_REFUSAL_TEXT,
 )
 
 LOGGER = logging.getLogger("genizah." + __name__)
@@ -232,6 +232,13 @@ CROSSING_NOTE_LONG = ("Matches across a page break with more than {k} words on o
 CROSSING_NOTE_TOO_MANY = ("Matches that run across pages were not searched: a query with * reached "
                           "{n:,} manuscripts, more than the {limit:,} that can be read in time.")
 CROSSING_NOTE_FAILED = "Matches across a page break could not be searched; the list may be incomplete."
+
+# Every message the engine translates and then fills with numbers. On the website the engine
+# writes in English (the process's language, which the API wants), and the page can no
+# longer look a message up once its numbers are in it: web/translations.py::
+# tr_engine_message recognises these templates and fills the visitor's language instead.
+# A new numbered message belongs here (tests/test_engine_message_translation.py checks).
+FILLED_MESSAGE_TEMPLATES = (CROSSING_NOTE_LONG, CROSSING_NOTE_TOO_MANY, GUARD_REFUSAL_TEXT)
 
 
 def _count_unique_chunks(chunk_hits):

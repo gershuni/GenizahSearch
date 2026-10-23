@@ -453,16 +453,20 @@ PATTERN_REFUSAL_TEXT = (
 )
 
 
+GUARD_REFUSAL_TEXT = (
+    "Query exceeds the limit of {limit} expanded terms (estimated {count} terms). "
+    "Please simplify your query by using fewer OR-group alternatives or "
+    "removing the # (grammatical prefixes) modifier from some terms."
+)
+
+
 def guard_refusal(limit=None):
     """The query is over the guard's limit after every step down: refused with its
     message and its code -- a 400 on the API, not the 500 a plain ValueError became
     there (Codex review of PR #432). Still a ValueError for the apps' handlers."""
     limit = Config.MAX_EXPANDED_TERMS if limit is None else limit
     return ResponsaQueryRefused(
-        _tr("Query exceeds the limit of {limit} expanded terms (estimated {count} terms). "
-            "Please simplify your query by using fewer OR-group alternatives or "
-            "removing the # (grammatical prefixes) modifier from some terms.").format(
-                limit=limit, count=f'{limit}+'),
+        _tr(GUARD_REFUSAL_TEXT).format(limit=limit, count=f'{limit}+'),
         code=GUARD_REFUSAL_CODE)
 
 

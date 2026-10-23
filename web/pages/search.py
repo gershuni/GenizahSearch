@@ -14,7 +14,7 @@ from nicegui import ui, run, app
 from web import io_bound_result
 from web.state import state
 from web.pages.search_helpers import compute_selected_uids
-from web.translations import tr, is_rtl, get_language, using_language
+from web.translations import tr, tr_engine_message, is_rtl, get_language, using_language
 from web.ux_timing import ux_done, ux_ignored
 from web.components.typography import h2, h3, h4
 from web.clipboard import copy_text_to_clipboard
@@ -2845,7 +2845,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         counts them: it stays while they show (plan §5.3) -- a filter or exclusion
         re-render dropped it (Codex review of PR #433)."""
         note = search_state.responsa_warning
-        return (" · " + '; '.join(tr(part) for part in note.split('; '))) if note else ''
+        return (" · " + tr_engine_message(note)) if note else ''
 
     def _update_search_within_btn():
         """D-01: Show/hide search within button based on result availability."""
@@ -5760,9 +5760,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     if get_language() == 'he' else
                     'The search exceeded its time limit and was stopped. Try a narrower query or search scope.'
                 )
-            # tr(): a refused Responsa query (shared/responsa_match.py) or the guard's
-            # message arrives in English from the worker; the key translates it.
-            error_msg = tr(error_msg)
+            # A refused Responsa query (shared/responsa_match.py) or the guard's message
+            # arrives in English from the worker, its numbers filled in.
+            error_msg = tr_engine_message(error_msg)
             ui.notify(error_msg, type='warning', timeout=8000, close_button=True)
             search_state.is_running = False
             search_state.is_cancelled = False
