@@ -184,9 +184,32 @@ def test_a_finished_build_beside_the_live_index_is_swapped_in_and_the_window_ret
     assert info.call_count == 1 and "42" in info.call_args[0][2]
 
 
-def test_the_swap_waits_while_a_search_holds_the_index(window):
+class _Running:
+    def isRunning(self):
+        return True
+
+
+def _reader(window, kind):
+    """Something that reads the open index: the main search, Composition, grouping, or
+    the Join Workbench's two searches (desktop/join_workbench.py shares app.searcher)."""
+    import types
+    if kind == 'search':
+        window.is_searching = True
+    elif kind == 'composition':
+        window.comp_thread = _Running()
+    elif kind == 'grouping':
+        window.group_thread = _Running()
+    elif kind == 'join candidates':
+        window._join_workbench = types.SimpleNamespace(_search_thread=_Running(), _cross_worker=None)
+    elif kind == 'join cross-side':
+        window._join_workbench = types.SimpleNamespace(_search_thread=None, _cross_worker=_Running())
+
+
+@pytest.mark.parametrize('kind', ['search', 'composition', 'grouping', 'join candidates', 'join cross-side'])
+def test_the_swap_waits_while_a_search_holds_the_index(window, kind):
     th = _started(window, 'beside')
-    window.is_searching = True
+    _reader(window, kind)
+    assert window._index_readers_busy() == [kind]
     with patch.object(genizah_app, 'swap_in_staged_index') as swap, \
             patch.object(genizah_app.QTimer, 'singleShot') as later:
         th.finished_signal.emit(42)

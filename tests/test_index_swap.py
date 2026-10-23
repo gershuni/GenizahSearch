@@ -349,6 +349,18 @@ def test_the_fl_lookup_is_rebuilt_from_the_new_browse_map(live):
         SearchEngine._shared_browse_map = kept
 
 
+def test_the_cross_manuscript_order_is_forgotten_with_the_browse_map(live):
+    # Codex round 3 on PR #446: Browse kept walking the old map's manuscript order.
+    root, eng = live
+    from shared.search_engine import SearchEngine
+    kept = SearchEngine._shared_browse_map
+    eng._ordered_sys_ids = ["9900000001"]
+    with patch.object(eng, "start_fl_id_index_build"):
+        eng.browse_map_replaced()
+    SearchEngine._shared_browse_map = kept
+    assert eng._ordered_sys_ids == [] and eng._fl_id_index is None
+
+
 def test_a_lookup_built_from_a_map_replaced_meanwhile_is_not_kept(live):
     root, eng = live
     from shared.search_engine import SearchEngine

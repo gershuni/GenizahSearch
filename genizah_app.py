@@ -33258,10 +33258,36 @@ class GenizahGUI(QMainWindow):
 
     _INSTALL_RETRY_MS = 1000
 
+    def _index_readers_busy(self):
+        """The workers reading the open index right now, by name: the install waits for
+        them (close_index would take the index from under a running one, and on Windows
+        their maps keep the old files from being renamed). The main search and the
+        search-within completion (search_thread), Composition, grouping, and the Join
+        Workbench's candidate and cross-side searches, which share self.searcher
+        (desktop/join_workbench.py; Codex round 3 on PR #446)."""
+        busy = []
+        if getattr(self, 'is_searching', False):
+            busy.append('search')
+        for name, attr in (('search', 'search_thread'), ('composition', 'comp_thread'),
+                           ('grouping', 'group_thread')):
+            th = getattr(self, attr, None)
+            if th is not None and th.isRunning() and name not in busy:
+                busy.append(name)
+        wb = getattr(self, '_join_workbench', None)
+        if wb is not None:
+            for name, attr in (('join candidates', '_search_thread'), ('join cross-side', '_cross_worker')):
+                try:
+                    th = getattr(wb, attr, None)
+                    if th is not None and th.isRunning():
+                        busy.append(name)
+                except RuntimeError:          # the workbench window was deleted
+                    break
+        return busy
+
     def _install_staged_index(self, total_docs):
-        """The swap (shared/index_swap.py::swap_in_staged_index) once no search holds the
-        open index: on Windows a running one would keep the old files from being renamed,
-        so the install waits for it, a second at a time."""
+        """The swap (shared/index_swap.py::swap_in_staged_index) once nothing reads the
+        open index (_index_readers_busy): on Windows a running reader would keep the old
+        files from being renamed, so the install waits, a second at a time."""
         state = getattr(self, '_index_build', None)
         if not state:
             return                    # cancelled or ended while the install waited (a retry)
@@ -33271,8 +33297,7 @@ class GenizahGUI(QMainWindow):
             discard_staged_index(Config.INDEX_DIR, Config.BROWSE_MAP)
             self.on_index_cancelled()
             return
-        comp = getattr(self, 'comp_thread', None)
-        if getattr(self, 'is_searching', False) or (comp is not None and comp.isRunning()):
+        if self._index_readers_busy():
             if not state.get('at_exit'):
                 self.index_rebuild_bar.set_message(tr(
                     "The new search index is ready; it takes over when the current search ends."))

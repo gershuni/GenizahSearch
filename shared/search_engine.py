@@ -2054,6 +2054,9 @@ class SearchEngine:
         the old map's offsets until a restart)."""
         SearchEngine._shared_browse_map = None
         self._browse_map_cache = None
+        # The cross-manuscript order Browse walks (get_browse_page / the neighbour lookup)
+        # is the old map's key order: forgotten too (Codex round 3 on PR #446).
+        self._ordered_sys_ids = []
         with self._fl_id_index_lock:
             self._fl_id_index_generation += 1
             self._fl_id_index = None
