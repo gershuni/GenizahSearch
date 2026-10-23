@@ -6,7 +6,7 @@ Two defects, both found 2026-09-03 and both fixed here:
    inserted the markers (``browse_render_page``) and then built the HTML with a
    bare ``page_text.replace('\\n', '<br>')``, so a search hit reached the reader
    as literal asterisks -- ``VEKHEN *AMAR / RABI* YEHUDA``. Every other surface
-   converts (``ResultDialog._htmlify``, ``HiddenScrollArea``, the web parallels
+   converts (``ResultDialog._htmlify``, ``ContextSnippet``, the web parallels
    page, ``shared/search_engine.py``); Browse was the lone outlier.
 
 2. ``browse_original_page_text`` is captured from the pristine ``pd['text']``

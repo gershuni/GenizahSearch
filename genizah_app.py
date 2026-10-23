@@ -89,7 +89,7 @@ from desktop.vs_cache import DesktopVSCache, VSFetchThread, VSDownloadThread  # 
 from desktop.my_library_tab import MyLibraryTab  # Phase 95 — 7th tab
 from desktop.pdf_page_renderer import PdfRenderWorker  # Phase 100 D-07
 from desktop.pdf_image_controller import PdfImageController  # Phase 100 D-07b
-from desktop.ui_widgets import (ShelfmarkTableWidgetItem, CheckBoxHeader, HiddenScrollArea,
+from desktop.ui_widgets import (ShelfmarkTableWidgetItem, CheckBoxHeader, ContextSnippet,
                                 ListsTreeWidget, ElidingLabel, MatchCentredSnippet)
 from desktop.settings_dialogs import SettingsDialog, SearchSettingsDialog, HelpDialog, TabularQueryBuilderDialog, LabScoringDialog
 from desktop import passage_lifecycle  # Phase 146: letter-level (passage) search
@@ -30465,7 +30465,7 @@ class GenizahGUI(QMainWindow):
         if not text_content:
             return QLabel("")
         flat = text_content.replace("\n", " ").replace("\r", " ").strip()
-        return HiddenScrollArea(flat)
+        return ContextSnippet(flat)
 
     def _set_comp_tree_text(self, node, column, text):
         node.setText(column, text)
@@ -30564,10 +30564,12 @@ class GenizahGUI(QMainWindow):
         ms_txt = data.get("ms_ctx", "")
         anchor = data.get("anchor")
 
-        src_widget = HiddenScrollArea(src_txt.replace("\n", " "))
+        # The marked chunk in the middle of each cell (ContextSnippet); the MS
+        # cell centred on the chunk the Context cell shows.
+        src_widget = ContextSnippet(src_txt.replace("\n", " "))
         self.comp_tree.setItemWidget(node, self.comp_col_context, src_widget)
-        
-        ms_widget = HiddenScrollArea(ms_txt.replace("\n", " "), anchor_text=anchor)
+
+        ms_widget = ContextSnippet(ms_txt.replace("\n", " "), anchor_text=anchor)
         self.comp_tree.setItemWidget(node, self.comp_col_ms_context, ms_widget)
 
     def _clear_comp_node_previews(self, node):
