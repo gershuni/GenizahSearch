@@ -7,6 +7,20 @@ The authoritative release history is [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
+## What's New in Version 9.8.0? (the README's own text, 2026-10-19)
+
+**Joins Lab upgrades** (installer 9.8.0):
+
+- **Joins Lab: sort and filter by library and domain**, on the website and in the app
+- **Joins Lab: three card sizes**, and a **fuller Compare window** — a copy button, the
+  fragment's details in one line, and links to Ktiv, the library's own viewer and the Princeton
+  Geniza Project
+- **Website: a link that reopens the Joins Lab screen**, and Browse opens in a new tab
+- **Website: the homepage search box opens shelfmarks and system IDs**; the Browse page's
+  buttons carry icons; Visual Similarity has thumbnail sizes
+
+---
+
 ## What's New in Version 9.7.0? (the README's own text, 2026-10-19)
 
 **Conditions in Composition Search, and letter-level search in My Library** (installer 9.7.0):

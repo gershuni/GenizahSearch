@@ -767,7 +767,7 @@ from version import APP_VERSION
 # Names the CONTENT wave, not a release: the seen flag is stored per browser
 # as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
-WHATS_NEW_VERSION = "9.8.0-joins-lab"
+WHATS_NEW_VERSION = "9.9.0-wildcards"
 # The What's New entry for each combination of live AI listings (web/ai_listings.py).
 AI_LAUNCH_WHATS_NEW = {
     ('ChatGPT', 'Claude'): "New: GenizahSearch in ChatGPT and Claude - ask about the manuscripts in your own words, from the AI tools page.",
@@ -1776,16 +1776,19 @@ def create_layout():
         _new_surfaces.append(
             (tr("New: ask the Genizah in ChatGPT - the GenizahSearch GPT, a research "
                 "skill for other AI assistants, and the public API, from the AI tools page."), '/ai'))
-    # v9.7.0 (2026-10-18), ungated: the owner's own Hebrew. First, as the newest,
-    # so it goes in after the AI entry has taken position 0.
-    _new_surfaces.insert(0, (tr("New: support for shelfmarks in the NLI catalogue's style, "
-                                "and thumbnails in the visual join suggestions"), '/search'))
-    # v9.8.0 (2026-10-19), ungated: opens with the owner's own Hebrew. First,
-    # with the 9.7.0 entry kept below it (owner). It leads to the Joins Lab:
-    # the Visual Similarity window is a dialog inside Browse, with no page.
+    # v9.8.0 (2026-10-19), ungated: opens with the owner's own Hebrew. It leads
+    # to the Joins Lab: the Visual Similarity window is a dialog inside Browse,
+    # with no page. Kept below the 9.9.0 entries (owner); the 9.7.0 entry went.
     _new_surfaces.insert(0, (tr("New in the Joins Lab and the Visual Similarity window: sort and "
                                 "filter by library and domain, image and card sizes, a link to "
                                 "share the screen, and a fuller Compare window"), '/joins-lab'))
+    # v9.9.0 (2026-10-23), ungated, both in the owner's own Hebrew: the phone layout
+    # of the Joins Lab and Personal Lists, then the Responsa stars on top.
+    _new_surfaces.insert(0, (tr("The Joins Lab and Personal Lists now fit a phone: Compare shows "
+                                "the anchor and the candidate together, and the anchor stays in "
+                                "view while you scroll"), '/joins-lab'))
+    _new_surfaces.insert(0, (tr("Better wildcard search in Responsa style (the * operator): "
+                                "the site now finds fuller results"), '/search'))
 
     _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
     # Each listing launch lights the unread dot again (whats_new_suffix).

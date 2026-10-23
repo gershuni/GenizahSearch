@@ -4,6 +4,294 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [9.9.0] - 2026-10-23 — True wildcards in Responsa
+
+Responsa search reads `*` as the Bar-Ilan Responsa Project does: any letters, none included,
+anywhere in a word and as often as typed, so `מאמ* קור*` finds `מאמתי קורין` and `*נים *לים`
+finds `כהנים גדולים`. Every Responsa word is a whole word, `#word#` searches all its forms, a
+bracketed word is found, and on a rebuilt index the matches across page breaks of every
+multi-word search come from a new seam index. The index format is 2 (seams and a reversed-words
+field): the website's index is rebuilt by the owner, and the desktop offers a one-time rebuild
+that now runs beside the index in use, with progress in the main window and a "Rebuild when I
+exit" answer. Also: Back restores a website search as the page showed it, the Joins Lab and
+Personal Lists on a phone, and the found words centred in the desktop's Snippet and Context
+cells. PRs #432–#446. Installer 9.9.0; web deployed from `master-main`.
+
+### Responsa search: whole words, every grammatical form, and bracketed words found (web + desktop, PRs #432 and #433)
+
+Phase 1 of `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md`: one meaning of a Responsa query on every
+search path -- the main search, the line search (`|`), My Library, both together, and the complete
+pass that search-within relies on.
+
+- **Every word is a whole word**, the first and the last included, by the same rule as Exact:
+  `כהנים גדול` finds `כהנים גדול` and no longer `כהנים גדולים`; a lone `ספר` finds the word ספר,
+  not `מספרים`. The rule holds inside each `AND` word, in both directions of a bidirectional
+  search, and at each line's edges; with flexible spacing it bounds the joined words as one unit.
+  Result counts of existing searches change accordingly (owner decision 8, 2026-10-21).
+- **`#word#` searches every combination of prefixes and suffixes** (600 forms per word): the
+  limit that dropped the suffixes now counts the terms a search really looks up, measured on the
+  real index, and is 5,000 (`Config.MAX_EXPANDED_TERMS`). When a search has to turn an option off,
+  the note stays beside the result count (it was a five-second message).
+- **A word with a bracket inside it is found**: `שלום` finds `של[ו]ם`, on the website, the desktop
+  and in My Library, and the bracket stays in the highlight.
+- **Excluded words read the page the match is on**, in every mode (a Responsa `-word` and the
+  "Exclude Words" box of Exact, Variants and Fuzzy): a result is no longer hidden because the word
+  appears on another page of the same manuscript (owner decision 7). In My Library, excluded words
+  now apply to every search.
+- A `*` inside a word, a word made only of `*`, and other shapes with several `*` are not searched
+  yet: the website, the desktop, Joins Lab (both sides) and the API say so (API: 400
+  `responsa_unsupported_star`), instead of showing no results. `*word`, `word*` and `*word*` work as
+  before.
+- Website: the expanded result text highlights words written with an ASCII quote (`ר"ת`): it is
+  now matched before it is escaped.
+- Line search results mark the matched words, not their whole lines.
+- `shared/responsa_match.py`: the word compiler. Retrieval per index (each word's scored terms,
+  ORed with a bracket- and Hebrew-mark-tolerant pattern lookup of the same forms); the check
+  pattern; the highlight pattern. Its gate, `scripts/verify_responsa_wildcards.py`, compares the
+  engine with an independent reading of `Transcriptions.txt` on the real index: all nine Phase 1
+  queries agree, page and span (2026-10-22).
+
+### Search index format 2: page-break documents and a word-ending lookup (web + desktop, PRs #438 and #440)
+
+Phase 2 of `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md` (design: §6.1). A rebuilt index carries
+two additions the coming wildcard search (`*` as any letters, Phase 3) reads; nothing searches
+through them yet, so results are unchanged.
+
+- **Seam documents**: one small document for each place where one page of a manuscript runs on
+  into the next in reading order (the same transcription, the same volume, the next page
+  number), holding the 30 words on each side, with where each slice stands in its page. Oxford
+  parts also join the last page of one folio to the first of the next. 1,541,186 seams over the
+  V0.8 and V0.7 files; they live in their own index inside `tantivy_db/seams/`, so nothing that
+  reads the main index meets them.
+- **A reversed copy of every word** (`content_rev`) on every document, so a word's ending is a
+  fast lookup.
+- **A format marker**, `tantivy_db/index_format.json`, written last. An index without it (every
+  index built before this) is searched exactly as today; the desktop's Settings says which
+  format the index has, and rebuilding stays the user's click.
+- `build_index.py main --index-dir <folder>` builds into a new folder beside the live one (with
+  `--corpus-v8`, `--corpus-v7`, `--v08-only`, `--caches-from`, `--no-seams`, `--no-reversed-field`);
+  `docs/guides/DEPLOYMENT_TECHNICAL.md` has the server's rebuild, swap and rollback.
+- New checks in `scripts/measure_responsa_wildcards.py`: `seam-plan`, `index-sample`,
+  `seam-topology`, `reversed-check`, `crossing-diff`.
+
+### Responsa search: `*` finds any letters at the end of a word or inside it (web + desktop, PR #442)
+
+Phase 3, first part, of `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md` (§7, "Phase 3, settled before
+building"). It works on today's index, on the website and on every desktop.
+
+- **A `*` stands for any letters inside one word, none included**, at the end of a word or inside
+  it, as many times as typed, as in the Bar-Ilan Responsa Project: `מאמ* קור*` finds `מאמתי
+  קורין`, `כ*נים` finds `כהנים`, `כוהנים` and `כנים`. A star never reaches past a space, a digit
+  or punctuation, and every star word is a whole word. Spelling variants, Judeo-Arabic, `%` and `#`
+  apply to the letters around the star. A star word is looked up through the index's pattern
+  search, so it is quick on today's index too.
+- **Matches across a page break** are found for star searches: on a rebuilt index from the seams,
+  on today's index from each manuscript's page breaks when the manuscripts holding the words are few
+  enough to read in time; when they are not, the count shows "+" and the results line says which
+  matches were not searched. Search within such a list searches within the shown results.
+- **Responsa reads the pages first**, then the matches that run across pages, and reads up to
+  150,000 candidate pages (it was 50,000), so a broad star search shows its full list. A search whose
+  every word has a star is ordered by the matches on each page, then by shelfmark. The results line
+  counts a star word as a pattern.
+- Counts change: a `word*` search now finds every word that begins with the letters, not only the
+  word with its 25 grammatical suffixes.
+- A `*` at the start of a word works as before for now (`*word` with the grammatical prefixes,
+  `*word*` as `#word#`); a word that begins with `*` and holds another `*`, a word made only of
+  `*`, and a star word with punctuation inside are refused with a message (API: 400
+  `responsa_unsupported_star`). A star word with only one or two letters of its own carries a note
+  that its list may be cut.
+- `Config.RESPONSA_PAGE_LIMIT` (150,000) and `Config.RESPONSA_STAR_AGGREGATE_LIMIT` (2,000); the
+  cut-off signal gains `partial` / `limited` for matches left out by rule
+  (`RefinementStep.result_partial`); seam rows have `scope` `seam` and carry the pages they cover.
+
+### Responsa search: `*` at the start of a word; page-break matches from the seams (web + desktop, PR #443)
+
+Phase 3, second part, of `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md` (§7, "Phase 3, settled
+before building", decision 10), on top of the first part (`*` at the end of a word or inside it).
+
+- **A `*` at the start of a word stands for any letters too**, as it does everywhere else in a
+  word: `*נים *לים` finds `כהנים גדולים`, `*כהנ*` finds every word that holds `כהנ`, and
+  `*כ*ה*נים` finds `הכוהנים`. On a rebuilt index it is looked up from the end of each word,
+  quickly; on an older index it reads the index's whole word list, several seconds a word.
+- **Matches across a page break come from the seams on a rebuilt index**, for every search of
+  several words (Exact, Variants, Fuzzy and Responsa, up to 30 words on a side): only pages
+  that follow each other in a manuscript are joined, and every such match is found, not only a
+  manuscript's first. A longer phrase reads the whole manuscripts, as before.
+- Counts change: `*word` now finds every word that ends with the letters (the word with its 24
+  grammatical prefixes is `#word`), `*word*` is searched as typed rather than as `#word#`, and on
+  a rebuilt index a page-break match is read only where the pages follow each other.
+- Desktop: on an index built by an earlier version, a notice after startup offers a rebuild once
+  ("Rebuild now" opens the usual rebuild and its confirmation; "Later" is remembered for that
+  index). Nothing rebuilds by itself.
+- `scripts/verify_responsa_wildcards.py --phase 3` holds the leading-star queries and compares
+  finite words' crossings in full on a rebuilt index; `scripts/measure_responsa_wildcards.py`
+  gains `missing-pages --via-engine` and a `crossing-diff` that checks the engine against the
+  seams' simulation.
+
+### The search index rebuilds beside the one in use (desktop, PR #446)
+
+Rebuilding the desktop's search index (Settings, or the offer an index of an earlier format
+gets after startup) used to delete the index first and build in its place: for the twenty-odd
+minutes of the build nothing could be searched, the main window showed nothing of it (the only
+progress bar is in the Settings dialog), and a crash left no index at all.
+
+- **Built beside, swapped at the end.** When the disk has room for a second index (about the
+  current index's size plus 1.5 GB), `Indexer.create_index(beside=True)` builds into
+  `tantivy_db.new` (its own seams and marker, the browse map into `browse_map.pkl.new`) while
+  the open index keeps serving searches. At the end the app closes its index, renames the
+  folders (`shared/index_swap.py::swap_in_staged_index`), reopens the new one, updates the
+  Settings line and removes the old folder in the background (retried: on Windows the old
+  memory-mapped files refuse deletion until released; what refuses goes at the next start).
+  Without the room the build runs in place as before, and the confirmation says so, with the
+  figures. A build interrupted by a crash or a shutdown is cleaned up at the next start before
+  the index opens (`recover_index_dirs`: an interrupted swap is finished, a half-built
+  `tantivy_db.new` discarded), so a user is never left without an index. `build_index.py
+  --index-dir` keeps working unchanged.
+- **Progress where the user looks.** A line at the top of the main window
+  (`desktop/index_rebuild_bar.py`): "Rebuilding the search index: 37%, about 14 minutes left.
+  Searching uses the current index meanwhile." The phases after the corpus lines (the
+  whole-manuscript documents, the commit and merges, the seam index) now report progress too
+  (`Indexer.create_index(phase_callback=)`), weighted into one bar and one estimate
+  (`shared/index_build_progress.py`), where the Settings bar used to sit at the last line for
+  minutes. For an in-place build the line says searching is unavailable until the build ends,
+  and the Search and Analyze buttons are disabled with that sentence as their tooltip.
+- **"Rebuild when I exit."** The offer's third answer, beside "Rebuild now" and "Later"; its
+  text names what each does, in English and Hebrew. Recorded for that index like "Later"; the
+  close path then hides the main window, runs the build in a small modal progress window and
+  quits when it is done. Its Cancel keeps the index you have (the build runs beside it). A
+  build already running when the program is closed goes to the same window instead of being
+  thrown away. Cancel of a running build (`IndexerThread.request_cancel`,
+  `Indexer.create_index(cancel=)`) removes what the build wrote and nothing else.
+
+### Back to a search shows what the page showed, in every mode (web, PR #436)
+
+Measured before (local server, built-in browser, open a result in the same tab,
+press Back): a Responsa search ran again from scratch (in production on
+2026-10-22 one 45 s search ran three times for one visitor); a finished
+25,320-row Exact search came back as 250 rows ("250+"); a search left before it
+finished started again, while the abandoned one ran on and the new one waited
+behind it. Causes: the Back check refused any address with a `mode`; the page
+reads its saved state while it is built, before the browser's socket connects,
+so NiceGUI's per-tab storage was never readable there and every restore fell
+back to the 250-row copy every tab shares; and the address was stamped only when
+a search completed.
+
+Now every search writes its address when it starts: the query, the page's mode,
+the Responsa options and a random run code (`run=`). `web/search_runs.py` keeps,
+per browser and code, the running search and then the page's snapshot (up to
+1,000 rows and the filters shown with them), in memory and bounded (30 minutes
+after last use, 5 runs per browser, 100 in all). Back to the address:
+
+* a finished run is restored from it -- all its rows up to 1,000, its own
+  pre-search filters (saved with the run) and display filters (PGP, library,
+  printed, exclusions; updated as they change), never another tab's; a run that
+  found nothing shows "0 results" instead of searching again;
+* a run still running is followed: the page shows its progress and clock and
+  its rows when it ends, and Stop stops it -- no second search;
+* a stopped run comes back as the partial rows the page showed;
+* with the run not kept (a restart), the shared copy is used when it is that
+  run's, else the address searches again, in its mode.
+
+`web/search_bootstrap.py::matches_saved_run` is the match (code, query, mode,
+Responsa options, and the run's filters); a typed or pasted link without the code
+searches again, as a link should. Only the page that owns a run saves it (a page
+left mid-search still finishes it, and must not add a second history entry).
+Addresses without a mode, stamped before this, keep the old query-only Back.
+NiceGUI's tab storage is no longer used by the search page.
+
+Tests: `tests/test_search_runs.py` (the registry: per browser, bounds, running /
+done / failed), `tests/test_search_bootstrap.py` (the match in every mode, rejoin,
+an empty run, each way it must not match, the run's snapshot and filters, and the
+page's call sites: the address stamped before the job is awaited, Stop on a page
+following a run, the owner-only save, no local named `run` -- that shadowed
+NiceGUI's `run` module and broke every search's enrichment until the browser
+check caught it). Checked in the browser on a local server: the five cases above.
+
+### Joins Lab and Personal Lists on a phone (web, PR #439)
+
+Owner's screenshots, 2026-10-22, at 390px: the Joins Lab builder's controls lay across the
+anchor's transcription while the page scrolled under it, and the Personal Lists tree was a
+97px column with its heading wrapped and its three buttons stacked.
+
+### Fixed
+
+- **Joins Lab under 1024px.** The anchor pane (image, transcription, known joins) was a 380px
+  sticky column with its own scroll at every width, which left the builder and the candidates
+  10px on a phone. The pane now sits above the work column, each at the full width and the pane
+  no longer sticky; on a phone the transcription keeps a bounded scroll (45vh) so the builder
+  stays within reach, the viewer's control bar is one row of 32px buttons (in the page and in
+  Compare; on a 320px phone its zoom group takes a second row rather than being clipped), and
+  the Compare window's two panes stack, anchor above candidate. The
+  label the page rendered below everything for a narrow-screen anchor strip that was never
+  built (empty, then the sys_id in monospace) is gone.
+- **Personal Lists under 769px.** The My Lists tree was the splitter's 25% panel. The splitter
+  now stacks, the tree above the list at the full width with a bounded scroll, the page scrolls
+  instead of a fixed-height shell, choosing a list scrolls it into view, and an item card's
+  action icons are a row under the text (as a column beside it they were one icon per line
+  and the card 700px tall). On a small phone
+  (480px) dialog cards also drop their 400px / 500px minimum width, which made the create-list,
+  trash and edit dialogs wider than the screen.
+- The hooks are pinned in `tests/test_phone_layout_rules.py`.
+
+### Joins Lab on a phone: Compare shows the two images, and the anchor stays in view (web, PR #444)
+
+The Lab's job on a phone is "anchor vs candidate", and the one screen built for that was the
+one that failed at it (owner, 2026-10-23): with the Compare window's panes stacked, each pane
+was a head, an image capped at 40vh and the whole transcription, so the candidate's image sat
+several screens below the anchor's and the two were never on the screen together.
+
+### Fixed
+
+- **Compare on a phone shows the two images alone.** Below 641px each pane's head keeps only
+  the role, the shelfmark and the badges on one row; the title, details and info rows and both
+  transcriptions hide; and each image is capped at 32vh (31dvh), so the anchor and the candidate
+  are on the screen together with the verdict bar. A new "Show text" button in the window header
+  brings the transcriptions and details back for as long as the window is open. The header
+  stays one row on a phone: the "Compare" title goes, and Add as Join and Add to Puzzle go
+  icon-only and dense.
+- **A phone on its side compares side by side.** On any screen under 521px tall the panes sit
+  beside each other (two 420px panes on an 844px phone, wider than the desktop's 380px anchor
+  pane; two 312px panes on a 640px-wide phone, where the phone rule had stacked them), the text
+  hides the same way, and each image takes the height the window header, the head, the control
+  bar and the verdict bar leave.
+- **The anchor stays in view while candidates scroll.** Under 1024px the anchor pane stacks above
+  the work column and scrolled away with the candidates. Once it has left the screen, a strip
+  under the header shows the anchor's thumbnail and shelfmark, moves to the top while the
+  header's reveal has hidden it, and a tap scrolls back up
+  (`web/static/js/joins_lab_anchor_strip.js`). The narrow-screen strip the Phase-119 design named
+  was never built; this is it.
+- The hooks are pinned in `tests/test_phone_layout_rules.py`.
+
+### The found words in the middle of the Snippet and Context cells (desktop, PR #445)
+
+- The Search tab's Snippet column shows the found words in the middle of the cell. The cell
+  showed the end of the snippet: Qt centres a paragraph only while it fits its label, and a
+  longer right-to-left line is laid out from the label's left edge, so a match cut 60
+  characters in from either side stood at the cell's right edge, cut, or beyond it whenever
+  the snippet was wider than twice the column -- in the app's font, most rows. The cell is
+  now `desktop/ui_widgets.py::MatchCentredSnippet`: the label at its natural width, slid so
+  the marked words are centred, never past either end of the text. Several marks are centred
+  as one span; a match at the start or end of a page is shown with that end of the text at the
+  cell's edge; a snippet that fits is shown whole, as before. Text selection in the cell is
+  unchanged.
+- The Composition tab's Context and MS Context columns centre the matched chunk the same
+  way (`ContextSnippet`). They were `HiddenScrollArea`, a scroll area whose scrollbar was set
+  from the chunk's share of the text's characters, so the chunk stood near the middle only as
+  the letters' widths allowed, after a 10 ms timer per cell and per column resize. Kept from
+  it: the bold dark-red marks, the whole text as the tooltip, the 5 px gap between the two
+  columns, the mouse wheel sliding the text sideways, and the MS Context cell centring on the
+  chunk the Context cell shows. New: HTML in the text (`<`, `&`) is shown as text.
+- Pinned by `tests/test_match_centred_cells.py`, which reads where the red pixels land.
+
+### The local test runner cleans up after itself (ci, PR #437)
+
+- `scripts/run_local_tests.py` now writes each run's `tmp_path` files into a folder of the run's own
+  under `%TEMP%\genizah-test-lanes\`, and removes it when the run passes. A full run used to leave
+  about 18 GB there until the next run started. A failed run keeps its folder for inspection; any
+  later run removes it once it is a day old.
+- Two runs at once no longer delete each other's files: a run used to start by wiping the one
+  shared folder (133 errors in a second run, 2026-09-20).
+
 ## [9.8.3] - 2026-10-22 — A compact layout at every width
 
 The website was laid out for one width: on a phone the search controls took most of

@@ -5911,6 +5911,24 @@ TRANSLATIONS.update({
         'חדש במעבדת הצירופים ובחלונית הדמיון החזותי: מיון וסינון לפי ספרייה ותחום, בחירת גודל לתמונות ולכרטיסים, קישור לשיתוף המסך וחלון השוואה מלא יותר',
 })
 
+# v9.9.0 desktop What's New bar and dialog, and the two web What's New entries
+# (2026-10-23). The Hebrew is the owner's own (the web Responsa line, the three
+# dialog bullets); the English keys follow it.
+TRANSLATIONS.update({
+    'Better wildcard search in Responsa style (the * operator): the site now finds fuller results':
+        'שיפור בחיפוש רצף תווים בסגנון פרויקט השו"ת (שימוש באופרטור *) - האתר מוצא כעת תוצאות מלאות יותר',
+    'Better wildcard search in Responsa style (the * operator): the app now finds fuller results':
+        'שיפור בחיפוש רצף תווים בסגנון פרויקט השו"ת (שימוש באופרטור *) - התוכנה מוצאת כעת תוצאות מלאות יותר',
+    'The Joins Lab and Personal Lists now fit a phone: Compare shows the anchor and the candidate together, and the anchor stays in view while you scroll':
+        'מעבדת צירופים ורשימות אישיות מותאמות כעת לטלפון: חלון "השווה" מציג את העוגן והמועמד יחד, והעוגן נשאר בטווח ראייה בזמן הגלילה',
+    'Better wildcard search in Responsa style (the * operator): the app now finds fuller results. A star (*) stands for any sequence of letters, anywhere in a word, final letters included: search כהנ* גדו* and you get both כהן גדול and כהנים גדולים, and *א*תי קורי* also finds מאמתי קורין. Variants, grammatical prefixes and suffixes (#) and plene/defective spelling (%) work together with the star. The search also works across a page break in the same manuscript. Rebuilding the index speeds up searches with a star at the start of a word and completes the matches across page breaks.':
+        'שיפור בחיפוש רצף תווים בסגנון פרויקט השו"ת (שימוש באופרטור *) - התוכנה מוצאת כעת תוצאות מלאות יותר. כוכבית (*) מייצגת כל רצף אותיות, בכל מקום במילה, כולל חלופות אותיות סופיות. נסו לחפש כהנ* גדו* ותקבלו גם כהן גדול וגם כהנים גדולים. חיפוש *א*תי קורי* ימצא גם מאמתי קורין. אופציות וריאנטים, קידומות וסיומות דקדוקיות (#) וכתיב מלא/חסר (%) פועלות יחד עם הכוכבית. החיפוש פועל גם במעבר בין עמודים באותו כתב יד. בנייה מחדש של האינדקס מאיצה את החיפוש עם כוכבית בתחילת מילה ומשלימה את ההתאמות במעבר בין עמודים.',
+    'Every word in a Responsa-style search is a whole word, #word# searches every combination of prefixes and suffixes, and the search also finds a word with brackets inside it, such as של[ו]ם. An excluded word hides a result only when it is on the same page.':
+        'כל מילה בחיפוש בסגנון פרויקט השו"ת היא מילה שלמה, #מילה# מחפש כל צירוף של תחיליות וסיומות, החיפוש מוצא גם מילה שיש בתוכה סוגריים, כגון של[ו]ם. מילה מוחרגת מסתירה תוצאה רק כשהיא באותו עמוד.',
+    'Better search display: the highlighted words in the results are now centred in the Snippet column.':
+        'שיפור בממשק החיפוש: המילים המודגשות בתוצאות החיפוש ממורכזות כעת בעמודת הקטע.',
+})
+
 # Phone layout (2026-10-22): the search toolbar's phone menu, the browse image
 # panel's slider toggle, and the catalog-browse sidebar toggle.
 TRANSLATIONS.update({

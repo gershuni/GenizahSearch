@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 9.8.3
+# Dicta Genizah Search Pro 9.9.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,20 +8,27 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 9.8.0?
+## What's New in Version 9.9.0?
 
-**Joins Lab upgrades** (installer 9.8.0):
+**True wildcards in Responsa search** (installer 9.9.0):
 
-- **Joins Lab: sort and filter by library and domain**, on the website and in the app
-- **Joins Lab: three card sizes**, and a **fuller Compare window** — a copy button, the
-  fragment's details in one line, and links to Ktiv, the library's own viewer and the Princeton
-  Geniza Project
-- **Website: a link that reopens the Joins Lab screen**, and Browse opens in a new tab
-- **Website: the homepage search box opens shelfmarks and system IDs**; the Browse page's
-  buttons carry icons; Visual Similarity has thumbnail sizes
+- **`*` stands for any letters, anywhere in a word**, as in the Bar-Ilan Responsa Project:
+  `מאמ* קור*` finds `מאמתי קורין`, `כ*נים` finds `כהנים` and `כוהנים`, `*נים *לים` finds
+  `כהנים גדולים`. Spelling variants, `#` and `%` apply to the letters around the star.
+- **Whole words and every form**: each Responsa word is matched whole, `#word#` searches every
+  prefix and suffix combination, and a word written with a bracket (`של[ו]ם`) is found.
+- **Matches across page breaks** are found for every search of several words on a rebuilt
+  index, and Responsa reads up to 150,000 candidate pages, so broad searches show their full
+  lists.
+- **Desktop: the search index rebuilds beside the one in use** — searching continues meanwhile,
+  progress shows at the top of the main window, and you can choose "Rebuild when I exit". The
+  app offers the rebuild once; until then the index works as before.
+- **Website: Back returns to your search as you left it**, in every mode; the Joins Lab and
+  Personal Lists fit a phone.
+- **Desktop: the found words sit in the middle of the Snippet and Context cells.**
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md). The README's previous What's New sections
-(8.1.0 to 9.7.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
+(8.1.0 to 9.8.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
 
 ---
 
@@ -96,7 +103,7 @@ Add **GenizahSearch to ChatGPT** from [genizahsearch.com/ai](https://genizahsear
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V9.8.3_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
+1. **Download:** the installer (`GenizahSearchPro_V9.9.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

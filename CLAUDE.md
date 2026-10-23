@@ -324,6 +324,20 @@ every session's context.
 
 ### Releases
 
+- **v9.9.0 — True wildcards in Responsa (2026-10-23)** — PRs #432–#446 (plan
+  `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md`): Responsa `*` = any letters, none included, anywhere in a
+  word, as often as typed (`shared/responsa_match.py`, one compiler per index; gate
+  `scripts/verify_responsa_wildcards.py` against `Transcriptions.txt`); every Responsa word whole, `#word#`
+  all 600 forms, bracketed words found, excluded words per page; `Config.RESPONSA_PAGE_LIMIT` 150,000,
+  `RESPONSA_STAR_AGGREGATE_LIMIT` 2,000. **Index format 2** (`tantivy_db/seams/` K=30, `content_rev`,
+  `index_format.json` written last; `SearchEngine.index_format_status()`): page-break matches of every
+  multi-word search from the seams, leading stars from the reversed field; a format-1 index keeps today's
+  routes. Server rebuild = owner (`docs/guides/DEPLOYMENT_TECHNICAL.md`, "Rebuild the main index in
+  format 2"). Desktop: rebuild beside + swap (`shared/index_swap.py`, `recover_index_dirs` at start),
+  main-window progress line (`desktop/index_rebuild_bar.py`), one-time offer with "Rebuild when I exit".
+  Web: Back restores a run (`web/search_runs.py`); Joins Lab and Personal Lists on a phone. Desktop:
+  match-centred Snippet/Context cells. Desktop What's New 9.9.0; web `WHATS_NEW_VERSION`
+  "9.9.0-wildcards". (both)
 - **v9.8.3 — A compact layout at every width (2026-10-22)** — PR #434 (web-only, no installer, no GitHub Release): one stylesheet with breakpoints at 640, 1023 and 1440. Phone: the page scrolls, the search form folds to a strip when a search starts, the browse image sets its own height, icon-only header buttons; laptop: the search form is one row (Advanced Options / "Search only in..." as buttons with a count badge), compact result rows by default remembered per visitor (`search_density`), an expanded result with the full text beside a thumbnail, a one-line quick view with the catalog details collapsed at the foot (three tabs on a phone), the drawer overlays up to 1023; the viewer takes pinch-zoom and one-finger pan (`web/static/manuscript_viewer.js`). Five Codex rounds, nine fixes, each pinned in `tests/test_phone_layout_rules.py`. No What's New (owner): the change is visible. (web)
 - **v9.8.2 — Downloads and thumbnails (2026-10-22)** — PRs #426-#430: desktop Excel/Word/text downloads write the page the row shows (Snippet marks line breaks ` ‖ `, Full Text a space), and the Source column shows whenever a result is V0.7 (it needed `AllGenizah_OLD.txt` beside the exe); web NLI thumbnails kept on disk (`web/nli_image_store.py`, `<INDEX_DIR>/nli_thumbs/`, 10 GB cap) and the FL-id cache really keeps 30 days (`nli_fl_ids.db`; the old JSON is no longer read); web saves off the event loop (`run.io_bound(..., client=)`), /browse keeps the page under the spinner, one `gc.freeze()` after the startup loaders (`web/gc_freeze.py`, `GENIZAH_GC_FREEZE=0` turns it off), reconnect backoff after a restart (`web/static/js/reconnect_backoff.js`); Responsa true-wildcard plan + Phase 0 numbers; new tracker rows as `docs/open_issues.d/` fragments. No What's New: `WHATS_NEW_CONTENT_VERSION` stays 9.8.0. (both)
 - **v9.8.1 — Reliability and sign-up (2026-10-21)** — PRs #418-#425: web on NiceGUI 3.18 / Starlette 1.9 (`deploy.sh` installs with `-c requirements-lock.txt`); sign-up under email confirmation on both apps (typed fields in sign-up metadata, written by `handle_new_user`; usernames never the email, `migrations/profiles_no_email_username.sql` applied 10-21); API/MCP/ChatGPT `exact` = whole words (engine `literal`, responses still say `exact`); worker threads get the visitor's language (`web.translations.in_visitor_language`); `ux_timing` PostHog event (`UX_TIMING_*`); Puzzle auto-save + crops; desktop own corrections by account id, quit waits <=2 s, `crash_log.txt` in the data folder, Excel "N+"; append-preservation deploy gate (`scripts/verify_append_preservation.py`). No desktop or web What's New (owner, 2026-10-21): `WHATS_NEW_CONTENT_VERSION` stays 9.8.0, `WHATS_NEW_VERSION` stays "9.8.0-joins-lab". (both)
