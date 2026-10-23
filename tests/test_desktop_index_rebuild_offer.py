@@ -283,9 +283,38 @@ def test_cancel_in_the_exit_window_asks_the_build_to_stop_and_keeps_the_index(at
             self.cancelled = True
 
     w.ithread = _Th()
-    w._exit_rebuild_progress.findChild(QPushButton).click()    # the Cancel button (the window's X does the same)
+    dlg = w._exit_rebuild_progress
+    dlg.findChild(QPushButton).click()                         # the Cancel button (the window's X does the same)
     assert w.ithread.cancelled
-    assert w._exit_rebuild_progress.labelText() == "Cancelling... the index you have is kept."
+    assert dlg.labelText() == "Cancelling... the index you have is kept."
+    # QProgressDialog hid itself on Cancel; the window comes back, without the button,
+    # and keeps saying so through the ticks until the build has stopped (Codex round 2).
+    QApplication.instance().processEvents()
+    assert dlg.isVisible() and dlg.findChild(QPushButton) is None
+    w._index_build['clock'].started -= 120
+    w.on_index_progress(9000, 10000)
+    assert dlg.labelText() == "Cancelling... the index you have is kept." and dlg.value() == 49
+
+
+def test_cancel_while_the_install_waits_for_a_search_discards_the_staged_build(at_exit, english):
+    # Codex round 2 on PR #446: the thread had finished and _install_staged_index was
+    # retrying behind a running search; Cancel requested nothing and the retry swapped.
+    w = at_exit
+    w._defer_close_for_index_rebuild(_Event())
+
+    class _Done:
+        def isRunning(self):
+            return False
+
+        def request_cancel(self):
+            raise AssertionError("nothing to cancel on a finished thread")
+
+    w.ithread = _Done()
+    with patch.object(genizah_app, 'discard_staged_index') as discard, \
+            patch.object(QApplication, 'quit') as quit_:
+        w._exit_rebuild_progress.findChild(QPushButton).click()
+    discard.assert_called_once_with(Config.INDEX_DIR, Config.BROWSE_MAP)
+    assert w.closed == [1] and quit_.call_count == 1 and w._index_build is None
 
 
 def test_a_build_already_running_at_close_moves_to_the_exit_window(at_exit, english):

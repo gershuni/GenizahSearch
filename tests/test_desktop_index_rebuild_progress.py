@@ -73,6 +73,9 @@ class _Engine:
         self.index = object()
         return True
 
+    def browse_map_replaced(self):
+        self.calls.append('browse_map_replaced')
+
     def index_format_status(self):
         return {'current': True}
 
@@ -82,7 +85,8 @@ def _no_modal_boxes_and_no_real_index(tmp_path):
     """Nothing here may block on a real message box (a path a mutation opens would hang the
     run offscreen) or touch the real index folder: the boxes answer at once, the swap helpers
     are stand-ins unless a test patches them itself, and INDEX_DIR is a temp folder."""
-    with patch.object(QMessageBox, 'information'), patch.object(QMessageBox, 'critical'),             patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.No),             patch.object(genizah_app.Config, 'INDEX_DIR', str(tmp_path)),             patch.object(genizah_app.Config, 'BROWSE_MAP', str(tmp_path / "browse_map.pkl")),             patch.object(genizah_app, 'swap_in_staged_index'),             patch.object(genizah_app, 'remove_old_index'),             patch.object(genizah_app, 'remove_old_index_in_background'):
+    with patch.object(QMessageBox, 'information'), patch.object(QMessageBox, 'critical'),             patch.object(QMessageBox, 'question', return_value=QMessageBox.StandardButton.No),             patch.object(genizah_app.Config, 'INDEX_DIR', str(tmp_path)),             patch.object(genizah_app.Config, 'BROWSE_MAP', str(tmp_path / "browse_map.pkl")),             patch.object(genizah_app, 'swap_in_staged_index'),             patch.object(genizah_app, 'remove_old_index'),             patch.object(genizah_app, 'remove_old_index_in_background'), \
+            patch.object(genizah_app, 'discard_staged_index'):
         yield
 
 
@@ -167,13 +171,12 @@ def test_a_finished_build_beside_the_live_index_is_swapped_in_and_the_window_ret
     swaps = []
     with patch.object(genizah_app, 'swap_in_staged_index', side_effect=lambda d, b: swaps.append((d, b)) or 'old') as swap, \
             patch.object(genizah_app, 'remove_old_index_in_background') as remove, \
-            patch.object(genizah_app.SearchEngine, '_shared_browse_map', {'stale': 1}), \
             patch.object(QMessageBox, 'information') as info:
         th.finished_signal.emit(42)
-        assert genizah_app.SearchEngine._shared_browse_map is None
     assert swap.call_count == 1 and swaps[0][0] == genizah_app.Config.INDEX_DIR
-    assert window.searcher.calls == ['close', 'reload']        # closed before the swap, reopened after
-    assert window.searcher._browse_map_cache is None
+    # Closed before the swap, reopened after, and the browse map (with the FL-id lookup
+    # built from it) rebuilt: Codex round 2 on PR #446.
+    assert window.searcher.calls == ['close', 'reload', 'browse_map_replaced']
     remove.assert_called_once_with(genizah_app.Config.INDEX_DIR)
     assert not window.index_rebuild_bar.isVisibleTo(window)
     assert window.btn_search.isEnabled() and window._index_build is None
@@ -194,6 +197,31 @@ def test_the_swap_waits_while_a_search_holds_the_index(window):
     assert window._index_build is not None
 
 
+def test_a_build_cancelled_while_its_install_waited_installs_nothing(window):
+    # Codex round 2 on PR #446: the retry fired after the build had been cancelled.
+    th = _started(window, 'beside')
+    window.is_searching = True
+    retries = []
+    with patch.object(genizah_app.QTimer, 'singleShot', side_effect=lambda ms, fn: retries.append(fn)):
+        th.finished_signal.emit(42)
+    assert len(retries) == 1
+    window.on_index_cancelled()
+    window.is_searching = False
+    with patch.object(genizah_app, 'swap_in_staged_index') as swap:
+        retries[0]()
+    assert swap.call_count == 0 and window.searcher.calls == []
+
+
+def test_a_finished_build_marked_cancelling_is_discarded_not_installed(window):
+    th = _started(window, 'beside')
+    window._index_build['cancelling'] = True
+    with patch.object(genizah_app, 'swap_in_staged_index') as swap, \
+            patch.object(genizah_app, 'discard_staged_index') as discard:
+        th.finished_signal.emit(42)
+    assert swap.call_count == 0 and discard.call_count == 1
+    assert window._index_build is None and window.searcher.calls == []
+
+
 def test_a_swap_that_fails_reopens_the_index_the_user_had(window):
     th = _started(window, 'beside')
     with patch.object(genizah_app, 'swap_in_staged_index', side_effect=OSError("locked")), \
@@ -208,7 +236,7 @@ def test_a_finished_in_place_build_reloads_and_re_enables_search(window):
     th = _started(window, 'inplace')
     with patch.object(QMessageBox, 'information'):
         th.finished_signal.emit(7)
-    assert window.searcher.calls == ['close', 'reload']
+    assert window.searcher.calls == ['close', 'reload', 'browse_map_replaced']
     assert window.btn_search.isEnabled() and window.btn_search.toolTip() == ""
     assert not window.index_rebuild_bar.isVisibleTo(window)
 

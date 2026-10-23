@@ -101,7 +101,8 @@ from shared import compound_query  # Composition Search conditions (pure)
 from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog, TelemetryConsentBar, WHATS_NEW_CONTENT_VERSION  # Phase 127 update_ui; SEED-031 re-ask bar
 from desktop.index_rebuild_bar import IndexRebuildBar, remaining_phrase
 from shared.index_build_progress import BuildClock
-from shared.index_swap import gib, plan_build, remove_old_index, remove_old_index_in_background, swap_in_staged_index
+from shared.index_swap import (discard_staged_index, gib, plan_build, remove_old_index,
+                               remove_old_index_in_background, swap_in_staged_index)
 from desktop.filter_text_dialog import FilterTextDialog
 from desktop.column_filter_dialog import ColumnFilterDialog  # moved 2026-09-19; alias stub at the root
 from desktop.list_filter_dialog import ListFilterDialog
@@ -33217,7 +33218,8 @@ class GenizahGUI(QMainWindow):
             dlg = getattr(self, '_exit_rebuild_progress', None)
             if dlg is not None:
                 dlg.setValue(percent)
-                dlg.setLabelText(self._exit_rebuild_text(percent, minutes))
+                if not state.get('cancelling'):      # "Cancelling..." stays until it has
+                    dlg.setLabelText(self._exit_rebuild_text(percent, minutes))
         else:
             self.index_rebuild_bar.set_progress(percent, minutes, phase)
 
@@ -33245,6 +33247,8 @@ class GenizahGUI(QMainWindow):
             self.index_progress.setValue(self.index_progress.maximum())
             self.index_progress.setFormat(tr("Indexing complete"))
         self.searcher.reload_index()
+        if not state.get('at_exit'):
+            self.searcher.browse_map_replaced()    # the in-place build rewrote browse_map.pkl too
         self._show_index_format()
         self._end_index_build()
         if state.get('at_exit'):
@@ -33258,7 +33262,15 @@ class GenizahGUI(QMainWindow):
         """The swap (shared/index_swap.py::swap_in_staged_index) once no search holds the
         open index: on Windows a running one would keep the old files from being renamed,
         so the install waits for it, a second at a time."""
-        state = getattr(self, '_index_build', None) or {}
+        state = getattr(self, '_index_build', None)
+        if not state:
+            return                    # cancelled or ended while the install waited (a retry)
+        if state.get('cancelling'):
+            # Cancel came while the build was finishing (the exit window): the finished
+            # build is not wanted. Codex round 2 on PR #446.
+            discard_staged_index(Config.INDEX_DIR, Config.BROWSE_MAP)
+            self.on_index_cancelled()
+            return
         comp = getattr(self, 'comp_thread', None)
         if getattr(self, 'is_searching', False) or (comp is not None and comp.isRunning()):
             if not state.get('at_exit'):
@@ -33281,10 +33293,6 @@ class GenizahGUI(QMainWindow):
             if state.get('at_exit'):
                 self._finish_exit_rebuild()
             return
-        # The browse map was replaced with the index: drop the one in memory.
-        SearchEngine._shared_browse_map = None
-        if hasattr(self.searcher, '_browse_map_cache'):
-            self.searcher._browse_map_cache = None
         if state.get('at_exit'):
             # Nothing reopens the index: the program is closing. The old one's files are
             # unmapped already, so its folder goes now (what refuses goes at the next start).
@@ -33292,6 +33300,9 @@ class GenizahGUI(QMainWindow):
                 remove_old_index(Config.INDEX_DIR)
         else:
             self.searcher.reload_index()
+            # The browse map was replaced with the index: the map in memory and the FL-id
+            # lookup built from it are rebuilt (SearchEngine.browse_map_replaced).
+            self.searcher.browse_map_replaced()
             if old:
                 remove_old_index_in_background(Config.INDEX_DIR)
         if hasattr(self, 'index_progress'):
@@ -33558,6 +33569,11 @@ class GenizahGUI(QMainWindow):
         return head + "\n" + tr("This build runs in place and cannot be cancelled; the program closes when it is done.")
 
     def _cancel_exit_rebuild(self):
+        """Cancel in the exit window (its button, or its X). QProgressDialog hides itself
+        before this slot runs, so the window is shown again, without the button, until
+        the build has stopped: that can take minutes when the worker is inside Tantivy's
+        commit, and with the main window hidden too nothing else would show that the
+        program is still running (Codex round 2 on PR #446)."""
         th = getattr(self, 'ithread', None)
         state = getattr(self, '_index_build', None) or {}
         dlg = getattr(self, '_exit_rebuild_progress', None)
@@ -33566,11 +33582,19 @@ class GenizahGUI(QMainWindow):
             if dlg is not None:
                 QTimer.singleShot(0, dlg.show)
             return
-        if th is not None and th.isRunning():
-            th.request_cancel()
+        state['cancelling'] = True
         if dlg is not None:
+            dlg.setCancelButton(None)
             dlg.setLabelText(tr("Cancelling... the index you have is kept."))
-        # cancelled_signal ends the window and the close (on_index_cancelled)
+            QTimer.singleShot(0, dlg.show)
+        if th is not None and th.isRunning():
+            th.request_cancel()         # cancelled_signal ends the window and the close
+            return
+        # The build has finished and its install is waiting for a search to end
+        # (_install_staged_index's retry): no cancelled_signal will come, so the staged
+        # build is discarded here and the close goes ahead.
+        discard_staged_index(Config.INDEX_DIR, Config.BROWSE_MAP)
+        self.on_index_cancelled()
 
     def _finish_exit_rebuild(self):
         """The build the close waited for has ended, however it ended: the close goes

@@ -315,6 +315,61 @@ def test_a_leftover_staged_build_is_removed_before_a_new_one_starts(live):
     assert os.path.isfile(os.path.join(staged, "meta.json"))
 
 
+# --- the FL-id lookup after the browse map was replaced -------------------------------------
+
+def _wait_fl_build(eng, seconds=15):
+    import time
+    deadline = time.time() + seconds
+    while eng._fl_id_index_building and time.time() < deadline:
+        time.sleep(0.05)
+    assert not eng._fl_id_index_building
+
+
+def test_the_fl_lookup_is_rebuilt_from_the_new_browse_map(live):
+    # Codex round 2 on PR #446: Browse by FL id answered from the old map's offsets.
+    root, eng = live
+    from shared.search_engine import SearchEngine
+    kept = SearchEngine._shared_browse_map
+    SearchEngine._shared_browse_map = None
+    try:
+        with patch.object(Config, "BROWSE_MAP", _browse_map(root)):
+            assert eng._build_fl_id_index() is True
+            before = dict(eng._fl_id_index)
+            assert before and all(sid == "9900000001" for pairs in before.values() for sid, _ in pairs)
+            build(root, B, beside=True)
+            eng.close_index()
+            index_swap.swap_in_staged_index(root, _browse_map(root))
+            _reload(eng, root)
+            eng.browse_map_replaced()
+            _wait_fl_build(eng)
+            after = eng._fl_id_index
+        assert after is not None and after != before
+        assert any(sid == "9900000002" for pairs in after.values() for sid, _ in pairs)
+    finally:
+        SearchEngine._shared_browse_map = kept
+
+
+def test_a_lookup_built_from_a_map_replaced_meanwhile_is_not_kept(live):
+    root, eng = live
+    from shared.search_engine import SearchEngine
+    kept = SearchEngine._shared_browse_map
+    SearchEngine._shared_browse_map = None
+    real_load = eng._load_browse_map
+
+    def load_and_replace():
+        browse_map = real_load()
+        eng._fl_id_index_generation += 1            # the swap landed while this build read
+        return browse_map
+
+    try:
+        with patch.object(Config, "BROWSE_MAP", _browse_map(root)), \
+                patch.object(eng, "_load_browse_map", load_and_replace):
+            assert eng._build_fl_id_index() is False
+            assert eng._fl_id_index is None
+    finally:
+        SearchEngine._shared_browse_map = kept
+
+
 # --- the free-space plan --------------------------------------------------------------------
 
 class _Usage:
