@@ -2822,6 +2822,19 @@ In `web/pages/joins_lab.py`:
 The route is `web/main.py::joins_lab_page_route(state=...)`. The Compare header's
 `on_copy_link` lives in `web/components/compare_modal.py`.
 
+## web/static/js/joins_lab_anchor_strip.js
+
+The Joins Lab on a phone (2026-10-23). Under 1024px the anchor pane stacks above the work
+column; once it has scrolled off, `anchor_strip` in `web/pages/joins_lab.py` (class
+`joins-lab-anchor-strip`: thumbnail, shelfmark, a tap scrolls back up) shows under the header.
+This script sets `is-visible` from an IntersectionObserver on the pane, copies the pane's image
+into the thumbnail, and sets `under-hidden-header` while the header's reveal has hidden it; the
+rules are in `web/static/common.css` ("Joins Lab anchor strip"). The Compare window's phone
+layout is CSS over the `compare-pane-*` hooks in `web/components/compare_modal.py` ("Compare on
+a phone"): the two images alone, each head one row, with the header's "Show text" button
+toggling `compare-text-shown` on the panes row. Both are pinned in
+`tests/test_phone_layout_rules.py`.
+
 ## shared/fragment_details.py
 
 What the Joins Lab Compare window shows about a fragment besides its images, one rule for both apps:

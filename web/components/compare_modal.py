@@ -373,6 +373,7 @@ def create_compare_modal(
     _cand_pane_ref: list = []          # [column_element] — R2-5 verdict border
     _prev_btn_ref: list = []           # [button_element]
     _next_btn_ref: list = []           # [button_element]
+    _text_shown: dict = {"value": False}   # phone: transcriptions shown (Show text)
 
     # Anchor viewer ref — stored here so the show-loader can await update_content.
     _anchor_viewer_ref: list = []      # [AnchorViewer instance]
@@ -826,12 +827,16 @@ def create_compare_modal(
             " display:flex; flex-direction:column; overflow:hidden;"
         ):
             # ── Header bar ───────────────────────────────────────────────────
+            # compare-header: on a phone its two icon-only buttons go dense so
+            # the row stays one row (common.css, "Compare on a phone").
             with ui.row().classes(
-                "w-full items-center justify-between px-4 py-2"
+                "w-full items-center justify-between px-4 py-2 compare-header"
             ).style(
                 "background: var(--bg-header); color: white; flex-shrink:0;"
             ):
-                ui.label(tr("Compare")).classes("text-lg font-semibold")
+                # compare-header-title: hidden on a phone, where the row's width
+                # goes to the counter and the buttons.
+                ui.label(tr("Compare")).classes("text-lg font-semibold compare-header-title")
                 # R2-2: force LTR + bidi-isolate so "5 / 118" is not flipped to
                 # "118 / 5" by the Hebrew RTL UI direction.
                 # Marked 'compare-flip-counter' for render-smoke element location.
@@ -857,6 +862,7 @@ def create_compare_modal(
                             on_click=_on_add_join_click,
                         )
                         .props("unelevated color=primary")
+                        .classes("phone-icon-only")
                         .mark("compare-add-as-join")
                         .tooltip(tr("Add as Join"))
                     )
@@ -877,9 +883,29 @@ def create_compare_modal(
                             on_click=_on_add_puzzle_click,
                         )
                         .props("flat color=primary")
+                        .classes("phone-icon-only")
                         .mark("compare-add-to-puzzle")
                         .tooltip(tr("Add anchor + this candidate to the Fragment Puzzle"))
                     )
+
+                # On a phone, and on any screen too short for two images with
+                # text under them, the panes show the two images alone (common.css,
+                # "Compare on a phone"); this button brings the transcriptions,
+                # titles and details back. Hidden at desktop widths, where the
+                # panes have room for everything. The choice lasts while the
+                # window is open: the panes row outlives every flip.
+                def _toggle_text() -> None:
+                    _text_shown["value"] = not _text_shown["value"]
+                    panes_row.classes(toggle="compare-text-shown")
+                    text_toggle.classes(toggle="is-on")
+
+                text_toggle = (
+                    ui.button(icon="notes", on_click=_toggle_text)
+                    .props(f'flat dense round aria-label="{tr("Show text")}"')
+                    .classes("text-white compare-text-toggle")
+                    .mark("compare-text-toggle")
+                    .tooltip(tr("Show text"))
+                )
 
                 # Copy a link to this screen with this pair open (the Lab builds it).
                 if on_copy_link is not None:
@@ -905,16 +931,23 @@ def create_compare_modal(
             # length is the taller pane's content.
             # compare-panes: below 641px the two panes stack, anchor above
             # candidate (common.css, "Joins Lab").
-            with ui.row().classes("w-full flex-grow min-h-0 compare-panes").style(
-                "overflow-y:auto; flex:1; align-items:flex-start;"
-            ):
+            _panes_rtl_class = " compare-panes-rtl" if is_rtl() else ""
+            panes_row = ui.row().classes(
+                f"w-full flex-grow min-h-0 compare-panes{_panes_rtl_class}"
+            ).style("overflow-y:auto; flex:1; align-items:flex-start;")
+            with panes_row:
                 # ── Anchor pane (left) ────────────────────────────────────────
                 with ui.column().classes("flex-1 gap-2 p-4").style(
                     "border-right: 2px solid var(--border-light);"
                     " display:flex; flex-direction:column;"
                 ):
-                    # Fixed header block (does not scroll)
-                    with ui.column().classes("w-full gap-1").style("flex-shrink:0;"):
+                    # Fixed header block (does not scroll). The compare-pane-*
+                    # classes are the phone layout's hooks (common.css, "Compare
+                    # on a phone"): the head becomes one row of role + shelfmark
+                    # and the title, details and info rows hide until "Show text".
+                    with ui.column().classes("w-full gap-1 compare-pane-head").style(
+                        "flex-shrink:0;"
+                    ):
                         ui.label(tr("Anchor")).classes(
                             "text-xs font-bold uppercase"
                         ).style("color: var(--text-muted);")
@@ -946,14 +979,14 @@ def create_compare_modal(
 
                         # Round-4 Issue 3: anchor title (RTL, muted) when present;
                         # otherwise filled from the details fetcher in _load_anchor_meta.
-                        anchor_title_row = ui.row().classes("w-full")
+                        anchor_title_row = ui.row().classes("w-full compare-pane-title")
                         _anchor_title_row_ref.append(anchor_title_row)
                         _render_title(anchor_title_row,
                                       getattr(anchor_cand, "title", None) or "",
                                       "compare-anchor-title")
 
                         # Info line + external links (filled in _load_anchor_meta).
-                        anchor_details = ui.column().classes("w-full gap-0")
+                        anchor_details = ui.column().classes("w-full gap-0 compare-pane-details")
                         _anchor_details_ref.append(anchor_details)
                         _render_pane_details(
                             anchor_details,
@@ -965,9 +998,9 @@ def create_compare_modal(
                         # D-09/H3: anchor pane info button row — MOVED UP into the
                         # header so the FJMS/PGP buttons stay visible at 100% zoom
                         # (Round-4 Issue 3).  Populated off-loop in _on_show.
-                        anchor_info_row = ui.row().classes("gap-2 items-center py-1").style(
-                            "display:none;"
-                        )
+                        anchor_info_row = ui.row().classes(
+                            "gap-2 items-center py-1 compare-pane-info"
+                        ).style("display:none;")
                         _anchor_info_row_ref.append(anchor_info_row)
 
                     # Viewer area — natural height (image capped at 40vh +
@@ -999,8 +1032,11 @@ def create_compare_modal(
                 )
                 _cand_pane_ref.append(cand_pane_col)
                 with cand_pane_col:
-                    # Fixed header block (does not scroll) — shelfmark/title/badges/info
-                    with ui.column().classes("w-full gap-1").style("flex-shrink:0;"):
+                    # Fixed header block (does not scroll) — shelfmark/title/badges/info.
+                    # Same compare-pane-* hooks as the anchor head.
+                    with ui.column().classes("w-full gap-1 compare-pane-head").style(
+                        "flex-shrink:0;"
+                    ):
                         ui.label(tr("Candidate")).classes(
                             "text-xs font-bold uppercase"
                         ).style("color: var(--text-muted);")
@@ -1019,11 +1055,11 @@ def create_compare_modal(
 
                         # Round-4 Issue 3: candidate TITLE (RTL, muted) — was missing.
                         # Cleared + rebuilt on each flip in _fill_candidate.
-                        cand_title_row = ui.row().classes("w-full")
+                        cand_title_row = ui.row().classes("w-full compare-pane-title")
                         _cand_title_row_ref.append(cand_title_row)
 
                         # Info line + external links — redrawn on each flip.
-                        cand_details = ui.column().classes("w-full gap-0")
+                        cand_details = ui.column().classes("w-full gap-0 compare-pane-details")
                         _cand_details_ref.append(cand_details)
 
                         cand_badge_row = ui.row().classes("gap-2 items-center flex-wrap")
@@ -1031,9 +1067,9 @@ def create_compare_modal(
 
                         # D-09/H3: candidate pane info button row — MOVED UP into the
                         # header (Round-4 Issue 3) so it stays visible at 100% zoom.
-                        cand_info_row = ui.row().classes("gap-2 items-center py-1").style(
-                            "display:none;"
-                        )
+                        cand_info_row = ui.row().classes(
+                            "gap-2 items-center py-1 compare-pane-info"
+                        ).style("display:none;")
                         _cand_info_row_ref.append(cand_info_row)
 
                     # Viewer area — natural height; the outer body scrolls (round-5).
