@@ -260,19 +260,28 @@ def test_the_ms_context_cell_centres_on_the_chunk_the_context_cell_shows():
     """Two marked chunks in the MS text, too far apart to both be on screen
     whole: with the Context cell's chunk as the anchor, that chunk is centred
     and whole and the other is off screen; without an anchor the span of the
-    two is centred, so parts of both are on screen, cut at the edges."""
+    two is centred, so parts of both are on screen, cut at the edges.
+
+    The gap between the chunks is sized in pixels from this font's letters:
+    about 190 px in a 300 px cell. Further than the half-cell less half a
+    chunk, so centring one chunk puts the other off screen; nearer than the
+    cell, so centring the span shows both ends. Thirty letters were that on
+    Ubuntu and more than the cell on Windows, whose Hebrew is wider (gui-tests
+    on PR #445: no red at all)."""
     other = "*אאא בבב גגג*"
-    ms = _context(40) + other + _context(30) + MATCH + _context(40)
     whole = _red(_context_cell(MATCH, 400))                 # the anchor's own width
+    mark_w = whole[1] - whole[0]
+    letter_w = _painted_label(_context_cell(_context(30), 1000)).width() / 30
+    ms = _context(40) + other + _context(round(190 / letter_w)) + MATCH + _context(40)
     anchored = _context_cell(ms, 300, anchor_text=MATCH.strip("*"))
     red = _red(anchored)
     assert red is not None
     assert abs(_middle(red) - 150) <= TOLERANCE
-    assert abs((red[1] - red[0]) - (whole[1] - whole[0])) <= 1, "not the anchor alone, whole"
+    assert abs((red[1] - red[0]) - mark_w) <= 1, "not the anchor alone, whole"
     unanchored = _context_cell(ms, 300)
     red = _red(unanchored)
-    assert red is not None
-    assert red[1] - red[0] > 2 * (whole[1] - whole[0]), "only one chunk is on screen"
+    assert red is not None, "neither chunk is on screen"
+    assert red[1] - red[0] > 1.5 * mark_w, "only one chunk is on screen"
 
 
 def test_the_marked_html_keeps_the_old_marker_rules_and_escapes_the_text():
