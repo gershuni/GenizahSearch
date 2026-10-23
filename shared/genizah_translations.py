@@ -459,7 +459,7 @@ TRANSLATIONS = {
     "Download is in progress. Cancel and close?": "הורדה בתהליך. לבטל ולסגור?",
 
     # --- Indexing ---
-    "Index not found.\nWould you like to build it now?\n(Requires 'Transcriptions.txt' next to this app)": "האינדקס לא נמצא.\nהאם ברצונך לבנות אותו כעת?\n(דורש את הקובץ 'Transcriptions.txt' לצד התוכנה)",
+    "Index not found.\nWould you like to build it now?\n(It is built from 'Transcriptions.txt'. If the file is not next to the app, you will be asked where it is.)": "האינדקס לא נמצא.\nהאם ברצונך לבנות אותו כעת?\n(הוא נבנה מהקובץ 'Transcriptions.txt'. אם הקובץ אינו לצד התוכנה, תתבקשו לציין היכן הוא.)",
     "Index Missing": "אינדקס חסר",
     "Start indexing?": "להתחיל ביצירת אינדקס?",
     "Index": "אינדקס",

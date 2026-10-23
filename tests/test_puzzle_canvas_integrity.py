@@ -1527,6 +1527,7 @@ def quit_host(env, monkeypatch):
     monkeypatch.setattr(si, "_restart_requested", False)
     host = types.SimpleNamespace(_puzzle_window=env.win,
                                  _defer_close_for_passage=lambda e: False,
+                                 _defer_close_for_index_rebuild=lambda e: False,
                                  status_label=QLabel(""), lang_btn=QPushButton(""),
                                  reached=[], raise_past_check=True)
 
@@ -1713,7 +1714,9 @@ def deferring_host(env, monkeypatch):
     from PyQt6.QtWidgets import QLabel, QPushButton
     monkeypatch.setattr(si, "_restart_requested", False)
     host = _Host(_puzzle_window=env.win, status_label=QLabel(""), lang_btn=QPushButton(""),
-                 busy=[], batch=False, cancels=[], shutdowns=[])
+                 busy=[], batch=False, cancels=[], shutdowns=[],
+                 # the index-rebuild deferral (after the passage one) is not under test here
+                 _defer_close_for_index_rebuild=lambda e: False)
     host._passage_workers_busy = lambda: list(host.busy)
     host._passage_batch_in_flight = lambda: host.batch and bool(host.busy)
     host.comp_thread = types.SimpleNamespace(request_cancel=lambda: host.cancels.append(1))

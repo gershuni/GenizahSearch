@@ -125,6 +125,54 @@ def test_the_swap_undoes_its_first_rename_when_the_second_fails(live):
     assert _reload(eng, root) and _count(eng, "לוי") == 0      # the index the user had
 
 
+def test_a_browse_map_that_refuses_to_move_undoes_both_renames(live):
+    # Codex round 1 on PR #446: the index renames were done, the browse map's os.replace
+    # failed, and the caller said "the index you had is still in use" over the NEW index.
+    root, eng = live
+    build(root, B, beside=True)
+    eng.close_index()
+    with patch("shared.index_swap.os.replace", side_effect=PermissionError("map in use")):
+        with pytest.raises(PermissionError):
+            index_swap.swap_in_staged_index(root, _browse_map(root))
+    assert os.path.isdir(index_swap.staged_index_path(root))          # the build is still staged
+    assert not os.path.exists(index_swap.old_index_path(root))
+    assert os.path.isfile(index_swap.staged_browse_map_path(_browse_map(root)))
+    assert _reload(eng, root) and _count(eng, "לוי") == 0            # the index the user had
+
+
+def test_a_swap_interrupted_before_its_browse_map_is_finished_at_the_next_start(live):
+    root, eng = live
+    build(root, B, beside=True)
+    eng.close_index()
+    with open(index_swap.staged_browse_map_path(_browse_map(root)), "rb") as f:
+        staged_map = f.read()
+    with open(_browse_map(root), "wb") as f:
+        f.write(b"the old index's map")
+    # The crash came after both renames and before the browse map moved.
+    os.rename(index_swap.live_index_path(root), index_swap.old_index_path(root))
+    os.rename(index_swap.staged_index_path(root), index_swap.live_index_path(root))
+    actions = index_swap.recover_index_dirs(root, _browse_map(root))
+    assert actions == ['applied-staged-browse-map', 'discarded-old']
+    with open(_browse_map(root), "rb") as f:
+        assert f.read() == staged_map
+    assert _reload(eng, root) and _count(eng, "לוי") == 1
+
+
+def test_a_half_built_index_never_gets_its_map_applied_even_beside_a_stale_old_folder(live):
+    root, eng = live
+    os.makedirs(index_swap.old_index_path(root))                     # a swap whose cleanup failed
+    staged = index_swap.staged_index_path(root)
+    os.makedirs(staged)                                               # a build that crashed
+    with open(index_swap.staged_browse_map_path(_browse_map(root)), "wb") as f:
+        f.write(b"a half-built index's map")
+    with open(_browse_map(root), "rb") as f:
+        before = f.read()
+    actions = index_swap.recover_index_dirs(root, _browse_map(root))
+    assert actions == ['discarded-staged', 'discarded-old', 'discarded-staged-browse-map']
+    with open(_browse_map(root), "rb") as f:
+        assert f.read() == before
+
+
 def test_a_rename_waits_out_a_lazily_released_handle(tmp_path):
     src, dst = tmp_path / "a", tmp_path / "b"
     src.mkdir()
@@ -301,12 +349,15 @@ def test_free_space_is_read_from_the_nearest_existing_parent(tmp_path):
 
 def test_build_index_dot_py_still_builds_in_place_without_the_flag(tmp_path):
     """build_index.py calls create_index without *beside*: the in-place build it has
-    always run (the server builds into a relocated INDEX_DIR, not a staged folder)."""
-    import inspect
-    import build_index
-    src = inspect.getsource(build_index.build_main_index)
+    always run (the server builds into a relocated INDEX_DIR, not a staged folder).
+    Read as text, never imported: importing build_index.py creates ``Genizah_Index``
+    beside the code, which the app then prefers over the real index."""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(here, "build_index.py"), encoding="utf-8") as f:
+        src = f.read()
     assert "create_index(progress_callback=progress_callback, **kwargs)" in src
     assert "beside" not in src
+    assert not os.path.isdir(os.path.join(here, "Genizah_Index.made-by-this-test"))
     root = build(tmp_path, A)
     with patch.object(Config, "INDEX_DIR", root):
         assert index_swap.live_index_path() == os.path.join(root, "tantivy_db")

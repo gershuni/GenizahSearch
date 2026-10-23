@@ -22,6 +22,8 @@ crash or a shutdown can leave are told apart by what exists:
   its two renames; ``.new`` is a finished build (a swap starts only after one), so it is
   moved into place.
 * ``tantivy_db`` missing, only ``.old`` -- restored.
+* ``tantivy_db`` and ``.old`` present, no ``.new`` dir, ``browse_map.pkl.new`` present -- a swap
+  interrupted after its renames and before its browse-map replace; the staged map is applied.
 * otherwise every ``.new`` (a build that did not finish, or was never installed) and every
   ``.old`` (a swap whose cleanup did not finish) is junk: renamed aside at once and deleted
   in the background (``tantivy_db.discard-*``), so a user is never left without an index
@@ -161,7 +163,9 @@ def swap_in_staged_index(index_dir=None, browse_map=None):
     """Put the staged build in place: ``tantivy_db`` -> ``.old``, ``.new`` -> ``tantivy_db``,
     then the browse map. Call with every handle on the live index closed. Returns the old
     index's path (to remove once the new one is open) or None when there was none.
-    When the second rename fails the first is undone, so the live index stays."""
+    When any step after the first rename fails, every rename done is undone before the
+    error is raised, so "the index you had" is true when the caller says it: the second
+    rename failing undoes the first; the browse-map replace failing undoes both."""
     index_dir = index_dir or Config.INDEX_DIR
     live, staged, old = live_index_path(index_dir), staged_index_path(index_dir), old_index_path(index_dir)
     if not os.path.isdir(staged):
@@ -184,7 +188,19 @@ def swap_in_staged_index(index_dir=None, browse_map=None):
     target = browse_map or Config.BROWSE_MAP
     source = staged_browse_map_path(target)
     if os.path.isfile(source):
-        os.replace(source, target)
+        try:
+            os.replace(source, target)
+        except OSError:
+            # Codex round 1 on PR #446: without this the new index stayed in place while the
+            # caller reported the old one restored. Both renames back, then raise.
+            try:
+                _rename_retry(live, staged)
+                if had_live:
+                    _rename_retry(old, live)
+            except OSError:
+                LOGGER.critical("The index folders could not be put back after the browse map "
+                                "refused to move; the next start sets them right", exc_info=True)
+            raise
     return old if had_live else None
 
 
@@ -255,6 +271,13 @@ def recover_index_dirs(index_dir=None, browse_map=None):
             else:
                 _rename_retry(old, live)
                 actions.append('restored-old')
+        elif os.path.isdir(live) and os.path.isdir(old) and not os.path.isdir(staged) and os.path.isfile(staged_map):
+            # The renames were done and the browse map was not yet replaced (a crash, or the
+            # replace refused and the rollback failed too). The staged map belongs to the
+            # index now live; a half-built index's map never gets here (its .new dir would
+            # still exist).
+            os.replace(staged_map, target)
+            actions.append('applied-staged-browse-map')
         if os.path.isdir(staged):
             _rename_retry(staged, _discard_name(index_dir))
             actions.append('discarded-staged')

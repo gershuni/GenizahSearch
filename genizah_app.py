@@ -1956,7 +1956,7 @@ class GenizahGUI(QMainWindow):
             index_exists = os.path.exists(db_path) and os.listdir(db_path)
             
             if not index_exists:
-                msg = tr("Index not found.\nWould you like to build it now?\n(Requires 'Transcriptions.txt' next to this app)")
+                msg = tr("Index not found.\nWould you like to build it now?\n(It is built from 'Transcriptions.txt'. If the file is not next to the app, you will be asked where it is.)")
                 reply = QMessageBox.question(self, tr("Index Missing"), msg,
                                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
                 if reply == QMessageBox.StandardButton.Yes:

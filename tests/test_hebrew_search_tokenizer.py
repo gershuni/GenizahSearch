@@ -530,7 +530,8 @@ class TestSchemaSourceGuards:
 
     def test_create_index_content_is_hebword_with_content_search(self):
         from shared.indexer import build_main_schema
-        assert "build_main_schema()" in inspect.getsource(Indexer.create_index)
+        # The schema is chosen in Indexer._build (create_index stages the folders and delegates).
+        assert "build_main_schema()" in inspect.getsource(Indexer._build)
         src = inspect.getsource(build_main_schema)
         assert 'add_text_field("content", stored=True, tokenizer_name="hebword")' in src
         assert 'add_text_field("content_search"' in src
@@ -544,7 +545,7 @@ class TestSchemaSourceGuards:
     def test_create_index_populates_content_search(self):
         # Page, whole-manuscript and seam documents take their folded field (and the
         # reversed words, Responsa plan §6.1) from one helper.
-        assert "self._search_fields(page_content)" in inspect.getsource(Indexer.create_index)
+        assert "self._search_fields(page_content)" in inspect.getsource(Indexer._write_documents)
         assert "self._search_fields(" in inspect.getsource(Indexer._add_continuous_document)
         src = inspect.getsource(Indexer._search_fields)
         assert "folded = strip_search_diacritics(text)" in src and "'content_search': folded" in src
