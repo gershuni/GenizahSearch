@@ -369,7 +369,7 @@ Notes:
 | `gap > 10` AND `search_mode != 'responsa'` | `invalid_combination` | 400 | Responsa `[N]` gaps have no limit (2026-10-12) |
 | Top-level `mode` key (legacy Phase 78 shape) | `invalid_request` | 400 | message includes hint `"unknown field 'mode' — use search_mode instead"` per Phase 81A D-13 |
 | `regex` value for `search_mode` | `invalid_request` | 400 | structurally rejected by Literal enum; never part of this API's public surface (dropped before the initial public release, Phase 81A D-09) |
-| `search_mode="responsa"` with a word made only of `*`, a `*` word holding punctuation, or a word that begins with `*` and holds another `*` | `responsa_unsupported_star` | 400 | 2026-10-21 (narrowed 2026-10-22: a `*` inside a word or at its end is searched); on `/api/search/jobs` the job's result carries the same error |
+| `search_mode="responsa"` with a word made only of `*`, or a `*` word holding punctuation | `responsa_unsupported_star` | 400 | 2026-10-21 (narrowed 2026-10-22: a `*` inside a word or at its end is searched); on `/api/search/jobs` the job's result carries the same error |
 | `search_mode="responsa"` whose words expand to more than 5,000 terms after every step down (for example many `(a/b)` groups in one word), too many words to search in good time, or a word longer than 120 characters | `responsa_query_too_large` | 400 | 2026-10-22 (it was a 500); on `/api/search/jobs` the job's result carries the same error |
 
 ### Response example
