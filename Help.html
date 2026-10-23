@@ -876,7 +876,8 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
     <h3>Data & Index</h3>
     <ul>
         <li><b>Download Transcriptions (Zenodo):</b> Opens a link to download the latest transcription data from Zenodo.</li>
-        <li><b>Build / Rebuild Index:</b> Creates or updates the search index from the Transcriptions.txt file. Required after downloading new transcriptions.</li>
+        <li><b>Build / Rebuild Index:</b> Creates or updates the search index from the Transcriptions.txt file. Required after downloading new transcriptions. When an index already exists and the disk has room for a second one (about the current index's size plus 1.5 GB), the new index is built beside it: searching keeps working on the current index, and the new one takes over when the build ends. A line at the top of the main window shows the progress and about how long is left. Without that room the index is rebuilt in place, and searching waits until the build ends. A build interrupted by a crash or a shutdown leaves the index you had.</li>
+        <li><b>The rebuild offer:</b> When the index on this computer was built by an earlier version, the program offers a rebuild once after startup, with three answers: <i>Rebuild now</i>, <i>Rebuild when I exit</i> (the build runs after you close the program, in a small window whose Cancel keeps the index you have), and <i>Later</i> (the index stays as it is; rebuild it at any time from here).</li>
     </ul>
 
     <h3>Application</h3>

@@ -6,6 +6,7 @@ genizah_core.py retains a permanent same-object re-export shim so all
 existing ``from genizah_core import Indexer`` callers continue working.
 """
 
+import gc
 import logging
 import os
 import re
@@ -33,6 +34,8 @@ from shared.search_tokenizer import register_search_tokenizers
 from shared.text_normalize import strip_search_diacritics
 from shared.browse_map_utils import dedupe_browse_map
 from shared.index_format import write_index_format
+from shared.index_swap import (
+    discard_staged_index, live_index_path, staged_browse_map_path, staged_index_path)
 from shared.index_seams import (
     REVERSED_WORDS_FIELD, SEAM_SCOPE, SEAM_WORDS_EACH_SIDE, SEAMS_SUBDIR, ChainStats,
     chains_for, hebword_analyzer, reversed_words, seams_of)
@@ -115,6 +118,10 @@ def build_seam_schema(reversed_words: bool = True) -> tantivy.Schema:
     builder.add_text_field("boundaries", stored=True)
     builder.add_unsigned_field("cut", stored=True)
     return builder.build()
+
+
+class IndexBuildCancelled(Exception):
+    """``Indexer.create_index`` stopped at its *cancel* check. Nothing of that build is kept."""
 
 
 class Indexer:
@@ -351,14 +358,29 @@ class Indexer:
         }
 
     def create_index(self, progress_callback=None, *, seams=True, reversed_field=True,
-                     seam_words=SEAM_WORDS_EACH_SIDE):
-        """Build the main index in ``Config.INDEX_DIR/tantivy_db`` (replacing it) and the
-        browse map. *seams*: the seam index in ``tantivy_db/seams`` (§6.1); *reversed_field*:
-        the reversed-words field on every document (§5.6 B). With both off the index is
-        today's (format 1, no marker). ``self.last_build`` holds the counts and timings. The
-        build waits for Tantivy's merges before it returns (19 segments on the full corpus,
+                     seam_words=SEAM_WORDS_EACH_SIDE, beside=False, cancel=None,
+                     phase_callback=None):
+        """Build the main index and the browse map. *seams*: the seam index in
+        ``tantivy_db/seams`` (§6.1); *reversed_field*: the reversed-words field on every
+        document (§5.6 B). With both off the index is today's (format 1, no marker).
+
+        *beside* (shared/index_swap.py): build into ``tantivy_db.new`` and
+        ``browse_map.pkl.new`` and leave them there, the live index untouched and still
+        open; the caller swaps them in (``swap_in_staged_index``). Off: today's build,
+        which removes ``Config.INDEX_DIR/tantivy_db`` first and builds in its place.
+
+        *cancel*: a callable; when it answers True at a check (every few hundred pages,
+        between the phases) the build stops with :class:`IndexBuildCancelled`. A build
+        beside the live index that stops or fails removes what it wrote.
+
+        *progress_callback(lines_read, total_lines)* ticks through the corpus files;
+        *phase_callback(phase, done, total)* reports the phases after them:
+        ``aggregates`` (the whole-manuscript and part documents), ``commit`` (the main
+        index's commit and merges; no ticks), ``seams`` (chains), ``finish`` (the browse
+        map and the marker). ``self.last_build`` holds the counts and timings. The build
+        waits for Tantivy's merges before it returns (19 segments on the full corpus,
         where an index left merging had about 150)."""
-        # Validation (before the old index is removed)
+        # Validation (before anything is removed)
         if seams and (not isinstance(seam_words, int) or isinstance(seam_words, bool) or seam_words < 1):
             raise ValueError(f"seam_words must be a positive number of words, not {seam_words!r}")
         if not os.path.exists(Config.FILE_V8):
@@ -368,12 +390,43 @@ class Indexer:
         if not os.path.exists(Config.INDEX_DIR):
             os.makedirs(Config.INDEX_DIR)
 
-        # Specific Tantivy Subfolder (to avoid deleting user data)
-        db_path = os.path.join(Config.INDEX_DIR, "tantivy_db")
-        if os.path.exists(db_path):
-            shutil.rmtree(db_path)
+        if beside:
+            # A leftover of an earlier build beside the live index goes first; the live
+            # index is not touched.
+            discard_staged_index(Config.INDEX_DIR, Config.BROWSE_MAP)
+            db_path = staged_index_path(Config.INDEX_DIR)
+            browse_map_path = staged_browse_map_path(Config.BROWSE_MAP)
+        else:
+            # Specific Tantivy Subfolder (to avoid deleting user data)
+            db_path = live_index_path(Config.INDEX_DIR)
+            browse_map_path = Config.BROWSE_MAP
+            if os.path.exists(db_path):
+                shutil.rmtree(db_path)
         os.makedirs(db_path)
 
+        try:
+            return self._build(db_path, browse_map_path, progress_callback, phase_callback, cancel,
+                               seams=seams, reversed_field=reversed_field, seam_words=seam_words)
+        except BaseException:
+            if beside:
+                # The failed build's writer and index are gone (_build drops them before
+                # raising); its folder follows. The live index was never touched.
+                gc.collect()
+                discard_staged_index(Config.INDEX_DIR, Config.BROWSE_MAP)
+            raise
+
+    @staticmethod
+    def _check_cancel(cancel):
+        if cancel is not None and cancel():
+            raise IndexBuildCancelled()
+
+    @staticmethod
+    def _report_phase(phase_callback, phase, done, total):
+        if phase_callback is not None:
+            phase_callback(phase, done, total)
+
+    def _build(self, db_path, browse_map_path, progress_callback, phase_callback, cancel, *,
+               seams, reversed_field, seam_words):
         started = time.perf_counter()
         self.last_build = build = {'seams': None, 'reversed_field': bool(reversed_field)}
         self._rev_analyzer = hebword_analyzer() if reversed_field else None
@@ -383,7 +436,53 @@ class Indexer:
         # SEED-006: register hebword (+ builtins) before the writer tokenizes content.
         register_search_tokenizers(index)
         writer = index.writer(heap_size=500_000_000)
+        try:
+            total_docs, system_pages, browse_map = self._write_documents(
+                writer, progress_callback, phase_callback, cancel, build, started)
+            self._check_cancel(cancel)
+            self._report_phase(phase_callback, 'commit', 0, 0)
+            LOGGER.info("Committing index (this may take a moment)...")
+            writer.commit()
+            writer.wait_merging_threads()
+            build['main_committed_s'] = round(time.perf_counter() - started, 1)
+        finally:
+            # Dropped here, inside the frame, so that a failure's traceback holds no
+            # writer or index: on Windows their open files would keep the folder from
+            # being removed (a failed build beside the live one) or renamed (the swap).
+            writer = None
+            index = None
 
+        if seams:
+            self._check_cancel(cancel)
+            build['seams'] = self._build_seam_index(os.path.join(db_path, SEAMS_SUBDIR),
+                                                    system_pages, seam_words,
+                                                    phase_callback=phase_callback, cancel=cancel)
+            build['seams_committed_s'] = round(time.perf_counter() - started, 1)
+
+        self._check_cancel(cancel)
+        self._report_phase(phase_callback, 'finish', 0, 0)
+        for sid in browse_map: browse_map[sid].sort(key=lambda x: x['p_num'])
+
+        total_before = sum(len(v) for v in browse_map.values())
+        browse_map, deduped = dedupe_browse_map(browse_map)
+        total_after = sum(len(v) for v in browse_map.values())
+
+        if deduped:
+            LOGGER.info("Removed %d duplicate browse-map entries during indexing", total_before - total_after)
+
+        with open(browse_map_path, 'wb') as f: pickle.dump(browse_map, f)
+        # Last: the marker says the index is complete in this format (shared/index_format.py).
+        if seams or reversed_field:
+            write_index_format(db_path, reversed_field=reversed_field, seams=build['seams'])
+        build['total_s'] = round(time.perf_counter() - started, 1)
+        build['page_docs'] = total_docs
+        self._rev_analyzer = None
+        gc.collect()
+        return total_docs
+
+    def _write_documents(self, writer, progress_callback, phase_callback, cancel, build, started):
+        """The page documents, then the whole-manuscript and part documents. Returns
+        (page count, pages by sys_id, browse map)."""
         total_docs = 0
         browse_map = defaultdict(list)
         system_pages = defaultdict(list)
@@ -402,6 +501,8 @@ class Indexer:
             LOGGER.warning("Failed to load codicological manager before indexing: %s", e)
 
         for cid, chead, label, page_content in self.iter_corpus_pages(progress_callback):
+            if total_docs % 500 == 0:
+                self._check_cancel(cancel)
             pos = self._extract_position_fields(page_content)
             shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
             writer.add_document(tantivy.Document(
@@ -420,21 +521,33 @@ class Indexer:
                 global_seq_index += 1
             total_docs += 1
 
+        part_to_folios = self.meta_mgr.codico_mgr.part_to_folios or {}
+        aggregates_total = len(system_pages) + len(part_to_folios)
+        aggregates_done = 0
+        self._report_phase(phase_callback, 'aggregates', 0, aggregates_total)
+
         # Build continuous documents per System ID
         for sid, pages in system_pages.items():
+            aggregates_done += 1
+            if aggregates_done % 500 == 0:
+                self._check_cancel(cancel)
+                self._report_phase(phase_callback, 'aggregates', aggregates_done, aggregates_total)
             if not pages:
                 continue
             pages.sort(key=lambda p: p['seq_index'])
             self._add_continuous_document(writer, pages, scope="system", unique_id=f"sys:{sid}")
 
         # Build continuous documents per Codicological Part (Oxford)
-        if self.meta_mgr.codico_mgr.part_to_folios:
-            total_parts = len(self.meta_mgr.codico_mgr.part_to_folios)
+        if part_to_folios:
+            total_parts = len(part_to_folios)
             LOGGER.info("Indexing %d Codicological Parts...", total_parts)
 
-            for idx, (part_id, folios) in enumerate(self.meta_mgr.codico_mgr.part_to_folios.items()):
+            for idx, (part_id, folios) in enumerate(part_to_folios.items()):
+                aggregates_done += 1
                 if idx % 500 == 0:
                     LOGGER.info("Processing Part %d/%d...", idx, total_parts)
+                    self._check_cancel(cancel)
+                    self._report_phase(phase_callback, 'aggregates', aggregates_done, aggregates_total)
 
                 part_pages = []
                 for folio_sid in folios:
@@ -465,66 +578,51 @@ class Indexer:
                 else:
                     self._add_continuous_document(writer, part_pages, scope="part", unique_id=f"part:{part_id}")
 
-        LOGGER.info("Committing index (this may take a moment)...")
+        self._report_phase(phase_callback, 'aggregates', aggregates_total, aggregates_total)
         build['pages_and_aggregates_s'] = round(time.perf_counter() - started, 1)
-        writer.commit()
-        writer.wait_merging_threads()
-        build['main_committed_s'] = round(time.perf_counter() - started, 1)
+        return total_docs, system_pages, browse_map
 
-        if seams:
-            build['seams'] = self._build_seam_index(os.path.join(db_path, SEAMS_SUBDIR),
-                                                    system_pages, seam_words)
-            build['seams_committed_s'] = round(time.perf_counter() - started, 1)
-
-        for sid in browse_map: browse_map[sid].sort(key=lambda x: x['p_num'])
-
-        total_before = sum(len(v) for v in browse_map.values())
-        browse_map, deduped = dedupe_browse_map(browse_map)
-        total_after = sum(len(v) for v in browse_map.values())
-
-        if deduped:
-            LOGGER.info("Removed %d duplicate browse-map entries during indexing", total_before - total_after)
-
-        with open(Config.BROWSE_MAP, 'wb') as f: pickle.dump(browse_map, f)
-        # Last: the marker says the index is complete in this format (shared/index_format.py).
-        if seams or reversed_field:
-            write_index_format(db_path, reversed_field=reversed_field, seams=build['seams'])
-        build['total_s'] = round(time.perf_counter() - started, 1)
-        build['page_docs'] = total_docs
-        self._rev_analyzer = None
-        return total_docs
-
-    def _build_seam_index(self, seam_path, system_pages, seam_words):
+    def _build_seam_index(self, seam_path, system_pages, seam_words, *, phase_callback=None, cancel=None):
         """The seam index (§6.1) from the pages the main build read: one document per
         junction of every chain (shared/index_seams.py). Returns its counts."""
         os.makedirs(seam_path, exist_ok=True)
         index = tantivy.Index(build_seam_schema(reversed_words=self._rev_analyzer is not None), path=seam_path)
         register_search_tokenizers(index)
         writer = index.writer(heap_size=500_000_000)
-        csv_bank = getattr(self.meta_mgr, 'csv_bank', None) or {}
-        codico = getattr(self.meta_mgr, 'codico_mgr', None)
-        part_to_folios = getattr(codico, 'part_to_folios', None) or {}
+        try:
+            csv_bank = getattr(self.meta_mgr, 'csv_bank', None) or {}
+            codico = getattr(self.meta_mgr, 'codico_mgr', None)
+            part_to_folios = getattr(codico, 'part_to_folios', None) or {}
 
-        def folio_number(sid):
-            return codico._get_folio_number((csv_bank.get(sid) or {}).get('shelfmark', ''))
+            def folio_number(sid):
+                return codico._get_folio_number((csv_bank.get(sid) or {}).get('shelfmark', ''))
 
-        stats = ChainStats()
-        for pages in system_pages.values():
-            pages.sort(key=lambda p: p['seq_index'])
-        chains = chains_for(system_pages, part_to_folios, folio_number if codico else None, stats=stats)
-        count = chars = 0
-        for chain in chains:
-            for seam in seams_of(chain, seam_words):
-                writer.add_document(tantivy.Document(
-                    unique_id=seam.unique_id, content=seam.text, **self._search_fields(seam.text),
-                    source=str(seam.left.get('source', '')), full_header=str(seam.left.get('full_header', '')),
-                    sys_ids=' '.join(sorted({s['sys_id'] for s in seam.slices if s.get('sys_id')})),
-                    scope=SEAM_SCOPE, boundaries=json.dumps(seam.slices, ensure_ascii=False), cut=seam.cut))
-                count += 1
-                chars += len(seam.text)
-        LOGGER.info("Committing %d seam documents...", count)
-        writer.commit()
-        writer.wait_merging_threads()
+            stats = ChainStats()
+            for pages in system_pages.values():
+                pages.sort(key=lambda p: p['seq_index'])
+            chains = chains_for(system_pages, part_to_folios, folio_number if codico else None, stats=stats)
+            self._report_phase(phase_callback, 'seams', 0, len(chains))
+            count = chars = 0
+            for n, chain in enumerate(chains, 1):
+                if n % 500 == 0:
+                    self._check_cancel(cancel)
+                    self._report_phase(phase_callback, 'seams', n, len(chains))
+                for seam in seams_of(chain, seam_words):
+                    writer.add_document(tantivy.Document(
+                        unique_id=seam.unique_id, content=seam.text, **self._search_fields(seam.text),
+                        source=str(seam.left.get('source', '')), full_header=str(seam.left.get('full_header', '')),
+                        sys_ids=' '.join(sorted({s['sys_id'] for s in seam.slices if s.get('sys_id')})),
+                        scope=SEAM_SCOPE, boundaries=json.dumps(seam.slices, ensure_ascii=False), cut=seam.cut))
+                    count += 1
+                    chars += len(seam.text)
+            self._check_cancel(cancel)
+            self._report_phase(phase_callback, 'seams', len(chains), len(chains))
+            LOGGER.info("Committing %d seam documents...", count)
+            writer.commit()
+            writer.wait_merging_threads()
+        finally:
+            writer = None   # see _build: no open files left in a traceback
+            index = None
         return {'words_each_side': seam_words, 'count': count, 'chars': chars, 'chains': len(chains),
                 'runs': stats.runs, 'run_junctions': stats.run_junctions, 'bridges': stats.bridges,
                 'bridges_refused': dict(stats.bridges_refused)}

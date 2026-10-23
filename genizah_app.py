@@ -99,6 +99,9 @@ from shared import passage_witness_source  # witness resolution (pure, shared wi
 from shared import passage_fusion  # RRF fusion (pure, shared with web + API)
 from shared import compound_query  # Composition Search conditions (pure)
 from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog, TelemetryConsentBar, WHATS_NEW_CONTENT_VERSION  # Phase 127 update_ui; SEED-031 re-ask bar
+from desktop.index_rebuild_bar import IndexRebuildBar, remaining_phrase
+from shared.index_build_progress import BuildClock
+from shared.index_swap import gib, plan_build, remove_old_index, remove_old_index_in_background, swap_in_staged_index
 from desktop.filter_text_dialog import FilterTextDialog
 from desktop.column_filter_dialog import ColumnFilterDialog  # moved 2026-09-19; alias stub at the root
 from desktop.list_filter_dialog import ListFilterDialog
@@ -2472,6 +2475,11 @@ class GenizahGUI(QMainWindow):
         self.telemetry_consent_bar.never_ask_requested.connect(self.on_telemetry_reask_never)
         self.telemetry_consent_bar.dismissed.connect(self.on_telemetry_reask_dismissed)
         main_layout.addWidget(self.telemetry_consent_bar)
+
+        # The search-index rebuild's line (desktop/index_rebuild_bar.py): hidden until a
+        # build runs. The Settings dialog keeps its own bar.
+        self.index_rebuild_bar = IndexRebuildBar()
+        main_layout.addWidget(self.index_rebuild_bar)
 
         main_layout.addWidget(self.tabs)
 
@@ -33126,34 +33134,192 @@ class GenizahGUI(QMainWindow):
 
         # 2. Standard Indexing Confirmation
         if not self.indexer: return
-        
-        if QMessageBox.question(self, tr("Index"), tr("Start indexing?"), QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-            # Release existing index to unlock files on Windows (memory-mapped .fast files)
-            if self.searcher:
-                self.searcher.close_index()
+        if self._index_build_running():
+            QMessageBox.information(self, tr("Index"), tr("The search index is already being rebuilt."))
+            return
 
+        plan = plan_build(Config.INDEX_DIR)
+        if QMessageBox.question(self, tr("Index"), self._index_build_question(plan),
+                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+            self._start_index_build(plan.mode)
+
+    # --- the build itself. Beside the live index when the disk has room for a second
+    # one, so searching keeps working and the new index is swapped in at the end; in place
+    # (today's build: the index is closed and removed first) when it has not
+    # (shared/index_swap.py). Its progress is shown in the main window
+    # (desktop/index_rebuild_bar.py) as well as in the Settings dialog.
+
+    @staticmethod
+    def _index_build_question(plan):
+        """The confirmation's text: how this build will run (BuildPlan.mode)."""
+        head = tr("Start indexing?")
+        if plan.mode == 'beside':
+            return head + "\n\n" + tr(
+                "The new index is built beside the current one, so searching keeps working "
+                "meanwhile; the new index takes over when the build ends.")
+        if plan.mode == 'inplace':
+            return head + "\n\n" + tr(
+                "There is not enough free disk space to build the new index beside the current "
+                "one (about {} GB needed, {} GB free). The index is rebuilt in place: searching "
+                "is unavailable until the build ends.").format(gib(plan.needed), gib(plan.free))
+        return head
+
+    def _index_build_running(self):
+        return getattr(self, '_index_build', None) is not None
+
+    def _start_index_build(self, mode, *, at_exit=False):
+        """Start the IndexerThread. *mode*: 'beside' leaves the open index serving and
+        swaps the new one in at the end; anything else is the in-place build, which
+        closes the index first and blocks the Search buttons until it ends. *at_exit*:
+        the build runs from the close path, with the exit window for its progress
+        instead of the bar."""
+        beside = mode == 'beside'
+        if not beside and self.searcher:
+            # Release existing index to unlock files on Windows (memory-mapped .fast files)
+            self.searcher.close_index()
+        self._index_build = {'mode': 'beside' if beside else 'inplace', 'clock': BuildClock(),
+                             'at_exit': at_exit}
+        if hasattr(self, 'index_progress'):
             self.index_progress.setVisible(True)
             self.index_progress.setRange(0, 1)
             self.index_progress.setValue(0)
             self.index_progress.setFormat(tr("Indexing... %p%"))
+        if not at_exit:
+            self.index_rebuild_bar.begin(self._index_build['mode'])
+            if not beside:
+                self._set_search_available(False)
+        self.ithread = IndexerThread(self.meta_mgr, beside=beside)
+        self.ithread.progress_signal.connect(self.on_index_progress)
+        self.ithread.phase_signal.connect(self.on_index_phase)
+        self.ithread.finished_signal.connect(self.on_index_finished)
+        self.ithread.cancelled_signal.connect(self.on_index_cancelled)
+        self.ithread.error_signal.connect(self.on_index_error)
+        self.ithread.start()
 
-            self.ithread = IndexerThread(self.meta_mgr)
-            self.ithread.progress_signal.connect(self.on_index_progress)
-            self.ithread.finished_signal.connect(self.on_index_finished)
-            self.ithread.error_signal.connect(self.on_index_error)
-            self.ithread.start()
+    def _set_search_available(self, available):
+        """The Search and Analyze buttons during an in-place build: disabled, with the
+        reason as their tooltip; back when the build ends."""
+        for name in ('btn_search', 'btn_comp_run'):
+            btn = getattr(self, name, None)
+            if btn is None:
+                continue
+            btn.setEnabled(bool(available))
+            btn.setToolTip("" if available else tr("Searching is unavailable until the build ends."))
+
+    def _tick_index_build(self, phase, done, total):
+        state = getattr(self, '_index_build', None)
+        if not state:
+            return
+        clock = state['clock']
+        clock.update(phase, done, total)
+        percent, minutes = clock.percent(), clock.minutes_left()
+        if state['at_exit']:
+            dlg = getattr(self, '_exit_rebuild_progress', None)
+            if dlg is not None:
+                dlg.setValue(percent)
+                dlg.setLabelText(self._exit_rebuild_text(percent, minutes))
+        else:
+            self.index_rebuild_bar.set_progress(percent, minutes, phase)
 
     def on_index_progress(self, current, total):
-        self.index_progress.setRange(0, max(total, 1))
-        self.index_progress.setValue(current)
-        self.index_progress.setFormat(f"{current}/{total} lines")
+        if hasattr(self, 'index_progress'):
+            self.index_progress.setRange(0, max(total, 1))
+            self.index_progress.setValue(current)
+            self.index_progress.setFormat(f"{current}/{total} lines")
+        self._tick_index_build('pages', current, total)
+
+    def on_index_phase(self, phase, done, total):
+        self._tick_index_build(phase, done, total)
+        state = getattr(self, '_index_build', None)
+        if state and hasattr(self, 'index_progress'):
+            self.index_progress.setRange(0, 100)
+            self.index_progress.setValue(state['clock'].percent())
+            self.index_progress.setFormat(tr("Finishing the index... %p%"))
 
     def on_index_finished(self, total_docs):
-        self.index_progress.setValue(self.index_progress.maximum())
-        self.index_progress.setFormat(tr("Indexing complete"))
+        state = getattr(self, '_index_build', None) or {}
+        if state.get('mode') == 'beside':
+            self._install_staged_index(total_docs)
+            return
+        if hasattr(self, 'index_progress'):
+            self.index_progress.setValue(self.index_progress.maximum())
+            self.index_progress.setFormat(tr("Indexing complete"))
         self.searcher.reload_index()
         self._show_index_format()
+        self._end_index_build()
+        if state.get('at_exit'):
+            self._finish_exit_rebuild()
+            return
         QMessageBox.information(self, tr("Done"), tr("Indexing complete. Documents indexed: {}").format(total_docs))
+
+    _INSTALL_RETRY_MS = 1000
+
+    def _install_staged_index(self, total_docs):
+        """The swap (shared/index_swap.py::swap_in_staged_index) once no search holds the
+        open index: on Windows a running one would keep the old files from being renamed,
+        so the install waits for it, a second at a time."""
+        state = getattr(self, '_index_build', None) or {}
+        comp = getattr(self, 'comp_thread', None)
+        if getattr(self, 'is_searching', False) or (comp is not None and comp.isRunning()):
+            if not state.get('at_exit'):
+                self.index_rebuild_bar.set_message(tr(
+                    "The new search index is ready; it takes over when the current search ends."))
+            QTimer.singleShot(self._INSTALL_RETRY_MS, lambda: self._install_staged_index(total_docs))
+            return
+        try:
+            self.searcher.close_index()
+            old = swap_in_staged_index(Config.INDEX_DIR, Config.BROWSE_MAP)
+        except Exception as e:                                   # noqa: BLE001
+            logger.exception("the new search index could not be put in place")
+            # The swap undoes its first rename when its second fails: the index the user
+            # had is still at tantivy_db. Reopen it.
+            self.searcher.reload_index()
+            self._end_index_build()
+            QMessageBox.critical(self, tr("Indexing Error"), tr(
+                "The new search index could not be put in place; the index you had is still "
+                "in use.") + "\n\n" + str(e))
+            if state.get('at_exit'):
+                self._finish_exit_rebuild()
+            return
+        # The browse map was replaced with the index: drop the one in memory.
+        SearchEngine._shared_browse_map = None
+        if hasattr(self.searcher, '_browse_map_cache'):
+            self.searcher._browse_map_cache = None
+        if state.get('at_exit'):
+            # Nothing reopens the index: the program is closing. The old one's files are
+            # unmapped already, so its folder goes now (what refuses goes at the next start).
+            if old:
+                remove_old_index(Config.INDEX_DIR)
+        else:
+            self.searcher.reload_index()
+            if old:
+                remove_old_index_in_background(Config.INDEX_DIR)
+        if hasattr(self, 'index_progress'):
+            self.index_progress.setValue(self.index_progress.maximum())
+            self.index_progress.setFormat(tr("Indexing complete"))
+        self._show_index_format()
+        self._end_index_build()
+        if state.get('at_exit'):
+            self._finish_exit_rebuild()
+            return
+        QMessageBox.information(self, tr("Done"), tr("Indexing complete. Documents indexed: {}").format(total_docs))
+
+    def _end_index_build(self):
+        """After a build ended, however it ended: the bar goes, the Search buttons return."""
+        self._index_build = None
+        if hasattr(self, 'index_rebuild_bar'):
+            self.index_rebuild_bar.finish()
+        self._set_search_available(True)
+
+    def on_index_cancelled(self):
+        state = getattr(self, '_index_build', None) or {}
+        if hasattr(self, 'index_progress'):
+            self.index_progress.setFormat(tr("Indexing cancelled"))
+        self._end_index_build()
+        if hasattr(self, 'status_label'):
+            self.status_label.setText(tr("Index rebuild cancelled. The index you had is unchanged."))
+        if state.get('at_exit'):
+            self._finish_exit_rebuild()
 
     def _show_index_format(self):
         """The line under Build / Rebuild Index: whether the index on this computer has
@@ -33183,6 +33349,7 @@ class GenizahGUI(QMainWindow):
     # always the user's click: "Rebuild now" opens run_indexing, whose confirmation follows.
 
     _REBUILD_LATER_KEY = 'index_rebuild_later'
+    _REBUILD_ON_EXIT_KEY = 'index_rebuild_on_exit'
     _REBUILD_OFFER_TRIES = 20          # 3 s apart, while another window waits on the user
 
     def _index_identity(self):
@@ -33197,9 +33364,9 @@ class GenizahGUI(QMainWindow):
 
     def _rebuild_offer_due(self):
         """Whether to offer a rebuild: an open index built by an earlier version, a build
-        that can run, and no "Later" for this index. Fails closed (no offer) when the
-        config cannot be read: the reader answers {} then, with its problem beside it
-        (Codex round 5 on PR #443)."""
+        that can run, and no "Later" or "Rebuild when I exit" for this index. Fails closed
+        (no offer) when the config cannot be read: the reader answers {} then, with its
+        problem beside it (Codex round 5 on PR #443)."""
         engine = getattr(self, 'searcher', None)
         if engine is None or getattr(engine, 'index', None) is None or not getattr(self, 'indexer', None):
             return False
@@ -33221,45 +33388,215 @@ class GenizahGUI(QMainWindow):
         if problem:
             logger.warning("rebuild offer: the config is %s, so no offer this time", problem)
             return False
-        return cfg.get(self._REBUILD_LATER_KEY) != ident
+        return ident not in (cfg.get(self._REBUILD_LATER_KEY), cfg.get(self._REBUILD_ON_EXIT_KEY))
 
-    def _ask_rebuild(self):
-        """The offer itself: 'rebuild' or 'later' (closing the window is "Later")."""
+    def _rebuild_offer_box(self):
+        """The offer: the box and its buttons by answer ('rebuild', 'on_exit', 'later').
+        The text names what each answer does. "Rebuild when I exit" is offered only when
+        the disk has room to build beside the live index, which is what makes its Cancel
+        safe; without the room, "Rebuild now" rebuilds in place and the text says so."""
+        plan = plan_build(Config.INDEX_DIR)
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Information)
         box.setWindowTitle(tr("Search index"))
         box.setText(tr("The search index on this computer was built by an earlier version. "
                        "It works as before."))
-        box.setInformativeText(tr(
+        gain = tr(
             "Rebuilding it makes Responsa search fast for a * at the start of a word, and reads "
             "matches that run across a page break from the pages that follow each other in "
-            "each manuscript. A rebuild takes about 20-25 minutes on a recent laptop; "
-            "searching waits until it is done."))
-        rebuild = box.addButton(tr("Rebuild now"), QMessageBox.ButtonRole.AcceptRole)
-        later = box.addButton(tr("Later"), QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(later)
+            "each manuscript. A rebuild takes about 20-25 minutes on a recent laptop.")
+        if plan.mode == 'beside':
+            how = tr(
+                "Rebuild now builds the new index beside the current one: searching keeps "
+                "working meanwhile, and the new index takes over when the build ends. "
+                "Rebuild when I exit runs the build after you close the program, in a small "
+                "window whose Cancel keeps the index you have. "
+                "Later leaves the index as it is; you can rebuild it at any time from Settings.")
+        else:
+            how = tr(
+                "There is not enough free disk space to build the new index beside the current "
+                "one (about {} GB needed, {} GB free), so Rebuild now rebuilds it in place: "
+                "searching waits until the build ends. "
+                "Later leaves the index as it is; you can rebuild it at any time from Settings."
+            ).format(gib(plan.needed), gib(plan.free))
+        box.setInformativeText(gain + "\n\n" + how)
+        buttons = {'rebuild': box.addButton(tr("Rebuild now"), QMessageBox.ButtonRole.AcceptRole)}
+        if plan.mode == 'beside':
+            buttons['on_exit'] = box.addButton(tr("Rebuild when I exit"), QMessageBox.ButtonRole.ActionRole)
+        buttons['later'] = box.addButton(tr("Later"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(buttons['later'])
+        return box, buttons
+
+    def _ask_rebuild(self):
+        """The offer itself: 'rebuild', 'on_exit' or 'later' (closing the window is "Later")."""
+        box, buttons = self._rebuild_offer_box()
         box.exec()
-        return 'rebuild' if box.clickedButton() is rebuild else 'later'
+        clicked = box.clickedButton()
+        for answer, button in buttons.items():
+            if clicked is button:
+                return answer
+        return 'later'
 
     def _offer_index_rebuild(self, tries=0):
         """After startup: offer a rebuild once for an index of an earlier format, when no
-        other window is waiting on the user (the citation reminder, the consent prompt)."""
+        other window is waiting on the user (the citation reminder, the consent prompt).
+        "Rebuild now" starts the build (its own confirmation follows); the other two
+        answers are recorded for this index, and "Rebuild when I exit" is read back by
+        the close path (_defer_close_for_index_rebuild)."""
         if not self._rebuild_offer_due():
             return
         if QApplication.activeModalWidget() is not None:
             if tries < self._REBUILD_OFFER_TRIES:
                 QTimer.singleShot(3000, lambda: self._offer_index_rebuild(tries + 1))
             return
-        if self._ask_rebuild() == 'rebuild':
+        answer = self._ask_rebuild()
+        if answer == 'rebuild':
             self.run_indexing()
+            return
+        key = self._REBUILD_ON_EXIT_KEY if answer == 'on_exit' else self._REBUILD_LATER_KEY
+        try:
+            save_app_config({key: self._index_identity()})
+        except Exception:                                # noqa: BLE001
+            logger.exception("could not record the rebuild offer's answer")
+
+    # --- "Rebuild when I exit": the build runs from the close path, beside the live
+    # index, in a small modal window after the main window hides; the program quits when
+    # it is done. A build already running when the user closes goes to the same window,
+    # so a twenty-minute build is not thrown away by a close.
+
+    def _exit_rebuild_due(self):
+        """Whether this close runs the rebuild the user asked for at the offer: the answer
+        recorded for THIS index, the index still an old one, the corpus file present and
+        room to build beside the index. The answer is spent by the close that reads it,
+        whatever happens next, so a crash mid-build cannot run it at every close; the offer
+        then comes back at the next start."""
+        if getattr(self, '_exit_rebuild_done', False) or not getattr(self, 'indexer', None):
+            return False
+        ident = self._index_identity()
+        if ident is None:
+            return False
+        try:
+            from genizah_core import _read_app_config
+            cfg, problem = _read_app_config()
+        except Exception:                                    # noqa: BLE001
+            logger.exception("could not read the rebuild-at-exit answer")
+            return False
+        if problem or cfg.get(self._REBUILD_ON_EXIT_KEY) != ident:
+            return False
+        try:
+            save_app_config({self._REBUILD_ON_EXIT_KEY: None})
+        except Exception:                                    # noqa: BLE001
+            logger.exception("could not clear the rebuild-at-exit answer")
+        engine = getattr(self, 'searcher', None)
+        try:
+            if engine is None or getattr(engine, 'index', None) is None or engine.index_format_status().get('current'):
+                return False
+        except Exception:                                    # noqa: BLE001
+            logger.debug("_exit_rebuild_due: no index format", exc_info=True)
+            return False
+        if not os.path.exists(Config.FILE_V8):
+            logger.warning("rebuild at exit skipped: %s is missing", Config.FILE_V8)
+            return False
+        plan = plan_build(Config.INDEX_DIR)
+        if plan.mode != 'beside':
+            logger.warning("rebuild at exit skipped: no room to build beside the index "
+                           "(%s GB needed, %s GB free)", gib(plan.needed), gib(plan.free))
+            return False
+        return True
+
+    def _defer_close_for_index_rebuild(self, event):
+        """Returns True when the close waits for an index build: the one the user asked
+        for at exit (started here), or one already running, which the exit window takes
+        over. Cancel in that window keeps the index the user has, because the build runs
+        beside it; an in-place build has no Cancel, since its index is already gone."""
+        running = self._index_build_running()
+        if not running and not self._exit_rebuild_due():
+            return False
+        event.ignore()
+        if getattr(self, '_exit_rebuild_progress', None) is not None:
+            return True                      # a second close while the window is up
+        try:
+            self._close_result_dialog()
+        except Exception:
+            logger.exception("rebuild at exit: closing the Manuscript Viewer failed")
+        # Closing a hidden window fires no lastWindowClosed, and closing the progress
+        # window must not quit before closeEvent has saved the session: the quit is
+        # explicit, at the end of closeEvent.
+        QApplication.instance().setQuitOnLastWindowClosed(False)
+        self._exit_rebuild_hid_window = True
+        self.hide()
+        dlg = QProgressDialog("", tr("Cancel"), 0, 100, None)
+        dlg.setWindowTitle(tr("Search index"))
+        dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
+        dlg.setMinimumDuration(0)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        dlg.setMinimumWidth(460)
+        self._exit_rebuild_progress = dlg
+        if running:
+            state = self._index_build
+            state['at_exit'] = True
+            self.index_rebuild_bar.finish()
+            if state['mode'] != 'beside':
+                dlg.setCancelButton(None)
+                dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint)
+            dlg.setValue(state['clock'].percent())
+            dlg.setLabelText(self._exit_rebuild_text(state['clock'].percent(), state['clock'].minutes_left()))
         else:
+            self._start_index_build('beside', at_exit=True)
+            dlg.setLabelText(self._exit_rebuild_text(0, None))
+        dlg.canceled.connect(self._cancel_exit_rebuild)
+        dlg.show()
+        return True
+
+    def _exit_rebuild_text(self, percent, minutes):
+        state = getattr(self, '_index_build', None) or {}
+        head = "{}, {}.".format(tr("Rebuilding the search index before closing: {}%").format(percent),
+                                remaining_phrase(minutes))
+        if state.get('mode') == 'beside':
+            return head + "\n" + tr("Cancel keeps the index you have; the program closes either way.")
+        return head + "\n" + tr("This build runs in place and cannot be cancelled; the program closes when it is done.")
+
+    def _cancel_exit_rebuild(self):
+        th = getattr(self, 'ithread', None)
+        state = getattr(self, '_index_build', None) or {}
+        dlg = getattr(self, '_exit_rebuild_progress', None)
+        if state.get('mode') != 'beside':
+            # Not cancellable (see _defer_close_for_index_rebuild); the window stays up.
+            if dlg is not None:
+                QTimer.singleShot(0, dlg.show)
+            return
+        if th is not None and th.isRunning():
+            th.request_cancel()
+        if dlg is not None:
+            dlg.setLabelText(tr("Cancelling... the index you have is kept."))
+        # cancelled_signal ends the window and the close (on_index_cancelled)
+
+    def _finish_exit_rebuild(self):
+        """The build the close waited for has ended, however it ended: the close goes
+        ahead (closeEvent again, this time all the way), and the program quits."""
+        dlg = getattr(self, '_exit_rebuild_progress', None)
+        self._exit_rebuild_progress = None
+        if dlg is not None:
             try:
-                save_app_config({self._REBUILD_LATER_KEY: self._index_identity()})
-            except Exception:                                # noqa: BLE001
-                logger.exception("could not record the rebuild offer's answer")
+                dlg.canceled.disconnect(self._cancel_exit_rebuild)
+            except TypeError:
+                pass
+            dlg.close()
+            dlg.deleteLater()
+        self._exit_rebuild_done = True
+        if self.close():
+            # Hidden for the build: closing a hidden window fires no lastWindowClosed. A
+            # close that a retry completes later (passage work) quits from closeEvent.
+            QApplication.instance().quit()
 
     def on_index_error(self, err):
-        self.index_progress.setFormat(tr("Indexing failed"))
+        state = getattr(self, '_index_build', None) or {}
+        if hasattr(self, 'index_progress'):
+            self.index_progress.setFormat(tr("Indexing failed"))
+        # A build beside the live index removed what it wrote; the open index serves on.
+        # An in-place build left no index, as before.
+        self._end_index_build()
 
         # Check for file locking error (caused by file managers, antivirus, etc.)
         err_lower = str(err).lower()
@@ -33272,6 +33609,9 @@ class GenizahGUI(QMainWindow):
             QMessageBox.critical(self, tr("Indexing Error"), msg)
         else:
             QMessageBox.critical(self, tr("Indexing Error"), str(err))
+        if state.get('at_exit'):
+            # After the message (modal): the close goes ahead and the program quits.
+            self._finish_exit_rebuild()
 
     # ------------------------------------------------------------------
     # Search History
@@ -34866,6 +35206,10 @@ class GenizahGUI(QMainWindow):
         # telemetry and session-save paths are already disarmed.
         if self._defer_close_for_passage(event):
             return
+        # The rebuild the user asked for at exit, or one running now, in a small
+        # window after this one hides; the close comes back when it has ended.
+        if self._defer_close_for_index_rebuild(event):
+            return
         # The close goes ahead, which ends this close attempt: a retry still
         # queued must not re-issue it, and no answer is kept past it.
         self._close_pending = False
@@ -35045,6 +35389,10 @@ class GenizahGUI(QMainWindow):
                     t.wait()
         finally:
             super().closeEvent(event)
+            if event.isAccepted() and getattr(self, '_exit_rebuild_hid_window', False):
+                # Hidden for the rebuild at exit: closing a hidden window fires no
+                # lastWindowClosed, so the quit is explicit (and after this event).
+                QTimer.singleShot(0, QApplication.instance().quit)
 
     def _stop_meta_loader_for_close(self):
         """Ask a running metadata loader to stop, and wait for it a bounded time.
