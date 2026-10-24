@@ -5549,6 +5549,10 @@ TRANSLATIONS.update({
     "Image adjustments": "כוונון תמונה",
     "{} matching pages": "{} עמודים תואמים",
     "All sections": "כל הלשוניות",
+    # The side menu (desktop/widgets/side_nav.py, 2026-10-24): its ☰ button.
+    "Menu": "תפריט",
+    "Collapse menu": "כיווץ התפריט",
+    "Expand menu": "הרחבת התפריט",
     "Columns": "עמודות",
     "Show all columns": "הצגת כל העמודות",
     "Fit columns to window": "התאמת העמודות לחלון",
