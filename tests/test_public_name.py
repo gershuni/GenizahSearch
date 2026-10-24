@@ -127,11 +127,14 @@ def _handler_of(button, name):
 def dialog(monkeypatch):
     """The real dialog; ``run(handler_name, typed=...)`` types and clicks."""
     h = {'calls': [], 'answer': None, 'notes': [], 'storage': {}, 'cached': [],
-         'client_threads': [], 'loop_thread': None}
+         'client_threads': [], 'loop_thread': None,
+         'signed_in': 'user-1', 'signs_in_during_save': None}
 
     def record(user_id, data, *, client=None):
         h['calls'].append({'thread': threading.get_ident(), 'client': client,
                            'user_id': user_id, 'data': dict(data)})
+        if h['signs_in_during_save']:  # another tab of this browser, meanwhile
+            h['signed_in'] = h['signs_in_during_save']
         return h['answer'] if h['answer'] is not None else {'success': True, 'profile': {**ALIAS_PROFILE, **data}}
 
     def build_client():
@@ -142,6 +145,7 @@ def dialog(monkeypatch):
     monkeypatch.setattr(pn, 'get_user_client', build_client)
     monkeypatch.setattr(pn, 'safe_user_set', lambda key, value: h['storage'].__setitem__(key, value) or True)
     monkeypatch.setattr(pn.GlobalAuthState, 'update_profile_cache', staticmethod(h['cached'].append))
+    monkeypatch.setattr(pn.GlobalAuthState, 'get_user_id', staticmethod(lambda: h['signed_in']))
     monkeypatch.setattr(pn.ui, 'notify', lambda message, *a, **k: h['notes'].append((str(message), k.get('type'))))
     monkeypatch.setenv('GENIZAH_STORAGE_SECRET', 'x' * 40)
     prepare_simulation()
@@ -216,6 +220,26 @@ def test_a_refused_save_is_said_and_not_asked_again_here(dialog):
     assert dialog['storage'] == {pn._SKIP_KEY: 'user-1'}
     assert dialog['cached'] == [] and dialog['header_text'] == 'Curious Scribe'
     assert [kind for _m, kind in dialog['notes']] == ['negative']
+
+
+def test_an_account_switched_in_another_tab_gets_nothing_written(dialog):
+    """Codex (PR #447): the browser's storage is shared by its tabs."""
+    dialog['signed_in'] = 'user-2'
+    dialog['run']('save', typed='Ada Lovelace')
+
+    assert dialog['calls'] == [], "the other account's client would have written"
+    assert dialog['cached'] == [] and dialog['open'] is False
+
+
+def test_an_account_switched_during_the_save_keeps_its_own_cache(dialog):
+    """Codex (PR #447): A's saved profile -- name and role -- must not land in B's cache."""
+    dialog['signs_in_during_save'] = 'user-2'
+    dialog['run']('save', typed='Ada Lovelace')
+
+    assert len(dialog['calls']) == 1
+    assert dialog['cached'] == [], "account A's profile was cached for account B"
+    assert dialog['header_text'] == 'Curious Scribe' and dialog['notes'] == []
+    assert dialog['storage'] == {}
 
 
 # ---------------------------------------------------------------- where names are shown

@@ -72,6 +72,14 @@ lock table auth.users, public.profiles in share row exclusive mode;
 -- ============================================================================
 -- 1) The column
 -- ============================================================================
+-- Whether this run adds it: only then are existing names marked as chosen
+-- (step 4). On a later run every username-holder created in between has an
+-- alias from the trigger, and marking would count it as a name they chose.
+select set_config('genizah.first_run',
+  (not exists (select 1 from information_schema.columns
+               where table_schema = 'public' and table_name = 'profiles'
+                 and column_name = 'public_name_confirmed'))::text, true);
+
 alter table public.profiles
   add column if not exists public_name_confirmed boolean not null default false;
 
@@ -163,16 +171,23 @@ begin
   v_confirmed := v_username is not null or v_full_name is not null;
   v_username := coalesce(v_username, public.new_public_alias());
 
-  begin
-    insert into public.profiles (id, username, full_name, affiliation, public_name_confirmed)
-    values (new.id, v_username, v_full_name, v_affiliation, v_confirmed);
-  exception when unique_violation then
-    -- The username was taken between the check and the insert (two sign-ups
-    -- at once): a fresh alias. Any other clash (the id) raises again here and
-    -- aborts, as before.
-    insert into public.profiles (id, username, full_name, affiliation, public_name_confirmed)
-    values (new.id, public.new_public_alias(), v_full_name, v_affiliation, v_full_name is not null);
-  end;
+  for attempt in 1..5 loop
+    begin
+      insert into public.profiles (id, username, full_name, affiliation, public_name_confirmed)
+      values (new.id, v_username, v_full_name, v_affiliation, v_confirmed);
+      exit;
+    exception when unique_violation then
+      -- The username was taken between the check and the insert (sign-ups at
+      -- the same moment): a fresh alias, and try again. An error inside this
+      -- handler would escape it, so the retry is the loop, not a second
+      -- insert here. A clash on the id is not about the name: it aborts, as before.
+      if attempt = 5 or exists (select 1 from public.profiles p where p.id = new.id) then
+        raise;
+      end if;
+      v_username := public.new_public_alias();
+      v_confirmed := v_full_name is not null;
+    end;
+  end loop;
 
   insert into public.user_lists (user_id, name, name_en, is_default)
   values (new.id, 'General', 'General', true);
@@ -196,11 +211,13 @@ create table if not exists private.profiles_alias_fix_20261024 (
 alter table private.profiles_alias_fix_20261024 enable row level security;
 revoke all on private.profiles_alias_fix_20261024 from public, anon, authenticated;
 
--- A name of their own counts as chosen. Before the aliases, and never for an
--- alias this file gave (a second run of the file).
+-- A name of their own counts as chosen. Before the aliases, and only on the
+-- run that adds the column (step 1): from then on the trigger sets the flag,
+-- and a username may be an alias it gave.
 update public.profiles p
    set public_name_confirmed = true
- where not p.public_name_confirmed
+ where current_setting('genizah.first_run')::boolean
+   and not p.public_name_confirmed
    and (nullif(btrim(p.full_name), '') is not null or nullif(btrim(p.username), '') is not null)
    and not exists (select 1 from private.profiles_alias_fix_20261024 f where f.id = p.id);
 

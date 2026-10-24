@@ -121,6 +121,12 @@ def show_public_name_dialog(user: Dict, profile: Dict, name_button=None):
             .style('color: var(--text-muted);')
 
         async def answer(full_name: Optional[str]):
+            # The browser's storage is shared by its tabs: another tab may have
+            # signed in as someone else since this dialog opened. Then its
+            # client is theirs and its cache theirs; write nothing.
+            if GlobalAuthState.get_user_id() != user_id:
+                dialog.close()
+                return
             data = {CONFIRMED_KEY: True}
             if full_name:
                 data['full_name'] = full_name
@@ -135,6 +141,8 @@ def show_public_name_dialog(user: Dict, profile: Dict, name_button=None):
                     button.enable()
                 return  # cancelled or app stopping
             dialog.close()
+            if GlobalAuthState.get_user_id() != user_id:
+                return  # the account changed during the save (as above)
             if 'error' in result:
                 logger.warning("public name not saved for this account")
                 safe_user_set(_SKIP_KEY, user_id)

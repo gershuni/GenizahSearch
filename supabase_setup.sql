@@ -501,16 +501,23 @@ begin
   v_confirmed := v_username is not null or v_full_name is not null;
   v_username := coalesce(v_username, public.new_public_alias());
 
-  begin
-    insert into public.profiles (id, username, full_name, affiliation, public_name_confirmed)
-    values (new.id, v_username, v_full_name, v_affiliation, v_confirmed);
-  exception when unique_violation then
-    -- The username was taken between the check and the insert (two sign-ups
-    -- at once): a fresh alias. Any other clash (the id) raises again here and
-    -- aborts, as before.
-    insert into public.profiles (id, username, full_name, affiliation, public_name_confirmed)
-    values (new.id, public.new_public_alias(), v_full_name, v_affiliation, v_full_name is not null);
-  end;
+  for attempt in 1..5 loop
+    begin
+      insert into public.profiles (id, username, full_name, affiliation, public_name_confirmed)
+      values (new.id, v_username, v_full_name, v_affiliation, v_confirmed);
+      exit;
+    exception when unique_violation then
+      -- The username was taken between the check and the insert (sign-ups at
+      -- the same moment): a fresh alias, and try again. An error inside this
+      -- handler would escape it, so the retry is the loop, not a second
+      -- insert here. A clash on the id is not about the name: it aborts, as before.
+      if attempt = 5 or exists (select 1 from public.profiles p where p.id = new.id) then
+        raise;
+      end if;
+      v_username := public.new_public_alias();
+      v_confirmed := v_full_name is not null;
+    end;
+  end loop;
 
   insert into public.user_lists (user_id, name, name_en, is_default)
   values (new.id, 'General', 'General', true);

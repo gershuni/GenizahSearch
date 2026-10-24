@@ -67,10 +67,15 @@ def test_the_trigger_never_copies_the_email_and_always_leaves_a_name():
     assert "new.email" not in fn, "the address must never become a profile field"
     assert re.search(r"security definer\s+set search_path = ''", fn)
     assert "v_username := coalesce(v_username, public.new_public_alias());" in fn
-    handler = fn.split("exception when unique_violation then", 1)[1]
-    assert "public.new_public_alias()" in handler, "a lost race must take a fresh alias"
-    assert "raise;" not in handler
-    assert fn.count("public_name_confirmed") == 2
+    loop = fn.split("for attempt in 1..5 loop", 1)[1].split("end loop;", 1)[0]
+    insert, handler = loop.split("exception when unique_violation then", 1)
+    assert "insert into public.profiles" in insert and "exit;" in insert
+    assert "v_username := public.new_public_alias();" in handler, "a lost race must take a fresh alias"
+    # Codex (PR #447): an insert inside the handler escapes it on a second clash
+    # and aborts the sign-up; the retry must be the loop around the insert.
+    assert "insert into" not in handler
+    assert "if attempt = 5 or exists (select 1 from public.profiles p where p.id = new.id) then" in handler
+    assert fn.count("public_name_confirmed") == 1
 
 
 def test_the_alias_generator_is_out_of_the_data_apis_reach():
@@ -107,8 +112,13 @@ def test_sign_ups_wait_and_names_are_marked_before_aliases_are_given():
     marked = sql.index("set public_name_confirmed = true")
     aliases = sql.index("v_alias := public.new_public_alias()")
     assert lock < marked < aliases, "an alias must never count as a name the person chose"
-    # ...nor on a second run of the file.
-    assert "not exists (select 1 from private.profiles_alias_fix_20261024 f where f.id = p.id)" in sql
+    # ...nor on a second run of the file (Codex, PR #447): by then the trigger has
+    # given aliases with no record here, so the marking runs only on the run
+    # that adds the column, decided before the column is added.
+    first_run = sql.index("select set_config('genizah.first_run'")
+    assert first_run < sql.index("alter table public.profiles")
+    update = sql[marked:aliases].split(";", 1)[0]
+    assert "where current_setting('genizah.first_run')::boolean" in update
 
 
 def test_every_alias_is_recorded_before_it_is_written():
