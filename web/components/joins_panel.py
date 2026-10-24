@@ -579,10 +579,10 @@ def _fetch_community_puzzle_joins(document_id: str) -> List[Dict]:
         pj_profiles = {}
         try:
             pj_profiles_resp = client.table('profiles').select(
-                'id, full_name'
+                'id, full_name, username'
             ).in_('id', pj_user_ids).execute()
             pj_profiles = {
-                p['id']: p.get('full_name') or 'Anonymous'
+                p['id']: p.get('full_name') or p.get('username') or 'Anonymous'
                 for p in (pj_profiles_resp.data or [])
             }
         except Exception:

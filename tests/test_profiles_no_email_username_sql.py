@@ -1,8 +1,8 @@
 """migrations/profiles_no_email_username.sql (2026-10-21) lives in SQL the app
 never runs, so nothing else would notice if it drifted. These checks pin what
 a later edit is most likely to break: the new-user trigger never copies the
-email address and pins its search_path, supabase_setup.sql installs the same
-function, the migration is a dry run unless someone switches it, every
+email address and pins its search_path, supabase_setup.sql does not either, the
+migration is a dry run unless someone switches it, every
 username it changes is recorded before it is changed, and the verification
 script never commits.
 """
@@ -41,8 +41,10 @@ def test_the_trigger_never_copies_the_email_and_pins_its_search_path():
     assert "'signup_profile'" in fn and "'provider'" in fn
 
 
-def test_supabase_setup_installs_the_same_trigger():
-    assert _normalized(_handle_new_user(_sql(SETUP))) == _normalized(_handle_new_user(_sql(MIGRATION)))
+# supabase_setup.sql now carries the trigger of migrations/profiles_public_aliases.sql
+# (2026-10-24): tests/test_profiles_public_aliases_sql.py pins that they match.
+def test_supabase_setup_still_never_copies_the_email():
+    assert "new.email" not in _handle_new_user(_sql(SETUP)).lower()
 
 
 def test_the_migration_is_a_dry_run_unless_switched():

@@ -396,7 +396,7 @@ def resolve_author_profiles(client, user_ids: List[str]) -> Dict[str, str]:
         user_ids: List of user UUIDs to resolve.
 
     Returns:
-        Dict mapping user_id -> full_name. Missing users get "Anonymous".
+        Dict mapping user_id -> full name, else username. Missing users get "Anonymous".
     """
     if not user_ids:
         return {}
@@ -404,11 +404,14 @@ def resolve_author_profiles(client, user_ids: List[str]) -> Dict[str, str]:
     try:
         response = (
             client.table('profiles')
-            .select('id, full_name')
+            .select('id, full_name, username')
             .in_('id', user_ids)
             .execute()
         )
-        profiles = {r['id']: r['full_name'] for r in (response.data or [])}
+        # The username is the alias of anyone without a full name
+        # (migrations/profiles_public_aliases.sql); a NULL name is not a name.
+        profiles = {r['id']: r.get('full_name') or r.get('username')
+                    for r in (response.data or []) if r.get('full_name') or r.get('username')}
     except Exception as e:
         logger.error("resolve_author_profiles failed: %s", e)
         profiles = {}

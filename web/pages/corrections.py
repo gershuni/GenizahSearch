@@ -786,7 +786,8 @@ async def create_corrections_page():
                                             ui.label(f" • {tr('Image')} {page_num}").classes('text-sm')
 
                                 with ui.row().classes('items-center gap-3'):
-                                    ui.label(f"by {(corr.get('author') or {}).get('username') or 'Unknown'}").style('color: var(--text-secondary);')
+                                    author = corr.get('author') or {}
+                                    ui.label(f"by {author.get('full_name') or author.get('username') or 'Unknown'}").style('color: var(--text-secondary);')
 
                                     # Vote display for reviewers
                                     upvotes = corr.get('upvotes', 0)

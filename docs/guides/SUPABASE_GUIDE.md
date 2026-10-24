@@ -480,6 +480,47 @@ the file). `supabase_setup.sql` carries the same function.
 - **App side:** the website shows "check your inbox" after Register (production requires email
   confirmation) and never writes the profile itself at sign-up.
 
+### Public names: aliases and the one-time question (2026-10-24)
+
+After the migration above 164 of 193 profiles had neither a username nor a full name, and every
+page that credits a contribution showed them as "Unknown". From
+`migrations/profiles_public_aliases.sql`:
+
+- **Aliases.** `public.new_public_alias()` makes a name such as "Curious Scribe" (40 adjectives x 40
+  Genizah-world trades and callings; on a clash "of <city>" from 24 cities, then a number), never a
+  username someone has in any letter case. `handle_new_user` gives one to every sign-up without a
+  usable username of its own, and the migration gave one to every existing profile with an empty
+  username, recording each in `private.profiles_alias_fix_20261024` (undo at the end of the file).
+  The function is revoked from `anon`/`authenticated`: only the trigger uses it. The aliases are
+  English, stored once, and shown as they are on the Hebrew site too.
+- **`profiles.public_name_confirmed`** (boolean, default false): true once the person chose how
+  their name appears -- a username or full name typed at sign-up, or an answer to the website's
+  question. `web/public_name.py` asks once (persistent dialog, prefilled with the Google name)
+  while it is false and the full name is empty; Save writes `full_name`, Keep leaves the alias;
+  both set the flag. A profile without the column is never asked.
+- Every surface that names a contributor falls back from the full name to the username, so the
+  alias reaches installed desktop versions with no code change.
+- **Run:** a dry run as written (ends in a `DRY RUN` error with a sample of aliases); switch
+  `genizah.dry_run` to `'off'` to apply. Locks `auth.users` and `profiles` for about a second.
+- **Verify:** `scripts/verify_profiles_public_aliases.sql`, before and after; a pass after is
+  every check PASS. It supersedes `scripts/verify_profiles_no_email_username.sql`, whose
+  empty-username sign-ups now FAIL by design.
+
+### Account emails for admins (2026-10-24)
+
+After the migration above most profiles have no username and no full name, so the admin Users tab
+reads the email instead, from `public.admin_list_user_emails()` (`migrations/admin_list_user_emails.sql`):
+SECURITY DEFINER, returns `(id, email)` from `auth.users` only when the caller's own profile has
+role `admin` (else SQLSTATE `42501`); executable by `authenticated`, revoked from `anon` and
+`PUBLIC`. `web/pages/admin.py::get_all_users` calls it with the admin's client and merges by id;
+if it is missing, the tab still loads and shows "No name set".
+
+- **Run:** the whole file in the SQL editor (idempotent).
+- **Verify:** `select * from public.admin_list_user_emails();` in the SQL editor must fail with
+  "admin role required" (no signed-in user there); /admin -> Users, signed in as an admin, shows
+  emails.
+- **Roll back:** `drop function if exists public.admin_list_user_emails();`
+
 ### Detailed Policy SQL Examples
 
 ```sql
