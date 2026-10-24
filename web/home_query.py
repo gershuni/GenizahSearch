@@ -24,23 +24,12 @@ Pure (no NiceGUI import) so it is unit-tested directly:
 """
 from __future__ import annotations
 
-import unicodedata
 from typing import Optional
 from urllib.parse import quote
 
+# Shared with the desktop's Go to box (shared/quick_open.py), which routes the same way.
+from shared.quick_open import has_hebrew_or_arabic_letter
 from shared.sys_id_patterns import CORPUS_SYS_ID_RE
-
-
-def has_hebrew_or_arabic_letter(text: str) -> bool:
-    """True when ``text`` holds at least one Hebrew or Arabic LETTER.
-
-    Letters only: niqqud, cantillation and Arabic-Indic digits do not count,
-    so a string of them alone is not routed to full-text search.
-    """
-    for ch in text:
-        if ch.isalpha() and unicodedata.name(ch, '').startswith(('HEBREW ', 'ARABIC ')):
-            return True
-    return False
 
 
 def home_query_target(text: Optional[str]) -> Optional[str]:

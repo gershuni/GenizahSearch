@@ -1,8 +1,9 @@
-## [Unreleased] -- A side menu as an option, text size, Ctrl+1..7, and an account menu (desktop, branch `claude/sleepy-hawking-id0eg0`)
+## [Unreleased] -- A side menu as an option, Go to, text size, shortcuts, and an account menu (desktop, branch `claude/sleepy-hawking-id0eg0`)
 
 Owner, 2026-10-24: "move the menu to one of the app sides, remove the V tick boxes, and add also the
 puzzle, joins lab and settings to the menu", then "Keep the tabs. Offer an option to change them to
-the side menu", and "option to change the size of the texts in search etc windows".
+the side menu", "option to change the size of the texts in search etc windows", and "Move the
+menu button to the extreme right or left".
 
 - **Two menu layouts.** Settings > Menu: *Tabs at the top* (the default, as before) or *Side menu*
   (`desktop/widgets/side_nav.py`), a column on the window's start side -- right in Hebrew, left in
@@ -15,6 +16,13 @@ the side menu", and "option to change the size of the texts in search etc window
 - **The side menu:** the current section has an accent bar; ☰ shows or hides the labels (remembered).
   On a narrow window (a 1080p screen at 300% is 640 px wide) it shows icons only and ☰ opens the full
   list; a short window scrolls it rather than being made taller by it.
+- **☰ at the window's edge**, before the first tab: far right in Hebrew, far left in English. It was
+  between the tabs and the Login button.
+- **Go to (Ctrl+G)**, also in the menus: type a shelfmark, system number or FL number to open the
+  manuscript in Browse from anywhere; Hebrew or Arabic words are searched instead (the website
+  homepage's rule, `shared/quick_open.py`).
+- **More keys:** F1 opens Help at the section in front (Help is now in the menus too), Ctrl+, opens
+  Settings, and Ctrl+F puts the cursor in the section's own search or find box.
 - **Ctrl+1 .. Ctrl+7** open the sections in their order, in either layout; each tab's tooltip and
   each menu entry shows its key.
 - **An account menu.** Logged in, the Login button shows your name with ▾ and opens *Sync lists now*

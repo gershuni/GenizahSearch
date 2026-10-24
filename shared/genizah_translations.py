@@ -5560,6 +5560,14 @@ TRANSLATIONS.update({
     "Move the menu to the side": "העברת התפריט לצד",
     "Back to tabs at the top": "חזרה ללשוניות למעלה",
     "Account": "חשבון",
+    # The Go to box (Ctrl+G).
+    "Go to": "מעבר אל",
+    "Go to...": "מעבר אל...",
+    "A shelfmark, system number or FL number opens the manuscript. "
+    "Hebrew or Arabic words are searched.":
+        "מספר מדף, מספר מערכת או מספר FL פותחים את כתב היד. "
+        "מילים בעברית או בערבית נשלחות לחיפוש.",
+    "For example T-S 12.123": "למשל T-S 12.123",
     # Text size of the result lists (Settings, Ctrl+= / Ctrl+- / Ctrl+0).
     "Text size in result lists:": "גודל הטקסט ברשימות התוצאות:",
     "Normal": "רגיל",

@@ -73,6 +73,12 @@ def glyph_icon(glyph: str, color: QColor, size: int = ICON_SIZE) -> QIcon:
     return icon
 
 
+def ltr(text: str) -> str:
+    """``text`` between left-to-right marks, for a key such as "Ctrl+," shown in
+    the Hebrew UI: unmarked, its trailing comma moves to the front (",Ctrl+")."""
+    return f"\u200e{text}\u200e" if text else text
+
+
 def popup_point(anchor: QWidget, menu: QMenu, *, beside: bool = False) -> QPoint:
     """Where to open ``menu`` for ``anchor``: below it (a button in a top row),
     or ``beside`` it toward the window's content, growing up from its foot (an
@@ -276,14 +282,20 @@ class SideNav(QFrame):
         shown as its hint and beside it in menus; the caller binds the key."""
         btn = self._add(NavButton(glyph, label, checkable=True), footer=False)
         btn.shortcut_text = shortcut
-        btn.setToolTip(shortcut)
+        btn.setToolTip(ltr(shortcut))
         self._sections.addButton(btn)
         self.section_buttons.append(btn)
         return btn
 
-    def add_button(self, glyph: str, label: str, *, footer: bool = False) -> NavButton:
-        """An action: a tool that opens its own window, Settings, the account..."""
-        return self._add(NavButton(glyph, label), footer=footer)
+    def add_button(self, glyph: str, label: str, *, footer: bool = False,
+                   shortcut: str = "") -> NavButton:
+        """An action: a tool that opens its own window, Settings, the account...
+        ``shortcut`` as for ``add_section``."""
+        btn = self._add(NavButton(glyph, label), footer=footer)
+        if shortcut:
+            btn.shortcut_text = shortcut
+            btn.setToolTip(ltr(shortcut))
+        return btn
 
     def add_separator(self, *, footer: bool = False):
         line = QFrame()
@@ -394,7 +406,7 @@ class SideNav(QFrame):
                 menu.addSeparator()
             last_group = group
             # A tab marks QMenu's shortcut column; nothing is bound by it.
-            text = f"{btn.text()}\t{btn.shortcut_text}" if btn.shortcut_text else btn.text()
+            text = f"{btn.text()}\t{ltr(btn.shortcut_text)}" if btn.shortcut_text else btn.text()
             act = menu.addAction(btn.icon(), text)
             if btn.isChecked():
                 font = act.font()

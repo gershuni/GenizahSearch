@@ -84,6 +84,7 @@ EXTRACTED_MODULES = [
     "shared/docx_export.py",
     "shared/domain_hierarchy.py",
     "shared/catalog_shelfmark.py",       # catalogue-shelfmark plan, 2026-10-18
+    "shared/quick_open.py",              # the desktop Go to box (Ctrl+G), 2026-10-24
     "shared/exclusion_service.py",
     "shared/export_dossier.py",
     "shared/export_utils.py",

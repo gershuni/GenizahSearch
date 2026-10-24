@@ -75,6 +75,7 @@ DESKTOP_MODULES = [
     "desktop/widgets/overflow_row.py",
     # 2026-10-24: the side menu, the optional second menu layout.
     "desktop/widgets/side_nav.py",
+    "desktop/go_to_dialog.py",           # the Go to box (Ctrl+G), 2026-10-24
     # 2026-09-25: one running copy per data folder.
     "desktop/single_instance.py",
     "desktop/shelfmark_picker.py",      # catalogue-shelfmark plan, 2026-10-18

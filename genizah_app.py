@@ -69,7 +69,9 @@ from desktop.qthread_exit import settle_running_threads
 from desktop.qt_translations import install_qt_translations
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
-from desktop.widgets.side_nav import LinkedButton, SideNav, popup_point
+from desktop.widgets.side_nav import LinkedButton, SideNav, ltr, popup_point
+from desktop.go_to_dialog import GoToDialog
+from shared.quick_open import quick_open_target
 from desktop.widgets.line_number_text_edit import (
     apply_line_numbered_text,
     is_line_numbers_enabled,
@@ -2358,12 +2360,21 @@ class GenizahGUI(QMainWindow):
             self._section_shortcuts.append(shortcut)
             key = seq.toString(QKeySequence.SequenceFormat.NativeText)
             section_keys.append(key)
-            self.tabs.setTabToolTip(i, f"{self.tabs.tabText(i)} ({key})")
+            self.tabs.setTabToolTip(i, f"{self.tabs.tabText(i)} ({ltr(key)})")
         # Ctrl+= (or Ctrl++) / Ctrl+- / Ctrl+0: larger, smaller, normal text --
         # the transcription on the Browse tab, the result lists everywhere else.
         for keys, step in (("Ctrl+=", 1), ("Ctrl++", 1), ("Ctrl+-", -1), ("Ctrl+0", 0)):
             shortcut = QShortcut(QKeySequence(keys), self)
             shortcut.activated.connect(lambda s=step: self._step_text_size(s))
+            self._section_shortcuts.append(shortcut)
+        # Ctrl+G Go to, F1 Help for the section in front, Ctrl+, Settings,
+        # Ctrl+F the section's own search or find field (owner, 2026-10-24).
+        for keys, slot in (("Ctrl+G", self.open_go_to),
+                           ("F1", self.open_help_for_current_section),
+                           ("Ctrl+,", self._open_settings_dialog),
+                           ("Ctrl+F", self._focus_section_field)):
+            shortcut = QShortcut(QKeySequence(keys), self)
+            shortcut.activated.connect(slot)
             self._section_shortcuts.append(shortcut)
 
         # Two menu layouts, chosen in Settings and kept in config.pkl as
@@ -2372,18 +2383,12 @@ class GenizahGUI(QMainWindow):
         # corner -- the default -- or the side menu (desktop/widgets/side_nav.py).
         # Both are built; _apply_nav_layout shows one of them.
 
-        # Corner widget — order: Menu | Login | v6.x | Language | Website |
-        # Puzzle | Joins | Settings(⚙). An overflow row: on a narrow window the
-        # extras move into "More" instead of taking half the tab row (owner
-        # screenshots at 300%, 2026-09-24). The language switch, Settings and the
-        # menu always stay; the version leaves first (Settings and About both
-        # show it and offer the update check).
-        corner_widget = self.corner_row = OverflowRow(tr("More"), spacing=4)
-        corner_widget.setContentsMargins(5, 0, 5, 0)
-
-        # The menu: every section -- the current one in bold, no tick boxes --
-        # then Puzzle, Joins Lab, Settings and the switch to the side menu, so
-        # it still has every section when the tab bar is too narrow and scrolls.
+        # The menu, at the window's edge before the first tab -- far right in
+        # Hebrew, far left in English (owner, 2026-10-24: "Move the menu button
+        # to the extreme right or left"). Every section, the current one in bold
+        # and no tick boxes, then Go to, Puzzle, Joins Lab, Help, Settings and the
+        # switch to the side menu: it still has every section when the tab bar
+        # is too narrow and scrolls.
         self.corner_sections_btn = QToolButton()
         self.corner_sections_btn.setText("\u2630")
         self.corner_sections_btn.setToolTip(tr("Menu"))
@@ -2393,7 +2398,21 @@ class GenizahGUI(QMainWindow):
         self._corner_sections_menu = QMenu(self.corner_sections_btn)
         self._corner_sections_menu.aboutToShow.connect(self._fill_sections_menu)
         self.corner_sections_btn.setMenu(self._corner_sections_menu)
-        corner_widget.add(self.corner_sections_btn, -1)
+        self.corner_menu_holder = QWidget()
+        _menu_holder_layout = QHBoxLayout(self.corner_menu_holder)
+        _menu_holder_layout.setContentsMargins(4, 0, 4, 0)
+        _menu_holder_layout.addWidget(self.corner_sections_btn)
+        # Qt mirrors corner positions in RTL: the "left" corner is the start edge.
+        self.tabs.setCornerWidget(self.corner_menu_holder, Qt.Corner.TopLeftCorner)
+
+        # Corner widget, at the other end — order: Login | v6.x | Language |
+        # Website | Puzzle | Joins | Settings(⚙). An overflow row: on a narrow
+        # window the extras move into "More" instead of taking half the tab row
+        # (owner screenshots at 300%, 2026-09-24). The language switch and
+        # Settings always stay; the version leaves first (Settings and About
+        # both show it and offer the update check).
+        corner_widget = self.corner_row = OverflowRow(tr("More"), spacing=4)
+        corner_widget.setContentsMargins(5, 0, 5, 0)
 
         # Login, or the account's name, which opens the account menu. A
         # LinkedButton: its side-menu twin follows its text and enabled state.
@@ -2459,7 +2478,7 @@ class GenizahGUI(QMainWindow):
         self.corner_settings_btn = QPushButton("\u2699")
         self.corner_settings_btn.setFlat(True)
         self.corner_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.corner_settings_btn.setToolTip(tr("Settings"))
+        self.corner_settings_btn.setToolTip(f"{tr('Settings')} ({ltr('Ctrl+,')})")
         self.corner_settings_btn.setStyleSheet("font-size: 16px; padding: 1px 2px;")
         self.corner_settings_btn.setFixedWidth(30)
         self.corner_settings_btn.clicked.connect(self._open_settings_dialog)
@@ -2503,9 +2522,14 @@ class GenizahGUI(QMainWindow):
         self.nav_puzzle_btn.clicked.connect(self._open_puzzle_window)
         self.nav_joins_btn = self.side_nav.add_button("\U0001F517", tr("Joins Lab"))
         self.nav_joins_btn.clicked.connect(self.open_join_workbench)
+        self.nav_go_to_btn = self.side_nav.add_button("\U0001F9ED", tr("Go to..."), shortcut="Ctrl+G")
+        self.nav_go_to_btn.clicked.connect(self.open_go_to)
 
         self.side_nav.add_separator(footer=True)
-        self.nav_settings_btn = self.side_nav.add_button("\u2699\uFE0F", tr("Settings"), footer=True)
+        self.nav_help_btn = self.side_nav.add_button("\u2753", tr("Help"), footer=True, shortcut="F1")
+        self.nav_help_btn.clicked.connect(self.open_help_for_current_section)
+        self.nav_settings_btn = self.side_nav.add_button(
+            "\u2699\uFE0F", tr("Settings"), footer=True, shortcut="Ctrl+,")
         self.nav_settings_btn.clicked.connect(self._open_settings_dialog)
         self.nav_login_btn = self.side_nav.add_button("\U0001F464", "", footer=True)
         self.corner_login_btn.link(self.nav_login_btn)
@@ -6170,6 +6194,7 @@ class GenizahGUI(QMainWindow):
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
+        btn_help.setToolTip(f"{tr('Help')} (F1)")
         btn_help.clicked.connect(lambda: self.open_help_center(anchor=None))
 
         # Domain filter button and label
@@ -6650,6 +6675,7 @@ class GenizahGUI(QMainWindow):
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
+        btn_help.setToolTip(f"{tr('Help')} (F1)")
         btn_help.clicked.connect(lambda: self.open_help_center(anchor="composition"))
         _title_flow.addWidget(btn_help)
         top_row.addWidget(self.comp_title_actions)
@@ -7284,6 +7310,7 @@ class GenizahGUI(QMainWindow):
 
         # Help
         btn_browse_help = QPushButton("?")
+        btn_browse_help.setToolTip(f"{tr('Help')} (F1)")
         btn_browse_help.setFixedWidth(30)
         btn_browse_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
         btn_browse_help.clicked.connect(lambda: self.open_help_center(anchor="browse"))
@@ -16433,6 +16460,7 @@ class GenizahGUI(QMainWindow):
         self.nav_layout = 'side' if side else 'tabs'
         self.tabs.tabBar().setVisible(not side)
         self.corner_row.setVisible(not side)
+        self.corner_menu_holder.setVisible(not side)
         # No pane frame beside the side menu: the column's own edge divides.
         self.tabs.setDocumentMode(side)
         self.side_nav.setVisible(side)
@@ -16450,6 +16478,76 @@ class GenizahGUI(QMainWindow):
 
     def _open_website(self):
         QDesktopServices.openUrl(QUrl("https://genizahsearch.com"))
+
+    # -- Go to, Help, Ctrl+F (owner, 2026-10-24) -------------------------------
+    def open_go_to(self):
+        """Ctrl+G: the Go to box, then open or search what was typed."""
+        dlg = GoToDialog(self, completer=getattr(self, 'shelf_completer', None))
+        try:
+            accepted = dlg.exec()
+            text = dlg.text()
+        finally:
+            dlg.detach_completer()
+            dlg.deleteLater()
+        if accepted:
+            self.go_to(text)
+
+    def go_to(self, text):
+        """Open a system number, FL number or shelfmark in Browse, or search
+        Hebrew or Arabic words (shared/quick_open.py decides which). Returns the
+        kind acted on, or None for blank text."""
+        target = quick_open_target(text)
+        if target is None:
+            return None
+        kind, value = target
+        if kind == 'search':
+            self.query_input.setText(value)
+            self._set_active_tab(self.search_tab)
+            if not self.is_searching:
+                self.toggle_search()
+            return kind
+        # Only the one field: browse_load also reads the other two, and a
+        # number left over in one of them would compete with this one.
+        fields = {'sys_id': (self.browse_sys_input, "sys"),
+                  'fl': (self.browse_fl_input, "fl"),
+                  'shelfmark': (self.browse_shelf_input, "shelf")}
+        for field, _name in fields.values():
+            field.clear()
+        field, name = fields[kind]
+        field.setText(value)
+        self._set_last_browse_field(name)
+        self._set_active_tab(self.browse_tab)
+        self.browse_load()
+        return kind
+
+    # The Help section for each section of the window (Help.html ids).
+    _SECTION_HELP = (('search_tab', 'search'), ('composition_tab', 'composition'),
+                     ('browse_tab', 'browse'), ('catalog_browse_tab', 'catalog-browse'),
+                     ('lists_tab', 'lists'), ('community_tab', 'community'),
+                     ('my_library_tab', 'my-library'))
+
+    def open_help_for_current_section(self):
+        """F1 and the Help entry: Help, opened at the section in front."""
+        current = self.tabs.currentWidget()
+        anchor = next((a for name, a in self._SECTION_HELP
+                       if getattr(self, name, None) is current), None)
+        self.open_help_center(anchor=anchor)
+
+    # Ctrl+F: the field each section searches or filters with.
+    _SECTION_FIND_FIELD = (('search_tab', 'query_input'), ('composition_tab', 'comp_text_area'),
+                           ('browse_tab', 'browse_find_input'),
+                           ('catalog_browse_tab', 'catalog_author_input'),
+                           ('lists_tab', 'lists_filter_input'))
+
+    def _focus_section_field(self):
+        current = self.tabs.currentWidget()
+        for tab, field_name in self._SECTION_FIND_FIELD:
+            field = getattr(self, field_name, None)
+            if getattr(self, tab, None) is current and field is not None:
+                field.setFocus(Qt.FocusReason.ShortcutFocusReason)
+                field.selectAll()
+                return field
+        return None
 
     # -- text size (owner, 2026-10-24: "option to change the size of the texts
     # in search etc windows") ---------------------------------------------------

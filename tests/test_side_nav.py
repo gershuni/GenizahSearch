@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
 )
 
 import genizah_app
-from desktop.widgets.side_nav import LinkedButton, NavButton, SideNav, popup_point
+from desktop.widgets.side_nav import LinkedButton, NavButton, SideNav, ltr, popup_point
 from genizah_app import GenizahGUI
 
 pytestmark = pytest.mark.gui
@@ -214,10 +214,12 @@ def test_sections_carry_their_shortcut_into_the_hint_and_the_menu():
     nav.add_section("\U0001F4DC", "Composition Search", "Ctrl+2")
     QHBoxLayout(host).addWidget(nav)
     nav.set_current(0)
-    assert nav.section_buttons[0].toolTip() == "Ctrl+1"
+    # Marked left-to-right: in the Hebrew UI "Ctrl+," would show as ",Ctrl+".
+    assert nav.section_buttons[0].toolTip() == ltr("Ctrl+1") == "\u200eCtrl+1\u200e"
     menu = nav.build_menu(QMenu(), extras=[("Back to tabs at the top", lambda: None)])
     texts = [a.text() for a in menu.actions()]
-    assert texts == ["Search\tCtrl+1", "Composition Search\tCtrl+2", "", "Back to tabs at the top"]
+    assert texts == [f"Search\t{ltr('Ctrl+1')}", f"Composition Search\t{ltr('Ctrl+2')}", "",
+                     "Back to tabs at the top"]
 
 
 def test_linked_button_relabels_and_disables_its_twin():
@@ -257,6 +259,8 @@ class _Window:
             self.tabs.addTab(QWidget(), name)
         self.corner_row = QLabel("corner")
         self.tabs.setCornerWidget(self.corner_row)
+        self.corner_menu_holder = QLabel("\u2630")
+        self.tabs.setCornerWidget(self.corner_menu_holder, Qt.Corner.TopLeftCorner)
         self.side_nav = SideNav()
         for i in range(self.tabs.count()):
             btn = self.side_nav.add_section("\u2022", self.tabs.tabText(i), f"Ctrl+{i + 1}")
@@ -310,8 +314,10 @@ def test_tabs_are_the_default_and_the_side_menu_applies_at_once(window):
     w = window
     assert w.nav_layout == "tabs"
     assert w.tabs.tabBar().isVisible() and w.corner_row.isVisible() and not w.side_nav.isVisible()
+    assert w.corner_menu_holder.isVisible()
     w.set_nav_layout("side")
     assert not w.tabs.tabBar().isVisible() and not w.corner_row.isVisible() and w.side_nav.isVisible()
+    assert not w.corner_menu_holder.isVisible()
     assert w.cfg == {"nav_layout": "side"}
     assert w.settings_dialog.combo_nav_layout.currentIndex() == 1
     w.set_nav_layout("tabs")
@@ -333,7 +339,8 @@ def test_the_tab_layouts_menu_has_sections_tools_settings_and_no_tick_boxes(wind
     w._fill_sections_menu()
     acts = w._corner_sections_menu.actions()
     texts = [a.text() for a in acts if not a.isSeparator()]
-    assert texts == ["Search\tCtrl+1", "Composition Search\tCtrl+2", "Personal Lists\tCtrl+3",
+    assert texts == [f"Search\t{ltr('Ctrl+1')}", f"Composition Search\t{ltr('Ctrl+2')}",
+                     f"Personal Lists\t{ltr('Ctrl+3')}",
                      "Fragment Puzzle", "Joins Lab", "Settings", "Move the menu to the side"]
     assert not any(a.isCheckable() for a in acts)
     assert [a.font().bold() for a in acts[:3]] == [False, True, False]
@@ -364,6 +371,9 @@ def test_main_window_wiring():
     src = (Path(__file__).resolve().parent.parent / "genizah_app.py").read_text(encoding="utf-8")
     init_ui = src[src.index("    def init_ui(self):"):src.index("    def _update_corner_login_state(self):")]
     assert "self.tabs.setCornerWidget(corner_widget" in init_ui                    # tabs kept
+    # ☰ at the window's start edge, before the first tab (mirrored in Hebrew).
+    assert "self.tabs.setCornerWidget(self.corner_menu_holder, Qt.Corner.TopLeftCorner)" in init_ui
+    assert "corner_widget.add(self.corner_sections_btn" not in init_ui
     assert "self._apply_nav_layout(load_app_config().get('nav_layout', 'tabs'))" in init_ui
     for label in ("Fragment Puzzle", "Joins Lab", "Settings"):
         assert re.search(r'self\.side_nav\.add_button\([^)]*tr\("%s"\)' % label, init_ui), label
