@@ -662,7 +662,7 @@ def create_auth_buttons():
             ui.icon('account_circle').classes('text-2xl text-white/80')
 
             # User info with dropdown menu
-            with ui.button(username, icon='arrow_drop_down').props('flat text-color=white dense').classes('text-sm auth-username'):
+            with ui.button(username, icon='arrow_drop_down').props('flat text-color=white dense').classes('text-sm auth-username') as name_button:
                 with ui.menu().classes('min-w-40').style('background: var(--bg-card); color: var(--text-primary);'):
                     ui.menu_item(f"Role: {role.title()}", auto_close=False).props('disable')
                     ui.separator()
@@ -678,6 +678,13 @@ def create_auth_buttons():
                         ui.navigate.reload()
 
                     ui.menu_item(tr('Logout'), handle_logout)
+
+        # Once per account: how should the name appear (an alias until answered)?
+        try:
+            from web.public_name import maybe_ask_public_name
+            maybe_ask_public_name(name_button)
+        except Exception:
+            logger.warning("public name prompt failed", exc_info=True)  # never costs the header
     else:
         # Login/Register buttons (dialog built lazily on first click)
         dialog = None

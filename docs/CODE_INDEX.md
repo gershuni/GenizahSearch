@@ -1939,6 +1939,14 @@ Variant and Lab preferences of one website visitor, kept in that visitor's stora
 - **Function** `has_hebrew_or_arabic_letter` (Line 34) — True when ``text`` holds at least one Hebrew or Arabic LETTER.
 - **Function** `home_query_target` (Line 46) — The URL the homepage box navigates to for ``text``, or None if blank.
 
+## web/public_name.py
+
+- **Function** `clean_public_name` (Line 39) — the name as it will be stored, or None (blank, or contains `@`).
+- **Function** `suggested_public_name` (Line 51) — the name the person's own sign-in carries (Google's), to prefill.
+- **Function** `needs_public_name` (Line 61) — True while `public_name_confirmed` is false and the full name empty (migrations/profiles_public_aliases.sql).
+- **Function** `maybe_ask_public_name` (Line 67) — called by `create_auth_buttons`; opens the dialog once per account, re-reads a profile cached before the column existed.
+- **Function** `show_public_name_dialog` (Line 104) — the one-time "How should your name appear?" dialog: Save (full name) or Keep this name (the alias); both set the flag.
+
 ## web/search_bootstrap.py
 
 - **Function** `matches_saved_run` — True when a stamped URL (`run=` code, query, mode, Responsa options) is the address of a saved run.

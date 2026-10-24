@@ -27,7 +27,9 @@ CREATE TABLE public.profiles (
     avatar_url TEXT,
     settings JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    last_login TIMESTAMPTZ
+    last_login TIMESTAMPTZ,
+    -- true once the person chose how their name appears (migrations/profiles_public_aliases.sql)
+    public_name_confirmed BOOLEAN NOT NULL DEFAULT false
 );
 
 -- ============================================
@@ -416,9 +418,57 @@ GRANT USAGE, SELECT ON SEQUENCE public.document_fragments_id_seq TO service_role
 -- ============================================
 -- FUNCTION: Create profile & default list for new users
 -- The username is what the person typed at an email/password sign-up, never
--- the email address (profiles is readable by anon). Keep this identical to
--- migrations/profiles_no_email_username.sql (tests/test_profiles_no_email_username_sql.py).
+-- the email address (profiles is readable by anon), else a generated alias.
+-- Keep both functions identical to migrations/profiles_public_aliases.sql
+-- (tests/test_profiles_public_aliases_sql.py).
 -- ============================================
+create or replace function public.new_public_alias()
+returns text
+language plpgsql
+volatile
+set search_path = ''
+as $$
+declare
+  adjectives text[] := array[
+    'Attentive', 'Bold', 'Bright', 'Candid', 'Careful', 'Cheerful', 'Clever', 'Curious',
+    'Devoted', 'Diligent', 'Discerning', 'Eager', 'Earnest', 'Generous', 'Gentle', 'Hopeful',
+    'Inquisitive', 'Intrepid', 'Keen', 'Kindly', 'Learned', 'Lively', 'Meticulous', 'Modest',
+    'Nimble', 'Observant', 'Patient', 'Persistent', 'Quiet', 'Resourceful', 'Serene', 'Sharp-eyed',
+    'Steady', 'Studious', 'Thoughtful', 'Tireless', 'Unhurried', 'Wandering', 'Watchful', 'Wise'];
+  nouns text[] := array[
+    'Apothecary', 'Archivist', 'Astronomer', 'Bookbinder', 'Bookseller', 'Calligrapher',
+    'Cartographer', 'Cataloguer', 'Chronicler', 'Collector', 'Commentator', 'Copyist',
+    'Correspondent', 'Decipherer', 'Glassmaker', 'Grammarian', 'Illuminator', 'Lexicographer',
+    'Librarian', 'Linguist', 'Mathematician', 'Merchant', 'Navigator', 'Papermaker',
+    'Perfumer', 'Philosopher', 'Physician', 'Poet', 'Puzzler', 'Reader', 'Scholar', 'Scribe',
+    'Seeker', 'Silversmith', 'Storyteller', 'Student', 'Teacher', 'Translator', 'Traveler', 'Weaver'];
+  places text[] := array[
+    'Acre', 'Aden', 'Aleppo', 'Alexandria', 'Almeria', 'Baghdad', 'Cairo', 'Constantinople',
+    'Cordoba', 'Damascus', 'Fez', 'Fustat', 'Jerusalem', 'Mangalore', 'Narbonne', 'Palermo',
+    'Qayrawan', 'Ramla', 'Seville', 'Sijilmasa', 'Tiberias', 'Toledo', 'Tripoli', 'Tyre'];
+  candidate text;
+begin
+  for attempt in 1..60 loop
+    candidate := adjectives[1 + floor(random() * cardinality(adjectives))::int]
+                 || ' ' || nouns[1 + floor(random() * cardinality(nouns))::int];
+    if attempt > 20 then
+      candidate := candidate || ' of ' || places[1 + floor(random() * cardinality(places))::int];
+    end if;
+    if attempt > 40 then
+      candidate := candidate || ' ' || (2 + floor(random() * 998))::int;
+    end if;
+    if not exists (select 1 from public.profiles p where lower(p.username) = lower(candidate)) then
+      return candidate;
+    end if;
+  end loop;
+  -- Not reached in practice (1,600 names, then 38,400, then millions). A clash
+  -- here is caught by the UNIQUE constraint and handle_new_user tries again.
+  return candidate || ' ' || (100000 + floor(random() * 900000))::int;
+end;
+$$;
+
+revoke all on function public.new_public_alias() from public, anon, authenticated;
+
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -432,6 +482,7 @@ declare
   v_username text;
   v_full_name text;
   v_affiliation text;
+  v_confirmed boolean;
 begin
   if coalesce(new.raw_app_meta_data ->> 'provider', '') = 'email' then
     v_username    := left(nullif(btrim(coalesce(typed ->> 'username',    meta ->> 'username')),    ''), 100);
@@ -445,18 +496,28 @@ begin
     v_username := null;
   end if;
 
-  begin
-    insert into public.profiles (id, username, full_name, affiliation)
-    values (new.id, v_username, v_full_name, v_affiliation);
-  exception when unique_violation then
-    -- The username was taken between the check and the insert (two sign-ups
-    -- at once). Any other clash (the id) still aborts, as before.
-    if v_username is null then
-      raise;
-    end if;
-    insert into public.profiles (id, username, full_name, affiliation)
-    values (new.id, null, v_full_name, v_affiliation);
-  end;
+  -- A username or full name the person typed is their public name; otherwise
+  -- they get an alias and the website asks them once.
+  v_confirmed := v_username is not null or v_full_name is not null;
+  v_username := coalesce(v_username, public.new_public_alias());
+
+  for attempt in 1..5 loop
+    begin
+      insert into public.profiles (id, username, full_name, affiliation, public_name_confirmed)
+      values (new.id, v_username, v_full_name, v_affiliation, v_confirmed);
+      exit;
+    exception when unique_violation then
+      -- The username was taken between the check and the insert (sign-ups at
+      -- the same moment): a fresh alias, and try again. An error inside this
+      -- handler would escape it, so the retry is the loop, not a second
+      -- insert here. A clash on the id is not about the name: it aborts, as before.
+      if attempt = 5 or exists (select 1 from public.profiles p where p.id = new.id) then
+        raise;
+      end if;
+      v_username := public.new_public_alias();
+      v_confirmed := v_full_name is not null;
+    end;
+  end loop;
 
   insert into public.user_lists (user_id, name, name_en, is_default)
   values (new.id, 'General', 'General', true);

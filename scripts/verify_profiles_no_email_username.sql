@@ -1,5 +1,10 @@
 -- ============================================================================
 -- Verify migrations/profiles_no_email_username.sql on the live project.
+--
+-- SUPERSEDED once migrations/profiles_public_aliases.sql (2026-10-24) has
+-- run: a sign-up below that expects an empty username now gets an alias, so
+-- those checks FAIL by design. Use scripts/verify_profiles_public_aliases.sql.
+--
 -- Paste the COMPLETE file into the SQL editor and run it. Run it BEFORE the
 -- migration (the sign-up checks then FAIL: the old trigger copies the email)
 -- and AFTER it (a pass: every check PASS, none SKIPPED).

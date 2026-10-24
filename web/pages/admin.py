@@ -143,15 +143,40 @@ def get_pending_corrections():
         return []
 
 
-def get_all_users():
-    """Get all users from Supabase profiles table."""
+def get_all_users(client=None):
+    """Get all users from the Supabase profiles table, each with its account email.
+
+    profiles has carried no address since 2026-10-21 (the username was the
+    email), and most accounts have no name either, so the email comes from
+    auth.users through the admin-only `admin_list_user_emails` RPC
+    (migrations/admin_list_user_emails.sql). `client` is the authenticated
+    admin client, resolved by the caller on the event loop -- see
+    get_pending_identification_reviews. Without it, or before the migration
+    has run, the rows simply carry no 'email'.
+    """
     try:
-        client = get_client()
-        response = client.table('profiles').select('*').order('created_at', desc=True).execute()
-        return response.data or []
+        response = get_client().table('profiles').select('*').order('created_at', desc=True).execute()
+        users = response.data or []
     except Exception as e:
         logger.error("Error fetching users: %s", e)
         return []
+    if users and client is not None:
+        try:
+            rows = client.rpc('admin_list_user_emails', {}).execute().data or []
+        except Exception as e:
+            logger.warning("Account emails unavailable (%s)", type(e).__name__)
+        else:
+            emails = {row.get('id'): row.get('email') for row in rows}
+            for user in users:
+                if emails.get(user.get('id')):
+                    user['email'] = emails[user['id']]
+    return users
+
+
+def user_display_name(user) -> str:
+    """What the admin list calls an account: full name, username, then email."""
+    return (user.get('full_name') or user.get('username') or user.get('email')
+            or tr('No name set'))
 
 
 def get_all_corrections_count():
@@ -284,7 +309,7 @@ def _load_admin_data(user_client):
     return {
         'pending_corrections': get_pending_corrections(),
         'identification_reviews': get_pending_identification_reviews(user_client),
-        'users': get_all_users(),
+        'users': get_all_users(user_client),
         'total_corrections': get_all_corrections_count(),
     }
 
@@ -778,9 +803,22 @@ async def create_users_list_view(users=None):
     # Users table
     h3(f"{len(users)} {tr('users')}", classes='text-lg font-medium mb-2')
 
-    with ui.column().classes('w-full gap-2') as users_container:
+    rows = []
+    with ui.column().classes('w-full gap-2'):
         for user in users:
-            create_user_row(user)
+            rows.append((create_user_row(user), user))
+
+    def apply_filters():
+        query = (search_input.value or '').strip().lower()
+        role = role_filter.value
+        for card, user in rows:
+            text = ' '.join(str(user.get(key) or '') for key in
+                            ('full_name', 'username', 'email', 'affiliation')).lower()
+            card.set_visibility((not query or query in text)
+                                and (role == 'all' or user.get('role', 'user') == role))
+
+    search_input.on_value_change(lambda _: apply_filters())
+    role_filter.on_value_change(lambda _: apply_filters())
 
 
 def create_user_row(user):
@@ -793,16 +831,19 @@ def create_user_row(user):
         'admin': 'red'
     }
 
-    with ui.card().classes('w-full p-3'):
+    display_name = user_display_name(user)
+    with ui.card().classes('w-full p-3') as card:
         with ui.row().classes('w-full items-center justify-between'):
             # User info
             with ui.row().classes('items-center gap-3 flex-1'):
                 ui.icon('account_circle').classes('text-2xl').style('color: var(--primary-600);')
                 with ui.column().classes('gap-0'):
-                    ui.label(user.get('full_name') or user.get('username') or 'Unknown').classes('font-medium')
-                    # Note: email is not in profiles table, would need to join with auth.users
+                    ui.label(display_name).classes('font-medium')
                     if user.get('username'):
                         ui.label(f"@{user.get('username')}").classes('text-xs').style('color: var(--text-muted);')
+                    # The email, from auth.users (see get_all_users), unless it is already the name
+                    if user.get('email') and user.get('email') != display_name:
+                        ui.label(user.get('email')).classes('text-xs').style('color: var(--text-muted);')
 
             # Affiliation
             if user.get('affiliation'):
@@ -864,8 +905,9 @@ def create_user_row(user):
                         ui.separator()
                         ui.menu_item(
                             tr('Delete User'),
-                            lambda uid=user_id, uname=user.get('username') or 'user': confirm_delete_user(uid, uname)
+                            lambda uid=user_id, uname=display_name: confirm_delete_user(uid, uname)
                         ).classes('text-red-500')
+    return card
 
 
 async def create_stats_view(users=None, pending=None, total_corrections=None):
