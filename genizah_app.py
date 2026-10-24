@@ -23,7 +23,8 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QCompleter)
 from PyQt6.QtCore import (Qt, QTimer, QUrl, pyqtSignal, QThread, QEventLoop, QEvent, QPoint)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QColor,
-                         QStandardItemModel, QStandardItem, QPalette, QCursor)
+                         QStandardItemModel, QStandardItem, QPalette, QCursor,
+                         QKeySequence, QShortcut)
 from PyQt6 import sip
 
 from version import APP_VERSION
@@ -68,7 +69,7 @@ from desktop.qthread_exit import settle_running_threads
 from desktop.qt_translations import install_qt_translations
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
-from desktop.widgets.side_nav import SideNav
+from desktop.widgets.side_nav import LinkedButton, SideNav, popup_point
 from desktop.widgets.line_number_text_edit import (
     apply_line_numbered_text,
     is_line_numbers_enabled,
@@ -2345,14 +2346,132 @@ class GenizahGUI(QMainWindow):
         # Settings Dialog (persistent, created once)
         self.settings_dialog = SettingsDialog(self)
 
-        # The menu down the window's start side (desktop/widgets/side_nav.py):
-        # every section, then Puzzle and Joins Lab, and at the foot Settings, the
-        # account, the language switch, the website and the version. It replaces
-        # the tab bar, the "All sections" menu and the buttons in the tab row's
-        # corner (owner, 2026-10-24). The ☰ choice between labels and icons only
-        # is kept in config.pkl.
-        self.tabs.tabBar().hide()
-        self.tabs.setDocumentMode(True)  # no pane frame: the column's edge divides
+        # Ctrl+1 .. Ctrl+7 open the sections, in either menu layout; each tab's
+        # tooltip names its shortcut (and its full name, when the tab is elided).
+        self._section_shortcuts = []
+        section_keys = []
+        for i in range(self.tabs.count()):
+            seq = QKeySequence(f"Ctrl+{i + 1}")
+            shortcut = QShortcut(seq, self)
+            shortcut.activated.connect(lambda idx=i: self.tabs.setCurrentIndex(idx))
+            self._section_shortcuts.append(shortcut)
+            key = seq.toString(QKeySequence.SequenceFormat.NativeText)
+            section_keys.append(key)
+            self.tabs.setTabToolTip(i, f"{self.tabs.tabText(i)} ({key})")
+
+        # Two menu layouts, chosen in Settings and kept in config.pkl as
+        # nav_layout (owner, 2026-10-24: "Keep the tabs. Offer an option to
+        # change them to the side menu"): the tab bar with the buttons in its
+        # corner -- the default -- or the side menu (desktop/widgets/side_nav.py).
+        # Both are built; _apply_nav_layout shows one of them.
+
+        # Corner widget — order: Menu | Login | v6.x | Language | Website |
+        # Puzzle | Joins | Settings(⚙). An overflow row: on a narrow window the
+        # extras move into "More" instead of taking half the tab row (owner
+        # screenshots at 300%, 2026-09-24). The language switch, Settings and the
+        # menu always stay; the version leaves first (Settings and About both
+        # show it and offer the update check).
+        corner_widget = self.corner_row = OverflowRow(tr("More"), spacing=4)
+        corner_widget.setContentsMargins(5, 0, 5, 0)
+
+        # The menu: every section -- the current one in bold, no tick boxes --
+        # then Puzzle, Joins Lab, Settings and the switch to the side menu, so
+        # it still has every section when the tab bar is too narrow and scrolls.
+        self.corner_sections_btn = QToolButton()
+        self.corner_sections_btn.setText("\u2630")
+        self.corner_sections_btn.setToolTip(tr("Menu"))
+        self.corner_sections_btn.setAccessibleName(tr("Menu"))
+        self.corner_sections_btn.setAutoRaise(True)
+        self.corner_sections_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._corner_sections_menu = QMenu(self.corner_sections_btn)
+        self._corner_sections_menu.aboutToShow.connect(self._fill_sections_menu)
+        self.corner_sections_btn.setMenu(self._corner_sections_menu)
+        corner_widget.add(self.corner_sections_btn, -1)
+
+        # Login, or the account's name, which opens the account menu. A
+        # LinkedButton: its side-menu twin follows its text and enabled state.
+        self.corner_login_btn = LinkedButton(tr("Login"))
+        self.corner_login_btn.setFlat(True)
+        self.corner_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.corner_login_btn.clicked.connect(lambda: self._corner_login_clicked(self.corner_login_btn))
+        # Never shortened to the "▾" its label ends with: the name is the point.
+        corner_widget.add(self.corner_login_btn, 2, short_text=None)
+
+        # Version
+        self.corner_version_btn = QPushButton(f"v{APP_VERSION}")
+        self.corner_version_btn.setFlat(True)
+        self.corner_version_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.corner_version_btn.setToolTip(tr("Check for updates"))
+        self.corner_version_btn.clicked.connect(self.check_updates_manual)
+        self.corner_version_btn.setStyleSheet("color: #7f8c8d; font-size: 11px;")
+        corner_widget.add(self.corner_version_btn, 5)
+
+        # Language toggle (names the language it switches to; linked like Login)
+        self.lang_btn = LinkedButton("English" if CURRENT_LANG == 'he' else "עברית")
+        self.lang_btn.setFlat(True)
+        self.lang_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.lang_btn.clicked.connect(lambda: self.toggle_language())
+        corner_widget.add(self.lang_btn, -1)
+
+        # Website
+        self.corner_website_btn = QPushButton("\U0001F310 GenizahSearch.com")
+        self.corner_website_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.corner_website_btn.setToolTip(tr("Visit our website"))
+        self.corner_website_btn.clicked.connect(self._open_website)
+        self.corner_website_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e8f4fc; color: #1a73e8;
+                border: 1px solid #1a73e8; border-radius: 4px;
+                padding: 3px 8px; font-weight: bold; font-size: 11px;
+            }
+            QPushButton:hover { background-color: #1a73e8; color: white; }
+        """)
+        corner_widget.add(self.corner_website_btn, 4)
+
+        # Puzzle canvas button
+        self.corner_puzzle_btn = QPushButton("\U0001F9E9")  # puzzle piece emoji
+        self.corner_puzzle_btn.setFlat(True)
+        self.corner_puzzle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.corner_puzzle_btn.setToolTip(tr("Fragment Puzzle"))
+        self.corner_puzzle_btn.setStyleSheet("font-size: 16px; padding: 1px 2px;")
+        self.corner_puzzle_btn.setFixedWidth(30)
+        self.corner_puzzle_btn.clicked.connect(self._open_puzzle_window)
+        corner_widget.add(self.corner_puzzle_btn, 3)
+
+        # Joins Lab button (Feature 6)
+        self.corner_joins_btn = QPushButton("\U0001F517")  # 🔗 link emoji
+        self.corner_joins_btn.setFlat(True)
+        self.corner_joins_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.corner_joins_btn.setToolTip(tr("Joins Lab"))
+        self.corner_joins_btn.setStyleSheet("font-size: 16px; padding: 1px 2px;")
+        self.corner_joins_btn.setFixedWidth(30)
+        self.corner_joins_btn.clicked.connect(self.open_join_workbench)
+        corner_widget.add(self.corner_joins_btn, 3)
+
+        # Settings gear
+        self.corner_settings_btn = QPushButton("\u2699")
+        self.corner_settings_btn.setFlat(True)
+        self.corner_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.corner_settings_btn.setToolTip(tr("Settings"))
+        self.corner_settings_btn.setStyleSheet("font-size: 16px; padding: 1px 2px;")
+        self.corner_settings_btn.setFixedWidth(30)
+        self.corner_settings_btn.clicked.connect(self._open_settings_dialog)
+        corner_widget.add(self.corner_settings_btn, -1)
+
+        # Expand tab bar so corner widget is pushed to the far edge.
+        # Qt mirrors corner positions in RTL, so TopRightCorner works for both:
+        #   English LTR: physically right → Search far-left, gear far-right
+        #   Hebrew  RTL: mirrored to left → Search far-right, gear far-left
+        self.tabs.tabBar().setExpanding(True)
+        # Shorten tab names with "..." rather than cutting them mid-word when
+        # the window is narrow; the full name stays in the menu and the tooltip.
+        self.tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
+        self.tabs.setCornerWidget(corner_widget, Qt.Corner.TopRightCorner)
+
+        # The side menu: the same sections, Puzzle and Joins Lab, and at its foot
+        # Settings, the account, the language switch, the website and the
+        # version. The ☰ choice between labels and icons only is kept in
+        # config.pkl too.
         self.side_nav = SideNav(expanded=bool(load_app_config().get('side_nav_expanded', True)))
         self.side_nav.toggled.connect(lambda on: save_app_config({'side_nav_expanded': on}))
         section_icons = {
@@ -2366,7 +2485,8 @@ class GenizahGUI(QMainWindow):
         }
         for i in range(self.tabs.count()):
             btn = self.side_nav.add_section(
-                section_icons.get(self.tabs.widget(i), "\u2022"), self.tabs.tabText(i))
+                section_icons.get(self.tabs.widget(i), "\u2022"), self.tabs.tabText(i),
+                section_keys[i])
             btn.clicked.connect(lambda _c=False, idx=i: self.tabs.setCurrentIndex(idx))
         self.side_nav.set_current(self.tabs.currentIndex())
         self.tabs.currentChanged.connect(self.side_nav.set_current)
@@ -2380,17 +2500,15 @@ class GenizahGUI(QMainWindow):
         self.side_nav.add_separator(footer=True)
         self.nav_settings_btn = self.side_nav.add_button("\u2699\uFE0F", tr("Settings"), footer=True)
         self.nav_settings_btn.clicked.connect(self._open_settings_dialog)
-        # Login/Logout. Named for the tab-row corner it used to sit in; its text
-        # is set by _update_corner_login_state.
-        self.corner_login_btn = self.side_nav.add_button("\U0001F464", tr("Login"), footer=True)
-        self.corner_login_btn.clicked.connect(self._corner_login_clicked)
-        # The language switch names the language it switches to.
-        self.lang_btn = self.side_nav.add_button(
-            "\U0001F524", "English" if CURRENT_LANG == 'he' else "עברית", footer=True)
-        self.lang_btn.clicked.connect(lambda: self.toggle_language())
+        self.nav_login_btn = self.side_nav.add_button("\U0001F464", "", footer=True)
+        self.corner_login_btn.link(self.nav_login_btn)
+        self.nav_login_btn.clicked.connect(lambda: self._corner_login_clicked(self.nav_login_btn))
+        self.nav_lang_btn = self.side_nav.add_button("\U0001F524", "", footer=True)
+        self.lang_btn.link(self.nav_lang_btn)
+        self.nav_lang_btn.clicked.connect(lambda: self.toggle_language())
         self.nav_website_btn = self.side_nav.add_button("\U0001F310", "GenizahSearch.com", footer=True)
         self.nav_website_btn.setToolTip(tr("Visit our website"))
-        self.nav_website_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://genizahsearch.com")))
+        self.nav_website_btn.clicked.connect(self._open_website)
         self.nav_version_btn = QPushButton(f"v{APP_VERSION}")
         self.nav_version_btn.setFlat(True)
         self.nav_version_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2400,6 +2518,9 @@ class GenizahGUI(QMainWindow):
             "QPushButton { color: #7f8c8d; font-size: 10px; border: none; padding: 2px; }"
             "QPushButton:hover { text-decoration: underline; }")
         self.side_nav.add_widget(self.nav_version_btn)
+        # On its narrow-window menu and its right-click menu: the way back.
+        self.side_nav.menu_extras = [
+            (tr("Back to tabs at the top"), lambda: self.set_nav_layout('tabs'))]
         self._update_corner_login_state()
 
         # Connect tab change to refresh community data when needed
@@ -2453,6 +2574,7 @@ class GenizahGUI(QMainWindow):
         main_layout.addWidget(self.citation_bar)
 
         self.setCentralWidget(central_widget)
+        self._apply_nav_layout(load_app_config().get('nav_layout', 'tabs'))
 
         # Pre-warm FJMS caches in background so catalog browse tab opens instantly.
         # thread_safe=True is required because the QThread will use the same connection.
@@ -2473,15 +2595,14 @@ class GenizahGUI(QMainWindow):
             pass  # Cache operation failed; continue without cached data
 
     def _update_corner_login_state(self):
-        """Update the side menu's login button based on login state (and Sync lists now,
+        """Update the login button (and its side-menu twin) based on login state (and Sync lists now,
         which needs a sign-in: is_logged_in() makes a request, so it is asked once)."""
         logged_in = self.corrections_client.is_logged_in()
         if logged_in:
+            # The account's name; a click opens the account menu (Sync lists now,
+            # Logout) instead of logging out at once (owner, 2026-10-24).
             name = account_display_name(self.corrections_client.current_user)
-            if name:
-                self.corner_login_btn.setText(f"{name} ({tr('Logout')})")
-            else:
-                self.corner_login_btn.setText(tr("Logout"))
+            self.corner_login_btn.setText(f"{name or tr('Account')} \u25be")
         else:
             self.corner_login_btn.setText(tr("Login"))
         self._set_lists_sync_now_enabled(logged_in and not self._logout_pending)
@@ -2565,12 +2686,40 @@ class GenizahGUI(QMainWindow):
         except Exception as e:
             logger.exception("Error in _on_tab_changed: %s", e)
 
-    def _corner_login_clicked(self):
-        """Handle a click on the side menu's login button."""
+    def _corner_login_clicked(self, anchor=None):
+        """Login, or -- logged in -- the account menu, under the button clicked
+        (the tab row's or the side menu's)."""
         if self.corrections_client.is_logged_in():
-            self._do_logout()
+            self._show_account_menu(anchor)
         else:
             self._show_login_dialog()
+
+    def _fill_account_menu(self, menu):
+        """Sync lists now (as the Lists tab's button stands: enabled only while
+        a sync can run), then Logout."""
+        menu.clear()
+        sync = self.btn_lists_sync_now
+        if sync is not None:
+            act = menu.addAction(sync.text())
+            act.setEnabled(sync.isEnabled())
+            act.setToolTip(sync.toolTip())
+            act.triggered.connect(lambda _c=False: sync.click())
+            menu.addSeparator()
+        menu.addAction(tr("Logout")).triggered.connect(lambda _c=False: self._do_logout())
+        return menu
+
+    def _show_account_menu(self, anchor=None):
+        side = self.nav_layout == 'side'
+        if anchor is None:
+            anchor = self.nav_login_btn if side else self.corner_login_btn
+        menu = self._fill_account_menu(QMenu(self))
+        menu.setToolTipsVisible(True)
+        if anchor.visibleRegion().isEmpty():
+            # Clicked from the tab row's More menu: the button is parked out of
+            # sight, so the menu opens where the click was.
+            menu.exec(QCursor.pos())
+        else:
+            menu.exec(popup_point(anchor, menu, beside=self.side_nav.isAncestorOf(anchor)))
 
     def _show_login_dialog(self):
         dialog = LoginDialog(self, self.corrections_client)
@@ -16070,7 +16219,7 @@ class GenizahGUI(QMainWindow):
     def open_join_workbench(self, *, emit_telemetry: bool = True):
         """Open the Join Lab (no anchor required). Restores last session state if available.
 
-        Called by the side menu's Joins Lab entry (Feature 6) and used as the new no-arg launcher.
+        Called by the Joins Lab button and menu entries (Feature 6) and used as the new no-arg launcher.
         If persisted join_lab state exists with a non-empty anchor, restore_state() is called
         to rebuild input + defer the search to the background worker (hard constraint: no
         synchronous search on the UI thread — Feature 7).
@@ -16238,8 +16387,52 @@ class GenizahGUI(QMainWindow):
                 lambda scr: self.setMinimumSize(*self._main_window_floor(scr)))
             self.setMinimumSize(*self._main_window_floor(handle.screen()))
 
+    def _fill_sections_menu(self):
+        """The tab layout's ☰ menu: built from the side menu's entries, so the
+        two list the same sections and tools; the account, the language switch
+        and the website are left out, being beside it in the tab row."""
+        self.side_nav.build_menu(
+            self._corner_sections_menu,
+            omit=(self.nav_login_btn, self.nav_lang_btn, self.nav_website_btn),
+            extras=[(tr("Move the menu to the side"), lambda: self.set_nav_layout('side'))])
+
+    # Which menu layout is showing: 'tabs' (the default) or 'side'.
+    nav_layout = 'tabs'
+
+    def _apply_nav_layout(self, layout):
+        """Show the tab bar and its corner buttons, or the side menu instead."""
+        side = layout == 'side'
+        self.nav_layout = 'side' if side else 'tabs'
+        self.tabs.tabBar().setVisible(not side)
+        self.corner_row.setVisible(not side)
+        # No pane frame beside the side menu: the column's own edge divides.
+        self.tabs.setDocumentMode(side)
+        self.side_nav.setVisible(side)
+
+    def set_nav_layout(self, layout):
+        """The user's choice of menu layout (Settings, or the menus): applied at
+        once and remembered."""
+        self._apply_nav_layout(layout)
+        save_app_config({'nav_layout': self.nav_layout})
+        combo = getattr(self.settings_dialog, 'combo_nav_layout', None)
+        if combo is not None:
+            combo.blockSignals(True)
+            combo.setCurrentIndex(1 if self.nav_layout == 'side' else 0)
+            combo.blockSignals(False)
+
+    def _open_website(self):
+        QDesktopServices.openUrl(QUrl("https://genizahsearch.com"))
+
+    # The corner cluster may ask for at most this share of the window's width;
+    # the rest is the tab bar's. A QTabWidget gives its corner widget exactly the
+    # width it asks for, so without a cap the cluster would never overflow.
+    _CORNER_WIDTH_SHARE = 0.42
+
     def resizeEvent(self, event):  # noqa: N802 - Qt API
         super().resizeEvent(event)
+        row = getattr(self, 'corner_row', None)
+        if row is not None:
+            row.set_width_cap(int(self.width() * self._CORNER_WIDTH_SHARE))
         nav = getattr(self, 'side_nav', None)
         if nav is not None:
             nav.fit_to(self.width())
@@ -16261,6 +16454,13 @@ class GenizahGUI(QMainWindow):
                 chk.blockSignals(False)
         except Exception:  # noqa: BLE001
             pass  # never block opening Settings on attribute or import error
+        # The menu layout may have been switched from ☰ since the last opening.
+        combo = getattr(self.settings_dialog, 'combo_nav_layout', None)
+        if combo is not None:
+            combo.blockSignals(True)
+            combo.setCurrentIndex(1 if self.nav_layout == 'side' else 0)
+            combo.blockSignals(False)
+        self.settings_dialog.refresh_config_snapshot()
         self.settings_dialog.exec()
 
     def apply_settings(self):
@@ -16277,8 +16477,10 @@ class GenizahGUI(QMainWindow):
 
         Delegates to the dialog's _on_cancel(), which restores the D-07b config
         snapshot (telemetry-consent keys stripped) before rejecting the modal.
+        The menu layout applies at once, so it is put back to the restored one.
         """
         self.settings_dialog._on_cancel()
+        self._apply_nav_layout(load_app_config().get('nav_layout', 'tabs'))
 
     def _on_language_combo_changed(self, index):
         """Handle language combo box change — close settings dialog first to

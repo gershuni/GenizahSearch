@@ -5549,10 +5549,17 @@ TRANSLATIONS.update({
     "Image adjustments": "כוונון תמונה",
     "{} matching pages": "{} עמודים תואמים",
     "All sections": "כל הלשוניות",
-    # The side menu (desktop/widgets/side_nav.py, 2026-10-24): its ☰ button.
+    # The menu layouts (desktop/widgets/side_nav.py, 2026-10-24): ☰, the
+    # Settings choice between them, and the account menu.
     "Menu": "תפריט",
     "Collapse menu": "כיווץ התפריט",
     "Expand menu": "הרחבת התפריט",
+    "Menu:": "תפריט:",
+    "Tabs at the top": "לשוניות למעלה",
+    "Side menu": "תפריט צד",
+    "Move the menu to the side": "העברת התפריט לצד",
+    "Back to tabs at the top": "חזרה ללשוניות למעלה",
+    "Account": "חשבון",
     "Columns": "עמודות",
     "Show all columns": "הצגת כל העמודות",
     "Fit columns to window": "התאמת העמודות לחלון",

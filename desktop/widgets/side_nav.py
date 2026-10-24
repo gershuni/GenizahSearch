@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-"""The main window's menu, down one side of the window.
+"""The main window's side menu: the sections and tools down one side of the window.
 
 Owner, 2026-10-24: "move the menu to one of the app sides, remove the V tick
-boxes, and add also the puzzle, joins lab and settings to the menu". This column
-replaces the tab bar, the "All sections" menu (whose checkable entries drew an
-empty box beside every section but the current one) and the buttons that sat in
-the tab row's corner.
+boxes, and add also the puzzle, joins lab and settings to the menu", then "Keep
+the tabs. Offer an option to change them to the side menu". So it is one of two
+layouts, chosen in Settings: the tab bar with its corner buttons (the default),
+or this column in their place. The tab layout's ☰ menu is built from this
+column's entries too (``build_menu``), so the two always list the same things.
 
 * It sits on the window's start side -- right in Hebrew, left in English; Qt
   mirrors the layout. Sections first, the current one highlighted (never
@@ -21,8 +22,10 @@ the tab row's corner.
 * A short window scrolls the column instead of being made taller by it (a
   window that does not fit its screen was #362).
 * ``NavButton.setText`` sets the LABEL and keeps the icon, so code written for a
-  plain QPushButton -- the login button relabels itself, so does the language
-  switch -- works unchanged; ``text()`` returns the label.
+  plain QPushButton works unchanged; ``text()`` returns the label.
+* The login button and the language switch exist in both layouts. The tab-row
+  one is a ``LinkedButton``: whatever relabels or disables it does the same to
+  its side-menu twin.
 """
 from __future__ import annotations
 
@@ -70,6 +73,50 @@ def glyph_icon(glyph: str, color: QColor, size: int = ICON_SIZE) -> QIcon:
     return icon
 
 
+def popup_point(anchor: QWidget, menu: QMenu, *, beside: bool = False) -> QPoint:
+    """Where to open ``menu`` for ``anchor``: below it (a button in a top row),
+    or ``beside`` it toward the window's content, growing up from its foot (an
+    entry of the side menu). QMenu does not mirror an explicit position in
+    right-to-left, so the menu's width is taken off here: unmirrored, a menu
+    under the side menu's ☰ opened past the window's right edge."""
+    size = menu.sizeHint()
+    rtl = anchor.isRightToLeft()
+    if beside:
+        pos = anchor.mapToGlobal(QPoint(0, anchor.height() - size.height()))
+        pos.setX(pos.x() - size.width() if rtl else pos.x() + anchor.width())
+    else:
+        pos = anchor.mapToGlobal(QPoint(0, anchor.height() + 1))
+        if rtl:
+            pos.setX(pos.x() + anchor.width() - size.width())
+    return pos
+
+
+class LinkedButton(QPushButton):
+    """A QPushButton whose label and enabled state are copied to its twins: the
+    same control in the other menu layout. The login button is relabelled and
+    disabled from several places (signing out, the account name arriving); with
+    this they never have to know which layout is showing."""
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self._twins = []
+
+    def link(self, twin: QPushButton):
+        self._twins.append(twin)
+        twin.setText(self.text())
+        twin.setEnabled(self.isEnabled())
+
+    def setText(self, text):  # noqa: N802 - Qt API
+        super().setText(text)
+        for twin in self._twins:
+            twin.setText(text)
+
+    def setEnabled(self, enabled):  # noqa: N802 - Qt API
+        super().setEnabled(enabled)
+        for twin in self._twins:
+            twin.setEnabled(enabled)
+
+
 def _text_color() -> QColor:
     return QApplication.palette().color(QPalette.ColorRole.WindowText)
 
@@ -91,6 +138,8 @@ class NavButton(QPushButton):
         self._hint = ""
         self._compact = False
         self._text_width = None
+        # A keyboard shortcut to show beside the label in menus ("Ctrl+1").
+        self.shortcut_text = ""
         self.setObjectName("navItem")
         self.setCheckable(checkable)
         self.setFlat(True)
@@ -177,6 +226,9 @@ class SideNav(QFrame):
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         self._prefer_expanded = bool(expanded)
         self._room = True
+        # (label, callable) pairs added after the entries in the narrow-window
+        # menu and the right-click menu -- the way back to the tab layout.
+        self.menu_extras = []
         self._restyling = False
         self._entries = []          # (button, group) in display order, for the menu
         self._group = 0
@@ -219,9 +271,12 @@ class SideNav(QFrame):
         self._apply()
 
     # -- building ---------------------------------------------------------------
-    def add_section(self, glyph: str, label: str) -> NavButton:
-        """A section: exactly one is current (``set_current``)."""
+    def add_section(self, glyph: str, label: str, shortcut: str = "") -> NavButton:
+        """A section: exactly one is current (``set_current``). ``shortcut`` is
+        shown as its hint and beside it in menus; the caller binds the key."""
         btn = self._add(NavButton(glyph, label, checkable=True), footer=False)
+        btn.shortcut_text = shortcut
+        btn.setToolTip(shortcut)
         self._sections.addButton(btn)
         self.section_buttons.append(btn)
         return btn
@@ -325,39 +380,56 @@ class SideNav(QFrame):
         self._apply()
         self.toggled.emit(self._prefer_expanded)
 
-    def build_menu(self, menu: QMenu) -> QMenu:
-        """Every entry as a menu item: icon and label, the current section in bold.
-        No item is checkable, so no tick boxes."""
+    def build_menu(self, menu: QMenu, *, omit=(), extras=None) -> QMenu:
+        """Every entry (but those in ``omit``) as a menu item: icon, label and
+        shortcut, the current section in bold. No item is checkable, so no tick
+        boxes. Then ``extras`` (default ``menu_extras``) after a separator.
+        Clicking an item clicks the entry, even while the column is hidden."""
         menu.clear()
         last_group = None
         for btn, group in self._entries:
-            if explicitly_hidden(btn):
+            if btn in omit or explicitly_hidden(btn):
                 continue
             if last_group is not None and group != last_group:
                 menu.addSeparator()
             last_group = group
-            act = menu.addAction(btn.icon(), btn.text())
+            # A tab marks QMenu's shortcut column; nothing is bound by it.
+            text = f"{btn.text()}\t{btn.shortcut_text}" if btn.shortcut_text else btn.text()
+            act = menu.addAction(btn.icon(), text)
             if btn.isChecked():
                 font = act.font()
                 font.setBold(True)
                 act.setFont(font)
             act.setEnabled(btn.isEnabled())
             act.triggered.connect(lambda _c=False, b=btn: b.click())
+        self._add_extras(menu, self.menu_extras if extras is None else extras)
         return menu
 
+    @staticmethod
+    def _add_extras(menu: QMenu, extras):
+        if extras:
+            menu.addSeparator()
+            for text, slot in extras:
+                menu.addAction(text).triggered.connect(lambda _c=False, f=slot: f())
+
     def menu_position(self, menu: QMenu) -> QPoint:
-        """Below ☰, opening toward the window's content. QMenu does not mirror an
-        explicit position in right-to-left, so the menu's own width is taken off
-        here: unmirrored, it opened past the window's right edge."""
-        anchor = self.toggle_button
-        pos = anchor.mapToGlobal(QPoint(0, anchor.height() + 1))
-        if self.isRightToLeft():
-            pos.setX(pos.x() + anchor.width() - menu.sizeHint().width())
-        return pos
+        """Below ☰, opening toward the window's content."""
+        return popup_point(self.toggle_button, menu)
 
     def _show_menu(self):
         menu = self.build_menu(QMenu(self))
         menu.exec(self.menu_position(menu))
+
+    def contextMenuEvent(self, event):  # noqa: N802 - Qt API
+        """Right-click: labels on or off (when there is room for them) and the
+        ``menu_extras`` -- so the way back to tabs is on the menu itself, not
+        only in Settings."""
+        menu = QMenu(self)
+        if self._room:
+            menu.addAction(self.toggle_button.toolTip()).triggered.connect(self._on_toggle)
+        self._add_extras(menu, self.menu_extras)
+        if menu.actions():
+            menu.exec(event.globalPos())
 
     # -- look -------------------------------------------------------------------
     def changeEvent(self, event):  # noqa: N802 - Qt API

@@ -1,12 +1,16 @@
-"""SideNav: the main window's menu down one side (owner, 2026-10-24).
+"""SideNav and the two menu layouts (owner, 2026-10-24).
 
 Pinned here: the current section is highlighted and nothing is ever ticked (no
 checkable menu item); a relabelled entry keeps its icon; compact shows icons with
 the label as tooltip; ☰ toggles labels when there is room and opens the menu when
 there is not; the expanded column is wide enough for every label and capped for a
-long one; the menu opens toward the content in both directions; a short window
-scrolls the column instead of growing; and the main window builds it with the
-sections, Puzzle, Joins Lab and Settings in place of the tab bar.
+long one; menus open toward the content in both directions; a short window
+scrolls the column instead of growing. And in the window: the tab layout is the
+default and the side menu an option that applies at once (Cancel in Settings puts
+it back); the tab layout's ☰ menu lists the sections with their Ctrl+N
+shortcuts, Puzzle, Joins Lab and Settings and no tick boxes; the login button and
+the language switch relabel their side-menu twins; a logged-in click opens the
+account menu (Sync lists now, Logout) instead of logging out.
 """
 
 import os
@@ -17,9 +21,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PyQt6.QtCore import QPoint, Qt
-from PyQt6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMenu, QPushButton, QWidget
+from PyQt6.QtWidgets import (
+    QApplication, QComboBox, QHBoxLayout, QLabel, QMenu, QPushButton, QTabWidget, QWidget,
+)
 
-from desktop.widgets.side_nav import NavButton, SideNav
+import genizah_app
+from desktop.widgets.side_nav import LinkedButton, NavButton, SideNav, popup_point
+from genizah_app import GenizahGUI
 
 pytestmark = pytest.mark.gui
 
@@ -184,12 +192,178 @@ def test_nav_button_is_a_drop_in_for_qpushbutton_text():
     assert b.text() == ""
 
 
-def test_main_window_builds_the_side_menu_in_place_of_the_tab_bar():
+@pytest.mark.parametrize("rtl", [False, True])
+def test_a_side_menu_entry_opens_its_menu_beside_it(rtl):
+    host, nav, puzzle, settings = _nav(rtl=rtl)
+    menu = QMenu(nav)
+    menu.addAction("Logout")
+    pos = popup_point(settings, menu, beside=True)
+    left = settings.mapToGlobal(QPoint(0, 0)).x()
+    if rtl:
+        assert pos.x() + menu.sizeHint().width() == left          # toward the content
+    else:
+        assert pos.x() == left + settings.width()
+    bottom = settings.mapToGlobal(QPoint(0, settings.height())).y()
+    assert pos.y() + menu.sizeHint().height() == bottom             # grows up from its foot
+
+
+def test_sections_carry_their_shortcut_into_the_hint_and_the_menu():
+    host = QWidget()
+    nav = SideNav()
+    nav.add_section("\U0001F50D", "Search", "Ctrl+1")
+    nav.add_section("\U0001F4DC", "Composition Search", "Ctrl+2")
+    QHBoxLayout(host).addWidget(nav)
+    nav.set_current(0)
+    assert nav.section_buttons[0].toolTip() == "Ctrl+1"
+    menu = nav.build_menu(QMenu(), extras=[("Back to tabs at the top", lambda: None)])
+    texts = [a.text() for a in menu.actions()]
+    assert texts == ["Search\tCtrl+1", "Composition Search\tCtrl+2", "", "Back to tabs at the top"]
+
+
+def test_linked_button_relabels_and_disables_its_twin():
+    twin = NavButton("\U0001F464", "")
+    btn = LinkedButton("Login")
+    btn.link(twin)
+    assert twin.text() == "Login"                      # the state at link time
+    btn.setEnabled(False)
+    btn.setText("Logging out...")
+    assert twin.text() == "Logging out..." and not twin.isEnabled()
+    btn.setEnabled(True)
+    btn.setText("Hillel G \u25be")
+    assert twin.text() == "Hillel G \u25be" and twin.isEnabled()
+    assert not twin.icon().isNull()                    # the twin keeps its icon
+
+
+# -- the window's two layouts ----------------------------------------------------
+
+class _Window:
+    """The parts of GenizahGUI the menu layouts use, with the real methods."""
+
+    _apply_nav_layout = GenizahGUI._apply_nav_layout
+    set_nav_layout = GenizahGUI.set_nav_layout
+    cancel_settings = GenizahGUI.cancel_settings
+    _fill_sections_menu = GenizahGUI._fill_sections_menu
+    _fill_account_menu = GenizahGUI._fill_account_menu
+    nav_layout = GenizahGUI.nav_layout
+
+    def __init__(self):
+        self.tabs = QTabWidget()
+        for name in ("Search", "Composition Search", "Personal Lists"):
+            self.tabs.addTab(QWidget(), name)
+        self.corner_row = QLabel("corner")
+        self.tabs.setCornerWidget(self.corner_row)
+        self.side_nav = SideNav()
+        for i in range(self.tabs.count()):
+            btn = self.side_nav.add_section("\u2022", self.tabs.tabText(i), f"Ctrl+{i + 1}")
+            btn.clicked.connect(lambda _c=False, idx=i: self.tabs.setCurrentIndex(idx))
+        self.tabs.currentChanged.connect(self.side_nav.set_current)
+        self.side_nav.set_current(0)
+        self.side_nav.add_separator()
+        self.puzzle_opened = []
+        self.nav_puzzle_btn = self.side_nav.add_button("\U0001F9E9", "Fragment Puzzle")
+        self.nav_puzzle_btn.clicked.connect(lambda: self.puzzle_opened.append(True))
+        self.nav_joins_btn = self.side_nav.add_button("\U0001F517", "Joins Lab")
+        self.side_nav.add_separator(footer=True)
+        self.nav_settings_btn = self.side_nav.add_button("\u2699", "Settings", footer=True)
+        self.nav_login_btn = self.side_nav.add_button("\U0001F464", "", footer=True)
+        self.nav_lang_btn = self.side_nav.add_button("\U0001F524", "", footer=True)
+        self.nav_website_btn = self.side_nav.add_button("\U0001F310", "GenizahSearch.com", footer=True)
+        self.corner_login_btn = LinkedButton("Login")
+        self.corner_login_btn.link(self.nav_login_btn)
+        self.host = QWidget()
+        lay = QHBoxLayout(self.host)
+        lay.addWidget(self.side_nav)
+        lay.addWidget(self.tabs, 1)
+        self._corner_sections_menu = QMenu()
+        combo = QComboBox()
+        combo.addItems(["Tabs at the top", "Side menu"])
+        self.cancelled = []
+        self.settings_dialog = type("Dlg", (), {
+            "combo_nav_layout": combo,
+            "_on_cancel": lambda _self: self.cancelled.append(True)})()
+        self.btn_lists_sync_now = QPushButton("Sync lists now")
+        self.logouts = []
+        self._apply_nav_layout("tabs")
+        self.host.show()
+        QApplication.processEvents()
+
+    def _do_logout(self):
+        self.logouts.append(True)
+
+
+@pytest.fixture
+def window(monkeypatch):
+    cfg = {}
+    monkeypatch.setattr(genizah_app, "save_app_config", cfg.update)
+    monkeypatch.setattr(genizah_app, "load_app_config", lambda: dict(cfg))
+    w = _Window()
+    w.cfg = cfg
+    return w
+
+
+def test_tabs_are_the_default_and_the_side_menu_applies_at_once(window):
+    w = window
+    assert w.nav_layout == "tabs"
+    assert w.tabs.tabBar().isVisible() and w.corner_row.isVisible() and not w.side_nav.isVisible()
+    w.set_nav_layout("side")
+    assert not w.tabs.tabBar().isVisible() and not w.corner_row.isVisible() and w.side_nav.isVisible()
+    assert w.cfg == {"nav_layout": "side"}
+    assert w.settings_dialog.combo_nav_layout.currentIndex() == 1
+    w.set_nav_layout("tabs")
+    assert w.tabs.tabBar().isVisible() and w.corner_row.isVisible() and not w.side_nav.isVisible()
+    assert w.cfg == {"nav_layout": "tabs"} and w.settings_dialog.combo_nav_layout.currentIndex() == 0
+
+
+def test_cancel_in_settings_puts_the_layout_back(window):
+    w = window
+    w.cfg["nav_layout"] = "tabs"                       # what the snapshot restores
+    w._apply_nav_layout("side")                        # picked in the dialog, not kept
+    w.cancel_settings()
+    assert w.cancelled == [True] and w.nav_layout == "tabs" and not w.side_nav.isVisible()
+
+
+def test_the_tab_layouts_menu_has_sections_tools_settings_and_no_tick_boxes(window):
+    w = window
+    w.tabs.setCurrentIndex(1)
+    w._fill_sections_menu()
+    acts = w._corner_sections_menu.actions()
+    texts = [a.text() for a in acts if not a.isSeparator()]
+    assert texts == ["Search\tCtrl+1", "Composition Search\tCtrl+2", "Personal Lists\tCtrl+3",
+                     "Fragment Puzzle", "Joins Lab", "Settings", "Move the menu to the side"]
+    assert not any(a.isCheckable() for a in acts)
+    assert [a.font().bold() for a in acts[:3]] == [False, True, False]
+    next(a for a in acts if a.text() == "Fragment Puzzle").trigger()
+    assert w.puzzle_opened == [True]
+    acts[0].trigger()
+    assert w.tabs.currentIndex() == 0
+    acts[-1].trigger()
+    assert w.nav_layout == "side" and w.side_nav.isVisible()
+
+
+def test_the_account_menu_offers_sync_and_logout(window):
+    w = window
+    w.btn_lists_sync_now.setEnabled(False)
+    menu = w._fill_account_menu(QMenu())
+    acts = [a for a in menu.actions() if not a.isSeparator()]
+    assert [a.text() for a in acts] == ["Sync lists now", "Logout"]
+    assert not acts[0].isEnabled()                     # as the Lists tab's button stands
+    assert w.logouts == []                             # opening it logs nobody out
+    acts[1].trigger()
+    assert w.logouts == [True]
+    w.btn_lists_sync_now = None                        # before the Lists tab exists
+    menu = w._fill_account_menu(QMenu())
+    assert [a.text() for a in menu.actions()] == ["Logout"]
+
+
+def test_main_window_wiring():
     src = (Path(__file__).resolve().parent.parent / "genizah_app.py").read_text(encoding="utf-8")
     init_ui = src[src.index("    def init_ui(self):"):src.index("    def _update_corner_login_state(self):")]
-    assert "self.tabs.tabBar().hide()" in init_ui
-    assert "setCornerWidget" not in init_ui
+    assert "self.tabs.setCornerWidget(corner_widget" in init_ui                    # tabs kept
+    assert "self._apply_nav_layout(load_app_config().get('nav_layout', 'tabs'))" in init_ui
     for label in ("Fragment Puzzle", "Joins Lab", "Settings"):
         assert re.search(r'self\.side_nav\.add_button\([^)]*tr\("%s"\)' % label, init_ui), label
-    assert "self.tabs.currentChanged.connect(self.side_nav.set_current)" in init_ui
-    assert "_fill_sections_menu" not in src
+    assert 'QKeySequence(f"Ctrl+{i + 1}")' in init_ui
+    assert "self.corner_login_btn.link(self.nav_login_btn)" in init_ui
+    assert "self.lang_btn.link(self.nav_lang_btn)" in init_ui
+    login = src[src.index("    def _corner_login_clicked(self"):src.index("    def _fill_account_menu(self")]
+    assert "_show_account_menu" in login and "_do_logout" not in login
