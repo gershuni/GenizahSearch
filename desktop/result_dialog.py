@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QMenu, QMessageBox, QPushButton, QSpinBox, QSplitter, QStyle,
     QTextBrowser, QToolButton, QToolTip, QVBoxLayout, QWidget,
 )
-from PyQt6.QtCore import QMargins, QPoint, QRect, QSize, Qt, QTimer, QUrl, pyqtSignal
+from PyQt6.QtCore import QMargins, QObject, QPoint, QRect, QSize, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6 import sip
 from PyQt6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QPalette, QPixmap
 
@@ -53,7 +53,7 @@ logger = get_logger(__name__)
 # the window is up and uses the real frame.
 _FRAME_ESTIMATE = QMargins(8, 32, 8, 8)
 
-# Manuscript / source text size in the viewer (A- / A+), in points.
+# Manuscript / source text size in the viewer and the Browse tab (A- / A+), in points.
 VIEWER_TEXT_PT_KEY = 'viewer_text_pt'
 TEXT_PT_DEFAULT, TEXT_PT_MIN, TEXT_PT_MAX, TEXT_PT_STEP = 16, 9, 40, 2
 
@@ -64,6 +64,38 @@ def _saved_text_pt():
     except Exception:  # noqa: BLE001 - unreadable config: the default
         return TEXT_PT_DEFAULT
     return max(TEXT_PT_MIN, min(TEXT_PT_MAX, pt))
+
+
+class _ReadingTextSize(QObject):
+    """The transcription text size, one for the Manuscript Viewer and the Browse
+    tab (owner, 2026-10-24: "option to change the size of the texts"): saved under
+    VIEWER_TEXT_PT_KEY and announced, so a view that is open follows a change
+    made in the other -- the viewer is a window of its own beside the main one."""
+
+    changed = pyqtSignal(int)
+
+    def value(self) -> int:
+        return _saved_text_pt()
+
+    def set(self, pt) -> int:
+        pt = max(TEXT_PT_MIN, min(TEXT_PT_MAX, int(pt)))
+        try:
+            save_app_config({VIEWER_TEXT_PT_KEY: pt})
+        except Exception:  # noqa: BLE001 - a preference, never worth an error
+            pass
+        self.changed.emit(pt)
+        return pt
+
+
+_READING_TEXT_SIZE = None
+
+
+def reading_text_size() -> _ReadingTextSize:
+    """The one shared reading-text size (made on first use, after QApplication)."""
+    global _READING_TEXT_SIZE
+    if _READING_TEXT_SIZE is None:
+        _READING_TEXT_SIZE = _ReadingTextSize()
+    return _READING_TEXT_SIZE
 
 
 # Kept free between a fitted viewer and the screen edge (logical px).
@@ -881,6 +913,8 @@ class ResultDialog(QDialog):
         # A viewer reopened at a saved limit shows which way is left (Codex, #362).
         self.btn_text_smaller.setEnabled(self._text_pt > TEXT_PT_MIN)
         self.btn_text_larger.setEnabled(self._text_pt < TEXT_PT_MAX)
+        # A change made in the Browse tab (or another viewer) reaches this one.
+        reading_text_size().changed.connect(self._apply_text_size)
         self.text_src.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         line_height = self.text_src.fontMetrics().lineSpacing()
         self.text_src.setMinimumHeight(line_height * 3 + 12)
@@ -983,10 +1017,13 @@ class ResultDialog(QDialog):
             self.btn_compact_ext_info.setText(self.btn_ext_info.text())
 
     def _change_text_size(self, delta):
-        """Enlarge or shrink the manuscript and source text; remember the size."""
+        """Enlarge or shrink the manuscript and source text; remember the size
+        (shared with the Browse tab, which follows)."""
         pt = max(TEXT_PT_MIN, min(TEXT_PT_MAX, self._text_pt + delta))
-        if pt == self._text_pt:
-            return
+        if pt != self._text_pt:
+            reading_text_size().set(pt)
+
+    def _apply_text_size(self, pt):
         self._text_pt = pt
         for pane in (self.text_ms, self.text_src):
             f = pane.font()
@@ -994,10 +1031,6 @@ class ResultDialog(QDialog):
             pane.setFont(f)
         self.btn_text_smaller.setEnabled(pt > TEXT_PT_MIN)
         self.btn_text_larger.setEnabled(pt < TEXT_PT_MAX)
-        try:
-            save_app_config({VIEWER_TEXT_PT_KEY: pt})
-        except Exception:  # noqa: BLE001 - a preference, never worth an error
-            pass
 
     def eventFilter(self, obj, event):  # noqa: N802 - Qt API
         from PyQt6.QtCore import QEvent

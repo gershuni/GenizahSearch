@@ -418,7 +418,11 @@ class MatchCentredSnippet(QWidget):
     def changeEvent(self, event):
         super().changeEvent(event)
         if event.type() == QEvent.Type.FontChange:
-            # The cell takes the table's font on insertion; measure in it.
+            # The cell takes the table's font on insertion; measure in it. The
+            # label is given it outright: under a view with a style sheet (the
+            # Composition tree's) Qt does not pass a font on to a cell's children.
+            if self._label.font() != self.font():
+                self._label.setFont(self.font())
             self._metrics = None
             self.update()
 
@@ -511,6 +515,12 @@ class ContextSnippet(MatchCentredSnippet):
         self.setToolTip(text.replace("*", ""))
         # Keep the tree's rows slim: a row is as tall as its cells ask.
         self.setFixedHeight(self.fontMetrics().lineSpacing() + 4)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.FontChange:
+            # The tree's font (its own, or Settings > Text size): one line of it.
+            self.setFixedHeight(self.fontMetrics().lineSpacing() + 4)
 
     @classmethod
     def marked_html(cls, text):

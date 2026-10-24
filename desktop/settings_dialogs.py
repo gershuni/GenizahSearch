@@ -1144,6 +1144,20 @@ class SettingsDialog(QDialog):
         layout.addLayout(_pref_row(tr("Menu:"), self.combo_nav_layout))
         layout.addSpacing(4)
 
+        # Text size of the result lists (2026-10-24). Applied at once.
+        self.combo_results_text = QComboBox()
+        self.combo_results_text.addItems([tr("Normal"), tr("Large"), tr("Larger"), tr("Largest")])
+        self.combo_results_text.setCurrentIndex(
+            max(0, min(3, int(load_app_config().get('results_text_level', 0) or 0))))
+        self.combo_results_text.setFixedWidth(self._combo_w)
+        self.combo_results_text.setToolTip(tr(
+            "The text in the search, composition, identification and list results. "
+            "Also Ctrl+= and Ctrl+-, and Ctrl+0 for normal. The transcription has "
+            "its own A- / A+ buttons."))
+        self.combo_results_text.currentIndexChanged.connect(self.main_win.set_results_text_level)
+        layout.addLayout(_pref_row(tr("Text size in result lists:"), self.combo_results_text))
+        layout.addSpacing(4)
+
         # Desktop Notifications
         from PyQt6.QtWidgets import QCheckBox
         self.main_win.chk_notifications = QCheckBox(tr("Desktop Notifications"))

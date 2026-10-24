@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
 from PyQt6.QtCore import (Qt, QTimer, QUrl, pyqtSignal, QThread, QEventLoop, QEvent, QPoint)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QColor,
                          QStandardItemModel, QStandardItem, QPalette, QCursor,
-                         QKeySequence, QShortcut)
+                         QFontInfo, QFontMetrics, QKeySequence, QShortcut)
 from PyQt6 import sip
 
 from version import APP_VERSION
@@ -81,7 +81,8 @@ from desktop.title_helpers import (
     _translate_hebrew_date, _resolve_display_title,
 )
 from desktop.image_loader import ImageLoaderThread
-from desktop.result_dialog import ResultDialog
+from desktop.result_dialog import (ResultDialog, reading_text_size,
+                                   TEXT_PT_DEFAULT, TEXT_PT_MAX, TEXT_PT_MIN, TEXT_PT_STEP)
 from desktop import comp_view_filter as _cvf
 from desktop.dialogs_scholarly import FjmsBibliographyDialog, FjmsCatalogDialog, FjmsMeasurementsDialog, NliBibliographyDialog  # noqa: F401
 from desktop.dialogs_filter import ExcludeDialog, DomainFilterDialog, PreSearchFilterDialog, LibraryFilterDialog, library_apply_selection  # noqa: F401
@@ -2358,6 +2359,12 @@ class GenizahGUI(QMainWindow):
             key = seq.toString(QKeySequence.SequenceFormat.NativeText)
             section_keys.append(key)
             self.tabs.setTabToolTip(i, f"{self.tabs.tabText(i)} ({key})")
+        # Ctrl+= (or Ctrl++) / Ctrl+- / Ctrl+0: larger, smaller, normal text --
+        # the transcription on the Browse tab, the result lists everywhere else.
+        for keys, step in (("Ctrl+=", 1), ("Ctrl++", 1), ("Ctrl+-", -1), ("Ctrl+0", 0)):
+            shortcut = QShortcut(QKeySequence(keys), self)
+            shortcut.activated.connect(lambda s=step: self._step_text_size(s))
+            self._section_shortcuts.append(shortcut)
 
         # Two menu layouts, chosen in Settings and kept in config.pkl as
         # nav_layout (owner, 2026-10-24: "Keep the tabs. Offer an option to
@@ -2575,6 +2582,7 @@ class GenizahGUI(QMainWindow):
 
         self.setCentralWidget(central_widget)
         self._apply_nav_layout(load_app_config().get('nav_layout', 'tabs'))
+        self._apply_results_text_level(load_app_config().get(self.RESULTS_TEXT_KEY, 0))
 
         # Pre-warm FJMS caches in background so catalog browse tab opens instantly.
         # thread_safe=True is required because the QThread will use the same connection.
@@ -7633,6 +7641,22 @@ class GenizahGUI(QMainWindow):
         self.browse_find_input.textChanged.connect(lambda text: apply_find_highlight(self.browse_text, text.strip()))
         browse_find_row.addWidget(self.browse_find_input)
 
+        # Text size, as in the Manuscript Viewer's find row and shared with it
+        # (owner, 2026-10-24). Ctrl+= / Ctrl+- / Ctrl+0 too, on this tab.
+        self.btn_b_text_smaller = QToolButton()
+        # Left-to-right marks: in the Hebrew UI a bare "A-" displays as "-A".
+        self.btn_b_text_smaller.setText("\u200eA\u2212\u200e")
+        self.btn_b_text_smaller.setToolTip(tr("Smaller text"))
+        self.btn_b_text_smaller.setAccessibleName(tr("Smaller text"))
+        self.btn_b_text_smaller.clicked.connect(lambda: self._browse_step_text_size(-TEXT_PT_STEP))
+        self.btn_b_text_larger = QToolButton()
+        self.btn_b_text_larger.setText("\u200eA+\u200e")
+        self.btn_b_text_larger.setToolTip(tr("Larger text"))
+        self.btn_b_text_larger.setAccessibleName(tr("Larger text"))
+        self.btn_b_text_larger.clicked.connect(lambda: self._browse_step_text_size(TEXT_PT_STEP))
+        for _b in (self.btn_b_text_smaller, self.btn_b_text_larger):
+            browse_find_row.addWidget(_b)
+
         # Phase 999.4 — line-numbers toggle next to Find input (matches the
         # ResultDialog placement at desktop/result_dialog.py).
         self.btn_b_line_numbers = QPushButton(tr("# Lines"))
@@ -7730,11 +7754,15 @@ class GenizahGUI(QMainWindow):
         # Text display/edit widget
         self.browse_text = QTextEdit()
         self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.browse_text.setFont(QFont("SBL Hebrew", 16))
+        # The Manuscript Viewer's size (A- / A+ in either changes both).
+        self.browse_text.setFont(QFont("SBL Hebrew", reading_text_size().value()))
         self.browse_text.setReadOnly(True)  # Start in read-only mode
         self.browse_edit_mode = False
         self.browse_original_text = ""
         text_layout.addWidget(self.browse_text)
+
+        self._browse_apply_text_size(reading_text_size().value())
+        reading_text_size().changed.connect(self._browse_apply_text_size)
 
         # Phase 999.4: attach line-number gutter as sibling widget (D-04 selection-safe).
         # First real render (browse_render_page etc.) will populate via apply_line_numbered_text.
@@ -16423,6 +16451,117 @@ class GenizahGUI(QMainWindow):
     def _open_website(self):
         QDesktopServices.openUrl(QUrl("https://genizahsearch.com"))
 
+    # -- text size (owner, 2026-10-24: "option to change the size of the texts
+    # in search etc windows") ---------------------------------------------------
+    # The result lists: points added to the window's own font, one level for
+    # all of them, chosen in Settings > Text size or with Ctrl+= / Ctrl+- /
+    # Ctrl+0. Their headers keep the window's font. The transcription (Browse,
+    # Manuscript Viewer) has its own size, A- / A+ (reading_text_size).
+    RESULTS_TEXT_KEY = 'results_text_level'
+    RESULTS_TEXT_STEPS = (0, 2, 4, 6)       # Normal, Large, Larger, Largest
+    results_text_level = 0
+
+    def _results_text_widgets(self):
+        names = ('results_table', 'comp_tree', 'catalog_results_table', 'lists_items_table')
+        return [w for w in (getattr(self, n, None) for n in names) if w is not None]
+
+    def _apply_results_text_level(self, level):
+        try:
+            level = max(0, min(len(self.RESULTS_TEXT_STEPS) - 1, int(level)))
+        except (TypeError, ValueError):
+            level = 0
+        self.results_text_level = level
+        # QFontInfo: the size the font really has, also when the system font is
+        # given in pixels (its pointSizeF() is then -1).
+        base = QFontInfo(QApplication.font()).pointSizeF()
+        for view in self._results_text_widgets():
+            headers = [view.header()] if isinstance(view, QTreeWidget) else [
+                view.horizontalHeader(), view.verticalHeader()]
+            if view.property('_base_row_height') is None:
+                # Pin the headers to the window's font before the first change,
+                # and keep the style's row height as the floor. The size is set
+                # explicitly: an unmodified copy of an inherited font still
+                # counts as inherited, and the header would follow the table.
+                for header in headers:
+                    pinned = QFont(header.font())
+                    pinned.setPointSizeF(base)
+                    header.setFont(pinned)
+                if not isinstance(view, QTreeWidget):
+                    view.setProperty('_base_row_height', view.verticalHeader().defaultSectionSize())
+                else:
+                    view.setProperty('_base_row_height', 0)
+            font = QFont(view.font())
+            font.setPointSizeF(base + self.RESULTS_TEXT_STEPS[level])
+            view.setFont(font)
+            # Under a view with a style sheet (the Composition tree) Qt passes
+            # the font on to neither its viewport nor the snippet cells already
+            # in it: the viewport is given it for cells still to come, and the
+            # cells now showing are given it one by one.
+            view.viewport().setFont(font)
+            for cell in self._snippet_cells(view):
+                cell.setFont(font)
+            if not isinstance(view, QTreeWidget):
+                # Table rows do not grow with their text; a tree's do.
+                view.verticalHeader().setDefaultSectionSize(max(
+                    int(view.property('_base_row_height')),
+                    QFontMetrics(font).height() + 10))
+
+    @staticmethod
+    def _snippet_cells(view):
+        """The snippet cells (MatchCentredSnippet) a result table or tree holds."""
+        if isinstance(view, QTreeWidget):
+            stack = [view.topLevelItem(i) for i in range(view.topLevelItemCount())]
+            while stack:
+                item = stack.pop()
+                for col in range(view.columnCount()):
+                    cell = view.itemWidget(item, col)
+                    if isinstance(cell, MatchCentredSnippet):
+                        yield cell
+                stack.extend(item.child(i) for i in range(item.childCount()))
+        else:
+            for row in range(view.rowCount()):
+                for col in range(view.columnCount()):
+                    cell = view.cellWidget(row, col)
+                    if isinstance(cell, MatchCentredSnippet):
+                        yield cell
+
+    def set_results_text_level(self, level):
+        """The user's choice (Settings, Ctrl+= / Ctrl+- / Ctrl+0): applied at once
+        and remembered."""
+        self._apply_results_text_level(level)
+        save_app_config({self.RESULTS_TEXT_KEY: self.results_text_level})
+        combo = getattr(self.settings_dialog, 'combo_results_text', None)
+        if combo is not None:
+            combo.blockSignals(True)
+            combo.setCurrentIndex(self.results_text_level)
+            combo.blockSignals(False)
+
+    def _browse_apply_text_size(self, pt):
+        f = self.browse_text.font()
+        f.setPointSize(pt)
+        self.browse_text.setFont(f)
+        self.btn_b_text_smaller.setEnabled(pt > TEXT_PT_MIN)
+        self.btn_b_text_larger.setEnabled(pt < TEXT_PT_MAX)
+
+    def _browse_step_text_size(self, delta):
+        pt = self.browse_text.font().pointSize()
+        new = max(TEXT_PT_MIN, min(TEXT_PT_MAX, pt + delta))
+        if new != pt:
+            reading_text_size().set(new)
+
+    def _step_text_size(self, step):
+        """Ctrl+= (1), Ctrl+- (-1), Ctrl+0 (0, back to normal)."""
+        if self.tabs.currentWidget() is getattr(self, 'browse_tab', None):
+            if step == 0:
+                reading_text_size().set(TEXT_PT_DEFAULT)
+            else:
+                self._browse_step_text_size(step * TEXT_PT_STEP)
+            return
+        level = 0 if step == 0 else self.results_text_level + step
+        level = max(0, min(len(self.RESULTS_TEXT_STEPS) - 1, level))
+        if level != self.results_text_level or step == 0:
+            self.set_results_text_level(level)
+
     # The corner cluster may ask for at most this share of the window's width;
     # the rest is the tab bar's. A QTabWidget gives its corner widget exactly the
     # width it asks for, so without a cap the cluster would never overflow.
@@ -16454,12 +16593,15 @@ class GenizahGUI(QMainWindow):
                 chk.blockSignals(False)
         except Exception:  # noqa: BLE001
             pass  # never block opening Settings on attribute or import error
-        # The menu layout may have been switched from ☰ since the last opening.
-        combo = getattr(self.settings_dialog, 'combo_nav_layout', None)
-        if combo is not None:
-            combo.blockSignals(True)
-            combo.setCurrentIndex(1 if self.nav_layout == 'side' else 0)
-            combo.blockSignals(False)
+        # The menu layout may have been switched from ☰, and the text size with
+        # Ctrl+= / Ctrl+-, since the last opening.
+        for name, index in (('combo_nav_layout', 1 if self.nav_layout == 'side' else 0),
+                            ('combo_results_text', self.results_text_level)):
+            combo = getattr(self.settings_dialog, name, None)
+            if combo is not None:
+                combo.blockSignals(True)
+                combo.setCurrentIndex(index)
+                combo.blockSignals(False)
         self.settings_dialog.refresh_config_snapshot()
         self.settings_dialog.exec()
 
@@ -16477,10 +16619,12 @@ class GenizahGUI(QMainWindow):
 
         Delegates to the dialog's _on_cancel(), which restores the D-07b config
         snapshot (telemetry-consent keys stripped) before rejecting the modal.
-        The menu layout applies at once, so it is put back to the restored one.
+        The menu layout and the text size apply at once, so they are put back
+        to the restored ones.
         """
         self.settings_dialog._on_cancel()
         self._apply_nav_layout(load_app_config().get('nav_layout', 'tabs'))
+        self._apply_results_text_level(load_app_config().get(self.RESULTS_TEXT_KEY, 0))
 
     def _on_language_combo_changed(self, index):
         """Handle language combo box change — close settings dialog first to

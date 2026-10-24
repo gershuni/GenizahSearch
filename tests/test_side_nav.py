@@ -245,6 +245,11 @@ class _Window:
     _fill_sections_menu = GenizahGUI._fill_sections_menu
     _fill_account_menu = GenizahGUI._fill_account_menu
     nav_layout = GenizahGUI.nav_layout
+    # Cancel also puts the text size back (tests/test_text_size.py); no lists here.
+    RESULTS_TEXT_KEY = GenizahGUI.RESULTS_TEXT_KEY
+    RESULTS_TEXT_STEPS = GenizahGUI.RESULTS_TEXT_STEPS
+    _results_text_widgets = GenizahGUI._results_text_widgets
+    _apply_results_text_level = GenizahGUI._apply_results_text_level
 
     def __init__(self):
         self.tabs = QTabWidget()

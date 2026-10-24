@@ -5560,6 +5560,16 @@ TRANSLATIONS.update({
     "Move the menu to the side": "העברת התפריט לצד",
     "Back to tabs at the top": "חזרה ללשוניות למעלה",
     "Account": "חשבון",
+    # Text size of the result lists (Settings, Ctrl+= / Ctrl+- / Ctrl+0).
+    "Text size in result lists:": "גודל הטקסט ברשימות התוצאות:",
+    "Normal": "רגיל",
+    "Larger": "גדול יותר",
+    "Largest": "הגדול ביותר",
+    "The text in the search, composition, identification and list results. "
+    "Also Ctrl+= and Ctrl+-, and Ctrl+0 for normal. The transcription has "
+    "its own A- / A+ buttons.":
+        "הטקסט בתוצאות החיפוש, חיפוש החיבורים, העיון לפי זיהוי והרשימות. "
+        "אפשר גם Ctrl+= ו-Ctrl+-, ו-Ctrl+0 לגודל הרגיל. לתעתיק יש כפתורי A- / A+ משלו.",
     "Columns": "עמודות",
     "Show all columns": "הצגת כל העמודות",
     "Fit columns to window": "התאמת העמודות לחלון",
