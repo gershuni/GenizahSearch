@@ -91,6 +91,10 @@ TEAM_CREDITS = {
     # Owner-verified on the live FGP site 2026-10-25 (T-S F5.49); dbo_CodeSource 111.
     111: ("שמחה עמנואל, ראש צוות FGP לפרשנות התלמוד והספרות ההלכתית (עברית)",
           "Simcha Emanuel, Head of FGP Talmud Commentaries and Halakhic Literature (Hebrew) team"),
+    # Owner-verified on the live FGP site 2026-10-25 (AIU III.B.109): the Hebrew line is FJMS's own;
+    # the English rendering is ours (no English form exists locally) -- confirm before a release.
+    161: ("עמנואל פרידברג, ראש צוות FGP להעתקות ומידע ממחברים שונים",
+          "Emanuel Friedberg, Head of FGP Transcriptions and Information from Various Authors team"),
 }
 INFRA_CREDITS = {
     200: (GENUZOS_HE, GENUZOS_EN),

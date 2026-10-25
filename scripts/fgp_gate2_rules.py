@@ -86,7 +86,7 @@ DEFAULT_INVENTORY = os.path.join(DEFAULT_OUT, "inventory.db")
 GENERIC_CREDIT = ("פרויקט הגניזה של פרידברג", "Friedberg Genizah Project")
 
 OUTCOMES = ("kept", "re-sourced", "retired-with-alias")
-CREDIT_RESOLVED = ("team", "team_individual", "infra", "catalog", "book", "datasource_part")
+CREDIT_RESOLVED = ("team", "team_individual", "infra", "catalog", "book", "datasource_part", "bibliographic_reference")
 CREDIT_UNRESOLVED = ("datasource_only", "unresolved")
 
 # FIST sources with no verified team credit whose contributor FJMS's per-manuscript DataSource
@@ -94,12 +94,17 @@ CREDIT_UNRESOLVED = ("datasource_only", "unresolved")
 # list several site users). Confirmed on the live FGP site by the owner, 2026-10-25: BL OR
 # 10578S.16 (source 100 -> the named site user) and AIU III.B.109 (161 -> Friedberg's line).
 DATASOURCE_PART_TOKENS = {
-    100: "משתמש באתר",                        # a site user
+    100: "משתמש באתר",                        # a site user (CODE_Source 100 = צוות אורחים)
     850: "משתמש באתר",
     700: "משתמש באתר",
-    161: "ראש צוות FGP להעתקות ומידע ממחברים שונים",  # Emanuel Friedberg's team line
-    300: "רשימות אישיות",                     # Ben-Sasson's personal lists
+    300: "רשימות אישיות",                     # a personal list (CODE_Source 300); Ben-Sasson's in practice
 }
+# 161 (Emanuel Friedberg's team) is a verified TEAM_CREDITS entry since 2026-10-25.
+
+# FIST source 601 = הפניות ביבליוגרפיות: the unit's SubId is a dbo_UnitBibliographyReference id,
+# which FJMS renders as "Bibliographical Reference - <author>, <journal> <date>, עמוד <page>"
+# (owner's screenshot of Or.1080 6.17, 2026-10-25). Built here from the same FIST rows.
+BIBREF_SOURCE = 601
 
 UNIT_TABLES = {
     "transcription": ("dbo_UnitTranscription", "UnitTranscriptionId"),
@@ -163,6 +168,44 @@ def fist_units_for_absent_file(fist: sqlite3.Connection, basename: str) -> tuple
     return units, almas
 
 
+def build_bibref_map(fist: sqlite3.Connection, ref_ids) -> dict:
+    """{UnitBibliographyReferenceId: (he, en)} for FIST source 601 units; {} when the tables are absent."""
+    ref_ids = sorted({int(i) for i in ref_ids if i is not None})
+    if not ref_ids:
+        return {}
+    tables = {r[0] for r in fist.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if not {"dbo_UnitBibliographyReference", "CODE_Title"} <= tables:
+        return {}
+    title_cols = [c for c in ("RunningTitleHeb", "FullTitleHeb", "RunningTitleEng")
+                  if c in {r[1] for r in fist.execute("PRAGMA table_info(CODE_Title)")}]
+    out = {}
+    for ref_id in ref_ids:
+        r = fist.execute(
+            "SELECT TitleId, JournalDate, MentionPage, FromPage, ToPage FROM dbo_UnitBibliographyReference "
+            "WHERE UnitBibliographyReferenceId = ?", (ref_id,)
+        ).fetchone()
+        if not r:
+            continue
+        title_id, date, page, from_p, to_p = r
+        t = fist.execute(f"SELECT {', '.join(title_cols)} FROM CODE_Title WHERE TitleId = ?",
+                         (title_id,)).fetchone() if title_id is not None and title_cols else None
+        journal = next((str(v).strip() for v in (t or ()) if v and str(v).strip()), "")
+        authors = []
+        if {"dbo_BibMultiArticleAuthor", "CODE_Author"} <= tables:
+            authors = [a[0] for a in fist.execute(
+                "SELECT COALESCE(b.ArticleAuthorDisplay, ca.HebDesc, ca.EngDesc) FROM dbo_BibMultiArticleAuthor b "
+                "LEFT JOIN CODE_Author ca ON ca.AuthorId = b.ArticleAuthorId "
+                "WHERE b.UnitBibliographyReferenceId = ? ORDER BY b.AuthorOrder", (ref_id,)) if a[0]]
+        pages = (page or "").strip() or (f"{from_p}-{to_p}" if from_p and to_p else "")
+        body = ", ".join(x for x in ("; ".join(authors), " ".join(x for x in (journal, (date or "").strip()) if x)) if x)
+        if not body:
+            continue
+        if pages:
+            body = f"{body}, עמוד {pages}"
+        out[ref_id] = (f"הפניה ביבליוגרפית – {body}", f"Bibliographical reference – {body}")
+    return out
+
+
 def load_copyright(fist: sqlite3.Connection) -> dict:
     out = {}
     for table, id_col in (("dbo_UnitTranscription", "UnitTranscriptionId"), ("dbo_UnitTranslation", "UnitTranslationId")):
@@ -192,10 +235,14 @@ def content_hashes(conn: sqlite3.Connection, ids: list) -> dict:
 # --------------------------------------------------------------------------- credit
 
 
-def credit_for_unit(unit: dict, mms_id, credit_parts: dict, catalog_map: dict, book_map: dict) -> tuple:
+def credit_for_unit(unit: dict, mms_id, credit_parts: dict, catalog_map: dict, book_map: dict,
+                    bibref_map: dict | None = None) -> tuple:
     """(he, en, category) from the unit's FIST source, mirroring fgp_fill_credits_bilingual but keyed on FIST."""
     so, su = unit["source"], unit["sub"]
     parts = credit_parts.get(str(mms_id), []) if mms_id is not None else []
+    if so == BIBREF_SOURCE:
+        ref = (bibref_map or {}).get(su)
+        return (ref[0], ref[1], "bibliographic_reference") if ref else (None, None, "unresolved")
     if so == 500:
         s = catalog_map.get(su)
         return (s, s, "catalog") if s else (None, None, "unresolved")
@@ -250,8 +297,9 @@ def xml_text_status(row: dict, unit: dict, inv: dict) -> tuple:
 
 def build_outcomes(rows: list, inv: dict, fist: sqlite3.Connection, credit_parts: dict,
                    catalog_map: dict, book_map: dict, copyright: dict, hashes: dict,
-                   credit_policy: str = "generic") -> tuple:
+                   credit_policy: str = "generic", bibref_map: dict | None = None) -> tuple:
     C = collections.Counter()
+    bibref_map = bibref_map or {}
     outcomes, aliases = [], []
     rulings = collections.defaultdict(lambda: {"rows": 0, "today_credits": collections.Counter()})
     # exact duplicates: same (filename, sys_id, c_number) -> keep the lowest id. Rows without a
@@ -340,7 +388,7 @@ def build_outcomes(rows: list, inv: dict, fist: sqlite3.Connection, credit_parts
             outcome, reason, succ = "kept", "", None
         # ---- credit (from the unit; today's for comparison)
         if unit:
-            he, en, cat = credit_for_unit(unit, r["mms_id"], credit_parts, catalog_map, book_map)
+            he, en, cat = credit_for_unit(unit, r["mms_id"], credit_parts, catalog_map, book_map, bibref_map)
             cr = copyright.get((unit["table"], unit["unit_id"]))
             if cr:
                 # An acknowledgment or permission line is shown beside the credit, never as the credit.
@@ -597,11 +645,14 @@ def main(argv=None) -> int:
     fgp.close()
     fist = ro(args.fist)
     catalog_map, book_map, copyright = build_catalog_map(fist), build_book_map(fist), load_copyright(fist)
+    bibref_ids = {u["sub"] for units in inv["units"].values() for u in units if u["source"] == BIBREF_SOURCE}
+    bibref_map = build_bibref_map(fist, bibref_ids)
     log(f"  {len(rows):,} rows, {len(credit_parts):,} DataSource manuscripts, {len(catalog_map):,} catalogues, "
-        f"{len(book_map):,} books, {len(copyright):,} copyright units ({time.time() - t0:.0f}s)")
+        f"{len(book_map):,} books, {len(bibref_map):,} bibliographic references, {len(copyright):,} copyright units "
+        f"({time.time() - t0:.0f}s)")
     log("applying the rules ...")
     outcomes, aliases, rulings, C = build_outcomes(rows, inv, fist, credit_parts, catalog_map, book_map, copyright, hashes,
-                                                   credit_policy=args.credit_policy)
+                                                   credit_policy=args.credit_policy, bibref_map=bibref_map)
     fist.close()
     checks = run_checks(outcomes, aliases, C, expectations)
     db_path = write_outputs(outcomes, aliases, rulings, checks, C, args.out_dir, meta)

@@ -42,6 +42,11 @@ def build_fist(path: str, mixed_kind: bool = False, extended: bool = False) -> N
         CREATE TABLE dbo_CodeSource (TeamCode INTEGER, EngDesc TEXT);
         CREATE TABLE CODE_Catalog (CatalogId INTEGER, CatAcronym TEXT, Publisher TEXT, YearOfPublishing TEXT);
         CREATE TABLE CODE_Title (TitleId INTEGER, RunningTitleHeb TEXT, FullTitleHeb TEXT, AcronymHeb TEXT);
+        CREATE TABLE dbo_UnitBibliographyReference (UnitBibliographyReferenceId INTEGER, SignatureId INTEGER,
+            TitleId INTEGER, JournalDate TEXT, MentionPage TEXT, FromPage TEXT, ToPage TEXT);
+        CREATE TABLE dbo_BibMultiArticleAuthor (BibMultiArticleAuthorID INTEGER, UnitBibliographyReferenceId INTEGER,
+            ArticleAuthorId INTEGER, ArticleAuthorDisplay TEXT, AuthorOrder INTEGER);
+        CREATE TABLE CODE_Author (AuthorId INTEGER, HebDesc TEXT, EngDesc TEXT);
         """
     )
     tr = [
@@ -73,6 +78,8 @@ def build_fist(path: str, mixed_kind: bool = False, extended: bool = False) -> N
         (14, 115, "60000010000051", None, "6000001\\", None, 2, None, None, None),
         # a Genuzos unit without a position folder whose image's B1 folder belongs to another Genuzos unit
         (15, 116, "20000040000061_CUL_T-S 6.1_Tc", None, "2000004\\", None, 2, None, None, None),
+        # a bibliographic-reference unit (source 601; SubId = the reference id)
+        (16, 117, "60198140000021_CUL_ Or.1080 6.17 _Tc", None, "6010000\\", None, 2, None, None, None),
     ]
     con.executemany("INSERT INTO dbo_UnitTranscription VALUES (?,?,?,?,?,?,?,?,?,?)", tr + (extended_tr if extended else []))
     con.execute("INSERT INTO dbo_UnitTranslation VALUES (?,?,?,?,?,?,?,?,?)",
@@ -88,21 +95,25 @@ def build_fist(path: str, mixed_kind: bool = False, extended: bool = False) -> N
         (107, 1007, 850, 7, "2020"), (108, 1008, 200, 0, "2020"), (109, 1001, 200, 0, "2020"),
         (110, 1010, 500, 352, "2020"), (111, 1011, 106, 3, "2020"), (112, 1012, 106, 3, "2021"),
         (113, 1013, 500, 12, "2020"), (114, 1014, 600, 77, "2020"), (115, 1015, 600, 78, "2020"),
-        (116, 1016, 200, 0, "2020"),
+        (116, 1016, 200, 0, "2020"), (117, 1017, 601, 43279814, "2015"),
     ])
     con.executemany("INSERT INTO dbo_InventorySignature VALUES (?,?)", [
         (11, 1001), (12, 1002), (13, 1003), (14, 1004), (15, 1005), (16, 1006), (17, 1007), (20, 1010),
-        (21, 1011), (21, 1012), (22, 1013), (23, 1014), (24, 1015), (25, 1016),
+        (21, 1011), (21, 1012), (22, 1013), (23, 1014), (24, 1015), (25, 1016), (26, 1017),
     ])
     con.executemany("INSERT INTO dbo_InventoryAlma VALUES (?,?,?)", [
         (1, 11, ALMA_A), (2, 12, ALMA_B), (3, 13, ALMA_C), (4, 13, ALMA_D), (5, 14, ALMA_A),
         (6, 15, ALMA_B), (7, 16, ALMA_A), (8, 17, ALMA_D), (9, 20, ALMA_C), (10, 21, ALMA_B),
-        (11, 22, ALMA_A), (12, 23, ALMA_A), (13, 24, ALMA_A), (14, 25, ALMA_A),
+        (11, 22, ALMA_A), (12, 23, ALMA_A), (13, 24, ALMA_A), (14, 25, ALMA_A), (15, 26, ALMA_A),
     ])
     con.executemany("INSERT INTO dbo_CodeSource VALUES (?,?)", [(200, "Genuzos"), (132, "Goitein")])
     con.execute("INSERT INTO CODE_Catalog VALUES (12, 'CUDL', 'Cambridge', '2010')")
     con.execute("INSERT INTO CODE_Title VALUES (77, 'ספר הבהיר', NULL, NULL)")
     con.execute("INSERT INTO CODE_Title VALUES (78, NULL, NULL, NULL)")
+    con.execute("INSERT INTO CODE_Title VALUES (51153, 'קובץ חצי גבורים', NULL, NULL)")
+    con.execute("INSERT INTO dbo_UnitBibliographyReference VALUES (43279814, 117, 51153, 'אלול תשע\"ד', 'כו', 'כא', 'כז')")
+    con.execute("INSERT INTO dbo_BibMultiArticleAuthor VALUES (1, 43279814, 4293, NULL, 2)")
+    con.execute("INSERT INTO CODE_Author VALUES (4293, 'מילר, יעקב יצחק', NULL)")
     con.commit()
     con.close()
 
@@ -131,6 +142,7 @@ def build_folders(root: str, extended: bool = False) -> tuple:
         touch(os.path.join(nopos, "6000001", "pdf", "60000010000041.pdf"))
         touch(os.path.join(nopos, "6000001", "pdf", "60000010000051.pdf"))
         touch(os.path.join(nopos, "2000004", "pdf", "20000040000061_CUL_T-S 6.1_Tc.pdf"))
+        touch(os.path.join(nopos, "6010000", "pdf", "60198140000021_CUL_ Or.1080 6.17 _Tc.pdf"))
     touch(os.path.join(nopos, "New Text Document.txt"))
     withpos = os.path.join(root, "WithPOS")
     for f in ("100000.xml", "100000.js", "100000.xml.js", "100000.json", "100000_1.png", "img.jpg"):
@@ -179,6 +191,8 @@ def build_sidecars(root: str, extended: bool = False) -> tuple:
     extended_rows = [
         # 17: not in FIST at all but reachable -> association none, kept but held
         row(17, "88888888888888_Nowhere_Tc_trans.pdf", ALMA_C, image_id="88888888888888", method="fjms_shelfmark"),
+        # 18: a bibliographic reference (source 601) -> credit built from FIST's reference row
+        row(18, "60198140000021_CUL_ Or.1080 6.17 _Tc_trans.pdf", ALMA_A, image_id="60198140000021"),
         # 5/6: exact duplicates (same file, manuscript, image; two shelfmark folders) -> 6 retired, successor 5
         row(5, "20000000000015_CUL_T-S 1.5_Tc_trans.pdf", ALMA_C, credit="wrong team", rel_path="CUL/a/x.pdf"),
         row(6, "20000000000015_CUL_T-S 1.5_Tc_trans.pdf", ALMA_C, credit="wrong team", rel_path="CUL/b/x.pdf"),
