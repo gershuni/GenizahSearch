@@ -125,15 +125,31 @@ def test_a_label_the_column_was_sized_for_is_never_cut(monkeypatch):
 
 
 def test_a_font_that_arrives_later_resizes_the_column():
+    """A font set after the column was sized (a style sheet's, say) re-measures
+    it. How wide the other labels are depends on the machine's fonts (the
+    Ubuntu CI's column was already wider than a 1.6x puzzle label), so the
+    puzzle's font is grown until its label no longer fits."""
     host, nav, puzzle, settings = _nav()
-    narrow = nav.width()
+    fitted = nav.width() - nav._margins() - nav._extra()
     big = QFont(puzzle.font())
-    big.setPointSizeF(big.pointSizeF() * 1.6)
-    puzzle.setFont(big)                              # e.g. a style sheet's, after the column was sized
+    by_points = big.pointSizeF() > 0
+    base = big.pointSizeF() if by_points else big.pixelSize()
+    for step in range(1, 40):
+        if by_points:
+            big.setPointSizeF(base * (1 + step / 10))
+        else:
+            big.setPixelSize(round(base * (1 + step / 10)))
+        if QFontMetrics(big).horizontalAdvance("Fragment Puzzle") > fitted:
+            break
+    puzzle.setFont(big)
     QApplication.processEvents()
-    assert puzzle.label_width() > narrow - nav._margins() - nav._extra()   # it no longer fitted
-    assert nav.width() >= puzzle.label_width() + nav._margins() + nav._extra()
-    assert _shown(puzzle) == "Fragment Puzzle"
+    assert puzzle.label_width() > fitted                  # it no longer fitted
+    assert nav.width() >= min(SideNav.MAX_EXPANDED,
+                              puzzle.label_width() + nav._margins() + nav._extra())
+    if puzzle.label_width() <= puzzle._text_width:
+        assert _shown(puzzle) == "Fragment Puzzle"
+    else:                                                 # past the cap: cut, not clipped
+        assert _shown(puzzle).endswith("…")
 
 
 def test_a_long_label_is_elided_and_the_column_capped():
