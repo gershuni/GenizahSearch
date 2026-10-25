@@ -105,6 +105,8 @@ from shared import passage_fusion  # RRF fusion (pure, shared with web + API)
 from shared import compound_query  # Composition Search conditions (pure)
 from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog, TelemetryConsentBar, WHATS_NEW_CONTENT_VERSION  # Phase 127 update_ui; SEED-031 re-ask bar
 from desktop.index_rebuild_bar import IndexRebuildBar, remaining_phrase
+from desktop import startup_tips
+from desktop.startup_tips import TipStrip
 from shared.index_build_progress import BuildClock
 from shared.index_swap import (discard_staged_index, gib, plan_build, remove_old_index,
                                remove_old_index_in_background, swap_in_staged_index)
@@ -1987,6 +1989,8 @@ class GenizahGUI(QMainWindow):
             # Show What's New bar until its content has been dismissed
             cfg = load_app_config()
             self._maybe_show_whats_new(cfg)
+            # One startup tip, once the window has settled (desktop/startup_tips.py).
+            QTimer.singleShot(1500, self._maybe_show_startup_tip)
 
             # SEED-031: gently re-invite not-yet-opted-in decliners (throttled,
             # non-modal). Mutually exclusive with the first-run modal by
@@ -2377,6 +2381,8 @@ class GenizahGUI(QMainWindow):
             shortcut.activated.connect(slot)
             self._section_shortcuts.append(shortcut)
 
+        self._wire_tip_signals()
+
         # Two menu layouts, chosen in Settings and kept in config.pkl as
         # nav_layout (owner, 2026-10-24: "Keep the tabs. Offer an option to
         # change them to the side menu"): the tab bar with the buttons in its
@@ -2592,6 +2598,15 @@ class GenizahGUI(QMainWindow):
         self.telemetry_consent_bar.never_ask_requested.connect(self.on_telemetry_reask_never)
         self.telemetry_consent_bar.dismissed.connect(self.on_telemetry_reask_dismissed)
         main_layout.addWidget(self.telemetry_consent_bar)
+
+        # One startup tip (desktop/startup_tips.py, owner 2026-10-25): hidden
+        # until _maybe_show_startup_tip picks one.
+        self.tip_strip = TipStrip()
+        self.tip_strip.show_me.connect(self._tip_show_me)
+        self.tip_strip.next_requested.connect(self._tip_next)
+        self.tip_strip.closed.connect(self._tip_closed)
+        self.tip_strip.turned_off.connect(self._tip_turn_off)
+        main_layout.addWidget(self.tip_strip)
 
         # The search-index rebuild's line (desktop/index_rebuild_bar.py): hidden until a
         # build runs. The Settings dialog keeps its own bar.
@@ -5589,6 +5604,7 @@ class GenizahGUI(QMainWindow):
 
     def _show_results_context_menu(self, pos):
         """Show context menu for search results with community options."""
+        startup_tips.mark_used('result_menu')  # its startup tip is no longer needed
         row = self.results_table.rowAt(pos.y())
         if row < 0:
             return
@@ -6621,6 +6637,7 @@ class GenizahGUI(QMainWindow):
 
         # 1. Exclude & Filter (Moved to top row)
         btn_exclude = QPushButton(tr("Exclude Manuscripts"))
+        self.btn_comp_exclude = btn_exclude
         btn_exclude.setToolTip(tr(
             "Manuscripts you already know: they are kept out of the results and listed "
             "under Excluded."))
@@ -13645,6 +13662,8 @@ class GenizahGUI(QMainWindow):
         list_id = item.data(0, Qt.ItemDataRole.UserRole)
         if not list_id:
             return
+        if list_id == 'recent':
+            startup_tips.mark_used('recent_list')  # its startup tip is no longer needed
         self.lists_current_list_id = list_id
         self.lists_current_item_id = None
         self.lists_refresh_items()
@@ -14506,6 +14525,7 @@ class GenizahGUI(QMainWindow):
 
     def lists_copy_info_by_id(self, item_id):
         """Copy item info to clipboard with format options."""
+        startup_tips.mark_used('copy_info')  # its startup tip is no longer needed
         if not self.lists_mgr:
             return
 
@@ -16198,6 +16218,7 @@ class GenizahGUI(QMainWindow):
 
     def _open_puzzle_window(self):
         """Open the puzzle canvas window (or bring existing one to front)."""
+        startup_tips.mark_used('puzzle')  # its startup tip is no longer needed
         # D-03: Fragment Puzzle feature_opened (explicit open path — corner button / menu)
         self._emit_feature_opened(feature_name='fragment_puzzle')
         if self._puzzle_window is None or sip.isdeleted(self._puzzle_window):
@@ -16338,6 +16359,7 @@ class GenizahGUI(QMainWindow):
         the ghost desktop_feature_opened event from deferred session-restore calls.
         Default True keeps all user-gesture callers emitting normally.
         """
+        startup_tips.mark_used('joins_lab')  # its startup tip is no longer needed
         from desktop.join_workbench import JoinWorkbenchWindow  # lazy import (desktop-only)
         # D-03: Joins Lab feature_opened telemetry (no-arg launcher path).
         # CR-114-05: gated on emit_telemetry so deferred restore (emit_telemetry=False)
@@ -16538,6 +16560,7 @@ class GenizahGUI(QMainWindow):
     def open_go_to(self):
         """Ctrl+G: the Go to box, then open or search what was typed, or open
         the recent manuscript chosen in it."""
+        startup_tips.mark_used('go_to')  # its startup tip is no longer needed
         dlg = GoToDialog(self, completer=getattr(self, 'shelf_completer', None),
                          recent=self._go_to_recent_items())
         try:
@@ -16652,6 +16675,281 @@ class GenizahGUI(QMainWindow):
                 field.selectAll()
                 return field
         return None
+
+    # -- startup tips (desktop/startup_tips.py, owner 2026-10-25) --------------
+    # One tip at each start, in the strip under the notice bars: not on the
+    # first start, not while another notice bar is up, and not once turned off.
+    _MODE_INDEX_RESPONSA = 2
+    _MODE_INDEX_PGP_TAGS = 7
+
+    def _maybe_show_startup_tip(self):
+        try:
+            starts = startup_tips.record_start()
+            if starts < 2 or startup_tips.tips_off():
+                return None
+            for name in ('whats_new_bar', 'telemetry_consent_bar', 'update_bar'):
+                bar = getattr(self, name, None)
+                if bar is not None and not bar.isHidden():
+                    return None
+            return self._show_next_tip()
+        except Exception:
+            logger.exception("Startup tip failed")
+            return None
+
+    def _show_next_tip(self):
+        """Show the next tip not shown yet whose feature is not in use; it
+        counts as shown at once. None (and the strip hidden) when none is left."""
+        seen = list(load_app_config().get(startup_tips.TIPS_SEEN_KEY) or [])
+        used = self._tip_features_in_use()
+        tip = startup_tips.next_tip(seen, used)
+        if tip is None:
+            self.tip_strip.hide()
+            return None
+        startup_tips.mark_seen(tip)
+        has_next = startup_tips.next_tip(seen + [tip.key], used) is not None
+        self.tip_strip.set_tip(tip, self._tip_action_label(tip), has_next=has_next)
+        return tip
+
+    def _tip_invitation(self, tip):
+        """'letter_index' / 'account' when the tip needs what is not set up
+        yet: its button then builds the index or opens the login (owner)."""
+        if tip.needs == 'letter_index' and not passage_lifecycle.passage_available():
+            return 'letter_index'
+        client = getattr(self, 'corrections_client', None)
+        if tip.needs == 'account' and not getattr(client, 'current_user', None):
+            return 'account'
+        return None
+
+    def _tip_action_label(self, tip):
+        invitation = self._tip_invitation(tip)
+        if invitation == 'letter_index':
+            return tr("Build the index")
+        if invitation == 'account':
+            return tr("Login")
+        return tr("Show me") if tip.show else None
+
+    def _tip_show_me(self, tip):
+        if tip is None:
+            return
+        startup_tips.note_engaged()
+        invitation = self._tip_invitation(tip)
+        if invitation == 'letter_index':
+            self._maybe_offer_passage_build(explicit=True)
+        elif invitation == 'account':
+            self._corner_login_clicked()
+        else:
+            self._run_tip_action(tip.show)
+
+    def _tip_next(self):
+        startup_tips.note_engaged()
+        self._show_next_tip()
+
+    def _tip_closed(self):
+        self.tip_strip.hide()
+        if startup_tips.note_closed():
+            self.statusBar().showMessage(
+                tr("Tips are off. You can turn them on again in Settings."), 8000)
+
+    def _tip_turn_off(self):
+        startup_tips.set_tips_off(True)
+        self.tip_strip.hide()
+        self.statusBar().showMessage(
+            tr("Tips are off. You can turn them on again in Settings."), 8000)
+
+    _TIP_TABS = {'search': 'search_tab', 'responsa': 'search_tab',
+                 'composition': 'composition_tab', 'browse': 'browse_tab'}
+
+    def _run_tip_action(self, action):
+        """What a tip's Show me does: open the section and ring the control
+        ("search:btn_search"), switch the search mode first ("responsa:..."),
+        open a section ("tab:lists_tab"), Help at a section ("help:responsa"),
+        or one of the named actions below."""
+        if not action:
+            return
+        kind, _, target = action.partition(':')
+        if kind in self._TIP_TABS:
+            self._set_active_tab(getattr(self, self._TIP_TABS[kind]))
+            if kind == 'responsa':
+                self.mode_combo.setCurrentIndex(self._MODE_INDEX_RESPONSA)
+            widget = getattr(self, target, None)
+            if widget is not None:
+                QTimer.singleShot(80, lambda w=widget: self._flash_widget(w))
+        elif kind == 'tab':
+            self._set_active_tab(getattr(self, target))
+        elif kind == 'help':
+            self.open_help_center(anchor=target or None)
+        elif kind == 'query':
+            self._set_active_tab(self.search_tab)
+            self.query_input.setFocus(Qt.FocusReason.OtherFocusReason)
+            QTimer.singleShot(80, lambda: self._flash_widget(self.query_input))
+        elif kind == 'history':
+            self._set_active_tab(self.search_tab)
+            QTimer.singleShot(80, self._show_search_history_menu)
+        elif kind == 'go_to':
+            self.open_go_to()
+        elif kind == 'pgp_tags':
+            self._set_active_tab(self.search_tab)
+            self.mode_combo.setCurrentIndex(self._MODE_INDEX_PGP_TAGS)
+        elif kind == 'witness_dialog':
+            self._set_active_tab(self.composition_tab)
+            if self._comp_method() == 'passage':
+                self._open_witness_dialog()
+            else:
+                QTimer.singleShot(80, lambda: self._flash_widget(self.comp_method_combo))
+        elif kind == 'joins_lab':
+            self.open_join_workbench()
+        elif kind == 'settings':
+            self._open_settings_dialog()
+        elif kind == 'search_settings':
+            self.open_search_settings()
+        elif kind == 'menu':
+            if self.nav_layout == 'tabs':
+                self.corner_sections_btn.click()
+            else:
+                self._flash_widget(self.side_nav)
+        elif kind == 'recent_list':
+            self._set_active_tab(self.lists_tab)
+            self._select_recent_list()
+
+    def _select_recent_list(self):
+        tree = getattr(self, 'lists_tree', None)
+        if tree is None:
+            return False
+        items = [tree.topLevelItem(i) for i in range(tree.topLevelItemCount())]
+        while items:
+            item = items.pop(0)
+            if item.data(0, Qt.ItemDataRole.UserRole) == 'recent':
+                tree.setCurrentItem(item)
+                self.lists_on_list_selected(item, 0)
+                return True
+            items.extend(item.child(i) for i in range(item.childCount()))
+        return False
+
+    def _flash_widget(self, widget, ms=2500):
+        """Ring *widget* in orange for a moment: what a tip's Show me points at.
+        A frame laid over the window, not a style sheet on the widget, which
+        would fight the widget's own."""
+        if widget is None or not widget.isVisible():
+            return None
+        ring = QFrame(self)
+        ring.setObjectName("tip_ring")
+        ring.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        ring.setStyleSheet("#tip_ring { border: 3px solid #f39c12; border-radius: 6px; background: transparent; }")
+        corner = widget.mapTo(self, QPoint(0, 0))
+        ring.setGeometry(corner.x() - 4, corner.y() - 4, widget.width() + 8, widget.height() + 8)
+        ring.show()
+        ring.raise_()
+        QTimer.singleShot(ms, ring.deleteLater)
+        return ring
+
+    # (widget, signal, feature, condition on the signal's argument or None)
+    _TIP_WIRES = (
+        ('btn_query_builder', 'clicked', 'tabular', None),
+        ('search_within_btn', 'clicked', 'search_within', None),
+        ('comp_method_combo', 'currentIndexChanged', 'letter_level', 'passage_chosen'),
+        ('btn_comp_witnesses', 'clicked', 'witness', None),
+        ('act_comp_quoted_texts', 'triggered', 'quoted', None),
+        ('act_comp_quoting_texts', 'triggered', 'quoting', None),
+        ('act_comp_add_condition', 'triggered', 'condition', None),
+        ('btn_comp_exclude', 'clicked', 'exclude', None),
+        ('browse_find_input', 'textEdited', 'browse_find', None),
+        ('btn_find_parallels', 'clicked', 'parallels', None),
+        ('btn_b_add_to_view', 'clicked', 'reading_desk', None),
+        ('btn_b_cite', 'clicked', 'cite', None),
+        ('btn_b_open_web', 'clicked', 'website', None),
+        ('btn_b_copy_web', 'clicked', 'website', None),
+        ('btn_b_add_to_puzzle', 'clicked', 'puzzle', None),
+        ('btn_b_catalog', 'clicked', 'ktiv', None),
+        ('btn_b_edit', 'clicked', 'edit_comment', None),
+        ('btn_b_comment', 'clicked', 'edit_comment', None),
+        ('chk_responsa_flex', 'toggled', 'flex', 'on'),
+        ('chk_responsa_ja', 'toggled', 'judeo_arabic', 'on'),
+        ('chk_bidirectional', 'toggled', 'bidirectional', 'on'),
+        ('boundary_mode_combo', 'currentIndexChanged', 'cross_paragraph', 'not_full'),
+    )
+
+    def _wire_tip_signals(self):
+        """A feature used retires its tip (startup_tips.mark_used). The uses
+        that are one widget's signal are connected here; the others call
+        mark_used where they happen, and some are read from what is kept
+        (_tip_derived_features)."""
+        tests = {
+            None: lambda *_a: True,
+            'on': lambda checked=False, *_a: bool(checked),
+            'passage_chosen': lambda *_a: self._comp_method() == 'passage',
+            'not_full': lambda *_a: self.boundary_mode_combo.currentData() != 'full',
+        }
+        for name, signal, feature, condition in self._TIP_WIRES:
+            widget = getattr(self, name, None)
+            if widget is None:
+                continue
+            test = tests[condition]
+            getattr(widget, signal).connect(
+                lambda *a, f=feature, t=test: startup_tips.mark_used(f) if t(*a) else None)
+        self.tabs.currentChanged.connect(
+            lambda _i: startup_tips.mark_used('catalog_tab')
+            if self.tabs.currentWidget() is getattr(self, 'catalog_browse_tab', None) else None)
+        for shortcut in self._section_shortcuts[:self.tabs.count()]:
+            shortcut.activated.connect(lambda: startup_tips.mark_used('section_key'))
+
+    def _tip_features_in_use(self):
+        return startup_tips.features_used() | self._tip_derived_features()
+
+    def _tip_derived_features(self):
+        """Features in use, read from what is kept: the search history, the
+        lists, My Library's folders, the settings."""
+        found = set()
+        try:
+            from shared.session_persistence import get_history
+            history = get_history()
+            for kind in ('regular', 'composition'):
+                for entry in history.get(kind, []):
+                    params = entry.get('search_params') or {}
+                    if entry.get('pinned'):
+                        found.add('saved_search')
+                    if any(k != 'include_mode' for k in (entry.get('pre_search_filters') or {})):
+                        found.add('filters')
+                    if kind == 'composition':
+                        if params.get('comp_method') == 'passage':
+                            found.add('letter_level')
+                        continue
+                    query = entry.get('query') or ''
+                    if params.get('mode_index') == self._MODE_INDEX_RESPONSA:
+                        found.add('responsa_search')
+                        if '#' in query or '%' in query:
+                            found.add('responsa_affixes')
+                        if '(' in query or '[' in query:
+                            found.add('responsa_or_gap')
+                    elif params.get('mode_index') == self._MODE_INDEX_PGP_TAGS:
+                        found.add('pgp_tags')
+                    if params.get('text_position'):
+                        found.add('position')
+        except Exception:
+            logger.debug("Startup tips: reading the search history failed", exc_info=True)
+        cfg = load_app_config()
+        if cfg.get('nav_layout') == 'side':
+            found.add('side_menu')
+        if cfg.get(self.RESULTS_TEXT_KEY) or reading_text_size().value() != TEXT_PT_DEFAULT:
+            found.add('text_size')
+        lists = getattr(self, 'lists_mgr', None)
+        try:
+            if lists is not None:
+                if any(item.get('lists') for item in lists.data.get('items', {}).values()):
+                    found.add('list_items')
+                if lists.get_projects() or lists.get_all_tags():
+                    found.add('projects')
+        except Exception:
+            logger.debug("Startup tips: reading the lists failed", exc_info=True)
+        try:
+            indexer = getattr(getattr(self, 'my_library_tab', None), '_indexer', None)
+            if indexer is not None and indexer.list_folders():
+                found.add('my_library')
+        except Exception:
+            logger.debug("Startup tips: reading My Library failed", exc_info=True)
+        settings = getattr(getattr(self, 'lab_engine', None), 'settings', None)
+        if getattr(settings, 'custom_variants', None):
+            found.add('custom_pairs')
+        return found
 
     # -- text size (owner, 2026-10-24: "option to change the size of the texts
     # in search etc windows") ---------------------------------------------------
@@ -16804,6 +17102,12 @@ class GenizahGUI(QMainWindow):
                 combo.blockSignals(True)
                 combo.setCurrentIndex(index)
                 combo.blockSignals(False)
+        # And the tips may have been turned off from the strip.
+        chk_tips = getattr(self.settings_dialog, 'chk_startup_tips', None)
+        if chk_tips is not None:
+            chk_tips.blockSignals(True)
+            chk_tips.setChecked(not startup_tips.tips_off())
+            chk_tips.blockSignals(False)
         self.settings_dialog.refresh_config_snapshot()
         self.settings_dialog.exec()
 
@@ -17389,6 +17693,7 @@ class GenizahGUI(QMainWindow):
         cannot be loaded, HelpDialog shows a short translated notice with the
         website's Help link (the old built-in help texts were months out of
         date and were removed, owner 2026-10-18)."""
+        startup_tips.mark_used('help')  # its startup tip is no longer needed
         help_path = Config.HELP_FILE
         dlg = HelpDialog(
             self,
@@ -17848,6 +18153,7 @@ class GenizahGUI(QMainWindow):
         # Check for shortcut prefix followed by space
         for prefix, target_mode in self._SHORTCUT_PREFIXES:
             if text.startswith(prefix + ' ') or text == prefix + ' ':
+                startup_tips.mark_used('mode_sign')  # its startup tip is no longer needed
                 clean = text[len(prefix):].lstrip()
                 # Block signals to avoid recursive textChanged
                 self.query_input.blockSignals(True)
@@ -20451,6 +20757,7 @@ class GenizahGUI(QMainWindow):
         btn_load.setToolTip(tr(
             "Choose one or more files. Each file becomes a witness."))
         btn_load.clicked.connect(self._load_witness_files)
+        btn_load.clicked.connect(lambda: startup_tips.mark_used('witness_files'))
         actions.addWidget(btn_load)
         self.chk_comp_witness_split_files = QCheckBox(tr(
             "Split each file on blank lines"))
@@ -20471,6 +20778,7 @@ class GenizahGUI(QMainWindow):
         actions.addStretch()
         self.btn_comp_witness_promote = QPushButton(tr("Search with these too"))
         self.btn_comp_witness_promote.clicked.connect(self._promote_checked_comp)
+        self.btn_comp_witness_promote.clicked.connect(lambda: startup_tips.mark_used('promote'))
         actions.addWidget(self.btn_comp_witness_promote)
         self.btn_comp_witness_run = QPushButton(tr("Search now"))
         self.btn_comp_witness_run.clicked.connect(self._search_pending_witnesses)
@@ -23112,6 +23420,7 @@ class GenizahGUI(QMainWindow):
     def _on_pause_clicked(self, ctx):
         """Pause <-> Resume. The click owns 'pausing'/'running'; only an accepted
         acknowledgement from the worker may set 'paused'."""
+        startup_tips.mark_used('pause')  # its startup tip is no longer needed
         if (ctx is getattr(self, '_pause_comp', None)
                 and self._refuse_stop_during_passage_scan()):
             # Pause is the fourth way to ask a scan to stop, and it has to
@@ -24647,6 +24956,7 @@ class GenizahGUI(QMainWindow):
             _start()
 
     def _open_results_filter_dialog(self, column):
+        startup_tips.mark_used('column_filter')  # its startup tip is no longer needed
         if column == 1:
             self.open_list_filter_dialog()
             return
@@ -26478,6 +26788,7 @@ class GenizahGUI(QMainWindow):
         self._show_result_dialog(sorted_results, target_index)
 
     def open_result_in_browse_from_table(self, res):
+        startup_tips.mark_used('browse_from_result')  # its startup tip is no longer needed
         if not res:
             return
         display = res.get('display', {})
@@ -27532,6 +27843,7 @@ class GenizahGUI(QMainWindow):
         Export results handling specific formats directly.
         fmt: 'xlsx', 'csv', 'txt', or 'docx'
         """
+        startup_tips.mark_used('export')  # its startup tip is no longer needed
         base_path = self._default_report_path(self.last_search_query, tr("Search_Results"))
         default_path = os.path.splitext(base_path)[0] + f".{fmt}"
 

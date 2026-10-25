@@ -1158,6 +1158,19 @@ class SettingsDialog(QDialog):
         layout.addLayout(_pref_row(tr("Text size in result lists:"), self.combo_results_text))
         layout.addSpacing(4)
 
+        # Startup tips (desktop/startup_tips.py, 2026-10-25): the strip's own
+        # "Don't show tips" turns them off; this turns them back on.
+        from PyQt6.QtWidgets import QCheckBox
+        from desktop import startup_tips
+        self.chk_startup_tips = QCheckBox(tr("Show a tip when the program starts"))
+        self.chk_startup_tips.setChecked(not startup_tips.tips_off())
+        self.chk_startup_tips.toggled.connect(lambda on: startup_tips.set_tips_off(not on))
+        tips_row = QHBoxLayout()
+        tips_row.addWidget(self.chk_startup_tips)
+        tips_row.addStretch()
+        layout.addLayout(tips_row)
+        layout.addSpacing(4)
+
         # Desktop Notifications
         from PyQt6.QtWidgets import QCheckBox
         self.main_win.chk_notifications = QCheckBox(tr("Desktop Notifications"))

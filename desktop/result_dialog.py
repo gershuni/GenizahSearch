@@ -39,6 +39,7 @@ from desktop.title_helpers import (
     _resolve_display_title, _set_label_with_tooltip,
 )
 from desktop.image_loader import ImageLoaderThread
+from desktop import startup_tips
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import (
     PINNED, OverflowRow, explicitly_hidden,
@@ -293,6 +294,7 @@ class ResultDialog(QDialog):
         self.btn_res_next_ms.setAutoDefault(False)
         self.btn_res_next_ms.setVisible(False)
         self.btn_res_next_ms.clicked.connect(lambda: self.navigate_manuscript_results(1))
+        self.btn_res_next_ms.clicked.connect(lambda: startup_tips.mark_used('next_ms'))
         # --- Composition result context (hidden for every other caller) ---
         # The current result's category (Main / Appendix / Filtered / Excluded),
         # the result-list filters that shaped this list (a snapshot taken when

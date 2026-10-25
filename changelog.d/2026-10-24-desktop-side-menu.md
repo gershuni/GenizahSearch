@@ -1,4 +1,4 @@
-## [Unreleased] -- A side menu as an option, Go to, saved searches, text size, shortcuts, and an account menu (desktop, branch `claude/sleepy-hawking-id0eg0`)
+## [Unreleased] -- A side menu as an option, Go to, saved searches, startup tips, text size, shortcuts, and an account menu (desktop, branch `claude/sleepy-hawking-id0eg0`)
 
 Owner, 2026-10-24: "move the menu to one of the app sides, remove the V tick boxes, and add also the
 puzzle, joins lab and settings to the menu", then "Keep the tabs. Offer an option to change them to
@@ -33,6 +33,12 @@ size and position.
   three modes, the variant slider, *Sort by shelfmark only*, the corpus choice and the buttons do,
   and which way to turn them. Help's *Min chunks*
   now says page: the count is per page, as the engine applies it.
+- **Startup tips** (`desktop/startup_tips.py`): from the second start, one tip at each start in a
+  strip under the top bar, about a feature that is easy to miss; 55 tips, written and approved by the
+  owner in English and Hebrew, the strongest five first. Show me opens the feature and rings the
+  control; a tip that needs the letter-level index or an account invites to it instead (builds the
+  index, opens the login). Each tip is shown once, tips about features already in use are skipped,
+  five closes in a row turn them off; Settings > *Show a tip when the program starts*.
 - **The window opens where, and as large as, it was closed** (`main_window_geometry` in
   config.pkl); the first start is maximized, as before.
 - **More keys:** F1 opens Help at the section in front (Help is now in the menus too), Ctrl+, opens

@@ -5679,6 +5679,129 @@ TRANSLATIONS.update({
         "חיפוש נוסף שבו התוצאות הטובות ביותר משמשות עדים נוספים, ממוזגות לרשימה אחת.",
 })
 
+# Startup tips (desktop/startup_tips.py, 2026-10-25). The Hebrew of each tip is
+# the owner's own, from the review sheet (startup_tips_review, round 4); **bold**
+# marks a name on screen, as Hebrew has no capitals to mark one.
+TRANSLATIONS.update({
+    "Show me": "הראו לי",
+    "Next tip": "הטיפ הבא",
+    "Don't show tips": "לא להציג טיפים",
+    "Build the index": "בניית האינדקס",
+    "Tips are off. You can turn them on again in Settings.":
+        "הטיפים כבויים. אפשר להפעיל אותם שוב בהגדרות.",
+    "Show a tip when the program starts": "הצגת טיפ בפתיחת התוכנה",
+    "Ctrl+G opens any manuscript from anywhere: type a shelfmark or system number, or pick one of the last ten you opened.":
+        "Ctrl+G פותח כל כתב יד מכל מקום: הקלידו מספר מדף או מספר מערכת, או בחרו אחד מעשרת כתבי היד האחרונים שפתחתם.",
+    "The arrow at the end of the query box reruns a recent search; ☆ keeps it at the top of the list for good.":
+        "החץ בקצה תיבת החיפוש מריץ שוב אחד מהחיפושים האחרונים; ☆ מצמיד אותו לראש הרשימה לצמיתות.",
+    "**Letter-level search** finds parallels much faster than chunk search, with fewer unrelated results. Its index is built once, from **Settings**.":
+        "**חיפוש ברמת האות** מוצא מקבילות מהר בהרבה מחיפוש מקטעים, ועם פחות תוצאות לא רלוונטיות. את האינדקס שלו בונים פעם אחת, בחלון **הגדרות**.",
+    "Have several textual witnesses of the work you are looking for? Add each one in the **Witnesses** window: each copy is searched separately and the results are merged, which finds more than any single copy.":
+        "יש לכם כמה עדי נוסח של החיבור שאתם מחפשים? הוסיפו כל אחד מהם בחלון **עדים**: החיפוש נעשה בכל עותק בנפרד והתוצאות ממוזגות, וכך מוצאים יותר מאשר בכל עותק לבדו.",
+    "In **Responsa** style, * stands for any letters inside a word: כהנ* גדו* finds both כהן גדול and כהנים גדולים.":
+        "בחיפוש בסגנון **פרויקט השו\"ת**, הסימן * מייצג אותיות כלשהן בתוך מילה: כהנ* גדו* מוצא גם כהן גדול וגם כהנים גדולים.",
+    "Type a sign followed by a space to pick the search mode: ? שלום for **Variants**, ~ for **Fuzzy**, $ for catalog titles, # for shelfmarks, and R and a space for **Responsa** style.":
+        "הקלידו סימן ואחריו רווח כדי לבחור את סוג החיפוש: ? שלום לחיפוש **וריאנטים**, ~ לחיפוש **מקורב**, $ לכותרות בקטלוג, # למספרי מדף, ו-R ורווח לחיפוש בסגנון **פרויקט השו\"ת**.",
+    "#שלום# finds the word with every prefix and suffix (600 forms), and %שלום finds it with and without ו and י.":
+        "#שלום# מוצא את המילה עם כל התחיליות והסיומות (600 צורות), ו-%שלום מוצא אותה בכתיב מלא ובכתיב חסר (עם ו' ו-י' ובלעדיהן).",
+    "Not sure of the **Responsa** syntax? **Tabular Search** builds the query from boxes, with a live preview.":
+        "לא בטוחים בתחביר של **פרויקט השו\"ת**? הכפתור **חיפוש טבלאי** בונה את השאילתה בעזרת תיבות, עם תצוגה מקדימה בזמן אמת.",
+    "The position list beside the query box (**Anywhere**, **Start of text**, **End of text**, **Line starts**, **Line ends**) limits the search to the start or end of a text or of a line, which helps when hunting joins.":
+        "רשימת המיקום שליד תיבת החיפוש (**בכל מקום**, **תחילת טקסט**, **סוף טקסט**, **תחילת שורה**, **סוף שורה**) מגבילה את החיפוש לתחילת טקסט או שורה, או לסופם – שימושי באיתור צירופים.",
+    "**Focus Search** narrows a search before it runs: by subject, author, work, date, or printed versus handwritten.":
+        "הכפתור **מקד חיפוש** מצמצם את החיפוש מראש: לפי תחום, מחבר, חיבור, תאריך, ודפוס או כתב יד.",
+    "After a search, **Search within N manuscripts** searches again only in the manuscripts it found.":
+        "אחרי חיפוש, הכפתור **חפש בתוך N כתבי יד** מחפש שוב רק בכתבי היד שנמצאו.",
+    "Click the filter mark in a column heading to filter the results by text; tick **Exclude matches** to hide the matching results instead.":
+        "לחצו על סמן הסינון בראש העמודה כדי לסנן את התוצאות לפי טקסט; סמנו **סנן התאמות** כדי להסתיר דווקא את התוצאות התואמות.",
+    "Right-click a result to hide that manuscript, copy its shelfmark, or send a correction or a comment.":
+        "לחצו לחיצה ימנית על תוצאה כדי להסתיר את כתב היד, להעתיק את מספר המדף שלו, או לשלוח תיקון או תגובה.",
+    "Tick results and press **Search with these too**: the pages that matched become more witnesses for the next round.":
+        "סמנו תוצאות ולחצו על **חפש גם עם אלו**: העמודים התואמים יהפכו לעדים נוספים בסבב הבא.",
+    "If your text contains verses or other quoted sources, you can filter them out with **Filter texts** > **Quoted texts**.":
+        "אם הטקסט שלכם מכיל פסוקים או מקורות מצוטטים אחרים, תוכלו לסנן אותם בעזרת **סנן טקסטים** > **מקורות מצוטטים**.",
+    "**Filter texts** > **Quoting texts** > **Load from Sefaria**: choose the passage of a work that quotes yours (the Rif on Berakhot, say), and that work's pages move out of the results.":
+        "**סנן טקסטים** > **חיבורים מצטטים** > **טען מספריא**: בחרו את הקטע בחיבור שמצטט את הטקסט שלכם (למשל הרי\"ף לברכות), ועמודי החיבור הזה יוצאו מהתוצאות.",
+    "**Filter texts** > **Add condition** shows only pages where another known text also appears: on the same image, on an adjacent one, or anywhere in the manuscript.":
+        "**סנן טקסטים** > **הוסף תנאי** מציג רק עמודים שבהם מופיע גם טקסט ידוע נוסף: באותה תמונה, בתמונה סמוכה או בכל מקום בכתב היד.",
+    "Already know some witnesses? List them in **Exclude Manuscripts**: they move to the **Excluded** group and the new finds stand out.":
+        "כבר מכירים חלק מהעדים? רשמו אותם בחלון **החרג כתבי יד**: הם יעברו לקבוצת **מוחרגים**, והממצאים החדשים יבלטו.",
+    "Shelfmarks needn't be exact: TS NS 13 15 finds T-S NS 13.15.":
+        "אין צורך להקליד מספר מדף מדויק: TS NS 13 15 מוצא את T-S NS 13.15.",
+    "**Find** on the Browse tab marks a word as you type it; **View All** puts every page of the manuscript in one scroll.":
+        "השדה **מצא** בלשונית **עיון לפי מספר מדף** מדגיש מילה תוך כדי הקלדה; הכפתור **הכל** מציג את כל עמודי כתב היד בגלילה רציפה אחת.",
+    "🔍 **Parallels**, on the Browse tab and in the viewer, sends the page you are reading to Composition Search to find other copies of it.":
+        "הכפתור 🔍 **מקבילות**, בלשונית **עיון לפי מספר מדף** ובחלון הצפייה, שולח את העמוד שאתם קוראים ללשונית **חיפוש חיבורים** כדי למצוא עותקים נוספים שלו.",
+    "The **Reading Desk** shows several manuscripts side by side with their images: 👁️ **Add to View** adds the one on screen, and the 🔗 joins menu opens all joined fragments at once.":
+        "**שולחן עיון** מציג כמה כתבי יד זה לצד זה, עם התמונות שלהם: 👁️ **הוסף לתצוגה** מוסיף את כתב היד שעל המסך, ותפריט הצירופים 🔗 פותח בבת אחת את כל הקטעים שבצירוף.",
+    "**Cite this page** copies a ready citation for the manuscript on screen.":
+        "הכפתור **צטט דף זה** מעתיק הפניה ביבליוגרפית מוכנה לכתב היד המוצג.",
+    "**Open on the website** and **Copy link** lead to the same page on genizahsearch.com, handy for sharing with others.":
+        "הכפתורים **פתיחה באתר** ו-**העתקת קישור** מקשרים לאותו עמוד באתר genizahsearch.com, שימושי לשיתוף עם אחרים.",
+    "Click a PGP tag on the Browse tab (a letter, a contract) to list every manuscript with that topic, or choose **PGP Tags** as the search mode.":
+        "לחצו על תגית PGP בלשונית **עיון לפי מספר מדף** (למשל מכתב או חוזה) כדי להציג את כל כתבי היד בנושא הזה, או בחרו בסוג החיפוש **תגיות PGP**.",
+    "**Browse by Identification** lists manuscripts by subject, author, work and date; **Search in these results** then searches only them.":
+        "הלשונית **עיון לפי זיהוי** מציגה כתבי יד לפי תחום, מחבר, חיבור ותאריך; אחר כך הכפתור **חפש בתוצאות אלה** מחפש רק בהם.",
+    "The ☆ on each search result adds it to a personal list; signed in, your lists sync with genizahsearch.com.":
+        "הכוכב ☆ שליד כל תוצאת חיפוש מוסיף אותה לרשימה אישית; כשאתם מחוברים לחשבון, הרשימות שלכם מסתנכרנות עם genizahsearch.com.",
+    "Group your lists into projects, give items tags and notes, and save a list to Excel or Word with **Export List**.":
+        "קבצו את הרשימות לפרויקטים, הוסיפו לפריטים תגיות והערות, ושמרו רשימה כקובץ Excel או Word בעזרת **ייצוא רשימה**.",
+    "📋 **Copy Info** on a list item copies its details (short, detailed or with a link), ready to paste into an article.":
+        "הכפתור 📋 **העתק מידע** שבפריט ברשימה מעתיק את פרטיו (בקצרה, בפירוט או עם קישור), מוכנים להדבקה במאמר.",
+    "The **Joins Lab** helps you find joins for a given manuscript. Anchor it, and see beside it the results of a search for text you expect on the joining fragment, fragments that look like it, or both together.":
+        "**מעבדת צירופים** נועדה לסייע לכם למצוא צירופים לכתב יד מסוים. תוכלו לעגן את כתב היד ולצפות מולו בתוצאות חיפוש טקסט שאתם מצפים שיהיה בקטע המצורף, או בהתאמות חזותיות לקטע, וכן בשילוב של שניהם.",
+    "In the **Joins Lab**, **Visual Similarity** finds fragments that look alike. Note: it is a computer algorithm that covers only about half of the Genizah fragments, so its suggestions add matches but never rule one out.":
+        "בחלון **מעבדת צירופים**, הכפתור **דמיון חזותי** מוצא קטעים שנראים דומים זה לזה. תשומת לב: זה אלגוריתם ממוחשב הכולל רק כמחצית מקטעי הגניזה, כך שהצעותיו מוסיפות אך לא פוסלות התאמות.",
+    "Want to join fragments to each other physically? 🧩 **Puzzle** on the Browse tab puts the fragment on a canvas: remove the background, rotate and fit the pieces together, then export the result as one image.":
+        "רוצים לצרף קטעים פיזית אחד לשני? הכפתור 🧩 **פאזל** בלשונית **עיון לפי מספר מדף** מניח את הקטע על משטח עבודה: הסירו את הרקע, סובבו והתאימו את החלקים זה לזה, ואז ייצאו את התוצאה כתמונה אחת.",
+    "Ask the community: in the **Community** tab, + shares a discovery or a question about a manuscript, and other researchers can reply.":
+        "שאלו את הקהילה: בלשונית **קהילה**, לחצו על + כדי לשתף תגלית או שאלה על כתב יד, וחוקרים אחרים יוכלו להגיב.",
+    "You can search your own files! **My Library** indexes your Word, PDF, text and Excel files, so **Search** and **Composition Search** search them too when you choose **Local** or **ALL**.":
+        "תוכלו לחפש בקבצים שלכם! הלשונית **הספרייה שלי** מוסיפה לאינדקס את קובצי ה-Word, ה-PDF, הטקסט וה-Excel שלכם, כך שהלשוניות **חפש** ו-**חיפוש חיבורים** יחפשו גם בהם, אם בוחרים **מקומי** או **הכול**.",
+    "F1 opens Help at the section you are in; the orange **?** buttons do the same.":
+        "F1 פותח את העזרה בפרק של הלשונית שבה אתם נמצאים; גם הכפתורים הכתומים **?** עושים זאת.",
+    "Ctrl+1 to Ctrl+7 jump between the sections, and Ctrl+F puts the cursor in the section's own search box.":
+        "הקישו Ctrl+1 עד Ctrl+7 כדי לעבור בין הלשוניות, ו-Ctrl+F כדי להעביר את הסמן לתיבת החיפוש של הלשונית.",
+    "Ctrl+= and Ctrl+- make the text in the result lists larger or smaller, and Ctrl+0 returns to normal; **A−** and **A+** size the transcription.":
+        "Ctrl+= ו-Ctrl+- מגדילים ומקטינים את הכתב ברשימות התוצאות, ו-Ctrl+0 מחזיר לגודל הרגיל; **A−** ו-**A+** משנים את גודל התעתיק.",
+    "Prefer a menu down the side of the window? ☰ > **Move the menu to the side**.":
+        "מעדיפים תפריט לאורך צד החלון? ☰ > **העברת התפריט לצד**.",
+    "In the results, Space pages down and Shift+Space pages up.":
+        "ברשימת התוצאות, מקש הרווח מדפדף עמוד למטה, ו-Shift+רווח – עמוד למעלה.",
+    "The **XLSX** button exports a research workbook: the results, the manuscripts, a bibliography and credits, with a link to each image. Tick rows first to export only those.":
+        "הכפתור **XLSX** מייצא חוברת עבודה למחקר: התוצאות, כתבי היד, ביבליוגרפיה וקרדיטים, עם קישור לכל תמונה. סמנו שורות מראש כדי לייצא רק אותן.",
+    "Is a search taking a long time? ⏸ pauses it and ▶ resumes it from the same point; **Stop** keeps everything found so far.":
+        "החיפוש נמשך זמן רב? ⏸ משהה אותו ו-▶ ממשיך אותו מאותה נקודה; הכפתור **עצור** שומר את כל מה שנמצא עד כה.",
+    "You can add your own variant pairs, such as מ=נו, in the ⚙ **Search Settings** window.":
+        "תוכלו להוסיף זוגות וריאנטים מותאמים אישית, למשל מ=נו, בחלון ⚙ **הגדרות חיפוש**.",
+    "The automatic transcription sometimes splits or joins words. To get past this, choose **Responsa** style and tick **Flex Spacing**.":
+        "התעתיק האוטומטי מפצל ומאחד לפעמים מילים. כדי להתגבר על כך, בחרו בחיפוש בסגנון **פרויקט השו\"ת** וסמנו **ריווח גמיש**.",
+    "Searching Judeo-Arabic? In **Responsa** style, tick **Judeo-Arabic** to add the article אל- to every word.":
+        "מחפשים בערבית-יהודית? בחיפוש בסגנון **פרויקט השו\"ת**, סמנו **ערבית-יהודית** כדי להוסיף לכל מילה את תווית היידוע אל-.",
+    "In **Responsa** style, (שלום/שלומות) finds either word, and שלום [3] עולם allows up to three words between the two.":
+        "בחיפוש בסגנון **פרויקט השו\"ת**, (שלום/שלומות) מוצא כל אחת משתי המילים, והחיפוש שלום [3] עולם מתיר עד שלוש מילים ביניהן.",
+    "Not sure which word comes first? In **Responsa** style, tick **Bidirectional** to find the words in either order.":
+        "לא בטוחים איזו מילה באה קודם? בחיפוש בסגנון **פרויקט השו\"ת**, סמנו **דו-כיווני** כדי למצוא את המילים בכל סדר.",
+    "If you are looking for a work in several paragraphs, such as the Amidah or a piyyut, try **Cross-paragraph only**: the program looks only for phrases that link the paragraphs, which filters out quotations of a single paragraph.":
+        "אם אתם מחפשים חיבור בן כמה פסקאות, כמו תפילת שמונה עשרה או פיוט, נסו את האפשרות **חוצה-פסקאות בלבד**: התוכנה תחפש רק ביטויים שמחברים בין הפסקאות וכך תסנן ציטוטים של פסקה בפני עצמה.",
+    "Many textual witnesses in one file? In the **Witnesses** window, tick **Split each file on blank lines** and press **Load from files** to add them all at once.":
+        "יש לכם עדי נוסח רבים בקובץ אחד? בחלון **עדים**, סמנו **פצל כל קובץ לפי שורות ריקות** ולחצו על **טען מקבצים** כדי להוסיף את כולם בבת אחת.",
+    "In the viewer opened from Composition Search, **Next Manuscript ▶▶** skips the remaining pages of the fragment you are reading.":
+        "בחלון הצפייה שנפתח מהלשונית **חיפוש חיבורים**, הכפתור **לכתב היד הבא ◀◀** מדלג על שאר העמודים של הקטע שאתם קוראים.",
+    "🌐 **View on Ktiv** opens the manuscript in the National Library of Israel's catalogue.":
+        "הכפתור 🌐 **עיין בכתיב** פותח את כתב היד בקטלוג של הספרייה הלאומית.",
+    "Can't find a manuscript you saw yesterday? **Personal Lists** keeps a **Recently Viewed** list with the last 50 you opened.":
+        "לא מוצאים כתב יד שראיתם אתמול? בלשונית **רשימות אישיות** שמורה הרשימה **נצפו לאחרונה**, ובה 50 כתבי היד האחרונים שפתחתם.",
+    "You can edit the transcription or post comments with the matching buttons on the Browse tab or in the results viewer.":
+        "תוכלו לערוך את התעתיק או לפרסם הערות, בכפתורים המתאימים בלשונית העיון או בחלונית תצוגת התוצאות.",
+    "In the **Joins Lab** window, press **Browse results ▶** to show the results one after another beside the anchor fragment.":
+        "בחלון **מעבדת צירופים** תוכלו ללחוץ על הכפתור **◀ עיין בתוצאות** כדי להציג אותן בזה אחר זה לצד קטע העוגן.",
+    "If you have a fragment and a guess at what the fragment joining it says on both sides, try a tailored search: in the **Joins Lab**, tick **search also on the other side of the leaf (p ±1)**.":
+        "אם יש לכם קרע והשערה מה כתוב בקרע המצורף לו משני הצדדים, נסו לערוך חיפוש מותאם: בחלון **מעבדת צירופים**, סמנו **חפש גם בצד השני של הדף (p ±1)**.",
+    "📖 on a search result opens the whole manuscript on the Browse tab; a double-click opens the viewer at that page.":
+        "הכפתור 📖 שבשורת התוצאה פותח את כל כתב היד בלשונית **עיון לפי מספר מדף**; לחיצה כפולה על התוצאה פותחת את חלון הצפייה באותו עמוד.",
+})
+
 # The word gap limit (owner, 2026-10-12): at most 10 in Exact, Variants and Fuzzy;
 # Responsa and Regex have none. The Search press, and a saved step that is not run again.
 TRANSLATIONS.update({
