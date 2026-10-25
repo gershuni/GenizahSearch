@@ -73,9 +73,9 @@ def main(argv=None):
     # A run interrupted after its append has archived some IDs already: they are not
     # appended twice, and a details section it left behind (its row already gone) is
     # removed now, so running the command again finishes the job (Codex review of #449).
-    archived = {i.id for _, i in closed if _archived(before, i.id)}
+    archived = {i.id for _, i in closed if _archived(before, i.id, sections.get(i.id, ""))}
     rows = {i.id for doc in parsed.values() for i in doc.issues}
-    leftover = sorted(k for k in sections if k not in rows and _archived(before, k))
+    leftover = sorted(k for k in sections if k not in rows and _archived(before, k, sections[k]))
     if not closed and not leftover:
         print("No closed rows (a status starting with %s) in the tracker or the backlog."
               % " ".join(model.CLOSED_MARKS))
@@ -110,8 +110,7 @@ def main(argv=None):
         with io.open(args.archive, "r", encoding="utf-8", newline="") as fh:
             after = fh.read()
         missing = [i.id for _, i in new
-                   if not _archived(after, i.id) or i.headline not in after
-                   or rebased(sections[i.id]).replace("\n", eol) not in after]
+                   if not _archived(after, i.id, sections[i.id]) or i.headline not in after]
         if missing or not after.startswith(before):
             print("!! the archive does not hold GS-%s after the append; nothing else was changed"
                   % ", GS-".join(map(str, missing)))
@@ -137,12 +136,15 @@ def main(argv=None):
     return 0
 
 
-def _archived(archive: str, issue_id: int) -> bool:
-    """The archive holds this ID's row ('| GS-<n> (<file>) |') AND its details ('### GS-<n>'
-    with a body). A run stopped inside its append can leave the row alone: that ID is not
-    archived, so it is appended again in full rather than its text lost (Codex, #449)."""
-    return (("| GS-%d (" % issue_id) in archive and
-            re.search(r"(?m)^### GS-%d\r?\n(?:\r?\n)*[ \t]*\S" % issue_id, archive) is not None)
+def _archived(archive: str, issue_id: int, details: str) -> bool:
+    """The archive holds this ID's row ('| GS-<n> (<file>) |') AND, under '### GS-<n>', the
+    whole of *details* (the source section, rebased). A run stopped anywhere inside its
+    append -- after the row, or partway through the details -- leaves the ID not archived,
+    so the next run appends it again in full rather than removing the only complete copy
+    (Codex review of PR #449, twice). Empty *details* never count as archived."""
+    flat = archive.replace("\r\n", "\n")
+    return (bool(details.strip()) and ("| GS-%d (" % issue_id) in flat
+            and ("\n### GS-%d\n\n%s\n" % (issue_id, rebased(details))) in flat)
 
 
 if __name__ == "__main__":

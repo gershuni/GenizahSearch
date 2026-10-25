@@ -463,6 +463,21 @@ def test_an_archive_append_stopped_after_the_row_appends_the_whole_entry_again(t
     assert co.check(f["tracker"], f["backlog"], f["details"]) == []
 
 
+def test_an_archive_append_stopped_inside_the_details_appends_the_whole_entry_again(tmp_path):
+    """A heading and the first characters of the body are not the details: the whole
+    entry is appended again before the source goes (Codex review of PR #449)."""
+    details = model.render_details(["# Issue details", ""],
+                                   {2: "alpha beta gamma", 3: "b", 4: "p2", 5: "debt"})
+    d, f = _tree(tmp_path, {}, tracker=CLOSED_GS2, details=details)
+    partial = ARCHIVE + ("| GS-2 (OPEN_ISSUES.md) | Old P3 a | `y.py` | 2026-09-01 | "
+                         "✅ Fixed (2026-10-22, abc1234) |\n\n### GS-2\n\nal")
+    f["archive"].write_text(partial, encoding="utf-8")
+    assert ac.main(_archive_argv(f)) == 0
+    archive = f["archive"].read_text(encoding="utf-8")
+    assert archive.startswith(partial) and "### GS-2\n\nalpha beta gamma\n" in archive
+    assert co.check(f["tracker"], f["backlog"], f["details"]) == []
+
+
 def test_relative_links_in_archived_details_are_rebased_on_the_archive(tmp_path):
     """Details are written from docs/; the archive is docs/archive/ (Codex review of #449)."""
     body = ("See [the plan](plans/X.md#step-2), [parked](archive/Y.md), [readme](../README.md), "
