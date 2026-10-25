@@ -210,27 +210,20 @@ data. Register it nightly with
 
 ### Open Issues Tracker (REQUIRED)
 
-**`docs/OPEN_ISSUES.md`** is the central issue tracking document. **You MUST maintain it:**
+**`docs/OPEN_ISSUES.md`** lists every open defect, one line each, by priority and area, under a
+stable ID (`GS-12`). Rebuilt 2026-10-25: the full text of each row is in `docs/ISSUE_DETAILS.md`,
+and what is not a defect (deferred, debt, test gaps, ideas, owner tasks) is in `docs/BACKLOG.md`.
+**Grep those two by ID; never read them whole.**
 
-1. **At session start:** read the **"Last Updated" note and "Quick Summary"** at the top, then
-   read only the section relevant to the work at hand. **Do not read the whole file** — it is
-   ~150 KB, it is resident for the rest of the session, and re-reading it is the single largest
-   recurring context cost in this project. Grep for what you need.
-2. **After fixing any bug:** mark it `✅ Fixed (YYYY-MM-DD)` **and move the entry to
-   `docs/archive/OPEN_ISSUES_ARCHIVE.md`** in the same edit — closed items must not accumulate
-   in the tracker.
-3. **After finding new bugs:** write the P1/P2/P3 row as a file in `docs/open_issues.d/` (see its
-   README), not in the tracker itself: rows added there conflict across open PRs. `init.ps1`
-   lists pending fragments; `scripts/collect_open_issues.py --apply` folds them in
-4. **At session end:** if you edited the tracker itself (closed a row, rewrote one), update the
-   "Last Updated" timestamp and summary counts. A session that only wrote fragments leaves the
-   tracker alone: the fold counts them
-
-Closed history (fixed/resolved/superseded + the full Change Log) lives in
-`docs/archive/OPEN_ISSUES_ARCHIVE.md` (~515 KB). **Grep it; never read it whole.**
-Re-split with `python scripts/archive_closed_issues.py --apply` (dry run without the flag) if the
-tracker grows past ~150 KB again. Never re-run `scripts/split_open_issues.ps1 -Apply`: it rebuilds
-the archive from scratch and would discard everything in it.
+1. **At session start:** read the "Last Updated" line, the Summary and your area's rows.
+2. **New defect:** a fragment in `docs/open_issues.d/` (see its README), never a row in the
+   tracker: rows conflict across open PRs. `scripts/collect_open_issues.py --apply` gives it an ID.
+3. **Fixed:** set the row's status to `✅ Fixed (YYYY-MM-DD, <sha>)`, then run
+   `python scripts/archive_closed_issues.py --apply`: it moves the row and its details to
+   `docs/archive/OPEN_ISSUES_ARCHIVE.md` (~530 KB, grep only) and regenerates the counts.
+4. **Never hand-edit a count:** the Summary is generated; `tests/test_open_issues_fragments.py`
+   fails when it drifts, and `collect_open_issues.py --apply` repairs it. Cite issues by ID, never
+   by line. Never re-run `scripts/split_open_issues.ps1 -Apply`: it rebuilds the archive from scratch.
 
 ### When to Update Docs
 

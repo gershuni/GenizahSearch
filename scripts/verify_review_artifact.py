@@ -84,8 +84,8 @@ def _row_count(db: str):
 # This artifact's KNOWN non-ok provenance rows, measured on the 2026-09-02
 # build (519,382 rows):
 #
-#     26,180  offsets_missing   the HTR re-alignment, docs/OPEN_ISSUES.md:210,
-#                               recorded there as CLOSED 2026-09-01 -- the
+#     26,180  offsets_missing   the HTR re-alignment (tracker GS-26, whose
+#                               addressing half is CLOSED 2026-09-01) -- the
 #                               rows were re-located in the HTR text and the
 #                               status kept as a label of how they got there
 #         86  nfc_shift         normalisation-shifted spans, accepted

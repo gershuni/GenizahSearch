@@ -60,10 +60,12 @@ $oi = 'docs\OPEN_ISSUES.md'
 if (Test-Path $oi) {
     $lines  = Get-Content $oi -Encoding UTF8
     $bytes  = (Get-Item $oi).Length
-    $openN  = @($lines | Where-Object { $_ -match [char]0x274C }).Count
-    $pendN  = @($lines | Where-Object { $_ -match [char]0x23F3 }).Count
-    Write-Host ("  size        : {0:N0} bytes / 180,000 ceiling  ({1:N0}%)" -f $bytes, (100 * $bytes / 180000))
-    Write-Host ("  open marks  : {0} open, {1} pending" -f $openN, $pendN)
+    $ceiling = 80000    # scripts/check_docs.py CONTEXT_BUDGET
+    $rows   = @($lines | Where-Object { $_ -match '^\| \[GS-\d+\]' })    # rows, not the status legend
+    $openN  = @($rows | Where-Object { $_ -match [char]0x274C }).Count
+    $pendN  = @($rows | Where-Object { $_ -match [char]0x23F3 }).Count
+    Write-Host ("  size        : {0:N0} bytes / {1:N0} ceiling  ({2:N0}%)" -f $bytes, $ceiling, (100 * $bytes / $ceiling))
+    Write-Host ("  open marks  : {0} open, {1} needing a check" -f $openN, $pendN)
     $lu = $lines | Where-Object { $_ -match '^\>\s*\*\*Last Updated' } | Select-Object -First 1
     if ($lu) {
         $txt = ($lu -replace '^\>\s*', '') -replace '\s+', ' '
@@ -71,8 +73,8 @@ if (Test-Path $oi) {
         Write-Host "  newest entry:"
         Write-Host ("    " + $txt) -ForegroundColor Gray
     }
-    Write-Host "  (read the Quick Summary + the one relevant section. Grep the rest." -ForegroundColor DarkGray
-    Write-Host "   Closed history is docs/archive/OPEN_ISSUES_ARCHIVE.md - grep only.)" -ForegroundColor DarkGray
+    Write-Host "  (read the Summary + your area's rows. Grep docs/ISSUE_DETAILS.md for GS-<n>," -ForegroundColor DarkGray
+    Write-Host "   docs/BACKLOG.md for debt/ideas, docs/archive/OPEN_ISSUES_ARCHIVE.md for closed.)" -ForegroundColor DarkGray
     # New rows wait as fragments until scripts/collect_open_issues.py folds them in.
     $frags = @(Get-ChildItem 'docs\open_issues.d' -Filter '*.md' -ErrorAction SilentlyContinue |
                Where-Object { $_.Name -ne 'README.md' })

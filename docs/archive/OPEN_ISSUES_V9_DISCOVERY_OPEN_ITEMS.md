@@ -1,5 +1,7 @@
 # v9.0.0 Discovery Milestone — open items (moved from the tracker 2026-10-23)
 
+> **2026-10-25: these items moved back into the tracker's ID space** at its reconstruction: each is a row of `docs/OPEN_ISSUES.md` or `docs/BACKLOG.md`, with this text verbatim in `docs/ISSUE_DETAILS.md` (in file order: item 1 -> GS-114, item 2 -> GS-113, item 3 -> GS-249, item 4 -> GS-259, item 5 -> GS-122, item 6 -> GS-123, item 7 -> GS-118, item 8 -> GS-248, item 9 -> GS-119, item 10 -> GS-120, item 11 -> GS-187, item 12 -> GS-115, item 13 -> GS-116, item 14 -> GS-117, item 15 -> GS-226, item 16 -> GS-121, item 17 -> GS-188, item 18 -> GS-189). This file is history; grep `docs/ISSUE_DETAILS.md` for the current state.
+
 > Moved verbatim from `docs/OPEN_ISSUES.md` (section "v9.0.0 Discovery Milestone — open items") on
 > 2026-10-23, a size split: the tracker had passed its 180,000-byte ceiling after the v9.9.0 fragment
 > fold. **These items are still open.** The authority on v9.0.0 is
