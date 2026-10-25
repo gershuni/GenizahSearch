@@ -14,7 +14,8 @@ Exports:
     add_history_entry(search_type, entry, limit) -> bool
     get_history(search_type) -> dict | list
     delete_history_entry(search_type, index) -> bool
-    clear_history(search_type) -> bool
+    set_history_pinned(search_type, index, pinned) -> bool
+    clear_history(search_type, keep_pinned) -> bool
     get_interrupted_search() -> Optional[dict]
     clear_interrupted_flag() -> bool
 """
@@ -276,9 +277,18 @@ def add_history_entry(search_type: str, entry: dict, limit: int = 20) -> bool:
         # Sort by timestamp descending (newest first) after update
         entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
 
-        # Enforce limit
+        # Enforce limit. Saved (starred) searches are kept whatever their age
+        # and do not count towards it: the limit trims the plain history only.
         if len(entries) > limit:
-            entries = entries[:limit]
+            kept = 0
+            trimmed = []
+            for e in entries:
+                if e.get("pinned"):
+                    trimmed.append(e)
+                elif kept < limit:
+                    trimmed.append(e)
+                    kept += 1
+            entries = trimmed
 
         data[search_type] = entries
         return _save_history_file(data)
@@ -339,21 +349,55 @@ def delete_history_entry(search_type: str, index: int) -> bool:
         return False
 
 
-def clear_history(search_type: str | None = None) -> bool:
+def set_history_pinned(search_type: str, index: int, pinned: bool) -> bool:
+    """
+    Save (star) or unsave a history entry.
+
+    A saved entry is kept whatever its age: the history limit and
+    ``clear_history(..., keep_pinned=True)`` leave it alone. Re-running it
+    updates it in place, so it stays saved.
+
+    Args:
+        search_type: ``'regular'`` or ``'composition'``.
+        index: Zero-based index in the (sorted newest-first) list.
+        pinned: True to save it, False to make it ordinary history again.
+
+    Returns:
+        True on success, False on failure or invalid index.
+    """
+    try:
+        data = _load_history_file()
+        entries = data.get(search_type, [])
+        entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+        if not 0 <= index < len(entries):
+            return False
+        if pinned:
+            entries[index]["pinned"] = True
+        else:
+            entries[index].pop("pinned", None)
+        data[search_type] = entries
+        return _save_history_file(data)
+    except Exception as e:
+        logger.error("Failed to save history entry: %s", e)
+        return False
+
+
+def clear_history(search_type: str | None = None, keep_pinned: bool = False) -> bool:
     """
     Clear search history.
 
     Args:
         search_type: ``'regular'``, ``'composition'``, or None to clear all.
+        keep_pinned: keep the saved (starred) entries.
 
     Returns:
         True on success, False on failure.
     """
     try:
-        if search_type is None:
-            return _save_history_file({"regular": [], "composition": []})
         data = _load_history_file()
-        data[search_type] = []
+        for key in ([search_type] if search_type is not None else ["regular", "composition"]):
+            data[key] = ([e for e in data.get(key, []) if e.get("pinned")]
+                         if keep_pinned else [])
         return _save_history_file(data)
     except Exception as e:
         logger.error("Failed to clear history: %s", e)

@@ -5563,11 +5563,22 @@ TRANSLATIONS.update({
     # The Go to box (Ctrl+G).
     "Go to": "מעבר אל",
     "Go to...": "מעבר אל...",
-    "A shelfmark, system number or FL number opens the manuscript. "
+    "A shelfmark or system number opens the manuscript. "
     "Hebrew or Arabic words are searched.":
-        "מספר מדף, מספר מערכת או מספר FL פותחים את כתב היד. "
+        "מספר מדף או מספר מערכת פותחים את כתב היד. "
         "מילים בעברית או בערבית נשלחות לחיפוש.",
     "For example T-S 12.123": "למשל T-S 12.123",
+    "Recent manuscripts": "כתבי יד אחרונים",
+    # Saved searches: the star in the search history menus (2026-10-25).
+    "Saved searches": "חיפושים שמורים",
+    "Clear history (saved searches stay)": "ניקוי ההיסטוריה (החיפושים השמורים נשארים)",
+    "Remove from saved searches": "הסרה מהחיפושים השמורים",
+    "Save this search: it stays at the top of this list and is never dropped from it":
+        "שמירת החיפוש: הוא יישאר בראש הרשימה ולא יימחק ממנה",
+    "Clear the search history? Your saved searches stay.":
+        "לנקות את היסטוריית החיפוש? החיפושים השמורים יישארו.",
+    "How many recent searches each history list keeps. Saved (starred) searches are not counted.":
+        "כמה חיפושים אחרונים שומרת כל רשימת היסטוריה. חיפושים שמורים (בכוכב) אינם נספרים.",
     # Text size of the result lists (Settings, Ctrl+= / Ctrl+- / Ctrl+0).
     "Text size in result lists:": "גודל הטקסט ברשימות התוצאות:",
     "Normal": "רגיל",
@@ -5589,6 +5600,83 @@ TRANSLATIONS.update({
     "This page is not on genizahsearch.com.": "עמוד זה אינו נמצא באתר genizahsearch.com.",
     "Smaller text": "הקטנת הטקסט",
     "Larger text": "הגדלת הטקסט",
+})
+
+# Composition Search tooltips in plain words (owner, 2026-10-25).
+TRANSLATIONS.update({
+    "Your text is searched in runs of this many words. Fewer words find more, "
+    "including chance matches; more words find fewer, surer ones. "
+    "5 to 7 suits most texts.":
+        "הטקסט שלך נחפש ברצפים של מספר מילים זה. פחות מילים מוצאות יותר, "
+        "כולל התאמות מקריות; יותר מילים מוצאות פחות, אבל בוודאות רבה יותר. "
+        "5 עד 7 מתאים לרוב הטקסטים.",
+    "A run of words found on more than this many pages is treated as a common "
+    "phrase, such as a verse or a formula, and the pages where it is found go to "
+    "the Filtered group. Raise it if too much ends up there. At 50 or more, "
+    "nothing is filtered this way.":
+        "רצף מילים שנמצא ביותר עמודים ממספר זה נחשב לביטוי נפוץ, כגון פסוק או נוסחה, "
+        "והעמודים שבהם הוא נמצא עוברים לקבוצת המסוננים. הגדילו את המספר אם יותר מדי "
+        "עובר לשם. ב-50 ומעלה שום דבר אינו מסונן כך.",
+    "How closely the manuscripts must match your words:":
+        "עד כמה כתבי היד צריכים להתאים למילים שלך:",
+    "Exact: your words as written, as whole words.":
+        "מדויק: המילים שלך כפי שנכתבו, כמילים שלמות.",
+    "Variants: also common spelling variants. The slider beside it sets "
+    "how many kinds of letter swap are tried.":
+        "וריאנטים: גם חילופי כתיב נפוצים. המחוון שלידו קובע כמה סוגים של "
+        "חילופי אותיות ינוסו.",
+    "Fuzzy: also near spellings, with a letter added, dropped, changed or "
+    "swapped (two in words of five letters or more).":
+        "מקורב: גם כתיב קרוב, עם אות שנוספה, נשמטה, הוחלפה או החליפה מקום "
+        "(שתיים במילים של חמש אותיות ומעלה).",
+    "How many kinds of letter swap to try, the most common first. Higher finds "
+    "more spellings, more slowly and with more noise. The slider in the Search "
+    "tab moves with it.":
+        "כמה סוגים של חילופי אותיות לנסות, הנפוצים קודם. ערך גבוה מוצא יותר צורות "
+        "כתיב, לאט יותר ועם יותר רעש. המחוון בלשונית החיפוש זז יחד איתו.",
+    "When more than this many results share one catalog title (many copies of "
+    "one prayer book, for example), they are gathered under that title in the "
+    "Appendix, so they do not crowd the main results.":
+        "כאשר ליותר תוצאות ממספר זה יש אותה כותרת בקטלוג (למשל עותקים רבים של "
+        "סידור אחד), הן מקובצות תחת הכותרת הזאת בנספח, כדי שלא יציפו את התוצאות הראשיות.",
+    "A page is listed only when at least this many different chunks of your "
+    "text are found on it. Raise it to drop pages that share only one phrase "
+    "with your text. With cross-paragraph search, the \u2699 setting is used "
+    "instead.":
+        "עמוד מוצג רק אם נמצאו בו לפחות מספר זה של מקטעים שונים מהטקסט שלך. "
+        "הגדילו את המספר כדי להשמיט עמודים שחולקים עם הטקסט שלך ביטוי אחד בלבד. "
+        "בחיפוש חוצה פסקאות משמשת במקומו ההגדרה שבכפתור \u2699.",
+    "Show every result in one list, without the Main Results, Appendix and "
+    "Filtered groups. Filtered and excluded results are marked in the list "
+    "instead.":
+        "הצגת כל התוצאות ברשימה אחת, בלי הקבוצות תוצאות ראשיות, נספח ומסוננים. "
+        "תוצאות מסוננות ומוחרגות מסומנות ברשימה עצמה.",
+    "Search the corpus for parallels to the text in the box.":
+        "חיפוש מקבילות לטקסט שבתיבה.",
+    "Which texts to search:": "באילו טקסטים לחפש:",
+    "Genizah: the Genizah transcriptions.": "גניזה: התעתיקים של הגניזה.",
+    "Local: your My Library documents.": "מקומי: המסמכים שלך בספרייה שלי.",
+    "ALL: both, in one list.": "הכול: שניהם, ברשימה אחת.",
+    "Put the text of a file in the box, instead of pasting it.":
+        "הכנסת הטקסט של קובץ לתיבה, במקום להדביק אותו.",
+    "Manuscripts you already know: they are kept out of the results and listed "
+    "under Excluded.":
+        "כתבי יד שכבר ידועים לך: הם מוצאים מהתוצאות ומופיעים תחת מוחרגים.",
+    "Keep other texts out of your results: texts your composition quotes, works "
+    "that quote it, or a text that must appear. Hover over an item for an example.":
+        "הרחקת טקסטים אחרים מהתוצאות: טקסטים שהחיבור שלך מצטט, חיבורים שמצטטים אותו, "
+        "או טקסט שחייב להופיע. העבירו את העכבר מעל פריט כדי לראות דוגמה.",
+    "Search, then search again with the full text of the pages found "
+    "added to yours, to reach copies your text alone does not find. "
+    "Tick results first to use only those.":
+        "חיפוש, ואחריו חיפוש נוסף שבו הטקסט המלא של העמודים שנמצאו מתווסף לטקסט שלך, "
+        "כדי להגיע לעותקים שהטקסט שלך לבדו אינו מוצא. סמנו תוצאות קודם כדי להשתמש רק בהן.",
+    "Search again with the full text of the ticked results added to "
+    "yours.":
+        "חיפוש נוסף שבו הטקסט המלא של התוצאות המסומנות מתווסף לטקסט שלך.",
+    "Search again with the best results as more witnesses, merged into "
+    "one list.":
+        "חיפוש נוסף שבו התוצאות הטובות ביותר משמשות עדים נוספים, ממוזגות לרשימה אחת.",
 })
 
 # The word gap limit (owner, 2026-10-12): at most 10 in Exact, Variants and Fuzzy;

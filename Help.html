@@ -146,6 +146,7 @@
         <li><b>Preview:</b> Double-clicking a row opens the full Manuscript Viewer on that page. Clicking the "&#128065;" button will lead to the same result.</li>
         <li><b>Browse manuscript:</b> Clicking the "&#128214;" icon will open the manuscript in the "Browse by Shelfmark" tab. A similar browse button is also found in the Manuscript Viewer.</li>
         <li><b>Column Filtering:</b> Click on column headers (Shelfmark, Title, Snippet) to filter results by text. Check "Exclude" to hide matching results instead of showing them.</li>
+        <li><b>Recent and saved searches:</b> the arrow at the end of the query box (or the Down key in it) lists your recent searches; click one to run it again with the settings and filters it had. Click &#9734; beside a search to save it: saved searches are listed first, under <i>Saved searches</i>, and stay until you remove them (&#9733; again, or &#10005;), while the rest of the list keeps only the latest searches (<i>History Limit</i> in Settings, 20 by default). <i>Clear history</i> leaves the saved ones. Composition Search has the same list, on its title box.</li>
     </ul>
 
     <h3>Stopping and Pausing a Search</h3>
@@ -343,7 +344,7 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
         <li><b>Filter &gt;:</b> If a specific title (e.g., "Siddur Rav Saadia Gaon") appears more than X times in the results, the software groups these results under a single "Group" in the Appendix to avoid flooding the main list.</li>
         <li><b>Sort by shelfmark only:</b> Disables smart grouping and displays a flat, sorted list of all found manuscripts.</li>
         <li><b>Exact / Variants / Fuzzy:</b> the search mode (see Search Modes above). In Variants mode a slider (<i>Variant intensity</i>) appears beside it instead of the Basic / Extended / Maximum buttons; it sets how many letter substitutions are tried. The number of changes is not shown here: Composition Search uses the ×1&ndash;×3 value set for the Basic level in the Search tab (Fuzzy: always ×2).</li>
-        <li><b>Min chunks:</b> A manuscript is listed only if at least this many chunks matched in it (default 1; turning on Lab Mode sets it to 3). It applies with Full search; in the two cross-paragraph modes the <i>Min. cross-paragraph matches</i> setting (gear button) is used instead.</li>
+        <li><b>Min chunks:</b> A page is listed only if at least this many different chunks matched on it (default 1; turning on Lab Mode sets it to 3). It applies with Full search; in the two cross-paragraph modes the <i>Min. cross-paragraph matches</i> setting (gear button) is used instead.</li>
     </ul>
 
     <h3>Advanced Options</h3>
@@ -886,7 +887,8 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
         <li><b>Menu:</b> <i>Tabs at the top</i> (the default) shows the sections as tabs, with the &#9776; menu, Login, the language switch, the website, the Fragment Puzzle, the Joins Lab and Settings beside them. <i>Side menu</i> lists the same things down the side of the window instead. The change applies at once. The &#9776; menu also offers <b>Move the menu to the side</b>; right-click the side menu for <b>Back to tabs at the top</b>.</li>
         <li><b>The side menu:</b> &#9776; at its top shows or hides the labels. On a narrow window it shows icons only (hover for the name), and &#9776; opens the full list.</li>
         <li><b>The &#9776; menu</b> sits at the edge of the window, before the first tab (on the right in Hebrew, on the left in English). It lists every section, then <b>Go to...</b>, the Fragment Puzzle, the Joins Lab, <b>Help</b> and Settings.</li>
-        <li><b>Go to (Ctrl+G):</b> type a shelfmark, a system number or an FL number to open the manuscript in Browse by Shelfmark from anywhere in the window. Hebrew or Arabic words are searched instead, on the Search tab with its current settings.</li>
+        <li><b>Go to (Ctrl+G):</b> type a shelfmark or a system number to open the manuscript in Browse by Shelfmark from anywhere in the window. Hebrew or Arabic words are searched instead, on the Search tab with its current settings. Under the box are the last ten manuscripts you opened: the Down key, then Enter, opens one; typing narrows the list.</li>
+        <li><b>Window size:</b> the window opens where, and as large as, it was when you closed it. The first time it opens maximized.</li>
         <li><b>Keyboard:</b> <b>Ctrl+1</b> to <b>Ctrl+7</b> open the sections in their order, from Search to My Library. <b>Ctrl+G</b> opens Go to, <b>F1</b> opens this Help at the section in front, <b>Ctrl+,</b> opens Settings, and <b>Ctrl+F</b> puts the cursor in the section's own search or find box (the query on Search, the source text on Composition Search, <i>Find</i> on Browse by Shelfmark, the author box on Browse by Identification, the item filter on Personal Lists).</li>
     </ul>
 
@@ -971,6 +973,7 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
         <li><b>תצוגה מקדימה:</b> לחיצה כפולה על שורה תפתח את חלון <b>צפייה בכתב יד</b> באותו עמוד. לחיצה על לחצן ה"&#128065;" תוביל לאותה תוצאה.</li>
 		<li><b>עיין בכתב יד:</b> לחיצה על לחצן ה"&#128214;" תוביל לפתיחת כתב היד בלשונית עיון לפי מספר מדף. לחצן עיון דומה נמצא גם בחלון צפייה בכתב יד.</li>
         <li><b>סינון עמודות:</b> לחיצה על כותרות העמודות (מספר מדף, כותרת, קטע) מאפשרת לסנן תוצאות לפי טקסט. סמנו "החרג" כדי להסתיר תוצאות תואמות במקום להציג אותן.</li>
+        <li><b>חיפושים אחרונים ושמורים:</b> החץ שבקצה תיבת השאילתה (או המקש חץ למטה בתוכה) מציג את החיפושים האחרונים; לחיצה על אחד מהם מריצה אותו שוב עם ההגדרות והמסננים שהיו לו. לחיצה על &#9734; ליד חיפוש שומרת אותו: החיפושים השמורים מופיעים ראשונים, תחת <i>חיפושים שמורים</i>, ונשארים עד שתסירו אותם (שוב &#9733;, או &#10005;), ואילו שאר הרשימה שומרת רק את החיפושים האחרונים (<i>מגבלת היסטוריה</i> בהגדרות, 20 כברירת מחדל). <i>ניקוי ההיסטוריה</i> משאיר את השמורים. לחיפוש חיבורים יש אותה רשימה, בתיבת הכותרת שלו.</li>
     </ul>
 
     <h3>עצירה והשהיה של חיפוש</h3>
@@ -1133,7 +1136,7 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
         <li><b>סינון &gt;:</b> אם כותרת מסוימת (למשל "סידור רב סעדיה גאון") מופיעה בתוצאות יותר מ-X פעמים, התוכנה תקבץ את כל התוצאות הללו תחת "קבוצה" אחת בנספח, כדי לא להציף את הרשימה הראשית.</li>
         <li><b>מיין לפי מספר מדף בלבד:</b> מבטל את הקיבוץ החכם ומציג רשימה שטוחה וממוינת של כל כתבי היד שנמצאו.</li>
         <li><b>מדויק / וריאנטים / מקורב:</b> מצב החיפוש (ראו מצבי חיפוש לעיל). במצב וריאנטים מופיע לידו מחוון (<i>עוצמת וריאנטים</i>) במקום הכפתורים בסיסי / מורחב / מרבי; הוא קובע כמה חילופי אותיות ייבדקו. מספר השינויים אינו מוצג כאן: חיפוש חיבורים משתמש בערך ×1&ndash;×3 שנקבע לרמה בסיסי בלשונית "חפש" (במקורב תמיד ×2).</li>
-        <li><b>מינ' מקטעים:</b> כתב יד יוצג רק אם נמצאו בו לפחות מספר זה של מקטעים תואמים (ברירת מחדל 1; הפעלת מצב מעבדה קובעת 3). הערך חל בחיפוש מלא; בשני מצבי חוצה-הפסקאות חלה במקומו ההגדרה <i>מינימום התאמות חוצות-פסקאות</i> (כפתור גלגל השיניים).</li>
+        <li><b>מינ' מקטעים:</b> עמוד יוצג רק אם נמצאו בו לפחות מספר זה של מקטעים שונים תואמים (ברירת מחדל 1; הפעלת מצב מעבדה קובעת 3). הערך חל בחיפוש מלא; בשני מצבי חוצה-הפסקאות חלה במקומו ההגדרה <i>מינימום התאמות חוצות-פסקאות</i> (כפתור גלגל השיניים).</li>
     </ul>
 
     <h3>אפשרויות מתקדמות</h3>
@@ -1661,7 +1664,8 @@ found so far is kept. Up to 25 witnesses can be held at once.</p>
         <li><b>תפריט:</b> <i>לשוניות למעלה</i> (ברירת המחדל) מציג את הלשוניות בראש החלון, ולצידן את תפריט &#9776;, התחברות, החלפת השפה, האתר, פאזל קטעים, מעבדת צירופים והגדרות. <i>תפריט צד</i> מציג את כל אלה לאורך צד החלון. השינוי חל מיד. בתפריט &#9776; יש גם <b>העברת התפריט לצד</b>; לחיצה ימנית על תפריט הצד מציעה <b>חזרה ללשוניות למעלה</b>.</li>
         <li><b>תפריט הצד:</b> &#9776; בראשו מציג או מסתיר את השמות. בחלון צר הוא מציג סמלים בלבד (השם מופיע במעבר העכבר), ו-&#9776; פותח את הרשימה המלאה.</li>
         <li><b>תפריט &#9776;</b> נמצא בקצה החלון, לפני הלשונית הראשונה (מימין בעברית, משמאל באנגלית). הוא מציג את כל הלשוניות, ואחריהן <b>מעבר אל...</b>, פאזל קטעים, מעבדת צירופים, <b>עזרה</b> והגדרות.</li>
-        <li><b>מעבר אל (<bdi dir="ltr">Ctrl+G</bdi>):</b> הקלידו מספר מדף, מספר מערכת או מספר FL כדי לפתוח את כתב היד בעיון לפי מספר מדף מכל מקום בחלון. מילים בעברית או בערבית נשלחות במקום זאת לחיפוש, בלשונית חפש ובהגדרות הנוכחיות שלה.</li>
+        <li><b>מעבר אל (<bdi dir="ltr">Ctrl+G</bdi>):</b> הקלידו מספר מדף או מספר מערכת כדי לפתוח את כתב היד בעיון לפי מספר מדף מכל מקום בחלון. מילים בעברית או בערבית נשלחות במקום זאת לחיפוש, בלשונית חפש ובהגדרות הנוכחיות שלה. מתחת לתיבה מופיעים עשרת כתבי היד האחרונים שפתחתם: המקש חץ למטה ואחריו Enter פותחים אחד מהם; הקלדה מצמצמת את הרשימה.</li>
+        <li><b>גודל החלון:</b> החלון נפתח במקום ובגודל שהיו לו כשסגרתם אותו. בפעם הראשונה הוא נפתח מוגדל למסך מלא.</li>
         <li><b>מקלדת:</b> <bdi dir="ltr">Ctrl+1</bdi> עד <bdi dir="ltr">Ctrl+7</bdi> פותחים את הלשוניות לפי סדרן, מחפש ועד הספרייה שלי. <bdi dir="ltr">Ctrl+G</bdi> פותח את מעבר אל, <bdi dir="ltr">F1</bdi> פותח עזרה זו בפרק של הלשונית הפתוחה, <bdi dir="ltr">Ctrl+,</bdi> פותח את ההגדרות, ו-<bdi dir="ltr">Ctrl+F</bdi> מעביר את הסמן לתיבת החיפוש או הסינון של הלשונית (השאילתה בחפש, טקסט המקור בחיפוש חיבורים, <i>מצא</i> בעיון לפי מספר מדף, תיבת המחבר בעיון לפי זיהוי, סינון הפריטים ברשימות אישיות).</li>
     </ul>
 

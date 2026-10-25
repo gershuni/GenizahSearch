@@ -6,7 +6,10 @@ FL number or shelfmark in Browse with only that field filled -- browse_load read
 all three, so a leftover number would compete -- or runs a search for Hebrew or
 Arabic words, without starting a second search over a running one; that F1 opens
 Help at the section in front; and that Ctrl+F puts the cursor in the section's
-own search or find field.
+own search or find field. And (owner, 2026-10-25) the recent manuscripts under
+the box: one row per manuscript, narrowed by typing, picked with Down, and
+opened the way Browse's own Recently Viewed list opens them; the hint no longer
+names FL numbers.
 """
 
 import os
@@ -161,6 +164,108 @@ def test_the_dialog_returns_what_was_typed_and_gives_the_completer_back():
     dlg.deleteLater()
 
 
+def test_the_hint_does_not_offer_fl_numbers():
+    from desktop.go_to_dialog import GoToDialog
+    from PyQt6.QtWidgets import QLabel
+    dlg = GoToDialog(None)
+    hints = " ".join(lbl.text() for lbl in dlg.findChildren(QLabel))
+    assert "FL" not in hints
+    assert not dlg.recent_list.isVisibleTo(dlg)          # nothing opened yet: no list
+    assert dlg.choice() == ("text", "")
+    dlg.deleteLater()
+
+
+def _recent_dialog():
+    from desktop.go_to_dialog import GoToDialog
+    return GoToDialog(None, recent=[("T-S NS 13.15 \u2014 Piyyut", "id1"),
+                                    ("ENA 2345.1", "id2"),
+                                    ("T-S 12.123", "id3")])
+
+
+def _press(widget, key):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QKeyEvent
+    from PyQt6.QtCore import QEvent
+    QApplication.sendEvent(widget, QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier))
+
+
+def test_down_picks_a_recent_manuscript_and_typing_narrows_the_list():
+    from PyQt6.QtCore import Qt
+    dlg = _recent_dialog()
+    assert dlg.recent_list.count() == 3 and dlg.recent_list.isVisibleTo(dlg)
+    _press(dlg.input, Qt.Key.Key_Down)
+    assert dlg.choice() == ("recent", "id1")
+    _press(dlg.input, Qt.Key.Key_Down)
+    assert dlg.choice() == ("recent", "id2")
+    _press(dlg.input, Qt.Key.Key_Up)
+    _press(dlg.input, Qt.Key.Key_Up)                    # above the first: back to the box
+    assert dlg.choice() == ("text", "")
+    dlg.input.setText("ts 12")                          # letters and digits only
+    shown = [dlg.recent_list.item(r).text() for r in range(3)
+             if not dlg.recent_list.item(r).isHidden()]
+    assert shown == ["T-S 12.123"]
+    assert dlg.choice() == ("text", "ts 12")            # typed, nothing picked
+    _press(dlg.input, Qt.Key.Key_Down)
+    assert dlg.choice() == ("recent", "id3")
+    dlg.input.setText("ts 1")                           # typing again drops the pick
+    assert dlg.choice() == ("text", "ts 1")
+    dlg.deleteLater()
+
+
+class _Lists:
+    def __init__(self, items):
+        self.items = items
+
+    def get_items_in_list(self, list_id):
+        assert list_id == "recent"
+        return [dict(i) for i in self.items]
+
+    def get_item(self, item_id):
+        return next((dict(i) for i in self.items if i["item_id"] == item_id), None)
+
+
+class _Meta:
+    def get_meta_for_id(self, sid):
+        return {"990001": ("T-S 12.123", "Siddur " + "x" * 80),
+                "990002": ("Unknown", "")}.get(sid, ("", ""))
+
+
+def test_recent_items_are_one_row_per_manuscript():
+    w = _Window()
+    w._go_to_recent_items = GenizahGUI._go_to_recent_items.__get__(w)
+    w.lists_mgr = _Lists([
+        {"item_id": "990001_3", "sys_id": "990001", "img": "3"},
+        {"item_id": "990002", "sys_id": "990002"},
+        {"item_id": "990001_1", "sys_id": "990001", "img": "1"},   # the same manuscript again
+        {"item_id": "971234", "sys_id": "971234", "shelfmark_override": "My letter"},
+    ])
+    w.meta_mgr = _Meta()
+    rows = w._go_to_recent_items()
+    assert [payload for _label, payload in rows] == ["990001_3", "990002", "971234"]
+    assert rows[0][0].startswith("T-S 12.123 \u2014 Siddur") and rows[0][0].endswith("\u2026")
+    assert rows[1][0] == "990002"                       # no shelfmark known: the number
+    assert rows[2][0] == "My letter"
+    assert w._go_to_recent_items(limit=1) == rows[:1]
+    w.lists_mgr = None
+    assert w._go_to_recent_items() == []
+
+
+def test_a_recent_manuscript_opens_as_browse_recently_viewed_does():
+    w = _Window()
+    w._open_recent_item = GenizahGUI._open_recent_item.__get__(w)
+    w._browse_open_list_entry = GenizahGUI._browse_open_list_entry.__get__(w)
+    w._normalize_fl_id = lambda v: v
+    w.lists_mgr = _Lists([{"item_id": "a", "sys_id": "990001", "fl_id": "FL77"},
+                          {"item_id": "b", "sys_id": "990002"}])
+    w.browse_sys_input.setText("leftover")
+    assert w._open_recent_item("a")
+    assert w.tabs.currentWidget() is w.browse_tab
+    assert w.calls == [("last", "fl"), ("browse", "", "", "77")]
+    assert w._open_recent_item("b")
+    assert w.calls[-2:] == [("last", "sys"), ("browse", "990002", "", "")]
+    assert not w._open_recent_item("gone")
+
+
 def test_main_window_wiring():
     from pathlib import Path
     src = (Path(__file__).resolve().parent.parent / "genizah_app.py").read_text(encoding="utf-8")
@@ -170,3 +275,5 @@ def test_main_window_wiring():
         assert f"({keys}, {slot})" in init_ui
     assert 'tr("Go to..."), shortcut="Ctrl+G")' in init_ui
     assert 'tr("Help"), footer=True, shortcut="F1")' in init_ui
+    go = src[src.index("    def open_go_to(self):"):src.index("    def _go_to_recent_items(")]
+    assert "recent=self._go_to_recent_items()" in go and "self._open_recent_item(value)" in go

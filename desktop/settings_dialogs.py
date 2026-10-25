@@ -1189,7 +1189,8 @@ class SettingsDialog(QDialog):
         self.main_win.spin_history_limit = QSpinBox()
         self.main_win.spin_history_limit.setRange(5, 100)
         self.main_win.spin_history_limit.setValue(load_app_config().get('history_limit', 20))
-        self.main_win.spin_history_limit.setToolTip(tr("Maximum search history entries per type"))
+        self.main_win.spin_history_limit.setToolTip(tr(
+            "How many recent searches each history list keeps. Saved (starred) searches are not counted."))
         self.main_win.spin_history_limit.valueChanged.connect(
             lambda val: save_app_config({'history_limit': val})
         )

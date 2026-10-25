@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QScrollArea, QFrame, QSlider, QSizePolicy, QInputDialog,
                              QToolButton, QAbstractSlider, QAbstractItemView,
                              QCompleter)
-from PyQt6.QtCore import (Qt, QTimer, QUrl, pyqtSignal, QThread, QEventLoop, QEvent, QPoint)
+from PyQt6.QtCore import (Qt, QTimer, QUrl, pyqtSignal, QThread, QEventLoop, QEvent, QPoint, QByteArray)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QColor,
                          QStandardItemModel, QStandardItem, QPalette, QCursor,
                          QFontInfo, QFontMetrics, QKeySequence, QShortcut)
@@ -6616,10 +6616,14 @@ class GenizahGUI(QMainWindow):
 
         # Load Button moved to top row
         btn_load = QPushButton(tr("Load Text File")); btn_load.clicked.connect(self.load_comp_file)
+        btn_load.setToolTip(tr("Put the text of a file in the box, instead of pasting it."))
         top_row.addWidget(btn_load)
 
         # 1. Exclude & Filter (Moved to top row)
         btn_exclude = QPushButton(tr("Exclude Manuscripts"))
+        btn_exclude.setToolTip(tr(
+            "Manuscripts you already know: they are kept out of the results and listed "
+            "under Excluded."))
         btn_exclude.clicked.connect(
             lambda: self.open_exclude_dialog('composition'))
         # "Filter texts" menu (owner, 2026-10-14): replaces the old "Filter
@@ -6629,6 +6633,9 @@ class GenizahGUI(QMainWindow):
         # created further down in this method -- fine, since the menu cannot
         # be shown before the tab finishes building.
         self.btn_comp_filter_texts = QPushButton(tr("Filter texts"))
+        self.btn_comp_filter_texts.setToolTip(tr(
+            "Keep other texts out of your results: texts your composition quotes, works "
+            "that quote it, or a text that must appear. Hover over an item for an example."))
         self.btn_comp_filter_texts.setMenu(self._build_comp_filter_menu())
         self.lbl_exclude_status = QLabel("")
         self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
@@ -6713,16 +6720,39 @@ class GenizahGUI(QMainWindow):
 
         # 2. Parameters
         self.spin_chunk = QSpinBox(); self.spin_chunk.setRange(2, 20); self.spin_chunk.setValue(5); self.spin_chunk.setPrefix(tr("Chunk: "))
-        self.spin_chunk.setToolTip(tr("Words per search block (Rec: 5-7)"))
+        # Tooltips in plain words (owner, 2026-10-25): what each setting does
+        # and which way to turn it.
+        self.spin_chunk.setToolTip(tr(
+            "Your text is searched in runs of this many words. Fewer words find more, "
+            "including chance matches; more words find fewer, surer ones. "
+            "5 to 7 suits most texts."))
         self.spin_chunk.valueChanged.connect(self._update_boundary_stats)
         
         self.spin_freq = QSpinBox(); self.spin_freq.setValue(10); self.spin_freq.setRange(1,1000); self.spin_freq.setPrefix(tr("Max Freq: "))
-        self.spin_freq.setToolTip(tr("Ignore phrases appearing > X times (filters common phrases)"))
+        self.spin_freq.setToolTip(tr(
+            "A run of words found on more than this many pages is treated as a common "
+            "phrase, such as a verse or a formula, and the pages where it is found go to "
+            "the Filtered group. Raise it if too much ends up there. At 50 or more, "
+            "nothing is filtered this way."))
         
         self.comp_mode_combo = QComboBox(); self.comp_mode_combo.addItems([tr("Exact"), tr("Variants"), tr("Fuzzy")])
         self.comp_mode_combo.setItemData(0, tr("Exact match"))
         self.comp_mode_combo.setItemData(1, tr("Variant search (uses slider level)"))
         self.comp_mode_combo.setItemData(2, tr("Fuzzy search"))
+        for _i, _tip in enumerate((
+                tr("Exact: your words as written, as whole words."),
+                tr("Variants: also common spelling variants. The slider beside it sets "
+                   "how many kinds of letter swap are tried."),
+                tr("Fuzzy: also near spellings, with a letter added, dropped, changed or "
+                   "swapped (two in words of five letters or more)."))):
+            self.comp_mode_combo.setItemData(_i, _tip, Qt.ItemDataRole.ToolTipRole)
+        self.comp_mode_combo.setToolTip(
+            tr("How closely the manuscripts must match your words:") + "\n"
+            + tr("Exact: your words as written, as whole words.") + "\n"
+            + tr("Variants: also common spelling variants. The slider beside it sets "
+                 "how many kinds of letter swap are tried.") + "\n"
+            + tr("Fuzzy: also near spellings, with a letter added, dropped, changed or "
+                 "swapped (two in words of five letters or more)."))
         self.comp_mode_combo.currentIndexChanged.connect(self._on_comp_mode_changed)
 
         # Variant Level Slider for Composition (visible only in Variants mode)
@@ -6733,7 +6763,10 @@ class GenizahGUI(QMainWindow):
         self.comp_variant_slider.setRange(10, 500)
         self.comp_variant_slider.setValue(50)
         self.comp_variant_slider.setFixedWidth(80)
-        self.comp_variant_slider.setToolTip(tr("Variant intensity"))
+        self.comp_variant_slider.setToolTip(tr(
+            "How many kinds of letter swap to try, the most common first. Higher finds "
+            "more spellings, more slowly and with more noise. The slider in the Search "
+            "tab moves with it."))
         self.comp_variant_slider_label = QLabel("50")
         self.comp_variant_slider_label.setFixedWidth(25)
         self.comp_variant_slider.valueChanged.connect(lambda v: (
@@ -6745,18 +6778,28 @@ class GenizahGUI(QMainWindow):
         self.comp_variant_slider_container.setVisible(False)
 
         self.spin_filter = QSpinBox(); self.spin_filter.setValue(5); self.spin_filter.setPrefix(tr("Filter > "))
-        self.spin_filter.setToolTip(tr("Move titles appearing > X times to Appendix"))
+        self.spin_filter.setToolTip(tr(
+            "When more than this many results share one catalog title (many copies of "
+            "one prayer book, for example), they are gathered under that title in the "
+            "Appendix, so they do not crowd the main results."))
 
         # Min chunk matches spinbox
         self.spin_min_chunks = QSpinBox()
         self.spin_min_chunks.setRange(1, 20)
         self.spin_min_chunks.setValue(1)
         self.spin_min_chunks.setPrefix(tr("Min chunks: "))
-        self.spin_min_chunks.setToolTip(tr("Minimum chunk matches per manuscript"))
+        self.spin_min_chunks.setToolTip(tr(
+            "A page is listed only when at least this many different chunks of your "
+            "text are found on it. Raise it to drop pages that share only one phrase "
+            "with your text. With cross-paragraph search, the \u2699 setting is used "
+            "instead."))
 
         # Shortened Text
         self.chk_comp_flat = QCheckBox(tr("Sort by shelfmark only"))
-        self.chk_comp_flat.setToolTip(tr("Disable Main/Appendix grouping"))
+        self.chk_comp_flat.setToolTip(tr(
+            "Show every result in one list, without the Main Results, Appendix and "
+            "Filtered groups. Filtered and excluded results are marked in the list "
+            "instead."))
         self.chk_comp_flat.toggled.connect(self.on_comp_display_mode_changed)
 
         cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
@@ -6988,11 +7031,14 @@ class GenizahGUI(QMainWindow):
 
         # Shortened Text
         self.btn_comp_run = QPushButton(tr("Analyze")); self.btn_comp_run.clicked.connect(self.toggle_composition)
+        self.btn_comp_run.setToolTip(tr(
+            "Search the corpus for parallels to the text in the box."))
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
         self.btn_comp_run.setEnabled(False)
         self.btn_comp_recursive = QPushButton(tr("Full Recursive Search")); self.btn_comp_recursive.clicked.connect(self.run_recursive_composition)
         self.btn_comp_recursive.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
         self.btn_comp_recursive.setEnabled(True)
+        self.btn_comp_recursive.setToolTip(self._recursive_tip('full'))
 
         # "New" button to reset/clear composition search state
         self.btn_reset_comp = QPushButton(tr("New"))
@@ -7016,7 +7062,11 @@ class GenizahGUI(QMainWindow):
             self.comp_corpus_scope_combo.addItem("Genizah", "genizah")
             self.comp_corpus_scope_combo.addItem("Local", "local")
             self.comp_corpus_scope_combo.addItem("ALL", "all")
-        self.comp_corpus_scope_combo.setToolTip(tr("Select which corpus to search"))
+        self.comp_corpus_scope_combo.setToolTip(
+            tr("Which texts to search:") + "\n"
+            + tr("Genizah: the Genizah transcriptions.") + "\n"
+            + tr("Local: your My Library documents.") + "\n"
+            + tr("ALL: both, in one list."))
         self.comp_corpus_scope_combo.setFixedWidth(90)
         _comp_saved_scope = getattr(self, '_comp_corpus_scope', 'genizah')
         _comp_scope_idx = self.comp_corpus_scope_combo.findData(_comp_saved_scope)
@@ -8001,6 +8051,11 @@ class GenizahGUI(QMainWindow):
                 self._browse_rd_add_entry(sys_id, shelfmark)
             return
 
+        self._browse_open_list_entry(entry)
+
+    def _browse_open_list_entry(self, entry):
+        """Open a list or Recently Viewed entry in Browse: at its FL or image
+        when it has one, else by system number."""
         fl_id = entry.get('fl_id')
         img_id = entry.get('img')
         sys_id = entry.get('sys_id')
@@ -16481,16 +16536,65 @@ class GenizahGUI(QMainWindow):
 
     # -- Go to, Help, Ctrl+F (owner, 2026-10-24) -------------------------------
     def open_go_to(self):
-        """Ctrl+G: the Go to box, then open or search what was typed."""
-        dlg = GoToDialog(self, completer=getattr(self, 'shelf_completer', None))
+        """Ctrl+G: the Go to box, then open or search what was typed, or open
+        the recent manuscript chosen in it."""
+        dlg = GoToDialog(self, completer=getattr(self, 'shelf_completer', None),
+                         recent=self._go_to_recent_items())
         try:
             accepted = dlg.exec()
-            text = dlg.text()
+            kind, value = dlg.choice()
         finally:
             dlg.detach_completer()
             dlg.deleteLater()
-        if accepted:
-            self.go_to(text)
+        if not accepted:
+            return
+        if kind == 'recent':
+            self._open_recent_item(value)
+        else:
+            self.go_to(value)
+
+    def _go_to_recent_items(self, limit=10):
+        """The manuscripts opened last, for the Go to box: (label, item id),
+        most recent first, each manuscript once (Recently Viewed keeps a row
+        per image)."""
+        if not getattr(self, 'lists_mgr', None):
+            return []
+        try:
+            items = self.lists_mgr.get_items_in_list('recent')
+        except Exception:
+            logger.exception("Go to: reading Recently Viewed failed")
+            return []
+        out, seen = [], set()
+        for item in items:
+            sid = item.get('sys_id')
+            if not sid or sid in seen or not item.get('item_id'):
+                continue
+            seen.add(sid)
+            shelfmark, title = '', ''
+            if getattr(self, 'meta_mgr', None):
+                try:
+                    shelfmark, title = self.meta_mgr.get_meta_for_id(sid)
+                except Exception:
+                    shelfmark, title = '', ''
+            shelfmark = item.get('shelfmark_override') or shelfmark
+            if not shelfmark or shelfmark == 'Unknown':
+                shelfmark = str(sid)
+            title = (title or '').strip()
+            if len(title) > 60:
+                title = title[:59].rstrip() + '\u2026'
+            out.append((f"{shelfmark} \u2014 {title}" if title else shelfmark, item['item_id']))
+            if len(out) >= limit:
+                break
+        return out
+
+    def _open_recent_item(self, item_id):
+        """Open a Recently Viewed entry in Browse, as its own list does."""
+        entry = self.lists_mgr.get_item(item_id) if getattr(self, 'lists_mgr', None) else None
+        if not entry:
+            return False
+        self._set_active_tab(self.browse_tab)
+        self._browse_open_list_entry(entry)
+        return True
 
     def go_to(self, text):
         """Open a system number, FL number or shelfmark in Browse, or search
@@ -32215,11 +32319,28 @@ class GenizahGUI(QMainWindow):
             # runs on every render, so without this branch it would put the
             # chunk name back the moment any result appeared.
             self.btn_comp_recursive.setText(tr("Run auto-expand now"))
+            tip = 'expand'
         elif checked:
             self.btn_comp_recursive.setText(tr("Recursive Search in Results"))
+            tip = 'checked'
         else:
             self.btn_comp_recursive.setText(tr("Full Recursive Search"))
+            tip = 'full'
+        self.btn_comp_recursive.setToolTip(self._recursive_tip(tip))
         self.btn_comp_recursive.setEnabled(True)
+
+    @staticmethod
+    def _recursive_tip(kind):
+        """The recursive button's tooltip, by what the button reads now."""
+        return {
+            'full': tr("Search, then search again with the full text of the pages found "
+                       "added to yours, to reach copies your text alone does not find. "
+                       "Tick results first to use only those."),
+            'checked': tr("Search again with the full text of the ticked results added to "
+                          "yours."),
+            'expand': tr("Search again with the best results as more witnesses, merged into "
+                         "one list."),
+        }[kind]
 
     def _has_comp_results(self):
         if self.comp_main or self.comp_appendix or self.comp_known:
@@ -34069,6 +34190,10 @@ class GenizahGUI(QMainWindow):
     _HISTORY_LBL_NORMAL = "text-align: right; padding: 2px 4px; font-size: 12px;"
     _HISTORY_DEL_HIGHLIGHT = "color: white; font-size: 12px; font-weight: bold; border: none; padding: 0px;"
     _HISTORY_DEL_NORMAL = "color: #c0392b; font-size: 12px; font-weight: bold; border: none; padding: 0px;"
+    # The star that saves a search (owner, 2026-10-25): gold when saved, grey when not.
+    _HISTORY_STAR_HIGHLIGHT = "color: white; font-size: 14px; border: none; padding: 0px;"
+    _HISTORY_STAR_SAVED = "color: #e0a800; font-size: 14px; border: none; padding: 0px;"
+    _HISTORY_STAR_NORMAL = "color: #8a8a8a; font-size: 14px; border: none; padding: 0px;"
 
     def _on_history_menu_hovered(self, action, menu=None):
         """Highlight the active QWidgetAction container on hover/keyboard navigation."""
@@ -34081,10 +34206,20 @@ class GenizahGUI(QMainWindow):
                 w = a.defaultWidget()
                 active = a is action
                 w.setStyleSheet(self._HISTORY_HIGHLIGHT if active else "")
-                children = w.findChildren(QPushButton)
-                if len(children) >= 2:
-                    children[0].setStyleSheet(self._HISTORY_LBL_HIGHLIGHT if active else self._HISTORY_LBL_NORMAL)
-                    children[1].setStyleSheet(self._HISTORY_DEL_HIGHLIGHT if active else self._HISTORY_DEL_NORMAL)
+                lbl = w.findChild(QPushButton, "history_label")
+                star = w.findChild(QPushButton, "history_star")
+                btn_del = w.findChild(QPushButton, "history_delete")
+                if lbl is not None:
+                    lbl.setStyleSheet(self._HISTORY_LBL_HIGHLIGHT if active else self._HISTORY_LBL_NORMAL)
+                if btn_del is not None:
+                    btn_del.setStyleSheet(self._HISTORY_DEL_HIGHLIGHT if active else self._HISTORY_DEL_NORMAL)
+                if star is not None:
+                    star.setStyleSheet(self._history_star_style(star.property("saved"), active))
+
+    def _history_star_style(self, saved, active=False):
+        if active:
+            return self._HISTORY_STAR_HIGHLIGHT
+        return self._HISTORY_STAR_SAVED if saved else self._HISTORY_STAR_NORMAL
 
     def _show_search_history_menu(self):
         """Show the search history dropdown below the query input."""
@@ -34103,31 +34238,48 @@ class GenizahGUI(QMainWindow):
 
     def _refresh_search_history(self):
         """Rebuild the search history menu with per-item delete buttons."""
-        from shared.session_persistence import get_history
-        self.search_history_menu.clear()
-        entries = get_history('regular')
-        if not entries:
-            self.search_history_menu.addAction(tr("No search history")).setEnabled(False)
-            return
-        for i, entry in enumerate(entries):
-            self._add_history_menu_item(self.search_history_menu, 'regular', i, entry)
-        self.search_history_menu.addSeparator()
-        clear_action = self.search_history_menu.addAction(tr("Clear all history"))
-        clear_action.triggered.connect(lambda: self._clear_search_history('regular'))
+        self._fill_history_menu(self.search_history_menu, 'regular', tr("No search history"))
 
     def _refresh_comp_history(self):
         """Rebuild the composition history menu with per-item delete buttons."""
+        self._fill_history_menu(self.comp_history_menu, 'composition',
+                                tr("No Composition Search history"))
+
+    def _fill_history_menu(self, menu, search_type, empty_text):
+        """Saved (starred) searches first, under their own heading, then the
+        rest of the history, newest first. Each row keeps its index in the
+        stored newest-first list, which is what delete and star act on."""
         from shared.session_persistence import get_history
-        self.comp_history_menu.clear()
-        entries = get_history('composition')
+        menu.clear()
+        entries = list(enumerate(get_history(search_type)))
         if not entries:
-            self.comp_history_menu.addAction(tr("No Composition Search history")).setEnabled(False)
+            menu.addAction(empty_text).setEnabled(False)
             return
-        for i, entry in enumerate(entries):
-            self._add_history_menu_item(self.comp_history_menu, 'composition', i, entry)
-        self.comp_history_menu.addSeparator()
-        clear_action = self.comp_history_menu.addAction(tr("Clear all history"))
-        clear_action.triggered.connect(lambda: self._clear_search_history('composition'))
+        saved = [(i, e) for i, e in entries if e.get('pinned')]
+        recent = [(i, e) for i, e in entries if not e.get('pinned')]
+        if saved:
+            self._add_history_heading(menu, tr("Saved searches"))
+            for i, entry in saved:
+                self._add_history_menu_item(menu, search_type, i, entry)
+            if recent:
+                menu.addSeparator()
+                self._add_history_heading(menu, tr("Recent searches"))
+        for i, entry in recent:
+            self._add_history_menu_item(menu, search_type, i, entry)
+        menu.addSeparator()
+        if saved:
+            clear_action = menu.addAction(tr("Clear history (saved searches stay)"))
+        else:
+            clear_action = menu.addAction(tr("Clear all history"))
+        clear_action.triggered.connect(lambda: self._clear_search_history(search_type))
+
+    @staticmethod
+    def _add_history_heading(menu, text):
+        heading = menu.addAction(text)
+        heading.setEnabled(False)
+        font = heading.font()
+        font.setBold(True)
+        heading.setFont(font)
 
     @staticmethod
     def _build_filter_summary(filters: dict, max_len: int = 50) -> str:
@@ -34261,6 +34413,7 @@ class GenizahGUI(QMainWindow):
         labels_col.setSpacing(0)
 
         lbl = QPushButton(label_text)
+        lbl.setObjectName("history_label")
         lbl.setFlat(True)
         lbl.setStyleSheet("text-align: right; padding: 2px 4px; font-size: 12px;")
         lbl.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -34274,7 +34427,21 @@ class GenizahGUI(QMainWindow):
             filter_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
             labels_col.addWidget(filter_lbl)
 
+        saved = bool(entry.get('pinned'))
+        star = QPushButton("\u2605" if saved else "\u2606")
+        star.setObjectName("history_star")
+        star.setProperty("saved", saved)
+        star.setFixedSize(20, 20)
+        star.setStyleSheet(self._history_star_style(saved))
+        star.setCursor(Qt.CursorShape.PointingHandCursor)
+        star.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        star.setToolTip(tr("Remove from saved searches") if saved else
+                        tr("Save this search: it stays at the top of this list and is never dropped from it"))
+        star.clicked.connect(lambda checked, st=search_type, idx=index, on=not saved:
+                             self._set_history_saved(st, idx, on))
+
         btn_del = QPushButton("×")
+        btn_del.setObjectName("history_delete")
         btn_del.setFixedSize(20, 20)
         btn_del.setStyleSheet("color: #c0392b; font-size: 12px; font-weight: bold; border: none; padding: 0px;")
         btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -34283,6 +34450,7 @@ class GenizahGUI(QMainWindow):
         btn_del.clicked.connect(lambda checked, st=search_type, idx=index: self._delete_history_item(st, idx))
 
         h.addLayout(labels_col, 1)
+        h.addWidget(star, 0)
         h.addWidget(btn_del, 0)
 
         wa = QWidgetAction(menu)
@@ -34304,10 +34472,20 @@ class GenizahGUI(QMainWindow):
             self.comp_history_menu.close()
             self._restore_comp_search_from_state(state, entry)
 
+    def _set_history_saved(self, search_type, index, saved, reopen=True):
+        """The star: save a search, or make it ordinary history again, and
+        show the menu again in its new order."""
+        from shared.session_persistence import set_history_pinned
+        set_history_pinned(search_type, index, saved)
+        self._reshow_history_menu(search_type, reopen)
+
     def _delete_history_item(self, search_type, index, reopen=False):
         """Delete a single history entry and refresh the menu."""
         from shared.session_persistence import delete_history_entry
         delete_history_entry(search_type, index)
+        self._reshow_history_menu(search_type, reopen)
+
+    def _reshow_history_menu(self, search_type, reopen):
         if search_type == 'regular':
             self.search_history_menu.close()
             self._refresh_search_history()
@@ -34639,13 +34817,16 @@ class GenizahGUI(QMainWindow):
     def _clear_search_history(self, search_type):
         """Clear all entries for a search type after confirmation."""
         from shared.session_persistence import clear_history
+        from shared.session_persistence import get_history
+        any_saved = any(e.get('pinned') for e in get_history(search_type))
         reply = QMessageBox.question(
             self, tr("Clear History"),
-            tr("Clear all search history?"),
+            tr("Clear the search history? Your saved searches stay.") if any_saved
+            else tr("Clear all search history?"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            clear_history(search_type)
+            clear_history(search_type, keep_pinned=True)
             if search_type == 'regular':
                 self._refresh_search_history()
             else:
@@ -35635,6 +35816,27 @@ class GenizahGUI(QMainWindow):
             logger.exception("closeEvent: clearing the closing message failed")
         return True
 
+    WINDOW_GEOMETRY_KEY = 'main_window_geometry'
+
+    def save_window_geometry(self):
+        """Keep the window's size, position and maximized state in config.pkl."""
+        data = bytes(self.saveGeometry().toBase64()).decode('ascii')
+        save_app_config({self.WINDOW_GEOMETRY_KEY: data})
+
+    def restore_window_geometry(self):
+        """Put the window back as it was at the last close; False when nothing
+        usable was kept (the first start: the window then opens maximized).
+        Qt moves a window that would open off every screen -- a monitor
+        unplugged since -- back onto one."""
+        data = load_app_config().get(self.WINDOW_GEOMETRY_KEY)
+        if not isinstance(data, str) or not data:
+            return False
+        try:
+            return bool(self.restoreGeometry(QByteArray.fromBase64(data.encode('ascii'))))
+        except Exception:
+            logger.exception("Restoring the window size failed")
+            return False
+
     def closeEvent(self, event):
         # Any close, the first one included, that arrives while a question
         # is open waits for its answer, so no quit question is stacked on it.
@@ -35660,6 +35862,12 @@ class GenizahGUI(QMainWindow):
         self._close_pending = False
         self._puzzle_quit_answered = False
         self._close_waiting_for_prompt = False
+        # The next start opens the window where, and as large as, it is now
+        # (owner, 2026-10-25). Guarded on its own, like each step below.
+        try:
+            self.save_window_geometry()
+        except Exception:
+            logger.exception("closeEvent: saving the window size failed")
         # The Manuscript Viewer is an unparented top-level window
         # (2026-09-17), so it does not close with this one. Left open it
         # would keep the process alive (quitOnLastWindowClosed never fires)
@@ -36394,7 +36602,11 @@ if __name__ == "__main__":
         sys.exit(0)
 
     window = GenizahGUI()
-    window.showMaximized()
+    # Where and as large as it was at the last close; maximized the first time.
+    if window.restore_window_geometry():
+        window.show()
+    else:
+        window.showMaximized()
     _exit_code = app.exec()
     # No running QThread may be destroyed on the way out: PyQt's exit handler destroys
     # the windows, and with them any thread a hidden window (a closed Joins Lab) still
