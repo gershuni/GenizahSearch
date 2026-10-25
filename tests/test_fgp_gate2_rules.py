@@ -54,7 +54,8 @@ def test_every_row_gets_one_outcome_and_the_gate_passes(world, capsys):
     # the sidecar-only file is tied through FIST directly; the file FIST never saw has no record
     assert o[3]["in_export"] == 0 and o[3]["association_basis"] == "fist_chain" and o[3]["unit_id"] == 8
     assert o[3]["outcome"] == "kept" and o[3]["text_status"] == "file_absent_in_delivery"
-    assert json.loads(o[3]["hold_reasons"]) == ["file_absent_in_delivery", "credit_unresolved"]
+    assert json.loads(o[3]["hold_reasons"]) == ["file_absent_in_delivery"]  # the credit is generic under the ruling
+    assert o[3]["credit_status"] == "generic" and o[3]["credit_en"] == "Friedberg Genizah Project"
     assert o[17]["association_basis"] == "none" and o[17]["outcome"] == "kept"
     assert o[17]["outcome_reason"] == "no_fist_unit_of_this_kind" and o[17]["text_status"] == "no_record"
     assert o[17]["publishable_strict"] == 0 and o[17]["publishable_generic"] == 0
@@ -93,6 +94,7 @@ def test_every_row_gets_one_outcome_and_the_gate_passes(world, capsys):
     assert o[14]["credit_category"] == "book" and o[14]["credit_he"] == "ספר הבהיר"
     assert o[15]["credit_category"] == "unresolved" and o[15]["credit_changed"] == 0
     assert o[15]["outcome"] == "kept" and o[15]["publishable_strict"] == 0 and o[15]["publishable_generic"] == 1
+    assert o[15]["publishable"] == 1 and o[15]["credit_status"] == "generic" and o[15]["credit_he"] == "פרויקט הגניזה של פרידברג"
     rulings = {r["source"]: r for r in _rows(db, "SELECT * FROM credit_rulings")}
     assert rulings["source 600 sub 78"]["rows"] == 1 and rulings["source 850"]["rows"] == 1
 
@@ -107,6 +109,7 @@ def test_every_row_gets_one_outcome_and_the_gate_passes(world, capsys):
     # totals
     assert counts["outcome.kept"] == 7 and counts["outcome.re-sourced"] == 6 and counts["outcome.retired-with-alias"] == 4
     assert counts["publishable.strict"] == 7 and counts["publishable.generic_credit_allowed"] == 8
+    assert counts["publishable.under_policy"] == 8 and counts["credit.generic_rows"] == 3  # rows 3, 15, 17
     assert counts["durable_keys_distinct"] == 14  # row 6 shares row 5's key; rows 4 and 17 have no unit
     aliases = {r["old_id"]: r for r in _rows(db, "SELECT * FROM aliases")}
     assert set(aliases) == {4, 6, 9, 10} and aliases[6]["same_meaning"] == 1 and aliases[9]["same_meaning"] == 0
@@ -146,3 +149,13 @@ def test_gate_fails_on_a_missed_expectation_and_refuses_a_foreign_db(world, caps
     with pytest.raises(SystemExit, match="refusing to overwrite"):
         gate2.main(_args(world))
     assert gate2.main(_args(world, "--expect-file", os.path.join(world["root"], "missing.json"))) == 2
+
+
+def test_strict_policy_holds_the_generic_credit_rows(world, capsys):
+    assert gate2.main(_args(world, "--credit-policy", "strict", "--expect", "publishable.under_policy=7")) == 0
+    db = os.path.join(world["out"], "gate2.db")
+    o = {r["id"]: r for r in _rows(db, "SELECT * FROM row_outcomes")}
+    assert o[15]["publishable"] == 0 and o[15]["credit_status"] == "unresolved" and o[15]["credit_he"] is None
+    assert json.loads(o[15]["hold_reasons"]) == ["credit_unresolved"]
+    assert json.loads(o[3]["hold_reasons"]) == ["file_absent_in_delivery", "credit_unresolved"]
+    assert "Credit policy: **strict**" in open(os.path.join(world["out"], "GATE2_REPORT.md"), encoding="utf-8").read()

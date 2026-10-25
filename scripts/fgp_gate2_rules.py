@@ -230,7 +230,8 @@ def xml_text_status(row: dict, unit: dict, inv: dict) -> tuple:
 
 
 def build_outcomes(rows: list, inv: dict, fist: sqlite3.Connection, credit_parts: dict,
-                   catalog_map: dict, book_map: dict, copyright: dict, hashes: dict) -> tuple:
+                   catalog_map: dict, book_map: dict, copyright: dict, hashes: dict,
+                   credit_policy: str = "generic") -> tuple:
     C = collections.Counter()
     outcomes, aliases = [], []
     rulings = collections.defaultdict(lambda: {"rows": 0, "today_credits": collections.Counter()})
@@ -275,7 +276,8 @@ def build_outcomes(rows: list, inv: dict, fist: sqlite3.Connection, credit_parts
             "credit_category": None, "credit_status": None, "credit_he": None, "credit_en": None,
             "copyright_he": None, "copyright_en": None, "credit_changed": None,
             "text_status": None, "xml_owner_relation": None, "visibility_hold": 0,
-            "publishable_strict": 0, "publishable_generic": 0, "hold_reasons": None, "durable_key": None,
+            "publishable_strict": 0, "publishable_generic": 0, "publishable": 0, "hold_reasons": None,
+            "durable_key": None,
         }
         reasons = []
         unit = None
@@ -357,13 +359,20 @@ def build_outcomes(rows: list, inv: dict, fist: sqlite3.Connection, credit_parts
         strict = not reasons and not credit_hold
         generic = not reasons
         if credit_hold and outcome != "retired-with-alias":
-            reasons.append("credit_" + (out["credit_category"] or "unresolved"))
+            if credit_policy == "generic":
+                # The owner's ruling (2026-10-25): publish under the generic attribution; the
+                # unresolved category and today's DataSource text stay recorded for refinement.
+                out["credit_he"], out["credit_en"] = GENERIC_CREDIT
+                out["credit_status"] = "generic"
+            else:
+                reasons.append("credit_" + (out["credit_category"] or "unresolved"))
         # re-sourced: identity kept, but credit or text comes from elsewhere than today
         if outcome == "kept" and ((out["credit_changed"] or 0) == 1 or ts.startswith("xml_")):
             outcome = "re-sourced"
             reason = ";".join(x for x in (reason, "credit_from_fist" if out["credit_changed"] else "", ts if ts.startswith("xml_") else "") if x)
         out.update({"outcome": outcome, "outcome_reason": reason or None, "successor_id": succ,
                     "publishable_strict": int(strict), "publishable_generic": int(generic),
+                    "publishable": int(generic if credit_policy == "generic" else strict),
                     "hold_reasons": _j(reasons) if reasons else None})
         if outcome == "retired-with-alias":
             aliases.append({"old_id": rid, "successor_id": succ, "reason": reason,
@@ -387,11 +396,14 @@ def build_outcomes(rows: list, inv: dict, fist: sqlite3.Connection, credit_parts
     C["retired.with_successor"] = sum(1 for a in aliases if a["successor_id"] is not None)
     C["credit.changed_rows"] = sum(1 for o in outcomes if o["credit_changed"] == 1)
     C["credit.resolved_rows"] = sum(1 for o in outcomes if o["credit_status"] == "resolved")
+    C["credit.generic_rows"] = sum(1 for o in outcomes if o["credit_status"] == "generic")
     C["credit.unresolved_rows"] = sum(1 for o in outcomes if o["credit_status"] != "resolved")
     C["credit.copyright_rows"] = sum(1 for o in outcomes if o["copyright_he"] or o["copyright_en"])
     C["visibility.held_rows"] = sum(o["visibility_hold"] for o in outcomes)
     C["publishable.strict"] = sum(o["publishable_strict"] for o in outcomes)
     C["publishable.generic_credit_allowed"] = sum(o["publishable_generic"] for o in outcomes)
+    C["publishable.under_policy"] = sum(o["publishable"] for o in outcomes)
+    C["publishable.not_under_policy"] = len(rows) - C["publishable.under_policy"]
     C["publishable.not_strict"] = len(rows) - C["publishable.strict"]
     C["durable_keys_distinct"] = len({o["durable_key"] for o in outcomes if o["durable_key"]})
     C["kind_disagrees_with_unit"] = sum(1 for o in outcomes if o["unit_kind"] and o["unit_kind"] != o["kind"])
@@ -432,21 +444,22 @@ def run_checks(outcomes: list, aliases: list, C: dict, expectations: dict) -> li
                 bad_alias += 1
     add("G03_aliases_keep_meaning", bad_alias == 0 and len(aliases) == C["outcome.retired-with-alias"], f"0 bad, {C['outcome.retired-with-alias']} aliases",
         f"{bad_alias} bad, {len(aliases)} aliases", "every retired row has a reason; a successor exists, is not retired, and has the same meaning")
-    viol = sum(1 for o in outcomes if o["publishable_strict"] and (
-        o["credit_status"] != "resolved" or o["visibility_hold"] or o["outcome"] == "retired-with-alias"
+    viol = sum(1 for o in outcomes if o["publishable"] and (
+        o["credit_status"] not in ("resolved", "generic") or o["visibility_hold"] or o["outcome"] == "retired-with-alias"
         or o["association_basis"] not in ("fist_chain", "fist_chain_multi_registration") or o["text_status"] != "ok"))
-    add("G04_no_publishable_row_with_a_hold", viol == 0, 0, viol,
-        "no strictly publishable row has an unresolved credit, a visibility flag, an ambiguous association, unverified text, or is retired")
-    viol = sum(1 for o in outcomes if o["publishable_strict"] and not (o["credit_he"] and o["credit_en"]))
-    add("G05_publishable_rows_have_bilingual_credit", viol == 0, 0, viol, "every strictly publishable row carries a Hebrew and an English credit")
+    viol_strict = sum(1 for o in outcomes if o["publishable_strict"] and o["credit_status"] != "resolved")
+    add("G04_no_publishable_row_with_a_hold", viol == 0 and viol_strict == 0, "0 and 0", f"{viol} and {viol_strict}",
+        "no publishable row has an unresolved credit (generic only under the ruled policy), a visibility flag, "
+        "an ambiguous association, unverified text, or is retired; no strictly publishable row has a generic credit")
+    viol = sum(1 for o in outcomes if o["publishable"] and not (o["credit_he"] and o["credit_en"]))
+    add("G05_publishable_rows_have_bilingual_credit", viol == 0, 0, viol, "every publishable row carries a Hebrew and an English credit")
     dk = collections.Counter(o["durable_key"] for o in outcomes if o["outcome"] != "retired-with-alias" and o["durable_key"])
     dup_keys = sum(1 for v in dk.values() if v > 1)
     add("G06_durable_keys_unique_among_live_rows", dup_keys == 0, 0, dup_keys,
         "no two live rows share (unit, sys_id, c_number); exact duplicates are retired")
-    lhs = sum(v for k, v in C.items() if k.startswith("hold.")) >= C["publishable.not_strict"]
-    add("G07_every_unpublishable_row_has_a_reason", lhs and all(o["hold_reasons"] for o in outcomes if not o["publishable_strict"]),
-        C["publishable.not_strict"], sum(1 for o in outcomes if not o["publishable_strict"] and o["hold_reasons"]),
-        "every row that is not strictly publishable names at least one hold reason")
+    add("G07_every_unpublishable_row_has_a_reason", all(o["hold_reasons"] for o in outcomes if not o["publishable"]),
+        C["publishable.not_under_policy"], sum(1 for o in outcomes if not o["publishable"] and o["hold_reasons"]),
+        "every row that is not publishable under the policy names at least one hold reason")
     for key, want in sorted(expectations.items()):
         have = C.get(key)
         add(f"E_{key}", have == want, want, have, "declared expectation (--expect / --expect-file)")
@@ -512,7 +525,9 @@ def render_report(outcomes, aliases, rulings, checks, C, meta) -> str:
     out += ["", "## Outcomes of today's rows", "", "| Outcome | Rows |", "|---|---|"]
     for k in OUTCOMES:
         out.append(f"| `{k}` | {C.get('outcome.' + k, 0):,} |")
-    out += ["", "## Credit rulings the owner still has to make (rows whose FIST source has no verified credit)", "",
+    out += ["", f"Credit policy: **{meta.get('credit_policy', 'generic')}** — publishable {C['publishable.under_policy']:,} "
+            f"(strict {C['publishable.strict']:,}; {C['credit.generic_rows']:,} rows under the generic attribution).",
+            "", "## Rows whose FIST source has no verified credit (generic under the ruling; refine from the live FGP site)", "",
             "| FIST source | Rows | Today's credits (top) |", "|---|---|---|"]
     for r in rulings:
         out.append(f"| {r['source']} | {r['rows']:,} | {r['today_credits']} |")
@@ -532,6 +547,9 @@ def main(argv=None) -> int:
     ap.add_argument("--fgp-db", default=DEFAULT_FGP_DB)
     ap.add_argument("--fist", default=DEFAULT_FIST)
     ap.add_argument("--out-dir", default=DEFAULT_OUT)
+    ap.add_argument("--credit-policy", choices=("strict", "generic"), default="generic",
+                    help="generic (the owner's ruling, 2026-10-25): a row whose FIST source has no verified credit "
+                         "is published under the generic Friedberg Genizah Project attribution; strict: it is held")
     ap.add_argument("--expect", action="append", metavar="KEY=VALUE")
     ap.add_argument("--expect-file", metavar="PATH")
     args = ap.parse_args(argv)
@@ -541,7 +559,8 @@ def main(argv=None) -> int:
         print(ex, file=sys.stderr)
         return 2
     t0 = time.time()
-    meta = {"run_at": time.strftime("%Y-%m-%d %H:%M:%S"), "inventory": args.inventory, "fgp_db": args.fgp_db, "fist": args.fist}
+    meta = {"run_at": time.strftime("%Y-%m-%d %H:%M:%S"), "inventory": args.inventory, "fgp_db": args.fgp_db,
+            "fist": args.fist, "credit_policy": args.credit_policy}
     log("loading the gate-1 inventory ...")
     with ro(args.inventory) as conn:
         inv = load_inventory(conn)
@@ -562,7 +581,8 @@ def main(argv=None) -> int:
     log(f"  {len(rows):,} rows, {len(credit_parts):,} DataSource manuscripts, {len(catalog_map):,} catalogues, "
         f"{len(book_map):,} books, {len(copyright):,} copyright units ({time.time() - t0:.0f}s)")
     log("applying the rules ...")
-    outcomes, aliases, rulings, C = build_outcomes(rows, inv, fist, credit_parts, catalog_map, book_map, copyright, hashes)
+    outcomes, aliases, rulings, C = build_outcomes(rows, inv, fist, credit_parts, catalog_map, book_map, copyright, hashes,
+                                                   credit_policy=args.credit_policy)
     fist.close()
     checks = run_checks(outcomes, aliases, C, expectations)
     db_path = write_outputs(outcomes, aliases, rulings, checks, C, args.out_dir, meta)

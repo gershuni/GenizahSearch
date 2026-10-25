@@ -77,3 +77,30 @@ def test_book_map_without_author_tables():
 def test_book_map_missing_title_table_returns_empty():
     con = sqlite3.connect(":memory:")
     assert build_book_map(con) == {}
+
+
+def test_book_map_falls_back_to_the_english_title_and_english_authors():
+    """FIST carries 2,127 titles with no Hebrew title at all (Gil's *Pious Foundations*, the India
+    Book ...); they credited nothing until the English columns were read. Hebrew still wins when
+    present, and the author names follow the title's language."""
+    con = sqlite3.connect(":memory:")
+    con.executescript(
+        """
+        CREATE TABLE CODE_Title (
+            TitleId INTEGER PRIMARY KEY, FullTitleHeb TEXT, RunningTitleHeb TEXT, AcronymHeb TEXT,
+            FullTitleEng TEXT, RunningTitleEng TEXT, AcronymEng TEXT
+        );
+        INSERT INTO CODE_Title VALUES (3391, NULL, NULL, NULL,
+            'Documents of the Jewish pious foundations from the Cairo Geniza', NULL, 'Pious Foundations');
+        INSERT INTO CODE_Title VALUES (7, 'מלא', 'רץ', NULL, 'Full', 'Running', NULL);
+        INSERT INTO CODE_Title VALUES (8, NULL, NULL, NULL, NULL, NULL, NULL);
+        CREATE TABLE CODE_TitleAuthor (TitleId INTEGER, AuthorId INTEGER, IsCanceledCode INTEGER);
+        INSERT INTO CODE_TitleAuthor VALUES (3391, 221, 0), (7, 221, 0), (7, 9, 0);
+        CREATE TABLE CODE_Author (AuthorId INTEGER, HebDesc TEXT, EngDesc TEXT);
+        INSERT INTO CODE_Author VALUES (221, 'גיל, משה', 'Gil, Moshe'), (9, NULL, 'Only, English');
+        """
+    )
+    out = build_book_map(con)
+    assert out[3391] == "Gil, Moshe, Documents of the Jewish pious foundations from the Cairo Geniza"
+    assert out[7] == "גיל, משה; Only, English, רץ"  # Hebrew title and names first; English name when no Hebrew one
+    assert 8 not in out

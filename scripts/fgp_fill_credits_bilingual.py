@@ -253,8 +253,12 @@ def build_book_map(fi):
     title_cols = _table_columns(fi, "CODE_Title")
     if "TitleId" not in title_cols:
         return {}
-    avail_titles = [c for c in ("RunningTitleHeb", "FullTitleHeb", "AcronymHeb") if c in title_cols]
-    if not avail_titles:
+    heb_titles = [c for c in ("RunningTitleHeb", "FullTitleHeb", "AcronymHeb") if c in title_cols]
+    # 2,127 FIST titles carry only an English title (Gil's *Pious Foundations*, the India Book,
+    # Goitein's *Letters of Medieval Jewish Traders*, Mann, Ginzberg's *Geonica* ...). Hebrew
+    # first, English when there is no Hebrew; the author names follow the title's language.
+    eng_titles = [c for c in ("RunningTitleEng", "FullTitleEng", "AcronymEng") if c in title_cols]
+    if not heb_titles and not eng_titles:
         return {}
 
     authors = {}
@@ -265,22 +269,33 @@ def build_book_map(fi):
             f"SELECT TitleId, AuthorId FROM CODE_TitleAuthor {where}ORDER BY TitleId, rowid"
         ):
             authors.setdefault(tid, []).append(aid)
-    aname = {}
+    aname_heb, aname_eng = {}, {}
     a_cols = _table_columns(fi, "CODE_Author")
     if {"AuthorId", "HebDesc"} <= a_cols:
-        aname = {
+        aname_heb = {
             r[0]: r[1]
             for r in fi.execute("SELECT AuthorId, HebDesc FROM CODE_Author WHERE HebDesc IS NOT NULL")
         }
+    if {"AuthorId", "EngDesc"} <= a_cols:
+        aname_eng = {
+            r[0]: r[1]
+            for r in fi.execute("SELECT AuthorId, EngDesc FROM CODE_Author WHERE EngDesc IS NOT NULL")
+        }
 
-    select = "TitleId, " + ", ".join(avail_titles)
+    select = "TitleId, " + ", ".join(heb_titles + eng_titles)
+    n_heb = len(heb_titles)
     out = {}
     for row in fi.execute(f"SELECT {select} FROM CODE_Title"):
         tid = row[0]
-        title = next((str(v).strip() for v in row[1:] if v and str(v).strip()), "")
+        title = next((str(v).strip() for v in row[1:1 + n_heb] if v and str(v).strip()), "")
+        first, second = aname_heb, aname_eng
+        if not title:
+            title = next((str(v).strip() for v in row[1 + n_heb:] if v and str(v).strip()), "")
+            first, second = aname_eng, aname_heb
         if not title:
             continue
-        names = [aname[a] for a in authors.get(tid, []) if a in aname]
+        names = [first.get(a) or second.get(a) for a in authors.get(tid, [])]
+        names = [n for n in names if n]
         out[tid] = (f"{'; '.join(names)}, {title}" if names else title)
     return out
 
