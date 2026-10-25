@@ -390,15 +390,16 @@ Each gate names what makes it fail; "measured" or "reviewed" alone is never a pa
    **Run 2026-10-25 — PASS, 7 checks + 29 declared expectations** (`scripts/run_fgp_gate2_rules.ps1` →
    `scripts/fgp_gate2_rules.py`; rules and open rulings in
    [`FGP_IDENTITY_CREDIT_VISIBILITY_RULES.md`](FGP_IDENTITY_CREDIT_VISIBILITY_RULES.md); output
-   `fgp_data/inventory/gate2.db`). Outcomes: 39,256 kept · 5,728 re-sourced (2,598 credits from FIST instead of
+   `fgp_data/inventory/gate2.db`). Outcomes: 39,176 kept · 5,808 re-sourced (2,678 credits from FIST instead of
    the file-name prefix — 1,463 books, 531 of them with titles FIST holds only in English; 1,051 named contributors
-   from the single matching FJMS DataSource part; 11 bibliographic references composed from FIST; teams 111 and 161
-   verified on the live site — and 3,130 XML rows whose text must come from the row's own record) · 50
-   retired-with-alias (17 exact duplicates with a same-meaning successor, 28 unreachable rows without a `sys_id`, 5
-   whose `sys_id` the FIST chain contradicts). Publishable: 41,807 under the owner's ruling of 2026-10-25 that rows
-   whose FIST source has no verified credit (418 rows, 6 sources after the live-site refinement) carry the generic
-   FGP attribution; 41,406 under the strict reading. Held and named per row: 3,130 XML rows, 23
-   `tmp_DoubleNotToDisplay`, 19 files absent from the delivery, 7 unconfirmed associations.
+   from the single matching FJMS DataSource part; 11 bibliographic references composed from FIST; 74 site users and
+   6 personal lists named by `SubId` from the live site; teams 111 and 161 verified there — and 3,130 XML rows whose
+   text must come from the row's own record) · 50 retired-with-alias (17 exact duplicates with a same-meaning
+   successor, 28 unreachable rows without a `sys_id`, 5 whose `sys_id` the FIST chain contradicts). Publishable:
+   41,807 under the owner's ruling of 2026-10-25 that rows whose FIST source has no verified credit (338 rows, 5
+   sources after the live-site refinement) carry the generic FGP attribution; 41,472 under the strict reading. Held
+   and named per row: 3,130 XML rows, 23 `tmp_DoubleNotToDisplay`, 19 files absent from the delivery, 7 unconfirmed
+   associations.
 3. **Unified text pipeline on a separate output DB.** *Fails if:* two runs differ; any replaced row lacks a proven
    source correspondence (FIST link); any line-level diff against today's text is unaligned or has an insertion /
    deletion without a disposition; any replaced line falls outside the accepted classes (restored prefix, restored
@@ -491,3 +492,11 @@ source: for 601 it is a `dbo_UnitBibliographyReference` id, from which the gate 
 (all 11 rows); for 160 the journal only; for 300 a list id (51 Ben-Sasson, 53 unnamed); for 850 a user id outside
 this FIST copy. Team 161 (Emanuel Friedberg) is a verified team credit for all 60 rows. 418 rows over 6 sources stay
 generic, with the shelfmark to check on FJMS listed per source in the rules doc §6.
+
+**Revision 10 (live-site lookups, 2026-10-25)** — eleven FJMS lookups through the owner's Chrome session read the
+"Source:" line of each remaining generic source: source 850's `SubId` is a site-user id FJMS resolves to a name
+(eight ids → 74 rows: Brody, Oren, Ber, Greenstein, Ilan, Katzman, Gershuni, Ventura), source 300's `SubId` 53 is
+Milikowsky's personal handlist (6 rows), source 160's own source line on FJMS is empty (generic is what FJMS does),
+source 240 is a demonstration-team entry, and every source-100 file checked (four manuscripts, BL and CUL) was Avi
+Shmidman's — not applied by inference, since two JTS rows of that source name other users. 338 rows over 5 sources
+remain generic; publishable 41,807 (strict 41,472).

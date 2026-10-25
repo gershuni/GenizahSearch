@@ -86,7 +86,28 @@ DEFAULT_INVENTORY = os.path.join(DEFAULT_OUT, "inventory.db")
 GENERIC_CREDIT = ("פרויקט הגניזה של פרידברג", "Friedberg Genizah Project")
 
 OUTCOMES = ("kept", "re-sourced", "retired-with-alias")
-CREDIT_RESOLVED = ("team", "team_individual", "infra", "catalog", "book", "datasource_part", "bibliographic_reference")
+CREDIT_RESOLVED = ("team", "team_individual", "infra", "catalog", "book", "datasource_part", "bibliographic_reference",
+                   "site_user", "personal_list")
+
+# FIST source 850: the unit's SubId is a site-user id that this FIST copy does not carry. The names
+# were read off the live FGP site (the transcription's "Source: Site User - ..." line) on 2026-10-25,
+# one shelfmark per id, by the owner's Chrome session. Hebrew and English as FJMS shows them.
+SITE_USER_IDS = {
+    221: ("משתמש באתר - Prof. Robert Brody", "Site user - Prof. Robert Brody"),        # T-S 10F1
+    493: ("משתמש באתר - David Oren", "Site user - David Oren"),                        # T-S AS 119.57
+    187: ("משתמש באתר - Chaya Ber", "Site user - Chaya Ber"),                          # ENA 149.4
+    7: ("משתמש באתר - מרים גרינשטיין", "Site user - Miriam Greenstein"),               # ENA NS 3.27
+    346: ("משתמש באתר - שלמה אילן", "Site user - Shlomo Ilan"),                        # Or.1080 1.57
+    80: ("משתמש באתר - Rabbi Tuvia Katzman", "Site user - Rabbi Tuvia Katzman"),      # T-S G1.82
+    34: ("משתמש באתר - ד\"ר הלל גרשוני", "Site user - Dr. Hillel Gershuni"),            # T-S 12.863
+    645: ("משתמש באתר - daniel ventura", "Site user - daniel ventura"),                # T-S AS 69.186
+}
+# FIST source 300 (רשימות אישיות): the SubId is a personal-list id. 51 is Ben-Sasson's (36 rows carry
+# it in their DataSource); 53 was read off the live site (T-S AS 74.11: "Chaim Milikowsky, Personal Handlist").
+PERSONAL_LIST_IDS = {
+    51: ("בן ששון מנחם, רשימות אישיות", "Menahem Ben-Sasson, personal handlist"),
+    53: ("חיים מיליקובסקי, רשימות אישיות", "Chaim Milikowsky, personal handlist"),
+}
 CREDIT_UNRESOLVED = ("datasource_only", "unresolved")
 
 # FIST sources with no verified team credit whose contributor FJMS's per-manuscript DataSource
@@ -261,6 +282,12 @@ def credit_for_unit(unit: dict, mms_id, credit_parts: dict, catalog_map: dict, b
         if len(matched) == 1:
             e, h = matched[0]
             return h, (e or h), "datasource_part"
+    if so == 850 and su in SITE_USER_IDS:
+        he, en = SITE_USER_IDS[su]
+        return he, en, "site_user"
+    if so == 300 and su in PERSONAL_LIST_IDS:
+        he, en = PERSONAL_LIST_IDS[su]
+        return he, en, "personal_list"
     if parts:
         he = "; ".join(dict.fromkeys(h for (_e, h) in parts if h)) or None
         en = "; ".join(dict.fromkeys(e for (e, _h) in parts if e)) or None

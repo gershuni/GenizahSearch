@@ -37,13 +37,13 @@ def _args(w, *extra):
 
 
 def test_every_row_gets_one_outcome_and_the_gate_passes(world, capsys):
-    rc = gate2.main(_args(world, "--expect", "rows=18"))
+    rc = gate2.main(_args(world, "--expect", "rows=20"))
     out = capsys.readouterr().out
     assert rc == 0, out
     db = os.path.join(world["out"], "gate2.db")
     o = {r["id"]: r for r in _rows(db, "SELECT * FROM row_outcomes")}
     counts = {r["key"]: r["value"] for r in _rows(db, "SELECT * FROM counts")}
-    assert len(o) == 18
+    assert len(o) == 20
 
     # identity: the FIST unit reached through the row's own sys_id, and a durable key
     assert o[1]["association_basis"] == "fist_chain" and o[1]["unit_id"] == 1
@@ -114,11 +114,16 @@ def test_every_row_gets_one_outcome_and_the_gate_passes(world, capsys):
     assert o[18]["credit_he"] == 'הפניה ביבליוגרפית – מילר, יעקב יצחק, קובץ חצי גבורים אלול תשע"ד, עמוד כו'
     assert o[18]["credit_en"].startswith("Bibliographical reference – מילר")
 
+    # a site user known by id and a personal list known by id, both read off the live site
+    assert o[19]["credit_category"] == "site_user" and o[19]["credit_en"] == "Site user - Prof. Robert Brody"
+    assert o[20]["credit_category"] == "personal_list" and o[20]["credit_he"] == "חיים מיליקובסקי, רשימות אישיות"
+    assert o[19]["publishable"] == 1 and o[20]["publishable"] == 1
+
     # totals
-    assert counts["outcome.kept"] == 6 and counts["outcome.re-sourced"] == 8 and counts["outcome.retired-with-alias"] == 4
-    assert counts["publishable.strict"] == 8 and counts["publishable.generic_credit_allowed"] == 9
-    assert counts["publishable.under_policy"] == 9 and counts["credit.generic_rows"] == 2  # rows 15, 17
-    assert counts["durable_keys_distinct"] == 15  # row 6 shares row 5's key; rows 4 and 17 have no unit
+    assert counts["outcome.kept"] == 6 and counts["outcome.re-sourced"] == 10 and counts["outcome.retired-with-alias"] == 4
+    assert counts["publishable.strict"] == 10 and counts["publishable.generic_credit_allowed"] == 11
+    assert counts["publishable.under_policy"] == 11 and counts["credit.generic_rows"] == 2  # rows 15, 17
+    assert counts["durable_keys_distinct"] == 17  # row 6 shares row 5's key; rows 4 and 17 have no unit
     aliases = {r["old_id"]: r for r in _rows(db, "SELECT * FROM aliases")}
     assert set(aliases) == {4, 6, 9, 10} and aliases[6]["same_meaning"] == 1 and aliases[9]["same_meaning"] == 0
     checks = {r["name"]: r for r in _rows(db, "SELECT * FROM checks")}
@@ -160,7 +165,7 @@ def test_gate_fails_on_a_missed_expectation_and_refuses_a_foreign_db(world, caps
 
 
 def test_strict_policy_holds_the_generic_credit_rows(world, capsys):
-    assert gate2.main(_args(world, "--credit-policy", "strict", "--expect", "publishable.under_policy=8")) == 0
+    assert gate2.main(_args(world, "--credit-policy", "strict", "--expect", "publishable.under_policy=10")) == 0
     db = os.path.join(world["out"], "gate2.db")
     o = {r["id"]: r for r in _rows(db, "SELECT * FROM row_outcomes")}
     assert o[15]["publishable"] == 0 and o[15]["credit_status"] == "unresolved" and o[15]["credit_he"] is None

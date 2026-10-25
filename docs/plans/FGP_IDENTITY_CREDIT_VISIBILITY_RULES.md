@@ -27,8 +27,8 @@ live rows share one (check `G06`).
 
 | Outcome | Rows | Rule |
 |---|---|---|
-| **kept** | 39,256 | the unit's chain reaches the row's `sys_id` (or the row is one of the 7 whose unit has no AlmaId / 19 whose file is absent from this delivery); identity, text source and credit source unchanged |
-| **re-sourced** | 5,728 | identity kept, but the credit (2,598 rows) or the XML text (3,130 rows) will come from a different source than today — see §3, §4 |
+| **kept** | 39,176 | the unit's chain reaches the row's `sys_id` (or the row is one of the 7 whose unit has no AlmaId / 19 whose file is absent from this delivery); identity, text source and credit source unchanged |
+| **re-sourced** | 5,808 | identity kept, but the credit (2,678 rows) or the XML text (3,130 rows) will come from a different source than today — see §3, §4 |
 | **retired-with-alias** | 50 | the meaning cannot stand: **17** exact duplicates of another row (same file, manuscript and image, imported from two shelfmark folders; successor = the lowest id, same meaning, content byte-identical in all 23 groups), **28** rows with no `sys_id` (unreachable: the chooser selects by `sys_id`), **5** rows whose `sys_id` the FIST chain contradicts (4 `libraries_csv` resolutions of non-corpus-shaped ids and 1 `fjms_shelfmark` neighbour; no successor — the pipeline creates the correct row under a new id) |
 
 Ids are never reused. A retired id resolves through `aliases(old_id, successor_id, reason, same_meaning)`: with a
@@ -64,27 +64,31 @@ The credit of a row is derived from **its unit's FIST `SourceId` / `SubId`**, no
    "משתמש באתר – אבי שמידמן"). FJMS's DataSource is per manuscript and lists everyone who contributed anything to
    it, so the part is taken only when exactly one matches the source's token (14 manuscripts list several site
    users). The owner confirmed the rule on the live site 2026-10-25 (BL OR 10578S.16 → Shmidman);
-6. otherwise **unresolved** at the source level (424 rows over 6 FIST sources, §6): 108 where only an aggregate
-   without a matching part exists (`datasource_only`), 316 with nothing. **Ruled 2026-10-25:** these are published
+6. source 850 (site users whose id FIST carries but whose name it does not) and source 300 (personal lists): the
+   name read off the live FGP site for that `SubId` (`SITE_USER_IDS`: Brody, Oren, Ber, Greenstein, Ilan, Katzman,
+   Gershuni, Ventura — 74 rows; `PERSONAL_LIST_IDS`: 51 Ben-Sasson, 53 Milikowsky — 6 rows); 13 single-row user
+   ids were not looked up;
+7. otherwise **unresolved** at the source level (344 rows over 5 FIST sources, §6): 72 where only an aggregate
+   without a matching part exists (`datasource_only`), 272 with nothing. **Ruled 2026-10-25:** these are published
    under the generic attribution "Friedberg Genizah Project / פרויקט הגניזה של פרידברג" (`credit_status = generic`,
-   418 live rows); the DataSource text stays recorded per row.
+   338 live rows); the DataSource text stays recorded per row.
 
 What FIST's `SubId` means depends on the source: a `TitleId` for 600 (books), a `CatalogId` for 500, a reference id
 for 601, a journal `TitleId` for 160 (Tarbiz, Kobez Al Yad, Peamim, Cathedra, Asufot, Sidra — the journal, not the
-article), a constant for 100 / 161, a personal-list id for 300 (51 = Ben-Sasson's lists, 53 = another, unnamed in
-FIST), and for 850 an id of a table this FIST copy does not have (not `CODE_GenizahPerson`).
+article; FJMS itself shows an empty source line for these), a constant for 100 / 161, a personal-list id for 300,
+and a site-user id for 850 (a table this FIST copy does not have; FJMS resolves it to "Site User - ‹name›").
 
 FIST `HebCopyRight` / `EngCopyRight` (849 rows: the Sussmann / Israel Academy acknowledgment, "Displayed by permission
 of Koninklijke Brill NV.") is carried verbatim **beside** the credit as an acknowledgment, never as the credit.
-2,598 rows change credit under these rules: 1,463 book rows whose `SubId` the old `image_id[3:7]` heuristic could
-not reach (e.g. 50414 → גנזי קדם, 3391 → Gil, *Pious Foundations*), 1,051 contributor parts and 11 bibliographic
-references that replace an aggregate or nothing, the 24 team-161 rows without DataSource and 1 team-111 row, 26
-rows the heuristic had credited to Genuzos that FIST registers under team 132 or a book (e.g. row 3154 → Gil,
-*Eretz Israel in the first Muslim period*), 3 catalogue rows.
+2,678 rows change credit under these rules: 1,463 book rows whose `SubId` the old `image_id[3:7]` heuristic could
+not reach (e.g. 50414 → גנזי קדם, 3391 → Gil, *Pious Foundations*), 1,051 contributor parts, 11 bibliographic
+references, 74 site users and 6 personal lists that replace an aggregate or nothing, the 24 team-161 rows without
+DataSource and 1 team-111 row, 26 rows the heuristic had credited to Genuzos that FIST registers under team 132 or a
+book (e.g. row 3154 → Gil, *Eretz Israel in the first Muslim period*), 3 catalogue rows.
 
 ## 4. Visibility
 
-A row is **publishable** when all of these hold — 41,807 rows under the ruled policy (41,406 under the strict
+A row is **publishable** when all of these hold — 41,807 rows under the ruled policy (41,472 under the strict
 reading, which `publishable_strict` keeps reporting):
 
 - kind is transcription or translation (descriptions and unmatched files never enter the chooser);
@@ -115,23 +119,24 @@ On a new FIST delivery the pipeline matches a row by its unit id first, then by 
 ## 6. Rulings
 
 1. **Credits without a verified source — ruled 2026-10-25: generic FGP attribution**, refined the same day from
-   the live FGP site. What each source got, and what is left generic (`credit_rulings`):
+   the live FGP site (the owner's checks, then eleven lookups through the owner's Chrome session, reading each
+   transcription's "Source:" line). What each source got, and what is left generic (`credit_rulings`):
 
-   | FIST source | Rows | Resolved | Still generic | Live-site finding / what to check next |
+   | FIST source | Rows | Resolved | Still generic | Live-site finding |
    |---|---|---|---|---|
-   | 100 | 1,297 | 1,003 named site users (DataSource part) | 294 (no DataSource, or no site-user part) | BL OR 10578S.16 → Avi Shmidman, confirmed. **To check:** BL OR 5557A.7 (file `10000020001791`) — whom does FJMS name when the DataSource has only an institute's catalogue? |
+   | 100 | 1,297 | 1,003 named site users (DataSource part) | 294 (no DataSource, or no site-user part) | BL OR 10578S.16, BL OR 9772D.1 (3 of 4 files), BL OR 5557A.7, CUL Or.1080 1.2 (1 of 8 files) → all Avi Shmidman. Yet two JTS rows of the same source name other site users, and FIST's `SubId` is a constant 2, so the 294 are not credited by inference; a ruling "source 100 without a part → Shmidman" would cover them |
    | 161 | 60 | **verified team 161**: all 60 (36 with the individual from DataSource) | 0 | AIU III.B.109 → "עמנואל פרידברג, ראש צוות FGP להעתקות ומידע ממחברים שונים", confirmed; English wording ours |
    | 601 | 11 | 11 bibliographic references composed from FIST | 0 | Or.1080 6.17 → "מילר, י י, חצי גבורים אלול תשע"ד, עמוד כו", confirmed (screenshot) |
    | 111 | 1 | **verified team 111**: Simcha Emanuel | 0 | T-S F5.49 → that line, confirmed |
    | 700 | 1 | 1 (Weiss, a site user's own manuscript) | 0 | — |
-   | 300 | 42 | 36 "בן ששון מנחם, רשימות אישיות" (`SubId` 51) | 6 (`SubId` 53, a list FIST does not name) | **To check:** T-S AS 74.11 (`30000530000201`) |
-   | 850 | 98 | 11 named site users | 87 (`SubId` is a user id outside this FIST copy) | **To check:** CUL Or.1080 1.57 (`85003460000011`), JTS ENA 1628.6 (`85004930000021`) |
-   | 160 | 34 | — | 34 (`SubId` = the journal only; no DataSource part names the article) | **To check:** T-S 10G4.4 (`16000070000021`, Peamim), JTS MS R2274 fol. 1 (`16000140000021`, Sidra) |
+   | 300 | 42 | 36 Ben-Sasson (`SubId` 51, DataSource part) + 6 Milikowsky (`SubId` 53, `PERSONAL_LIST_IDS`) | 0 | T-S AS 74.11 → "Chaim Milikowsky, Personal Handlist" |
+   | 850 | 98 | 11 named site users (DataSource part) + 74 by `SubId` (`SITE_USER_IDS`: 221 Prof. Robert Brody — T-S 10F1; 493 David Oren — T-S AS 119.57; 187 Chaya Ber — ENA 149.4; 7 Miriam Greenstein — ENA NS 3.27; 346 שלמה אילן — Or.1080 1.57; 80 Rabbi Tuvia Katzman — T-S G1.82; 34 Dr. Hillel Gershuni — T-S 12.863; 645 daniel ventura — T-S AS 69.186) | 13 (single-row user ids not looked up) | FJMS shows "Site User - ‹name›" for each; the name lives in a user table this FIST copy lacks |
+   | 160 | 34 | — | 34 | T-S 10G4.4 → FJMS's own source line is **empty**; generic is what FJMS does |
    | 600 / 6413 | 2 | — | 2 | T-S Misc.35.108: FJMS lists two transcriptions, Abramson's *Chapters from the Introduction to the Talmud* (our row 22208, FIST `TitleId` 3413) and *Ginzei Qedem* (old) — which FIST registers as a Hebrew *translation* (`TitleId` 117, our row 22210). The two rows on `TitleId` 6413 (22207 transcription, 22209 translation; no title in `CODE_Title`, "Tarbiz" by the old heuristic) have no counterpart on FJMS. Candidates for a hold, pending gate 3's text comparison |
-   | 240 | 1 | — | 1 (Gottstein catalogue + "מרים נוסף, צוות FGP להדגמה") | **To check:** Birmingham Mingana 3 (`24000220000231`) |
+   | 240 | 1 | — | 1 | Mingana 3 → "Miriam add, FGP Example team (Head Team, Head)": a demonstration-team entry, left generic on purpose |
 
-   A further per-source credit the owner confirms goes into `TEAM_CREDITS`, `DATASOURCE_PART_TOKENS` or a new map;
-   the gate then reports it as resolved and the expectations move.
+   A further per-source credit the owner confirms goes into `TEAM_CREDITS`, `DATASOURCE_PART_TOKENS`, `SITE_USER_IDS`
+   or `PERSONAL_LIST_IDS`; the gate then reports it as resolved and the expectations move.
 2. **`tmp_DoubleNotToDisplay`** (23 served rows, 90 files): confirm its meaning with FGP before anything flagged is
    published or withheld on purpose. Open.
 3. **XML text on 3,130 rows** (§4): gate 3 decides by comparison; the hold is provisional.
@@ -140,8 +145,8 @@ On a new FIST delivery the pipeline matches a row by its unit id first, then by 
 
 ## 7. Run record
 
-2026-10-25 — `scripts/run_fgp_gate2_rules.ps1` (policy generic, DataSource-part and bibliographic-reference rules,
-teams 111 and 161): **PASS, 7 checks + 34 declared expectations**, 10 s. `G01` every row has one outcome · `G02` meaning preserved (0 kind disagreements, 0 publishable rows off the
+2026-10-25 — `scripts/run_fgp_gate2_rules.ps1` (policy generic; DataSource-part, bibliographic-reference, site-user
+and personal-list rules; teams 111 and 161): **PASS, 7 checks + 35 declared expectations**, 10 s. `G01` every row has one outcome · `G02` meaning preserved (0 kind disagreements, 0 publishable rows off the
 chain) · `G03` every retired row has a reason and any successor has the same meaning · `G04` no publishable row with
 a hold, and no strictly publishable row with a generic credit · `G05` every publishable row has a Hebrew and an
 English credit · `G06` durable keys unique among live rows · `G07` every unpublishable row names its reason.
