@@ -15,7 +15,6 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtGui import QFontInfo
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QTableWidget, QTabWidget, QTextEdit, QToolButton,
     QTreeWidget, QTreeWidgetItem, QWidget,
@@ -38,6 +37,7 @@ class _Window:
     RESULTS_TEXT_STEPS = GenizahGUI.RESULTS_TEXT_STEPS
     results_text_level = GenizahGUI.results_text_level
     _results_text_widgets = GenizahGUI._results_text_widgets
+    _base_point_size = staticmethod(GenizahGUI._base_point_size)
     _apply_results_text_level = GenizahGUI._apply_results_text_level
     _snippet_cells = GenizahGUI.__dict__["_snippet_cells"]
     set_results_text_level = GenizahGUI.set_results_text_level
@@ -91,7 +91,7 @@ def _pt(widget):
 
 def test_a_level_sizes_the_lists_but_not_their_headers(window):
     w = window
-    base = QFontInfo(QApplication.font()).pointSizeF()
+    base = GenizahGUI._base_point_size()
     w.set_results_text_level(3)
     for view in (w.results_table, w.comp_tree):
         assert _pt(view) == base + 6
@@ -103,13 +103,31 @@ def test_a_level_sizes_the_lists_but_not_their_headers(window):
     assert _pt(w.results_table) == base and _pt(w.comp_tree) == base
 
 
+def test_the_base_size_survives_a_font_system_that_answers_nonsense(window, monkeypatch):
+    """The headless Windows CI: QFontInfo gave -0.75 points, so the headers
+    could not be pinned (a negative size is refused) and took the lists' size."""
+    class Nonsense:
+        def __init__(self, _font):
+            pass
+
+        def pointSizeF(self):
+            return -0.75
+    monkeypatch.setattr(genizah_app, "QFontInfo", Nonsense)
+    base = GenizahGUI._base_point_size()
+    assert base > 0 and base == (QApplication.font().pointSizeF() if QApplication.font().pointSizeF() > 0 else 9.0)
+    w = window
+    w.set_results_text_level(3)
+    assert _pt(w.results_table) == base + 6
+    assert _pt(w.results_table.horizontalHeader()) == base
+
+
 def test_snippet_cells_follow_including_under_a_style_sheet(window):
     w = window
     w.set_results_text_level(2)
     QApplication.processEvents()
     cells = list(w._snippet_cells(w.results_table)) + list(w._snippet_cells(w.comp_tree))
     assert len(cells) == 5
-    want = QFontInfo(QApplication.font()).pointSizeF() + 4
+    want = GenizahGUI._base_point_size() + 4
     for cell in cells:
         assert _pt(cell) == want
         assert _pt(cell.label()) == want          # the label is what draws the text

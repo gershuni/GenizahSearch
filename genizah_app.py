@@ -17000,6 +17000,18 @@ class GenizahGUI(QMainWindow):
     RESULTS_TEXT_STEPS = (0, 2, 4, 6)       # Normal, Large, Larger, Largest
     results_text_level = 0
 
+    @staticmethod
+    def _base_point_size():
+        """The window's text size in points. QFontInfo: the size the font
+        really has, also when the system font is given in pixels (its
+        pointSizeF() is then -1). Where even that answers nonsense (-0.75 on
+        the headless Windows CI), the font's own size, else 9."""
+        font = QApplication.font()
+        for size in (QFontInfo(font).pointSizeF(), font.pointSizeF()):
+            if size > 0:
+                return size
+        return 9.0
+
     def _results_text_widgets(self):
         names = ('results_table', 'comp_tree', 'catalog_results_table', 'lists_items_table')
         return [w for w in (getattr(self, n, None) for n in names) if w is not None]
@@ -17010,9 +17022,7 @@ class GenizahGUI(QMainWindow):
         except (TypeError, ValueError):
             level = 0
         self.results_text_level = level
-        # QFontInfo: the size the font really has, also when the system font is
-        # given in pixels (its pointSizeF() is then -1).
-        base = QFontInfo(QApplication.font()).pointSizeF()
+        base = self._base_point_size()
         for view in self._results_text_widgets():
             headers = [view.header()] if isinstance(view, QTreeWidget) else [
                 view.horizontalHeader(), view.verticalHeader()]

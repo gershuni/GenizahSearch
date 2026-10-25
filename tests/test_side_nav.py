@@ -21,6 +21,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtGui import QFont, QFontMetrics
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QHBoxLayout, QLabel, QMenu, QPushButton, QTabWidget, QWidget,
 )
@@ -103,6 +104,36 @@ def test_expanded_column_fits_every_label():
         assert _shown(b) == b.text()
         assert b.width() >= b.sizeHint().width()          # never clipped by the column
     assert QWidget.toolTip(puzzle) == ""                  # the label is showing
+
+
+def test_a_label_the_column_was_sized_for_is_never_cut(monkeypatch):
+    """The Windows CI drew "Composition Se..." in a column made for the whole
+    label: elidedText() measured the text wider than horizontalAdvance(), which
+    sizes the column. Here elidedText() is made 30 px more pessimistic."""
+    from desktop.widgets import side_nav
+
+    class Pessimistic(QFontMetrics):
+        def elidedText(self, text, mode, width, flags=0):
+            return super().elidedText(text, mode, width - 30, flags)
+    monkeypatch.setattr(side_nav, "QFontMetrics", Pessimistic)
+    host, nav, puzzle, settings = _nav()
+    for b in nav.section_buttons + [puzzle, settings]:
+        assert _shown(b) == b.text()
+    settings.setText("Hillel G (Logout)")
+    QApplication.processEvents()
+    assert _shown(settings) == "Hillel G (Logout)"
+
+
+def test_a_font_that_arrives_later_resizes_the_column():
+    host, nav, puzzle, settings = _nav()
+    narrow = nav.width()
+    big = QFont(puzzle.font())
+    big.setPointSizeF(big.pointSizeF() * 1.6)
+    puzzle.setFont(big)                              # e.g. a style sheet's, after the column was sized
+    QApplication.processEvents()
+    assert puzzle.label_width() > narrow - nav._margins() - nav._extra()   # it no longer fitted
+    assert nav.width() >= puzzle.label_width() + nav._margins() + nav._extra()
+    assert _shown(puzzle) == "Fragment Puzzle"
 
 
 def test_a_long_label_is_elided_and_the_column_capped():
@@ -252,6 +283,7 @@ class _Window:
     RESULTS_TEXT_STEPS = GenizahGUI.RESULTS_TEXT_STEPS
     _results_text_widgets = GenizahGUI._results_text_widgets
     _apply_results_text_level = GenizahGUI._apply_results_text_level
+    _base_point_size = staticmethod(GenizahGUI._base_point_size)
 
     def __init__(self):
         self.tabs = QTabWidget()

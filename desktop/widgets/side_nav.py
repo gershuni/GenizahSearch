@@ -214,6 +214,13 @@ class NavButton(QPushButton):
     def text(self):
         return self._label
 
+    def changeEvent(self, event):  # noqa: N802 - Qt API
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.FontChange:
+            # A font that arrives after the column was sized (a style sheet's,
+            # the platform's): the column measures again, or the label is cut.
+            self.label_changed.emit()
+
     def setToolTip(self, hint):  # noqa: N802 - Qt API
         self._hint = hint or ""
         self._render()
@@ -245,7 +252,11 @@ class NavButton(QPushButton):
         shown = ""
         if not self._compact:
             shown = self._label
-            if self._text_width:
+            # Elided only when the label does not fit by the measure the column
+            # is sized with (label_width): elidedText() can measure the same
+            # text wider, and a label the column was made for came out cut
+            # ("Composition Se..." on the Windows CI).
+            if self._text_width and self.label_width() > self._text_width:
                 font = QFont(self.font())
                 if self.isCheckable():
                     font.setBold(True)
