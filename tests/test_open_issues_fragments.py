@@ -349,6 +349,32 @@ def test_a_different_issue_that_shares_a_headline_is_added_not_taken_for_a_rerun
     assert co.check(f["tracker"], f["backlog"], f["details"]) == []
 
 
+def test_a_details_write_that_fails_midway_leaves_the_old_file_whole(tmp_path, monkeypatch):
+    """Writes are all or nothing (shared/atomic_io.py): a failure while the details are
+    replaced leaves the previous file intact and the fragment in place, and the next run
+    finishes the fold (Codex review of PR #449, round 7)."""
+    import os
+    d, f = _tree(tmp_path, {"2026-10-21-a.md": FRAG_P2})
+    real_replace = os.replace
+
+    def failing(src, dst, *a, **k):
+        if os.path.basename(dst) == "details.md":
+            raise OSError(28, "No space left on device")
+        return real_replace(src, dst, *a, **k)
+
+    monkeypatch.setattr(os, "replace", failing)
+    with pytest.raises(OSError):
+        _run(d, f, "--apply")
+    assert f["details"].read_text(encoding="utf-8") == DETAILS            # untouched, whole
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")]  # no temp left
+    assert (d / "2026-10-21-a.md").exists()
+    monkeypatch.setattr(os, "replace", real_replace)
+    assert _run(d, f, "--apply") == 0
+    assert co.check(f["tracker"], f["backlog"], f["details"]) == []
+    assert model.parse_details(f["details"].read_text(encoding="utf-8"))[1][8].endswith(
+        "What happens, and where.")
+
+
 def test_the_same_issue_in_two_fragments_is_folded_once(tmp_path):
     d, f = _tree(tmp_path, {"2026-10-21-a.md": FRAG_P2, "2026-10-20-b.md": FRAG_P2})
     assert _run(d, f, "--apply") == 0

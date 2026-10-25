@@ -126,10 +126,9 @@ def main(argv=None):
             continue
         doc.issues = [i for i in doc.issues if i.id not in ids]
         model.set_last_updated(doc, args.date, label)
-        path.write_text(model.render(doc), encoding="utf-8", newline="\n")
-    args.details.write_text(model.render_details(head, {k: v for k, v in sections.items()
-                                                        if k not in ids}),
-                            encoding="utf-8", newline="\n")
+        model.write_text(path, model.render(doc))                  # all or nothing
+    model.write_text(args.details, model.render_details(
+        head, {k: v for k, v in sections.items() if k not in ids}))
     print("\nverified and applied: %d row(s) moved to %s%s." % (
         len(new), args.archive.name,
         "" if len(ids) == len(new) else "; %d already there, finished" % (len(ids) - len(new))))

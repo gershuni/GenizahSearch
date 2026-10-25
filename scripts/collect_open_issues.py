@@ -263,7 +263,7 @@ def main(argv=None) -> int:
     # that stops before the details is finished by the next one (fold's `have` branch).
     for key, new in (("tracker", tracker), ("backlog", backlog), ("details", details)):
         if new != texts[key]:
-            getattr(args, key).write_text(new, encoding="utf-8", newline="\n")
+            model.write_text(getattr(args, key), new)       # all or nothing
     kept = []
     for p in paths:
         try:

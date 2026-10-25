@@ -21,10 +21,14 @@ details (scripts/archive_closed_issues.py); their IDs are never reused.
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:      # run as a script, only scripts/ is on the path
+    sys.path.append(str(REPO_ROOT))
+from shared.atomic_io import write_bytes_atomic  # noqa: E402 -- stdlib-only leaf module
 TRACKER = REPO_ROOT / "docs" / "OPEN_ISSUES.md"
 BACKLOG = REPO_ROOT / "docs" / "BACKLOG.md"
 DETAILS = REPO_ROOT / "docs" / "ISSUE_DETAILS.md"
@@ -261,6 +265,14 @@ def details_section(issue: Issue, place: str, body: str) -> str:
     return ("**%s** · %s · %s · %s · opened %s\n\nWhere: %s\n\n%s"
             % (issue.headline, place, AREAS[issue.area], issue.status,
                issue.opened or "—", issue.where, body.strip()))
+
+
+def write_text(path, text: str) -> None:
+    """Replace *path* with *text* ("\\n" endings; git's autocrlf restores the checkout's),
+    all or nothing: a temporary file renamed over the target (shared/atomic_io.py). A run
+    stopped mid-write can no longer leave a truncated tracker, backlog or details file --
+    the class of state Codex rounds 4, 6 and 7 on PR #449 each found another way into."""
+    write_bytes_atomic(str(path), text.encode("utf-8"))
 
 
 def used_ids(*texts: str) -> set:
