@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """Gate 1 of the FGP source-folders plan (``scripts/fgp_association_inventory.py``).
 
-A synthetic FIST, the two source folders, today's sidecar, fjms and nli are built in
-``tmp_path``; the inventory must tie every file to its record, classify every
-multi-association, give every unmatched / absent / sidecar-only file a reason, and fail
-when a basename is registered under two kinds or an expectation is not reproduced.
+The synthetic world of ``tests/fgp_fixture_world.py`` is built in ``tmp_path``; the inventory
+must tie every file to its record, classify every multi-association, give every unmatched /
+absent / sidecar-only file a reason, and fail when a basename is registered under two kinds
+or an expectation is not reproduced.
 """
 from __future__ import annotations
 
@@ -15,173 +15,17 @@ import sqlite3
 import pytest
 
 from scripts import fgp_association_inventory as inv
-
-
-ALMA_A, ALMA_B, ALMA_C, ALMA_D = "990001", "990002", "990003", "990004"
-
-
-def _touch(path: str, content: bytes = b"x") -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "wb") as fh:
-        fh.write(content)
-
-
-def _build_fist(path: str, mixed_kind: bool = False) -> None:
-    con = sqlite3.connect(path)
-    con.executescript(
-        """
-        CREATE TABLE dbo_UnitTranscription (UnitTranscriptionId INTEGER, SignatureId INTEGER, FileName TEXT,
-            Lang INTEGER, FolderPath TEXT, tmp_DoubleNotToDisplay INTEGER, HasFiles INTEGER,
-            ImageTranscriptionFolder TEXT, HebCopyRight TEXT, EngCopyRight TEXT);
-        CREATE TABLE dbo_UnitTranslation (UnitTranslationId INTEGER, SignatureId INTEGER, FileName TEXT,
-            Lang INTEGER, FolderPath TEXT, tmp_DoubleNotToDisplay INTEGER, HasFiles INTEGER,
-            HebCopyRight TEXT, EngCopyRight TEXT);
-        CREATE TABLE dbo_UnitFreeDescription (UnitFreeDescriptionId INTEGER, SignatureId INTEGER, FileName TEXT,
-            FolderPath TEXT, FreeDesc TEXT, HasFiles INTEGER);
-        CREATE TABLE dbo_Signature (SignatureId INTEGER, SetSignatureId INTEGER, SourceId INTEGER, SubId INTEGER,
-            DateCreated TEXT);
-        CREATE TABLE dbo_InventorySignature (InventoryId INTEGER, SetSignatureId INTEGER);
-        CREATE TABLE dbo_InventoryAlma (ID INTEGER, InventoryId INTEGER, AlmaId INTEGER);
-        CREATE TABLE dbo_CodeSource (TeamCode INTEGER, EngDesc TEXT);
-        """
-    )
-    tr = [
-        # served today, one Alma, linked to an existing B1 dir
-        (1, 101, "20000000000011_CUL_T-S 1.1_Tc", 1, "2000000\\", None, 2, "100000", None, None),
-        # candidate (not in today's DB), scan twin, linked to a B2 dir
-        (2, 102, "20000000000012_CUL_T-S 1.2", None, "2000000\\", None, 2, "C200", "ack", None),
-        # multi-Alma through one inventory; credit prefix disagrees (SourceId 132)
-        (3, 103, "20000000000015_CUL_T-S 1.5_Tc", None, "2000000\\", None, 2, "9999_G1", None, None),
-        # held: tmp_DoubleNotToDisplay = 1
-        (4, 104, "20000000000016_CUL_T-S 1.6_Tc", None, "2000000\\", 1, 2, None, None, None),
-        # duplicate unit rows for one file, same signature
-        (5, 105, "20000000000017", None, "2000000\\", None, 2, None, None, None),
-        (6, 105, "20000000000017", None, "2000000\\", None, 2, None, None, None),
-        # absent from the export: dir present, file missing
-        (7, 106, "20000000000099_CUL_T-S 9.9_Tc", None, "2000000\\", None, 2, None, None, None),
-        # absent from the export: dir not exported (the 19 sidecar-only files' shape)
-        (8, 107, "85000070000451_JTS_ENA NS 2.23_Tc", None, "8500000\\", None, 2, None, None, None),
-        # unresolved: signature without an inventory
-        (9, 108, "20000000000018_CUL_T-S 1.8_Tc", None, "2000000\\", None, 2, None, None, None),
-    ]
-    con.executemany("INSERT INTO dbo_UnitTranscription VALUES (?,?,?,?,?,?,?,?,?,?)", tr)
-    con.execute("INSERT INTO dbo_UnitTranslation VALUES (?,?,?,?,?,?,?,?,?)",
-                (1, 109, "20000000000011_CUL_T-S 1.1_Tl", 2, "2000000\\", None, 2, None, None))
-    con.execute("INSERT INTO dbo_UnitFreeDescription VALUES (?,?,?,?,?,?)",
-                (1, 110, "20000000000013", "2000000\\", "a description", 2))
-    if mixed_kind:
-        con.execute("INSERT INTO dbo_UnitFreeDescription VALUES (?,?,?,?,?,?)",
-                    (2, 101, "20000000000011_CUL_T-S 1.1_Tc", "2000000\\", "same file, other kind", 2))
-    con.executemany("INSERT INTO dbo_Signature VALUES (?,?,?,?,?)", [
-        (101, 1001, 200, 0, "2020"), (102, 1002, 200, 0, "2020"), (103, 1003, 132, 0, "2020"),
-        (104, 1004, 200, 0, "2020"), (105, 1005, 200, 0, "2020"), (106, 1006, 200, 0, "2020"),
-        (107, 1007, 850, 7, "2020"), (108, 1008, 200, 0, "2020"), (109, 1001, 200, 0, "2020"),
-        (110, 1010, 500, 352, "2020"),
-    ])
-    con.executemany("INSERT INTO dbo_InventorySignature VALUES (?,?)", [
-        (11, 1001), (12, 1002), (13, 1003), (14, 1004), (15, 1005), (16, 1006), (17, 1007), (20, 1010),
-    ])
-    con.executemany("INSERT INTO dbo_InventoryAlma VALUES (?,?,?)", [
-        (1, 11, ALMA_A), (2, 12, ALMA_B), (3, 13, ALMA_C), (4, 13, ALMA_D), (5, 14, ALMA_A),
-        (6, 15, ALMA_B), (7, 16, ALMA_A), (8, 17, ALMA_D), (9, 20, ALMA_C),
-    ])
-    con.executemany("INSERT INTO dbo_CodeSource VALUES (?,?)", [(200, "Genuzos"), (132, "Goitein")])
-    con.commit()
-    con.close()
-
-
-def _build_folders(root: str) -> tuple:
-    nopos = os.path.join(root, "NoPOS")
-    pdf = os.path.join(nopos, "2000000", "pdf")
-    for name in (
-        "20000000000011_CUL_T-S 1.1_Tc.pdf", "20000000000011_CUL_T-S 1.1_Tl.pdf",
-        "20000000000012_CUL_T-S 1.2.pdf", "20000000000012_CUL_T-S 1.2.scan.pdf",
-        "20000000000013.pdf", "20000000000015_CUL_T-S 1.5_Tc.pdf", "20000000000016_CUL_T-S 1.6_Tc.pdf",
-        "20000000000017.pdf", "20000000000018_CUL_T-S 1.8_Tc.pdf",
-        "20000000000014_CUL_T-S 1.4_Tc.pdf",        # no FIST trace at all
-        "20000000000015_CUL_T-S 1.5 renamed.pdf",   # same id as a FIST file, other name
-        "20000000000011_CUL_T-S  1.1_Tc.pdf",       # whitespace drift of a FIST FileName (NTFS folds case)
-        "C252953.pdf",                               # C-number named
-        "Copy of 20000000000011_CUL_T-S 1.1_Tc.pdf", "~$lock.pdf", "notes.txt",
-    ):
-        _touch(os.path.join(pdf, name))
-    _touch(os.path.join(nopos, "2000000", "word", "20000000000011_CUL_T-S 1.1_Tc.docx"))
-    _touch(os.path.join(nopos, "2000000", "word", "20000000000020_docx_only.docx"))
-    _touch(os.path.join(nopos, "2000000", "word_old", "20000000000011_CUL_T-S 1.1_Tc.doc"))
-    _touch(os.path.join(nopos, "New Text Document.txt"))
-    withpos = os.path.join(root, "WithPOS")
-    for f in ("100000.xml", "100000.js", "100000.xml.js", "100000.json", "100000_1.png", "img.jpg"):
-        _touch(os.path.join(withpos, "100000", f))
-    for f in ("data.js", "C200_1.png", "img.jpg"):
-        _touch(os.path.join(withpos, "C200", f))
-    for f in ("300.xml", "300.js", "allb.jpg"):
-        _touch(os.path.join(withpos, "300 301 99944", f))
-    _touch(os.path.join(withpos, "400_G1", "400_G1.xml"))
-    _touch(os.path.join(withpos, "C200.G2", "data.js"))   # same number as C200, a second region: "both"? no — B2 twice
-    _touch(os.path.join(withpos, "100000 dup", "x.xml"))  # 100000 also in a B1 join dir
-    os.makedirs(os.path.join(withpos, "V"))
-    _touch(os.path.join(withpos, "stray.txt"))
-    return nopos, withpos
-
-
-def _build_sidecars(root: str) -> tuple:
-    fgp = os.path.join(root, "fgp_transcriptions.db")
-    con = sqlite3.connect(fgp)
-    con.execute("CREATE TABLE fgp_transcriptions (id INTEGER, filename TEXT, c_number TEXT, sys_id TEXT, text_source TEXT, image_id TEXT)")
-    con.executemany("INSERT INTO fgp_transcriptions VALUES (?,?,?,?,?,?)", [
-        (1, "20000000000011_CUL_T-S 1.1_Tc_trans.pdf", "C100000", ALMA_A, "xml", "20000000000011"),
-        (2, "20000000000011_CUL_T-S 1.1_Tl_translate_eng.pdf", "C100000", ALMA_A, "original", "20000000000011"),
-        (3, "85000070000451_JTS_ENA NS 2.23_Tc_trans.pdf", None, ALMA_D, "pdf_rtl", "85000070000451"),
-        (4, "99999999999999_Nowhere_Tc_trans.pdf", "C300", None, "pdf_rtl", "99999999999999"),
-    ])
-    con.commit()
-    con.close()
-    fjms = os.path.join(root, "fjms_enrichment.db")
-    con = sqlite3.connect(fjms)
-    con.execute("CREATE TABLE extra_info (FGP TEXT, AlmaId TEXT, PixelWidth INTEGER, PixelHeight INTEGER, Rotation_Angle_deg REAL)")
-    con.executemany("INSERT INTO extra_info VALUES (?,?,?,?,?)", [
-        ("C100000", ALMA_A, 2232, 2712, 1.0), ("C200", ALMA_B, 2000, 3000, 182.0),
-        ("C300", ALMA_C, 2000, 3000, None), ("C301", ALMA_C, 2000, 3000, 270.0),
-        ("C99944", ALMA_C, 2000, 3000, 45.0), ("C777", "x", 1, 1, None),
-    ])
-    con.commit()
-    con.close()
-    nli = os.path.join(root, "nli_crossref.db")
-    con = sqlite3.connect(nli)
-    con.execute("CREATE TABLE nli_images (FGPImageNumberId TEXT, NLI_AlmaId TEXT, ImageName TEXT)")
-    con.executemany("INSERT INTO nli_images VALUES (?,?,?)", [
-        ("100000", ALMA_A, "T_S_1_1__L1F0B0S1"), ("200", ALMA_B, "T_S_1_2__L1F0B0S1"),
-        ("200", ALMA_C, "T_S_1_2__L1F0B0S1"), ("300", ALMA_C, "X"),
-    ])
-    con.commit()
-    con.close()
-    return fgp, fjms, nli
+from tests.fgp_fixture_world import ALMA_A, ALMA_B, ALMA_C, ALMA_D, build_fist, build_world, rows as _rows
 
 
 @pytest.fixture
 def world(tmp_path):
-    root = str(tmp_path)
-    fist = os.path.join(root, "FIST.db")
-    _build_fist(fist)
-    nopos, withpos = _build_folders(root)
-    fgp, fjms, nli = _build_sidecars(root)
-    out = os.path.join(root, "inventory")
-    return {"root": root, "fist": fist, "nopos": nopos, "withpos": withpos, "fgp": fgp, "fjms": fjms,
-            "nli": nli, "out": out}
+    return build_world(str(tmp_path))
 
 
 def _args(w, *extra):
     return ["--nopos", w["nopos"], "--withpos", w["withpos"], "--fist", w["fist"], "--fjms", w["fjms"],
             "--nli", w["nli"], "--fgp-db", w["fgp"], "--out-dir", w["out"], *extra]
-
-
-def _rows(db, sql):
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-    con.row_factory = sqlite3.Row
-    try:
-        return [dict(r) for r in con.execute(sql)]
-    finally:
-        con.close()
 
 
 def test_inventory_passes_and_ties_every_file(world, capsys):
@@ -295,7 +139,7 @@ def test_inventory_passes_and_ties_every_file(world, capsys):
 
 def test_gate_fails_on_a_basename_of_two_kinds(world, capsys):
     os.remove(world["fist"])
-    _build_fist(world["fist"], mixed_kind=True)
+    build_fist(world["fist"], mixed_kind=True)
     rc = inv.main(_args(world))
     out = capsys.readouterr().out
     assert rc == 1

@@ -387,6 +387,16 @@ Each gate names what makes it fail; "measured" or "reviewed" alone is never a pa
 2. **Identity, credit, visibility and refresh rules.** *Fails if:* any of the 45,034 existing rows lacks an explicit
    outcome (kept / re-sourced / retired-with-alias); any public `fgp:<id>` changes meaning; any row with an unresolved
    credit, an ambiguous association, or an unknown visibility flag (`tmp_DoubleNotToDisplay`) is marked publishable.
+   **Run 2026-10-25 — PASS, 7 checks + 29 declared expectations** (`scripts/run_fgp_gate2_rules.ps1` →
+   `scripts/fgp_gate2_rules.py`; rules and open rulings in
+   [`FGP_IDENTITY_CREDIT_VISIBILITY_RULES.md`](FGP_IDENTITY_CREDIT_VISIBILITY_RULES.md); output
+   `fgp_data/inventory/gate2.db`). Outcomes: 40,893 kept · 4,091 re-sourced (961 credits from FIST instead of the
+   file-name prefix, 3,130 XML rows whose text must come from the row's own record) · 50 retired-with-alias
+   (17 exact duplicates with a same-meaning successor, 28 unreachable rows without a `sys_id`, 5 whose `sys_id` the
+   FIST chain contradicts). Strictly publishable: 39,754; 41,807 if the generic FGP attribution counts as a resolved
+   credit. Held: 2,078 unresolved credits over 18 FIST sources (source 100 "site users" 1,297; ten book
+   `TitleId`s without a title), 3,130 XML rows, 23 `tmp_DoubleNotToDisplay`, 19 files absent from the delivery, 7
+   unconfirmed associations — each named per row. The rulings those holds need are the owner's (rules doc §6).
 3. **Unified text pipeline on a separate output DB.** *Fails if:* two runs differ; any replaced row lacks a proven
    source correspondence (FIST link); any line-level diff against today's text is unaligned or has an insertion /
    deletion without a disposition; any replaced line falls outside the accepted classes (restored prefix, restored
@@ -448,3 +458,12 @@ transcriptions, so the full totals are 69,338 / 54,536 / 68,871 / 7,957 / 31,440
 transcription files are 72, not 80); 8 empty `ImageTranscriptionFolder` strings had been counted as a missing
 directory (694, not 695). Statuses, unresolved reasons, visibility holds and the multi-association classes with their
 proposed rules are in §8.1.
+
+**Revision 6 (gate 2 run, 2026-10-25)** — `scripts/fgp_gate2_rules.py` gives each of the 45,034 rows an outcome under
+the identity, credit, visibility and refresh rules of `FGP_IDENTITY_CREDIT_VISIBILITY_RULES.md` (7 checks + 29
+expectations, PASS). Findings: today's rows are already one per (file, manuscript, image) and 44,975 of them carry a
+`sys_id` the file's FIST chain reaches, so the FIST unit is found by basename + `sys_id`; 50 rows cannot stand (17
+duplicates, 28 unreachable, 5 contradicted); 961 credits change once derived from FIST `SourceId`/`SubId` (932 book
+rows the `image_id[3:7]` heuristic could not reach); 2,078 rows have no verified credit source (18 FIST sources, listed
+for ruling); the 3,099 "unverified" XML rows are, for 3,073, Genuzos units whose image folder FIST assigns to another
+Genuzos unit of the same manuscript. Gate 2 changes nothing in production.
