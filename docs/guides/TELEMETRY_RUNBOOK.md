@@ -1,6 +1,6 @@
 # GenizahSearch Desktop Telemetry Runbook
 
-> Last updated: 2026-06-16
+> Last updated: 2026-10-25
 > For: Developers, Release Engineers
 
 ---
@@ -173,6 +173,21 @@ When a user opts out via the Settings/About consent toggle:
 
 The opt-out is effective immediately and persists across launches — it is stored in the same
 `config.pkl` consent record as the initial opt-in choice.
+
+---
+
+## (f) Reading the data: `scripts/posthog_report.py`
+
+One command pulls traffic, searches, crashes and errors, signed-in users, desktop usage and
+`ux_timing` for both apps into one Markdown file, comparing the window with the one before it:
+
+```
+python scripts/posthog_report.py --days 30          # --list shows the sections, --only picks some
+```
+
+It needs a **personal** key (`phx_`, scope "Query: Read") in `POSTHOG_PERSONAL_API_KEY`; the
+`phc_` keys above cannot read and are refused. The report names users by email and quotes web
+search text, so it is written to the git-ignored `_tmp/` folder. Never commit it or the key.
 
 ---
 
