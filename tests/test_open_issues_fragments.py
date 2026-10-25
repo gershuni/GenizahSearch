@@ -449,6 +449,20 @@ def test_an_archive_run_stopped_before_the_tracker_write_does_not_append_twice(t
     assert co.check(f["tracker"], f["backlog"], f["details"]) == []
 
 
+def test_an_archive_append_stopped_after_the_row_appends_the_whole_entry_again(tmp_path):
+    """The row alone in the archive is not 'archived': its details would be lost if the
+    run then removed the section (Codex review of PR #449)."""
+    d, f = _tree(tmp_path, {}, tracker=CLOSED_GS2)
+    partial = ARCHIVE + ("| GS-2 (OPEN_ISSUES.md) | Old P3 a | `y.py` | 2026-09-01 | "
+                         "✅ Fixed (2026-10-22, abc1234) |\n")
+    f["archive"].write_text(partial, encoding="utf-8")
+    assert ac.main(_archive_argv(f)) == 0
+    archive = f["archive"].read_text(encoding="utf-8")
+    assert archive.startswith(partial) and "### GS-2\n\na\n" in archive
+    assert "Old P3 a" not in f["tracker"].read_text(encoding="utf-8")
+    assert co.check(f["tracker"], f["backlog"], f["details"]) == []
+
+
 def test_the_archive_without_closed_rows_is_left_alone(tmp_path):
     d, f = _tree(tmp_path, {})
     argv = ["--apply"]

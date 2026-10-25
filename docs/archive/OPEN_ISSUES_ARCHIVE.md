@@ -1870,7 +1870,7 @@ Every open row was re-checked against the code at `ca809c56` (v9.10.0). These we
 - **Issue:** **The checked-in V4.2 recipe cannot rebuild the artifact in production**
 - **File:** `_tmp/build_v42lit_sidecar.ps1`, `_tmp/v42lit_alias_hash.txt`
 - **Status:** ❌ Open (found 2026-08-19) · **Rechecked 2026-10-06:** both pins still fail against disk exactly as below; the work-domains hash is still a literal in the script and the alias hash a hand-kept file.
-- **Notes:** Two of its hash pins fail against disk (`work_domains_v42lit.json`, `work_author_aliases-v42lit.json`) and the loaders fail closed, so rollback-by-rebuild does not exist; rollback by manifest repoint is unaffected. Fix before it is needed under pressure: derive both hashes at run time. Detail: [`docs/specs/discovery-performance-situation-2026-08-20.md`](specs/discovery-performance-situation-2026-08-20.md). Full text archived 2026-10-19.
+- **Notes:** Two of its hash pins fail against disk (`work_domains_v42lit.json`, `work_author_aliases-v42lit.json`) and the loaders fail closed, so rollback-by-rebuild does not exist; rollback by manifest repoint is unaffected. Fix before it is needed under pressure: derive both hashes at run time. Detail: [`docs/specs/discovery-performance-situation-2026-08-20.md`](../specs/discovery-performance-situation-2026-08-20.md). Full text archived 2026-10-19.
 
 ### Responsa wildcard grammatical-expansion recall bypasses the explosion guard and can build oversized Tantivy OR clauses
 
@@ -2025,7 +2025,7 @@ The tracker was rebuilt into `docs/OPEN_ISSUES.md` (defects), `docs/BACKLOG.md` 
 
 > The authority on v9.0.0 is `.planning/milestones/v9.0.0-MILESTONE-AUDIT.md`; `.planning/STATE.md` froze 2026-08-21. Recorded findings: `docs/archive/OPEN_ISSUES_V9_DISCOVERY_RECORDED.md`; the old coordination narrative and closed items: the archive's "Moved from the tracker 2026-09-25 (size split)" block.
 
-> **Moved 2026-10-23 (size split, the tracker over its 180,000-byte ceiling):** this section's 18 open items are in [`docs/archive/OPEN_ISSUES_V9_DISCOVERY_OPEN_ITEMS.md`](archive/OPEN_ISSUES_V9_DISCOVERY_OPEN_ITEMS.md), verbatim and still open; close or re-home them there.
+> **Moved 2026-10-23 (size split, the tracker over its 180,000-byte ceiling):** this section's 18 open items are in [`docs/archive/OPEN_ISSUES_V9_DISCOVERY_OPEN_ITEMS.md`](OPEN_ISSUES_V9_DISCOVERY_OPEN_ITEMS.md), verbatim and still open; close or re-home them there.
 
 > C3/H12 (audit) — the append-diff gate exists since 2026-10-20 (`scripts/verify_append_preservation.py`, step three of `docs/specs/discovery-deploy.md` §2.1 and §2.4): a live main-pool identification that a candidate deletes or demotes blocks the deploy unless the owner rules on that exact delta. The matcher itself is unchanged (`REF_DF_CAP`), so a REF7+ append will still lose identifications; the gate makes that loss visible and owner-ruled, not silent. Its first run found 523 V4.2 demotions that the August review had not counted; the owner accepted them on 2026-10-20 ("accept, nothing more"; archived).
 #### 2026-05-29 Audit Follow-up (fan-out codebase audit + Codex review)

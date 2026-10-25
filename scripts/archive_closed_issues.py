@@ -16,6 +16,7 @@ taken: scripts/collect_open_issues.py never gives out an ID the archive holds.
 import argparse
 import datetime
 import io
+import re
 import sys
 from pathlib import Path
 
@@ -122,8 +123,11 @@ def main(argv=None):
 
 
 def _archived(archive: str, issue_id: int) -> bool:
-    """The archive holds this ID's row (archive_block writes it as '| GS-<n> (<file>) |')."""
-    return ("| GS-%d (" % issue_id) in archive
+    """The archive holds this ID's row ('| GS-<n> (<file>) |') AND its details ('### GS-<n>'
+    with a body). A run stopped inside its append can leave the row alone: that ID is not
+    archived, so it is appended again in full rather than its text lost (Codex, #449)."""
+    return (("| GS-%d (" % issue_id) in archive and
+            re.search(r"(?m)^### GS-%d\r?\n(?:\r?\n)*[ \t]*\S" % issue_id, archive) is not None)
 
 
 if __name__ == "__main__":
