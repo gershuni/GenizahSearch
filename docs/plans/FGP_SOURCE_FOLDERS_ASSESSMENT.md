@@ -384,8 +384,9 @@ Each gate names what makes it fail; "measured" or "reviewed" alone is never a pa
 ## 9. Evidence files (session scratchpad, not in the repo)
 
 `census2.json`, `verify_a.json` … `verify_i.json`, `b1_geometry.json`, `b1_geometry2.json` (full counts),
-`census2_withpos_numbers.tsv`, `census2_nopos_basenames.tsv`, `overlay_rich_100000.jpg`, `overlay_c_C100181.jpg`; Codex
-reviews verbatim in `_tmp/codex-round1-review.md`, `_tmp/codex-round2-review.md`, `_tmp/codex-round3-review.md`.
+`census2_withpos_numbers.tsv`, `census2_nopos_basenames.tsv`, `overlay_rich_100000.jpg`, `overlay_c_C100181.jpg`. The four
+Codex reviews were kept verbatim in the assessment worktree's gitignored `_tmp/` and went with it when the worktree was
+removed after the fast-forward; their findings and dispositions are recorded in §10.
 
 ## 10. Revision history
 
