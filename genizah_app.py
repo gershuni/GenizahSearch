@@ -21,9 +21,10 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QScrollArea, QFrame, QSlider, QSizePolicy, QInputDialog,
                              QToolButton, QAbstractSlider, QAbstractItemView,
                              QCompleter)
-from PyQt6.QtCore import (Qt, QTimer, QUrl, pyqtSignal, QThread, QEventLoop, QEvent, QPoint)
+from PyQt6.QtCore import (Qt, QTimer, QUrl, pyqtSignal, QThread, QEventLoop, QEvent, QPoint, QByteArray)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QColor,
-                         QStandardItemModel, QStandardItem, QPalette, QCursor)
+                         QStandardItemModel, QStandardItem, QPalette, QCursor,
+                         QFontInfo, QFontMetrics, QKeySequence, QShortcut)
 from PyQt6 import sip
 
 from version import APP_VERSION
@@ -68,6 +69,9 @@ from desktop.qthread_exit import settle_running_threads
 from desktop.qt_translations import install_qt_translations
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
+from desktop.widgets.side_nav import LayoutProofShortcuts, LinkedButton, SideNav, ltr, popup_point
+from desktop.go_to_dialog import GoToDialog
+from shared.quick_open import quick_open_target
 from desktop.widgets.line_number_text_edit import (
     apply_line_numbered_text,
     is_line_numbers_enabled,
@@ -79,7 +83,8 @@ from desktop.title_helpers import (
     _translate_hebrew_date, _resolve_display_title,
 )
 from desktop.image_loader import ImageLoaderThread
-from desktop.result_dialog import ResultDialog
+from desktop.result_dialog import (ResultDialog, reading_text_size,
+                                   TEXT_PT_DEFAULT, TEXT_PT_MAX, TEXT_PT_MIN, TEXT_PT_STEP)
 from desktop import comp_view_filter as _cvf
 from desktop.dialogs_scholarly import FjmsBibliographyDialog, FjmsCatalogDialog, FjmsMeasurementsDialog, NliBibliographyDialog  # noqa: F401
 from desktop.dialogs_filter import ExcludeDialog, DomainFilterDialog, PreSearchFilterDialog, LibraryFilterDialog, library_apply_selection  # noqa: F401
@@ -100,6 +105,8 @@ from shared import passage_fusion  # RRF fusion (pure, shared with web + API)
 from shared import compound_query  # Composition Search conditions (pure)
 from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog, TelemetryConsentBar, WHATS_NEW_CONTENT_VERSION  # Phase 127 update_ui; SEED-031 re-ask bar
 from desktop.index_rebuild_bar import IndexRebuildBar, remaining_phrase
+from desktop import startup_tips
+from desktop.startup_tips import TipStrip
 from shared.index_build_progress import BuildClock
 from shared.index_swap import (discard_staged_index, gib, plan_build, remove_old_index,
                                remove_old_index_in_background, swap_in_staged_index)
@@ -1982,6 +1989,8 @@ class GenizahGUI(QMainWindow):
             # Show What's New bar until its content has been dismissed
             cfg = load_app_config()
             self._maybe_show_whats_new(cfg)
+            # One startup tip, once the window has settled (desktop/startup_tips.py).
+            QTimer.singleShot(1500, self._maybe_show_startup_tip)
 
             # SEED-031: gently re-invite not-yet-opted-in decliners (throttled,
             # non-modal). Mutually exclusive with the first-run modal by
@@ -2344,34 +2353,94 @@ class GenizahGUI(QMainWindow):
         # Settings Dialog (persistent, created once)
         self.settings_dialog = SettingsDialog(self)
 
-        # Corner widget — order: All sections | Login | v6.x | Language | Website |
-        # Puzzle | Joins | Settings(⚙). An overflow row: on a narrow window the
-        # extras move into "More" instead of taking half the tab row (owner
-        # screenshots at 300%, 2026-09-24). The language switch, Settings and the
-        # sections menu always stay; the version leaves first (Settings and About
-        # both show it and offer the update check).
-        corner_widget = self.corner_row = OverflowRow(tr("More"), spacing=4)
-        corner_widget.setContentsMargins(5, 0, 5, 0)
+        # Ctrl+1 .. Ctrl+7 open the sections, in either menu layout; each tab's
+        # tooltip names its shortcut (and its full name, when the tab is elided).
+        self._section_shortcuts = []
+        section_keys = []
+        for i in range(self.tabs.count()):
+            seq = QKeySequence(f"Ctrl+{i + 1}")
+            shortcut = QShortcut(seq, self)
+            shortcut.activated.connect(lambda idx=i: self.tabs.setCurrentIndex(idx))
+            self._section_shortcuts.append(shortcut)
+            key = seq.toString(QKeySequence.SequenceFormat.NativeText)
+            section_keys.append(key)
+            self.tabs.setTabToolTip(i, f"{self.tabs.tabText(i)} ({ltr(key)})")
+        # Ctrl+= (or Ctrl++) / Ctrl+- / Ctrl+0: larger, smaller, normal text --
+        # the transcription on the Browse tab, the result lists everywhere else.
+        for keys, step in (("Ctrl+=", 1), ("Ctrl++", 1), ("Ctrl+-", -1), ("Ctrl+0", 0)):
+            shortcut = QShortcut(QKeySequence(keys), self)
+            shortcut.activated.connect(lambda s=step: self._step_text_size(s))
+            self._section_shortcuts.append(shortcut)
+        # Ctrl+G Go to, F1 Help for the section in front, Ctrl+, Settings,
+        # Ctrl+F the section's own search or find field (owner, 2026-10-24).
+        # Ctrl+8 the Fragment Puzzle, Ctrl+9 the Joins Lab (owner, 2026-10-25).
+        for keys, slot in (("Ctrl+G", self.open_go_to),
+                           ("F1", self.open_help_for_current_section),
+                           ("Ctrl+,", self._open_settings_dialog),
+                           ("Ctrl+F", self._focus_section_field),
+                           ("Ctrl+8", self._open_puzzle_window),
+                           ("Ctrl+9", self.open_join_workbench)):
+            shortcut = QShortcut(QKeySequence(keys), self)
+            shortcut.activated.connect(slot)
+            self._section_shortcuts.append(shortcut)
+        # On Windows a Ctrl+letter shortcut can miss in a keyboard layout whose
+        # letter keys type another script (owner: "Ctrl-G does not work" while
+        # the menu entry did). These also answer to the physical key.
+        if sys.platform == 'win32':
+            self._layout_shortcuts = LayoutProofShortcuts(self, {
+                ('G', Qt.KeyboardModifier.ControlModifier): self.open_go_to,
+                ('F', Qt.KeyboardModifier.ControlModifier): self._focus_section_field,
+                (',', Qt.KeyboardModifier.ControlModifier): self._open_settings_dialog,
+            })
+            QApplication.instance().installEventFilter(self._layout_shortcuts)
 
-        # All sections: every tab in one menu, for when the tab bar is too
-        # narrow to show them all and scrolls.
+        self._wire_tip_signals()
+
+        # Two menu layouts, chosen in Settings and kept in config.pkl as
+        # nav_layout (owner, 2026-10-24: "Keep the tabs. Offer an option to
+        # change them to the side menu"): the tab bar with the buttons in its
+        # corner -- the default -- or the side menu (desktop/widgets/side_nav.py).
+        # Both are built; _apply_nav_layout shows one of them.
+
+        # The menu, at the window's edge before the first tab -- far right in
+        # Hebrew, far left in English (owner, 2026-10-24: "Move the menu button
+        # to the extreme right or left"). Every section, the current one in bold
+        # and no tick boxes, then Go to, Puzzle, Joins Lab, Help, Settings and the
+        # switch to the side menu: it still has every section when the tab bar
+        # is too narrow and scrolls.
         self.corner_sections_btn = QToolButton()
         self.corner_sections_btn.setText("\u2630")
-        self.corner_sections_btn.setToolTip(tr("All sections"))
-        self.corner_sections_btn.setAccessibleName(tr("All sections"))
+        self.corner_sections_btn.setToolTip(tr("Menu"))
+        self.corner_sections_btn.setAccessibleName(tr("Menu"))
         self.corner_sections_btn.setAutoRaise(True)
         self.corner_sections_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self._corner_sections_menu = QMenu(self.corner_sections_btn)
         self._corner_sections_menu.aboutToShow.connect(self._fill_sections_menu)
         self.corner_sections_btn.setMenu(self._corner_sections_menu)
-        corner_widget.add(self.corner_sections_btn, -1)
+        self.corner_menu_holder = QWidget()
+        _menu_holder_layout = QHBoxLayout(self.corner_menu_holder)
+        _menu_holder_layout.setContentsMargins(4, 0, 4, 0)
+        _menu_holder_layout.addWidget(self.corner_sections_btn)
+        # Qt mirrors corner positions in RTL: the "left" corner is the start edge.
+        self.tabs.setCornerWidget(self.corner_menu_holder, Qt.Corner.TopLeftCorner)
 
-        # Login/Logout
-        self.corner_login_btn = QPushButton(tr("Login"))
+        # Corner widget, at the other end — order: Login | v6.x | Language |
+        # Website | Puzzle | Joins | Settings(⚙). An overflow row: on a narrow
+        # window the extras move into "More" instead of taking half the tab row
+        # (owner screenshots at 300%, 2026-09-24). The language switch and
+        # Settings always stay; the version leaves first (Settings and About
+        # both show it and offer the update check).
+        corner_widget = self.corner_row = OverflowRow(tr("More"), spacing=4)
+        corner_widget.setContentsMargins(5, 0, 5, 0)
+
+        # Login, or the account's name, which opens the account menu. A
+        # LinkedButton: its side-menu twin follows its text and enabled state.
+        self.corner_login_btn = LinkedButton(tr("Login"))
         self.corner_login_btn.setFlat(True)
         self.corner_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.corner_login_btn.clicked.connect(self._corner_login_clicked)
-        corner_widget.add(self.corner_login_btn, 2)
+        self.corner_login_btn.clicked.connect(lambda: self._corner_login_clicked(self.corner_login_btn))
+        # Never shortened to the "▾" its label ends with: the name is the point.
+        corner_widget.add(self.corner_login_btn, 2, short_text=None)
 
         # Version
         self.corner_version_btn = QPushButton(f"v{APP_VERSION}")
@@ -2382,8 +2451,8 @@ class GenizahGUI(QMainWindow):
         self.corner_version_btn.setStyleSheet("color: #7f8c8d; font-size: 11px;")
         corner_widget.add(self.corner_version_btn, 5)
 
-        # Language toggle
-        self.lang_btn = QPushButton("English" if CURRENT_LANG == 'he' else "עברית")
+        # Language toggle (names the language it switches to; linked like Login)
+        self.lang_btn = LinkedButton("English" if CURRENT_LANG == 'he' else "עברית")
         self.lang_btn.setFlat(True)
         self.lang_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.lang_btn.clicked.connect(lambda: self.toggle_language())
@@ -2393,7 +2462,7 @@ class GenizahGUI(QMainWindow):
         self.corner_website_btn = QPushButton("\U0001F310 GenizahSearch.com")
         self.corner_website_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.corner_website_btn.setToolTip(tr("Visit our website"))
-        self.corner_website_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://genizahsearch.com")))
+        self.corner_website_btn.clicked.connect(self._open_website)
         self.corner_website_btn.setStyleSheet("""
             QPushButton {
                 background-color: #e8f4fc; color: #1a73e8;
@@ -2404,11 +2473,26 @@ class GenizahGUI(QMainWindow):
         """)
         corner_widget.add(self.corner_website_btn, 4)
 
+        # Text size, the buttons beside the keys (owner, 2026-10-25): the
+        # transcription on the Browse tab, the result lists elsewhere.
+        for name, label, tip, keys, step in (
+                ('corner_text_smaller_btn', "\u200eA\u2212\u200e", tr("Smaller text"), "Ctrl+-", -1),
+                ('corner_text_larger_btn', "\u200eA+\u200e", tr("Larger text"), "Ctrl+=", 1)):
+            btn = QPushButton(label)
+            btn.setFlat(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setToolTip(f"{tip} ({ltr(keys)})")
+            btn.setStyleSheet("font-size: 13px; font-weight: bold; padding: 1px 2px;")
+            btn.setFixedWidth(30)
+            btn.clicked.connect(lambda _c=False, s=step: self._step_text_size(s))
+            setattr(self, name, btn)
+            corner_widget.add(btn, 3)
+
         # Puzzle canvas button
         self.corner_puzzle_btn = QPushButton("\U0001F9E9")  # puzzle piece emoji
         self.corner_puzzle_btn.setFlat(True)
         self.corner_puzzle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.corner_puzzle_btn.setToolTip(tr("Fragment Puzzle"))
+        self.corner_puzzle_btn.setToolTip(f"{tr('Fragment Puzzle')} ({ltr('Ctrl+8')})")
         self.corner_puzzle_btn.setStyleSheet("font-size: 16px; padding: 1px 2px;")
         self.corner_puzzle_btn.setFixedWidth(30)
         self.corner_puzzle_btn.clicked.connect(self._open_puzzle_window)
@@ -2418,7 +2502,7 @@ class GenizahGUI(QMainWindow):
         self.corner_joins_btn = QPushButton("\U0001F517")  # 🔗 link emoji
         self.corner_joins_btn.setFlat(True)
         self.corner_joins_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.corner_joins_btn.setToolTip(tr("Joins Lab"))
+        self.corner_joins_btn.setToolTip(f"{tr('Joins Lab')} ({ltr('Ctrl+9')})")
         self.corner_joins_btn.setStyleSheet("font-size: 16px; padding: 1px 2px;")
         self.corner_joins_btn.setFixedWidth(30)
         self.corner_joins_btn.clicked.connect(self.open_join_workbench)
@@ -2428,7 +2512,7 @@ class GenizahGUI(QMainWindow):
         self.corner_settings_btn = QPushButton("\u2699")
         self.corner_settings_btn.setFlat(True)
         self.corner_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.corner_settings_btn.setToolTip(tr("הגדרות") if CURRENT_LANG == 'he' else "Settings")
+        self.corner_settings_btn.setToolTip(f"{tr('Settings')} ({ltr('Ctrl+,')})")
         self.corner_settings_btn.setStyleSheet("font-size: 16px; padding: 1px 2px;")
         self.corner_settings_btn.setFixedWidth(30)
         self.corner_settings_btn.clicked.connect(self._open_settings_dialog)
@@ -2440,18 +2524,96 @@ class GenizahGUI(QMainWindow):
         #   Hebrew  RTL: mirrored to left → Search far-right, gear far-left
         self.tabs.tabBar().setExpanding(True)
         # Shorten tab names with "..." rather than cutting them mid-word when
-        # the window is narrow; the full name stays in the All sections menu.
+        # the window is narrow; the full name stays in the menu and the tooltip.
         self.tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
         self.tabs.setCornerWidget(corner_widget, Qt.Corner.TopRightCorner)
+
+        # The side menu: the same sections, Puzzle and Joins Lab, and at its foot
+        # Settings, the account, the language switch, the website and the
+        # version. The ☰ choice between labels and icons only is kept in
+        # config.pkl too.
+        self.side_nav = SideNav(expanded=bool(load_app_config().get('side_nav_expanded', True)))
+        self.side_nav.toggled.connect(lambda on: save_app_config({'side_nav_expanded': on}))
+        section_icons = {
+            self.search_tab: "\U0001F50D",          # magnifying glass
+            self.composition_tab: "\U0001F4DC",     # scroll
+            self.browse_tab: "\U0001F4D6",          # open book
+            self.catalog_browse_tab: "\U0001F5C2\uFE0F",  # card index dividers
+            self.lists_tab: "\U0001F4CB",           # clipboard
+            self.community_tab: "\U0001F465",       # people
+            self.my_library_tab: "\U0001F4DA",      # books
+        }
+        for i in range(self.tabs.count()):
+            btn = self.side_nav.add_section(
+                section_icons.get(self.tabs.widget(i), "\u2022"), self.tabs.tabText(i),
+                section_keys[i])
+            btn.clicked.connect(lambda _c=False, idx=i: self.tabs.setCurrentIndex(idx))
+        self.side_nav.set_current(self.tabs.currentIndex())
+        self.tabs.currentChanged.connect(self.side_nav.set_current)
+
+        self.side_nav.add_separator()
+        self.nav_puzzle_btn = self.side_nav.add_button("\U0001F9E9", tr("Fragment Puzzle"), shortcut="Ctrl+8")
+        self.nav_puzzle_btn.clicked.connect(self._open_puzzle_window)
+        self.nav_joins_btn = self.side_nav.add_button("\U0001F517", tr("Joins Lab"), shortcut="Ctrl+9")
+        self.nav_joins_btn.clicked.connect(self.open_join_workbench)
+        self.nav_go_to_btn = self.side_nav.add_button("\U0001F9ED", tr("Go to..."), shortcut="Ctrl+G")
+        self.nav_go_to_btn.clicked.connect(self.open_go_to)
+
+        self.side_nav.add_separator(footer=True)
+        self.nav_help_btn = self.side_nav.add_button("\u2753", tr("Help"), footer=True, shortcut="F1")
+        self.nav_help_btn.clicked.connect(self.open_help_for_current_section)
+        self.nav_settings_btn = self.side_nav.add_button(
+            "\u2699\uFE0F", tr("Settings"), footer=True, shortcut="Ctrl+,")
+        self.nav_settings_btn.clicked.connect(self._open_settings_dialog)
+        self.nav_text_larger_btn = self.side_nav.add_button(
+            "A+", tr("Larger text"), footer=True, shortcut="Ctrl+=")
+        self.nav_text_larger_btn.clicked.connect(lambda: self._step_text_size(1))
+        self.nav_text_smaller_btn = self.side_nav.add_button(
+            "A\u2212", tr("Smaller text"), footer=True, shortcut="Ctrl+-")
+        self.nav_text_smaller_btn.clicked.connect(lambda: self._step_text_size(-1))
+        # The way back to tabs, in view (owner, 2026-10-25): the tab layout's
+        # ☰ menu has "Move the menu to the side", and this is its opposite.
+        self.nav_to_tabs_btn = self.side_nav.add_button(
+            "\u2B06\uFE0F", tr("Move the menu to tabs"), footer=True)
+        self.nav_to_tabs_btn.clicked.connect(lambda: self.set_nav_layout('tabs'))
+        self.nav_login_btn = self.side_nav.add_button("\U0001F464", "", footer=True)
+        self.corner_login_btn.link(self.nav_login_btn)
+        self.nav_login_btn.clicked.connect(lambda: self._corner_login_clicked(self.nav_login_btn))
+        self.nav_lang_btn = self.side_nav.add_button("\U0001F524", "", footer=True)
+        self.lang_btn.link(self.nav_lang_btn)
+        self.nav_lang_btn.clicked.connect(lambda: self.toggle_language())
+        self.nav_website_btn = self.side_nav.add_button("\U0001F310", "GenizahSearch.com", footer=True)
+        self.nav_website_btn.setToolTip(tr("Visit our website"))
+        self.nav_website_btn.clicked.connect(self._open_website)
+        self.nav_version_btn = QPushButton(f"v{APP_VERSION}")
+        self.nav_version_btn.setFlat(True)
+        self.nav_version_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.nav_version_btn.setToolTip(tr("Check for updates"))
+        self.nav_version_btn.clicked.connect(self.check_updates_manual)
+        self.nav_version_btn.setStyleSheet(
+            "QPushButton { color: #7f8c8d; font-size: 10px; border: none; padding: 2px; }"
+            "QPushButton:hover { text-decoration: underline; }")
+        self.side_nav.add_widget(self.nav_version_btn)
+        # Its right-click menu offers the way back too (the narrow-window menu
+        # lists the entry itself).
+        self.side_nav.context_extras = [
+            (tr("Move the menu to tabs"), lambda: self.set_nav_layout('tabs'))]
         self._update_corner_login_state()
 
         # Connect tab change to refresh community data when needed
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self._community_data_loaded = False
 
-        # Main Layout wrapper for Notification Bar
+        # The side menu runs the full height of the window; the notification
+        # bars, the sections and the citation bar sit beside it.
         central_widget = QWidget()
-        main_layout = QVBoxLayout(central_widget)
+        shell_layout = QHBoxLayout(central_widget)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
+        shell_layout.addWidget(self.side_nav)
+        content_widget = QWidget()
+        shell_layout.addWidget(content_widget, 1)
+        main_layout = QVBoxLayout(content_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
@@ -2477,6 +2639,15 @@ class GenizahGUI(QMainWindow):
         self.telemetry_consent_bar.dismissed.connect(self.on_telemetry_reask_dismissed)
         main_layout.addWidget(self.telemetry_consent_bar)
 
+        # One startup tip (desktop/startup_tips.py, owner 2026-10-25): hidden
+        # until _maybe_show_startup_tip picks one.
+        self.tip_strip = TipStrip()
+        self.tip_strip.show_me.connect(self._tip_show_me)
+        self.tip_strip.next_requested.connect(self._tip_next)
+        self.tip_strip.closed.connect(self._tip_closed)
+        self.tip_strip.turned_off.connect(self._tip_turn_off)
+        main_layout.addWidget(self.tip_strip)
+
         # The search-index rebuild's line (desktop/index_rebuild_bar.py): hidden until a
         # build runs. The Settings dialog keeps its own bar.
         self.index_rebuild_bar = IndexRebuildBar()
@@ -2489,6 +2660,8 @@ class GenizahGUI(QMainWindow):
         main_layout.addWidget(self.citation_bar)
 
         self.setCentralWidget(central_widget)
+        self._apply_nav_layout(load_app_config().get('nav_layout', 'tabs'))
+        self._apply_results_text_level(load_app_config().get(self.RESULTS_TEXT_KEY, 0))
 
         # Pre-warm FJMS caches in background so catalog browse tab opens instantly.
         # thread_safe=True is required because the QThread will use the same connection.
@@ -2509,15 +2682,14 @@ class GenizahGUI(QMainWindow):
             pass  # Cache operation failed; continue without cached data
 
     def _update_corner_login_state(self):
-        """Update the corner login button based on login state (and Sync lists now,
+        """Update the login button (and its side-menu twin) based on login state (and Sync lists now,
         which needs a sign-in: is_logged_in() makes a request, so it is asked once)."""
         logged_in = self.corrections_client.is_logged_in()
         if logged_in:
+            # The account's name; a click opens the account menu (Sync lists now,
+            # Logout) instead of logging out at once (owner, 2026-10-24).
             name = account_display_name(self.corrections_client.current_user)
-            if name:
-                self.corner_login_btn.setText(f"{name} ({tr('Logout')})")
-            else:
-                self.corner_login_btn.setText(tr("Logout"))
+            self.corner_login_btn.setText(f"{name or tr('Account')} \u25be")
         else:
             self.corner_login_btn.setText(tr("Login"))
         self._set_lists_sync_now_enabled(logged_in and not self._logout_pending)
@@ -2601,12 +2773,40 @@ class GenizahGUI(QMainWindow):
         except Exception as e:
             logger.exception("Error in _on_tab_changed: %s", e)
 
-    def _corner_login_clicked(self):
-        """Handle corner login button click."""
+    def _corner_login_clicked(self, anchor=None):
+        """Login, or -- logged in -- the account menu, under the button clicked
+        (the tab row's or the side menu's)."""
         if self.corrections_client.is_logged_in():
-            self._do_logout()
+            self._show_account_menu(anchor)
         else:
             self._show_login_dialog()
+
+    def _fill_account_menu(self, menu):
+        """Sync lists now (as the Lists tab's button stands: enabled only while
+        a sync can run), then Logout."""
+        menu.clear()
+        sync = self.btn_lists_sync_now
+        if sync is not None:
+            act = menu.addAction(sync.text())
+            act.setEnabled(sync.isEnabled())
+            act.setToolTip(sync.toolTip())
+            act.triggered.connect(lambda _c=False: sync.click())
+            menu.addSeparator()
+        menu.addAction(tr("Logout")).triggered.connect(lambda _c=False: self._do_logout())
+        return menu
+
+    def _show_account_menu(self, anchor=None):
+        side = self.nav_layout == 'side'
+        if anchor is None:
+            anchor = self.nav_login_btn if side else self.corner_login_btn
+        menu = self._fill_account_menu(QMenu(self))
+        menu.setToolTipsVisible(True)
+        if anchor.visibleRegion().isEmpty():
+            # Clicked from the tab row's More menu: the button is parked out of
+            # sight, so the menu opens where the click was.
+            menu.exec(QCursor.pos())
+        else:
+            menu.exec(popup_point(anchor, menu, beside=self.side_nav.isAncestorOf(anchor)))
 
     def _show_login_dialog(self):
         dialog = LoginDialog(self, self.corrections_client)
@@ -5444,6 +5644,7 @@ class GenizahGUI(QMainWindow):
 
     def _show_results_context_menu(self, pos):
         """Show context menu for search results with community options."""
+        startup_tips.mark_used('result_menu')  # its startup tip is no longer needed
         row = self.results_table.rowAt(pos.y())
         if row < 0:
             return
@@ -6049,6 +6250,7 @@ class GenizahGUI(QMainWindow):
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
+        btn_help.setToolTip(f"{tr('Help')} (F1)")
         btn_help.clicked.connect(lambda: self.open_help_center(anchor=None))
 
         # Domain filter button and label
@@ -6470,10 +6672,15 @@ class GenizahGUI(QMainWindow):
 
         # Load Button moved to top row
         btn_load = QPushButton(tr("Load Text File")); btn_load.clicked.connect(self.load_comp_file)
+        btn_load.setToolTip(tr("Put the text of a file in the box, instead of pasting it."))
         top_row.addWidget(btn_load)
 
         # 1. Exclude & Filter (Moved to top row)
         btn_exclude = QPushButton(tr("Exclude Manuscripts"))
+        self.btn_comp_exclude = btn_exclude
+        btn_exclude.setToolTip(tr(
+            "Manuscripts you already know: they are kept out of the results and listed "
+            "under Excluded."))
         btn_exclude.clicked.connect(
             lambda: self.open_exclude_dialog('composition'))
         # "Filter texts" menu (owner, 2026-10-14): replaces the old "Filter
@@ -6483,6 +6690,9 @@ class GenizahGUI(QMainWindow):
         # created further down in this method -- fine, since the menu cannot
         # be shown before the tab finishes building.
         self.btn_comp_filter_texts = QPushButton(tr("Filter texts"))
+        self.btn_comp_filter_texts.setToolTip(tr(
+            "Keep other texts out of your results: texts your composition quotes, works "
+            "that quote it, or a text that must appear. Hover over an item for an example."))
         self.btn_comp_filter_texts.setMenu(self._build_comp_filter_menu())
         self.lbl_exclude_status = QLabel("")
         self.lbl_exclude_status.setStyleSheet("color: #8e44ad; font-weight: bold;")
@@ -6529,6 +6739,7 @@ class GenizahGUI(QMainWindow):
         btn_help = QPushButton("?")
         btn_help.setFixedWidth(30)
         btn_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
+        btn_help.setToolTip(f"{tr('Help')} (F1)")
         btn_help.clicked.connect(lambda: self.open_help_center(anchor="composition"))
         _title_flow.addWidget(btn_help)
         top_row.addWidget(self.comp_title_actions)
@@ -6566,16 +6777,39 @@ class GenizahGUI(QMainWindow):
 
         # 2. Parameters
         self.spin_chunk = QSpinBox(); self.spin_chunk.setRange(2, 20); self.spin_chunk.setValue(5); self.spin_chunk.setPrefix(tr("Chunk: "))
-        self.spin_chunk.setToolTip(tr("Words per search block (Rec: 5-7)"))
+        # Tooltips in plain words (owner, 2026-10-25): what each setting does
+        # and which way to turn it.
+        self.spin_chunk.setToolTip(tr(
+            "Your text is searched in runs of this many words. Fewer words find more, "
+            "including chance matches; more words find fewer, surer ones. "
+            "5 to 7 suits most texts."))
         self.spin_chunk.valueChanged.connect(self._update_boundary_stats)
         
         self.spin_freq = QSpinBox(); self.spin_freq.setValue(10); self.spin_freq.setRange(1,1000); self.spin_freq.setPrefix(tr("Max Freq: "))
-        self.spin_freq.setToolTip(tr("Ignore phrases appearing > X times (filters common phrases)"))
+        self.spin_freq.setToolTip(tr(
+            "A run of words found on more than this many pages is treated as a common "
+            "phrase, such as a verse or a formula, and the pages where it is found go to "
+            "the Filtered group. Raise it if too much ends up there. At 50 or more, "
+            "nothing is filtered this way."))
         
         self.comp_mode_combo = QComboBox(); self.comp_mode_combo.addItems([tr("Exact"), tr("Variants"), tr("Fuzzy")])
         self.comp_mode_combo.setItemData(0, tr("Exact match"))
         self.comp_mode_combo.setItemData(1, tr("Variant search (uses slider level)"))
         self.comp_mode_combo.setItemData(2, tr("Fuzzy search"))
+        for _i, _tip in enumerate((
+                tr("Exact: your words as written, as whole words."),
+                tr("Variants: also common spelling variants. The slider beside it sets "
+                   "how many kinds of letter swap are tried."),
+                tr("Fuzzy: also near spellings, with a letter added, dropped, changed or "
+                   "swapped (two in words of five letters or more)."))):
+            self.comp_mode_combo.setItemData(_i, _tip, Qt.ItemDataRole.ToolTipRole)
+        self.comp_mode_combo.setToolTip(
+            tr("How closely the manuscripts must match your words:") + "\n"
+            + tr("Exact: your words as written, as whole words.") + "\n"
+            + tr("Variants: also common spelling variants. The slider beside it sets "
+                 "how many kinds of letter swap are tried.") + "\n"
+            + tr("Fuzzy: also near spellings, with a letter added, dropped, changed or "
+                 "swapped (two in words of five letters or more)."))
         self.comp_mode_combo.currentIndexChanged.connect(self._on_comp_mode_changed)
 
         # Variant Level Slider for Composition (visible only in Variants mode)
@@ -6586,7 +6820,10 @@ class GenizahGUI(QMainWindow):
         self.comp_variant_slider.setRange(10, 500)
         self.comp_variant_slider.setValue(50)
         self.comp_variant_slider.setFixedWidth(80)
-        self.comp_variant_slider.setToolTip(tr("Variant intensity"))
+        self.comp_variant_slider.setToolTip(tr(
+            "How many kinds of letter swap to try, the most common first. Higher finds "
+            "more spellings, more slowly and with more noise. The slider in the Search "
+            "tab moves with it."))
         self.comp_variant_slider_label = QLabel("50")
         self.comp_variant_slider_label.setFixedWidth(25)
         self.comp_variant_slider.valueChanged.connect(lambda v: (
@@ -6598,18 +6835,28 @@ class GenizahGUI(QMainWindow):
         self.comp_variant_slider_container.setVisible(False)
 
         self.spin_filter = QSpinBox(); self.spin_filter.setValue(5); self.spin_filter.setPrefix(tr("Filter > "))
-        self.spin_filter.setToolTip(tr("Move titles appearing > X times to Appendix"))
+        self.spin_filter.setToolTip(tr(
+            "When more than this many results share one catalog title (many copies of "
+            "one prayer book, for example), they are gathered under that title in the "
+            "Appendix, so they do not crowd the main results."))
 
         # Min chunk matches spinbox
         self.spin_min_chunks = QSpinBox()
         self.spin_min_chunks.setRange(1, 20)
         self.spin_min_chunks.setValue(1)
         self.spin_min_chunks.setPrefix(tr("Min chunks: "))
-        self.spin_min_chunks.setToolTip(tr("Minimum chunk matches per manuscript"))
+        self.spin_min_chunks.setToolTip(tr(
+            "A page is listed only when at least this many different chunks of your "
+            "text are found on it. Raise it to drop pages that share only one phrase "
+            "with your text. With cross-paragraph search, the \u2699 setting is used "
+            "instead."))
 
         # Shortened Text
         self.chk_comp_flat = QCheckBox(tr("Sort by shelfmark only"))
-        self.chk_comp_flat.setToolTip(tr("Disable Main/Appendix grouping"))
+        self.chk_comp_flat.setToolTip(tr(
+            "Show every result in one list, without the Main Results, Appendix and "
+            "Filtered groups. Filtered and excluded results are marked in the list "
+            "instead."))
         self.chk_comp_flat.toggled.connect(self.on_comp_display_mode_changed)
 
         cr.addWidget(self.spin_chunk); cr.addWidget(self.spin_freq)
@@ -6841,11 +7088,14 @@ class GenizahGUI(QMainWindow):
 
         # Shortened Text
         self.btn_comp_run = QPushButton(tr("Analyze")); self.btn_comp_run.clicked.connect(self.toggle_composition)
+        self.btn_comp_run.setToolTip(tr(
+            "Search the corpus for parallels to the text in the box."))
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold;")
         self.btn_comp_run.setEnabled(False)
         self.btn_comp_recursive = QPushButton(tr("Full Recursive Search")); self.btn_comp_recursive.clicked.connect(self.run_recursive_composition)
         self.btn_comp_recursive.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
         self.btn_comp_recursive.setEnabled(True)
+        self.btn_comp_recursive.setToolTip(self._recursive_tip('full'))
 
         # "New" button to reset/clear composition search state
         self.btn_reset_comp = QPushButton(tr("New"))
@@ -6869,7 +7119,11 @@ class GenizahGUI(QMainWindow):
             self.comp_corpus_scope_combo.addItem("Genizah", "genizah")
             self.comp_corpus_scope_combo.addItem("Local", "local")
             self.comp_corpus_scope_combo.addItem("ALL", "all")
-        self.comp_corpus_scope_combo.setToolTip(tr("Select which corpus to search"))
+        self.comp_corpus_scope_combo.setToolTip(
+            tr("Which texts to search:") + "\n"
+            + tr("Genizah: the Genizah transcriptions.") + "\n"
+            + tr("Local: your My Library documents.") + "\n"
+            + tr("ALL: both, in one list."))
         self.comp_corpus_scope_combo.setFixedWidth(90)
         _comp_saved_scope = getattr(self, '_comp_corpus_scope', 'genizah')
         _comp_scope_idx = self.comp_corpus_scope_combo.findData(_comp_saved_scope)
@@ -7163,6 +7417,7 @@ class GenizahGUI(QMainWindow):
 
         # Help
         btn_browse_help = QPushButton("?")
+        btn_browse_help.setToolTip(f"{tr('Help')} (F1)")
         btn_browse_help.setFixedWidth(30)
         btn_browse_help.setStyleSheet("background-color: #f39c12; color: white; font-weight: bold; border-radius: 15px;")
         btn_browse_help.clicked.connect(lambda: self.open_help_center(anchor="browse"))
@@ -7520,6 +7775,22 @@ class GenizahGUI(QMainWindow):
         self.browse_find_input.textChanged.connect(lambda text: apply_find_highlight(self.browse_text, text.strip()))
         browse_find_row.addWidget(self.browse_find_input)
 
+        # Text size, as in the Manuscript Viewer's find row and shared with it
+        # (owner, 2026-10-24). Ctrl+= / Ctrl+- / Ctrl+0 too, on this tab.
+        self.btn_b_text_smaller = QToolButton()
+        # Left-to-right marks: in the Hebrew UI a bare "A-" displays as "-A".
+        self.btn_b_text_smaller.setText("\u200eA\u2212\u200e")
+        self.btn_b_text_smaller.setToolTip(tr("Smaller text"))
+        self.btn_b_text_smaller.setAccessibleName(tr("Smaller text"))
+        self.btn_b_text_smaller.clicked.connect(lambda: self._browse_step_text_size(-TEXT_PT_STEP))
+        self.btn_b_text_larger = QToolButton()
+        self.btn_b_text_larger.setText("\u200eA+\u200e")
+        self.btn_b_text_larger.setToolTip(tr("Larger text"))
+        self.btn_b_text_larger.setAccessibleName(tr("Larger text"))
+        self.btn_b_text_larger.clicked.connect(lambda: self._browse_step_text_size(TEXT_PT_STEP))
+        for _b in (self.btn_b_text_smaller, self.btn_b_text_larger):
+            browse_find_row.addWidget(_b)
+
         # Phase 999.4 — line-numbers toggle next to Find input (matches the
         # ResultDialog placement at desktop/result_dialog.py).
         self.btn_b_line_numbers = QPushButton(tr("# Lines"))
@@ -7617,11 +7888,15 @@ class GenizahGUI(QMainWindow):
         # Text display/edit widget
         self.browse_text = QTextEdit()
         self.browse_text.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.browse_text.setFont(QFont("SBL Hebrew", 16))
+        # The Manuscript Viewer's size (A- / A+ in either changes both).
+        self.browse_text.setFont(QFont("SBL Hebrew", reading_text_size().value()))
         self.browse_text.setReadOnly(True)  # Start in read-only mode
         self.browse_edit_mode = False
         self.browse_original_text = ""
         text_layout.addWidget(self.browse_text)
+
+        self._browse_apply_text_size(reading_text_size().value())
+        reading_text_size().changed.connect(self._browse_apply_text_size)
 
         # Phase 999.4: attach line-number gutter as sibling widget (D-04 selection-safe).
         # First real render (browse_render_page etc.) will populate via apply_line_numbered_text.
@@ -7833,6 +8108,11 @@ class GenizahGUI(QMainWindow):
                 self._browse_rd_add_entry(sys_id, shelfmark)
             return
 
+        self._browse_open_list_entry(entry)
+
+    def _browse_open_list_entry(self, entry):
+        """Open a list or Recently Viewed entry in Browse: at its FL or image
+        when it has one, else by system number."""
         fl_id = entry.get('fl_id')
         img_id = entry.get('img')
         sys_id = entry.get('sys_id')
@@ -13422,6 +13702,8 @@ class GenizahGUI(QMainWindow):
         list_id = item.data(0, Qt.ItemDataRole.UserRole)
         if not list_id:
             return
+        if list_id == 'recent':
+            startup_tips.mark_used('recent_list')  # its startup tip is no longer needed
         self.lists_current_list_id = list_id
         self.lists_current_item_id = None
         self.lists_refresh_items()
@@ -14283,6 +14565,7 @@ class GenizahGUI(QMainWindow):
 
     def lists_copy_info_by_id(self, item_id):
         """Copy item info to clipboard with format options."""
+        startup_tips.mark_used('copy_info')  # its startup tip is no longer needed
         if not self.lists_mgr:
             return
 
@@ -15975,6 +16258,7 @@ class GenizahGUI(QMainWindow):
 
     def _open_puzzle_window(self):
         """Open the puzzle canvas window (or bring existing one to front)."""
+        startup_tips.mark_used('puzzle')  # its startup tip is no longer needed
         # D-03: Fragment Puzzle feature_opened (explicit open path — corner button / menu)
         self._emit_feature_opened(feature_name='fragment_puzzle')
         if self._puzzle_window is None or sip.isdeleted(self._puzzle_window):
@@ -16106,7 +16390,7 @@ class GenizahGUI(QMainWindow):
     def open_join_workbench(self, *, emit_telemetry: bool = True):
         """Open the Join Lab (no anchor required). Restores last session state if available.
 
-        Called by the corner_joins_btn (Feature 6) and used as the new no-arg launcher.
+        Called by the Joins Lab button and menu entries (Feature 6) and used as the new no-arg launcher.
         If persisted join_lab state exists with a non-empty anchor, restore_state() is called
         to rebuild input + defer the search to the background worker (hard constraint: no
         synchronous search on the UI thread — Feature 7).
@@ -16115,6 +16399,7 @@ class GenizahGUI(QMainWindow):
         the ghost desktop_feature_opened event from deferred session-restore calls.
         Default True keeps all user-gesture callers emitting normally.
         """
+        startup_tips.mark_used('joins_lab')  # its startup tip is no longer needed
         from desktop.join_workbench import JoinWorkbenchWindow  # lazy import (desktop-only)
         # D-03: Joins Lab feature_opened telemetry (no-arg launcher path).
         # CR-114-05: gated on emit_telemetry so deferred restore (emit_telemetry=False)
@@ -16275,14 +16560,556 @@ class GenizahGUI(QMainWindow):
             self.setMinimumSize(*self._main_window_floor(handle.screen()))
 
     def _fill_sections_menu(self):
-        """The All sections menu: one entry per tab, the current one checked."""
-        menu = self._corner_sections_menu
-        menu.clear()
-        for i in range(self.tabs.count()):
-            act = menu.addAction(self.tabs.tabText(i))
-            act.setCheckable(True)
-            act.setChecked(i == self.tabs.currentIndex())
-            act.triggered.connect(lambda _c=False, idx=i: self.tabs.setCurrentIndex(idx))
+        """The tab layout's ☰ menu: built from the side menu's entries, so the
+        two list the same sections and tools; the account, the language switch
+        and the website are left out, being beside it in the tab row."""
+        self.side_nav.build_menu(
+            self._corner_sections_menu,
+            omit=(self.nav_login_btn, self.nav_lang_btn, self.nav_website_btn, self.nav_to_tabs_btn),
+            extras=[(tr("Move the menu to the side"), lambda: self.set_nav_layout('side'))])
+
+    # Which menu layout is showing: 'tabs' (the default) or 'side'.
+    nav_layout = 'tabs'
+
+    def _apply_nav_layout(self, layout):
+        """Show the tab bar and its corner buttons, or the side menu instead."""
+        side = layout == 'side'
+        self.nav_layout = 'side' if side else 'tabs'
+        self.tabs.tabBar().setVisible(not side)
+        self.corner_row.setVisible(not side)
+        self.corner_menu_holder.setVisible(not side)
+        # No pane frame beside the side menu: the column's own edge divides.
+        self.tabs.setDocumentMode(side)
+        self.side_nav.setVisible(side)
+
+    def set_nav_layout(self, layout):
+        """The user's choice of menu layout (Settings, or the menus): applied at
+        once and remembered."""
+        self._apply_nav_layout(layout)
+        save_app_config({'nav_layout': self.nav_layout})
+        combo = getattr(self.settings_dialog, 'combo_nav_layout', None)
+        if combo is not None:
+            combo.blockSignals(True)
+            combo.setCurrentIndex(1 if self.nav_layout == 'side' else 0)
+            combo.blockSignals(False)
+
+    def _open_website(self):
+        QDesktopServices.openUrl(QUrl("https://genizahsearch.com"))
+
+    # -- Go to, Help, Ctrl+F (owner, 2026-10-24) -------------------------------
+    def open_go_to(self):
+        """Ctrl+G: the Go to box, then open or search what was typed, or open
+        the recent manuscript chosen in it."""
+        startup_tips.mark_used('go_to')  # its startup tip is no longer needed
+        dlg = GoToDialog(self, completer=getattr(self, 'shelf_completer', None),
+                         recent=self._go_to_recent_items())
+        try:
+            accepted = dlg.exec()
+            kind, value = dlg.choice()
+        finally:
+            dlg.deleteLater()
+        if not accepted:
+            return
+        if kind == 'recent':
+            self._open_recent_item(value)
+        else:
+            self.go_to(value)
+
+    def _go_to_recent_items(self, limit=10):
+        """The manuscripts opened last, for the Go to box: (label, item id),
+        most recent first, each manuscript once (Recently Viewed keeps a row
+        per image)."""
+        if not getattr(self, 'lists_mgr', None):
+            return []
+        try:
+            items = self.lists_mgr.get_items_in_list('recent')
+        except Exception:
+            logger.exception("Go to: reading Recently Viewed failed")
+            return []
+        out, seen = [], set()
+        for item in items:
+            sid = item.get('sys_id')
+            if not sid or sid in seen or not item.get('item_id'):
+                continue
+            seen.add(sid)
+            shelfmark, title = '', ''
+            if getattr(self, 'meta_mgr', None):
+                try:
+                    shelfmark, title = self.meta_mgr.get_meta_for_id(sid)
+                except Exception:
+                    shelfmark, title = '', ''
+            shelfmark = item.get('shelfmark_override') or shelfmark
+            if not shelfmark or shelfmark == 'Unknown':
+                shelfmark = str(sid)
+            title = (title or '').strip()
+            if len(title) > 60:
+                title = title[:59].rstrip() + '\u2026'
+            out.append((f"{shelfmark} \u2014 {title}" if title else shelfmark, item['item_id']))
+            if len(out) >= limit:
+                break
+        return out
+
+    def _open_recent_item(self, item_id):
+        """Open a Recently Viewed entry in Browse, as its own list does."""
+        entry = self.lists_mgr.get_item(item_id) if getattr(self, 'lists_mgr', None) else None
+        if not entry:
+            return False
+        self._set_active_tab(self.browse_tab)
+        self._browse_open_list_entry(entry)
+        return True
+
+    def go_to(self, text):
+        """Open a system number, FL number or shelfmark in Browse, or search
+        Hebrew or Arabic words (shared/quick_open.py decides which). Returns the
+        kind acted on, or None for blank text."""
+        target = quick_open_target(text)
+        if target is None:
+            return None
+        kind, value = target
+        if kind == 'search':
+            self.query_input.setText(value)
+            self._set_active_tab(self.search_tab)
+            if not self.is_searching:
+                self.toggle_search()
+            return kind
+        # Only the one field: browse_load also reads the other two, and a
+        # number left over in one of them would compete with this one.
+        fields = {'sys_id': (self.browse_sys_input, "sys"),
+                  'fl': (self.browse_fl_input, "fl"),
+                  'shelfmark': (self.browse_shelf_input, "shelf")}
+        for field, _name in fields.values():
+            field.clear()
+        field, name = fields[kind]
+        field.setText(value)
+        self._set_last_browse_field(name)
+        self._set_active_tab(self.browse_tab)
+        self.browse_load()
+        return kind
+
+    # The Help section for each section of the window (Help.html ids).
+    _SECTION_HELP = (('search_tab', 'search'), ('composition_tab', 'composition'),
+                     ('browse_tab', 'browse'), ('catalog_browse_tab', 'catalog-browse'),
+                     ('lists_tab', 'lists'), ('community_tab', 'community'),
+                     ('my_library_tab', 'my-library'))
+
+    def open_help_for_current_section(self):
+        """F1 and the Help entry: Help, opened at the section in front."""
+        current = self.tabs.currentWidget()
+        anchor = next((a for name, a in self._SECTION_HELP
+                       if getattr(self, name, None) is current), None)
+        self.open_help_center(anchor=anchor)
+
+    # Ctrl+F: the field each section searches or filters with.
+    _SECTION_FIND_FIELD = (('search_tab', 'query_input'), ('composition_tab', 'comp_text_area'),
+                           ('browse_tab', 'browse_find_input'),
+                           ('catalog_browse_tab', 'catalog_author_input'),
+                           ('lists_tab', 'lists_filter_input'))
+
+    def _focus_section_field(self):
+        current = self.tabs.currentWidget()
+        for tab, field_name in self._SECTION_FIND_FIELD:
+            field = getattr(self, field_name, None)
+            if getattr(self, tab, None) is current and field is not None:
+                field.setFocus(Qt.FocusReason.ShortcutFocusReason)
+                field.selectAll()
+                return field
+        return None
+
+    # -- startup tips (desktop/startup_tips.py, owner 2026-10-25) --------------
+    # One tip at each start, in the strip under the notice bars: not on the
+    # first start, not while another notice bar is up, and not once turned off.
+    _MODE_INDEX_RESPONSA = 2
+    _MODE_INDEX_PGP_TAGS = 7
+
+    def _maybe_show_startup_tip(self):
+        try:
+            starts = startup_tips.record_start()
+            if starts < 2 or startup_tips.tips_off():
+                return None
+            for name in ('whats_new_bar', 'telemetry_consent_bar', 'update_bar'):
+                bar = getattr(self, name, None)
+                if bar is not None and not bar.isHidden():
+                    return None
+            return self._show_next_tip()
+        except Exception:
+            logger.exception("Startup tip failed")
+            return None
+
+    def _show_next_tip(self):
+        """Show the next tip not shown yet whose feature is not in use; it
+        counts as shown at once. None (and the strip hidden) when none is left."""
+        seen = list(load_app_config().get(startup_tips.TIPS_SEEN_KEY) or [])
+        used = self._tip_features_in_use()
+        tip = startup_tips.next_tip(seen, used)
+        if tip is None:
+            self.tip_strip.hide()
+            return None
+        startup_tips.mark_seen(tip)
+        has_next = startup_tips.next_tip(seen + [tip.key], used) is not None
+        self.tip_strip.set_tip(tip, self._tip_action_label(tip), has_next=has_next)
+        return tip
+
+    def _tip_invitation(self, tip):
+        """'letter_index' / 'account' when the tip needs what is not set up
+        yet: its button then builds the index or opens the login (owner)."""
+        if tip.needs == 'letter_index' and not passage_lifecycle.passage_available():
+            return 'letter_index'
+        client = getattr(self, 'corrections_client', None)
+        if tip.needs == 'account' and not getattr(client, 'current_user', None):
+            return 'account'
+        return None
+
+    def _tip_action_label(self, tip):
+        invitation = self._tip_invitation(tip)
+        if invitation == 'letter_index':
+            return tr("Build the index")
+        if invitation == 'account':
+            return tr("Login")
+        return tr("Show me") if tip.show else None
+
+    def _tip_show_me(self, tip):
+        if tip is None:
+            return
+        startup_tips.note_engaged()
+        invitation = self._tip_invitation(tip)
+        if invitation == 'letter_index':
+            self._maybe_offer_passage_build(explicit=True)
+        elif invitation == 'account':
+            self._corner_login_clicked()
+        else:
+            self._run_tip_action(tip.show)
+
+    def _tip_next(self):
+        startup_tips.note_engaged()
+        self._show_next_tip()
+
+    def _tip_closed(self):
+        self.tip_strip.hide()
+        if startup_tips.note_closed():
+            self.statusBar().showMessage(
+                tr("Tips are off. You can turn them on again in Settings."), 8000)
+
+    def _tip_turn_off(self):
+        startup_tips.set_tips_off(True)
+        self.tip_strip.hide()
+        self.statusBar().showMessage(
+            tr("Tips are off. You can turn them on again in Settings."), 8000)
+
+    _TIP_TABS = {'search': 'search_tab', 'responsa': 'search_tab',
+                 'composition': 'composition_tab', 'browse': 'browse_tab'}
+
+    def _run_tip_action(self, action):
+        """What a tip's Show me does: open the section and ring the control
+        ("search:btn_search"), switch the search mode first ("responsa:..."),
+        open a section ("tab:lists_tab"), Help at a section ("help:responsa"),
+        or one of the named actions below."""
+        if not action:
+            return
+        kind, _, target = action.partition(':')
+        if kind in self._TIP_TABS:
+            self._set_active_tab(getattr(self, self._TIP_TABS[kind]))
+            if kind == 'responsa':
+                self.mode_combo.setCurrentIndex(self._MODE_INDEX_RESPONSA)
+            widget = getattr(self, target, None)
+            if widget is not None:
+                QTimer.singleShot(80, lambda w=widget: self._flash_widget(w))
+        elif kind == 'tab':
+            self._set_active_tab(getattr(self, target))
+        elif kind == 'help':
+            self.open_help_center(anchor=target or None)
+        elif kind == 'query':
+            self._set_active_tab(self.search_tab)
+            self.query_input.setFocus(Qt.FocusReason.OtherFocusReason)
+            QTimer.singleShot(80, lambda: self._flash_widget(self.query_input))
+        elif kind == 'history':
+            self._set_active_tab(self.search_tab)
+            QTimer.singleShot(80, self._show_search_history_menu)
+        elif kind == 'go_to':
+            self.open_go_to()
+        elif kind == 'pgp_tags':
+            self._set_active_tab(self.search_tab)
+            self.mode_combo.setCurrentIndex(self._MODE_INDEX_PGP_TAGS)
+        elif kind == 'witness_dialog':
+            self._set_active_tab(self.composition_tab)
+            if self._comp_method() == 'passage':
+                self._open_witness_dialog()
+            else:
+                QTimer.singleShot(80, lambda: self._flash_widget(self.comp_method_combo))
+        elif kind == 'joins_lab':
+            self.open_join_workbench()
+        elif kind == 'settings':
+            self._open_settings_dialog()
+        elif kind == 'search_settings':
+            self.open_search_settings()
+        elif kind == 'menu':
+            if self.nav_layout == 'tabs':
+                self.corner_sections_btn.click()
+            else:
+                self._flash_widget(self.side_nav)
+        elif kind == 'recent_list':
+            self._set_active_tab(self.lists_tab)
+            self._select_recent_list()
+
+    def _select_recent_list(self):
+        tree = getattr(self, 'lists_tree', None)
+        if tree is None:
+            return False
+        items = [tree.topLevelItem(i) for i in range(tree.topLevelItemCount())]
+        while items:
+            item = items.pop(0)
+            if item.data(0, Qt.ItemDataRole.UserRole) == 'recent':
+                tree.setCurrentItem(item)
+                self.lists_on_list_selected(item, 0)
+                return True
+            items.extend(item.child(i) for i in range(item.childCount()))
+        return False
+
+    def _flash_widget(self, widget, ms=2500):
+        """Ring *widget* in orange for a moment: what a tip's Show me points at.
+        A frame laid over the window, not a style sheet on the widget, which
+        would fight the widget's own."""
+        if widget is None or not widget.isVisible():
+            return None
+        ring = QFrame(self)
+        ring.setObjectName("tip_ring")
+        ring.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        ring.setStyleSheet("#tip_ring { border: 3px solid #f39c12; border-radius: 6px; background: transparent; }")
+        corner = widget.mapTo(self, QPoint(0, 0))
+        ring.setGeometry(corner.x() - 4, corner.y() - 4, widget.width() + 8, widget.height() + 8)
+        ring.show()
+        ring.raise_()
+        QTimer.singleShot(ms, ring.deleteLater)
+        return ring
+
+    # (widget, signal, feature, condition on the signal's argument or None)
+    _TIP_WIRES = (
+        ('btn_query_builder', 'clicked', 'tabular', None),
+        ('search_within_btn', 'clicked', 'search_within', None),
+        ('comp_method_combo', 'currentIndexChanged', 'letter_level', 'passage_chosen'),
+        ('btn_comp_witnesses', 'clicked', 'witness', None),
+        ('act_comp_quoted_texts', 'triggered', 'quoted', None),
+        ('act_comp_quoting_texts', 'triggered', 'quoting', None),
+        ('act_comp_add_condition', 'triggered', 'condition', None),
+        ('btn_comp_exclude', 'clicked', 'exclude', None),
+        ('browse_find_input', 'textEdited', 'browse_find', None),
+        ('btn_find_parallels', 'clicked', 'parallels', None),
+        ('btn_b_add_to_view', 'clicked', 'reading_desk', None),
+        ('btn_b_cite', 'clicked', 'cite', None),
+        ('btn_b_open_web', 'clicked', 'website', None),
+        ('btn_b_copy_web', 'clicked', 'website', None),
+        ('btn_b_add_to_puzzle', 'clicked', 'puzzle', None),
+        ('btn_b_catalog', 'clicked', 'ktiv', None),
+        ('btn_b_edit', 'clicked', 'edit_comment', None),
+        ('btn_b_comment', 'clicked', 'edit_comment', None),
+        ('chk_responsa_flex', 'toggled', 'flex', 'on'),
+        ('chk_responsa_ja', 'toggled', 'judeo_arabic', 'on'),
+        ('chk_bidirectional', 'toggled', 'bidirectional', 'on'),
+        ('boundary_mode_combo', 'currentIndexChanged', 'cross_paragraph', 'not_full'),
+    )
+
+    def _wire_tip_signals(self):
+        """A feature used retires its tip (startup_tips.mark_used). The uses
+        that are one widget's signal are connected here; the others call
+        mark_used where they happen, and some are read from what is kept
+        (_tip_derived_features)."""
+        tests = {
+            None: lambda *_a: True,
+            'on': lambda checked=False, *_a: bool(checked),
+            'passage_chosen': lambda *_a: self._comp_method() == 'passage',
+            'not_full': lambda *_a: self.boundary_mode_combo.currentData() != 'full',
+        }
+        for name, signal, feature, condition in self._TIP_WIRES:
+            widget = getattr(self, name, None)
+            if widget is None:
+                continue
+            test = tests[condition]
+            getattr(widget, signal).connect(
+                lambda *a, f=feature, t=test: startup_tips.mark_used(f) if t(*a) else None)
+        self.tabs.currentChanged.connect(
+            lambda _i: startup_tips.mark_used('catalog_tab')
+            if self.tabs.currentWidget() is getattr(self, 'catalog_browse_tab', None) else None)
+        for shortcut in self._section_shortcuts[:self.tabs.count()]:
+            shortcut.activated.connect(lambda: startup_tips.mark_used('section_key'))
+
+    def _tip_features_in_use(self):
+        return startup_tips.features_used() | self._tip_derived_features()
+
+    def _tip_derived_features(self):
+        """Features in use, read from what is kept: the search history, the
+        lists, My Library's folders, the settings."""
+        found = set()
+        try:
+            from shared.session_persistence import get_history
+            history = get_history()
+            for kind in ('regular', 'composition'):
+                for entry in history.get(kind, []):
+                    params = entry.get('search_params') or {}
+                    if entry.get('pinned'):
+                        found.add('saved_search')
+                    if any(k != 'include_mode' for k in (entry.get('pre_search_filters') or {})):
+                        found.add('filters')
+                    if kind == 'composition':
+                        if params.get('comp_method') == 'passage':
+                            found.add('letter_level')
+                        continue
+                    query = entry.get('query') or ''
+                    if params.get('mode_index') == self._MODE_INDEX_RESPONSA:
+                        found.add('responsa_search')
+                        if '#' in query or '%' in query:
+                            found.add('responsa_affixes')
+                        if '(' in query or '[' in query:
+                            found.add('responsa_or_gap')
+                    elif params.get('mode_index') == self._MODE_INDEX_PGP_TAGS:
+                        found.add('pgp_tags')
+                    if params.get('text_position'):
+                        found.add('position')
+        except Exception:
+            logger.debug("Startup tips: reading the search history failed", exc_info=True)
+        cfg = load_app_config()
+        if cfg.get('nav_layout') == 'side':
+            found.add('side_menu')
+        if cfg.get(self.RESULTS_TEXT_KEY) or reading_text_size().value() != TEXT_PT_DEFAULT:
+            found.add('text_size')
+        lists = getattr(self, 'lists_mgr', None)
+        try:
+            if lists is not None:
+                if any(item.get('lists') for item in lists.data.get('items', {}).values()):
+                    found.add('list_items')
+                if lists.get_projects() or lists.get_all_tags():
+                    found.add('projects')
+        except Exception:
+            logger.debug("Startup tips: reading the lists failed", exc_info=True)
+        try:
+            indexer = getattr(getattr(self, 'my_library_tab', None), '_indexer', None)
+            if indexer is not None and indexer.list_folders():
+                found.add('my_library')
+        except Exception:
+            logger.debug("Startup tips: reading My Library failed", exc_info=True)
+        settings = getattr(getattr(self, 'lab_engine', None), 'settings', None)
+        if getattr(settings, 'custom_variants', None):
+            found.add('custom_pairs')
+        return found
+
+    # -- text size (owner, 2026-10-24: "option to change the size of the texts
+    # in search etc windows") ---------------------------------------------------
+    # The result lists: points added to the window's own font, one level for
+    # all of them, chosen in Settings > Text size or with Ctrl+= / Ctrl+- /
+    # Ctrl+0. Their headers keep the window's font. The transcription (Browse,
+    # Manuscript Viewer) has its own size, A- / A+ (reading_text_size).
+    RESULTS_TEXT_KEY = 'results_text_level'
+    RESULTS_TEXT_STEPS = (0, 2, 4, 6)       # Normal, Large, Larger, Largest
+    results_text_level = 0
+
+    @staticmethod
+    def _base_point_size():
+        """The window's text size in points. QFontInfo: the size the font
+        really has, also when the system font is given in pixels (its
+        pointSizeF() is then -1). Where even that answers nonsense (-0.75 on
+        the headless Windows CI), the font's own size, else 9."""
+        font = QApplication.font()
+        for size in (QFontInfo(font).pointSizeF(), font.pointSizeF()):
+            if size > 0:
+                return size
+        return 9.0
+
+    def _results_text_widgets(self):
+        names = ('results_table', 'comp_tree', 'catalog_results_table', 'lists_items_table')
+        return [w for w in (getattr(self, n, None) for n in names) if w is not None]
+
+    def _apply_results_text_level(self, level):
+        try:
+            level = max(0, min(len(self.RESULTS_TEXT_STEPS) - 1, int(level)))
+        except (TypeError, ValueError):
+            level = 0
+        self.results_text_level = level
+        base = self._base_point_size()
+        for view in self._results_text_widgets():
+            headers = [view.header()] if isinstance(view, QTreeWidget) else [
+                view.horizontalHeader(), view.verticalHeader()]
+            if view.property('_base_row_height') is None:
+                # Pin the headers to the window's font before the first change,
+                # and keep the style's row height as the floor. The size is set
+                # explicitly: an unmodified copy of an inherited font still
+                # counts as inherited, and the header would follow the table.
+                for header in headers:
+                    pinned = QFont(header.font())
+                    pinned.setPointSizeF(base)
+                    header.setFont(pinned)
+                if not isinstance(view, QTreeWidget):
+                    view.setProperty('_base_row_height', view.verticalHeader().defaultSectionSize())
+                else:
+                    view.setProperty('_base_row_height', 0)
+            font = QFont(view.font())
+            font.setPointSizeF(base + self.RESULTS_TEXT_STEPS[level])
+            view.setFont(font)
+            # Under a view with a style sheet (the Composition tree) Qt passes
+            # the font on to neither its viewport nor the snippet cells already
+            # in it: the viewport is given it for cells still to come, and the
+            # cells now showing are given it one by one.
+            view.viewport().setFont(font)
+            for cell in self._snippet_cells(view):
+                cell.setFont(font)
+            if not isinstance(view, QTreeWidget):
+                # Table rows do not grow with their text; a tree's do.
+                view.verticalHeader().setDefaultSectionSize(max(
+                    int(view.property('_base_row_height')),
+                    QFontMetrics(font).height() + 10))
+
+    @staticmethod
+    def _snippet_cells(view):
+        """The snippet cells (MatchCentredSnippet) a result table or tree holds."""
+        if isinstance(view, QTreeWidget):
+            stack = [view.topLevelItem(i) for i in range(view.topLevelItemCount())]
+            while stack:
+                item = stack.pop()
+                for col in range(view.columnCount()):
+                    cell = view.itemWidget(item, col)
+                    if isinstance(cell, MatchCentredSnippet):
+                        yield cell
+                stack.extend(item.child(i) for i in range(item.childCount()))
+        else:
+            for row in range(view.rowCount()):
+                for col in range(view.columnCount()):
+                    cell = view.cellWidget(row, col)
+                    if isinstance(cell, MatchCentredSnippet):
+                        yield cell
+
+    def set_results_text_level(self, level):
+        """The user's choice (Settings, Ctrl+= / Ctrl+- / Ctrl+0): applied at once
+        and remembered."""
+        self._apply_results_text_level(level)
+        save_app_config({self.RESULTS_TEXT_KEY: self.results_text_level})
+        combo = getattr(self.settings_dialog, 'combo_results_text', None)
+        if combo is not None:
+            combo.blockSignals(True)
+            combo.setCurrentIndex(self.results_text_level)
+            combo.blockSignals(False)
+
+    def _browse_apply_text_size(self, pt):
+        f = self.browse_text.font()
+        f.setPointSize(pt)
+        self.browse_text.setFont(f)
+        self.btn_b_text_smaller.setEnabled(pt > TEXT_PT_MIN)
+        self.btn_b_text_larger.setEnabled(pt < TEXT_PT_MAX)
+
+    def _browse_step_text_size(self, delta):
+        pt = self.browse_text.font().pointSize()
+        new = max(TEXT_PT_MIN, min(TEXT_PT_MAX, pt + delta))
+        if new != pt:
+            reading_text_size().set(new)
+
+    def _step_text_size(self, step):
+        """Ctrl+= (1), Ctrl+- (-1), Ctrl+0 (0, back to normal)."""
+        if self.tabs.currentWidget() is getattr(self, 'browse_tab', None):
+            if step == 0:
+                reading_text_size().set(TEXT_PT_DEFAULT)
+            else:
+                self._browse_step_text_size(step * TEXT_PT_STEP)
+            return
+        level = 0 if step == 0 else self.results_text_level + step
+        level = max(0, min(len(self.RESULTS_TEXT_STEPS) - 1, level))
+        if level != self.results_text_level or step == 0:
+            self.set_results_text_level(level)
 
     # The corner cluster may ask for at most this share of the window's width;
     # the rest is the tab bar's. A QTabWidget gives its corner widget exactly the
@@ -16294,6 +17121,9 @@ class GenizahGUI(QMainWindow):
         row = getattr(self, 'corner_row', None)
         if row is not None:
             row.set_width_cap(int(self.width() * self._CORNER_WIDTH_SHARE))
+        nav = getattr(self, 'side_nav', None)
+        if nav is not None:
+            nav.fit_to(self.width())
 
     def _open_settings_dialog(self):
         """Open the settings dialog.
@@ -16312,6 +17142,22 @@ class GenizahGUI(QMainWindow):
                 chk.blockSignals(False)
         except Exception:  # noqa: BLE001
             pass  # never block opening Settings on attribute or import error
+        # The menu layout may have been switched from ☰, and the text size with
+        # Ctrl+= / Ctrl+-, since the last opening.
+        for name, index in (('combo_nav_layout', 1 if self.nav_layout == 'side' else 0),
+                            ('combo_results_text', self.results_text_level)):
+            combo = getattr(self.settings_dialog, name, None)
+            if combo is not None:
+                combo.blockSignals(True)
+                combo.setCurrentIndex(index)
+                combo.blockSignals(False)
+        # And the tips may have been turned off from the strip.
+        chk_tips = getattr(self.settings_dialog, 'chk_startup_tips', None)
+        if chk_tips is not None:
+            chk_tips.blockSignals(True)
+            chk_tips.setChecked(not startup_tips.tips_off())
+            chk_tips.blockSignals(False)
+        self.settings_dialog.refresh_config_snapshot()
         self.settings_dialog.exec()
 
     def apply_settings(self):
@@ -16328,8 +17174,12 @@ class GenizahGUI(QMainWindow):
 
         Delegates to the dialog's _on_cancel(), which restores the D-07b config
         snapshot (telemetry-consent keys stripped) before rejecting the modal.
+        The menu layout and the text size apply at once, so they are put back
+        to the restored ones.
         """
         self.settings_dialog._on_cancel()
+        self._apply_nav_layout(load_app_config().get('nav_layout', 'tabs'))
+        self._apply_results_text_level(load_app_config().get(self.RESULTS_TEXT_KEY, 0))
 
     def _on_language_combo_changed(self, index):
         """Handle language combo box change — close settings dialog first to
@@ -16892,6 +17742,7 @@ class GenizahGUI(QMainWindow):
         cannot be loaded, HelpDialog shows a short translated notice with the
         website's Help link (the old built-in help texts were months out of
         date and were removed, owner 2026-10-18)."""
+        startup_tips.mark_used('help')  # its startup tip is no longer needed
         help_path = Config.HELP_FILE
         dlg = HelpDialog(
             self,
@@ -17351,6 +18202,7 @@ class GenizahGUI(QMainWindow):
         # Check for shortcut prefix followed by space
         for prefix, target_mode in self._SHORTCUT_PREFIXES:
             if text.startswith(prefix + ' ') or text == prefix + ' ':
+                startup_tips.mark_used('mode_sign')  # its startup tip is no longer needed
                 clean = text[len(prefix):].lstrip()
                 # Block signals to avoid recursive textChanged
                 self.query_input.blockSignals(True)
@@ -19954,6 +20806,7 @@ class GenizahGUI(QMainWindow):
         btn_load.setToolTip(tr(
             "Choose one or more files. Each file becomes a witness."))
         btn_load.clicked.connect(self._load_witness_files)
+        btn_load.clicked.connect(lambda: startup_tips.mark_used('witness_files'))
         actions.addWidget(btn_load)
         self.chk_comp_witness_split_files = QCheckBox(tr(
             "Split each file on blank lines"))
@@ -19974,6 +20827,7 @@ class GenizahGUI(QMainWindow):
         actions.addStretch()
         self.btn_comp_witness_promote = QPushButton(tr("Search with these too"))
         self.btn_comp_witness_promote.clicked.connect(self._promote_checked_comp)
+        self.btn_comp_witness_promote.clicked.connect(lambda: startup_tips.mark_used('promote'))
         actions.addWidget(self.btn_comp_witness_promote)
         self.btn_comp_witness_run = QPushButton(tr("Search now"))
         self.btn_comp_witness_run.clicked.connect(self._search_pending_witnesses)
@@ -22615,6 +23469,7 @@ class GenizahGUI(QMainWindow):
     def _on_pause_clicked(self, ctx):
         """Pause <-> Resume. The click owns 'pausing'/'running'; only an accepted
         acknowledgement from the worker may set 'paused'."""
+        startup_tips.mark_used('pause')  # its startup tip is no longer needed
         if (ctx is getattr(self, '_pause_comp', None)
                 and self._refuse_stop_during_passage_scan()):
             # Pause is the fourth way to ask a scan to stop, and it has to
@@ -24150,6 +25005,7 @@ class GenizahGUI(QMainWindow):
             _start()
 
     def _open_results_filter_dialog(self, column):
+        startup_tips.mark_used('column_filter')  # its startup tip is no longer needed
         if column == 1:
             self.open_list_filter_dialog()
             return
@@ -25981,6 +26837,7 @@ class GenizahGUI(QMainWindow):
         self._show_result_dialog(sorted_results, target_index)
 
     def open_result_in_browse_from_table(self, res):
+        startup_tips.mark_used('browse_from_result')  # its startup tip is no longer needed
         if not res:
             return
         display = res.get('display', {})
@@ -27035,6 +27892,7 @@ class GenizahGUI(QMainWindow):
         Export results handling specific formats directly.
         fmt: 'xlsx', 'csv', 'txt', or 'docx'
         """
+        startup_tips.mark_used('export')  # its startup tip is no longer needed
         base_path = self._default_report_path(self.last_search_query, tr("Search_Results"))
         default_path = os.path.splitext(base_path)[0] + f".{fmt}"
 
@@ -31822,11 +32680,28 @@ class GenizahGUI(QMainWindow):
             # runs on every render, so without this branch it would put the
             # chunk name back the moment any result appeared.
             self.btn_comp_recursive.setText(tr("Run auto-expand now"))
+            tip = 'expand'
         elif checked:
             self.btn_comp_recursive.setText(tr("Recursive Search in Results"))
+            tip = 'checked'
         else:
             self.btn_comp_recursive.setText(tr("Full Recursive Search"))
+            tip = 'full'
+        self.btn_comp_recursive.setToolTip(self._recursive_tip(tip))
         self.btn_comp_recursive.setEnabled(True)
+
+    @staticmethod
+    def _recursive_tip(kind):
+        """The recursive button's tooltip, by what the button reads now."""
+        return {
+            'full': tr("Search, then search again with the full text of the pages found "
+                       "added to yours, to reach copies your text alone does not find. "
+                       "Tick results first to use only those."),
+            'checked': tr("Search again with the full text of the ticked results added to "
+                          "yours."),
+            'expand': tr("Search again with the best results as more witnesses, merged into "
+                         "one list."),
+        }[kind]
 
     def _has_comp_results(self):
         if self.comp_main or self.comp_appendix or self.comp_known:
@@ -33676,6 +34551,10 @@ class GenizahGUI(QMainWindow):
     _HISTORY_LBL_NORMAL = "text-align: right; padding: 2px 4px; font-size: 12px;"
     _HISTORY_DEL_HIGHLIGHT = "color: white; font-size: 12px; font-weight: bold; border: none; padding: 0px;"
     _HISTORY_DEL_NORMAL = "color: #c0392b; font-size: 12px; font-weight: bold; border: none; padding: 0px;"
+    # The star that saves a search (owner, 2026-10-25): gold when saved, grey when not.
+    _HISTORY_STAR_HIGHLIGHT = "color: white; font-size: 14px; border: none; padding: 0px;"
+    _HISTORY_STAR_SAVED = "color: #e0a800; font-size: 14px; border: none; padding: 0px;"
+    _HISTORY_STAR_NORMAL = "color: #8a8a8a; font-size: 14px; border: none; padding: 0px;"
 
     def _on_history_menu_hovered(self, action, menu=None):
         """Highlight the active QWidgetAction container on hover/keyboard navigation."""
@@ -33688,10 +34567,20 @@ class GenizahGUI(QMainWindow):
                 w = a.defaultWidget()
                 active = a is action
                 w.setStyleSheet(self._HISTORY_HIGHLIGHT if active else "")
-                children = w.findChildren(QPushButton)
-                if len(children) >= 2:
-                    children[0].setStyleSheet(self._HISTORY_LBL_HIGHLIGHT if active else self._HISTORY_LBL_NORMAL)
-                    children[1].setStyleSheet(self._HISTORY_DEL_HIGHLIGHT if active else self._HISTORY_DEL_NORMAL)
+                lbl = w.findChild(QPushButton, "history_label")
+                star = w.findChild(QPushButton, "history_star")
+                btn_del = w.findChild(QPushButton, "history_delete")
+                if lbl is not None:
+                    lbl.setStyleSheet(self._HISTORY_LBL_HIGHLIGHT if active else self._HISTORY_LBL_NORMAL)
+                if btn_del is not None:
+                    btn_del.setStyleSheet(self._HISTORY_DEL_HIGHLIGHT if active else self._HISTORY_DEL_NORMAL)
+                if star is not None:
+                    star.setStyleSheet(self._history_star_style(star.property("saved"), active))
+
+    def _history_star_style(self, saved, active=False):
+        if active:
+            return self._HISTORY_STAR_HIGHLIGHT
+        return self._HISTORY_STAR_SAVED if saved else self._HISTORY_STAR_NORMAL
 
     def _show_search_history_menu(self):
         """Show the search history dropdown below the query input."""
@@ -33710,31 +34599,48 @@ class GenizahGUI(QMainWindow):
 
     def _refresh_search_history(self):
         """Rebuild the search history menu with per-item delete buttons."""
-        from shared.session_persistence import get_history
-        self.search_history_menu.clear()
-        entries = get_history('regular')
-        if not entries:
-            self.search_history_menu.addAction(tr("No search history")).setEnabled(False)
-            return
-        for i, entry in enumerate(entries):
-            self._add_history_menu_item(self.search_history_menu, 'regular', i, entry)
-        self.search_history_menu.addSeparator()
-        clear_action = self.search_history_menu.addAction(tr("Clear all history"))
-        clear_action.triggered.connect(lambda: self._clear_search_history('regular'))
+        self._fill_history_menu(self.search_history_menu, 'regular', tr("No search history"))
 
     def _refresh_comp_history(self):
         """Rebuild the composition history menu with per-item delete buttons."""
+        self._fill_history_menu(self.comp_history_menu, 'composition',
+                                tr("No Composition Search history"))
+
+    def _fill_history_menu(self, menu, search_type, empty_text):
+        """Saved (starred) searches first, under their own heading, then the
+        rest of the history, newest first. Each row keeps its index in the
+        stored newest-first list, which is what delete and star act on."""
         from shared.session_persistence import get_history
-        self.comp_history_menu.clear()
-        entries = get_history('composition')
+        menu.clear()
+        entries = list(enumerate(get_history(search_type)))
         if not entries:
-            self.comp_history_menu.addAction(tr("No Composition Search history")).setEnabled(False)
+            menu.addAction(empty_text).setEnabled(False)
             return
-        for i, entry in enumerate(entries):
-            self._add_history_menu_item(self.comp_history_menu, 'composition', i, entry)
-        self.comp_history_menu.addSeparator()
-        clear_action = self.comp_history_menu.addAction(tr("Clear all history"))
-        clear_action.triggered.connect(lambda: self._clear_search_history('composition'))
+        saved = [(i, e) for i, e in entries if e.get('pinned')]
+        recent = [(i, e) for i, e in entries if not e.get('pinned')]
+        if saved:
+            self._add_history_heading(menu, tr("Saved searches"))
+            for i, entry in saved:
+                self._add_history_menu_item(menu, search_type, i, entry)
+            if recent:
+                menu.addSeparator()
+                self._add_history_heading(menu, tr("Recent searches"))
+        for i, entry in recent:
+            self._add_history_menu_item(menu, search_type, i, entry)
+        menu.addSeparator()
+        if saved:
+            clear_action = menu.addAction(tr("Clear history (saved searches stay)"))
+        else:
+            clear_action = menu.addAction(tr("Clear all history"))
+        clear_action.triggered.connect(lambda: self._clear_search_history(search_type))
+
+    @staticmethod
+    def _add_history_heading(menu, text):
+        heading = menu.addAction(text)
+        heading.setEnabled(False)
+        font = heading.font()
+        font.setBold(True)
+        heading.setFont(font)
 
     @staticmethod
     def _build_filter_summary(filters: dict, max_len: int = 50) -> str:
@@ -33868,6 +34774,7 @@ class GenizahGUI(QMainWindow):
         labels_col.setSpacing(0)
 
         lbl = QPushButton(label_text)
+        lbl.setObjectName("history_label")
         lbl.setFlat(True)
         lbl.setStyleSheet("text-align: right; padding: 2px 4px; font-size: 12px;")
         lbl.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -33881,7 +34788,21 @@ class GenizahGUI(QMainWindow):
             filter_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
             labels_col.addWidget(filter_lbl)
 
+        saved = bool(entry.get('pinned'))
+        star = QPushButton("\u2605" if saved else "\u2606")
+        star.setObjectName("history_star")
+        star.setProperty("saved", saved)
+        star.setFixedSize(20, 20)
+        star.setStyleSheet(self._history_star_style(saved))
+        star.setCursor(Qt.CursorShape.PointingHandCursor)
+        star.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        star.setToolTip(tr("Remove from saved searches") if saved else
+                        tr("Save this search: it stays at the top of this list and is never dropped from it"))
+        star.clicked.connect(lambda checked, st=search_type, idx=index, on=not saved:
+                             self._set_history_saved(st, idx, on))
+
         btn_del = QPushButton("×")
+        btn_del.setObjectName("history_delete")
         btn_del.setFixedSize(20, 20)
         btn_del.setStyleSheet("color: #c0392b; font-size: 12px; font-weight: bold; border: none; padding: 0px;")
         btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -33890,6 +34811,7 @@ class GenizahGUI(QMainWindow):
         btn_del.clicked.connect(lambda checked, st=search_type, idx=index: self._delete_history_item(st, idx))
 
         h.addLayout(labels_col, 1)
+        h.addWidget(star, 0)
         h.addWidget(btn_del, 0)
 
         wa = QWidgetAction(menu)
@@ -33911,10 +34833,20 @@ class GenizahGUI(QMainWindow):
             self.comp_history_menu.close()
             self._restore_comp_search_from_state(state, entry)
 
+    def _set_history_saved(self, search_type, index, saved, reopen=True):
+        """The star: save a search, or make it ordinary history again, and
+        show the menu again in its new order."""
+        from shared.session_persistence import set_history_pinned
+        set_history_pinned(search_type, index, saved)
+        self._reshow_history_menu(search_type, reopen)
+
     def _delete_history_item(self, search_type, index, reopen=False):
         """Delete a single history entry and refresh the menu."""
         from shared.session_persistence import delete_history_entry
         delete_history_entry(search_type, index)
+        self._reshow_history_menu(search_type, reopen)
+
+    def _reshow_history_menu(self, search_type, reopen):
         if search_type == 'regular':
             self.search_history_menu.close()
             self._refresh_search_history()
@@ -34246,13 +35178,16 @@ class GenizahGUI(QMainWindow):
     def _clear_search_history(self, search_type):
         """Clear all entries for a search type after confirmation."""
         from shared.session_persistence import clear_history
+        from shared.session_persistence import get_history
+        any_saved = any(e.get('pinned') for e in get_history(search_type))
         reply = QMessageBox.question(
             self, tr("Clear History"),
-            tr("Clear all search history?"),
+            tr("Clear the search history? Your saved searches stay.") if any_saved
+            else tr("Clear all search history?"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            clear_history(search_type)
+            clear_history(search_type, keep_pinned=True)
             if search_type == 'regular':
                 self._refresh_search_history()
             else:
@@ -35242,6 +36177,27 @@ class GenizahGUI(QMainWindow):
             logger.exception("closeEvent: clearing the closing message failed")
         return True
 
+    WINDOW_GEOMETRY_KEY = 'main_window_geometry'
+
+    def save_window_geometry(self):
+        """Keep the window's size, position and maximized state in config.pkl."""
+        data = bytes(self.saveGeometry().toBase64()).decode('ascii')
+        save_app_config({self.WINDOW_GEOMETRY_KEY: data})
+
+    def restore_window_geometry(self):
+        """Put the window back as it was at the last close; False when nothing
+        usable was kept (the first start: the window then opens maximized).
+        Qt moves a window that would open off every screen -- a monitor
+        unplugged since -- back onto one."""
+        data = load_app_config().get(self.WINDOW_GEOMETRY_KEY)
+        if not isinstance(data, str) or not data:
+            return False
+        try:
+            return bool(self.restoreGeometry(QByteArray.fromBase64(data.encode('ascii'))))
+        except Exception:
+            logger.exception("Restoring the window size failed")
+            return False
+
     def closeEvent(self, event):
         # Any close, the first one included, that arrives while a question
         # is open waits for its answer, so no quit question is stacked on it.
@@ -35267,6 +36223,12 @@ class GenizahGUI(QMainWindow):
         self._close_pending = False
         self._puzzle_quit_answered = False
         self._close_waiting_for_prompt = False
+        # The next start opens the window where, and as large as, it is now
+        # (owner, 2026-10-25). Guarded on its own, like each step below.
+        try:
+            self.save_window_geometry()
+        except Exception:
+            logger.exception("closeEvent: saving the window size failed")
         # The Manuscript Viewer is an unparented top-level window
         # (2026-09-17), so it does not close with this one. Left open it
         # would keep the process alive (quitOnLastWindowClosed never fires)
@@ -36001,7 +36963,11 @@ if __name__ == "__main__":
         sys.exit(0)
 
     window = GenizahGUI()
-    window.showMaximized()
+    # Where and as large as it was at the last close; maximized the first time.
+    if window.restore_window_geometry():
+        window.show()
+    else:
+        window.showMaximized()
     _exit_code = app.exec()
     # No running QThread may be destroyed on the way out: PyQt's exit handler destroys
     # the windows, and with them any thread a hidden window (a closed Joins Lab) still

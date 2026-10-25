@@ -263,14 +263,16 @@ def test_corner_button_and_community_header_never_show_none():
     host = _Host(_user(username=None))
     host._update_corner_login_state()
     host._update_community_header()
-    assert host.corner_login_btn.text == "Logout"
+    # Logged in, the button names the account and opens the account menu
+    # (Sync lists now, Logout): with no name to show, "Account".
+    assert host.corner_login_btn.text == "Account \u25be"
     assert "None" not in host.community_user_label.text
     assert "<b>User</b>" in host.community_user_label.text
 
     host = _Host(_user(username=None, full_name="Hillel G"))
     host._update_corner_login_state()
     host._update_community_header()
-    assert host.corner_login_btn.text == "Hillel G (Logout)"
+    assert host.corner_login_btn.text == "Hillel G \u25be"
     assert "<b>Hillel G</b>" in host.community_user_label.text
 
 
