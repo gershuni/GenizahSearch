@@ -277,19 +277,26 @@ def update_user_role(user_id: str, new_role: str, client=None):
 
 
 def delete_user(user_id: str, client=None):
-    """Delete user from Supabase (requires service role, typically done via dashboard).
+    """Delete the account itself, through the admin-only `admin_delete_user` RPC.
 
-    `client` per update_correction_status.
+    It used to delete only the profiles row, which left an account that could
+    still sign in, with no profile (migrations/admin_delete_user.sql). The
+    function deletes from auth.users; each table's foreign key decides what
+    goes with the account. It refuses non-admins, the caller's own account and
+    other admins, and names the foreign key that blocks a delete. `client` per
+    update_correction_status.
     """
-    # Note: Deleting auth users requires the service role key
-    # For now, we'll just mark them or remove from profiles
     try:
         client = get_user_client() if client is None else client
-        # Delete profile (user can't access anything without profile)
-        response = client.table('profiles').delete().eq('id', user_id).execute()
-        return {'success': True}
+        response = client.rpc('admin_delete_user', {'p_user_id': user_id}).execute()
     except Exception as e:
-        return {'error': str(e)}
+        logger.warning("Account not deleted (%s %s)", type(e).__name__, getattr(e, 'code', ''))
+        return {'error': str(getattr(e, 'message', '') or e)}
+    if response.data is True:
+        return {'success': True}
+    # English here: this runs in a worker, which has no visitor language. The
+    # handler translates it on the loop.
+    return {'error': 'No such account: it may already have been deleted.'}
 
 
 def get_pending_identification_reviews(client=None):
@@ -930,6 +937,9 @@ def create_user_row(user):
                     with ui.dialog() as confirm_dialog, ui.card().classes('p-4'):
                         h3(tr('Delete User?'), classes='text-lg font-bold')
                         ui.label(f"{tr('Are you sure you want to delete')} {uname}?").classes('text-sm')
+                        ui.label(tr('The account is deleted: they can no longer sign in, and their lists '
+                                    'and votes go with it. Their corrections, comments and joins stay, '
+                                    'without a name.')).classes('text-sm').style('max-width: 28rem;')
                         ui.label(tr('This action cannot be undone.')).classes('text-sm text-red-500')
                         with ui.row().classes('justify-end gap-2 mt-4'):
                             ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
@@ -941,7 +951,7 @@ def create_user_row(user):
                                 if result is None:
                                     return  # cancelled or app stopping
                                 if "error" in result:
-                                    ui.notify(result['error'], type='negative')
+                                    ui.notify(tr(result['error']), type='negative')
                                 else:
                                     ui.notify(tr('User deleted'), type='positive')
                                     ui.navigate.reload()
@@ -954,11 +964,14 @@ def create_user_row(user):
                         ui.menu_item(tr('Set as User'), lambda uid=user_id: change_role(uid, 'user'))
                         ui.menu_item(tr('Set as Editor'), lambda uid=user_id: change_role(uid, 'editor'))
                         ui.menu_item(tr('Set as Admin'), lambda uid=user_id: change_role(uid, 'admin'))
-                        ui.separator()
-                        ui.menu_item(
-                            tr('Delete User'),
-                            lambda uid=user_id, uname=display_name: confirm_delete_user(uid, uname)
-                        ).classes('text-red-500')
+                        # An admin's account (the viewer's own included) is refused by
+                        # admin_delete_user: change the role first.
+                        if role != 'admin':
+                            ui.separator()
+                            ui.menu_item(
+                                tr('Delete User'),
+                                lambda uid=user_id, uname=display_name: confirm_delete_user(uid, uname)
+                            ).classes('text-red-500')
     return card
 
 

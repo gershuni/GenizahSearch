@@ -509,6 +509,25 @@ page that credits a contribution showed them as "Unknown". From
   every check PASS. It supersedes `scripts/verify_profiles_no_email_username.sql`, whose
   empty-username sign-ups now FAIL by design.
 
+### Deleting an account from the admin tab (2026-10-25)
+
+"Delete User" on /admin -> Users calls `public.admin_delete_user(p_user_id)`
+(`migrations/admin_delete_user.sql`), which deletes from `auth.users`. Until then it deleted only
+the `profiles` row, which left an account that could still sign in with no profile (two found
+2026-10-25). SECURITY DEFINER, `search_path = ''`, executable by `authenticated` only; it refuses
+a caller who is not an admin, the caller's own account and any other admin's (42501), and names
+the foreign key that blocks a delete (23503) -- e.g. `corrections.reviewed_by`, which has no
+ON DELETE action. In `supabase_setup.sql` the profile, lists, list items, projects, recent items
+and votes go with the account; corrections, comments, discoveries and joins stay, without an
+author. The migration's last query lists the live foreign keys and what each does.
+
+- **Run:** the whole file in the SQL editor; it aborts if the role running it cannot delete from
+  `auth.users`.
+- **Verify:** `select public.admin_delete_user(gen_random_uuid());` in the SQL editor must fail
+  with "admin role required"; then delete a test account from the admin tab and check
+  Authentication -> Users.
+- **Roll back:** `drop function if exists public.admin_delete_user(uuid);`
+
 ### Account emails and sign-in names for admins (2026-10-24, 2026-10-25)
 
 The admin Users tab shows, under each public name, the name the account signed in with and its

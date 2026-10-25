@@ -1974,6 +1974,8 @@ TRANSLATIONS = {
     "Name saved": "השם נשמר",
     "A public name cannot contain @.": "השם לא יכול לכלול את התו @.",
     "Please enter your name, or use the alias.": "נא להזין את שמך, או להשתמש בכינוי.",
+    "The account is deleted: they can no longer sign in, and their lists and votes go with it. Their corrections, comments and joins stay, without a name.": "החשבון יימחק: לא ניתן יהיה להתחבר אליו, והרשימות וההצבעות שלו יימחקו איתו. התיקונים, ההערות והצירופים שלו יישארו, ללא שם.",
+    "No such account: it may already have been deleted.": "החשבון לא נמצא: ייתכן שכבר נמחק.",
     "The name this account signed in with. Not public unless they choose it.": "השם שאיתו החשבון נכנס לאתר. אינו מוצג לציבור אלא אם בעל/ת החשבון בוחר/ת בו.",
     "Your name could not be saved. You can set it in My Profile.": "לא ניתן היה לשמור את השם. אפשר להגדיר אותו בדף \"הפרופיל שלי\".",
     "All Roles": "כל התפקידים",
