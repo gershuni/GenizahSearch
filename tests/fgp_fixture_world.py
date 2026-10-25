@@ -10,6 +10,7 @@ registered twice, or carrying XML text from another record's folder.
 """
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 
@@ -205,6 +206,15 @@ def build_sidecars(root: str, extended: bool = False) -> tuple:
     con.executemany("INSERT INTO fgp_transcriptions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     base_rows + (extended_rows if extended else []))
     con.execute("CREATE TABLE fgp_shelfmark_meta (collection TEXT, shelfmark TEXT, mms_id TEXT, raw_json TEXT)")
+    if extended:
+        # FJMS DataSource for the manuscript of row 3 (source 850): one site user beside a catalogue,
+        # the single matching part gate 2 credits; and for ALMA_C's manuscript two site users (ambiguous).
+        con.executemany("INSERT INTO fgp_shelfmark_meta VALUES (?,?,?,?)", [
+            ("JTS", "ENA NS 2.23", "m" + ALMA_D, json.dumps({"DataSource":
+                "{eng:Schwab Catalog, heb:Schwab Catalog}, {eng:משתמש באתר - פלוני אלמוני, heb:משתמש באתר - פלוני אלמוני}"})),
+            ("CUL", "T-S 1.5", "m" + ALMA_C, json.dumps({"DataSource":
+                "{eng:משתמש באתר - ראובן, heb:משתמש באתר - ראובן}, {eng:משתמש באתר - שמעון, heb:משתמש באתר - שמעון}"})),
+        ])
     con.commit()
     con.close()
     fjms = os.path.join(root, "fjms_enrichment.db")

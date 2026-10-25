@@ -53,9 +53,11 @@ def test_every_row_gets_one_outcome_and_the_gate_passes(world, capsys):
 
     # the sidecar-only file is tied through FIST directly; the file FIST never saw has no record
     assert o[3]["in_export"] == 0 and o[3]["association_basis"] == "fist_chain" and o[3]["unit_id"] == 8
-    assert o[3]["outcome"] == "kept" and o[3]["text_status"] == "file_absent_in_delivery"
-    assert json.loads(o[3]["hold_reasons"]) == ["file_absent_in_delivery"]  # the credit is generic under the ruling
-    assert o[3]["credit_status"] == "generic" and o[3]["credit_en"] == "Friedberg Genizah Project"
+    assert o[3]["outcome"] == "re-sourced" and o[3]["text_status"] == "file_absent_in_delivery"
+    assert json.loads(o[3]["hold_reasons"]) == ["file_absent_in_delivery"]
+    # source 850 with exactly one site-user part in the manuscript's DataSource: that person is the credit
+    assert o[3]["credit_category"] == "datasource_part" and o[3]["credit_status"] == "resolved"
+    assert o[3]["credit_he"] == "משתמש באתר - פלוני אלמוני" and o[3]["credit_changed"] == 1
     assert o[17]["association_basis"] == "none" and o[17]["outcome"] == "kept"
     assert o[17]["outcome_reason"] == "no_fist_unit_of_this_kind" and o[17]["text_status"] == "no_record"
     assert o[17]["publishable_strict"] == 0 and o[17]["publishable_generic"] == 0
@@ -96,7 +98,8 @@ def test_every_row_gets_one_outcome_and_the_gate_passes(world, capsys):
     assert o[15]["outcome"] == "kept" and o[15]["publishable_strict"] == 0 and o[15]["publishable_generic"] == 1
     assert o[15]["publishable"] == 1 and o[15]["credit_status"] == "generic" and o[15]["credit_he"] == "פרויקט הגניזה של פרידברג"
     rulings = {r["source"]: r for r in _rows(db, "SELECT * FROM credit_rulings")}
-    assert rulings["source 600 sub 78"]["rows"] == 1 and rulings["source 850"]["rows"] == 1
+    assert rulings["source 600 sub 78"]["rows"] == 1
+    assert "source 850" not in rulings  # row 3's contributor was found in the DataSource part
 
     # XML text that came from another record's folder holds the row until gate 3 verifies it
     assert o[16]["text_status"] == "xml_unverified"
@@ -107,9 +110,9 @@ def test_every_row_gets_one_outcome_and_the_gate_passes(world, capsys):
     assert counts["credit.copyright_rows"] == 0
 
     # totals
-    assert counts["outcome.kept"] == 7 and counts["outcome.re-sourced"] == 6 and counts["outcome.retired-with-alias"] == 4
+    assert counts["outcome.kept"] == 6 and counts["outcome.re-sourced"] == 7 and counts["outcome.retired-with-alias"] == 4
     assert counts["publishable.strict"] == 7 and counts["publishable.generic_credit_allowed"] == 8
-    assert counts["publishable.under_policy"] == 8 and counts["credit.generic_rows"] == 3  # rows 3, 15, 17
+    assert counts["publishable.under_policy"] == 8 and counts["credit.generic_rows"] == 2  # rows 15, 17
     assert counts["durable_keys_distinct"] == 14  # row 6 shares row 5's key; rows 4 and 17 have no unit
     aliases = {r["old_id"]: r for r in _rows(db, "SELECT * FROM aliases")}
     assert set(aliases) == {4, 6, 9, 10} and aliases[6]["same_meaning"] == 1 and aliases[9]["same_meaning"] == 0
@@ -139,7 +142,7 @@ def test_gate_fails_when_a_unit_kind_disagrees_with_the_row(world, capsys):
 
 def test_gate_fails_on_a_missed_expectation_and_refuses_a_foreign_db(world, capsys):
     assert gate2.main(_args(world, "--expect", "outcome.kept=1")) == 1
-    assert "[FAIL] E_outcome.kept: expected 1, got 7" in capsys.readouterr().out
+    assert "[FAIL] E_outcome.kept: expected 1, got 6" in capsys.readouterr().out
     foreign = os.path.join(world["out"], "gate2.db")
     os.remove(foreign)
     con = sqlite3.connect(foreign)
@@ -157,5 +160,5 @@ def test_strict_policy_holds_the_generic_credit_rows(world, capsys):
     o = {r["id"]: r for r in _rows(db, "SELECT * FROM row_outcomes")}
     assert o[15]["publishable"] == 0 and o[15]["credit_status"] == "unresolved" and o[15]["credit_he"] is None
     assert json.loads(o[15]["hold_reasons"]) == ["credit_unresolved"]
-    assert json.loads(o[3]["hold_reasons"]) == ["file_absent_in_delivery", "credit_unresolved"]
+    assert json.loads(o[3]["hold_reasons"]) == ["file_absent_in_delivery"]  # its credit is a resolved DataSource part
     assert "Credit policy: **strict**" in open(os.path.join(world["out"], "GATE2_REPORT.md"), encoding="utf-8").read()

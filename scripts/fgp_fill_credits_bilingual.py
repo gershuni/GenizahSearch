@@ -88,6 +88,9 @@ TEAM_CREDITS = {
           "Shmuel Glick, Head of FGP Seride Teshuvot Team: Shocken Institute"),
     220: ("אלדינה קינטנה, ראש צוות FGP ללאדינו",
           "Aldina Quintana, Head of FGP Ladino team"),
+    # Owner-verified on the live FGP site 2026-10-25 (T-S F5.49); dbo_CodeSource 111.
+    111: ("שמחה עמנואל, ראש צוות FGP לפרשנות התלמוד והספרות ההלכתית (עברית)",
+          "Simcha Emanuel, Head of FGP Talmud Commentaries and Halakhic Literature (Hebrew) team"),
 }
 INFRA_CREDITS = {
     200: (GENUZOS_HE, GENUZOS_EN),

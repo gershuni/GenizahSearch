@@ -30,9 +30,10 @@ reach (sys_id NULL). Ids are never reused; a retired id resolves through ``alias
 
 Credit. By the unit's FIST SourceId/SubId: a verified team-head credit (with the
 manuscript's DataSource part for that team when present), the Genuzos / Herzog
-infrastructure credit, the catalogue (CODE_Catalog) or the book (CODE_Title); anything
-else is *unresolved* (a DataSource aggregate is recorded as ``datasource_only`` but counts
-as unresolved until the owner rules). FIST copyright text on the unit is carried verbatim
+infrastructure credit, the catalogue (CODE_Catalog) or the book (CODE_Title); for the
+sources in ``DATASOURCE_PART_TOKENS`` the single DataSource part that names the
+contributor; anything else is *unresolved* (a DataSource aggregate is recorded as
+``datasource_only`` but counts as unresolved until the owner rules). FIST copyright text on the unit is carried verbatim
 beside the credit as an acknowledgment, never as the credit. The generic "Friedberg
 Genizah Project" attribution is reported as a second, looser publishable count, never
 used by the strict flag.
@@ -85,8 +86,20 @@ DEFAULT_INVENTORY = os.path.join(DEFAULT_OUT, "inventory.db")
 GENERIC_CREDIT = ("פרויקט הגניזה של פרידברג", "Friedberg Genizah Project")
 
 OUTCOMES = ("kept", "re-sourced", "retired-with-alias")
-CREDIT_RESOLVED = ("team", "team_individual", "infra", "catalog", "book")
+CREDIT_RESOLVED = ("team", "team_individual", "infra", "catalog", "book", "datasource_part")
 CREDIT_UNRESOLVED = ("datasource_only", "unresolved")
+
+# FIST sources with no verified team credit whose contributor FJMS's per-manuscript DataSource
+# names in a recognisable part. The part is taken only when exactly one matches (14 manuscripts
+# list several site users). Confirmed on the live FGP site by the owner, 2026-10-25: BL OR
+# 10578S.16 (source 100 -> the named site user) and AIU III.B.109 (161 -> Friedberg's line).
+DATASOURCE_PART_TOKENS = {
+    100: "משתמש באתר",                        # a site user
+    850: "משתמש באתר",
+    700: "משתמש באתר",
+    161: "ראש צוות FGP להעתקות ומידע ממחברים שונים",  # Emanuel Friedberg's team line
+    300: "רשימות אישיות",                     # Ben-Sasson's personal lists
+}
 
 UNIT_TABLES = {
     "transcription": ("dbo_UnitTranscription", "UnitTranscriptionId"),
@@ -195,6 +208,12 @@ def credit_for_unit(unit: dict, mms_id, credit_parts: dict, catalog_map: dict, b
     if so in INFRA_CREDITS:
         he, en = INFRA_CREDITS[so]
         return he, en, "infra"
+    token = DATASOURCE_PART_TOKENS.get(so)
+    if token:
+        matched = [(e, h) for (e, h) in parts if h and token in h]
+        if len(matched) == 1:
+            e, h = matched[0]
+            return h, (e or h), "datasource_part"
     if parts:
         he = "; ".join(dict.fromkeys(h for (_e, h) in parts if h)) or None
         en = "; ".join(dict.fromkeys(e for (e, _h) in parts if e)) or None
