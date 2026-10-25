@@ -16,6 +16,7 @@ taken: scripts/collect_open_issues.py never gives out an ID the archive holds.
 import argparse
 import datetime
 import io
+import posixpath
 import re
 import sys
 from pathlib import Path
@@ -32,8 +33,22 @@ def archive_block(closed: list, sections: dict, date: str) -> str:
         out.append(issue.row().replace("[GS-%d](ISSUE_DETAILS.md#gs-%d)" % (issue.id, issue.id),
                                        "GS-%d (%s)" % (issue.id, place)))
     for _, issue in closed:
-        out += ["", "### GS-%d" % issue.id, "", sections[issue.id]]
+        out += ["", "### GS-%d" % issue.id, "", rebased(sections[issue.id])]
     return "\n".join(out) + "\n"
+
+
+_LINK_RE = re.compile(r"\]\((?![a-z][a-z0-9+.-]*:|#|/)([^)\s]+)\)", re.IGNORECASE)
+
+
+def rebased(text: str) -> str:
+    """*text*'s relative links, written from docs/ (ISSUE_DETAILS.md), rewritten for
+    docs/archive/: `plans/X.md` -> `../plans/X.md`, `archive/Y.md` -> `Y.md` (Codex review
+    of PR #449). Absolute URLs and in-page anchors are left alone."""
+    def one(m):
+        path, hash_, anchor = m.group(1).partition("#")
+        new = posixpath.relpath(posixpath.normpath(posixpath.join("docs", path)), "docs/archive")
+        return "](%s%s%s)" % (new, hash_, anchor)
+    return _LINK_RE.sub(one, text)
 
 
 def main(argv=None):
@@ -96,7 +111,7 @@ def main(argv=None):
             after = fh.read()
         missing = [i.id for _, i in new
                    if not _archived(after, i.id) or i.headline not in after
-                   or sections[i.id].replace("\n", eol) not in after]
+                   or rebased(sections[i.id]).replace("\n", eol) not in after]
         if missing or not after.startswith(before):
             print("!! the archive does not hold GS-%s after the append; nothing else was changed"
                   % ", GS-".join(map(str, missing)))

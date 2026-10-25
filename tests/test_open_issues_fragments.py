@@ -463,6 +463,19 @@ def test_an_archive_append_stopped_after_the_row_appends_the_whole_entry_again(t
     assert co.check(f["tracker"], f["backlog"], f["details"]) == []
 
 
+def test_relative_links_in_archived_details_are_rebased_on_the_archive(tmp_path):
+    """Details are written from docs/; the archive is docs/archive/ (Codex review of #449)."""
+    body = ("See [the plan](plans/X.md#step-2), [parked](archive/Y.md), [readme](../README.md), "
+            "[web](https://example.org/a), [here](#top) and [mail](mailto:a@b.c).")
+    d, f = _tree(tmp_path, {}, tracker=CLOSED_GS2, details=model.render_details(
+        ["# Issue details", ""], {2: body, 3: "b", 4: "p2", 5: "debt"}))
+    assert ac.main(_archive_argv(f)) == 0
+    archive = f["archive"].read_text(encoding="utf-8")
+    assert ("See [the plan](../plans/X.md#step-2), [parked](Y.md), [readme](../../README.md), "
+            "[web](https://example.org/a), [here](#top) and [mail](mailto:a@b.c).") in archive
+    assert "Old P3 a" not in f["tracker"].read_text(encoding="utf-8")
+
+
 def test_the_archive_without_closed_rows_is_left_alone(tmp_path):
     d, f = _tree(tmp_path, {})
     argv = ["--apply"]
