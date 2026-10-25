@@ -392,6 +392,23 @@ def test_a_target_locked_past_the_retries_is_never_written_in_place(tmp_path, mo
     assert [p.name for p in tmp_path.iterdir()] == ["OPEN_ISSUES.md"]   # no temp left
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_a_rewrite_keeps_the_files_permissions(tmp_path):
+    """mkstemp's 0600 must not replace a shared checkout's 0644 (Codex review of #449)."""
+    import os
+    import stat
+    target = tmp_path / "OPEN_ISSUES.md"
+    target.write_text(TRACKER, encoding="utf-8")
+    os.chmod(target, 0o644)
+    model.write_text(target, TRACKER + "\n")
+    assert stat.S_IMODE(os.stat(target).st_mode) == 0o644
+    fresh = tmp_path / "BACKLOG.md"
+    model.write_text(fresh, BACKLOG)
+    umask = os.umask(0)
+    os.umask(umask)
+    assert stat.S_IMODE(os.stat(fresh).st_mode) == 0o666 & ~umask
+
+
 def test_the_same_issue_in_two_fragments_is_folded_once(tmp_path):
     d, f = _tree(tmp_path, {"2026-10-21-a.md": FRAG_P2, "2026-10-20-b.md": FRAG_P2})
     assert _run(d, f, "--apply") == 0

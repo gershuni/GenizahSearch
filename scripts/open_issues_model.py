@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -287,6 +288,15 @@ def write_text(path, text: str) -> None:
             fh.write(text.encode("utf-8"))
             fh.flush()
             os.fsync(fh.fileno())
+        # mkstemp makes the file 0600, and the rename would carry that onto the target:
+        # keep the target's mode, or give a new file what open() would (Codex, PR #449).
+        try:
+            mode = stat.S_IMODE(os.stat(path).st_mode)
+        except FileNotFoundError:
+            umask = os.umask(0)
+            os.umask(umask)
+            mode = 0o666 & ~umask
+        os.chmod(tmp, mode)
         replace_file(tmp, path)          # retried while Windows reports a file busy
     except BaseException:
         discard(tmp)
