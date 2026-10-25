@@ -4,6 +4,148 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [9.10.0] - 2026-10-25 — Desktop UI improvements
+
+The desktop gets an optional side menu, Go to (Ctrl+G) with the last manuscripts opened, saved
+searches, a text size for the result lists, startup tips, more keyboard shortcuts, an account menu,
+and a window that reopens where it was closed. On the website every account has a public name (an
+alias, and a one-time question), the admin Users tab names every account and Delete User deletes
+the account itself, and Responsa notes with numbers appear in the visitor's language. PRs #447 and
+#448. Installer 9.10.0; web deployed from `master-main`.
+
+### A side menu as an option, Go to, saved searches, startup tips, text size, shortcuts, and an account menu (desktop)
+
+Owner, 2026-10-24: "move the menu to one of the app sides, remove the V tick boxes, and add also the
+puzzle, joins lab and settings to the menu", then "Keep the tabs. Offer an option to change them to
+the side menu", "option to change the size of the texts in search etc windows", and "Move the
+menu button to the extreme right or left"; 2026-10-25: recent manuscripts and saved searches
+("star icon on the list"), usable tooltips in Composition Search, and remembering the window's
+size and position.
+
+- **Two menu layouts.** Settings > Menu: *Tabs at the top* (the default, as before) or *Side menu*
+  (`desktop/widgets/side_nav.py`), a column on the window's start side -- right in Hebrew, left in
+  English -- with the seven sections, Fragment Puzzle and Joins Lab, and at its foot Settings, the
+  account, the language switch, GenizahSearch.com and the version. The choice applies at once and is
+  kept (`nav_layout` in config.pkl). The tab layout's ☰ menu offers *Move the menu to the side*, and
+  the side menu has its opposite in view, *Move the menu to tabs* (also on its right-click menu).
+- **The ☰ menu without tick boxes**, now with Fragment Puzzle, Joins Lab and Settings after the
+  sections. The current section is bold; the old menu drew an empty checkbox beside every other one.
+- **The side menu:** the current section has an accent bar; ☰ shows or hides the labels (remembered).
+  On a narrow window (a 1080p screen at 300% is 640 px wide) it shows icons only and ☰ opens the full
+  list; a short window scrolls it rather than being made taller by it.
+- **☰ at the window's edge**, before the first tab: far right in Hebrew, far left in English. It was
+  between the tabs and the Login button.
+- **Go to (Ctrl+G)**, also in the menus: type a shelfmark or system number to open the manuscript in
+  Browse from anywhere; Hebrew or Arabic words are searched instead (the website homepage's rule,
+  `shared/quick_open.py`). Under the box, the last ten manuscripts opened (from Recently Viewed, one
+  row per manuscript): Down and Enter open one, and typing narrows the list. An FL number still
+  works but is no longer offered (owner: nobody types one).
+- **Saved searches.** Each row of the Search and Composition Search history menus has a ☆: a saved
+  search is listed first, under *Saved searches*, and is kept whatever its age -- the history limit
+  counts only the rest, and *Clear history* leaves it (`pinned` on the entry in
+  `search_history.json`; `shared/session_persistence.set_history_pinned`).
+- **Composition Search tooltips in plain words**: what Chunk, Max Freq, Filter >, Min chunks, the
+  three modes, the variant slider, *Sort by shelfmark only*, the corpus choice and the buttons do,
+  and which way to turn them. Help's *Min chunks*
+  now says page: the count is per page, as the engine applies it.
+- **Startup tips** (`desktop/startup_tips.py`): from the second start, one tip at each start in a
+  strip under the top bar, about a feature that is easy to miss; 55 tips, written and approved by the
+  owner in English and Hebrew, the strongest five first. Show me opens the feature and rings the
+  control; a tip that needs the letter-level index or an account invites to it instead (builds the
+  index, opens the login). Each tip is shown once, tips about features already in use are skipped,
+  five closes in a row turn them off; Settings > *Show a tip when the program starts*.
+- **The window opens where, and as large as, it was closed** (`main_window_geometry` in
+  config.pkl); the first start is maximized, as before.
+- **More keys:** F1 opens Help at the section in front (Help is now in the menus too), Ctrl+, opens
+  Settings, and Ctrl+F puts the cursor in the section's own search or find box.
+- **Ctrl+1 .. Ctrl+7** open the sections in their order, in either layout; each tab's tooltip and
+  each menu entry shows its key. **Ctrl+8** opens the Fragment Puzzle and **Ctrl+9** the Joins Lab.
+  On Windows, Ctrl+G, Ctrl+F and Ctrl+, also answer to the physical key
+  (`side_nav.LayoutProofShortcuts`): the owner found Ctrl+G dead while its menu entry worked, and a
+  keyboard layout whose letter keys type Hebrew is the likely cause.
+- **An account menu.** Logged in, the Login button shows your name with ▾ and opens *Sync lists now*
+  (enabled when the Lists tab's button is) and *Logout*. One click on your name used to log you out.
+- **Text size.** Settings > *Text size in result lists*: Normal, Large, Larger or Largest, for the
+  Search, Composition Search, Browse by Identification and Personal Lists results (the headings keep
+  their size); Ctrl+= / Ctrl+- step it, and so do A- / A+ beside the tabs and in the side menu;
+  Ctrl+0 resets it. The Browse tab gains the Manuscript
+  Viewer's A- / A+ beside Find, and the two now share one transcription size (changing it in either
+  changes both); on the Browse tab the same keys size the transcription.
+- **Settings > Cancel** no longer undoes settings changed outside the dialog since the program
+  started: the dialog is built once, and it kept the startup snapshot. It now takes one each time it
+  opens.
+- Help (English and Hebrew): a Menu section (layouts, the side menu, the shortcuts, Go to, the window
+  size), recent and saved searches on the Search tab, and the Login and Joins Lab passages say where
+  they are in each layout.
+
+### Everyone has a public name: aliases and a one-time question (web)
+
+- After the 2026-10-21 hardening took the email out of the username, 164 of 193 accounts had no
+  public name, and every page that credits a contribution -- corrections, comments, joins, the
+  citation of a corrected text -- showed them as "Unknown" (38 of the 51 visible corrections).
+- `migrations/profiles_public_aliases.sql` gives each of them an alias such as "Curious Scribe" or
+  "Patient Copyist" (40 adjectives x 40 Genizah-world trades and callings, then "of <city>" on a
+  clash), and new sign-ups without a username of their own get one at sign-up. Every surface,
+  installed desktop versions included, already falls back to the username, so all of them show
+  it. Undo statement at the end of the file; dry run as written.
+- The website asks each person with an alias once, on any page after sign-in: "How should your
+  name appear?" -- their own name (prefilled with the name in their sign-in data: Google's, or
+  the one typed at an email sign-up; never published unless they choose it) or the alias.
+  "Use my name" sets the full name; "Use the alias" keeps the alias. Both are remembered
+  in the new `profiles.public_name_confirmed`, so the question is asked once per account, on
+  any device (`web/public_name.py`). Nothing is asked before the migration runs.
+- Author lookups that ignored the username now use it: published joins on browse
+  (`web/components/joins_panel.py`, `shared/puzzle_publish_service.py::resolve_author_profiles`,
+  which also returned None for a profile without a full name) and the pending list on
+  /corrections.
+- Pinned by `tests/test_public_name.py` (the real dialog, off-loop write with the visitor's
+  client) and `tests/test_profiles_public_aliases_sql.py`; verification on the live project:
+  `scripts/verify_profiles_public_aliases.sql`.
+
+### Admin Users tab names every account (web)
+
+- Since the 2026-10-21 hardening took the email out of `profiles.username`, most accounts had
+  no name and no username left, and /admin -> Users listed them as "Unknown". Each row now shows
+  the public name, then the name the account signed in with (Google's, or the one typed at an
+  email sign-up; for the admin's eyes, not published) and the email, read from `auth.users`
+  through an admin-only function, `public.admin_list_user_emails()`
+  (`migrations/admin_list_user_emails.sql`, re-run 2026-10-25 for the sign-in name): it answers
+  only a caller whose profile has role `admin`, and `profiles` stays free of addresses. No line
+  repeats the name above it.
+- A lookup that fails says why above the list: no signed-in session on the server (seen
+  2026-10-25: signing in again cured it), not an admin in the database, the function missing,
+  or another error; the log line carries the error code.
+- The tab's "Search users..." box and role filter were never connected; they now filter the
+  list (name, username, sign-in name, email, affiliation; role).
+- Pinned by `tests/test_admin_user_emails.py` (the rendered tab) and
+  `tests/test_offloaded_readers.py` (the lookup gets the admin client).
+
+### Admin "Delete User" deletes the account (web)
+
+- "Delete User" on /admin -> Users deleted only the profile row. The person could still sign
+  in, with no profile: no public name, never asked for one, and My Profile unable to save (two
+  such accounts found 2026-10-25). It now calls `public.admin_delete_user()`
+  (`migrations/admin_delete_user.sql`), which deletes the sign-in account itself, and only for
+  an admin; it refuses the admin's own account and other admins' (change the role first), and
+  says which link blocks a delete. The menu no longer offers it on admin rows.
+- The confirmation says what happens: the person can no longer sign in, their lists and votes
+  go with the account, and their corrections, comments and joins stay without a name.
+- Pinned by `tests/test_admin_delete_user.py`.
+
+### Responsa notes with numbers in the visitor's language (web)
+
+- A Hebrew results line no longer ends in English. The engine writes its notes in English on
+  the website (the API and MCP want them so), and the page looked each note up as it was: a
+  note whose numbers were already in it ("a query with * reached 5,252 manuscripts, more than
+  the 2,000 ...") never matched its key, and "Matches across a page break could not be
+  searched; the list may be incomplete." was split at its own "; ". The page now recognises
+  the engine's numbered messages (`shared/search_engine.py::FILLED_MESSAGE_TEMPLATES`: the two
+  page-break notes and the Responsa guard's refusal) and writes them in the visitor's language
+  with the same numbers (`web/translations.py::tr_engine_message`), in the results line and in
+  the refusal message. The desktop translated these before filling them in and is unchanged.
+- Pinned by `tests/test_engine_message_translation.py`, which also fails a new numbered
+  message that is not registered.
+
 ## [9.9.0] - 2026-10-23 — True wildcards in Responsa
 
 Responsa search reads `*` as the Bar-Ilan Responsa Project does: any letters, none included,

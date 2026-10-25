@@ -6188,6 +6188,23 @@ TRANSLATIONS.update({
         'שיפור בממשק החיפוש: המילים המודגשות בתוצאות החיפוש ממורכזות כעת בעמודת הקטע.',
 })
 
+# v9.10.0 desktop What's New bar and dialog (2026-10-25). The Hebrew of the
+# dialog bullets is the owner's own; the English keys follow it.
+TRANSLATIONS.update({
+    'New: a side menu as an option, Go to (Ctrl+G), saved searches, and larger text in the result lists':
+        'חדש: אפשרות לתפריט צד, מעבר מהיר לכתב יד (Ctrl+G), חיפושים שמורים והגדלת הטקסט ברשימות התוצאות',
+    'The menu can move to the side of the window: Settings > Menu: Side menu, or ☰ > Move the menu to the side. Ctrl+1 to Ctrl+7 open the sections, Ctrl+8 the Fragment Puzzle and Ctrl+9 the Joins Lab.':
+        'אפשר להעביר את התפריט לצד החלון: הגדרות > תפריט: תפריט צד, או ☰ > העברת התפריט לצד. Ctrl+1 עד Ctrl+7 פותחים את הלשוניות, Ctrl+8 את פאזל קטעים ו-Ctrl+9 את מעבדת צירופים.',
+    'Go to (Ctrl+G): type a shelfmark or system number, and the manuscript opens in Browse by Shelfmark from anywhere in the program; type Hebrew or Arabic words in the same box to search the corpus for them. The last ten manuscripts you opened are listed under the box, for quick access.':
+        'מעבר אל (Ctrl+G): הקלידו מספר מדף או מספר מערכת, וכתב היד ייפתח בלשונית "עיון לפי מספר מדף" מכל מקום בתוכנה; הקלידו מילים בעברית או בערבית באותה תיבה לשם חיפוש מונחים בקורפוס. מתחת לתיבה מופיעים עשרת כתבי היד האחרונים שפתחתם, לגישה מהירה.',
+    'Saved searches: click ☆ beside a search in the history menu of Search or Composition Search, and it stays at the top of the list; clearing the history leaves it.':
+        'חיפושים שמורים: לחצו על ☆ ליד חיפוש בתפריט ההיסטוריה של "חפש" או של "חיפוש חיבורים", והוא יישאר בראש הרשימה; ניקוי ההיסטוריה אינו מוחק אותו.',
+    'Text size: Settings > Text size in result lists, Ctrl+= / Ctrl+- (Ctrl+0 for normal), or A- / A+ beside the tabs. To enlarge or shrink the transcriptions, click the A- / A+ buttons beside them.':
+        'גודל הטקסט: הגדרות > גודל הטקסט ברשימות התוצאות, Ctrl+= / Ctrl+- (Ctrl+0 לגודל הרגיל), או A- / A+ ליד הלשוניות. להגדלה או הקטנה של התעתיקים, לחצו על כפתורי A- / A+ לידם.',
+    'More features: a short tip at each start (turn it off or on in Settings > Show a tip when the program starts), the window opens where and as large as it was closed, F1 opens Help at the section in front, clicking your name on the Login button opens an account menu so you no longer log out by accident, and clear explanations in the Composition Search tooltips.':
+        'תכונות נוספות: טיפ קצר בכל פתיחה (ניתן לבטל או להפעיל בהגדרות > הצגת טיפ בפתיחת התוכנה), החלון נפתח במקום ובגודל שבו נסגר, F1 פותח את העזרה בנושא הלשונית הפתוחה, לחיצה על שמכם בכפתור הכניסה פותחת תפריט חשבון כדי למנוע התנתקות אקראית, ונוספו הסברים ברורים בחלוניות העזר של חיפוש חיבורים.',
+})
+
 # Phone layout (2026-10-22): the search toolbar's phone menu, the browse image
 # panel's slider toggle, and the catalog-browse sidebar toggle.
 TRANSLATIONS.update({

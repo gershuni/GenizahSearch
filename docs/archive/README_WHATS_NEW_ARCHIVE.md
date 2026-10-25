@@ -7,6 +7,27 @@ The authoritative release history is [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
+## What's New in Version 9.9.0? (the README's own text, 2026-10-23)
+
+**True wildcards in Responsa search** (installer 9.9.0):
+
+- **`*` stands for any letters, anywhere in a word**, as in the Bar-Ilan Responsa Project:
+  `מאמ* קור*` finds `מאמתי קורין`, `כ*נים` finds `כהנים` and `כוהנים`, `*נים *לים` finds
+  `כהנים גדולים`. Spelling variants, `#` and `%` apply to the letters around the star.
+- **Whole words and every form**: each Responsa word is matched whole, `#word#` searches every
+  prefix and suffix combination, and a word written with a bracket (`של[ו]ם`) is found.
+- **Matches across page breaks** are found for every search of several words on a rebuilt
+  index, and Responsa reads up to 150,000 candidate pages, so broad searches show their full
+  lists.
+- **Desktop: the search index rebuilds beside the one in use** — searching continues meanwhile,
+  progress shows at the top of the main window, and you can choose "Rebuild when I exit". The
+  app offers the rebuild once; until then the index works as before.
+- **Website: Back returns to your search as you left it**, in every mode; the Joins Lab and
+  Personal Lists fit a phone.
+- **Desktop: the found words sit in the middle of the Snippet and Context cells.**
+
+---
+
 ## What's New in Version 9.8.0? (the README's own text, 2026-10-19)
 
 **Joins Lab upgrades** (installer 9.8.0):

@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues Tracker
 
-> **Last Updated:** 2026-10-23 (folded 12 fragment(s) from `docs/open_issues.d/`: 2026-10-23-responsa-star-word-hebrew-punctuation.md, 2026-10-23-responsa-gate-mutations-undetectable-on-real-data.md, 2026-10-23-responsa-bracketed-quote-between-words.md, 2026-10-22-windows-ci-tantivy-commit-flake.md, 2026-10-22-scoped-search-address-unscoped-fallback.md, 2026-10-22-responsa-local-downgrade-options.md, 2026-10-22-regex-mode-star-words-zero-rows.md, 2026-10-22-preparing-run-evicted.md, 2026-10-22-multi-catalogued-page-attribution.md, 2026-10-22-joins-lab-refusal-test-timing.md, 2026-10-22-exact-whole-manuscript-crossing-shadow.md, 2026-10-22-back-loses-filter-results-panel.md) -- P3 +12. 252 open.
+> **Last Updated:** 2026-10-25 (folded 1 fragment(s) from `docs/open_issues.d/`: 2026-10-25-search-cutoff-leaks-between-tests.md) -- P3 +1. 253 open.
 > 
 > See `docs/archive/OPEN_ISSUES_ARCHIVE.md` for the dated header log; this tracker holds only what is still open.
 
@@ -67,14 +67,14 @@ Move to "Completed Issues" section at bottom with date
 |----------|------|
 | P1 Critical Bugs | 0 |
 | P2 Medium Bugs | 48 |
-| P3 Low Priority | 164 |
+| P3 Low Priority | 165 |
 | Documentation Issues | 2 |
 | Code Quality Debt | 19 |
 | Untested Areas | 5 |
 | Deferred to v7.15+ | 6 |
 | 2026-05-29 audit follow-up | 2 |
 | FGP integration (§4.5) | 5 |
-| **Total open** | **252** |
+| **Total open** | **253** |
 
 > Counts here exclude closed items (recomputed 2026-08-14 by counting rows carrying ❌/⏸/⏳); closed history lives in docs/archive/OPEN_ISSUES_ARCHIVE.md.
 > Count notes from 2026-09-25 to 2026-10-05 moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-06.
@@ -118,6 +118,7 @@ Move to "Completed Issues" section at bottom with date
 > 2026-10-22 (9.8.2 release, both: PRs #426-#430): branch references replaced by PR numbers, no row opened or closed -- 243.
 > 2026-10-22 (folded from `docs/open_issues.d/`: 2026-10-22-web-phone-viewer-touch.md): P3 +1 -- 244.
 > 2026-10-23 (folded from `docs/open_issues.d/`: 2026-10-23-responsa-star-word-hebrew-punctuation.md, 2026-10-23-responsa-gate-mutations-undetectable-on-real-data.md, 2026-10-23-responsa-bracketed-quote-between-words.md, 2026-10-22-windows-ci-tantivy-commit-flake.md, 2026-10-22-scoped-search-address-unscoped-fallback.md, 2026-10-22-responsa-local-downgrade-options.md, 2026-10-22-regex-mode-star-words-zero-rows.md, 2026-10-22-preparing-run-evicted.md, 2026-10-22-multi-catalogued-page-attribution.md, 2026-10-22-joins-lab-refusal-test-timing.md, 2026-10-22-exact-whole-manuscript-crossing-shadow.md, 2026-10-22-back-loses-filter-results-panel.md): P3 +12 -- 252.
+> 2026-10-25 (folded from `docs/open_issues.d/`: 2026-10-25-search-cutoff-leaks-between-tests.md): P3 +1 -- 253.
 > **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
 
 
@@ -215,6 +216,7 @@ Move to "Completed Issues" section at bottom with date
 
 | Issue | File | Status | Notes |
 |-------|------|--------|-------|
+| **A stale "interrupted" search cut-off leaks into `test_worker_result_carries_the_engines_cut_off`** | `tests/test_web_search_within_cutoff.py`, `shared/search_engine.py` (`_LAST_SEARCH_CUTOFF`), `shared/research_worker.py` | ❌ Open (2026-10-25) | The test passes alone (38 passed, run three times) but fails when it runs after the other files of one 29-file chunk in the same process: `result['cutoff']` is `{'capped': True, 'interrupted': True}`, not `interrupted: False`. Reproduced identically on `26ae875` (before the startup-tips change), so it is not that change's. Cause: `_note_search_cutoff` ORs into a thread-local value that only `consume_last_search_cutoff()` clears, and an earlier test on the main thread leaves `interrupted=True` behind; `research_worker.run_query` reads it without clearing it first. Fix sketch: `run_query` (or the engine at the start of a search) calls `consume_last_search_cutoff()` before running, which also guards a long-lived thread; or an autouse fixture that clears `_LAST_SEARCH_CUTOFF`. Found by the desktop branch `claude/sleepy-hawking-id0eg0`'s chunked test run. |
 | **Responsa: a star word holding Hebrew punctuation is not refused** | `shared/responsa_match.py::_TOKEN_RE`, `refuse_unsupported_stars` | ❌ Open (2026-10-23) | Codex on PR #442 (1468ca4, P2): the run check of a star word accepts the whole Hebrew block, so a maqaf, sof pasuq or Hebrew geresh inside the word (`א־*`) passes where the contract says a star never reaches past punctuation and `docs/SEARCH_API.md` promises `responsa_unsupported_star`; the search runs and a match may span the maqaf. Everywhere else a maqaf ends a word. No real search goes wrong, so the owner merged without it (2026-10-23). Fix: judge a run's characters by Unicode category (letters plus the looked-past marks, quotes and brackets) rather than the block range; settle together with the bracketed-quote-between-words row, both are punctuation between letters. |
 | **Responsa real-data gate: two mutations cannot fail on the real index** | `scripts/verify_responsa_wildcards.py::PHASE3` | ❌ Open (2026-10-23) | Measured on the owner's laptop (2026-10-23, both indexes). `--mutation no-star-windows` on today's format-1 index exits 0 with #442's Phase 3 set: the only star crossing the set has on the real index (`כהנ* גדול*`, IE45532164 p69 into p70) is that manuscript's first match, which whole-first-match reading finds too. `--mutation finite-crossings-whole` on the format-2 index exits 1 with #443's set only because of the bracketed-quote page (its own fragment): the set's nine finite queries have 0 crossings on the real index. Both are proven red on the synthetic corpus of `tests/test_verify_responsa_wildcards.py`. To make them able to fail on real data: add a Responsa finite pair with real crossings (`crossing-diff` shows `אהרן הכהן` with 2 in literal mode) and a trailing-star query whose crossing follows an in-page match (`*נים *לים` does it, 4 crossings lost under the mutation, but it belongs to #443's set). Adding a query changes the oracle cache key and costs a corpus rescan (43-56 min). |
 | **Responsa: a bracket group holding only a quote between two words blocks the sequence** | `shared/responsa_match.py::_separator` | ❌ Open (2026-10-23) | Found by the Phase 3 real-data gates on the owner's laptop (PRs #442/#443): for `*נים *לים` the brute force and the oracle list page `IE156716378_P000002_FL156716384` (sys_id 990053175920205171) and the engine does not, on both index formats. The page reads `בעצנים ⟦'⟧` then a line break then `הגוצלים`. The separator between two query words is a class of everything but word characters, the Hebrew block and the apostrophe: the apostrophe is an in-word quote, so `⟦'⟧` counts as a word standing between the pair and a gap-0 sequence fails. The same for the finite pair `בעצנים הגוצלים`, on both regex runtimes; the line break alone is fine (checked with the compiled check on the page's text). The oracle and `measure_responsa_wildcards.py` read a bracket group of quotes and marks as transparent. One page in 3,872 for this query; older than Phase 3. Either the separator admits a bracket group whose content is only quotes or marks, or the oracle lists the kind as it lists maqaf; the owner's call. |

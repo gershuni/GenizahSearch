@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 9.9.0
+# Dicta Genizah Search Pro 9.10.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,27 +8,26 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 9.9.0?
+## What's New in Version 9.10.0?
 
-**True wildcards in Responsa search** (installer 9.9.0):
+**Desktop UI improvements** (installer 9.10.0):
 
-- **`*` stands for any letters, anywhere in a word**, as in the Bar-Ilan Responsa Project:
-  `מאמ* קור*` finds `מאמתי קורין`, `כ*נים` finds `כהנים` and `כוהנים`, `*נים *לים` finds
-  `כהנים גדולים`. Spelling variants, `#` and `%` apply to the letters around the star.
-- **Whole words and every form**: each Responsa word is matched whole, `#word#` searches every
-  prefix and suffix combination, and a word written with a bracket (`של[ו]ם`) is found.
-- **Matches across page breaks** are found for every search of several words on a rebuilt
-  index, and Responsa reads up to 150,000 candidate pages, so broad searches show their full
-  lists.
-- **Desktop: the search index rebuilds beside the one in use** — searching continues meanwhile,
-  progress shows at the top of the main window, and you can choose "Rebuild when I exit". The
-  app offers the rebuild once; until then the index works as before.
-- **Website: Back returns to your search as you left it**, in every mode; the Joins Lab and
-  Personal Lists fit a phone.
-- **Desktop: the found words sit in the middle of the Snippet and Context cells.**
+- **A side menu, if you prefer it**: Settings > Menu switches between the tabs at the top (still
+  the default) and a side menu with every section, the Fragment Puzzle, the Joins Lab and
+  Settings. Ctrl+1 to Ctrl+9 open them in either layout.
+- **Go to (Ctrl+G)** opens a manuscript by shelfmark or system number from anywhere, and lists the
+  last ten you opened.
+- **Saved searches**: a ☆ in the search history keeps a search at the top, whatever its age.
+- **Text size** for the result lists (Settings, Ctrl+= / Ctrl+-, A- / A+), and A- / A+ for the
+  Browse transcription.
+- **Startup tips**, one per start about a feature that is easy to miss; the window reopens where
+  you left it; F1, Ctrl+, and Ctrl+F; an account menu under your name.
+- **Website**: every contributor has a public name — accounts without one get an alias such as
+  "Curious Scribe", and the site asks once how your name should appear. Responsa notes on a Hebrew
+  page are now in Hebrew.
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md). The README's previous What's New sections
-(8.1.0 to 9.8.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
+(8.1.0 to 9.9.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
 
 ---
 
@@ -103,7 +102,7 @@ Add **GenizahSearch to ChatGPT** from [genizahsearch.com/ai](https://genizahsear
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V9.9.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
+1. **Download:** the installer (`GenizahSearchPro_V9.10.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

@@ -324,6 +324,7 @@ every session's context.
 
 ### Releases
 
+- **v9.10.0 — Desktop UI improvements (2026-10-25)** — PRs #447 #448: desktop menu layouts (Settings > Menu: tabs at the top, the default, or a side menu, `desktop/widgets/side_nav.py`, `nav_layout` in config.pkl), ☰ at the window's edge, Go to Ctrl+G with recent manuscripts (`shared/quick_open.py`), saved searches (☆, `pinned` in `search_history.json`), startup tips (`desktop/startup_tips.py`, 55 owner-approved), result-list text size, Ctrl+1..9 / F1 / Ctrl+, / Ctrl+F (physical-key fallback `LayoutProofShortcuts`), account menu, window geometry kept; web: public-name aliases + one-time name question (`web/public_name.py`, `migrations/profiles_public_aliases.sql`), admin Users tab emails (`admin_list_user_emails()`) and a real Delete User (`admin_delete_user()`), Responsa numbered notes translated (`tr_engine_message`). Desktop What's New 9.10.0; no web What's New. (both)
 - **v9.9.0 — True wildcards in Responsa (2026-10-23)** — PRs #432–#446 (plan
   `docs/plans/RESPONSA_TRUE_WILDCARDS_PLAN.md`): Responsa `*` = any letters, none included, anywhere in a
   word, as often as typed (`shared/responsa_match.py`, one compiler per index; gate
