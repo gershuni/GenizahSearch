@@ -65,7 +65,10 @@ _ANY_ID_RE = re.compile(r"\bGS-(\d+)\b")
 TABLE_HEAD = ("| ID | Issue | Where | Opened | Status |\n"
               "|----|-------|-------|--------|--------|")
 LAST_UPDATED_RE = re.compile(r"^>\s*\*\*Last Updated:\*\*")
-_COUNT_TAIL_RE = re.compile(r"(\d+ open: P1 \d+, P2 \d+, P3 \d+|\d+ items)\.\s*$")
+# The generated count is only what follows the "). " that closes the line's parenthesised
+# note (set_last_updated's form): a count-shaped phrase in hand-written text ("reviewed 3
+# items.") is never rewritten -- the check reports such a line instead.
+_COUNT_TAIL_RE = re.compile(r"(?<=\)\. )(\d+ open: P1 \d+, P2 \d+, P3 \d+|\d+ items)\.\s*$")
 
 
 @dataclass
@@ -285,9 +288,9 @@ def problems(tracker: str, backlog: str, details: str) -> list:
             found.append("%s is not in canonical form (a count, an order or a blank line "
                          "differs): run `python scripts/collect_open_issues.py --apply`" % name)
         updated = [ln for ln in doc.preamble if LAST_UPDATED_RE.match(ln)]
-        if not updated or not updated[0].rstrip().endswith(" %s." % counts_line(doc)):
-            found.append("%s: the '> **Last Updated:**' line must end with the generated count "
-                         "'%s.'" % (name, counts_line(doc)))
+        if not updated or not updated[0].rstrip().endswith("). %s." % counts_line(doc)):
+            found.append("%s: the '> **Last Updated:**' line must end with '(<what>). %s.', "
+                         "the generated count" % (name, counts_line(doc)))
         for i in doc.issues:
             if i.is_closed:
                 found.append("%s: GS-%d is closed; run `python scripts/archive_closed_issues.py "

@@ -175,7 +175,9 @@ def fold(tracker: str, details: str, fragments: list, taken: set, today: str) ->
         for issue, body in issues:
             have = known.get(_norm(issue.headline))
             if have is not None:
-                if have.id not in sections:    # a run that stopped between the two writes
+                # A run that stopped between the two writes left it missing, or a heading with
+                # no body: either way the fragment still holds the text (Codex review of #449).
+                if not sections.get(have.id, "").strip():
                     sections[have.id] = model.details_section(have, have.group, body)
                     added = True
                 continue

@@ -119,11 +119,24 @@ def test_every_fragment_in_the_tree_folds_into_the_real_tracker(path):
     (("| `y.py` |", "| `y.py` | extra |"), "not 5"),
     # The count closing "Last Updated" is generated too (Codex review of PR #449).
     ((". 3 open: P1 0, P2 1, P3 2.", ". 7 open: P1 0, P2 1, P3 2."), "not in canonical form"),
-    ((" 3 open: P1 0, P2 1, P3 2.", " three open."), "must end with the generated count"),
+    ((" 3 open: P1 0, P2 1, P3 2.", " three open."), "the generated count"),
 ])
 def test_the_check_reports_a_hand_edit_that_breaks_the_tracker(change, expect):
     found = model.problems(TRACKER.replace(*change), BACKLOG, DETAILS)
     assert any(expect in p for p in found), found
+
+
+def test_a_count_shaped_phrase_in_hand_written_text_is_never_rewritten(tmp_path):
+    """Only the count after '(...). ' is generated; 'reviewed 3 items.' in narrative is the
+    owner's text: it is reported, not silently turned into today's count (Codex, #449)."""
+    narrative = TRACKER.replace("(something). 3 open: P1 0, P2 1, P3 2.",
+                                "(something); reviewed 3 items.")
+    doc = model.parse(narrative, model.PRIORITIES)
+    assert model.render(doc) == narrative
+    assert any("the generated count" in p for p in model.problems(narrative, BACKLOG, DETAILS))
+    d, f = _tree(tmp_path, {}, tracker=narrative)
+    assert _run(d, f, "--apply") == 0
+    assert "reviewed 3 items." in f["tracker"].read_text(encoding="utf-8")
 
 
 def test_the_check_reports_an_emptied_details_section():
@@ -306,6 +319,24 @@ def test_a_run_that_stopped_before_the_details_is_finished_by_the_next(tmp_path)
     assert _run(d2, f2, "--apply") == 0
     assert f2["tracker"].read_text(encoding="utf-8") == folded
     assert co.check(f2["tracker"], f2["backlog"], f2["details"]) == []
+
+
+def test_a_details_heading_left_empty_is_refilled_by_the_next_run(tmp_path):
+    """A heading with no body is as incomplete as no heading (Codex review of PR #449)."""
+    d, f = _tree(tmp_path, {"2026-10-21-a.md": FRAG_P2})
+    assert _run(d, f, "--apply") == 0
+    folded = f["tracker"].read_text(encoding="utf-8")
+    head, sections = model.parse_details(f["details"].read_text(encoding="utf-8"))
+    sections[8] = ""
+    (tmp_path / "again").mkdir()
+    d2, f2 = _tree(tmp_path / "again", {"2026-10-21-a.md": FRAG_P2}, tracker=folded,
+                   details=model.render_details(head, sections))
+    assert any("is empty" in p for p in co.check(f2["tracker"], f2["backlog"], f2["details"]))
+    assert _run(d2, f2, "--apply") == 0
+    assert co.check(f2["tracker"], f2["backlog"], f2["details"]) == []
+    assert model.parse_details(f2["details"].read_text(encoding="utf-8"))[1][8].endswith(
+        "What happens, and where.")
+    assert sorted(p.name for p in d2.iterdir()) == ["README.md"]
 
 
 def test_the_same_issue_in_two_fragments_is_folded_once(tmp_path):
