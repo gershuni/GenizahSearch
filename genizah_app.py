@@ -16607,7 +16607,6 @@ class GenizahGUI(QMainWindow):
             accepted = dlg.exec()
             kind, value = dlg.choice()
         finally:
-            dlg.detach_completer()
             dlg.deleteLater()
         if not accepted:
             return

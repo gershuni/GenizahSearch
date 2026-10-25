@@ -150,18 +150,44 @@ def test_ctrl_f_focuses_the_sections_own_field():
     assert w._focus_section_field() is None                # nothing to search there
 
 
-def test_the_dialog_returns_what_was_typed_and_gives_the_completer_back():
-    from PyQt6.QtWidgets import QCompleter
+def test_the_dialog_returns_what_was_typed_and_leaves_browses_completer_alone():
+    """A QCompleter serves one widget at a time. The box borrowed Browse's and
+    left it attached to nothing once it closed: typing in Browse's shelfmark
+    field then crashed (Codex review of PR #448). It now has its own."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QStandardItem, QStandardItemModel
+    from PyQt6.QtTest import QTest
     from desktop.go_to_dialog import GoToDialog
-    shared = QCompleter(["T-S 12.123"])
+    from desktop.widgets import ShelfmarkCompleter
+    model = QStandardItemModel()                       # as the window builds it: the key in UserRole
+    for shelfmark in ("T-S 12.123", "T-S 13.15"):
+        item = QStandardItem(shelfmark)
+        item.setData(ShelfmarkCompleter.normalize(shelfmark), Qt.ItemDataRole.UserRole)
+        model.appendRow(item)
+    shared = ShelfmarkCompleter(model, valid_keys={"ts12.123"})
+    shared.setCompletionRole(Qt.ItemDataRole.UserRole)
+    shared.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
     browse_field = QLineEdit()
     browse_field.setCompleter(shared)
+    browse_field.show()
+    QApplication.processEvents()
     dlg = GoToDialog(None, completer=shared)
+    own = dlg.input.completer()
+    assert isinstance(own, ShelfmarkCompleter) and own is not shared
+    assert own.model() is model and own.valid_keys == {"ts12.123"}
+    assert own.caseSensitivity() == Qt.CaseSensitivity.CaseInsensitive
+    assert own.completionRole() == Qt.ItemDataRole.UserRole
     dlg.input.setText("  T-S 12.123 ")
     assert dlg.text() == "T-S 12.123"
-    dlg.detach_completer()
-    assert dlg.input.completer() is None and browse_field.completer() is shared
+    dlg.close()
     dlg.deleteLater()
+    QApplication.processEvents()
+    assert browse_field.completer() is shared and shared.widget() is browse_field
+    browse_field.setFocus()
+    QTest.keyClicks(browse_field, "T-S 1")             # crashed before
+    QApplication.processEvents()
+    assert shared.completionCount() == 2
+    browse_field.close()
 
 
 def test_the_hint_does_not_offer_fl_numbers():

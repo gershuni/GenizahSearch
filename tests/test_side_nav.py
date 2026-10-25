@@ -354,6 +354,25 @@ def test_the_tab_layouts_menu_has_sections_tools_settings_and_no_tick_boxes(wind
     assert w.nav_layout == "side" and w.side_nav.isVisible()
 
 
+def test_cancel_in_settings_restores_defaults_never_saved(monkeypatch):
+    """Codex review of PR #448: the menu layout, text size and tips are saved
+    as they change; on a profile that never saved them, Cancel kept the change,
+    since the snapshot lacked the key and save_app_config only merges."""
+    import desktop.settings_dialogs as sd
+    from desktop.settings_dialogs import SettingsDialog
+    from desktop import startup_tips
+    store = {"language": "he"}
+    monkeypatch.setattr(sd, "load_app_config", lambda: dict(store))
+    monkeypatch.setattr(sd, "save_app_config", store.update)
+    dlg = type("Dlg", (), {"_CANCEL_DEFAULTS": SettingsDialog._CANCEL_DEFAULTS,
+                           "reject": lambda self: None})()
+    SettingsDialog.refresh_config_snapshot(dlg)
+    store.update({"nav_layout": "side", "results_text_level": 3, startup_tips.TIPS_OFF_KEY: True})
+    SettingsDialog._on_cancel(dlg)
+    assert store["nav_layout"] == "tabs" and store["results_text_level"] == 0
+    assert store[startup_tips.TIPS_OFF_KEY] is False and store["language"] == "he"
+
+
 def test_the_side_menu_shows_the_way_back_to_tabs(window):
     """Owner, 2026-10-25: the tab layout's menu had "Move the menu to the side"
     and the side menu had no opposite in view."""

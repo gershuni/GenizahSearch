@@ -6,8 +6,9 @@ Hebrew or Arabic words to search them. What the text is, is decided by
 window acts on it (``GenizahGUI.go_to``). An FL number still works, but the
 box no longer offers it (owner, 2026-10-25: nobody types one).
 
-The shelfmark field offers the same completions as Browse's (the window's
-``shelf_completer``, once the catalogue has loaded). Under it, the
+The shelfmark field offers the same completions as Browse's, from a completer
+of its own on the window's ``shelf_completer`` model (once the catalogue has
+loaded). Under it, the
 manuscripts opened last (owner, 2026-10-25), so going back to one is
 Ctrl+G, Down, Enter; typing narrows that list, and what is highlighted in it
 is what opens.
@@ -16,7 +17,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QDialog, QDialogButtonBox, QLabel, QLineEdit, QListWidget,
+    QAbstractItemView, QCompleter, QDialog, QDialogButtonBox, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QVBoxLayout,
 )
 
@@ -46,7 +47,7 @@ class GoToDialog(QDialog):
         self.input.setPlaceholderText(tr("For example T-S 12.123"))
         self.input.setClearButtonEnabled(True)
         if completer is not None:
-            self.input.setCompleter(completer)
+            self.input.setCompleter(self._own_completer(completer))
         layout.addWidget(self.input)
 
         # (label, payload) pairs, most recent first.
@@ -132,11 +133,21 @@ class GoToDialog(QDialog):
             return True
         return super().eventFilter(obj, event)
 
-    def detach_completer(self):
-        """Give the shared completer back before the dialog goes: a QLineEdit
-        that is destroyed with a completer set would leave it pointing at a
-        deleted widget, and Browse's shelfmark field shares it."""
-        self.input.setCompleter(None)
+    def _own_completer(self, shared):
+        """A completer of its own on the shared one's model and settings. A
+        QCompleter serves one widget at a time: borrowing Browse's left it
+        attached to nothing once this box closed, and typing in Browse's
+        shelfmark field then crashed (Codex review of PR #448, 2026-10-25)."""
+        from desktop.widgets import ShelfmarkCompleter
+        if isinstance(shared, ShelfmarkCompleter):
+            own = ShelfmarkCompleter(shared.model(), self, valid_keys=shared.valid_keys)
+        else:
+            own = QCompleter(shared.model(), self)
+        own.setCompletionRole(shared.completionRole())
+        own.setCaseSensitivity(shared.caseSensitivity())
+        own.setCompletionMode(shared.completionMode())
+        own.setFilterMode(shared.filterMode())
+        return own
 
 
 def _letters(text: str) -> str:

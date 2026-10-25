@@ -1072,6 +1072,8 @@ class SettingsDialog(QDialog):
         btn_layout.addWidget(btn_ok)
         outer.addLayout(btn_layout)
 
+    _CANCEL_DEFAULTS = (('nav_layout', 'tabs'), ('results_text_level', 0))
+
     def refresh_config_snapshot(self):
         """Snapshot config so Cancel can restore it. Taken again each time the
         dialog opens (GenizahGUI._open_settings_dialog): the dialog is built once
@@ -1098,6 +1100,13 @@ class SettingsDialog(QDialog):
             k: v for k, v in load_app_config().items()
             if k not in _TELEMETRY_SNAPSHOT_EXCLUDE
         }
+        # Settings this dialog writes at once that may never have been saved:
+        # Cancel puts their defaults back. save_app_config only merges, so a
+        # key absent from the snapshot kept the value chosen in the dialog
+        # (Codex review of PR #448, 2026-10-25).
+        from desktop import startup_tips  # noqa: PLC0415
+        for key, default in self._CANCEL_DEFAULTS + ((startup_tips.TIPS_OFF_KEY, False),):
+            self._config_snapshot.setdefault(key, default)
 
     def _on_cancel(self):
         """Restore config snapshot and close."""
