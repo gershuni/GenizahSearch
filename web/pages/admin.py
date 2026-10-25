@@ -143,34 +143,54 @@ def get_pending_corrections():
         return []
 
 
-def get_all_users(client=None):
-    """Get all users from the Supabase profiles table, each with its account email.
-
-    profiles has carried no address since 2026-10-21 (the username was the
-    email), and most accounts have no name either, so the email comes from
-    auth.users through the admin-only `admin_list_user_emails` RPC
-    (migrations/admin_list_user_emails.sql). `client` is the authenticated
-    admin client, resolved by the caller on the event loop -- see
-    get_pending_identification_reviews. Without it, or before the migration
-    has run, the rows simply carry no 'email'.
-    """
+def get_all_users():
+    """Get all users from Supabase profiles table."""
     try:
         response = get_client().table('profiles').select('*').order('created_at', desc=True).execute()
-        users = response.data or []
+        return response.data or []
     except Exception as e:
         logger.error("Error fetching users: %s", e)
         return []
-    if users and client is not None:
-        try:
-            rows = client.rpc('admin_list_user_emails', {}).execute().data or []
-        except Exception as e:
-            logger.warning("Account emails unavailable (%s)", type(e).__name__)
-        else:
-            emails = {row.get('id'): row.get('email') for row in rows}
-            for user in users:
-                if emails.get(user.get('id')):
-                    user['email'] = emails[user['id']]
-    return users
+
+
+#: Why the Users tab has no emails, by what get_user_emails could tell.
+EMAILS_PROBLEMS = {
+    'no_session': 'Emails could not be loaded: the server has no signed-in session for this page. '
+                  'Sign out and sign in again.',
+    'not_admin': 'Emails could not be loaded: the database does not list this account as an admin.',
+    'missing': 'Emails could not be loaded: migrations/admin_list_user_emails.sql has not been run.',
+    'error': 'Emails could not be loaded. The server log has the reason ("Account emails unavailable").',
+}
+
+
+def get_user_emails(client):
+    """Account emails by user id, and why there are none if the lookup failed.
+
+    profiles has carried no address since 2026-10-21 (the username was the
+    email), so the email comes from auth.users through the admin-only
+    `admin_list_user_emails` RPC (migrations/admin_list_user_emails.sql).
+    `client` is the authenticated admin client, resolved by the caller on the
+    event loop -- see get_pending_identification_reviews. Returns
+    ``(emails, problem)``: ``problem`` is None, or a key of EMAILS_PROBLEMS.
+    The function refuses anyone but an admin: an anonymous client (no
+    session on the server) is refused by the grant, a signed-in non-admin by
+    the function itself.
+    """
+    if client is None:
+        return {}, 'no_session'
+    try:
+        rows = client.rpc('admin_list_user_emails', {}).execute().data or []
+    except Exception as e:
+        code = str(getattr(e, 'code', '') or '')
+        message = str(getattr(e, 'message', '') or '')
+        # The code and Postgres's message name the cause; neither carries row data.
+        logger.warning("Account emails unavailable (%s %s: %s)", type(e).__name__, code, message[:120])
+        if code == '42501':
+            return {}, 'not_admin' if 'admin role required' in message else 'no_session'
+        if code in ('PGRST202', '42883'):
+            return {}, 'missing'
+        return {}, 'error'
+    return {row['id']: row['email'] for row in rows if row.get('id') and row.get('email')}, None
 
 
 def user_display_name(user) -> str:
@@ -306,10 +326,16 @@ def _load_admin_data(user_client):
     in this repo establishes that concurrent use of it is safe. Serial-but-off-
     the-loop already removes the defect that mattered.
     """
+    users = get_all_users()
+    emails, emails_problem = get_user_emails(user_client) if users else ({}, None)
+    for user in users:
+        if emails.get(user.get('id')):
+            user['email'] = emails[user['id']]
     return {
         'pending_corrections': get_pending_corrections(),
         'identification_reviews': get_pending_identification_reviews(user_client),
-        'users': get_all_users(user_client),
+        'users': users,
+        'emails_problem': emails_problem,
         'total_corrections': get_all_corrections_count(),
     }
 
@@ -364,7 +390,7 @@ async def create_admin_page():
 
             # All Users panel
             with ui.tab_panel(users_tab):
-                await create_users_list_view(data['users'])
+                await create_users_list_view(data['users'], data['emails_problem'])
 
             # Statistics panel
             with ui.tab_panel(stats_tab):
@@ -777,14 +803,24 @@ async def create_pending_correction_card(corr):
                 ui.button(tr('Reject'), on_click=reject).props('flat color=negative')
 
 
-async def create_users_list_view(users=None):
-    """View all users with management options."""
+async def create_users_list_view(users=None, emails_problem=None):
+    """View all users with management options.
+
+    ``emails_problem`` (a key of EMAILS_PROBLEMS) says why the rows carry no
+    email: a lookup that fails silently looks the same as one never made.
+    """
     if users is None:
         users = await run.io_bound(get_all_users)
 
     if not users:
         ui.label(tr('No users found')).style('color: var(--text-secondary);')
         return
+
+    if emails_problem:
+        with ui.row().classes('w-full items-center gap-2 mb-2'):
+            ui.icon('warning').style('color: var(--accent-amber);')
+            ui.label(tr(EMAILS_PROBLEMS[emails_problem])).classes('text-sm') \
+                .style('color: var(--text-secondary);')
 
     # Filter controls
     with ui.row().classes('w-full items-center gap-4 mb-4'):
@@ -839,11 +875,13 @@ def create_user_row(user):
                 ui.icon('account_circle').classes('text-2xl').style('color: var(--primary-600);')
                 with ui.column().classes('gap-0'):
                     ui.label(display_name).classes('font-medium')
-                    if user.get('username'):
-                        ui.label(f"@{user.get('username')}").classes('text-xs').style('color: var(--text-muted);')
-                    # The email, from auth.users (see get_all_users), unless it is already the name
-                    if user.get('email') and user.get('email') != display_name:
-                        ui.label(user.get('email')).classes('text-xs').style('color: var(--text-muted);')
+                    # Under the name: the email (from auth.users, see get_user_emails);
+                    # without one, the username -- unless either is the name itself.
+                    email, username = user.get('email'), user.get('username')
+                    if email and email != display_name:
+                        ui.label(email).classes('text-xs').style('color: var(--text-muted);')
+                    elif not email and username and username != display_name:
+                        ui.label(f"@{username}").classes('text-xs').style('color: var(--text-muted);')
 
             # Affiliation
             if user.get('affiliation'):

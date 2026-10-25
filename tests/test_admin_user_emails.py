@@ -1,23 +1,25 @@
 # -*- coding: utf-8 -*-
-"""The admin Users tab names every account, even one with no name or username.
+"""The admin Users tab shows each account's email under its name.
 
 Since migrations/profiles_no_email_username.sql (2026-10-21) the username is no
-longer the email, and most accounts have no full name either, so the tab listed
-them as "Unknown". get_all_users now adds each account's email from the
-admin-only `admin_list_user_emails` RPC (migrations/admin_list_user_emails.sql).
+longer the email, so the email comes from the admin-only
+`admin_list_user_emails` RPC (migrations/admin_list_user_emails.sql), and a
+lookup that fails says why on the tab: on 2026-10-25 the deployed tab showed no
+emails and nothing on the page or in a plain log read told the cause.
 """
 
+import asyncio
+import itertools
 import pathlib
 
 import pytest
+from nicegui import core, ui
+from nicegui.client import Client
+from nicegui.testing.general import prepare_simulation
 
 admin = pytest.importorskip('web.pages.admin')
 
-PROFILES = [
-    {'id': 'a', 'full_name': 'John Locke', 'username': 'johnlockejrr', 'role': 'user'},
-    {'id': 'b', 'full_name': None, 'username': None, 'role': 'user'},
-    {'id': 'c', 'full_name': None, 'username': None, 'role': 'editor'},
-]
+_paths = itertools.count()
 
 
 class _Response:
@@ -25,24 +27,20 @@ class _Response:
         self.data = data
 
 
-class _Query:
+class _Call:
     def __init__(self, data):
         self._data = data
 
-    def select(self, *_a, **_kw):
-        return self
-
-    def order(self, *_a, **_kw):
-        return self
-
     def execute(self):
-        return _Response([dict(row) for row in self._data])
+        return _Response(self._data)
 
 
-class _AnonClient:
-    def table(self, name):
-        assert name == 'profiles'
-        return _Query(PROFILES)
+class _APIError(Exception):
+    """The shape of postgrest.exceptions.APIError: a code and a message."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code, self.message = code, message
 
 
 class _AdminClient:
@@ -55,12 +53,7 @@ class _AdminClient:
         self.calls.append((name, params))
         if self.error:
             raise self.error
-        return _Query(self.rows)
-
-
-@pytest.fixture(autouse=True)
-def _anon(monkeypatch):
-    monkeypatch.setattr(admin, 'get_client', lambda: _AnonClient())
+        return _Call(self.rows)
 
 
 @pytest.fixture(autouse=True)
@@ -71,38 +64,37 @@ def _english():
         yield
 
 
-def test_unnamed_accounts_get_their_email():
-    client = _AdminClient([{'id': 'a', 'email': 'a@x.org'},
-                           {'id': 'b', 'email': 'b@x.org'}])
-    users = admin.get_all_users(client)
-
+def test_the_emails_come_by_account_id():
+    client = _AdminClient([{'id': 'a', 'email': 'a@x.org'}, {'id': 'b', 'email': None}])
+    assert admin.get_user_emails(client) == ({'a': 'a@x.org'}, None)
     assert client.calls == [('admin_list_user_emails', {})]
-    by_id = {u['id']: u for u in users}
-    assert by_id['a']['email'] == 'a@x.org'
-    assert by_id['b']['email'] == 'b@x.org'
-    assert 'email' not in by_id['c'], 'an account the RPC did not return gets no email'
-    assert [admin.user_display_name(u) for u in users] == \
-        ['John Locke', 'b@x.org', 'No name set']
 
 
-@pytest.mark.parametrize('client', [
-    None,  # the fallback path (no admin client)
-    _AdminClient(error=RuntimeError('function admin_list_user_emails does not exist')),
+@pytest.mark.parametrize('client, problem', [
+    (None, 'no_session'),
+    # What Supabase answered on 2026-10-25 to the anon key: the grant refuses it.
+    (_AdminClient(error=_APIError('42501', 'permission denied for function admin_list_user_emails')),
+     'no_session'),
+    (_AdminClient(error=_APIError('42501', 'admin role required')), 'not_admin'),
+    (_AdminClient(error=_APIError('PGRST202', 'Could not find the function public.admin_list_user_emails')),
+     'missing'),
+    (_AdminClient(error=RuntimeError('connection reset')), 'error'),
 ])
-def test_without_the_rpc_the_list_still_loads(client):
-    """Before the migration runs, or without an admin client: names only, no crash."""
-    users = admin.get_all_users(client)
-
-    assert [u['id'] for u in users] == ['a', 'b', 'c']
-    assert not any('email' in u for u in users)
-    assert admin.user_display_name(users[1]) == 'No name set'
+def test_a_failed_lookup_says_why(client, problem):
+    assert admin.get_user_emails(client) == ({}, problem)
+    assert problem in admin.EMAILS_PROBLEMS
 
 
-def test_the_failure_log_does_not_carry_the_error_text(caplog):
-    """A Supabase error string can quote row data; only its type is logged."""
-    client = _AdminClient(error=RuntimeError('b@x.org'))
-    admin.get_all_users(client)
-    assert 'b@x.org' not in caplog.text
+def test_the_failure_log_names_the_cause_and_no_address(caplog):
+    admin.get_user_emails(_AdminClient(error=_APIError('42501', 'admin role required')))
+    assert '42501' in caplog.text and 'admin role required' in caplog.text
+
+
+def test_display_name_falls_back_to_the_email():
+    assert admin.user_display_name({'full_name': 'John Locke', 'username': 'jl'}) == 'John Locke'
+    assert admin.user_display_name({'username': 'Curious Scribe', 'email': 'c@x.org'}) == 'Curious Scribe'
+    assert admin.user_display_name({'email': 'c@x.org'}) == 'c@x.org'
+    assert admin.user_display_name({}) == 'No name set'
 
 
 def test_the_rpc_is_admin_only_and_closed_to_anon():
@@ -115,3 +107,38 @@ def test_the_rpc_is_admin_only_and_closed_to_anon():
     assert 'security definer' in sql and "set search_path = ''" in sql
     assert 'revoke all on function public.admin_list_user_emails() from public, anon;' in sql
     assert 'grant execute on function public.admin_list_user_emails() to authenticated;' in sql
+
+
+# ---------------------------------------------------------------- the rendered tab
+
+def _texts_of(users, problem=None, monkeypatch=None):
+    """The labels of the real Users tab, row by row."""
+    async def render():
+        core.loop = asyncio.get_running_loop()
+        with Client(ui.page(f'/_admin_users_probe_{next(_paths)}')) as client:
+            await admin.create_users_list_view(users, problem)
+            return [e.text for e in client.elements.values() if isinstance(e, ui.label)]
+    monkeypatch.setenv('GENIZAH_STORAGE_SECRET', 'x' * 40)
+    prepare_simulation()
+    return asyncio.run(render())
+
+
+def test_each_row_shows_the_name_then_the_email(monkeypatch):
+    texts = _texts_of([
+        {'id': '1', 'full_name': 'John Locke', 'username': 'johnlockejrr', 'email': 'jl@x.org'},
+        {'id': '2', 'username': 'Discerning Seeker', 'email': 'ds@x.org'},
+        {'id': '3', 'full_name': 'יעקב חלבי', 'username': 'Eager Bookseller'},
+        {'id': '4', 'username': 'Nimble Bookbinder'},
+    ], monkeypatch=monkeypatch)
+
+    assert 'jl@x.org' in texts and '@johnlockejrr' not in texts, 'with an email, the email is the second line'
+    assert 'ds@x.org' in texts and '@Discerning Seeker' not in texts
+    assert '@Eager Bookseller' in texts, 'without an email, the username, when it is not the name'
+    assert texts.count('Nimble Bookbinder') == 1 and '@Nimble Bookbinder' not in texts, \
+        'an alias that is the name is not repeated under it'
+    assert not any(t.startswith('Emails could not be loaded') for t in texts)
+
+
+def test_the_tab_says_why_there_are_no_emails(monkeypatch):
+    texts = _texts_of([{'id': '1', 'username': 'Curious Scribe'}], 'no_session', monkeypatch)
+    assert admin.EMAILS_PROBLEMS['no_session'] in texts

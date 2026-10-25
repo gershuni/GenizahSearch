@@ -673,6 +673,7 @@ def test_short_circuited_403_is_still_timed():
 ADMIN_BLOCKING_CALLS = [
     'get_pending_corrections',
     'get_all_users',
+    'get_user_emails',
     'get_all_corrections_count',
     'get_pending_identification_reviews',
     'update_correction_status',
@@ -752,14 +753,16 @@ def test_admin_payload_fetches_each_source_once_and_threads_the_client(monkeypat
         seen['client'] = client
         return ('review',)
 
-    def _users(client=None):
-        calls.append('users')
-        seen['users_client'] = client
-        return ['user']
+    def _emails(client):
+        calls.append('emails')
+        seen['emails_client'] = client
+        return {'u1': 'a@x.org'}, None
 
     monkeypatch.setattr(admin, 'get_pending_corrections',
                         lambda: calls.append('pending') or ['correction'])
-    monkeypatch.setattr(admin, 'get_all_users', _users)
+    monkeypatch.setattr(admin, 'get_all_users',
+                        lambda: calls.append('users') or [{'id': 'u1'}, {'id': 'u2'}])
+    monkeypatch.setattr(admin, 'get_user_emails', _emails)
     monkeypatch.setattr(admin, 'get_all_corrections_count',
                         lambda: calls.append('count') or 7)
     monkeypatch.setattr(admin, 'get_pending_identification_reviews', _reviews)
@@ -770,15 +773,17 @@ def test_admin_payload_fetches_each_source_once_and_threads_the_client(monkeypat
     assert seen['client'] is sentinel, \
         'the worker re-derived its own client instead of using the caller\'s'
     # The account emails come from an admin-only RPC: an anonymous client
-    # would be refused and every unnamed account would show no name at all.
-    assert seen['users_client'] is sentinel, \
-        'the users list did not get the admin client for the account emails'
+    # would be refused and the Users tab would show no emails at all.
+    assert seen['emails_client'] is sentinel, \
+        'the email lookup did not get the admin client'
     assert calls.count('users') == 1, f'users fetched {calls.count("users")}x: {calls}'
+    assert calls.count('emails') == 1, f'emails fetched {calls.count("emails")}x: {calls}'
     assert calls.count('pending') == 1, f'pending fetched {calls.count("pending")}x: {calls}'
     assert data == {
         'pending_corrections': ['correction'],
         'identification_reviews': ('review',),
-        'users': ['user'],
+        'users': [{'id': 'u1', 'email': 'a@x.org'}, {'id': 'u2'}],
+        'emails_problem': None,
         'total_corrections': 7,
     }
 
