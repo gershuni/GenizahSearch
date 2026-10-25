@@ -34,9 +34,10 @@ and the backlog in canonical form, which is how a hand edit that left a count or
 order behind is repaired. It writes nothing if a fragment is malformed or a file does
 not parse.
 
-Running it again is safe: an issue whose headline the tracker already holds is not
-added twice (only its missing details section, if any, is written), so a run that
-wrote the tracker but could not delete a fragment is finished by the next run.
+Running it again is safe: an issue the tracker already holds -- the same headline,
+area and Where -- is not added twice (only a missing or empty details section is
+written back), so a run that wrote the tracker but could not delete a fragment is
+finished by the next run.
 """
 from __future__ import annotations
 
@@ -66,9 +67,13 @@ def fragment_paths(fragment_dir: Path) -> list:
     return sorted(p for p in fragment_dir.glob("*.md") if p.name != "README.md")
 
 
-def _norm(headline: str) -> str:
+def _norm(text: str) -> str:
     # The tracker holds a "|" escaped (open_issues_model.escape_cell); a fragment does not.
-    return re.sub(r"\s+", " ", headline.replace("**", "").replace("\\|", "|")).strip().lower()
+    return re.sub(r"\s+", " ", text.replace("**", "").replace("\\|", "|")).strip().lower()
+
+
+def _key(issue) -> tuple:
+    return (_norm(issue.headline), issue.area, _norm(issue.where))
 
 
 def _legacy(lines: list, default_date: str) -> tuple:
@@ -167,13 +172,15 @@ def fold(tracker: str, details: str, fragments: list, taken: set, today: str) ->
     file has used, the archive's included. Raises ValueError when a file does not parse."""
     doc = model.parse(tracker, model.PRIORITIES)
     head, sections = model.parse_details(details)
-    known = {_norm(i.headline): i for i in doc.issues}
+    # A re-run is the same headline at the same area and place: a different defect that
+    # happens to share a headline is a new issue, not a re-run (Codex review of PR #449).
+    known = {_key(i): i for i in doc.issues}
     next_id = max(taken | {0}) + 1
     names = []
     for name, issues in fragments:
         added = False
         for issue, body in issues:
-            have = known.get(_norm(issue.headline))
+            have = known.get(_key(issue))
             if have is not None:
                 # A run that stopped between the two writes left it missing, or a heading with
                 # no body: either way the fragment still holds the text (Codex review of #449).
@@ -183,7 +190,7 @@ def fold(tracker: str, details: str, fragments: list, taken: set, today: str) ->
                 continue
             issue.id, next_id = next_id, next_id + 1
             doc.issues.append(issue)
-            known[_norm(issue.headline)] = issue
+            known[_key(issue)] = issue
             sections[issue.id] = model.details_section(issue, issue.group, body)
             added = True
         if added:

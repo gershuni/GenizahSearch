@@ -339,6 +339,16 @@ def test_a_details_heading_left_empty_is_refilled_by_the_next_run(tmp_path):
     assert sorted(p.name for p in d2.iterdir()) == ["README.md"]
 
 
+def test_a_different_issue_that_shares_a_headline_is_added_not_taken_for_a_rerun(tmp_path):
+    """Same headline, another area and place: a separate defect (Codex review of PR #449)."""
+    d, f = _tree(tmp_path, {"2026-10-21-a.md": "## P3 desktop: Old P2\nWhere: `other.py`\n\nd\n"})
+    assert _run(d, f, "--apply") == 0
+    doc = model.parse(f["tracker"].read_text(encoding="utf-8"), model.PRIORITIES)
+    assert sorted((i.id, i.area) for i in doc.issues if i.headline == "Old P2") == [
+        (4, "search"), (8, "desktop")]
+    assert co.check(f["tracker"], f["backlog"], f["details"]) == []
+
+
 def test_the_same_issue_in_two_fragments_is_folded_once(tmp_path):
     d, f = _tree(tmp_path, {"2026-10-21-a.md": FRAG_P2, "2026-10-20-b.md": FRAG_P2})
     assert _run(d, f, "--apply") == 0
@@ -399,6 +409,44 @@ def test_a_closed_row_without_its_details_is_not_archived(tmp_path, sections):
     assert ac.main(argv) == 1
     assert f["archive"].read_text(encoding="utf-8") == ARCHIVE
     assert f["tracker"].read_text(encoding="utf-8") == closed
+
+
+def _archive_argv(f, date="2026-10-22"):
+    argv = ["--apply", "--date", date]
+    for key, path in f.items():
+        argv += ["--" + key, str(path)]
+    return argv
+
+
+CLOSED_GS2 = TRACKER.replace("| `y.py` | 2026-09-01 | ❌ Open |",
+                             "| `y.py` | 2026-09-01 | ✅ Fixed (2026-10-22, abc1234) |")
+
+
+def test_an_archive_run_stopped_before_the_details_write_is_finished_by_the_next(tmp_path):
+    """Its row is gone and archived, its section is left: the next run removes the section
+    without appending anything again (Codex review of PR #449)."""
+    d, f = _tree(tmp_path, {}, tracker=CLOSED_GS2)
+    assert ac.main(_archive_argv(f)) == 0
+    archive = f["archive"].read_text(encoding="utf-8")
+    f["details"].write_text(DETAILS, encoding="utf-8")            # GS-2's section is back
+    assert co.check(f["tracker"], f["backlog"], f["details"])      # orphaned
+    assert ac.main(_archive_argv(f, "2026-10-23")) == 0
+    assert f["archive"].read_text(encoding="utf-8") == archive     # not appended twice
+    assert 2 not in model.parse_details(f["details"].read_text(encoding="utf-8"))[1]
+    assert co.check(f["tracker"], f["backlog"], f["details"]) == []
+
+
+def test_an_archive_run_stopped_before_the_tracker_write_does_not_append_twice(tmp_path):
+    d, f = _tree(tmp_path, {}, tracker=CLOSED_GS2)
+    assert ac.main(_archive_argv(f)) == 0
+    archive = f["archive"].read_text(encoding="utf-8")
+    f["tracker"].write_text(CLOSED_GS2, encoding="utf-8")         # as if the run stopped there
+    f["details"].write_text(DETAILS, encoding="utf-8")
+    assert ac.main(_archive_argv(f, "2026-10-23")) == 0
+    assert f["archive"].read_text(encoding="utf-8") == archive
+    assert archive.count("| GS-2 (") == 1
+    assert "Old P3 a" not in f["tracker"].read_text(encoding="utf-8")
+    assert co.check(f["tracker"], f["backlog"], f["details"]) == []
 
 
 def test_the_archive_without_closed_rows_is_left_alone(tmp_path):

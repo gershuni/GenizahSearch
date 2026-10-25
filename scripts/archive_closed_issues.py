@@ -51,16 +51,28 @@ def main(argv=None):
     parsed = {name: model.parse(path.read_text(encoding="utf-8"), groups)
               for name, (path, groups) in docs.items()}
     head, sections = model.parse_details(args.details.read_text(encoding="utf-8"))
+    with io.open(args.archive, "r", encoding="utf-8", newline="") as fh:
+        before = fh.read()
     closed = [(name, i) for name, doc in parsed.items() for i in doc.issues if i.is_closed]
-    if not closed:
+    # A run interrupted after its append has archived some IDs already: they are not
+    # appended twice, and a details section it left behind (its row already gone) is
+    # removed now, so running the command again finishes the job (Codex review of #449).
+    archived = {i.id for _, i in closed if _archived(before, i.id)}
+    rows = {i.id for doc in parsed.values() for i in doc.issues}
+    leftover = sorted(k for k in sections if k not in rows and _archived(before, k))
+    if not closed and not leftover:
         print("No closed rows (a status starting with %s) in the tracker or the backlog."
               % " ".join(model.CLOSED_MARKS))
         return 0
     for name, i in closed:
-        print("  GS-%-4d %-14s %s" % (i.id, name, i.headline[:80]))
+        print("  GS-%-4d %-14s %s%s" % (i.id, name, i.headline[:80],
+                                        " (already in the archive)" if i.id in archived else ""))
+    for k in leftover:
+        print("  GS-%-4d details left by an interrupted run (the row is already archived)" % k)
     # The details are the row's full text: archiving a row without them would lose it
     # (Codex review of PR #449). An interrupted fold can leave a row so -- finish it first.
-    bare = [i.id for _, i in closed if not sections.get(i.id, "").strip()]
+    bare = [i.id for _, i in closed
+            if i.id not in archived and not sections.get(i.id, "").strip()]
     if bare:
         print("! GS-%s %s no details section in %s; nothing written. Run "
               "`python scripts/collect_open_issues.py --apply` (or restore the section) first."
@@ -73,24 +85,25 @@ def main(argv=None):
         return 0
 
     # 1. Append to the archive, keeping its line endings, and verify before removing anything.
-    with io.open(args.archive, "r", encoding="utf-8", newline="") as fh:
-        before = fh.read()
-    eol = "\r\n" if before.count("\r\n") > before.count("\n") // 2 else "\n"
-    block = archive_block(closed, sections, args.date).replace("\n", eol)
-    with io.open(args.archive, "a", encoding="utf-8", newline="") as fh:
-        fh.write(block)
-    with io.open(args.archive, "r", encoding="utf-8", newline="") as fh:
-        after = fh.read()
-    missing = [i.id for _, i in closed
-               if "GS-%d (" % i.id not in after or i.headline not in after
-               or sections[i.id].replace("\n", eol) not in after]
-    if missing or not after.startswith(before):
-        print("!! the archive does not hold GS-%s after the append; nothing else was changed"
-              % ", GS-".join(map(str, missing)))
-        return 1
+    new = [(name, i) for name, i in closed if i.id not in archived]
+    if new:
+        eol = "\r\n" if before.count("\r\n") > before.count("\n") // 2 else "\n"
+        block = archive_block(new, sections, args.date).replace("\n", eol)
+        with io.open(args.archive, "a", encoding="utf-8", newline="") as fh:
+            fh.write(block)
+        with io.open(args.archive, "r", encoding="utf-8", newline="") as fh:
+            after = fh.read()
+        missing = [i.id for _, i in new
+                   if not _archived(after, i.id) or i.headline not in after
+                   or sections[i.id].replace("\n", eol) not in after]
+        if missing or not after.startswith(before):
+            print("!! the archive does not hold GS-%s after the append; nothing else was changed"
+                  % ", GS-".join(map(str, missing)))
+            return 1
 
-    # 2. Only now take the rows and their details out.
-    ids = {i.id for _, i in closed}
+    # 2. Only now take the rows and their details out (the details last: a run stopped
+    #    before that write leaves sections that the next run removes as leftovers).
+    ids = {i.id for _, i in closed} | set(leftover)
     label = "archived %s" % ", ".join("GS-%d" % i for i in sorted(ids))
     for name, (path, _) in docs.items():
         doc = parsed[name]
@@ -102,8 +115,15 @@ def main(argv=None):
     args.details.write_text(model.render_details(head, {k: v for k, v in sections.items()
                                                         if k not in ids}),
                             encoding="utf-8", newline="\n")
-    print("\nverified and applied: %d row(s) moved to %s." % (len(closed), args.archive.name))
+    print("\nverified and applied: %d row(s) moved to %s%s." % (
+        len(new), args.archive.name,
+        "" if len(ids) == len(new) else "; %d already there, finished" % (len(ids) - len(new))))
     return 0
+
+
+def _archived(archive: str, issue_id: int) -> bool:
+    """The archive holds this ID's row (archive_block writes it as '| GS-<n> (<file>) |')."""
+    return ("| GS-%d (" % issue_id) in archive
 
 
 if __name__ == "__main__":
