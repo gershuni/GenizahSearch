@@ -11,8 +11,8 @@ size and position.
   (`desktop/widgets/side_nav.py`), a column on the window's start side -- right in Hebrew, left in
   English -- with the seven sections, Fragment Puzzle and Joins Lab, and at its foot Settings, the
   account, the language switch, GenizahSearch.com and the version. The choice applies at once and is
-  kept (`nav_layout` in config.pkl). The tab layout's ☰ menu offers *Move the menu to the side*; a
-  right-click on the side menu offers *Back to tabs at the top*.
+  kept (`nav_layout` in config.pkl). The tab layout's ☰ menu offers *Move the menu to the side*, and
+  the side menu has its opposite in view, *Move the menu to tabs* (also on its right-click menu).
 - **The ☰ menu without tick boxes**, now with Fragment Puzzle, Joins Lab and Settings after the
   sections. The current section is bold; the old menu drew an empty checkbox beside every other one.
 - **The side menu:** the current section has an accent bar; ☰ shows or hides the labels (remembered).
@@ -44,12 +44,16 @@ size and position.
 - **More keys:** F1 opens Help at the section in front (Help is now in the menus too), Ctrl+, opens
   Settings, and Ctrl+F puts the cursor in the section's own search or find box.
 - **Ctrl+1 .. Ctrl+7** open the sections in their order, in either layout; each tab's tooltip and
-  each menu entry shows its key.
+  each menu entry shows its key. **Ctrl+8** opens the Fragment Puzzle and **Ctrl+9** the Joins Lab.
+  On Windows, Ctrl+G, Ctrl+F and Ctrl+, also answer to the physical key
+  (`side_nav.LayoutProofShortcuts`): the owner found Ctrl+G dead while its menu entry worked, and a
+  keyboard layout whose letter keys type Hebrew is the likely cause.
 - **An account menu.** Logged in, the Login button shows your name with ▾ and opens *Sync lists now*
   (enabled when the Lists tab's button is) and *Logout*. One click on your name used to log you out.
 - **Text size.** Settings > *Text size in result lists*: Normal, Large, Larger or Largest, for the
   Search, Composition Search, Browse by Identification and Personal Lists results (the headings keep
-  their size); Ctrl+= / Ctrl+- step it and Ctrl+0 resets it. The Browse tab gains the Manuscript
+  their size); Ctrl+= / Ctrl+- step it, and so do A- / A+ beside the tabs and in the side menu;
+  Ctrl+0 resets it. The Browse tab gains the Manuscript
   Viewer's A- / A+ beside Find, and the two now share one transcription size (changing it in either
   changes both); on the Browse tab the same keys size the transcription.
 - **Settings > Cancel** no longer undoes settings changed outside the dialog since the program

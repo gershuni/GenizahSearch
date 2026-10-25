@@ -69,7 +69,7 @@ from desktop.qthread_exit import settle_running_threads
 from desktop.qt_translations import install_qt_translations
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
-from desktop.widgets.side_nav import LinkedButton, SideNav, ltr, popup_point
+from desktop.widgets.side_nav import LayoutProofShortcuts, LinkedButton, SideNav, ltr, popup_point
 from desktop.go_to_dialog import GoToDialog
 from shared.quick_open import quick_open_target
 from desktop.widgets.line_number_text_edit import (
@@ -2373,13 +2373,26 @@ class GenizahGUI(QMainWindow):
             self._section_shortcuts.append(shortcut)
         # Ctrl+G Go to, F1 Help for the section in front, Ctrl+, Settings,
         # Ctrl+F the section's own search or find field (owner, 2026-10-24).
+        # Ctrl+8 the Fragment Puzzle, Ctrl+9 the Joins Lab (owner, 2026-10-25).
         for keys, slot in (("Ctrl+G", self.open_go_to),
                            ("F1", self.open_help_for_current_section),
                            ("Ctrl+,", self._open_settings_dialog),
-                           ("Ctrl+F", self._focus_section_field)):
+                           ("Ctrl+F", self._focus_section_field),
+                           ("Ctrl+8", self._open_puzzle_window),
+                           ("Ctrl+9", self.open_join_workbench)):
             shortcut = QShortcut(QKeySequence(keys), self)
             shortcut.activated.connect(slot)
             self._section_shortcuts.append(shortcut)
+        # On Windows a Ctrl+letter shortcut can miss in a keyboard layout whose
+        # letter keys type another script (owner: "Ctrl-G does not work" while
+        # the menu entry did). These also answer to the physical key.
+        if sys.platform == 'win32':
+            self._layout_shortcuts = LayoutProofShortcuts(self, {
+                ('G', Qt.KeyboardModifier.ControlModifier): self.open_go_to,
+                ('F', Qt.KeyboardModifier.ControlModifier): self._focus_section_field,
+                (',', Qt.KeyboardModifier.ControlModifier): self._open_settings_dialog,
+            })
+            QApplication.instance().installEventFilter(self._layout_shortcuts)
 
         self._wire_tip_signals()
 
@@ -2460,11 +2473,26 @@ class GenizahGUI(QMainWindow):
         """)
         corner_widget.add(self.corner_website_btn, 4)
 
+        # Text size, the buttons beside the keys (owner, 2026-10-25): the
+        # transcription on the Browse tab, the result lists elsewhere.
+        for name, label, tip, keys, step in (
+                ('corner_text_smaller_btn', "\u200eA\u2212\u200e", tr("Smaller text"), "Ctrl+-", -1),
+                ('corner_text_larger_btn', "\u200eA+\u200e", tr("Larger text"), "Ctrl+=", 1)):
+            btn = QPushButton(label)
+            btn.setFlat(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setToolTip(f"{tip} ({ltr(keys)})")
+            btn.setStyleSheet("font-size: 13px; font-weight: bold; padding: 1px 2px;")
+            btn.setFixedWidth(30)
+            btn.clicked.connect(lambda _c=False, s=step: self._step_text_size(s))
+            setattr(self, name, btn)
+            corner_widget.add(btn, 3)
+
         # Puzzle canvas button
         self.corner_puzzle_btn = QPushButton("\U0001F9E9")  # puzzle piece emoji
         self.corner_puzzle_btn.setFlat(True)
         self.corner_puzzle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.corner_puzzle_btn.setToolTip(tr("Fragment Puzzle"))
+        self.corner_puzzle_btn.setToolTip(f"{tr('Fragment Puzzle')} ({ltr('Ctrl+8')})")
         self.corner_puzzle_btn.setStyleSheet("font-size: 16px; padding: 1px 2px;")
         self.corner_puzzle_btn.setFixedWidth(30)
         self.corner_puzzle_btn.clicked.connect(self._open_puzzle_window)
@@ -2474,7 +2502,7 @@ class GenizahGUI(QMainWindow):
         self.corner_joins_btn = QPushButton("\U0001F517")  # 🔗 link emoji
         self.corner_joins_btn.setFlat(True)
         self.corner_joins_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.corner_joins_btn.setToolTip(tr("Joins Lab"))
+        self.corner_joins_btn.setToolTip(f"{tr('Joins Lab')} ({ltr('Ctrl+9')})")
         self.corner_joins_btn.setStyleSheet("font-size: 16px; padding: 1px 2px;")
         self.corner_joins_btn.setFixedWidth(30)
         self.corner_joins_btn.clicked.connect(self.open_join_workbench)
@@ -2524,9 +2552,9 @@ class GenizahGUI(QMainWindow):
         self.tabs.currentChanged.connect(self.side_nav.set_current)
 
         self.side_nav.add_separator()
-        self.nav_puzzle_btn = self.side_nav.add_button("\U0001F9E9", tr("Fragment Puzzle"))
+        self.nav_puzzle_btn = self.side_nav.add_button("\U0001F9E9", tr("Fragment Puzzle"), shortcut="Ctrl+8")
         self.nav_puzzle_btn.clicked.connect(self._open_puzzle_window)
-        self.nav_joins_btn = self.side_nav.add_button("\U0001F517", tr("Joins Lab"))
+        self.nav_joins_btn = self.side_nav.add_button("\U0001F517", tr("Joins Lab"), shortcut="Ctrl+9")
         self.nav_joins_btn.clicked.connect(self.open_join_workbench)
         self.nav_go_to_btn = self.side_nav.add_button("\U0001F9ED", tr("Go to..."), shortcut="Ctrl+G")
         self.nav_go_to_btn.clicked.connect(self.open_go_to)
@@ -2537,6 +2565,17 @@ class GenizahGUI(QMainWindow):
         self.nav_settings_btn = self.side_nav.add_button(
             "\u2699\uFE0F", tr("Settings"), footer=True, shortcut="Ctrl+,")
         self.nav_settings_btn.clicked.connect(self._open_settings_dialog)
+        self.nav_text_larger_btn = self.side_nav.add_button(
+            "A+", tr("Larger text"), footer=True, shortcut="Ctrl+=")
+        self.nav_text_larger_btn.clicked.connect(lambda: self._step_text_size(1))
+        self.nav_text_smaller_btn = self.side_nav.add_button(
+            "A\u2212", tr("Smaller text"), footer=True, shortcut="Ctrl+-")
+        self.nav_text_smaller_btn.clicked.connect(lambda: self._step_text_size(-1))
+        # The way back to tabs, in view (owner, 2026-10-25): the tab layout's
+        # ☰ menu has "Move the menu to the side", and this is its opposite.
+        self.nav_to_tabs_btn = self.side_nav.add_button(
+            "\u2B06\uFE0F", tr("Move the menu to tabs"), footer=True)
+        self.nav_to_tabs_btn.clicked.connect(lambda: self.set_nav_layout('tabs'))
         self.nav_login_btn = self.side_nav.add_button("\U0001F464", "", footer=True)
         self.corner_login_btn.link(self.nav_login_btn)
         self.nav_login_btn.clicked.connect(lambda: self._corner_login_clicked(self.nav_login_btn))
@@ -2555,9 +2594,10 @@ class GenizahGUI(QMainWindow):
             "QPushButton { color: #7f8c8d; font-size: 10px; border: none; padding: 2px; }"
             "QPushButton:hover { text-decoration: underline; }")
         self.side_nav.add_widget(self.nav_version_btn)
-        # On its narrow-window menu and its right-click menu: the way back.
-        self.side_nav.menu_extras = [
-            (tr("Back to tabs at the top"), lambda: self.set_nav_layout('tabs'))]
+        # Its right-click menu offers the way back too (the narrow-window menu
+        # lists the entry itself).
+        self.side_nav.context_extras = [
+            (tr("Move the menu to tabs"), lambda: self.set_nav_layout('tabs'))]
         self._update_corner_login_state()
 
         # Connect tab change to refresh community data when needed
@@ -16525,7 +16565,7 @@ class GenizahGUI(QMainWindow):
         and the website are left out, being beside it in the tab row."""
         self.side_nav.build_menu(
             self._corner_sections_menu,
-            omit=(self.nav_login_btn, self.nav_lang_btn, self.nav_website_btn),
+            omit=(self.nav_login_btn, self.nav_lang_btn, self.nav_website_btn, self.nav_to_tabs_btn),
             extras=[(tr("Move the menu to the side"), lambda: self.set_nav_layout('side'))])
 
     # Which menu layout is showing: 'tabs' (the default) or 'side'.

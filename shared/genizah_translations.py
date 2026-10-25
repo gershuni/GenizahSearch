@@ -5558,7 +5558,7 @@ TRANSLATIONS.update({
     "Tabs at the top": "לשוניות למעלה",
     "Side menu": "תפריט צד",
     "Move the menu to the side": "העברת התפריט לצד",
-    "Back to tabs at the top": "חזרה ללשוניות למעלה",
+    "Move the menu to tabs": "העברת התפריט לתצורת לשוניות",
     "Account": "חשבון",
     # The Go to box (Ctrl+G).
     "Go to": "מעבר אל",
@@ -5683,7 +5683,7 @@ TRANSLATIONS.update({
 # the owner's own, from the review sheet (startup_tips_review, round 4); **bold**
 # marks a name on screen, as Hebrew has no capitals to mark one.
 TRANSLATIONS.update({
-    "Show me": "הראו לי",
+    "Show me": "הראה לי",
     "Next tip": "הטיפ הבא",
     "Don't show tips": "לא להציג טיפים",
     "Build the index": "בניית האינדקס",

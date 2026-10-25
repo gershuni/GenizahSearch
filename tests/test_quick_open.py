@@ -275,5 +275,13 @@ def test_main_window_wiring():
         assert f"({keys}, {slot})" in init_ui
     assert 'tr("Go to..."), shortcut="Ctrl+G")' in init_ui
     assert 'tr("Help"), footer=True, shortcut="F1")' in init_ui
+    # Ctrl+8 / Ctrl+9 (owner, 2026-10-25), and the keys in the menus.
+    assert '("Ctrl+8", self._open_puzzle_window)' in init_ui and '("Ctrl+9", self.open_join_workbench)' in init_ui
+    assert 'tr("Fragment Puzzle"), shortcut="Ctrl+8")' in init_ui
+    assert 'tr("Joins Lab"), shortcut="Ctrl+9")' in init_ui
+    # Ctrl+G / Ctrl+F / Ctrl+, also by the physical key on Windows.
+    assert "LayoutProofShortcuts(self, {" in init_ui and "('G', Qt.KeyboardModifier.ControlModifier): self.open_go_to" in init_ui
+    # A- / A+ beside the tabs and in the side menu.
+    assert "self._step_text_size(s)" in init_ui and 'tr("Larger text"), footer=True, shortcut="Ctrl+="' in init_ui
     go = src[src.index("    def open_go_to(self):"):src.index("    def _go_to_recent_items(")]
     assert "recent=self._go_to_recent_items()" in go and "self._open_recent_item(value)" in go

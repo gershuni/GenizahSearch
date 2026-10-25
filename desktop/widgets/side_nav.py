@@ -29,7 +29,7 @@ column's entries too (``build_menu``), so the two always list the same things.
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import QEvent, QPoint, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QPoint, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPalette, QPixmap
 from PyQt6.QtWidgets import (
     QApplication, QButtonGroup, QFrame, QMenu, QPushButton, QScrollArea, QSizePolicy,
@@ -71,6 +71,52 @@ def glyph_icon(glyph: str, color: QColor, size: int = ICON_SIZE) -> QIcon:
         painter.end()
         icon.addPixmap(pm)
     return icon
+
+
+# Windows virtual-key codes of the keys LayoutProofShortcuts takes besides
+# letters and digits (whose codes are their upper-case ASCII).
+_WINDOWS_VK = {',': 0xBC, '-': 0xBD, '.': 0xBE, '=': 0xBB}
+
+
+def windows_virtual_key(char: str):
+    c = char.upper()
+    if len(c) == 1 and ('A' <= c <= 'Z' or '0' <= c <= '9'):
+        return ord(c)
+    return _WINDOWS_VK.get(c)
+
+
+class LayoutProofShortcuts(QObject):
+    """Ctrl+letter shortcuts that also answer to the physical key.
+
+    On Windows, a QShortcut for Ctrl+G can miss when the keyboard layout's G
+    key types another script, the Hebrew \u05e2 for one (owner, 2026-10-25:
+    "Ctrl-G does not work" while the menu entry did). Installed on the
+    application, this sees a key press that no shortcut took and matches it
+    by its virtual-key code, which is the same in every layout. A press a
+    QShortcut did take never arrives as a key press, so nothing fires twice;
+    only the window's own presses count, not a dialog's.
+    """
+
+    _MODIFIERS = (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+                  | Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.MetaModifier)
+
+    def __init__(self, window, bindings):
+        """``bindings``: {(key character, modifiers): slot}, e.g.
+        {('G', Qt.KeyboardModifier.ControlModifier): window.open_go_to}."""
+        super().__init__(window)
+        self.window = window
+        self.bindings = {(windows_virtual_key(k), m): slot for (k, m), slot in bindings.items()}
+
+    def eventFilter(self, obj, event):  # noqa: N802 - Qt API
+        if event.type() != QEvent.Type.KeyPress:
+            return False
+        if QApplication.activeModalWidget() is not None or QApplication.activeWindow() is not self.window:
+            return False
+        slot = self.bindings.get((event.nativeVirtualKey(), event.modifiers() & self._MODIFIERS))
+        if slot is None:
+            return False
+        slot()
+        return True
 
 
 def ltr(text: str) -> str:
@@ -235,6 +281,7 @@ class SideNav(QFrame):
         # (label, callable) pairs added after the entries in the narrow-window
         # menu and the right-click menu -- the way back to the tab layout.
         self.menu_extras = []
+        self.context_extras = []    # the right-click menu's only
         self._restyling = False
         self._entries = []          # (button, group) in display order, for the menu
         self._group = 0
@@ -433,13 +480,13 @@ class SideNav(QFrame):
         menu.exec(self.menu_position(menu))
 
     def contextMenuEvent(self, event):  # noqa: N802 - Qt API
-        """Right-click: labels on or off (when there is room for them) and the
-        ``menu_extras`` -- so the way back to tabs is on the menu itself, not
-        only in Settings."""
+        """Right-click: labels on or off (when there is room for them), the
+        ``menu_extras`` and the ``context_extras`` -- so the way back to tabs
+        is on the menu itself, not only in Settings."""
         menu = QMenu(self)
         if self._room:
             menu.addAction(self.toggle_button.toolTip()).triggered.connect(self._on_toggle)
-        self._add_extras(menu, self.menu_extras)
+        self._add_extras(menu, list(self.menu_extras) + list(self.context_extras))
         if menu.actions():
             menu.exec(event.globalPos())
 

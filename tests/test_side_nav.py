@@ -216,10 +216,10 @@ def test_sections_carry_their_shortcut_into_the_hint_and_the_menu():
     nav.set_current(0)
     # Marked left-to-right: in the Hebrew UI "Ctrl+," would show as ",Ctrl+".
     assert nav.section_buttons[0].toolTip() == ltr("Ctrl+1") == "\u200eCtrl+1\u200e"
-    menu = nav.build_menu(QMenu(), extras=[("Back to tabs at the top", lambda: None)])
+    menu = nav.build_menu(QMenu(), extras=[("Move the menu to tabs", lambda: None)])
     texts = [a.text() for a in menu.actions()]
     assert texts == [f"Search\t{ltr('Ctrl+1')}", f"Composition Search\t{ltr('Ctrl+2')}", "",
-                     "Back to tabs at the top"]
+                     "Move the menu to tabs"]
 
 
 def test_linked_button_relabels_and_disables_its_twin():
@@ -277,6 +277,8 @@ class _Window:
         self.nav_login_btn = self.side_nav.add_button("\U0001F464", "", footer=True)
         self.nav_lang_btn = self.side_nav.add_button("\U0001F524", "", footer=True)
         self.nav_website_btn = self.side_nav.add_button("\U0001F310", "GenizahSearch.com", footer=True)
+        self.nav_to_tabs_btn = self.side_nav.add_button("\u2B06", "Move the menu to tabs", footer=True)
+        self.nav_to_tabs_btn.clicked.connect(lambda: self.set_nav_layout('tabs'))
         self.corner_login_btn = LinkedButton("Login")
         self.corner_login_btn.link(self.nav_login_btn)
         self.host = QWidget()
@@ -350,6 +352,49 @@ def test_the_tab_layouts_menu_has_sections_tools_settings_and_no_tick_boxes(wind
     assert w.tabs.currentIndex() == 0
     acts[-1].trigger()
     assert w.nav_layout == "side" and w.side_nav.isVisible()
+
+
+def test_the_side_menu_shows_the_way_back_to_tabs(window):
+    """Owner, 2026-10-25: the tab layout's menu had "Move the menu to the side"
+    and the side menu had no opposite in view."""
+    w = window
+    w.set_nav_layout("side")
+    assert w.nav_to_tabs_btn.isVisible()
+    w.nav_to_tabs_btn.click()
+    assert w.nav_layout == "tabs" and not w.side_nav.isVisible() and w.cfg["nav_layout"] == "tabs"
+    w._fill_sections_menu()                    # not offered in the tab layout's own menu
+    assert "Move the menu to tabs" not in [a.text() for a in w._corner_sections_menu.actions()]
+
+
+def test_layout_proof_shortcuts_match_the_physical_key(monkeypatch):
+    """Ctrl+G on a Hebrew keyboard: the key types \u05e2, its virtual-key code is G."""
+    from PyQt6.QtCore import QEvent
+    from PyQt6.QtGui import QKeyEvent
+    from desktop.widgets import side_nav
+    from desktop.widgets.side_nav import LayoutProofShortcuts, windows_virtual_key
+    win = QWidget()
+    state = {"active": win, "modal": None}
+    monkeypatch.setattr(side_nav, "QApplication", type("App", (), {
+        "activeWindow": staticmethod(lambda: state["active"]),
+        "activeModalWidget": staticmethod(lambda: state["modal"])}))
+    fired = []
+    filt = LayoutProofShortcuts(win, {('G', Qt.KeyboardModifier.ControlModifier): lambda: fired.append('G'),
+                                      (',', Qt.KeyboardModifier.ControlModifier): lambda: fired.append(',')})
+    assert windows_virtual_key('g') == 0x47 and windows_virtual_key(',') == 0xBC
+
+    def press(vk, mods=Qt.KeyboardModifier.ControlModifier, kind=QEvent.Type.KeyPress):
+        return filt.eventFilter(win, QKeyEvent(kind, 0x05E2, mods, 0, vk, 0, "\u05e2"))
+
+    assert press(0x47) and fired == ['G']
+    assert press(0xBC) and fired == ['G', ',']
+    assert not press(0x47, Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier)  # AltGr
+    assert not press(0x47, kind=QEvent.Type.KeyRelease)
+    assert not press(0x48)
+    state["modal"] = QWidget()                 # a dialog is open: its keys are its own
+    assert not press(0x47)
+    state["modal"], state["active"] = None, QWidget()   # another window in front
+    assert not press(0x47)
+    assert fired == ['G', ',']
 
 
 def test_the_account_menu_offers_sync_and_logout(window):
