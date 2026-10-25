@@ -222,8 +222,10 @@ Four classes ([decision 0005](../decisions/0005-document-classes.md)):
 | Audit evidence | `.planning/milestones/*-MILESTONE-AUDIT.md`, `.planning/phase87_storage_allowlist.yaml`, phase decision files that tests read | cited; never moved |
 | Archived history | `docs/archive/`, `.planning/milestones/*-phases/`, `.planning/quick/`, `.planning/debug/` | banner names the successor; excluded from `check_docs` scans |
 
-The open-issues tracker is [docs/OPEN_ISSUES.md](../OPEN_ISSUES.md) (closed items move to
-`docs/archive/OPEN_ISSUES_ARCHIVE.md`); release history is [CHANGELOG.md](../../CHANGELOG.md);
+The open-issues tracker is [docs/OPEN_ISSUES.md](../OPEN_ISSUES.md), with
+[docs/BACKLOG.md](../BACKLOG.md) for what is not a defect and
+[docs/ISSUE_DETAILS.md](../ISSUE_DETAILS.md) for each row's full text (closed items move to
+`docs/archive/OPEN_ISSUES_ARCHIVE.md`; `scripts/open_issues_model.py` defines the form); release history is [CHANGELOG.md](../../CHANGELOG.md);
 the instruction files for agents are `AGENTS.md` (commands and layout rules), `CLAUDE.md`
 (project context), `CONTRIBUTING.md` and `.cursorrules`, kept consistent with each other by the
 doc gates.

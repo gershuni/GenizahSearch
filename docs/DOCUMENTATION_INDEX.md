@@ -10,7 +10,7 @@ This directory contains all project documentation, organized by category.
 
 | Need to... | Read this |
 |------------|-----------|
-| **See open bugs & issues** | [OPEN_ISSUES.md](OPEN_ISSUES.md) |
+| **See open bugs & issues** | [OPEN_ISSUES.md](OPEN_ISSUES.md) (defects), [BACKLOG.md](BACKLOG.md) (debt, test gaps, ideas, owner tasks); full text by ID in [ISSUE_DETAILS.md](ISSUE_DETAILS.md) |
 | **Understand where code and data live, and who owns what** | [architecture/OVERVIEW.md](architecture/OVERVIEW.md), [architecture/DATA_LIFECYCLE.md](architecture/DATA_LIFECYCLE.md) |
 | **See why a decision was made (and not re-open it)** | [decisions/](decisions/README.md) |
 | **See feature ideas / what to build next** | [FEATURE_IDEAS.md](FEATURE_IDEAS.md) |
@@ -30,7 +30,9 @@ This directory contains all project documentation, organized by category.
 ```
 docs/
 ├── DOCUMENTATION_INDEX.md    # This file
-├── OPEN_ISSUES.md            # Active issue tracker (AI agents MUST update)
+├── OPEN_ISSUES.md            # Open defects, one line each by ID (AI agents MUST update)
+├── BACKLOG.md                # Deferred defects, debt, test gaps, ideas, owner tasks
+├── ISSUE_DETAILS.md          # Full text of every tracker/backlog row by GS-<n> (grep only)
 ├── CODE_INDEX.md             # Symbol-level index of the code
 │
 ├── architecture/             # CURRENT ARCHITECTURE -- authoritative for where code and data live

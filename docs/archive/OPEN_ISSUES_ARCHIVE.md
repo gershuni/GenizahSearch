@@ -1854,3 +1854,255 @@ Every research worker job stops at `Config.WEB_SEARCH_TIME_LIMIT` (180 s): the w
 | Issue | Location | Status | Notes |
 |-------|----------|--------|-------|
 | **Desktop: a level click during a running search changes that search's pair count** | `genizah_app.py::_set_variant_preset`, `shared/variants.py::VariantManager.set_variant_level` | ✅ Fixed (2026-10-07, branch `fix/variant-changes-per-preset`) | Clicking Basic / Extended / Maximum while a desktop Variants search runs sets the shared VariantManager's level, which the running search reads for each later word -- as on master. Composition, Joins, refinement replays and the count preview no longer write it (2026-10-07, Codex review on #386). Fix: run the main search on a settings view of its own, keeping a cache per level so repeated searches stay fast. Fixed the same day (Codex review round 4 on #386): preset clicks and `?` prefixes only select the level shown; start_search sets the shared level and x once the previous search has stopped, and nothing else writes them while a search runs. |
+
+---
+
+## Closed entries moved out of the tracker on 2026-10-25 (reconstruction triage)
+
+Every open row was re-checked against the code at `ca809c56` (v9.10.0). These were found fixed, superseded or duplicated, each claim confirmed by a second reading of the code before it moved. Each entry quotes the row verbatim.
+
+### The checked-in V4.2 recipe cannot rebuild the artifact in production
+
+- **From:** `1. Outstanding Bugs / P2 - Medium`
+- **Verdict:** fixed. Recomputed with curated_content_hash (build_discovery_sidecar.py:6754, hash of the payload array only): work_domains `assignments` = 4f90ffc7... and aliases = b2bf3cff..., exactly the pins; load_work_domains and load_work_author_aliases ACCEPT them (1,351 / 149 rows) when run read-only. The 79c9ea13 / dc94b4b0 'actual' values in the spec are plain file sha256s, a different quantity; the ps1's other five sha pins also match disk and the files are unchanged since 2026-08-19. No commit involved (nothing changed; the original measurement was wrong). Residual hygiene only: the work-domains hash is a literal in the script; the ps1 is in gitignored _tmp, not 'checked-in'.
+- **Confirmed:** re-ran 2026-10-25: scripts/build_discovery_sidecar.py::load_work_domains accepts the recipe's own discovery_builds/discovery_v4_2/build/work_domains_v42lit.json with the pin sha256:4f90ffc7... (1,351 rows), and load_work_author_aliases accepts discovery_data/work_author_aliases-v42lit.json with _tmp/v42lit_alias_hash.txt (149 rows). The 'failing' values were whole-file sha256s, not the loaders' payload-array recipe. Left over (hygiene, not a failure): the work-domains pin is a literal in a gitignored script.
+
+- **Issue:** **The checked-in V4.2 recipe cannot rebuild the artifact in production**
+- **File:** `_tmp/build_v42lit_sidecar.ps1`, `_tmp/v42lit_alias_hash.txt`
+- **Status:** ❌ Open (found 2026-08-19) · **Rechecked 2026-10-06:** both pins still fail against disk exactly as below; the work-domains hash is still a literal in the script and the alias hash a hand-kept file.
+- **Notes:** Two of its hash pins fail against disk (`work_domains_v42lit.json`, `work_author_aliases-v42lit.json`) and the loaders fail closed, so rollback-by-rebuild does not exist; rollback by manifest repoint is unaffected. Fix before it is needed under pressure: derive both hashes at run time. Detail: [`docs/specs/discovery-performance-situation-2026-08-20.md`](../specs/discovery-performance-situation-2026-08-20.md). Full text archived 2026-10-19.
+
+### Responsa wildcard grammatical-expansion recall bypasses the explosion guard and can build oversized Tantivy OR clauses
+
+- **From:** `1. Outstanding Bugs / P2 - Medium`
+- **Verdict:** fixed. _count_expanded_terms and _apply_explosion_guard now delegate to responsa_match.expand_under_guard, which counts the real terms of the lookup (forms plus each star word's StarForm runs via term_cost, responsa_match.py:372) against Config.MAX_EXPANDED_TERMS while expanding (expand_stems takes a _Budget and raises _OverLimit). The ~25-form wildcard expansion the row describes was replaced by the true-wildcard compiler in commit 6e853f3f (2026-10-22, v9.9.0) and the guard is shared by every path including line-break.
+- **Confirmed:** re-read at ca809c56: shared/responsa.py::_apply_explosion_guard delegates to shared/responsa_match.py::expand_under_guard (responsa.py:847-848), which counts the real lookup terms; the ~25-form wildcard expansion the row describes is gone (6e853f3f, v9.9.0).
+
+- **Issue:** **Responsa wildcard grammatical-expansion recall bypasses the explosion guard and can build oversized Tantivy OR clauses**
+- **File:** `genizah_core.py`
+- **Status:** ❌ Open
+- **Notes:** Review of the 2026-03-25 wildcard fixes found that `build_tantivy_query()` and `_execute_line_break_search()` now expand each suffix/prefix wildcard into ~25 real grammatical forms for Tantivy recall, but `_count_expanded_terms()` / `_apply_explosion_guard()` still counts wildcard components as a single base word unless explicit grammatical prefix/suffix modifiers are set. Wildcard-heavy queries can therefore slip past the 500-term guard and generate much larger Tantivy queries than the system estimates, risking slower searches or query-parser failures.
+
+### Responsa pattern wildcards still have imperfect Tantivy recall in line-break/position searches
+
+- **From:** `1. Outstanding Bugs / P2 - Medium`
+- **Verdict:** fixed. Star words are now retrieved with regex_query patterns built by star_pattern (responsa_match.py:1323; '.*' between runs, wider than the check by design) with the star_route forward/reversed/scan lookup, and a pattern too large is split or REFUSED rather than silently cut (star_queries :1376-1407). _execute_line_break_search compiles via compile_responsa_line_groups and uses compiled.retrieval(...) (search_engine.py:3470-3510). Added in d4bd357d (2026-10-22, Phase 3, v9.9.0).
+- **Confirmed:** re-read at ca809c56: star words are retrieved with star_queries (regex_query, `.*` between runs; too-large patterns split or refused), and the line-break path compiles through the same compiler and calls compiled.retrieval (shared/search_engine.py:3516); d4bd357d, v9.9.0.
+
+- **Issue:** **Responsa pattern wildcards still have imperfect Tantivy recall in line-break/position searches**
+- **File:** `genizah_core.py`
+- **Status:** ❌ Open
+- **Notes:** Follow-up review on 2026-03-25 confirmed the line-break path now reuses expanded terms for non-wildcards and fixes suffix wildcard recall, but pattern wildcards (`*a*b*`) still cannot be meaningfully prefiltered from Tantivy using the current stem-based strategy. This matches the normal Responsa limitation: regex is correct, but candidate recall may still miss some pattern-only hits before post-filtering.
+
+### `test_browse_core_timeout_returns_504` fails when `test_search_api_v2.py` runs first
+
+- **From:** `1. Outstanding Bugs / P3 - Low Priority`
+- **Verdict:** fixed. Commit d5132deb (2026-10-22) made the fixtures use monkeypatch (tests/test_search_api_v2.py:205 monkeypatch.setattr(state, 'searcher', fake)), one undo stack, so the stub no longer outlives the file. Ran the row's reproduce command this session: 131 passed, 6 skipped, exit 0.
+- **Confirmed:** re-ran the row's own reproduction at ca809c56: `pytest tests/test_search_api_v2.py tests/test_browse_api.py::test_browse_core_timeout_returns_504` -> 131 passed, 6 skipped; the fixtures use monkeypatch since d5132deb (2026-10-22).
+
+- **Issue:** **`test_browse_core_timeout_returns_504` fails when `test_search_api_v2.py` runs first**
+- **File:** `tests/test_search_api_v2.py`, `tests/test_browse_api.py`
+- **Status:** ❌ Open (found 2026-10-05)
+- **Notes:** Gets 200 instead of 504. Passes alone and after every other API test file; fails the same way on master-main `1d952620` without the channel change (PR #380). Some state `test_search_api_v2.py` leaves behind (likely a browse timeout or service stub) outlives it. Reproduce: `pytest tests/test_search_api_v2.py "tests/test_browse_api.py::test_browse_core_timeout_returns_504"`.
+
+### Line-break searches highlight the wrong characters when the only match needs bracket stripping
+
+- **From:** `1. Outstanding Bugs / P3 - Low Priority`
+- **Verdict:** fixed. search_engine.py:3637 matches on match_content (brackets stripped) and 3676-3689 maps the span back with _unstripped_span (to_original) before _highlight_pair / _aggregate_row / _map_span_to_pages (3689-3702); the star crossing path does the same at 3651. Introduced by 6e853f3f (2026-10-22, 'one bracket rule' for main, line-break and My Library); tests/test_responsa_whole_words.py:100 pins the bracket-marked-where-it-stands rule.
+- **Confirmed:** re-read shared/search_engine.py::_execute_line_break_search at ca809c56: both branches pass the match through to_original, which maps a stripped span back with _unstripped_span before _aggregate_row / _highlight_pair (lines 3676-3689).
+
+- **Issue:** **Line-break searches highlight the wrong characters when the only match needs bracket stripping**
+- **File:** `shared/search_engine.py::_execute_line_break_search`
+- **Status:** ❌ Open (found 2026-10-04; narrowed 2026-10-05)
+- **Notes:** When the original text holds no match, the line-break path keeps the span from the bracket-stripped text and passes it straight to `_map_span_to_pages` and the highlight, so on a whole-manuscript or part row the highlight is shifted by the removed brackets and the snippet comes out empty (reproduced: a stripped span (0,30) gave page p2 the highlight 'עולם זחט שלום' instead of 'עולם זחט שלום טוב'). The main path, search-within over parts and Composition already map back with `_unstripped_span` (`27352174`, `d02a9db9`); this path should do the same before mapping. Original entry archived 2026-10-05.
+
+### Admin "Delete User" deletes nothing and reports success
+
+- **From:** `1. Outstanding Bugs / P3 - Low Priority`
+- **Verdict:** fixed. web/pages/admin.py:279-299 now calls client.rpc('admin_delete_user') and returns success only when response.data is True, else an error; commit 2de98bbe (2026-10-25, ancestor of HEAD), pinned by tests/test_admin_delete_user.py. The owner must still run migrations/admin_delete_user.sql on the live DB (until then the button reports an error, not a false success).
+- **Confirmed:** re-read web/pages/admin.py::delete_user at ca809c56: it calls the admin_delete_user RPC (deletes from auth.users) and reports success only when response.data is True; 2de98bbe (2026-10-25), deployed in v9.10.0; the owner confirmed migrations/admin_delete_user.sql applied in production 2026-10-25.
+
+- **Issue:** **Admin "Delete User" deletes nothing and reports success**
+- **File:** `web/pages/admin.py::delete_user`
+- **Status:** ❌ Open (2026-09-25) · 🔑 *Server check:* is there a DELETE policy on `profiles` in the live database?
+- **Notes:** It deletes the `profiles` row through the user client, but the repo SQL has no DELETE policy on `profiles` (not checked live), so the delete changes 0 rows; the function returns success without looking. Deleting the auth user needs the service role anyway (its own comment). Fix: do it server-side with the auth admin API, or remove the button; either way, check the result.
+
+### Website: rows kept by Stop or a forced stop are not saved for a reload
+
+- **From:** `1. Outstanding Bugs / P3 - Low Priority`
+- **Verdict:** fixed. The branch 'if search_state.is_cancelled or _forced_stop' now ends with persist_search_snapshot(search_state), _safe_set('search_query', ...) and save_search_run(...) before its return (search.py:5880-5892), after committing a stopped refinement step (5842-5846); added by f22dd611 (2026-10-22, PR #436).
+- **Confirmed:** re-read web/pages/search.py at ca809c56: the stopped/forced-stop branch commits a stopped refinement step (_commit_refinement_step) and then calls persist_search_snapshot, saves search_query and save_search_run before its return (about lines 5842-5891); f22dd611, PR #436 (2026-10-22).
+
+- **Issue:** **Website: rows kept by Stop or a forced stop are not saved for a reload**
+- **File:** `web/pages/search.py` (the stopped-search early return in `execute_search`)
+- **Status:** ❌ Open (2026-10-07)
+- **Notes:** After Stop, or when the web side kills a worker that did not stop at its time limit (60 s later), the page keeps the rows it had shown, marked "N+", but returns before `persist_search_snapshot`: a reload shows the previous search (or none), and a stopped refinement step can be lost. Codex review round 5 on #385 (rated P2). Fix: persist the partial snapshot on that path too.
+
+### Joins Lab search time limit on the page
+
+- **From:** `3. Untested Areas`
+- **Verdict:** fixed. Commit 10460b00 (2026-10-08) added tests/test_web_io_bound_none_findings.py::test_joins_lab_a_search_past_its_time_limit_says_so (:723) and ::test_joins_lab_an_other_side_search_past_its_time_limit_says_so (:760), which drive a real /joins-lab search through NiceGUI's user fixture with _SEARCH_TIMEOUT_SECONDS shortened; both passed when run in this session (2 passed, 30 s). Code path at joins_lab.py:3837-3853 reports 'Search timed out'.
+- **Confirmed:** re-read tests/test_web_io_bound_none_findings.py at ca809c56: test_joins_lab_a_search_past_its_time_limit_says_so (723) and the other-side variant (760) drive a Joins Lab search past _SEARCH_TIMEOUT_SECONDS; added in 10460b00 (2026-10-08). The row said no harness drove one.
+
+- **Area:** **Joins Lab search time limit on the page**
+- **Status:** ❌ Not Tested
+- **Notes:** `web/pages/joins_lab.py` (`asyncio.wait_for(run.io_bound(...))`): a search past `_SEARCH_TIMEOUT_SECONDS` now reports "Search timed out" (fixed 2026-10-07: `run.io_bound` returns None on the timeout's cancel, and that None reached `dedup_candidates`). Only the NiceGUI behaviour is tested (`tests/test_web_io_bound_none.py`); no harness drives a Joins Lab search yet.
+
+### `tests/test_browse_map_atomic_write.py` can overwrite a developer's real `browse_map.pkl`
+
+- **From:** `5. Code Quality Debt / Repo structure Round 1 findings (2026-09-18)`
+- **Verdict:** fixed. Commit 906e310b changed _fresh_engine (tests/test_browse_map_atomic_write.py:36-47) to wait on SearchEngine._browse_map_lock and redirect Config.BROWSE_MAP first, with an assert (line 36-38) that dedupe_browse_map is not yet faked; every fake dedupe is now installed AFTER _fresh_engine (lines 57-58, 141-142, 159-160) or after the redirect (201-240). Regression tests at :83 (live map untouched while another thread loads it) and :123 (the guard fires).
+- **Confirmed:** re-read tests/test_browse_map_atomic_write.py at ca809c56: _fresh_engine waits on the lock and redirects Config.BROWSE_MAP (lines 37-42) before every dedupe fake (lines 57-58, 141-142, 159-160); line 130 is the guard's own test, redirected first; added in 906e310b (2026-10-21).
+
+- **Issue:** **`tests/test_browse_map_atomic_write.py` can overwrite a developer's real `browse_map.pkl`**
+- **File:** `tests/test_browse_map_atomic_write.py` (`_fresh_engine`; the `dedupe_browse_map` patches)
+- **Status:** ❌ Open (2026-09-20; reshaped 2026-10-05)
+- **Notes:** Each test patches `dedupe_browse_map` before `_fresh_engine` waits on `SearchEngine._browse_map_lock` and redirects `Config.BROWSE_MAP`, so a background FL-ID load left by an earlier test can run the fake dedupe and `os.replace` the fixture over the real file (reproduced 10 of 10 on a stand-in map, 2026-10-05). Fix: do the lock wait and the redirect before patching, or a tmp `BROWSE_MAP` in an autouse fixture. Full text archived 2026-10-19.
+
+
+---
+
+## Tracker prose retired at the 2026-10-25 reconstruction
+
+The tracker was rebuilt into `docs/OPEN_ISSUES.md` (defects), `docs/BACKLOG.md` and `docs/ISSUE_DETAILS.md` (every open row, verbatim, under its `GS-<n>` ID). Its table rows moved there or into the section above; this is the rest of it -- the Quick Summary's count notes and each section's notes -- verbatim, under the headings it sat under.
+
+#### Quick Summary
+
+> Counts here exclude closed items (recomputed 2026-08-14 by counting rows carrying ❌/⏸/⏳); closed history lives in docs/archive/OPEN_ISSUES_ARCHIVE.md.
+> Count notes from 2026-09-25 to 2026-10-05 moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-06.
+> Count notes from 2026-10-06 to 2026-10-12 (through the v9.6.2 release) moved to `docs/archive/OPEN_ISSUES_ARCHIVE.md` ("Quick Summary count notes") on 2026-10-18.
+> 2026-10-14 (composition conditions plan): P3 +1 (the feature row for the letter's D1/D2/D3) -- 211.
+> 2026-10-14 (Codex review of that plan): P2 +1 (composition grouping keeps one page per P number) -- 212.
+> 2026-10-14 (step 1 of that plan): P2 -1 (the grouping row, fixed on feat/composition-conditions and archived) -- 211.
+> 2026-10-14 (the branch's local GUI run): P3 +1 (a GUI test that fails under a Hebrew UI, pre-existing) -- 212.
+> 2026-10-14 (Codex review of the Filter texts menu): P3 +1 (the Quoted texts dialog too wide at 300%, pre-existing) -- 213.
+> 2026-10-18 (Settings telemetry opt-in): P2 +1 -1 (found and fixed the same day, archived) -- 213.
+> 2026-10-18 (catalogue-form shelfmarks, PR #400): P3 +4 (four pre-existing shelfmark-resolver behaviours, untouched by the change) -- 217.
+> 2026-10-18 (Visual Similarity window): P2 +1 -1 (Sort/Library/Domain never applied; found and fixed the same day, archived); P3 +1 (its English domain names and first-domain-only, pre-existing) -- 218 (after #400).
+> 2026-10-18 (master-main pulled after #397-#401 merged): branch references replaced by PR numbers, no row opened or closed -- 218.
+> 2026-10-18 (library-prefix rule, `feat/shelfmark-prefix-scope`): P3 -1 (the library-prefix row, fixed, archived) +3 (three inherited resolver behaviours, pre-existing) -- 220.
+> 2026-10-18 (PR #402 Codex review): P3 +1 (T2's older keys check only the variant the index kept, pre-existing in #400) -- 221.
+> 2026-10-19 (9.7.0 release prepared): #402 merged, Hebrew approved; no row opened or closed -- 221.
+> 2026-10-19 (Visual Similarity domain names and counts): P3 row narrowed (Hebrew domain names fixed, archived; first-domain-only stays open), no row opened or closed -- 221.
+> 2026-10-19 (tracker trim): 49 rows condensed, full text archived; no row opened or closed -- 221.
+> 2026-10-19 (Joins Lab links + Compare window, `feat/joins-lab-links-compare`): P2 +2 -2 (white Browse icons in the web Compare window; its FJMS/PGP buttons stuck on the first candidate), P3 +2 -2 (card / Known Joins Browse icons replaced the Lab; desktop Compare anchor line empty) -- all found and fixed the same day, archived -- 221.
+> 2026-10-19 (render-smoke hang on failure, `claude/blissful-goldberg-mn4em0`): P3 -1 ("A render-smoke file can hang a test lane", fixed, archived) -- 220.
+> 2026-10-20 (append-preservation gate, `feat/append-preservation-gate`): P2 +1 -1 (the V4.2 release's 523 demotions, found by the gate and accepted by owner ruling the same day, archived); P3 +1 (the local artifact is V4, production V4.2) -- 221.
+> 2026-10-20 (web page context + per-visitor language, `ccr-bf48c2a5-pj4z5d`): P2 -2 (/catalog-browse first load; text in another visitor's language -- fixed, archived); P2 +2 -2 (citation chip after the default version; correction editor auto-save) and P3 +2 -2 (Joins Lab address bar; Retry export and list confirmation) found and fixed the same day, archived; puzzle auto-save and reload-loop rows narrowed -- 218.
+> 2026-10-20 (web fixes round 2, `ccr-bf48c2a5-pj4z5d`): P2 -1 (puzzle auto-save, fixed, archived); P2 +1 -1 (Save dropped a confirmed crop) and P3 +4 -4 (tab canvas carried no crop; the publish-storage test's real request; two event handlers returning a detached task) found and fixed the same day, archived; P3 +1 (two tabs on one draft: the last auto-save wins) -- 219.
+> 2026-10-20 (six quick fixes, `ccr-6beb2d2c-dg78a3`): P2 -3 (anonymous discovery author; unbounded quit wait; bare AND/OR/NOT), P3 -3 (crash log location; puzzle Delete on a failed delete; desktop Excel "N+") -- fixed, archived; P3 +2 (the quit's executor join at exit; Excel after an interrupted completion step) -- 216.
+> 2026-10-20 (reliability and latency review, `claude/reliability-latency-review`): sign-up row narrowed, stays open; P1 +1, P2 +8, P3 +9 (the review's open findings) -- 234.
+> 2026-10-21 (sign-up with email confirmation + Codex round 1, `claude/reliability-latency-review`): P2 -1 (sign-up drops the chosen username: fixed, archived); P3 +2 (desktop registration; no resend of the confirmation email); Codex's five round-1 findings were in this branch's own new code and were fixed before any merge -- 235.
+> 2026-10-21 (profiles usernames, Codex round 2, `claude/reliability-latency-review`): the P1 `profiles` row confirmed live and its fix written (⏳ until the owner runs the SQL; stays P1); P3 +1 (the lock is a Windows resolution); the desktop row rewritten -- 236.
+> 2026-10-21 (API Exact, `claude/reliability-latency-review`): P2 -1 (API / MCP / Joins Lab Exact not whole-word: switched by owner decision, archived) -- 235.
+> 2026-10-21 (Codex round 4, information only): P3 +1 (Exact misses a phrase with 4+ stray tokens between its words; pre-existing) -- 236.
+> 2026-10-21 (profiles usernames live): P1 -1 (fixed live by the owner, archived), P3 +1 (its residuals: anonymous reads of unneeded columns, the Google-name decision) -- 236.
+> 2026-10-21 (live checks Q13 / discovery_responses): P2 +1 (web discovery replies fail: the table does not exist live); the anonymous-author row: nothing exposed today -- 237.
+> 2026-10-21 (Codex review on #423): P3 +1 (case-variant usernames from simultaneous sign-ups; needs a database index) -- 238.
+> 2026-10-21 (desktop accounts without a username, PR #424): P3 -1 (desktop registration and own corrections by username: fixed, archived) -- 237.
+> 2026-10-21 (desktop vs website `*כהנים *גדולים` comparison): P2 +3 (desktop Excel Full Text and glued lines; hidden Source column; Responsa `*word` recall and speed) -- 240.
+> 2026-10-21 (Responsa wildcard shapes): P2 +1 (`#word#` loses its suffixes to the 500-term guard; a star inside a word returns nothing) -- 241.
+> 2026-10-21 (Responsa outer edges): P2 +1 (the first and last words of a Responsa query have no word boundary) -- 242.
+> 2026-10-21 (desktop Excel page text + Source column, PR #426): P2 -2 (desktop Excel Full Text and glued lines; hidden Source column: fixed, archived) -- 240.
+> 2026-10-21 (NLI thumbnails on disk, PR #427): P2 +1 (grid thumbnails of unopened manuscripts, partly fixed, stays open) +1 -1 (the "30-day" FL-id cache held 5 minutes: found and fixed the same day, archived); P3 +1 (desktop image-cache key collision) -- 242.
+> 2026-10-21 (web event-loop reliability, PR #430): P2 -2 (GC freeze; Supabase writes on the loop: fixed, archived) +1 (a correction draft follows the reader to the next page, pre-existing); P3 +1 (Supabase calls still on the loop); the /browse rebuild and restart reload-loop rows narrowed, stay open -- 242.
+> 2026-10-22 (folded from `docs/open_issues.d/`: 2026-10-21-web-highlight-after-escaping.md): P3 +1 -- 243.
+> 2026-10-22 (9.8.2 release, both: PRs #426-#430): branch references replaced by PR numbers, no row opened or closed -- 243.
+> 2026-10-22 (folded from `docs/open_issues.d/`: 2026-10-22-web-phone-viewer-touch.md): P3 +1 -- 244.
+> 2026-10-23 (folded from `docs/open_issues.d/`: 2026-10-23-responsa-star-word-hebrew-punctuation.md, 2026-10-23-responsa-gate-mutations-undetectable-on-real-data.md, 2026-10-23-responsa-bracketed-quote-between-words.md, 2026-10-22-windows-ci-tantivy-commit-flake.md, 2026-10-22-scoped-search-address-unscoped-fallback.md, 2026-10-22-responsa-local-downgrade-options.md, 2026-10-22-regex-mode-star-words-zero-rows.md, 2026-10-22-preparing-run-evicted.md, 2026-10-22-multi-catalogued-page-attribution.md, 2026-10-22-joins-lab-refusal-test-timing.md, 2026-10-22-exact-whole-manuscript-crossing-shadow.md, 2026-10-22-back-loses-filter-results-panel.md): P3 +12 -- 252.
+> 2026-10-25 (folded from `docs/open_issues.d/`: 2026-10-25-search-cutoff-leaks-between-tests.md): P3 +1 -- 253.
+> **Checks the cloud cannot run** (marked 2026-10-05, 28 entries; the 17 `🖥️ Local check` ones were run on 2026-10-06 and replaced by their results, so 11 remain): `🖥️ Local check:` needs the owner's machine (the real index, sidecars, discovery artifacts, `_tmp/`, Windows); `🔑 Server check:` needs the production server or Supabase (SSH, service key, dashboard); `✋ By hand:` needs a person at a screen or device. Find them with `Select-String -Path docs/OPEN_ISSUES.md -Pattern 'Local check:|Server check:|By hand:'`. Checks that need only the public site (response headers, API timings) can run from a cloud session.
+
+> **Open (2026-07-28) — DEFERRED follow-up: password-reset SSR hardening via Supabase `token_hash`/`verify_otp` (Path B, not implemented).** Path A fixed the dead-end link (P1 table above). Path B is more robust: the Supabase "Reset Password" template links to `/auth/confirm?token_hash=...` and a server route calls `verify_otp`, so no client-side JS step and no session-replay window. It needs a production dashboard edit the owner deferred; revisit if Path A shows issues. Full text archived 2026-10-19. ❌ Open (deferred).
+
+> **Open (2026-07-28) — no app-side rate limit or CAPTCHA on the anonymous password-reset request (Codex review MEDIUM-3).** 🔑 *Server check:* is CAPTCHA on in the Supabase Auth settings? The code sends no token, so resets would then be refused. `web/auth_state.py::create_forgot_password_dialog` → `web/supabase_client.py::request_password_reset` has no app-side abuse control, only Supabase's own throttle, so the risk is email nuisance and quota, not account compromise (the success text does not enumerate accounts; timing is unverified). `web/api_hardening.py`'s limiter covers `/api/*` only. Fix: CAPTCHA/Turnstile on the auth endpoints with the token passed on the request, plus a modest per-IP limiter. Full text archived 2026-10-06. ❌ Open (deferred).
+>
+> **Open (2026-06-24) — FGP credit bilingual follow-up polish (deferred; core shipped in v8.2.2, PR #309).** Core credits shipped in v8.2.2. Three optional follow-ups: (a) double-part team rows show both the team head and the transcriber in Hebrew (approved as-is); (b) teams 104/110/134 fall back to raw DataSource until FJMS supplies their heads (`TEAM_CREDITS`); (c) about 1,460 rows have no derivable credit. Full text archived 2026-10-19. ❌ Open (deferred polish).
+
+---
+
+#### v9.0.0 Discovery Milestone — open items (milestone CLOSED 2026-09-10)
+
+> The authority on v9.0.0 is `.planning/milestones/v9.0.0-MILESTONE-AUDIT.md`; `.planning/STATE.md` froze 2026-08-21. Recorded findings: `docs/archive/OPEN_ISSUES_V9_DISCOVERY_RECORDED.md`; the old coordination narrative and closed items: the archive's "Moved from the tracker 2026-09-25 (size split)" block.
+
+> **Moved 2026-10-23 (size split, the tracker over its 180,000-byte ceiling):** this section's 18 open items are in [`docs/archive/OPEN_ISSUES_V9_DISCOVERY_OPEN_ITEMS.md`](OPEN_ISSUES_V9_DISCOVERY_OPEN_ITEMS.md), verbatim and still open; close or re-home them there.
+
+> C3/H12 (audit) — the append-diff gate exists since 2026-10-20 (`scripts/verify_append_preservation.py`, step three of `docs/specs/discovery-deploy.md` §2.1 and §2.4): a live main-pool identification that a candidate deletes or demotes blocks the deploy unless the owner rules on that exact delta. The matcher itself is unchanged (`REF_DF_CAP`), so a REF7+ append will still lose identifications; the gate makes that loss visible and owner-ruled, not silent. Its first run found 523 V4.2 demotions that the August review had not counted; the owner accepted them on 2026-10-20 ("accept, nothing more"; archived).
+#### 2026-05-29 Audit Follow-up (fan-out codebase audit + Codex review)
+
+> 2026-05-29 audit (35 findings) fixed via commit 3c6c62d3, regression tests in tests/test_audit_followup_2026_05_29.py; pre-2026-05-29 header log archived at docs/archive/OPEN_ISSUES_HEADER_LOG_pre-2026-05-29.md.
+
+#### Open (logged 2026-05-29, deferred)
+
+---
+
+#### 1. Outstanding Bugs
+
+#### P1 - Critical
+
+#### P2 - Medium
+
+#### P3 - Low Priority
+
+---
+
+#### 2. Documentation Issues
+
+#### Stale/Outdated Content
+
+#### Version Number Mismatches
+
+---
+
+#### 3. Untested Areas
+
+These items from `PRE_LAUNCH_CHECKLIST.md` need verification:
+
+---
+
+#### 4. Pending Plans (Implemented)
+
+#### 4.5 FGP Transcriptions — data ready, integration pending (2026-06-18)
+
+**Plan:** `docs/plans/FGP_TRANSCRIPTIONS_INTEGRATION_PLAN.md` + `docs/plans/FGP_CHOOSER_MILESTONE.md`.
+Data-store reference: `fgp_data/README.md`. Deploy note: the DB is gitignored, so it must be
+scp'd to the web server (and packaged/downloaded for desktop) — `deploy.sh` does not move
+sidecars. The chooser feature degrades to a no-op until the DB is present AND the flag is on.
+
+---
+
+#### 5. Code Quality Debt
+
+#### Duplication to Address
+
+#### Hardcoded Values
+
+#### Input Sanitization
+
+#### v7.8 Code Review Findings (Phase 65)
+
+#### Repo structure Round 1 findings (2026-09-18)
+
+Surfaced while writing `docs/architecture/DATA_LIFECYCLE.md` (every row verified against the code; the page's "What this table found" list is the source). Stage 1 changed docs, gates and archive paths only; these are the code/data facts it left for a decision.
+
+#### 2026-09-25 sweep: hygiene and tooling (logged 2026-10-06)
+
+#### 6. Documentation Gaps
+
+#### 7.5 SEO Follow-up (post-7.7.1 deploy)
+
+- **SEO follow-up needed (post-7.7.1 deploy)**: Run real Search Console URL Inspection + PSI on production homepage and `/browse?sys_id=X` to get actual Core Web Vitals + crawlability data. Defer per-language URL architecture (`/he/` vs `/en/` + hreflang) and server-side rendered browse body content to future phases -- both are higher-impact than the title-language debate but require larger refactors.
+
+---
+
+#### Deferred to v7.15+ (Phase 95 follow-up backlog)
+
+These items were raised during Phase 95 (My Library) user testing but explicitly
+deferred to a future phase. Promote via `/gsd-add-phase` or `/gsd-plant-seed`.
+
+#### Related Documents
+
+- `docs/archive/PRE_LAUNCH_CHECKLIST.md` - Detailed test checklist
+- `docs/archive/plans/FIX_PLAN.md` - Bug fix tracking (historical; this tracker replaced it)
+- `CODE_QUALITY_AUDIT_2026-01-30.md` - Full code audit
+- `PLANS_INDEX.md` - Implementation plans overview

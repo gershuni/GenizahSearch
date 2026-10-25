@@ -142,7 +142,9 @@ LAST_UPDATED_LABEL_RE = re.compile(r'Last[ \t]+updated', re.IGNORECASE)
 # (append-only; the older split_open_issues.ps1 rebuilds the archive and must not be re-run).
 CONTEXT_BUDGET = [
     ('CLAUDE.md', 40_000),
-    ('docs/OPEN_ISSUES.md', 180_000),
+    # 179 KB before the 2026-10-25 reconstruction, 39 KB after it (one line per defect; the
+    # text lives in docs/ISSUE_DETAILS.md). Lowered so the regrowth is caught early.
+    ('docs/OPEN_ISSUES.md', 80_000),
 ]
 
 
@@ -479,7 +481,10 @@ def check_context_budget() -> list:
 # CommonMark: a fence closes only on the SAME character, at least as long as the opener. A
 # four-backtick fence quoting a transcript that itself contains ``` must not close early.
 FENCE_RE = re.compile(r'^\s*(`{3,}|~{3,})')
-LINE_CITATION_FILES = ('OPEN_ISSUES.md', 'CHANGELOG.md', 'CLAUDE.md')
+# BACKLOG.md and ISSUE_DETAILS.md (2026-10-25) are regenerated in ID order and move as much.
+# Cite an issue by its ID (GS-12) instead.
+LINE_CITATION_FILES = ('OPEN_ISSUES.md', 'BACKLOG.md', 'ISSUE_DETAILS.md', 'CHANGELOG.md',
+                       'CLAUDE.md')
 # Both spellings a reader can click: ``file.md:161`` (editor/grep form) and ``file.md#L161``
 # (GitHub's anchor form, with or without a ``-L170`` range end).
 LINE_CITATION_RE = re.compile(
@@ -694,7 +699,7 @@ def main():
             print_status(False, c)
         total_issues += len(line_cites)
     else:
-        print_status(True, "No line-numbered citations of OPEN_ISSUES.md / CHANGELOG.md / CLAUDE.md")
+        print_status(True, "No line-numbered citations of %s" % " / ".join(LINE_CITATION_FILES))
 
     # 6. Check for broken links
     print("\n🔗 Internal Links")
