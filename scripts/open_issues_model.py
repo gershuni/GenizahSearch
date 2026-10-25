@@ -20,15 +20,17 @@ details (scripts/archive_closed_issues.py); their IDs are never reused.
 """
 from __future__ import annotations
 
+import os
 import re
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:      # run as a script, only scripts/ is on the path
     sys.path.append(str(REPO_ROOT))
-from shared.atomic_io import write_bytes_atomic  # noqa: E402 -- stdlib-only leaf module
+from shared.atomic_io import discard, replace_file  # noqa: E402 -- stdlib-only leaf module
 TRACKER = REPO_ROOT / "docs" / "OPEN_ISSUES.md"
 BACKLOG = REPO_ROOT / "docs" / "BACKLOG.md"
 DETAILS = REPO_ROOT / "docs" / "ISSUE_DETAILS.md"
@@ -269,10 +271,26 @@ def details_section(issue: Issue, place: str, body: str) -> str:
 
 def write_text(path, text: str) -> None:
     """Replace *path* with *text* ("\\n" endings; git's autocrlf restores the checkout's),
-    all or nothing: a temporary file renamed over the target (shared/atomic_io.py). A run
+    all or nothing: a temporary file, flushed to disk, renamed over the target. A run
     stopped mid-write can no longer leave a truncated tracker, backlog or details file --
-    the class of state Codex rounds 4, 6 and 7 on PR #449 each found another way into."""
-    write_bytes_atomic(str(path), text.encode("utf-8"))
+    the class of state Codex rounds 4, 6 and 7 on PR #449 each found another way into.
+
+    Strict, unlike shared.atomic_io.write_bytes_atomic: when Windows keeps the target
+    locked past the busy-file retries, that helper writes in place (a desktop setting
+    must land); here the error is raised and the target left whole -- run the command
+    again (Codex review of PR #449, round 8)."""
+    path = str(path)
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", suffix=".tmp",
+                               dir=os.path.dirname(os.path.abspath(path)))
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(text.encode("utf-8"))
+            fh.flush()
+            os.fsync(fh.fileno())
+        replace_file(tmp, path)          # retried while Windows reports a file busy
+    except BaseException:
+        discard(tmp)
+        raise
 
 
 def used_ids(*texts: str) -> set:

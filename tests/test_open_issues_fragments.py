@@ -375,6 +375,23 @@ def test_a_details_write_that_fails_midway_leaves_the_old_file_whole(tmp_path, m
         "What happens, and where.")
 
 
+def test_a_target_locked_past_the_retries_is_never_written_in_place(tmp_path, monkeypatch):
+    """Windows holding the file: the write raises and the file stays whole -- no in-place
+    fallback that a second failure could tear (Codex review of PR #449, round 8)."""
+    import os
+    target = tmp_path / "OPEN_ISSUES.md"
+    target.write_text(TRACKER, encoding="utf-8")
+
+    def locked(src, dst, *a, **k):
+        raise PermissionError(13, "The process cannot access the file")
+
+    monkeypatch.setattr(os, "replace", locked)
+    with pytest.raises(PermissionError):
+        model.write_text(target, "something else\n")
+    assert target.read_text(encoding="utf-8") == TRACKER
+    assert [p.name for p in tmp_path.iterdir()] == ["OPEN_ISSUES.md"]   # no temp left
+
+
 def test_the_same_issue_in_two_fragments_is_folded_once(tmp_path):
     d, f = _tree(tmp_path, {"2026-10-21-a.md": FRAG_P2, "2026-10-20-b.md": FRAG_P2})
     assert _run(d, f, "--apply") == 0
