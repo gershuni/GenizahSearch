@@ -64,9 +64,17 @@ def _english():
         yield
 
 
-def test_the_emails_come_by_account_id():
-    client = _AdminClient([{'id': 'a', 'email': 'a@x.org'}, {'id': 'b', 'email': None}])
-    assert admin.get_user_emails(client) == ({'a': 'a@x.org'}, None)
+def test_the_accounts_come_by_id():
+    client = _AdminClient([
+        {'id': 'a', 'email': 'a@x.org', 'sign_in_name': 'Ada Lovelace', 'provider': 'google'},
+        {'id': 'b', 'email': None, 'sign_in_name': None, 'provider': 'email'},
+        {'id': 'c', 'email': 'c@x.org'},  # the function as first deployed: (id, email)
+    ])
+    assert admin.get_user_accounts(client) == ({
+        'a': {'email': 'a@x.org', 'sign_in_name': 'Ada Lovelace', 'provider': 'google'},
+        'b': {'provider': 'email'},
+        'c': {'email': 'c@x.org'},
+    }, None)
     assert client.calls == [('admin_list_user_emails', {})]
 
 
@@ -81,12 +89,12 @@ def test_the_emails_come_by_account_id():
     (_AdminClient(error=RuntimeError('connection reset')), 'error'),
 ])
 def test_a_failed_lookup_says_why(client, problem):
-    assert admin.get_user_emails(client) == ({}, problem)
+    assert admin.get_user_accounts(client) == ({}, problem)
     assert problem in admin.EMAILS_PROBLEMS
 
 
 def test_the_failure_log_names_the_cause_and_no_address(caplog):
-    admin.get_user_emails(_AdminClient(error=_APIError('42501', 'admin role required')))
+    admin.get_user_accounts(_AdminClient(error=_APIError('42501', 'admin role required')))
     assert '42501' in caplog.text and 'admin role required' in caplog.text
 
 
@@ -105,6 +113,10 @@ def test_the_rpc_is_admin_only_and_closed_to_anon():
     assert gate < body.index('raise exception') < body.index('return query'), \
         'the admin check must come before the emails are returned'
     assert 'security definer' in sql and "set search_path = ''" in sql
+    # 2026-10-25 widened the return type, which CREATE OR REPLACE cannot do.
+    assert sql.index('drop function if exists public.admin_list_user_emails();') \
+        < sql.index('create function public.admin_list_user_emails()')
+    assert 'returns table (id uuid, email text, sign_in_name text, provider text)' in sql
     assert 'revoke all on function public.admin_list_user_emails() from public, anon;' in sql
     assert 'grant execute on function public.admin_list_user_emails() to authenticated;' in sql
 
@@ -123,16 +135,20 @@ def _texts_of(users, problem=None, monkeypatch=None):
     return asyncio.run(render())
 
 
-def test_each_row_shows_the_name_then_the_email(monkeypatch):
+def test_each_row_shows_the_name_the_sign_in_name_and_the_email(monkeypatch):
     texts = _texts_of([
-        {'id': '1', 'full_name': 'John Locke', 'username': 'johnlockejrr', 'email': 'jl@x.org'},
-        {'id': '2', 'username': 'Discerning Seeker', 'email': 'ds@x.org'},
+        {'id': '1', 'full_name': 'John Locke', 'username': 'johnlockejrr', 'email': 'jl@x.org',
+         'sign_in_name': 'John Locke'},
+        {'id': '2', 'username': 'Discerning Seeker', 'email': 'ds@x.org', 'sign_in_name': 'Dana Seeker'},
         {'id': '3', 'full_name': 'יעקב חלבי', 'username': 'Eager Bookseller'},
         {'id': '4', 'username': 'Nimble Bookbinder'},
     ], monkeypatch=monkeypatch)
 
-    assert 'jl@x.org' in texts and '@johnlockejrr' not in texts, 'with an email, the email is the second line'
-    assert 'ds@x.org' in texts and '@Discerning Seeker' not in texts
+    assert 'jl@x.org' in texts and '@johnlockejrr' not in texts, 'with an email, the email is under the name'
+    assert texts.count('John Locke') == 1, 'a sign-in name that is the public name is not repeated'
+    assert texts.index('Discerning Seeker') < texts.index('Dana Seeker') < texts.index('ds@x.org'), \
+        'the public name, then the name the account signed in with, then the email'
+    assert '@Discerning Seeker' not in texts
     assert '@Eager Bookseller' in texts, 'without an email, the username, when it is not the name'
     assert texts.count('Nimble Bookbinder') == 1 and '@Nimble Bookbinder' not in texts, \
         'an alias that is the name is not repeated under it'

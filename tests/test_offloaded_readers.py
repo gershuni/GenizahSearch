@@ -673,7 +673,7 @@ def test_short_circuited_403_is_still_timed():
 ADMIN_BLOCKING_CALLS = [
     'get_pending_corrections',
     'get_all_users',
-    'get_user_emails',
+    'get_user_accounts',
     'get_all_corrections_count',
     'get_pending_identification_reviews',
     'update_correction_status',
@@ -756,13 +756,13 @@ def test_admin_payload_fetches_each_source_once_and_threads_the_client(monkeypat
     def _emails(client):
         calls.append('emails')
         seen['emails_client'] = client
-        return {'u1': 'a@x.org'}, None
+        return {'u1': {'email': 'a@x.org', 'sign_in_name': 'Ada'}}, None
 
     monkeypatch.setattr(admin, 'get_pending_corrections',
                         lambda: calls.append('pending') or ['correction'])
     monkeypatch.setattr(admin, 'get_all_users',
                         lambda: calls.append('users') or [{'id': 'u1'}, {'id': 'u2'}])
-    monkeypatch.setattr(admin, 'get_user_emails', _emails)
+    monkeypatch.setattr(admin, 'get_user_accounts', _emails)
     monkeypatch.setattr(admin, 'get_all_corrections_count',
                         lambda: calls.append('count') or 7)
     monkeypatch.setattr(admin, 'get_pending_identification_reviews', _reviews)
@@ -782,7 +782,7 @@ def test_admin_payload_fetches_each_source_once_and_threads_the_client(monkeypat
     assert data == {
         'pending_corrections': ['correction'],
         'identification_reviews': ('review',),
-        'users': [{'id': 'u1', 'email': 'a@x.org'}, {'id': 'u2'}],
+        'users': [{'id': 'u1', 'email': 'a@x.org', 'sign_in_name': 'Ada'}, {'id': 'u2'}],
         'emails_problem': None,
         'total_corrections': 7,
     }

@@ -203,7 +203,7 @@ def test_keep_confirms_the_alias_and_writes_no_name(dialog):
 
 @pytest.mark.parametrize('typed, message', [
     ('ada@example.org', 'A public name cannot contain @.'),
-    ('   ', 'Please enter a name, or keep the one you have.'),
+    ('   ', 'Please enter your name, or use the alias.'),
 ])
 def test_a_name_that_cannot_be_one_is_refused_in_place(dialog, typed, message):
     dialog['run']('save', typed=typed)

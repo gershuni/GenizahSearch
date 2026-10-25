@@ -109,14 +109,16 @@ def show_public_name_dialog(user: Dict, profile: Dict, name_button=None):
     with ui.dialog().props('persistent') as dialog, \
             ui.card().classes('p-6 gap-3').style('max-width: 32rem;'):
         ui.label(tr('How should your name appear?')).classes('text-lg font-bold')
-        ui.label(tr('Your corrections, comments and joins are credited to this name. '
-                    'Until you choose one, they appear under the name the site gave you:')
+        ui.label(tr('Your corrections, comments and joins are credited to the name you choose: '
+                    'your own name, or an alias the site gave you.')
                  ).classes('text-sm').style('color: var(--text-secondary);')
-        ui.label(current).classes('font-medium')
-        name_input = ui.input(label=tr('Public name'), value=suggested_public_name(user)) \
+        name_input = ui.input(label=tr('Your name'), value=suggested_public_name(user)) \
             .props('outlined').classes('w-full')
         error_label = ui.label('').classes('text-sm text-red-500')
         error_label.set_visibility(False)
+        with ui.row().classes('items-baseline gap-2'):
+            ui.label(tr('Your alias:')).classes('text-sm').style('color: var(--text-secondary);')
+            ui.label(current).classes('font-medium')
         ui.label(tr('You can change it later in My Profile.')).classes('text-xs') \
             .style('color: var(--text-muted);')
 
@@ -160,7 +162,7 @@ def show_public_name_dialog(user: Dict, profile: Dict, name_button=None):
             name = clean_public_name(name_input.value)
             if name is None:
                 error_label.text = (tr('A public name cannot contain @.') if '@' in (name_input.value or '')
-                                    else tr('Please enter a name, or keep the one you have.'))
+                                    else tr('Please enter your name, or use the alias.'))
                 error_label.set_visibility(True)
                 return
             await answer(name)
@@ -170,8 +172,8 @@ def show_public_name_dialog(user: Dict, profile: Dict, name_button=None):
 
         with ui.row().classes('w-full justify-end gap-2 mt-2'):
             buttons = [
-                ui.button(tr('Keep this name'), on_click=keep).props('flat'),
-                ui.button(tr('Save'), on_click=save).props('color=primary'),
+                ui.button(tr('Use the alias'), on_click=keep).props('flat'),
+                ui.button(tr('Use my name'), on_click=save).props('color=primary'),
             ]
 
     dialog.open()

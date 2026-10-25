@@ -495,9 +495,12 @@ page that credits a contribution showed them as "Unknown". From
   English, stored once, and shown as they are on the Hebrew site too.
 - **`profiles.public_name_confirmed`** (boolean, default false): true once the person chose how
   their name appears -- a username or full name typed at sign-up, or an answer to the website's
-  question. `web/public_name.py` asks once (persistent dialog, prefilled with the Google name)
-  while it is false and the full name is empty; Save writes `full_name`, Keep leaves the alias;
-  both set the flag. A profile without the column is never asked.
+  question. `web/public_name.py` asks once while it is false and the full name is empty: a
+  persistent dialog offering their own name (prefilled with the name in their sign-in data --
+  Google's, or the one typed at an email sign-up) or the alias. "Use my name" writes
+  `full_name`, "Use the alias" leaves it; both set the flag. A profile without the column is
+  never asked. Sign-in names are never copied into `profiles` unasked (owner, 2026-10-25: offer,
+  don't publish; 113 Google and 56 email accounts had one and no public name).
 - Every surface that names a contributor falls back from the full name to the username, so the
   alias reaches installed desktop versions with no code change.
 - **Run:** a dry run as written (ends in a `DRY RUN` error with a sample of aliases); switch
@@ -506,19 +509,22 @@ page that credits a contribution showed them as "Unknown". From
   every check PASS. It supersedes `scripts/verify_profiles_no_email_username.sql`, whose
   empty-username sign-ups now FAIL by design.
 
-### Account emails for admins (2026-10-24)
+### Account emails and sign-in names for admins (2026-10-24, 2026-10-25)
 
-After the migration above most profiles have no username and no full name, so the admin Users tab
-reads the email instead, from `public.admin_list_user_emails()` (`migrations/admin_list_user_emails.sql`):
-SECURITY DEFINER, returns `(id, email)` from `auth.users` only when the caller's own profile has
-role `admin` (else SQLSTATE `42501`); executable by `authenticated`, revoked from `anon` and
-`PUBLIC`. `web/pages/admin.py::get_all_users` calls it with the admin's client and merges by id;
-if it is missing, the tab still loads and shows "No name set".
+The admin Users tab shows, under each public name, the name the account signed in with and its
+email, from `public.admin_list_user_emails()` (`migrations/admin_list_user_emails.sql`): SECURITY
+DEFINER, returns `(id, email, sign_in_name, provider)` from `auth.users` (the sign-in name is
+`raw_user_meta_data` `full_name`, else `name`) only when the caller's own profile has role
+`admin` (else SQLSTATE `42501`); executable by `authenticated`, revoked from `anon` and `PUBLIC`.
+`web/pages/admin.py::get_user_accounts` calls it with the admin's client; `_load_admin_data`
+merges by id. A failed lookup is said above the list (`EMAILS_PROBLEMS`): on 2026-10-25 an admin
+page whose server session had no tokens called it as anon, and signing in again cured it.
 
-- **Run:** the whole file in the SQL editor (idempotent).
+- **Run:** the whole file in the SQL editor (idempotent; it drops and re-creates the function,
+  since the 2026-10-25 columns change its return type).
 - **Verify:** `select * from public.admin_list_user_emails();` in the SQL editor must fail with
   "admin role required" (no signed-in user there); /admin -> Users, signed in as an admin, shows
-  emails.
+  sign-in names and emails.
 - **Roll back:** `drop function if exists public.admin_list_user_emails();`
 
 ### Detailed Policy SQL Examples

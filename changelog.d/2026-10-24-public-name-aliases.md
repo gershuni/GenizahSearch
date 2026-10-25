@@ -9,8 +9,9 @@
   installed desktop versions included, already falls back to the username, so all of them show
   it. Undo statement at the end of the file; dry run as written.
 - The website asks each person with an alias once, on any page after sign-in: "How should your
-  name appear?", prefilled with the name their Google sign-in carries (never published unless
-  they save it). Save sets the full name; "Keep this name" keeps the alias. Both are remembered
+  name appear?" -- their own name (prefilled with the name in their sign-in data: Google's, or
+  the one typed at an email sign-up; never published unless they choose it) or the alias.
+  "Use my name" sets the full name; "Use the alias" keeps the alias. Both are remembered
   in the new `profiles.public_name_confirmed`, so the question is asked once per account, on
   any device (`web/public_name.py`). Nothing is asked before the migration runs.
 - Author lookups that ignored the username now use it: published joins on browse

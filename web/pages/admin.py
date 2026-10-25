@@ -163,18 +163,25 @@ EMAILS_PROBLEMS = {
 }
 
 
-def get_user_emails(client):
-    """Account emails by user id, and why there are none if the lookup failed.
+#: What admin_list_user_emails tells about each account, beyond its profile.
+ACCOUNT_FIELDS = ('email', 'sign_in_name', 'provider')
+
+
+def get_user_accounts(client):
+    """Each account's email and sign-in name by user id, and why there are none if the lookup failed.
 
     profiles has carried no address since 2026-10-21 (the username was the
-    email), so the email comes from auth.users through the admin-only
-    `admin_list_user_emails` RPC (migrations/admin_list_user_emails.sql).
-    `client` is the authenticated admin client, resolved by the caller on the
-    event loop -- see get_pending_identification_reviews. Returns
-    ``(emails, problem)``: ``problem`` is None, or a key of EMAILS_PROBLEMS.
-    The function refuses anyone but an admin: an anonymous client (no
-    session on the server) is refused by the grant, a signed-in non-admin by
-    the function itself.
+    email), and the name an account signed in with is published only if the
+    person chooses it (web/public_name.py), so both come from auth.users
+    through the admin-only `admin_list_user_emails` RPC
+    (migrations/admin_list_user_emails.sql). `client` is the authenticated
+    admin client, resolved by the caller on the event loop -- see
+    get_pending_identification_reviews. Returns ``(accounts, problem)``:
+    ``accounts`` maps id -> the ACCOUNT_FIELDS that have a value; ``problem``
+    is None, or a key of EMAILS_PROBLEMS. The function refuses anyone but an
+    admin: an anonymous client (no session on the server -- seen 2026-10-25,
+    cured by signing in again) is refused by the grant, a signed-in non-admin
+    by the function itself.
     """
     if client is None:
         return {}, 'no_session'
@@ -190,7 +197,8 @@ def get_user_emails(client):
         if code in ('PGRST202', '42883'):
             return {}, 'missing'
         return {}, 'error'
-    return {row['id']: row['email'] for row in rows if row.get('id') and row.get('email')}, None
+    return {row['id']: {key: row[key] for key in ACCOUNT_FIELDS if row.get(key)}
+            for row in rows if row.get('id')}, None
 
 
 def user_display_name(user) -> str:
@@ -327,10 +335,9 @@ def _load_admin_data(user_client):
     the-loop already removes the defect that mattered.
     """
     users = get_all_users()
-    emails, emails_problem = get_user_emails(user_client) if users else ({}, None)
+    accounts, emails_problem = get_user_accounts(user_client) if users else ({}, None)
     for user in users:
-        if emails.get(user.get('id')):
-            user['email'] = emails[user['id']]
+        user.update(accounts.get(user.get('id')) or {})
     return {
         'pending_corrections': get_pending_corrections(),
         'identification_reviews': get_pending_identification_reviews(user_client),
@@ -849,7 +856,7 @@ async def create_users_list_view(users=None, emails_problem=None):
         role = role_filter.value
         for card, user in rows:
             text = ' '.join(str(user.get(key) or '') for key in
-                            ('full_name', 'username', 'email', 'affiliation')).lower()
+                            ('full_name', 'username', 'sign_in_name', 'email', 'affiliation')).lower()
             card.set_visibility((not query or query in text)
                                 and (role == 'all' or user.get('role', 'user') == role))
 
@@ -875,9 +882,16 @@ def create_user_row(user):
                 ui.icon('account_circle').classes('text-2xl').style('color: var(--primary-600);')
                 with ui.column().classes('gap-0'):
                     ui.label(display_name).classes('font-medium')
-                    # Under the name: the email (from auth.users, see get_user_emails);
-                    # without one, the username -- unless either is the name itself.
+                    # Under the public name: the name the account signed in with
+                    # (the admin's eyes only), then the email -- both from auth.users,
+                    # see get_user_accounts; without an email, the username. Never a
+                    # line that repeats the name above it.
                     email, username = user.get('email'), user.get('username')
+                    sign_in_name = user.get('sign_in_name')
+                    if sign_in_name and sign_in_name != display_name:
+                        ui.label(sign_in_name).classes('text-sm') \
+                            .style('color: var(--text-secondary);') \
+                            .tooltip(tr('The name this account signed in with. Not public unless they choose it.'))
                     if email and email != display_name:
                         ui.label(email).classes('text-xs').style('color: var(--text-muted);')
                     elif not email and username and username != display_name:

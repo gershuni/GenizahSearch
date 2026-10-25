@@ -1945,7 +1945,7 @@ Variant and Lab preferences of one website visitor, kept in that visitor's stora
 - **Function** `suggested_public_name` (Line 51) — the name the person's own sign-in carries (Google's), to prefill.
 - **Function** `needs_public_name` (Line 61) — True while `public_name_confirmed` is false and the full name empty (migrations/profiles_public_aliases.sql).
 - **Function** `maybe_ask_public_name` (Line 67) — called by `create_auth_buttons`; opens the dialog once per account, re-reads a profile cached before the column existed.
-- **Function** `show_public_name_dialog` (Line 104) — the one-time "How should your name appear?" dialog: Save (full name) or Keep this name (the alias); both set the flag.
+- **Function** `show_public_name_dialog` (Line 104) — the one-time "How should your name appear?" dialog: "Use my name" (full name, prefilled from the sign-in data) or "Use the alias"; both set the flag.
 
 ## web/search_bootstrap.py
 
