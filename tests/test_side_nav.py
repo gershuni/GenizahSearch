@@ -64,6 +64,21 @@ def _shown(btn):
     return QPushButton.text(btn)
 
 
+def _assert_cut_only_past_the_cap(nav, buttons):
+    """Every label the column has room for shows in full; one is cut, with
+    "…", only when the column is at its cap and the label is wider than that.
+    Which labels fit depends on the fonts: the headless Windows CI draws every
+    character as a 12 px box, so there "Composition Search" needs 216 px and
+    the column stops at SideNav.MAX_EXPANDED."""
+    capped = nav._expanded_width() == SideNav.MAX_EXPANDED
+    for b in buttons:
+        if b.label_width() <= b._text_width:
+            assert _shown(b) == b.text()
+        else:
+            assert capped, (b.text(), b.label_width(), b._text_width, nav.width())
+            assert _shown(b).endswith("…")
+
+
 def test_one_section_is_current_and_nothing_is_checkable_but_sections():
     host, nav, puzzle, settings = _nav()
     nav.set_current(2)
@@ -80,7 +95,7 @@ def test_set_text_sets_the_label_and_keeps_the_icon():
     icon_before = settings.icon().cacheKey()
     settings.setText("Hillel G (Logout)")
     assert settings.text() == "Hillel G (Logout)"
-    assert _shown(settings) == "Hillel G (Logout)"
+    _assert_cut_only_past_the_cap(nav, [settings])
     assert settings.icon().cacheKey() == icon_before
     assert settings.accessibleName() == "Hillel G (Logout)"
 
@@ -100,10 +115,11 @@ def test_compact_shows_icons_with_the_label_as_tooltip():
 def test_expanded_column_fits_every_label():
     host, nav, puzzle, settings = _nav()
     assert nav.is_expanded()
+    _assert_cut_only_past_the_cap(nav, nav.section_buttons + [puzzle, settings])
     for b in nav.section_buttons + [puzzle, settings]:
-        assert _shown(b) == b.text()
         assert b.width() >= b.sizeHint().width()          # never clipped by the column
-    assert QWidget.toolTip(puzzle) == ""                  # the label is showing
+        if _shown(b) == b.text():
+            assert QWidget.toolTip(b) == ""               # the label is showing
 
 
 def test_a_label_the_column_was_sized_for_is_never_cut(monkeypatch):
@@ -117,11 +133,10 @@ def test_a_label_the_column_was_sized_for_is_never_cut(monkeypatch):
             return super().elidedText(text, mode, width - 30, flags)
     monkeypatch.setattr(side_nav, "QFontMetrics", Pessimistic)
     host, nav, puzzle, settings = _nav()
-    for b in nav.section_buttons + [puzzle, settings]:
-        assert _shown(b) == b.text()
+    _assert_cut_only_past_the_cap(nav, nav.section_buttons + [puzzle, settings])
     settings.setText("Hillel G (Logout)")
     QApplication.processEvents()
-    assert _shown(settings) == "Hillel G (Logout)"
+    _assert_cut_only_past_the_cap(nav, nav.section_buttons + [puzzle, settings])
 
 
 def test_a_font_that_arrives_later_resizes_the_column():
