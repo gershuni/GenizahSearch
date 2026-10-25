@@ -117,10 +117,28 @@ def test_every_fragment_in_the_tree_folds_into_the_real_tracker(path):
     (("| ⏳ Needs a check |", "| Open |"), "does not start with"),
     (("### Website", "### Web"), "is not one of the areas"),
     (("| `y.py` |", "| `y.py` | extra |"), "not 5"),
+    # The count closing "Last Updated" is generated too (Codex review of PR #449).
+    ((". 3 open: P1 0, P2 1, P3 2.", ". 7 open: P1 0, P2 1, P3 2."), "not in canonical form"),
+    ((" 3 open: P1 0, P2 1, P3 2.", " three open."), "must end with the generated count"),
 ])
 def test_the_check_reports_a_hand_edit_that_breaks_the_tracker(change, expect):
     found = model.problems(TRACKER.replace(*change), BACKLOG, DETAILS)
     assert any(expect in p for p in found), found
+
+
+def test_the_check_reports_an_emptied_details_section():
+    """The section is the row's only full text: a heading left with no body is a loss."""
+    found = model.problems(TRACKER, BACKLOG, model.render_details(
+        ["# d", ""], {2: "", 3: "b", 4: "p2", 5: "debt"}))
+    assert any("GS-2 (OPEN_ISSUES.md): its '## GS-2' section in ISSUE_DETAILS.md is empty" in p
+               for p in found), found
+
+
+def test_a_stale_last_updated_count_is_repaired_by_apply(tmp_path):
+    d, f = _tree(tmp_path, {}, tracker=TRACKER.replace(". 3 open: P1 0, P2 1, P3 2.",
+                                                       ". 7 open: P1 0, P2 1, P3 2."))
+    assert _run(d, f, "--apply") == 0
+    assert f["tracker"].read_text(encoding="utf-8") == TRACKER
 
 
 def test_the_check_reports_details_without_a_row_and_a_row_without_details():
@@ -188,6 +206,28 @@ def test_a_legacy_fragment_lands_under_unsorted(tmp_path):
     legacy = next(i for i in doc.issues if i.headline == "Legacy bug")
     assert (legacy.group, legacy.area, legacy.opened) == ("P3", "unsorted", "2026-10-19")
     assert "### Unsorted" in f["tracker"].read_text(encoding="utf-8")
+
+
+def test_a_pipe_in_a_fragment_stays_inside_its_cell_and_is_not_folded_twice(tmp_path):
+    """A "|" in a headline or Where (a regex, an alternative) is escaped in the row; the
+    next parse reads five cells, and a re-run recognises the issue (Codex review of #449)."""
+    frag = "## P2 search: Regex a|b finds nothing\nWhere: `x.py` (a|b)\n\nd\n"
+    d, f = _tree(tmp_path, {"2026-10-21-a.md": frag})
+    assert _run(d, f, "--apply") == 0
+    tracker = f["tracker"].read_text(encoding="utf-8")
+    assert "| Regex a\\|b finds nothing | `x.py` (a\\|b) | 2026-10-21 | ❌ Open |" in tracker
+    assert co.check(f["tracker"], f["backlog"], f["details"]) == []
+    (d / "2026-10-22-again.md").write_text(frag, encoding="utf-8")
+    assert _run(d, f, "--apply") == 0
+    assert f["tracker"].read_text(encoding="utf-8") == tracker
+
+
+def test_an_old_style_heading_inside_new_style_details_is_just_text():
+    """The first heading decides the form (Codex review of PR #449)."""
+    text = "## P2 search: New bug\nWhere: `a.py`\n\nIntro.\n\n### P2 - Medium\nnotes under it\n"
+    issues, found = co.parse(text, "2026-10-21")
+    assert found == [] and len(issues) == 1
+    assert issues[0][1].endswith("### P2 - Medium\nnotes under it")
 
 
 def test_without_apply_nothing_changes(tmp_path):
@@ -312,6 +352,22 @@ def test_the_highest_id_closed_is_never_given_out_again(tmp_path):
     new = next(i for i in model.parse(f["tracker"].read_text(encoding="utf-8"),
                                       model.PRIORITIES).issues if i.headline == "New P2 bug")
     assert new.id == 6
+
+
+@pytest.mark.parametrize("sections", [{3: "b", 4: "p2", 5: "debt"},             # no section
+                                      {2: "", 3: "b", 4: "p2", 5: "debt"}])    # an empty one
+def test_a_closed_row_without_its_details_is_not_archived(tmp_path, sections):
+    """Its details are its full text: archiving without them loses it (Codex review of #449)."""
+    closed = TRACKER.replace("| `y.py` | 2026-09-01 | ❌ Open |",
+                             "| `y.py` | 2026-09-01 | ✅ Fixed (2026-10-22, abc1234) |")
+    d, f = _tree(tmp_path, {}, tracker=closed,
+                 details=model.render_details(["# Issue details", ""], sections))
+    argv = ["--apply", "--date", "2026-10-22"]
+    for key, path in f.items():
+        argv += ["--" + key, str(path)]
+    assert ac.main(argv) == 1
+    assert f["archive"].read_text(encoding="utf-8") == ARCHIVE
+    assert f["tracker"].read_text(encoding="utf-8") == closed
 
 
 def test_the_archive_without_closed_rows_is_left_alone(tmp_path):

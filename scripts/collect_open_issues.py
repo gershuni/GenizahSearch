@@ -67,7 +67,8 @@ def fragment_paths(fragment_dir: Path) -> list:
 
 
 def _norm(headline: str) -> str:
-    return re.sub(r"\s+", " ", headline.replace("**", "")).strip().lower()
+    # The tracker holds a "|" escaped (open_issues_model.escape_cell); a fragment does not.
+    return re.sub(r"\s+", " ", headline.replace("**", "").replace("\\|", "|")).strip().lower()
 
 
 def _legacy(lines: list, default_date: str) -> tuple:
@@ -105,7 +106,9 @@ def parse(text: str, default_date: str = "") -> tuple:
     lines = [ln.rstrip() for ln in text.splitlines()]
     if not any(ln.strip() for ln in lines):
         return [], ["is empty"]
-    if any(ln in LEGACY_SECTIONS for ln in lines):
+    # The first heading decides the form: a new-form issue's details may themselves hold a
+    # "### P2 - Medium" line (Codex review of PR #449).
+    if next(ln for ln in lines if ln.strip()) in LEGACY_SECTIONS:
         return _legacy([ln for ln in lines if ln.strip()], default_date)
     issues, found, i = [], [], 0
     while i < len(lines) and not lines[i].strip():

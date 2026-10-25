@@ -31,7 +31,7 @@ def archive_block(closed: list, sections: dict, date: str) -> str:
         out.append(issue.row().replace("[GS-%d](ISSUE_DETAILS.md#gs-%d)" % (issue.id, issue.id),
                                        "GS-%d (%s)" % (issue.id, place)))
     for _, issue in closed:
-        out += ["", "### GS-%d" % issue.id, "", sections.get(issue.id, "(no details section)")]
+        out += ["", "### GS-%d" % issue.id, "", sections[issue.id]]
     return "\n".join(out) + "\n"
 
 
@@ -58,6 +58,15 @@ def main(argv=None):
         return 0
     for name, i in closed:
         print("  GS-%-4d %-14s %s" % (i.id, name, i.headline[:80]))
+    # The details are the row's full text: archiving a row without them would lose it
+    # (Codex review of PR #449). An interrupted fold can leave a row so -- finish it first.
+    bare = [i.id for _, i in closed if not sections.get(i.id, "").strip()]
+    if bare:
+        print("! GS-%s %s no details section in %s; nothing written. Run "
+              "`python scripts/collect_open_issues.py --apply` (or restore the section) first."
+              % (", GS-".join(map(str, bare)), "has" if len(bare) == 1 else "have",
+                 args.details.name))
+        return 1
     if not args.apply:
         print("\n%d row(s) would move to %s (dry run -- pass --apply to write)."
               % (len(closed), args.archive.name))
@@ -73,7 +82,8 @@ def main(argv=None):
     with io.open(args.archive, "r", encoding="utf-8", newline="") as fh:
         after = fh.read()
     missing = [i.id for _, i in closed
-               if "GS-%d (" % i.id not in after or i.headline not in after]
+               if "GS-%d (" % i.id not in after or i.headline not in after
+               or sections[i.id].replace("\n", eol) not in after]
     if missing or not after.startswith(before):
         print("!! the archive does not hold GS-%s after the append; nothing else was changed"
               % ", GS-".join(map(str, missing)))

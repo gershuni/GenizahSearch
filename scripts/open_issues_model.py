@@ -65,6 +65,7 @@ _ANY_ID_RE = re.compile(r"\bGS-(\d+)\b")
 TABLE_HEAD = ("| ID | Issue | Where | Opened | Status |\n"
               "|----|-------|-------|--------|--------|")
 LAST_UPDATED_RE = re.compile(r"^>\s*\*\*Last Updated:\*\*")
+_COUNT_TAIL_RE = re.compile(r"(\d+ open: P1 \d+, P2 \d+, P3 \d+|\d+ items)\.\s*$")
 
 
 @dataclass
@@ -86,8 +87,15 @@ class Issue:
         return self.status.strip().startswith(CLOSED_MARKS)
 
     def row(self) -> str:
+        # A literal "|" (a regex, an alternative) would end the cell: escape it. An already
+        # escaped "\|" -- what parse() returns -- is left as it is, so rendering is stable.
         return "| [GS-%d](ISSUE_DETAILS.md#gs-%d) | %s | %s | %s | %s |" % (
-            self.id, self.id, self.headline, self.where, self.opened or "—", self.status)
+            self.id, self.id, escape_cell(self.headline), escape_cell(self.where),
+            escape_cell(self.opened) or "—", escape_cell(self.status))
+
+
+def escape_cell(text: str) -> str:
+    return re.sub(r"(?<!\\)\|", r"\\|", text.replace("\n", " "))
 
 
 @dataclass
@@ -178,7 +186,11 @@ def summary(issues: list, groups: dict) -> list:
 
 
 def render(doc: Doc) -> str:
-    out = list(doc.preamble) + ["## Summary", ""] + summary(doc.issues, doc.groups)
+    # The count closing the "Last Updated" line is generated like the Summary: a hand-edited
+    # or stale one is not canonical, and --apply rewrites it (Codex review of PR #449).
+    preamble = [_COUNT_TAIL_RE.sub(counts_line(doc) + ".", ln) if LAST_UPDATED_RE.match(ln)
+                else ln for ln in doc.preamble]
+    out = preamble + ["## Summary", ""] + summary(doc.issues, doc.groups)
     for key, title in doc.groups.items():
         out += ["", "## " + title, ""]
         mine = [i for i in doc.issues if i.group == key]
@@ -272,6 +284,10 @@ def problems(tracker: str, backlog: str, details: str) -> list:
         if render(doc) != text:
             found.append("%s is not in canonical form (a count, an order or a blank line "
                          "differs): run `python scripts/collect_open_issues.py --apply`" % name)
+        updated = [ln for ln in doc.preamble if LAST_UPDATED_RE.match(ln)]
+        if not updated or not updated[0].rstrip().endswith(" %s." % counts_line(doc)):
+            found.append("%s: the '> **Last Updated:**' line must end with the generated count "
+                         "'%s.'" % (name, counts_line(doc)))
         for i in doc.issues:
             if i.is_closed:
                 found.append("%s: GS-%d is closed; run `python scripts/archive_closed_issues.py "
@@ -291,6 +307,10 @@ def problems(tracker: str, backlog: str, details: str) -> list:
             seen[i.id] = name
             if i.id not in sections:
                 found.append("GS-%d (%s) has no '## GS-%d' section in ISSUE_DETAILS.md"
+                             % (i.id, name, i.id))
+            elif not sections[i.id].strip():
+                # The section is the only full-text record of the row (Codex review of #449).
+                found.append("GS-%d (%s): its '## GS-%d' section in ISSUE_DETAILS.md is empty"
                              % (i.id, name, i.id))
     if len(docs) == 2:
         for k in sections:
