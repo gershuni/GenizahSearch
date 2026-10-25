@@ -101,21 +101,23 @@ independently (Node SQLite, read-only) in two review rounds.
 
 ### 3.2 File naming — the lookup key is the FIST `FileName`, not the 14-digit id
 
-`<FileName>` has four shapes (PDF counts):
+`<FileName>` has four shapes (basenames; gate 1 counts — revision 5 corrects the census, whose suffix pattern only
+matched a suffix followed by `.scan`):
 
 | Shape | Count | Example |
 |---|---|---|
-| `<id>_<Library> <Shelfmark>_<Tc\|Tl\|D>` with a suffix | 3,443 | `20000070000181_CUL_T-S NS 329.533_Tc` |
-| `<id>_<Library> <Shelfmark>` with **no** suffix | 51,573 | `10800010000031_RNL_Yevr_ III B 71` |
-| `<id>` only | 20,442 | `50002300001701` (catalogue/book-derived; no shelfmark in the name) |
+| `<id>_<Library> <Shelfmark>_<Tc\|Tl\|D>` with a suffix | 31,986 | `20000070000181_CUL_T-S NS 329.533_Tc` |
+| `<id>_<Library> <Shelfmark>` with **no** suffix | 19,728 | `10800010000031_RNL_Yevr_ III B 71` |
+| `<id>` only | 20,430 | `50002300001701` (catalogue/book-derived; no shelfmark in the name) |
 | C-number named | 6 | `C252953` |
 
-- `Tc` = transcription, `Tl` = translation, `D` = description — but most files carry no suffix, so **the kind must come
-  from FIST**, not the name.
+- `Tc` = transcription, `Tl` = translation, `D` = description. Where a suffix exists it agrees with the FIST kind in
+  every case (0 disagreements), but 40,164 basenames carry none, so **the kind must come from FIST**, not the name.
 - **The 14-digit id is not unique**: 8,131 ids have 2–8 PDFs. `60000010010951` is both `T-S G2.98`
   (AlmaId 990051182080205171) and `T-S Misc.35.108` (990051125920205171), different content. 5,095 ids are 15 digits.
 - **The basename is an exact lookup key but not a scholarly identity**: 1,645 matched basenames occur in more than
-  one FIST unit row (all of the same kind). A refresh must carry FIST's typed unit id and `SignatureId`, not the name.
+  one FIST unit row (all of the same kind; gate 1: every one of them is several signatures of *different* signature
+  sets, none a duplicate row). A refresh must carry FIST's typed unit id and `SignatureId`, not the name.
 - **`.scan.pdf` twins**: 3,432 files; 3,354 sit next to a born-digital twin, 77 are orphans with no DOCX/DOC sibling.
   Checked samples are image-only (0 text chars, Acrobat Distiller / PDFCreator) — scans of typed sheets. Whether the
   77 orphans have text anywhere else in FIST is unchecked.
@@ -131,9 +133,14 @@ Matching the 72,098 basenames (`.scan` folded) against FIST (Codex reproduced th
 | `dbo_UnitFreeDescription` | 97,174 | **10,890** |
 | unmatched | — | 2,768 (1,857 of them in `2000000`) |
 
+These are PDF basenames. Gate 1 (§8.1) also counts the **52 basenames that exist only as DOCX**: 8 are FIST
+transcriptions (7 of team 133 "Judeo Persian" in `1330000`, 1 in `8500000`) and 44 are unmatched, so the inventory's
+totals are 69,338 matched / 54,536 transcriptions / 2,812 unmatched.
+
 Every matched file has a `dbo_Signature` row. The chain
 `FileName → SignatureId → SetSignatureId → dbo_InventorySignature.InventoryId → dbo_InventoryAlma.AlmaId`
-resolves **68,865 / 69,330** files to at least one manuscript; **7,954 files resolve to more than one AlmaId**, through
+resolves **68,865 / 69,330** files to at least one manuscript (68,871 / 69,338 with the DOCX-only files); **7,954
+files resolve to more than one AlmaId** (7,957), through
 48 distinct inventories that carry more than one AlmaId (164 set–inventory associations reach them) — joined /
 multi-part shelfmarks, not errors, but each needs a decision, since a chooser row has one `sys_id`.
 `dbo_Signature.SourceId/SubId` gives the team/catalogue/book (provenance, not a finished display credit);
@@ -152,10 +159,13 @@ Academy); 84 rows have `tmp_DoubleNotToDisplay=1` (meaning unknown — those row
   `2000007` 749 · `1510000` (Glick) 478 · `1080000` (Milikowsky) 407 · `1020000` (Stroumsa) 243. 14,917 of them carry a
   shelfmark in the name; 2,403 are id-only and need the FIST chain.
 - Manuscripts: transcription files → **31,439 AlmaIds (all associations) vs 24,940 sys_ids today → 6,694 candidates
-  not in the DB**; description files add 5,223 manuscripts with a description but no transcription file.
+  not in the DB** (31,440 / 6,695 with the DOCX-only files); description files add 5,223 manuscripts with a
+  description but no transcription file.
 - Why today's import missed them: the June export was keyed on the FGP *shelfmark folders* (`…/Trans/*_trans.pdf`);
-  files FIST holds only in the flat team store never appeared there. The export itself has gaps the other way (the
-  19 rows above, 80 FIST transcription FileNames with no PDF here).
+  files FIST holds only in the flat team store never appeared there. The export itself has gaps the other way: the
+  19 rows above (their FIST directories are in the export, the files are not), and 72 FIST transcription FileNames
+  plus 1 translation with no file here (44 in exported directories, 29 in directories the export lacks; 8 more
+  transcriptions exist only as DOCX).
 
 ### 3.5 The Word files
 
@@ -253,8 +263,9 @@ comparator (new files) need their own acceptance.
 - 5,438 numbers have no `c_number` row today — rows that exist without a C-number (CUL direct-`Trans/` layout) and
   images not transcribed in the June export; **1,938 of the 11,782 manuscripts have no FGP row at all today**.
 - `nli_images.FGPImageNumberId` hits 24,598 / 24,615; 89 numbers map to two AlmaIds there although `ImageName` agrees.
-- FIST ties the folders together: `dbo_UnitTranscription.ImageTranscriptionFolder` (21,527 rows) names the B dir;
-  20,825 exist, 695 do not (e.g. `1996_G1`…), and 2,660 B dirs are not referenced by any FIST transcription row.
+- FIST ties the folders together: `dbo_UnitTranscription.ImageTranscriptionFolder` (21,527 rows; 21,519 distinct
+  values once 8 empty strings are dropped) names the B dir; 20,825 exist, 694 do not (e.g. `1996_G1`…), and 2,660 B
+  dirs are not referenced by any FIST transcription row.
 - Recorded rotation (`extra_info.Rotation_Angle_deg`) for the 24,615 images: 12,267 within ±10°, 552 ≈180°,
   274 ≈90°/270°, 353 other, 11,169 null.
 
@@ -344,8 +355,9 @@ per-image transform (rotation/reflection/translation) where it differs; suppress
   (600 rows) must be shown; **the 84 `tmp_DoubleNotToDisplay=1` rows are withheld from publication until the flag's
   meaning is confirmed with FGP**; displaying word boxes over library images and any training-data reuse are new uses
   of FGP data — confirm with the data owner before they are public.
-- **Export gaps.** 19 of today's rows and 80 FIST transcription FileNames are not in this export; 77 `.scan.pdf`
-  orphans have no text form in the folders; the DOC copies are unexamined. All go on the list for the FGP data owner.
+- **Export gaps.** 19 of today's rows and 72 FIST transcription FileNames (+1 translation) are not in this export,
+  and 8 transcriptions exist only as DOCX; 77 `.scan.pdf` orphans have no text form in the folders; the DOC copies are
+  unexamined. All go on the list for the FGP data owner.
 - **Size.** Today's 405 MB sidecar is already bundled; a fuller text DB and a positions DB add to the installer, so
   positions should be an optional download on the desktop and `run.io_bound` reads on the web must cover fetch +
   decode. The post-install sidecar updater does not know FGP yet (open tracker row).
@@ -358,6 +370,20 @@ Each gate names what makes it fail; "measured" or "reviewed" alone is never a pa
    B-folder dir, kind, visibility flags, status. *Fails if:* any count does not reconcile across physical files,
    basenames, unit rows, images and manuscripts; any multi-association lacks a resolution rule; any region suffix or
    description is miscounted; any of the 19 missing / 80 absent / 2,768 unmatched files lacks a reason.
+   **Run 2026-10-25 — PASS, 53 / 53 checks** (`scripts/run_fgp_association_inventory.ps1` →
+   `scripts/fgp_association_inventory.py`, expectations in `scripts/fgp_association_inventory.expect.json`; output
+   `fgp_data/inventory/` — `inventory.db`, `summary.json`, `REPORT.md`; 22 s; `tests/test_fgp_association_inventory.py`
+   proves the gate fails on a basename of two kinds and on a missed expectation). Every count partitions; 0 mixed
+   kinds, 0 missing signatures, 0 suffix / kind disagreements. The 72,150 basenames: 40,311 served · 15,188 candidates
+   (14,524 transcriptions, 664 translations) · 2,528 candidates with several AlmaIds · 10,890 descriptions · 331
+   transcriptions / translations without an AlmaId (467 files in all: 463 whose inventory has no AlmaId, 4 whose set
+   has no inventory) · 90 held by `tmp_DoubleNotToDisplay` (84 transcriptions, 6 translations; 23 served today) ·
+   2,812 unmatched, each with a reason (1,865 whose id prefix is a FIST file of another name, 910 with no FIST trace,
+   29 whitespace drift from a FIST name, 6 C-named, 2 scan-only). Multi-association classes, each with a declared
+   rule (proposals for gate 2; a file may fall in several): `set_multi_inventory` 6,639 ·
+   `multi_signature_different_sets` 1,645 · `inventory_multi_alma` 236 · `dup_unit_rows_same_signature` 0 ·
+   `multi_signature_same_set` 0. Corrections the run made to this report: the §3.2 shape table, the 52 DOCX-only
+   basenames (§3.3–3.4), 695 → 694 position folders (§4.4).
 2. **Identity, credit, visibility and refresh rules.** *Fails if:* any of the 45,034 existing rows lacks an explicit
    outcome (kept / re-sourced / retired-with-alias); any public `fgp:<id>` changes meaning; any row with an unresolved
    credit, an ambiguous association, or an unknown visibility flag (`tmp_DoubleNotToDisplay`) is marked publishable.
@@ -386,7 +412,9 @@ Each gate names what makes it fail; "measured" or "reviewed" alone is never a pa
 `census2.json`, `verify_a.json` … `verify_i.json`, `b1_geometry.json`, `b1_geometry2.json` (full counts),
 `census2_withpos_numbers.tsv`, `census2_nopos_basenames.tsv`, `overlay_rich_100000.jpg`, `overlay_c_C100181.jpg`. The four
 Codex reviews were kept verbatim in the assessment worktree's gitignored `_tmp/` and went with it when the worktree was
-removed after the fast-forward; their findings and dispositions are recorded in §10.
+removed after the fast-forward; their findings and dispositions are recorded in §10. Since revision 5 the §3 and §4
+association counts are reproduced by the gate-1 script (§8.1), whose output in `fgp_data/inventory/` is regenerated
+in under a minute.
 
 ## 10. Revision history
 
@@ -411,3 +439,12 @@ FreeDesc"; 84 visibility-flag rows withheld; every §8 gate given an explicit fa
 counts both box representations (1,074,196 real-text entries, 98.9% in `src`; dict-only numerator 867,846) and says
 "entries, not unique words"; "all of the Sussmann Talmud material" bounded to the 4,171 delivered directories; §8.5
 fails on the residual error after the transform and on undeclared limits.
+
+**Revision 5 (gate 1 run, 2026-10-25)** — `scripts/fgp_association_inventory.py` reproduces the report's association
+counts as declared expectations (53 / 53 checks). Two counting differences found and folded in: the §3.2 name-shape
+table (the census pattern only matched a suffix followed by `.scan`; 31,986 basenames carry a suffix, 40,164 do not,
+and every suffix agrees with the FIST kind), and 52 DOCX-only basenames the PDF census never saw (8 FIST
+transcriptions, so the full totals are 69,338 / 54,536 / 68,871 / 7,957 / 31,440 / 6,695 and the absent FIST
+transcription files are 72, not 80); 8 empty `ImageTranscriptionFolder` strings had been counted as a missing
+directory (694, not 695). Statuses, unresolved reasons, visibility holds and the multi-association classes with their
+proposed rules are in §8.1.
