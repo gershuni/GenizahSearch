@@ -135,6 +135,15 @@ def test_the_migration_refuses_a_trigger_owner_that_cannot_make_aliases():
     assert "has_function_privilege(trigger_owner, 'public.new_public_alias()', 'execute')" in sql
 
 
+def test_the_verification_writes_the_expected_flag_as_the_profile_read_does():
+    """Live run 2026-10-25: format('%s', boolean) gives t/f, but the profile is read
+    through jsonb (true/false), so all 11 sign-ups FAILED with the right values."""
+    sql = _without_comments(_sql(VERIFY))
+    expect = sql.split("function pg_temp.expect_sign_up", 1)[1].split("end $$;", 1)[0]
+    assert "p_confirmed::text" in expect
+    assert "v_profile ->> 'public_name_confirmed'" in sql
+
+
 def test_the_verification_script_never_commits():
     sql = _without_comments(_sql(VERIFY))
     statements = [s.strip().lower() for s in sql.split(";") if s.strip()]

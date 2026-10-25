@@ -75,9 +75,10 @@ language plpgsql as $$
 begin
   insert into results (check_name, expected, got)
   values (p_name,
+          -- p_confirmed::text: %s formats a boolean as t/f, the profile read gives true/false.
           format('username=%s full_name=%s affiliation=%s confirmed=%s default_lists=1',
                  coalesce(p_username, '(empty)'), coalesce(p_full_name, '(empty)'),
-                 coalesce(p_affiliation, '(empty)'), p_confirmed),
+                 coalesce(p_affiliation, '(empty)'), p_confirmed::text),
           pg_temp.sign_up_as(p_label, p_provider, p_meta));
 end $$;
 
