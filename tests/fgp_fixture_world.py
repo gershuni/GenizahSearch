@@ -420,3 +420,204 @@ def rows(db: str, sql: str) -> list:
         return [dict(r) for r in con.execute(sql)]
     finally:
         con.close()
+
+
+# --------------------------------------------------------------------------- gate 5: the position world
+# Word boxes for the B1 folder 100000 and the B2 folder C400, synthetic photographs whose ink sits exactly in those
+# boxes, and the renditions the gate would otherwise fetch from NLI (a manifest and two displayed images), so the
+# geometry check runs offline. Only ``write_position_content`` / ``add_position_gallery`` touch the world; gates 1-4
+# see the same world as before plus one gallery image, one fjms row and a longer text on the XML rows 1 and 16.
+
+B1_POS_FRAME = (1200, 1500)                 # coldata.imagesize: the editor's image
+B1_POS_PHOTO_BOX = (40, 30, 1160, 1470)      # alldata.box: where img.jpg sits in the frame
+B1_POS_COL_BOX = (100, 150, 1100, 1100)
+B1_POS_PITCH = 150
+# (row uid, [(word uid, text)]) right to left; "תהו" (uid 13) has no box, "פני" (uid 19) a list-form box
+B1_POS_ROWS = [(1, [(2, "בראשית"), (3, "ברא"), (4, "אלהים")]), (5, [(6, "את"), (7, "השמים"), (8, "ואת"), (9, "הארץ")]),
+               (10, [(11, "והארץ"), (12, "היתה"), (13, "תהו")]), (14, [(15, "ובהו"), (16, "וחשך")]),
+               (17, [(18, "על"), (19, "פני"), (20, "תהום"), (21, "ורוח")]), (22, [(23, "אלהים"), (24, "מרחפת")])]
+B1_POS_TEXT = "\n".join(" ".join(t for _, t in words) for _, words in B1_POS_ROWS)
+B1_POS_NO_BOX, B1_POS_LIST_BOX = 13, 19
+B1_POS_POSITIONED = sum(len(w) for _, w in B1_POS_ROWS) - 1
+
+B2_POS_MASTER = (1500, 2000)                 # the fjms pixel size of image 400
+B2_POS_COL = (300, 400, 1300, 1800)          # cols["1"] on the master
+B2_POS_FACT = 0.2
+B2_POS_PITCH = 150
+# segments per ac row (crop-relative, right to left); row 1 is a lacuna (no letter), row 4's segment lacks its sigla
+B2_POS_SEGMENTS = {1: ["@[.........]"], 2: ["יום", "הכפורים", "אסור", "באכילה"], 3: ["אוסרי{ם\\/\\/ן}", "ב'"], 4: ["ליענש"]}
+B2_POS_POSITIONED = sum(len(v) for v in B2_POS_SEGMENTS.values())
+B2_POS_DISPLAY_ROT = 183           # 180 degrees and a 3-degree tilt: the small-angle search must find it
+
+
+def _b1_pos_layout() -> tuple:
+    """Frame-pixel geometry: {word uid: [x, y, w, h]}, {row uid: (band, baseline points)}."""
+    words, rows_ = {}, {}
+    for i, (ruid, ws_) in enumerate(B1_POS_ROWS):
+        base = 250 + i * B1_POS_PITCH
+        x = 1080
+        for uid, t in ws_:
+            w = 40 * len(t) + 40
+            words[uid] = [x - w, base - 60, w, 70]
+            x -= w + 40
+        rows_[ruid] = ([100, base - 90, 1000, B1_POS_PITCH], [[100, base], [400, base], [700, base], [1100, base]])
+    return words, rows_
+
+
+def b1_pos_xml() -> str:
+    rows_ = []
+    for i, (ruid, ws_) in enumerate(B1_POS_ROWS):
+        ws_xml = "".join(f'<w u="{uid}">{escape(t)}{"" if k == len(ws_) - 1 else " "}</w>' for k, (uid, t) in enumerate(ws_))
+        rows_.append(f'<row u="{ruid}" num="{i + 1}" col="1"><t>{ws_xml}</t></row>')
+    return ('<?xml version="1.0"?><root><info><fgp>100000</fgp><lib>קמבריג\'</lib><shelf>T-S 1.1</shelf></info>'
+            f'<col n="1" t="טור_א">{"".join(rows_)}</col></root>')
+
+
+def b1_pos_js() -> str:
+    words, rows_ = _b1_pos_layout()
+    x1, y1, x2, y2 = B1_POS_PHOTO_BOX
+    cx1, cy1, cx2, cy2 = B1_POS_COL_BOX
+    alldata = {"fgps": {"100000": {"lib": "קמבריג'", "shelf": "T-S 1.1"}},
+               "box": {"imgid": 1, "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                       "fn": f"http://server:8181/?cmd=img&fn=T_0001/T_S_1_1__L1F0B0S1.jpg&x={x1}&y={y1}&w={x2 - x1}&h={y2 - y1}"},
+               "cols": {"1": {"id": 1, "name": "טור_א", "col": 1, "box": {"x1": cx1, "y1": cy1, "x2": cx2, "y2": cy2}, "FGP": "100000"}}}
+    row_of = {uid: ruid for ruid, ws_ in B1_POS_ROWS for uid, _ in ws_}
+    boxs = {}
+    for ruid, (band, _) in rows_.items():
+        boxs[str(ruid)] = {"r": 0, "s": "", "t": "", "box": {"0": [band[0], band[1] + 30, band[2], band[3] - 60], "1": band}}
+    for uid, b in words.items():
+        band = rows_[row_of[uid]][0]
+        if uid == B1_POS_NO_BOX:
+            boxs[str(uid)] = {"r": 0, "s": "", "t": "", "box": []}
+        elif uid == B1_POS_LIST_BOX:
+            boxs[str(uid)] = {"r": 0, "s": "", "t": "", "box": [b, band]}
+        else:
+            boxs[str(uid)] = {"r": 0, "s": "", "t": "", "box": {"0": b, "1": band}}
+    coldata = {"fn": f"http://server:8383/hag/fgps/img.php?cr=1&fn=T_0001/T_S_1_1__L1F0B0S1.jpg&x1={cx1}&x2={cx2}&y1={cy1}&y2={cy2}",
+               "fgp": "100000", "col": "1", "coln": "טור_א",
+               "box": {"x1": cx1, "y1": cy1, "x2": cx2, "y2": cy2, "w": cx2 - cx1, "h": cy2 - cy1}, "notes": [],
+               "imagesize": list(B1_POS_FRAME),
+               "rows": [{"id": ruid, "srcnum": str(i + 1), "pnts": bl, "grp": 0} for i, (ruid, (_, bl)) in enumerate(rows_.items())],
+               "boxs": boxs, "aca": {"html": ""}, "src": {}}
+    return ("var alldata=" + json.dumps(alldata, ensure_ascii=False) + ";\ncoldata[\"100000_1\"]=\n"
+            + json.dumps(coldata, ensure_ascii=False, indent=1) + ";\n")
+
+
+def _b2_pos_layout() -> tuple:
+    """Crop-relative geometry of C400: (rows, segment boxes) in the shape of ``data.js``."""
+    rows_, segs = [], []
+    for i in range(4):
+        ndx = 400 + i + 1
+        y1 = 100 + i * B2_POS_PITCH
+        y2 = y1 + B2_POS_PITCH
+        rows_.append({"id": ndx, "col": 1, "x1": 50, "x2": 950, "y1": y1, "y2": y2, "sx1": 50, "sx2": 950, "sy1": y1, "sy2": y2,
+                      "xy": [[50, y2 - 30], [350, y2 - 30], [650, y2 - 30], [950, y2 - 30]]})
+        x = 950
+        for k, t in enumerate(B2_POS_SEGMENTS[i + 1]):
+            w = 30 * len(t) + 30
+            segs.append({"type": "", "sug": "רגיל", "id": f"{ndx}_{2 * k}_split(ROW)", "col": 1, "pop": 0, "g": 0, "row": str(ndx),
+                         "txt": t, "x1": x - w, "x2": x, "y1": y1 + 20, "y2": y2 - 20})
+            x -= w
+            segs.append({"type": "", "sug": "רגיל", "id": f"{ndx}_{2 * k + 1}_split(ROW)", "col": 1, "pop": 0, "g": 0, "row": str(ndx),
+                         "txt": " ", "x1": x - 30, "x2": x, "y1": y1 + 20, "y2": y2 - 20})
+            x -= 30
+    # the editor's artefacts: an empty "test" box with a negative x1, and a segment whose text the line does not hold
+    segs.append({"type": "", "sug": "רגיל", "id": "401_9_test", "col": 1, "pop": 0, "g": 0, "row": "401", "txt": "",
+                 "x1": -50, "x2": 50, "y1": 100, "y2": 250})
+    segs.append({"type": "", "sug": "רגיל", "id": "402_9_split(ROW)", "col": 1, "pop": 0, "g": 0, "row": "402", "txt": "זר",
+                 "x1": 10, "x2": 40, "y1": 270, "y2": 380})
+    return rows_, segs
+
+
+def b2_pos_js() -> str:
+    rows_, segs = _b2_pos_layout()
+    x1, y1, x2, y2 = B2_POS_COL
+    nw, nh = (x2 - x1) * B2_POS_FACT, (y2 - y1) * B2_POS_FACT
+    j = {"FGP": "C400", "pdf_fact": 29.1, "fact": B2_POS_FACT, "w": nw, "h": nh,
+         "cols": {"1": {"w": nw, "h": nh, "t": 0, "l": 0, "img": "C400_1.png", "x1": x1, "x2": x2, "y1": y1, "y2": y2,
+                        "sx1": x1, "sx2": x2, "sy1": y1, "sy2": y2, "mm": 1.0, "ord": 0}},
+         "ac": [{"title": "", "rows": {str(i + 1): {"ndx": 400 + i + 1, "txt": t} for i, t in enumerate(B2_C400_ROWS)}}],
+         "img": {"src": f"/img.php?hoz=0&cr=1&fn=00001/T_S_1_1__L3F0B0S1.jpg&x1={x1}&y1={y1}&x2={x2}&y2={y2}&nw={nw}&nh={nh}",
+                 "x1": 0, "y1": 0, "y2": nh, "w": nw, "h": nh, "fact": B2_POS_FACT},
+         "rows": rows_, "boxs": segs, "info": {"Shelfmark": "T-S 1.1", "libheb": "Cambridge", "fgpNumber": "C400"},
+         "notes": [], "date": "2013-01-01 00:00:00"}
+    return "fgp=" + json.dumps(j, ensure_ascii=False, indent=1) + ";"
+
+
+def _synthetic_photograph(seed: int, size: tuple, ink_boxes: list):
+    """A light page with fibre texture and distinct dark ink in every box (numpy + Pillow; tests only)."""
+    import numpy as np
+    from PIL import Image, ImageDraw
+    from scipy import ndimage
+    rng = np.random.default_rng(seed)
+    w, h = size
+    page = ndimage.uniform_filter(rng.normal(205, 6, (h, w)), 3)
+    im = Image.fromarray(np.clip(page, 0, 255).astype("uint8"))
+    draw = ImageDraw.Draw(im)
+    for _ in range(80):
+        x, y, r = int(rng.integers(0, w)), int(rng.integers(0, h)), int(rng.integers(2, 6))
+        draw.ellipse([x - r, y - r, x + r, y + r], fill=int(rng.integers(150, 190)))
+    for x, y, bw, bh in ink_boxes:
+        for _ in range(max(6, int(bw // 12))):
+            cx, cy = x + rng.uniform(0.05, 0.95) * bw, y + rng.uniform(0.15, 0.85) * bh
+            rx, ry = rng.uniform(3, 8), rng.uniform(5, 14)
+            draw.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=int(rng.integers(20, 70)))
+        draw.line([(x + 5, y + bh * 0.5), (x + bw - 5, y + bh * 0.5 + rng.uniform(-8, 8))], fill=40, width=3)
+    return im
+
+
+def _manifest(entries: list) -> dict:
+    return {"sequences": [{"canvases": [
+        {"@id": f"https://iiif.nli.org.il/IIIFv21/canvas/{fl}", "label": label, "width": w, "height": h,
+         "images": [{"resource": {"service": {"@id": f"https://iiif.nli.org.il/IIIFv21/FL{fl}"}}}]}
+        for fl, label, w, h in entries]}]}
+
+
+def write_position_content(root: str, cache_dir: str) -> None:
+    """The geometry files of 100000 and C400, their photographs, and the fetch cache the gate reads offline."""
+    from PIL import Image
+    withpos = os.path.join(root, "WithPOS")
+    touch(os.path.join(withpos, "100000", "100000.xml"), b1_pos_xml().encode("utf-8"))
+    touch(os.path.join(withpos, "100000", "100000.js"), b1_pos_js().encode("utf-8"))
+    touch(os.path.join(withpos, "C400", "data.js"), b2_pos_js().encode("utf-8"))
+    words, _ = _b1_pos_layout()
+    master1 = _synthetic_photograph(1, B1_POS_FRAME, [b for uid, b in words.items() if uid != B1_POS_NO_BOX])
+    master1.crop(B1_POS_PHOTO_BOX).save(os.path.join(withpos, "100000", "img.jpg"), quality=92)
+    _, segs = _b2_pos_layout()
+    ox, oy = B2_POS_COL[0], B2_POS_COL[1]
+    ink = [[ox + s["x1"], oy + s["y1"], s["x2"] - s["x1"], s["y2"] - s["y1"]] for s in segs if s["txt"].strip() and s["x1"] >= 0]
+    master2 = _synthetic_photograph(2, B2_POS_MASTER, ink)
+    cw, ch = B2_POS_COL[2] - B2_POS_COL[0], B2_POS_COL[3] - B2_POS_COL[1]
+    master2.crop(B2_POS_COL).resize((int(cw * B2_POS_FACT), int(ch * B2_POS_FACT)), Image.Resampling.LANCZOS).save(
+        os.path.join(withpos, "C400", "img.jpg"), quality=92)
+    os.makedirs(cache_dir, exist_ok=True)
+    # what NLI would serve: canvases 1r, 1v, 3r of ALMA_A; the displayed renditions are the masters, the second one rotated
+    with open(os.path.join(cache_dir, f"manifest_{ALMA_A}-1.json"), "w", encoding="utf-8") as fh:
+        json.dump(_manifest([("1", "1r", B1_POS_FRAME[0], B1_POS_FRAME[1]), ("2", "1v", 1000, 1300),
+                             ("3", "3r", B2_POS_MASTER[0], B2_POS_MASTER[1])]), fh)
+    master1.resize((1000, 1250), Image.Resampling.LANCZOS).save(os.path.join(cache_dir, "FL1_w2000.jpg"), quality=90)
+    master2.rotate(B2_POS_DISPLAY_ROT, expand=True).resize((900, 1200), Image.Resampling.LANCZOS).save(
+        os.path.join(cache_dir, "FL3_w2000.jpg"), quality=90)
+
+
+def write_other_displayed_image(cache_dir: str) -> None:
+    """Replace the displayed rendition of 100000 with another photograph (the geometry check must fail)."""
+    from PIL import Image
+    other = _synthetic_photograph(99, B1_POS_FRAME, [[150 + 90 * i, 200 + 110 * i, 200, 60] for i in range(8)])
+    other.resize((1000, 1250), Image.Resampling.LANCZOS).save(os.path.join(cache_dir, "FL1_w2000.jpg"), quality=90)
+
+
+def add_position_gallery(world: dict) -> None:
+    """Image 400 enters ALMA_A's gallery with a pixel size, and rows 1 and 16 carry the position world's B1 text."""
+    con = sqlite3.connect(world["nli"])
+    con.execute("INSERT INTO nli_images VALUES (?,?,?,?,?,?)", ("400", ALMA_A, "T_S_1_1__L3F0B0S1", "C400", "T-S 1.1 3r", "T-S 1.1"))
+    con.commit()
+    con.close()
+    con = sqlite3.connect(world["fjms"])
+    con.execute("INSERT INTO extra_info VALUES (?,?,?,?,?)", ("C400", ALMA_A, B2_POS_MASTER[0], B2_POS_MASTER[1], 180.0))
+    con.commit()
+    con.close()
+    con = sqlite3.connect(world["fgp"])
+    con.execute("UPDATE fgp_transcriptions SET content=?, content_length=? WHERE id IN (1, 16)", (B1_POS_TEXT, len(B1_POS_TEXT)))
+    con.commit()
+    con.close()

@@ -445,6 +445,31 @@ Each gate names what makes it fail; "measured" or "reviewed" alone is never a pa
    pass — the transformed overlay has to land); any overlay text span is not tied to the selected edition's revision;
    an unresolved mapping still shows an overlay; installed size, largest payload or cold read latency exceed the
    declared limits for the chosen storage — in which case the other schema is taken or the scope cut.
+   **Run 2026-10-26 — FAIL on G1, 17 of 20 images PASS; the other nine checks PASS; 39 declared expectations, two
+   runs with one digest** (`scripts/run_fgp_gate5_positions.ps1` → `scripts/fgp_gate5_positions.py`; the tolerance,
+   limits, sampling, transform family and the run record in
+   [`FGP_POSITIONS_RULES.md`](FGP_POSITIONS_RULES.md); output `fgp_data/inventory/positions_payload.db` (chosen,
+   53 MB) and `positions_relational.db` (136 MB), `gate5.db`, the fetched renditions under `gate5_cache/`). Declared
+   before the run: a landmark tolerance (≥ 6 words found at NCC ≥ 0.45 in ≥ 4 grid cells, every residual ≤ 0.35 of
+   the line pitch, RMS ≤ 0.20) and the store limits (512 MB installed, 1 MB per payload, cold read p95 25 ms / max
+   200 ms, 2,048 MB build peak); a seeded stratified draw of 20 (B1 / B2 × small / large recorded rotation,
+   round-robin over libraries, a reserve for images NLI does not serve or whose canvas is not confirmed as the page).
+   What the check found: the FGP frame maps onto NLI's rendition by a similarity transform — orientation, a searched
+   uniform scale (the FGP master is often a crop of a larger library photograph: Strasbourg ×2.9, HUC ×1.9, the AIU
+   grid-board photographs ×1.33), a small angle (±0.75° on two Vienna images) and a translation — and lands: on the
+   17 passing images 288 landmarks, mean residual 1.5 px at width 2000, 16 of 17 under 4.1 px at the worst word.
+   The three failures are findings: JTS ENA 2017.8 is another capture of the page (no transform correlates), the
+   first two lines of Strasbourg 4075.5 sit 40–47 px left of their words in FGP's geometry, BL Or 12299.25 has eight
+   positioned words of which five land within 1.6 px — below the declared six. B2 coordinates live in the master as
+   FGP turned it (swapped at 90/270); B1 join and region directories are composites or derivatives and are unresolved
+   by rule. The prototype store: 19,608 of 19,659 directories tied to a candidate row by text hash (46 differ from
+   the candidate's text, 5 have no row, 2 are region directories), 22,319 payloads keyed by `(durable_key,
+   text_hash)` holding 2,275,222 positioned words with verified spans, `overlay_allowed` only on the 17 verified
+   images; schema P 53 MB, largest payload 16 KB, cold read p95 0.7 ms, build 112 s at 865 MB peak. Ten of the
+   thirty drawn images gave way: five NLI 503s, four pages the manifest cannot be aligned to by folio label (the
+   per-folio alignment defect the apps share), one manifest shorter than the gallery. Owner items: the verdict for
+   re-photographed pages and few-word images, acceptance for the 19,591 unchecked images (a minute each), page
+   confirmation in the overlay contract, the 46 mismatched texts.
 6. **Joins pilot and description reconciliation**, each separately reviewed. *Fails if:* a published relationship
    lacks provenance or an approved scholarly classification; a reconciled description is unattributed, duplicates an
    existing `catalog_free_desc` row, or displaces existing text or translations.
@@ -572,3 +597,13 @@ publishable with text 40,990); the stubs of the same-image pairs are retired (ga
 two readings stay; the 1,138 gallery-mismatch rows stay held. Gate 4 rerun, PASS, record revised above (44,286 carried,
 6,395 new, 58 expectations); `master-main` pushed. Still unruled: `RecordStatus` 1 / 5 and code 5309 (a question for
 FGP), team 850's non-manuscript documents, team 107's excerpt rows. The candidate is not deployed.
+
+**Revision 15 (gate 5 run, 2026-10-26)** — the positions prototype after the 20-image geometry check (§8.5):
+FAIL on the geometry check, 17 of 20, every other check PASS, two runs with one digest
+([`FGP_POSITIONS_RULES.md`](FGP_POSITIONS_RULES.md)). Corrections to this document from the run: the B2 `split(ROW)`
+boxes §4.2 lists among the editor artefacts are the words themselves (only the blank `_test` boxes and negative `x1`
+are artefacts); B1 join directories are composites (`ziruf`) in their own frame and region directories a derivative
+(§4.1 `imagesize`, not the fjms size), so neither maps by a rigid transform of the master; B2 coordinates sit in the
+master as FGP turned it (swapped at a recorded 90/270); the §4.5 "scaling is `iiif_width / PixelWidth`" holds for the
+canvases that are the master (10 of 20) and not for the rest, where the master is a crop of a larger photograph and
+the scale must be searched; and NLI's canvas at a page's gallery index is not always that page (4 of 30 drawn).
