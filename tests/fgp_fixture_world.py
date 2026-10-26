@@ -374,10 +374,14 @@ def build_sidecars(root: str, extended: bool = False, text: bool = False) -> tup
     con.close()
     nli = os.path.join(root, "nli_crossref.db")
     con = sqlite3.connect(nli)
-    con.execute("CREATE TABLE nli_images (FGPImageNumberId TEXT, NLI_AlmaId TEXT, ImageName TEXT)")
-    con.executemany("INSERT INTO nli_images VALUES (?,?,?)", [
-        ("100000", ALMA_A, "T_S_1_1__L1F0B0S1"), ("200", ALMA_B, "T_S_1_2__L1F0B0S1"),
-        ("200", ALMA_C, "T_S_1_2__L1F0B0S1"), ("300", ALMA_C, "X"),
+    # The columns the apps' NliCrossrefService.get_images reads too (gate 4 drives it over this file).
+    con.execute("CREATE TABLE nli_images (FGPImageNumberId TEXT, NLI_AlmaId TEXT, ImageName TEXT, FGPNumber TEXT, "
+                "ImageSourceName TEXT, Shelfmark TEXT)")
+    con.executemany("INSERT INTO nli_images VALUES (?,?,?,?,?,?)", [
+        ("100000", ALMA_A, "T_S_1_1__L1F0B0S1", "C100000", "T-S 1.1 recto", "T-S 1.1"),
+        ("100001", ALMA_A, "T_S_1_1__L1F0B0S2", "C100001", "T-S 1.1 verso", "T-S 1.1"),
+        ("200", ALMA_B, "T_S_1_2__L1F0B0S1", "C200", "T-S 1.2 recto", "T-S 1.2"),
+        ("200", ALMA_C, "T_S_1_2__L1F0B0S1", "C200", "T-S 1.2 recto", "T-S 1.2"), ("300", ALMA_C, "X", "C300", "X", "X"),
     ])
     con.commit()
     con.close()

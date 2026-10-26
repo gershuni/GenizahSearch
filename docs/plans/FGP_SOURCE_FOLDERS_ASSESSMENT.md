@@ -419,6 +419,22 @@ Each gate names what makes it fail; "measured" or "reviewed" alone is never a pa
    unselectable; a saved choice is lost; a page assignment changes without approval; a default-selection change is
    not dispositioned; import peak memory exceeds the declared limit (to be set against the 63 GB dev machine and the
    server's 5–6 GB baseline) or manuscript-load latency exceeds the declared budget on the reference manuscripts.
+   **Run 2026-10-26 — PASS, 15 checks + 51 declared expectations, two runs with one digest**
+   (`scripts/run_fgp_gate4_chooser_validation.ps1` → `scripts/fgp_gate4_chooser_validation.py`; the rules, the budgets
+   declared before the run, the reference set and the run record in
+   [`FGP_CHOOSER_VALIDATION_RULES.md`](FGP_CHOOSER_VALIDATION_RULES.md); output
+   `fgp_data/inventory/fgp_transcriptions.candidate.db` beside today's sidecar, never over it, and `gate4.db`). The
+   candidate carries 44,500 of today's rows under their ids (27,686 with gate 3's text; 534 excluded: 391 XML rows gate
+   3 could not verify, 80 gate-2 holds, 50 retired, 13 without text) and 6,433 new rows under the `plain` policy (1,569
+   per image, 4,864 whole document; 18,846 held: 17,124 structured DOCX, 1,138 image–manuscript mismatches, 322
+   without an AlmaId, 168 blank, 94 the chooser could not list). Selectability over 27,625 manuscripts through the
+   real service: every listed source kept or dispositioned (474 lost, each by a gate-2 ruling, a retirement, a text-less
+   row or a same-text swap), all 6,433 new rows listed; page keys unchanged on all 44,500; on 88 reference manuscripts
+   (1,130 pages) 497 default changes, every one dispositioned (430 new editions, 62 excluded rows, 3 replaced texts, 2
+   swaps), web and desktop shapes agree; latency p95 2.7 ms per manuscript load and 4.4 ms per page against budgets of
+   500 / 250 ms; memory 950 MB build peak, 10.6 MB app-side; file 295 MB. Two defects recorded: the reading desk's
+   saved source choice is never applied (open-issue fragment 2026-10-26), and today's chooser hides the shorter of 95
+   same-image pairs (rules §5).
 5. **Positions prototype after the 20-image geometry check.** The landmark tolerance and the size / payload / latency
    limits are declared *before* the check; an undeclared limit is itself a fail. *Fails if:* for any of the 20 images
    the **residual** landmark error after the recorded transform exceeds the tolerance (recording a transform is not a
@@ -521,3 +537,12 @@ every line of which is accounted for; 2,679 of the 3,130 held XML rows are verif
 types and the Genuzos DOCX files carry sigla and notes neither rendering shows; 3,800 rows are held with their
 blocks for review, concentrated in teams 101, 132, 200 and 600. Publishable with text 41,143. The 25,342 new rows
 are read with a DOCX structure census and accepted by no rule until the owner picks the `plain` policy.
+
+**Revision 12 (gate 4 run, 2026-10-26)** — `scripts/fgp_gate4_chooser_validation.py` builds the larger sidecar as a
+candidate from gates 2 and 3 (ids kept, gate-3 texts, gate-2 credits, new rows under a declared policy with image and
+shadowing rules) and drives the chooser's shared functions over today's and the candidate with both apps' argument
+shapes (`FGP_CHOOSER_VALIDATION_RULES.md`; 15 checks + 51 expectations, budgets declared before the run, two runs with
+one digest, PASS). Every source listed today stays listed or carries a disposition, every page key is unchanged, every
+default change on 88 reference manuscripts is dispositioned, and latency and memory sit two orders below the budgets.
+Found on the way: the reading desk saves a source choice by list position and never applies it; today's
+`dedupe_fgp_sources` collapses 3,603 same-image pairs of two FIST units, 95 of them with different texts.
