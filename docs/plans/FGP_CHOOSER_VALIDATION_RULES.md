@@ -118,3 +118,23 @@ whether or not the row was the default.
 Open for the owner (beside gate 3's rulings): whether the 11 text-less rows' DOCX texts are approved; whether the
 95 shorter rows of the same-image pairs (§5) are drafts to retire; the 1,138 folder-B rows whose manuscript the
 gallery does not list for the image; the `plain` policy itself.
+
+### Drafts and short texts in the delta (owner's question of 2026-10-26; `_tmp/fgp_delta_drafts_report.md`)
+
+The delta holds drafts and short rows, at a lower rate than today's rows, with three exceptions of its own. Short
+texts: 8.0 % of the delta's rows are under 200 non-whitespace characters against 18.0 % of today's (medians 861 vs
+553); on the same format (DOCX) 6.3 % vs 10.4 %; folder-B per-image rows are as short on both sides (median ≈ 290
+characters). The short delta rows come from team 200 (677 units), team 107's Firkovitch `העתקות:` excerpts (391) and
+team 500's catalogue rows (123). Declared drafts: `לפני הגהה אחרונה` ("before final proofreading", team 151) is on
+291 of today's rows and 298 of the delta's — today's sidecar already publishes them; `!DRAFT` (team 133, 7 delta
+rows), `טרם הוגה` (1 each side), `הקריאה לא סופית` (1 delta row). FIST marks more draft-like units among today's
+rows than the delta's: `PartOfTranscription` = partial on 1,600 of today's units vs 214; the unit comment `לא נבדק
+מול המקור` / `אין לפרסם עד לקריאה מול מקור` on 168 of today's rows (166 publishable under gate 2 — open-issue fragment
+2026-10-26) vs 4 in the delta; `PermissionCommentCode` 5309 on 156 of today's units vs 8. The delta's own exceptions:
+168 empty files (56 units; 98 rows are two team-600 translations fanned out over 49 manuscripts) — gate 4 holds them
+as `blank_text`; 19 test or dummy units (23 rows, teams 240 and 850: "test", "ggg", "נסיון", a contact list, a recipe,
+software notes) — not caught by any rule yet; and `dbo_Signature.RecordStatus` 1 or 5 on 6,586 delta units (35 %)
+against one of today's 40,416, with no code table to say what the values mean. Rulings needed before the `plain`
+policy ships: the meaning of `RecordStatus` 1 / 5 and of code 5309, a hold on the test units and on the unchecked
+comments, and whether team 107's excerpt rows are editions at all. `content_length` in today's sidecar is
+`len(content)`, whitespace included, not the non-whitespace count the schema comment claims.
