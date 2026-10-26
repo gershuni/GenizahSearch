@@ -257,7 +257,8 @@ def test_new_row_image_rules():
 
     texts.executemany("INSERT INTO unit_texts VALUES (?,?,?)", [
         ("dbo_UnitTranscription", 7, "test"), ("dbo_UnitTranscription", 8, "נסיון\nנא להתעלם!!!"),
-        ("dbo_UnitTranscription", 9, "ggg"), ("dbo_UnitTranscription", 10, "טקסט של ממש"), ("dbo_UnitTranscription", 11, "5555")])
+        ("dbo_UnitTranscription", 9, "ggg"), ("dbo_UnitTranscription", 10, "טקסט של ממש"), ("dbo_UnitTranscription", 11, "5555"),
+        ("dbo_UnitTranscription", 12, LEGACY_FONT_TEXT), ("dbo_UnitTranscription", 13, VOCALISED_TEXT)])
     g3_new = [new(1, "A", "b2_rows", "C10\\data.js"),          # image 10 already served by unit 100 on A
               new(2, "A", "b2_rows", "C11\\data.js"),          # gallery lists image 11 under Z, not A
               new(3, "A", "b1_xml", "99\\99.xml"),             # unknown image
@@ -268,9 +269,11 @@ def test_new_row_image_rules():
               new(8, "C", "docx", "x\\word\\u8.docx"),
               new(9, "C", "docx", "x\\word\\u9.docx"),
               new(10, "C", "docx", "x\\word\\u10.docx"),       # held by its FIST comment
-              new(11, "C", "docx", "x\\word\\u11.docx")]
+              new(11, "C", "docx", "x\\word\\u11.docx"),
+              new(12, "C", "docx", "x\\word\\u12.docx"),       # a legacy-font DOCX: vowel points where letters should be
+              new(13, "E", "docx", "x\\word\\u13.docx")]       # a vocalised piyyut: every mark follows a letter -> passes
     b_numbers = {"10": {"A"}, "11": {"Z"}, "12": {"B"}, "13": {"C"}}
-    units = {("dbo_UnitTranscription", i): (200, 1, f"u{i}") for i in range(1, 12)}
+    units = {("dbo_UnitTranscription", i): (200, 1, f"u{i}") for i in range(1, 14)}
     ctx = {"parts": {}, "catalog": {}, "book": {}, "bibref": {}}
     comments = {("dbo_UnitTranscription", 10): "אין לפרסם עד לקריאה מול מקור"}
     plan = g4.plan_candidate(today, g2, {}, {}, g3_new, texts, b_numbers, units, {}, ctx, "plain", comments=comments)
@@ -280,8 +283,9 @@ def test_new_row_image_rules():
     held = {rk.split(":")[2].split("|")[0]: d for rk, d, _ in plan["held"]}
     assert held == {"1": "image_already_served", "2": "image_alma_mismatch", "3": "image_unknown",
                     "4": "shadows_whole_doc_row", "5": "whole_doc_shadowed", "7": "test_or_dummy", "8": "test_or_dummy",
-                    "9": "test_or_dummy", "10": "fist_comment_unchecked", "11": "test_or_dummy"}
-    assert [(r["row_key"], r["c_number"], r["sys_id"]) for r in plan["new_rows"]] == [("new:dbo_UnitTranscription:6|C", "C13", "C")]
+                    "9": "test_or_dummy", "10": "fist_comment_unchecked", "11": "test_or_dummy", "12": "legacy_font"}
+    assert [(r["row_key"], r["c_number"], r["sys_id"]) for r in plan["new_rows"]] == [
+        ("new:dbo_UnitTranscription:6|C", "C13", "C"), ("new:dbo_UnitTranscription:13|E", None, "E")]
     assert plan["new_rows"][0]["id"] == 6 and "גנוזות" in plan["new_rows"][0]["source_credit_he"]
     assert g4.plan_candidate(today, g2, {}, {}, g3_new, texts, b_numbers, units, {}, ctx, "hold")["new_rows"] == []
 
@@ -295,3 +299,21 @@ def test_new_row_image_rules():
 ])
 def test_test_or_dummy_rule(text, relation, expected):
     assert g4.test_or_dummy(text, relation) is expected
+
+
+# A DOCX typed in a pre-Unicode Hebrew font: the letters arrive as vowel points after spaces (RNL Arab.-Yevr. 72).
+LEGACY_FONT_TEXT = "העתקות: 1א: " + " ".join(["ַָָ ם ַהו זַֽֿ בַ ַֻהם בו"] * 4)
+# A vocalised piyyut: every mark follows its letter.
+VOCALISED_TEXT = "אֵל פְּנֵה לַנֱּחֳלִים מִנְּדוּדְךָ יִדְאָבוּ\nבְּחֹדֶשׁ סִיוָן נִתְּנָה דָת לְנוֹחֲלֶיהָ\n" * 6
+
+
+@pytest.mark.parametrize("text, expected", [
+    (LEGACY_FONT_TEXT, True), (VOCALISED_TEXT, False), ("טקסט פשוט בלי ניקוד " * 10, False),
+    ("ַא " * 9, False),                           # fewer than 10 orphan marks: left alone
+    ("ַא " * 10 + "א" * 200, False),              # 10 orphans but under a tenth of the letters
+    ("ַא " * 10 + "א" * 50, True),
+    ("] ָ ְ ָ (שם) " * 10, False),           # marks standing alone: a placeholder for an illegible letter
+    ("Muḥammad and Buṭrus " * 10, False),       # Latin letters with decomposed diacritics
+])
+def test_legacy_font_rule(text, expected):
+    assert g4.legacy_font(text) is expected

@@ -22,14 +22,16 @@ Candidate sidecar ``fgp_transcriptions.candidate.db`` (today's schema + ``origin
      gate-2 hold is ``xml_unverified`` and gate 3 verified the XML text by the row's own record; and
      it has a text that is not a test or dummy file (``test_or_dummy``: at most 40 characters that
      are a transcription without a Hebrew or Arabic letter, test words and digits only, or carry
-     "טסט" / "נא להתעלם").
+     "טסט" / "נא להתעלם") and, when gate 3 replaced it, not a legacy-font DOCX (``legacy_font``:
+     at least 10 combining marks that follow no letter, and at least a tenth as many as letters).
   R3 its text is gate 3's when gate 3 replaced it (status accepted / approved), else today's;
      ``sections`` (the PDF page split) is cleared on a replaced text.
   R4 its credit is gate 2's (``credit_he`` / ``credit_en``; the generic Friedberg attribution where
      gate 2 ruled generic).
   R5 a new (unit, AlmaId) row read by gate 3 enters under ``--new-rows-policy plain`` iff its text
-     is non-blank, not a test or dummy file, its FIST unit comment does not say it was never checked
-     against the source (``fist_comment_unchecked``, gate 2's rule), and it comes from folder B, or
+     is non-blank, not a test or dummy file, not a legacy-font DOCX, its FIST unit comment does not say
+     it was never checked against the source (``fist_comment_unchecked``, gate 2's rule), and it
+     comes from folder B, or
      from a DOCX without tables, footnotes, hidden runs,
      tracked changes or auto-numbering; a folder-B row carries the image number of its folder as
      ``c_number`` only when the NLI gallery lists that image under the row's manuscript (else held
@@ -139,7 +141,48 @@ STRUCTURE_HOLD_KEYS = ("tables", "footnotes", "hidden_runs", "tracked_changes", 
 SAME_TEXT_RATIO = 0.95
 # The only reasons a source the chooser lists today may be missing from the candidate's list.
 SELECTABILITY_DISPOSITIONS = frozenset({"retired_alias", "gate2_hold", "xml_unverified", "empty_text", "test_or_dummy",
-                                        "same_text_swap"})
+                                        "legacy_font", "same_text_swap"})
+# Legacy-font DOCX (owner's ruling of 2026-10-26): a file typed in a pre-Unicode Hebrew font reads as vowel points
+# standing where letters should be. In real Unicode text a combining mark always follows a letter; a mark that
+# follows a space, a digit, punctuation or the start of the text ("orphan") is the font's letter. A vocalised
+# piyyut has none; the garbled files have one per word. Held when there are at least LEGACY_ORPHAN_MIN orphan marks
+# and they are at least LEGACY_ORPHAN_SHARE of the letters. Judged on gate 3's texts only (DOCX, folder B): today's
+# PDF text detaches marks by itself, which gate 3's classes handle.
+LEGACY_ORPHAN_MIN = 10
+LEGACY_ORPHAN_SHARE = 0.10
+
+
+def legacy_font_stats(text: str) -> tuple:
+    """(Hebrew and Arabic letters, orphan combining marks) of ``text``.
+
+    A mark attaches to any letter (a Latin letter with a decomposed diacritic, "Muḥammad", is not an orphan).
+    An orphan counts only when it starts a word -- the next character is a letter or another mark -- which is
+    how a legacy font's letters arrive; a mark standing alone between spaces is a transcriber's placeholder for
+    an illegible letter (T-S AS 141.44d: "] ָ ְ ָ (שם)") and is left alone.
+    """
+    text = text or ""
+    letters = orphan = 0
+    after_letter = False
+    for i, c in enumerate(text):
+        cat = unicodedata.category(c)
+        if "א" <= c <= "ת" or "ؠ" <= c <= "ي":
+            letters += 1
+            after_letter = True
+        elif cat.startswith("L"):
+            after_letter = True
+        elif cat == "Mn":
+            if not after_letter:
+                nxt = text[i + 1] if i + 1 < len(text) else ""
+                if nxt and (unicodedata.category(nxt).startswith("L") or unicodedata.category(nxt) == "Mn"):
+                    orphan += 1
+        else:
+            after_letter = False
+    return letters, orphan
+
+
+def legacy_font(text: str) -> bool:
+    letters, orphan = legacy_font_stats(text)
+    return orphan >= LEGACY_ORPHAN_MIN and orphan >= LEGACY_ORPHAN_SHARE * letters
 # Test and dummy files (owner's ruling of 2026-10-26, after the drafts check): a text of at most 40 characters that
 # is a transcription without a Hebrew or Arabic letter ("test", "ggg", "fgfghfg", "241241"), or consists of test
 # words and digits only ("בדיקה", "נסיון", "test"), or carries "טסט" or "נא להתעלם" ("please ignore") anywhere.
@@ -326,6 +369,8 @@ def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new:
             excluded.append((k["id"], "empty_text", "gate3:" + str((g3_today.get(k["id"]) or {}).get("hold_reason") or "")))
         elif test_or_dummy(text, today[k["id"]].get("doc_relation") or "Digital Edition"):
             excluded.append((k["id"], "test_or_dummy", text.strip()[:TEST_TEXT_MAX]))
+        elif k["replaced"] and legacy_font(text):
+            excluded.append((k["id"], "legacy_font", "%d orphan marks / %d letters" % legacy_font_stats(text)[::-1]))
         else:
             with_text.append(k)
     kept = with_text
@@ -365,6 +410,9 @@ def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new:
         relation = "Digital Translation" if n["kind"] == "translation" else "Digital Edition"
         if test_or_dummy(text, relation):
             held.append((rk, "test_or_dummy", text.strip()[:TEST_TEXT_MAX]))
+            continue
+        if legacy_font(text):
+            held.append((rk, "legacy_font", "%d orphan marks / %d letters" % legacy_font_stats(text)[::-1]))
             continue
         structure = json.loads(n["structure"] or "{}") if n["structure"] else {}
         if n["reader"] == "docx" and any(structure.get(k) for k in STRUCTURE_HOLD_KEYS):
