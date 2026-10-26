@@ -4065,3 +4065,16 @@ marks as typed, and to follow up with a legend link beside the text, or by drawi
 Fix sketch: a link needs a public address for the legend (none known; the PDF is local only). Drawing
 needs a rule in both readers, limited to Hebrew transcriptions (`?` is a real question mark in English
 translations), and a decision on whether copied and cited text keeps the marks.
+
+Assessed 2026-10-26 (mock: `_tmp/fgp_sigla_options.html`, untracked). The marks are the Genuzot team's: of its
+11,870 new rows 84% carry `?x?`, 48% `@`, 45% `¶`; other teams carry none of these. Two team legends exist, both
+local only (no public copy found; FGP's sites sit behind the FJMS sign-in): the 2024 `סיגלה אקדמית` PDF (23
+marks) and a 2014 Word table, `סיגלה עיונית וסיגלה חזותית`, of the Talmud work (27 numbered marks with their
+software codes, the same letters as the visual XML's `c` classes). They disagree on `[…]` (2014: between the
+lines / margin; 2024: torn or blurred). Not explained by either: `@` around one to three letters inside a word
+(5,078 + 933 occurrences in new rows, beside 10,893 piyyut spans), `¶` (2014 has a different glyph for a
+non-standard paragraph end), `\`, `[[…]]`, `[|…|]`, `§…§` (2014: an explicitly marked variant reading; the
+liturgical rows use it for cue words), runs of `??`. Every mark inside a word also defeats search-hit
+highlighting in both apps (`browse.py::highlight_text`, `desktop/widgets::mark_pattern_hits`), and on the
+desktop `*…*` headings collide with the hit markers. Found alongside: the desktop drops every `<…>` mark (its
+own row, from `docs/open_issues.d/2026-10-26-desktop-fgp-pgp-angle-marks-swallowed.md`).
