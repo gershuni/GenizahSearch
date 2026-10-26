@@ -56,8 +56,8 @@ def world(tmp_path_factory):
         json.dump(HTR, fh, ensure_ascii=False)
     assert g4.main(["--fgp-db", w["fgp"], "--gate2", os.path.join(w["out"], "gate2.db"), "--gate3", os.path.join(w["out"], "gate3.db"),
                     "--inventory", inv, "--fist", w["fist"], "--nli", w["nli"], "--libraries-csv", os.path.join(root, "none.csv"),
-                    "--approvals", os.path.join(root, "none.json"), "--out-dir", w["out"], "--htr-json", htr,
-                    "--allow-single-run"]) == 0
+                    "--approvals", os.path.join(root, "none.json"), "--exclusions", os.path.join(root, "none.json"),
+                    "--out-dir", w["out"], "--htr-json", htr, "--allow-single-run"]) == 0
     w["candidate"] = os.path.join(w["out"], g4.CANDIDATE_NAME)
     return w
 
