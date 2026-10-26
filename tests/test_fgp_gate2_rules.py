@@ -94,6 +94,9 @@ def test_every_row_gets_one_outcome_and_the_gate_passes(world, capsys):
     assert o[13]["credit_category"] == "catalog" and o[13]["credit_en"] == "CUDL Catalog, Cambridge, 2010"
     assert o[13]["outcome"] == "re-sourced" and o[13]["publishable_strict"] == 1
     assert o[14]["credit_category"] == "book" and o[14]["credit_he"] == "ספר הבהיר"
+    # FIST's unit comment says the transcription was never checked against the source -> held, credit kept
+    assert o[14]["fist_comment"] == "לא נבדק מול המקור. מצב כתיבה-הגהה א'" and o[14]["publishable"] == 0
+    assert json.loads(o[14]["hold_reasons"]) == ["fist_comment_unchecked"] and o[14]["outcome"] == "re-sourced"
     assert o[15]["credit_category"] == "unresolved" and o[15]["credit_changed"] == 0
     assert o[15]["outcome"] == "kept" and o[15]["publishable_strict"] == 0 and o[15]["publishable_generic"] == 1
     assert o[15]["publishable"] == 1 and o[15]["credit_status"] == "generic" and o[15]["credit_he"] == "פרויקט הגניזה של פרידברג"
@@ -121,8 +124,9 @@ def test_every_row_gets_one_outcome_and_the_gate_passes(world, capsys):
 
     # totals
     assert counts["outcome.kept"] == 6 and counts["outcome.re-sourced"] == 10 and counts["outcome.retired-with-alias"] == 4
-    assert counts["publishable.strict"] == 10 and counts["publishable.generic_credit_allowed"] == 11
-    assert counts["publishable.under_policy"] == 11 and counts["credit.generic_rows"] == 2  # rows 15, 17
+    assert counts["publishable.strict"] == 9 and counts["publishable.generic_credit_allowed"] == 10
+    assert counts["publishable.under_policy"] == 10 and counts["credit.generic_rows"] == 2  # rows 15, 17
+    assert counts["hold.fist_comment_unchecked"] == 1
     assert counts["durable_keys_distinct"] == 17  # row 6 shares row 5's key; rows 4 and 17 have no unit
     aliases = {r["old_id"]: r for r in _rows(db, "SELECT * FROM aliases")}
     assert set(aliases) == {4, 6, 9, 10} and aliases[6]["same_meaning"] == 1 and aliases[9]["same_meaning"] == 0
@@ -137,7 +141,9 @@ def test_gate_fails_when_a_unit_kind_disagrees_with_the_row(world, capsys):
     # register the translation's file as a transcription in FIST: the row's kind no longer matches its unit
     con = sqlite3.connect(world["fist"])
     con.execute("DELETE FROM dbo_UnitTranslation")
-    con.execute("INSERT INTO dbo_UnitTranscription VALUES (99, 109, '20000000000011_CUL_T-S 1.1_Tl', 2, '2000000\\', NULL, 2, NULL, NULL, NULL)")
+    con.execute("INSERT INTO dbo_UnitTranscription (UnitTranscriptionId, SignatureId, FileName, Lang, FolderPath, "
+                "tmp_DoubleNotToDisplay, HasFiles, ImageTranscriptionFolder, HebCopyRight, EngCopyRight) "
+                "VALUES (99, 109, '20000000000011_CUL_T-S 1.1_Tl', 2, '2000000\\', NULL, 2, NULL, NULL, NULL)")
     con.commit()
     con.close()
     assert gate1.main(["--nopos", world["nopos"], "--withpos", world["withpos"], "--fist", world["fist"],
@@ -165,7 +171,7 @@ def test_gate_fails_on_a_missed_expectation_and_refuses_a_foreign_db(world, caps
 
 
 def test_strict_policy_holds_the_generic_credit_rows(world, capsys):
-    assert gate2.main(_args(world, "--credit-policy", "strict", "--expect", "publishable.under_policy=10")) == 0
+    assert gate2.main(_args(world, "--credit-policy", "strict", "--expect", "publishable.under_policy=9")) == 0
     db = os.path.join(world["out"], "gate2.db")
     o = {r["id"]: r for r in _rows(db, "SELECT * FROM row_outcomes")}
     assert o[15]["publishable"] == 0 and o[15]["credit_status"] == "unresolved" and o[15]["credit_he"] is None

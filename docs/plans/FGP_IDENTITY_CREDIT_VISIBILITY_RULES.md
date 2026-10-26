@@ -94,6 +94,11 @@ reading, which `publishable_strict` keeps reporting):
 - kind is transcription or translation (descriptions and unmatched files never enter the chooser);
 - outcome is not retired; association basis is `fist_chain` or `fist_chain_multi_registration`;
 - the unit's `tmp_DoubleNotToDisplay` is not 1 (23 rows held; its meaning is unconfirmed with FGP);
+- the unit's FIST `Comment` does not say the transcription was not checked against the source (`לא נבדק מול
+  המקור`, with a writing stage `כתוב חדש` / `הגהה א'` / `הגהה ב'`) or must not be published until read against it
+  (`אין לפרסם עד לקריאה מול מקור`) — hold `fist_comment_unchecked`, the owner's ruling of 2026-10-26 after the
+  drafts check (`FGP_CHOOSER_VALIDATION_RULES.md` §6): 168 rows, 151 units, team 130 but one; the comment is kept
+  in `row_outcomes.fist_comment`;
 - the credit is resolved, or generic under the ruled policy (§3);
 - the text is verified to belong to the row's own record. XML rows fail this when today's rebuild keyed the XML by
   image number: 3,099 `xml_unverified` (3,073 of them on Genuzos units whose image folder FIST assigns to *another
@@ -152,3 +157,8 @@ a hold, and no strictly publishable row with a generic credit · `G05` every pub
 English credit · `G06` durable keys unique among live rows · `G07` every unpublishable row names its reason.
 `tests/test_fgp_gate2_rules.py` proves the gate fails when a unit's kind disagrees with its row's and on a missed
 expectation, and that `--credit-policy strict` holds the generic rows again.
+
+2026-10-26 — rerun with the `fist_comment_unchecked` hold (§4): **PASS, 7 checks + 36 declared expectations**.
+167 rows held by their unit's comment (the 168th is retired); publishable **41,642** under the ruled policy (41,307
+strict), from 41,807 / 41,472. Outcomes, credits and retirements unchanged. Gate 3's `publishable_text` follows
+(41,143 → 40,980) and gate 4's candidate drops the 165 carried rows (`FGP_CHOOSER_VALIDATION_RULES.md` §6).

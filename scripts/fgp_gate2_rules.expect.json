@@ -32,7 +32,8 @@
   "text.xml_other_edition": 5,
   "text.file_absent_in_delivery": 19,
   "xml_owner.owner_same_source_same_manuscript": 3073,
-  "publishable.strict": 41472,
-  "publishable.under_policy": 41807,
-  "publishable.generic_credit_allowed": 41807
+  "publishable.strict": 41307,
+  "publishable.under_policy": 41642,
+  "publishable.generic_credit_allowed": 41642,
+  "hold.fist_comment_unchecked": 167
 }

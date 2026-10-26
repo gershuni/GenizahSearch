@@ -67,15 +67,16 @@ def _load(w):
 
 
 def test_candidate_follows_the_rules_and_the_chooser_lists_every_edition(world, capsys):
-    rc = g4.main(_args(world, "--allow-single-run", "--expect", "rows.candidate=14"))
+    rc = g4.main(_args(world, "--allow-single-run", "--expect", "rows.candidate=13"))
     out = capsys.readouterr().out
     assert rc == 0, out
     cand, disp, sel, dec, counts, checks = _load(world)
     assert all(c["passed"] == 1 for c in checks.values()), [n for n, c in checks.items() if not c["passed"]]
 
     # R1/R2: today's ids kept; retired and gate-2-held rows excluded, each with its reason
-    assert sorted(i for i in cand if cand[i]["origin"] == "today") == [1, 2, 5, 7, 12, 13, 14, 15, 16, 18, 19, 20, 21]
+    assert sorted(i for i in cand if cand[i]["origin"] == "today") == [1, 2, 5, 7, 12, 13, 15, 16, 18, 19, 20, 21]
     assert disp["6"]["disposition"] == "retired_alias" and json.loads(disp["6"]["detail"])["successor_id"] == 5
+    assert disp["14"]["disposition"] == "gate2_hold" and "fist_comment_unchecked" in disp["14"]["detail"]
     assert disp["3"]["disposition"] == "gate2_hold" and "file_absent_in_delivery" in disp["3"]["detail"]
     assert disp["8"]["disposition"] == "gate2_hold" and "tmp_DoubleNotToDisplay" in disp["8"]["detail"]
     assert disp["11"]["disposition"] == "gate2_hold" and "association_unconfirmed" in disp["11"]["detail"]
@@ -98,7 +99,7 @@ def test_candidate_follows_the_rules_and_the_chooser_lists_every_edition(world, 
     assert disp[f"new:dbo_UnitTranscription:20|{ALMA_B}"]["disposition"] == "docx_structure"
     assert disp[f"new:dbo_UnitTranscription:2|{ALMA_B}"]["disposition"] == "shadows_whole_doc_row"
     # R6
-    assert meta["version"] == g4.CANDIDATE_VERSION and meta["candidate"] and meta["rows"] == "14"
+    assert meta["version"] == g4.CANDIDATE_VERSION and meta["candidate"] and meta["rows"] == "13"
 
     # C2: the real service lists every carried edition; the lost ones carry their dispositions
     svc = fs.FgpService(db_path=world["candidate"])
@@ -111,7 +112,7 @@ def test_candidate_follows_the_rules_and_the_chooser_lists_every_edition(world, 
     assert counts["selectability.new_unlisted"] == 0 and counts["selectability.new_listed"] == 1
 
     # C4 / C5: page keys unchanged; the two default changes are the new edition and the excluded row
-    assert counts["page_assignment.unchanged"] == 13
+    assert counts["page_assignment.unchanged"] == 12
     changed = {(d["sys_id"], d["p_num"]): d for d in dec if d["changed"]}
     assert changed[(ALMA_C, 1)]["disposition"] == "new_edition" and changed[(ALMA_C, 1)]["candidate_uid"] == "fgp:22"
     assert changed[("990004", 1)]["disposition"] == "row_excluded"
@@ -122,7 +123,7 @@ def test_candidate_follows_the_rules_and_the_chooser_lists_every_edition(world, 
 def test_hold_policy_adds_no_new_row(world, capsys):
     assert g4.main(_args(world, "--allow-single-run", "--new-rows-policy", "hold")) == 0, capsys.readouterr().out
     cand, disp, sel, dec, counts, checks = _load(world)
-    assert counts["rows.new"] == 0 and counts["new_held.policy_hold"] == 3 and counts["rows.candidate"] == 13
+    assert counts["rows.new"] == 0 and counts["new_held.policy_hold"] == 3 and counts["rows.candidate"] == 12
 
 
 def test_two_runs_must_agree(world, capsys):
@@ -241,9 +242,12 @@ def test_new_row_image_rules():
     texts.executemany("INSERT INTO unit_texts VALUES (?,?,?)", [("dbo_UnitTranscription", i, "טקסט %d" % i) for i in range(1, 7)])
     today = {1: {"id": 1, "sys_id": "A", "c_number": "C10", "doc_relation": "Digital Edition", "language": None, "content": "אבג"},
              2: {"id": 2, "sys_id": "B", "c_number": None, "doc_relation": "Digital Edition", "language": None, "content": "דהו"},
-             3: {"id": 3, "sys_id": "D", "c_number": None, "doc_relation": "Digital Edition", "language": None, "content": " "}}
+             3: {"id": 3, "sys_id": "D", "c_number": None, "doc_relation": "Digital Edition", "language": None, "content": " "},
+             4: {"id": 4, "sys_id": "D", "c_number": None, "doc_relation": "Digital Edition", "language": None, "content": "טסט טסט"},
+             5: {"id": 5, "sys_id": "D", "c_number": None, "doc_relation": "Digital Translation", "language": "English",
+                 "content": "phrastic"}}
     g2 = {i: {"outcome": "kept", "publishable": 1, "hold_reasons": None, "credit_he": "x", "credit_en": "x", "unit_id": 100 * i,
-              "unit_table": "dbo_UnitTranscription", "durable_key": f"k{i}"} for i in (1, 2, 3)}
+              "unit_table": "dbo_UnitTranscription", "durable_key": f"k{i}"} for i in (1, 2, 3, 4, 5)}
 
     def new(uid, sid, reader, path, structure=None):
         return {"row_key": f"new:dbo_UnitTranscription:{uid}|{sid}", "unit_table": "dbo_UnitTranscription", "unit_id": uid,
@@ -251,21 +255,43 @@ def test_new_row_image_rules():
                 "structure": json.dumps(structure) if structure else None, "status": "no_comparator", "basename": f"u{uid}",
                 "durable_key": f"n{uid}"}
 
+    texts.executemany("INSERT INTO unit_texts VALUES (?,?,?)", [
+        ("dbo_UnitTranscription", 7, "test"), ("dbo_UnitTranscription", 8, "נסיון\nנא להתעלם!!!"),
+        ("dbo_UnitTranscription", 9, "ggg"), ("dbo_UnitTranscription", 10, "טקסט של ממש"), ("dbo_UnitTranscription", 11, "5555")])
     g3_new = [new(1, "A", "b2_rows", "C10\\data.js"),          # image 10 already served by unit 100 on A
               new(2, "A", "b2_rows", "C11\\data.js"),          # gallery lists image 11 under Z, not A
               new(3, "A", "b1_xml", "99\\99.xml"),             # unknown image
               new(4, "B", "b2_rows", "C12\\data.js"),          # B has a whole-document row -> would shadow it
               new(5, "A", "docx", "x\\word\\u5.docx"),         # whole-document on A, which has per-image rows
-              new(6, "C", "b2_rows", "C13\\data.js")]          # passes: image 13 confirmed for C
+              new(6, "C", "b2_rows", "C13\\data.js"),          # passes: image 13 confirmed for C
+              new(7, "C", "docx", "x\\word\\u7.docx"),         # test files and dummies
+              new(8, "C", "docx", "x\\word\\u8.docx"),
+              new(9, "C", "docx", "x\\word\\u9.docx"),
+              new(10, "C", "docx", "x\\word\\u10.docx"),       # held by its FIST comment
+              new(11, "C", "docx", "x\\word\\u11.docx")]
     b_numbers = {"10": {"A"}, "11": {"Z"}, "12": {"B"}, "13": {"C"}}
-    units = {("dbo_UnitTranscription", i): (200, 1, f"u{i}") for i in range(1, 7)}
+    units = {("dbo_UnitTranscription", i): (200, 1, f"u{i}") for i in range(1, 12)}
     ctx = {"parts": {}, "catalog": {}, "book": {}, "bibref": {}}
-    plan = g4.plan_candidate(today, g2, {}, {}, g3_new, texts, b_numbers, units, {}, ctx, "plain")
-    # R2: a carried row must have a text
-    assert [k["id"] for k in plan["kept"]] == [1, 2] and plan["excluded"] == [(3, "empty_text", "gate3:")]
+    comments = {("dbo_UnitTranscription", 10): "אין לפרסם עד לקריאה מול מקור"}
+    plan = g4.plan_candidate(today, g2, {}, {}, g3_new, texts, b_numbers, units, {}, ctx, "plain", comments=comments)
+    # R2: a carried row must have a text that is not a test file; an English translation is not a test file
+    assert [k["id"] for k in plan["kept"]] == [1, 2, 5]
+    assert plan["excluded"] == [(3, "empty_text", "gate3:"), (4, "test_or_dummy", "טסט טסט")]
     held = {rk.split(":")[2].split("|")[0]: d for rk, d, _ in plan["held"]}
     assert held == {"1": "image_already_served", "2": "image_alma_mismatch", "3": "image_unknown",
-                    "4": "shadows_whole_doc_row", "5": "whole_doc_shadowed"}
+                    "4": "shadows_whole_doc_row", "5": "whole_doc_shadowed", "7": "test_or_dummy", "8": "test_or_dummy",
+                    "9": "test_or_dummy", "10": "fist_comment_unchecked", "11": "test_or_dummy"}
     assert [(r["row_key"], r["c_number"], r["sys_id"]) for r in plan["new_rows"]] == [("new:dbo_UnitTranscription:6|C", "C13", "C")]
-    assert plan["new_rows"][0]["id"] == 4 and "גנוזות" in plan["new_rows"][0]["source_credit_he"]
+    assert plan["new_rows"][0]["id"] == 6 and "גנוזות" in plan["new_rows"][0]["source_credit_he"]
     assert g4.plan_candidate(today, g2, {}, {}, g3_new, texts, b_numbers, units, {}, ctx, "hold")["new_rows"] == []
+
+
+@pytest.mark.parametrize("text, relation, expected", [
+    ("test", "Digital Edition", True), ("ggg", "Digital Edition", True), ("241241", "Digital Edition", True),
+    ("בדיקה", "Digital Edition", True), ("נסיון", "Digital Translation", True), ("טסט מפולים", "Digital Edition", True),
+    ("נסיון\nנא להתעלם!!!", "Digital Edition", True), ("phrastic", "Digital Translation", False),
+    ("בדיקה של חמץ", "Digital Edition", False), ("בגמר דין שמא", "Digital Edition", False),
+    ("test " * 20, "Digital Edition", False), ("", "Digital Edition", False),
+])
+def test_test_or_dummy_rule(text, relation, expected):
+    assert g4.test_or_dummy(text, relation) is expected

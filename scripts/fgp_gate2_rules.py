@@ -66,6 +66,7 @@ import collections
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -227,6 +228,25 @@ def build_bibref_map(fist: sqlite3.Connection, ref_ids) -> dict:
     return out
 
 
+# A FIST unit whose free-text Comment says the transcription was not checked against the source
+# ("לא נבדק מול המקור", with a writing stage) or must not be published until read against it
+# ("אין לפרסם עד לקריאה מול מקור") is held (owner's ruling of 2026-10-26, after the drafts check).
+UNCHECKED_COMMENT_RE = re.compile(r"לא נבדק מול המקור|אין לפרסם|לא לפרסם")
+
+
+def load_unit_comments(fist: sqlite3.Connection) -> dict:
+    """{(unit_table, unit_id) -> Comment} for every unit with a non-blank Comment; {} on a FIST without the column."""
+    out = {}
+    for table, id_col in (("dbo_UnitTranscription", "UnitTranscriptionId"), ("dbo_UnitTranslation", "UnitTranslationId")):
+        try:
+            rows = fist.execute(f"SELECT {id_col}, Comment FROM {table} WHERE Comment IS NOT NULL AND TRIM(Comment) != ''").fetchall()
+        except sqlite3.OperationalError:
+            continue
+        for uid, comment in rows:
+            out[(table, uid)] = comment.strip()
+    return out
+
+
 def load_copyright(fist: sqlite3.Connection) -> dict:
     out = {}
     for table, id_col in (("dbo_UnitTranscription", "UnitTranscriptionId"), ("dbo_UnitTranslation", "UnitTranslationId")):
@@ -324,9 +344,10 @@ def xml_text_status(row: dict, unit: dict, inv: dict) -> tuple:
 
 def build_outcomes(rows: list, inv: dict, fist: sqlite3.Connection, credit_parts: dict,
                    catalog_map: dict, book_map: dict, copyright: dict, hashes: dict,
-                   credit_policy: str = "generic", bibref_map: dict | None = None) -> tuple:
+                   credit_policy: str = "generic", bibref_map: dict | None = None, comments: dict | None = None) -> tuple:
     C = collections.Counter()
     bibref_map = bibref_map or {}
+    comments = comments or {}
     outcomes, aliases = [], []
     rulings = collections.defaultdict(lambda: {"rows": 0, "today_credits": collections.Counter()})
     # exact duplicates: same (filename, sys_id, c_number) -> keep the lowest id. Rows without a
@@ -369,7 +390,7 @@ def build_outcomes(rows: list, inv: dict, fist: sqlite3.Connection, credit_parts
             "association_basis": None, "outcome": None, "outcome_reason": None, "successor_id": None,
             "credit_category": None, "credit_status": None, "credit_he": None, "credit_en": None,
             "copyright_he": None, "copyright_en": None, "credit_changed": None,
-            "text_status": None, "xml_owner_relation": None, "visibility_hold": 0,
+            "text_status": None, "xml_owner_relation": None, "visibility_hold": 0, "fist_comment": None,
             "publishable_strict": 0, "publishable_generic": 0, "publishable": 0, "hold_reasons": None,
             "durable_key": None,
         }
@@ -443,6 +464,10 @@ def build_outcomes(rows: list, inv: dict, fist: sqlite3.Connection, credit_parts
         if unit and unit["held"]:
             out["visibility_hold"] = 1
             reasons.append("tmp_DoubleNotToDisplay")
+        if unit:
+            out["fist_comment"] = comments.get((unit["table"], unit["unit_id"]))
+            if out["fist_comment"] and UNCHECKED_COMMENT_RE.search(out["fist_comment"]) and outcome != "retired-with-alias":
+                reasons.append("fist_comment_unchecked")
         if outcome == "retired-with-alias":
             reasons.append("retired")
         if basis not in ("fist_chain", "fist_chain_multi_registration") and outcome != "retired-with-alias":
@@ -672,14 +697,15 @@ def main(argv=None) -> int:
     fgp.close()
     fist = ro(args.fist)
     catalog_map, book_map, copyright = build_catalog_map(fist), build_book_map(fist), load_copyright(fist)
+    comments = load_unit_comments(fist)
     bibref_ids = {u["sub"] for units in inv["units"].values() for u in units if u["source"] == BIBREF_SOURCE}
     bibref_map = build_bibref_map(fist, bibref_ids)
     log(f"  {len(rows):,} rows, {len(credit_parts):,} DataSource manuscripts, {len(catalog_map):,} catalogues, "
-        f"{len(book_map):,} books, {len(bibref_map):,} bibliographic references, {len(copyright):,} copyright units "
-        f"({time.time() - t0:.0f}s)")
+        f"{len(book_map):,} books, {len(bibref_map):,} bibliographic references, {len(copyright):,} copyright units, "
+        f"{len(comments):,} unit comments ({time.time() - t0:.0f}s)")
     log("applying the rules ...")
     outcomes, aliases, rulings, C = build_outcomes(rows, inv, fist, credit_parts, catalog_map, book_map, copyright, hashes,
-                                                   credit_policy=args.credit_policy, bibref_map=bibref_map)
+                                                   credit_policy=args.credit_policy, bibref_map=bibref_map, comments=comments)
     fist.close()
     checks = run_checks(outcomes, aliases, C, expectations)
     db_path = write_outputs(outcomes, aliases, rulings, checks, C, args.out_dir, meta)

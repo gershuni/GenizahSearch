@@ -19,13 +19,18 @@ Candidate sidecar ``fgp_transcriptions.candidate.db`` (today's schema + ``origin
 ``text_provenance``, ``fist_unit_table``, ``fist_unit_id``, ``durable_key``):
   R1 every today row keeps its ``id``; new rows take ids above today's maximum, in row-key order.
   R2 a today row is carried iff gate 2 did not retire it and it is gate-2 publishable, or its only
-     gate-2 hold is ``xml_unverified`` and gate 3 verified the XML text by the row's own record.
+     gate-2 hold is ``xml_unverified`` and gate 3 verified the XML text by the row's own record; and
+     it has a text that is not a test or dummy file (``test_or_dummy``: at most 40 characters that
+     are a transcription without a Hebrew or Arabic letter, test words and digits only, or carry
+     "טסט" / "נא להתעלם").
   R3 its text is gate 3's when gate 3 replaced it (status accepted / approved), else today's;
      ``sections`` (the PDF page split) is cleared on a replaced text.
   R4 its credit is gate 2's (``credit_he`` / ``credit_en``; the generic Friedberg attribution where
      gate 2 ruled generic).
   R5 a new (unit, AlmaId) row read by gate 3 enters under ``--new-rows-policy plain`` iff its text
-     is non-blank and comes from folder B, or from a DOCX without tables, footnotes, hidden runs,
+     is non-blank, not a test or dummy file, its FIST unit comment does not say it was never checked
+     against the source (``fist_comment_unchecked``, gate 2's rule), and it comes from folder B, or
+     from a DOCX without tables, footnotes, hidden runs,
      tracked changes or auto-numbering; a folder-B row carries the image number of its folder as
      ``c_number`` only when the NLI gallery lists that image under the row's manuscript (else held
      ``image_alma_mismatch`` / ``image_unknown``); a row today's chooser could never show is held:
@@ -93,7 +98,9 @@ sys.path.insert(0, ROOT)
 
 from scripts.fgp_association_inventory import DEFAULT_FIST, DEFAULT_OUT, parse_expectations, ro  # noqa: E402
 from scripts.fgp_fill_credits_bilingual import build_book_map, build_catalog_map, build_credit_parts  # noqa: E402
-from scripts.fgp_gate2_rules import BIBREF_SOURCE, GENERIC_CREDIT, build_bibref_map, credit_for_unit  # noqa: E402
+from scripts.fgp_gate2_rules import (  # noqa: E402
+    BIBREF_SOURCE, GENERIC_CREDIT, UNCHECKED_COMMENT_RE, build_bibref_map, credit_for_unit, load_unit_comments,
+)
 from scripts.fgp_rebuild_text_and_credit import heb_ratio  # noqa: E402
 
 os.environ.setdefault("FGP_TRANSCRIPTIONS_ENABLED", "1")
@@ -131,7 +138,26 @@ PAGE_FIELDS = ("sys_id", "c_number", "image_side", "page_info", "folio_num")
 STRUCTURE_HOLD_KEYS = ("tables", "footnotes", "hidden_runs", "tracked_changes", "numbered_paragraphs")
 SAME_TEXT_RATIO = 0.95
 # The only reasons a source the chooser lists today may be missing from the candidate's list.
-SELECTABILITY_DISPOSITIONS = frozenset({"retired_alias", "gate2_hold", "xml_unverified", "empty_text", "same_text_swap"})
+SELECTABILITY_DISPOSITIONS = frozenset({"retired_alias", "gate2_hold", "xml_unverified", "empty_text", "test_or_dummy",
+                                        "same_text_swap"})
+# Test and dummy files (owner's ruling of 2026-10-26, after the drafts check): a text of at most 40 characters that
+# is a transcription without a Hebrew or Arabic letter ("test", "ggg", "fgfghfg", "241241"), or consists of test
+# words and digits only ("בדיקה", "נסיון", "test"), or carries "טסט" or "נא להתעלם" ("please ignore") anywhere.
+TEST_TEXT_MAX = 40
+TEST_WORDS = frozenset({"test", "טסט", "בדיקה", "נסיון"})
+TEST_TOKEN_RE = re.compile(r"[\w']+", re.UNICODE)
+
+
+def test_or_dummy(text: str, relation: str) -> bool:
+    t = (text or "").strip()
+    if not t or len(t) > TEST_TEXT_MAX:
+        return False
+    if "טסט" in t or "נא להתעלם" in t:
+        return True
+    if relation == "Digital Edition" and not LETTERS_RE.search(unicodedata.normalize("NFD", t)):
+        return True
+    tokens = [w.lower() for w in TEST_TOKEN_RE.findall(t)]
+    return bool(tokens) and all(w in TEST_WORDS or w.isdigit() for w in tokens)
 LETTERS_RE = re.compile(r"[א-תؠ-ي]+")
 NEW_UID_RE = re.compile(r"^(dbo_\w+):(\d+)\|(\d+)$")
 
@@ -256,7 +282,9 @@ def image_number_of(reader: str, source_path: str) -> str | None:
 
 
 def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new: list, texts_conn: sqlite3.Connection,
-                   b_numbers: dict, units: dict, libraries: dict, credit_ctx: dict, policy: str) -> dict:
+                   b_numbers: dict, units: dict, libraries: dict, credit_ctx: dict, policy: str,
+                   comments: dict | None = None) -> dict:
+    comments = comments or {}
     kept, excluded = [], []
     for rid in sorted(today):
         o = g2.get(rid)
@@ -294,10 +322,12 @@ def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new:
     with_text = []
     for k in kept:
         text = texts.get(k["unit"], "") if k["replaced"] else (today[k["id"]].get("content") or "")
-        if text.strip():
-            with_text.append(k)
-        else:
+        if not text.strip():
             excluded.append((k["id"], "empty_text", "gate3:" + str((g3_today.get(k["id"]) or {}).get("hold_reason") or "")))
+        elif test_or_dummy(text, today[k["id"]].get("doc_relation") or "Digital Edition"):
+            excluded.append((k["id"], "test_or_dummy", text.strip()[:TEST_TEXT_MAX]))
+        else:
+            with_text.append(k)
     kept = with_text
     # new rows
     new_rows, held = [], []
@@ -328,11 +358,18 @@ def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new:
         if not text.strip():
             held.append((rk, "blank_text", ""))
             continue
+        comment = comments.get((ut, uid))
+        if comment and UNCHECKED_COMMENT_RE.search(comment):
+            held.append((rk, "fist_comment_unchecked", comment[:80]))
+            continue
+        relation = "Digital Translation" if n["kind"] == "translation" else "Digital Edition"
+        if test_or_dummy(text, relation):
+            held.append((rk, "test_or_dummy", text.strip()[:TEST_TEXT_MAX]))
+            continue
         structure = json.loads(n["structure"] or "{}") if n["structure"] else {}
         if n["reader"] == "docx" and any(structure.get(k) for k in STRUCTURE_HOLD_KEYS):
             held.append((rk, "docx_structure", _j({k: structure.get(k, 0) for k in STRUCTURE_HOLD_KEYS if structure.get(k)})))
             continue
-        relation = "Digital Translation" if n["kind"] == "translation" else "Digital Edition"
         language = n["language"]
         key = (relation, language, sid)
         image = image_number_of(n["reader"], n["source_path"])
@@ -927,13 +964,14 @@ def main(argv=None) -> int:
     bibref_ids = {units[k][1] for k in units if units[k][0] == BIBREF_SOURCE}
     credit_ctx = {"parts": build_credit_parts(db_t), "catalog": build_catalog_map(fist), "book": build_book_map(fist),
                   "bibref": build_bibref_map(fist, bibref_ids)}
+    comments = load_unit_comments(fist)
     fist.close()
     log(f"  {len(today):,} today rows, {len(g3_new):,} new rows read by gate 3, {len(libraries):,} manuscripts in libraries.csv "
         f"({time.time() - t0:.0f}s)")
 
     log("planning and writing the candidate sidecar ...")
     plan = plan_candidate(today, g2, aliases, g3_today, g3_new, g3_conn, b_numbers, units, libraries, credit_ctx,
-                          args.new_rows_policy)
+                          args.new_rows_policy, comments=comments)
     g3_conn.close()
     cand_path = os.path.join(args.out_dir, CANDIDATE_NAME)
     write_candidate(cand_path, args.fgp_db, cols_t, plan, meta)

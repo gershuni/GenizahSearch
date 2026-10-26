@@ -160,7 +160,9 @@ replaced row loses its source link (`T02`), when two runs differ (`T01`), and on
 | `none` | 69 | — | — | — | 19 absent from the delivery, 50 retired |
 
 - **Replaced: 27,704** rows (9,514 from folder B's line text, 18,190 from the DOCX); **verified: 2,679** XML rows,
-  lifting 2,731 of the 3,130 gate-2 XML holds; **publishable with text: 41,143** (gate 2: 41,807 — 3,393 of those
+  lifting 2,731 of the 3,130 gate-2 XML holds; **publishable with text: 41,143** (rerun 2026-10-26 after gate 2's
+  `fist_comment_unchecked` hold: 40,980, gate 2 41,642, digest `ba1e47e9db555190`, PASS 55/55; no other count
+  changed) (gate 2: 41,807 — 3,393 of those
   are held here, 2,731 come back through the lifted holds).
 - **Held: 3,800** — 2,545 with an unclassified difference (a reading, a stray character, Arabic the font garbled
   beyond the junk rule, a line the DOCX lacks), 771 whose only differences are typed sigla (`sigla_rendering`), 85

@@ -197,6 +197,12 @@ def build_fist(path: str, mixed_kind: bool = False, extended: bool = False, text
                     tr + (extended_tr if extended else []) + (text_tr if text else []))
     con.execute("INSERT INTO dbo_UnitTranslation VALUES (?,?,?,?,?,?,?,?,?)",
                 (1, 109, "20000000000011_CUL_T-S 1.1_Tl", 2, "2000000\\", None, 2, None, None))
+    if extended:
+        # FIST's free-text unit comment: unit 13 (row 14) was never checked against the source -> gate 2 holds it
+        con.execute("ALTER TABLE dbo_UnitTranscription ADD COLUMN Comment TEXT")
+        con.execute("ALTER TABLE dbo_UnitTranslation ADD COLUMN Comment TEXT")
+        con.execute("UPDATE dbo_UnitTranscription SET Comment = ? WHERE UnitTranscriptionId = 13",
+                    ("לא נבדק מול המקור. מצב כתיבה-הגהה א'",))
     con.execute("INSERT INTO dbo_UnitFreeDescription VALUES (?,?,?,?,?,?)",
                 (1, 110, "20000000000013", "2000000\\", "a description", 2))
     if mixed_kind:
@@ -288,7 +294,7 @@ def build_sidecars(root: str, extended: bool = False, text: bool = False) -> tup
     genuzos = "צוות FGP להעתקות -גנוזות"
     genuzos_en = "FGP Transcriptions Team - Genuzos"
 
-    def row(rid, filename, sys_id, c_number="", image_id="", text_source="pdf_rtl", credit=None, content="text",
+    def row(rid, filename, sys_id, c_number="", image_id="", text_source="pdf_rtl", credit=None, content="טקסט",
             rel_path=None, language=None, doc_relation="Digital Edition", method="fjms_cnumber", credit_en=None):
         return (rid, filename, "CUL", "T-S", c_number or None, image_id or filename[:14], doc_relation, language,
                 sys_id, "m" + (sys_id or ""), method if sys_id else None, text_source, credit,
@@ -296,9 +302,10 @@ def build_sidecars(root: str, extended: bool = False, text: bool = False) -> tup
                 len(content), rel_path or f"CUL/{rid}/{filename}")
 
     # gate 3: real text behind the rows its readers and classes act on
-    c_xml = B1_TEXT if text else "text"
-    c_unit3 = DOCX_UNIT3_TODAY if text else "text"
-    c_held = "אבד דהו\nשורה שנייה" if text else "text"
+    # The placeholder is Hebrew: gate 4 holds a short Latin-only transcription as a test file.
+    c_xml = B1_TEXT if text else "טקסט"
+    c_unit3 = DOCX_UNIT3_TODAY if text else "טקסט"
+    c_held = "אבד דהו\nשורה שנייה" if text else "טקסט"
     base_rows = [
         # 1: served, own position folder, XML text from its own folder -> kept
         row(1, "20000000000011_CUL_T-S 1.1_Tc_trans.pdf", ALMA_A, "C100000", text_source="xml", credit=genuzos, credit_en=genuzos_en,
