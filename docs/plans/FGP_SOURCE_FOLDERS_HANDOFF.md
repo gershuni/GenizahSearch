@@ -21,30 +21,38 @@ PDFs, with known losses (line starts before a gershayim, final and vocalised let
 lines, Arabic). Four gates have been run on the new material and a **candidate sidecar** built and checked against
 the real chooser of both apps; a fifth gate measured the positions.
 
-| the candidate `fgp_data/inventory/fgp_transcriptions.candidate.db` (gitignored; seventh gate-4 run, 2026-10-26 19:08) | rows |
+| the candidate `fgp_data/inventory/fgp_transcriptions.candidate.db` (gitignored; eighth gate-4 run, 2026-10-26 19:27; sha256 `ef9068b7…a00300e4`) | rows |
 |---|---|
 | today's rows carried under their ids | 44,484 of 45,034 |
 | of which with a cleaner text (the Word file or the per-line position text instead of the PDF) | 27,673 |
 | today's rows dropped | 550 |
-| new transcriptions added | 18,543 |
-| new rows held, with a reason each | 6,736 |
-| total | 63,027 |
+| new transcriptions added | 14,598 |
+| new rows held, with a reason each | 10,681 |
+| total | 59,082 |
 
 The 550 drops: 391 XML rows gate 3 could not verify by their own record, 97 gate-2 holds (17 the explicit
 "do not publish until read against the source" comment, 23 `tmp_DoubleNotToDisplay`, 19 absent files, 26 wrong
 XML region, 5 another edition, 7 unconfirmed associations), 50 retired duplicates, 6 keyboard-dummy rows (listed,
 R2d), 3 without text, 3 test files.
 
-The 6,736 holds: 3,858 whole-document rows on manuscripts another unit already serves per image (3,811 Nuscha —
-the chooser keeps one row per image and would drop them), 1,153 Word files whose rendering differs from FGP's own
-PDF in a way the classes do not explain, 1,138 folder-B rows whose image the NLI gallery does not list under the
-row's manuscript, 322 without an AlmaId, 168 blank files, 28 real tables (several columns), 26 unknown images, 21
-test or dummy files, 13 legacy-font texts, 3 personal data (team 850's contact list on three images, R2e), 3
-non-manuscript documents (listed, R2d), 3 shadowing cases.
+The 10,681 holds, each under its first reason: 4,506 older versions FGP superseded (FIST `RecordStatus` 5, R2f),
+3,666 whole-document rows on manuscripts another unit already serves per image (the chooser keeps one row per image
+and would drop them), 1,136 folder-B rows whose image the NLI gallery does not list under the row's manuscript, 812
+Word files whose rendering differs from FGP's own PDF in a way the classes do not explain, 322 without an AlmaId,
+168 blank files, 26 unknown images, 15 test or dummy files, 12 real tables (several columns), 9 legacy-font texts,
+3 personal data (team 850's contact list on three images, R2e), 3 non-manuscript documents (listed, R2d), 3
+shadowing cases.
 
 Every number above is a declared expectation reproduced by two runs with one digest (gate 3 `0088ba547d3dfc83`,
-rerun from the committed code 2026-10-26 evening with the same digest; gate 4 `1a5d7558fa8eac09`); the budgets
-(latency, memory, size) are far under their limits.
+rerun from the committed code 2026-10-26 evening with the same digest; gate 4 `9b3305335cb57b79`); the budgets
+(latency, memory, size) are far under their limits. `scripts/check_fgp_sidecar.py` checks the file itself
+(integrity, version, rows, checksum, and that the passing run built it).
+
+**`RecordStatus` 5 is "superseded" (found the same evening).** FIST keeps each version of a unit as its own signature;
+3,926 of the 3,945 status-5 rows that had entered have a newer status-0 version of the same unit, 3,920 of them
+already in the candidate, and 83 % of a 300-pair sample have identical letters — the candidate would have listed the
+same edition twice. R2f holds them. Status 1 stays unread: 1,982 new rows (and 19 of today's, served now) with no
+newer version, mostly team 200's 2018 delivery; no code table says what it means (§3 item 5).
 
 **Correction of the evening (Codex review of the candidate, then the owner's go-ahead):** the sixth run's candidate
 (62,983 rows, digest `058a0c26`) was not releasable. It published team 850's private contact list (107 telephone
@@ -82,7 +90,7 @@ drafts study · `acd26177` comment and test holds · `99c90650` legacy fonts · 
 | gate 1 inventory | `fgp_data/inventory/inventory.db` | `scripts/run_fgp_association_inventory.ps1` |
 | gate 2 outcomes | `fgp_data/inventory/gate2.db` | `scripts/run_fgp_gate2_rules.ps1`; one run; 7 checks + 36 expectations |
 | gate 3 texts | `fgp_data/inventory/gate3.db` (+ `gate3_run1/`) | `scripts/run_fgp_gate3_text_pipeline.ps1`; two runs; 9 + 55; **about 15 minutes a run with the PDF cache `fgp_data/inventory/pdf_text_cache.db`, 28 cold** |
-| gate 4 candidate | `fgp_data/inventory/fgp_transcriptions.candidate.db`, `gate4.db` (+ `gate4_run1/`) | `scripts/run_fgp_gate4_chooser_validation.ps1`; two runs; 16 + 64; about 2–3 minutes a run; exclusions `scripts/fgp_gate4_exclusions.json`; never written over today's `fgp_data/fgp_transcriptions.db` |
+| gate 4 candidate | `fgp_data/inventory/fgp_transcriptions.candidate.db`, `gate4.db` (+ `gate4_run1/`) | `scripts/run_fgp_gate4_chooser_validation.ps1`; two runs; 16 + 65; about 2–3 minutes a run; exclusions `scripts/fgp_gate4_exclusions.json`; never written over today's `fgp_data/fgp_transcriptions.db` |
 | gate 5 positions | `fgp_data/inventory/gate5*.db` and the positions store | `scripts/run_fgp_gate5_positions.ps1`; 68 minutes a run; verdict FAIL on G1 (17 of 20 images) by findings, not tuning |
 | Word-file census | `fgp_data/inventory/docx_structure_census.json` | `scripts/fgp_docx_structure_census.py` |
 | Nuscha hidden layer | `fgp_data/nuscha_hidden_layer.db` (155 MB) | `scripts/fgp_nuscha_hidden_layer.py`; 38,790 files, 796,854 lines; nothing reads it yet |
@@ -116,10 +124,13 @@ For the owner:
 4. **Positions** (gate 5, [`FGP_POSITIONS_RULES.md`](FGP_POSITIONS_RULES.md) §7 "Open for the owner", six items):
    whether the pass bar stands as declared, how to clear 19,591 unchecked images, whether an overlay needs a
    confirmed page, the NLI 503s, the 46 `hash_mismatch` folders, the Strasbourg offset (§4 step D).
-5. **The FGP codes nobody will ask FGP about**: `RecordStatus` 1 / 5 (on 6,586 delta units, one of today's),
-   `PermissionCommentCode` 5309 ("being worked on by a team", 156 of today's units), `tmp_DoubleNotToDisplay` (23 rows
-   held). The agreed way to guess: look up twenty units carrying each code on FGP's own public site; if FGP shows the
-   transcription, we show it (§4 step E).
+5. **The FGP codes**: `RecordStatus` 5 is settled from FIST's own version chain (superseded, held by R2f, §1).
+   Still open: `RecordStatus` 1 on **1,982 new rows** (and 19 of today's): ship or hold until it is understood;
+   `PermissionCommentCode` 5309 — FIST's own code table reads it "being worked on… the data is therefore temporarily
+   inaccessible", and today's site serves 180 rows carrying it (no new row has it); `tmp_DoubleNotToDisplay` (23 rows
+   held). `ViewLevelCode` is 310, "regular", on every candidate row (2310 "authorised only" and 3310 "not for
+   publication" occur on none). The earlier plan — look up twenty units per code on FGP's site — interprets a code but
+   does not clear every record that carries it (Codex).
 6. **Team 850's non-manuscript documents** — the contact list, the recipe, the Polus specification and the Bavli entry
    list are held since the evening (R2d / R2e). Still unruled in team 850: two English translations filed as `_Tc`
    transcriptions (`fgp:52183`, `52187`, the same text as the `_Tl` rows 63307 / 63308) and a handful of very short
@@ -134,6 +145,14 @@ For the owner:
 ## 4. Recommended plan, in order
 
 **A. The release (web and desktop, one release).** Effort: a day plus the installer build.
+0. **Web deploy script (2026-10-26 evening):** `powershell -File scripts/deploy_fgp_sidecar.ps1 -Rows 59082` (the
+   owner runs it; `-DryRun` checks the file only). It checks the candidate locally with `scripts/check_fgp_sidecar.py`
+   (the passing gate-4 run built it), uploads it as `fgp_transcriptions.db.new`, checks checksum, integrity, version
+   and rows on the server, renames the served file to `fgp_transcriptions.db.prev-<stamp>`, swaps, restarts, checks
+   the served file, and prints the rollback. No code deploy is needed for the data. **For the desktop build** the
+   candidate must sit at `fgp_data/fgp_transcriptions.db` (keep today's as e.g. `fgp_transcriptions.v1-pdf.db`);
+   after that the gates' default `--fgp-db` reads the candidate as "today's", so a rerun of this record must pass
+   `--fgp-db` the kept v1 file.
 1. Web: copy the candidate to the server as `fgp_data/fgp_transcriptions.db` **before** the code (the deploy rule:
    sidecars by `scp` first, then `git pull`; the auto-mode classifier blocks `scp` from a Claude session, so the owner
    runs it). The app code needs no change for the candidate's schema (the gates drove the real service over it; the
@@ -153,7 +172,7 @@ For the owner:
    (346,939,392 bytes), today's 405 MB. Its `fgp_meta` still carries today's build keys (`sysid_resolved` 45006 /
    45034, `empty_text` 13, `source` D:\…, `extractor` PyMuPDF) beside the new ones; nothing reads them, but they
    misdescribe the file.
-3. The changelog fragment (`changelog.d/`) and the release notes should say what users see: about 18,500 new
+3. The changelog fragment (`changelog.d/`) and the release notes should say what users see: about 14,600 new
    transcriptions, cleaner text on about 27,700, about 550 removed and why (`feedback_release_texts_gentle_on_past_gaps`).
 4. Before any of it: push `8ba4111c`; run `python scripts/check_docs.py` and `ruff check .`; collect the three
    open-issue fragments into the tracker.

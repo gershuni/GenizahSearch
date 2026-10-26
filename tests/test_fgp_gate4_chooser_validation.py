@@ -315,7 +315,8 @@ def test_new_row_image_rules():
         ("dbo_UnitTranscription", 16, "1. שורה ראשונה¹ של כתב היד\n2. שורה שנייה\n\n1 הערת שוליים"),
         ("dbo_UnitTranscription", 17, "מהדורה של כל כתב היד בקובץ וורד"), ("dbo_UnitTranscription", 18, "מהדורה של תמונה אחת"),
         ("dbo_UnitTranscription", 19, "פלונית: 0525550104\nאלמונית 054-5550105\nמהלשכה: 02-5550106"),
-        ("dbo_UnitTranscription", 20, "בצק לילדים\nהמצרכים:\n4 ביצים\n1 כוס שמן")])
+        ("dbo_UnitTranscription", 20, "בצק לילדים\nהמצרכים:\n4 ביצים\n1 כוס שמן"),
+        ("dbo_UnitTranscription", 21, "גרסה ראשונה של העתקה שהוחלפה בגרסה שנייה")])
     g3_new = [new(1, "A", "b2_rows", "C10\\data.js"),          # image 10 already served by unit 100 on A
               new(2, "A", "b2_rows", "C11\\data.js"),          # gallery lists image 11 under Z, not A
               new(3, "A", "b1_xml", "99\\99.xml"),             # unknown image
@@ -342,14 +343,16 @@ def test_new_row_image_rules():
               new(17, "H", "docx", "x\\word\\u17.docx", status="checked", yardstick="pdf"),
               new(18, "H", "b2_rows", "C14\\data.js"),
               new(19, "K", "docx", "x\\word\\u19.docx"),       # R2e: personal phone numbers -> held
-              new(20, "K", "docx", "x\\word\\u20.docx")]       # R2d: listed as not a manuscript -> held
+              new(20, "K", "docx", "x\\word\\u20.docx"),       # R2d: listed as not a manuscript -> held
+              new(21, "L", "docx", "x\\word\\u21.docx")]       # R2f: an older version FIST superseded -> held
     b_numbers = {"10": {"A"}, "11": {"Z"}, "12": {"B"}, "13": {"C"}, "14": {"H"}}
-    units = {("dbo_UnitTranscription", i): (200, 1, f"u{i}") for i in range(1, 21)}
+    units = {("dbo_UnitTranscription", i): (200, 1, f"u{i}") for i in range(1, 22)}
     ctx = {"parts": {}, "catalog": {}, "book": {}, "bibref": {}}
     comments = {("dbo_UnitTranscription", 10): "אין לפרסם עד לקריאה מול מקור"}
     exclusions = {"k12": "keyboard_dummy", "n20": "non_manuscript", "k99": "keyboard_dummy"}
+    superseded = {("dbo_UnitTranscription", 21): 777}
     plan = g4.plan_candidate(today, g2, {}, {}, g3_new, texts, b_numbers, units, {}, ctx, "plain", comments=comments,
-                             exclusions=exclusions)
+                             exclusions=exclusions, superseded=superseded)
     # R2: a carried row must have a text that is not a test file; an English translation is not a test file.
     # R2d/R2e: a listed row and a contact list are excluded with their reasons.
     # R2c: only the stub CONTAINED in the full text of the same image is retired; the short different text and the
@@ -366,7 +369,8 @@ def test_new_row_image_rules():
                     "4": "shadows_whole_doc_row", "5": "whole_doc_shadowed", "7": "test_or_dummy", "8": "test_or_dummy",
                     "9": "test_or_dummy", "10": "fist_comment_no_publish", "11": "test_or_dummy", "12": "legacy_font",
                     "14": "pdf_held", "15": "docx_multicolumn_table", "17": "whole_doc_shadowed", "19": "personal_data",
-                    "20": "non_manuscript"}
+                    "20": "non_manuscript", "21": "superseded_version"}
+    assert json.loads(dict((rk, d) for rk, _, d in plan["held"])["new:dbo_UnitTranscription:21|L"]) == {"newer_signature": 777}
     assert json.loads(dict((rk, d) for rk, _, d in plan["held"])["new:dbo_UnitTranscription:15|G"])["columns"] == 5
     assert [(r["row_key"], r["c_number"], r["sys_id"]) for r in plan["new_rows"]] == [
         ("new:dbo_UnitTranscription:18|H", "C14", "H"), ("new:dbo_UnitTranscription:6|C", "C13", "C"),
@@ -398,6 +402,27 @@ def test_test_or_dummy_rule(text, relation, expected):
 ])
 def test_personal_data_rule(text, expected):
     assert g4.personal_data(text) is expected
+
+
+def test_load_superseded_reads_fist_versions():
+    """R2f: a unit whose FIST signature has RecordStatus 5 is an older version; the newer status-0 version of the
+    same unit (SourceId, SubId, UnitNumInSource) is recorded when FIST has one. Status 1 is not read as superseded."""
+    fist = sqlite3.connect(":memory:")
+    fist.execute("CREATE TABLE dbo_Signature (SignatureId, SourceId, SubId, UnitNumInSource, Version, RecordStatus)")
+    fist.executemany("INSERT INTO dbo_Signature VALUES (?,?,?,?,?,?)", [
+        (1, 200, 1, 5, 1, 5), (2, 200, 1, 5, 2, 0),   # version 1 superseded by version 2
+        (3, 200, 1, 6, 1, 5),                          # superseded, no newer version in the export
+        (4, 107, 9, 7, 1, 1),                          # status 1: meaning unknown, left alone
+        (5, 107, 9, 8, 1, 0)])
+    fist.execute("CREATE TABLE dbo_UnitTranscription (UnitTranscriptionId, SignatureId)")
+    fist.execute("CREATE TABLE dbo_UnitTranslation (UnitTranslationId, SignatureId)")
+    fist.executemany("INSERT INTO dbo_UnitTranscription VALUES (?,?)", [(10, 1), (11, 2), (12, 3), (13, 4), (14, 5)])
+    fist.execute("INSERT INTO dbo_UnitTranslation VALUES (20, 1)")
+    assert g4.load_superseded(fist) == {("dbo_UnitTranscription", 10): 2, ("dbo_UnitTranscription", 12): None,
+                                        ("dbo_UnitTranslation", 20): 2}
+    old = sqlite3.connect(":memory:")
+    old.execute("CREATE TABLE dbo_Signature (SignatureId, SourceId, SubId, UnitNumInSource)")
+    assert g4.load_superseded(old) == {}
 
 
 def test_text_ratio_reads_the_whole_text():
