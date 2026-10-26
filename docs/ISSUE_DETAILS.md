@@ -3937,3 +3937,108 @@ Moved 2026-10-25 from `2026-05-29 Audit Follow-up (fan-out codebase audit + Code
 - **Notes:** ❌ Open. Surface both on a `/_internal/*` health endpoint next to `/_internal/memstat`.
 
 *Triage 2026-10-25:* still open. git grep shows get_dropped_event_count is defined in both modules (web/api_hardening.py:572, shared/posthog_server.py:88) and read by no route; /_internal/memstat (web/main.py:273-320) returns RSS, storage and runtime-cache stats but no drop counts.
+
+## GS-268
+
+**FGP text drops the part of a line before a gershayim** · P2 · Data and sidecars · ❌ Open · opened 2026-10-25
+
+Where: `fgp_data/fgp_transcriptions.db` (`text_source='pdf_rtl'`), `shared/local_indexer.py::extract_pdf_pages`, `scripts/fgp_rebuild_text_and_credit.py`
+
+The PDF-extracted FGP text loses everything on a line before a `"`: `ועד י"ג שנים ואף על פי שלא` is stored
+as `ג שנים ואף על פי שלא`, `הה"ד` as `ד`, and the missing prefix is nowhere in the row. Measured on 805
+random FGP images whose own line text exists in FGP's position export
+(`C:\FGPTranscriptions_WithPOSInfoAndImages\C<n>\data.js`, matched to the row through FIST
+`dbo_UnitTranscription.ImageTranscriptionFolder` → `FileName`, lines aligned with `difflib`): 63 lines
+in 23 documents lose a prefix; 6 catchword lines (`%אמור%`) and 2 short lines are absent; 10 long lines
+are stored as two; 288 lines have mirrored lacuna brackets and 214 doubled backslashes (`{ה\/\/ב}`).
+Gate 3 (`scripts/fgp_gate3_text_pipeline.py`, 2026-10-25) found more on the rows whose source is the
+DOCX: final letters left as C0 control characters or symbols (`שלו\x0e ולכ\x04`, `ואיל"` for `ואילך`) or
+dropped outright (`דנו` for `דנום`), vocalised letters as control characters, line numbers re-ordered by
+the RTL fix (`.1` for `1.`, `-1` for `1-`), mixed-direction lines scrambled (`12.528: TS ראה`), Arabic
+alef dropped, Arabic lines reduced to control characters. The same source also explains GS-60 (`&deg;`
+entities). Fix sketch: rebuild the text from the structured sources (folder-B line text, else DOCX)
+per `docs/plans/FGP_SOURCE_FOLDERS_ASSESSMENT.md` §6.1, gated per changed line (§8.3,
+`docs/plans/FGP_TEXT_PIPELINE_RULES.md`), never from the PDF.
+
+## GS-269
+
+**FGP visual XML is applied by image number, not by source record** · P2 · Data and sidecars · ❌ Open · opened 2026-10-25
+
+Where: `scripts/fgp_rebuild_text_and_credit.py::build_xml_index`, `fgp_data/fgp_transcriptions.db` (`text_source='xml'`)
+
+The XML-primary rebuild keys the Talmud-project visual XML by C-number and writes it into every row
+of that image, whatever file the row came from. FIST attributes 5 of the 6,381 `xml` rows to a
+different team's edition (C192908 row 3717, whose own text reads `למשתה` / `בתר` where the XML reads
+`למשתי` / `כתר`) and 3 to the wrong `_G` region of the same photograph (rows 24067, 36404, 36406
+carry the G1 region's text); 3,099 team-200 rows have no FIST folder link and are unverified. Those
+rows show another edition's text under their own file's credit. Fix sketch: tie XML and line text to
+the source record (FIST `ImageTranscriptionFolder` ↔ `FileName`), never to the image; re-attribute the
+6,381 rows before any further rebuild (assessment §2, §7).
+
+## GS-270
+
+**FGP credit heuristic disagrees with FIST on 1,551 / 6,151 files** · P2 · Data and sidecars · ❌ Open · opened 2026-10-25
+
+Where: `scripts/fgp_fill_credits_bilingual.py`
+
+Credits derive the team from `image_id[:3]` and the catalogue/book from `image_id[3:7]`, but the
+14-digit id is not unique (8,131 ids carry 2–8 files) and FIST `dbo_Signature.SourceId/SubId`
+disagrees on 1,551 source prefixes and 6,151 sub-ids of 69,330 files. Concrete: rows 20076
+(T-S G2.98) and 22207 (T-S Misc.35.108) share `image_id` 60000010010951 and both show
+"תרביץ: רבעון למדעי היהדות" from sub-id `1`, while FIST assigns book sub-ids 3308 and 6413. Fix
+sketch: take team / catalogue / book from FIST (`FileName` → `SignatureId` → `SourceId/SubId`) at
+build time and keep the team-matched transcriber enrichment the script already adds (assessment
+§2, §6.2).
+
+## GS-271
+
+**The tracker scripts' atomic write does not keep a POSIX file's group** · P3 · Build, CI and tests · ❌ Open · opened 2026-10-25
+
+Where: `scripts/open_issues_model.py::write_text`
+
+`write_text` writes a temporary file (`tempfile.mkstemp`) and renames it over the target. Since
+PR #449 (Codex round 9) it copies the target's mode, but not its group: on a POSIX checkout shared
+through a group other than the invoking user's primary group, a group-owned `0664`
+`OPEN_ISSUES.md`, `BACKLOG.md` or `ISSUE_DETAILS.md` comes back owned by the user's default
+group after `collect_open_issues.py --apply` or `archive_closed_issues.py --apply`, and the other
+members can no longer update it. No such checkout exists today: the scripts run on the owner's
+Windows machine and in CI. Fix sketch: `os.chown(tmp, -1, os.stat(path).st_gid)` before the
+rename, raising rather than writing when that is not permitted. Found by the Codex review of
+PR #449 (round 10) and logged instead of fixed under that PR's review budget.
+
+## GS-272
+
+**FIST's RecordStatus 1 / 5 and PermissionCommentCode 5309 have no ruling before FGP new rows ship** · P3 · Data and sidecars · ❌ Open · opened 2026-10-26
+
+Where: `fist_data/FIST.db` `dbo_Signature.RecordStatus`, `PermissionCommentCode`; `scripts/fgp_gate2_rules.py`, `scripts/fgp_gate4_chooser_validation.py`
+
+The 2026-10-26 check of drafts in the FGP delta (`_tmp/fgp_delta_drafts_report.md`, section 4) found three FIST
+signals the gates do not read. The first, the unit's free-text `Comment` saying `לא נבדק מול המקור` ("not checked
+against the source") or `אין לפרסם עד לקריאה מול מקור` ("do not publish until read against the source"), was ruled
+the same day: gate 2 holds the units whose comment is the explicit do-not-publish instruction
+(`fist_comment_no_publish`, 17 of today's rows, team 130; the 150 "not checked" rows are a quality note and stay
+publishable, the owner's narrowing later that day) and gate 4 applies the same rule to new rows. Two remain
+without a ruling: `dbo_Signature.RecordStatus` is 0 on 40,415 of today's
+40,416 units but 1 or 5 on 6,586 of the delta's units, and the FIST export carries no code table for it; and
+`PermissionCommentCode` 5309 ("being worked on by a team, data temporarily inaccessible") covers 156 of today's
+units (team 135, 180 rows publishable) and 8 of the delta's. Fix sketch: the owner asks FGP what `RecordStatus` 1 /
+5 and code 5309 mean; a gate-2 hold for whichever means "not for publication", applied in gate 4's candidate build
+before the `plain` new-rows policy ships.
+
+## GS-273
+
+**The reading desk saves a source choice it never applies, keyed by list position** · P3 · Website · ❌ Open · opened 2026-10-26
+
+Where: `web/pages/browse.py` (reading-desk version `ui.select`, `state.reading_desk_selected_sources`), `web/pages/browse_state.py`
+
+The reading desk's per-fragment version dropdown stores the chosen option under
+`state.reading_desk_selected_sources[sys_id]` and the browse snapshot persists it as `selected_sources`, but
+the dropdown is always built with `value=default_key` (first PGP edition, else first translation, else V0.8):
+the saved value is restored into state on `enter_joined_view` and never read again, so a choice does not
+survive a page rebuild or a session. The key is also the option's list position (`src_<i>`), which changes
+whenever the fragment's PGP or FGP source list changes (a sidecar refresh adds or removes rows; gate 4,
+`docs/plans/FGP_CHOOSER_VALIDATION_RULES.md` §5, measured 282 manuscripts whose FGP list order changes with the
+larger sidecar). Found while validating the chooser against the larger FGP sidecar (gate 4 of
+`docs/plans/FGP_SOURCE_FOLDERS_ASSESSMENT.md`), whose check C3 keeps `fgp:<id>` stable for exactly this reason.
+Fix sketch: key the option by the source's stable id (`fgp:<id>` / `pgp:<id>`, `v08`), pass the saved key as the
+select's initial value when it is still among the options, and fall back to the default otherwise.

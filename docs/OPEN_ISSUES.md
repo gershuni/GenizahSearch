@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-10-25 (reconstructed: every open row re-checked against the code; fixed ones archived, non-defects moved to the backlog). 158 open: P1 0, P2 38, P3 120.
+> **Last Updated:** 2026-10-26 (folded 4 fragment(s) from `docs/open_issues.d/`: 2026-10-25-fgp-text-loss-and-xml-by-image.md, 2026-10-25-tracker-write-group-ownership.md, 2026-10-26-fgp-gate2-ignores-fist-unit-comment.md, 2026-10-26-reading-desk-saved-source-choice-not-applied.md). 164 open: P1 0, P2 41, P3 123.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -25,14 +25,15 @@ owner tasks -- is in [`BACKLOG.md`](BACKLOG.md). Closed history:
 | Search | 0 | 4 | 21 | 25 |
 | Browse and viewer | 0 | 4 | 6 | 10 |
 | Desktop app | 0 | 9 | 25 | 34 |
-| Website | 0 | 6 | 21 | 27 |
+| Website | 0 | 6 | 22 | 28 |
 | API and AI | 0 | 2 | 1 | 3 |
 | Discovery | 0 | 2 | 11 | 13 |
 | Accounts and community | 0 | 8 | 27 | 35 |
-| Data and sidecars | 0 | 1 | 4 | 5 |
+| Data and sidecars | 0 | 4 | 5 | 9 |
+| Build, CI and tests | 0 | 0 | 1 | 1 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 2 | 1 | 3 |
-| **Total** | **0** | **38** | **120** | **158** |
+| **Total** | **0** | **41** | **123** | **164** |
 
 ## P1 - Critical
 
@@ -114,6 +115,9 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-268](ISSUE_DETAILS.md#gs-268) | FGP text drops the part of a line before a gershayim | `fgp_data/fgp_transcriptions.db` (`text_source='pdf_rtl'`), `shared/local_indexer.py::extract_pdf_pages`, `scripts/fgp_rebuild_text_and_credit.py` | 2026-10-25 | ❌ Open |
+| [GS-269](ISSUE_DETAILS.md#gs-269) | FGP visual XML is applied by image number, not by source record | `scripts/fgp_rebuild_text_and_credit.py::build_xml_index`, `fgp_data/fgp_transcriptions.db` (`text_source='xml'`) | 2026-10-25 | ❌ Open |
+| [GS-270](ISSUE_DETAILS.md#gs-270) | FGP credit heuristic disagrees with FIST on 1,551 / 6,151 files | `scripts/fgp_fill_credits_bilingual.py` | 2026-10-25 | ❌ Open |
 | [GS-36](ISSUE_DETAILS.md#gs-36) | V0.8 corpus: cross-manuscript misattribution upstream; ~6% V0.7-only manuscripts absent from production (by owner decision) | `Transcriptions.txt` ingest (upstream); `data/v08_repair_manifest.json` | 2026-08-16 | ❌ Partly fixed |
 
 ### Server and operations
@@ -196,6 +200,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-273](ISSUE_DETAILS.md#gs-273) | The reading desk saves a source choice it never applies, keyed by list position | `web/pages/browse.py` (reading-desk version `ui.select`, `state.reading_desk_selected_sources`), `web/pages/browse_state.py` | 2026-10-26 | ❌ Open |
 | [GS-91](ISSUE_DETAILS.md#gs-91) | Website: Back to a search-within or visual-similarity search whose run is no longer kept runs it over the whole corpus | `web/pages/search.py::_search_url` (5248), page start elif initial_query (6547); `web/search_runs.py` | 2026-10-22 | ❌ Open |
 | [GS-92](ISSUE_DETAILS.md#gs-92) | Website: a search still preparing can be evicted from the run registry before finished ones | `web/search_runs.py` (`_prune`, `_oldest_first_removable`) | 2026-10-22 | ❌ Open |
 | [GS-93](ISSUE_DETAILS.md#gs-93) | Website: Back to a search shows its rows without the Filter Results panel's constraints | `web/pages/search.py` (Filter Results inputs); `web/pages/search_state.py::_post_filters` | 2026-10-22 | ❌ Open |
@@ -276,10 +281,17 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-272](ISSUE_DETAILS.md#gs-272) | FIST's RecordStatus 1 / 5 and PermissionCommentCode 5309 have no ruling before FGP new rows ship | `fist_data/FIST.db` `dbo_Signature.RecordStatus`, `PermissionCommentCode`; `scripts/fgp_gate2_rules.py`, `scripts/fgp_gate4_chooser_validation.py` | 2026-10-26 | ❌ Open |
 | [GS-151](ISSUE_DETAILS.md#gs-151) | A failed NLI metadata fetch is cached as "Unknown" (and saved, on the desktop) | `shared/metadata_manager.py::fetch_nli_data`, `batch_fetch_shelfmarks` (+ `save_caches`) | 2026-09-25 | ❌ Open |
 | [GS-152](ISSUE_DETAILS.md#gs-152) | PGP import can still produce a sidecar that is wrong but passes every check | `scripts/import_pgp_full.py`, `import_pgp_sections.py`, `pgp_transcriptions_export.py` | 2026-09-22 | ❌ Open |
 | [GS-153](ISSUE_DETAILS.md#gs-153) | Four sibling translate scripts accept a blank API answer as a successful translation | `scripts/translate_*.py` (four) translate_with_retry, lines `101/164/146/127` | 2026-09-21 | ❌ Open |
 | [GS-154](ISSUE_DETAILS.md#gs-154) | Oxford licence attribution is incomplete: no Schaaf number, no photographer credit, no per-object link | `web/services.py::ATTRIBUTION_BY_LIBRARY`; `shared/metadata_manager.py:36`; `oxford_full_db.json` | 2026-09-02 | ❌ Open |
+
+### Build, CI and tests
+
+| ID | Issue | Where | Opened | Status |
+|----|-------|-------|--------|--------|
+| [GS-271](ISSUE_DETAILS.md#gs-271) | The tracker scripts' atomic write does not keep a POSIX file's group | `scripts/open_issues_model.py::write_text` | 2026-10-25 | ❌ Open |
 
 ### Documentation
 

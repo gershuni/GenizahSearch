@@ -58,7 +58,7 @@ release for web and desktop together**, the Nuscha hidden layer kept.
 **Commits on `master-main`** (fast-forward, no PRs, all pushed except the last): `c38a7e79` gate 4 · `5f6160a1`
 drafts study · `acd26177` comment and test holds · `99c90650` legacy fonts · `adbccb24` the owner's rulings ·
 `02341c77` gate 5 (the positions session) · `a50230a6` the comment hold narrowed · `83e65fee` the Word-file census ·
-`8ba4111c` the Word-file rulings implemented (**local, not pushed at the time of writing**).
+`8ba4111c` the Word-file rulings implemented (pushed with this handoff `766fbfa7`; checked 2026-10-26 18:25).
 
 ## 2. What exists
 
@@ -77,7 +77,7 @@ drafts study · `acd26177` comment and test holds · `99c90650` legacy fonts · 
 | approvals | `scripts/fgp_gate3_approvals.json`, `scripts/fgp_gate4_approvals.json` (absent) | keyed on the durable key `<unit_table>:<unit_id>\|<sys_id>\|<c_number>` and both text hashes |
 | expectations | `scripts/fgp_gate{2,3,4,5}_*.expect.json` | re-declared from a run only on purpose, with the rules document; count the keys programmatically |
 | tests | `tests/test_fgp_{association_inventory,gate2_rules,gate3_text_pipeline,gate4_chooser_validation,gate5_positions}.py` over `tests/fgp_fixture_world.py` | 101 tests, about 10 minutes together (the gate-5 file is the slow one) |
-| open-issue fragments | `docs/open_issues.d/2026-10-25-fgp-text-loss-and-xml-by-image.md`, `2026-10-26-fgp-gate2-ignores-fist-unit-comment.md`, `2026-10-26-reading-desk-saved-source-choice-not-applied.md` | not yet collected into the tracker (`scripts/collect_open_issues.py --apply`) |
+| open issues | GS-268 (text loss), GS-269 (XML by image), GS-270 (credit heuristic), GS-272 (FIST codes), GS-273 (reading-desk save key) | collected into the tracker 2026-10-26 evening |
 
 How to rerun, in order, from the repository root in PowerShell: the four wrappers above. Gate 4 reads gate 3's
 output, gate 3 reads gate 2's, gate 2 reads gate 1's; a change in any gate's rules reruns everything downstream.
@@ -121,13 +121,18 @@ For the owner:
    harmless), but verify `FgpService.get_version()` / any version check in the web and desktop code before copying.
    Keep today's file beside it on the server for a rollback. Smoke-check a reading-desk page, a search hit with an
    FGP source and the `/api` transcription endpoint.
-2. Desktop: `fgp_transcriptions.db` is not bundled in the installer and the sidecar updater (`SidecarUpdateThread`,
-   `desktop/gui_threads.py`, manifest `sidecar-versions.json` on the GitHub release tag `data-latest`) wires only
-   pgp / fjms / nli. Add FGP to its `service_map` and to the manifest (the candidate is 295 MB; GitHub Releases take
-   it), so desktop users get the same file the site serves — that is what "one release" needs. A desktop release
-   (version bump, What's New, installer, GitHub Release) then ships the updater change; the sidecar itself travels
-   through `data-latest`. See `reference_desktop_data_provisioning` in memory for the paths and the 60-requests-an-hour
-   API limit on the manifest fetch.
+2. Desktop. **Corrected by the next session (2026-10-26 evening): `fgp_transcriptions.db` IS bundled in the
+   installer** (`GenizahSearchPro.spec` datas, `('fgp_data\\fgp_transcriptions.db', 'fgp_data')`, since v8.2.0
+   `3dc62d5d`), and `build_app.bat` builds from that spec, reading the file at the project root. So the desktop half
+   of the release is: put the candidate at `fgp_data/fgp_transcriptions.db` (today's file kept beside it for a
+   rollback — this writes over the file the gates never touch, so it waits for the owner's go-ahead) and build the
+   installer. The sidecar updater is **not** a route: its GitHub release `data-latest` does not exist (`gh release
+   view data-latest` → "release not found"; the tag 404s), so `SidecarUpdateThread` has never offered anything, and
+   `FgpService.get_version()` is read only by that updater (today's file has no `version` key; the candidate's is
+   2.0.0). Only `FgpService` opens the file (grep of `shared/`, `web/`, `desktop/`). The candidate is 347 MB
+   (346,939,392 bytes), today's 405 MB. Its `fgp_meta` still carries today's build keys (`sysid_resolved` 45006 /
+   45034, `empty_text` 13, `source` D:\…, `extractor` PyMuPDF) beside the new ones; nothing reads them, but they
+   misdescribe the file.
 3. The changelog fragment (`changelog.d/`) and the release notes should say what users see: about 18,500 new
    transcriptions, cleaner text on about 27,700, about 600 removed and why (`feedback_release_texts_gentle_on_past_gaps`).
 4. Before any of it: push `8ba4111c`; run `python scripts/check_docs.py` and `ruff check .`; collect the three
