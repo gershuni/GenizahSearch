@@ -31,13 +31,14 @@ Candidate sidecar ``fgp_transcriptions.candidate.db`` (today's schema + ``origin
      ``scripts/fgp_gate4_exclusions.json`` is excluded under its listed reason (``non_manuscript``,
      ``keyboard_dummy``). R2e: a text with three or more telephone numbers or an e-mail address
      is excluded as ``personal_data``. R2f: a unit whose FIST signature has ``RecordStatus`` 5 is an
-     older version FGP superseded (``superseded_version``).
+     older version FGP superseded (``superseded_version``). R2g: a new translation whose signature has
+     ``RecordStatus`` 1 is held (``status1_translation``); status-1 transcriptions enter.
   R3 its text is gate 3's when gate 3 replaced it (status accepted / approved), else today's;
      ``sections`` (the PDF page split) is cleared on a replaced text.
   R4 its credit is gate 2's (``credit_he`` / ``credit_en``; the generic Friedberg attribution where
      gate 2 ruled generic).
   R5 a new (unit, AlmaId) row read by gate 3 enters under ``--new-rows-policy plain`` iff its text
-     is non-blank, not a superseded version (R2f), not listed (R2d), without personal data (R2e), not a test or dummy file, not a
+     is non-blank, not a superseded version (R2f), not a status-1 translation (R2g), not listed (R2d), without personal data (R2e), not a test or dummy file, not a
      legacy-font DOCX, its FIST unit comment does not say
      it must not be published until read against the source (``fist_comment_no_publish``, gate 2's rule), and it
      comes from folder B, or
@@ -250,8 +251,11 @@ def personal_data(text: str) -> bool:
 # export has no code table for dbo_Signature.RecordStatus, but 3,926 of the 3,945 new rows with status 5 have a newer
 # status-0 version of the same unit and 3,920 of those newer versions are already in the candidate, 83% of the sampled
 # pairs with identical letters -- status 5 is "replaced by a newer version". Status 1 (1,982 new rows, no newer
-# version) is left alone: its meaning is not in the data.
+# version) has no meaning in the data; the owner looked it up on FJMS (2026-10-26): FGP shows the status-1
+# transcriptions sampled from teams 200, 107 and 500 with the same text, and neither status-1 translation sampled (one
+# of them not the fragment's text). Status-1 transcriptions enter; the 26 status-1 translations are held (R2g).
 SUPERSEDED_STATUS = 5
+STATUS_ONE = 1
 
 
 def load_superseded(fist: sqlite3.Connection) -> dict:
@@ -276,6 +280,19 @@ def load_superseded(fist: sqlite3.Connection) -> dict:
         for uid, sid in fist.execute(f"SELECT {id_col}, SignatureId FROM {table}"):
             if sid in old:
                 out[(table, uid)] = old[sid]
+    return out
+
+
+def load_status_one(fist: sqlite3.Connection) -> set:
+    """{(unit_table, unit_id)} of every unit whose FIST signature has RecordStatus STATUS_ONE; empty on a FIST
+    without the column."""
+    try:
+        sigs = {sid for (sid,) in fist.execute("SELECT SignatureId FROM dbo_Signature WHERE RecordStatus = ?", (STATUS_ONE,))}
+    except sqlite3.OperationalError:
+        return set()
+    out = set()
+    for table, id_col in (("dbo_UnitTranscription", "UnitTranscriptionId"), ("dbo_UnitTranslation", "UnitTranslationId")):
+        out |= {(table, uid) for uid, sid in fist.execute(f"SELECT {id_col}, SignatureId FROM {table}") if sid in sigs}
     return out
 LETTERS_RE = re.compile(r"[א-תؠ-ي]+")
 NEW_UID_RE = re.compile(r"^(dbo_\w+):(\d+)\|(\d+)$")
@@ -427,10 +444,12 @@ def image_number_of(reader: str, source_path: str) -> str | None:
 
 def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new: list, texts_conn: sqlite3.Connection,
                    b_numbers: dict, units: dict, libraries: dict, credit_ctx: dict, policy: str,
-                   comments: dict | None = None, exclusions: dict | None = None, superseded: dict | None = None) -> dict:
+                   comments: dict | None = None, exclusions: dict | None = None, superseded: dict | None = None,
+                   status_one: set | None = None) -> dict:
     comments = comments or {}
     exclusions = exclusions or {}
     superseded = superseded or {}
+    status_one = status_one or set()
     known_keys = {(g3_today.get(rid) or g2.get(rid) or {}).get("durable_key") for rid in today} | {n["durable_key"] for n in g3_new}
     kept, excluded = [], []
     for rid in sorted(today):
@@ -545,6 +564,9 @@ def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new:
             continue
         if (ut, uid) in superseded:
             held.append((rk, "superseded_version", _j({"newer_signature": superseded[(ut, uid)]})))
+            continue
+        if n["kind"] == "translation" and (ut, uid) in status_one:
+            held.append((rk, "status1_translation", ""))
             continue
         if n["durable_key"] in exclusions:
             held.append((rk, exclusions[n["durable_key"]], _j({"listed": n["durable_key"]})))
@@ -1185,13 +1207,15 @@ def main(argv=None) -> int:
                   "bibref": build_bibref_map(fist, bibref_ids)}
     comments = load_unit_comments(fist)
     superseded = load_superseded(fist)
+    status_one = load_status_one(fist)
     fist.close()
     log(f"  {len(today):,} today rows, {len(g3_new):,} new rows read by gate 3, {len(libraries):,} manuscripts in libraries.csv "
         f"({time.time() - t0:.0f}s)")
 
     log("planning and writing the candidate sidecar ...")
     plan = plan_candidate(today, g2, aliases, g3_today, g3_new, g3_conn, b_numbers, units, libraries, credit_ctx,
-                          args.new_rows_policy, comments=comments, exclusions=exclusions, superseded=superseded)
+                          args.new_rows_policy, comments=comments, exclusions=exclusions, superseded=superseded,
+                          status_one=status_one)
     g3_conn.close()
     cand_path = os.path.join(args.out_dir, CANDIDATE_NAME)
     write_candidate(cand_path, args.fgp_db, cols_t, plan, meta)

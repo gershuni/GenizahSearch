@@ -21,38 +21,40 @@ PDFs, with known losses (line starts before a gershayim, final and vocalised let
 lines, Arabic). Four gates have been run on the new material and a **candidate sidecar** built and checked against
 the real chooser of both apps; a fifth gate measured the positions.
 
-| the candidate `fgp_data/inventory/fgp_transcriptions.candidate.db` (gitignored; eighth gate-4 run, 2026-10-26 19:27; sha256 `ef9068b7…a00300e4`) | rows |
+| the candidate `fgp_data/inventory/fgp_transcriptions.candidate.db` (gitignored; ninth gate-4 run, 2026-10-26 20:11; sha256 `ce53c4010b797f62…`) | rows |
 |---|---|
 | today's rows carried under their ids | 44,484 of 45,034 |
 | of which with a cleaner text (the Word file or the per-line position text instead of the PDF) | 27,673 |
 | today's rows dropped | 550 |
-| new transcriptions added | 14,598 |
-| new rows held, with a reason each | 10,681 |
-| total | 59,082 |
+| new transcriptions added | 14,572 |
+| new rows held, with a reason each | 10,707 |
+| total | 59,056 |
 
 The 550 drops: 391 XML rows gate 3 could not verify by their own record, 97 gate-2 holds (17 the explicit
 "do not publish until read against the source" comment, 23 `tmp_DoubleNotToDisplay`, 19 absent files, 26 wrong
 XML region, 5 another edition, 7 unconfirmed associations), 50 retired duplicates, 6 keyboard-dummy rows (listed,
 R2d), 3 without text, 3 test files.
 
-The 10,681 holds, each under its first reason: 4,506 older versions FGP superseded (FIST `RecordStatus` 5, R2f),
+The 10,707 holds, each under its first reason: 4,506 older versions FGP superseded (FIST `RecordStatus` 5, R2f),
 3,666 whole-document rows on manuscripts another unit already serves per image (the chooser keeps one row per image
-and would drop them), 1,136 folder-B rows whose image the NLI gallery does not list under the row's manuscript, 812
+and would drop them), 1,136 folder-B rows whose image the NLI gallery does not list under the row's manuscript, 788
 Word files whose rendering differs from FGP's own PDF in a way the classes do not explain, 322 without an AlmaId,
 168 blank files, 26 unknown images, 15 test or dummy files, 12 real tables (several columns), 9 legacy-font texts,
 3 personal data (team 850's contact list on three images, R2e), 3 non-manuscript documents (listed, R2d), 3
-shadowing cases.
+shadowing cases, 50 status-1 translations (R2g).
 
 Every number above is a declared expectation reproduced by two runs with one digest (gate 3 `0088ba547d3dfc83`,
-rerun from the committed code 2026-10-26 evening with the same digest; gate 4 `9b3305335cb57b79`); the budgets
+rerun from the committed code 2026-10-26 evening with the same digest; gate 4 `14a8cfb929633f56`); the budgets
 (latency, memory, size) are far under their limits. `scripts/check_fgp_sidecar.py` checks the file itself
 (integrity, version, rows, checksum, and that the passing run built it).
 
 **`RecordStatus` 5 is "superseded" (found the same evening).** FIST keeps each version of a unit as its own signature;
 3,926 of the 3,945 status-5 rows that had entered have a newer status-0 version of the same unit, 3,920 of them
 already in the candidate, and 83 % of a 300-pair sample have identical letters — the candidate would have listed the
-same edition twice. R2f holds them. Status 1 stays unread: 1,982 new rows (and 19 of today's, served now) with no
-newer version, mostly team 200's 2018 delivery; no code table says what it means (§3 item 5).
+same edition twice. R2f holds them. Status 1 has no code table; the owner looked a sample up on FJMS the same
+evening: FGP shows the status-1 transcriptions (teams 200, 107, 500, same text) and not the status-1 translations
+(one of them not the fragment's text). Ruling: the 1,956 status-1 transcriptions ship, the 26 status-1 translations
+are held (R2g); today's 19 status-1 rows stay.
 
 **Correction of the evening (Codex review of the candidate, then the owner's go-ahead):** the sixth run's candidate
 (62,983 rows, digest `058a0c26`) was not releasable. It published team 850's private contact list (107 telephone
@@ -90,7 +92,7 @@ drafts study · `acd26177` comment and test holds · `99c90650` legacy fonts · 
 | gate 1 inventory | `fgp_data/inventory/inventory.db` | `scripts/run_fgp_association_inventory.ps1` |
 | gate 2 outcomes | `fgp_data/inventory/gate2.db` | `scripts/run_fgp_gate2_rules.ps1`; one run; 7 checks + 36 expectations |
 | gate 3 texts | `fgp_data/inventory/gate3.db` (+ `gate3_run1/`) | `scripts/run_fgp_gate3_text_pipeline.ps1`; two runs; 9 + 55; **about 15 minutes a run with the PDF cache `fgp_data/inventory/pdf_text_cache.db`, 28 cold** |
-| gate 4 candidate | `fgp_data/inventory/fgp_transcriptions.candidate.db`, `gate4.db` (+ `gate4_run1/`) | `scripts/run_fgp_gate4_chooser_validation.ps1`; two runs; 16 + 65; about 2–3 minutes a run; exclusions `scripts/fgp_gate4_exclusions.json`; never written over today's `fgp_data/fgp_transcriptions.db` |
+| gate 4 candidate | `fgp_data/inventory/fgp_transcriptions.candidate.db`, `gate4.db` (+ `gate4_run1/`) | `scripts/run_fgp_gate4_chooser_validation.ps1`; two runs; 16 + 66; about 2–3 minutes a run; exclusions `scripts/fgp_gate4_exclusions.json`; never written over today's `fgp_data/fgp_transcriptions.db` |
 | gate 5 positions | `fgp_data/inventory/gate5*.db` and the positions store | `scripts/run_fgp_gate5_positions.ps1`; 68 minutes a run; verdict FAIL on G1 (17 of 20 images) by findings, not tuning |
 | Word-file census | `fgp_data/inventory/docx_structure_census.json` | `scripts/fgp_docx_structure_census.py` |
 | Nuscha hidden layer | `fgp_data/nuscha_hidden_layer.db` (155 MB) | `scripts/fgp_nuscha_hidden_layer.py`; 38,790 files, 796,854 lines; nothing reads it yet |
@@ -125,7 +127,7 @@ For the owner:
    whether the pass bar stands as declared, how to clear 19,591 unchecked images, whether an overlay needs a
    confirmed page, the NLI 503s, the 46 `hash_mismatch` folders, the Strasbourg offset (§4 step D).
 5. **The FGP codes**: `RecordStatus` 5 is settled from FIST's own version chain (superseded, held by R2f, §1).
-   Still open: `RecordStatus` 1 on **1,982 new rows** (and 19 of today's): ship or hold until it is understood;
+   `RecordStatus` 1 ruled the same evening (transcriptions ship, translations held, R2g). Still open:
    `PermissionCommentCode` 5309 — FIST's own code table reads it "being worked on… the data is therefore temporarily
    inaccessible", and today's site serves 180 rows carrying it (no new row has it); `tmp_DoubleNotToDisplay` (23 rows
    held). `ViewLevelCode` is 310, "regular", on every candidate row (2310 "authorised only" and 3310 "not for
@@ -145,7 +147,7 @@ For the owner:
 ## 4. Recommended plan, in order
 
 **A. The release (web and desktop, one release).** Effort: a day plus the installer build.
-0. **Web deploy script (2026-10-26 evening):** `powershell -File scripts/deploy_fgp_sidecar.ps1 -Rows 59082` (the
+0. **Web deploy script (2026-10-26 evening):** `powershell -File scripts/deploy_fgp_sidecar.ps1 -Rows 59056` (the
    owner runs it; `-DryRun` checks the file only). It checks the candidate locally with `scripts/check_fgp_sidecar.py`
    (the passing gate-4 run built it), uploads it as `fgp_transcriptions.db.new`, checks checksum, integrity, version
    and rows on the server, renames the served file to `fgp_transcriptions.db.prev-<stamp>`, swaps, restarts, checks
