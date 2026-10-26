@@ -25,14 +25,19 @@ Candidate sidecar ``fgp_transcriptions.candidate.db`` (today's schema + ``origin
      "טסט" / "נא להתעלם") and, when gate 3 replaced it, not a legacy-font DOCX (``legacy_font``:
      at least 10 combining marks that follow no letter, and at least a tenth as many as letters);
      and it is not the stub of a same-image pair (``stub_retired``: another unit's row on the same
-     image, relation, language and manuscript has more than three times its letters and a
-     different text -- today's chooser lists only the longer one anyway).
+     image, relation, language and manuscript has more than three times its letters and CONTAINS
+     it -- at least 80% of its letters in order, in runs of six or more letters of the longer text;
+     a short row that is another text stays). R2d: a row listed by durable key in
+     ``scripts/fgp_gate4_exclusions.json`` is excluded under its listed reason (``non_manuscript``,
+     ``keyboard_dummy``). R2e: a text with three or more telephone numbers or an e-mail address
+     is excluded as ``personal_data``.
   R3 its text is gate 3's when gate 3 replaced it (status accepted / approved), else today's;
      ``sections`` (the PDF page split) is cleared on a replaced text.
   R4 its credit is gate 2's (``credit_he`` / ``credit_en``; the generic Friedberg attribution where
      gate 2 ruled generic).
   R5 a new (unit, AlmaId) row read by gate 3 enters under ``--new-rows-policy plain`` iff its text
-     is non-blank, not a test or dummy file, not a legacy-font DOCX, its FIST unit comment does not say
+     is non-blank, not listed (R2d), without personal data (R2e), not a test or dummy file, not a
+     legacy-font DOCX, its FIST unit comment does not say
      it must not be published until read against the source (``fist_comment_no_publish``, gate 2's rule), and it
      comes from folder B, or
      from a DOCX whose rendering gate 3 checked clean against FGP's PDF of the file (or that has no
@@ -55,8 +60,9 @@ Checks (a failing check exits 1; a missed expectation too)
   C2 selectability, every manuscript, through the real ``FgpService`` on both DBs: every source
      the chooser lists today is listed from the candidate, or carries one of the dispositions
      ``retired_alias`` (a same-meaning successor is listed), ``gate2_hold``, ``xml_unverified``,
-     ``same_text_swap`` (its image group is now won by a row of the same text, ratio >= 0.95);
-     every new row is listed; a same-meaning successor is listed.
+     an R2 / R2c / R2d / R2e exclusion, ``same_text_swap`` (its image group is now won by a row of
+     the same text, ratio >= 0.95 over the whole text); every new row is listed; a same-meaning
+     successor is listed.
   C3 identity: every carried row keeps id, uid, doc_relation and language -- the only keys a saved
      choice can rest on (the reading desk keys choices by list position; see the rules document).
   C4 page assignment: every carried row keeps sys_id, c_number, image_side, page_info and
@@ -73,6 +79,8 @@ Checks (a failing check exits 1; a missed expectation too)
      the candidate and reading the full sys_id sets, the heaviest manuscript's load; the file size.
   C8 the service contract: the source table is discovered, ``get_version()`` answers, every row has
      a sys_id and text, counts reconcile.
+  C9 every durable key listed in the exclusions file names a row of today's sidecar or of gate 3's
+     new rows.
 
 Outputs (``--out-dir``, default ``fgp_data/inventory``): ``fgp_transcriptions.candidate.db``,
 ``gate4.db`` (``candidate_rows``, ``row_dispositions``, ``selectability``, ``page_assignment``,
@@ -122,6 +130,8 @@ DEFAULT_INVENTORY = os.path.join(DEFAULT_OUT, "inventory.db")
 DEFAULT_NLI = os.path.join(ROOT, "nli_data", "nli_crossref.db")
 DEFAULT_LIBRARIES = os.path.join(ROOT, "libraries.csv")
 DEFAULT_APPROVALS = os.path.join(ROOT, "scripts", "fgp_gate4_approvals.json")
+DEFAULT_EXCLUSIONS = os.path.join(ROOT, "scripts", "fgp_gate4_exclusions.json")
+EXCLUSION_REASONS = frozenset({"non_manuscript", "keyboard_dummy"})
 CANDIDATE_NAME = "fgp_transcriptions.candidate.db"
 CANDIDATE_VERSION = "2.0.0"
 MS_HEB_G2 = "990053489970205171"
@@ -147,7 +157,8 @@ MULTICOLUMN_MIN = 2  # a table whose widest row has this many cells is a real ta
 SAME_TEXT_RATIO = 0.95
 # The only reasons a source the chooser lists today may be missing from the candidate's list.
 SELECTABILITY_DISPOSITIONS = frozenset({"retired_alias", "gate2_hold", "xml_unverified", "empty_text", "test_or_dummy",
-                                        "legacy_font", "stub_retired", "same_text_swap"})
+                                        "legacy_font", "stub_retired", "same_text_swap", "personal_data"}
+                                       | EXCLUSION_REASONS)
 # Legacy-font DOCX (owner's ruling of 2026-10-26): a file typed in a pre-Unicode Hebrew font reads as vowel points
 # standing where letters should be. In real Unicode text a combining mark always follows a letter; a mark that
 # follows a space, a digit, punctuation or the start of the text ("orphan") is the font's letter. A vocalised
@@ -156,12 +167,15 @@ SELECTABILITY_DISPOSITIONS = frozenset({"retired_alias", "gate2_hold", "xml_unve
 # PDF text detaches marks by itself, which gate 3's classes handle.
 LEGACY_ORPHAN_MIN = 10
 LEGACY_ORPHAN_SHARE = 0.10
-# Stubs (owner's ruling of 2026-10-26): when two FIST units serve the same image, relation and language of one
-# manuscript, today's chooser lists only the longer text; a shorter one with under STUB_SHARE of the longer's
-# letters, and not the same text, is a stub of a transcription filed twice (team 200 sub-team 4 "_Tc" files beside
-# sub-team 1's full text) and is retired from the candidate. Rows of about the same length that differ are two
-# readings and both stay.
+# Stubs (owner's ruling of 2026-10-26, corrected the same evening): when two FIST units serve the same image, relation
+# and language of one manuscript, today's chooser lists only the longer text; a shorter one with under STUB_SHARE of
+# the longer's letters is a stub of a transcription filed twice, and is retired, only when it is a PART of the longer
+# text: at least STUB_CONTAINED of its letters lie, in order, in runs of STUB_RUN or more letters of the longer one.
+# Length alone retired 56 of today's rows that are other texts (team 200's "גנוזות" rows on a different photograph of
+# the same C-number; none above 0.33 by this measure, a real excerpt 0.996). Rows that are not contained stay.
 STUB_SHARE = 0.30
+STUB_RUN = 6
+STUB_CONTAINED = 0.80
 
 
 def legacy_font_stats(text: str) -> tuple:
@@ -213,6 +227,23 @@ def test_or_dummy(text: str, relation: str) -> bool:
         return True
     tokens = [w.lower() for w in TEST_TOKEN_RE.findall(t)]
     return bool(tokens) and all(w in TEST_WORDS or w.isdigit() for w in tokens)
+# Personal data (owner's ruling of 2026-10-26 evening): a manuscript transcription has no telephone numbers or e-mail
+# addresses; team 850 filed a contact list (107 numbers) as a transcription. Held at PERSONAL_PHONES_MIN numbers -- a
+# phone-shaped run never starts inside a longer number (image and file ids) -- or at any Latin e-mail address with a
+# known top-level domain (the transcribers' "@...@" marks are not one).
+PERSONAL_PHONES_MIN = 3
+PHONE_RE = re.compile(r"(?<!\d)(?:05\d-?\d{7}|0[2-9]-?\d{7}|\+972[-\s]?\d[\d-]{7,})(?!\d)")
+EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.(?:com|org|net|il|ac\.il|co\.il|edu|gov)\b", re.I)
+
+
+def personal_data_counts(text: str) -> tuple:
+    """(telephone numbers, e-mail addresses) in ``text``."""
+    return len(PHONE_RE.findall(text or "")), len(EMAIL_RE.findall(text or ""))
+
+
+def personal_data(text: str) -> bool:
+    phones, emails = personal_data_counts(text)
+    return phones >= PERSONAL_PHONES_MIN or emails > 0
 LETTERS_RE = re.compile(r"[א-תؠ-ي]+")
 NEW_UID_RE = re.compile(r"^(dbo_\w+):(\d+)\|(\d+)$")
 
@@ -234,10 +265,21 @@ def letters(text: str) -> str:
 
 
 def text_ratio(a: str, b: str) -> float:
+    """Similarity of the two texts' letters over their whole length (a prefix would call two texts with one
+    beginning and different endings the same)."""
     la, lb = letters(a), letters(b)
     if not la or not lb:
         return 0.0
-    return difflib.SequenceMatcher(None, la[:4000], lb[:4000], autojunk=False).ratio()
+    return difflib.SequenceMatcher(None, la, lb, autojunk=False).ratio()
+
+
+def contained_share(short: str, long: str) -> float:
+    """Share of ``short``'s letters that lie, in order, in runs of STUB_RUN or more letters of ``long``."""
+    ls, ll = letters(short), letters(long)
+    if not ls or not ll:
+        return 0.0
+    blocks = difflib.SequenceMatcher(None, ls, ll, autojunk=False).get_matching_blocks()
+    return sum(b.size for b in blocks if b.size >= STUB_RUN) / len(ls)
 
 
 def pct(values: list, q: float) -> float:
@@ -324,6 +366,20 @@ def load_approvals(path: str) -> dict:
     return {"page": page, "default": default}
 
 
+def load_exclusions(path: str) -> dict:
+    """durable key -> reason, from the owner-ruled exclusions file (R2d); absent = none."""
+    if not path or not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        data = json.load(fh)
+    out = {}
+    for e in data.get("exclusions", []):
+        if e["reason"] not in EXCLUSION_REASONS:
+            raise ValueError(f"exclusion {e['durable_key']}: reason {e['reason']!r} is not one of {sorted(EXCLUSION_REASONS)}")
+        out[e["durable_key"]] = e["reason"]
+    return out
+
+
 def image_number_of(reader: str, source_path: str) -> str | None:
     """The FGP image number a folder-B unit text belongs to: B2 ``C<n>\\data.js`` -> n; B1 ``<n>.xml`` -> n."""
     if reader == "b2_rows":
@@ -338,8 +394,10 @@ def image_number_of(reader: str, source_path: str) -> str | None:
 
 def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new: list, texts_conn: sqlite3.Connection,
                    b_numbers: dict, units: dict, libraries: dict, credit_ctx: dict, policy: str,
-                   comments: dict | None = None) -> dict:
+                   comments: dict | None = None, exclusions: dict | None = None) -> dict:
     comments = comments or {}
+    exclusions = exclusions or {}
+    known_keys = {(g3_today.get(rid) or g2.get(rid) or {}).get("durable_key") for rid in today} | {n["durable_key"] for n in g3_new}
     kept, excluded = [], []
     for rid in sorted(today):
         o = g2.get(rid)
@@ -383,6 +441,10 @@ def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new:
         text = texts.get(k["unit"], "") if k["replaced"] else (today[k["id"]].get("content") or "")
         if not text.strip():
             excluded.append((k["id"], "empty_text", "gate3:" + str((g3_today.get(k["id"]) or {}).get("hold_reason") or "")))
+        elif k["durable_key"] in exclusions:
+            excluded.append((k["id"], exclusions[k["durable_key"]], _j({"listed": k["durable_key"]})))
+        elif personal_data(text):
+            excluded.append((k["id"], "personal_data", _j(dict(zip(("phones", "emails"), personal_data_counts(text))))))
         elif test_or_dummy(text, today[k["id"]].get("doc_relation") or "Digital Edition"):
             excluded.append((k["id"], "test_or_dummy", text.strip()[:TEST_TEXT_MAX]))
         elif k["replaced"] and legacy_font(text):
@@ -407,10 +469,14 @@ def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new:
             if k is longest or k["unit"] == longest["unit"]:
                 continue
             short_text = text_of[k["id"]]
-            if len(letters(short_text)) < STUB_SHARE * len(letters(long_text)) and text_ratio(short_text, long_text) < SAME_TEXT_RATIO:
+            if len(letters(short_text)) >= STUB_SHARE * len(letters(long_text)):
+                continue
+            share = contained_share(short_text, long_text)
+            if share >= STUB_CONTAINED:
                 stubs.add(k["id"])
                 excluded.append((k["id"], "stub_retired", _j({"longer": f"fgp:{longest['id']}", "letters": len(letters(short_text)),
-                                                                "longer_letters": len(letters(long_text))})))
+                                                                "longer_letters": len(letters(long_text)),
+                                                                "contained": round(share, 3)})))
     kept = [k for k in kept if k["id"] not in stubs]
     # new rows
     new_rows, held, yardstick = [], [], {}
@@ -440,6 +506,12 @@ def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new:
         text = texts.get((ut, uid), "")
         if not text.strip():
             held.append((rk, "blank_text", ""))
+            continue
+        if n["durable_key"] in exclusions:
+            held.append((rk, exclusions[n["durable_key"]], _j({"listed": n["durable_key"]})))
+            continue
+        if personal_data(text):
+            held.append((rk, "personal_data", _j(dict(zip(("phones", "emails"), personal_data_counts(text))))))
             continue
         comment = comments.get((ut, uid))
         if comment and NO_PUBLISH_COMMENT_RE.search(comment):
@@ -514,7 +586,8 @@ def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new:
             per_image_any[key].add(next_id - 1)
         else:
             whole_doc[key].add(next_id - 1)
-    return {"kept": kept, "excluded": excluded, "new_rows": new_rows, "held": held, "texts": texts, "yardstick": yardstick}
+    return {"kept": kept, "excluded": excluded, "new_rows": new_rows, "held": held, "texts": texts, "yardstick": yardstick,
+            "exclusions_unmatched": sorted(k for k in exclusions if k not in known_keys)}
 
 
 def write_candidate(path: str, today_db: str, today_cols: list, plan: dict, meta: dict) -> None:
@@ -910,6 +983,8 @@ def run_checks(C: collections.Counter, latency: list, memory: list, contract: di
         add(f"C7_{r[0]}", r[3], f"<= {r[2]} MB", f"{r[1]} MB", r[4])
     add("C8_service_contract", contract["ok"], "table found, version set, every row with sys_id and text",
         contract["detail"], "")
+    add("C9_exclusions_matched", C.get("exclusions.unmatched", 0) == 0, 0, C.get("exclusions.unmatched", 0),
+        "durable keys listed in the exclusions file that name no row")
     for key, exp in sorted(expectations.items()):
         actual = C.get(key)
         add(f"E_{key}", actual == exp, exp, actual if actual is not None else "missing", "declared expectation")
@@ -1019,6 +1094,7 @@ def main(argv=None) -> int:
     ap.add_argument("--nli", default=DEFAULT_NLI, help="nli_crossref.db (gallery; page assignment)")
     ap.add_argument("--libraries-csv", default=DEFAULT_LIBRARIES)
     ap.add_argument("--approvals", default=DEFAULT_APPROVALS)
+    ap.add_argument("--exclusions", default=DEFAULT_EXCLUSIONS, help="owner-ruled exclusions by durable key (R2d)")
     ap.add_argument("--out-dir", default=DEFAULT_OUT)
     ap.add_argument("--new-rows-policy", choices=("hold", "plain"), default="plain")
     ap.add_argument("--htr-json", help="HTR pages per sys_id (tests); default: the search engine")
@@ -1045,7 +1121,8 @@ def main(argv=None) -> int:
     except ImportError:  # pragma: no cover
         proc = None
     meta = {"run_at": time.strftime("%Y-%m-%d %H:%M:%S"), "fgp_db": args.fgp_db, "gate2": args.gate2, "gate3": args.gate3,
-            "inventory": args.inventory, "nli": args.nli, "approvals": args.approvals, "new_rows_policy": args.new_rows_policy,
+            "inventory": args.inventory, "nli": args.nli, "approvals": args.approvals, "exclusions": args.exclusions,
+            "new_rows_policy": args.new_rows_policy,
             "htr": args.htr_json or "search engine", "budgets": _j(BUDGETS)}
 
     log("loading today's sidecar, gates 2 and 3, the inventory ...")
@@ -1062,6 +1139,7 @@ def main(argv=None) -> int:
     inv.close()
     libraries = load_libraries(args.libraries_csv)
     approvals = load_approvals(args.approvals)
+    exclusions = load_exclusions(args.exclusions)
     fist = ro(args.fist)
     bibref_ids = {units[k][1] for k in units if units[k][0] == BIBREF_SOURCE}
     credit_ctx = {"parts": build_credit_parts(db_t), "catalog": build_catalog_map(fist), "book": build_book_map(fist),
@@ -1073,7 +1151,7 @@ def main(argv=None) -> int:
 
     log("planning and writing the candidate sidecar ...")
     plan = plan_candidate(today, g2, aliases, g3_today, g3_new, g3_conn, b_numbers, units, libraries, credit_ctx,
-                          args.new_rows_policy, comments=comments)
+                          args.new_rows_policy, comments=comments, exclusions=exclusions)
     g3_conn.close()
     cand_path = os.path.join(args.out_dir, CANDIDATE_NAME)
     write_candidate(cand_path, args.fgp_db, cols_t, plan, meta)
@@ -1101,6 +1179,10 @@ def main(argv=None) -> int:
     C["rows.candidate"] = len(plan["kept"]) + len(plan["new_rows"])
     for y in plan["yardstick"].values():
         C[f"new.yardstick.{y}"] += 1
+    C["exclusions.listed"] = len(exclusions)
+    C["exclusions.unmatched"] = len(plan["exclusions_unmatched"])
+    for k in plan["exclusions_unmatched"]:
+        log(f"  listed exclusion names no row: {k}")
 
     db_c = ro(cand_path)
     svc_t, svc_c = fs.FgpService(db_path=args.fgp_db), fs.FgpService(db_path=cand_path)

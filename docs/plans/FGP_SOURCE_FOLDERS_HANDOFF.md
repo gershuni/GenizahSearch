@@ -21,28 +21,39 @@ PDFs, with known losses (line starts before a gershayim, final and vocalised let
 lines, Arabic). Four gates have been run on the new material and a **candidate sidecar** built and checked against
 the real chooser of both apps; a fifth gate measured the positions.
 
-| the candidate `fgp_data/inventory/fgp_transcriptions.candidate.db` (gitignored, 2026-10-26 evening) | rows |
+| the candidate `fgp_data/inventory/fgp_transcriptions.candidate.db` (gitignored; seventh gate-4 run, 2026-10-26 19:08) | rows |
 |---|---|
-| today's rows carried under their ids | 44,434 of 45,034 |
-| of which with a cleaner text (the Word file or the per-line position text instead of the PDF) | 27,677 |
-| today's rows dropped | 600 |
-| new transcriptions added | 18,549 |
-| new rows held, with a reason each | 6,730 |
-| total | 62,983 |
+| today's rows carried under their ids | 44,484 of 45,034 |
+| of which with a cleaner text (the Word file or the per-line position text instead of the PDF) | 27,673 |
+| today's rows dropped | 550 |
+| new transcriptions added | 18,543 |
+| new rows held, with a reason each | 6,736 |
+| total | 63,027 |
 
-The 600 drops: 391 XML rows gate 3 could not verify by their own record, 97 gate-2 holds (17 the explicit
+The 550 drops: 391 XML rows gate 3 could not verify by their own record, 97 gate-2 holds (17 the explicit
 "do not publish until read against the source" comment, 23 `tmp_DoubleNotToDisplay`, 19 absent files, 26 wrong
-XML region, 5 another edition, 7 unconfirmed associations), 56 short stubs beside a fuller text of the same image,
-50 retired duplicates, 3 without text, 3 test files.
+XML region, 5 another edition, 7 unconfirmed associations), 50 retired duplicates, 6 keyboard-dummy rows (listed,
+R2d), 3 without text, 3 test files.
 
-The 6,730 holds: 3,858 whole-document rows on manuscripts another unit already serves per image (3,811 Nuscha —
+The 6,736 holds: 3,858 whole-document rows on manuscripts another unit already serves per image (3,811 Nuscha —
 the chooser keeps one row per image and would drop them), 1,153 Word files whose rendering differs from FGP's own
 PDF in a way the classes do not explain, 1,138 folder-B rows whose image the NLI gallery does not list under the
 row's manuscript, 322 without an AlmaId, 168 blank files, 28 real tables (several columns), 26 unknown images, 21
-test or dummy files, 13 legacy-font texts, 3 shadowing cases.
+test or dummy files, 13 legacy-font texts, 3 personal data (team 850's contact list on three images, R2e), 3
+non-manuscript documents (listed, R2d), 3 shadowing cases.
 
 Every number above is a declared expectation reproduced by two runs with one digest (gate 3 `0088ba547d3dfc83`,
-gate 4 `058a0c2690d68b4f`); the budgets (latency, memory, size) are far under their limits. The chooser's checks
+rerun from the committed code 2026-10-26 evening with the same digest; gate 4 `1a5d7558fa8eac09`); the budgets
+(latency, memory, size) are far under their limits.
+
+**Correction of the evening (Codex review of the candidate, then the owner's go-ahead):** the sixth run's candidate
+(62,983 rows, digest `058a0c26`) was not releasable. It published team 850's private contact list (107 telephone
+numbers, three rows) and three other non-manuscript documents, kept six keyboard-dummy rows from today's file, and
+its stub rule (R2c) dropped 56 of today's rows on length alone — none of them is part of its "longer" text; each is
+team 200's `גנוזות` transcription of a different photograph under the same C-number (e.g. `fgp:16363`, Talmud Yoma,
+beside a halakhic text). Gate 4 now has R2d (owner-listed exclusions, `scripts/fgp_gate4_exclusions.json`), R2e
+(personal data), R2c by containment, `text_ratio` over the whole text (it read the first 4,000 letters), and check
+C9; the record is [`FGP_CHOOSER_VALIDATION_RULES.md`](FGP_CHOOSER_VALIDATION_RULES.md) §6. The chooser's checks
 drive the real `FgpService`, `filter_sources_for_page` / `_select_fgp_sources_for_page` and
 `choose_default_source` over both databases.
 
@@ -51,7 +62,8 @@ new-rows policy ships; the 10 text-less rows take their Word text (the first app
 `scripts/fgp_gate3_approvals.json`); stubs of same-image pairs retired, pairs of two readings both kept; the 1,138
 gallery-mismatch rows held; the FIST comment hold narrowed to the 17 explicit do-not-publish rows (the 150 "not
 checked against the source" rows are a quality note and stay published); legacy-font Word texts held; test files
-held; the Word-file rulings of [`FGP_DOCX_STRUCTURE_RULES.md`](FGP_DOCX_STRUCTURE_RULES.md) §5 — superscript
+held; (evening) the contact list, three non-manuscript documents and six keyboard-dummy rows held or excluded, and
+the stub rule narrowed to texts contained in the longer one, which returns the 56 rows it had dropped; the Word-file rulings of [`FGP_DOCX_STRUCTURE_RULES.md`](FGP_DOCX_STRUCTURE_RULES.md) §5 — superscript
 footnote markers, real tables held, every new Word row checked against FGP's PDF, everything in one run and **one
 release for web and desktop together**, the Nuscha hidden layer kept.
 
@@ -70,7 +82,7 @@ drafts study · `acd26177` comment and test holds · `99c90650` legacy fonts · 
 | gate 1 inventory | `fgp_data/inventory/inventory.db` | `scripts/run_fgp_association_inventory.ps1` |
 | gate 2 outcomes | `fgp_data/inventory/gate2.db` | `scripts/run_fgp_gate2_rules.ps1`; one run; 7 checks + 36 expectations |
 | gate 3 texts | `fgp_data/inventory/gate3.db` (+ `gate3_run1/`) | `scripts/run_fgp_gate3_text_pipeline.ps1`; two runs; 9 + 55; **about 15 minutes a run with the PDF cache `fgp_data/inventory/pdf_text_cache.db`, 28 cold** |
-| gate 4 candidate | `fgp_data/inventory/fgp_transcriptions.candidate.db`, `gate4.db` (+ `gate4_run1/`) | `scripts/run_fgp_gate4_chooser_validation.ps1`; two runs; 15 + 60; about 2 minutes a run; never written over today's `fgp_data/fgp_transcriptions.db` |
+| gate 4 candidate | `fgp_data/inventory/fgp_transcriptions.candidate.db`, `gate4.db` (+ `gate4_run1/`) | `scripts/run_fgp_gate4_chooser_validation.ps1`; two runs; 16 + 64; about 2–3 minutes a run; exclusions `scripts/fgp_gate4_exclusions.json`; never written over today's `fgp_data/fgp_transcriptions.db` |
 | gate 5 positions | `fgp_data/inventory/gate5*.db` and the positions store | `scripts/run_fgp_gate5_positions.ps1`; 68 minutes a run; verdict FAIL on G1 (17 of 20 images) by findings, not tuning |
 | Word-file census | `fgp_data/inventory/docx_structure_census.json` | `scripts/fgp_docx_structure_census.py` |
 | Nuscha hidden layer | `fgp_data/nuscha_hidden_layer.db` (155 MB) | `scripts/fgp_nuscha_hidden_layer.py`; 38,790 files, 796,854 lines; nothing reads it yet |
@@ -108,8 +120,16 @@ For the owner:
    `PermissionCommentCode` 5309 ("being worked on by a team", 156 of today's units), `tmp_DoubleNotToDisplay` (23 rows
    held). The agreed way to guess: look up twenty units carrying each code on FGP's own public site; if FGP shows the
    transcription, we show it (§4 step E).
-6. **Team 850's non-manuscript documents** (a contact list, a recipe, software notes — longer texts no rule catches)
-   and **team 107's excerpt rows** (`העתקות:` Firkovitch excerpts, 391 short rows): editions or not.
+6. **Team 850's non-manuscript documents** — the contact list, the recipe, the Polus specification and the Bavli entry
+   list are held since the evening (R2d / R2e). Still unruled in team 850: two English translations filed as `_Tc`
+   transcriptions (`fgp:52183`, `52187`, the same text as the `_Tl` rows 63307 / 63308) and a handful of very short
+   site-user rows (`fgp:54500` «מארבע», `54501` «ויהי בימי אחשורוש»). **Team 107's excerpt rows** (`העתקות:`
+   Firkovitch excerpts) are kept, 1,166 today and 1,704 new: Codex's advice is to keep genuine excerpts, labelled as
+   excerpts — a label, not a hold.
+7. **From the Codex review, not yet done:** a fixed reference set with expected results declared independently of the
+   run (gate 4's draw moves with the candidate), and a decision on whether 0.95 is the right bar for "the same text"
+   (it decides 2 dispositions today). The status codes of item 5: twenty FGP-site examples interpret a code, they do
+   not clear every record carrying it.
 
 ## 4. Recommended plan, in order
 
@@ -134,7 +154,7 @@ For the owner:
    45034, `empty_text` 13, `source` D:\…, `extractor` PyMuPDF) beside the new ones; nothing reads them, but they
    misdescribe the file.
 3. The changelog fragment (`changelog.d/`) and the release notes should say what users see: about 18,500 new
-   transcriptions, cleaner text on about 27,700, about 600 removed and why (`feedback_release_texts_gentle_on_past_gaps`).
+   transcriptions, cleaner text on about 27,700, about 550 removed and why (`feedback_release_texts_gentle_on_past_gaps`).
 4. Before any of it: push `8ba4111c`; run `python scripts/check_docs.py` and `ruff check .`; collect the three
    open-issue fragments into the tracker.
 

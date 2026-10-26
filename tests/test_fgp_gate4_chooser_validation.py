@@ -52,7 +52,7 @@ def _args(w, *extra):
     return ["--fgp-db", w["fgp"], "--gate2", os.path.join(w["out"], "gate2.db"), "--gate3", os.path.join(w["out"], "gate3.db"),
             "--inventory", os.path.join(w["out"], "inventory.db"), "--fist", w["fist"], "--nli", w["nli"],
             "--libraries-csv", os.path.join(w["root"], "none.csv"), "--approvals", os.path.join(w["root"], "none.json"),
-            "--out-dir", w["out"], "--htr-json", w["htr"], *extra]
+            "--exclusions", os.path.join(w["root"], "none.json"), "--out-dir", w["out"], "--htr-json", w["htr"], *extra]
 
 
 def _load(w):
@@ -174,6 +174,38 @@ def test_gate_fails_when_an_exclusion_has_no_declared_reason(world, monkeypatch)
     assert checks["C2_selectability_dispositioned"]["passed"] == 0
 
 
+def test_listed_exclusions_apply_and_a_stale_key_fails(world, capsys):
+    """R2d: a listed durable key excludes its today row with the listed reason (a declared selectability
+    disposition); a listed key that names no row fails C9, so the list cannot go stale unnoticed."""
+    assert g4.main(_args(world, "--allow-single-run")) == 0, capsys.readouterr().out
+    con = sqlite3.connect(f"file:{world['candidate']}?mode=ro", uri=True)
+    key16 = con.execute("SELECT durable_key FROM fgp_transcriptions WHERE id = 16").fetchone()[0]
+    con.close()
+    assert key16
+    listed = os.path.join(world["root"], "exclusions.json")
+
+    def write(entries):
+        with open(listed, "w", encoding="utf-8") as fh:
+            json.dump({"exclusions": entries}, fh, ensure_ascii=False)
+
+    write([{"durable_key": key16, "reason": "keyboard_dummy"},
+           {"durable_key": "dbo_UnitTranscription:999999|990000000000000000|", "reason": "non_manuscript"}])
+    args = _args(world, "--allow-single-run")
+    args[args.index("--exclusions") + 1] = listed
+    assert g4.main(args) == 1
+    cand, disp, sel, dec, counts, checks = _load(world)
+    assert checks["C9_exclusions_matched"]["passed"] == 0 and counts["exclusions.unmatched"] == 1
+    assert disp["16"]["disposition"] == "keyboard_dummy" and 16 not in cand
+    write([{"durable_key": key16, "reason": "keyboard_dummy"}])
+    assert g4.main(args) == 0, capsys.readouterr().out
+    cand, disp, sel, dec, counts, checks = _load(world)
+    assert all(c["passed"] == 1 for c in checks.values()), [n for n, c in checks.items() if not c["passed"]]
+    assert counts["excluded.keyboard_dummy"] == 1 and counts.get("exclusions.unmatched", 0) == 0
+    write([{"durable_key": key16, "reason": "looks_odd"}])
+    with pytest.raises(ValueError):
+        g4.load_exclusions(listed)
+
+
 def test_gate_fails_on_an_undispositioned_default_change(world, monkeypatch):
     real = fs.choose_default_source
     calls = {"n": 0}
@@ -246,16 +278,25 @@ def test_new_row_image_rules():
              4: {"id": 4, "sys_id": "D", "c_number": None, "doc_relation": "Digital Edition", "language": None, "content": "טסט טסט"},
              5: {"id": 5, "sys_id": "D", "c_number": None, "doc_relation": "Digital Translation", "language": "English",
                  "content": "phrastic"},
-             # the same image of one manuscript served by two units: a full text and a stub, then two readings
+             # the same image of one manuscript served by three units: a full text, a stub that is a part of it,
+             # and a short DIFFERENT text (another layer or reading); then two readings of about one length
              6: {"id": 6, "sys_id": "F", "c_number": "C20", "doc_relation": "Digital Edition", "language": None,
                  "content": "שורה ראשונה של העתקה מלאה ושורה שנייה ושלישית ורביעית וחמישית וכן הלאה עד סוף הדף"},
-             7: {"id": 7, "sys_id": "F", "c_number": "C20", "doc_relation": "Digital Edition", "language": None, "content": "ואמר ליה רב"},
+             7: {"id": 7, "sys_id": "F", "c_number": "C20", "doc_relation": "Digital Edition", "language": None,
+                 "content": "...שורה שנייה ושלי[שית]"},
              8: {"id": 8, "sys_id": "F", "c_number": "C21", "doc_relation": "Digital Edition", "language": None,
                  "content": "עליהן אין מתענין ולא מספידין בשבתות ובימים טובים"},
              9: {"id": 9, "sys_id": "F", "c_number": "C21", "doc_relation": "Digital Edition", "language": None,
-                 "content": "ולא והרי החובל בחבירו דאיכא ממון ומלקות"}}
+                 "content": "ולא והרי החובל בחבירו דאיכא ממון ומלקות"},
+             10: {"id": 10, "sys_id": "F", "c_number": "C20", "doc_relation": "Digital Edition", "language": None,
+                  "content": "ואמר ליה רב"},
+             # R2e: a contact list filed as a transcription; R2d: a row listed as keyboard noise
+             11: {"id": 11, "sys_id": "J", "c_number": None, "doc_relation": "Digital Edition", "language": None,
+                  "content": "פלוני -02-5550101\nאלמוני (שוכר)- 0505550102\nשכן: 054-5550103\nכתובת: a.b@example.co.il"},
+             12: {"id": 12, "sys_id": "J", "c_number": "C30", "doc_relation": "Digital Edition", "language": None,
+                  "content": "יעכיכ עיכי"}}
     g2 = {i: {"outcome": "kept", "publishable": 1, "hold_reasons": None, "credit_he": "x", "credit_en": "x", "unit_id": 100 * i,
-              "unit_table": "dbo_UnitTranscription", "durable_key": f"k{i}"} for i in range(1, 10)}
+              "unit_table": "dbo_UnitTranscription", "durable_key": f"k{i}"} for i in range(1, 13)}
 
     def new(uid, sid, reader, path, structure=None, **extra):
         d = {"row_key": f"new:dbo_UnitTranscription:{uid}|{sid}", "unit_table": "dbo_UnitTranscription", "unit_id": uid,
@@ -272,7 +313,9 @@ def test_new_row_image_rules():
         ("dbo_UnitTranscription", 14, "טקסט שהקריאה שלו שונה מן הקובץ של פרידברג"),
         ("dbo_UnitTranscription", 15, "מנהג אשכנז מנהג איטליה סדר רב עמרם"),
         ("dbo_UnitTranscription", 16, "1. שורה ראשונה¹ של כתב היד\n2. שורה שנייה\n\n1 הערת שוליים"),
-        ("dbo_UnitTranscription", 17, "מהדורה של כל כתב היד בקובץ וורד"), ("dbo_UnitTranscription", 18, "מהדורה של תמונה אחת")])
+        ("dbo_UnitTranscription", 17, "מהדורה של כל כתב היד בקובץ וורד"), ("dbo_UnitTranscription", 18, "מהדורה של תמונה אחת"),
+        ("dbo_UnitTranscription", 19, "פלונית: 0525550104\nאלמונית 054-5550105\nמהלשכה: 02-5550106"),
+        ("dbo_UnitTranscription", 20, "בצק לילדים\nהמצרכים:\n4 ביצים\n1 כוס שמן")])
     g3_new = [new(1, "A", "b2_rows", "C10\\data.js"),          # image 10 already served by unit 100 on A
               new(2, "A", "b2_rows", "C11\\data.js"),          # gallery lists image 11 under Z, not A
               new(3, "A", "b1_xml", "99\\99.xml"),             # unknown image
@@ -297,29 +340,40 @@ def test_new_row_image_rules():
               # both new on manuscript H, the whole-document DOCX listed first: the per-image row enters and the
               # whole-document row is held, since the chooser would drop it beside a per-image row
               new(17, "H", "docx", "x\\word\\u17.docx", status="checked", yardstick="pdf"),
-              new(18, "H", "b2_rows", "C14\\data.js")]
+              new(18, "H", "b2_rows", "C14\\data.js"),
+              new(19, "K", "docx", "x\\word\\u19.docx"),       # R2e: personal phone numbers -> held
+              new(20, "K", "docx", "x\\word\\u20.docx")]       # R2d: listed as not a manuscript -> held
     b_numbers = {"10": {"A"}, "11": {"Z"}, "12": {"B"}, "13": {"C"}, "14": {"H"}}
-    units = {("dbo_UnitTranscription", i): (200, 1, f"u{i}") for i in range(1, 19)}
+    units = {("dbo_UnitTranscription", i): (200, 1, f"u{i}") for i in range(1, 21)}
     ctx = {"parts": {}, "catalog": {}, "book": {}, "bibref": {}}
     comments = {("dbo_UnitTranscription", 10): "אין לפרסם עד לקריאה מול מקור"}
-    plan = g4.plan_candidate(today, g2, {}, {}, g3_new, texts, b_numbers, units, {}, ctx, "plain", comments=comments)
+    exclusions = {"k12": "keyboard_dummy", "n20": "non_manuscript", "k99": "keyboard_dummy"}
+    plan = g4.plan_candidate(today, g2, {}, {}, g3_new, texts, b_numbers, units, {}, ctx, "plain", comments=comments,
+                             exclusions=exclusions)
     # R2: a carried row must have a text that is not a test file; an English translation is not a test file.
-    # R2c: the stub beside the full text of the same image is retired; two readings of about one length both stay.
-    assert [k["id"] for k in plan["kept"]] == [1, 2, 5, 6, 8, 9]
+    # R2d/R2e: a listed row and a contact list are excluded with their reasons.
+    # R2c: only the stub CONTAINED in the full text of the same image is retired; the short different text and the
+    # two readings of about one length stay.
+    assert [k["id"] for k in plan["kept"]] == [1, 2, 5, 6, 8, 9, 10]
     assert plan["excluded"][:2] == [(3, "empty_text", "gate3:"), (4, "test_or_dummy", "טסט טסט")]
-    assert plan["excluded"][2][:2] == (7, "stub_retired") and json.loads(plan["excluded"][2][2])["longer"] == "fgp:6"
+    assert [e[:2] for e in plan["excluded"][2:]] == [(11, "personal_data"), (12, "keyboard_dummy"), (7, "stub_retired")]
+    assert json.loads(plan["excluded"][2][2]) == {"emails": 1, "phones": 3}
+    stub = json.loads(plan["excluded"][4][2])
+    assert stub["longer"] == "fgp:6" and stub["contained"] == 1.0
+    assert plan["exclusions_unmatched"] == ["k99"]
     held = {rk.split(":")[2].split("|")[0]: d for rk, d, _ in plan["held"]}
     assert held == {"1": "image_already_served", "2": "image_alma_mismatch", "3": "image_unknown",
                     "4": "shadows_whole_doc_row", "5": "whole_doc_shadowed", "7": "test_or_dummy", "8": "test_or_dummy",
                     "9": "test_or_dummy", "10": "fist_comment_no_publish", "11": "test_or_dummy", "12": "legacy_font",
-                    "14": "pdf_held", "15": "docx_multicolumn_table", "17": "whole_doc_shadowed"}
+                    "14": "pdf_held", "15": "docx_multicolumn_table", "17": "whole_doc_shadowed", "19": "personal_data",
+                    "20": "non_manuscript"}
     assert json.loads(dict((rk, d) for rk, _, d in plan["held"])["new:dbo_UnitTranscription:15|G"])["columns"] == 5
     assert [(r["row_key"], r["c_number"], r["sys_id"]) for r in plan["new_rows"]] == [
         ("new:dbo_UnitTranscription:18|H", "C14", "H"), ("new:dbo_UnitTranscription:6|C", "C13", "C"),
         ("new:dbo_UnitTranscription:13|E", None, "E"), ("new:dbo_UnitTranscription:16|G", None, "G")]
     assert plan["yardstick"] == {"new:dbo_UnitTranscription:6|C": "none", "new:dbo_UnitTranscription:18|H": "none",
                                  "new:dbo_UnitTranscription:13|E": "none", "new:dbo_UnitTranscription:16|G": "pdf"}
-    assert plan["new_rows"][0]["id"] == 10 and "גנוזות" in plan["new_rows"][0]["source_credit_he"]
+    assert plan["new_rows"][0]["id"] == 13 and "גנוזות" in plan["new_rows"][0]["source_credit_he"]
     assert g4.plan_candidate(today, g2, {}, {}, g3_new, texts, b_numbers, units, {}, ctx, "hold")["new_rows"] == []
 
 
@@ -332,6 +386,37 @@ def test_new_row_image_rules():
 ])
 def test_test_or_dummy_rule(text, relation, expected):
     assert g4.test_or_dummy(text, relation) is expected
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("פלוני -02-5550101\nאלמוני - 0505550102\nשכן: 054-5550103", True),  # three phone numbers (synthetic)
+    ("כתובת: someone@example.co.il", True),                              # an email address
+    ("פלונית: 0525550104\nשכן: 0545550105", False),                     # two are not enough
+    (".....כך צריך להניח שליד למעלה כדי שיפ@גע@ בה", False),             # the transcribers' @ notation
+    ("FGP 89745 JTS ENA 2941/5r\nשנת 4851 ליצירה 1090 למספרם", False),   # catalogue and year numbers
+    ("C112408 C112409 C112410 20000040006041", False),                    # image and file numbers
+])
+def test_personal_data_rule(text, expected):
+    assert g4.personal_data(text) is expected
+
+
+def test_text_ratio_reads_the_whole_text():
+    """Two texts with one 4,000-letter beginning and different endings are not the same text."""
+    base = ("אבגדהוזחטיכלמנסעפצקרשת" * 200)[:4000]
+    a, b = base + "שלום עולם " * 120, base + "ותפארת ישראל " * 90
+    assert g4.text_ratio(a, b) < g4.SAME_TEXT_RATIO
+    assert g4.text_ratio(a, a) == 1.0
+
+
+@pytest.mark.parametrize("short, expected", [
+    ("שורה שנייה ושלישית", 1.0),                          # a part of the longer text
+    ("...שו[רה] שנייה ושלי?שית?", 1.0),                    # with the transcribers' marks
+    ("ואמר ליה רב", 0.0),                                  # another text
+    ("שורה ראשונה ואמר ליה רב", 10 / 19),                 # one ten-letter run of the longer text, of 19 letters
+])
+def test_contained_share(short, expected):
+    long = "שורה ראשונה של העתקה מלאה ושורה שנייה ושלישית ורביעית וחמישית וכן הלאה עד סוף הדף"
+    assert g4.contained_share(short, long) == pytest.approx(expected, abs=0.05)
 
 
 # A DOCX typed in a pre-Unicode Hebrew font: the letters arrive as vowel points after spaces (RNL Arab.-Yevr. 72).

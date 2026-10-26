@@ -1,0 +1,23 @@
+{
+  "_doc": "Owner-ruled exclusions for gate 4 (scripts/fgp_gate4_chooser_validation.py, rule R2d): FGP rows that are not transcriptions of a manuscript and that no general rule catches. Keyed on the durable key <unit_table>:<unit_id>|<sys_id>|<c_number>; a today row is excluded from the candidate, a new row is held. Every key must name a row of today's sidecar or of gate 3's new rows, or check C9 fails. Reasons: non_manuscript (a document that is not a manuscript's text), keyboard_dummy (keyboard noise filed as a transcription). Ruled 2026-10-26 after the Codex review of the candidate; FGP_CHOOSER_VALIDATION_RULES.md.",
+  "exclusions": [
+    {"durable_key": "dbo_UnitTranscription:3662814|990001805120205171|", "reason": "non_manuscript", "fgp_id": 52436,
+     "note": "team 850, 85000070000051: a children's recipe ('בצק לילדים | המצרכים')"},
+    {"durable_key": "dbo_UnitTranscription:3464814|990053945880205171|", "reason": "non_manuscript", "fgp_id": 52195,
+     "note": "team 850, 85000160000041: a specification of FGP's Polus system ('אפיון הזנת העתקות ותרגומים במערכת פולוס')"},
+    {"durable_key": "dbo_UnitTranscription:3667814|990001696520205171|", "reason": "non_manuscript", "fgp_id": 52445,
+     "note": "team 850, 85000070000121: an entry list of the Babylonian Talmud project ('רשימת הכניסות של פרויקט הבבלי')"},
+    {"durable_key": "dbo_UnitTranscription:4929814|990053001060205171|", "reason": "keyboard_dummy", "fgp_id": 34819,
+     "note": "'אא בב גג דד'"},
+    {"durable_key": "dbo_UnitTranscription:4944814|990038775370205171|", "reason": "keyboard_dummy", "fgp_id": 24925,
+     "note": "'אאאא בבב גגג'"},
+    {"durable_key": "dbo_UnitTranscription:4930814|990053001060205171|", "reason": "keyboard_dummy", "fgp_id": 34818,
+     "note": "'בבב בבב בבב בבב'"},
+    {"durable_key": "dbo_UnitTranscription:4927814|990053001040205171|", "reason": "keyboard_dummy", "fgp_id": 34814,
+     "note": "'אאא בבב גגג דדד ההה ווו / חחחחחחחחחח'"},
+    {"durable_key": "dbo_UnitTranscription:4928814|990053001040205171|", "reason": "keyboard_dummy", "fgp_id": 34815,
+     "note": "'ןוטן טוןטו טוןטו טוןט'"},
+    {"durable_key": "dbo_UnitTranscription:4919814|990053571570205171|", "reason": "keyboard_dummy", "fgp_id": 33761,
+     "note": "'יעכיכ עיכי'"}
+  ]
+}
