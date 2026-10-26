@@ -396,8 +396,9 @@ Each gate names what makes it fail; "measured" or "reviewed" alone is never a pa
    6 personal lists named by `SubId` from the live site; teams 111 and 161 verified there — and 3,130 XML rows whose
    text must come from the row's own record) · 50 retired-with-alias (17 exact duplicates with a same-meaning
    successor, 28 unreachable rows without a `sys_id`, 5 whose `sys_id` the FIST chain contradicts). Publishable:
-   41,807 under the owner's ruling of 2026-10-25 (41,642 since the `fist_comment_unchecked` hold of 2026-10-26, 167 rows
-   whose FIST unit says they were never checked against the source) that rows whose FIST source has no verified credit (338 rows, 5
+   41,807 under the owner's ruling of 2026-10-25 (41,642 under the `fist_comment_unchecked` hold of 2026-10-26, 167 rows
+   whose FIST unit says they were never checked against the source; 41,790 since the hold was narrowed the same day to
+   the 17 rows whose comment is the explicit do-not-publish instruction, `fist_comment_no_publish`) that rows whose FIST source has no verified credit (338 rows, 5
    sources after the live-site refinement) carry the generic FGP attribution; 41,472 under the strict reading. Held
    and named per row: 3,130 XML rows, 23 `tmp_DoubleNotToDisplay`, 19 files absent from the delivery, 7 unconfirmed
    associations.
@@ -415,30 +416,32 @@ Each gate names what makes it fail; "measured" or "reviewed" alone is never a pa
    (never replaced by it; 2,731 gate-2 XML holds lifted) · 3,800 held and listed per block (2,545 unclassified
    differences, 771 typed-sigla-only, 85 extra lines, 399 XML rows whose own record disagrees) · 19 absent · 50
    retired. Publishable with text 41,143 (40,980 after the 2026-10-26 hold; 40,990 with the owner's 10 approvals of the
-   text-less rows the same day). New rows 25,342 read with a structure census, none accepted under the
+   text-less rows the same day; 41,137 since the hold was narrowed). New rows 25,342 read with a structure census, none accepted under the
    default policy. Descriptions never read; no replaced row loses a letter of today's text.
 4. **Chooser validation with the larger sidecar, both apps.** *Fails if:* an independent edition becomes
    unselectable; a saved choice is lost; a page assignment changes without approval; a default-selection change is
    not dispositioned; import peak memory exceeds the declared limit (to be set against the 63 GB dev machine and the
    server's 5–6 GB baseline) or manuscript-load latency exceeds the declared budget on the reference manuscripts.
-   **Run 2026-10-26 — PASS, 15 checks + 58 declared expectations, two runs with one digest**
+   **Run 2026-10-26 — PASS, 15 checks + 57 declared expectations, two runs with one digest**
    (`scripts/run_fgp_gate4_chooser_validation.ps1` → `scripts/fgp_gate4_chooser_validation.py`; the rules, the budgets
    declared before the run, the reference set and the run record in
    [`FGP_CHOOSER_VALIDATION_RULES.md`](FGP_CHOOSER_VALIDATION_RULES.md); output
    `fgp_data/inventory/fgp_transcriptions.candidate.db` beside today's sidecar, never over it, and `gate4.db`). The
-   candidate carries 44,286 of today's rows under their ids (27,530 with gate 3's text; 748 excluded: 391 XML rows gate
-   3 could not verify, 245 gate-2 holds — 165 of them the unchecked-comment hold ruled the same day — 56 stubs retired, 50 retired, 3
-   without text, 3 test files) and 6,395 new rows under the `plain` policy (1,569 per image, 4,826 whole document;
-   18,884 held: 17,124 structured DOCX, 1,138 image–manuscript mismatches, 322 without an AlmaId, 168 blank, 94 the
-   chooser could not list, 21 test or dummy files, 13 legacy-font texts, 4 never checked against the source). Selectability over 27,606
-   manuscripts through the real service: every listed source kept or dispositioned (555 lost, each by a gate-2 ruling, a
-   retirement, a text-less, test or stub row or a same-text swap), all 6,395 new rows listed; page keys unchanged on all
-   44,286; on 88 reference manuscripts (1,237 pages) 502 default changes, every one dispositioned (432 new editions, 67
-   excluded rows, 1 replaced text, 2 swaps), web and desktop shapes agree; latency p95 under 5 ms per manuscript load
-   and per page against budgets of 500 / 250 ms; memory 951 MB build peak, 10.7 MB app-side; file 294 MB. Two defects
+   candidate carries 44,434 of today's rows under their ids (27,677 with gate 3's text; 600 excluded: 391 XML rows gate
+   3 could not verify, 97 gate-2 holds — 17 of them the do-not-publish comment hold, narrowed the same day from the
+   unchecked-comment hold — 56 stubs retired, 50 retired, 3 without text, 3 test files) and 6,399 new rows under the
+   `plain` policy (1,569 per image, 4,830 whole document; 18,880 held: 17,124 structured DOCX, 1,138 image–manuscript
+   mismatches, 322 without an AlmaId, 168 blank, 94 the chooser could not list, 21 test or dummy files, 13 legacy-font
+   texts). Selectability over 27,609 manuscripts through the real service: every listed source kept or dispositioned
+   (479 lost, each by a gate-2 ruling, a retirement, a text-less, test or stub row or a same-text swap), all 6,399 new
+   rows listed; page keys unchanged on all 44,434; on 88 reference manuscripts (1,236 pages) 506 default changes, every
+   one dispositioned (432 new editions, 68 excluded rows, 4 replaced texts, 2 swaps), web and desktop shapes agree;
+   latency p95 under 4 ms per manuscript load and per page against budgets of 500 / 250 ms; memory
+   952 MB build peak, 11.0 MB app-side; file 294 MB. Two defects
    recorded: the reading desk's saved source choice is never applied (open-issue fragment 2026-10-26), and today's
    chooser hides the shorter of 95 same-image pairs (rules §5). The earlier records of the day (44,500 carried, 6,433 new,
-   51 expectations; 44,332 / 6,408 / 55; 44,332 / 6,395 / 56) preceded the three holds and the owner's rulings.
+   51 expectations; 44,332 / 6,408 / 55; 44,332 / 6,395 / 56; 44,286 / 6,395 / 58) preceded the three holds, the
+   owner's rulings and the narrowing of the comment hold.
 5. **Positions prototype after the 20-image geometry check.** The landmark tolerance and the size / payload / latency
    limits are declared *before* the check; an undeclared limit is itself a fail. *Fails if:* for any of the 20 images
    the **residual** landmark error after the recorded transform exceeds the tolerance (recording a transform is not a
@@ -607,3 +610,12 @@ are artefacts); B1 join directories are composites (`ziruf`) in their own frame 
 master as FGP turned it (swapped at a recorded 90/270); the §4.5 "scaling is `iiif_width / PixelWidth`" holds for the
 canvases that are the master (10 of 20) and not for the rest, where the master is a crop of a larger photograph and
 the scale must be searched; and NLI's canvas at a page's gallery index is not always that page (4 of 30 drawn).
+
+**Revision 16 (the comment hold narrowed, 2026-10-26)** — the owner, reading the status: a transcription "not checked
+against the source" is a legitimate if imperfect transcription. Of the 167 rows the comment hold removed — all served
+today, all Uri Erlich's liturgy team — 150 only carry that note (with a writing stage) and 17 the instruction "do not
+publish until read against the source". Gate 2 now holds the 17 (`fist_comment_no_publish`; publishable 41,790), the
+150 are published as today; gate 3 (publishable with text 41,137) and gate 4 rerun, PASS, records revised above
+(44,434 carried, 6,399 new, 600 excluded, 50,833 candidate rows). Gate 4's C5 learned to disposition a page whose
+whole-document edition changed hands because gate 3 replaced a text (`text_replaced`), found on a manuscript the
+reseeded reference draw brought in. The candidate is not deployed.

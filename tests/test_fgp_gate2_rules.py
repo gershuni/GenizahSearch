@@ -89,14 +89,16 @@ def test_every_row_gets_one_outcome_and_the_gate_passes(world, capsys):
     # registered twice for one manuscript: the lowest unit id is canonical, the row is publishable
     assert o[12]["association_basis"] == "fist_chain_multi_registration" and o[12]["unit_id"] == 10
     assert o[12]["publishable_strict"] == 1 and o[12]["credit_category"] == "team"
+    # a FIST comment that only says "not checked against the source" is kept as a note, never a hold
+    assert o[12]["fist_comment"] == "לא נבדק מול המקור. מצב כתיבה-הגהה א'" and o[12]["hold_reasons"] in (None, "[]")
 
     # catalogue and book credits resolve from FIST SubId; a book without a title stays unresolved
     assert o[13]["credit_category"] == "catalog" and o[13]["credit_en"] == "CUDL Catalog, Cambridge, 2010"
     assert o[13]["outcome"] == "re-sourced" and o[13]["publishable_strict"] == 1
     assert o[14]["credit_category"] == "book" and o[14]["credit_he"] == "ספר הבהיר"
-    # FIST's unit comment says the transcription was never checked against the source -> held, credit kept
-    assert o[14]["fist_comment"] == "לא נבדק מול המקור. מצב כתיבה-הגהה א'" and o[14]["publishable"] == 0
-    assert json.loads(o[14]["hold_reasons"]) == ["fist_comment_unchecked"] and o[14]["outcome"] == "re-sourced"
+    # FIST's unit comment says the transcription must not be published until read against the source -> held, credit kept
+    assert o[14]["fist_comment"] == "אין לפרסם עד לקריאה מול מקור" and o[14]["publishable"] == 0
+    assert json.loads(o[14]["hold_reasons"]) == ["fist_comment_no_publish"] and o[14]["outcome"] == "re-sourced"
     assert o[15]["credit_category"] == "unresolved" and o[15]["credit_changed"] == 0
     assert o[15]["outcome"] == "kept" and o[15]["publishable_strict"] == 0 and o[15]["publishable_generic"] == 1
     assert o[15]["publishable"] == 1 and o[15]["credit_status"] == "generic" and o[15]["credit_he"] == "פרויקט הגניזה של פרידברג"
@@ -126,7 +128,7 @@ def test_every_row_gets_one_outcome_and_the_gate_passes(world, capsys):
     assert counts["outcome.kept"] == 6 and counts["outcome.re-sourced"] == 10 and counts["outcome.retired-with-alias"] == 4
     assert counts["publishable.strict"] == 9 and counts["publishable.generic_credit_allowed"] == 10
     assert counts["publishable.under_policy"] == 10 and counts["credit.generic_rows"] == 2  # rows 15, 17
-    assert counts["hold.fist_comment_unchecked"] == 1
+    assert counts["hold.fist_comment_no_publish"] == 1
     assert counts["durable_keys_distinct"] == 17  # row 6 shares row 5's key; rows 4 and 17 have no unit
     aliases = {r["old_id"]: r for r in _rows(db, "SELECT * FROM aliases")}
     assert set(aliases) == {4, 6, 9, 10} and aliases[6]["same_meaning"] == 1 and aliases[9]["same_meaning"] == 0

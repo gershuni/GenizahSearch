@@ -228,10 +228,12 @@ def build_bibref_map(fist: sqlite3.Connection, ref_ids) -> dict:
     return out
 
 
-# A FIST unit whose free-text Comment says the transcription was not checked against the source
-# ("לא נבדק מול המקור", with a writing stage) or must not be published until read against it
-# ("אין לפרסם עד לקריאה מול מקור") is held (owner's ruling of 2026-10-26, after the drafts check).
-UNCHECKED_COMMENT_RE = re.compile(r"לא נבדק מול המקור|אין לפרסם|לא לפרסם")
+# A FIST unit whose free-text Comment says it must not be published until read against the source
+# ("אין לפרסם עד לקריאה מול מקור", "לא לפרסם") is held. A comment that only says the transcription was
+# not checked against the source ("לא נבדק מול המקור", usually with a writing stage) is a quality note
+# on a finished transcription FGP itself shows, not an instruction: the owner first held both
+# (2026-10-26, after the drafts check) and narrowed the hold to the explicit instruction the same day.
+NO_PUBLISH_COMMENT_RE = re.compile(r"אין לפרסם|לא לפרסם")
 
 
 def load_unit_comments(fist: sqlite3.Connection) -> dict:
@@ -466,8 +468,8 @@ def build_outcomes(rows: list, inv: dict, fist: sqlite3.Connection, credit_parts
             reasons.append("tmp_DoubleNotToDisplay")
         if unit:
             out["fist_comment"] = comments.get((unit["table"], unit["unit_id"]))
-            if out["fist_comment"] and UNCHECKED_COMMENT_RE.search(out["fist_comment"]) and outcome != "retired-with-alias":
-                reasons.append("fist_comment_unchecked")
+            if out["fist_comment"] and NO_PUBLISH_COMMENT_RE.search(out["fist_comment"]) and outcome != "retired-with-alias":
+                reasons.append("fist_comment_no_publish")
         if outcome == "retired-with-alias":
             reasons.append("retired")
         if basis not in ("fist_chain", "fist_chain_multi_registration") and outcome != "retired-with-alias":

@@ -76,7 +76,7 @@ def test_candidate_follows_the_rules_and_the_chooser_lists_every_edition(world, 
     # R1/R2: today's ids kept; retired and gate-2-held rows excluded, each with its reason
     assert sorted(i for i in cand if cand[i]["origin"] == "today") == [1, 2, 5, 7, 12, 13, 15, 16, 18, 19, 20, 21]
     assert disp["6"]["disposition"] == "retired_alias" and json.loads(disp["6"]["detail"])["successor_id"] == 5
-    assert disp["14"]["disposition"] == "gate2_hold" and "fist_comment_unchecked" in disp["14"]["detail"]
+    assert disp["14"]["disposition"] == "gate2_hold" and "fist_comment_no_publish" in disp["14"]["detail"]
     assert disp["3"]["disposition"] == "gate2_hold" and "file_absent_in_delivery" in disp["3"]["detail"]
     assert disp["8"]["disposition"] == "gate2_hold" and "tmp_DoubleNotToDisplay" in disp["8"]["detail"]
     assert disp["11"]["disposition"] == "gate2_hold" and "association_unconfirmed" in disp["11"]["detail"]
@@ -293,7 +293,7 @@ def test_new_row_image_rules():
     held = {rk.split(":")[2].split("|")[0]: d for rk, d, _ in plan["held"]}
     assert held == {"1": "image_already_served", "2": "image_alma_mismatch", "3": "image_unknown",
                     "4": "shadows_whole_doc_row", "5": "whole_doc_shadowed", "7": "test_or_dummy", "8": "test_or_dummy",
-                    "9": "test_or_dummy", "10": "fist_comment_unchecked", "11": "test_or_dummy", "12": "legacy_font"}
+                    "9": "test_or_dummy", "10": "fist_comment_no_publish", "11": "test_or_dummy", "12": "legacy_font"}
     assert [(r["row_key"], r["c_number"], r["sys_id"]) for r in plan["new_rows"]] == [
         ("new:dbo_UnitTranscription:6|C", "C13", "C"), ("new:dbo_UnitTranscription:13|E", None, "E")]
     assert plan["new_rows"][0]["id"] == 10 and "גנוזות" in plan["new_rows"][0]["source_credit_he"]

@@ -198,10 +198,13 @@ def build_fist(path: str, mixed_kind: bool = False, extended: bool = False, text
     con.execute("INSERT INTO dbo_UnitTranslation VALUES (?,?,?,?,?,?,?,?,?)",
                 (1, 109, "20000000000011_CUL_T-S 1.1_Tl", 2, "2000000\\", None, 2, None, None))
     if extended:
-        # FIST's free-text unit comment: unit 13 (row 14) was never checked against the source -> gate 2 holds it
+        # FIST's free-text unit comment: unit 13 (row 14) must not be published until read against the
+        # source -> gate 2 holds it; unit 10 (row 12) was only "not checked against the source" -> a note, not a hold
         con.execute("ALTER TABLE dbo_UnitTranscription ADD COLUMN Comment TEXT")
         con.execute("ALTER TABLE dbo_UnitTranslation ADD COLUMN Comment TEXT")
         con.execute("UPDATE dbo_UnitTranscription SET Comment = ? WHERE UnitTranscriptionId = 13",
+                    ("אין לפרסם עד לקריאה מול מקור",))
+        con.execute("UPDATE dbo_UnitTranscription SET Comment = ? WHERE UnitTranscriptionId = 10",
                     ("לא נבדק מול המקור. מצב כתיבה-הגהה א'",))
     con.execute("INSERT INTO dbo_UnitFreeDescription VALUES (?,?,?,?,?,?)",
                 (1, 110, "20000000000013", "2000000\\", "a description", 2))

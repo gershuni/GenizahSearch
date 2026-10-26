@@ -168,8 +168,10 @@ replaced row loses its source link (`T02`), when two runs differ (`T01`), and on
   lifting 2,731 of the 3,130 gate-2 XML holds; **publishable with text: 41,143** (rerun 2026-10-26 after gate 2's
   `fist_comment_unchecked` hold: 40,980, gate 2 41,642, digest `ba1e47e9db555190`, PASS 55/55; no other count
   changed; second rerun the same day with the 10 approvals of §5: 10 rows `approved`, replaced 27,714, held
-  3,790, publishable with text 40,990, digest `496575a202e34af2`, PASS 56/56) (gate 2: 41,807 — 3,393 of those
-  are held here, 2,731 come back through the lifted holds).
+  3,790, publishable with text 40,990, digest `496575a202e34af2`, PASS 56/56; third rerun the same day after gate 2
+  narrowed its comment hold to the explicit do-not-publish comments: publishable with text 41,137, gate 2 41,790,
+  digest `3ed1cfcbcdc1415c`, PASS 56/56, about 10 minutes per run; no other count changed) (gate 2: 41,807 — 3,393
+  of those are held here, 2,731 come back through the lifted holds).
 - **Held: 3,800** — 2,545 with an unclassified difference (a reading, a stray character, Arabic the font garbled
   beyond the junk rule, a line the DOCX lacks), 771 whose only differences are typed sigla (`sigla_rendering`), 85
   with lines today's text lacks (`extra_line`), 399 XML rows whose own record disagrees (`xml_text_unverified`: 391

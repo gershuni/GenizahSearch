@@ -33,7 +33,7 @@ Candidate sidecar ``fgp_transcriptions.candidate.db`` (today's schema + ``origin
      gate 2 ruled generic).
   R5 a new (unit, AlmaId) row read by gate 3 enters under ``--new-rows-policy plain`` iff its text
      is non-blank, not a test or dummy file, not a legacy-font DOCX, its FIST unit comment does not say
-     it was never checked against the source (``fist_comment_unchecked``, gate 2's rule), and it
+     it must not be published until read against the source (``fist_comment_no_publish``, gate 2's rule), and it
      comes from folder B, or
      from a DOCX without tables, footnotes, hidden runs,
      tracked changes or auto-numbering; a folder-B row carries the image number of its folder as
@@ -104,7 +104,7 @@ sys.path.insert(0, ROOT)
 from scripts.fgp_association_inventory import DEFAULT_FIST, DEFAULT_OUT, parse_expectations, ro  # noqa: E402
 from scripts.fgp_fill_credits_bilingual import build_book_map, build_catalog_map, build_credit_parts  # noqa: E402
 from scripts.fgp_gate2_rules import (  # noqa: E402
-    BIBREF_SOURCE, GENERIC_CREDIT, UNCHECKED_COMMENT_RE, build_bibref_map, credit_for_unit, load_unit_comments,
+    BIBREF_SOURCE, GENERIC_CREDIT, NO_PUBLISH_COMMENT_RE, build_bibref_map, credit_for_unit, load_unit_comments,
 )
 from scripts.fgp_rebuild_text_and_credit import heb_ratio  # noqa: E402
 
@@ -435,8 +435,8 @@ def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new:
             held.append((rk, "blank_text", ""))
             continue
         comment = comments.get((ut, uid))
-        if comment and UNCHECKED_COMMENT_RE.search(comment):
-            held.append((rk, "fist_comment_unchecked", comment[:80]))
+        if comment and NO_PUBLISH_COMMENT_RE.search(comment):
+            held.append((rk, "fist_comment_no_publish", comment[:80]))
             continue
         relation = "Digital Translation" if n["kind"] == "translation" else "Digital Edition"
         if test_or_dummy(text, relation):
@@ -787,10 +787,19 @@ def check_defaults(svc_t: fs.FgpService, svc_c: fs.FgpService, db_t: sqlite3.Con
                     disp, detail = "row_excluded", _j(sorted({excluded[int(u.split(':')[1])][0] for u in gone}
                                                              | ({excluded[tid][0]} if tid in excluded else set())))
                 elif ut and ut not in set_c and set_c:
-                    # the page's edition changed hands: same text or not?
+                    # the page's edition changed hands: the same text, a new row, a text gate 3 replaced on
+                    # either side (which moves a whole-document row's page coverage), or unexplained
                     other = set_c[0]
-                    ratio = text_ratio(row_text(db_t, int(ut.split(":")[1])), row_text(db_c, int(other.split(":")[1])))
-                    disp = "same_text_swap" if ratio >= SAME_TEXT_RATIO else "unexplained"
+                    oid = int(other.split(":")[1])
+                    ratio = text_ratio(row_text(db_t, tid), row_text(db_c, oid))
+                    if ratio >= SAME_TEXT_RATIO:
+                        disp = "same_text_swap"
+                    elif oid > max_today_id:
+                        disp = "new_edition"
+                    elif any(sha(row_text(db_t, i)) != sha(row_text(db_c, i)) for i in (tid, oid)):
+                        disp = "text_replaced"
+                    else:
+                        disp = "unexplained"
                     detail = _j({"now": other, "ratio": round(ratio, 3)})
                 elif replaced:
                     disp, detail = "text_replaced", _j(replaced[:5])

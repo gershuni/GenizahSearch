@@ -94,11 +94,13 @@ reading, which `publishable_strict` keeps reporting):
 - kind is transcription or translation (descriptions and unmatched files never enter the chooser);
 - outcome is not retired; association basis is `fist_chain` or `fist_chain_multi_registration`;
 - the unit's `tmp_DoubleNotToDisplay` is not 1 (23 rows held; its meaning is unconfirmed with FGP);
-- the unit's FIST `Comment` does not say the transcription was not checked against the source (`לא נבדק מול
-  המקור`, with a writing stage `כתוב חדש` / `הגהה א'` / `הגהה ב'`) or must not be published until read against it
-  (`אין לפרסם עד לקריאה מול מקור`) — hold `fist_comment_unchecked`, the owner's ruling of 2026-10-26 after the
-  drafts check (`FGP_CHOOSER_VALIDATION_RULES.md` §6): 168 rows, 151 units, team 130 but one; the comment is kept
-  in `row_outcomes.fist_comment`;
+- the unit's FIST `Comment` does not say the transcription must not be published until read against the source
+  (`אין לפרסם עד לקריאה מול מקור`, `לא לפרסם`) — hold `fist_comment_no_publish`, 17 rows, team 130. A comment that
+  only says it was not checked against the source (`לא נבדק מול המקור`, usually with a writing stage `כתוב חדש` /
+  `הגהה א'` / `הגהה ב'`; 150 of today's rows, all served today) is a quality note on a finished transcription that
+  FGP itself shows, not an instruction: it is kept in `row_outcomes.fist_comment` and holds nothing. The owner's
+  ruling of 2026-10-26 after the drafts check (`FGP_CHOOSER_VALIDATION_RULES.md` §6) first held both kinds
+  (`fist_comment_unchecked`, 168 rows, 151 units) and was narrowed to the explicit instruction the same day;
 - the credit is resolved, or generic under the ruled policy (§3);
 - the text is verified to belong to the row's own record. XML rows fail this when today's rebuild keyed the XML by
   image number: 3,099 `xml_unverified` (3,073 of them on Genuzos units whose image folder FIST assigns to *another
@@ -162,3 +164,9 @@ expectation, and that `--credit-policy strict` holds the generic rows again.
 167 rows held by their unit's comment (the 168th is retired); publishable **41,642** under the ruled policy (41,307
 strict), from 41,807 / 41,472. Outcomes, credits and retirements unchanged. Gate 3's `publishable_text` follows
 (41,143 → 40,980) and gate 4's candidate drops the 165 carried rows (`FGP_CHOOSER_VALIDATION_RULES.md` §6).
+
+2026-10-26, later — rerun with the hold narrowed to `fist_comment_no_publish` (§4; the owner: a transcription not
+checked against the source is a legitimate if imperfect transcription): **PASS, 7 checks + 36 declared
+expectations**. 17 rows held by their unit's comment; the 150 rows whose comment only says "not checked" are
+publishable again (148 of them — 2 carry another hold); publishable **41,790** under the ruled policy (41,455
+strict). Outcomes, credits and retirements unchanged. Gate 3 and gate 4 reran after it (their §7 and §6 records).
