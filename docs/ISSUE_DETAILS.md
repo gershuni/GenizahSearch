@@ -4008,7 +4008,7 @@ PR #449 (round 10) and logged instead of fixed under that PR's review budget.
 
 ## GS-272
 
-**FIST's RecordStatus 1 / 5 and PermissionCommentCode 5309 have no ruling before FGP new rows ship** · P3 · Data and sidecars · ❌ Open · opened 2026-10-26
+**FIST's RecordStatus 1 / 5 and PermissionCommentCode 5309 have no ruling before FGP new rows ship** · P3 · Data and sidecars · ❌ Partly fixed · opened 2026-10-26
 
 Where: `fist_data/FIST.db` `dbo_Signature.RecordStatus`, `PermissionCommentCode`; `scripts/fgp_gate2_rules.py`, `scripts/fgp_gate4_chooser_validation.py`
 
@@ -4024,6 +4024,11 @@ without a ruling: `dbo_Signature.RecordStatus` is 0 on 40,415 of today's
 units (team 135, 180 rows publishable) and 8 of the delta's. Fix sketch: the owner asks FGP what `RecordStatus` 1 /
 5 and code 5309 mean; a gate-2 hold for whichever means "not for publication", applied in gate 4's candidate build
 before the `plain` new-rows policy ships.
+
+Partly fixed the same evening: `RecordStatus` 5 is a superseded version (a newer status-0 signature exists for the
+same unit), held by gate 4's R2f (`5d82aeb5`); `RecordStatus` 1 was ruled by the owner after checking examples on
+FJMS — transcriptions ship, translations are held, R2g (`3bbebf04`). Still without a ruling: code 5309 (180 of
+today's rows; no new row carries it).
 
 ## GS-273
 
@@ -4042,3 +4047,21 @@ larger sidecar). Found while validating the chooser against the larger FGP sidec
 `docs/plans/FGP_SOURCE_FOLDERS_ASSESSMENT.md`), whose check C3 keeps `fgp:<id>` stable for exactly this reason.
 Fix sketch: key the option by the source's stable id (`fgp:<id>` / `pgp:<id>`, `v08`), pass the saved key as the
 select's initial value when it is still among the options, and fall back to the default otherwise.
+
+## GS-274
+
+**FGP's transcription marks (`?א?`, `@…@`, `¶`, …) show as typed, with no legend and no drawing** · idea · Browse and viewer · ❌ Open · opened 2026-10-26
+
+Where: web reading view (`web/pages/browse.py`), desktop viewer; `shared/fgp_service.py`
+
+FGP's transcribers mark what they see with symbols around the text. The Genuzos team's legend (an image-only
+PDF the owner holds, `Genuzos SiglaA.pdf`) reads `?..?` doubtful, `[..]` reconstructed, `(..)` deleted,
+`((..))` erased, `{..}` corrected, `^..^` interlinear, `@..@` piyyut, `%..%` catchword, `*..*` heading,
+`&..&` Judeo-Arabic, `##` dots above; `¶` is not on it and is unconfirmed. FJMS draws these marks; both
+our apps show the text as typed. Today about 10% of FGP rows carry them; in the source-folders candidate
+the corrected rows keep that rate, but of the new rows 68% carry doubtful-letter marks, 37% `@..@` and
+36% `¶` (mostly the Genuzos team's convention). The owner ruled on 2026-10-26 to ship the release with the
+marks as typed, and to follow up with a legend link beside the text, or by drawing the common marks.
+Fix sketch: a link needs a public address for the legend (none known; the PDF is local only). Drawing
+needs a rule in both readers, limited to Hebrew transcriptions (`?` is a real question mark in English
+translations), and a decision on whether copied and cited text keeps the marks.

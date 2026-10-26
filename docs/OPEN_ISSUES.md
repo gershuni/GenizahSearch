@@ -281,7 +281,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
-| [GS-272](ISSUE_DETAILS.md#gs-272) | FIST's RecordStatus 1 / 5 and PermissionCommentCode 5309 have no ruling before FGP new rows ship | `fist_data/FIST.db` `dbo_Signature.RecordStatus`, `PermissionCommentCode`; `scripts/fgp_gate2_rules.py`, `scripts/fgp_gate4_chooser_validation.py` | 2026-10-26 | ❌ Open |
+| [GS-272](ISSUE_DETAILS.md#gs-272) | FIST's RecordStatus 1 / 5 and PermissionCommentCode 5309 have no ruling before FGP new rows ship | `fist_data/FIST.db` `dbo_Signature.RecordStatus`, `PermissionCommentCode`; `scripts/fgp_gate2_rules.py`, `scripts/fgp_gate4_chooser_validation.py` | 2026-10-26 | ❌ Partly fixed |
 | [GS-151](ISSUE_DETAILS.md#gs-151) | A failed NLI metadata fetch is cached as "Unknown" (and saved, on the desktop) | `shared/metadata_manager.py::fetch_nli_data`, `batch_fetch_shelfmarks` (+ `save_caches`) | 2026-09-25 | ❌ Open |
 | [GS-152](ISSUE_DETAILS.md#gs-152) | PGP import can still produce a sidecar that is wrong but passes every check | `scripts/import_pgp_full.py`, `import_pgp_sections.py`, `pgp_transcriptions_export.py` | 2026-09-22 | ❌ Open |
 | [GS-153](ISSUE_DETAILS.md#gs-153) | Four sibling translate scripts accept a blank API answer as a successful translation | `scripts/translate_*.py` (four) translate_with_retry, lines `101/164/146/127` | 2026-09-21 | ❌ Open |

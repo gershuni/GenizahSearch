@@ -1,6 +1,6 @@
 # GenizahSearch - Backlog
 
-> **Last Updated:** 2026-10-25 (created at the tracker reconstruction from its non-defect sections and rows). 109 items.
+> **Last Updated:** 2026-10-25 (created at the tracker reconstruction from its non-defect sections and rows). 110 items.
 
 What is not an open defect: deferred defects, code debt, test gaps, ideas and extensions,
 and server or owner tasks. Same row form and the same ID space as
@@ -14,7 +14,7 @@ move one to the tracker by moving its row and changing its section to a priority
 | Area | Deferred defects | Code debt | Test gaps | Ideas and extensions | Server and owner tasks | Total |
 |------|------|------|------|------|------|------|
 | Search | 0 | 5 | 0 | 6 | 0 | 11 |
-| Browse and viewer | 0 | 0 | 0 | 0 | 1 | 1 |
+| Browse and viewer | 0 | 0 | 0 | 1 | 1 | 2 |
 | Desktop app | 2 | 12 | 1 | 8 | 0 | 23 |
 | Website | 0 | 7 | 0 | 3 | 2 | 12 |
 | Discovery | 0 | 3 | 0 | 2 | 2 | 7 |
@@ -22,7 +22,7 @@ move one to the tracker by moving its row and changing its section to a priority
 | Data and sidecars | 2 | 0 | 0 | 0 | 2 | 4 |
 | Build, CI and tests | 0 | 6 | 24 | 0 | 0 | 30 |
 | Server and operations | 0 | 0 | 0 | 0 | 3 | 3 |
-| **Total** | **4** | **40** | **28** | **24** | **13** | **109** |
+| **Total** | **4** | **40** | **28** | **25** | **13** | **110** |
 
 ## Deferred defects
 
@@ -169,6 +169,12 @@ move one to the tracker by moving its row and changing its section to a priority
 | [GS-234](ISSUE_DETAILS.md#gs-234) | Desktop search: common words are still cut at 50,000 rows, and some routes show no early rows | `shared/config.py:138`, `shared/search_engine.py:4333-4338`, `desktop/gui_threads.py:310` | 2026-04-17 | ❌ Open |
 | [GS-235](ISSUE_DETAILS.md#gs-235) | Desktop composition search in chunk mode shows nothing until the whole scan ends (28-43 s) | `desktop/gui_threads.py:499` (CompositionThread), `genizah_app.py` (run_composition) | 2026-04-17 | ❌ Open |
 | [GS-236](ISSUE_DETAILS.md#gs-236) | Search/indexing of FGP text | `shared/search_engine.py` (no FGP reference); `shared/fgp_service.py` | — | ❌ Open |
+
+### Browse and viewer
+
+| ID | Issue | Where | Opened | Status |
+|----|-------|-------|--------|--------|
+| [GS-274](ISSUE_DETAILS.md#gs-274) | FGP's transcription marks (`?א?`, `@…@`, `¶`, …) show as typed, with no legend and no drawing | web reading view (`web/pages/browse.py`), desktop viewer; `shared/fgp_service.py` | 2026-10-26 | ❌ Open |
 
 ### Desktop app
 

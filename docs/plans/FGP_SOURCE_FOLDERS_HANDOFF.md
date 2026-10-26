@@ -143,6 +143,11 @@ For the owner:
    run (gate 4's draw moves with the candidate), and a decision on whether 0.95 is the right bar for "the same text"
    (it decides 2 dispositions today). The status codes of item 5: twenty FGP-site examples interpret a code, they do
    not clear every record carrying it.
+8. **FGP's transcription marks** (`?א?`, `@…@`, `¶`): ruled 2026-10-26 — the release ships them as typed, as
+   today's site already shows them on ~10% of FGP rows (68% of the new rows carry doubtful-letter marks). A legend
+   link or drawing the common marks follows the release: [GS-274](../ISSUE_DETAILS.md#gs-274). Still open for the
+   owner before the release: the release texts (`_tmp/fgp_release_texts_draft.md`, untracked) and the review of
+   the examples (`_tmp/fgp_examples.html`).
 
 ## 4. Recommended plan, in order
 
