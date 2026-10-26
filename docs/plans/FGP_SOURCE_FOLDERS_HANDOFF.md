@@ -21,7 +21,7 @@ PDFs, with known losses (line starts before a gershayim, final and vocalised let
 lines, Arabic). Four gates have been run on the new material and a **candidate sidecar** built and checked against
 the real chooser of both apps; a fifth gate measured the positions.
 
-| the candidate `fgp_data/inventory/fgp_transcriptions.candidate.db` (gitignored; ninth gate-4 run, 2026-10-26 20:11; sha256 `ce53c4010b797f62…`) | rows |
+| the candidate `fgp_data/inventory/fgp_transcriptions.candidate.db` (gitignored; tenth gate-4 run, 2026-10-26 22:43, the ninth's rows; sha256 `be9f5d84a9677b22…`) | rows |
 |---|---|
 | today's rows carried under their ids | 44,484 of 45,034 |
 | of which with a cleaner text (the Word file or the per-line position text instead of the PDF) | 27,673 |
@@ -46,7 +46,8 @@ shadowing cases, 50 status-1 translations (R2g).
 Every number above is a declared expectation reproduced by two runs with one digest (gate 3 `0088ba547d3dfc83`,
 rerun from the committed code 2026-10-26 evening with the same digest; gate 4 `14a8cfb929633f56`); the budgets
 (latency, memory, size) are far under their limits. `scripts/check_fgp_sidecar.py` checks the file itself
-(integrity, version, rows, checksum, and that the passing run built it).
+(integrity, version, rows, and that it is byte for byte the file the passing run validated: the run records the
+file's sha256 in `gate4_summary.json`, and the checker refuses any other file).
 
 **`RecordStatus` 5 is "superseded" (found the same evening).** FIST keeps each version of a unit as its own signature;
 3,926 of the 3,945 status-5 rows that had entered have a newer status-0 version of the same unit, 3,920 of them
@@ -159,7 +160,8 @@ For the owner:
    the served file, and prints the rollback. No code deploy is needed for the data. **For the desktop build** the
    candidate must sit at `fgp_data/fgp_transcriptions.db` (keep today's as e.g. `fgp_transcriptions.v1-pdf.db`);
    after that the gates' default `--fgp-db` reads the candidate as "today's", so a rerun of this record must pass
-   `--fgp-db` the kept v1 file.
+   `--fgp-db` the kept v1 file. Check the copy before building: `python scripts/check_fgp_sidecar.py --db
+   fgp_data/fgp_transcriptions.db --version 2.0.0 --rows 59056 --gate4-summary fgp_data/inventory/gate4_summary.json`.
 1. Web: copy the candidate to the server as `fgp_data/fgp_transcriptions.db` **before** the code (the deploy rule:
    sidecars by `scp` first, then `git pull`; the auto-mode classifier blocks `scp` from a Claude session, so the owner
    runs it). The app code needs no change for the candidate's schema (the gates drove the real service over it; the

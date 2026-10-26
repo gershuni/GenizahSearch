@@ -87,7 +87,8 @@ Checks (a failing check exits 1; a missed expectation too)
 Outputs (``--out-dir``, default ``fgp_data/inventory``): ``fgp_transcriptions.candidate.db``,
 ``gate4.db`` (``candidate_rows``, ``row_dispositions``, ``selectability``, ``page_assignment``,
 ``default_decisions``, ``reference_set``, ``latency``, ``memory``, ``checks``, ``counts``,
-``gate4_meta``), ``gate4_summary.json``, ``GATE4_REPORT.md``.
+``gate4_meta``), ``gate4_summary.json``, ``GATE4_REPORT.md``. The summary's ``meta.candidate_sha256`` is
+the candidate file's checksum, which ``scripts/check_fgp_sidecar.py`` requires before a release.
 
 Usage
   python scripts/fgp_gate4_chooser_validation.py --allow-single-run
@@ -308,6 +309,14 @@ def _j(v) -> str:
 
 def sha(text: str) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
 
 
 def letters(text: str) -> str:
@@ -1102,7 +1111,7 @@ def render_report(meta, plan, sel, decisions, refs, latency, memory, checks, C) 
     failed = [c for c in checks if not c["passed"]]
     L = [f"# FGP gate 4 -- chooser validation with the larger sidecar ({meta['run_at']})", "",
          f"**{'FAIL' if failed else 'PASS'}** -- {len(checks) - len(failed)} / {len(checks)} checks; digest `{meta['digest'][:16]}`; "
-         f"new-rows policy `{meta['new_rows_policy']}`.", "",
+         f"new-rows policy `{meta['new_rows_policy']}`; candidate sha256 `{meta.get('candidate_sha256', '')}`.", "",
          "## The candidate sidecar", "",
          f"- today's rows carried {len(plan['kept']):,} (text replaced by gate 3 on {sum(1 for k in plan['kept'] if k['replaced']):,}), "
          f"excluded {len(plan['excluded']):,}: " +
@@ -1332,7 +1341,6 @@ def main(argv=None) -> int:
     meta["elapsed_s"] = round(time.time() - t0, 1)
 
     checks = run_checks(C, latency, memory, contract, digest, previous, args.allow_single_run, expectations)
-    db_path = write_outputs(args.out_dir, meta, plan, cand_rows, sel, page, decisions, ref_rows, latency, memory, checks, C)
     db_t.close()
     db_c.close()
     svc_t.close()
@@ -1340,6 +1348,11 @@ def main(argv=None) -> int:
     if nli_svc is not None:
         nli_svc.close()
         nli_mod._default_service = None
+    # The file's own checksum, taken once nothing holds it open: scripts/check_fgp_sidecar.py requires the file it
+    # releases to match, so a candidate changed after this run is refused. Not part of the digest (built_at differs
+    # between the two runs).
+    meta["candidate_sha256"] = sha256_file(cand_path)
+    db_path = write_outputs(args.out_dir, meta, plan, cand_rows, sel, page, decisions, ref_rows, latency, memory, checks, C)
     failed = [c for c in checks if not c["passed"]]
     for c in checks:
         log(f"  [{'ok  ' if c['passed'] else 'FAIL'}] {c['name']}: expected {c['expected']}, got {c['actual']}")

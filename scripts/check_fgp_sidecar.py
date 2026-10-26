@@ -7,8 +7,9 @@ library only, so the server runs it from /tmp without a code deploy.
 
   python scripts/check_fgp_sidecar.py --db fgp_data/inventory/fgp_transcriptions.candidate.db --version 2.0.0 --rows 59082
   python3 /tmp/check_fgp_sidecar.py --db fgp_data/fgp_transcriptions.db.new --sha256 <hex> --version 2.0.0 --rows 59082
-  --gate4-summary PATH also requires the file to be the one that run built (fgp_meta.built_at == the run's run_at)
-  and every check of that run to have passed.
+  --gate4-summary PATH also requires the file to be the one that run built and left unchanged (its sha256 == the
+  run's meta.candidate_sha256, and fgp_meta.built_at == the run's run_at) and every check of that run to have
+  passed. A summary that records no checksum (a run before 2026-10-26) is refused: rerun gate 4.
 """
 from __future__ import annotations
 
@@ -72,6 +73,11 @@ def main(argv=None) -> int:
               f"checks {len(summary.get('checks', []))}, failed {len(failed)}")
         if failed:
             problems.append(f"gate 4 run failed: {failed}")
+        recorded = (summary["meta"].get("candidate_sha256") or "").lower()
+        if not recorded:
+            problems.append("the gate-4 summary records no candidate_sha256; rerun gate 4")
+        elif digest != recorded:
+            problems.append(f"sha256 {digest} != the file gate 4 validated ({recorded}): the file changed after the run")
         if meta.get("built_at") != summary["meta"].get("run_at"):
             problems.append(f"the file was built at {meta.get('built_at')}, not by the summarised run ({summary['meta'].get('run_at')})")
     for p in problems:

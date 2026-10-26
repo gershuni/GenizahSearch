@@ -92,6 +92,14 @@ with empty text, as the apps do.
 
 ## 6. Run record
 
+**2026-10-26 late evening (tenth run, the checksum in the summary) — PASS, 16 checks + 66 declared expectations, two
+runs with one digest** (`14a8cfb929633f56`, the ninth run's: the same 59,056 rows; about 60 s per run). Codex found
+that `scripts/check_fgp_sidecar.py` tied the file to the run only by `built_at`, so a transcription edited after the
+run still passed; gate 4 now records the file's own checksum as `meta.candidate_sha256` (taken after every handle
+on the file is closed; not part of the digest, since `built_at` differs between the two runs) and the checker
+refuses a file that does not match it, or a summary that records none. The checker passes the rebuilt candidate
+(sha256 `be9f5d84a9677b22…`), and so does the deploy script's dry run.
+
 **2026-10-26 evening (ninth run, R2g) — PASS, 16 checks + 66 declared expectations, two runs with one digest**
 (`14a8cfb929633f56`; about 60 s per run). The candidate holds **59,056 rows: 44,484 of today's carried (27,673 with
 gate 3's text, as before) and 14,572 new** (12,986 whole document); 550 of today's rows excluded and 10,707 new rows

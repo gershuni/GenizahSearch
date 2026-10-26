@@ -16,6 +16,7 @@ import sqlite3
 
 import pytest
 
+from scripts import check_fgp_sidecar as check_sidecar
 from scripts import fgp_association_inventory as gate1
 from scripts import fgp_gate2_rules as gate2
 from scripts import fgp_gate3_text_pipeline as g3
@@ -140,6 +141,33 @@ def test_two_runs_must_agree(world, capsys):
     assert g4.main(_args(world, "--previous-summary", first)) == 1
     assert _load(world)[5]["C1_two_runs_identical"]["passed"] == 0
     assert g4.main(_args(world)) == 1  # neither a previous summary nor --allow-single-run
+
+
+def test_release_check_requires_the_file_gate_4_validated(world, capsys):
+    # Codex 2026-10-26: built_at alone let an edited candidate pass; the summary now carries the file's checksum
+    assert g4.main(_args(world, "--allow-single-run")) == 0, capsys.readouterr().out
+    summary = os.path.join(world["out"], "gate4_summary.json")
+    with open(summary, encoding="utf-8") as fh:
+        data = json.load(fh)
+    assert data["meta"]["candidate_sha256"] == check_sidecar.sha256_of(world["candidate"])
+    check = ["--db", world["candidate"], "--version", g4.CANDIDATE_VERSION, "--rows", "13", "--gate4-summary", summary]
+    capsys.readouterr()
+    assert check_sidecar.main(check) == 0, capsys.readouterr().out
+
+    no_sha = os.path.join(world["root"], "no_sha.json")
+    data["meta"].pop("candidate_sha256")
+    with open(no_sha, "w", encoding="utf-8") as fh:
+        json.dump(data, fh)
+    assert check_sidecar.main(check[:-1] + [no_sha]) == 1
+    assert "records no candidate_sha256" in capsys.readouterr().out
+
+    con = sqlite3.connect(world["candidate"])
+    con.execute("UPDATE fgp_transcriptions SET content = content || 'א' WHERE id = 1")
+    con.commit()
+    con.close()
+    assert check_sidecar.main(check) == 1
+    out = capsys.readouterr().out
+    assert "changed after the run" in out and "RESULT: FAIL" in out
 
 
 def test_gate_fails_when_a_listed_edition_disappears(world, monkeypatch, capsys):
