@@ -144,13 +144,77 @@ gate-4 run record.
 About 17,090 rows enter; the candidate grows from 50,833 to about 67,900 rows. The chooser's checks (C2–C5)
 then run over the larger candidate as before, with the reference draw reseeded by the new row set.
 
-## 5. Decisions for the owner
+## 5. The owner's rulings (2026-10-26)
 
-1. The footnote marker: a superscript digit on the word (recommended), or ` (1)` after it.
-2. Multi-column tables: hold the 28 units (recommended), or flatten each row with ` | ` between cells.
-3. The validation bar for the new rows: the PDF diff for all of them (recommended, a day of wiring), or the
-   by-eye sample alone.
-4. Order: the four tranches in sequence (recommended: tranche 1 alone is 91 % and needs no code), or everything
-   in one run once the PDF diff exists.
-5. The Nuscha hidden layer (Talmud location and image code per line): record the intent to keep it for a later
-   feature, or ignore it.
+1. The footnote marker: **a superscript digit on the word** (`כְתוֹאַר¹`).
+2. Multi-column tables: **held** (`docx_multicolumn_table`, 28 units); the source-and-translation pairs may
+   later become an edition row and a translation row.
+3. The validation bar for the new rows: **the PDF diff for all of them**, through gate 3's classes, plus the
+   declared by-eye sample.
+4. Order: **everything in one run** once the PDF diff exists — one release, web and desktop together — not the
+   four tranches of §4.
+5. The Nuscha hidden layer: **kept, not just noted** — extracted from every Nuscha file (today's rows and new)
+   into a store of its own, `fgp_data/nuscha_hidden_layer.db` (`scripts/fgp_nuscha_hidden_layer.py`): per line
+   the line number, the Talmud location and the 12-digit code, per file the record ids and shelfmarks. Nothing
+   reads it yet.
+
+The questions were put with examples (a footnoted line three ways; the Books customs table, a Linguistics
+source-and-translation pair; a Nuscha DOCX line against its PDF; a Nuscha paragraph with its hidden parts).
+
+## 6. Implementation (2026-10-26)
+
+- **Gate 3 reader** (`scripts/fgp_gate3_text_pipeline.py`): the footnote reference is a superscript digit on its
+  word; a bullet definition renders `•`; the structure census gains `table_max_columns` (the widest table row).
+- **Gate 3 comparison**: `footnote_marker` is an accepted class and the alignment key folds superscripts to
+  digits, so today's footnoted rows keep aligning against the PDF's plain digits.
+- **Gate 3 new rows**: every new DOCX unit with FGP's PDF beside it is diffed against the PDF's text (read as
+  today's sidecar was, `shared.local_indexer.extract_pdf_pages`; cached by file hash in
+  `fgp_data/inventory/pdf_text_cache.db`) through the same classes: `checked` / `pdf_held` / `no_comparator`,
+  blocks recorded in `line_diffs`, check `T09`. Under `plain`: `rule:docx_checked_against_pdf`,
+  `rule:docx_no_pdf_text`, holds `pdf_held` / `docx_multicolumn_table` / `blank_text`; counts `new.accepted_by.*`,
+  `new.held.*`, `new.yardstick_pdf`, `new_class_rows.*`, `new.structure.multicolumn_tables`.
+- **Gate 4 R5**: the `docx_structure` hold is gone; `docx_multicolumn_table` and `pdf_held` hold; the acceptance
+  basis of every entered row is counted (`new.yardstick.pdf` / `new.yardstick.none`).
+- **The Nuscha hidden layer**: `scripts/fgp_nuscha_hidden_layer.py` → `fgp_data/nuscha_hidden_layer.db` (`units`,
+  `lines`, `meta`): every Nuscha DOCX, today's rows and new, with the header's hidden ids and shelfmarks, and per
+  line the hidden runs raw plus the parsed line number, Talmud location and 12-digit code beside the visible text.
+- **Tests**: `tests/test_fgp_gate3_text_pipeline.py` (the marker class and key; the yardstick test: clean →
+  `checked`, an unexplained reading → `pdf_held`, no PDF text → the no-yardstick rule) and
+  `tests/test_fgp_gate4_chooser_validation.py` (a `pdf_held` row and a five-column table held, a file with hidden
+  runs, numbering, a footnote and a one-column table entering, the yardstick counted).
+
+## 7. Run record
+
+**2026-10-26 — gate 3 PASS, 9 checks + 55 declared expectations, two runs with one digest** (`0088ba547d3dfc83`;
+about 15 minutes per run once the PDF texts are cached, 28 for the first). Today's rows unchanged in every status
+(verified 2,679, held 3,790, publishable with text 41,137; the `footnote_marker` class on 1,872 of them). New rows
+25,342: 22,511 by the DOCX route, 22,310 of them with a PDF text to check against — **21,049 `checked`** (634
+identical to the PDF, 306 by letters-and-digits agreement under typed sigla, the rest through the classes),
+**1,261 `pdf_held`** (5.7 %; 862 units; Books 699 rows, Aggadic Midrashim 132, Firkovitch 86, Catalogs 63, Glick
+60 — mostly the PDF font's own losses the classes do not yet name, a final letter printed as `0`, a line the PDF
+has and the DOCX lacks), 201 without a PDF text (82 units: scans, five files with no PDF); 28 real tables. Of the
+17,220 new DOCX rows carrying one of the five features, 16,797 are `checked`, 412 `pdf_held`, 11 without a yardstick.
+
+Two things the first run taught. The marker fold must not touch the XML-decoded editions, whose `²` is a siglum
+canon() drops and the DOCX types as a backslash: folded to a digit it broke their letters-and-digits equality and
+306 verified XML rows went held, so the fold runs only when today's side has no superscript of its own. And a
+verify-only agreement (`sigla_rendering`) is a check for a new row, which has no text to replace: 328 rows held
+only for it are `checked`.
+
+**2026-10-26 — gate 4 PASS, 15 checks + 60 declared expectations, two runs with one digest** (`058a0c2690d68b4f`; about
+111 s per run). The candidate (`fgp_transcriptions.candidate.db`, 331 MB, **62,983 rows**): 44,434 of
+today's rows carried as before, **18,549 new rows** (1,586 per image, 16,963 whole document; 16,952 checked
+against their PDF, 1,597 without a yardstick: folder-B text and the scans), 6,730 held: **3,858 whole-document
+rows the chooser would drop beside per-image rows of the same manuscript** (3,811 of them Nuscha files whose
+manuscript other Nuscha units serve per image — the "second edition of one image" defect of
+`FGP_CHOOSER_VALIDATION_RULES.md` §5 is what keeps these out, not the Word rules), 1,153 `pdf_held`, 1,138
+image–manuscript mismatches, 322 without an AlmaId, 168 blank, 28 real tables, 26 unknown images, 21 test files,
+13 legacy fonts, 2 per-image rows that would hide a whole-document row, 1 image another unit serves. Folder-B rows
+are planned before whole-document DOCX rows, so a per-image row wins when both are new (17 more per-image rows
+than before). Selectability over 30,802 manuscripts; on 88 reference manuscripts (1,416 pages) 896 default
+changes, all dispositioned (822 new editions, 68 excluded rows, 4 replaced texts, 2 swaps), 520 pages unchanged;
+load p95 3.7 ms, page p95 10.3 ms, build peak 989 MB, app-side 12.6 MB.
+
+Against the plan of §4: about 17,090 rows were expected to enter and 12,150 did (18,549 − 6,399 before), the
+difference being the 3,858 shadowed whole-document rows and the 1,153 the PDF check holds. The candidate is
+not deployed; one release, web and desktop, is the owner's ruling.

@@ -96,7 +96,7 @@ def test_candidate_follows_the_rules_and_the_chooser_lists_every_edition(world, 
     # the table DOCX is held; the B2 row of unit 2 would shadow today's whole-document row 12 on the same manuscript
     assert cand[22]["origin"] == "new" and cand[22]["row_key"] == f"new:dbo_UnitTranscription:21|{ALMA_C}"
     assert text[22][4] == "new" and text[22][2] == "gate3:docx" and "גנוזות" in text[22][3]
-    assert disp[f"new:dbo_UnitTranscription:20|{ALMA_B}"]["disposition"] == "docx_structure"
+    assert disp[f"new:dbo_UnitTranscription:20|{ALMA_B}"]["disposition"] == "docx_multicolumn_table"
     assert disp[f"new:dbo_UnitTranscription:2|{ALMA_B}"]["disposition"] == "shadows_whole_doc_row"
     # R6
     assert meta["version"] == g4.CANDIDATE_VERSION and meta["candidate"] and meta["rows"] == "13"
@@ -257,16 +257,22 @@ def test_new_row_image_rules():
     g2 = {i: {"outcome": "kept", "publishable": 1, "hold_reasons": None, "credit_he": "x", "credit_en": "x", "unit_id": 100 * i,
               "unit_table": "dbo_UnitTranscription", "durable_key": f"k{i}"} for i in range(1, 10)}
 
-    def new(uid, sid, reader, path, structure=None):
-        return {"row_key": f"new:dbo_UnitTranscription:{uid}|{sid}", "unit_table": "dbo_UnitTranscription", "unit_id": uid,
-                "sys_id": sid, "kind": "transcription", "language": None, "reader": reader, "source_path": path,
-                "structure": json.dumps(structure) if structure else None, "status": "no_comparator", "basename": f"u{uid}",
-                "durable_key": f"n{uid}"}
+    def new(uid, sid, reader, path, structure=None, **extra):
+        d = {"row_key": f"new:dbo_UnitTranscription:{uid}|{sid}", "unit_table": "dbo_UnitTranscription", "unit_id": uid,
+             "sys_id": sid, "kind": "transcription", "language": None, "reader": reader, "source_path": path,
+             "structure": json.dumps(structure) if structure else None, "status": "no_comparator", "basename": f"u{uid}",
+             "durable_key": f"n{uid}"}
+        d.update(extra)
+        return d
 
     texts.executemany("INSERT INTO unit_texts VALUES (?,?,?)", [
         ("dbo_UnitTranscription", 7, "test"), ("dbo_UnitTranscription", 8, "נסיון\nנא להתעלם!!!"),
         ("dbo_UnitTranscription", 9, "ggg"), ("dbo_UnitTranscription", 10, "טקסט של ממש"), ("dbo_UnitTranscription", 11, "5555"),
-        ("dbo_UnitTranscription", 12, LEGACY_FONT_TEXT), ("dbo_UnitTranscription", 13, VOCALISED_TEXT)])
+        ("dbo_UnitTranscription", 12, LEGACY_FONT_TEXT), ("dbo_UnitTranscription", 13, VOCALISED_TEXT),
+        ("dbo_UnitTranscription", 14, "טקסט שהקריאה שלו שונה מן הקובץ של פרידברג"),
+        ("dbo_UnitTranscription", 15, "מנהג אשכנז מנהג איטליה סדר רב עמרם"),
+        ("dbo_UnitTranscription", 16, "1. שורה ראשונה¹ של כתב היד\n2. שורה שנייה\n\n1 הערת שוליים"),
+        ("dbo_UnitTranscription", 17, "מהדורה של כל כתב היד בקובץ וורד"), ("dbo_UnitTranscription", 18, "מהדורה של תמונה אחת")])
     g3_new = [new(1, "A", "b2_rows", "C10\\data.js"),          # image 10 already served by unit 100 on A
               new(2, "A", "b2_rows", "C11\\data.js"),          # gallery lists image 11 under Z, not A
               new(3, "A", "b1_xml", "99\\99.xml"),             # unknown image
@@ -279,9 +285,21 @@ def test_new_row_image_rules():
               new(10, "C", "docx", "x\\word\\u10.docx"),       # held by its FIST comment
               new(11, "C", "docx", "x\\word\\u11.docx"),
               new(12, "C", "docx", "x\\word\\u12.docx"),       # a legacy-font DOCX: vowel points where letters should be
-              new(13, "E", "docx", "x\\word\\u13.docx")]       # a vocalised piyyut: every mark follows a letter -> passes
-    b_numbers = {"10": {"A"}, "11": {"Z"}, "12": {"B"}, "13": {"C"}}
-    units = {("dbo_UnitTranscription", i): (200, 1, f"u{i}") for i in range(1, 14)}
+              new(13, "E", "docx", "x\\word\\u13.docx"),       # a vocalised piyyut: every mark follows a letter -> passes
+              # the Word-file rulings of 2026-10-26: a difference gate 3 could not classify against the PDF holds,
+              # a real table holds, and hidden runs, numbering, footnotes and a one-column table render and enter
+              new(14, "G", "docx", "x\\word\\u14.docx", status="pdf_held", held_blocks=2, classes=json.dumps({"unclassified": 2}),
+                  yardstick="pdf"),
+              new(15, "G", "docx", "x\\word\\u15.docx", {"tables": 1, "table_rows": 15, "table_max_columns": 5}),
+              new(16, "G", "docx", "x\\word\\u16.docx", {"hidden_runs": 40, "numbered_paragraphs": 2, "footnotes": 1,
+                                                          "tables": 1, "table_rows": 2, "table_max_columns": 1},
+                  status="checked", yardstick="pdf"),
+              # both new on manuscript H, the whole-document DOCX listed first: the per-image row enters and the
+              # whole-document row is held, since the chooser would drop it beside a per-image row
+              new(17, "H", "docx", "x\\word\\u17.docx", status="checked", yardstick="pdf"),
+              new(18, "H", "b2_rows", "C14\\data.js")]
+    b_numbers = {"10": {"A"}, "11": {"Z"}, "12": {"B"}, "13": {"C"}, "14": {"H"}}
+    units = {("dbo_UnitTranscription", i): (200, 1, f"u{i}") for i in range(1, 19)}
     ctx = {"parts": {}, "catalog": {}, "book": {}, "bibref": {}}
     comments = {("dbo_UnitTranscription", 10): "אין לפרסם עד לקריאה מול מקור"}
     plan = g4.plan_candidate(today, g2, {}, {}, g3_new, texts, b_numbers, units, {}, ctx, "plain", comments=comments)
@@ -293,9 +311,14 @@ def test_new_row_image_rules():
     held = {rk.split(":")[2].split("|")[0]: d for rk, d, _ in plan["held"]}
     assert held == {"1": "image_already_served", "2": "image_alma_mismatch", "3": "image_unknown",
                     "4": "shadows_whole_doc_row", "5": "whole_doc_shadowed", "7": "test_or_dummy", "8": "test_or_dummy",
-                    "9": "test_or_dummy", "10": "fist_comment_no_publish", "11": "test_or_dummy", "12": "legacy_font"}
+                    "9": "test_or_dummy", "10": "fist_comment_no_publish", "11": "test_or_dummy", "12": "legacy_font",
+                    "14": "pdf_held", "15": "docx_multicolumn_table", "17": "whole_doc_shadowed"}
+    assert json.loads(dict((rk, d) for rk, _, d in plan["held"])["new:dbo_UnitTranscription:15|G"])["columns"] == 5
     assert [(r["row_key"], r["c_number"], r["sys_id"]) for r in plan["new_rows"]] == [
-        ("new:dbo_UnitTranscription:6|C", "C13", "C"), ("new:dbo_UnitTranscription:13|E", None, "E")]
+        ("new:dbo_UnitTranscription:18|H", "C14", "H"), ("new:dbo_UnitTranscription:6|C", "C13", "C"),
+        ("new:dbo_UnitTranscription:13|E", None, "E"), ("new:dbo_UnitTranscription:16|G", None, "G")]
+    assert plan["yardstick"] == {"new:dbo_UnitTranscription:6|C": "none", "new:dbo_UnitTranscription:18|H": "none",
+                                 "new:dbo_UnitTranscription:13|E": "none", "new:dbo_UnitTranscription:16|G": "pdf"}
     assert plan["new_rows"][0]["id"] == 10 and "גנוזות" in plan["new_rows"][0]["source_credit_he"]
     assert g4.plan_candidate(today, g2, {}, {}, g3_new, texts, b_numbers, units, {}, ctx, "hold")["new_rows"] == []
 

@@ -78,7 +78,7 @@ def test_every_row_is_read_from_its_own_record_and_classified(world, capsys):
     assert r5["source_link"] == "fist_filename_docx" and r5["publishable_text"] == 1
     classes = json.loads(r5["classes"])
     for c in ("numbering", "restored_prefix", "bracket", "control_chars", "final_letters", "regrouped", "catchword",
-              "footnote_apart", "header_apart", "bidi_reorder", "escape"):
+              "footnote_apart", "header_apart", "bidi_reorder", "escape", "footnote_marker"):
         assert c in classes, (c, classes)
     assert "unclassified" not in classes and r5["held_blocks"] == 0 and r5["lost_today_lines"] == 0
     assert texts[("dbo_UnitTranscription", 3)]["text"] == DOCX_UNIT3_TEXT
@@ -127,9 +127,9 @@ def test_plain_policy_accepts_folder_b_and_plain_docx_new_rows_only(world):
     assert g3.main(_args(world, "--allow-single-run", "--new-rows-policy", "plain")) == 0
     rows, counts, _texts, _diffs, checks = _load(world)
     assert rows[f"new:dbo_UnitTranscription:2|{ALMA_B}"]["acceptance_basis"] == "rule:folder_b_text"
-    assert rows["new:dbo_UnitTranscription:21|990003"]["acceptance_basis"] == "rule:plain_docx"
+    assert rows["new:dbo_UnitTranscription:21|990003"]["acceptance_basis"] == "rule:docx_no_pdf_text"
     held = rows["new:dbo_UnitTranscription:20|990002"]
-    assert held["text_accepted"] == 0 and held["hold_reason"] == "docx_structure"
+    assert held["text_accepted"] == 0 and held["hold_reason"] == "docx_multicolumn_table"
     assert counts["new.accepted"] == 2 and checks["T05_new_rows_need_acceptance"]["passed"] == 1
 
 
@@ -260,3 +260,57 @@ def test_classes_of_the_pdf_artefacts(today, new, expected, ok):
     assert got_ok is ok and expected <= cls, cls
     accepted = cls <= g3.ACCEPTED_CLASSES
     assert accepted == (ok and not (cls & g3.VERIFY_ONLY_CLASSES))
+
+
+def test_footnote_marker_is_a_superscript_and_one_marker_to_the_comparison():
+    """The owner's ruling of 2026-10-26: the reference is a superscript digit on its word (the search
+    tokenizer drops it, so the word stays searchable); against the PDF's plain digit it is one marker."""
+    assert g3.classify_pair("הערה1 בטקסט", "הערה¹ בטקסט") == ({"footnote_marker"}, True)
+    assert g3.line_key("הערה1 בטקסט", True) == g3.line_key("הערה¹ בטקסט", False)
+    assert g3.canon("כתואר¹") == g3.canon("כתואר")
+    # the XML editions' ² siglum (the DOCX types a backslash) is not a marker: letters-and-digits equality still verifies
+    cls, ok = g3.classify_pair("טבילה לבעלי קריין² אלא אמ' רבא", "טבילה לבעלי קריין\\ אלא אמ' רבא")
+    assert ok and "footnote_marker" not in cls and "unclassified" not in cls
+
+
+def test_new_docx_rows_are_checked_against_their_pdf(tmp_path, monkeypatch):
+    """The owner's ruling of 2026-10-26: a new DOCX row with FGP's PDF beside it is diffed against the
+    PDF's text through the classes -- clean: ``checked`` and accepted under ``plain``; a difference
+    outside the classes: ``pdf_held``; no PDF text: accepted by the no-yardstick rule, counted apart."""
+    w = build_world(str(tmp_path), text=True)
+    pdf = os.path.join(w["nopos"], "2000000", "pdf", "20000000000032_CUL_T-S 3.2_Tc.pdf")
+    open(pdf, "wb").close()  # FGP's PDF beside unit 21's plain DOCX; its text comes from the patched extractor
+    assert gate1.main(["--nopos", w["nopos"], "--withpos", w["withpos"], "--fist", w["fist"], "--fjms", w["fjms"],
+                       "--nli", w["nli"], "--fgp-db", w["fgp"], "--out-dir", w["out"]]) == 0
+    assert gate2.main(["--inventory", os.path.join(w["out"], "inventory.db"), "--fgp-db", w["fgp"], "--fist", w["fist"],
+                       "--out-dir", w["out"]]) == 0
+    texts = {}
+    monkeypatch.setattr(g3, "pdf_text_of", lambda path, cache=None: texts.get(os.path.basename(path)))
+    rendering = g3.docx_text(g3.read_docx(os.path.join(w["nopos"], "2000000", "word", "20000000000032_CUL_T-S 3.2_Tc.docx")))
+    key = "new:dbo_UnitTranscription:21|990003"
+
+    texts[os.path.basename(pdf)] = rendering  # the PDF prints what the DOCX says
+    assert g3.main(_args(w, "--allow-single-run", "--new-rows-policy", "plain")) == 0
+    rows, counts, _t, _d, checks = _load(w)
+    r = rows[key]
+    assert r["status"] == "checked" and r["yardstick"] == "pdf" and r["text_accepted"] == 1
+    assert r["acceptance_basis"] == "rule:docx_checked_against_pdf" and counts["new.yardstick_pdf"] == 1
+    assert counts["new.accepted_by.rule:docx_checked_against_pdf"] == 1
+    assert checks["T09_accepted_new_docx_rows_clean_against_pdf"]["passed"] == 1
+    held = rows["new:dbo_UnitTranscription:20|990002"]
+    assert held["hold_reason"] == "docx_multicolumn_table" and held["status"] == "no_comparator"
+
+    texts[os.path.basename(pdf)] = "שורה שאין לה שום קשר למה שבקובץ"  # a reading the classes cannot explain
+    assert g3.main(_args(w, "--allow-single-run", "--new-rows-policy", "plain")) == 0
+    rows, counts, _t, diffs, checks = _load(w)
+    r = rows[key]
+    assert r["status"] == "pdf_held" and r["hold_reason"] == "pdf_held" and r["text_accepted"] == 0
+    assert r["held_blocks"] >= 1 and "unclassified" in json.loads(r["classes"])
+    assert counts["new.held.pdf_held"] == 1 and counts["new.accepted"] == 1  # the folder-B row still enters
+    assert any(d["row_key"] == key and d["disposition"] == "held" for d in diffs)
+
+    texts.clear()  # no PDF text at all (a scan): accepted by the no-yardstick rule, counted as such
+    assert g3.main(_args(w, "--allow-single-run", "--new-rows-policy", "plain")) == 0
+    rows, counts, _t, _d, _c = _load(w)
+    assert rows[key]["status"] == "no_comparator" and rows[key]["acceptance_basis"] == "rule:docx_no_pdf_text"
+    assert counts["new.accepted_by.rule:docx_no_pdf_text"] == 1 and "new.yardstick_pdf" not in counts

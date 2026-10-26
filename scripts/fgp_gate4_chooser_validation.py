@@ -35,8 +35,11 @@ Candidate sidecar ``fgp_transcriptions.candidate.db`` (today's schema + ``origin
      is non-blank, not a test or dummy file, not a legacy-font DOCX, its FIST unit comment does not say
      it must not be published until read against the source (``fist_comment_no_publish``, gate 2's rule), and it
      comes from folder B, or
-     from a DOCX without tables, footnotes, hidden runs,
-     tracked changes or auto-numbering; a folder-B row carries the image number of its folder as
+     from a DOCX whose rendering gate 3 checked clean against FGP's PDF of the file (or that has no
+     PDF text) and whose tables are one-column line blocks -- the owner's rulings of 2026-10-26
+     (FGP_DOCX_STRUCTURE_RULES.md): hidden runs, numbering, footnotes and tracked changes are
+     rendered, a real table holds the row (``docx_multicolumn_table``) and so does a difference
+     gate 3 could not classify against the PDF (``pdf_held``); a folder-B row carries the image number of its folder as
      ``c_number`` only when the NLI gallery lists that image under the row's manuscript (else held
      ``image_alma_mismatch`` / ``image_unknown``); a row today's chooser could never show is held:
      a whole-document row on a manuscript whose candidate already has per-image rows of the same
@@ -140,7 +143,7 @@ BUDGETS = {
 }
 EXTRA_COLUMNS = ("origin", "text_provenance", "fist_unit_table", "fist_unit_id", "durable_key")
 PAGE_FIELDS = ("sys_id", "c_number", "image_side", "page_info", "folio_num")
-STRUCTURE_HOLD_KEYS = ("tables", "footnotes", "hidden_runs", "tracked_changes", "numbered_paragraphs")
+MULTICOLUMN_MIN = 2  # a table whose widest row has this many cells is a real table, not a line block
 SAME_TEXT_RATIO = 0.95
 # The only reasons a source the chooser lists today may be missing from the candidate's list.
 SELECTABILITY_DISPOSITIONS = frozenset({"retired_alias", "gate2_hold", "xml_unverified", "empty_text", "test_or_dummy",
@@ -365,10 +368,14 @@ def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new:
     needed = {k["unit"] for k in kept if k["replaced"]}
     pre = []
     for n in g3_new:
-        if n["status"] != "no_comparator":
+        if n["status"] not in ("no_comparator", "checked", "pdf_held"):
             continue
         pre.append(n)
         needed.add((n["unit_table"], n["unit_id"]))
+    # per-image (folder-B) rows first: the chooser keeps per-image rows and drops a whole-document row beside
+    # them (dedupe_fgp_sources), so when both are new on one manuscript the per-image row enters and the
+    # whole-document row is held whole_doc_shadowed -- never the reverse by accident of row-key order
+    pre.sort(key=lambda n: (0 if n["reader"] in ("b1_xml", "b2_rows") else 1, n["row_key"]))
     texts = load_texts(texts_conn, needed) if needed else {}
     # R2: a carried row must have a text -- today's 13 text-less PDF rows (their DOCX text awaits a gate-3 approval)
     with_text = []
@@ -406,7 +413,7 @@ def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new:
                                                                 "longer_letters": len(letters(long_text))})))
     kept = [k for k in kept if k["id"] not in stubs]
     # new rows
-    new_rows, held = [], []
+    new_rows, held, yardstick = [], [], {}
     kept_ids = {k["id"] for k in kept}
     per_image = collections.defaultdict(set)      # (image, relation, language, sys_id) -> units serving it (candidate today rows)
     whole_doc = collections.defaultdict(set)      # (relation, language, sys_id) -> whole-document candidate rows
@@ -446,9 +453,15 @@ def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new:
             held.append((rk, "legacy_font", "%d orphan marks / %d letters" % legacy_font_stats(text)[::-1]))
             continue
         structure = json.loads(n["structure"] or "{}") if n["structure"] else {}
-        if n["reader"] == "docx" and any(structure.get(k) for k in STRUCTURE_HOLD_KEYS):
-            held.append((rk, "docx_structure", _j({k: structure.get(k, 0) for k in STRUCTURE_HOLD_KEYS if structure.get(k)})))
-            continue
+        if n["reader"] == "docx":
+            if (structure.get("table_max_columns") or 0) >= MULTICOLUMN_MIN:
+                held.append((rk, "docx_multicolumn_table", _j({"columns": structure["table_max_columns"],
+                                                               "tables": structure.get("tables", 0)})))
+                continue
+            if n.get("status") == "pdf_held":
+                held.append((rk, "pdf_held", _j({"held_blocks": n.get("held_blocks"),
+                                                 "classes": sorted(json.loads(n.get("classes") or "{}"))[:8]})))
+                continue
         language = n["language"]
         key = (relation, language, sid)
         image = image_number_of(n["reader"], n["source_path"])
@@ -481,6 +494,7 @@ def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new:
         lib, shelf = libraries.get(sid, ("", ""))
         m = re.match(r"^\d{14}", basename or "")
         src = (n["source_path"] or "").replace("\\", "/")
+        yardstick[rk] = "pdf" if n.get("yardstick") else "none"
         new_rows.append({
             "id": next_id, "row_key": rk, "collection": lib or "FIST", "shelfmark": shelf or (basename or ""),
             "c_number": f"C{image}" if image else None, "image_id": m.group(0) if m else (basename or ""),
@@ -500,7 +514,7 @@ def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new:
             per_image_any[key].add(next_id - 1)
         else:
             whole_doc[key].add(next_id - 1)
-    return {"kept": kept, "excluded": excluded, "new_rows": new_rows, "held": held, "texts": texts}
+    return {"kept": kept, "excluded": excluded, "new_rows": new_rows, "held": held, "texts": texts, "yardstick": yardstick}
 
 
 def write_candidate(path: str, today_db: str, today_cols: list, plan: dict, meta: dict) -> None:
@@ -1085,6 +1099,8 @@ def main(argv=None) -> int:
         C[f"new.credit.{r['credit_category']}"] += 1
         C["new.per_image" if r["c_number"] else "new.whole_doc"] += 1
     C["rows.candidate"] = len(plan["kept"]) + len(plan["new_rows"])
+    for y in plan["yardstick"].values():
+        C[f"new.yardstick.{y}"] += 1
 
     db_c = ro(cand_path)
     svc_t, svc_c = fs.FgpService(db_path=args.fgp_db), fs.FgpService(db_path=cand_path)

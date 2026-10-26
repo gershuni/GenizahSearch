@@ -31,12 +31,15 @@ Paragraphs one per line and a table row one line (its cells in document order; t
 `number | text` row as `01 text`, which the bidi class absorbs), manual breaks as lines, tabs as spaces; tracked deletions,
 hidden runs and hidden styles dropped (the Genuzos files keep line ids as hidden text); auto-numbering
 rendered from `numbering.xml` and the paragraph style (`%1.` → `1.`, decimal / letter / roman / Hebrew
-formats; unknown formats counted); footnote references numbered in order of appearance and the footnotes
-returned apart and appended after a blank line as `<n> <text>`; header and footer text returned apart
+formats; unknown formats counted; a bullet definition renders `•`); footnote references numbered in order of
+appearance **as superscript digits on their word** (`כְתוֹאַר¹` — the owner's ruling of 2026-10-26: the `hebword`
+tokenizer drops a superscript, so the word stays searchable, where a plain digit is kept in the token) and the
+footnotes returned apart and appended after a blank line as `<n> <text>`; header and footer text returned apart
 (`PAGE` fields removed); the column labels `טור_א` … become the blank line that separates columns; one
 rendering of a text box (`mc:Choice`). The structure census per unit (`structure`): paragraphs, tables,
 footnotes, superscript runs, bold runs, breaks, tabs, numbered paragraphs, hidden runs, tracked changes,
-images, column labels, header parts, numbering the reader could not render.
+images, column labels, header parts, numbering the reader could not render, and `table_max_columns`, the
+widest table row (one cell: a line block, the Glick layout; two or more: a real table — the owner's ruling holds it).
 
 ## 2. The diff and its classes
 
@@ -69,6 +72,7 @@ on both sides are classified line by line, then as a whole when a word crossed a
 | `bidi_reorder` | a mixed-direction line (ASCII present, or symbols only) with the same characters in another order | `12.528: TS ראה` → `ראה TS 12.528:`; `@]......[` → `[......]@` | yes |
 | `footnote_apart` | today's lines equal a DOCX footnote (number + text, wrapped), set apart | `1 זו הערת שוליים` | yes |
 | `header_apart` | today's line equals DOCX header/footer text (page numbers ignored) | `T-S 1.5 Cambridge` | yes |
+| `footnote_marker` | the PDF's plain footnote digit against the DOCX rendering's superscript (one marker; the alignment key folds them too) | `הערה1` ↔ `הערה¹` | yes |
 | `sigla_rendering` | equal as letters and digits only: the typed sigla differ (`?..?`, `[[..]]`, `~`, `²`/`\`) | `שורה` ↔ `?ש?ורה` | **verify only** |
 | `extra_line` | lines the source has and today's text lacks (a transcriber's note, a line the PDF dropped) | `1.(שורה 8) יש הערת גליון…` | **verify only** |
 | `unclassified` | anything else — a reading difference, scrambled Arabic, a stray character | `אבג` ↔ `אבד` | **no** |
@@ -86,7 +90,9 @@ blocks for review. A new class is added to `ACCEPTED_CLASSES` with its test, and
 | `verified` | an XML row whose own record's DOCX agrees (accepted or verify-only classes only) | 0 | 1 |
 | `approved` | a held row the owner approved (§5) | 1 | 1 |
 | `held` | an unclassified or verify-only difference — listed with its blocks | 0 | 0 |
-| `no_comparator` | a new row (§4) | 0 | by policy |
+| `checked` | a new DOCX row whose rendering is clean against FGP's PDF of the file (§4) | 0 | by policy |
+| `pdf_held` | a new DOCX row with a block outside the classes against its PDF (§4) | 0 | 0 |
+| `no_comparator` | a new row without a PDF text (folder B, a scan, no PDF) (§4) | 0 | by policy |
 | `no_source` / `retired` | nothing to read / retired by gate 2 | 0 | 0 |
 
 **XML never regresses, and the DOCX never replaces an XML text.** Today's XML text is FGP's decoded
@@ -114,12 +120,23 @@ shows — the owner decides whether the DOCX revision or FGP's rendering is the 
 
 Every transcription / translation unit of a `candidate`, `candidate_multi_alma`, `hold_visibility` or
 `unresolved_alma` file gets a row per AlmaId (none → one row with `sys_id` NULL) with its text, source
-link and DOCX structure census, and no comparator. Under `--new-rows-policy hold` (the default) none is
-accepted (`hold_reason = needs_acceptance`). Under `plain`, folder-B text (`rule:folder_b_text`) and a
-DOCX without tables, footnotes, superscripts, hidden runs, tracked changes, images or unrendered numbering
-(`rule:plain_docx`) are accepted by rule; a structured DOCX is held (`docx_structure`). Gate 3 never marks a
-new row publishable: credit and visibility for new rows are the import's job (assessment §6.2). Descriptions
-are never read (check `T07`).
+link and DOCX structure census. **A new DOCX unit is checked against FGP's own PDF of the same file** (the
+owner's ruling of 2026-10-26, [`FGP_DOCX_STRUCTURE_RULES.md`](FGP_DOCX_STRUCTURE_RULES.md) §3): the PDF's text is
+read the way today's sidecar got it (`shared.local_indexer.extract_pdf_pages`, pages joined, blank lines collapsed;
+cached by file hash in `--pdf-cache`, `fgp_data/inventory/pdf_text_cache.db`, shared by the wrapper's two runs) and
+diffed against the rendering through §2's classes exactly as today's rows are: no block outside the classes → status
+`checked` (a verify-only agreement counts: a new row has no text to replace, so letters-and-digits equality
+confirms the rendering as it verifies an XML row); a block outside the classes → `pdf_held`; no PDF text (a scan, no PDF, folder-B text) → `no_comparator`.
+The blocks are recorded in `line_diffs` under the new row's key; `yardstick` / `yardstick_hash` name the comparator.
+Under `--new-rows-policy hold` (the default, and the record run's) none is accepted (`hold_reason =
+needs_acceptance`; the status is still computed). Under `plain`, folder-B text is accepted by rule
+(`rule:folder_b_text`); a DOCX is accepted when its tables are line blocks (`table_max_columns` < 2, else held
+`docx_multicolumn_table`), its rendering is `checked` (`rule:docx_checked_against_pdf`) or has no PDF text
+(`rule:docx_no_pdf_text`), and its text is not blank (`blank_text`); a `pdf_held` rendering holds the row
+(`pdf_held`). Hidden runs, auto-numbering, footnotes, tracked changes and one-column tables are rendered, never a
+hold (the rulings replaced the earlier `plain`/`docx_structure` rule, under which any of them held the row). Gate 3
+never marks a new row publishable: credit and visibility for new rows are the import's job (assessment §6.2).
+Descriptions are never read (check `T07`).
 
 ## 5. Approvals
 
@@ -147,8 +164,8 @@ the previous run's — the wrapper runs twice; `--allow-single-run` is for devel
 every replaced row has a FIST source link · `T03` every diff block has a disposition and an accepted row
 has only accepted blocks · `T04` every block of a replaced row is in `ACCEPTED_CLASSES` or approved · `T05`
 no new row accepted without a basis · `T06` no replaced XML row loses a line · `T07` no row from a
-FreeDescription unit or a `_D` file · `T08` every row is a transcription or translation by FIST · `E_*` the
-declared expectations. The tests prove the gate fails when a lossy difference is accepted (`T06`), when a
+FreeDescription unit or a `_D` file · `T08` every row is a transcription or translation by FIST · `T09` an
+accepted new DOCX row with a PDF yardstick has only accepted blocks against it · `E_*` the declared expectations. The tests prove the gate fails when a lossy difference is accepted (`T06`), when a
 replaced row loses its source link (`T02`), when two runs differ (`T01`), and on a missed expectation.
 
 ## 7. Run record
@@ -170,8 +187,12 @@ replaced row loses its source link (`T02`), when two runs differ (`T01`), and on
   changed; second rerun the same day with the 10 approvals of §5: 10 rows `approved`, replaced 27,714, held
   3,790, publishable with text 40,990, digest `496575a202e34af2`, PASS 56/56; third rerun the same day after gate 2
   narrowed its comment hold to the explicit do-not-publish comments: publishable with text 41,137, gate 2 41,790,
-  digest `3ed1cfcbcdc1415c`, PASS 56/56, about 10 minutes per run; no other count changed) (gate 2: 41,807 — 3,393
-  of those are held here, 2,731 come back through the lifted holds).
+  digest `3ed1cfcbcdc1415c`, PASS 56/56, about 10 minutes per run; no other count changed; fourth rerun the same
+  day with the Word-file rulings — superscript markers, `table_max_columns`, every new DOCX row checked against its
+  PDF: today's rows unchanged in every status, `footnote_marker` on 1,872 rows, new rows 21,049 `checked` / 1,261
+  `pdf_held` / 2,969 without a PDF text, digest `0088ba547d3dfc83`, PASS 64/64 (9 checks + 55), about 15 minutes
+  per run with the PDF cache; record in `FGP_DOCX_STRUCTURE_RULES.md` §7) (gate 2: 41,807 — 3,393 of those are
+  held here, 2,731 come back through the lifted holds).
 - **Held: 3,800** — 2,545 with an unclassified difference (a reading, a stray character, Arabic the font garbled
   beyond the junk rule, a line the DOCX lacks), 771 whose only differences are typed sigla (`sigla_rendering`), 85
   with lines today's text lacks (`extra_line`), 399 XML rows whose own record disagrees (`xml_text_unverified`: 391

@@ -109,9 +109,12 @@ READERS =("b1_xml", "b2_rows", "docx", "pdf_today", "none")
 ACCEPTED_CLASSES = frozenset((
     "whitespace", "spacing", "escape", "bracket", "numbering", "diacritics", "vowel_glyphs", "control_chars",
     "final_letters", "arabic_alef", "arabic_glyphs", "restored_prefix", "catchword", "column_label", "regrouped",
-    "bidi_reorder", "footnote_apart", "header_apart",
+    "bidi_reorder", "footnote_apart", "header_apart", "footnote_marker",
 ))
-STATUSES = ("identical", "accepted", "verified", "approved", "held", "no_comparator", "no_source", "retired")
+# today's rows: identical / accepted / verified / approved / held; new rows: checked (clean against the
+# unit's own PDF), pdf_held (a block outside the classes against it), no_comparator (no PDF text)
+STATUSES = ("identical", "accepted", "verified", "approved", "held", "checked", "pdf_held", "no_comparator",
+            "no_source", "retired")
 CHAR_LEVEL_LIMIT = 60_000  # characters; a block beyond it is held rather than compared char by char
 
 CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
@@ -140,6 +143,12 @@ DIGITS_RE = re.compile(r"\d+")
 DIGITS_ONLY_RE = re.compile(r"^\d{1,3}$")
 ASCII_ALNUM_RE = re.compile(r"[0-9A-Za-z]")
 FOOTNOTE_SEPARATOR = "\n\n"
+# a footnote reference is a superscript digit on its word (the owner's ruling of 2026-10-26): the hebword
+# tokenizer drops superscripts, so the word stays searchable, where a plain digit would be kept in the token
+SUPERSCRIPT_DIGITS = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
+SUPERSCRIPT_TO_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
+SUPERSCRIPT_RE = re.compile("[⁰¹²³⁴⁵⁶⁷⁸⁹]")
+BLANK_LINES_RE = re.compile(r"\n[ \t]*\n+")
 # classes that verify an XML row's text as its own record's edition without replacing it: the
 # DOCX keeps the typed sigla as characters (uncertainty ``?..?``, doubled brackets, the ``~``
 # filler) where today's XML parse carried them as class codes, so letters-and-digits equality
@@ -297,7 +306,7 @@ def _collect(node, out: list, s: _State) -> None:
         fid = _attr(node, "id")
         if fid not in s.fn_order:
             s.fn_order[fid] = len(s.fn_order) + 1
-        out.append(str(s.fn_order[fid]))
+        out.append(str(s.fn_order[fid]).translate(SUPERSCRIPT_DIGITS))
         s.st["footnote_refs"] += 1
         return
     elif tag == W + "endnoteReference":
@@ -478,6 +487,8 @@ def _render_numbering(p, s: _State) -> str:
         del counters[deeper]
     fmt, text, _start = lvls[ilvl]
     s.st["numbered_paragraphs"] += 1
+    if fmt == "bullet":
+        return "• "  # not the Symbol-font private-use glyph the definition carries
 
     def sub(m):
         k = int(m.group(1)) - 1
@@ -560,6 +571,9 @@ def read_docx(path: str) -> DocxText:
                 # (the PDF printed ``01 text`` for a number | text row; the order is a bidi matter)
                 for tr in el.iter(W + "tr"):
                     cells = []
+                    # the widest row decides whether the table is a line block (one column, the Glick
+                    # layout) or a real table (several columns: synoptic customs, source | translation)
+                    d.structure["table_max_columns"] = max(d.structure.get("table_max_columns", 0), len(tr.findall(W + "tc")))
                     for tc in tr.findall(W + "tc"):
                         texts = [t for t in (para_text(p) for p in tc.iter(W + "p")) if t is not None]
                         cell = " ".join(ws(t.replace("\n", " ")) for t in texts if ws(t))
@@ -836,6 +850,10 @@ def _restored_prefix(a: str, b: str) -> bool:
     return bool(prefix) and prefix[-1] in GERSHAYIM and bool(HEB_LETTER_RE.search(prefix))
 
 
+# the marker fold runs only when today's side has no superscript of its own: a PDF-derived text carries a
+# footnote reference as a plain digit, while the XML-decoded editions use ² as a siglum that canon() drops
+# and the DOCX types as a backslash -- folding that ² to a digit would break their letters-and-digits equality
+_MARKER_STAGE = (("footnote_marker", lambda s: s.translate(SUPERSCRIPT_TO_DIGITS)),)
 _STAGES = (
     ("spacing", lambda s: s.replace(" ", "")),
     ("escape", lambda s: s.replace("\\", "")),
@@ -848,7 +866,7 @@ def _classify_strings(a: str, b: str, cls: set) -> tuple:
     tolerance, the bidi fallback and (verify-only) letters-and-digits equality."""
     if a == b:
         return cls, True
-    for name, f in _STAGES:
+    for name, f in (_STAGES if SUPERSCRIPT_RE.search(a) else _MARKER_STAGE + _STAGES):
         a2, b2 = f(a), f(b)
         if (a2, b2) != (a, b):
             cls.add(name)
@@ -888,7 +906,7 @@ def line_key(line: str, pdf_side: bool) -> str:
     cw = catchword_form(line, pdf_side)
     if cw:
         return cw
-    s = fix_number_prefix(line) if pdf_side else line
+    s = (fix_number_prefix(line) if pdf_side else line).translate(SUPERSCRIPT_TO_DIGITS)
     s = nfd(s.replace(" ", "").replace("\\", "").translate(BRACKET_TOKENS))
     s = MARKS_RE.sub("", CTRL_RE.sub("", s))
     return "".join(c for c in s if c not in FINALS)
@@ -1002,7 +1020,7 @@ def diff_texts(today_text: str, body_text: str, full_text: str, footnotes: list,
         # (a dropped line); an order change, a number or a restored prefix lose nothing, and the
         # ASCII a glyph class attests to be the font's junk is not content
         ct = canon(" ".join(T))
-        if cls & {"vowel_glyphs", "arabic_glyphs", "numbering"}:
+        if cls & {"vowel_glyphs", "arabic_glyphs", "numbering", "footnote_marker"}:
             ct = ASCII_ALNUM_RE.sub("", ct)  # a line number or footnote marker is not content either
         if T and (collections.Counter(ct) - collections.Counter(canon(" ".join(N)))):
             lost += len(T)
@@ -1064,6 +1082,40 @@ def load_approvals(path: str | None) -> dict:
     return out
 
 
+# --------------------------------------------------------------------------- the PDF yardstick
+
+
+def open_pdf_cache(path: str | None) -> sqlite3.Connection | None:
+    """The PDF-text cache (by file hash) shared by the wrapper's two runs; None disables it."""
+    if not path:
+        return None
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE IF NOT EXISTS pdf_text (sha TEXT PRIMARY KEY, text TEXT)")
+    return conn
+
+
+def pdf_text_of(path: str, cache: sqlite3.Connection | None = None) -> str | None:
+    """The PDF's text as today's sidecar got it (the old pipeline: ``shared.local_indexer.extract_pdf_pages``,
+    pages joined, blank lines collapsed), so the same classes apply; None for a scan or an unreadable file."""
+    h = file_sha(path)
+    if h is None:
+        return None
+    if cache is not None:
+        row = cache.execute("SELECT text FROM pdf_text WHERE sha=?", (h,)).fetchone()
+        if row is not None:
+            return row[0] or None
+    try:
+        from shared.local_indexer import extract_pdf_pages
+        text = BLANK_LINES_RE.sub("\n", "\n\n".join(t for _, t, _ in extract_pdf_pages(path)).strip()).strip()
+    except Exception:  # noqa: BLE001 - a corrupt or empty PDF is "no yardstick", recorded as such
+        text = ""
+    if cache is not None:
+        cache.execute("INSERT OR REPLACE INTO pdf_text (sha, text) VALUES (?, ?)", (h, text))
+        cache.commit()
+    return text or None
+
+
 # --------------------------------------------------------------------------- the pipeline
 
 
@@ -1110,11 +1162,32 @@ def read_unit(unit: dict, inp: dict, nopos: str, withpos: str) -> UnitText:
 
 
 def build(inp: dict, nopos: str, withpos: str, today_files: str, approvals: dict,
-          new_rows_policy: str = "hold", limit: int | None = None) -> tuple:
+          new_rows_policy: str = "hold", limit: int | None = None, pdf_cache: sqlite3.Connection | None = None) -> tuple:
     C = collections.Counter()
     unit_cache: dict = {}
     text_rows, line_diffs, unit_texts = [], [], {}
     diff_cache: dict = {}
+    yard_cache: dict = {}
+
+    def yardstick(key, unit, f, ut):
+        """A new DOCX unit's rendering diffed against FGP's PDF of the same file (the owner's ruling of
+        2026-10-26: every new Word row is checked, through the same classes as today's rows); None without
+        a PDF text (five files have no PDF, 125 are scans)."""
+        if key in yard_cache:
+            return yard_cache[key]
+        res = None
+        if ut.reader == "docx" and f.get("has_pdf"):
+            for d in dict.fromkeys(x for x in (unit["folder"], f.get("dir")) if x):
+                p = os.path.join(nopos, d, "pdf", unit["basename"] + ".pdf")
+                if os.path.isfile(p):
+                    text = pdf_text_of(p, pdf_cache)
+                    if text:
+                        dx = ut.docx
+                        res = {"hash": sha(text), "path": os.path.relpath(p, nopos),
+                               "d": diff_texts(text, ut.body, ut.text, dx.footnotes if dx else [], dx.headers if dx else [])}
+                    break
+        yard_cache[key] = res
+        return res
 
     def unit_text(key):
         if key not in unit_cache:
@@ -1130,7 +1203,8 @@ def build(inp: dict, nopos: str, withpos: str, today_files: str, approvals: dict
                 "new_lines": None, "status": None, "classes": None, "blocks": 0, "held_blocks": 0,
                 "lost_today_lines": None, "text_replaced": 0, "xml_verified": 0, "text_accepted": 0,
                 "acceptance_basis": None, "gate2_publishable": None, "gate2_hold_reasons": None,
-                "publishable_text": 0, "structure": None, "visibility_hold": 0, "hold_reason": None}
+                "publishable_text": 0, "structure": None, "visibility_hold": 0, "hold_reason": None,
+                "yardstick": None, "yardstick_hash": None}
         base.update(kw)
         return base
 
@@ -1258,9 +1332,8 @@ def build(inp: dict, nopos: str, withpos: str, today_files: str, approvals: dict
         f = inp["files"][u["basename"]]
         sys_ids = sorted(inp["almas"].get(u["basename"], set())) or [None]
         structure = _j(dict(ut.docx.structure)) if ut.docx else None
-        plain = bool(ut.docx) and not any(ut.docx.structure.get(k) for k in (
-            "tables", "footnotes", "superscript_runs", "hidden_runs", "tracked_changes", "images",
-            "numbering_unrendered", "numbering_unknown_format"))
+        multicolumn = bool(ut.docx) and (ut.docx.structure.get("table_max_columns") or 0) >= 2
+        yard = yardstick(key, u, f, ut) if ut.reader == "docx" else None
         if ut.reader not in ("none", "pdf_today") and key not in unit_texts:
             unit_texts[key] = {"unit_table": key[0], "unit_id": key[1], "reader": ut.reader, "source_path": ut.path,
                                "text": ut.text, "text_hash": sha(ut.text), "structure": structure,
@@ -1274,26 +1347,59 @@ def build(inp: dict, nopos: str, withpos: str, today_files: str, approvals: dict
                 out["status"] = "no_source"
                 out["hold_reason"] = ut.error or ("pdf_only_no_text_reader" if ut.reader == "pdf_today" else "file_absent")
             else:
-                out["status"] = "no_comparator"
                 out["new_hash"] = sha(ut.text)
                 out["new_lines"] = len(_lines(ut.text))
-                accepted = new_rows_policy == "plain" and ut.reader in ("b1_xml", "b2_rows") or \
-                    new_rows_policy == "plain" and plain and bool(ws(ut.text))
-                if accepted:
-                    out["text_accepted"], out["acceptance_basis"] = 1, ("rule:folder_b_text" if ut.reader != "docx" else "rule:plain_docx")
+                if yard:
+                    yd = yard["d"]
+                    out.update({"yardstick": "pdf", "yardstick_hash": yard["hash"], "today_lines": yd["today_lines"],
+                                "classes": _j(dict(yd["classes"])), "blocks": len(yd["blocks"]), "held_blocks": yd["held_blocks"],
+                                "lost_today_lines": yd["lost_today_lines"]})
+                    # a verify-only agreement (letters and digits equal under typed sigla) never replaces a text,
+                    # but a new row has none to replace: it confirms the rendering as it verifies an XML row
+                    out["status"] = "checked" if yd["held_blocks"] == 0 else "pdf_held"
                 else:
-                    out["hold_reason"] = "needs_acceptance" if new_rows_policy == "hold" else "docx_structure"
+                    out["status"] = "no_comparator"
+                # acceptance under the policy: folder-B text by rule; a DOCX when its rendering is clean against
+                # the PDF (or no PDF text exists) and its tables are line blocks, not real tables
+                if new_rows_policy != "plain":
+                    out["hold_reason"] = "needs_acceptance"
+                elif ut.reader in ("b1_xml", "b2_rows"):
+                    out["text_accepted"], out["acceptance_basis"] = 1, "rule:folder_b_text"
+                elif multicolumn:
+                    out["hold_reason"] = "docx_multicolumn_table"
+                elif out["status"] == "pdf_held":
+                    out["hold_reason"] = "pdf_held"
+                elif not ws(ut.text):
+                    out["hold_reason"] = "blank_text"
+                else:
+                    out["text_accepted"] = 1
+                    out["acceptance_basis"] = "rule:docx_checked_against_pdf" if yard else "rule:docx_no_pdf_text"
             text_rows.append(out)
+            if yard:
+                for i, b in enumerate(yard["d"]["blocks"]):
+                    line_diffs.append({"row_key": out["row_key"], "block_no": i, "op": b["op"], "today_from": b["today_from"],
+                                       "today_to": b["today_to"], "new_from": b["new_from"], "new_to": b["new_to"],
+                                       "today_text": b["today_text"], "new_text": b["new_text"], "classes": _j(b["classes"]),
+                                       "disposition": b["disposition"]})
             C[f"status.{out['status']}"] += 1
             C[f"new.route.{ut.reader}"] += 1
             C["rows.new"] += 1
             if out["text_accepted"]:
                 C["new.accepted"] += 1
+                C[f"new.accepted_by.{out['acceptance_basis']}"] += 1
+            if out["hold_reason"] and new_rows_policy == "plain":
+                C[f"new.held.{out['hold_reason']}"] += 1
+            if yard:
+                C["new.yardstick_pdf"] += 1
+                for c in yard["d"]["classes"]:
+                    C[f"new_class_rows.{c}"] += 1
             if structure:
                 for k, v in json.loads(structure).items():
                     if v and k in ("tables", "footnotes", "superscript_runs", "hidden_runs", "tracked_changes", "images",
                                    "numbered_paragraphs", "numbering_unrendered", "header_parts"):
                         C[f"new.structure.{k}"] += 1
+                if multicolumn:
+                    C["new.structure.multicolumn_tables"] += 1
     # ---- counts
     C["rows"] = len(text_rows)
     C["rows.today"] = len(rows)
@@ -1366,6 +1472,11 @@ def run_checks(text_rows: list, line_diffs: list, C: dict, expectations: dict, d
     bad = [o["row_key"] for o in text_rows if not o["today_id"] and o["text_accepted"] and not o["acceptance_basis"]]
     add("T05_new_rows_need_acceptance", not bad, "0 new rows accepted without a basis", f"{len(bad)}",
         "a row without a comparator is accepted only by a declared rule or an approval")
+    bad = [o["row_key"] for o in text_rows if not o["today_id"] and o["text_accepted"] and o["reader"] == "docx"
+           and (o["status"] == "pdf_held" or (o["yardstick"] and any(b["disposition"] not in ("accepted", "verify_only")
+                                                                      for b in by_key[o["row_key"]])))]
+    add("T09_accepted_new_docx_rows_clean_against_pdf", not bad, "0", f"{len(bad)}",
+        "an accepted new DOCX row with a PDF yardstick has no held block against it (the owner's ruling of 2026-10-26)")
     bad = [o["row_key"] for o in text_rows if o["today_text_source"] == "xml" and o["text_replaced"] and (o["lost_today_lines"] or 0) > 0]
     add("T06_no_xml_regression", not bad, "0 replaced XML rows losing a line", f"{len(bad)}",
         "a replaced XML row keeps every line of today's text")
@@ -1503,8 +1614,11 @@ def main(argv=None) -> int:
     ap.add_argument("--approvals", default=DEFAULT_APPROVALS, help="owner approvals JSON (absent = none)")
     ap.add_argument("--out-dir", default=DEFAULT_OUT)
     ap.add_argument("--new-rows-policy", choices=("hold", "plain"), default="hold",
-                    help="hold: no new row is accepted; plain: folder-B text and plain DOCX (no tables, footnotes, "
-                         "superscripts, hidden runs, tracked changes, images) are accepted by rule")
+                    help="hold: no new row is accepted; plain: folder-B text by rule, and a DOCX whose rendering is "
+                         "clean against FGP's PDF of the file (or has no PDF text) and whose tables are one-column "
+                         "line blocks (the owner's rulings of 2026-10-26)")
+    ap.add_argument("--pdf-cache", default=os.path.join(DEFAULT_OUT, "pdf_text_cache.db"),
+                    help="PDF-text cache by file hash shared by the two runs ('' disables it)")
     ap.add_argument("--previous-summary", metavar="PATH", help="a previous run's gate3_summary.json (T01)")
     ap.add_argument("--allow-single-run", action="store_true", help="let T01 pass without a previous run")
     ap.add_argument("--limit", type=int, help="development: only the first N rows / new units")
@@ -1527,14 +1641,18 @@ def main(argv=None) -> int:
     t0 = time.time()
     meta = {"run_at": time.strftime("%Y-%m-%d %H:%M:%S"), "inventory": args.inventory, "gate2": args.gate2,
             "fgp_db": args.fgp_db, "nopos": args.nopos, "withpos": args.withpos, "approvals": args.approvals,
-            "new_rows_policy": args.new_rows_policy, "limit": args.limit or ""}
+            "new_rows_policy": args.new_rows_policy, "limit": args.limit or "", "pdf_cache": args.pdf_cache or ""}
     log("loading the gate-1 inventory, gate-2 outcomes and today's text ...")
     inp = load_inputs(args.inventory, args.gate2, args.fgp_db)
     approvals = load_approvals(args.approvals)
     log(f"  {len(inp['units']):,} units, {len(inp['rows']):,} rows, {len(approvals):,} approvals ({time.time() - t0:.0f}s)")
     log("reading and diffing ...")
+    pdf_cache = open_pdf_cache(args.pdf_cache)
     text_rows, line_diffs, unit_texts, C, digest = build(inp, args.nopos, args.withpos, args.today_files, approvals,
-                                                         new_rows_policy=args.new_rows_policy, limit=args.limit)
+                                                         new_rows_policy=args.new_rows_policy, limit=args.limit,
+                                                         pdf_cache=pdf_cache)
+    if pdf_cache is not None:
+        pdf_cache.close()
     meta["digest"] = digest
     checks = run_checks(text_rows, line_diffs, C, expectations, digest, previous_digest, args.allow_single_run)
     db_path = write_outputs(text_rows, line_diffs, unit_texts, checks, C, args.out_dir, meta)

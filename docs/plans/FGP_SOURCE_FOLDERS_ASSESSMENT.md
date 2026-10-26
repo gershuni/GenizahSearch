@@ -416,8 +416,9 @@ Each gate names what makes it fail; "measured" or "reviewed" alone is never a pa
    (never replaced by it; 2,731 gate-2 XML holds lifted) · 3,800 held and listed per block (2,545 unclassified
    differences, 771 typed-sigla-only, 85 extra lines, 399 XML rows whose own record disagrees) · 19 absent · 50
    retired. Publishable with text 41,143 (40,980 after the 2026-10-26 hold; 40,990 with the owner's 10 approvals of the
-   text-less rows the same day; 41,137 since the hold was narrowed). New rows 25,342 read with a structure census, none accepted under the
-   default policy. Descriptions never read; no replaced row loses a letter of today's text.
+   text-less rows the same day; 41,137 since the hold was narrowed). New rows 25,342 read with a structure census; since the
+   Word-file rulings of 2026-10-26 every new DOCX unit is checked against FGP's PDF of the file (21,049 checked, 1,261
+   held, 2,969 without a PDF text; `FGP_DOCX_STRUCTURE_RULES.md`); none accepted under the default policy. Descriptions never read; no replaced row loses a letter of today's text.
 4. **Chooser validation with the larger sidecar, both apps.** *Fails if:* an independent edition becomes
    unselectable; a saved choice is lost; a page assignment changes without approval; a default-selection change is
    not dispositioned; import peak memory exceeds the declared limit (to be set against the 63 GB dev machine and the
@@ -429,19 +430,22 @@ Each gate names what makes it fail; "measured" or "reviewed" alone is never a pa
    `fgp_data/inventory/fgp_transcriptions.candidate.db` beside today's sidecar, never over it, and `gate4.db`). The
    candidate carries 44,434 of today's rows under their ids (27,677 with gate 3's text; 600 excluded: 391 XML rows gate
    3 could not verify, 97 gate-2 holds — 17 of them the do-not-publish comment hold, narrowed the same day from the
-   unchecked-comment hold — 56 stubs retired, 50 retired, 3 without text, 3 test files) and 6,399 new rows under the
-   `plain` policy (1,569 per image, 4,830 whole document; 18,880 held: 17,124 structured DOCX, 1,138 image–manuscript
-   mismatches, 322 without an AlmaId, 168 blank, 94 the chooser could not list, 21 test or dummy files, 13 legacy-font
-   texts). Selectability over 27,609 manuscripts through the real service: every listed source kept or dispositioned
-   (479 lost, each by a gate-2 ruling, a retirement, a text-less, test or stub row or a same-text swap), all 6,399 new
-   rows listed; page keys unchanged on all 44,434; on 88 reference manuscripts (1,236 pages) 506 default changes, every
-   one dispositioned (432 new editions, 68 excluded rows, 4 replaced texts, 2 swaps), web and desktop shapes agree;
+   unchecked-comment hold — 56 stubs retired, 50 retired, 3 without text, 3 test files) and, since the Word-file
+   rulings of the same day, 18,549 new rows under the `plain` policy (1,586 per image, 16,963 whole document; 16,952
+   checked against FGP's PDF of their file; 6,730 held: 3,858 whole-document rows the chooser would drop beside
+   per-image rows, 1,153 with a difference against the PDF the classes do not explain, 1,138 image–manuscript
+   mismatches, 322 without an AlmaId, 168 blank, 28 real tables, 26 unknown images, 21 test or dummy files, 13
+   legacy-font texts, 3 shadowing cases). Selectability over 30,802 manuscripts through the real service: every listed
+   source kept or dispositioned (479 lost, each by a gate-2 ruling, a retirement, a text-less, test or stub row or a
+   same-text swap), all 18,549 new rows listed; page keys unchanged on all 44,434; on 88 reference manuscripts (1,416
+   pages) 896 default changes, every one dispositioned (822 new editions, 68 excluded rows, 4 replaced texts, 2
+   swaps), web and desktop shapes agree;
    latency p95 under 4 ms per manuscript load and per page against budgets of 500 / 250 ms; memory
    952 MB build peak, 11.0 MB app-side; file 294 MB. Two defects
    recorded: the reading desk's saved source choice is never applied (open-issue fragment 2026-10-26), and today's
    chooser hides the shorter of 95 same-image pairs (rules §5). The earlier records of the day (44,500 carried, 6,433 new,
-   51 expectations; 44,332 / 6,408 / 55; 44,332 / 6,395 / 56; 44,286 / 6,395 / 58) preceded the three holds, the
-   owner's rulings and the narrowing of the comment hold.
+   51 expectations; 44,332 / 6,408 / 55; 44,332 / 6,395 / 56; 44,286 / 6,395 / 58; 44,434 / 6,399 / 57) preceded the
+   three holds, the owner's rulings, the narrowing of the comment hold and the Word-file rulings.
 5. **Positions prototype after the 20-image geometry check.** The landmark tolerance and the size / payload / latency
    limits are declared *before* the check; an undeclared limit is itself a fail. *Fails if:* for any of the 20 images
    the **residual** landmark error after the recorded transform exceeds the tolerance (recording a transform is not a
@@ -619,3 +623,14 @@ publish until read against the source". Gate 2 now holds the 17 (`fist_comment_n
 (44,434 carried, 6,399 new, 600 excluded, 50,833 candidate rows). Gate 4's C5 learned to disposition a page whose
 whole-document edition changed hands because gate 3 replaced a text (`text_replaced`), found on a manuscript the
 reseeded reference draw brought in. The candidate is not deployed.
+
+**Revision 17 (the Word files, 2026-10-26)** — the owner chose the 17,124 held Word-file rows as the next prize. A
+census (`scripts/fgp_docx_structure_census.py`, `FGP_DOCX_STRUCTURE_RULES.md`) found 15,638 of them held for hidden
+runs alone — the Nuscha team's bookkeeping, never text — and the rest for numbering, one-column tables, footnotes and
+five tracked-change files. The owner ruled: a superscript footnote marker (a plain digit made the word unsearchable),
+the 28 real tables held, every new Word row checked against FGP's own PDF of the file through gate 3's classes,
+everything in one run and one release for web and desktop, and the Nuscha hidden layer kept
+(`scripts/fgp_nuscha_hidden_layer.py` → `fgp_data/nuscha_hidden_layer.db`, 38,790 files, 796,854 lines). Gates 3 and 4
+rerun, PASS, records revised above: 18,549 new rows (21,049 of the 22,310 checked Word rows clean, 1,261 held), the
+candidate 62,983 rows. What keeps most of the rest out is the chooser, not the Word rules: 3,858 whole-document rows
+sit on manuscripts served per image by another unit. Not deployed.
