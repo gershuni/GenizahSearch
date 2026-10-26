@@ -26,7 +26,8 @@ both apps open the candidate unchanged.
 | R3 text | gate 3's text where gate 3 replaced it (status accepted / approved), else today's; `sections` (the PDF page split) is cleared on a replaced text (neither app reads it for FGP rows) |
 | R4 credit | gate 2's `credit_he` / `credit_en`; the generic Friedberg attribution where gate 2 ruled generic |
 | R2b legacy fonts | owner's ruling of 2026-10-26: a DOCX typed in a pre-Unicode Hebrew font arrives as vowel points standing where letters should be (RNL Arab.-Yevr. 72: «ַָָ ם ַהו זַֽֿ בַ ַֻהם בו»). In Unicode a combining mark follows a letter; a mark that opens a word (follows a space, digit or punctuation and is itself followed by a letter or a mark) is such a font's letter. A gate-3 text is held (`legacy_font`) when it has at least 10 such orphan marks and at least a tenth as many as Hebrew and Arabic letters. A vocalised piyyut has none; a mark standing alone between spaces is a transcriber's placeholder for an illegible letter and is not counted; a Latin letter with a decomposed diacritic is a letter. Applied to new rows and to carried rows whose text gate 3 replaced, never to today's PDF text (its detached marks are gate 3's classes) |
-| R5 new rows | under `--new-rows-policy plain` a new (unit, AlmaId) row read by gate 3 enters iff its text is non-blank, not a test or dummy file (R2a), not a legacy-font text (R2b), its FIST unit comment does not say it was never checked against the source (`fist_comment_unchecked`, gate 2's rule of 2026-10-26), and it comes from folder B, or from a DOCX with no tables, footnotes, hidden runs, tracked changes or auto-numbering (`docx_structure` holds the rest); a folder-B row's `c_number` is the image number of its folder, only when `b_numbers` (the NLI gallery) lists that image under the row's manuscript (`image_alma_mismatch` / `image_unknown` hold the rest); a row today's chooser could never list is held: `whole_doc_shadowed` (a whole-document row on a manuscript whose candidate has per-image rows of the same relation and language — `dedupe_fgp_sources` drops it), `image_already_served` (another unit already serves the image — the chooser keeps one row per image), `shadows_whole_doc_row` (the manuscript has a whole-document row of the same relation and language, which the new per-image row would hide). Under `hold` no new row enters. Credits by gate 2's resolver on the FIST unit (generic when unresolved) |
+| R2c stubs | owner's ruling of 2026-10-26: when two FIST units serve the same image, relation and language of one manuscript (team 200's sub-team 1 beside sub-team 4's `_Tc` file), today's chooser lists only the longer text; a shorter row with under 30 % of the longer's letters and not the same text (ratio < 0.95) is a stub of a transcription filed twice and is retired from the candidate (`stub_retired`, the longer row's uid recorded). Two rows of about one length that differ are two readings and both stay (listed in §5, hidden by the chooser until it shows both) |
+| R5 new rows | under `--new-rows-policy plain` (the owner's ruling of 2026-10-26: these rows ship) a new (unit, AlmaId) row read by gate 3 enters iff its text is non-blank, not a test or dummy file (R2a), not a legacy-font text (R2b), its FIST unit comment does not say it was never checked against the source (`fist_comment_unchecked`, gate 2's rule of 2026-10-26), and it comes from folder B, or from a DOCX with no tables, footnotes, hidden runs, tracked changes or auto-numbering (`docx_structure` holds the rest); a folder-B row's `c_number` is the image number of its folder, only when `b_numbers` (the NLI gallery) lists that image under the row's manuscript (`image_alma_mismatch` / `image_unknown` hold the rest); a row today's chooser could never list is held: `whole_doc_shadowed` (a whole-document row on a manuscript whose candidate has per-image rows of the same relation and language — `dedupe_fgp_sources` drops it), `image_already_served` (another unit already serves the image — the chooser keeps one row per image), `shadows_whole_doc_row` (the manuscript has a whole-document row of the same relation and language, which the new per-image row would hide). Under `hold` no new row enters. Credits by gate 2's resolver on the FIST unit (generic when unresolved) |
 | R6 meta | `fgp_meta.version` = `2.0.0`, `candidate`, `built_at`, `built_from_gate3_digest`, `new_rows_policy`, row counts |
 
 ## 2. Checks
@@ -34,7 +35,7 @@ both apps open the candidate unchanged.
 | check | fails when |
 |---|---|
 | C1 two runs | the digest (candidate rows, every disposition, every default decision) differs from the previous run's |
-| C2 selectability | a source the real `FgpService.get_fgp_sources_for_fragment` lists today is not listed from the candidate and carries none of: `retired_alias` (its same-meaning successor is listed), `gate2_hold`, `xml_unverified`, `empty_text`, `test_or_dummy`, `legacy_font`, `same_text_swap` (its image group is now won by a row whose text matches at ratio ≥ 0.95); or a new row is not listed; or a same-meaning successor is not listed. Every manuscript of either DB |
+| C2 selectability | a source the real `FgpService.get_fgp_sources_for_fragment` lists today is not listed from the candidate and carries none of: `retired_alias` (its same-meaning successor is listed), `gate2_hold`, `xml_unverified`, `empty_text`, `test_or_dummy`, `legacy_font`, `stub_retired`, `same_text_swap` (its image group is now won by a row whose text matches at ratio ≥ 0.95); or a new row is not listed; or a same-meaning successor is not listed. Every manuscript of either DB |
 | C3 identity | a carried row's `id`, `uid`, `doc_relation` or `language` changed — the only keys a saved choice can rest on |
 | C4 page assignment | a carried row's `sys_id`, `c_number`, `image_side`, `page_info` or `folio_num` changed without an approval; a new per-image row's image is not confirmed for its manuscript by `nli_crossref.db` |
 | C5 defaults | on the reference set, page by page: the web shape (`filter_sources_for_page` with the labels `folio_label_for_displayed_page` / `fgp_image_number_for_displayed_page` resolve) and the desktop shape (`_select_fgp_sources_for_page` with `displayed_folio_label` / `displayed_fgp_image_number`) disagree on either DB; or `choose_default_source`'s decision changes between the DBs without a disposition: `new_edition` (the candidate defaults to, or the page gained, a new row), `row_excluded` (a row of today's page set left the candidate — chosen or demoted, since a demoted edition's absence changes the reason too), `text_replaced` (an edition on the page carries gate 3's text), `same_text_swap`, `approved` |
@@ -84,34 +85,35 @@ with empty text, as the apps do.
 
 ## 6. Run record
 
-**2026-10-26 (third run, after the owner's three holds) — PASS, 15 checks + 56 declared expectations, two runs with
-one digest** (`44adcc4e93a5bcf8`; 67 s per run on the dev machine, the search engine loaded once for the HTR pages).
-The first record of the day (digest `d5b89673fd971ae3`, 44,500 carried, 6,433 new, 51 expectations) preceded gate 2's
-`fist_comment_unchecked` hold and R2a; the second (`d2645076b9603797`, 44,332 carried, 6,408 new, 55 expectations)
-preceded R2b; the numbers below replace both.
+**2026-10-26 (fourth run, on the owner's rulings) — PASS, 15 checks + 58 declared expectations, two runs with one
+digest** (`b5994fab1a88eb1a`; about 90 s per run on the dev machine, the search engine loaded once for the HTR pages).
+Earlier records of the day: `d5b89673fd971ae3` (44,500 carried, 6,433 new, 51 expectations) before gate 2's
+`fist_comment_unchecked` hold and R2a; `d2645076b9603797` (44,332 / 6,408 / 55) before R2b; `44adcc4e93a5bcf8`
+(44,332 / 6,395 / 56) before the 10 gate-3 approvals and R2c. The numbers below replace them.
 
-The candidate (`fgp_data/inventory/fgp_transcriptions.candidate.db`, 294 MB, 50,727 rows, `version` 2.0.0):
+The candidate (`fgp_data/inventory/fgp_transcriptions.candidate.db`, 294 MB, 50,681 rows, `version` 2.0.0):
 
 | rows | count | of which |
 |---|---|---|
-| today's rows carried | 44,332 | 27,522 with gate 3's text, 16,810 with today's (identical, XML verified, or held by gate 3) |
-| today's rows excluded | 702 | 391 XML rows gate 3 could not verify · 245 gate-2 holds (165 `fist_comment_unchecked`, 23 `tmp_DoubleNotToDisplay`, 19 absent files, 26 XML region, 5 other edition, 7 unconfirmed associations) · 50 retired (17 with a same-meaning successor) · 13 without text · 3 test or dummy files (`טסט`, a dots-only row, a 36-character English line filed as an edition) · no legacy font among the replaced texts |
+| today's rows carried | 44,286 | 27,530 with gate 3's text (10 of them by the owner's approval), 16,756 with today's (identical, XML verified, or held by gate 3) |
+| today's rows excluded | 748 | 391 XML rows gate 3 could not verify · 245 gate-2 holds (165 `fist_comment_unchecked`, 23 `tmp_DoubleNotToDisplay`, 19 absent files, 26 XML region, 5 other edition, 7 unconfirmed associations) · 56 stubs retired (R2c; the 57th of §5's count is held for another reason) · 50 retired (17 with a same-meaning successor) · 3 without text (an empty DOCX too) · 3 test or dummy files (`טסט`, a dots-only row, a 36-character English line filed as an edition) · no legacy font among the replaced texts |
 | new rows entered (`plain`) | 6,395 | 1,569 per image (folder B), 4,826 whole document (plain DOCX); credits: 2,168 books, 1,806 teams, 1,588 infrastructure, 659 named contributors, 117 catalogues, 39 generic, 18 others |
 | new rows held | 18,884 | 17,124 structured DOCX · 1,138 image–manuscript mismatches · 322 without an AlmaId · 168 blank · 48 whole-document rows shadowed · 26 unknown images · 21 test or dummy files (`test`, `ggg`, `נסיון / נא להתעלם!!!`, `241241`, teams 240 and 850) · 19 per-image rows that would hide a whole-document row · 13 legacy-font texts (10 units: RNL Arab.-Yevr. 24–81 and EVR ARAB I 1802 / 4528 of team 107, two Katz Center rows of team 131) · 4 units FIST says were never checked against the source · 1 image another unit serves |
 
-Checks: selectability over 27,606 manuscripts through the real service — 40,438 sources kept, 564 lost and each
-dispositioned (389 `xml_unverified`, 135 `gate2_hold`, 22 `retired_alias` with the successor listed, 13
-`empty_text`, 3 `test_or_dummy`, 2 `same_text_swap`), all 6,395 new rows listed; identity and page keys unchanged on
-all 44,332 carried rows, 1,569 new image numbers confirmed by `nli_crossref.db`; on the 88 reference manuscripts
-(1,237 pages; 7 without HTR) the web and desktop shapes agree everywhere and the 503 default changes are all
-dispositioned (432 `new_edition`, 68 `row_excluded`, 1 `text_replaced`, 2 `same_text_swap`), 734 pages unchanged.
+Checks: selectability over 27,606 manuscripts through the real service — 40,447 sources kept, 555 lost and each
+dispositioned (389 `xml_unverified`, 135 `gate2_hold`, 22 `retired_alias` with the successor listed, 3
+`empty_text`, 3 `test_or_dummy`, 1 `stub_retired` — a stub that won its image today because the longer row's PDF
+text was the shorter —, 2 `same_text_swap`), all 6,395 new rows listed; identity and page keys unchanged on all
+44,286 carried rows, 1,569 new image numbers confirmed by `nli_crossref.db`; on the 88 reference manuscripts (1,237
+pages; 6 without HTR) the web and desktop shapes agree everywhere and the 502 default changes are all dispositioned
+(432 `new_edition`, 67 `row_excluded`, 1 `text_replaced`, 2 `same_text_swap`), 735 pages unchanged.
 
 | budget | measured | limit |
 |---|---|---|
-| manuscript load, candidate | p50 0.2 ms · p95 2.8 ms · max 5.6 ms | p95 500 ms, max 2,000 ms, ≤ 1.5× today |
-| page filter + default, candidate | p50 0.3 ms · p95 4.3 ms · max 24.5 ms | p95 250 ms, max 2,000 ms, ≤ 1.5× today |
-| build peak working set | 951 MB | 3,072 MB |
-| app-side open + full sys_id sets | 10.7 MB | 128 MB |
+| manuscript load, candidate | p50 0.3 ms · p95 4.2 ms · max 8.5 ms | p95 500 ms, max 2,000 ms, ≤ 1.5× today |
+| page filter + default, candidate | p50 0.6 ms · p95 6.6 ms · max 45.0 ms | p95 250 ms, max 2,000 ms, ≤ 1.5× today |
+| build peak working set | 950 MB | 3,072 MB |
+| app-side open + full sys_id sets | 11.2 MB | 128 MB |
 | heaviest reference manuscript | 0.1 MB | 64 MB |
 | candidate file | 294 MB | 1,024 MB |
 
@@ -122,9 +124,11 @@ covers whether or not the row was the default. R2b was first measured as "marks 
 would have held 34 rows including five vocalised piyyutim (Or. 4856) and, applied to carried rows, 24 English
 translations with decomposed diacritics; the word-opening orphan count holds the 13 garbled texts and none of those.
 
-Open for the owner (beside gate 3's rulings): whether the 11 text-less rows' DOCX texts are approved; whether the
-95 shorter rows of the same-image pairs (§5) are drafts to retire; the 1,138 folder-B rows whose manuscript the
-gallery does not list for the image; the `plain` policy itself.
+**The owner's rulings of 2026-10-26 (by phone, "yes to all")**: the `plain` new-rows policy ships; the text-less
+rows take their DOCX texts (10 approvals in `scripts/fgp_gate3_approvals.json`, keyed on the durable key and both
+hashes; the three rows whose DOCX is also empty stay excluded); the stubs of the same-image pairs are retired (R2c)
+while the pairs of two readings stay as they are; the 1,138 folder-B rows whose manuscript the gallery does not
+list for the image stay held. Gates 3 and 4 were rerun on these rulings the same day (record below).
 
 ### Drafts and short texts in the delta (owner's question of 2026-10-26; `_tmp/fgp_delta_drafts_report.md`)
 
@@ -143,7 +147,8 @@ as `blank_text`; 19 test or dummy units (23 rows, teams 240 and 850: "test", "gg
 day by R2a (`test_or_dummy`), while team 850's non-manuscript documents (a contact list, a recipe, software notes)
 are longer texts no rule catches; and `dbo_Signature.RecordStatus` 1 or 5 on 6,586 delta units (35 %) against one
 of today's 40,416, with no code table to say what the values mean. The owner ruled the same day: gate 2 holds the
-unchecked comments (`fist_comment_unchecked`) and gate 4 the test units. Rulings still needed before the `plain`
-policy ships: the meaning of `RecordStatus` 1 / 5 and of code 5309 (open-issue fragment 2026-10-26), team 850's
+unchecked comments (`fist_comment_unchecked`) and gate 4 the test units; later the same day the owner ruled that
+the `plain` rows ship. Still without a ruling, and worth one before the sidecar is deployed: the meaning of
+`RecordStatus` 1 / 5 and of code 5309 (open-issue fragment 2026-10-26, a question for FGP), team 850's
 non-manuscript documents, and whether team 107's excerpt rows are editions at all. `content_length` in today's sidecar is
 `len(content)`, whitespace included, not the non-whitespace count the schema comment claims.

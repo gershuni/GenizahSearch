@@ -135,6 +135,11 @@ An entry names a gate-2 durable key (or `"unit": "<unit_table>:<unit_id>"` for e
 `approved` (an XML row: `verified`); its blocks are dispositioned `approved`. Approvals never override a
 visibility or association hold from gate 2.
 
+The first real approvals (2026-10-26, the owner, by phone): the 10 rows whose PDF yielded no text at all (today's
+hash is the empty text's) while their own DOCX holds it — 8 translations and 2 editions, 1 to 59 lines each. Gate 3
+had held them as `extra_line` because an empty text has nothing to align; the owner approved the DOCX texts
+wholesale. Three more text-less rows (975, 1010, 16978) have an empty DOCX too and stay without text.
+
 ## 6. Checks
 
 `T01` two runs identical (the digest over every row's reader, text hash, status, classes and flags equals
@@ -162,7 +167,8 @@ replaced row loses its source link (`T02`), when two runs differ (`T01`), and on
 - **Replaced: 27,704** rows (9,514 from folder B's line text, 18,190 from the DOCX); **verified: 2,679** XML rows,
   lifting 2,731 of the 3,130 gate-2 XML holds; **publishable with text: 41,143** (rerun 2026-10-26 after gate 2's
   `fist_comment_unchecked` hold: 40,980, gate 2 41,642, digest `ba1e47e9db555190`, PASS 55/55; no other count
-  changed) (gate 2: 41,807 — 3,393 of those
+  changed; second rerun the same day with the 10 approvals of §5: 10 rows `approved`, replaced 27,714, held
+  3,790, publishable with text 40,990, digest `496575a202e34af2`, PASS 56/56) (gate 2: 41,807 — 3,393 of those
   are held here, 2,731 come back through the lifted holds).
 - **Held: 3,800** — 2,545 with an unclassified difference (a reading, a stray character, Arabic the font garbled
   beyond the junk rule, a line the DOCX lacks), 771 whose only differences are typed sigla (`sigla_rendering`), 85

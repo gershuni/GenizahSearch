@@ -245,9 +245,17 @@ def test_new_row_image_rules():
              3: {"id": 3, "sys_id": "D", "c_number": None, "doc_relation": "Digital Edition", "language": None, "content": " "},
              4: {"id": 4, "sys_id": "D", "c_number": None, "doc_relation": "Digital Edition", "language": None, "content": "טסט טסט"},
              5: {"id": 5, "sys_id": "D", "c_number": None, "doc_relation": "Digital Translation", "language": "English",
-                 "content": "phrastic"}}
+                 "content": "phrastic"},
+             # the same image of one manuscript served by two units: a full text and a stub, then two readings
+             6: {"id": 6, "sys_id": "F", "c_number": "C20", "doc_relation": "Digital Edition", "language": None,
+                 "content": "שורה ראשונה של העתקה מלאה ושורה שנייה ושלישית ורביעית וחמישית וכן הלאה עד סוף הדף"},
+             7: {"id": 7, "sys_id": "F", "c_number": "C20", "doc_relation": "Digital Edition", "language": None, "content": "ואמר ליה רב"},
+             8: {"id": 8, "sys_id": "F", "c_number": "C21", "doc_relation": "Digital Edition", "language": None,
+                 "content": "עליהן אין מתענין ולא מספידין בשבתות ובימים טובים"},
+             9: {"id": 9, "sys_id": "F", "c_number": "C21", "doc_relation": "Digital Edition", "language": None,
+                 "content": "ולא והרי החובל בחבירו דאיכא ממון ומלקות"}}
     g2 = {i: {"outcome": "kept", "publishable": 1, "hold_reasons": None, "credit_he": "x", "credit_en": "x", "unit_id": 100 * i,
-              "unit_table": "dbo_UnitTranscription", "durable_key": f"k{i}"} for i in (1, 2, 3, 4, 5)}
+              "unit_table": "dbo_UnitTranscription", "durable_key": f"k{i}"} for i in range(1, 10)}
 
     def new(uid, sid, reader, path, structure=None):
         return {"row_key": f"new:dbo_UnitTranscription:{uid}|{sid}", "unit_table": "dbo_UnitTranscription", "unit_id": uid,
@@ -277,16 +285,18 @@ def test_new_row_image_rules():
     ctx = {"parts": {}, "catalog": {}, "book": {}, "bibref": {}}
     comments = {("dbo_UnitTranscription", 10): "אין לפרסם עד לקריאה מול מקור"}
     plan = g4.plan_candidate(today, g2, {}, {}, g3_new, texts, b_numbers, units, {}, ctx, "plain", comments=comments)
-    # R2: a carried row must have a text that is not a test file; an English translation is not a test file
-    assert [k["id"] for k in plan["kept"]] == [1, 2, 5]
-    assert plan["excluded"] == [(3, "empty_text", "gate3:"), (4, "test_or_dummy", "טסט טסט")]
+    # R2: a carried row must have a text that is not a test file; an English translation is not a test file.
+    # R2c: the stub beside the full text of the same image is retired; two readings of about one length both stay.
+    assert [k["id"] for k in plan["kept"]] == [1, 2, 5, 6, 8, 9]
+    assert plan["excluded"][:2] == [(3, "empty_text", "gate3:"), (4, "test_or_dummy", "טסט טסט")]
+    assert plan["excluded"][2][:2] == (7, "stub_retired") and json.loads(plan["excluded"][2][2])["longer"] == "fgp:6"
     held = {rk.split(":")[2].split("|")[0]: d for rk, d, _ in plan["held"]}
     assert held == {"1": "image_already_served", "2": "image_alma_mismatch", "3": "image_unknown",
                     "4": "shadows_whole_doc_row", "5": "whole_doc_shadowed", "7": "test_or_dummy", "8": "test_or_dummy",
                     "9": "test_or_dummy", "10": "fist_comment_unchecked", "11": "test_or_dummy", "12": "legacy_font"}
     assert [(r["row_key"], r["c_number"], r["sys_id"]) for r in plan["new_rows"]] == [
         ("new:dbo_UnitTranscription:6|C", "C13", "C"), ("new:dbo_UnitTranscription:13|E", None, "E")]
-    assert plan["new_rows"][0]["id"] == 6 and "גנוזות" in plan["new_rows"][0]["source_credit_he"]
+    assert plan["new_rows"][0]["id"] == 10 and "גנוזות" in plan["new_rows"][0]["source_credit_he"]
     assert g4.plan_candidate(today, g2, {}, {}, g3_new, texts, b_numbers, units, {}, ctx, "hold")["new_rows"] == []
 
 

@@ -1,5 +1,5 @@
 {
-  "_comment": "Counts the gate-3 run must reproduce over today's fgp_transcriptions.db (45,034 rows), the gate-1 inventory and the gate-2 outcomes, with the declared diff classes (docs/plans/FGP_TEXT_PIPELINE_RULES.md), no approvals and the default new-rows policy (hold). Declared 2026-10-26 from two identical runs; a rebuilt sidecar, a new delivery, a new class or an owner approval changes them on purpose, with the rules document.",
+  "_comment": "Counts the gate-3 run must reproduce over today's fgp_transcriptions.db (45,034 rows), the gate-1 inventory and the gate-2 outcomes, with the declared diff classes (docs/plans/FGP_TEXT_PIPELINE_RULES.md), the 10 owner approvals of 2026-10-26 (scripts/fgp_gate3_approvals.json) and the default new-rows policy (hold). Declared 2026-10-26 from two identical runs; a rebuilt sidecar, a new delivery, a new class or an owner approval changes them on purpose, with the rules document.",
   "rows": 70376,
   "rows.today": 45034,
   "rows.new": 25342,
@@ -11,14 +11,14 @@
   "status.identical": 10782,
   "status.accepted": 27704,
   "status.verified": 2679,
-  "status.held": 3800,
+  "status.held": 3790,
   "status.no_source": 82,
   "status.retired": 50,
   "status.no_comparator": 25279,
-  "replaced_rows": 27704,
+  "replaced_rows": 27714,
   "replaced.by_reader.b2_rows": 9514,
-  "replaced.by_reader.docx": 18190,
-  "held.by_reader.docx": 3745,
+  "replaced.by_reader.docx": 18200,
+  "held.by_reader.docx": 3735,
   "held.by_reader.b2_rows": 46,
   "held.by_reader.b1_xml": 9,
   "held_blocks": 8163,
@@ -27,7 +27,7 @@
   "xml.verified": 2679,
   "xml.held": 399,
   "xml.holds_lifted": 2731,
-  "publishable_text": 40980,
+  "publishable_text": 40990,
   "gate2_publishable": 41642,
   "class_rows.restored_prefix": 592,
   "class_rows.catchword": 533,
@@ -46,5 +46,6 @@
   "new.route.b2_rows": 750,
   "new.accepted": 0,
   "new.structure.tables": 645,
-  "new.structure.footnotes": 342
+  "new.structure.footnotes": 342,
+  "status.approved": 10
 }

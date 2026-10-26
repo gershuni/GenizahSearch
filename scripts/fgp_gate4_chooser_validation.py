@@ -23,7 +23,10 @@ Candidate sidecar ``fgp_transcriptions.candidate.db`` (today's schema + ``origin
      it has a text that is not a test or dummy file (``test_or_dummy``: at most 40 characters that
      are a transcription without a Hebrew or Arabic letter, test words and digits only, or carry
      "טסט" / "נא להתעלם") and, when gate 3 replaced it, not a legacy-font DOCX (``legacy_font``:
-     at least 10 combining marks that follow no letter, and at least a tenth as many as letters).
+     at least 10 combining marks that follow no letter, and at least a tenth as many as letters);
+     and it is not the stub of a same-image pair (``stub_retired``: another unit's row on the same
+     image, relation, language and manuscript has more than three times its letters and a
+     different text -- today's chooser lists only the longer one anyway).
   R3 its text is gate 3's when gate 3 replaced it (status accepted / approved), else today's;
      ``sections`` (the PDF page split) is cleared on a replaced text.
   R4 its credit is gate 2's (``credit_he`` / ``credit_en``; the generic Friedberg attribution where
@@ -141,7 +144,7 @@ STRUCTURE_HOLD_KEYS = ("tables", "footnotes", "hidden_runs", "tracked_changes", 
 SAME_TEXT_RATIO = 0.95
 # The only reasons a source the chooser lists today may be missing from the candidate's list.
 SELECTABILITY_DISPOSITIONS = frozenset({"retired_alias", "gate2_hold", "xml_unverified", "empty_text", "test_or_dummy",
-                                        "legacy_font", "same_text_swap"})
+                                        "legacy_font", "stub_retired", "same_text_swap"})
 # Legacy-font DOCX (owner's ruling of 2026-10-26): a file typed in a pre-Unicode Hebrew font reads as vowel points
 # standing where letters should be. In real Unicode text a combining mark always follows a letter; a mark that
 # follows a space, a digit, punctuation or the start of the text ("orphan") is the font's letter. A vocalised
@@ -150,6 +153,12 @@ SELECTABILITY_DISPOSITIONS = frozenset({"retired_alias", "gate2_hold", "xml_unve
 # PDF text detaches marks by itself, which gate 3's classes handle.
 LEGACY_ORPHAN_MIN = 10
 LEGACY_ORPHAN_SHARE = 0.10
+# Stubs (owner's ruling of 2026-10-26): when two FIST units serve the same image, relation and language of one
+# manuscript, today's chooser lists only the longer text; a shorter one with under STUB_SHARE of the longer's
+# letters, and not the same text, is a stub of a transcription filed twice (team 200 sub-team 4 "_Tc" files beside
+# sub-team 1's full text) and is retired from the candidate. Rows of about the same length that differ are two
+# readings and both stay.
+STUB_SHARE = 0.30
 
 
 def legacy_font_stats(text: str) -> tuple:
@@ -374,6 +383,28 @@ def plan_candidate(today: dict, g2: dict, aliases: dict, g3_today: dict, g3_new:
         else:
             with_text.append(k)
     kept = with_text
+    # R2c: retire the stub of a same-image pair of two units
+    by_image = collections.defaultdict(list)
+    for k in kept:
+        t = today[k["id"]]
+        if t.get("c_number"):
+            by_image[(t["c_number"], t.get("doc_relation"), t.get("language"), t.get("sys_id"))].append(k)
+    stubs = set()
+    for group in by_image.values():
+        if len({k["unit"] for k in group}) < 2:
+            continue
+        text_of = {k["id"]: (texts.get(k["unit"], "") if k["replaced"] else (today[k["id"]].get("content") or "")) for k in group}
+        longest = max(group, key=lambda k: (len(letters(text_of[k["id"]])), -k["id"]))
+        long_text = text_of[longest["id"]]
+        for k in group:
+            if k is longest or k["unit"] == longest["unit"]:
+                continue
+            short_text = text_of[k["id"]]
+            if len(letters(short_text)) < STUB_SHARE * len(letters(long_text)) and text_ratio(short_text, long_text) < SAME_TEXT_RATIO:
+                stubs.add(k["id"])
+                excluded.append((k["id"], "stub_retired", _j({"longer": f"fgp:{longest['id']}", "letters": len(letters(short_text)),
+                                                                "longer_letters": len(letters(long_text))})))
+    kept = [k for k in kept if k["id"] not in stubs]
     # new rows
     new_rows, held = [], []
     kept_ids = {k["id"] for k in kept}

@@ -414,30 +414,31 @@ Each gate names what makes it fail; "measured" or "reviewed" alone is never a pa
    the DOCX; every changed block in a declared artefact class) · 2,679 XML rows verified by their own record's DOCX
    (never replaced by it; 2,731 gate-2 XML holds lifted) · 3,800 held and listed per block (2,545 unclassified
    differences, 771 typed-sigla-only, 85 extra lines, 399 XML rows whose own record disagrees) · 19 absent · 50
-   retired. Publishable with text 41,143 (40,980 after the 2026-10-26 hold). New rows 25,342 read with a structure census, none accepted under the
+   retired. Publishable with text 41,143 (40,980 after the 2026-10-26 hold; 40,990 with the owner's 10 approvals of the
+   text-less rows the same day). New rows 25,342 read with a structure census, none accepted under the
    default policy. Descriptions never read; no replaced row loses a letter of today's text.
 4. **Chooser validation with the larger sidecar, both apps.** *Fails if:* an independent edition becomes
    unselectable; a saved choice is lost; a page assignment changes without approval; a default-selection change is
    not dispositioned; import peak memory exceeds the declared limit (to be set against the 63 GB dev machine and the
    server's 5–6 GB baseline) or manuscript-load latency exceeds the declared budget on the reference manuscripts.
-   **Run 2026-10-26 — PASS, 15 checks + 56 declared expectations, two runs with one digest**
+   **Run 2026-10-26 — PASS, 15 checks + 58 declared expectations, two runs with one digest**
    (`scripts/run_fgp_gate4_chooser_validation.ps1` → `scripts/fgp_gate4_chooser_validation.py`; the rules, the budgets
    declared before the run, the reference set and the run record in
    [`FGP_CHOOSER_VALIDATION_RULES.md`](FGP_CHOOSER_VALIDATION_RULES.md); output
    `fgp_data/inventory/fgp_transcriptions.candidate.db` beside today's sidecar, never over it, and `gate4.db`). The
-   candidate carries 44,332 of today's rows under their ids (27,522 with gate 3's text; 702 excluded: 391 XML rows gate
-   3 could not verify, 245 gate-2 holds — 165 of them the unchecked-comment hold ruled the same day — 50 retired, 13
+   candidate carries 44,286 of today's rows under their ids (27,530 with gate 3's text; 748 excluded: 391 XML rows gate
+   3 could not verify, 245 gate-2 holds — 165 of them the unchecked-comment hold ruled the same day — 56 stubs retired, 50 retired, 3
    without text, 3 test files) and 6,395 new rows under the `plain` policy (1,569 per image, 4,826 whole document;
    18,884 held: 17,124 structured DOCX, 1,138 image–manuscript mismatches, 322 without an AlmaId, 168 blank, 94 the
    chooser could not list, 21 test or dummy files, 13 legacy-font texts, 4 never checked against the source). Selectability over 27,606
-   manuscripts through the real service: every listed source kept or dispositioned (564 lost, each by a gate-2 ruling, a
-   retirement, a text-less or test row or a same-text swap), all 6,395 new rows listed; page keys unchanged on all
-   44,332; on 88 reference manuscripts (1,237 pages) 503 default changes, every one dispositioned (432 new editions, 68
+   manuscripts through the real service: every listed source kept or dispositioned (555 lost, each by a gate-2 ruling, a
+   retirement, a text-less, test or stub row or a same-text swap), all 6,395 new rows listed; page keys unchanged on all
+   44,286; on 88 reference manuscripts (1,237 pages) 502 default changes, every one dispositioned (432 new editions, 67
    excluded rows, 1 replaced text, 2 swaps), web and desktop shapes agree; latency p95 under 5 ms per manuscript load
    and per page against budgets of 500 / 250 ms; memory 951 MB build peak, 10.7 MB app-side; file 294 MB. Two defects
    recorded: the reading desk's saved source choice is never applied (open-issue fragment 2026-10-26), and today's
    chooser hides the shorter of 95 same-image pairs (rules §5). The earlier records of the day (44,500 carried, 6,433 new,
-   51 expectations; 44,332 / 6,408 / 55) preceded the three holds.
+   51 expectations; 44,332 / 6,408 / 55; 44,332 / 6,395 / 56) preceded the three holds and the owner's rulings.
 5. **Positions prototype after the 20-image geometry check.** The landmark tolerance and the size / payload / latency
    limits are declared *before* the check; an undeclared limit is itself a fail. *Fails if:* for any of the 20 images
    the **residual** landmark error after the recorded transform exceeds the tolerance (recording a transform is not a
@@ -564,3 +565,10 @@ pre-Unicode Hebrew font arriving from gate 3's reader as vowel points standing w
 ruling gate 4 holds such texts (R2b `legacy_font`: at least 10 word-opening orphan marks, at least a tenth of the
 letters; a vocalised piyyut, a lone placeholder mark and a Latin diacritic are not counted): 13 new rows of teams 107
 and 131, no carried row. Gate 4 rerun, PASS, record revised above (6,395 new rows, 18,884 held, 56 expectations).
+
+**Revision 15 (the owner's rulings, 2026-10-26)** — by phone, "yes to all and push": the `plain` new rows ship; the
+10 text-less rows take their DOCX texts (`scripts/fgp_gate3_approvals.json`, the first real approvals; gate 3 rerun,
+publishable with text 40,990); the stubs of the same-image pairs are retired (gate 4 R2c, 56 rows) while the pairs of
+two readings stay; the 1,138 gallery-mismatch rows stay held. Gate 4 rerun, PASS, record revised above (44,286 carried,
+6,395 new, 58 expectations); `master-main` pushed. Still unruled: `RecordStatus` 1 / 5 and code 5309 (a question for
+FGP), team 850's non-manuscript documents, team 107's excerpt rows. The candidate is not deployed.
