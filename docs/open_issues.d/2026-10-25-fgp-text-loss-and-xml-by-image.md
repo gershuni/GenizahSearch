@@ -9,9 +9,14 @@ random FGP images whose own line text exists in FGP's position export
 `dbo_UnitTranscription.ImageTranscriptionFolder` → `FileName`, lines aligned with `difflib`): 63 lines
 in 23 documents lose a prefix; 6 catchword lines (`%אמור%`) and 2 short lines are absent; 10 long lines
 are stored as two; 288 lines have mirrored lacuna brackets and 214 doubled backslashes (`{ה\/\/ב}`).
-The same source also explains GS-60 (`&deg;` entities). Fix sketch: rebuild the text from the
-structured sources (folder-B line text, else DOCX) per `docs/plans/FGP_SOURCE_FOLDERS_ASSESSMENT.md`
-§6.1, gated per changed line (§8.3), never from the PDF.
+Gate 3 (`scripts/fgp_gate3_text_pipeline.py`, 2026-10-25) found more on the rows whose source is the
+DOCX: final letters left as C0 control characters or symbols (`שלו\x0e ולכ\x04`, `ואיל"` for `ואילך`) or
+dropped outright (`דנו` for `דנום`), vocalised letters as control characters, line numbers re-ordered by
+the RTL fix (`.1` for `1.`, `-1` for `1-`), mixed-direction lines scrambled (`12.528: TS ראה`), Arabic
+alef dropped, Arabic lines reduced to control characters. The same source also explains GS-60 (`&deg;`
+entities). Fix sketch: rebuild the text from the structured sources (folder-B line text, else DOCX)
+per `docs/plans/FGP_SOURCE_FOLDERS_ASSESSMENT.md` §6.1, gated per changed line (§8.3,
+`docs/plans/FGP_TEXT_PIPELINE_RULES.md`), never from the PDF.
 
 ## P2 data: FGP visual XML is applied by image number, not by source record
 Where: `scripts/fgp_rebuild_text_and_credit.py::build_xml_index`, `fgp_data/fgp_transcriptions.db` (`text_source='xml'`)

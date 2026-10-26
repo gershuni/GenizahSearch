@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import zipfile
+from xml.sax.saxutils import escape
 
 ALMA_A, ALMA_B, ALMA_C, ALMA_D = "990001", "990002", "990003", "990004"
 
@@ -23,7 +25,107 @@ def touch(path: str, content: bytes = b"x") -> None:
         fh.write(content)
 
 
-def build_fist(path: str, mixed_kind: bool = False, extended: bool = False) -> None:
+# --------------------------------------------------------------------------- gate-3 text content
+
+_W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+
+
+def _run(text: str, hidden: bool = False, style: str | None = None) -> str:
+    rpr = ""
+    if hidden or style:
+        rpr = "<w:rPr>" + (f'<w:rStyle w:val="{style}"/>' if style else "") + ("<w:vanish/>" if hidden else "") + "</w:rPr>"
+    return f'<w:r>{rpr}<w:t xml:space="preserve">{escape(text)}</w:t></w:r>'
+
+
+def _para(text: str, numbered: bool = False, hidden: bool = False) -> str:
+    """One paragraph; ``<fn1>`` in the text becomes a footnote reference to footnote id 1."""
+    ppr = '<w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>' if numbered else ""
+    runs = []
+    for i, piece in enumerate(text.split("<fn1>")):
+        if i:
+            runs.append('<w:r><w:footnoteReference w:id="1"/></w:r>')
+        if piece:
+            runs.append(_run(piece, hidden=hidden))
+    return f"<w:p>{ppr}{''.join(runs)}</w:p>"
+
+
+def write_docx(path: str, paragraphs: list, numbered: tuple = (), footnotes: dict | None = None,
+               header: str | None = None, hidden: list = (), table_rows: list = ()) -> None:
+    """A minimal DOCX: paragraphs (``numbered`` indices get auto-numbering ``%1.``), hidden
+    paragraphs, a table (one cell text per cell), footnotes.xml and header1.xml when given."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    body = [_para(p, numbered=i in numbered) for i, p in enumerate(paragraphs)]
+    body += [_para(h, hidden=True) for h in hidden]
+    if table_rows:
+        rows = "".join("<w:tr>" + "".join(f"<w:tc>{_para(c)}</w:tc>" for c in r) + "</w:tr>" for r in table_rows)
+        body.append(f"<w:tbl>{rows}</w:tbl>")
+    doc = f'<?xml version="1.0" encoding="UTF-8"?><w:document {_W_NS}><w:body>{"".join(body)}<w:sectPr/></w:body></w:document>'
+    numbering = (
+        f'<?xml version="1.0" encoding="UTF-8"?><w:numbering {_W_NS}>'
+        '<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/>'
+        '<w:lvlText w:val="%1."/></w:lvl></w:abstractNum><w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>'
+        "</w:numbering>"
+    )
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+        z.writestr("word/document.xml", doc)
+        z.writestr("word/numbering.xml", numbering)
+        if footnotes:
+            fns = ('<w:footnote w:type="separator" w:id="-1"><w:p/></w:footnote>'
+                   '<w:footnote w:type="continuationSeparator" w:id="0"><w:p/></w:footnote>')
+            fns += "".join(f'<w:footnote w:id="{i}">{_para(t)}</w:footnote>' for i, t in footnotes.items())
+            z.writestr("word/footnotes.xml", f'<?xml version="1.0" encoding="UTF-8"?><w:footnotes {_W_NS}>{fns}</w:footnotes>')
+        if header:
+            z.writestr("word/header1.xml", f'<?xml version="1.0" encoding="UTF-8"?><w:hdr {_W_NS}>{_para(header)}</w:hdr>')
+
+
+# the B1 XML of unit 1 (its own position folder 100000) and the text today's parser makes of it
+B1_XML = ('<?xml version="1.0"?><root><info><fgp>100000</fgp></info>'
+          '<col n="1" t="טור_א"><row u="1" num="1"><t><w u="2">שורה </w><w u="3">ראשונה</w></t></row>'
+          '<row u="4" num="2"><t><w u="5">שורה </w><w u="6">שנייה</w></t></row></col></root>')
+B1_TEXT = "שורה ראשונה\nשורה שנייה"
+
+# the B2 data.js of unit 19 (folder C400) and today's PDF text of the same edition
+B2_C400_ROWS = ["@[.........]", "יום הכפורים אסור באכילה", "אוסרי{ם\\/\\/ן}&nbsp;ב'", "%ליענש%"]
+B2_C400_TODAY = "].........[@\nיום הכפורים אסור באכילה\nאוסרי{ם\\\\//\\\\ן} ב'"
+B2_C400_TEXT = "@[.........]\nיום הכפורים אסור באכילה\nאוסרי{ם\\/\\/ן} ב'\n%ליענש%"
+
+# the DOCX of unit 3 (rows 5, 6 and 7) and today's PDF text of it, one artefact per line
+DOCX_UNIT3_PARAS = ['ועד י"ג שנים [אב]ג', "שלום ולכן הוא דנום", "דבר ארוך מאד שנשבר לשתי שורות", "%ואמר%",
+                    "הערה<fn1> בטקסט", "ראה TS 12.528:", "{ה\\/\\/ב}"]
+DOCX_UNIT3_TODAY = ("T-S 1.5 Cambridge\n.1 ג שנים ]אב[ג\n.2 שלו\x0e ולכ\x04 הוא דנו\n.3 דבר ארוך מאד שנשבר\nלשתי שורות\n"
+                    ".4 הערה1 בטקסט\n12.528: TS ראה\n{ה\\\\/\\\\/ב}\n1 זו הערת שוליים")
+DOCX_UNIT3_TEXT = ('1. ועד י"ג שנים [אב]ג\n2. שלום ולכן הוא דנום\n3. דבר ארוך מאד שנשבר לשתי שורות\n%ואמר%\n'
+                   "4. הערה1 בטקסט\nראה TS 12.528:\n{ה\\/\\/ב}\n\n1 זו הערת שוליים")
+
+
+def _b2_js(number: str, rows: list) -> str:
+    return "fgp=" + json.dumps({"FGP": number, "ac": [{"title": "", "rows": {str(i + 1): {"ndx": i, "txt": t} for i, t in enumerate(rows)}}],
+                                "info": {"fgpNumber": number}}, ensure_ascii=False) + ";"
+
+
+def write_text_content(root: str) -> None:
+    """Real content for the files gate 3 reads, on top of the extended world."""
+    nopos, withpos = os.path.join(root, "NoPOS"), os.path.join(root, "WithPOS")
+    touch(os.path.join(withpos, "100000", "100000.xml"), B1_XML.encode("utf-8"))
+    touch(os.path.join(withpos, "C200", "data.js"), _b2_js("C200", ["שורה אחת", "שורה שתיים"]).encode("utf-8"))
+    touch(os.path.join(withpos, "C400", "data.js"), _b2_js("C400", B2_C400_ROWS).encode("utf-8"))
+    touch(os.path.join(withpos, "C400", "C400_1.png"))
+    word = os.path.join(nopos, "2000000", "word")
+    write_docx(os.path.join(word, "20000000000015_CUL_T-S 1.5_Tc.docx"), DOCX_UNIT3_PARAS, numbered=(0, 1, 2, 4),
+               footnotes={1: "זו הערת שוליים"}, header="T-S 1.5 Cambridge", hidden=["0001"])
+    write_docx(os.path.join(word, "20000000000016_CUL_T-S 1.6_Tc.docx"), ["אבג דהו", "שורה שנייה"])
+    write_docx(os.path.join(word, "20000000000031_CUL_T-S 3.1_Tc.docx"), ["כותרת"], table_rows=[["1", "תא ראשון"], ["2", "תא שני"]])
+    write_docx(os.path.join(word, "20000000000032_CUL_T-S 3.2_Tc.docx"), ["טקסט פשוט", "שורה שנייה"])
+    write_docx(os.path.join(nopos, "2000004", "word", "20000040000061_CUL_T-S 6.1_Tc.docx"), ["?ש?ורה ראשונה", "שורה שנייה"])
+    for name in ("20000000000021_CUL_T-S 2.1_Tc", "20000000000031_CUL_T-S 3.1_Tc", "20000000000032_CUL_T-S 3.2_Tc"):
+        touch(os.path.join(nopos, "2000000", "pdf", name + ".pdf"))
+    # today's copied PDFs: row 2's is byte-identical to the delivered one, row 12's is not
+    touch(os.path.join(root, "today_transcriptions", "CUL", "2", "20000000000011_CUL_T-S 1.1_Tl_translate_eng.pdf"))
+    touch(os.path.join(root, "today_transcriptions", "CUL", "12", "10600030000021_Oxford_MS 2_Tc_trans.pdf"), b"other")
+
+
+def build_fist(path: str, mixed_kind: bool = False, extended: bool = False, text: bool = False) -> None:
     con = sqlite3.connect(path)
     con.executescript(
         """
@@ -84,7 +186,15 @@ def build_fist(path: str, mixed_kind: bool = False, extended: bool = False) -> N
         (17, 118, "85002210000011_CUL_ T-S 10F1_Tc", None, "8500221\\", None, 2, None, None, None),
         (18, 119, "30000530000201_CUL_ T-S AS 74.11 _Tc", None, "3000053\\", None, 2, None, None, None),
     ]
-    con.executemany("INSERT INTO dbo_UnitTranscription VALUES (?,?,?,?,?,?,?,?,?,?)", tr + (extended_tr if extended else []))
+    text_tr = [
+        # served today (row 21), its own B2 position folder C400
+        (19, 120, "20000000000021_CUL_T-S 2.1_Tc", None, "2000000\\", None, 2, "C400", None, None),
+        # candidates (not in today's DB): a DOCX with a table, and a plain DOCX
+        (20, 121, "20000000000031_CUL_T-S 3.1_Tc", None, "2000000\\", None, 2, None, None, None),
+        (21, 122, "20000000000032_CUL_T-S 3.2_Tc", None, "2000000\\", None, 2, None, None, None),
+    ]
+    con.executemany("INSERT INTO dbo_UnitTranscription VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    tr + (extended_tr if extended else []) + (text_tr if text else []))
     con.execute("INSERT INTO dbo_UnitTranslation VALUES (?,?,?,?,?,?,?,?,?)",
                 (1, 109, "20000000000011_CUL_T-S 1.1_Tl", 2, "2000000\\", None, 2, None, None))
     con.execute("INSERT INTO dbo_UnitFreeDescription VALUES (?,?,?,?,?,?)",
@@ -99,17 +209,18 @@ def build_fist(path: str, mixed_kind: bool = False, extended: bool = False) -> N
         (110, 1010, 500, 352, "2020"), (111, 1011, 106, 3, "2020"), (112, 1012, 106, 3, "2021"),
         (113, 1013, 500, 12, "2020"), (114, 1014, 600, 77, "2020"), (115, 1015, 600, 78, "2020"),
         (116, 1016, 200, 0, "2020"), (117, 1017, 601, 43279814, "2015"), (118, 1018, 850, 221, "2016"),
-        (119, 1019, 300, 53, "2016"),
+        (119, 1019, 300, 53, "2016"), (120, 1020, 200, 0, "2020"), (121, 1021, 200, 0, "2020"), (122, 1022, 200, 0, "2020"),
     ])
     con.executemany("INSERT INTO dbo_InventorySignature VALUES (?,?)", [
         (11, 1001), (12, 1002), (13, 1003), (14, 1004), (15, 1005), (16, 1006), (17, 1007), (20, 1010),
         (21, 1011), (21, 1012), (22, 1013), (23, 1014), (24, 1015), (25, 1016), (26, 1017), (27, 1018), (28, 1019),
+        (29, 1020), (30, 1021), (31, 1022),
     ])
     con.executemany("INSERT INTO dbo_InventoryAlma VALUES (?,?,?)", [
         (1, 11, ALMA_A), (2, 12, ALMA_B), (3, 13, ALMA_C), (4, 13, ALMA_D), (5, 14, ALMA_A),
         (6, 15, ALMA_B), (7, 16, ALMA_A), (8, 17, ALMA_D), (9, 20, ALMA_C), (10, 21, ALMA_B),
         (11, 22, ALMA_A), (12, 23, ALMA_A), (13, 24, ALMA_A), (14, 25, ALMA_A), (15, 26, ALMA_A), (16, 27, ALMA_A),
-        (17, 28, ALMA_A),
+        (17, 28, ALMA_A), (18, 29, ALMA_A), (19, 30, ALMA_B), (20, 31, ALMA_C),
     ])
     con.executemany("INSERT INTO dbo_CodeSource VALUES (?,?)", [(200, "Genuzos"), (132, "Goitein")])
     con.execute("INSERT INTO CODE_Catalog VALUES (12, 'CUDL', 'Cambridge', '2010')")
@@ -166,7 +277,7 @@ def build_folders(root: str, extended: bool = False) -> tuple:
     return nopos, withpos
 
 
-def build_sidecars(root: str, extended: bool = False) -> tuple:
+def build_sidecars(root: str, extended: bool = False, text: bool = False) -> tuple:
     fgp = os.path.join(root, "fgp_transcriptions.db")
     con = sqlite3.connect(fgp)
     con.execute(
@@ -184,9 +295,14 @@ def build_sidecars(root: str, extended: bool = False) -> tuple:
                 credit_en if credit_en is not None else credit, content,
                 len(content), rel_path or f"CUL/{rid}/{filename}")
 
+    # gate 3: real text behind the rows its readers and classes act on
+    c_xml = B1_TEXT if text else "text"
+    c_unit3 = DOCX_UNIT3_TODAY if text else "text"
+    c_held = "אבד דהו\nשורה שנייה" if text else "text"
     base_rows = [
         # 1: served, own position folder, XML text from its own folder -> kept
-        row(1, "20000000000011_CUL_T-S 1.1_Tc_trans.pdf", ALMA_A, "C100000", text_source="xml", credit=genuzos, credit_en=genuzos_en),
+        row(1, "20000000000011_CUL_T-S 1.1_Tc_trans.pdf", ALMA_A, "C100000", text_source="xml", credit=genuzos, credit_en=genuzos_en,
+            content=c_xml),
         # 2: its translation (English)
         row(2, "20000000000011_CUL_T-S 1.1_Tl_translate_eng.pdf", ALMA_A, "C100000", text_source="original",
             credit=genuzos, credit_en=genuzos_en, language="English", doc_relation="Digital Translation"),
@@ -204,12 +320,12 @@ def build_sidecars(root: str, extended: bool = False) -> tuple:
         row(19, "85002210000011_CUL_ T-S 10F1_Tc_trans.pdf", ALMA_A, image_id="85002210000011"),
         row(20, "30000530000201_CUL_ T-S AS 74.11 _Tc_trans.pdf", ALMA_A, image_id="30000530000201"),
         # 5/6: exact duplicates (same file, manuscript, image; two shelfmark folders) -> 6 retired, successor 5
-        row(5, "20000000000015_CUL_T-S 1.5_Tc_trans.pdf", ALMA_C, credit="wrong team", rel_path="CUL/a/x.pdf"),
-        row(6, "20000000000015_CUL_T-S 1.5_Tc_trans.pdf", ALMA_C, credit="wrong team", rel_path="CUL/b/x.pdf"),
+        row(5, "20000000000015_CUL_T-S 1.5_Tc_trans.pdf", ALMA_C, credit="wrong team", rel_path="CUL/a/x.pdf", content=c_unit3),
+        row(6, "20000000000015_CUL_T-S 1.5_Tc_trans.pdf", ALMA_C, credit="wrong team", rel_path="CUL/b/x.pdf", content=c_unit3),
         # 7: the same file under its second AlmaId -> kept (multi-Alma is one row per manuscript)
-        row(7, "20000000000015_CUL_T-S 1.5_Tc_trans.pdf", ALMA_D, credit="wrong team"),
+        row(7, "20000000000015_CUL_T-S 1.5_Tc_trans.pdf", ALMA_D, credit="wrong team", content=c_unit3),
         # 8: held unit -> visibility hold
-        row(8, "20000000000016_CUL_T-S 1.6_Tc_trans.pdf", ALMA_A, credit=genuzos, credit_en=genuzos_en),
+        row(8, "20000000000016_CUL_T-S 1.6_Tc_trans.pdf", ALMA_A, credit=genuzos, credit_en=genuzos_en, content=c_held),
         # 9: sys_id the FIST chain contradicts -> retired, no successor
         row(9, "20000000000017_trans.pdf", ALMA_D, credit=genuzos, credit_en=genuzos_en, method="libraries_csv"),
         # 10: no sys_id -> unreachable, retired
@@ -225,10 +341,15 @@ def build_sidecars(root: str, extended: bool = False) -> tuple:
         row(15, "60000010000051_trans.pdf", ALMA_A, image_id="60000010000051"),
         # 16: XML text keyed by image 100000 on a unit without a folder; the folder's owner is unit 1 (same source, same ms)
         row(16, "20000040000061_CUL_T-S 6.1_Tc_trans.pdf", ALMA_A, "C100000", image_id="20000040000061",
-            text_source="xml", credit=genuzos, credit_en=genuzos_en),
+            text_source="xml", credit=genuzos, credit_en=genuzos_en, content=c_xml),
+    ]
+    text_rows = [
+        # 21: served, its unit's own B2 folder C400; today's text came through the PDF route
+        row(21, "20000000000021_CUL_T-S 2.1_Tc_trans.pdf", ALMA_A, "C400", image_id="20000000000021",
+            credit=genuzos, credit_en=genuzos_en, content=B2_C400_TODAY),
     ]
     con.executemany("INSERT INTO fgp_transcriptions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    base_rows + (extended_rows if extended else []))
+                    base_rows + (extended_rows if extended else []) + (text_rows if text else []))
     con.execute("CREATE TABLE fgp_shelfmark_meta (collection TEXT, shelfmark TEXT, mms_id TEXT, raw_json TEXT)")
     if extended:
         # FJMS DataSource for the manuscript of row 3 (source 850): one site user beside a catalogue,
@@ -263,14 +384,22 @@ def build_sidecars(root: str, extended: bool = False) -> tuple:
     return fgp, fjms, nli
 
 
-def build_world(root: str, extended: bool = False) -> dict:
-    """The gate-1 world; ``extended`` adds the files, units and sidecar rows gate 2's rules act on."""
+def build_world(root: str, extended: bool = False, text: bool = False) -> dict:
+    """The gate-1 world; ``extended`` adds the files, units and sidecar rows gate 2's rules act on;
+    ``text`` (implies extended) adds real XML / data.js / DOCX content and the rows gate 3 reads."""
+    extended = extended or text
     fist = os.path.join(root, "FIST.db")
-    build_fist(fist, extended=extended)
+    build_fist(fist, extended=extended, text=text)
     nopos, withpos = build_folders(root, extended=extended)
-    fgp, fjms, nli = build_sidecars(root, extended=extended)
+    fgp, fjms, nli = build_sidecars(root, extended=extended, text=text)
+    if text:
+        write_text_content(root)
     return {"root": root, "fist": fist, "nopos": nopos, "withpos": withpos, "fgp": fgp, "fjms": fjms,
-            "nli": nli, "out": os.path.join(root, "inventory")}
+            "nli": nli, "out": os.path.join(root, "inventory"), "today_files": os.path.join(root, "today_transcriptions")}
+
+
+def read_docx_path(world: dict, dir_name: str, basename: str) -> str:
+    return os.path.join(world["nopos"], dir_name, "word", basename + ".docx")
 
 
 def rows(db: str, sql: str) -> list:

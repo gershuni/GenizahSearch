@@ -406,6 +406,15 @@ Each gate names what makes it fail; "measured" or "reviewed" alone is never a pa
    catchword, unwrapped line, escape, bracket, whitespace) without an approved reading; any new row without a
    comparator is published without its own acceptance (DOCX structure accounted for: tables, footnotes, superscripts);
    any `xml` row regresses; any description becomes an edition.
+   **Run 2026-10-26 — PASS, 8 checks + 47 declared expectations, two runs with one digest**
+   (`scripts/run_fgp_gate3_text_pipeline.ps1` → `scripts/fgp_gate3_text_pipeline.py`; readers, classes and the run
+   record in [`FGP_TEXT_PIPELINE_RULES.md`](FGP_TEXT_PIPELINE_RULES.md); output `fgp_data/inventory/gate3.db`).
+   Over today's 45,034 rows: 10,782 identical · **27,704 replaced** (9,514 from folder B's line text, 18,190 from
+   the DOCX; every changed block in a declared artefact class) · 2,679 XML rows verified by their own record's DOCX
+   (never replaced by it; 2,731 gate-2 XML holds lifted) · 3,800 held and listed per block (2,545 unclassified
+   differences, 771 typed-sigla-only, 85 extra lines, 399 XML rows whose own record disagrees) · 19 absent · 50
+   retired. Publishable with text 41,143. New rows 25,342 read with a structure census, none accepted under the
+   default policy. Descriptions never read; no replaced row loses a letter of today's text.
 4. **Chooser validation with the larger sidecar, both apps.** *Fails if:* an independent edition becomes
    unselectable; a saved choice is lost; a page assignment changes without approval; a default-selection change is
    not dispositioned; import peak memory exceeds the declared limit (to be set against the 63 GB dev machine and the
@@ -500,3 +509,15 @@ Milikowsky's personal handlist (6 rows), source 160's own source line on FJMS is
 source 240 is a demonstration-team entry, and every source-100 file checked (four manuscripts, BL and CUL) was Avi
 Shmidman's — not applied by inference, since two JTS rows of that source name other users. 338 rows over 5 sources
 remain generic; publishable 41,807 (strict 41,472).
+
+**Revision 11 (gate 3 run, 2026-10-26)** — `scripts/fgp_gate3_text_pipeline.py` reads every row's text from the source
+its own FIST record links to (folder B's line text, else the DOCX, structure-aware), diffs it line by line against
+today's text and classifies every changed block into 19 declared PDF-route artefact classes plus two verify-only ones
+(`FGP_TEXT_PIPELINE_RULES.md`; 8 checks + 47 expectations, two runs with one digest, PASS). Beyond §4.3's classes the
+comparison found final and vocalised letters left as control characters, symbols or nothing, precomposed vowel
+letters, RTL-reordered line numbers, scrambled mixed-direction lines and garbled Arabic. 27,704 rows gain a text
+every line of which is accounted for; 2,679 of the 3,130 held XML rows are verified by their own record's DOCX
+(2,731 holds lifted) — the DOCX never replaces an XML text, since FGP's XML export drops the `?..?` marks the DOCX
+types and the Genuzos DOCX files carry sigla and notes neither rendering shows; 3,800 rows are held with their
+blocks for review, concentrated in teams 101, 132, 200 and 600. Publishable with text 41,143. The 25,342 new rows
+are read with a DOCX structure census and accepted by no rule until the owner picks the `plain` policy.
