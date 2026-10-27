@@ -4079,7 +4079,7 @@ Genuzot transcription is never a plain question mark.
 
 ## GS-276
 
-**1,810 FGP transcriptions show final letters as control characters** · P2 · Data and sidecars · ❌ Open · opened 2026-10-27
+**1,810 FGP transcriptions show final letters as control characters** · P2 · Data and sidecars · ❌ Partly fixed (2026-10-27, 3d62c5ad) · opened 2026-10-27
 
 Where: `fgp_data/inventory/fgp_transcriptions.candidate.db` (rows with `text_source` `pdf_rtl` / `original`); FGP text pipeline, gate 3
 
@@ -4096,3 +4096,11 @@ probably consistent. Fix sketch: in gate 3, for each such row choose, per contro
 that makes the most words of the corpus vocabulary (only at a word end; leave the rare inside-a-word cases), check
 the guesses against the 5,430 rows that have both versions, then rebuild the candidate and rerun gates 3-4. Found
 from the owner's screenshot while reviewing the marks legend.
+
+Partly fixed 2026-10-27 (3d62c5ad), the owner's ruling to repair before the release: gate 3 reads each kept row's
+code-to-letter mapping off its own words (`scripts/fgp_final_letters.py`, rules `FGP_TEXT_PIPELINE_RULES.md` §8) and
+applies a code only with at least two votes and 70% of them; check T10 measures it on every run (6,421 of 6,426 right
+on the 5,392 rows that exist both ways). The candidate restores 1,967 codes in 1,174 rows; rows with a control code
+1,810 -> 1,168. Still open: 664 word-final codes below the bar (left as boxes on purpose), 1,487 inside-word codes
+(vowel points and dots, which a vocabulary cannot infer), and finals some PDFs left as an ASCII symbol rather than a
+control character (`גיטי# וקידושי#`, row 992; not measured -- `#` is a real Genuzot mark, so it needs its own rule).
