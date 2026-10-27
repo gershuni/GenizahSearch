@@ -19,7 +19,7 @@ from web.corrections_service import get_pending_corrections_for_page
 from web.supabase_client import get_user_client
 from shared.fgp_service import (
     group_transcription_sources, source_relation_kind, pick_fgp_credit,
-    choose_default_source, fgp_incipit,
+    choose_default_source, number_repeated_labels,
 )
 from shared.fgp_marks_legend import labels as marks_labels, legend_html, uses_genuzot_marks
 from typing import Optional, Callable, List, Dict, Any
@@ -545,7 +545,16 @@ def create_version_selector(
                             ui.label(tr('FGP Transcriptions')).classes(
                                 'text-xs px-4 py-1 font-semibold'
                             ).style(f'color: {_FGP_COLOR};')
-                        for fed in fgp_sources:
+                        # D2: several FGP entries on one page (MS heb. g.2: ~10)
+                        # are told apart by a number, never by text of the
+                        # transcription (owner, 2026-10-27; the desktop does the same).
+                        def _fgp_kind_label(src):
+                            if source_relation_kind(src) == 'translation':
+                                return f"FGP {src.get('language') or ''} {tr('Translation')}".replace('  ', ' ').strip()
+                            return tr('FGP Transcription')
+
+                        _fgp_mains = number_repeated_labels([_fgp_kind_label(s) for s in fgp_sources])
+                        for fed, _fgp_main in zip(fgp_sources, _fgp_mains):
                             attribution = fed.get('attribution') or fed.get('source_scholar') or 'FGP'
                             # Specific FGP team credit (e.g. "יעקב זוסמן, ראש צוות
                             # FGP…"), in the UI language (HE/EN bilingual split,
@@ -557,13 +566,7 @@ def create_version_selector(
                             # Label it by its actual kind — never call a translation
                             # a "transcription" (matches desktop + reading desk).
                             _is_trans = source_relation_kind(fed) == 'translation'
-                            _lang = fed.get('language') or ''
-                            if _is_trans:
-                                _fgp_main = f"FGP {_lang} {tr('Translation')}".replace('  ', ' ').strip()
-                                _fgp_icon = 'translate'
-                            else:
-                                _fgp_main = tr('FGP Transcription')
-                                _fgp_icon = 'menu_book'
+                            _fgp_icon = 'translate' if _is_trans else 'menu_book'
 
                             def make_select_fgp(ed=fed, attr=attribution, cr=credit, is_tr=_is_trans):
                                 def select_fgp():
@@ -595,15 +598,6 @@ def create_version_selector(
                                         ui.label(credit).classes('text-xs').style(
                                             'color: var(--text-muted);'
                                         )
-                                        # D2: an incipit so multiple FGP rows on
-                                        # one manuscript (MS heb. g.2: ~10
-                                        # identical-looking "FGP Transcription"
-                                        # entries) are tellable apart.
-                                        _fgp_incipit = fgp_incipit(fed.get('content'))
-                                        if _fgp_incipit and len(fgp_sources) > 1:
-                                            ui.label(_fgp_incipit).classes(
-                                                'text-xs'
-                                            ).style('color: var(--text-tertiary);').props('dir="auto"')
                                         # SEED-030: demoted (partial) FGP edition.
                                         if _fgp_demoted and not _is_trans:
                                             ui.label(tr('shorter than V0.8')).classes(

@@ -2481,6 +2481,11 @@ class ResultDialog(QDialog):
         """Cancel edit mode and restore original text."""
         if hasattr(self, '_rd_original_edit_text'):
             self._rd_display_text(self._rd_original_edit_text)
+            # The restored text is what was on screen, and the chooser still holds
+            # its item: that, not _rd_display_text's V0.8 assumption, decides the
+            # legend "?" (Codex round 2).
+            sync_marks_legend_button(getattr(self, 'btn_rd_marks_legend', None),
+                                     getattr(self, 'rd_version_combo', None))
         self._rd_exit_edit_mode()
 
     def _rd_save_correction(self, submit=False):

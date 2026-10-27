@@ -7,6 +7,12 @@
   team's two lists, for prayer and piyyut fragments (2024) and for Talmud fragments transcribed for Hachi Garsinan
   (2014). One source serves both apps: `shared/fgp_marks_legend.py`. The text itself is unchanged; drawing the marks (option B) waits on FGP.
 
+### Improvements
+- **The version chooser shows no text of an FGP transcription** (owner, 2026-10-27). It named each FGP entry by
+  its opening words, which for many Genuzot texts is a line of lacuna dots; now entries that would read alike are
+  numbered ("FGP Transcription 1", "2", …), on the website and the desktop (`shared.fgp_service.number_repeated_labels`,
+  replacing `fgp_incipit`).
+
 ### Bug Fixes
 - **Desktop: `<…>` marks in PGP and FGP editions are shown again** (GS-275). The text went to Qt's `setHtml`
   unescaped, so every `<…>` was read as a tag and dropped with its contents: FGP's line fillers (`<רא>`, 9,729 of

@@ -49,15 +49,45 @@ def test_other_teams_translations_and_pgp_do_not():
 # "plain text" (its first row) has no mark.
 LIST_PRAYER = ("(…)", "^…^", "|…|", "=…=", "[....]", "{…}", "{א//ב}", "((…))", "?…?", "?א/ב?", "%…%",
                "<…>", "*…*", "-…-", "$…$", "@…@", "«…»", "&…&", "¿…¿", "##", "#", "ב+", "°")
-# Talmud fragments (Hachi Garsinan): the 2014 Word table, rows 3-27, academic column.
+# Talmud fragments (Hachi Garsinan): the 2014 Word table, rows 3-27, academic column,
+# then `@` around a letter, which the owner added (2026-10-27).
 LIST_TALMUD = ("(…)", "[…]", "¦…¦", "(…){…}", "[2]…[1]…", "ᵔ", "ᵕ", "א֗", "א֯", "א֯/ב֯", "(א֯){ב֯}/(ב֯){א֯}",
-               "....", "*…*", "א?", "§…§", "[1]", "?…?", "#", "##", "-א-", "<…>", "<~>", "<(…)>", "<<…>>", "²")
+               "....", "*…*", "א?", "§…§", "[1]", "?…?", "#", "##", "-א-", "<…>", "<~>", "<(…)>", "<<…>>", "²",
+               "@א@")
+
+
+def test_at_is_a_piyyut_in_the_prayer_list_and_a_letter_quirk_in_the_talmud_list():
+    """Owner, 2026-10-27."""
+    prayer = {m.form: m for m in PRAYER_MARKS}
+    talmud = {m.form: m for m in TALMUD_MARKS}
+    assert prayer["@…@"].he == "פיוט"
+    assert talmud["@א@"].he == "חריגות באות"
+
+
+# The Hebrew meanings, copied from the two sources by hand (Codex round 2: the
+# tests compared the page with the module's own table, so a wrong meaning passed).
+MEANINGS_PRAYER = ("טקסט מחוק", "בין השיטין", "תוספת בגליון או בין השיטין", "גליון", "קרוע או מטושטש", "תיקון",
+                   "תיקון, כשלא ברור מה המקור ומה התיקון", "גרידה", "קריאה מסופקת", "אותיות מסופקות", "שומר דף",
+                   "מילוי שורה", "כותרת", "מספר עמוד", "הלכות והוראות", "פיוט", "תוספות בנסיבות מיוחדות",
+                   "ערבית יהודית", "שפות זרות", "נקודות מעל מילה", "נקודות מעל אות", "ברוך אתה ה'", "סימון לגליון")
+MEANINGS_TALMUD = ("מחיקה", "גליון; בין השיטין; נוספה לאחר השלמת התיבה או השורה", "הוספה בתוך גליון או בין השיטין",
+                   "תיקון בגוף כתב היד או על גרידה", "תיקון סדר המילים או סדר האותיות", "חיבור של שתי תיבות לאחת",
+                   "הפרדה בין שתי תיבות", "קריאה כמעט ודאית", "קריאה מסופקת", "שתי אפשרויות לקריאה",
+                   "תיקון, כשלא ברור מה תוקן למה", "קריעה או טשטוש",
+                   "כל דבר שאינו שייך לגוף הטקסט של התלמוד או המשנה: כותרות, הדרן, סליק, קולופון, פירוש וכיוצא בזה",
+                   "סימון לגליון", "נוסח אחר, רק שכתוב במפורש (נ\"א וכדומה)", "הערה",
+                   "דברים לא מזוהים סביב המילה או האות", "קישוט מעל אות", "קישוט או קו מעל מילה", "מספור עמוד",
+                   "שומר דף (<ראובן>) או מילוי שורה (<רא>)", "לא מוגדר",
+                   "שומר דף או מילוי שורה השונים מהשורה או מהעמוד הבא", "תחילת השורה הבאה או העמוד הבא קרועה או איננה",
+                   "סוף פסקה לא סטנדרטי", "חריגות באות")
 
 
 def test_each_list_is_its_source_mark_for_mark_in_its_order():
     assert tuple(m.form for m in PRAYER_MARKS) == LIST_PRAYER
     assert tuple(m.form for m in TALMUD_MARKS) == LIST_TALMUD
-    assert all(m.en and m.he for m in PRAYER_MARKS + TALMUD_MARKS)
+    assert tuple(m.he for m in PRAYER_MARKS) == MEANINGS_PRAYER
+    assert tuple(m.he for m in TALMUD_MARKS) == MEANINGS_TALMUD
+    assert all(m.en for m in PRAYER_MARKS + TALMUD_MARKS)
 
 
 def test_the_legend_is_the_two_headed_lists_and_nothing_else():

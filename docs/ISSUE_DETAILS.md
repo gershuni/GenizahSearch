@@ -4073,5 +4073,26 @@ unchanged. The wording awaits the owner's approval
 waits on FGP's answer for the unexplained marks (`¶`, `[[…]]`, `\`, …) and on a rule for copy and citation.
 Owner, 2026-10-27: the 2014 list is for Talmud fragments transcribed for Hachi Garsinan, not an earlier version of
 the 2024 one (the legend labels its section so; the sidecar cannot tell those rows apart, 23,218 of 35,639 Genuzot
-rows having no domain); `@` around letters inside a word marks something unusual about them; and a `?` in a
+rows having no domain); `@…@` is a piyyut in the prayer list, while in the Talmud list `@` around a letter marks
+something unusual about it; and a `?` in a
 Genuzot transcription is never a plain question mark.
+
+## GS-276
+
+**1,810 FGP transcriptions show final letters as control characters** · P2 · Data and sidecars · ❌ Open · opened 2026-10-27
+
+Where: `fgp_data/inventory/fgp_transcriptions.candidate.db` (rows with `text_source` `pdf_rtl` / `original`); FGP text pipeline, gate 3
+
+FGP's PDF copies encode the final letters (ן ם ך ף) with font glyph codes that extraction turned into control
+characters U+0001-U+001D, so a reader sees a box where the letter belongs: Or.1081 J10 (row 4185) read
+`עבדהא אברהי□ אלמקי□` on the owner's desktop, which reads today's sidecar. Today's sidecar has 7,240 such rows;
+the source-folders candidate no longer carries 5,430 of them, mostly rebuilt from FGP's Word files (row 4185 now
+reads `אברהים אלמקים`),
+and keeps 1,810 that have no Word file (1,709 `pdf_rtl`, 101 `original`; teams: Goitein 398, Kahana 240,
+Judeo-Arabic halakha 223, Responsa 191, Yerushalmi 164, Philosophy 147, Linguistics 142, a site user 99, ...). The
+code-to-letter mapping is NOT fixed: measured on 1,500 rows present both ways, U+0018 stands for ן 2,203 times and
+ם 1,453 times, U+0004 for ן 1,858 / ם 1,354 / ך 831, so one table cannot repair them; within a single PDF it is
+probably consistent. Fix sketch: in gate 3, for each such row choose, per control character, the final letter
+that makes the most words of the corpus vocabulary (only at a word end; leave the rare inside-a-word cases), check
+the guesses against the 5,430 rows that have both versions, then rebuild the candidate and rerun gates 3-4. Found
+from the owner's screenshot while reviewing the marks legend.

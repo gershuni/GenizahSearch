@@ -4256,7 +4256,7 @@ class GenizahGUI(QMainWindow):
 
         # === FGP Group (distinct from PGP; FGP-07) ===
         if fgp_sources:
-            from shared.fgp_service import pick_fgp_credit, choose_default_source, fgp_incipit
+            from shared.fgp_service import pick_fgp_credit, choose_default_source, number_repeated_labels
             from shared.fgp_marks_legend import uses_genuzot_marks
             # Live read (CURRENT_LANG flips at runtime on language switch — the
             # module-level import binds a stale snapshot; see the lines-button site).
@@ -4287,22 +4287,24 @@ class GenizahGUI(QMainWindow):
             combo.addItem(_fgp_hdr, {"source": "header"})
             combo.model().item(combo.count() - 1).setEnabled(False)
 
-            for fsrc in fgp_sources:
+            def _fgp_kind_label(fsrc):
+                if source_relation_kind(fsrc) == 'translation':
+                    language = fsrc.get('language') or ''
+                    lang_part = f"{language} " if language else ""
+                    return f"FGP {lang_part}{tr('Translation')}"
+                return tr('FGP Transcription')
+
+            # D2: ~10 identical-looking "FGP Transcription" entries on one
+            # manuscript (MS heb. g.2) are told apart by a number, never by text
+            # of the transcription (owner, 2026-10-27; the web menu does the same).
+            # The credit stays in the tooltip below (not repeated here).
+            _fgp_labels = number_repeated_labels([_fgp_kind_label(s) for s in fgp_sources])
+            for fsrc, base_label in zip(fgp_sources, _fgp_labels):
                 is_trans = source_relation_kind(fsrc) == 'translation'
                 language = fsrc.get('language') or ''
-                if is_trans:
-                    lang_part = f"{language} " if language else ""
-                    label = f"  FGP {lang_part}{tr('Translation')}"
-                else:
-                    label = f"  {tr('FGP Transcription')}"
-                    if _fgp_demoted:
-                        label = f"{label} · {tr('shorter than V0.8')}"
-                # D2: an incipit so ~10 identical-looking "FGP Transcription"
-                # entries on one manuscript (MS heb. g.2) are tellable apart.
-                # The credit stays in the tooltip below (not repeated here).
-                _incipit = fgp_incipit(fsrc.get('content'))
-                if _incipit:
-                    label = f"{label} — {_incipit}"
+                label = f"  {base_label}"
+                if _fgp_demoted and not is_trans:
+                    label = f"{label} · {tr('shorter than V0.8')}"
                 _credit = pick_fgp_credit(fsrc, _fgp_lang)
                 # No folio suffix: the combo is filtered to the displayed image's
                 # folio, so the folio only routes placement (it's not shown).

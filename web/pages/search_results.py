@@ -37,7 +37,7 @@ from web.document_service import (
 )
 from shared.fgp_service import (
     get_fgp_sources_for_fragment, filter_sources_for_page, displayed_folio_label,
-    displayed_fgp_image_number, fgp_needs_full_htr, choose_default_source,
+    displayed_fgp_image_number, fgp_needs_full_htr, choose_default_source, decode_stored_entities,
 )
 from web.components.joins_panel import fetch_connected_fragments, create_joins_dialog
 from urllib.parse import quote
@@ -178,8 +178,10 @@ def _fgp_text_for_display(text) -> str:
     showing as a degree sign. Since GS-60 `shared.fgp_service` decodes FGP text
     for every surface when it reads a row, so for sidecar text this is a no-op
     kept as a guard; the desktop no longer renders FGP text as Qt HTML (GS-275).
+    It uses the service's own rule, one layer: a bare `html.unescape` also read
+    the semicolon-less `&deg&` of row 26994, which no other surface does (Codex).
     """
-    return html.unescape(text) if text else ''
+    return decode_stored_entities(text, layers=1) if text else ''
 
 # ---------------------------------------------------------------------------
 # Bidi isolation (Finding #15)

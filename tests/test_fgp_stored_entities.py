@@ -12,6 +12,20 @@ def test_the_margin_sign_and_a_double_encoding_are_decoded():
     assert decode_stored_entities("Pass&amp;#40age&amp;#41:") == "Pass(age):"
 
 
+def test_a_reference_to_a_control_character_stays_as_typed():
+    """Codex round 2: html.unescape drops `&#7` outright; rows 8299 and 19989, verbatim."""
+    assert decode_stored_entities("/ 2$%8 ا&#7س &%$#ي") == "/ 2$%8 ا&#7س &%$#ي"
+    assert decode_stored_entities("a&#0;b&#x1F;c") == "a&#0;b&#x1F;c"
+
+
+def test_quick_view_decodes_by_the_same_rule():
+    """Codex round 2: Quick View's bare html.unescape also read row 26994's `&deg&`."""
+    from tests.test_quick_view_text_escaping import _load_function
+    quick_view = _load_function("_fgp_text_for_display")
+    row_26994 = "[.....]&deg&[...........];deg;"
+    assert quick_view(row_26994) == decode_stored_entities(row_26994) == row_26994
+
+
 def test_the_genuzot_marks_and_loose_ampersands_are_left_alone():
     for text in ("&ערבית&", "&תמת&@", "R&D", "a & b", "&deg without a semicolon", "&notanentity;"):
         assert decode_stored_entities(text) == text

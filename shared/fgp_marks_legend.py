@@ -17,11 +17,12 @@ the 35,639 Genuzot rows have no domain, and the Talmud list's marks occur
 outside the rows marked Talmud too).
 
 * ``PRAYER_MARKS`` -- prayer and piyyut fragments: "סיגלה אקדמית" (2024), an
-  image-only PDF the owner holds, row by row. The owner added the second use of
-  ``@`` (around letters inside a word); a ``?`` is never a plain question mark.
+  image-only PDF the owner holds, row by row. A ``?`` is never a plain question
+  mark.
 * ``TALMUD_MARKS`` -- Talmud fragments, transcribed for Hachi Garsinan: the
   2014 Word table "סיגלה עיונית וסיגלה חזותית", its academic column, every row
-  with a mark that plain text can carry (rows 1-2 are fonts only).
+  with a mark that plain text can carry (rows 1-2 are fonts only), and, from the
+  owner, ``@`` around a letter: something unusual about it.
 
 The meanings follow each list's own wording. Like ``shared/transcription_credits.py``
 this takes ``lang`` explicitly and imports nothing beyond the standard library
@@ -71,8 +72,7 @@ PRAYER_MARKS: Tuple[Mark, ...] = (
     Mark("*…*", "a heading", "כותרת"),
     Mark("-…-", "a page number", "מספר עמוד"),
     Mark("$…$", "laws and instructions", "הלכות והוראות"),
-    Mark("@…@", "a piyyut; around letters inside a word: something unusual about the letters",
-         "פיוט; סביב אותיות בתוך מילה: משהו חריג באותיות"),
+    Mark("@…@", "a piyyut", "פיוט"),
     Mark("«…»", "additions in special circumstances", "תוספות בנסיבות מיוחדות"),
     Mark("&…&", "Judeo-Arabic", "ערבית יהודית"),
     Mark("¿…¿", "foreign languages", "שפות זרות"),
@@ -119,6 +119,8 @@ TALMUD_MARKS: Tuple[Mark, ...] = (
     Mark("<<…>>", "the start of the next line or page is torn or missing",                  # 26
          "תחילת השורה הבאה או העמוד הבא קרועה או איננה"),
     Mark("²", "a non-standard end of paragraph", "סוף פסקה לא סטנדרטי"),                    # 27
+    # Not in the 2014 table: the owner, 2026-10-27 (in the prayer list `@` is a piyyut).
+    Mark("@א@", "something unusual about the letter", "חריגות באות"),
 )
 
 _LABELS_EN: Dict[str, str] = {

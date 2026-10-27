@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-10-27 (archived GS-60). 163 open: P1 0, P2 41, P3 122.
+> **Last Updated:** 2026-10-27 (folded 1 fragment(s) from `docs/open_issues.d/`: 2026-10-27-fgp-pdf-final-letters-control-chars.md). 164 open: P1 0, P2 42, P3 122.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -29,11 +29,11 @@ owner tasks -- is in [`BACKLOG.md`](BACKLOG.md). Closed history:
 | API and AI | 0 | 2 | 1 | 3 |
 | Discovery | 0 | 2 | 11 | 13 |
 | Accounts and community | 0 | 8 | 27 | 35 |
-| Data and sidecars | 0 | 4 | 5 | 9 |
+| Data and sidecars | 0 | 5 | 5 | 10 |
 | Build, CI and tests | 0 | 0 | 1 | 1 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 2 | 1 | 3 |
-| **Total** | **0** | **41** | **122** | **163** |
+| **Total** | **0** | **42** | **122** | **164** |
 
 ## P1 - Critical
 
@@ -115,6 +115,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-276](ISSUE_DETAILS.md#gs-276) | 1,810 FGP transcriptions show final letters as control characters | `fgp_data/inventory/fgp_transcriptions.candidate.db` (rows with `text_source` `pdf_rtl` / `original`); FGP text pipeline, gate 3 | 2026-10-27 | ❌ Open |
 | [GS-268](ISSUE_DETAILS.md#gs-268) | FGP text drops the part of a line before a gershayim | `fgp_data/fgp_transcriptions.db` (`text_source='pdf_rtl'`), `shared/local_indexer.py::extract_pdf_pages`, `scripts/fgp_rebuild_text_and_credit.py` | 2026-10-25 | ❌ Open |
 | [GS-269](ISSUE_DETAILS.md#gs-269) | FGP visual XML is applied by image number, not by source record | `scripts/fgp_rebuild_text_and_credit.py::build_xml_index`, `fgp_data/fgp_transcriptions.db` (`text_source='xml'`) | 2026-10-25 | ❌ Open |
 | [GS-270](ISSUE_DETAILS.md#gs-270) | FGP credit heuristic disagrees with FIST on 1,551 / 6,151 files | `scripts/fgp_fill_credits_bilingual.py` | 2026-10-25 | ❌ Open |

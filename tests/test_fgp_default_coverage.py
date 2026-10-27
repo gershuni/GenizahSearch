@@ -22,8 +22,8 @@ from shared.fgp_service import (
     _heb_letter_count,
     _normalize_for_contains,
     choose_default_source,
-    fgp_incipit,
     fgp_needs_full_htr,
+    number_repeated_labels,
 )
 
 
@@ -377,31 +377,21 @@ class TestTextMatchDemotion:
         assert d["source"] is None
 
 
-# ── D2: FGP combo/menu incipit label ────────────────────────────────────────────
+# ── D2: telling several FGP entries on one page apart ─────────────────────────
 
 
-class TestFgpIncipit:
-    def test_strips_nikud_and_collapses_whitespace(self):
-        assert fgp_incipit("שָׁלוֹם\n\nעוֹלָם") == "שלום עולם"
+class TestNumberRepeatedLabels:
+    """The chooser shows no text of a transcription (owner, 2026-10-27): entries that
+    would read alike (MS heb. g.2: ~10 "FGP Transcription") are numbered instead."""
 
-    def test_short_content_returned_whole_no_ellipsis(self):
-        assert fgp_incipit("אבגד", max_chars=40) == "אבגד"
+    def test_a_label_that_repeats_is_numbered_in_order(self):
+        assert number_repeated_labels(["T", "T", "T"]) == ["T 1", "T 2", "T 3"]
 
-    def test_truncated_at_max_chars_with_ellipsis(self):
-        content = "א" * 50
-        out = fgp_incipit(content, max_chars=40)
-        assert out == "א" * 40 + "…"
-
-    def test_empty_and_none(self):
-        assert fgp_incipit("") == ""
-        assert fgp_incipit(None) == ""
-
-    def test_distinguishes_two_rows_with_identical_labels(self):
-        # The actual bug (MS heb. g.2): ~10 rows all render the bare "FGP
-        # Transcription" label. The incipit is what makes them tellable apart.
-        a = fgp_incipit("ברכת מזון אֲבָרֵך לְאֵל אֱמוּנָה")
-        b = fgp_incipit("Ox, Bold. Heb. g. 2 (2700) [example]")
-        assert a != b and a and b
+    def test_a_label_that_occurs_once_is_left_alone(self):
+        assert number_repeated_labels(["T", "FGP Arabic Translation", "T"]) == [
+            "T 1", "FGP Arabic Translation", "T 2"]
+        assert number_repeated_labels(["T"]) == ["T"]
+        assert number_repeated_labels([]) == []
 
 
 # ── SEED-033 Option A: search-scoped "must_contain" override ───────────────────

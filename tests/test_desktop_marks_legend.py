@@ -13,7 +13,9 @@ import pytest
 from PyQt6.QtWidgets import QApplication, QComboBox, QTextBrowser
 
 from desktop.marks_legend import MarksLegendDialog, make_marks_legend_button, sync_marks_legend_button
+from desktop.result_dialog import ResultDialog
 from genizah_app import GenizahGUI
+from genizah_app import tr as genizah_app_tr
 
 pytestmark = pytest.mark.gui
 
@@ -68,6 +70,24 @@ def test_the_chooser_tags_only_genuzot_transcriptions():
     assert tagged == {"fgp:7": True, "fgp:8": False}
 
 
+def test_the_chooser_shows_no_text_of_a_transcription_and_numbers_alike_entries():
+    """Owner, 2026-10-27: the chooser named each entry by the transcription's opening words.
+    Now there is no text of it at all; entries that would read alike are numbered."""
+    gui = type("_G", (), {})()
+    gui._browse_full_htr_text = lambda sid: ""
+    gui._populate_pgp_combo = MethodType(GenizahGUI._populate_pgp_combo, gui)
+
+    def fgp_labels(sources):
+        combo = QComboBox()
+        gui._populate_pgp_combo(combo, sources, {}, htr_text="", sys_id="99")
+        return [combo.itemText(i).strip() for i in range(combo.count())
+                if (combo.itemData(i) or {}).get("source") == "fgp_edition"]
+
+    transcription = genizah_app_tr("FGP Transcription")
+    assert fgp_labels([GENUZOT]) == [transcription]
+    assert fgp_labels([GENUZOT, OTHER]) == [f"{transcription} 1", f"{transcription} 2"]
+
+
 def test_browse_shows_the_button_for_a_genuzot_text_and_hides_it_for_v08():
     b = type("_B", (), {})()
     b.browse_text = QTextBrowser()
@@ -85,6 +105,28 @@ def test_browse_shows_the_button_for_a_genuzot_text_and_hides_it_for_v08():
     assert b.browse_text.toPlainText() == GENUZOT["content"]
     b._browse_display_version_text("V0.8 text")
     assert b.btn_b_marks_legend.isHidden()
+
+
+def test_cancelling_an_edit_of_a_genuzot_text_keeps_the_viewer_legend():
+    """Codex round 2: the viewer restored the text through _rd_display_text, which
+    assumes V0.8 and hid the "?" while the chooser still held the Genuzot item."""
+    d = type("_D", (), {})()
+    d.text_ms = QTextBrowser()
+    d.data = {"highlight_pattern": None}
+    d.find_ms_input = type("_I", (), {"text": staticmethod(lambda: "")})()
+    d.btn_rd_marks_legend = make_marks_legend_button(None)
+    d.rd_version_combo = _combo_with(("g", {"source": "fgp_edition", "marks_legend": True}))
+    d.rd_version_combo.setCurrentIndex(1)
+    d._rd_exit_edit_mode = lambda: None
+    for name in ("_mark_search_hits", "_htmlify", "_refresh_find_highlights", "_rd_display_text",
+                 "_rd_display_pgp_text", "_rd_cancel_edit"):
+        setattr(d, name, MethodType(getattr(ResultDialog, name), d))
+    d._rd_display_pgp_text(GENUZOT["content"])
+    assert not d.btn_rd_marks_legend.isHidden()
+    d._rd_original_edit_text = GENUZOT["content"]
+    d._rd_cancel_edit()
+    assert not d.btn_rd_marks_legend.isHidden()
+    assert d.text_ms.toPlainText() == GENUZOT["content"]
 
 
 _PANE_WRITES = {"setHtml", "setText", "setPlainText", "clear", "append", "insertHtml", "insertPlainText"}

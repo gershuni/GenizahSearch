@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from shared.fgp_service import decode_stored_entities
+
 ROOT = Path(__file__).resolve().parents[1]
 SEARCH_RESULTS = ROOT / "web" / "pages" / "search_results.py"
 
@@ -47,7 +49,7 @@ def _load_function(name: str):
     tree = ast.parse(src)
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
-            ns = {"html": html, "re": re}
+            ns = {"html": html, "re": re, "decode_stored_entities": decode_stored_entities}
             exec(textwrap.dedent(ast.get_source_segment(src, node)), ns)
             return ns[name]
     raise AssertionError(f"{name} is not defined in web/pages/search_results.py")

@@ -21,7 +21,7 @@ import weakref
 import html as html_module
 from urllib.parse import quote
 from shared.fgp_service import (
-    source_provider, source_relation_kind,
+    number_repeated_labels, source_provider, source_relation_kind,
 )
 from shared.transcription_credits import resolve_transcription_credit
 from shared.export_utils import GENIZAHSEARCH_URL
@@ -3780,6 +3780,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         key = f"src_{src_i}"
                                         source_options[key] = label
                                         source_map[key] = src
+                                    # FGP entries that read alike are numbered, as in
+                                    # the version menu (owner, 2026-10-27).
+                                    _fgp_keys = [k for k, s in source_map.items() if source_provider(s) == 'fgp']
+                                    for k, numbered in zip(_fgp_keys, number_repeated_labels(
+                                            [source_options[k] for k in _fgp_keys])):
+                                        source_options[k] = numbered
 
                                 # Always add V0.8 as fallback
                                 source_options['v08'] = 'V0.8 (HTR)'

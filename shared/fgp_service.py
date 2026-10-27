@@ -1098,10 +1098,16 @@ def _decode_entity(match: "re.Match") -> str:
     # read `&notanentity;` as `&not` + "anentity;".
     if ref[1] != "#" and ref[1:] not in html.entities.html5:
         return ref
-    return html.unescape(ref)
+    decoded = html.unescape(ref)
+    # A reference to a control or invalid code point stays as typed:
+    # html.unescape drops `&#7` outright, which deleted it from the garbled
+    # Arabic `ا&#7س` of rows 8299 and 19989 (Codex round 2).
+    if len(decoded) != 1 or decoded == "�" or not (decoded.isprintable() or decoded in "\t\n"):
+        return ref
+    return decoded
 
 
-def decode_stored_entities(text: Optional[str]) -> Optional[str]:
+def decode_stored_entities(text: Optional[str], layers: int = 2) -> Optional[str]:
     """Decode the HTML entities FGP's text stores, so every surface shows the character.
 
     GS-60: the sidecar keeps `&deg;` where the Genuzot team typed its margin
@@ -1110,11 +1116,13 @@ def decode_stored_entities(text: Optional[str]) -> Optional[str]:
     them, its Browse showed them literally, and the desktop decoded them only
     because it fed the text to Qt as HTML -- the bug GS-275 fixed by escaping.
     Decoded here, once, every reader gets the same text. Two layers at most,
-    for the double-encoded row; only well-formed entities are touched.
+    for the double-encoded row; only well-formed entities are touched (row
+    26994's semicolon-less `&deg&` stays as typed). Quick View passes
+    ``layers=1`` for its single decode of what it is handed.
     """
     if not text or "&" not in text:
         return text
-    for _ in range(2):
+    for _ in range(layers):
         decoded = _STORED_ENTITY_RE.sub(_decode_entity, text)
         if decoded == text:
             break
@@ -1199,23 +1207,27 @@ def pick_fgp_credit(src: Dict[str, Any], lang: str = "en") -> Optional[str]:
     return en or he or legacy
 
 
-def fgp_incipit(content: Optional[str], max_chars: int = 40) -> str:
-    """First ~``max_chars`` characters of ``content`` (nikud stripped,
-    whitespace collapsed to one line) — a distinguishing snippet for an FGP
-    combo/menu label (D2). Multiple FGP rows on one manuscript otherwise all
-    render as the bare "FGP Transcription" and are untellable apart (see
-    MS heb. g.2, ~10 identical-looking entries). Empty when ``content`` has no
-    text. An ellipsis marks truncation; a shorter-than-``max_chars`` content is
-    returned in full with no ellipsis."""
-    if not content:
-        return ""
-    text = _NIKUD_RE.sub("", content)
-    text = _WS_RE.sub(" ", text).strip()
-    if not text:
-        return ""
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars].rstrip() + "…"
+def number_repeated_labels(labels: List[str]) -> List[str]:
+    """Number the chooser labels that repeat: "FGP Transcription 1", "... 2".
+
+    Several FGP rows on one page (MS heb. g.2 has ~10) all read "FGP
+    Transcription"; a number tells them apart. A label that occurs once is
+    returned as it is. The owner ruled on 2026-10-27 that the chooser shows no
+    text of the transcription, so this replaced the opening-words excerpt
+    (D2) in both apps.
+    """
+    totals: Dict[str, int] = {}
+    for label in labels:
+        totals[label] = totals.get(label, 0) + 1
+    seen: Dict[str, int] = {}
+    out = []
+    for label in labels:
+        if totals[label] > 1:
+            seen[label] = seen.get(label, 0) + 1
+            out.append(f"{label} {seen[label]}")
+        else:
+            out.append(label)
+    return out
 
 
 class FgpService:
