@@ -104,7 +104,12 @@ def test_a_search_hit_next_to_a_mark_is_red_and_the_mark_stays():
 
 
 def test_entities_and_line_breaks():
-    """`&deg;` in a transcription is text, as on the website; lines still break."""
+    """The display shows what it is given, `&deg;` included; lines still break.
+
+    FGP's own stored entities are decoded earlier, where the row is read
+    (`shared.fgp_service.decode_stored_entities`, GS-60), so this layer never
+    decodes: a text that really contains `&deg;` keeps it.
+    """
     assert text_lines_to_html("a &deg; b") == "a &amp;deg; b"
     assert text_lines_to_html("א\n<ב>") == "א<br>&lt;ב&gt;"
     assert text_lines_to_html("") == ""

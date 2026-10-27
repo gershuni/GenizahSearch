@@ -89,6 +89,7 @@ EXTRACTED_MODULES = [
     "shared/export_dossier.py",
     "shared/export_utils.py",
     "shared/fgp_service.py",
+    "shared/fgp_marks_legend.py",      # the Genuzot marks legend, 2026-10-27 (GS-274)
     "shared/fist_cudl_bridge.py",
     "shared/fjms_service.py",
     "shared/joins_lab.py",

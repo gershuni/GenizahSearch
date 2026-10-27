@@ -45,6 +45,8 @@ refreshed/renamed schema; Phase C should still smoke-test against the live DB.
 """
 
 import functools
+import html
+import html.entities
 import json
 import logging
 import os
@@ -1084,6 +1086,42 @@ def dedupe_fgp_sources(sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+#: An HTML entity: a named one with its `;` (`&deg;`), or a numeric one with or without
+#: (row 8767 has `&#40age`). The `&...&` Judeo-Arabic mark never matches: its letters
+#: are Hebrew.
+_STORED_ENTITY_RE = re.compile(r"&(?:[A-Za-z][A-Za-z0-9]{1,31};|#[0-9]{1,7};?|#[xX][0-9A-Fa-f]{1,6};?)")
+
+
+def _decode_entity(match: "re.Match") -> str:
+    ref = match.group(0)
+    # A named entity only when the whole name is one: html.unescape alone would
+    # read `&notanentity;` as `&not` + "anentity;".
+    if ref[1] != "#" and ref[1:] not in html.entities.html5:
+        return ref
+    return html.unescape(ref)
+
+
+def decode_stored_entities(text: Optional[str]) -> Optional[str]:
+    """Decode the HTML entities FGP's text stores, so every surface shows the character.
+
+    GS-60: the sidecar keeps `&deg;` where the Genuzot team typed its margin
+    sign `°` (658 times in the 2026-06 sidecar, in 3 rows of the 2026-10 one),
+    and row 8767 double-encodes `&amp;#40;`. The website's Quick View decoded
+    them, its Browse showed them literally, and the desktop decoded them only
+    because it fed the text to Qt as HTML -- the bug GS-275 fixed by escaping.
+    Decoded here, once, every reader gets the same text. Two layers at most,
+    for the double-encoded row; only well-formed entities are touched.
+    """
+    if not text or "&" not in text:
+        return text
+    for _ in range(2):
+        decoded = _STORED_ENTITY_RE.sub(_decode_entity, text)
+        if decoded == text:
+            break
+        text = decoded
+    return text
+
+
 def _row_to_fgp_source(row: sqlite3.Row) -> Dict[str, Any]:
     """Map a raw FGP DB row to a chooser-shaped source dict (FGP-01/02/03).
 
@@ -1097,7 +1135,7 @@ def _row_to_fgp_source(row: sqlite3.Row) -> Dict[str, Any]:
     content = ""
     for col in _CONTENT_COLUMNS:
         if d.get(col):
-            content = d[col]
+            content = decode_stored_entities(d[col])
             break
 
     sections = d.get("sections")
@@ -1107,6 +1145,11 @@ def _row_to_fgp_source(row: sqlite3.Row) -> Dict[str, Any]:
         except (json.JSONDecodeError, TypeError):
             sections = None
     sections = _normalize_fgp_sections(sections)
+    for sec in sections or []:
+        if isinstance(sec, dict):
+            for key in ("text", "content"):
+                if isinstance(sec.get(key), str):
+                    sec[key] = decode_stored_entities(sec[key])
 
     raw_id = d.get("id")
     out: Dict[str, Any] = {

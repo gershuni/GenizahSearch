@@ -1358,9 +1358,9 @@ The Genuzot team's legend of transcription marks (GS-274 option A), one table fo
 
 - **Class** `Mark` — one mark: how it looks in the text, and what it means in each language
     - Method `meaning`
-- **Function** `labels` — the legend's frame (title, headings, notes) in ``lang``
-- **Function** `not_in_list` — the unexplained marks, described in ``lang``
-- **Function** `legend_html` — the whole legend as one HTML fragment, for both apps
+- `PRAYER_MARKS` (prayer and piyyut fragments, 2024 list) and `TALMUD_MARKS` (Talmud fragments for Hachi Garsinan, 2014 list)
+- **Function** `labels` — the legend's frame (title, two headings, column names) in ``lang``
+- **Function** `legend_html` — the whole legend as one HTML fragment, for both apps: two headed tables
 - **Function** `uses_genuzot_marks` — is ``source`` a transcription by the Genuzot team, which uses these marks?
 
 ## desktop/marks_legend.py

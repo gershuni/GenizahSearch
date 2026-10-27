@@ -2,9 +2,7 @@
 
 import html
 
-from shared.fgp_marks_legend import (
-    MARKS, NOT_IN_LIST, OLDER_LIST, labels, legend_html, not_in_list, uses_genuzot_marks,
-)
+from shared.fgp_marks_legend import PRAYER_MARKS, TALMUD_MARKS, labels, legend_html, uses_genuzot_marks
 
 GENUZOT_EN = "FGP Transcriptions Team - Genuzos"
 GENUZOT_HE = "צוות FGP להעתקות -גנוזות"
@@ -27,6 +25,16 @@ def test_any_one_credit_column_is_enough():
     assert uses_genuzot_marks(_fgp(source_credit_en=GENUZOT_EN))
 
 
+def test_the_per_row_credits_outrank_the_legacy_one():
+    """Codex round 1: in the 2026-06 sidecar the legacy `source_credit` lists every team that
+    touched the shelfmark. Row 38 is Yad Harav Herzog's, yet its legacy credit names Genuzot."""
+    row_38 = _fgp(source_credit_en="Yad Harav Herzog - FGP sponsored team",
+                  source_credit_he="יד הרב הרצוג - צוות FGP",
+                  source_credit="Sussmann (Talmud) Catalog; " + GENUZOT_HE + "; Schwab Catalog")
+    assert not uses_genuzot_marks(row_38)
+    assert uses_genuzot_marks(_fgp(source_credit_en="", source_credit_he=None, source_credit=GENUZOT_HE))
+
+
 def test_other_teams_translations_and_pgp_do_not():
     assert not uses_genuzot_marks(_fgp(source_credit_he="חיים מיליקובסקי, ראש צוות FGP למדרשי אגדה"))
     assert not uses_genuzot_marks(_fgp(source_credit_en=GENUZOT_EN, doc_relation="Digital Translation"))
@@ -37,28 +45,38 @@ def test_other_teams_translations_and_pgp_do_not():
     assert not uses_genuzot_marks({})
 
 
-def test_the_legend_shows_every_mark_as_typed():
-    """The marks are `<`, `&`, `$`: escaped, every one reaches the reader."""
+# Prayer and piyyut fragments: "סיגלה אקדמית" (2024, image-only PDF), transcribed form by form;
+# "plain text" (its first row) has no mark.
+LIST_PRAYER = ("(…)", "^…^", "|…|", "=…=", "[....]", "{…}", "{א//ב}", "((…))", "?…?", "?א/ב?", "%…%",
+               "<…>", "*…*", "-…-", "$…$", "@…@", "«…»", "&…&", "¿…¿", "##", "#", "ב+", "°")
+# Talmud fragments (Hachi Garsinan): the 2014 Word table, rows 3-27, academic column.
+LIST_TALMUD = ("(…)", "[…]", "¦…¦", "(…){…}", "[2]…[1]…", "ᵔ", "ᵕ", "א֗", "א֯", "א֯/ב֯", "(א֯){ב֯}/(ב֯){א֯}",
+               "....", "*…*", "א?", "§…§", "[1]", "?…?", "#", "##", "-א-", "<…>", "<~>", "<(…)>", "<<…>>", "²")
+
+
+def test_each_list_is_its_source_mark_for_mark_in_its_order():
+    assert tuple(m.form for m in PRAYER_MARKS) == LIST_PRAYER
+    assert tuple(m.form for m in TALMUD_MARKS) == LIST_TALMUD
+    assert all(m.en and m.he for m in PRAYER_MARKS + TALMUD_MARKS)
+
+
+def test_the_legend_is_the_two_headed_lists_and_nothing_else():
+    """Owner, 2026-10-27: the two headings and their tables; no notes, no unexplained marks."""
     for lang in ("en", "he"):
         page = legend_html(lang)
-        for mark in MARKS + OLDER_LIST:
+        lab = labels(lang)
+        assert page.index(html.escape(lab["prayer_heading"])) < page.index(html.escape(lab["talmud_heading"]))
+        assert page.count("<table") == 2 and page.count("<h4") == 2
+        assert "<p" not in page and "<ul" not in page
+        for mark in PRAYER_MARKS + TALMUD_MARKS:
             assert html.escape(mark.form) in page, mark.form
             assert html.escape(mark.meaning(lang)) in page
-        for item in not_in_list(lang):
-            assert html.escape(item) in page
         assert "<…>" not in page and "&…&" not in page, "a raw mark would be read as markup"
 
 
 def test_each_language_has_its_own_frame():
     assert legend_html("he").startswith("<div dir='rtl'")
     assert legend_html("en").startswith("<div dir='ltr'")
-    assert labels("he")["title"] == "סימני התעתוק"
-    assert labels("en")["title"] == "Transcription marks"
+    assert labels("he")["prayer_heading"] == "סיגלה צוות גנוזות - קטעי תפילה ופיוט"
+    assert labels("he")["talmud_heading"] == "סיגלה צוות גנוזות - קטעי תלמוד"
     assert set(labels("he")) == set(labels("en"))
-    assert len(not_in_list("he")) == len(NOT_IN_LIST)
-
-
-def test_every_mark_is_listed_once():
-    forms = [m.form for m in MARKS]
-    assert len(forms) == len(set(forms))
-    assert all(m.en and m.he for m in MARKS + OLDER_LIST)

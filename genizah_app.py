@@ -3748,6 +3748,8 @@ class GenizahGUI(QMainWindow):
         original = getattr(self, 'browse_original_edit_text', self.browse_original_text)
         # Phase 999.4: route through gutter helper so line numbers re-render
         apply_line_numbered_text(self.browse_text, original, source_text=original, is_html=False)
+        sync_marks_legend_button(getattr(self, 'btn_b_marks_legend', None),
+                                 getattr(self, 'browse_version_combo', None))
         self.browse_text.setReadOnly(True)
         self.browse_text.setStyleSheet("")
         self.browse_edit_bar.hide()
@@ -4959,6 +4961,9 @@ class GenizahGUI(QMainWindow):
                 if _lbl.parent() is None:
                     return
                 if snippet:
+                    # Manuscript text, not markup: a QLabel guesses rich text
+                    # and would swallow a `<...>` in it (GS-275).
+                    _lbl.setTextFormat(Qt.TextFormat.PlainText)
                     _lbl.setText(snippet)
                 else:
                     _lbl.setText(tr("No text available"))
@@ -10765,6 +10770,7 @@ class GenizahGUI(QMainWindow):
                 )
 
         full_html = "\n".join(html_parts)
+        sync_marks_legend_button(getattr(self, 'btn_b_marks_legend', None), None)  # the Reading Desk's stacked view
         # Phase 999.4: route through gutter helper in PER-FRAGMENT mode.
         # Each fragment's content gets numbered 1..N independently. The
         # per-fragment "Current" / "remove" header rows don't match any
@@ -11297,6 +11303,7 @@ class GenizahGUI(QMainWindow):
         page_data = self.searcher.get_browse_page(self.current_browse_sid, p_num=p, volume_ie=self.current_browse_volume_ie)
 
         if not page_data:
+            sync_marks_legend_button(getattr(self, 'btn_b_marks_legend', None), None)
             self.browse_text.setText(tr("Page not found."))
             return
 
@@ -27404,6 +27411,7 @@ class GenizahGUI(QMainWindow):
                     from PyQt6.QtCore import QTimer
                     QTimer.singleShot(0, self._append_next_view_all_batch)
             else:
+                sync_marks_legend_button(getattr(self, 'btn_b_marks_legend', None), None)  # a LOCAL file
                 # No extracted text — show placeholder in legacy mode.
                 placeholder = tr(
                     "Indexed LOCAL file — no extracted text available. "
@@ -27476,6 +27484,7 @@ class GenizahGUI(QMainWindow):
             html_parts.append(f"<p>{page_escaped}</p>")
             _page_texts.append(page_text)
         browse_html = "".join(html_parts)
+        sync_marks_legend_button(getattr(self, 'btn_b_marks_legend', None), None)  # a LOCAL file
         pages_arg = _page_texts if len(_page_texts) > 1 else None
         try:
             apply_line_numbered_text(
@@ -27639,6 +27648,7 @@ class GenizahGUI(QMainWindow):
         is_pdf = bool(filepath) and filepath.lower().endswith('.pdf')
         unit_word = tr("Page") if is_pdf else tr("Chunk")
 
+        sync_marks_legend_button(getattr(self, 'btn_b_marks_legend', None), None)  # a LOCAL file
         # Codex HIGH #4 closure: HTML-escape the raw file content BEFORE building
         # the rendered HTML. `<`, `&`, `>` in user files cannot inject markup.
         escaped = _html_mod.escape(text)
@@ -32996,6 +33006,7 @@ class GenizahGUI(QMainWindow):
 
         # Reset UI (skip when reading desk is active to preserve stacked view)
         if not self.browse_reading_desk_active:
+            sync_marks_legend_button(getattr(self, 'btn_b_marks_legend', None), None)
             self.browse_text.setText(tr("Loading metadata..."))
         if not self.browse_reading_desk_active:
             self.browse_viewer.load_images({})  # Clear viewer

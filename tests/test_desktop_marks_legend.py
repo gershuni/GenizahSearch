@@ -1,6 +1,10 @@
 """The desktop's "?" beside a Genuzot transcription (GS-274 option A)."""
 
+import ast
+import inspect
 import os
+import sys
+from pathlib import Path
 from types import MethodType
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -14,6 +18,8 @@ from genizah_app import GenizahGUI
 pytestmark = pytest.mark.gui
 
 _APP = QApplication.instance() or QApplication([])
+
+REPO = Path(__file__).resolve().parent.parent
 
 GENUZOT = {"source": "fgp", "is_fgp": True, "id": 7, "uid": "fgp:7",
            "doc_relation": "Digital Edition", "language": "Hebrew",
@@ -79,6 +85,57 @@ def test_browse_shows_the_button_for_a_genuzot_text_and_hides_it_for_v08():
     assert b.browse_text.toPlainText() == GENUZOT["content"]
     b._browse_display_version_text("V0.8 text")
     assert b.btn_b_marks_legend.isHidden()
+
+
+_PANE_WRITES = {"setHtml", "setText", "setPlainText", "clear", "append", "insertHtml", "insertPlainText"}
+# These two only write the empty first content, before the button exists.
+_BUILDS_THE_PANE = {"create_browse_tab", "init_ui"}
+
+
+def _pane_writers_without_sync(path, pane):
+    tree = ast.parse((REPO / path).read_text(encoding="utf-8"))
+    missing = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) or fn.name in _BUILDS_THE_PANE:
+            continue
+        writes = syncs = False
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.Call):
+                continue
+            f = node.func
+            name = getattr(f, "attr", getattr(f, "id", None))
+            syncs |= name == "sync_marks_legend_button"
+            writes |= (isinstance(f, ast.Attribute) and f.attr in _PANE_WRITES
+                       and isinstance(f.value, ast.Attribute) and f.value.attr == pane)
+            writes |= (name == "apply_line_numbered_text" and bool(node.args)
+                       and isinstance(node.args[0], ast.Attribute) and node.args[0].attr == pane)
+        if writes and not syncs:
+            missing.append(f"{path}:{fn.lineno} {fn.name}")
+    return missing
+
+
+def test_every_function_that_writes_the_text_pane_settles_the_legend_button():
+    """Codex round 1: a LOCAL page and the Reading Desk replaced a Genuzot text and left
+    its "?" up. Whatever writes the pane says whether the "?" belongs to what it wrote."""
+    missing = (_pane_writers_without_sync("genizah_app.py", "browse_text")
+               + _pane_writers_without_sync("desktop/result_dialog.py", "text_ms"))
+    assert not missing, "call sync_marks_legend_button after writing the pane:\n" + "\n".join(missing)
+
+
+def test_the_pane_guard_can_fail(tmp_path, monkeypatch):
+    (tmp_path / "probe.py").write_text(
+        "def shows(self):\n    self.browse_text.setHtml('x')\n"
+        "def settles(self):\n    self.browse_text.setHtml('x')\n    sync_marks_legend_button(None, None)\n",
+        encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "REPO", tmp_path)
+    assert _pane_writers_without_sync("probe.py", "browse_text") == ["probe.py:1 shows"]
+
+
+def test_the_similarity_preview_shows_its_text_as_plain_text():
+    """Codex round 1: the preview's QLabel guessed rich text, so `<...>` in a page vanished."""
+    src = inspect.getsource(GenizahGUI._show_vs_dialog)
+    plain = src.index("_lbl.setTextFormat(Qt.TextFormat.PlainText)")
+    assert plain < src.index("_lbl.setText(snippet)")
 
 
 @pytest.mark.parametrize("lang", ["en", "he"])

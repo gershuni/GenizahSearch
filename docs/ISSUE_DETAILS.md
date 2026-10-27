@@ -4081,8 +4081,12 @@ own row, from `docs/open_issues.d/2026-10-26-desktop-fgp-pgp-angle-marks-swallow
 
 Option A built 2026-10-27 (owner: "A now and B later"): a "?" beside a Genuzot transcription opens the legend, in
 both apps, from one shared table (`shared/fgp_marks_legend.py::legend_html`; web `web/components/version_selector.py`,
-desktop `desktop/marks_legend.py`). It follows the 2024 list in our own words, shows the three 2014 meanings apart,
-and lists the marks neither list explains; the text itself is unchanged. The wording awaits the owner's approval
+desktop `desktop/marks_legend.py`). Owner, 2026-10-27: it shows the two lists and nothing else, "סיגלה צוות גנוזות
+- קטעי תפילה ופיוט" (2024) and "סיגלה צוות גנוזות - קטעי תלמוד" (2014), each in its own wording; the text itself is
+unchanged. The wording awaits the owner's approval
 (`_tmp/fgp_marks_legend_review.html`, untracked). What is left here is option B, drawing the confirmed marks, which
-waits on FGP's answer for the unexplained marks (`@` around letters, `¶`, `[[…]]`, …) and on a rule for copy and
-citation.
+waits on FGP's answer for the unexplained marks (`¶`, `[[…]]`, `\`, …) and on a rule for copy and citation.
+Owner, 2026-10-27: the 2014 list is for Talmud fragments transcribed for Hachi Garsinan, not an earlier version of
+the 2024 one (the legend labels its section so; the sidecar cannot tell those rows apart, 23,218 of 35,639 Genuzot
+rows having no domain); `@` around letters inside a word marks something unusual about them; and a `?` in a
+Genuzot transcription is never a plain question mark.

@@ -175,8 +175,9 @@ def _fgp_text_for_display(text) -> str:
 
     Quick View used to hand FGP text to the browser unescaped, which decoded
     them; now that the text is escaped, decode them ONCE here so '&deg;' keeps
-    showing as a degree sign. Web-side only on purpose: the desktop renders the
-    same text as Qt HTML and relies on the entities staying encoded.
+    showing as a degree sign. Since GS-60 `shared.fgp_service` decodes FGP text
+    for every surface when it reads a row, so for sidecar text this is a no-op
+    kept as a guard; the desktop no longer renders FGP text as Qt HTML (GS-275).
     """
     return html.unescape(text) if text else ''
 
