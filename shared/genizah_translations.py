@@ -4193,6 +4193,8 @@ TRANSLATIONS.update({
     "any material":          "כל חומר",
     "any library":           "כל ספרייה",
     "any domain":            "כל תחום",
+    # Joins Lab Domain filter: show only the chosen domains, or hide them
+    "Show only":             "הצג רק",
     "Has dimensions":        "יש מידות",
     "all triage":            "כל סיווג",
     "Y — kept":         "Y — נשמר",
@@ -4240,6 +4242,8 @@ TRANSLATIONS.update({
     "Open Browse results compare window":
         "פתח חלון השוואה לעיון בתוצאות",
     "Filter ▾":              "סנן ▾",
+    # The Filter button with how many filters are on (.format(n=N))
+    "Filter ({n}) ▾":        "סנן ({n}) ▾",
     "Open filter dialog":    "פתח תיבת סינון",
     "Filter candidates":     "סנן מועמדים",
     "Current fragment":      "קטע נוכחי",

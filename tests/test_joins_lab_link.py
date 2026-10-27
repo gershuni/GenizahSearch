@@ -219,3 +219,20 @@ def test_library_domain_filters_and_the_sort_ride_in_the_link():
     assert jl.clean_share_state({"f": {"order": "nonsense"}})["f"]["order"] == "rank"
     stored = {"builder_rows": [_row("a")], "active_filter": f}
     assert jl.share_inputs_from_full_state(stored)["f"]["domains"] == ["Bible"]
+
+
+def test_the_library_and_domain_filters_modes_ride_in_the_link():
+    """Show only or hide the Library and Domain filters' values: kept by a link and
+    a stored session; a link from before them, or a bad value, shows only (as it
+    always did)."""
+    f = {"libraries": ["CUL"], "libraries_mode": "hide",
+         "domains": ["Bible", "Law"], "domains_mode": "hide"}
+    got = jl.decode_share_state(jl.encode_share_state({"f": f}))["f"]
+    assert got["domains"] == ["Bible", "Law"] and got["domains_mode"] == "hide"
+    assert got["libraries"] == ["CUL"] and got["libraries_mode"] == "hide"
+    stored = {"builder_rows": [_row("a")], "active_filter": f}
+    got = jl.share_inputs_from_full_state(stored)["f"]
+    assert got["domains_mode"] == "hide" and got["libraries_mode"] == "hide"
+    for key in ("libraries", "domains"):
+        for bad in ({key: ["X"]}, {f"{key}_mode": "exclude"}, {f"{key}_mode": 1}):
+            assert jl.clean_share_state({"f": bad})["f"][f"{key}_mode"] == "show_only"

@@ -18,6 +18,7 @@ from __future__ import annotations
 import dataclasses
 import html
 import re
+from collections import Counter
 from shared.search_regex import compile as compile_search_regex, SearchBudgetExceeded, search_budget
 from shared.responsa_match import ResponsaQueryRefused
 from dataclasses import dataclass
@@ -861,7 +862,9 @@ def compose(side: SideQuery) -> tuple:
 
 # ---------------------------------------------------------------------------
 # Library and domain: filter options and the list order (both Joins Labs, as in
-# the website's Visual Similarity window)
+# the website's Visual Similarity window). Each filter takes several values, to
+# show only them or to hide them; Domain is a tree (a parent takes in its whole
+# branch); each counts the candidates the other filters keep.
 # ---------------------------------------------------------------------------
 
 ORDERS = ("rank", "library", "domain")
@@ -872,16 +875,110 @@ def normalize_order(value) -> str:
     return value if isinstance(value, str) and value in ORDERS else "rank"
 
 
-def primary_domain(domains) -> dict:
+_MAX_DOMAIN_DEPTH = 4
+
+
+def domain_hebrew_names(hierarchy) -> dict:
+    """{English: Hebrew} for the domains of ``FjmsService.get_domain_hierarchy()``."""
+    out: dict = {}
+    for parent, info in (hierarchy or {}).items():
+        if info.get("parent_domain_heb"):
+            out.setdefault(parent, info["parent_domain_heb"])
+        for child in info.get("children") or []:
+            if child.get("domain_heb"):
+                out.setdefault(child["domain"], child["domain_heb"])
+            for sub in child.get("children") or []:
+                if sub.get("domain_heb"):
+                    out.setdefault(sub["domain"], sub["domain_heb"])
+    return out
+
+
+def domain_path(domain: Optional[str], parent_domain: Optional[str] = None,
+                domain_heb: Optional[str] = "", parent_domain_heb: Optional[str] = "",
+                hebrew_names: Optional[dict] = None) -> list:
+    """A domain's place in the FJMS tree: [[key, English, Hebrew], ...] from the top,
+    the domain itself last; [] for none.
+
+    The key is the filter value: the English name, qualified with its parent when
+    the name is ambiguous ("Other (Liturgy and Brakhot)"). Each step up follows the
+    canonical hierarchy (shared.domain_hierarchy), else the row's own parent;
+    *hebrew_names* ({English: Hebrew}) names the steps the row does not.
+    """
+    from shared.domain_hierarchy import FJMS_PARENT_OF
+    from shared.fjms_service import qualify_domain_name
+
+    if not domain:
+        return []
+    names = hebrew_names or {}
+    row_parent = parent_domain if parent_domain and parent_domain != domain else None
+    path = [[qualify_domain_name(domain, row_parent), domain,
+             domain_heb or names.get(domain, "")]]
+    up = FJMS_PARENT_OF.get(domain) or row_parent
+    while up and len(path) < _MAX_DOMAIN_DEPTH and all(step[1] != up for step in path):
+        hebrew = names.get(up) or (parent_domain_heb if up == row_parent else "")
+        path.insert(0, [up, up, hebrew or ""])
+        up = FJMS_PARENT_OF.get(up)
+    return path
+
+
+def primary_domain(domains, hebrew_names: Optional[dict] = None) -> dict:
     """A fragment's domain as the Visual Similarity window shows it.
 
     The first of its rows from ``FjmsService.get_domains_for_sys_ids``, as
-    {'domain', 'domain_heb'}; {} when it has none.
+    {'domain', 'domain_heb', 'domain_path'} (domain_path: its place in the tree,
+    for the Domain filter); {} when it has none.
     """
     for d in domains or []:
         if isinstance(d, dict) and d.get("domain"):
-            return {"domain": d["domain"], "domain_heb": d.get("domain_heb") or ""}
+            return {
+                "domain": d["domain"],
+                "domain_heb": d.get("domain_heb") or "",
+                "domain_path": domain_path(
+                    d["domain"], d.get("parent_domain"), d.get("domain_heb") or "",
+                    d.get("parent_domain_heb") or "", hebrew_names),
+            }
     return {}
+
+
+def domain_path_of(info: Optional[dict]) -> list:
+    """A candidate's domain path from its enrichment (or a suggestion's fields);
+    one made of its domain alone when it carries none (saved before paths were)."""
+    info = info or {}
+    if info.get("domain_path"):
+        return info["domain_path"]
+    domain = info.get("domain")
+    if not domain or domain == "--":
+        return []
+    return [[domain, domain, info.get("domain_heb") or ""]]
+
+
+FILTER_MODES = ("show_only", "hide")
+
+
+def normalize_filter_mode(value) -> str:
+    """'hide' (leave the chosen values out); anything else is 'show_only'."""
+    return "hide" if value == "hide" else "show_only"
+
+
+def filter_passes(value: Optional[str], chosen, mode) -> bool:
+    """Whether a candidate whose library (or domain) is *value* passes that filter.
+
+    Nothing chosen passes every candidate. 'show_only' keeps the candidates whose
+    value is one of *chosen*; 'hide' leaves those out and keeps the rest, a
+    candidate with no value included.
+    """
+    if not chosen:
+        return True
+    return (value in chosen) != (normalize_filter_mode(mode) == "hide")
+
+
+def path_passes(path, chosen, mode) -> bool:
+    """filter_passes for a domain path (domain_path): a candidate is among the
+    chosen when any step of its path is, so a chosen parent takes in its branch."""
+    if not chosen:
+        return True
+    hit = any(step[0] in chosen for step in path or [])
+    return hit != (normalize_filter_mode(mode) == "hide")
 
 
 def domain_label(domain: Optional[str], domain_heb: Optional[str] = "",
@@ -895,10 +992,12 @@ def domain_label(domain: Optional[str], domain_heb: Optional[str] = "",
     return domain or ""
 
 
-def counted_options(pairs) -> list:
+def counted_options(pairs, counted=None) -> list:
     """[(value, label, count)] for each distinct value, in label order.
 
-    From one (value, label) pair per candidate; empty values are left out.
+    From one (value, label) pair per candidate; empty values are left out. With
+    *counted* (the values of the candidates to count: those the other filters
+    keep), every value keeps its row, counted among those alone (0 for none).
     """
     counts: dict = {}
     labels: dict = {}
@@ -907,7 +1006,70 @@ def counted_options(pairs) -> list:
             continue
         counts[value] = counts.get(value, 0) + 1
         labels.setdefault(value, label or value)
+    if counted is not None:
+        tally = Counter(counted)
+        counts = {v: tally.get(v, 0) for v in counts}
     return [(v, labels[v], counts[v]) for v in sorted(counts, key=lambda v: labels[v])]
+
+
+def domain_tree_options(paths, counted_paths=None, hebrew: bool = False) -> list:
+    """The Domain filter as a tree: [(key, label, count, depth)], each node before
+    its branch, siblings in the canonical FJMS order (shared.domain_hierarchy).
+
+    *paths* (domain_path, one per candidate) make the tree; a node counts the
+    paths in *counted_paths* (default: *paths*; those the other filters keep)
+    that pass through it, 0 for none.
+    """
+    from shared.domain_hierarchy import domain_sort_key
+
+    nodes: dict = {}
+    children: dict = {}
+    for path in paths:
+        parent = None
+        for key, english, hebrew_name in path:
+            node = nodes.get(key)
+            if node is None:
+                node = nodes[key] = {"en": english, "he": hebrew_name}
+                children.setdefault(parent, []).append(key)
+            elif hebrew_name and not node["he"]:
+                node["he"] = hebrew_name
+            parent = key
+    counts = Counter()
+    for path in paths if counted_paths is None else counted_paths:
+        counts.update({step[0] for step in path})
+
+    out: list = []
+
+    def _walk(parent, depth):
+        for key in sorted(children.get(parent, []),
+                          key=lambda k: domain_sort_key(nodes[k]["en"])):
+            node = nodes[key]
+            out.append((key, domain_label(node["en"], node["he"], hebrew),
+                        counts.get(key, 0), depth))
+            _walk(key, depth + 1)
+
+    _walk(None, 0)
+    return out
+
+
+def facet_rows(candidates, library_ok, domain_ok, rest_ok, path_of,
+               hebrew: bool = False) -> tuple:
+    """The Library and Domain filter options for both Joins Labs, each
+    [(value, label, count, depth)].
+
+    Every library and domain among *candidates* keeps its row; each counts the
+    candidates the OTHER filters keep (*rest_ok* and the other of *library_ok* /
+    *domain_ok*), so choosing domains updates the library counts and the other
+    way round. Libraries in code order; domains as the tree (domain_tree_options;
+    *path_of* gives a candidate's domain_path), a parent counting its branch.
+    """
+    rest = [c for c in candidates if rest_ok(c)]
+    libraries = counted_options(
+        ((c.library_code, c.library_code) for c in candidates),
+        counted=[c.library_code for c in rest if domain_ok(c)])
+    domains = domain_tree_options(
+        [path_of(c) for c in candidates], [path_of(c) for c in rest if library_ok(c)], hebrew)
+    return [(value, label, n, 0) for value, label, n in libraries], domains
 
 
 def order_candidates(candidates, order, domain_of) -> list:

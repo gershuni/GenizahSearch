@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 from PyQt6.QtCore import QEvent, Qt
-from PyQt6.QtGui import QColor, QCursor, QFontMetrics
+from PyQt6.QtGui import QColor, QFontMetrics
 
 from genizah_core import CURRENT_LANG, normalize_shelfmark, tr
 from desktop.gui_threads import FilterCountWorker
@@ -1564,31 +1564,8 @@ class PreSearchFilterDialog(QDialog):
 
     def _make_chip(self, text, bg_color, on_click):
         """Create a removable chip button (dark-mode aware)."""
-        chip = QPushButton(f"{text}  \u00d7")
-        chip.setFlat(True)
-        chip.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        # Detect dark mode via palette brightness
-        palette = chip.palette()
-        is_dark = palette.color(palette.ColorRole.Window).lightness() < 128
-        if is_dark:
-            # Darken the background for dark mode, use light text
-            from PyQt6.QtGui import QColor as _QC
-            c = _QC(bg_color)
-            dark_bg = c.darker(250).name()
-            hover_bg = c.darker(180).name()
-            chip.setStyleSheet(
-                f"QPushButton {{ background: {dark_bg}; color: #e0e0e0; border: 1px solid #555; "
-                "border-radius: 10px; padding: 2px 8px; font-size: 11px; } "
-                f"QPushButton:hover {{ background: {hover_bg}; }}"
-            )
-        else:
-            chip.setStyleSheet(
-                f"QPushButton {{ background: {bg_color}; border: 1px solid #ccc; "
-                "border-radius: 10px; padding: 2px 8px; font-size: 11px; } "
-                "QPushButton:hover { background: #ddd; }"
-            )
-        chip.clicked.connect(on_click)
-        return chip
+        from desktop.widgets.filter_chip import make_filter_chip
+        return make_filter_chip(text, bg_color, on_click)
 
     def _rebuild_dialog_chips(self):
         """Rebuild unified chip bar showing all active filters."""

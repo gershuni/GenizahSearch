@@ -73,6 +73,7 @@ DESKTOP_MODULES = [
     "desktop/column_chooser.py",
     "desktop/widgets/flow_layout.py",
     "desktop/widgets/overflow_row.py",
+    "desktop/widgets/filter_chip.py",   # removable filter chips, 2026-10-27
     # 2026-10-24: the side menu, the optional second menu layout.
     "desktop/widgets/side_nav.py",
     "desktop/go_to_dialog.py",           # the Go to box (Ctrl+G), 2026-10-24

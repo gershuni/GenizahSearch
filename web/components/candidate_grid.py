@@ -33,13 +33,15 @@ MULTITENANT (T-117-03 / T-119-07):
 """
 from __future__ import annotations
 
+import json
 import math
 from typing import Optional, Callable
 
 from nicegui import ui
 
 from shared.joins_lab import (
-    TRIAGE_ICONS, counted_options, domain_label, normalize_order, order_candidates,
+    TRIAGE_ICONS, domain_label, domain_path_of, facet_rows, filter_passes,
+    normalize_filter_mode, normalize_order, order_candidates, path_passes,
 )
 from shared.synthetic_sys_id import is_synthetic_sys_id
 from web.services import is_oxford_manuscript, get_oxford_direct_image_url
@@ -261,8 +263,11 @@ def compute_filtered(
                           - exclude_mismatch: bool — exclude size-mismatch candidates
                           - triage_states: list[str] — 'All'/'Not triaged'/'Yes'/'Maybe'/'No'
                           - text_q: str — case-insensitive substring on shelfmark+title
-                          - libraries: list[str] — include only these library codes
-                          - domains: list[str] — include only these (English) domains
+                          - libraries: list[str] — library codes (empty=all)
+                          - domains: list[str] — domain keys (empty=all); a
+                            parent takes in its branch (domain_path)
+                          - libraries_mode / domains_mode: 'show_only' (the
+                            default) shows only those; 'hide' leaves them out
                           - order: 'rank' | 'library' | 'domain' — see below
         enrichment:     dict[sys_id → {width_cm, height_cm, material, domain, ...}]
         triage:         dict[sys_id → 'yes'|'maybe'|'no'] (or TriageState)
@@ -273,61 +278,9 @@ def compute_filtered(
         grouped by library or by domain (shared.joins_lab.order_candidates; each
         group keeps that order) when filter_state['order'] asks for it.
     """
-    text_q = (filter_state.get("text_q") or "").strip().lower()
-    materials = set(filter_state.get("materials") or [])
-    has_dims = bool(filter_state.get("has_dims", False))
-    exclude_mismatch = bool(filter_state.get("exclude_mismatch", False))
-    triage_states = set(filter_state.get("triage_states") or [])
-    libraries = set(filter_state.get("libraries") or [])
-    domains = set(filter_state.get("domains") or [])
-
-    # Look up anchor width for size-mismatch comparison
-    anchor_w = enrichment.get(anchor_sys_id, {}).get("width_cm")
-
-    # Support both TriageState objects and plain dicts
-    def _get_verdict(sys_id: str) -> Optional[str]:
-        if isinstance(triage, TriageState):
-            return triage.get(sys_id)
-        return triage.get(sys_id)
-
-    out = []
-    for c in all_candidates:
-        # Text filter (case-insensitive substring on shelfmark + title)
-        if text_q:
-            shelfmark_l = (getattr(c, "shelfmark", None) or "").lower()
-            title_l = (getattr(c, "title", None) or "").lower()
-            if text_q not in shelfmark_l and text_q not in title_l:
-                continue
-
-        # Library filter
-        if libraries and c.library_code not in libraries:
-            continue
-
-        # Material filter
-        m = enrichment.get(c.sys_id, {})
-        if materials and m.get("material") not in materials:
-            continue
-
-        # Domain filter (the fragment's first domain, as shown on its card)
-        if domains and m.get("domain") not in domains:
-            continue
-
-        # Has-dims filter
-        if has_dims and not (m.get("width_cm") and m.get("height_cm")):
-            continue
-
-        # Size-mismatch filter
-        if exclude_mismatch and is_size_mismatch(m.get("width_cm"), anchor_w):
-            continue
-
-        # Triage-state filter (WR-03: simplified from three-branch form)
-        if triage_states and "All" not in triage_states:
-            verdict = _get_verdict(c.sys_id)
-            verdict_key = verdict.capitalize() if verdict else "Not triaged"
-            if verdict_key not in triage_states:
-                continue
-
-        out.append(c)
+    library_ok, domain_ok, rest_ok = _filter_parts(
+        filter_state, enrichment, triage, anchor_sys_id)
+    out = [c for c in all_candidates if rest_ok(c) and library_ok(c) and domain_ok(c)]
 
     order = normalize_order(filter_state.get("order"))
     if order != "rank":
@@ -337,25 +290,82 @@ def compute_filtered(
     return out
 
 
+def _filter_parts(filter_state: dict, enrichment: dict, triage, anchor_sys_id: str):
+    """compute_filtered's filters as three predicates on a candidate: Library,
+    Domain, and the rest. Apart, so each of Library and Domain can be counted
+    among the candidates the other filters keep (facet_options)."""
+    text_q = (filter_state.get("text_q") or "").strip().lower()
+    materials = set(filter_state.get("materials") or [])
+    has_dims = bool(filter_state.get("has_dims", False))
+    exclude_mismatch = bool(filter_state.get("exclude_mismatch", False))
+    triage_states = set(filter_state.get("triage_states") or [])
+    libraries = set(filter_state.get("libraries") or [])
+    libraries_mode = filter_state.get("libraries_mode")
+    domains = set(filter_state.get("domains") or [])
+    domains_mode = filter_state.get("domains_mode")
+
+    # Look up anchor width for size-mismatch comparison
+    anchor_w = enrichment.get(anchor_sys_id, {}).get("width_cm")
+
+    def library_ok(c) -> bool:
+        # Shown only, or hidden
+        return filter_passes(c.library_code, libraries, libraries_mode)
+
+    def domain_ok(c) -> bool:
+        # The fragment's first domain, as shown on its card, and the branch it
+        # sits in: a chosen parent takes in its whole branch
+        return path_passes(domain_path_of(enrichment.get(c.sys_id)), domains, domains_mode)
+
+    def rest_ok(c) -> bool:
+        # Text filter (case-insensitive substring on shelfmark + title)
+        if text_q:
+            shelfmark_l = (getattr(c, "shelfmark", None) or "").lower()
+            title_l = (getattr(c, "title", None) or "").lower()
+            if text_q not in shelfmark_l and text_q not in title_l:
+                return False
+
+        m = enrichment.get(c.sys_id, {})
+        # Material filter
+        if materials and m.get("material") not in materials:
+            return False
+        # Has-dims filter
+        if has_dims and not (m.get("width_cm") and m.get("height_cm")):
+            return False
+        # Size-mismatch filter
+        if exclude_mismatch and is_size_mismatch(m.get("width_cm"), anchor_w):
+            return False
+
+        # Triage-state filter (WR-03: simplified from three-branch form); both
+        # TriageState objects and plain dicts have .get
+        if triage_states and "All" not in triage_states:
+            verdict = triage.get(c.sys_id)
+            verdict_key = verdict.capitalize() if verdict else "Not triaged"
+            if verdict_key not in triage_states:
+                return False
+        return True
+
+    return library_ok, domain_ok, rest_ok
+
+
 def candidate_domain_label(cand, enrichment: dict, hebrew: bool) -> str:
     """The candidate's domain as the visitor reads it ('' when it has none)."""
     m = enrichment.get(cand.sys_id) or {}
     return domain_label(m.get("domain"), m.get("domain_heb"), hebrew)
 
 
-def library_options(candidates: list) -> dict:
-    """Library filter options: library code -> "code (count)", in code order."""
-    return {v: f"{label} ({n})" for v, label, n in
-            counted_options((c.library_code, c.library_code) for c in candidates)}
+def facet_options(all_candidates: list, filter_state: dict, enrichment: dict,
+                  triage, anchor_sys_id: str, hebrew: bool) -> tuple:
+    """The Library and Domain filter options, each [(value, label, count, depth)].
 
-
-def domain_options(candidates: list, enrichment: dict, hebrew: bool) -> dict:
-    """Domain filter options: English domain -> "label (count)", in label order."""
-    pairs = []
-    for c in candidates:
-        m = enrichment.get(c.sys_id) or {}
-        pairs.append((m.get("domain"), domain_label(m.get("domain"), m.get("domain_heb"), hebrew)))
-    return {v: f"{label} ({n})" for v, label, n in counted_options(pairs)}
+    Every library and domain in the results keeps its row; each counts the
+    candidates the OTHER filters keep, so choosing domains updates the library
+    counts and the other way round. Libraries in code order; domains as a tree
+    (shared.joins_lab.domain_tree_options), a parent counting its branch.
+    """
+    library_ok, domain_ok, rest_ok = _filter_parts(
+        filter_state, enrichment, triage, anchor_sys_id)
+    return facet_rows(all_candidates, library_ok, domain_ok, rest_ok,
+                      lambda c: domain_path_of(enrichment.get(c.sys_id)), hebrew)
 
 
 def more_filters_count(filter_state: dict) -> int:
@@ -1341,30 +1351,67 @@ def create_candidate_table(
     return outer
 
 
-def _facet_select(filter_state: dict, key: str, options: dict, label: str,
-                  marker: str, ready: bool, on_filter_change: Callable):
+def nest_options(sel, depths: list) -> None:
+    """Show a select's options as a tree: each indented by its depth (*depths*, in
+    option order), the top level in medium weight. NiceGUI sends each option's
+    value as its index, which picks its depth; the labels stay plain, so chips
+    and the closed select show the bare names."""
+    if not any(depths):
+        return
+    sel.props('popup-content-style="min-width: 18rem"')    # room for long, indented names
+    by_index = json.dumps(list(depths))
+    sel.add_slot("option", (
+        '<q-item v-bind="props.itemProps">'
+        '<q-item-section :style="{paddingInlineStart: (' + by_index
+        + "[props.opt.value] || 0) * 1.25 + 'em'}\">"
+        '<q-item-label :class="' + by_index
+        + "[props.opt.value] ? '' : 'text-weight-medium'\">"
+        "{{ props.opt.label }}</q-item-label></q-item-section></q-item>"))
+
+
+def _facet_select(filter_state: dict, key: str, rows: list, label: str,
+                  marker: str, ready: bool, on_filter_change: Callable,
+                  mode_key: Optional[str] = None):
     """One toolbar filter, Library or Domain: several values, each with its count.
+
+    *rows* are facet_options' [(value, label, count, depth)]; Domain's depths make
+    a tree (nest_options). With *mode_key*, the list opens with a Show only | Hide
+    switch, kept in filter_state[mode_key]: show only the chosen values, or hide
+    them.
 
     A choice applies when the list closes, not on each click: applying re-renders
     the grid, this select included, which would shut the list after one pick. The
     clear button changes the value with the list shut, so that applies at once.
     """
     current = list(filter_state.get(key) or [])
+    mode = ({"value": normalize_filter_mode(filter_state.get(mode_key))}
+            if mode_key else None)
+    names = {value: name for value, name, _n, _d in rows}
+    options = {value: f"{name} ({n})" for value, name, n, _d in rows}
+    depths = [depth for *_rest, depth in rows]
     # A value that still filters but is in none of these results (a filter kept
     # from an earlier search) stays listed with a zero count, so it can be seen
     # and cleared; dropped from the list, it would empty the grid out of sight.
-    options = {**options, **{v: f"{v} (0)" for v in current if v not in options}}
+    for value in current:
+        if value not in options:
+            names[value], options[value] = value, f"{value} (0)"
+            depths.append(0)
     sel = ui.select(
         options=options, value=current, label=label, multiple=True, clearable=True,
     ).props("dense outlined options-dense").classes("w-40").mark(marker)
+    nest_options(sel, depths)
 
     def _show(values) -> None:
         # The names alone ("CUL, JTS"), not each option's "CUL (12)". Set directly:
-        # a Hebrew domain may hold a quote.
+        # a Hebrew domain may hold a quote. Hidden ones say so in the label above
+        # them ("Domain · Hiding"), which leaves the narrow field to the names.
         if values:
-            sel.props["display-value"] = ", ".join(options[v].rsplit(" (", 1)[0] for v in values)
+            sel.props["display-value"] = ", ".join(names[v] for v in values)
         else:
             sel.props.pop("display-value", None)
+        if mode is not None:
+            hiding = bool(values) and mode["value"] == "hide"
+            sel.label = f"{label} · {tr('Hiding')}" if hiding else label
 
     _show(current)
     if not (ready and options):
@@ -1375,7 +1422,11 @@ def _facet_select(filter_state: dict, key: str, options: dict, label: str,
 
     def _commit() -> None:
         values = list(sel.value or [])
-        if values != list(filter_state.get(key) or []):
+        changed = values != list(filter_state.get(key) or [])
+        if mode is not None and mode["value"] != normalize_filter_mode(filter_state.get(mode_key)):
+            filter_state[mode_key] = mode["value"]
+            changed = True
+        if changed:
             filter_state[key] = values
             on_filter_change()
 
@@ -1389,6 +1440,19 @@ def _facet_select(filter_state: dict, key: str, options: dict, label: str,
         is_open["value"] = False
         _commit()
 
+    if mode is not None:
+        # At the top of the open list; it applies with the picks, when the list closes.
+        with sel.add_slot("before-options"):
+            switch = ui.toggle(
+                {"show_only": tr("Show only"), "hide": tr("Hide")}, value=mode["value"],
+            ).props("dense no-caps no-wrap spread").classes("w-full q-pa-xs").mark(f"{marker}-mode")
+
+        def _on_mode_change(e) -> None:
+            mode["value"] = normalize_filter_mode(e.value)
+            _on_value_change(e)
+
+        switch.on_value_change(_on_mode_change)
+
     sel.on("popup-show", lambda: is_open.update(value=True))
     sel.on("popup-hide", _on_hide)
     sel.on_value_change(_on_value_change)
@@ -1396,7 +1460,8 @@ def _facet_select(filter_state: dict, key: str, options: dict, label: str,
 
 
 def _grid_header(total: int, *, all_candidates: list, filter_state: dict,
-                 enrichment: dict, enrichment_ready: bool, order: str,
+                 enrichment: dict, enrichment_ready: bool, triage, anchor_sys_id: str,
+                 order: str,
                  on_order_change: Optional[Callable], on_filter_change: Optional[Callable],
                  on_filter_open: Optional[Callable]) -> None:
     """The row above the cards: the count, then Library, Domain, Sort and More filters…"""
@@ -1406,14 +1471,18 @@ def _grid_header(total: int, *, all_candidates: list, filter_state: dict,
         )
         with ui.row().classes("items-center gap-1"):
             if on_filter_change is not None:
-                hebrew = get_language() == "he"
-                lib_opts = library_options(all_candidates)
-                dom_opts = domain_options(all_candidates, enrichment, hebrew)
+                lib_opts, dom_opts = facet_options(
+                    all_candidates, filter_state, enrichment, triage, anchor_sys_id,
+                    get_language() == "he")
+                # Each shows only the chosen values, or hides them, and counts
+                # the candidates the other filters keep.
                 _facet_select(filter_state, "libraries", lib_opts, tr("Library"),
-                              "joins-filter-library", True, on_filter_change)
+                              "joins-filter-library", True, on_filter_change,
+                              mode_key="libraries_mode")
                 # Domain comes with the enrichment, so it waits for it.
                 _facet_select(filter_state, "domains", dom_opts, tr("Domain"),
-                              "joins-filter-domain", enrichment_ready, on_filter_change)
+                              "joins-filter-domain", enrichment_ready, on_filter_change,
+                              mode_key="domains_mode")
             if on_order_change is not None:
                 order_sel = ui.select(
                     {"rank": tr("Rank"), "library": tr("Library"),
@@ -1528,7 +1597,8 @@ def create_candidate_grid(
 
     header = dict(
         all_candidates=list(all_candidates or []), filter_state=filter_state,
-        enrichment=enrichment, enrichment_ready=enrichment_ready, order=order,
+        enrichment=enrichment, enrichment_ready=enrichment_ready, triage=triage,
+        anchor_sys_id=anchor_sys_id, order=order,
         on_order_change=on_order_change, on_filter_change=on_filter_change,
         on_filter_open=on_filter_open,
     )

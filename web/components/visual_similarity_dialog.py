@@ -6,7 +6,8 @@ Displays ranked visual similarity suggestions from FJMS image analysis
 alongside the original manuscript in a side-by-side layout.
 
 Left pane: Original manuscript (image thumbnail + text snippet)
-Right pane: Ranked suggestions, filterable by library and domain, shown either
+Right pane: Ranked suggestions, filterable by library and domain (each shows
+            only the chosen values, or hides them), shown either
             as a list with expandable rows or as a grid of low-resolution
             thumbnails (the visitor's choice is remembered), with action
             buttons (Browse, Puzzle, Add to List, Add as Join).
@@ -18,11 +19,14 @@ Data sourced from visual_similarity.db sidecar via VisualSimilarityService.
 
 import asyncio
 import logging
-from collections import Counter
 
 from nicegui import ui, run
 
-from web.components.candidate_grid import build_thumbnail_url
+from shared.joins_lab import (
+    counted_options, domain_hebrew_names, domain_path_of, domain_tree_options, filter_passes,
+    normalize_filter_mode, path_passes, primary_domain,
+)
+from web.components.candidate_grid import build_thumbnail_url, nest_options
 from web.safe_storage import safe_user_get, safe_user_set
 from web.services import get_oxford_direct_image_url, is_oxford_manuscript
 from web.translations import tr, get_language
@@ -69,37 +73,73 @@ def _domain_label(s: dict, is_heb: bool) -> str:
     return s.get('domain', '--')
 
 
-def _counted_options(pairs) -> dict:
-    """Filter options from (value, label) pairs: value -> "label (count)", in label order.
+def _library_ok(s: dict, filter_state: dict) -> bool:
+    return filter_passes(s.get('library_code'), filter_state['libraries'],
+                         filter_state['libraries_mode'])
 
-    The count is how many of the pairs carry that value: for the dialog, how
-    many of the loaded suggestions, before any filter is applied.
+
+def _domain_ok(s: dict, filter_state: dict) -> bool:
+    # A chosen parent takes in its whole branch (shared.joins_lab.path_passes)
+    return path_passes(domain_path_of(s), filter_state['domains'], filter_state['domains_mode'])
+
+
+def _passes_filters(s: dict, filter_state: dict) -> bool:
+    """Whether a suggestion passes the Library and Domain filters, each showing
+    only its chosen values or hiding them (shared.joins_lab.filter_passes)."""
+    return _library_ok(s, filter_state) and _domain_ok(s, filter_state)
+
+
+def _facet_options(suggestions: list, filter_state: dict, is_heb: bool) -> tuple:
+    """The Library and Domain options, value -> "label (count)", and the domains'
+    depths (for nest_options).
+
+    Every library and domain among the suggestions keeps its row; each counts the
+    suggestions the OTHER filter keeps, so choosing domains updates the library
+    counts and the other way round. Libraries in code order; domains as the FJMS
+    tree (shared.joins_lab.domain_tree_options), a parent counting its branch,
+    unclassified ones ('--') left out.
     """
-    counts = Counter()
-    labels = {}
-    for value, label in pairs:
-        counts[value] += 1
-        labels.setdefault(value, label)
-    return {
-        value: f'{labels[value]} ({counts[value]})'
-        for value in sorted(counts, key=lambda v: labels[v])
-    }
+    libraries = counted_options(
+        ((s.get('library_code'), s.get('library_code')) for s in suggestions),
+        counted=[s.get('library_code') for s in suggestions if _domain_ok(s, filter_state)])
+    domains = domain_tree_options(
+        [domain_path_of(s) for s in suggestions],
+        [domain_path_of(s) for s in suggestions if _library_ok(s, filter_state)],
+        is_heb)
+    return ({value: f'{label} ({n})' for value, label, n in libraries},
+            {value: f'{label} ({n})' for value, label, n, _depth in domains},
+            [depth for *_rest, depth in domains])
 
 
-def _domain_options(suggestions: list, is_heb: bool) -> dict:
-    """Domain filter options: English domain -> "label (count)", in label order."""
-    return _counted_options(
-        (s['domain'], _domain_label(s, is_heb))
-        for s in suggestions if s.get('domain') and s['domain'] != '--'
-    )
+def _wire_facet_filter(sel, label: str, filter_state: dict, key: str, refilter) -> None:
+    """A Library or Domain select (*key* 'libraries' or 'domains'): its values
+    filter at once, shown only or hidden as the Show only | Hide switch at the top
+    of its open list says (as in the Joins Lab toolbar). While values are hidden,
+    the label says so ("Library · Hiding"), leaving the field to the values.
+    *refilter(key)* re-filters after a change to this filter.
+    """
+    mode_key = f'{key}_mode'
 
+    def _relabel() -> None:
+        hiding = bool(filter_state[key]) and filter_state[mode_key] == 'hide'
+        sel.label = f"{label} · {tr('Hiding')}" if hiding else label
 
-def _library_options(suggestions: list) -> dict:
-    """Library filter options: library code -> "code (count)", in code order."""
-    return _counted_options(
-        (s['library_code'], s['library_code'])
-        for s in suggestions if s.get('library_code')
-    )
+    def _on_values(e) -> None:
+        filter_state[key] = e.value or []
+        _relabel()
+        refilter(key)
+
+    def _on_mode(e) -> None:
+        filter_state[mode_key] = normalize_filter_mode(e.value)
+        _relabel()
+        if filter_state[key]:            # nothing chosen: nothing changes
+            refilter(key)
+
+    with sel.add_slot('before-options'):
+        ui.toggle(
+            {'show_only': tr('Show only'), 'hide': tr('Hide')}, value=filter_state[mode_key],
+        ).props('dense no-caps no-wrap spread').classes('w-full q-pa-xs').on_value_change(_on_mode)
+    sel.on_value_change(_on_values)
 
 
 def _suggestion_thumbnail_url(s: dict) -> str | None:
@@ -277,18 +317,22 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
             # Batch domain lookup (one SQL query instead of N+1)
             all_ids = [s['alma_id'] for s in suggestions]
             domain_map = {}
+            hebrew_names = {}
             try:
                 if fjms.is_available():
                     domain_map = fjms.get_domains_for_sys_ids(all_ids)
+                    hebrew_names = domain_hebrew_names(fjms.get_domain_hierarchy())
             except Exception:
                 pass  # Enrichment failed for this item; continue with available data
             for s in suggestions:
                 meta = csv_bank.get(s['alma_id']) if csv_bank else None
                 s['shelfmark'] = meta.get('shelfmark', s['alma_id']) if meta else s['alma_id']
                 s['library_code'] = meta.get('library_code', '') if meta else ''
-                domains = domain_map.get(s['alma_id'], [])
-                s['domain'] = domains[0]['domain'] if domains else '--'
-                s['domain_heb'] = (domains[0].get('domain_heb') or '') if domains else ''
+                # The first of its domains, with its place in the domain tree
+                primary = primary_domain(domain_map.get(s['alma_id'], []), hebrew_names)
+                s['domain'] = primary.get('domain', '--')
+                s['domain_heb'] = primary.get('domain_heb', '')
+                s['domain_path'] = primary.get('domain_path', [])
             return suggestions
 
         data = await run.io_bound(_enrich, data)
@@ -327,10 +371,6 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                 'color: var(--text-muted);'
             )
 
-            # Extract unique libraries and domains for filter options
-            all_libraries = _library_options(data)
-            all_domains = _domain_options(data, is_heb)
-
             # Sort and filter controls
             sort_options = [
                 {'label': tr('Rank'), 'value': 'rank'},
@@ -341,12 +381,17 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
             filter_state = {
                 'sort': 'rank',
                 'libraries': [],
+                'libraries_mode': 'show_only',   # or 'hide' (_wire_facet_filter)
                 'domains': [],
+                'domains_mode': 'show_only',
                 'visible_count': _PAGE_SIZE,
                 'view': _normalize_view(safe_user_get(_VIEW_STORAGE_KEY)),
                 'thumb': _normalize_thumb_size(safe_user_get(_THUMB_SIZE_STORAGE_KEY)),
                 'orig_large': safe_user_get(_ORIGINAL_LARGE_STORAGE_KEY) is True,
             }
+            # Unique libraries and domains for the filter options, with counts
+            all_libraries, all_domains, domain_depths = _facet_options(
+                data, filter_state, is_heb)
 
             with ui.row().classes('w-full items-center gap-2 px-4 pt-2 pb-1 flex-wrap'):
                 sort_sel = ui.select(
@@ -368,6 +413,8 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
                     label=tr('Domain'),
                     multiple=True,
                 ).props('dense outlined use-chips').classes('w-36') if all_domains else None
+                if dom_filter:
+                    nest_options(dom_filter, domain_depths)    # the domain tree
 
                 view_toggle = ui.toggle(
                     {'list': tr('List'), 'grid': tr('Thumbnails')},
@@ -459,11 +506,7 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
 
             def _get_filtered():
                 """Apply filters and sorting, return full filtered list."""
-                filtered = list(data)
-                if filter_state['libraries']:
-                    filtered = [s for s in filtered if s.get('library_code') in filter_state['libraries']]
-                if filter_state['domains']:
-                    filtered = [s for s in filtered if s.get('domain') in filter_state['domains']]
+                filtered = [s for s in data if _passes_filters(s, filter_state)]
 
                 sort_key = filter_state['sort']
                 if sort_key == 'library':
@@ -539,19 +582,21 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
 
             sort_sel.on_value_change(_on_sort_change)
 
-            if lib_filter:
-                def _on_lib_change(e):
-                    filter_state['libraries'] = e.value or []
-                    filter_state['visible_count'] = _PAGE_SIZE
-                    _render_rows()
-                lib_filter.on_value_change(_on_lib_change)
+            def _refilter(changed_key):
+                filter_state['visible_count'] = _PAGE_SIZE
+                _render_rows()
+                # Each filter counts what the other keeps: recount the other one
+                # (its list is shut; its choice is kept).
+                lib_opts, dom_opts, _depths = _facet_options(data, filter_state, is_heb)
+                other, opts = ((dom_filter, dom_opts) if changed_key == 'libraries'
+                               else (lib_filter, lib_opts))
+                if other:
+                    other.set_options(opts)
 
+            if lib_filter:
+                _wire_facet_filter(lib_filter, tr('Library'), filter_state, 'libraries', _refilter)
             if dom_filter:
-                def _on_dom_change(e):
-                    filter_state['domains'] = e.value or []
-                    filter_state['visible_count'] = _PAGE_SIZE
-                    _render_rows()
-                dom_filter.on_value_change(_on_dom_change)
+                _wire_facet_filter(dom_filter, tr('Domain'), filter_state, 'domains', _refilter)
 
             # Switching views keeps the filters and how many are shown.
             def _on_view_change(e):

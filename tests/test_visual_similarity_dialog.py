@@ -1,9 +1,9 @@
 from shared.genizah_translations import TRANSLATIONS
 from web.components.visual_similarity_dialog import (
     _domain_label,
-    _domain_options,
-    _library_options,
+    _facet_options,
     _normalize_view,
+    _passes_filters,
     _pick_preview_image_url,
     _suggestion_thumbnail_url,
 )
@@ -127,6 +127,10 @@ def test_domain_label_falls_back_to_english_without_a_hebrew_name():
     assert _domain_label({"domain": "--"}, is_heb=True) == "--"
 
 
+_NO_FILTER = {"libraries": [], "libraries_mode": "show_only",
+              "domains": [], "domains_mode": "show_only"}
+
+
 def test_domain_options_count_each_domain_and_skip_unclassified():
     suggestions = [
         {"domain": "Liturgy", "domain_heb": "תפילה"},
@@ -135,12 +139,33 @@ def test_domain_options_count_each_domain_and_skip_unclassified():
         {"domain": "--", "domain_heb": ""},
     ]
 
-    assert list(_domain_options(suggestions, is_heb=False).items()) == [
-        ("Derashot", "Derashot (1)"), ("Liturgy", "Liturgy (2)"),
+    _libs, doms, depths = _facet_options(suggestions, _NO_FILTER, is_heb=False)
+    assert list(doms.items()) == [("Derashot", "Derashot (1)"), ("Liturgy", "Liturgy (2)")]
+    assert depths == [0, 0]
+    _libs, doms, _depths = _facet_options(suggestions, _NO_FILTER, is_heb=True)
+    assert list(doms.items()) == [("Derashot", "דרשות (1)"), ("Liturgy", "תפילה (2)")]
+
+
+def test_domain_options_are_the_fjms_tree():
+    """A suggestion's domain path (shared.joins_lab.primary_domain) nests it under
+    its parents, in the canonical order; a parent counts its branch."""
+    from shared.joins_lab import primary_domain
+    suggestions = [
+        {"library_code": "CUL", **primary_domain([{"domain": "Piyyut"}])},
+        {"library_code": "JTS", **primary_domain([{"domain": "Aggadic Midrashim"}])},
+        {"library_code": "JTS", **primary_domain([{"domain": "Midrash"}])},
     ]
-    assert list(_domain_options(suggestions, is_heb=True).items()) == [
-        ("Derashot", "דרשות (1)"), ("Liturgy", "תפילה (2)"),
+    _libs, doms, depths = _facet_options(suggestions, _NO_FILTER, is_heb=False)
+    assert list(doms.items()) == [
+        ("Rabbinic Literature", "Rabbinic Literature (2)"), ("Midrash", "Midrash (2)"),
+        ("Aggadic Midrashim", "Aggadic Midrashim (1)"),
+        ("Piyut and its Interpretation", "Piyut and its Interpretation (1)"),
+        ("Piyyut", "Piyyut (1)"),
     ]
+    assert depths == [0, 1, 2, 0, 1]
+    # A chosen parent filters its branch
+    state = {**_NO_FILTER, "domains": ["Rabbinic Literature"]}
+    assert [_passes_filters(s, state) for s in suggestions] == [False, True, True]
 
 
 def test_library_options_count_each_library_in_code_order():
@@ -152,9 +177,44 @@ def test_library_options_count_each_library_in_code_order():
         {},
     ]
 
-    assert list(_library_options(suggestions).items()) == [
-        ("CUL", "CUL (2)"), ("JTS", "JTS (1)"),
+    libs, _doms, _depths = _facet_options(suggestions, _NO_FILTER, is_heb=False)
+    assert list(libs.items()) == [("CUL", "CUL (2)"), ("JTS", "JTS (1)")]
+
+
+def test_each_filter_counts_what_the_other_keeps():
+    suggestions = [
+        {"library_code": "CUL", "domain": "Bible"},
+        {"library_code": "CUL", "domain": "Liturgy"},
+        {"library_code": "JTS", "domain": "Bible"},
     ]
+    state = {**_NO_FILTER, "domains": ["Bible"]}
+    libs, doms, _depths = _facet_options(suggestions, state, is_heb=False)
+    assert libs == {"CUL": "CUL (1)", "JTS": "JTS (1)"}          # follows Domain
+    assert doms == {"Bible": "Bible (2)", "Liturgy": "Liturgy (1)"}   # its own: unchanged
+    state = {**_NO_FILTER, "libraries": ["JTS"], "libraries_mode": "hide"}
+    libs, doms, _depths = _facet_options(suggestions, state, is_heb=False)
+    assert libs == {"CUL": "CUL (2)", "JTS": "JTS (1)"}
+    assert doms == {"Bible": "Bible (1)", "Liturgy": "Liturgy (1)"}
+
+
+def test_library_and_domain_filters_show_only_or_hide():
+    s = {"library_code": "CUL", "domain": "Bible"}
+    unclassified = {"library_code": "JTS", "domain": "--"}
+
+    def state(libs=(), lib_mode="show_only", doms=(), dom_mode="show_only"):
+        return {"libraries": list(libs), "libraries_mode": lib_mode,
+                "domains": list(doms), "domains_mode": dom_mode}
+
+    assert _passes_filters(s, state())                           # nothing chosen
+    assert _passes_filters(s, state(libs=["CUL", "JTS"]))
+    assert not _passes_filters(s, state(libs=["CUL"], lib_mode="hide"))
+    assert _passes_filters(s, state(libs=["JTS"], lib_mode="hide"))
+    assert not _passes_filters(s, state(doms=["Liturgy"]))
+    assert not _passes_filters(s, state(doms=["Bible", "Law"], dom_mode="hide"))
+    assert not _passes_filters(s, state(libs=["JTS"], lib_mode="hide", doms=["Bible"],
+                                        dom_mode="hide"))         # both must pass
+    assert _passes_filters(unclassified, state(doms=["Bible"], dom_mode="hide"))
+    assert not _passes_filters(unclassified, state(doms=["Bible"]))
 
 
 def test_thumb_size_defaults_to_small():

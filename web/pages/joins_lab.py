@@ -72,7 +72,8 @@ from shared.fragment_details import fetch_fragment_details
 from shared.responsa_match import ResponsaQueryRefused
 from shared.joins_lab import (
     BuilderRow, Candidate, SideQuery, apply_cross_side, compose, dedup_candidates,
-    detect_self_match, merge_candidates, normalize_order, primary_domain,
+    detect_self_match, domain_hebrew_names, merge_candidates, normalize_order,
+    primary_domain,
 )
 from shared.visual_similarity_service import get_vs_service
 from shared.export_utils import GENIZAHSEARCH_URL
@@ -520,9 +521,11 @@ async def _enrich_candidates(sys_ids: list) -> dict:
             return {}
         out = fjms_svc.get_measurement_summaries_batch(sys_ids) or {}
         # The domain for the Library/Domain filter and order: the first of each
-        # fragment's domains, as the Visual Similarity window shows it.
+        # fragment's domains, as the Visual Similarity window shows it, with its
+        # place in the domain tree (named in Hebrew from the cached hierarchy).
+        hebrew_names = domain_hebrew_names(fjms_svc.get_domain_hierarchy())
         for sid, domains in (fjms_svc.get_domains_for_sys_ids(sys_ids) or {}).items():
-            primary = primary_domain(domains)
+            primary = primary_domain(domains, hebrew_names)
             if primary:
                 out.setdefault(sid, {}).update(primary)
         return out
@@ -612,7 +615,9 @@ def create_joins_lab_page(
         'triage_states': [],
         'text_q': '',
         'libraries': [],              # library codes (empty = all)
+        'libraries_mode': 'show_only',  # 'show_only' | 'hide' those libraries
         'domains': [],                # English domains (empty = all)
+        'domains_mode': 'show_only',  # 'show_only' | 'hide' those domains
         'order': 'rank',              # 'rank' | 'library' | 'domain' (the Sort control)
     }
     _enrichment: dict = {}        # sys_id → {width_cm, height_cm, material, ...} (D-16)
