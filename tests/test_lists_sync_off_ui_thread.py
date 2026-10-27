@@ -2086,7 +2086,10 @@ def test_closing_during_an_upload_keeps_what_it_did(gui, tmp_path, monkeypatch, 
             time.sleep(0.01)                                           # the worker ended; nothing drained it
     took, event = _close(host)
     try:
-        assert took < 1.0, f"closeEvent took {took:.1f}s"
+        # The budget catches a wait on the worker. In the queued case it has already ended, so the
+        # time is disk work only (the save, and on_done re-reading it): the 5 s the process exit gets.
+        budget = 5.0 if cell == "upload-result-queued" else 1.0
+        assert took < budget, f"closeEvent took {took:.1f}s"
         assert event.isAccepted() and runner.closed
         assert done and done[0].get("shutdown") is True
         on_disk = R.saved(desk)
