@@ -2142,3 +2142,35 @@ PGP edition and View All had the same unescaped step. All now use `desktop.widge
 then `\n` → `<br>`). Checked first that no displayed PGP/FGP text relies on real markup: the `<b>`/`<a>` tags are
 in PGP's `description` and `scholarship_records`, shown elsewhere. `tests/test_desktop_angle_marks.py` reads the
 marks back from both windows and fails any new site that builds HTML from unescaped text.
+
+---
+
+## Closed entries moved out of the tracker on 2026-10-27
+
+Moved by `scripts/archive_closed_issues.py`: each row as it stood, then its details. The IDs are not reused.
+
+| ID | Issue | Where | Opened | Status |
+|----|-------|-------|--------|--------|
+| GS-60 (OPEN_ISSUES.md) | FGP stored HTML entities (`&deg;` in ~520 rows) render differently per surface | `web/pages/search_results.py::_fgp_text_for_display`; `web/pages/browse.py`; `desktop/result_dialog.py` | 2026-09-25 | ✅ Fixed (2026-10-27, 943f995c) |
+
+### GS-60
+
+**FGP stored HTML entities (`&deg;` in ~520 rows) render differently per surface** · P3 · Browse and viewer · ❌ Open · opened 2026-09-25
+
+Where: `web/pages/search_results.py::_fgp_text_for_display`; `web/pages/browse.py`; `desktop/result_dialog.py`
+
+Moved 2026-10-25 from `1. Outstanding Bugs / P3 - Low Priority`, where it read:
+
+- **Issue:** **FGP stored HTML entities (`&deg;` in ~520 rows) render differently per surface**
+- **File:** `web/pages/search_results.py::_fgp_text_for_display` (Quick View decodes), Browse (shows `&deg;` literally), desktop `desktop/result_dialog.py::_rd_display_pgp_text` and `genizah_app.py` Browse (render edition text as unescaped Qt HTML, so tag-like notation is dropped there)
+- **Status:** ❌ Open (2026-09-25)
+- **Notes:** Do not decode in `shared/fgp_service.py`: the desktop relies on the entities staying encoded, and decoding there would double-decode. Fix per surface: Browse web-side decode like Quick View; desktop escape-then-mark.
+
+*Triage 2026-10-25:* still open. Only web/pages/search_results.py:173-181 (Quick View) unescapes; web/pages/browse.py:3838 shows the FGP section_text via ui.label with no unescape, and desktop/result_dialog.py:2028-2054 renders edition text as unescaped Qt HTML. No html.unescape exists in browse.py, shared/fgp_service.py or desktop/ (grep).
+
+Fixed 2026-10-27 (943f995c): `shared.fgp_service.decode_stored_entities` decodes well-formed entities once, in
+`_row_to_fgp_source` (content and section texts), so Quick View, web Browse and the desktop all show `°`. The
+desktop no longer renders FGP text as Qt HTML (it escapes, f4044f98), so nothing relies on the encoded form;
+Quick View's own `html.unescape` stays as a guard and is a no-op on sidecar text. Named entities are decoded only
+when the whole name is one, numeric ones with or without `;` (row 8767's `&amp;#40age`), two layers at most.
+Tests: `tests/test_fgp_stored_entities.py`.

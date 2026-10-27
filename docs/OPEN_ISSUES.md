@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-10-27 (archived GS-275). 164 open: P1 0, P2 41, P3 123.
+> **Last Updated:** 2026-10-27 (archived GS-60). 163 open: P1 0, P2 41, P3 122.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -23,7 +23,7 @@ owner tasks -- is in [`BACKLOG.md`](BACKLOG.md). Closed history:
 | Area | P1 | P2 | P3 | Total |
 |------|------|------|------|------|
 | Search | 0 | 4 | 21 | 25 |
-| Browse and viewer | 0 | 4 | 6 | 10 |
+| Browse and viewer | 0 | 4 | 5 | 9 |
 | Desktop app | 0 | 9 | 25 | 34 |
 | Website | 0 | 6 | 22 | 28 |
 | API and AI | 0 | 2 | 1 | 3 |
@@ -33,7 +33,7 @@ owner tasks -- is in [`BACKLOG.md`](BACKLOG.md). Closed history:
 | Build, CI and tests | 0 | 0 | 1 | 1 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 2 | 1 | 3 |
-| **Total** | **0** | **41** | **123** | **164** |
+| **Total** | **0** | **41** | **122** | **163** |
 
 ## P1 - Critical
 
@@ -159,7 +159,6 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
-| [GS-60](ISSUE_DETAILS.md#gs-60) | FGP stored HTML entities (`&deg;` in ~520 rows) render differently per surface | `web/pages/search_results.py::_fgp_text_for_display`; `web/pages/browse.py`; `desktop/result_dialog.py` | 2026-09-25 | ❌ Open |
 | [GS-61](ISSUE_DETAILS.md#gs-61) | Browse: a paged deep-link URL still carries `highlight`, so a reload lets the NEW folio claim the search phrase | `web/pages/browse.py::_update_browser_url` (877-906), _search_scope_phrase (835-859) | 2026-09-03 | ❌ Open |
 | [GS-62](ISSUE_DETAILS.md#gs-62) | `switchImageCredit()` updates the FIRST `data-role="image-credit"` node in the document — a hidden earlier Advanced View, not the open one | `web/static/manuscript_viewer.js::switchImageCredit`; `search_results.py::open_advanced_dialog` | 2026-09-03 | ❌ Open |
 | [GS-63](ISSUE_DETAILS.md#gs-63) | FGP version menu still lists whole-document rows unrelated to the displayed folio (demoted from the default, not hidden) | `shared/fgp_service.py::choose_default_source`, _select_fgp_editions_by_similarity | 2026-09-02 | ❌ Open |

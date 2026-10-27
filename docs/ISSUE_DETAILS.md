@@ -884,21 +884,6 @@ Moved 2026-10-25 from `1. Outstanding Bugs / P3 - Low Priority`, where it read:
 
 *Triage 2026-10-25:* still open. prefix_map still ends with ('R','responsa') and parse_query_syntax only bypasses it when responsa_mode is True (lines 3389-3432); both callers pass only is_responsa. tests/test_responsa_regression.py:365 even pins 'R test' -> responsa.
 
-## GS-60
-
-**FGP stored HTML entities (`&deg;` in ~520 rows) render differently per surface** · P3 · Browse and viewer · ❌ Open · opened 2026-09-25
-
-Where: `web/pages/search_results.py::_fgp_text_for_display`; `web/pages/browse.py`; `desktop/result_dialog.py`
-
-Moved 2026-10-25 from `1. Outstanding Bugs / P3 - Low Priority`, where it read:
-
-- **Issue:** **FGP stored HTML entities (`&deg;` in ~520 rows) render differently per surface**
-- **File:** `web/pages/search_results.py::_fgp_text_for_display` (Quick View decodes), Browse (shows `&deg;` literally), desktop `desktop/result_dialog.py::_rd_display_pgp_text` and `genizah_app.py` Browse (render edition text as unescaped Qt HTML, so tag-like notation is dropped there)
-- **Status:** ❌ Open (2026-09-25)
-- **Notes:** Do not decode in `shared/fgp_service.py`: the desktop relies on the entities staying encoded, and decoding there would double-decode. Fix per surface: Browse web-side decode like Quick View; desktop escape-then-mark.
-
-*Triage 2026-10-25:* still open. Only web/pages/search_results.py:173-181 (Quick View) unescapes; web/pages/browse.py:3838 shows the FGP section_text via ui.label with no unescape, and desktop/result_dialog.py:2028-2054 renders edition text as unescaped Qt HTML. No html.unescape exists in browse.py, shared/fgp_service.py or desktop/ (grep).
-
 ## GS-61
 
 **Browse: a paged deep-link URL still carries `highlight`, so a reload lets the NEW folio claim the search phrase** · P3 · Browse and viewer · ❌ Open · opened 2026-09-03
