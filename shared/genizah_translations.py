@@ -4252,7 +4252,8 @@ TRANSLATIONS.update({
     "Filter by width (cm)":  "סנן לפי רוחב (ס\"מ)",
     "min":                   "מינ",
     "max":                   "מקס",
-    "Size filter note":      "סינון גודל הוא אופציונאלי — מידות מוצגות כרמז בלבד.",
+    "Size filtering is optional — dimensions are shown as a hint only.":
+        "סינון גודל הוא אופציונאלי — מידות מוצגות כרמז בלבד.",
     "Reset":                 "איפוס",
     "Triage":                "סיווג",  # already exists but safe duplicate
 

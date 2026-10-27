@@ -4491,7 +4491,8 @@ if _QT_AVAILABLE:
             lay.addLayout(size_row)
 
             # Note text
-            note = QLabel(tr("Size filter note"))
+            note = QLabel(tr(
+                "Size filtering is optional — dimensions are shown as a hint only."))
             note.setStyleSheet("font-size:10px;color:#6b7280;")
             note.setWordWrap(True)
             lay.addWidget(note)
