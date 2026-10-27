@@ -55,7 +55,7 @@ from desktop.gui_threads import SearchThread, LabSearchThread, IndexerThread, Sh
 from desktop.widgets import (
     text_has_pattern_markers,
     ActionsHoverWidget, _format_add_to_list_label,
-    apply_find_highlight, markers_to_bold_html, mark_pattern_hits,
+    apply_find_highlight, markers_to_bold_html, mark_pattern_hits, text_lines_to_html,
     _get_folio_number_from_shelfmark,
     _get_folio_image_index, _get_folio_side_image_index,
     _get_initial_image_index,
@@ -107,6 +107,7 @@ from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog
 from desktop.index_rebuild_bar import IndexRebuildBar, remaining_phrase
 from desktop import startup_tips
 from desktop.startup_tips import TipStrip
+from desktop.marks_legend import make_marks_legend_button, sync_marks_legend_button
 from shared.index_build_progress import BuildClock
 from shared.index_swap import (discard_staged_index, gib, plan_build, remove_old_index,
                                remove_old_index_in_background, swap_in_staged_index)
@@ -4092,7 +4093,10 @@ class GenizahGUI(QMainWindow):
             return
         # Apply RTL formatting like browse_render_page does
         text = self._browse_mark_search_hits(text)
-        browse_html_text = text.replace('\n', '<br>')
+        # Escaped: a correction can carry `<...>`, which setHtml would drop.
+        browse_html_text = text_lines_to_html(text)
+        # V0.8 or a correction: not a Genuzot transcription, so no legend "?".
+        sync_marks_legend_button(getattr(self, 'btn_b_marks_legend', None), None)
         # 260903: same `*…*` → red bold the browse page render applies, so a
         # V0.8 switch-back keeps the search hit visible. AFTER newline→<br>.
         # Bold asterisks ONLY where they can be search markers -- see
@@ -4251,6 +4255,7 @@ class GenizahGUI(QMainWindow):
         # === FGP Group (distinct from PGP; FGP-07) ===
         if fgp_sources:
             from shared.fgp_service import pick_fgp_credit, choose_default_source, fgp_incipit
+            from shared.fgp_marks_legend import uses_genuzot_marks
             # Live read (CURRENT_LANG flips at runtime on language switch — the
             # module-level import binds a stale snapshot; see the lines-button site).
             from genizah_core import CURRENT_LANG as _fgp_lang
@@ -4308,6 +4313,8 @@ class GenizahGUI(QMainWindow):
                     "source_credit": _credit,
                     "source_id": fsrc.get('id'),
                     "uid": fsrc.get('uid'),
+                    # GS-274: shows the "?" that opens the team's legend of marks.
+                    "marks_legend": uses_genuzot_marks(fsrc),
                 })
                 # Surface the FGP team credit on hover (the label stays compact).
                 _tooltip = _credit or fsrc.get('attribution')
@@ -7657,6 +7664,9 @@ class GenizahGUI(QMainWindow):
         self.browse_version_combo.blockSignals(False)
         self.browse_version_combo.currentIndexChanged.connect(self._browse_change_version)
         community_bar.addWidget(self.browse_version_combo)
+        # GS-274: "?" beside a Genuzot transcription opens the team's legend.
+        self.btn_b_marks_legend = make_marks_legend_button(self)
+        community_bar.addWidget(self.btn_b_marks_legend)
         # Version data cache for current document
         self._browse_versions_cache = {}
         # PGP source state for current document
@@ -9945,7 +9955,10 @@ class GenizahGUI(QMainWindow):
         # then this path rendered it with no highlighting at all. Mark it the
         # same way the page render does (no-op when the phrase isn't here).
         text = self._browse_mark_search_hits(text)
-        browse_html_text = text.replace('\n', '<br>')
+        # Escaped: editions carry `<...>` marks (FGP's `<רא>` line fillers,
+        # PGP's `מיב<מ>נא` added letters) that setHtml would drop with their
+        # contents.
+        browse_html_text = text_lines_to_html(text)
         # Bold asterisks ONLY where they can be search markers -- see
         # _browse_markers_are_ours. Outside a search they are the page's own.
         if self._browse_markers_are_ours(text):
@@ -9958,6 +9971,10 @@ class GenizahGUI(QMainWindow):
             is_html=True,
         )
         apply_find_highlight(self.browse_text, self.browse_find_input.text().strip())
+        # The chooser's current item is what is on screen (every caller selects
+        # it first), so it decides the legend "?".
+        sync_marks_legend_button(getattr(self, 'btn_b_marks_legend', None),
+                                 getattr(self, 'browse_version_combo', None))
 
     def _browse_refresh_pgp_for_page(self):
         """Re-fetch PGP/FGP sources for current page (called on page change within same manuscript)."""
@@ -10718,7 +10735,8 @@ class GenizahGUI(QMainWindow):
             )
 
             def _emit_content_div(text_body):
-                html_text = text_body.replace('\n', '<br>')
+                # Escaped: a PGP edition's `<...>` added letters would vanish.
+                html_text = text_lines_to_html(text_body)
                 html_parts.append(
                     f"<div dir='{text_direction}' style='padding: 10px; font-family: SBL Hebrew, serif; "
                     f"font-size: 16px; line-height: 1.6;'>"
@@ -11308,6 +11326,7 @@ class GenizahGUI(QMainWindow):
         if not self.current_browse_sid: return
 
         self.browse_text.setText(tr("Loading full manuscript..."))
+        sync_marks_legend_button(self.btn_b_marks_legend, None)  # V0.8 pages
         QApplication.processEvents() # Refresh UI
 
         html_content = []
@@ -11361,8 +11380,8 @@ class GenizahGUI(QMainWindow):
                     </div>
                     """
 
-                    # Content with line breaks preserved
-                    content = p['text'].replace("\n", "<br>")
+                    # Content with line breaks preserved, escaped (text_lines_to_html)
+                    content = text_lines_to_html(p['text'])
 
                     html_content.append(anchor + separator + f"<div dir='rtl'>{content}</div>")
                     # Phase 999.4: accumulate raw page text for the gutter
@@ -11399,8 +11418,8 @@ class GenizahGUI(QMainWindow):
                 </div>
                 """
 
-                # Content with line breaks preserved
-                content = p['text'].replace("\n", "<br>")
+                # Content with line breaks preserved, escaped (text_lines_to_html)
+                content = text_lines_to_html(p['text'])
 
                 html_content.append(anchor + separator + f"<div dir='rtl'>{content}</div>")
                 # Phase 999.4: accumulate raw page text for the gutter
@@ -33360,7 +33379,9 @@ class GenizahGUI(QMainWindow):
         # lost the search hit — the Browse-side twin of the ResultDialog
         # sub-issue B fix (_rd_original_marked_text, 2026-09-02).
         self.browse_original_marked_text = page_text
-        browse_html_text = page_text.replace('\n', '<br>')
+        # Escaped, so a `<...>` in the page reaches the reader (text_lines_to_html).
+        browse_html_text = text_lines_to_html(page_text)
+        sync_marks_legend_button(self.btn_b_marks_legend, None)  # V0.8 on screen
         # 260903: `*…*` → red bold. The browse path had NO marker conversion at
         # all, so a search hit reached the reader as literal asterisks
         # (`וכן *אמר / רבי* יהודה`). Must run AFTER the newline→<br> above so a

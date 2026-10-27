@@ -24,7 +24,7 @@ from desktop.corrections_ui import (
 from desktop.widgets import (
     text_has_pattern_markers,
     _format_add_to_list_label,
-    apply_find_highlight, mark_pattern_hits, markers_to_bold_html,
+    apply_find_highlight, mark_pattern_hits, markers_to_bold_html, text_lines_to_html,
     _get_folio_number_from_shelfmark,
     _get_folio_image_index,
 )
@@ -39,6 +39,7 @@ from desktop.title_helpers import (
     _resolve_display_title, _set_label_with_tooltip,
 )
 from desktop.image_loader import ImageLoaderThread
+from desktop.marks_legend import make_marks_legend_button, sync_marks_legend_button
 from desktop import startup_tips
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import (
@@ -703,6 +704,9 @@ class ResultDialog(QDialog):
         self.rd_version_combo.setEnabled(False)
         self.rd_version_combo.currentIndexChanged.connect(self._rd_change_version)
         community_row.add(self.rd_version_combo, PINNED)
+        # GS-274: "?" beside a Genuzot transcription opens the team's legend.
+        self.btn_rd_marks_legend = make_marks_legend_button(self)
+        community_row.add(self.btn_rd_marks_legend, PINNED)
         self._rd_versions_cache = {}
 
 
@@ -2024,6 +2028,8 @@ class ResultDialog(QDialog):
             apply_line_numbered_text(
                 self.text_ms, self._htmlify(text), source_text=text, is_html=True,
             )
+            # V0.8 or a correction: not a Genuzot transcription, so no legend "?".
+            sync_marks_legend_button(getattr(self, 'btn_rd_marks_legend', None), None)
 
     def _rd_display_pgp_text(self, text, is_rtl=True):
         """Display PGP edition/translation text with proper directionality."""
@@ -2036,7 +2042,9 @@ class ResultDialog(QDialog):
         # this path rendered it with no highlighting whatsoever. Mark it the
         # same way V0.8 is marked (no-op when the phrase isn't in this edition).
         text = self._mark_search_hits(text)
-        html_text = text.replace('\n', '<br>')
+        # Escaped, as _htmlify does: editions carry `<...>` marks that setHtml
+        # would drop with their contents.
+        html_text = text_lines_to_html(text)
         # Bold asterisks ONLY where they can be search markers: this dialog
         # was opened from a search iff the result carries a pattern. Outside
         # one, an edition's own `*note*` is source text, and converting it
@@ -2053,6 +2061,10 @@ class ResultDialog(QDialog):
             is_html=True,
         )
         self._refresh_find_highlights()
+        # The chooser's current item is what is on screen (every caller selects
+        # it first), so it decides the legend "?".
+        sync_marks_legend_button(getattr(self, 'btn_rd_marks_legend', None),
+                                 getattr(self, 'rd_version_combo', None))
 
     def _on_rd_pgp_loaded(self, sys_id, sources, pgp_doc):
         """Handle PGP sources loaded from background thread."""
@@ -2978,6 +2990,7 @@ class ResultDialog(QDialog):
         apply_line_numbered_text(
             self.text_ms, self._htmlify(ms_raw), source_text=ms_raw, is_html=True,
         )
+        sync_marks_legend_button(self.btn_rd_marks_legend, None)  # V0.8 on screen
         self._refresh_find_highlights()
         
         # 2. Source Context
@@ -3377,6 +3390,7 @@ class ResultDialog(QDialog):
         apply_line_numbered_text(
             self.text_ms, self._htmlify(raw_text), source_text=raw_text, is_html=True,
         )
+        sync_marks_legend_button(self.btn_rd_marks_legend, None)  # V0.8 on screen
         self._refresh_find_highlights()
         self._scroll_to_first_highlight(self.text_ms, pattern_str)
 
@@ -3536,6 +3550,7 @@ class ResultDialog(QDialog):
         )
         self._refresh_find_highlights()
         self._scroll_to_first_highlight(self.text_ms, pattern_str)
+        sync_marks_legend_button(self.btn_rd_marks_legend, None)  # a LOCAL file
 
         # Item 4: spinbox displays p_num (physical page), NOT cur_idx (ordinal).
         # Spinbox max is set from max_p_num so the user sees a sensible upper

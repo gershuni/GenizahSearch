@@ -174,7 +174,7 @@ move one to the tracker by moving its row and changing its section to a priority
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
-| [GS-274](ISSUE_DETAILS.md#gs-274) | FGP's transcription marks (`?א?`, `@…@`, `¶`, …) show as typed, with no legend and no drawing | web reading view (`web/pages/browse.py`), desktop viewer; `shared/fgp_service.py` | 2026-10-26 | ❌ Open |
+| [GS-274](ISSUE_DETAILS.md#gs-274) | FGP's transcription marks (`?א?`, `@…@`, `¶`, …) are explained by a legend but not drawn | web reading view (`web/pages/browse.py`), desktop viewer; `shared/fgp_service.py`, `shared/fgp_marks_legend.py` | 2026-10-26 | ❌ Open |
 
 ### Desktop app
 

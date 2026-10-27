@@ -1,5 +1,6 @@
 """Shared desktop UI widgets and helper functions."""
 
+import html
 import re
 
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QTextEdit, QCompleter
@@ -100,6 +101,22 @@ def text_has_pattern_markers(text, pattern_str):
         return False
     return any(rx.fullmatch(m.group(1))
                for m in _HIGHLIGHT_MARKER_RE.finditer(text))
+
+
+def text_lines_to_html(text):
+    """Escape page text for ``setHtml`` and turn its newlines into ``<br>``.
+
+    Escaping comes FIRST: Qt's rich-text parser takes every ``<...>`` in the
+    text for a tag and drops it with its contents, and the texts carry them --
+    FGP's ``<רא>`` line fillers, a PGP editor's added letter in ``מיב<מ>נא``,
+    whatever a reader typed into a correction. ``*`` has no HTML meaning, so
+    the search-hit markers survive for ``markers_to_bold_html`` afterwards.
+    ``ResultDialog._htmlify`` already did this; the Browse paths and the PGP/FGP
+    paths did not (found 2026-10-26).
+    """
+    if not text:
+        return text
+    return html.escape(text, quote=False).replace('\n', '<br>')
 
 
 def markers_to_bold_html(html_text, color='red'):

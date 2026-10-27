@@ -127,7 +127,8 @@ def test_unmarked_text_renders_without_any_bold(browse):
 def test_browse_render_page_converts_markers():
     """The page render, not just the version switch, must convert."""
     src = inspect.getsource(GenizahGUI.browse_render_page)
-    newline_sub = src.index("browse_html_text = page_text.replace('\\n', '<br>')")
+    # The newline -> <br> step escapes first since GS-275 (text_lines_to_html).
+    newline_sub = src.index("browse_html_text = text_lines_to_html(page_text)")
     convert = src.index("markers_to_bold_html(browse_html_text)")
     assert newline_sub < convert, (
         "markers_to_bold_html must run AFTER newline->handling, or a hit "

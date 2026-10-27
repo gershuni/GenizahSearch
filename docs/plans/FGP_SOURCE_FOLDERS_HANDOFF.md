@@ -149,6 +149,10 @@ For the owner:
    link or drawing the common marks follows the release: [GS-274](../ISSUE_DETAILS.md#gs-274). Still open for the
    owner before the release: the release texts (`_tmp/fgp_release_texts_draft.md`, untracked) and the review of
    the examples (`_tmp/fgp_examples.html`).
+   Updated 2026-10-27 (owner: "A now and B later", and fix the desktop now): the release also carries the legend
+   "?" beside Genuzot transcriptions in both apps (GS-274 option A; its wording awaits approval in
+   `_tmp/fgp_marks_legend_review.html`) and the desktop fix that keeps `<…>` marks visible
+   ([GS-275](../ISSUE_DETAILS.md#gs-275)); both are in the draft texts, section 6.
 
 ## 4. Recommended plan, in order
 

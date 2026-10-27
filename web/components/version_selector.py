@@ -21,6 +21,7 @@ from shared.fgp_service import (
     group_transcription_sources, source_relation_kind, pick_fgp_credit,
     choose_default_source, fgp_incipit,
 )
+from shared.fgp_marks_legend import labels as marks_labels, legend_html, uses_genuzot_marks
 from typing import Optional, Callable, List, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -199,11 +200,35 @@ def create_version_selector(
         """Check if there are any PGP editions with content for current page."""
         return len(get_editions(sources)) > 0
 
+    # GS-274 option A: the Genuzot team types its marks into the text (`?ב?`,
+    # `@...@`, `<...>`), so a "?" beside one of its transcriptions opens their
+    # legend. It follows WHATEVER is on screen: every branch below reports the
+    # shown source through `on_version_change`, so the check wraps that.
+    _marks_uids = {s.get('uid') for s in (all_sources or []) if uses_genuzot_marks(s)}
+    _notify_caller = on_version_change
+    marks_button = None
+
+    def on_version_change(text, info):  # wraps the caller's callback
+        if marks_button is not None:
+            marks_button.set_visibility((info or {}).get('uid') in _marks_uids)
+        if _notify_caller:
+            _notify_caller(text, info)
+
     with container:
         # Version indicator
         version_label = ui.label('V0.8').classes('text-xs font-medium').style(
             'color: var(--text-secondary);'
         )
+        if _marks_uids:
+            _marks_lab = marks_labels(get_language())
+            with ui.dialog() as marks_dialog, ui.card().style('max-width: 640px;'):
+                ui.label(_marks_lab['title']).classes('text-lg font-semibold')
+                ui.html(legend_html(get_language()), sanitize=False)
+                ui.button(tr('Close'), on_click=marks_dialog.close).props('flat')
+            marks_button = ui.button(icon='help_outline', on_click=marks_dialog.open).props(
+                'flat round dense size=sm'
+            ).style(f'color: {_FGP_COLOR};').tooltip(_marks_lab['button_tooltip'])
+            marks_button.set_visibility(False)
 
         async def load_and_apply_latest():
             """Load versions and apply the latest/default one.

@@ -1351,6 +1351,27 @@ The NLI image proxy's two disk stores (2026-10-21; docs/plans/NLI_THUMBNAIL_PREF
 - **Function** `clipboard_write_js` — the JavaScript expression that writes a text exactly and resolves to a bool
 - **Function** `copy_text_to_clipboard` — async; copy in the browser and toast the real outcome (success / failed / unconfirmed)
 
+## shared/fgp_marks_legend.py
+
+The Genuzot team's legend of transcription marks (GS-274 option A), one table for both apps.
+`web/components/version_selector.py::create_version_selector` shows its "?" while a Genuzot transcription is on screen.
+
+- **Class** `Mark` — one mark: how it looks in the text, and what it means in each language
+    - Method `meaning`
+- **Function** `labels` — the legend's frame (title, headings, notes) in ``lang``
+- **Function** `not_in_list` — the unexplained marks, described in ``lang``
+- **Function** `legend_html` — the whole legend as one HTML fragment, for both apps
+- **Function** `uses_genuzot_marks` — is ``source`` a transcription by the Genuzot team, which uses these marks?
+
+## desktop/marks_legend.py
+
+- **Class** `MarksLegendDialog` — the legend; non-modal, so it can stay open beside the text it explains
+- **Function** `make_marks_legend_button` — a small hidden "?" that opens the legend
+- **Function** `sync_marks_legend_button` — show the button iff the chooser's current item is a Genuzot transcription
+
+(`desktop/widgets/__init__.py::text_lines_to_html` — escape page text for `setHtml`, then `\n` → `<br>`; every
+desktop text-to-HTML site uses it, pinned by `tests/test_desktop_angle_marks.py`.)
+
 ## web/auth_state.py
 
 - **Class** `GlobalAuthState` (Line 28) — singleton auth state using NiceGUI app.storage.user

@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-10-26 (folded 4 fragment(s) from `docs/open_issues.d/`: 2026-10-25-fgp-text-loss-and-xml-by-image.md, 2026-10-25-tracker-write-group-ownership.md, 2026-10-26-fgp-gate2-ignores-fist-unit-comment.md, 2026-10-26-reading-desk-saved-source-choice-not-applied.md). 164 open: P1 0, P2 41, P3 123.
+> **Last Updated:** 2026-10-27 (folded 1 fragment(s) from `docs/open_issues.d/`: 2026-10-26-desktop-fgp-pgp-angle-marks-swallowed.md). 165 open: P1 0, P2 42, P3 123.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -24,7 +24,7 @@ owner tasks -- is in [`BACKLOG.md`](BACKLOG.md). Closed history:
 |------|------|------|------|------|
 | Search | 0 | 4 | 21 | 25 |
 | Browse and viewer | 0 | 4 | 6 | 10 |
-| Desktop app | 0 | 9 | 25 | 34 |
+| Desktop app | 0 | 10 | 25 | 35 |
 | Website | 0 | 6 | 22 | 28 |
 | API and AI | 0 | 2 | 1 | 3 |
 | Discovery | 0 | 2 | 11 | 13 |
@@ -33,7 +33,7 @@ owner tasks -- is in [`BACKLOG.md`](BACKLOG.md). Closed history:
 | Build, CI and tests | 0 | 0 | 1 | 1 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 2 | 1 | 3 |
-| **Total** | **0** | **41** | **123** | **164** |
+| **Total** | **0** | **42** | **123** | **165** |
 
 ## P1 - Critical
 
@@ -63,6 +63,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-275](ISSUE_DETAILS.md#gs-275) | FGP and PGP editions lose every `<…>` mark on the desktop | `genizah_app.py::_browse_display_pgp_text`, `desktop/result_dialog.py::_rd_display_pgp_text` | 2026-10-26 | ❌ Open |
 | [GS-9](ISSUE_DETAILS.md#gs-9) | Desktop Search export, filters and counts see only the loaded rows | `genizah_app.py::export_results`, _collect_sorted_results, load_next_batch | 2026-09-25 | ❌ Open |
 | [GS-10](ISSUE_DETAILS.md#gs-10) | The `*` search-hit marker is in-band, so a literal asterisk in source text is still ambiguous | `desktop/widgets/__init__.py::mark_pattern_hits`, `desktop/result_dialog.py::_htmlify` | 2026-09-03 | ❌ Open |
 | [GS-11](ISSUE_DETAILS.md#gs-11) | Desktop: a stale `PGPBadgeWorker` can blank the PGP column of a table it never searched | `genizah_app.py::_on_pgp_badges_loaded`, _on_tag_search_results; PGPBadgeWorker | 2026-09-03 | ❌ Open |
