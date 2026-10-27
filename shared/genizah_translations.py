@@ -4252,7 +4252,10 @@ TRANSLATIONS.update({
     "Filter by width (cm)":  "סנן לפי רוחב (ס\"מ)",
     "min":                   "מינ",
     "max":                   "מקס",
-    "Size filter note":      "סינון גודל הוא אופציונאלי — מידות מוצגות כרמז בלבד.",
+    # The note under "Filter by width (cm)": the filter also hides every fragment with
+    # no width, even at the full 0-200 range (wording chosen by the owner, 2026-10-27)
+    "With this on, fragments with no recorded width are hidden too.":
+        "כשהסינון פעיל, מוסתרים גם קטעים שאין להם רוחב רשום.",
     "Reset":                 "איפוס",
     "Triage":                "סיווג",  # already exists but safe duplicate
 
