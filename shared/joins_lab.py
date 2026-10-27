@@ -861,7 +861,8 @@ def compose(side: SideQuery) -> tuple:
 
 # ---------------------------------------------------------------------------
 # Library and domain: filter options and the list order (both Joins Labs, as in
-# the website's Visual Similarity window)
+# the website's Visual Similarity window). The Domain filter takes several
+# domains, to show only them or to hide them.
 # ---------------------------------------------------------------------------
 
 ORDERS = ("rank", "library", "domain")
@@ -882,6 +883,26 @@ def primary_domain(domains) -> dict:
         if isinstance(d, dict) and d.get("domain"):
             return {"domain": d["domain"], "domain_heb": d.get("domain_heb") or ""}
     return {}
+
+
+DOMAIN_MODES = ("show_only", "hide")
+
+
+def normalize_domain_mode(value) -> str:
+    """'hide' (leave the chosen domains out); anything else is 'show_only'."""
+    return "hide" if value == "hide" else "show_only"
+
+
+def domain_passes(domain: Optional[str], chosen, mode) -> bool:
+    """Whether a candidate whose domain is *domain* passes the Domain filter.
+
+    Nothing chosen passes every candidate. 'show_only' keeps the candidates whose
+    domain is one of *chosen*; 'hide' leaves those out and keeps the rest, a
+    candidate with no domain included.
+    """
+    if not chosen:
+        return True
+    return (domain in chosen) != (normalize_domain_mode(mode) == "hide")
 
 
 def domain_label(domain: Optional[str], domain_heb: Optional[str] = "",

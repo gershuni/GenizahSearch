@@ -2496,6 +2496,71 @@ def test_sort_and_filter_by_library_and_domain(joins_lab_smoke_runner):
     joins_lab_smoke_runner(driver, mock_search_results=_lib_dom_results())
 
 
+def test_the_domain_filter_hides_the_chosen_domains(joins_lab_smoke_runner):
+    """The Domain list opens with a Show only | Hide switch. Hide leaves the chosen
+    domains out; like the picks, the switch applies when the list closes, and the
+    closed select's label says it is hiding (its narrow field keeps the names).
+    The choice is kept in the saved session."""
+    from unittest.mock import AsyncMock, patch
+
+    from nicegui import ElementFilter, ui
+
+    from web.joins_lab_storage import read_full_state
+
+    def _switch(user):
+        with user._client:
+            return next(iter(ElementFilter(kind=ui.toggle, marker='joins-filter-domain-mode')))
+
+    async def driver(user):
+        with patch('web.pages.joins_lab._enrich_candidates', new_callable=AsyncMock,
+                   return_value=dict(_LIB_DOM_ENRICH)):
+            await user.open('/joins-lab')
+            await _load_anchor_and_search(user)
+            await asyncio.sleep(0.5)
+            assert _card_domains(user) == ['Liturgy', 'Bible']
+
+            dom_sel = _toolbar_select(user, 'joins-filter-domain')
+            switch = _switch(user)
+            assert switch.value == 'show_only'
+            assert list(switch.options.values()) == ['Show only', 'Hide']
+            with user._client:                                  # in the open list
+                assert switch.parent_slot.name == 'before-options'
+                assert switch.parent_slot.parent is dom_sel
+
+            _fire(user, dom_sel, 'popup-show')
+            with user._client:
+                dom_sel.value = ['Bible']
+                switch.value = 'hide'
+            await asyncio.sleep(0.2)
+            assert _card_domains(user) == ['Liturgy', 'Bible']      # not yet
+            _fire(user, dom_sel, 'popup-hide')
+            await asyncio.sleep(0.3)
+            assert _card_domains(user) == ['Liturgy']
+
+            dom_sel = _toolbar_select(user, 'joins-filter-domain')  # re-rendered
+            assert dom_sel.value == ['Bible']
+            assert dom_sel._props.get('display-value') == 'Bible'
+            assert dom_sel.label == 'Domain · Hiding'
+            assert _switch(user).value == 'hide'
+            with user._client:
+                stored = (read_full_state() or {}).get('active_filter') or {}
+            assert stored.get('domains') == ['Bible']
+            assert stored.get('domains_mode') == 'hide'
+
+            # Back to Show only: the same choice now shows only Bible.
+            _fire(user, dom_sel, 'popup-show')
+            with user._client:
+                _switch(user).value = 'show_only'
+            _fire(user, dom_sel, 'popup-hide')
+            await asyncio.sleep(0.3)
+            assert _card_domains(user) == ['Bible']
+            dom_sel = _toolbar_select(user, 'joins-filter-domain')
+            assert dom_sel._props.get('display-value') == 'Bible'
+            assert dom_sel.label == 'Domain'
+
+    joins_lab_smoke_runner(driver, mock_search_results=_lib_dom_results())
+
+
 def test_a_saved_domain_filter_still_lets_its_candidates_in(joins_lab_smoke_runner):
     """A session restored with a Domain filter on re-runs its search before any
     candidate has a domain. The enrichment must cover every candidate, not just the

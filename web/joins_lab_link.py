@@ -19,7 +19,8 @@ What it carries:
   own text position; the cross-side search uses it, not the anchor side's)
 * ``vs`` -- Visual Similarity on
 * ``f`` -- the candidate filter (the filter dialog's keys, Library and Domain
-  included) and ``order``, the grid's Sort
+  included, with ``domains_mode``: show only or hide the domains) and
+  ``order``, the grid's Sort
 * ``view`` -- grid | table; ``gp`` -- the 0-based grid/table page
 * ``cmp`` -- the Compare pair's candidate as ``[sys_id, page]``
 * ``m`` -- the sender's marks ({sys_id: yes|maybe|no}), only when the sender
@@ -40,7 +41,7 @@ import zlib
 from typing import Any, Optional
 from urllib.parse import urlencode
 
-from shared.joins_lab import normalize_order
+from shared.joins_lab import normalize_domain_mode, normalize_order
 from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 from web.joins_lab_storage import _cap_rows
 
@@ -125,12 +126,14 @@ def _clean_filter(f: Any) -> dict:
         out["triage_states"] = [t for t in tri if t in _FILTER_TRIAGE_STATES]
     q = f.get("text_q", "")
     out["text_q"] = q[:_MAX_FILTER_TEXT] if isinstance(q, str) else ""
-    # Library / Domain filters and the Sort (shared.joins_lab.order_candidates)
+    # Library / Domain filters (Domain shows only its domains, or hides them) and
+    # the Sort (shared.joins_lab.order_candidates)
     for key in ("libraries", "domains"):
         vals = f.get(key)
         if isinstance(vals, list):
             out[key] = [v[:_MAX_FILTER_TEXT] for v in vals[:_MAX_FILTER_LIST]
                         if isinstance(v, str)]
+    out["domains_mode"] = normalize_domain_mode(f.get("domains_mode"))
     out["order"] = normalize_order(f.get("order"))
     return out
 

@@ -1195,9 +1195,9 @@ desktop.Y.X` identity holds via the facades.
 - **Function** `_create_candidate_card` (Line 676) — Render a single candidate card (Phase 119 D-09/D-11/D-07, Phase 120 D-07/ACT-01).
 - **Function** `open_filter_dialog` (Line 1061) — Open the "More filters…" dialog (D-14, CND-06).
 - **Function** `create_candidate_table` (Line 1152) — Render the multi-select sortable table view of candidates (D-10, CND-03).
-- **Function** `_facet_select` (Line 1344) — One toolbar filter, Library or Domain: several values, each with its count.
-- **Function** `_grid_header` (Line 1398) — The row above the cards: the count, then Library, Domain, Sort and More filters…
-- **Function** `create_candidate_grid` (Line 1441) — Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
+- **Function** `_facet_select` (Line 1348) — One toolbar filter, Library or Domain: several values, each with its count. Domain opens with a Show only | Hide switch (`domains_mode`).
+- **Function** `_grid_header` (Line 1429) — The row above the cards: the count, then Library, Domain, Sort and More filters…
+- **Function** `create_candidate_grid` (Line 1474) — Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
 ## web/main.py
 
@@ -2167,11 +2167,13 @@ moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `deskt
 - **Function** `snippet_html` (Line 736) — HTML snippet centered on the first regex match.
 - **Function** `snippet_plain` (Line 758) — Plain-text snippet centered on the first regex match, for table cells.
 - **Function** `compose` (Line 781) — Compose a SideQuery into the engine's line-break query syntax.
-- **Function** `normalize_order` (Line 867) — 'library' or 'domain'; anything else is 'rank' (the order the search gave).
-- **Function** `primary_domain` (Line 872) — A fragment's domain as the Visual Similarity window shows it.
-- **Function** `domain_label` (Line 884) — The domain as the user reads it (Hebrew in the Hebrew UI, when it has one).
-- **Function** `counted_options` (Line 895) — [(value, label, count)] for each distinct value, in label order.
-- **Function** `order_candidates` (Line 910) — The candidates in the search's order, or grouped by library or by domain.
+- **Function** `normalize_order` (Line 871) — 'library' or 'domain'; anything else is 'rank' (the order the search gave).
+- **Function** `primary_domain` (Line 876) — A fragment's domain as the Visual Similarity window shows it.
+- **Function** `normalize_domain_mode` (Line 891) — 'hide' (leave the chosen domains out); anything else is 'show_only'.
+- **Function** `domain_passes` (Line 896) — Whether a candidate whose domain is *domain* passes the Domain filter.
+- **Function** `domain_label` (Line 908) — The domain as the user reads it (Hebrew in the Hebrew UI, when it has one).
+- **Function** `counted_options` (Line 919) — [(value, label, count)] for each distinct value, in label order.
+- **Function** `order_candidates` (Line 934) — The candidates in the search's order, or grouped by library or by domain.
 
 ## shared/atomic_io.py
 

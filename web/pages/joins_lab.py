@@ -613,6 +613,7 @@ def create_joins_lab_page(
         'text_q': '',
         'libraries': [],              # library codes (empty = all)
         'domains': [],                # English domains (empty = all)
+        'domains_mode': 'show_only',  # 'show_only' | 'hide' those domains
         'order': 'rank',              # 'rank' | 'library' | 'domain' (the Sort control)
     }
     _enrichment: dict = {}        # sys_id → {width_cm, height_cm, material, ...} (D-16)

@@ -39,7 +39,8 @@ from typing import Optional, Callable
 from nicegui import ui
 
 from shared.joins_lab import (
-    TRIAGE_ICONS, counted_options, domain_label, normalize_order, order_candidates,
+    TRIAGE_ICONS, counted_options, domain_label, domain_passes, normalize_domain_mode,
+    normalize_order, order_candidates,
 )
 from shared.synthetic_sys_id import is_synthetic_sys_id
 from web.services import is_oxford_manuscript, get_oxford_direct_image_url
@@ -262,7 +263,9 @@ def compute_filtered(
                           - triage_states: list[str] — 'All'/'Not triaged'/'Yes'/'Maybe'/'No'
                           - text_q: str — case-insensitive substring on shelfmark+title
                           - libraries: list[str] — include only these library codes
-                          - domains: list[str] — include only these (English) domains
+                          - domains: list[str] — (English) domains (empty=all)
+                          - domains_mode: 'show_only' (the default) shows only
+                            those domains; 'hide' leaves them out
                           - order: 'rank' | 'library' | 'domain' — see below
         enrichment:     dict[sys_id → {width_cm, height_cm, material, domain, ...}]
         triage:         dict[sys_id → 'yes'|'maybe'|'no'] (or TriageState)
@@ -280,6 +283,7 @@ def compute_filtered(
     triage_states = set(filter_state.get("triage_states") or [])
     libraries = set(filter_state.get("libraries") or [])
     domains = set(filter_state.get("domains") or [])
+    domains_mode = filter_state.get("domains_mode")
 
     # Look up anchor width for size-mismatch comparison
     anchor_w = enrichment.get(anchor_sys_id, {}).get("width_cm")
@@ -309,7 +313,7 @@ def compute_filtered(
             continue
 
         # Domain filter (the fragment's first domain, as shown on its card)
-        if domains and m.get("domain") not in domains:
+        if not domain_passes(m.get("domain"), domains, domains_mode):
             continue
 
         # Has-dims filter
@@ -1342,14 +1346,20 @@ def create_candidate_table(
 
 
 def _facet_select(filter_state: dict, key: str, options: dict, label: str,
-                  marker: str, ready: bool, on_filter_change: Callable):
+                  marker: str, ready: bool, on_filter_change: Callable,
+                  mode_key: Optional[str] = None):
     """One toolbar filter, Library or Domain: several values, each with its count.
+
+    With *mode_key* (Domain), the list opens with a Show only | Hide switch, kept
+    in filter_state[mode_key]: show only the chosen values, or hide them.
 
     A choice applies when the list closes, not on each click: applying re-renders
     the grid, this select included, which would shut the list after one pick. The
     clear button changes the value with the list shut, so that applies at once.
     """
     current = list(filter_state.get(key) or [])
+    mode = ({"value": normalize_domain_mode(filter_state.get(mode_key))}
+            if mode_key else None)
     # A value that still filters but is in none of these results (a filter kept
     # from an earlier search) stays listed with a zero count, so it can be seen
     # and cleared; dropped from the list, it would empty the grid out of sight.
@@ -1360,11 +1370,15 @@ def _facet_select(filter_state: dict, key: str, options: dict, label: str,
 
     def _show(values) -> None:
         # The names alone ("CUL, JTS"), not each option's "CUL (12)". Set directly:
-        # a Hebrew domain may hold a quote.
+        # a Hebrew domain may hold a quote. Hidden ones say so in the label above
+        # them ("Domain · Hiding"), which leaves the narrow field to the names.
         if values:
             sel.props["display-value"] = ", ".join(options[v].rsplit(" (", 1)[0] for v in values)
         else:
             sel.props.pop("display-value", None)
+        if mode is not None:
+            hiding = bool(values) and mode["value"] == "hide"
+            sel.label = f"{label} · {tr('Hiding')}" if hiding else label
 
     _show(current)
     if not (ready and options):
@@ -1375,7 +1389,11 @@ def _facet_select(filter_state: dict, key: str, options: dict, label: str,
 
     def _commit() -> None:
         values = list(sel.value or [])
-        if values != list(filter_state.get(key) or []):
+        changed = values != list(filter_state.get(key) or [])
+        if mode is not None and mode["value"] != normalize_domain_mode(filter_state.get(mode_key)):
+            filter_state[mode_key] = mode["value"]
+            changed = True
+        if changed:
             filter_state[key] = values
             on_filter_change()
 
@@ -1388,6 +1406,19 @@ def _facet_select(filter_state: dict, key: str, options: dict, label: str,
     def _on_hide() -> None:
         is_open["value"] = False
         _commit()
+
+    if mode is not None:
+        # At the top of the open list; it applies with the picks, when the list closes.
+        with sel.add_slot("before-options"):
+            switch = ui.toggle(
+                {"show_only": tr("Show only"), "hide": tr("Hide")}, value=mode["value"],
+            ).props("dense no-caps spread").classes("w-full q-pa-xs").mark(f"{marker}-mode")
+
+        def _on_mode_change(e) -> None:
+            mode["value"] = normalize_domain_mode(e.value)
+            _on_value_change(e)
+
+        switch.on_value_change(_on_mode_change)
 
     sel.on("popup-show", lambda: is_open.update(value=True))
     sel.on("popup-hide", _on_hide)
@@ -1411,9 +1442,11 @@ def _grid_header(total: int, *, all_candidates: list, filter_state: dict,
                 dom_opts = domain_options(all_candidates, enrichment, hebrew)
                 _facet_select(filter_state, "libraries", lib_opts, tr("Library"),
                               "joins-filter-library", True, on_filter_change)
-                # Domain comes with the enrichment, so it waits for it.
+                # Domain comes with the enrichment, so it waits for it. It shows
+                # only the chosen domains, or hides them.
                 _facet_select(filter_state, "domains", dom_opts, tr("Domain"),
-                              "joins-filter-domain", enrichment_ready, on_filter_change)
+                              "joins-filter-domain", enrichment_ready, on_filter_change,
+                              mode_key="domains_mode")
             if on_order_change is not None:
                 order_sel = ui.select(
                     {"rank": tr("Rank"), "library": tr("Library"),

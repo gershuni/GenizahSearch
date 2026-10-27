@@ -219,3 +219,15 @@ def test_library_domain_filters_and_the_sort_ride_in_the_link():
     assert jl.clean_share_state({"f": {"order": "nonsense"}})["f"]["order"] == "rank"
     stored = {"builder_rows": [_row("a")], "active_filter": f}
     assert jl.share_inputs_from_full_state(stored)["f"]["domains"] == ["Bible"]
+
+
+def test_the_domain_filters_mode_rides_in_the_link():
+    """Show only or hide the Domain filter's domains: kept by a link and a stored
+    session; a link from before it, or a bad value, shows only (as it always did)."""
+    f = {"domains": ["Bible", "Law"], "domains_mode": "hide"}
+    got = jl.decode_share_state(jl.encode_share_state({"f": f}))["f"]
+    assert got["domains"] == ["Bible", "Law"] and got["domains_mode"] == "hide"
+    stored = {"builder_rows": [_row("a")], "active_filter": f}
+    assert jl.share_inputs_from_full_state(stored)["f"]["domains_mode"] == "hide"
+    for bad in ({"domains": ["Bible"]}, {"domains_mode": "exclude"}, {"domains_mode": 1}):
+        assert jl.clean_share_state({"f": bad})["f"]["domains_mode"] == "show_only"

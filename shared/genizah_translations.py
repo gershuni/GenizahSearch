@@ -4193,6 +4193,8 @@ TRANSLATIONS.update({
     "any material":          "כל חומר",
     "any library":           "כל ספרייה",
     "any domain":            "כל תחום",
+    # Joins Lab Domain filter: show only the chosen domains, or hide them
+    "Show only":             "הצג רק",
     "Has dimensions":        "יש מידות",
     "all triage":            "כל סיווג",
     "Y — kept":         "Y — נשמר",

@@ -57,6 +57,7 @@ Two of these changed later the same day, again by the owner:
 | 4 Sort and filters | #412 | Sort by Rank / Library / Domain and Library / Domain filters with counts, web and desktop |
 | 4, follow-up | #415 | The web Filter dialog's lists take its full width (they showed only their arrow) |
 | 4, follow-up | #416 | Website: Library and Domain in the results toolbar, "More filters…" with a count of the filters on; a filter that leaves nothing keeps the toolbar |
+| 4, follow-up | branch `claude/wonderful-meitner-oorblp` | Domain takes several domains, to show only them or hide them (`domains_mode`), web and desktop; the desktop's Domain became a checklist in the Filter dialog |
 | 5 Browse icons | #410 | Icons on the Browse page's text buttons (website only) |
 | 6 Thumbnail caching (a) | #409 | The six image routes no longer set the session cookie; images are kept a week |
 
