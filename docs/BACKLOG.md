@@ -1,6 +1,6 @@
 # GenizahSearch - Backlog
 
-> **Last Updated:** 2026-10-25 (created at the tracker reconstruction from its non-defect sections and rows). 110 items.
+> **Last Updated:** 2026-10-27 (GS-277 added: the owner's open question on editing an edition). 111 items.
 
 What is not an open defect: deferred defects, code debt, test gaps, ideas and extensions,
 and server or owner tasks. Same row form and the same ID space as
@@ -14,7 +14,7 @@ move one to the tracker by moving its row and changing its section to a priority
 | Area | Deferred defects | Code debt | Test gaps | Ideas and extensions | Server and owner tasks | Total |
 |------|------|------|------|------|------|------|
 | Search | 0 | 5 | 0 | 6 | 0 | 11 |
-| Browse and viewer | 0 | 0 | 0 | 1 | 1 | 2 |
+| Browse and viewer | 0 | 0 | 0 | 2 | 1 | 3 |
 | Desktop app | 2 | 12 | 1 | 8 | 0 | 23 |
 | Website | 0 | 7 | 0 | 3 | 2 | 12 |
 | Discovery | 0 | 3 | 0 | 2 | 2 | 7 |
@@ -22,7 +22,7 @@ move one to the tracker by moving its row and changing its section to a priority
 | Data and sidecars | 2 | 0 | 0 | 0 | 2 | 4 |
 | Build, CI and tests | 0 | 6 | 24 | 0 | 0 | 30 |
 | Server and operations | 0 | 0 | 0 | 0 | 3 | 3 |
-| **Total** | **4** | **40** | **28** | **25** | **13** | **110** |
+| **Total** | **4** | **40** | **28** | **26** | **13** | **111** |
 
 ## Deferred defects
 
@@ -174,6 +174,7 @@ move one to the tracker by moving its row and changing its section to a priority
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-277](ISSUE_DETAILS.md#gs-277) | Editing an edition: what Edit starts from, and how a correction of an FGP or PGP edition is recorded and shown (owner's open question) | web `web/pages/browse.py::toggle_edit_mode`, desktop `genizah_app.py::_browse_toggle_edit_mode`; Supabase `corrections` | 2026-10-27 | ❌ Open |
 | [GS-274](ISSUE_DETAILS.md#gs-274) | FGP's transcription marks (`?א?`, `@…@`, `¶`, …) are explained by a legend but not drawn | web reading view (`web/pages/browse.py`), desktop viewer; `shared/fgp_service.py`, `shared/fgp_marks_legend.py` | 2026-10-26 | ❌ Open |
 
 ### Desktop app

@@ -89,7 +89,7 @@ from web.components.joins_panel import peek_connected_fragments, load_connected_
 from web.components.shelfmark_picker import items_from_manuscripts, open_shelfmark_picker
 from web import io_bound_result
 from web.pages.browse_state import (
-    BrowseState, persist_browse_snapshot, clear_browse_snapshot, restore_browse_snapshot,
+    BrowseState, page_has_reading_view, persist_browse_snapshot, clear_browse_snapshot, restore_browse_snapshot,
 )
 from web.browse_bootstrap import resolve_browse_bootstrap
 from web.pages.browse_enrichment import (
@@ -791,8 +791,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             # `get_metadata_only_browse_page`) carries `text=''`: there is an
             # image and a catalogue entry, and no transcription at all. Offering
             # a citation there credits MiDRASH for a transcription that does not
-            # exist. Rejecting only `None` let those through.
-            if not (page.text or '').strip():
+            # exist. Rejecting only `None` let those through. An edition shown on
+            # a page without an automatic text is cited as that edition (or as the
+            # reader's approved version shown there).
+            shown_edition = (version_info or {}).get('source') in ('fgp', 'pgp', 'translation', 'user')
+            if not (page.text or '').strip() and not shown_edition:
                 set_page_citation(None)
                 return
             _sm = page.shelfmark or ''
@@ -4612,8 +4615,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     icon='image'
                                 ).props('flat dense').classes('text-green-700').tooltip(tr('Toggle Image'))
 
-                            # Edit, Comment, Notes, and Joins buttons
-                            if page.text:
+                            # Edit, Comment, Notes, and Joins buttons -- also on a page without an
+                            # automatic transcription (its text is then empty; owner, 2026-10-27)
+                            if page_has_reading_view(page):
                                 from web.components import create_comment_button, create_version_selector, create_notes_button, create_joins_button
 
                                 # Refresh callback to reload page after edits/comments
@@ -5221,8 +5225,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 elif source in ('V0.7', 'V0.8'):
                                     ui.notify(f"{tr('Showing')} {source}", type='info')
 
-                            # Version selector placeholder (populated by enrichment Phase B)
-                            if page.text:
+                            # Version selector placeholder (populated by enrichment Phase B). A page without
+                            # an automatic transcription gets it too, with empty text, so an edition of the
+                            # page shows by the usual rule (owner, 2026-10-27).
+                            if page_has_reading_view(page):
                                 version_row = ui.row().classes('items-center p-2 border-b print-hide')
                                 enrichment_refs['version_container'] = version_row
                                 enrichment_refs['version_change_handler'] = handle_version_change
@@ -5240,7 +5246,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         create_version_selector(
                                             document_id=page.sys_id,
                                             page_number=page.p_num,
-                                            original_text=page.text,
+                                            original_text=page.text or '',
                                             on_version_change=handle_version_change,
                                             pgp_transcription=state.pgp_transcription,
                                             all_sources=state.all_sources,

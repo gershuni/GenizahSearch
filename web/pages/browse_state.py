@@ -14,10 +14,20 @@ import asyncio
 import logging
 from typing import Any, Optional, List, Dict
 
+from shared.synthetic_sys_id import is_synthetic_sys_id
 from web.safe_storage import safe_user_get, safe_user_set, safe_user_pop
 from web.services import BrowsePage, DocumentPage
 
 logger = logging.getLogger(__name__)
+
+
+def page_has_reading_view(page) -> bool:
+    """Whether the reading view offers its versions, Edit, Comment, Notes and Joins for ``page``.
+
+    A page without an automatic transcription gets them too, its automatic text taken as empty, so an FGP or PGP
+    edition of the page shows by the usual default rule (owner, 2026-10-27). Not a synthetic catalogue-only record:
+    there is no page to read or correct (corrections for those stay deferred, Phase 85 SYNTH-06)."""
+    return page is not None and (bool(page.text) or not is_synthetic_sys_id(page.sys_id))
 
 
 class BrowseState:

@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-10-27 (folded 1 fragment(s) from `docs/open_issues.d/`: 2026-10-27-fgp-pdf-final-letters-control-chars.md). 164 open: P1 0, P2 42, P3 122.
+> **Last Updated:** 2026-10-27 (folded 1 fragment(s) from `docs/open_issues.d/`: 2026-10-27-web-fgp-reading-view-gaps.md). 165 open: P1 0, P2 42, P3 123.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -25,7 +25,7 @@ owner tasks -- is in [`BACKLOG.md`](BACKLOG.md). Closed history:
 | Search | 0 | 4 | 21 | 25 |
 | Browse and viewer | 0 | 4 | 5 | 9 |
 | Desktop app | 0 | 9 | 25 | 34 |
-| Website | 0 | 6 | 22 | 28 |
+| Website | 0 | 6 | 23 | 29 |
 | API and AI | 0 | 2 | 1 | 3 |
 | Discovery | 0 | 2 | 11 | 13 |
 | Accounts and community | 0 | 8 | 27 | 35 |
@@ -33,7 +33,7 @@ owner tasks -- is in [`BACKLOG.md`](BACKLOG.md). Closed history:
 | Build, CI and tests | 0 | 0 | 1 | 1 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 2 | 1 | 3 |
-| **Total** | **0** | **42** | **122** | **164** |
+| **Total** | **0** | **42** | **123** | **165** |
 
 ## P1 - Critical
 
@@ -200,6 +200,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-278](ISSUE_DETAILS.md#gs-278) | Search-hit highlighting in the reading view does not match through vowel points | `web/pages/browse.py::highlight_text` | 2026-10-27 | ❌ Open |
 | [GS-273](ISSUE_DETAILS.md#gs-273) | The reading desk saves a source choice it never applies, keyed by list position | `web/pages/browse.py` (reading-desk version `ui.select`, `state.reading_desk_selected_sources`), `web/pages/browse_state.py` | 2026-10-26 | ❌ Open |
 | [GS-91](ISSUE_DETAILS.md#gs-91) | Website: Back to a search-within or visual-similarity search whose run is no longer kept runs it over the whole corpus | `web/pages/search.py::_search_url` (5248), page start elif initial_query (6547); `web/search_runs.py` | 2026-10-22 | ❌ Open |
 | [GS-92](ISSUE_DETAILS.md#gs-92) | Website: a search still preparing can be evicted from the run registry before finished ones | `web/search_runs.py` (`_prune`, `_oldest_first_removable`) | 2026-10-22 | ❌ Open |

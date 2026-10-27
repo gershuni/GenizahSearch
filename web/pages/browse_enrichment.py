@@ -29,7 +29,7 @@ from shared.fgp_service import (
     get_fgp_sources_for_fragment, filter_sources_for_page, folio_label_for_displayed_page,
     fgp_image_number_for_displayed_page, fgp_needs_full_htr,
 )
-from web.pages.browse_state import BrowseState, _crossref_cache
+from web.pages.browse_state import BrowseState, _crossref_cache, page_has_reading_view
 from web.safe_storage import safe_user_get, safe_user_set
 from shared.synthetic_sys_id import is_synthetic_sys_id
 
@@ -784,13 +784,13 @@ def update_enrichment_sections(state: BrowseState, refs: BrowsePageRefs):
         version_container.clear()
         handler = refs.enrichment_refs.get('version_change_handler')
         page = state.current_page
-        if handler and page and page.text:
+        if handler and page_has_reading_view(page):  # also with no automatic text (owner, 2026-10-27)
             with version_container:
                 from web.components import create_version_selector
                 create_version_selector(
                     document_id=page.sys_id,
                     page_number=page.p_num,
-                    original_text=page.text,
+                    original_text=page.text or '',
                     on_version_change=handler,
                     pgp_transcription=state.pgp_transcription,
                     all_sources=state.all_sources,

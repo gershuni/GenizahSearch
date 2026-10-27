@@ -4119,3 +4119,34 @@ checks: digits or Latin reordered, a change of direction, decoding errors), 19,0
 boxes because no reference glyph certifies them (e.g. a qamats whose outline is also qamats qatan), the uncertified
 glyphs that still show a symbol (30 `آ` for kaf and 48 `&` in row 17083), and the 385 glyph shapes awaiting the
 owner's review by eye.
+
+## GS-277
+
+**Editing an edition: what Edit starts from, and how a correction of an FGP or PGP edition is recorded and shown (owner's open question)** · idea · Browse and viewer · ❌ Open · opened 2026-10-27
+
+Where: web `web/pages/browse.py::toggle_edit_mode`, desktop `genizah_app.py::_browse_toggle_edit_mode`; Supabase `corrections`
+
+Owner, 2026-10-27, deciding `docs/plans/EDITIONS_WITHOUT_AUTOMATIC_TEXT_PLAN.md`: keep editing simplest for now and
+log the question. Today the web's Edit starts from the automatic transcription (empty on a page without one) or the
+reader's own latest correction, and the saved text is the reader's own version; the desktop's Edit starts from
+whatever text is on screen, an edition included. The `corrections` table has no column naming the text a correction
+was made on. Open: should Edit start from the edition on screen; should a correction record its base (e.g. a
+`corrections.base_source` column, `fgp:<row id>` / `pgp:<edition id>`, with its GRANTs); how a correction of an
+edition is labelled in the version menu and on the review page; whether it can become the page's default over a
+scholar's published edition (citations credit whoever made the text shown); whether such corrections go back to FGP
+or PGP.
+
+## GS-278
+
+**Search-hit highlighting in the reading view does not match through vowel points** · P3 · Website · ❌ Open · opened 2026-10-27
+
+Where: `web/pages/browse.py::highlight_text`
+
+`highlight_text` marks each search term by a literal, case-insensitive substring replacement, so an unpointed term
+never matches a pointed transcription: opening MS heb. e.77/6 (row 40846, FGP pointed edition) from a search for
+`משוך בטלה` shows the FGP edition by default (the search-scoped default normalises nikud and finds it) but marks
+nothing, because the text reads `מְשוך בְטלה`. Applies to every pointed edition, FGP or PGP; older than the GS-276
+re-read, which only made more pointed texts reachable. The unpointed re-read texts highlight correctly (MS heb.
+d.34/59, `השרץ בחבית`). Fix sketch: build the term pattern with optional marks between letters (U+0591-U+05C7), the
+rule `shared/fgp_service.py::_normalize_for_contains` already uses for the default choice. The desktop's highlight
+path was not checked against pointed text. Found in the GS-276 step-7 app checks.
