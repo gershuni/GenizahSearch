@@ -60,8 +60,10 @@ def test_a_key_may_appear_in_two_different_tables():
     delete one of them, which is exactly the mistake that got reverted while
     this dedup was being done.
     """
-    import sys
-    sys.path.insert(0, str(TABLE.parent))
+    # Imported by its dotted name from the repository root tests/conftest.py
+    # already puts on sys.path. Never put `shared/` itself on sys.path here: it
+    # stays there for the rest of the process and makes every module in it
+    # importable by a bare name, which tests/test_no_root_alias_stubs.py forbids.
     from shared.genizah_translations import LIBRARY_CODES_HE, TRANSLATIONS
     assert TRANSLATIONS.get('Oxford'), 'TRANSLATIONS lost its Oxford entry'
     assert LIBRARY_CODES_HE.get('Oxford'), 'LIBRARY_CODES_HE lost its Oxford entry'
@@ -77,8 +79,6 @@ def test_the_tables_are_still_the_expected_size():
     means entries were lost, which is the one way a mechanical dedup can go
     wrong.
     """
-    import sys
-    sys.path.insert(0, str(TABLE.parent))
     from shared.genizah_translations import LIBRARY_CODES_HE, TRANSLATIONS
     assert len(TRANSLATIONS) >= 3758, len(TRANSLATIONS)
     assert len(LIBRARY_CODES_HE) >= 89, len(LIBRARY_CODES_HE)
