@@ -21,10 +21,11 @@ PDFs, with known losses (line starts before a gershayim, final and vocalised let
 lines, Arabic). Four gates have been run on the new material and a **candidate sidecar** built and checked against
 the real chooser of both apps; a fifth gate measured the positions.
 
-| the candidate `fgp_data/inventory/fgp_transcriptions.candidate.db` (gitignored; tenth gate-4 run, 2026-10-26 22:43, the ninth's rows; sha256 `be9f5d84a9677b22…`) | rows |
+| the candidate `fgp_data/inventory/fgp_transcriptions.candidate.db` (gitignored; eleventh gate-4 run, 2026-10-27 09:21, the tenth's rows; sha256 `0b1fb5faddff0bf6…`) | rows |
 |---|---|
 | today's rows carried under their ids | 44,484 of 45,034 |
 | of which with a cleaner text (the Word file or the per-line position text instead of the PDF) | 27,673 |
+| of which keeping the PDF text with its final letters restored (GS-276) | 1,174 |
 | today's rows dropped | 550 |
 | new transcriptions added | 14,572 |
 | new rows held, with a reason each | 10,707 |
@@ -43,8 +44,8 @@ Word files whose rendering differs from FGP's own PDF in a way the classes do no
 3 personal data (team 850's contact list on three images, R2e), 3 non-manuscript documents (listed, R2d), 3
 shadowing cases, 50 status-1 translations (R2g).
 
-Every number above is a declared expectation reproduced by two runs with one digest (gate 3 `0088ba547d3dfc83`,
-rerun from the committed code 2026-10-26 evening with the same digest; gate 4 `14a8cfb929633f56`); the budgets
+Every number above is a declared expectation reproduced by two runs with one digest (gate 3 `3f166188e2ebcc56`,
+2026-10-27 with the final-letter step, T10 6,421 / 6,426 right; gate 4 `07dd7d1f048713ea`); the budgets
 (latency, memory, size) are far under their limits. `scripts/check_fgp_sidecar.py` checks the file itself
 (integrity, version, rows, and that it is byte for byte the file the passing run validated: the run records the
 file's sha256 in `gate4_summary.json`, and the checker refuses any other file).

@@ -384,6 +384,38 @@ def load_gate3(conn: sqlite3.Connection) -> tuple:
     return today, new
 
 
+def load_final_letters(conn: sqlite3.Connection) -> dict:
+    """{today_id: {code character: final letter}} from gate 3's ``final_letters`` (GS-276); {} for a gate-3
+    database written before the table existed, or with none applied."""
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='final_letters'").fetchone():
+        return {}
+    if "mapping" not in table_columns(conn, "final_letters"):
+        return {}
+    out = {}
+    for tid, mapping in conn.execute("SELECT today_id, mapping FROM final_letters WHERE applied > 0"):
+        out[tid] = {chr(int(code[2:], 16)): letter for code, letter in json.loads(mapping).items()}
+    return out
+
+
+def apply_final_letters(text, sections, mapping: dict) -> tuple:
+    """A carried row's today text and PDF page split with its final letters restored (rules §8 of gate 3)."""
+    table = str.maketrans(mapping)
+    text = text.translate(table) if text else text
+    if sections:
+        try:
+            parsed = json.loads(sections)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, list):
+            for sec in parsed:
+                if isinstance(sec, dict):
+                    for key in ("text", "content"):
+                        if isinstance(sec.get(key), str):
+                            sec[key] = sec[key].translate(table)
+            sections = json.dumps(parsed, ensure_ascii=False)
+    return text, sections
+
+
 def load_texts(conn: sqlite3.Connection, keys: set) -> dict:
     """Texts of the units in ``keys`` only -- unit_texts is read once, streaming."""
     out = {}
@@ -688,7 +720,8 @@ def write_candidate(path: str, today_db: str, today_cols: list, plan: dict, meta
     # provenance, unit and credit of every carried row
     con.executemany(
         'UPDATE fgp_transcriptions SET origin=?, text_provenance=?, fist_unit_table=?, fist_unit_id=?, durable_key=? WHERE id=?',
-        [("today", f"gate3:{k['reader']}" if k["replaced"] else "today", k["unit"][0], k["unit"][1], k["durable_key"], k["id"])
+        [("today", f"gate3:{k['reader']}" if k["replaced"] else ("gate3:final_letters" if k.get("final_letters") else "today"),
+          k["unit"][0], k["unit"][1], k["durable_key"], k["id"])
          for k in plan["kept"]])
     credit_cols = [c for c in ("source_credit", "source_credit_he", "source_credit_en") if c in has]
     if credit_cols:
@@ -709,6 +742,20 @@ def write_candidate(path: str, today_db: str, today_cols: list, plan: dict, meta
                       "text_source": f"gate3:{k['reader']}"}
             params.append(tuple(values[c] for c in text_cols) + (k["id"],))
         con.executemany(f"UPDATE fgp_transcriptions SET {sets} WHERE id=?", params)
+    # GS-276: today's text with gate 3's final letters restored, in the content and the PDF page split
+    fixed = [k for k in plan["kept"] if not k["replaced"] and k.get("final_letters")]
+    if fixed and text_cols:
+        get = ["content"] + [c for c in ("sections", "text_source") if c in has]
+        params = []
+        for k in fixed:
+            row = dict(zip(get, con.execute(f"SELECT {', '.join(get)} FROM fgp_transcriptions WHERE id=?",
+                                            (k["id"],)).fetchone()))
+            text, sections = apply_final_letters(row["content"], row.get("sections"), k["final_letters"])
+            values = {"content": text, "content_length": sum(1 for c in text if not c.isspace()),
+                      "heb_ratio": heb_ratio(text), "size_bytes": len(text.encode("utf-8")), "sections": sections,
+                      "text_source": f"{row.get('text_source') or 'pdf'}+final_letters"}
+            params.append(tuple(values[c] for c in text_cols) + (k["id"],))
+        con.executemany(f"UPDATE fgp_transcriptions SET {sets} WHERE id=?", params)  # `sets` of text_cols, above
     if plan["new_rows"]:
         new_cols = [c for c in cols if c in plan["new_rows"][0]]
         names = ", ".join(f'"{c}"' for c in new_cols)
@@ -1203,6 +1250,7 @@ def main(argv=None) -> int:
     g2_conn.close()
     g3_conn = ro(args.gate3)
     g3_today, g3_new = load_gate3(g3_conn)
+    final_letters = load_final_letters(g3_conn)
     meta["gate3_digest"] = (g3_conn.execute("SELECT value FROM gate3_meta WHERE key='digest'").fetchone() or [""])[0]
     inv = ro(args.inventory)
     b_numbers, units = load_inventory(inv)
@@ -1226,6 +1274,10 @@ def main(argv=None) -> int:
                           args.new_rows_policy, comments=comments, exclusions=exclusions, superseded=superseded,
                           status_one=status_one)
     g3_conn.close()
+    # GS-276: a row that keeps today's text takes gate 3's final-letter mapping (rules §8 of gate 3)
+    for k in plan["kept"]:
+        if not k["replaced"] and k["id"] in final_letters:
+            k["final_letters"] = final_letters[k["id"]]
     cand_path = os.path.join(args.out_dir, CANDIDATE_NAME)
     write_candidate(cand_path, args.fgp_db, cols_t, plan, meta)
     build_peak = 0.0
@@ -1239,6 +1291,7 @@ def main(argv=None) -> int:
     C["rows.today"] = len(today)
     C["rows.carried"] = len(plan["kept"])
     C["rows.replaced"] = sum(1 for k in plan["kept"] if k["replaced"])
+    C["rows.final_letters"] = sum(1 for k in plan["kept"] if k.get("final_letters"))
     C["rows.excluded"] = len(plan["excluded"])
     for _, reason, _ in plan["excluded"]:
         C[f"excluded.{reason}"] += 1

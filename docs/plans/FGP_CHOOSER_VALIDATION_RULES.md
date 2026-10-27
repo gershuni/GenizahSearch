@@ -92,6 +92,15 @@ with empty text, as the apps do.
 
 ## 6. Run record
 
+**2026-10-27 morning (eleventh run, final letters, GS-276) — PASS, 16 checks + 66 declared expectations, two runs
+with one digest** (`07dd7d1f048713ea`; about 95 s per run), on gate 3's rerun with the final-letter step (digest
+`3f166188e2ebcc56`, `FGP_TEXT_PIPELINE_RULES.md` §8). The same 59,056 rows, carried / excluded / new / held as in
+the tenth run, and every declared expectation held, the default decisions included (1,625 pages; 6 `text_replaced`).
+**1,174 carried rows keep today's PDF text with their final letters restored** (`text_provenance`
+`gate3:final_letters`, `text_source` `<today's>+final_letters`; two of gate 3's 1,176 repaired rows are excluded by
+R2); rows still carrying a control code 1,810 → 1,168 (codes inside words, and codes below the bar). The checker
+passes the rebuilt candidate (sha256 `0b1fb5faddff0bf6…`).
+
 **2026-10-26 late evening (tenth run, the checksum in the summary) — PASS, 16 checks + 66 declared expectations, two
 runs with one digest** (`14a8cfb929633f56`, the ninth run's: the same 59,056 rows; about 60 s per run). Codex found
 that `scripts/check_fgp_sidecar.py` tied the file to the run only by `built_at`, so a transcription edited after the

@@ -496,3 +496,29 @@ VOCALISED_TEXT = "אֵל פְּנֵה לַנֱּחֳלִים מִנְּדוּד�
 ])
 def test_legacy_font_rule(text, expected):
     assert g4.legacy_font(text) is expected
+
+
+def test_a_kept_pdf_row_takes_gate_3s_final_letters(world, capsys):
+    """GS-276: a row that keeps today's PDF text gets gate 3's final-letter mapping (rules §8 of gate 3). The page
+    split is covered by tests/test_fgp_final_letters.py: this fixture's table has no `sections` column."""
+    code = "\x04"
+    con = sqlite3.connect(world["fgp"])
+    content = con.execute("SELECT content FROM fgp_transcriptions WHERE id=2").fetchone()[0]
+    con.execute("UPDATE fgp_transcriptions SET content=? WHERE id=2", (content + f"\nאברהי{code}",))
+    con.commit()
+    con.close()
+    g3db = sqlite3.connect(os.path.join(world["out"], "gate3.db"))
+    g3db.execute("DROP TABLE IF EXISTS final_letters")
+    g3db.execute("CREATE TABLE final_letters (today_id PRIMARY KEY, row_key, codes, applied, mapping, decisions, text, text_hash)")
+    g3db.execute("INSERT INTO final_letters VALUES (2, 'today:2', 1, 1, ?, '{}', '', '')", (json.dumps({"U+0004": "ם"}),))
+    g3db.commit()
+    g3db.close()
+
+    rc = g4.main(_args(world, "--allow-single-run"))
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    cand, disp, sel, dec, counts, checks = _load(world)
+    assert counts["rows.final_letters"] == 1
+    row = _rows(world["candidate"], "SELECT content, text_source, text_provenance FROM fgp_transcriptions WHERE id=2")[0]
+    assert row["content"].endswith("\nאברהים") and code not in row["content"]
+    assert row["text_source"].endswith("+final_letters") and row["text_provenance"] == "gate3:final_letters"

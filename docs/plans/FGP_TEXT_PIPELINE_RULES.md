@@ -165,7 +165,8 @@ every replaced row has a FIST source link · `T03` every diff block has a dispos
 has only accepted blocks · `T04` every block of a replaced row is in `ACCEPTED_CLASSES` or approved · `T05`
 no new row accepted without a basis · `T06` no replaced XML row loses a line · `T07` no row from a
 FreeDescription unit or a `_D` file · `T08` every row is a transcription or translation by FIST · `T09` an
-accepted new DOCX row with a PDF yardstick has only accepted blocks against it · `E_*` the declared expectations. The tests prove the gate fails when a lossy difference is accepted (`T06`), when a
+accepted new DOCX row with a PDF yardstick has only accepted blocks against it · `T10` the final-letter repair is
+right on at least 99.5% of at least 1,000 codes judged on the rows that exist both ways (§8) · `E_*` the declared expectations. The tests prove the gate fails when a lossy difference is accepted (`T06`), when a
 replaced row loses its source link (`T02`), when two runs differ (`T01`), and on a missed expectation.
 
 ## 7. Run record
@@ -212,3 +213,44 @@ replaced row loses its source link (`T02`), when two runs differ (`T01`), and on
 Open for the owner: (1) the 771 + 85 verify-only rows and the Genuzos DOCX question (§3); (2) whether B2's 22 extra
 short lines (`לנו@`, `מצרימה:`) may be accepted as restored lines; (3) the `plain` policy for new rows; (4) the held
 reading differences, by team, in `line_diffs`.
+
+## 8. Final letters on the rows that keep today's PDF text (GS-276; declared 2026-10-27, before the run)
+
+The owner ruled on 2026-10-27 that the rows keeping today's PDF text have their final letters restored before the
+release. FGP's PDF font left `ך ם ן ף ץ` as control characters U+0001-U+001F; in the source-folders candidate 1,810
+rows still carry them (the rows with no Word or line text: 1,709 `pdf_rtl`, 101 `original`), and today's sidecar
+7,240. The code-to-letter mapping differs from PDF to PDF (U+0018 is `ן` 2,203 times and `ם` 1,453 times over the
+rows that exist both ways), but within one row a code is one letter (99.92% of 156,315 aligned occurrences; 8,914
+of 8,981 row-and-code pairs fully consistent). So gate 3 reads each row's codes off the row's own words
+(`scripts/fgp_final_letters.py`):
+
+- **Vocabulary**: the words ending in a final letter of every text gate 3 holds without a control code (the source
+  texts it read and today's clean texts), each distinct text counted once. The corpus HTR was tried as extra
+  vocabulary and lowered accuracy at every weight; it is not used.
+- **Votes**: a code is word-final when at least as many of its occurrences end a word as stand inside one; each
+  word ending in it (stem of two letters or more, no other code) casts one vote, split between the final letters
+  that make it a vocabulary word by how often each does. Codes inside words are vowel points and dots in those
+  PDFs (U+05C4, U+0323, U+0307, hiriq, patah) and are left as typed.
+- **Assignment**: the row's codes are assigned together, the most votes less 1 for each code beyond the first on
+  one letter (96% of rows use a distinct code per letter).
+- **Applied** only when the letter has at least 2 votes and at least 70% of the code's votes; the code is then
+  replaced everywhere in the row's text and in its PDF page split (`sections`). Otherwise it stays as typed: a box is
+  honest, a wrong final letter is not.
+
+Measured before the run on the rows that exist both ways (today's PDF text against the candidate's clean text of the
+same row; each row's own clean words taken out of the vocabulary): **99.95% of 6,454 applied codes right** (3 wrong);
+at 60% it was 99.74% (18 wrong of 6,823), and the codes below the bar are right 71-95% of the time. On the 1,810 rows
+it applies 1,922 codes and leaves 700 word-final codes and the inside-word codes as typed.
+
+Gate 3 writes the decisions to `final_letters` (one row per kept today row with a code: the mapping, the votes,
+the repaired text and its hash), counts them under `final_letters.*`, folds them into the digest, and repeats the
+measurement on every run: **`T10`** fails when an applied code exists and fewer than 1,000 codes were judged or
+fewer than 99.5% of them are right. Gate 4 applies a row's mapping to the content and sections it carries from
+today (`text_source` `<today's>+final_letters`, `text_provenance` `gate3:final_letters`).
+
+**Run record (2026-10-27, `scripts/run_fgp_gate3_text_pipeline.ps1`):** two runs (28 and 11 minutes) with the identical
+digest `3f166188e2ebcc56`, **PASS 65 / 65** (10 checks + 55 expectations; no earlier count changed). T10: **6,421 of
+6,426** applied codes right on the 5,392 rows that exist both ways (99.92%; every assigned code, applied or not,
+8,350 / 8,546). Of 7,206 today rows with a control code, 1,814 keep today's text: 1,967 codes applied (119,522
+occurrences) in 1,176 rows, 643 of them now without a code; left as typed 664 word-final codes below the bar and
+1,487 inside-word codes. Vocabulary 110,422 words.

@@ -83,6 +83,7 @@ from scripts.fgp_association_inventory import (  # noqa: E402
     DEFAULT_FGP_DB, DEFAULT_NOPOS, DEFAULT_OUT, DEFAULT_WITHPOS, NAME_SUFFIX_RE, parse_expectations, ro,
 )
 from scripts.fgp_rebuild_text_and_credit import parse_fgp_xml  # noqa: E402  (today's XML rows came through it)
+from scripts import fgp_final_letters as fl  # noqa: E402  (GS-276, rules §8)
 
 try:
     import lxml.etree as _LX
@@ -1400,6 +1401,8 @@ def build(inp: dict, nopos: str, withpos: str, today_files: str, approvals: dict
                         C[f"new.structure.{k}"] += 1
                 if multicolumn:
                     C["new.structure.multicolumn_tables"] += 1
+    # ---- final letters on the rows that keep today's PDF text (GS-276; FGP_TEXT_PIPELINE_RULES.md §8)
+    final_rows = final_letter_step(text_rows, unit_texts, inp["today"], C)
     # ---- counts
     C["rows"] = len(text_rows)
     C["rows.today"] = len(rows)
@@ -1428,7 +1431,55 @@ def build(inp: dict, nopos: str, withpos: str, today_files: str, approvals: dict
         digest.update(b"\n")
     for k in sorted(unit_texts):
         digest.update(f"{k[0]}:{k[1]}:{unit_texts[k]['text_hash']}\n".encode("utf-8"))
-    return text_rows, line_diffs, list(unit_texts.values()), C, digest.hexdigest()
+    for f in final_rows:
+        digest.update(f"final:{f['today_id']}:{f['mapping']}:{f['text_hash']}\n".encode("utf-8"))
+    return text_rows, line_diffs, list(unit_texts.values()), final_rows, C, digest.hexdigest()
+
+
+def final_letter_step(text_rows: list, unit_texts: dict, today: dict, C) -> list:
+    """GS-276 (``FGP_TEXT_PIPELINE_RULES.md`` §8): restore the final letters the PDF font left as control
+    characters on every today row whose text is NOT replaced, from the vocabulary of the clean texts; measure
+    the same inference on the replaced rows that had codes (their clean text is the answer), each row's own
+    words left out. Returns the ``final_letters`` rows; counts go to ``final_letters.*`` (check T10)."""
+    vocab = fl.build_vocabulary([u["text"] for u in unit_texts.values()] + [c for c, _ in today.values()])
+    C["final_letters.vocabulary_words"] = len(vocab)
+    pairs, out = [], []
+    for o in text_rows:
+        tid = o["today_id"]
+        if not tid or o["status"] == "retired":
+            continue
+        content = today.get(tid, ("", None))[0]
+        if not fl.has_codes(content):
+            continue
+        C["final_letters.today_rows_with_codes"] += 1
+        if o["text_replaced"]:
+            src = unit_texts.get((o["unit_table"], o["unit_id"]))
+            if src and src["text"] and not fl.has_codes(src["text"]):
+                pairs.append((content, src["text"]))
+            continue
+        votes = fl.code_votes(content, vocab)
+        decisions = fl.assign(votes)
+        mapping = fl.mapping_of(decisions)
+        repaired = fl.apply_mapping(content, mapping)
+        C["final_letters.kept_rows_with_codes"] += 1
+        C["final_letters.codes_word_final"] += len(decisions)
+        C["final_letters.codes_applied"] += len(mapping)
+        C["final_letters.codes_left"] += len(decisions) - len(mapping)
+        C["final_letters.codes_inside_words"] += sum(1 for v, ends, inside in votes.values() if inside > ends)
+        C["final_letters.occurrences_replaced"] += sum(content.count(code) for code in mapping)
+        if mapping:
+            C["final_letters.rows_repaired"] += 1
+            if not fl.has_codes(repaired):
+                C["final_letters.rows_now_clean"] += 1
+        out.append({"today_id": tid, "row_key": o["row_key"], "codes": len(votes), "applied": len(mapping),
+                    "mapping": _j(dict(sorted((f"U+{ord(k):04X}", v) for k, v in mapping.items()))),
+                    "decisions": _j({f"U+{ord(k):04X}": d for k, d in sorted(decisions.items())}),
+                    "text": repaired, "text_hash": sha(repaired)})
+    ev = fl.evaluate(pairs, vocab)
+    C["final_letters.eval.pairs"] = len(pairs)
+    for k in ("judged", "right", "wrong", "all_judged", "all_right"):
+        C[f"final_letters.eval.{k}"] = ev[k]
+    return sorted(out, key=lambda r: r["today_id"])
 
 
 # --------------------------------------------------------------------------- checks
@@ -1486,6 +1537,13 @@ def run_checks(text_rows: list, line_diffs: list, C: dict, expectations: dict, d
         "no row comes from a FreeDescription unit or a _D file")
     bad = [o["row_key"] for o in text_rows if o["kind"] not in ("transcription", "translation")]
     add("T08_kinds_from_fist", not bad, "0", f"{len(bad)}", "every row is a transcription or a translation by FIST")
+    applied = C.get("final_letters.codes_applied", 0)
+    judged = C.get("final_letters.eval.judged", 0)
+    right = C.get("final_letters.eval.right", 0)
+    add("T10_final_letters_accurate", applied == 0 or (judged >= fl.MIN_JUDGED and right >= fl.ACCURACY_FLOOR * judged),
+        f"no code applied, or >= {fl.ACCURACY_FLOOR:.1%} of >= {fl.MIN_JUDGED:,} judged codes right",
+        f"{applied:,} applied; {right:,} / {judged:,} right",
+        "the final-letter inference is right on the rows that exist both ways before it touches a kept row (§8)")
     for key, want in sorted(expectations.items()):
         got = C.get(key, 0)
         add(f"E_{key}", got == want, want, got, "declared expectation")
@@ -1505,7 +1563,7 @@ def _create(conn, table, rows, pk=None):
     conn.executemany(f'INSERT INTO "{table}" VALUES ({",".join("?" * len(cols))})', ([r[c] for c in cols] for r in rows))
 
 
-def write_outputs(text_rows, line_diffs, unit_texts, checks, C, out_dir, meta) -> str:
+def write_outputs(text_rows, line_diffs, unit_texts, checks, C, out_dir, meta, final_rows=()) -> str:
     os.makedirs(out_dir, exist_ok=True)
     db_path = os.path.join(out_dir, "gate3.db")
     if os.path.exists(db_path):
@@ -1529,6 +1587,7 @@ def write_outputs(text_rows, line_diffs, unit_texts, checks, C, out_dir, meta) -
         _create(conn, "line_diffs", line_diffs)
         _create(conn, "checks", checks, pk="name")
         _create(conn, "counts", [{"key": k, "value": v} for k, v in sorted(C.items())], pk="key")
+        _create(conn, "final_letters", list(final_rows), pk="today_id")
         conn.execute('CREATE INDEX "ix_tr_today" ON "text_rows"("today_id")')
         conn.execute('CREATE INDEX "ix_tr_unit" ON "text_rows"("unit_table", "unit_id")')
         conn.execute('CREATE INDEX "ix_tr_status" ON "text_rows"("status")')
@@ -1572,6 +1631,16 @@ def render_report(text_rows, line_diffs, checks, C, meta) -> str:
         name = k[len("class_blocks."):]
         verdict = "yes" if name in ACCEPTED_CLASSES else ("verify only" if name in VERIFY_ONLY_CLASSES else "**no**")
         out.append(f"| `{name}` | {C[k]:,} | {C.get('class_rows.' + name, 0):,} | {verdict} |")
+    judged = C.get("final_letters.eval.judged", 0)
+    out += ["", "## Final letters on the rows that keep today's text (§8)", "",
+            f"Today rows with a control code {C.get('final_letters.today_rows_with_codes', 0):,}; kept with today's text "
+            f"{C.get('final_letters.kept_rows_with_codes', 0):,}: codes applied {C.get('final_letters.codes_applied', 0):,} "
+            f"({C.get('final_letters.occurrences_replaced', 0):,} occurrences, {C.get('final_letters.rows_repaired', 0):,} rows, "
+            f"{C.get('final_letters.rows_now_clean', 0):,} now without a code), left as typed "
+            f"{C.get('final_letters.codes_left', 0):,} word-final and {C.get('final_letters.codes_inside_words', 0):,} inside-word. "
+            f"Measured on {C.get('final_letters.eval.pairs', 0):,} rows that exist both ways: "
+            f"{C.get('final_letters.eval.right', 0):,} / {judged:,} applied codes right"
+            + (f" ({C.get('final_letters.eval.right', 0) / judged:.2%})." if judged else ".")]
     out += ["", "## One accepted example per class (today → new)", ""]
     seen = set()
     for b in line_diffs:
@@ -1648,14 +1717,14 @@ def main(argv=None) -> int:
     log(f"  {len(inp['units']):,} units, {len(inp['rows']):,} rows, {len(approvals):,} approvals ({time.time() - t0:.0f}s)")
     log("reading and diffing ...")
     pdf_cache = open_pdf_cache(args.pdf_cache)
-    text_rows, line_diffs, unit_texts, C, digest = build(inp, args.nopos, args.withpos, args.today_files, approvals,
-                                                         new_rows_policy=args.new_rows_policy, limit=args.limit,
-                                                         pdf_cache=pdf_cache)
+    text_rows, line_diffs, unit_texts, final_rows, C, digest = build(
+        inp, args.nopos, args.withpos, args.today_files, approvals, new_rows_policy=args.new_rows_policy,
+        limit=args.limit, pdf_cache=pdf_cache)
     if pdf_cache is not None:
         pdf_cache.close()
     meta["digest"] = digest
     checks = run_checks(text_rows, line_diffs, C, expectations, digest, previous_digest, args.allow_single_run)
-    db_path = write_outputs(text_rows, line_diffs, unit_texts, checks, C, args.out_dir, meta)
+    db_path = write_outputs(text_rows, line_diffs, unit_texts, checks, C, args.out_dir, meta, final_rows)
     failed = [c for c in checks if not c["passed"]]
     for c in checks:
         log(f"  [{'ok  ' if c['passed'] else 'FAIL'}] {c['name']}: expected {c['expected']}, got {c['actual']}")
