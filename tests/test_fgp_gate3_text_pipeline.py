@@ -22,6 +22,7 @@ from scripts import fgp_association_inventory as gate1
 from scripts import fgp_gate2_rules as gate2
 from scripts import fgp_gate3_text_pipeline as g3
 from tests.fgp_fixture_world import (
+    GATE3_REREAD_ARGS,
     ALMA_B, B1_TEXT, B2_C400_TEXT, DOCX_UNIT3_TEXT, build_world, read_docx_path, rows as _rows,
 )
 
@@ -39,7 +40,8 @@ def world(tmp_path):
 def _args(w, *extra):
     return ["--inventory", os.path.join(w["out"], "inventory.db"), "--gate2", os.path.join(w["out"], "gate2.db"),
             "--fgp-db", w["fgp"], "--nopos", w["nopos"], "--withpos", w["withpos"], "--today-files", w["today_files"],
-            "--approvals", os.path.join(w["root"], "no-approvals.json"), "--out-dir", w["out"], *extra]
+            "--approvals", os.path.join(w["root"], "no-approvals.json"), "--out-dir", w["out"], *GATE3_REREAD_ARGS,
+            *extra]
 
 
 def _load(w):
@@ -314,3 +316,49 @@ def test_new_docx_rows_are_checked_against_their_pdf(tmp_path, monkeypatch):
     rows, counts, _t, _d, _c = _load(w)
     assert rows[key]["status"] == "no_comparator" and rows[key]["acceptance_basis"] == "rule:docx_no_pdf_text"
     assert counts["new.accepted_by.rule:docx_no_pdf_text"] == 1 and "new.yardstick_pdf" not in counts
+
+
+# --- §9: the glyph re-read's checks T11-T14 (each must be able to fail) ------------------------------------------
+
+def _reread_counts(**over):
+    c = {"glyph_reread.rows.accepted": 10, "glyph_reread.c3.rows": 5, "glyph_reread.c3.weight": 1000,
+         "glyph_reread.c3.judged": 950, "glyph_reread.c3.agree": 940, "glyph_reread.c3.decode_error_weight": 0,
+         "glyph_reread.c5.denominator": 100, "glyph_reread.c5.recovered": 80, "glyph_reread.c5.unresolved": 5,
+         "glyph_reread.map_entries": 3, "glyph_reread.map.certified": 2, "glyph_reread.map.certified by shape": 1}
+    c.update(over)
+    import collections
+    return collections.Counter(c)
+
+
+def _t(C):
+    return {c["name"]: c["passed"] for c in g3.run_checks([], [], C, {}, "d" * 16, None, True)
+            if c["name"].startswith("T1") and c["name"] != "T10_final_letters_accurate"}
+
+
+def test_reread_checks_pass_a_sound_run():
+    assert _t(_reread_counts()) == {"T11_glyph_reread_faithful": 1, "T12_glyph_reread_c3": 1,
+                                    "T13_glyph_reread_c5": 1, "T14_glyph_reread_map_certified": 1}
+
+
+@pytest.mark.parametrize("over, failing", [
+    ({"glyph_reread.errors": 1}, "T11_glyph_reread_faithful"),
+    ({"glyph_reread.certify_errors": 1}, "T11_glyph_reread_faithful"),
+    ({"glyph_reread.unfaithful_bench": 1}, "T11_glyph_reread_faithful"),
+    ({"glyph_reread.hold.C1: the extractor no longer reproduces the stored text": 1}, "T11_glyph_reread_faithful"),
+    ({"glyph_reread.c3.judged": 800}, "T12_glyph_reread_c3"),
+    ({"glyph_reread.c3.decode_error_weight": 10}, "T12_glyph_reread_c3"),
+    ({"glyph_reread.c5.recovered": 0}, "T13_glyph_reread_c5"),
+    ({"glyph_reread.c5.unresolved": 30}, "T13_glyph_reread_c5"),
+    ({"glyph_reread.map_entries": 4}, "T14_glyph_reread_map_certified"),
+])
+def test_each_reread_check_fails_on_its_own_fault(over, failing):
+    res = _t(_reread_counts(**over))
+    assert res[failing] == 0 and all(v == 1 for k, v in res.items() if k != failing)
+
+
+def test_t11_fails_a_run_whose_only_pdf_failed():
+    # no measured row, no benchmark weight, no letters: the recorded error alone must fail T11 (Codex, round 2)
+    import collections
+    for key in ("glyph_reread.errors", "glyph_reread.certify_errors"):
+        assert _t(collections.Counter({key: 1}))["T11_glyph_reread_faithful"] == 0
+    assert _t(collections.Counter())["T11_glyph_reread_faithful"] == 1

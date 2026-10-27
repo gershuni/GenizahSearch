@@ -25,6 +25,7 @@ from scripts import fgp_gate4_chooser_validation as g4
 from scripts import fgp_gate5_positions as g5
 from scripts.fgp_rebuild_text_and_credit import parse_fgp_xml
 from tests.fgp_fixture_world import (
+    GATE3_REREAD_ARGS,
     ALMA_A, ALMA_B, ALMA_C, B1_POS_POSITIONED, B1_POS_TEXT,
     B2_C400_TEXT, B2_POS_DISPLAY_ROT, B2_POS_POSITIONED, add_position_gallery, build_world, rows as _rows,
     write_other_displayed_image, write_position_content,
@@ -50,7 +51,8 @@ def world(tmp_path_factory):
     assert gate2.main(["--inventory", inv, "--fgp-db", w["fgp"], "--fist", w["fist"], "--out-dir", w["out"]]) == 0
     assert g3.main(["--inventory", inv, "--gate2", os.path.join(w["out"], "gate2.db"), "--fgp-db", w["fgp"],
                     "--nopos", w["nopos"], "--withpos", w["withpos"], "--today-files", w["today_files"],
-                    "--approvals", os.path.join(root, "none.json"), "--out-dir", w["out"], "--allow-single-run"]) == 0
+                    "--approvals", os.path.join(root, "none.json"), "--out-dir", w["out"], "--allow-single-run",
+                    *GATE3_REREAD_ARGS]) == 0
     htr = os.path.join(root, "htr.json")
     with open(htr, "w", encoding="utf-8") as fh:
         json.dump(HTR, fh, ensure_ascii=False)

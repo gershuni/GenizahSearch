@@ -1,5 +1,5 @@
 {
-  "_comment": "Counts the gate-4 run must reproduce over today's fgp_transcriptions.db (45,034 rows), gate2.db (with the fist_comment_no_publish hold), gate3.db (with the 10 approvals of 2026-10-26), inventory.db and nli_crossref.db, with the plain new-rows policy, the test_or_dummy, legacy_font, stub_retired (by containment), personal_data and superseded_version (FIST RecordStatus 5) and status1_translation rules and the listed exclusions (scripts/fgp_gate4_exclusions.json, rulings of 2026-10-26 evening), the Word-file rules of 2026-10-26 (docx_multicolumn_table and pdf_held hold; hidden runs, numbering, footnotes, tracked changes and one-column tables render), no gate-4 approvals and the declared reference set (docs/plans/FGP_CHOOSER_VALIDATION_RULES.md). Declared 2026-10-26 from two identical runs; latency and memory are budgets, not expectations. A rebuilt input, a new rule or an approval changes them on purpose, with the rules document.",
+  "_comment": "Counts the gate-4 run must reproduce over today's fgp_transcriptions.db (45,034 rows), gate2.db (with the fist_comment_no_publish hold), gate3.db (with the 10 approvals of 2026-10-26), inventory.db and nli_crossref.db, with the plain new-rows policy, the test_or_dummy, legacy_font, stub_retired (by containment), personal_data and superseded_version (FIST RecordStatus 5) and status1_translation rules and the listed exclusions (scripts/fgp_gate4_exclusions.json, rulings of 2026-10-26 evening), the Word-file rules of 2026-10-26 (docx_multicolumn_table and pdf_held hold; hidden runs, numbering, footnotes, tracked changes and one-column tables render), no gate-4 approvals and the declared reference set (docs/plans/FGP_CHOOSER_VALIDATION_RULES.md). Declared 2026-10-26 from two identical runs; latency and memory are budgets, not expectations. A rebuilt input, a new rule or an approval changes them on purpose, with the rules document. The glyph re-read (GS-276, rules §9 of gate 3) declared 2026-10-27: 1,435 carried rows ship the re-read (the measured candidate scope; 1,013 of them had the vocabulary repair), 161 keep the vocabulary repair alone.",
   "rows.today": 45034,
   "rows.carried": 44484,
   "rows.replaced": 27673,
@@ -65,5 +65,9 @@
   "exclusions.listed": 9,
   "exclusions.unmatched": 0,
   "new_held.superseded_version": 4506,
-  "new_held.status1_translation": 50
+  "new_held.status1_translation": 50,
+  "rows.glyph_reread": 1435,
+  "rows.final_letters": 161,
+  "rows.glyph_reread_with_page_split": 0,
+  "rows.glyph_reread_stale": 0
 }

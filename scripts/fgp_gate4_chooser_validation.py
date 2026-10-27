@@ -129,6 +129,7 @@ import shared.nli_crossref_service as nli_mod  # noqa: E402
 DEFAULT_FGP_DB = os.path.join(ROOT, "fgp_data", "fgp_transcriptions.db")
 DEFAULT_GATE2 = os.path.join(DEFAULT_OUT, "gate2.db")
 DEFAULT_GATE3 = os.path.join(DEFAULT_OUT, "gate3.db")
+DEFAULT_TODAY_FILES = os.path.join(ROOT, "fgp_data", "transcriptions")  # today's PDFs (rel_path root), as gate 3
 DEFAULT_INVENTORY = os.path.join(DEFAULT_OUT, "inventory.db")
 DEFAULT_NLI = os.path.join(ROOT, "nli_data", "nli_crossref.db")
 DEFAULT_LIBRARIES = os.path.join(ROOT, "libraries.csv")
@@ -395,6 +396,22 @@ def load_final_letters(conn: sqlite3.Connection) -> dict:
     for tid, mapping in conn.execute("SELECT today_id, mapping FROM final_letters WHERE applied > 0"):
         out[tid] = {chr(int(code[2:], 16)): letter for code, letter in json.loads(mapping).items()}
     return out
+
+
+GLYPH_REREAD_ACCEPTED = ("accepted", "accepted (exception)")
+
+
+def load_glyph_reread(conn: sqlite3.Connection) -> dict:
+    """{today_id: (re-read text, its hash, hash of the stored text gate 3 read)} of the rows gate 3's glyph re-read
+    accepts (GS-276, rules §9 of gate 3); {} for a gate-3 database written before the table (or its hashes) existed,
+    or with nothing accepted."""
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='glyph_reread'").fetchone():
+        return {}
+    if not {"text", "text_hash", "today_text_hash", "rel_path", "pdf_sha256"} <= set(table_columns(conn, "glyph_reread")):
+        return {}
+    return {tid: (text, text_hash, today_hash, rel, pdf) for tid, text, text_hash, today_hash, rel, pdf in conn.execute(
+        "SELECT today_id, text, text_hash, today_text_hash, rel_path, pdf_sha256 FROM glyph_reread "
+        "WHERE decision IN (?, ?) AND text IS NOT NULL", GLYPH_REREAD_ACCEPTED)}
 
 
 def apply_final_letters(text, sections, mapping: dict) -> tuple:
@@ -720,7 +737,9 @@ def write_candidate(path: str, today_db: str, today_cols: list, plan: dict, meta
     # provenance, unit and credit of every carried row
     con.executemany(
         'UPDATE fgp_transcriptions SET origin=?, text_provenance=?, fist_unit_table=?, fist_unit_id=?, durable_key=? WHERE id=?',
-        [("today", f"gate3:{k['reader']}" if k["replaced"] else ("gate3:final_letters" if k.get("final_letters") else "today"),
+        [("today", f"gate3:{k['reader']}" if k["replaced"] else (
+            "gate3:glyph_reread" if k.get("glyph_reread") is not None else
+            "gate3:final_letters" if k.get("final_letters") else "today"),
           k["unit"][0], k["unit"][1], k["durable_key"], k["id"])
          for k in plan["kept"]])
     credit_cols = [c for c in ("source_credit", "source_credit_he", "source_credit_en") if c in has]
@@ -743,7 +762,7 @@ def write_candidate(path: str, today_db: str, today_cols: list, plan: dict, meta
             params.append(tuple(values[c] for c in text_cols) + (k["id"],))
         con.executemany(f"UPDATE fgp_transcriptions SET {sets} WHERE id=?", params)
     # GS-276: today's text with gate 3's final letters restored, in the content and the PDF page split
-    fixed = [k for k in plan["kept"] if not k["replaced"] and k.get("final_letters")]
+    fixed = [k for k in plan["kept"] if not k["replaced"] and k.get("final_letters") and k.get("glyph_reread") is None]
     if fixed and text_cols:
         get = ["content"] + [c for c in ("sections", "text_source") if c in has]
         params = []
@@ -754,6 +773,18 @@ def write_candidate(path: str, today_db: str, today_cols: list, plan: dict, meta
             values = {"content": text, "content_length": sum(1 for c in text if not c.isspace()),
                       "heb_ratio": heb_ratio(text), "size_bytes": len(text.encode("utf-8")), "sections": sections,
                       "text_source": f"{row.get('text_source') or 'pdf'}+final_letters"}
+            params.append(tuple(values[c] for c in text_cols) + (k["id"],))
+        con.executemany(f"UPDATE fgp_transcriptions SET {sets} WHERE id=?", params)  # `sets` of text_cols, above
+    # GS-276: the PDF text re-read through its fonts' glyph names (rules §9 of gate 3); only rows without a page split
+    reread = [k for k in plan["kept"] if not k["replaced"] and k.get("glyph_reread") is not None]
+    if reread and text_cols:
+        params = []
+        for k in reread:
+            src = con.execute("SELECT text_source FROM fgp_transcriptions WHERE id=?", (k["id"],)).fetchone()[0]
+            text = k["glyph_reread"]
+            values = {"content": text, "content_length": sum(1 for c in text if not c.isspace()),
+                      "heb_ratio": heb_ratio(text), "size_bytes": len(text.encode("utf-8")), "sections": None,
+                      "text_source": f"{src or 'pdf'}+glyphs"}
             params.append(tuple(values[c] for c in text_cols) + (k["id"],))
         con.executemany(f"UPDATE fgp_transcriptions SET {sets} WHERE id=?", params)  # `sets` of text_cols, above
     if plan["new_rows"]:
@@ -1206,6 +1237,8 @@ def main(argv=None) -> int:
     ap.add_argument("--fgp-db", default=DEFAULT_FGP_DB, help="today's sidecar (read only)")
     ap.add_argument("--gate2", default=DEFAULT_GATE2)
     ap.add_argument("--gate3", default=DEFAULT_GATE3)
+    ap.add_argument("--today-files", default=DEFAULT_TODAY_FILES,
+                    help="today's PDFs (rel_path root): a glyph re-read is attached only to the PDF gate 3 read")
     ap.add_argument("--inventory", default=DEFAULT_INVENTORY)
     ap.add_argument("--fist", default=DEFAULT_FIST)
     ap.add_argument("--nli", default=DEFAULT_NLI, help="nli_crossref.db (gallery; page assignment)")
@@ -1251,6 +1284,7 @@ def main(argv=None) -> int:
     g3_conn = ro(args.gate3)
     g3_today, g3_new = load_gate3(g3_conn)
     final_letters = load_final_letters(g3_conn)
+    glyph_reread = load_glyph_reread(g3_conn)
     meta["gate3_digest"] = (g3_conn.execute("SELECT value FROM gate3_meta WHERE key='digest'").fetchone() or [""])[0]
     inv = ro(args.inventory)
     b_numbers, units = load_inventory(inv)
@@ -1278,6 +1312,26 @@ def main(argv=None) -> int:
     for k in plan["kept"]:
         if not k["replaced"] and k["id"] in final_letters:
             k["final_letters"] = final_letters[k["id"]]
+    # GS-276: an accepted re-read replaces today's text (and its vocabulary repair) on a row without a page split;
+    # a held row keeps today's text with the final letters (rules §9 of gate 3)
+    split = {i for i, s in db_t.execute("SELECT id, sections FROM fgp_transcriptions WHERE sections IS NOT NULL "
+                                        "AND sections NOT IN ('', '[]', 'null')")} if "sections" in cols_t else set()
+    reread_skipped = reread_stale = 0
+    for k in plan["kept"]:
+        if not k["replaced"] and k["id"] in glyph_reread:
+            text, text_hash, today_hash, rel, pdf_sha = glyph_reread[k["id"]]
+            if k["id"] in split:
+                reread_skipped += 1
+                continue
+            # bound to the stored text and the PDF gate 3 read, and to itself: a re-read made from another sidecar or
+            # another PDF, or altered since, is not attached (the row keeps today's text) and is counted
+            row = today.get(k["id"]) or {}
+            pdf = os.path.join(args.today_files, row.get("rel_path") or "")
+            if (sha(row.get("content") or "") != today_hash or sha(text) != text_hash or row.get("rel_path") != rel
+                    or not os.path.isfile(pdf) or sha256_file(pdf) != pdf_sha):
+                reread_stale += 1
+                continue
+            k["glyph_reread"] = text
     cand_path = os.path.join(args.out_dir, CANDIDATE_NAME)
     write_candidate(cand_path, args.fgp_db, cols_t, plan, meta)
     build_peak = 0.0
@@ -1291,7 +1345,10 @@ def main(argv=None) -> int:
     C["rows.today"] = len(today)
     C["rows.carried"] = len(plan["kept"])
     C["rows.replaced"] = sum(1 for k in plan["kept"] if k["replaced"])
-    C["rows.final_letters"] = sum(1 for k in plan["kept"] if k.get("final_letters"))
+    C["rows.final_letters"] = sum(1 for k in plan["kept"] if k.get("final_letters") and k.get("glyph_reread") is None)
+    C["rows.glyph_reread"] = sum(1 for k in plan["kept"] if k.get("glyph_reread") is not None)
+    C["rows.glyph_reread_with_page_split"] = reread_skipped
+    C["rows.glyph_reread_stale"] = reread_stale
     C["rows.excluded"] = len(plan["excluded"])
     for _, reason, _ in plan["excluded"]:
         C[f"excluded.{reason}"] += 1
@@ -1379,9 +1436,14 @@ def main(argv=None) -> int:
         rk = next((n["row_key"] for n in plan["new_rows"] if n["id"] == r[0]), f"today:{r[0]}") if r[1] == "new" else f"today:{r[0]}"
         cat = next((n["credit_category"] for n in plan["new_rows"] if n["id"] == r[0]), None) if r[1] == "new" else None
         cand_rows.append((r[0], r[1], rk, r[2], r[3], r[4], r[5], r[6], r[7], sha(r[8]), len(letters(r[8])), r[9], cat))
+    # the page split and the text source are in the digest too (GS-276 plan, C7): a re-read changes them
+    extra = {i: (sha(s) if s else None, src) for i, s, src in db_c.execute(
+        "SELECT id, " + ("sections" if "sections" in cand_cols else "NULL") + ", "
+        + ("text_source" if "text_source" in cand_cols else "NULL") + " FROM fgp_transcriptions")}
     h = hashlib.sha256()
     for row in cand_rows:
-        h.update(_j([row[0], row[1], row[4], row[5], row[9], row[11], row[8]]).encode("utf-8"))
+        h.update(_j([row[0], row[1], row[4], row[5], row[9], row[11], row[8], *extra.get(row[0], (None, None))])
+                 .encode("utf-8"))
     for row in sorted(sel):
         h.update(_j(row).encode("utf-8"))
     for row in decisions:

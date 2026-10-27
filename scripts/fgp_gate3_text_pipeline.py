@@ -44,14 +44,17 @@ CHECKS
 T01 two runs identical (``--previous-summary``) · T02 every replaced row has a FIST
 source link · T03 every diff block has a disposition · T04 every replaced block is in an
 accepted class or approved · T05 no new row accepted without a basis · T06 no XML row
-regresses · T07 no description becomes an edition · T08 kinds from FIST · E_* declared
-expectations.
+regresses · T07 no description becomes an edition · T08 kinds from FIST · T10 final letters
+(§8) · T11-T14 the glyph re-read (§9: C1 faithful, C3 against the Word text, C5 recovery, C4
+certified map) · E_* declared expectations.
 
 OUTPUTS
 -------
 ``<out-dir>/gate3.db`` (``text_rows``, ``unit_texts``, ``line_diffs``, ``checks``,
-``counts``, ``gate3_meta``), ``gate3_summary.json``, ``GATE3_REPORT.md``. Read-only on
-every input.
+``counts``, ``gate3_meta``, ``final_letters``, ``glyph_reread``, ``glyph_map``,
+``glyph_reread_exceptions``), ``gate3_summary.json``, ``GATE3_REPORT.md``; the re-read's
+working files in ``<out-dir>/gate3_glyph_reread/`` (made fresh every run). Read-only on every
+input.
 
 USAGE
 -----
@@ -84,6 +87,7 @@ from scripts.fgp_association_inventory import (  # noqa: E402
 )
 from scripts.fgp_rebuild_text_and_credit import parse_fgp_xml  # noqa: E402  (today's XML rows came through it)
 from scripts import fgp_final_letters as fl  # noqa: E402  (GS-276, rules §8)
+from scripts import fgp_glyph_reread as gr  # noqa: E402  (GS-276, rules §9)
 
 try:
     import lxml.etree as _LX
@@ -1163,7 +1167,8 @@ def read_unit(unit: dict, inp: dict, nopos: str, withpos: str) -> UnitText:
 
 
 def build(inp: dict, nopos: str, withpos: str, today_files: str, approvals: dict,
-          new_rows_policy: str = "hold", limit: int | None = None, pdf_cache: sqlite3.Connection | None = None) -> tuple:
+          new_rows_policy: str = "hold", limit: int | None = None, pdf_cache: sqlite3.Connection | None = None,
+          reread_dir: str | None = None) -> tuple:
     C = collections.Counter()
     unit_cache: dict = {}
     text_rows, line_diffs, unit_texts = [], [], {}
@@ -1403,6 +1408,8 @@ def build(inp: dict, nopos: str, withpos: str, today_files: str, approvals: dict
                     C["new.structure.multicolumn_tables"] += 1
     # ---- final letters on the rows that keep today's PDF text (GS-276; FGP_TEXT_PIPELINE_RULES.md §8)
     final_rows = final_letter_step(text_rows, unit_texts, inp["today"], C)
+    # ---- the PDF text re-read through its fonts' glyph names (GS-276; FGP_TEXT_PIPELINE_RULES.md §9)
+    reread = glyph_reread_step(text_rows, unit_texts, inp["today"], final_rows, today_files, reread_dir, C)
     # ---- counts
     C["rows"] = len(text_rows)
     C["rows.today"] = len(rows)
@@ -1433,7 +1440,83 @@ def build(inp: dict, nopos: str, withpos: str, today_files: str, approvals: dict
         digest.update(f"{k[0]}:{k[1]}:{unit_texts[k]['text_hash']}\n".encode("utf-8"))
     for f in final_rows:
         digest.update(f"final:{f['today_id']}:{f['mapping']}:{f['text_hash']}\n".encode("utf-8"))
-    return text_rows, line_diffs, list(unit_texts.values()), final_rows, C, digest.hexdigest()
+    # the re-read's own digest covers every certification decision and the input versions (§9, C7)
+    digest.update(f"glyph_reread:{reread['digest']}\n".encode("utf-8"))
+    for g in reread["rows"]:
+        digest.update(f"reread:{g['today_id']}:{g['decision']}:{g['reasons']}:{g['text_hash']}\n".encode("utf-8"))
+    for e in reread["map"]:
+        digest.update(f"map:{e['sha256']}:{e['font_objid']}:{e['code']}:{e['sequence']}:{e['status']}\n".encode("utf-8"))
+    return text_rows, line_diffs, list(unit_texts.values()), final_rows, reread, C, digest.hexdigest()
+
+
+def glyph_reread_step(text_rows: list, unit_texts: dict, today: dict, final_rows: list, today_files: str,
+                      work_dir: str | None, C) -> dict:
+    """GS-276 (``FGP_TEXT_PIPELINE_RULES.md`` §9): re-read the PDF of every row kept with today's text through its
+    fonts' glyph names, in a fresh working folder of this run (``scripts/fgp_glyph_reread.py``, steps 1-5). An
+    accepted row, or a held row the owner's approved patterns cover, ships the re-read text (gate 4); every other
+    row keeps today's text with the vocabulary repair. Counts go to ``glyph_reread.*`` (checks T11-T14)."""
+    empty = {"rows": [], "map": [], "exceptions": [], "digest": "", "summary": None}
+    finals = {f["today_id"]: f["text"] for f in final_rows}
+    vmaps = {f["today_id"]: {chr(int(k[2:], 16)): v for k, v in json.loads(f["mapping"]).items()}
+             for f in final_rows if f["applied"]}
+    texts = {k: u["text"] for k, u in unit_texts.items()}
+    scope = gr.scope_from(text_rows, today, finals)
+    bench = gr.bench_from(text_rows, today, texts)
+    C["glyph_reread.scope_rows"] = len(scope)
+    C["glyph_reread.bench_rows"] = len(bench)
+    if not work_dir or not any(os.path.isfile(os.path.join(today_files, r["rel_path"])) for r in scope + bench):
+        return empty
+    import importlib.util
+    missing = [m for m in ("pdfminer", "fontTools") if importlib.util.find_spec(m) is None]
+    if missing:  # fail closed: a gate-3 run without the re-read must say so (--no-glyph-reread), never skip it silently
+        raise SystemExit(f"the glyph re-read (rules §9) needs {' and '.join(missing)} (packages pdfminer.six, fonttools); "
+                         "install them or pass --no-glyph-reread")
+    if os.path.isdir(work_dir):
+        import gc
+        import shutil
+        gc.collect()  # an earlier run in this process may still hold its working databases in reference cycles
+        shutil.rmtree(work_dir)  # this run's own working folder, made fresh every run (§9, C7)
+    os.makedirs(work_dir)
+    gr.use_work_dir(work_dir, today_files)
+    gr.set_inputs(scope, bench, vmaps, [u["text"] or "" for u in unit_texts.values()] + [c for c, _ in today.values()])
+    try:
+        res = gr.run_all()
+    finally:
+        gr.reset()  # later code in this process (gate 3's tests run it several times) sees the defaults again
+    s = res["summary"]
+    s0_hash = {r["id"]: sha(r["s0"]) for r in scope}
+    for k, v in s["scope_decisions"].items():
+        C[f"glyph_reread.rows.{k}"] = v
+    for k, v in s["hold_reasons"].items():
+        C[f"glyph_reread.hold.{k}"] = v
+    for k in ("weight", "judged", "agree", "texts_differ", "decode_errors", "decode_error_weight", "rows_held"):
+        C[f"glyph_reread.c3.{k}"] = s["c3"].get(k, 0)
+    C["glyph_reread.c3.rows"] = s["c3"].get("rows", 0)
+    for k in ("denominator", "recovered", "held", "unresolved"):
+        C[f"glyph_reread.c5.{k}"] = s["c5"].get(k, 0)
+    for k, v in s["c6"].items():
+        C[f"glyph_reread.c6.{k}"] = v
+    C["glyph_reread.errors"] = s["errors"]
+    C["glyph_reread.unfaithful_rows"] = s["unfaithful_rows"]
+    C["glyph_reread.unfaithful_bench"] = s["unfaithful_bench"]
+    C["glyph_reread.certify_errors"] = s["certify_errors"]
+    C["glyph_reread.unreadable_pdfs"] = s["unreadable_pdfs"]
+    C["glyph_reread.exceptions"] = len(res["exceptions"]["rows"])
+    C["glyph_reread.exceptions_excluded_c6"] = len(res["exceptions"]["excluded_c6_rows"])
+    C["glyph_reread.map_entries"] = len(res["map"])
+    for e in res["map"]:
+        C[f"glyph_reread.map.{e['status']}"] += 1
+    rows = []
+    for r in res["rows"]:
+        accepted = r["decision"].startswith("accepted")
+        rows.append({"today_id": r["id"], "rel_path": r["rel_path"], "pdf_sha256": r["sha256"], "decision": r["decision"],
+                     "reasons": _j(sorted(r["reasons"])), "exception": int(r["exception"]), "c6": _j(r["c6"]),
+                     "text": r["r"] if accepted else None, "text_hash": sha(r["shipped"]), "kept_text_hash": sha(r["s"]),
+                     # gate 4 attaches a re-read only to the row whose stored text this run read (Codex, step 6)
+                     "today_text_hash": s0_hash[r["id"]]})
+    exceptions = [{"today_id": e["id"], "patterns": _j(e["patterns"]), "u_sha256": e["u_sha256"],
+                   "r_sha256": e["r_sha256"]} for e in res["exceptions"]["rows"]]
+    return {"rows": rows, "map": res["map"], "exceptions": exceptions, "digest": s["digest"], "summary": s}
 
 
 def final_letter_step(text_rows: list, unit_texts: dict, today: dict, C) -> list:
@@ -1544,6 +1627,30 @@ def run_checks(text_rows: list, line_diffs: list, C: dict, expectations: dict, d
         f"no code applied, or >= {fl.ACCURACY_FLOOR:.1%} of >= {fl.MIN_JUDGED:,} judged codes right",
         f"{applied:,} applied; {right:,} / {judged:,} right",
         "the final-letter inference is right on the rows that exist both ways before it touches a kept row (§8)")
+    # §9: the re-read (GS-276); T12/T13 have nothing to judge in a run without benchmark weight or missing letters
+    c1 = C.get("glyph_reread.hold.C1: the extractor no longer reproduces the stored text", 0)
+    errors = C.get("glyph_reread.errors", 0) + C.get("glyph_reread.certify_errors", 0)
+    unfaithful = C.get("glyph_reread.unfaithful_rows", 0) + C.get("glyph_reread.unfaithful_bench", 0)
+    # no `not ran` escape: a run whose only PDF failed has no measured row, and must still fail (Codex, round 2)
+    add("T11_glyph_reread_faithful", errors == 0 and unfaithful == 0 and c1 == 0,
+        "0 errors, 0 unfaithful, 0 C1 holds", f"{errors} errors (reading and certifying), {unfaithful} unfaithful "
+        f"(kept and benchmark rows), {c1} C1 holds; {C.get('glyph_reread.unreadable_pdfs', 0)} PDFs unreadable",
+        "C1: the traced extractor equals the real one and reproduces every stored text it re-reads (§9); an unreadable "
+        "PDF keeps its rows' text and is counted (declared expectation)")
+    w, judged, agree = (C.get(f"glyph_reread.c3.{k}", 0) for k in ("weight", "judged", "agree"))
+    errw = C.get("glyph_reread.c3.decode_error_weight", 0)
+    ok3 = not w or (judged >= gr.C3_MIN_JUDGED * w and agree >= gr.C3_MIN_AGREE * (agree + errw))
+    add("T12_glyph_reread_c3", ok3, f">= {gr.C3_MIN_JUDGED:.0%} judged, >= {gr.C3_MIN_AGREE:.1%} decoding agreement",
+        f"{judged:,} / {w:,} judged; {agree:,} agree, {errw:,} decoding-error weight",
+        "C3 against the Word/line text; texts that differ outside the decoded letters are counted apart (§9, owner)")
+    den, rec, unr = (C.get(f"glyph_reread.c5.{k}", 0) for k in ("denominator", "recovered", "unresolved"))
+    ok5 = not den or (rec > 0 and rec >= gr.C5_MIN_RECOVERED * den and unr <= gr.C5_MAX_UNRESOLVED * den)
+    add("T13_glyph_reread_c5", ok5, f">= {gr.C5_MIN_RECOVERED:.0%} recovered, <= {gr.C5_MAX_UNRESOLVED:.0%} unresolved",
+        f"{rec:,} recovered, {unr:,} unresolved of {den:,}",
+        "C5: the Hebrew letters the PDFs draw that the kept texts lack, recovered by what ships (§9)")
+    uncert = C.get("glyph_reread.map_entries", 0) - sum(C.get(f"glyph_reread.map.{s}", 0) for s in gr.CERTIFIED)
+    add("T14_glyph_reread_map_certified", uncert == 0, "0", uncert,
+        "C4: every entry a repaired copy injects comes from a certified decision (§9)")
     for key, want in sorted(expectations.items()):
         got = C.get(key, 0)
         add(f"E_{key}", got == want, want, got, "declared expectation")
@@ -1563,7 +1670,7 @@ def _create(conn, table, rows, pk=None):
     conn.executemany(f'INSERT INTO "{table}" VALUES ({",".join("?" * len(cols))})', ([r[c] for c in cols] for r in rows))
 
 
-def write_outputs(text_rows, line_diffs, unit_texts, checks, C, out_dir, meta, final_rows=()) -> str:
+def write_outputs(text_rows, line_diffs, unit_texts, checks, C, out_dir, meta, final_rows=(), reread=None) -> str:
     os.makedirs(out_dir, exist_ok=True)
     db_path = os.path.join(out_dir, "gate3.db")
     if os.path.exists(db_path):
@@ -1588,6 +1695,10 @@ def write_outputs(text_rows, line_diffs, unit_texts, checks, C, out_dir, meta, f
         _create(conn, "checks", checks, pk="name")
         _create(conn, "counts", [{"key": k, "value": v} for k, v in sorted(C.items())], pk="key")
         _create(conn, "final_letters", list(final_rows), pk="today_id")
+        reread = reread or {}
+        _create(conn, "glyph_reread", reread.get("rows") or [], pk="today_id")
+        _create(conn, "glyph_map", reread.get("map") or [])
+        _create(conn, "glyph_reread_exceptions", reread.get("exceptions") or [], pk="today_id")
         conn.execute('CREATE INDEX "ix_tr_today" ON "text_rows"("today_id")')
         conn.execute('CREATE INDEX "ix_tr_unit" ON "text_rows"("unit_table", "unit_id")')
         conn.execute('CREATE INDEX "ix_tr_status" ON "text_rows"("status")')
@@ -1641,6 +1752,22 @@ def render_report(text_rows, line_diffs, checks, C, meta) -> str:
             f"Measured on {C.get('final_letters.eval.pairs', 0):,} rows that exist both ways: "
             f"{C.get('final_letters.eval.right', 0):,} / {judged:,} applied codes right"
             + (f" ({C.get('final_letters.eval.right', 0) / judged:.2%})." if judged else ".")]
+    dec = {k[len("glyph_reread.rows."):]: v for k, v in C.items() if k.startswith("glyph_reread.rows.")}
+    holds = sorted(((k[len("glyph_reread.hold."):], v) for k, v in C.items() if k.startswith("glyph_reread.hold.")),
+                   key=lambda kv: -kv[1])
+    w, den = C.get("glyph_reread.c3.weight", 0), C.get("glyph_reread.c5.denominator", 0)
+    agree, errw = C.get("glyph_reread.c3.agree", 0), C.get("glyph_reread.c3.decode_error_weight", 0)
+    out += ["", "## The PDF text re-read through the fonts' glyph names (§9)", "",
+            f"Rows kept with PDF text {C.get('glyph_reread.scope_rows', 0):,}: "
+            + ", ".join(f"{k} {v:,}" for k, v in sorted(dec.items()))
+            + f" ({C.get('glyph_reread.exceptions', 0):,} exceptions under the owner's approved patterns). "
+            f"Map entries injected {C.get('glyph_reread.map_entries', 0):,}. "
+            + (f"C3 on {C.get('glyph_reread.c3.rows', 0):,} benchmark rows: {C.get('glyph_reread.c3.judged', 0) / w:.1%} "
+               f"judged, decoding agreement {agree / (agree + errw):.2%}, texts that differ "
+               f"{C.get('glyph_reread.c3.texts_differ', 0):,}. " if w and agree + errw else "")
+            + (f"C5: {C.get('glyph_reread.c5.recovered', 0) / den:.1%} of {den:,} missing Hebrew letters recovered, "
+               f"{C.get('glyph_reread.c5.unresolved', 0) / den:.1%} unresolved." if den else ""),
+            "", "| Hold reason | Rows |", "|---|---:|"] + [f"| {k.replace('|', '/')} | {v:,} |" for k, v in holds]
     out += ["", "## One accepted example per class (today → new)", ""]
     seen = set()
     for b in line_diffs:
@@ -1680,6 +1807,8 @@ def main(argv=None) -> int:
     ap.add_argument("--nopos", default=DEFAULT_NOPOS)
     ap.add_argument("--withpos", default=DEFAULT_WITHPOS)
     ap.add_argument("--today-files", default=DEFAULT_TODAY_FILES, help="today's copied PDFs (rel_path root)")
+    ap.add_argument("--no-glyph-reread", action="store_true",
+                    help="skip the glyph re-read (§9); every kept row then keeps today's text with the vocabulary repair")
     ap.add_argument("--approvals", default=DEFAULT_APPROVALS, help="owner approvals JSON (absent = none)")
     ap.add_argument("--out-dir", default=DEFAULT_OUT)
     ap.add_argument("--new-rows-policy", choices=("hold", "plain"), default="hold",
@@ -1717,14 +1846,19 @@ def main(argv=None) -> int:
     log(f"  {len(inp['units']):,} units, {len(inp['rows']):,} rows, {len(approvals):,} approvals ({time.time() - t0:.0f}s)")
     log("reading and diffing ...")
     pdf_cache = open_pdf_cache(args.pdf_cache)
-    text_rows, line_diffs, unit_texts, final_rows, C, digest = build(
+    text_rows, line_diffs, unit_texts, final_rows, reread, C, digest = build(
         inp, args.nopos, args.withpos, args.today_files, approvals, new_rows_policy=args.new_rows_policy,
-        limit=args.limit, pdf_cache=pdf_cache)
+        limit=args.limit, pdf_cache=pdf_cache,
+        reread_dir=None if args.no_glyph_reread else os.path.join(args.out_dir, "gate3_glyph_reread"))
     if pdf_cache is not None:
         pdf_cache.close()
     meta["digest"] = digest
+    if reread["summary"]:
+        meta["glyph_reread_digest"] = reread["digest"]
+        for k in ("registry_version", "reference_version", "extractor_version"):
+            meta[f"glyph_reread_{k}"] = reread["summary"]["meta"][k]
     checks = run_checks(text_rows, line_diffs, C, expectations, digest, previous_digest, args.allow_single_run)
-    db_path = write_outputs(text_rows, line_diffs, unit_texts, checks, C, args.out_dir, meta, final_rows)
+    db_path = write_outputs(text_rows, line_diffs, unit_texts, checks, C, args.out_dir, meta, final_rows, reread)
     failed = [c for c in checks if not c["passed"]]
     for c in checks:
         log(f"  [{'ok  ' if c['passed'] else 'FAIL'}] {c['name']}: expected {c['expected']}, got {c['actual']}")

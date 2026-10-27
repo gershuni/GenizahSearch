@@ -22,7 +22,9 @@ from scripts import fgp_gate2_rules as gate2
 from scripts import fgp_gate3_text_pipeline as g3
 from scripts import fgp_gate4_chooser_validation as g4
 from shared import fgp_service as fs
-from tests.fgp_fixture_world import ALMA_A, ALMA_B, ALMA_C, B2_C400_TEXT, DOCX_UNIT3_TEXT, build_world, rows as _rows
+from tests.fgp_fixture_world import (
+    ALMA_A, ALMA_B, ALMA_C, B2_C400_TEXT, DOCX_UNIT3_TEXT, GATE3_REREAD_ARGS, build_world, rows as _rows,
+)
 
 HTR = {
     ALMA_A: [{"p_num": 1, "text": "שורה ראשונה שורה שנייה ועוד מילים רבות כאן בדף הזה"},
@@ -41,7 +43,8 @@ def world(tmp_path):
     assert gate2.main(["--inventory", inv, "--fgp-db", w["fgp"], "--fist", w["fist"], "--out-dir", w["out"]]) == 0
     assert g3.main(["--inventory", inv, "--gate2", os.path.join(w["out"], "gate2.db"), "--fgp-db", w["fgp"],
                     "--nopos", w["nopos"], "--withpos", w["withpos"], "--today-files", w["today_files"],
-                    "--approvals", os.path.join(w["root"], "none.json"), "--out-dir", w["out"], "--allow-single-run"]) == 0
+                    "--approvals", os.path.join(w["root"], "none.json"), "--out-dir", w["out"], "--allow-single-run",
+                    *GATE3_REREAD_ARGS]) == 0
     w["htr"] = os.path.join(w["root"], "htr.json")
     with open(w["htr"], "w", encoding="utf-8") as fh:
         json.dump(HTR, fh, ensure_ascii=False)
@@ -522,3 +525,53 @@ def test_a_kept_pdf_row_takes_gate_3s_final_letters(world, capsys):
     row = _rows(world["candidate"], "SELECT content, text_source, text_provenance FROM fgp_transcriptions WHERE id=2")[0]
     assert row["content"].endswith("\nאברהים") and code not in row["content"]
     assert row["text_source"].endswith("+final_letters") and row["text_provenance"] == "gate3:final_letters"
+
+
+def test_an_accepted_glyph_reread_replaces_the_kept_text_and_a_held_one_does_not(world):
+    """GS-276 (rules §9 of gate 3): gate 4 writes an accepted re-read as the row's text, with its provenance and
+    source marked; a held re-read leaves today's text."""
+    g3db = os.path.join(world["out"], "gate3.db")
+    con = sqlite3.connect(g3db)
+    kept = [i for (i,) in con.execute("SELECT today_id FROM text_rows WHERE NOT text_replaced AND status != 'retired' "
+                                      "AND today_id IN (1, 2, 5, 7, 12, 13, 15, 16, 18, 19, 20, 21) ORDER BY today_id")]
+    assert len(kept) >= 2
+    assert len(kept) >= 4
+    accepted, held, stale_text, stale_pdf = kept[:4]
+    today = {i: (c, rel) for i, c, rel in sqlite3.connect(world["fgp"]).execute(
+        "SELECT id, content, rel_path FROM fgp_transcriptions")}
+    before = {i: c for i, (c, _) in today.items()}
+    assert before[accepted]
+    pdf_sha = {}
+    for rid in (accepted, held, stale_text, stale_pdf):  # the PDF gate 3 read for each row
+        path = os.path.join(world["today_files"], today[rid][1])
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if not os.path.isfile(path):
+            with open(path, "wb") as fh:
+                fh.write(f"pdf {rid}".encode())
+        pdf_sha[rid] = g4.sha256_file(path)
+    reread = before[accepted][:-1] + "ן"  # a re-read restores letters; the chooser's choice must not move
+    con.execute("DROP TABLE glyph_reread")
+    con.execute("CREATE TABLE glyph_reread (today_id PRIMARY KEY, decision, text, text_hash, today_text_hash, rel_path, "
+                "pdf_sha256)")
+
+    def rec(rid, decision, text, today_text, pdf):
+        return (rid, decision, text, g4.sha(text if text is not None else today_text), g4.sha(today_text),
+                today[rid][1], pdf)
+    con.executemany("INSERT INTO glyph_reread VALUES (?, ?, ?, ?, ?, ?, ?)", [
+        rec(accepted, "accepted (exception)", reread, before[accepted], pdf_sha[accepted]),
+        rec(held, "held", None, before[held], pdf_sha[held]),
+        # read from another sidecar (its stored text differs), or from another PDF: neither may be attached
+        rec(stale_text, "accepted", "x", "not the stored text", pdf_sha[stale_text]),
+        rec(stale_pdf, "accepted", "y", before[stale_pdf], "0" * 64)])
+    con.commit()
+    con.close()
+    assert g4.main(_args(world, "--allow-single-run", "--today-files", world["today_files"])) == 0
+    cand = {r["id"]: r for r in _rows(world["candidate"], "SELECT id, content, text_provenance, text_source "
+                                                          "FROM fgp_transcriptions")}
+    assert cand[accepted]["content"] == reread
+    assert cand[accepted]["text_provenance"] == "gate3:glyph_reread"
+    assert (cand[accepted]["text_source"] or "").endswith("+glyphs")
+    assert cand[held]["content"] == before[held] and cand[held]["text_provenance"] != "gate3:glyph_reread"
+    counts = {r["key"]: r["value"] for r in _rows(os.path.join(world["out"], "gate4.db"), "SELECT * FROM counts")}
+    assert counts["rows.glyph_reread"] == 1 and counts["rows.glyph_reread_stale"] == 2
+    assert cand[stale_text]["content"] == before[stale_text] and cand[stale_pdf]["content"] == before[stale_pdf]

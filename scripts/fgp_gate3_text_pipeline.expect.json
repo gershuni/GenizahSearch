@@ -1,5 +1,5 @@
 {
-  "_comment": "Counts the gate-3 run must reproduce over today's fgp_transcriptions.db (45,034 rows), the gate-1 inventory and the gate-2 outcomes, with the declared diff classes (docs/plans/FGP_TEXT_PIPELINE_RULES.md), the 10 owner approvals of 2026-10-26 (scripts/fgp_gate3_approvals.json) the default new-rows policy (hold) and, since the owner's Word-file rulings of 2026-10-26, every new DOCX unit checked against FGP's PDF of the file (statuses checked / pdf_held / no_comparator, the PDF text cached by file hash). Declared 2026-10-26 from two identical runs; a rebuilt sidecar, a new delivery, a new class or an owner approval changes them on purpose, with the rules document.",
+  "_comment": "Counts the gate-3 run must reproduce over today's fgp_transcriptions.db (45,034 rows), the gate-1 inventory and the gate-2 outcomes, with the declared diff classes (docs/plans/FGP_TEXT_PIPELINE_RULES.md), the 10 owner approvals of 2026-10-26 (scripts/fgp_gate3_approvals.json) the default new-rows policy (hold) and, since the owner's Word-file rulings of 2026-10-26, every new DOCX unit checked against FGP's PDF of the file (statuses checked / pdf_held / no_comparator, the PDF text cached by file hash). Declared 2026-10-26 from two identical runs; a rebuilt sidecar, a new delivery, a new class or an owner approval changes them on purpose, with the rules document. The glyph re-read (GS-276, rules §9; step 6 of docs/plans/FGP_PDF_GLYPH_REREAD_PLAN.md) declared 2026-10-27 from the standalone run over the same scope (scripts/fgp_glyph_reread.py, digest 758b97fd7d6e38ca), with the owner's exception patterns of 2026-10-27.",
   "rows": 70376,
   "rows.today": 45034,
   "rows.new": 25342,
@@ -54,5 +54,16 @@
   "new.structure.multicolumn_tables": 28,
   "new_class_rows.unclassified": 1261,
   "new_class_rows.footnote_marker": 346,
-  "class_rows.footnote_marker": 1872
+  "class_rows.footnote_marker": 1872,
+  "glyph_reread.scope_rows": 10889,
+  "glyph_reread.bench_rows": 27714,
+  "glyph_reread.rows.accepted": 1046,
+  "glyph_reread.rows.accepted (exception)": 394,
+  "glyph_reread.rows.held": 346,
+  "glyph_reread.rows.nothing to decode": 9097,
+  "glyph_reread.rows.no change": 6,
+  "glyph_reread.exceptions": 394,
+  "glyph_reread.errors": 0,
+  "glyph_reread.unfaithful_rows": 0,
+  "glyph_reread.unreadable_pdfs": 0
 }

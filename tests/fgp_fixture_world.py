@@ -16,6 +16,14 @@ import sqlite3
 import zipfile
 from xml.sax.saxutils import escape
 
+import importlib.util
+
+# Gate 3's glyph re-read (FGP_TEXT_PIPELINE_RULES.md §9) needs pdfminer.six and fontTools, which CI's lock file does
+# not install; where they are missing the fixture runs of gate 3 say so with --no-glyph-reread (gate 3 itself fails
+# closed without them). Locally, with both installed, every fixture run exercises the re-read.
+GATE3_REREAD_ARGS = ([] if all(importlib.util.find_spec(m) for m in ("pdfminer", "fontTools"))
+                     else ["--no-glyph-reread"])
+
 ALMA_A, ALMA_B, ALMA_C, ALMA_D = "990001", "990002", "990003", "990004"
 
 

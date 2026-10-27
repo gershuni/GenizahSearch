@@ -4079,7 +4079,7 @@ Genuzot transcription is never a plain question mark.
 
 ## GS-276
 
-**1,810 FGP transcriptions show final letters as control characters** · P2 · Data and sidecars · ❌ Partly fixed (2026-10-27, 3d62c5ad) · opened 2026-10-27
+**FGP transcriptions that keep their PDF text show boxes or wrong symbols for letters** · P2 · Data and sidecars · ❌ Partly fixed (2026-10-27, 3d62c5ad + glyph re-read) · opened 2026-10-27
 
 Where: `fgp_data/inventory/fgp_transcriptions.candidate.db` (rows with `text_source` `pdf_rtl` / `original`); FGP text pipeline, gate 3
 
@@ -4104,3 +4104,18 @@ on the 5,392 rows that exist both ways). The candidate restores 1,967 codes in 1
 1,810 -> 1,168. Still open: 664 word-final codes below the bar (left as boxes on purpose), 1,487 inside-word codes
 (vowel points and dots, which a vocabulary cannot infer), and finals some PDFs left as an ASCII symbol rather than a
 control character (`גיטי# וקידושי#`, row 992; not measured -- `#` is a real Genuzot mark, so it needs its own rule).
+
+Further fixed 2026-10-27 by re-reading the PDFs through their fonts' glyph names (plan
+`docs/plans/FGP_PDF_GLYPH_REREAD_PLAN.md`, rules `FGP_TEXT_PIPELINE_RULES.md` §9). The cause is wider than the finals:
+FGP's PDFs name every glyph in their embedded fonts (`nunfinal`, `vavwithholam`, `alefisolated` ...) but most carry no
+Unicode map, so extraction fell back to the byte code -- a control character (a box), nothing at all where the code
+was a whitespace code (row 3485: 26 ן in the PDF, none in the text), or a wrong symbol (`#`, `!`, `&`). The census
+counted 79,030 Hebrew letters missing from 1,425 texts, and ~48,600 Arabic glyphs decoded wrong. Gate 3 now decodes
+each drawn glyph by its font and byte code, through a reviewed name registry and an exact outline match against
+pinned reference fonts, re-extracts a repaired copy and checks every change per glyph (C1-C7, T11-T14); gate 4 ships
+the re-read on 1,435 rows (`text_provenance` `gate3:glyph_reread`), 85.4% of the missing letters recovered, decoding
+agreement with the Word texts 99.97%. Still open: 340 candidate rows held (215 `original` rows by decision, 125 by the
+checks: digits or Latin reordered, a change of direction, decoding errors), 19,072 glyphs in 188 re-read rows left as
+boxes because no reference glyph certifies them (e.g. a qamats whose outline is also qamats qatan), the uncertified
+glyphs that still show a symbol (30 `آ` for kaf and 48 `&` in row 17083), and the 385 glyph shapes awaiting the
+owner's review by eye.
