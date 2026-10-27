@@ -4079,7 +4079,7 @@ Genuzot transcription is never a plain question mark.
 
 ## GS-276
 
-**FGP transcriptions that keep their PDF text show boxes or wrong symbols for letters** · P2 · Data and sidecars · ❌ Partly fixed (2026-10-27, 3d62c5ad + glyph re-read) · opened 2026-10-27
+**FGP transcriptions that keep their PDF text show boxes or wrong symbols for letters** · P2 · Data and sidecars · ❌ Partly fixed (2026-10-27, 3d62c5ad, 29fd499f) · opened 2026-10-27
 
 Where: `fgp_data/inventory/fgp_transcriptions.candidate.db` (rows with `text_source` `pdf_rtl` / `original`); FGP text pipeline, gate 3
 
@@ -4105,7 +4105,7 @@ on the 5,392 rows that exist both ways). The candidate restores 1,967 codes in 1
 (vowel points and dots, which a vocabulary cannot infer), and finals some PDFs left as an ASCII symbol rather than a
 control character (`גיטי# וקידושי#`, row 992; not measured -- `#` is a real Genuzot mark, so it needs its own rule).
 
-Further fixed 2026-10-27 by re-reading the PDFs through their fonts' glyph names (plan
+Further fixed 2026-10-27 (29fd499f) by re-reading the PDFs through their fonts' glyph names (plan
 `docs/plans/FGP_PDF_GLYPH_REREAD_PLAN.md`, rules `FGP_TEXT_PIPELINE_RULES.md` §9). The cause is wider than the finals:
 FGP's PDFs name every glyph in their embedded fonts (`nunfinal`, `vavwithholam`, `alefisolated` ...) but most carry no
 Unicode map, so extraction fell back to the byte code -- a control character (a box), nothing at all where the code

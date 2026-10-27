@@ -115,7 +115,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
-| [GS-276](ISSUE_DETAILS.md#gs-276) | FGP transcriptions that keep their PDF text show boxes or wrong symbols for letters | `fgp_data/inventory/fgp_transcriptions.candidate.db` (rows with `text_source` `pdf_rtl` / `original`); FGP text pipeline, gates 3-4 | 2026-10-27 | ❌ Partly fixed (2026-10-27, 3d62c5ad + glyph re-read) |
+| [GS-276](ISSUE_DETAILS.md#gs-276) | FGP transcriptions that keep their PDF text show boxes or wrong symbols for letters | `fgp_data/inventory/fgp_transcriptions.candidate.db` (rows with `text_source` `pdf_rtl` / `original`); FGP text pipeline, gates 3-4 | 2026-10-27 | ❌ Partly fixed (2026-10-27, 3d62c5ad, 29fd499f) |
 | [GS-268](ISSUE_DETAILS.md#gs-268) | FGP text drops the part of a line before a gershayim | `fgp_data/fgp_transcriptions.db` (`text_source='pdf_rtl'`), `shared/local_indexer.py::extract_pdf_pages`, `scripts/fgp_rebuild_text_and_credit.py` | 2026-10-25 | ❌ Open |
 | [GS-269](ISSUE_DETAILS.md#gs-269) | FGP visual XML is applied by image number, not by source record | `scripts/fgp_rebuild_text_and_credit.py::build_xml_index`, `fgp_data/fgp_transcriptions.db` (`text_source='xml'`) | 2026-10-25 | ❌ Open |
 | [GS-270](ISSUE_DETAILS.md#gs-270) | FGP credit heuristic disagrees with FIST on 1,551 / 6,151 files | `scripts/fgp_fill_credits_bilingual.py` | 2026-10-25 | ❌ Open |
