@@ -100,7 +100,10 @@ def _run(engine, **kw):
     return calls, final
 
 
-def test_the_preview_is_the_first_rows_of_the_final_list(engines):
+def test_the_preview_is_the_first_rows_of_the_final_list(engines, monkeypatch):
+    # The _PREVIEW_ROWS handover only: on a slow runner the 0.5 s clock would also hand
+    # over the rows so far first (that is the slow-run test below).
+    monkeypatch.setattr(se, "_PREVIEW_AFTER_S", float("inf"))
     calls, final = _run(engines["many"])
     assert len(calls) == 1, "the preview is handed over exactly once"
     preview = calls[0]
@@ -120,7 +123,8 @@ def test_no_preview_where_a_later_step_could_drop_or_move_rows(engines, kw):
     assert calls == []
 
 
-def test_no_preview_when_the_whole_result_is_smaller_and_fast(engines):
+def test_no_preview_when_the_whole_result_is_smaller_and_fast(engines, monkeypatch):
+    monkeypatch.setattr(se, "_PREVIEW_AFTER_S", float("inf"))     # "fast": the clock never fires
     calls, final = _run(engines["few"])
     assert calls == [] and len(final) >= 20
 
