@@ -4242,6 +4242,8 @@ TRANSLATIONS.update({
     "Open Browse results compare window":
         "פתח חלון השוואה לעיון בתוצאות",
     "Filter ▾":              "סנן ▾",
+    # The Filter button with how many filters are on (.format(n=N))
+    "Filter ({n}) ▾":        "סנן ({n}) ▾",
     "Open filter dialog":    "פתח תיבת סינון",
     "Filter candidates":     "סנן מועמדים",
     "Current fragment":      "קטע נוכחי",

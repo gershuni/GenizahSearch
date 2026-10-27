@@ -13,6 +13,7 @@ Pinned here by driving the real dialog through the client's own events:
    the Hebrew UI shows the Hebrew domain names (they were English in both UIs).
 5. Library and Domain each open with a Show only | Hide switch: Hide leaves the
    chosen values out, and the label says it is hiding.
+6. Each filter counts the suggestions the other keeps.
 """
 from __future__ import annotations
 
@@ -334,12 +335,35 @@ def test_hide_leaves_the_chosen_libraries_out_with_the_domain_filter():
     _run(driver)
 
 
+def test_each_filter_counts_what_the_other_keeps():
+    async def driver(user):
+        await user.open(PAGE)
+        _choose(user, _domain_select(user), 'Bible')
+        assert list(_library_select(user).options.values()) == [
+            'CUL (2)', 'JTS (0)', 'Mosseri (0)']
+        assert list(_domain_select(user).options.values()) == [     # its own: unchanged
+            'Bible (2)', 'Liturgy (1)', 'Poetry (1)']
+        _choose_mode(user, _domain_select(user), 'hide')
+        assert list(_library_select(user).options.values()) == [
+            'CUL (0)', 'JTS (1)', 'Mosseri (1)']
+
+        _choose(user, _library_select(user), 'JTS')
+        assert list(_domain_select(user).options.values()) == [
+            'Bible (0)', 'Liturgy (1)', 'Poetry (0)']
+        assert _library_select(user).value == ['JTS']              # the choice is kept
+        await _sees_only(user, 'ENA Beta')
+
+    _run(driver)
+
+
 def test_the_hebrew_ui_shows_hebrew_domain_names():
     async def driver(user):
         await user.open(PAGE)
-        # In label order; a domain with no Hebrew name keeps its English one.
+        # In the domain tree's order (the canonical FJMS order, else the English
+        # name), as in the search page's filter, in either language; a domain with
+        # no Hebrew name keeps its English one.
         assert list(_domain_select(user).options.items()) == [
-            ('Poetry', 'Poetry (1)'), ('Bible', 'מקרא (2)'), ('Liturgy', 'תפילה (1)'),
+            ('Bible', 'מקרא (2)'), ('Liturgy', 'תפילה (1)'), ('Poetry', 'Poetry (1)'),
         ]
         await user.should_see('תפילה')
         await user.should_not_see('Liturgy')

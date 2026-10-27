@@ -153,6 +153,21 @@ FJMS_SUBCHILD_IDX = {
 }
 
 
+def _parent_map() -> dict:
+    parent_of: dict = {}
+    for parent, children in FJMS_CHILD_ORDER.items():
+        for child in children:
+            parent_of.setdefault(child, parent)
+    for child, subchildren in FJMS_SUBCHILD_ORDER.items():
+        for sub in subchildren:
+            parent_of.setdefault(sub, child)
+    return parent_of
+
+
+# Each listed domain's canonical parent, one level up (a top-level domain has none).
+FJMS_PARENT_OF = _parent_map()
+
+
 def domain_sort_key(value: str) -> tuple:
     """Return a domain's canonical ``/catalog-browse`` hierarchy position."""
     text = str(value or "").strip()

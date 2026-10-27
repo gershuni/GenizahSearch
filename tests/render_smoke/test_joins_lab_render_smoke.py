@@ -2601,6 +2601,60 @@ def test_the_library_filter_hides_the_chosen_libraries(joins_lab_smoke_runner):
     joins_lab_smoke_runner(driver, mock_search_results=_lib_dom_results())
 
 
+def test_domains_nest_and_each_filter_counts_what_the_other_keeps(joins_lab_smoke_runner):
+    """The Domain list is the FJMS tree (a parent above its branch, indented by
+    the option slot); choosing a domain updates the Library counts, and the other
+    way round."""
+    from unittest.mock import AsyncMock, patch
+
+    from shared.joins_lab import primary_domain
+
+    nested = {
+        _LIB_DOM_SIDS[0]: primary_domain([{'domain': 'Aggadic Midrashim'}]),      # CUL
+        _LIB_DOM_SIDS[1]: primary_domain([{'domain': 'Midrash'}]),                # JTS
+    }
+
+    async def driver(user):
+        with patch('web.pages.joins_lab._enrich_candidates', new_callable=AsyncMock,
+                   return_value=nested):
+            await user.open('/joins-lab')
+            await _load_anchor_and_search(user)
+            await asyncio.sleep(0.5)
+
+            dom_sel = _toolbar_select(user, 'joins-filter-domain')
+            assert dom_sel.options == {'Rabbinic Literature': 'Rabbinic Literature (2)',
+                                       'Midrash': 'Midrash (2)',
+                                       'Aggadic Midrashim': 'Aggadic Midrashim (1)'}
+            option_slot = dom_sel.slots['option'].template
+            assert '[0,1,2][props.opt.value]' in option_slot.replace(' ', '')
+            assert 'option' not in _toolbar_select(user, 'joins-filter-library').slots
+
+            _set_select(user, 'joins-filter-domain', ['Aggadic Midrashim'])
+            await asyncio.sleep(0.3)
+            assert _card_domains(user) == ['Aggadic Midrashim']
+            lib_sel = _toolbar_select(user, 'joins-filter-library')
+            assert lib_sel.options == {'CUL': 'CUL (1)', 'JTS': 'JTS (0)'}   # follows Domain
+            dom_sel = _toolbar_select(user, 'joins-filter-domain')
+            assert dom_sel.options['Midrash'] == 'Midrash (2)'               # its own: unchanged
+            assert dom_sel._props.get('display-value') == 'Aggadic Midrashim'
+
+            _set_select(user, 'joins-filter-domain', None)
+            _set_select(user, 'joins-filter-library', ['JTS'])
+            await asyncio.sleep(0.3)
+            dom_sel = _toolbar_select(user, 'joins-filter-domain')
+            assert dom_sel.options == {'Rabbinic Literature': 'Rabbinic Literature (1)',
+                                       'Midrash': 'Midrash (1)',
+                                       'Aggadic Midrashim': 'Aggadic Midrashim (0)'}
+
+            # A chosen parent takes in its branch
+            _set_select(user, 'joins-filter-library', None)
+            _set_select(user, 'joins-filter-domain', ['Rabbinic Literature'])
+            await asyncio.sleep(0.3)
+            assert sorted(_card_domains(user)) == ['Aggadic Midrashim', 'Midrash']
+
+    joins_lab_smoke_runner(driver, mock_search_results=_lib_dom_results())
+
+
 def test_a_saved_domain_filter_still_lets_its_candidates_in(joins_lab_smoke_runner):
     """A session restored with a Domain filter on re-runs its search before any
     candidate has a domain. The enrichment must cover every candidate, not just the

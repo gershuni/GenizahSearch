@@ -57,7 +57,7 @@ Two of these changed later the same day, again by the owner:
 | 4 Sort and filters | #412 | Sort by Rank / Library / Domain and Library / Domain filters with counts, web and desktop |
 | 4, follow-up | #415 | The web Filter dialog's lists take its full width (they showed only their arrow) |
 | 4, follow-up | #416 | Website: Library and Domain in the results toolbar, "More filters…" with a count of the filters on; a filter that leaves nothing keeps the toolbar |
-| 4, follow-up | branch `claude/wonderful-meitner-oorblp` | Library and Domain each take several values, to show only them or hide them (`libraries_mode` / `domains_mode`), in both Joins Labs and the website's Visual Similarity window; the desktop's Library and Domain became checklists in the Filter dialog |
+| 4, follow-up | #450 | Library and Domain each take several values, to show only them or hide them (`libraries_mode` / `domains_mode`), in both Joins Labs and the website's Visual Similarity window; Domain is the FJMS tree; each counts what the other filters keep; desktop: checklists with Select All / None in the Filter dialog and a chips row of the filters on |
 | 5 Browse icons | #410 | Icons on the Browse page's text buttons (website only) |
 | 6 Thumbnail caching (a) | #409 | The six image routes no longer set the session cookie; images are kept a week |
 

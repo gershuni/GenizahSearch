@@ -10,8 +10,8 @@ from html import escape as _html_escape
 from shared.fragment_details import domain_labels, fetch_fragment_details, info_line
 from shared.joins_lab import htmlify, page_of, snippet_html, snippet_plain  # D-18: reuse Phase 106
 from shared.joins_lab import (
-    counted_options, domain_label, filter_passes, normalize_order, order_candidates,
-    primary_domain,
+    domain_hebrew_names, domain_label, domain_path_of, facet_rows, filter_passes,
+    normalize_order, order_candidates, path_passes, primary_domain,
 )
 from shared.responsa_match import ResponsaQueryRefused
 from shared.web_links import web_browse_url
@@ -637,13 +637,16 @@ try:
         QApplication, QDialog, QFrame, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
         QScrollArea, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTextBrowser,
         QWidget, QLineEdit, QInputDialog, QMessageBox,
-        QCheckBox, QMenu, QComboBox, QListWidget, QListWidgetItem,
+        QCheckBox, QMenu, QComboBox, QListWidget, QListWidgetItem, QTreeWidget,
+        QTreeWidgetItem,
     )
     from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
     from PyQt6.QtGui import QPalette, QPixmap, QImage
     from desktop.image_loader import ImageLoaderThread
     from desktop.widgets.line_number_text_edit import apply_line_numbered_text
     from desktop.gui_threads import SearchThread
+    from desktop.widgets.filter_chip import make_filter_chip
+    from desktop.widgets.flow_layout import FlowLayout
     # The worker keeper lives in gui_threads (the main window uses it too). The list is
     # re-exported under its old name for callers that read jw._ORPHANED_WORKERS.
     from desktop.gui_threads import _ORPHANED_WORKERS, _keep_until_finished, _retire_worker  # noqa: F401
@@ -2010,8 +2013,11 @@ if _QT_AVAILABLE:
                 logger.warning("_EnrichWorker.get_measurement_summaries_batch: %s", exc)
             # Domains for the Library/Domain filter and Sort, in the same batch pass
             doms = {}
+            hebrew_names = {}
             try:
                 doms = self.fjms_svc.get_domains_for_sys_ids(sys_ids) or {}
+                # The domain tree's names in Hebrew (the hierarchy is cached)
+                hebrew_names = domain_hebrew_names(self.fjms_svc.get_domain_hierarchy())
             except Exception as exc:
                 logger.warning("_EnrichWorker.get_domains_for_sys_ids: %s", exc)
 
@@ -2049,7 +2055,8 @@ if _QT_AVAILABLE:
                     "snippet_html": snip_h,
                     "snippet_plain": snip_p,
                     "mismatch": mismatch,
-                    **primary_domain(doms.get(c.sys_id)),   # domain, domain_heb
+                    # domain, domain_heb, domain_path (its place in the domain tree)
+                    **primary_domain(doms.get(c.sys_id), hebrew_names),
                 }
             self.enriched.emit(out)
 
@@ -2584,31 +2591,71 @@ if _QT_AVAILABLE:
 
     _PER_PAGE = 20
 
-    def _fill_checklist(widget, options, checked) -> None:
-        """A list of checkable "label (count)" items, UserRole = the value, from
-        counted_options; the values in *checked* come checked."""
-        widget.clear()
-        for value, label, n in options:
-            item = QListWidgetItem(f"{label} ({n})")
-            item.setData(Qt.ItemDataRole.UserRole, value)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked if value in checked
-                               else Qt.CheckState.Unchecked)
-            widget.addItem(item)
+    _LABEL_ROLE = Qt.ItemDataRole.UserRole + 1   # an item's name, without its count
 
-    def _checked_values(widget) -> list:
-        """The values of a checklist's checked items, in list order."""
-        return [widget.item(i).data(Qt.ItemDataRole.UserRole)
-                for i in range(widget.count())
-                if widget.item(i).checkState() == Qt.CheckState.Checked]
+    def _tree_items(tree) -> list:
+        """Every item of a checklist tree, each before its branch."""
+        out = []
 
-    def _set_checked(widget, values) -> None:
-        """Check a checklist's items whose value is in *values*, uncheck the rest."""
-        for i in range(widget.count()):
-            item = widget.item(i)
-            item.setCheckState(Qt.CheckState.Checked
-                               if item.data(Qt.ItemDataRole.UserRole) in values
-                               else Qt.CheckState.Unchecked)
+        def _walk(item):
+            out.append(item)
+            for i in range(item.childCount()):
+                _walk(item.child(i))
+
+        for i in range(tree.topLevelItemCount()):
+            _walk(tree.topLevelItem(i))
+        return out
+
+    def _fill_checklist(tree, rows, chosen) -> None:
+        """A Library or Domain checklist (a QTreeWidget) from facet_rows' rows
+        [(value, label, count, depth)]: "label (count)" items, UserRole the value,
+        nested by depth. A parent is checked, partly checked or not by its branch;
+        an item comes checked when it or a parent of it is in *chosen*."""
+        tree.clear()
+        branch = []   # (depth, item), from the top down to the last item
+        for value, label, n, depth in rows:
+            while branch and branch[-1][0] >= depth:
+                branch.pop()
+            item = QTreeWidgetItem(branch[-1][1] if branch else tree)
+            item.setText(0, f"{label} ({n})")
+            item.setData(0, Qt.ItemDataRole.UserRole, value)
+            item.setData(0, _LABEL_ROLE, label)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable
+                          | Qt.ItemFlag.ItemIsAutoTristate)
+            item.setCheckState(0, Qt.CheckState.Unchecked)
+            branch.append((depth, item))
+        tree.setRootIsDecorated(any(depth for *_rest, depth in rows))
+        tree.expandAll()
+        for item in _tree_items(tree):
+            if item.childCount():
+                continue      # follows its branch
+            node, on = item, False
+            while node is not None and not on:
+                on = node.data(0, Qt.ItemDataRole.UserRole) in chosen
+                node = node.parent()
+            item.setCheckState(0, Qt.CheckState.Checked if on else Qt.CheckState.Unchecked)
+
+    def _checked_values(tree) -> set:
+        """The values of a checklist's checked items, at every level: a parent whose
+        whole branch is checked is among them, so its own fragments count too."""
+        return {item.data(0, Qt.ItemDataRole.UserRole) for item in _tree_items(tree)
+                if item.checkState(0) == Qt.CheckState.Checked}
+
+    def _set_counts(tree, rows) -> None:
+        """Each item's count from facet_rows' rows (the names stay)."""
+        counts = {value: n for value, _label, n, _depth in rows}
+        blocked = tree.blockSignals(True)
+        for item in _tree_items(tree):
+            n = counts.get(item.data(0, Qt.ItemDataRole.UserRole), 0)
+            item.setText(0, f"{item.data(0, _LABEL_ROLE)} ({n})")
+        tree.blockSignals(blocked)
+        tree.viewport().update()
+
+    def _check_all(tree, on: bool) -> None:
+        """Select all / Select none: a parent takes its branch along."""
+        state = Qt.CheckState.Checked if on else Qt.CheckState.Unchecked
+        for i in range(tree.topLevelItemCount()):
+            tree.topLevelItem(i).setCheckState(0, state)
 
     def _filter_mode_combo() -> "QComboBox":
         """Show only | Hide for a checklist filter (userData = the mode)."""
@@ -2761,14 +2808,11 @@ if _QT_AVAILABLE:
             self.mat_filter = QComboBox()
             self.mat_filter.addItem(tr("any material"))
 
-            # Library / Domain: lists of checkable values (UserRole = the library
-            # code / English domain; none checked = any), each shown only or hidden
-            # as lib_mode / dom_mode says. Options with counts come with each result
-            # set (_refresh_facet_filters).
-            self.lib_filter = QListWidget()
-            self.lib_mode = _filter_mode_combo()
-            self.dom_filter = QListWidget()
-            self.dom_mode = _filter_mode_combo()
+            # Library / Domain: the chosen library codes / domain keys (none = any),
+            # each shown only or hidden. The Filter dialog lists the results' values
+            # with counts (_facet_rows); the chips row under the toolbar shows them.
+            self.facet_chosen = {"libraries": set(), "domains": set()}
+            self.facet_mode = {"libraries": "show_only", "domains": "show_only"}
 
             self.dim_chk = QCheckBox(tr("Has dimensions"))
 
@@ -2853,6 +2897,13 @@ if _QT_AVAILABLE:
             res_toolbar.addWidget(self.status)
 
             rv.addLayout(res_toolbar)
+
+            # The filters now on, as removable chips under the toolbar (each chip
+            # clears its filter); hidden while none is on (_refresh_filter_chips).
+            self._chips_widget = QWidget()
+            self._chips_layout = FlowLayout(self._chips_widget, margin=0, h_spacing=4, v_spacing=4)
+            self._chips_widget.setVisible(False)
+            rv.addWidget(self._chips_widget)
 
             # --- Shared bulk-action bar (grid + table) — hidden until selection non-empty ---
             self._selected_keys: set = set()
@@ -3656,85 +3707,173 @@ if _QT_AVAILABLE:
             m = self._enrich.get(c.key) or {}
             return domain_label(m.get("domain"), m.get("domain_heb"), CURRENT_LANG == "he")
 
+        def _path_of(self, c) -> list:
+            """The candidate's domain path (shared.joins_lab.domain_path)."""
+            return domain_path_of(self._enrich.get(c.key))
+
         def _refresh_facet_filters(self):
-            """Library and Domain options, each "label (count)", for the current results.
-            A checked value still on offer stays checked; one that is not is dropped."""
-            libs = counted_options((c.library_code, c.library_code) for c in self.results)
-            doms = counted_options(
-                ((self._enrich.get(c.key) or {}).get("domain"), self._domain_of(c))
-                for c in self.results
-            )
-            try:
-                for widget, options in ((self.lib_filter, libs), (self.dom_filter, doms)):
-                    _fill_checklist(widget, options, set(_checked_values(widget)))
-            except RuntimeError:
-                pass
+            """New results: a chosen library or domain that is not among them is dropped."""
+            self.facet_chosen["libraries"] &= {c.library_code for c in self.results}
+            self.facet_chosen["domains"] &= {
+                step[0] for c in self.results for step in self._path_of(c)}
 
         def _on_order_changed(self, _index: int):
             """Sort changed: back to the first page, in the new order."""
             self._page = 0
             self.apply_filters()
 
-        def apply_filters(self):
-            """Apply refine-bar filters and update the display."""
-            text_q = (self.filter_in.text() if self.filter_in else "").strip().lower()
-            # Feature 9: read English value from userData (display label may be Hebrew)
-            mat_q = ""
-            if self.mat_filter:
-                mat_q = self.mat_filter.currentData()
-                if mat_q is None:
-                    mat_q = ""   # userData not set (legacy path)
-            mat_any = (not mat_q)  # userData=="" means "any material"
-            lib_chosen = set(_checked_values(self.lib_filter))
-            lib_mode = self.lib_mode.currentData()
-            dom_chosen = set(_checked_values(self.dom_filter))
-            dom_mode = self.dom_mode.currentData()
-            need_dims = self.dim_chk.isChecked()
-            tri_q_idx = self.tri_filter.currentIndex()
+        def _filter_spec(self) -> dict:
+            """The filters now applied: the hidden widgets', Library's and Domain's."""
+            size_on = self.size_btn.isChecked()
+            return {
+                "text": self.filter_in.text(),
+                # Feature 9: the English value is the userData ("" or None = any)
+                "material": self.mat_filter.currentData() or "",
+                "dims": self.dim_chk.isChecked(),
+                "triage": self.tri_filter.currentIndex(),
+                "size": (self.size_min.value(), self.size_max.value()) if size_on else None,
+                "libraries": set(self.facet_chosen["libraries"]),
+                "libraries_mode": self.facet_mode["libraries"],
+                "domains": set(self.facet_chosen["domains"]),
+                "domains_mode": self.facet_mode["domains"],
+            }
+
+        def _filter_parts(self, spec: dict):
+            """A filter spec as three predicates on a candidate: Library, Domain and
+            the rest. Apart, so each of Library and Domain can be counted among the
+            candidates the other filters keep (_facet_rows)."""
+            text_q = (spec["text"] or "").strip().lower()
+            mat_q = spec["material"]
+            tri_q_idx = spec["triage"]
             # tri_q_idx: 0=all, 1=Y, 2=?, 3=N, 4=untriaged
             _tri_map = {1: "yes", 2: "maybe", 3: "no"}
+            size = spec["size"]     # (min, max) cm when the size filter is on (opt-in)
 
-            size_active = self.size_btn.isChecked() if hasattr(self, "size_btn") else False
-            size_min = self.size_min.value() if size_active else 0
-            size_max = self.size_max.value() if size_active else 200
+            def library_ok(c) -> bool:
+                return filter_passes(c.library_code, spec["libraries"], spec["libraries_mode"])
 
-            filtered = []
-            for c in self.results:
-                # Text filter
+            def domain_ok(c) -> bool:
+                # The fragment's first domain and the branch it sits in: a chosen
+                # parent takes in its whole branch
+                return path_passes(self._path_of(c), spec["domains"], spec["domains_mode"])
+
+            def rest_ok(c) -> bool:
                 if text_q and not (
                     text_q in (c.shelfmark or "").lower()
                     or text_q in (c.full_text or "").lower()
                     or text_q in (c.title or "").lower()
                 ):
-                    continue
-                # Material filter
+                    return False
                 m = self._enrich.get(c.key) or {}
-                if not mat_any:
-                    if (m.get("material") or "") != mat_q:
-                        continue
-                # Library / Domain filters (the domain is the fragment's first one;
-                # the chosen values are shown only, or hidden)
-                if not filter_passes(c.library_code, lib_chosen, lib_mode):
-                    continue
-                if not filter_passes(m.get("domain"), dom_chosen, dom_mode):
-                    continue
-                # Has-dimensions filter
-                if need_dims and not (m.get("width_cm") and m.get("height_cm")):
-                    continue
-                # Triage filter
-                if tri_q_idx == 4:
-                    # untriaged
-                    if self.wb.triage.get(c.sys_id):
-                        continue
-                elif tri_q_idx in _tri_map:
-                    if self.wb.triage.get(c.sys_id) != _tri_map[tri_q_idx]:
-                        continue
-                # Size filter (opt-in)
-                if size_active:
+                if mat_q and (m.get("material") or "") != mat_q:
+                    return False
+                if spec["dims"] and not (m.get("width_cm") and m.get("height_cm")):
+                    return False
+                verdict = self.wb.triage.get(c.sys_id)
+                if tri_q_idx == 4 and verdict:
+                    return False
+                if tri_q_idx in _tri_map and verdict != _tri_map[tri_q_idx]:
+                    return False
+                if size is not None:
                     w = m.get("width_cm")
-                    if w is None or not (size_min <= w <= size_max):
-                        continue
-                filtered.append(c)
+                    if w is None or not (size[0] <= w <= size[1]):
+                        return False
+                return True
+
+            return library_ok, domain_ok, rest_ok
+
+        def _facet_rows(self, spec: dict) -> tuple:
+            """Library and Domain options for the results under *spec*, each counting
+            the candidates the other filters keep (shared.joins_lab.facet_rows)."""
+            library_ok, domain_ok, rest_ok = self._filter_parts(spec)
+            return facet_rows(self.results, library_ok, domain_ok, rest_ok, self._path_of,
+                              CURRENT_LANG == "he")
+
+        def _chosen_names(self, key: str) -> list:
+            """The chosen libraries or domains as the user reads them; of domains, only
+            the top of each chosen branch (a chosen parent stands for its branch)."""
+            chosen = self.facet_chosen[key]
+            if key == "libraries":
+                return sorted(chosen)
+            hebrew = CURRENT_LANG == "he"
+            names: dict = {}
+            covered = set()      # chosen domains under a chosen parent
+            for c in self.results:
+                path = self._path_of(c)
+                for i, (step_key, english, hebrew_name) in enumerate(path):
+                    names.setdefault(step_key, domain_label(english, hebrew_name, hebrew))
+                    if step_key in chosen and any(s[0] in chosen for s in path[:i]):
+                        covered.add(step_key)
+            return sorted(names.get(k, k) for k in chosen - covered)
+
+        def _active_filters(self) -> list:
+            """The filters now on, as [(chip text, full text, clear)]."""
+            out = []
+            text = self.filter_in.text().strip()
+            if text:
+                out.append((f"{tr('Text')}: {text}", None, self.filter_in.clear))
+            mat = self.mat_filter.currentData()
+            if mat:
+                out.append((f"{tr('Material')}: {material_display(mat)}", None,
+                            lambda: self.mat_filter.setCurrentIndex(0)))
+            for key, label in (("libraries", tr("Library")), ("domains", tr("Domain"))):
+                if not self.facet_chosen[key]:
+                    continue
+                if self.facet_mode[key] == "hide":
+                    label = f"{label} · {tr('Hiding')}"
+                names = self._chosen_names(key)
+                shown = ", ".join(names[:2]) + (f" +{len(names) - 2}" if len(names) > 2 else "")
+                out.append((f"{label}: {shown}", f"{label}: {', '.join(names)}",
+                            lambda k=key: self.facet_chosen[k].clear()))
+            if self.dim_chk.isChecked():
+                out.append((tr("Has dimensions"), None, lambda: self.dim_chk.setChecked(False)))
+            if self.tri_filter.currentIndex():
+                out.append((f"{tr('Triage')}: {self.tri_filter.currentText()}", None,
+                            lambda: self.tri_filter.setCurrentIndex(0)))
+            if self.size_btn.isChecked():
+                out.append((f"{tr('Width')}: {self.size_min.value()}–{self.size_max.value()} cm",
+                            None, lambda: self.size_btn.setChecked(False)))
+            return out
+
+        def _refresh_filter_chips(self):
+            """The chips row and the Filter button's count follow the filters now on."""
+            try:
+                while self._chips_layout.count():
+                    w = self._chips_layout.takeAt(0).widget()
+                    if w is not None:
+                        w.deleteLater()
+                active = self._active_filters()
+                for text, full, clear in active:
+                    def _remove(_checked=False, clear=clear):
+                        clear()
+                        self.apply_filters()
+                    chip = make_filter_chip(text, "#e8f4fd", _remove)
+                    chip.setToolTip(full or text)
+                    self._chips_layout.addWidget(chip)
+                if len(active) > 1:
+                    clear_all = QPushButton(tr("Clear all"))
+                    clear_all.setFlat(True)
+                    clear_all.clicked.connect(self._clear_filters)
+                    self._chips_layout.addWidget(clear_all)
+                self._chips_widget.setVisible(bool(active))
+                self.btn_filter.setText(
+                    tr("Filter ({n}) ▾").format(n=len(active)) if active else tr("Filter ▾"))
+            except RuntimeError:
+                pass
+
+        def _clear_filters(self):
+            """Every filter of the Filter dialog off (Clear all on the chips row)."""
+            for _text, _full, clear in self._active_filters():
+                clear()
+            for key in self.facet_mode:
+                self.facet_mode[key] = "show_only"
+            self.apply_filters()
+
+        def apply_filters(self):
+            """Apply refine-bar filters and update the display."""
+            library_ok, domain_ok, rest_ok = self._filter_parts(self._filter_spec())
+            filtered = [c for c in self.results if rest_ok(c) and library_ok(c) and domain_ok(c)]
+            self._refresh_filter_chips()
 
             filtered = order_candidates(filtered, self.order_combo.currentData(), self._domain_of)
             self.wb.filtered = filtered
@@ -4098,13 +4237,12 @@ if _QT_AVAILABLE:
                 self.filter_in.clear()
                 self.mat_filter.setCurrentIndex(0)
                 self.tri_filter.setCurrentIndex(0)
-                # Library / Domain back to any and Show only (their options go
-                # with the results), and Sort back to the search's order.
-                for widget, mode in ((self.lib_filter, self.lib_mode),
-                                     (self.dom_filter, self.dom_mode)):
-                    widget.clear()
-                    mode.setCurrentIndex(0)
-                self._refresh_facet_filters()
+                # Library / Domain back to any and Show only, and Sort back to the
+                # search's order.
+                for key in self.facet_chosen:
+                    self.facet_chosen[key].clear()
+                    self.facet_mode[key] = "show_only"
+                self._refresh_filter_chips()
                 self.order_combo.blockSignals(True)
                 self.order_combo.setCurrentIndex(0)
                 self.order_combo.blockSignals(False)
@@ -4276,37 +4414,43 @@ if _QT_AVAILABLE:
             mat_row.addWidget(dlg_mat, 1)
             lay.addLayout(mat_row)
 
-            # Library / Domain: check several, then show only them or hide them.
-            # Copies of the hidden checklists and their Show only / Hide choice.
-            def _facet_rows(label, src_list, src_mode):
-                dlg_mode = QComboBox()
-                for i in range(src_mode.count()):
-                    dlg_mode.addItem(src_mode.itemText(i), src_mode.itemData(i))
-                dlg_mode.setCurrentIndex(max(0, src_mode.currentIndex()))
-                dlg_mode.setAccessibleName(label)
+            # Library / Domain: check several (Domain is the tree: a parent takes
+            # its branch along), then show only them or hide them. Each counts the
+            # candidates the dialog's other filters keep, as they change (_recount).
+            lib_rows, dom_rows = self._facet_rows(self._filter_spec())
+
+            def _facet_box(label, rows, key):
+                mode = _filter_mode_combo()
+                mode.setCurrentIndex(max(0, mode.findData(self.facet_mode[key])))
+                mode.setAccessibleName(label)
                 row = QHBoxLayout()
                 row.addWidget(QLabel(label + ":"))
-                row.addWidget(dlg_mode, 1)
+                row.addWidget(mode, 1)
+                checklist = QTreeWidget()
+                checklist.setHeaderHidden(True)
+                checklist.setAccessibleName(label)
+                _fill_checklist(checklist, rows, self.facet_chosen[key])
+                for text, on in ((tr("Select All"), True), (tr("Select None"), False)):
+                    btn = QPushButton(text)
+                    btn.setFlat(True)
+                    btn.setAccessibleName(f"{label}: {text}")
+                    btn.setEnabled(bool(rows))
+                    btn.clicked.connect(lambda _checked=False, on=on: _check_all(checklist, on))
+                    row.addWidget(btn)
                 lay.addLayout(row)
-                dlg_list = QListWidget()
-                dlg_list.setAccessibleName(label)
-                for i in range(src_list.count()):
-                    dlg_list.addItem(src_list.item(i).clone())
-                if dlg_list.count():
-                    dlg_list.setMaximumHeight(
-                        dlg_list.sizeHintForRow(0) * min(dlg_list.count(), 6)
-                        + 2 * dlg_list.frameWidth())
-                    lay.addWidget(dlg_list)
+                if rows:
+                    line = checklist.fontMetrics().height() + 6
+                    checklist.setMaximumHeight(
+                        line * min(len(rows), 8) + 2 * checklist.frameWidth())
+                    lay.addWidget(checklist)
                 else:
                     # None in these results (or not yet known): nothing to choose
-                    dlg_mode.setEnabled(False)
-                    dlg_list.setVisible(False)
-                return dlg_list, dlg_mode
+                    mode.setEnabled(False)
+                    checklist.setVisible(False)
+                return checklist, mode
 
-            dlg_lib, dlg_lib_mode = _facet_rows(tr("Library"), self.lib_filter, self.lib_mode)
-            dlg_dom, dlg_dom_mode = _facet_rows(tr("Domain"), self.dom_filter, self.dom_mode)
-            facets = ((self.lib_filter, self.lib_mode, dlg_lib, dlg_lib_mode),
-                      (self.dom_filter, self.dom_mode, dlg_dom, dlg_dom_mode))
+            dlg_lib, dlg_lib_mode = _facet_box(tr("Library"), lib_rows, "libraries")
+            dlg_dom, dlg_dom_mode = _facet_box(tr("Domain"), dom_rows, "domains")
 
             dlg_dim = QCheckBox(tr("Has dimensions"))
             dlg_dim.setChecked(self.dim_chk.isChecked())
@@ -4381,9 +4525,9 @@ if _QT_AVAILABLE:
             def _on_reset():
                 dlg_filter_in.setText("")
                 dlg_mat.setCurrentIndex(0)
-                for _src, _mode, dlg_list, dlg_mode in facets:
-                    _set_checked(dlg_list, ())
-                    dlg_mode.setCurrentIndex(0)
+                for checklist, mode in ((dlg_lib, dlg_lib_mode), (dlg_dom, dlg_dom_mode)):
+                    _check_all(checklist, False)
+                    mode.setCurrentIndex(0)
                 dlg_dim.setChecked(False)
                 dlg_tri.setCurrentIndex(0)
                 dlg_size_chk.setChecked(False)
@@ -4405,11 +4549,13 @@ if _QT_AVAILABLE:
                 if not synced:
                     self.mat_filter.setCurrentIndex(0)
                 self.mat_filter.blockSignals(False)
-                # Library / Domain by value: new results may have rebuilt the
-                # lists meanwhile.
-                for src_list, src_mode, dlg_list, dlg_mode in facets:
-                    _set_checked(src_list, set(_checked_values(dlg_list)))
-                    src_mode.setCurrentIndex(dlg_mode.currentIndex())
+                # Library / Domain by value; one no longer among the results (new
+                # results may have come meanwhile) is dropped.
+                for key, checklist, mode in (("libraries", dlg_lib, dlg_lib_mode),
+                                             ("domains", dlg_dom, dlg_dom_mode)):
+                    self.facet_chosen[key] = _checked_values(checklist)
+                    self.facet_mode[key] = mode.currentData()
+                self._refresh_facet_filters()
                 self.dim_chk.setChecked(dlg_dim.isChecked())
                 self.tri_filter.setCurrentIndex(dlg_tri.currentIndex())
                 self.size_btn.setChecked(dlg_size_chk.isChecked())
@@ -4417,6 +4563,33 @@ if _QT_AVAILABLE:
                 self.size_max.setValue(dlg_size_max.value())
                 self.apply_filters()
                 dlg.accept()
+
+            def _dialog_spec() -> dict:
+                """The filters as the dialog now has them, not yet applied."""
+                size_on = dlg_size_chk.isChecked()
+                return {
+                    "text": dlg_filter_in.text(),
+                    "material": dlg_mat.currentData() or "",
+                    "dims": dlg_dim.isChecked(),
+                    "triage": dlg_tri.currentIndex(),
+                    "size": (dlg_size_min.value(), dlg_size_max.value()) if size_on else None,
+                    "libraries": _checked_values(dlg_lib),
+                    "libraries_mode": dlg_lib_mode.currentData(),
+                    "domains": _checked_values(dlg_dom),
+                    "domains_mode": dlg_dom_mode.currentData(),
+                }
+
+            def _recount(*_args) -> None:
+                lib_rows, dom_rows = self._facet_rows(_dialog_spec())
+                _set_counts(dlg_lib, lib_rows)
+                _set_counts(dlg_dom, dom_rows)
+
+            for signal in (dlg_lib.itemChanged, dlg_dom.itemChanged,
+                           dlg_lib_mode.currentIndexChanged, dlg_dom_mode.currentIndexChanged,
+                           dlg_filter_in.textChanged, dlg_mat.currentIndexChanged,
+                           dlg_dim.toggled, dlg_tri.currentIndexChanged, dlg_size_chk.toggled,
+                           dlg_size_min.valueChanged, dlg_size_max.valueChanged):
+                signal.connect(_recount)
 
             btn_reset.clicked.connect(_on_reset)
             btn_apply.clicked.connect(_on_apply)

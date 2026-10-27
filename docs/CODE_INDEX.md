@@ -1149,11 +1149,10 @@ desktop.Y.X` identity holds via the facades.
 - **Function** `_normalize_view` (Line 51) — 'grid' for the thumbnail view; anything else is the list (the default).
 - **Function** `_normalize_thumb_size` (Line 56) — 's', 'm' or 'l'; anything else is Small (the default, the size before).
 - **Function** `_domain_label` (Line 61) — The suggestion's domain as the visitor reads it: Hebrew in the Hebrew UI.
-- **Function** `_counted_options` (Line 72) — Filter options from (value, label) pairs: value -> "label (count)", in label order.
-- **Function** `_domain_options` (Line 89) — Domain filter options: English domain -> "label (count)", in label order.
-- **Function** `_passes_filters` (Line 99) — Whether a suggestion passes the Library and Domain filters, each showing only its chosen values or hiding them.
-- **Function** `_wire_facet_filter` (Line 108) — A Library or Domain select: its values filter at once, shown only or hidden as the Show only | Hide switch at the top of its open list says.
-- **Function** `_library_options` (Line 97) — Library filter options: library code -> "code (count)", in code order.
+- **Function** `_library_ok` / `_domain_ok` (Line 76) — one suggestion against the Library / Domain filter (a chosen parent domain takes its branch).
+- **Function** `_passes_filters` (Line 86) — Whether a suggestion passes the Library and Domain filters, each showing only its chosen values or hiding them.
+- **Function** `_facet_options` (Line 92) — The Library and Domain options with counts (each counting what the other filter keeps) and the domains' depths.
+- **Function** `_wire_facet_filter` (Line 114) — A Library or Domain select: its values filter at once, shown only or hidden as the Show only | Hide switch at the top of its open list says; `refilter(key)` recounts the other select.
 - **Function** `_suggestion_thumbnail_url` (Line 105) — Low-resolution first-image URL for a suggestion's thumbnail card.
 - **Function** `_pick_preview_image_url` (Line 121) — Choose the same best-effort preview source family as the browse page.
 - **Function** `_resolve_preview_image_url_sync` (Line 156) — Populate browse metadata on demand, then pick the preview image URL.
@@ -1181,11 +1180,11 @@ desktop.Y.X` identity holds via the facades.
     - Method `__len__` (Line 227)
     - Method `__contains__` (Line 230)
 - **Function** `make_triage_state` (Line 234) — Factory for a fresh in-memory triage state object (D-11).
-- **Function** `compute_filtered` (Line 243) — Apply filter_state predicates to all_candidates and return the filtered list.
-- **Function** `candidate_domain_label` (Line 340) — The candidate's domain as the visitor reads it ('' when it has none).
-- **Function** `library_options` (Line 346) — Library filter options: library code -> "code (count)", in code order.
-- **Function** `domain_options` (Line 352) — Domain filter options: English domain -> "label (count)", in label order.
-- **Function** `more_filters_count` (Line 361) — How many of the "More filters…" dialog's filters are on.
+- **Function** `compute_filtered` (Line 245) — Apply filter_state predicates to all_candidates and return the filtered list.
+- **Function** `_filter_parts` (Line 293) — compute_filtered's filters as three predicates: Library, Domain, the rest.
+- **Function** `candidate_domain_label` (Line 350) — The candidate's domain as the visitor reads it ('' when it has none).
+- **Function** `facet_options` (Line 356) — The toolbar's Library and Domain options, each [(value, label, count, depth)], counting what the other filters keep.
+- **Function** `more_filters_count` (Line 371) — How many of the "More filters…" dialog's filters are on.
 - **Function** `get_table_columns` (Line 380) — Return the 8-column table column definitions (D-10, CND-03).
 - **Function** `get_table_config` (Line 398) — Return table configuration dict (used by tests to assert multi-select etc.).
 - **Function** `_make_table_rows` (Line 410) — Build row dicts for the ui.table from a candidate list.
@@ -1197,9 +1196,10 @@ desktop.Y.X` identity holds via the facades.
 - **Function** `_create_candidate_card` (Line 676) — Render a single candidate card (Phase 119 D-09/D-11/D-07, Phase 120 D-07/ACT-01).
 - **Function** `open_filter_dialog` (Line 1061) — Open the "More filters…" dialog (D-14, CND-06).
 - **Function** `create_candidate_table` (Line 1152) — Render the multi-select sortable table view of candidates (D-10, CND-03).
-- **Function** `_facet_select` (Line 1349) — One toolbar filter, Library or Domain: several values, each with its count. Each opens with a Show only | Hide switch (`libraries_mode` / `domains_mode`).
-- **Function** `_grid_header` (Line 1430) — The row above the cards: the count, then Library, Domain, Sort and More filters…
-- **Function** `create_candidate_grid` (Line 1476) — Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
+- **Function** `nest_options` (Line 1354) — Show a select's options as a tree: an `option` slot indents each by its depth (the value is its index); also the Visual Similarity window's Domain.
+- **Function** `_facet_select` (Line 1372) — One toolbar filter, Library or Domain: several values, each with its count. Each opens with a Show only | Hide switch (`libraries_mode` / `domains_mode`); Domain is nested.
+- **Function** `_grid_header` (Line 1462) — The row above the cards: the count, then Library, Domain, Sort and More filters…
+- **Function** `create_candidate_grid` (Line 1510) — Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
 ## web/main.py
 
@@ -2169,13 +2169,19 @@ moved out of `genizah_core.py` (→ `shared/*`) and `genizah_app.py` (→ `deskt
 - **Function** `snippet_html` (Line 736) — HTML snippet centered on the first regex match.
 - **Function** `snippet_plain` (Line 758) — Plain-text snippet centered on the first regex match, for table cells.
 - **Function** `compose` (Line 781) — Compose a SideQuery into the engine's line-break query syntax.
-- **Function** `normalize_order` (Line 871) — 'library' or 'domain'; anything else is 'rank' (the order the search gave).
-- **Function** `primary_domain` (Line 876) — A fragment's domain as the Visual Similarity window shows it.
-- **Function** `normalize_filter_mode` (Line 891) — 'hide' (leave the chosen values out); anything else is 'show_only'.
-- **Function** `filter_passes` (Line 896) — Whether a candidate whose library (or domain) is *value* passes that filter.
-- **Function** `domain_label` (Line 908) — The domain as the user reads it (Hebrew in the Hebrew UI, when it has one).
-- **Function** `counted_options` (Line 919) — [(value, label, count)] for each distinct value, in label order.
-- **Function** `order_candidates` (Line 934) — The candidates in the search's order, or grouped by library or by domain.
+- **Function** `normalize_order` (Line 873) — 'library' or 'domain'; anything else is 'rank' (the order the search gave).
+- **Function** `domain_hebrew_names` (Line 881) — {English: Hebrew} for the domains of ``FjmsService.get_domain_hierarchy()``.
+- **Function** `domain_path` (Line 896) — A domain's place in the FJMS tree: [[key, English, Hebrew], ...] from the top (canonical parents from `shared.domain_hierarchy.FJMS_PARENT_OF`; "Other" keyed by its parent).
+- **Function** `primary_domain` (Line 924) — A fragment's domain as the Visual Similarity window shows it, with its `domain_path`.
+- **Function** `domain_path_of` (Line 943) — A candidate's domain path from its enrichment (or a suggestion's fields); its domain alone when it carries none.
+- **Function** `normalize_filter_mode` (Line 958) — 'hide' (leave the chosen values out); anything else is 'show_only'.
+- **Function** `filter_passes` (Line 963) — Whether a candidate whose library (or domain) is *value* passes that filter.
+- **Function** `path_passes` (Line 975) — filter_passes for a domain path: a chosen parent takes in its branch.
+- **Function** `domain_label` (Line 984) — The domain as the user reads it (Hebrew in the Hebrew UI, when it has one).
+- **Function** `counted_options` (Line 995) — [(value, label, count)] for each distinct value, in label order; `counted=` counts some candidates only.
+- **Function** `domain_tree_options` (Line 1015) — The Domain filter as a tree: [(key, label, count, depth)], canonical FJMS order, a parent counting its branch.
+- **Function** `facet_rows` (Line 1055) — Library and Domain options for both Joins Labs, each counting the candidates the other filters keep.
+- **Function** `order_candidates` (Line 1075) — The candidates in the search's order, or grouped by library or by domain.
 
 ## shared/atomic_io.py
 
@@ -2840,6 +2846,10 @@ One tip at each start (owner, 2026-10-25), in a strip under the notice bars (`Ti
 ## desktop/widgets/flow_layout.py
 
 `FlowLayout` / `FlowWidget`: a wrapping, right-to-left-aware layout with height-for-width; hidden widgets take no space. Used for the Search tab's second row (`search_row2`), the Composition title buttons (`comp_title_actions`), options row (`comp_options_row`) and letter-level options (`comp_passage_row`), and the viewer's info row (`info_flow`).
+
+## desktop/widgets/filter_chip.py
+
+`make_filter_chip(text, bg_color, on_click)`: a removable chip ("text  ×", dark-mode aware), clicking it removes that filter. Shared by the search's filter dialog (`dialogs_filter._make_chip`) and the Joins Lab's row of active filters (`JoinCandidatePane._refresh_filter_chips`, in a `FlowLayout` under the results toolbar: one chip per filter of the Filter dialog, "Clear all" from two on, and the count on the Filter button). The Joins Lab's Library and Domain choices are plain state (`facet_chosen` / `facet_mode`); its Filter dialog lists them as checklists (Domain the FJMS tree, `_fill_checklist`), each with Select All / Select None, counting live what the dialog's other choices keep (`_facet_rows`). Tests: `tests/test_join_workbench_library_domain_qt.py`.
 
 ## shared/web_links.py
 
