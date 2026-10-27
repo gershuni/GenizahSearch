@@ -18,6 +18,12 @@ def test_a_reference_to_a_control_character_stays_as_typed():
     assert decode_stored_entities("a&#0;b&#x1F;c") == "a&#0;b&#x1F;c"
 
 
+def test_an_entity_that_expands_to_two_characters_is_decoded():
+    """Codex round 3: the control-character guard also refused `&fjlig;` ("fj")."""
+    assert decode_stored_entities("&fjlig;") == "fj"
+    assert decode_stored_entities("&NotEqualTilde;") == "≂̸"
+
+
 def test_quick_view_decodes_by_the_same_rule():
     """Codex round 2: Quick View's bare html.unescape also read row 26994's `&deg&`."""
     from tests.test_quick_view_text_escaping import _load_function

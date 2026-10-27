@@ -1102,7 +1102,8 @@ def _decode_entity(match: "re.Match") -> str:
     # A reference to a control or invalid code point stays as typed:
     # html.unescape drops `&#7` outright, which deleted it from the garbled
     # Arabic `ا&#7س` of rows 8299 and 19989 (Codex round 2).
-    if len(decoded) != 1 or decoded == "�" or not (decoded.isprintable() or decoded in "\t\n"):
+    # Some valid entities expand to two characters (`&fjlig;` -> "fj"; Codex round 3).
+    if not decoded or any(ch == "�" or not (ch.isprintable() or ch in "\t\n") for ch in decoded):
         return ref
     return decoded
 
