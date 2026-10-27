@@ -6,7 +6,8 @@ Displays ranked visual similarity suggestions from FJMS image analysis
 alongside the original manuscript in a side-by-side layout.
 
 Left pane: Original manuscript (image thumbnail + text snippet)
-Right pane: Ranked suggestions, filterable by library and domain, shown either
+Right pane: Ranked suggestions, filterable by library and domain (each shows
+            only the chosen values, or hides them), shown either
             as a list with expandable rows or as a grid of low-resolution
             thumbnails (the visitor's choice is remembered), with action
             buttons (Browse, Puzzle, Add to List, Add as Join).
@@ -22,6 +23,7 @@ from collections import Counter
 
 from nicegui import ui, run
 
+from shared.joins_lab import filter_passes, normalize_filter_mode
 from web.components.candidate_grid import build_thumbnail_url
 from web.safe_storage import safe_user_get, safe_user_set
 from web.services import get_oxford_direct_image_url, is_oxford_manuscript
@@ -92,6 +94,45 @@ def _domain_options(suggestions: list, is_heb: bool) -> dict:
         (s['domain'], _domain_label(s, is_heb))
         for s in suggestions if s.get('domain') and s['domain'] != '--'
     )
+
+
+def _passes_filters(s: dict, filter_state: dict) -> bool:
+    """Whether a suggestion passes the Library and Domain filters, each showing
+    only its chosen values or hiding them (shared.joins_lab.filter_passes)."""
+    return (filter_passes(s.get('library_code'), filter_state['libraries'],
+                          filter_state['libraries_mode'])
+            and filter_passes(s.get('domain'), filter_state['domains'],
+                              filter_state['domains_mode']))
+
+
+def _wire_facet_filter(sel, label: str, filter_state: dict, key: str, refilter) -> None:
+    """A Library or Domain select (*key* 'libraries' or 'domains'): its values
+    filter at once, shown only or hidden as the Show only | Hide switch at the top
+    of its open list says (as in the Joins Lab toolbar). While values are hidden,
+    the label says so ("Library · Hiding"), leaving the field to the values.
+    """
+    mode_key = f'{key}_mode'
+
+    def _relabel() -> None:
+        hiding = bool(filter_state[key]) and filter_state[mode_key] == 'hide'
+        sel.label = f"{label} · {tr('Hiding')}" if hiding else label
+
+    def _on_values(e) -> None:
+        filter_state[key] = e.value or []
+        _relabel()
+        refilter()
+
+    def _on_mode(e) -> None:
+        filter_state[mode_key] = normalize_filter_mode(e.value)
+        _relabel()
+        if filter_state[key]:            # nothing chosen: nothing changes
+            refilter()
+
+    with sel.add_slot('before-options'):
+        ui.toggle(
+            {'show_only': tr('Show only'), 'hide': tr('Hide')}, value=filter_state[mode_key],
+        ).props('dense no-caps no-wrap spread').classes('w-full q-pa-xs').on_value_change(_on_mode)
+    sel.on_value_change(_on_values)
 
 
 def _library_options(suggestions: list) -> dict:
@@ -341,7 +382,9 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
             filter_state = {
                 'sort': 'rank',
                 'libraries': [],
+                'libraries_mode': 'show_only',   # or 'hide' (_wire_facet_filter)
                 'domains': [],
+                'domains_mode': 'show_only',
                 'visible_count': _PAGE_SIZE,
                 'view': _normalize_view(safe_user_get(_VIEW_STORAGE_KEY)),
                 'thumb': _normalize_thumb_size(safe_user_get(_THUMB_SIZE_STORAGE_KEY)),
@@ -459,11 +502,7 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
 
             def _get_filtered():
                 """Apply filters and sorting, return full filtered list."""
-                filtered = list(data)
-                if filter_state['libraries']:
-                    filtered = [s for s in filtered if s.get('library_code') in filter_state['libraries']]
-                if filter_state['domains']:
-                    filtered = [s for s in filtered if s.get('domain') in filter_state['domains']]
+                filtered = [s for s in data if _passes_filters(s, filter_state)]
 
                 sort_key = filter_state['sort']
                 if sort_key == 'library':
@@ -539,19 +578,14 @@ async def show_visual_similarity_dialog(sys_id: str, shelfmark: str, vs_service=
 
             sort_sel.on_value_change(_on_sort_change)
 
-            if lib_filter:
-                def _on_lib_change(e):
-                    filter_state['libraries'] = e.value or []
-                    filter_state['visible_count'] = _PAGE_SIZE
-                    _render_rows()
-                lib_filter.on_value_change(_on_lib_change)
+            def _refilter():
+                filter_state['visible_count'] = _PAGE_SIZE
+                _render_rows()
 
+            if lib_filter:
+                _wire_facet_filter(lib_filter, tr('Library'), filter_state, 'libraries', _refilter)
             if dom_filter:
-                def _on_dom_change(e):
-                    filter_state['domains'] = e.value or []
-                    filter_state['visible_count'] = _PAGE_SIZE
-                    _render_rows()
-                dom_filter.on_value_change(_on_dom_change)
+                _wire_facet_filter(dom_filter, tr('Domain'), filter_state, 'domains', _refilter)
 
             # Switching views keeps the filters and how many are shown.
             def _on_view_change(e):

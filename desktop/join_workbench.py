@@ -10,7 +10,7 @@ from html import escape as _html_escape
 from shared.fragment_details import domain_labels, fetch_fragment_details, info_line
 from shared.joins_lab import htmlify, page_of, snippet_html, snippet_plain  # D-18: reuse Phase 106
 from shared.joins_lab import (
-    counted_options, domain_label, domain_passes, normalize_order, order_candidates,
+    counted_options, domain_label, filter_passes, normalize_order, order_candidates,
     primary_domain,
 )
 from shared.responsa_match import ResponsaQueryRefused
@@ -2610,6 +2610,13 @@ if _QT_AVAILABLE:
                                if item.data(Qt.ItemDataRole.UserRole) in values
                                else Qt.CheckState.Unchecked)
 
+    def _filter_mode_combo() -> "QComboBox":
+        """Show only | Hide for a checklist filter (userData = the mode)."""
+        combo = QComboBox()
+        combo.addItem(tr("Show only"), "show_only")
+        combo.addItem(tr("Hide"), "hide")
+        return combo
+
     class JoinCandidatePane(QWidget):
         """Candidate-hunt surface in the Workbench right pane (Plan 03, JWB-07/10/11/12).
 
@@ -2754,16 +2761,14 @@ if _QT_AVAILABLE:
             self.mat_filter = QComboBox()
             self.mat_filter.addItem(tr("any material"))
 
-            # Library: userData is the library code ("" = any). Domain: a list of
-            # checkable domains (UserRole = the English domain; none checked = any),
-            # shown only or hidden as dom_mode says. Options with counts come with
-            # each result set (_refresh_facet_filters).
-            self.lib_filter = QComboBox()
-            self.lib_filter.addItem(tr("any library"), "")
+            # Library / Domain: lists of checkable values (UserRole = the library
+            # code / English domain; none checked = any), each shown only or hidden
+            # as lib_mode / dom_mode says. Options with counts come with each result
+            # set (_refresh_facet_filters).
+            self.lib_filter = QListWidget()
+            self.lib_mode = _filter_mode_combo()
             self.dom_filter = QListWidget()
-            self.dom_mode = QComboBox()
-            self.dom_mode.addItem(tr("Show only"), "show_only")
-            self.dom_mode.addItem(tr("Hide"), "hide")
+            self.dom_mode = _filter_mode_combo()
 
             self.dim_chk = QCheckBox(tr("Has dimensions"))
 
@@ -3653,24 +3658,15 @@ if _QT_AVAILABLE:
 
         def _refresh_facet_filters(self):
             """Library and Domain options, each "label (count)", for the current results.
-            A choice still on offer is kept; one that is not falls back to any (a
-            domain that is not is unchecked)."""
+            A checked value still on offer stays checked; one that is not is dropped."""
             libs = counted_options((c.library_code, c.library_code) for c in self.results)
             doms = counted_options(
                 ((self._enrich.get(c.key) or {}).get("domain"), self._domain_of(c))
                 for c in self.results
             )
             try:
-                current = self.lib_filter.currentData() or ""
-                self.lib_filter.blockSignals(True)
-                self.lib_filter.clear()
-                self.lib_filter.addItem(tr("any library"), "")
-                for value, label, n in libs:
-                    self.lib_filter.addItem(f"{label} ({n})", value)
-                idx = self.lib_filter.findData(current)
-                self.lib_filter.setCurrentIndex(idx if idx >= 0 else 0)
-                self.lib_filter.blockSignals(False)
-                _fill_checklist(self.dom_filter, doms, set(_checked_values(self.dom_filter)))
+                for widget, options in ((self.lib_filter, libs), (self.dom_filter, doms)):
+                    _fill_checklist(widget, options, set(_checked_values(widget)))
             except RuntimeError:
                 pass
 
@@ -3689,7 +3685,8 @@ if _QT_AVAILABLE:
                 if mat_q is None:
                     mat_q = ""   # userData not set (legacy path)
             mat_any = (not mat_q)  # userData=="" means "any material"
-            lib_q = self.lib_filter.currentData() or ""
+            lib_chosen = set(_checked_values(self.lib_filter))
+            lib_mode = self.lib_mode.currentData()
             dom_chosen = set(_checked_values(self.dom_filter))
             dom_mode = self.dom_mode.currentData()
             need_dims = self.dim_chk.isChecked()
@@ -3716,10 +3713,10 @@ if _QT_AVAILABLE:
                     if (m.get("material") or "") != mat_q:
                         continue
                 # Library / Domain filters (the domain is the fragment's first one;
-                # the chosen domains are shown only, or hidden)
-                if lib_q and c.library_code != lib_q:
+                # the chosen values are shown only, or hidden)
+                if not filter_passes(c.library_code, lib_chosen, lib_mode):
                     continue
-                if not domain_passes(m.get("domain"), dom_chosen, dom_mode):
+                if not filter_passes(m.get("domain"), dom_chosen, dom_mode):
                     continue
                 # Has-dimensions filter
                 if need_dims and not (m.get("width_cm") and m.get("height_cm")):
@@ -4101,11 +4098,12 @@ if _QT_AVAILABLE:
                 self.filter_in.clear()
                 self.mat_filter.setCurrentIndex(0)
                 self.tri_filter.setCurrentIndex(0)
-                # Library / Domain back to any (their options go with the results),
-                # Domain back to Show only, and Sort back to the search's order.
-                self.lib_filter.setCurrentIndex(0)
-                self.dom_filter.clear()
-                self.dom_mode.setCurrentIndex(0)
+                # Library / Domain back to any and Show only (their options go
+                # with the results), and Sort back to the search's order.
+                for widget, mode in ((self.lib_filter, self.lib_mode),
+                                     (self.dom_filter, self.dom_mode)):
+                    widget.clear()
+                    mode.setCurrentIndex(0)
                 self._refresh_facet_filters()
                 self.order_combo.blockSignals(True)
                 self.order_combo.setCurrentIndex(0)
@@ -4278,40 +4276,37 @@ if _QT_AVAILABLE:
             mat_row.addWidget(dlg_mat, 1)
             lay.addLayout(mat_row)
 
-            # Library / Domain: copies of the hidden widgets (userData = the filter value)
-            def _mirror(src: QComboBox) -> QComboBox:
-                dst = QComboBox()
-                for i in range(src.count()):
-                    dst.addItem(src.itemText(i), src.itemData(i))
-                dst.setCurrentIndex(max(0, src.currentIndex()))
-                return dst
+            # Library / Domain: check several, then show only them or hide them.
+            # Copies of the hidden checklists and their Show only / Hide choice.
+            def _facet_rows(label, src_list, src_mode):
+                dlg_mode = QComboBox()
+                for i in range(src_mode.count()):
+                    dlg_mode.addItem(src_mode.itemText(i), src_mode.itemData(i))
+                dlg_mode.setCurrentIndex(max(0, src_mode.currentIndex()))
+                dlg_mode.setAccessibleName(label)
+                row = QHBoxLayout()
+                row.addWidget(QLabel(label + ":"))
+                row.addWidget(dlg_mode, 1)
+                lay.addLayout(row)
+                dlg_list = QListWidget()
+                dlg_list.setAccessibleName(label)
+                for i in range(src_list.count()):
+                    dlg_list.addItem(src_list.item(i).clone())
+                if dlg_list.count():
+                    dlg_list.setMaximumHeight(
+                        dlg_list.sizeHintForRow(0) * min(dlg_list.count(), 6)
+                        + 2 * dlg_list.frameWidth())
+                    lay.addWidget(dlg_list)
+                else:
+                    # None in these results (or not yet known): nothing to choose
+                    dlg_mode.setEnabled(False)
+                    dlg_list.setVisible(False)
+                return dlg_list, dlg_mode
 
-            dlg_lib = _mirror(self.lib_filter)
-            lib_row = QHBoxLayout()
-            lib_row.addWidget(QLabel(tr("Library") + ":"))
-            lib_row.addWidget(dlg_lib, 1)
-            lay.addLayout(lib_row)
-
-            # Domain: check several, then show only them or hide them
-            dlg_dom_mode = _mirror(self.dom_mode)
-            dlg_dom_mode.setAccessibleName(tr("Domain"))
-            dom_row = QHBoxLayout()
-            dom_row.addWidget(QLabel(tr("Domain") + ":"))
-            dom_row.addWidget(dlg_dom_mode, 1)
-            lay.addLayout(dom_row)
-            dlg_dom = QListWidget()
-            dlg_dom.setAccessibleName(tr("Domain"))
-            for i in range(self.dom_filter.count()):
-                dlg_dom.addItem(self.dom_filter.item(i).clone())
-            if dlg_dom.count():
-                dlg_dom.setMaximumHeight(
-                    dlg_dom.sizeHintForRow(0) * min(dlg_dom.count(), 6)
-                    + 2 * dlg_dom.frameWidth())
-                lay.addWidget(dlg_dom)
-            else:
-                # No domains in these results (or not yet known): nothing to choose
-                dlg_dom_mode.setEnabled(False)
-                dlg_dom.setVisible(False)
+            dlg_lib, dlg_lib_mode = _facet_rows(tr("Library"), self.lib_filter, self.lib_mode)
+            dlg_dom, dlg_dom_mode = _facet_rows(tr("Domain"), self.dom_filter, self.dom_mode)
+            facets = ((self.lib_filter, self.lib_mode, dlg_lib, dlg_lib_mode),
+                      (self.dom_filter, self.dom_mode, dlg_dom, dlg_dom_mode))
 
             dlg_dim = QCheckBox(tr("Has dimensions"))
             dlg_dim.setChecked(self.dim_chk.isChecked())
@@ -4386,9 +4381,9 @@ if _QT_AVAILABLE:
             def _on_reset():
                 dlg_filter_in.setText("")
                 dlg_mat.setCurrentIndex(0)
-                dlg_lib.setCurrentIndex(0)
-                _set_checked(dlg_dom, ())
-                dlg_dom_mode.setCurrentIndex(0)
+                for _src, _mode, dlg_list, dlg_mode in facets:
+                    _set_checked(dlg_list, ())
+                    dlg_mode.setCurrentIndex(0)
                 dlg_dim.setChecked(False)
                 dlg_tri.setCurrentIndex(0)
                 dlg_size_chk.setChecked(False)
@@ -4410,11 +4405,11 @@ if _QT_AVAILABLE:
                 if not synced:
                     self.mat_filter.setCurrentIndex(0)
                 self.mat_filter.blockSignals(False)
-                # The mirrors hold the same items, so the index carries over. The
-                # domains go by value: new results may have rebuilt the list meanwhile.
-                self.lib_filter.setCurrentIndex(dlg_lib.currentIndex())
-                _set_checked(self.dom_filter, set(_checked_values(dlg_dom)))
-                self.dom_mode.setCurrentIndex(dlg_dom_mode.currentIndex())
+                # Library / Domain by value: new results may have rebuilt the
+                # lists meanwhile.
+                for src_list, src_mode, dlg_list, dlg_mode in facets:
+                    _set_checked(src_list, set(_checked_values(dlg_list)))
+                    src_mode.setCurrentIndex(dlg_mode.currentIndex())
                 self.dim_chk.setChecked(dlg_dim.isChecked())
                 self.tri_filter.setCurrentIndex(dlg_tri.currentIndex())
                 self.size_btn.setChecked(dlg_size_chk.isChecked())

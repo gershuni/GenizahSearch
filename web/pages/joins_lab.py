@@ -612,6 +612,7 @@ def create_joins_lab_page(
         'triage_states': [],
         'text_q': '',
         'libraries': [],              # library codes (empty = all)
+        'libraries_mode': 'show_only',  # 'show_only' | 'hide' those libraries
         'domains': [],                # English domains (empty = all)
         'domains_mode': 'show_only',  # 'show_only' | 'hide' those domains
         'order': 'rank',              # 'rank' | 'library' | 'domain' (the Sort control)

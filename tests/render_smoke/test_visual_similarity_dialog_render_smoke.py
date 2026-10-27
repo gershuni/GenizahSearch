@@ -11,6 +11,8 @@ Pinned here by driving the real dialog through the client's own events:
 3. The List / Thumbnails choice is remembered for the visitor's next window.
 4. Each domain and library option says how many suggestions carry it, and
    the Hebrew UI shows the Hebrew domain names (they were English in both UIs).
+5. Library and Domain each open with a Show only | Hide switch: Hide leaves the
+   chosen values out, and the label says it is hiding.
 """
 from __future__ import annotations
 
@@ -267,6 +269,67 @@ def test_each_library_option_counts_its_suggestions_and_still_filters():
         await user.should_see('T-S Gamma')
         await user.should_not_see('ENA Beta')
         await user.should_not_see('Mosseri Delta')
+
+    _run(driver)
+
+
+def _mode_switch(user, select):
+    """The Show only | Hide switch at the top of *select*'s open list."""
+    [toggle] = [t for t in user.find(ui.toggle).elements
+                if set(t.options) == {'show_only', 'hide'} and t.parent_slot.parent is select]
+    assert toggle.parent_slot.name == 'before-options'
+    return toggle
+
+
+def _choose_mode(user, select, mode):
+    toggle = _mode_switch(user, select)
+    UserInteraction(user, {toggle}, None).trigger(
+        'update:modelValue', list(toggle.options).index(mode))
+
+
+async def _sees_only(user, *shelfmarks):
+    for sid, (shelfmark, _lib, _dom) in SUGGESTIONS.items():
+        if shelfmark in shelfmarks:
+            await user.should_see(shelfmark)
+        else:
+            await user.should_not_see(shelfmark)
+
+
+def test_hide_leaves_the_chosen_domains_out():
+    async def driver(user):
+        await user.open(PAGE)
+        select = _domain_select(user)
+        label = select.label
+        _choose_mode(user, select, 'hide')                   # nothing chosen yet: all
+        await _sees_only(user, 'T-S Alpha', 'ENA Beta', 'T-S Gamma', 'Mosseri Delta')
+        assert select.label == label
+
+        _choose(user, select, 'Bible')
+        await _sees_only(user, 'ENA Beta', 'Mosseri Delta')
+        assert select.label == f"{label} · {vsd.tr('Hiding')}"
+
+        _choose_mode(user, select, 'show_only')              # the same choice, shown only
+        await _sees_only(user, 'T-S Alpha', 'T-S Gamma')
+        assert select.label == label
+
+    _run(driver)
+
+
+def test_hide_leaves_the_chosen_libraries_out_with_the_domain_filter():
+    async def driver(user):
+        await user.open(PAGE)
+        lib = _library_select(user)
+        label = lib.label
+        _choose(user, lib, 'CUL')
+        await _sees_only(user, 'T-S Alpha', 'T-S Gamma')
+        _choose_mode(user, lib, 'hide')                      # flips at once
+        await _sees_only(user, 'ENA Beta', 'Mosseri Delta')
+        assert lib.label == f"{label} · {vsd.tr('Hiding')}"
+
+        dom = _domain_select(user)
+        _choose_mode(user, dom, 'hide')
+        _choose(user, dom, 'Liturgy')
+        await _sees_only(user, 'Mosseri Delta')
 
     _run(driver)
 

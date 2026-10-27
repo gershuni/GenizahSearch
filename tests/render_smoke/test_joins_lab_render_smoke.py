@@ -2561,6 +2561,46 @@ def test_the_domain_filter_hides_the_chosen_domains(joins_lab_smoke_runner):
     joins_lab_smoke_runner(driver, mock_search_results=_lib_dom_results())
 
 
+def test_the_library_filter_hides_the_chosen_libraries(joins_lab_smoke_runner):
+    """The Library list opens with the same Show only | Hide switch as Domain."""
+    from unittest.mock import AsyncMock, patch
+
+    from nicegui import ElementFilter, ui
+
+    from web.joins_lab_storage import read_full_state
+
+    async def driver(user):
+        with patch('web.pages.joins_lab._enrich_candidates', new_callable=AsyncMock,
+                   return_value=dict(_LIB_DOM_ENRICH)):
+            await user.open('/joins-lab')
+            await _load_anchor_and_search(user)
+            await asyncio.sleep(0.5)
+            assert _card_domains(user) == ['Liturgy', 'Bible']      # CUL, JTS
+
+            lib_sel = _toolbar_select(user, 'joins-filter-library')
+            with user._client:
+                switch = next(iter(ElementFilter(kind=ui.toggle,
+                                                 marker='joins-filter-library-mode')))
+                assert switch.parent_slot.parent is lib_sel
+            _fire(user, lib_sel, 'popup-show')
+            with user._client:
+                lib_sel.value = ['JTS']
+                switch.value = 'hide'
+            _fire(user, lib_sel, 'popup-hide')
+            await asyncio.sleep(0.3)
+            assert _card_domains(user) == ['Liturgy']               # JTS hidden
+
+            lib_sel = _toolbar_select(user, 'joins-filter-library')
+            assert lib_sel.label == 'Library · Hiding'
+            assert lib_sel._props.get('display-value') == 'JTS'
+            with user._client:
+                stored = (read_full_state() or {}).get('active_filter') or {}
+            assert stored.get('libraries') == ['JTS']
+            assert stored.get('libraries_mode') == 'hide'
+
+    joins_lab_smoke_runner(driver, mock_search_results=_lib_dom_results())
+
+
 def test_a_saved_domain_filter_still_lets_its_candidates_in(joins_lab_smoke_runner):
     """A session restored with a Domain filter on re-runs its search before any
     candidate has a domain. The enrichment must cover every candidate, not just the

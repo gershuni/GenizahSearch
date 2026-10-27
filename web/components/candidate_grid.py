@@ -39,7 +39,7 @@ from typing import Optional, Callable
 from nicegui import ui
 
 from shared.joins_lab import (
-    TRIAGE_ICONS, counted_options, domain_label, domain_passes, normalize_domain_mode,
+    TRIAGE_ICONS, counted_options, domain_label, filter_passes, normalize_filter_mode,
     normalize_order, order_candidates,
 )
 from shared.synthetic_sys_id import is_synthetic_sys_id
@@ -262,10 +262,10 @@ def compute_filtered(
                           - exclude_mismatch: bool — exclude size-mismatch candidates
                           - triage_states: list[str] — 'All'/'Not triaged'/'Yes'/'Maybe'/'No'
                           - text_q: str — case-insensitive substring on shelfmark+title
-                          - libraries: list[str] — include only these library codes
+                          - libraries: list[str] — library codes (empty=all)
                           - domains: list[str] — (English) domains (empty=all)
-                          - domains_mode: 'show_only' (the default) shows only
-                            those domains; 'hide' leaves them out
+                          - libraries_mode / domains_mode: 'show_only' (the
+                            default) shows only those; 'hide' leaves them out
                           - order: 'rank' | 'library' | 'domain' — see below
         enrichment:     dict[sys_id → {width_cm, height_cm, material, domain, ...}]
         triage:         dict[sys_id → 'yes'|'maybe'|'no'] (or TriageState)
@@ -282,6 +282,7 @@ def compute_filtered(
     exclude_mismatch = bool(filter_state.get("exclude_mismatch", False))
     triage_states = set(filter_state.get("triage_states") or [])
     libraries = set(filter_state.get("libraries") or [])
+    libraries_mode = filter_state.get("libraries_mode")
     domains = set(filter_state.get("domains") or [])
     domains_mode = filter_state.get("domains_mode")
 
@@ -303,8 +304,8 @@ def compute_filtered(
             if text_q not in shelfmark_l and text_q not in title_l:
                 continue
 
-        # Library filter
-        if libraries and c.library_code not in libraries:
+        # Library filter (shown only, or hidden)
+        if not filter_passes(c.library_code, libraries, libraries_mode):
             continue
 
         # Material filter
@@ -313,7 +314,7 @@ def compute_filtered(
             continue
 
         # Domain filter (the fragment's first domain, as shown on its card)
-        if not domain_passes(m.get("domain"), domains, domains_mode):
+        if not filter_passes(m.get("domain"), domains, domains_mode):
             continue
 
         # Has-dims filter
@@ -1350,15 +1351,15 @@ def _facet_select(filter_state: dict, key: str, options: dict, label: str,
                   mode_key: Optional[str] = None):
     """One toolbar filter, Library or Domain: several values, each with its count.
 
-    With *mode_key* (Domain), the list opens with a Show only | Hide switch, kept
-    in filter_state[mode_key]: show only the chosen values, or hide them.
+    With *mode_key*, the list opens with a Show only | Hide switch, kept in
+    filter_state[mode_key]: show only the chosen values, or hide them.
 
     A choice applies when the list closes, not on each click: applying re-renders
     the grid, this select included, which would shut the list after one pick. The
     clear button changes the value with the list shut, so that applies at once.
     """
     current = list(filter_state.get(key) or [])
-    mode = ({"value": normalize_domain_mode(filter_state.get(mode_key))}
+    mode = ({"value": normalize_filter_mode(filter_state.get(mode_key))}
             if mode_key else None)
     # A value that still filters but is in none of these results (a filter kept
     # from an earlier search) stays listed with a zero count, so it can be seen
@@ -1390,7 +1391,7 @@ def _facet_select(filter_state: dict, key: str, options: dict, label: str,
     def _commit() -> None:
         values = list(sel.value or [])
         changed = values != list(filter_state.get(key) or [])
-        if mode is not None and mode["value"] != normalize_domain_mode(filter_state.get(mode_key)):
+        if mode is not None and mode["value"] != normalize_filter_mode(filter_state.get(mode_key)):
             filter_state[mode_key] = mode["value"]
             changed = True
         if changed:
@@ -1412,10 +1413,10 @@ def _facet_select(filter_state: dict, key: str, options: dict, label: str,
         with sel.add_slot("before-options"):
             switch = ui.toggle(
                 {"show_only": tr("Show only"), "hide": tr("Hide")}, value=mode["value"],
-            ).props("dense no-caps spread").classes("w-full q-pa-xs").mark(f"{marker}-mode")
+            ).props("dense no-caps no-wrap spread").classes("w-full q-pa-xs").mark(f"{marker}-mode")
 
         def _on_mode_change(e) -> None:
-            mode["value"] = normalize_domain_mode(e.value)
+            mode["value"] = normalize_filter_mode(e.value)
             _on_value_change(e)
 
         switch.on_value_change(_on_mode_change)
@@ -1440,10 +1441,11 @@ def _grid_header(total: int, *, all_candidates: list, filter_state: dict,
                 hebrew = get_language() == "he"
                 lib_opts = library_options(all_candidates)
                 dom_opts = domain_options(all_candidates, enrichment, hebrew)
+                # Each shows only the chosen values, or hides them.
                 _facet_select(filter_state, "libraries", lib_opts, tr("Library"),
-                              "joins-filter-library", True, on_filter_change)
-                # Domain comes with the enrichment, so it waits for it. It shows
-                # only the chosen domains, or hides them.
+                              "joins-filter-library", True, on_filter_change,
+                              mode_key="libraries_mode")
+                # Domain comes with the enrichment, so it waits for it.
                 _facet_select(filter_state, "domains", dom_opts, tr("Domain"),
                               "joins-filter-domain", enrichment_ready, on_filter_change,
                               mode_key="domains_mode")

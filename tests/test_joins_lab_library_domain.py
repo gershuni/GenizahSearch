@@ -4,7 +4,7 @@
 
 As in the website's Visual Similarity window: a fragment's domain is the first of its
 domain rows, shown in Hebrew in the Hebrew UI; the English domain is the filter key.
-The Domain filter takes several domains, to show only them or to hide them.
+Each filter takes several values, to show only them or to hide them.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import asyncio
 from unittest.mock import MagicMock, patch
 
 from shared.joins_lab import (
-    Candidate, counted_options, domain_label, domain_passes, normalize_domain_mode,
+    Candidate, counted_options, domain_label, filter_passes, normalize_filter_mode,
     normalize_order, order_candidates, primary_domain,
 )
 
@@ -52,22 +52,23 @@ def test_domain_label_is_hebrew_only_in_hebrew_and_when_named():
     assert domain_label(None, None, hebrew=True) == ""
 
 
-def test_domain_mode_is_show_only_unless_hide():
-    assert normalize_domain_mode("hide") == "hide"
+def test_filter_mode_is_show_only_unless_hide():
+    assert normalize_filter_mode("hide") == "hide"
     for other in (None, "", "show_only", "exclude", ["hide"], 1):
-        assert normalize_domain_mode(other) == "show_only"
+        assert normalize_filter_mode(other) == "show_only"
 
 
-def test_domain_passes_shows_only_or_hides_the_chosen():
+def test_filter_passes_shows_only_or_hides_the_chosen():
     chosen = {"Bible", "Liturgy"}
-    assert domain_passes("Bible", chosen, "show_only")
-    assert not domain_passes("Law", chosen, "show_only")
-    assert not domain_passes(None, chosen, "show_only")      # no domain: not chosen
-    assert not domain_passes("Bible", chosen, "hide")
-    assert domain_passes("Law", chosen, "hide")
-    assert domain_passes(None, chosen, "hide")               # no domain: not hidden
+    assert filter_passes("Bible", chosen, "show_only")
+    assert not filter_passes("Law", chosen, "show_only")
+    assert not filter_passes(None, chosen, "show_only")      # no value: not chosen
+    assert not filter_passes("Bible", chosen, "hide")
+    assert filter_passes("Law", chosen, "hide")
+    assert filter_passes(None, chosen, "hide")               # no value: not hidden
+    assert filter_passes("", {"CUL"}, "hide") and not filter_passes("", {"CUL"}, "show_only")
     for mode in ("show_only", "hide", None):                 # nothing chosen: all pass
-        assert domain_passes("Bible", set(), mode) and domain_passes(None, [], mode)
+        assert filter_passes("Bible", set(), mode) and filter_passes(None, [], mode)
 
 
 def test_counted_options_count_each_value_in_label_order():
@@ -96,6 +97,20 @@ def test_library_and_domain_filters():
     assert [c.sys_id for c in got] == ["99d"]
     got = compute_filtered(CANDS, {"domains": ["Bible", "Liturgy"]}, ENRICH, {}, "")
     assert [c.sys_id for c in got] == ["99a", "99c", "99d"]
+
+
+def test_hidden_libraries_are_left_out():
+    """'hide' leaves the chosen libraries out; a candidate with no library stays."""
+    from web.components.candidate_grid import compute_filtered
+    f = {"libraries": ["JTS"], "libraries_mode": "hide"}
+    assert [c.sys_id for c in compute_filtered(CANDS, f, ENRICH, {}, "")] == ["99b", "99c"]
+    f = {"libraries": ["JTS", "CUL"], "libraries_mode": "hide"}
+    assert [c.sys_id for c in compute_filtered(CANDS, f, ENRICH, {}, "")] == ["99b"]
+    f = {"libraries": [], "libraries_mode": "hide"}           # nothing hidden: all
+    assert compute_filtered(CANDS, f, ENRICH, {}, "") == CANDS
+    f = {"libraries": ["CUL"], "libraries_mode": "hide",
+         "domains": ["Liturgy"], "domains_mode": "hide"}
+    assert [c.sys_id for c in compute_filtered(CANDS, f, ENRICH, {}, "")] == ["99b", "99d"]
 
 
 def test_hidden_domains_are_left_out():

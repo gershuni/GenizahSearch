@@ -4,6 +4,7 @@ from web.components.visual_similarity_dialog import (
     _domain_options,
     _library_options,
     _normalize_view,
+    _passes_filters,
     _pick_preview_image_url,
     _suggestion_thumbnail_url,
 )
@@ -155,6 +156,26 @@ def test_library_options_count_each_library_in_code_order():
     assert list(_library_options(suggestions).items()) == [
         ("CUL", "CUL (2)"), ("JTS", "JTS (1)"),
     ]
+
+
+def test_library_and_domain_filters_show_only_or_hide():
+    s = {"library_code": "CUL", "domain": "Bible"}
+    unclassified = {"library_code": "JTS", "domain": "--"}
+
+    def state(libs=(), lib_mode="show_only", doms=(), dom_mode="show_only"):
+        return {"libraries": list(libs), "libraries_mode": lib_mode,
+                "domains": list(doms), "domains_mode": dom_mode}
+
+    assert _passes_filters(s, state())                           # nothing chosen
+    assert _passes_filters(s, state(libs=["CUL", "JTS"]))
+    assert not _passes_filters(s, state(libs=["CUL"], lib_mode="hide"))
+    assert _passes_filters(s, state(libs=["JTS"], lib_mode="hide"))
+    assert not _passes_filters(s, state(doms=["Liturgy"]))
+    assert not _passes_filters(s, state(doms=["Bible", "Law"], dom_mode="hide"))
+    assert not _passes_filters(s, state(libs=["JTS"], lib_mode="hide", doms=["Bible"],
+                                        dom_mode="hide"))         # both must pass
+    assert _passes_filters(unclassified, state(doms=["Bible"], dom_mode="hide"))
+    assert not _passes_filters(unclassified, state(doms=["Bible"]))
 
 
 def test_thumb_size_defaults_to_small():
