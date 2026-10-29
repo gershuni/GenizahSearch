@@ -60,7 +60,8 @@ Curated pointers, not a listing. For a symbol-level index see
   [shared/responsa_match.py](../../shared/responsa_match.py)),
   metadata and shelfmark handling ([shared/shelfmark_bridge.py](../../shared/shelfmark_bridge.py),
   [shared/sys_id_patterns.py](../../shared/sys_id_patterns.py) -- the single definition of a
-  sys_id pattern), and the sidecar services (`shared/*_service.py`: PGP documents, FJMS
+  sys_id pattern; [shared/cudl_identity.py](../../shared/cudl_identity.py) -- the only decision
+  of which Cambridge CUDL item a record links to), and the sidecar services (`shared/*_service.py`: PGP documents, FJMS
   enrichment, NLI cross-reference, FGP transcriptions, translations, visual similarity, puzzle).
   [genizah_core.py](../../genizah_core.py) is a permanent facade over these
   ([decision 0001](../decisions/0001-permanent-genizah-core-facade.md)).

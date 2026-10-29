@@ -68,6 +68,19 @@ def _saved_text_pt():
     return max(TEXT_PT_MIN, min(TEXT_PT_MAX, pt))
 
 
+
+def _cached_meta_needs_enrichment(meta_mgr, sys_id, cached_meta) -> bool:
+    """Must the dialog enrich this record before showing it, rather than reuse the cache?
+
+    Yes when nothing is cached, when the entry was never enriched (no MARC), and when it
+    was enriched before the record's current Cambridge decision: such an entry may hold
+    another item's CUDL link and images (shared/cudl_identity.py).
+    """
+    from shared.cudl_identity import entry_decision_stale
+    # The decision of THIS entry -- the one the dialog would show -- not a re-read.
+    return (not cached_meta or 'marc' not in cached_meta
+            or entry_decision_stale(meta_mgr, cached_meta))
+
 class _ReadingTextSize(QObject):
     """The transcription text size, one for the Manuscript Viewer and the Browse
     tab (owner, 2026-10-24: "option to change the size of the texts"): saved under
@@ -3665,7 +3678,7 @@ class ResultDialog(QDialog):
                     pass  # dialog deleted after close; the answer has no home
             threading.Thread(target=worker, daemon=True).start()
 
-        if not cached_meta or 'marc' not in cached_meta:
+        if _cached_meta_needs_enrichment(self.meta_mgr, self.current_sys_id, cached_meta):
             # Disconnect old enrich worker to prevent stale signals and GC crash
             if hasattr(self, 'enrich_worker') and self.enrich_worker is not None:
                 try:
@@ -4003,7 +4016,9 @@ class ResultDialog(QDialog):
             self.external_pane.setVisible(False)
             self.btn_toggle_image.setChecked(False)
 
-        self.external_url = meta.get('external_url') or meta.get('marc', {}).get('external_iiif_link')
+        # external_url carries the record's Cambridge decision (enrich_metadata); the raw
+        # MARC 856 link does not.
+        self.external_url = meta.get('external_url')
         # Prefer library_viewer_url (catalog page) over manifest URL for JTS/Manchester
         lib_viewer = meta.get('library_viewer_url')
         if lib_viewer and lib_viewer.get('url'):

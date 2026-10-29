@@ -38,6 +38,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
+from shared.cudl_identity import RESOLVER_REVISION as CUDL_RESOLVER_REVISION
+
 from web.services import get_oxford_direct_image_url
 from shared.synthetic_sys_id import is_synthetic_sys_id
 
@@ -229,7 +231,10 @@ def resolve_image_url(
             img_url = f"/api/oxford_image/{sys_id}?page={page_idx}{cache_bust_api}{_width_api}"
     elif active_source == 'cambridge' and _has_cambridge_images and not is_oxford:
         has_image = True
-        img_url = f"/api/cambridge_image/{sys_id}?page={page_idx}{cache_bust_api}{_width_api}"
+        # cv=: browsers keep these a week (IMAGE_HTTP_MAX_AGE) and never ask again in
+        # that time, so a new Cambridge decision needs a new URL (cudl_identity).
+        img_url = (f"/api/cambridge_image/{sys_id}?page={page_idx}{cache_bust_api}{_width_api}"
+                   f"&cv={CUDL_RESOLVER_REVISION}")
     elif active_source == 'manchester' and _has_manchester_images and not is_oxford:
         has_image = True
         # For multi-IE manuscripts, Manchester canvases span all volumes
@@ -293,6 +298,9 @@ def resolve_external_images(
           ``cambridge_images``    — list of IIIF canvas URLs (empty list if none)
           ``external_provider``   — 'manchester', 'jts', '' (Cambridge), or ''
           ``cambridge_alignment`` — CUDL↔NLI alignment verdict dict or None
+          ``cambridge_resolution`` — the record's Cambridge decision (shared/cudl_identity.py)
+          ``external_url``        — the external library link
+        All five come from ONE cache entry: the decision vouches for exactly these images.
 
         On enrich_metadata failure (any Exception), returns the same shape with
         all-empty values — degrades gracefully, mirrors browse_enrichment.py:249-250.
@@ -314,28 +322,32 @@ def resolve_external_images(
             'cambridge_images': [],
             'external_provider': '',
             'cambridge_alignment': None,
+            'cambridge_resolution': None,
+            'external_url': '',
         }
 
-    cached = getattr(meta_mgr, 'nli_cache', {}).get(sys_id, {})
-    if not cached.get('images_ext'):
-        # nli_cache not yet populated — call enrich_metadata to resolve
-        # Manchester/Cambridge/JTS images from crossref sidecar + IIIF.
-        # enrich_metadata is Phase-98-NLI-breaker-guarded; failure degrades
-        # to empty image fields (no raise), mirroring browse_enrichment.py:249-250.
-        try:
-            meta_mgr.enrich_metadata(sys_id)
-            cached = meta_mgr.nli_cache.get(sys_id, {})
-        except Exception as e:
-            # Audit #37: include stack info so the failing call path is
-            # diagnosable (the bare warning lost the traceback).
-            logger.warning(
-                "resolve_external_images enrich_metadata error for %s: %s",
-                sys_id, e, exc_info=True,
-            )
-            cached = {}
+    # nli_cache not yet populated -- or populated before the record's current Cambridge
+    # decision, so its images may be another item's: fresh_external_entry enriches it
+    # (Manchester/Cambridge/JTS images from crossref sidecar + IIIF) and hands back the
+    # one entry everything below is read from. enrich_metadata is Phase-98-NLI-breaker-
+    # guarded; failure degrades to empty image fields (no raise), mirroring
+    # browse_enrichment.py:249-250.
+    from shared.cudl_identity import fresh_external_entry
+    try:
+        cached = fresh_external_entry(meta_mgr, sys_id)
+    except Exception as e:
+        # Audit #37: include stack info so the failing call path is
+        # diagnosable (the bare warning lost the traceback).
+        logger.warning(
+            "resolve_external_images enrich_metadata error for %s: %s",
+            sys_id, e, exc_info=True,
+        )
+        cached = {}
 
     return {
         'cambridge_images': cached.get('images_ext', []),
         'external_provider': cached.get('external_provider', ''),
         'cambridge_alignment': cached.get('cambridge_alignment'),
+        'cambridge_resolution': cached.get('cambridge_resolution'),
+        'external_url': cached.get('external_url', '') or '',
     }

@@ -24,6 +24,9 @@ from tqdm import tqdm
 # Add project root to path so we can import genizah_core
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from genizah_core import normalize_shelfmark
+# One definition, shared with the runtime lookup that must reproduce this key
+# (shared/cudl_identity.py::candidate_key).
+from shared.cudl_identity import cudl_label_to_shelfmark
 
 VERSION = "1.0.0"
 BATCH_SIZE = 10_000
@@ -37,48 +40,6 @@ NLI_COLUMNS = [
     "PartOf", "See", "BifolioWith", "NumFolio", "NumBifolio",
     "Material", "Size", "IsNotGenizah",
 ]
-
-
-def cudl_label_to_shelfmark(label: str) -> str:
-    """
-    Convert a CUDL manifest label to a human-readable shelfmark.
-
-    Steps:
-    1. Strip 'MS-' prefix
-    2. Split by '-'
-    3. Strip leading zeros from numeric segments (e.g., '00006' -> '6')
-    4. Rejoin: '.' between consecutive numeric parts, space otherwise
-
-    Examples:
-        MS-TS-00016-00114 -> 'TS 16.114'
-        MS-ADD-00863-00002 -> 'ADD 863.2'
-        MS-MOSSERI-II-00292-00002 -> 'MOSSERI II 292.2'
-    """
-    s = label
-    if s.startswith("MS-"):
-        s = s[3:]
-
-    parts = s.split("-")
-    cleaned = []
-    for p in parts:
-        if p.isdigit():
-            cleaned.append(str(int(p)))  # strip leading zeros
-        else:
-            cleaned.append(p)
-
-    if not cleaned:
-        return label
-
-    result = cleaned[0]
-    for i in range(1, len(cleaned)):
-        prev_numeric = cleaned[i - 1].isdigit()
-        curr_numeric = cleaned[i].isdigit()
-        if prev_numeric and curr_numeric:
-            result += "." + cleaned[i]
-        else:
-            result += " " + cleaned[i]
-
-    return result
 
 
 def import_nli_images(target):

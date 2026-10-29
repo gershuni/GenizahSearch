@@ -77,7 +77,9 @@ class _Crossref:
     def __init__(self, viewer):
         self._viewer = viewer
 
-    def get_library_viewer_url(self, sid):
+    def get_library_viewer_url(self, sid, cambridge_viewer_url=None):
+        if cambridge_viewer_url and self._viewer:
+            return dict(self._viewer, url=cambridge_viewer_url)
         return self._viewer
 
 
@@ -105,6 +107,24 @@ def test_fetch_details_links_in_fixed_order(monkeypatch):
     assert got["dating"] is None   # "-99" is FJMS's empty date
     assert [ln["key"] for ln in got["links"]] == ["ktiv", "library", "pgp"]
     assert got["links"][1]["label"] == "Cambridge Digital Library"
+
+
+def test_fetch_details_library_link_is_the_cudl_item_the_decision_names(monkeypatch):
+    """The Library link opens the item the record's Cambridge decision names
+    (shared/cudl_identity.py), not a CUDL search for its shelfmark."""
+    _patch_sources(monkeypatch, viewer={"url": "https://cudl.lib.cam.ac.uk/search?keyword=Or.1080%203.45",
+                                        "label": "Cambridge Digital Library"})
+    item = "https://cudl.lib.cam.ac.uk/view/MS-OR-01080-00003-00045"
+
+    class _Meta:
+        csv_bank = {CORPUS: {"library_code": "CUL"}}
+        nli_cache: dict = {}
+
+        def resolve_cambridge(self, sid, crossref_svc=None):
+            return {"status": "match", "viewer_url": item}
+
+    got = fd.fetch_fragment_details(CORPUS, meta_mgr=_Meta())
+    assert [ln["url"] for ln in got["links"] if ln["key"] == "library"] == [item]
 
 
 def test_fetch_details_falls_back_to_the_oxford_part_link(monkeypatch):

@@ -411,34 +411,18 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                             if part_meta.get('direct_link'):
                                 result['external_url'] = part_meta['direct_link']
 
-            # Cambridge MARC
-            if 'external_url' not in result:
-                marc_data = {}
-                if hasattr(state_mod.meta_mgr, 'nli_cache') and _sys_id in state_mod.meta_mgr.nli_cache:
-                    marc_data = state_mod.meta_mgr.nli_cache[_sys_id].get('marc', {})
-                ext_link = marc_data.get('external_iiif_link')
-                if ext_link and "cudl.lib.cam.ac.uk" in ext_link:
-                    result['is_cambridge'] = True
-                    result['external_url'] = ext_link.replace("/iiif/", "/view/")
-
-            # NLI crossref queries
+            # NLI crossref queries. Cambridge is NOT decided here: the record's one
+            # Cambridge decision is read back from enrich_metadata below.
+            crossref_svc = None
             try:
                 from shared.nli_crossref_service import get_nli_crossref_service
                 crossref_svc = get_nli_crossref_service(thread_safe=True)
                 if crossref_svc.is_available() and _sys_id:
                     from genizah_core import normalize_shelfmark
                     norm_shelf = normalize_shelfmark(_shelfmark) if _shelfmark else None
-                    # Phase 84 follow-up: pass raw shelfmark so the service can
-                    # fall through to the bridge cascade when the canonical-form
-                    # direct query misses (Mosseri label, T-S slash + leading-zero,
-                    # Or.-numeric-collapse). Without this, _has_cambridge stays
-                    # False in browse and the Cambridge button + IIIF images are
-                    # suppressed despite a valid manifest URL upstream.
                     result['image_source_info'] = crossref_svc.get_image_sources(
-                        _sys_id, normalized_shelfmark=norm_shelf, shelfmark=_shelfmark
+                        _sys_id, normalized_shelfmark=norm_shelf,
                     )
-                    if not result.get('is_cambridge') and result['image_source_info'].get('cambridge'):
-                        result['is_cambridge'] = True
                     folio_images = crossref_svc.get_folio_images(_sys_id)
                     result['folio_images'] = folio_images
                     if (folio_images
@@ -462,8 +446,7 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
 
                     # Skip get_physical_metadata here -- fetch_crossref already gets it
                     # via get_crossref_metadata. We read it from crossref_data after gather.
-
-                    result['library_viewer_url'] = crossref_svc.get_library_viewer_url(_sys_id)
+                    # (library_viewer_url: below, once the Cambridge decision is known.)
 
                     # Derive fl_id for metadata-only records (no Tantivy fl_id)
                     if not _page.fl_id and folio_images:
@@ -484,20 +467,29 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                 result['cambridge_images'] = _ext['cambridge_images']
                 result['external_provider'] = _ext['external_provider']
                 result['cambridge_alignment'] = _ext['cambridge_alignment']
-                # Phase 84 follow-up: propagate external_url back from nli_cache when
-                # the MARC branch (line 192-199 above) didn't set one. enrich_metadata
-                # may have resolved it via the bridge supplement (Cambridge for
-                # CUDL-only rows like Mosseri). Without this, pg.external_url stays
-                # empty for Mosseri/CUL-CUDL rows and the browse "View on CUDL" link
-                # falls through to a lossy shelfmark-slug fallback that 404s.
-                # (Read back the post-enrich nli_cache entry for the external_url field.)
-                if not result.get('external_url') and hasattr(state_mod.meta_mgr, 'nli_cache'):
-                    _cached_after = state_mod.meta_mgr.nli_cache.get(_sys_id, {})
-                    if _cached_after.get('external_url'):
-                        cached_url = _cached_after.get('external_url') or ''
-                        if 'cudl.lib.cam.ac.uk' in cached_url.lower():
-                            result['is_cambridge'] = True
+                # The record's Cambridge decision is the only source of "Cambridge" on
+                # this page: the availability flag, the CUDL link and the library link
+                # all follow it -- the decision from the SAME cache entry as the images
+                # above (resolve_external_images), never a later re-read of the cache.
+                _cam = _ext.get('cambridge_resolution') or {}
+                _cam_url = _cam.get('viewer_url') if _cam.get('status') == 'match' else None
+                if _cam_url:
+                    result['is_cambridge'] = True
+                    if result.get('image_source_info') is not None:
+                        result['image_source_info']['cambridge'] = True
+                    if not result.get('external_url'):
+                        result['external_url'] = _cam_url
+                elif not result.get('external_url'):
+                    # Other providers' links (JTS / Manchester) resolved by enrich_metadata.
+                    cached_url = _ext.get('external_url') or ''
+                    if cached_url and 'cudl.lib.cam.ac.uk' not in cached_url.lower():
                         result['external_url'] = cached_url
+                if crossref_svc is not None and crossref_svc.is_available():
+                    try:
+                        result['library_viewer_url'] = crossref_svc.get_library_viewer_url(
+                            _sys_id, cambridge_viewer_url=_cam_url)
+                    except Exception as e:
+                        logger.error("Browse enrichment library link error: %s", e)
 
                 # Same ordering problem for the NLI credit (Codex P2, 2026-09-02):
                 # the attribution block above runs BEFORE `enrich_metadata` populates

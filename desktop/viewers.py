@@ -881,11 +881,8 @@ class ManuscriptViewerWidget(QWidget):
         if meta.get('external_provider'):
             return meta['external_provider']
 
-        marc = meta.get('marc', {}) if meta else {}
-        url = (marc.get('external_iiif_link') or "").lower()
-        if "cudl.lib.cam.ac.uk" in url:
-            return "cambridge"
-
+        # Not the NLI catalogue's CUDL link (MARC 856): enrich_metadata folds it into
+        # the record's one Cambridge decision, and sets external_provider when it holds.
         for img in meta.get('images_ext', []) or []:
             img_url = (img.get('url', '').lower())
             if "cudl.lib.cam.ac.uk" in img_url:
@@ -1103,8 +1100,9 @@ class ManuscriptViewerWidget(QWidget):
                     break
 
         # External Link
-        marc = meta.get('marc', {})
-        self.external_url = meta.get('external_url') or marc.get('external_iiif_link')
+        # external_url carries the record's Cambridge decision; the raw MARC 856 link
+        # does not (it can name another library's or another fragment's item).
+        self.external_url = meta.get('external_url')
 
         # Prefer library_viewer_url when available (detail page > generic manifest URL)
         lib_viewer = meta.get('library_viewer_url')

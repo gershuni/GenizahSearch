@@ -20,6 +20,7 @@ from web.state import state
 from web.safe_storage import safe_user_pop
 
 # Phase 98 D-21: shared NLI circuit breaker for puzzle folio resolution.
+from shared.cudl_identity import RESOLVER_REVISION as CUDL_RESOLVER_REVISION
 from shared.nli_circuit_breaker import (
     is_open as _nli_circuit_is_open,
     record_failure as _nli_record_failure,
@@ -32,6 +33,12 @@ logger = logging.getLogger(__name__)
 
 # Fabric.js CDN (v6.4.3 stable)
 FABRIC_JS_CDN = '<script src="https://cdn.jsdelivr.net/npm/fabric@6.4.3/dist/index.min.js"></script>'
+
+# Appended to every /api/puzzle_ext_image URL. Its disk cache is keyed by the CUDL item the
+# record's Cambridge decision names, but a browser keeps the bytes of an unchanged URL
+# (Cache-Control max-age); a new decision revision must give the image a new URL
+# (shared/cudl_identity.py).
+EXT_IMAGE_VERSION = f"&cv={CUDL_RESOLVER_REVISION}"
 
 # How often the canvas positions are kept in the tab, for a reload or a return to /puzzle.
 STATE_SAVE_INTERVAL_S = 30
@@ -352,7 +359,7 @@ window.puzzleCanvas = {
             var extUrl = '/api/puzzle_ext_image?sys_id=' + encodeURIComponent(meta.sys_id)
                 + '&page=' + pageIdx + '&provider=' + encodeURIComponent(provider)
                 + '&threshold=' + threshold + '&size=' + size
-                + '&processed=' + processed;
+                + '&processed=' + processed + '__EXT_IMAGE_VERSION__';
             try {
                 var extResp = await fetch(extUrl);
                 if (extResp.ok) {
@@ -435,8 +442,8 @@ window.puzzleCanvas = {
         // are available from Oxford directly via /api/oxford_image
         if (meta && meta.sys_id) {
             var proxyFallbacks = [
-                '/api/puzzle_ext_image?sys_id=' + encodeURIComponent(meta.sys_id) + '&page=0&provider=oxford&threshold=' + threshold + '&size=' + size + '&processed=' + processed,
-                '/api/puzzle_ext_image?sys_id=' + encodeURIComponent(meta.sys_id) + '&page=0&provider=cambridge&threshold=' + threshold + '&size=' + size + '&processed=' + processed
+                '/api/puzzle_ext_image?sys_id=' + encodeURIComponent(meta.sys_id) + '&page=0&provider=oxford&threshold=' + threshold + '&size=' + size + '&processed=' + processed + '__EXT_IMAGE_VERSION__',
+                '/api/puzzle_ext_image?sys_id=' + encodeURIComponent(meta.sys_id) + '&page=0&provider=cambridge&threshold=' + threshold + '&size=' + size + '&processed=' + processed + '__EXT_IMAGE_VERSION__'
             ];
             for (var fi = 0; fi < proxyFallbacks.length; fi++) {
                 try {
@@ -2202,7 +2209,7 @@ async def _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta, pending_fragme
         # Cambridge CUDL images (Mosseri etc.) have blue conservation mats like CUL T-S
         ext_is_cul = external_provider == 'cambridge'
         ext_threshold = 150.0 if ext_is_cul else threshold
-        url = f"/api/puzzle_ext_image?sys_id={sys_id}&page={page_index}&provider={external_provider}&threshold={ext_threshold}&size=800&processed={'true' if ext_processed else 'false'}"
+        url = f"/api/puzzle_ext_image?sys_id={sys_id}&page={page_index}&provider={external_provider}&threshold={ext_threshold}&size=800&processed={'true' if ext_processed else 'false'}{EXT_IMAGE_VERSION}"
         meta = {
             'fl_id': '', 'image_url': image_url, 'threshold': ext_threshold, 'size': 800,
             'processed': ext_processed, 'sys_id': sys_id, 'is_cul': ext_is_cul,
@@ -2264,7 +2271,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
     image_browser_key = browser_key_for_page()
     ui.add_head_html(FABRIC_JS_CDN)
     ui.add_head_html(PUZZLE_STYLES)
-    ui.add_body_html(PUZZLE_CANVAS_JS)
+    ui.add_body_html(PUZZLE_CANVAS_JS.replace('__EXT_IMAGE_VERSION__', EXT_IMAGE_VERSION))
 
     # Inject banner texts synchronously (before tryInit WebSocket call)
     # so _updateExtensionBanner() always has the correct language
@@ -2789,7 +2796,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             elif ext_provider:
                 # External library path — use puzzle_ext_image endpoint
                 page_idx = frag_page_idx if frag_page_idx >= 0 else 0
-                url = f"/api/puzzle_ext_image?sys_id={frag.sys_id}&page={page_idx}&provider={ext_provider}&threshold={threshold}&size=800&processed={'true' if processed else 'false'}"
+                url = f"/api/puzzle_ext_image?sys_id={frag.sys_id}&page={page_idx}&provider={ext_provider}&threshold={threshold}&size=800&processed={'true' if processed else 'false'}{EXT_IMAGE_VERSION}"
                 ext_is_cul = ext_provider == 'cambridge'
                 ext_processed = ext_provider != 'oxford'
                 js_meta = json.dumps({
@@ -4149,7 +4156,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 elif ext_provider and meta.get('sys_id'):
                     # External library path (Oxford, Manchester, JTS, Cambridge CUDL)
                     page_idx = meta.get('page_index', 0) or 0
-                    url = f"/api/puzzle_ext_image?sys_id={meta['sys_id']}&page={page_idx}&provider={ext_provider}&threshold={threshold}&size=800&processed={str(bool(processed)).lower()}"
+                    url = f"/api/puzzle_ext_image?sys_id={meta['sys_id']}&page={page_idx}&provider={ext_provider}&threshold={threshold}&size=800&processed={str(bool(processed)).lower()}{EXT_IMAGE_VERSION}"
                 else:
                     logger.warning(f"Session restore: skipping fragment {key} — no fl_id or external_provider")
                     continue
@@ -4371,7 +4378,7 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
                 ext_is_cul = external_provider == 'cambridge'
                 ext_processed = external_provider != 'oxford'
                 ext_threshold = 150.0 if ext_is_cul else threshold
-                url = f"/api/puzzle_ext_image?sys_id={add_sys_id}&page={pg}&provider={external_provider}&threshold={ext_threshold}&size=800&processed={'true' if ext_processed else 'false'}"
+                url = f"/api/puzzle_ext_image?sys_id={add_sys_id}&page={pg}&provider={external_provider}&threshold={ext_threshold}&size=800&processed={'true' if ext_processed else 'false'}{EXT_IMAGE_VERSION}"
                 js_meta = json.dumps({
                     'fl_id': '', 'image_url': image_url, 'threshold': ext_threshold, 'size': 800,
                     'processed': ext_processed, 'sys_id': add_sys_id, 'is_cul': ext_is_cul,

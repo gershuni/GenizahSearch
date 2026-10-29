@@ -161,12 +161,19 @@ def env(tmp_path, monkeypatch):
         cache.clear()
 
 
-def _manager(env, web, monkeypatch, *, checked):
+def _manager(env, web, monkeypatch, *, checked, catalogue=True):
     mm_mod = env['mm_mod']
     mm = (mm_mod.MetadataManager(checked_library_fetches=True) if checked
           else mm_mod.MetadataManager())
     monkeypatch.setattr(mm, '_make_session', lambda: web)
     monkeypatch.setattr(mm, 'get_part_for_folio', lambda _sys_id: None)
+    if catalogue:
+        # A Cambridge record of a loaded catalogue: its NLI-catalogue CUDL link (MARC 856)
+        # is what the record's Cambridge decision takes when no name decides
+        # (shared/cudl_identity.py) -- the route under test fetches that item.
+        mm.csv_bank = {SYS: {'shelfmark': 'T-S 1.1', 'title': '', 'library_code': 'CUL',
+                             'call_numbers_raw': ['T-S 1.1']}}
+        mm._csv_bank_loaded = True
     monkeypatch.setattr(requests, 'get', web.get)
     import time
     monkeypatch.setattr(time, 'sleep', lambda _s: None)  # the first lookup's retry pauses
@@ -251,7 +258,8 @@ def test_the_first_marc_lookup_does_not_follow_a_redirect_off_the_library_hosts(
     routes[MARC_URL] = _Resp(302, location=OTHER_MARC)
     routes[OTHER_MARC] = _Resp(200, _marc(shelfmark='Other shelfmark', fl='FL9999999'))
     web = _Web(routes)
-    mm = _manager(env, web, monkeypatch, checked=True)
+    # Not in the catalogue: the cold cache fetches the record itself from NLI.
+    mm = _manager(env, web, monkeypatch, checked=True, catalogue=False)
 
     got = _puzzle_ext_image(env, mm, monkeypatch)
 

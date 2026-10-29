@@ -188,7 +188,8 @@ def _pick_preview_image_url(
     if images_ext:
         if library_code == 'CUL' and cambridge_alignment.get('verdict') == 'misaligned':
             return f"/api/nli_image_by_sysid/{sys_id}?page=0&width={_PREVIEW_IMAGE_WIDTH}"
-        return f"/api/cambridge_image/{sys_id}?page=0{width_param}"
+        from shared.cudl_identity import RESOLVER_REVISION
+        return f"/api/cambridge_image/{sys_id}?page=0{width_param}&cv={RESOLVER_REVISION}"
 
     return f"/api/nli_image_by_sysid/{sys_id}?page=0&width={_PREVIEW_IMAGE_WIDTH}"
 
@@ -206,10 +207,12 @@ def _resolve_preview_image_url_sync(sys_id: str, shelfmark: str = '') -> str | N
     shelfmark = shelfmark or csv_meta.get('shelfmark', '')
 
     cached = meta_mgr.nli_cache.get(sys_id, {}) if getattr(meta_mgr, 'nli_cache', None) else {}
-    if not cached.get('images_ext') and not cached.get('image_source_info'):
+    from shared.cudl_identity import entry_decision_stale
+    # The decision is checked on the entry the preview is picked from (not a re-read).
+    if (not cached.get('images_ext') and not cached.get('image_source_info')) or entry_decision_stale(meta_mgr, cached):
         try:
-            meta_mgr.enrich_metadata(sys_id)
-            cached = meta_mgr.nli_cache.get(sys_id, {})
+            fresh = meta_mgr.enrich_metadata(sys_id)
+            cached = fresh if isinstance(fresh, dict) else meta_mgr.nli_cache.get(sys_id, {})
         except Exception as e:
             logger.debug("VS dialog: enrich_metadata error for %s: %s", sys_id, e)
 

@@ -346,8 +346,12 @@ def test_get_image_sources_with_fgp(service):
 
 
 def test_get_image_sources_with_cambridge(service):
-    """Returns cambridge=True when manifest exists."""
+    """``cambridge`` is the record's Cambridge decision, passed in -- not a table probe:
+    a manifest sharing the record's normalized key is not proof it is the record's item
+    (shared/cudl_identity.py)."""
     sources = service.get_image_sources("A001", normalized_shelfmark="ts12123")
+    assert sources["cambridge"] is False
+    sources = service.get_image_sources("A001", normalized_shelfmark="ts12123", cambridge=True)
     assert sources["cambridge"] is True
     assert sources["nli_fgp"] is True
 

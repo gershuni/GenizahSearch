@@ -201,6 +201,24 @@ class _BoundedLRUCache:
             self._data.move_to_end(key)
             return self._data[key]
 
+    def merge_fields(self, key, fields, default=None):
+        """Set ``fields`` on the entry stored under ``key`` NOW, as one locked step.
+
+        A copy of the current entry (or of ``default`` when there is none) gets the
+        fields and replaces it. A caller that read an entry, waited on the network and
+        then wrote its copy back could put an older entry over one published meanwhile
+        (enrich_metadata publishes whole entries); here the read and the write cannot be
+        separated by another thread's write.
+        """
+        with self._lock:
+            current = self._data.get(key)
+            entry = dict(current if current is not None else (default or {}))
+            entry.update(fields)
+            self._data[key] = entry
+            self._data.move_to_end(key)
+            self._evict_locked()
+            return entry
+
     def items(self):
         with self._lock:
             return list(self._data.items())
@@ -278,6 +296,9 @@ class MetadataManager:
     # library hosts (shared/puzzle_image_service.py::get_with_checked_redirects).
     # The desktop and the scripts leave it False and fetch as before.
     checked_library_fetches = False
+    _csv_bank_loaded = False
+    # Entries carry a Cambridge decision (shared/cudl_identity.py::entry_decision_stale).
+    supports_cambridge_decision = True
 
     def __init__(self, *, checked_library_fetches: bool = False):
         self.checked_library_fetches = bool(checked_library_fetches)
@@ -285,6 +306,9 @@ class MetadataManager:
         # Bounded LRU (was an unbounded dict — see _BoundedLRUCache above).
         self.nli_cache = _BoundedLRUCache()
         self.csv_bank = {}
+        # True once libraries.csv has been read to the end: until then a sys_id missing
+        # from csv_bank may simply not have been reached yet.
+        self._csv_bank_loaded = False
         self._shelfmark_index = None
         self.nli_executor = ThreadPoolExecutor(max_workers=2)
         self.ns = {'marc': 'http://www.loc.gov/MARC21/slim'}
@@ -412,6 +436,7 @@ class MetadataManager:
                         'library_code': library_code,
                         'call_numbers_raw': call_numbers_raw,
                     }
+            self._csv_bank_loaded = True
             # CSV data is authoritative for shelfmark browsing; force the normalized index
             # to rebuild after background loading completes.
             self._shelfmark_index = None
@@ -516,6 +541,46 @@ class MetadataManager:
         if sys_id and sys_id in self.nli_cache:
             return self.nli_cache[sys_id].get('shelfmark', '')
         return ''
+
+    def cambridge_record_names(self, system_id):
+        """``(names, library_code)`` from libraries.csv, main name first.
+
+        None while libraries.csv is still loading and has not reached the record: a
+        record the catalogue has not read yet is not a record without names.
+        """
+        row = self.csv_bank.get(system_id)
+        if row is None:
+            return ([], '') if self._csv_bank_loaded else None
+        primary = row.get('shelfmark') or ''
+        names = [primary] if primary else []
+        names += [n for n in (row.get('call_numbers_raw') or []) if n and n != primary]
+        return names, row.get('library_code', '') or ''
+
+    def resolve_cambridge(self, system_id, marc_url=None, crossref_svc=None):
+        """The CUDL item this record links to (``shared/cudl_identity.py``).
+
+        Status ``unavailable`` -- no revision, so never cached as final -- while
+        libraries.csv has not reached the record or the crossref sidecar cannot be read.
+        Without the sidecar, a Cambridge record's NLI-catalogue link still stands,
+        unconfirmed: also without a revision, so the next run decides again.
+        """
+        from shared.cudl_identity import CAMBRIDGE_LIBRARY_CODES, resolve_record, unavailable
+        record = self.cambridge_record_names(system_id)
+        if record is None:
+            return unavailable()
+        names, library_code = record
+        if library_code not in CAMBRIDGE_LIBRARY_CODES:
+            # Final without the sidecar: another library's record is never Cambridge's.
+            return resolve_record(names, library_code, lambda _key, _guess: ())
+        if crossref_svc is None:
+            crossref_svc = _get_crossref_service()
+        if crossref_svc is not None and crossref_svc.is_available():
+            return crossref_svc.resolve_cambridge_record(names, library_code, marc_url=marc_url)
+        if not marc_url:
+            return unavailable()
+        res = resolve_record(names, library_code, lambda _key, _guess: (), marc_url=marc_url)
+        res['revision'] = None
+        return res
 
     def save_caches(self):
         try:
@@ -1093,8 +1158,18 @@ class MetadataManager:
         if system_id not in self.nli_cache:
             self.fetch_nli_data(system_id)
 
-        current_meta = self.nli_cache.get(system_id, {})
+        # Work on a copy and publish it whole at the end (self.nli_cache[system_id] = ...).
+        # Other threads read this entry while the network calls below run; mutating it in
+        # place showed them a new Cambridge decision beside the old item's images, and the
+        # Puzzle's disk cache saved those pixels under the new item's name.
+        current_meta = dict(self.nli_cache.get(system_id) or {})
         current_meta['sys_id'] = system_id  # Store for downstream consumers
+        # The catalogue's name is the record's name (get_meta_for_id reads it first too).
+        # An entry first fetched from NLI keeps NLI's 942 shelfmark, which for a renamed
+        # fragment is the OLD name ("Ms. T-S Loan Collection 180" for T-S Misc.36.180).
+        csv_shelfmark = (self.csv_bank.get(system_id) or {}).get('shelfmark')
+        if csv_shelfmark:
+            current_meta['shelfmark'] = csv_shelfmark
 
         # 1. Submit both NLI network calls concurrently (fetch_marc_data + fetch_iiif_manifest)
         # These are independent calls; running in parallel halves metadata fetch time.
@@ -1119,62 +1194,36 @@ class MetadataManager:
         image_list = []
         external_meta = {}
 
-        # Check for External Link from MARC (e.g. CUDL)
-        ext_link = marc_data.get('external_iiif_link')
-        if ext_link:
-            # Phase 84 follow-up: store the viewer URL form (cudl.lib.cam.ac.uk/view/...)
-            # rather than the raw IIIF manifest JSON URL (cudl.lib.cam.ac.uk/iiif/...).
-            # The "View on CUDL" external link in browse opens external_url in a new tab;
-            # /iiif/ returns JSON ("unavailable page" to a human), /view/ is the gallery
-            # page. Web-side browse_enrichment.py:199 already does this transform for
-            # MARC; centralizing it here so the bridge supplement (3a) and the Mosseri
-            # variant loop (3b) below get the same correct form.
-            if 'cudl.lib.cam.ac.uk' in ext_link.lower():
-                ext_link = ext_link.replace("/iiif/", "/view/")
-                current_meta['external_provider'] = 'cambridge'
-            current_meta['external_url'] = ext_link
-
         # Lists for multiple sources
         images_nli = []
         images_ext = []
 
-        # Initialize crossref service once (used for both Cambridge supplement and NLI FL IDs)
+        # Initialize crossref service once (used for the Cambridge decision and NLI FL IDs)
         crossref_svc = _get_crossref_service()
 
-        # 2a-supplement: if MARC didn't provide a CUDL link, try crossref sidecar
-        # Phase 84: migrated from get_cambridge_manifest(norm_sm) to get_cambridge_manifest_with_bridge(shelfmark)
-        # The wrapper owns normalization internally; pass raw shelfmark (Codex MEDIUM #6).
-        if not ext_link and crossref_svc and crossref_svc.is_available():
-            shelfmark = current_meta.get('shelfmark', '')
-            if shelfmark:
-                cam_manifest_url = crossref_svc.get_cambridge_manifest_with_bridge(shelfmark)
-                if cam_manifest_url:
-                    ext_link = cam_manifest_url
-                    # Bridge returns the IIIF manifest URL form (/iiif/MS-...). Convert
-                    # to the CUDL viewer URL (/view/MS-...) for the user-facing
-                    # "View on CUDL" link. /iiif/ returns JSON; /view/ is the gallery.
-                    current_meta['external_url'] = ext_link.replace("/iiif/", "/view/")
-                    current_meta['external_provider'] = 'cambridge'
-                    LOGGER.info(f"Using local Cambridge manifest for {system_id} from crossref sidecar")
-
-        # 2a-mosseri: if crossref didn't find Cambridge manifest and this is Mosseri, try CUDL label construction
-        # Phase 84: migrated from get_cambridge_manifest_by_label(label) to get_cambridge_manifest_with_bridge(variant)
-        # Round 3 Codex HIGH #4: variant loop PRESERVED — wrapper takes one shelfmark; only the loop
-        # knows which alternates to try for Mosseri rows whose primary shelfmark is not the resolving form.
-        if not ext_link and crossref_svc and crossref_svc.is_available():
-            lib_code = current_meta.get('lib_code') or self.csv_bank.get(system_id, {}).get('library_code', '')
-            if lib_code == 'Mosseri':
-                # Try all call_number variants for best CUDL match
-                variants = self.csv_bank.get(system_id, {}).get('call_numbers_raw') or [current_meta.get('shelfmark', '')]
-                for variant in variants:
-                    cam_url = crossref_svc.get_cambridge_manifest_with_bridge(variant)
-                    if cam_url:
-                        ext_link = cam_url
-                        # iiif manifest URL → viewer page URL (see 2a-supplement above).
-                        current_meta['external_url'] = ext_link.replace("/iiif/", "/view/")
-                        current_meta['external_provider'] = 'cambridge'
-                        LOGGER.info(f"Using Mosseri CUDL manifest for {system_id} via variant {variant!r}")
-                        break
+        # 2a-cambridge: ONE decision for the record -- its catalogue names, structurally
+        # matched, plus the NLI catalogue's own link (shared/cudl_identity.py). Nothing
+        # else may link a record to CUDL. What an earlier run derived from Cambridge is
+        # dropped first: a corrected or withdrawn link must not survive in the cache.
+        prev_cambridge_label = (current_meta.get('cambridge_resolution') or {}).get('label')
+        was_cambridge = (current_meta.get('external_provider') == 'cambridge'
+                         or 'cudl.lib.cam.ac.uk' in (current_meta.get('external_url') or '').lower())
+        if was_cambridge:
+            for key in ('external_url', 'external_provider', 'cambridge_alignment',
+                        'external_count_mismatch'):
+                current_meta.pop(key, None)
+        cambridge = self.resolve_cambridge(
+            system_id, marc_url=marc_data.get('external_iiif_link'), crossref_svc=crossref_svc,
+        )
+        current_meta['cambridge_resolution'] = cambridge
+        if was_cambridge and (cambridge['status'] != 'match'
+                              or cambridge.get('label') != prev_cambridge_label):
+            current_meta.pop('attribution', None)  # the old item's credit; recomputed below
+        ext_link = None
+        if cambridge['status'] == 'match':
+            ext_link = cambridge['viewer_url']
+            current_meta['external_url'] = ext_link
+            current_meta['external_provider'] = 'cambridge'
 
         # 2a-manchester: build canvas entries directly from ALL crossref images (each has its own luna_id)
         if not ext_link and crossref_svc and crossref_svc.is_available():
@@ -1321,7 +1370,8 @@ class MetadataManager:
                 shelfmark = current_meta.get('shelfmark', '')
                 norm_sm = normalize_shelfmark(shelfmark) if shelfmark else ''
                 current_meta['image_source_info'] = crossref_svc.get_image_sources(
-                    system_id, normalized_shelfmark=norm_sm, shelfmark=shelfmark
+                    system_id, normalized_shelfmark=norm_sm,
+                    cambridge=cambridge['status'] == 'match',
                 )
                 current_meta['folio_images'] = crossref_svc.get_folio_images(system_id)
 
@@ -1330,8 +1380,12 @@ class MetadataManager:
                 if phys_meta:
                     current_meta['physical_metadata'] = phys_meta
 
-                # Library viewer URL (Phase 32: META-04)
-                lib_url = crossref_svc.get_library_viewer_url(system_id)
+                # Library viewer URL (Phase 32: META-04) -- the CUDL item itself
+                # when the Cambridge decision named one, not a CUDL search.
+                lib_url = crossref_svc.get_library_viewer_url(
+                    system_id,
+                    cambridge_viewer_url=cambridge['viewer_url'] if cambridge['status'] == 'match' else None,
+                )
                 if lib_url:
                     current_meta['library_viewer_url'] = lib_url
 
@@ -1700,12 +1754,20 @@ class MetadataManager:
 
         thumb_url = self._resolve_thumbnail(fl_ids, size=size)
 
-        if meta is None:
-            meta = {'shelfmark': 'Unknown', 'title': '', 'desc': '', 'fl_ids': fl_ids}
-        meta['fl_ids'] = fl_ids
-        meta['thumb_url'] = thumb_url
-        meta['thumb_checked'] = True
-        self.nli_cache[system_id] = meta
+        # Only the thumbnail fields are written, onto the entry as it is at the moment of
+        # writing, in one locked step (_BoundedLRUCache.merge_fields). enrich_metadata
+        # publishes whole entries: putting back the entry read above -- or a copy taken
+        # one step before the write -- could undo an enrichment published meanwhile, and
+        # with it the record's Cambridge decision and images.
+        fields = {'fl_ids': fl_ids, 'thumb_url': thumb_url, 'thumb_checked': True}
+        base = meta if meta is not None else {'shelfmark': 'Unknown', 'title': '', 'desc': ''}
+        merge = getattr(self.nli_cache, 'merge_fields', None)
+        if callable(merge):
+            merge(system_id, fields, default=base)
+        else:  # a plain dict (tests): one thread
+            entry = dict(self.nli_cache.get(system_id) or base)
+            entry.update(fields)
+            self.nli_cache[system_id] = entry
         return thumb_url
 
     def batch_fetch_shelfmarks(self, system_ids, progress_callback=None, use_network=True, check_cancel=None):

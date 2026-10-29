@@ -3414,3 +3414,26 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
     - Method `accepts` (Line 156)
 - **Function** `compose` (Line 303) — A width preset plus a passage-length profile plus a search depth,
 - **Function** `get_preset` (Line 351)
+
+## shared/cudl_identity.py
+
+- **Function** `cudl_label_to_shelfmark` (Line 58) — Convert a CUDL manifest label to a human-readable shelfmark.
+- **Function** `_signature` (Line 103) — Letters merged between numbers (so ``Ja`` == ``J-A``), numbers as integers.
+- **Function** `label_signature` (Line 119) — Structure of a CUDL label: ``MS-TS-00008-J-A-00002`` -> ('TS', 8, 'JA', 2).
+- **Function** `_generic_tokens` (Line 126)
+- **Function** `_mosseri_tokens` (Line 143)
+- **Function** `_name_tokens` (Line 155)
+- **Function** `name_signature` (Line 166) — Structure of a catalogue name, or None when it is not a form we can read whole.
+- **Function** `_readable` (Line 177)
+- **Function** `candidate_key` (Line 185) — The ``normalized_shelfmark`` every label with this structure carries.
+- **Function** `guess_label` (Line 191) — The CUDL label spelled the way the name is written (``T-S Ar.18(1).6`` ->
+- **Function** `label_from_url` (Line 201) — ``https://cudl.lib.cam.ac.uk/view/MS-TS-00001-00001/2`` -> ``MS-TS-00001-00001``.
+- **Function** `viewer_url` (Line 209)
+- **Function** `manifest_url_for` (Line 213)
+- **Function** `match_name` (Line 217) — One name -> ``{'status': 'match'|'ambiguous'|'none', 'label', 'manifest_url', 'labels'}``.
+- **Function** `resolution_is_current` (Line 238) — True when ``res`` is a final resolution made by this revision of the rules.
+- **Function** `cached_decision_stale` (Line 243) — True when ``meta_mgr``'s cached entry for ``sys_id`` has no current Cambridge
+- **Function** `unavailable` (Line 253) — No answer yet (catalogue still loading, sidecar unreadable). Carries no
+- **Function** `_result` (Line 262)
+- **Function** `_resolve_record` (Line 276) — The CUDL item a catalogue record links to.
+- **Function** `resolve_record` (Line 358) — See ``_resolve_record``; the result also carries ``marc_label``, the item the

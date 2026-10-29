@@ -166,20 +166,13 @@ class TestScanDiffBaselineStillResolves:
 
 
 class TestImageSourceInfoBridgeFallback:
-    """Phase 84 follow-up: get_image_sources() must reflect Cambridge availability
-    for CUDL-form classmarks resolved via the bridge.
+    """Phase 84 follow-up, under the 2026-10-29 Cambridge decision (shared/cudl_identity.py).
 
-    Pre-fix: get_image_sources did a single direct query against
-    cambridge_manifests.normalized_shelfmark using the CANONICAL normalize_shelfmark()
-    output. CUDL-form classmarks (slash, comma, leading-zero, Mosseri-label,
-    Or.-numeric-collapse) miss that query — even when get_cambridge_manifest_with_bridge
-    DOES resolve a manifest. Result: browse `_has_cambridge` flag stayed False and the
-    Cambridge button + IIIF images were suppressed despite a valid manifest URL.
-
-    Post-fix: when the direct query misses, the service falls through to
-    get_cambridge_manifest_with_bridge(shelfmark) and flips cambridge=True iff a
-    URL is reachable. UAT Test 2 (Mosseri) and Test 1 sub-issue 1c (T-S F 8/002)
-    are blocked on this behavior.
+    These CUDL-form classmarks (Mosseri label, slash + leading zero, Or. J) once missed the
+    availability probe, hiding the Cambridge button and images. The probe is gone:
+    get_image_sources reports the record's Cambridge decision, and that decision -- made
+    from the record's catalogue names by structure -- must find each of them. The real
+    sidecar is used when present; tests/test_cudl_identity.py covers the same shapes in CI.
     """
 
     @pytest.fixture(scope="class")
@@ -200,51 +193,20 @@ class TestImageSourceInfoBridgeFallback:
             pytest.skip("nli_crossref.db not found")
         return NliCrossrefService(db_path=db_path)
 
-    def test_mosseri_label_form_lifts_cambridge_flag_via_bridge(self, nli_svc):
-        """Mosseri row: canonical norm gives 'iii27a', no direct cambridge_manifests
-        match. Bridge resolves via Tier 3 (Mosseri label MS-MOSSERI-III-00027-A)."""
-        from genizah_core import normalize_shelfmark
-        sm = "Ms. III 27A"
-        sid = "990053834880205171"
-        norm = normalize_shelfmark(sm)
-        pre = nli_svc.get_image_sources(sid, normalized_shelfmark=norm)
-        post = nli_svc.get_image_sources(sid, normalized_shelfmark=norm, shelfmark=sm)
-        assert pre["cambridge"] is False, "regression test premise broken"
-        assert post["cambridge"] is True, (
-            "Phase 84 follow-up regressed: bridge fallback in get_image_sources "
-            "no longer detects Mosseri Cambridge availability. "
-            "Browse will hide the Cambridge button + images."
-        )
+    @pytest.mark.parametrize("names, library_code, label", [
+        (["Ms. III 27A", "Moss. III,27A"], "Mosseri", "MS-MOSSERI-III-00027-A"),     # 990053834880205171
+        (["Ms. T-S F 8/002"], "CUL", "MS-TS-F-00008-00002"),                       # 990026242400205171
+        (["Or. 1080 J 15"], "CUL", "MS-OR-01080-J-00015"),
+    ])
+    def test_cudl_form_classmarks_are_found_by_the_record_decision(self, nli_svc, names, library_code, label):
+        res = nli_svc.resolve_cambridge_record(names, library_code)
+        assert (res["status"], res["label"]) == ("match", label), (
+            "the record's Cambridge decision no longer finds this CUDL-form classmark; "
+            "Browse would hide the Cambridge button + images")
 
-    def test_ts_slash_leading_zero_form_lifts_cambridge_flag_via_bridge(self, nli_svc):
-        """T-S F 8/002 row: canonical norm gives 'tsf8.002', no direct match.
-        Bridge resolves via Tier 2 (cudl_normalize -> 'tsf8.2' which IS in the table)."""
-        from genizah_core import normalize_shelfmark
-        sm = "Ms. T-S F 8/002"
-        sid = "990026242400205171"
-        norm = normalize_shelfmark(sm)
-        pre = nli_svc.get_image_sources(sid, normalized_shelfmark=norm)
-        post = nli_svc.get_image_sources(sid, normalized_shelfmark=norm, shelfmark=sm)
-        assert pre["cambridge"] is False, "regression test premise broken"
-        assert post["cambridge"] is True, (
-            "Phase 84 follow-up regressed: bridge fallback in get_image_sources "
-            "no longer detects CUDL-form (slash + leading-zero) Cambridge availability."
-        )
-
-    def test_canonical_form_unchanged(self, nli_svc):
-        """Or. 1080 J 15 already matched the direct query pre-fix (canonical
-        and CUDL forms collide for this shape). Verify the bridge fallback is a
-        pure ADDITION that doesn't alter pre-fix behavior for canonical-matching
-        shelfmarks."""
-        from genizah_core import normalize_shelfmark
-        sm = "Or. 1080 J 15"
-        norm = normalize_shelfmark(sm)
-        pre = nli_svc.get_image_sources("synthetic", normalized_shelfmark=norm)
-        post = nli_svc.get_image_sources("synthetic", normalized_shelfmark=norm, shelfmark=sm)
-        # Both should detect Cambridge — the direct query already hits, the bridge
-        # short-circuits (inside the `if not result["cambridge"]` guard).
-        assert pre["cambridge"] is True
-        assert post["cambridge"] is True
+    def test_availability_flag_reports_the_decision(self, nli_svc):
+        assert nli_svc.get_image_sources("990026242400205171", cambridge=True)["cambridge"] is True
+        assert nli_svc.get_image_sources("990026242400205171", normalized_shelfmark="tsf8.2")["cambridge"] is False
 
 
 class TestResolveSystemBridgeExactMatch:
