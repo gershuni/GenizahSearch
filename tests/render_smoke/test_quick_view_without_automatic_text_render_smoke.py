@@ -47,6 +47,8 @@ SLOW_SID = '990051614290205171'           # 4 images too, but counting them take
 SLOW_FETCH_SID = '990051614300205171'     # 2 images; its page takes longer to fetch than SLOW_SID's count
 IMAGE_COUNTS[SLOW_FETCH_SID] = 2
 SLOW_COUNT_DONE = threading.Event()       # SLOW_SID's count has come
+MEDIUM_SID = '990051614320205171'         # 4 images, counted in 1.5 s: inside a wait widened past it
+MEDIUM_COUNT_DONE = threading.Event()
 SLOW_FETCH_DONE = threading.Event()       # SLOW_FETCH_SID's page has come
 SHELFMARK = 'T-S NS 243.146'
 FGP_TEXT = 'אֵל מְשוך בְטלה / לְנִפְקְדו בַטְלאִ ים ' * 20
@@ -81,7 +83,7 @@ class _Service:
         if sys_id == SLOW_FETCH_SID:
             time.sleep(4.5)
             SLOW_FETCH_DONE.set()
-        if sys_id in (NO_TEXT_SID, UNCOUNTED_SID, SLOW_SID, SLOW_FETCH_SID):
+        if sys_id in (NO_TEXT_SID, UNCOUNTED_SID, SLOW_SID, SLOW_FETCH_SID, MEDIUM_SID):
             # SearchEngine._get_metadata_only_browse_page: the requested page, moved by direction, no count
             return _page(sys_id, max(1, (p_num or 1) + direction), '', total_pages=0)
         pages = PAGES.get(sys_id) or []
@@ -107,6 +109,7 @@ RESULTS = {
     'uncounted': _result(UNCOUNTED_SID, ''),
     'slow': _result(SLOW_SID, ''),
     'slow-fetch': _result(SLOW_FETCH_SID, ''),
+    'medium': _result(MEDIUM_SID, ''),
     'catalogue': _result(SYNTHETIC_SID, ''),
     'no-edition': _result(NO_EDITION_SID, '2', snippet='שורה *שנייה* של הדף השני', full_text=HTR_TEXT),
 }
@@ -127,6 +130,10 @@ def _image_count(sys_id, folio_images=None, suffix=1):
     if sys_id == SLOW_SID:
         time.sleep(3.0)
         SLOW_COUNT_DONE.set()
+        return 4
+    if sys_id == MEDIUM_SID:
+        time.sleep(1.5)
+        MEDIUM_COUNT_DONE.set()
         return 4
     return IMAGE_COUNTS.get(sys_id, 0)
 
@@ -356,5 +363,27 @@ def test_a_late_count_does_not_render_over_the_next_result():
         assert 'Page 1/4' not in _labels(user), sorted(_labels(user))
         await _wait_until(lambda: 'Page 1/2' in _labels(user))
         assert 'Page 1/2' in _labels(user), sorted(_labels(user))
+
+    _run(driver)
+
+
+def test_a_load_overtaken_by_the_next_result_does_not_render_over_it():
+    # Codex on #454: result 1 waits (within PAGE_COUNT_WAIT_S) for its count; the reader moves to result 2, which
+    # renders first. Result 1's load must then stop, not render result 1 under result 2's header.
+    MEDIUM_COUNT_DONE.clear()
+
+    async def driver(user):
+        with patch('web.page_count.PAGE_COUNT_WAIT_S', 3.0):
+            await user.open(f'{PAGE}?case=medium,hit')
+            await _wait_until(lambda: _button(user, 'Next'))
+            [next_result] = _button(user, 'Next')
+            _click(user, next_result)
+            await _wait_until(lambda: _version_label(user) == 'V0.8' and 'שנייה' in _html(user))
+            assert not MEDIUM_COUNT_DONE.is_set(), 'result 2 did not render first'
+            await _wait_until(MEDIUM_COUNT_DONE.is_set, timeout=10)
+            await asyncio.sleep(0.3)  # past result 1's load resuming
+            labels = _labels(user)
+            assert 'Result 2 / 2' in labels and 'Page 1/4' not in labels, sorted(labels)
+            assert 'שנייה' in _html(user)
 
     _run(driver)

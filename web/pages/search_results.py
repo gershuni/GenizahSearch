@@ -1367,12 +1367,21 @@ def open_advanced_dialog(search_state, refs, index, result):
 
         # Fetch page data asynchronously
         async def fetch_and_render():
+            # Next/Previous result may choose another result while this one loads: then that
+            # one's own load renders it, and this one stops (Codex on #454).
+            selected = (adv_state.current_result_idx, adv_state.current_sys_id)
+
+            def superseded():
+                return (adv_state.current_result_idx, adv_state.current_sys_id) != selected
+
             if adv_state.current_sys_id:
                 page = await run.io_bound(in_visitor_language(lambda: service.get_browse_page(
                     adv_state.current_sys_id, p_num=adv_state.current_p_num,
                     volume_ie=adv_state.volume_ie
                 )))
                 await count_pages_without_text(page)
+                if superseded():
+                    return
                 adv_state.current_page = page
                 if page:
                     adv_state.total_pages = page.total_pages
@@ -1381,14 +1390,15 @@ def open_advanced_dialog(search_state, refs, index, result):
                 adv_state.current_page = None
                 adv_state.total_pages = 1
 
-            # Fetch FJMS + crossref enrichment
+            # Fetch FJMS + crossref enrichment (kept only while this result is still the one chosen)
+            fjms_data = crossref_data = None
             if adv_state.current_sys_id:
                 sid = adv_state.current_sys_id
                 try:
                     from shared.fjms_service import get_fjms_service
                     fjms = get_fjms_service(thread_safe=True)
                     if fjms.is_available():
-                        adv_state.fjms_data = await run.io_bound(lambda: {
+                        fjms_data = await run.io_bound(lambda: {
                             'catalog_records': fjms.get_catalog_records(sid),
                             'domains': fjms.get_domains(sid),
                             'bibliography': fjms.get_bibliography(sid),
@@ -1401,11 +1411,14 @@ def open_advanced_dialog(search_state, refs, index, result):
                     from shared.nli_crossref_service import get_nli_crossref_service
                     svc = get_nli_crossref_service(thread_safe=True)
                     if svc.is_available():
-                        adv_state.crossref_data = await run.io_bound(
+                        crossref_data = await run.io_bound(
                             lambda: svc.get_crossref_metadata(sid)
                         )
                 except Exception:
                     pass  # Enrichment failed for this item; continue with available data
+            if superseded():
+                return
+            adv_state.fjms_data, adv_state.crossref_data = fjms_data, crossref_data
 
             render_content(result)
             ux_done(_ux_client, 'result_quick_view', 'ok' if adv_state.current_page else 'error',
@@ -1420,6 +1433,7 @@ def open_advanced_dialog(search_state, refs, index, result):
         if not adv_state.current_sys_id:
             return
 
+        selected = (adv_state.current_result_idx, adv_state.current_sys_id)
         target_p_num = p_num if p_num is not None else adv_state.current_p_num
         page = await run.io_bound(in_visitor_language(lambda: service.get_browse_page(
             adv_state.current_sys_id, p_num=target_p_num, direction=direction,
@@ -1428,6 +1442,8 @@ def open_advanced_dialog(search_state, refs, index, result):
 
         if page:
             await count_pages_without_text(page)
+            if (adv_state.current_result_idx, adv_state.current_sys_id) != selected:
+                return  # another result was chosen meanwhile (Codex on #454)
             adv_state.current_page = page
             adv_state.current_p_num = page.p_num
             adv_state.total_pages = page.total_pages
