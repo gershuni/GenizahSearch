@@ -1939,12 +1939,14 @@ Variant and Lab preferences of one website visitor, kept in that visitor's stora
 - **Function** `render_results` (Line 115)
 - **Function** `render_preview_results` — the rows found so far, shown under "Still searching" while a search runs (no export/filter/pagination; the result re-renders)
 - **Function** `create_result_card` (Line 345)
+- **Function** `_quick_view_has_reading_view` — whether Quick View builds its version chooser, Edit, Comment and Joins: Browse's `page_has_reading_view`, so also on a page without an automatic transcription (2026-10-29)
 - **Function** `open_advanced_dialog` (Line 752) — Open an enhanced Advanced View dialog with in-place navigation and IIIF image viewer.
 
 ## web/pages/browse_state.py
 
 - **Class** `BrowseState` (Line 23) — Holds the state for the browse page.
     - Method `__init__` (Line 26)
+- **Function** `page_has_reading_view` — whether the reading view offers its versions, Edit, Comment, Notes and Joins: also on a page without an automatic transcription, not on a synthetic catalogue-only record (2026-10-27)
 - **Function** `restore_browse_snapshot` (Line 95) — Hydrate browse snapshot fields; return raw (position, reading_desk) dicts.
 - **Function** `persist_browse_snapshot` (Line 154) — Serialize browse position and reading desk state to app.storage.user.
 - **Function** `clear_browse_snapshot` (Line 196) — Wipe browse snapshot keys.

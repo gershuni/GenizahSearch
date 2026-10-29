@@ -1,13 +1,17 @@
 # -*- coding: utf-8 -*-
 """A page without an automatic transcription gets its reading view (owner, 2026-10-27): its text is taken as empty,
 so the version selector, Edit, Comment, Notes and Joins are built and an FGP or PGP edition of the page shows by the
-usual default rule. A synthetic catalogue-only record still gets none of them."""
+usual default rule. A synthetic catalogue-only record still gets none of them.
+
+Quick View (web/pages/search_results.py) takes the same decision through Browse's helper; its render-smoke is
+tests/render_smoke/test_quick_view_without_automatic_text_render_smoke.py."""
 from types import SimpleNamespace
 
 import pytest
 
 from shared.fgp_service import choose_default_source
 from web.pages.browse_state import page_has_reading_view
+from web.pages.search_results import _quick_view_has_reading_view
 
 
 @pytest.mark.parametrize("text, sys_id, expected", [
@@ -30,3 +34,16 @@ def test_an_edition_is_the_default_where_the_automatic_text_is_empty():
                "content": "אֵל מְשוך בְטלה / לְנִפְקְדו בַטְלאִ ים " * 20}
     decision = choose_default_source([edition], "", full_htr_getter=lambda: "")
     assert decision["eligible"] and decision["source"]["id"] == 22952
+
+
+@pytest.mark.parametrize("sys_id, page, current_text, expected", [
+    ("990051614260205171", SimpleNamespace(text="שורה", sys_id="990051614260205171"), "שורה", True),
+    ("990051614260205171", SimpleNamespace(text="", sys_id="990051614260205171"), "", True),   # no automatic text
+    ("990051614260205171", SimpleNamespace(text=None, sys_id="990051614260205171"), None, True),
+    ("990001234560000000", SimpleNamespace(text="", sys_id="990001234560000000"), "", False),  # catalogue-only
+    ("990051614260205171", None, "שורה", True),     # the page could not be fetched: the result's own text, as before
+    ("990051614260205171", None, "", False),
+    ("", None, "שורה", False),                       # no manuscript id: nothing to choose a version of
+])
+def test_quick_view_takes_browse_decision(sys_id, page, current_text, expected):
+    assert _quick_view_has_reading_view(sys_id, page, current_text) is expected

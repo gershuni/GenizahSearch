@@ -20,6 +20,7 @@ from web.translations import tr, is_rtl, get_language, in_visitor_language
 from web.ux_timing import ux_done
 from web.feature_flags import WEB_PUZZLE_ENABLED, web_fgp_enabled
 from web.components.filter_panel import persist_value
+from web.pages.browse_state import page_has_reading_view
 from web.pages.search_state import (
     AdvancedViewState, domain_display_name, save_post_filters_with_run,
 )
@@ -131,6 +132,17 @@ def _hit_scope_phrase(snippet, adv_state, page):
         adv_state.hit_scope = current
         return phrase
     return phrase if adv_state.hit_scope == current else None
+
+
+def _quick_view_has_reading_view(sys_id, page, current_text) -> bool:
+    """Whether Quick View offers its version chooser, Edit, Comment and Joins for ``page``.
+
+    As Browse (``web.pages.browse_state.page_has_reading_view``): a page without an automatic transcription gets
+    them too, its automatic text taken as empty, so an FGP or PGP edition of the page shows with the chooser
+    (owner, 2026-10-27); a synthetic catalogue-only record does not. ``current_text`` is the result's own text
+    when the page could not be fetched (``page`` is None), as before.
+    """
+    return bool(sys_id) and (bool(current_text) or page_has_reading_view(page))
 
 
 # ---------------------------------------------------------------------------
@@ -1554,6 +1566,9 @@ def open_advanced_dialog(search_state, refs, index, result):
         current_text = page.text if page else full_text
         current_p_num = page.p_num if page else adv_state.current_p_num
         total_pages = page.total_pages if page else 1
+        # The version chooser, Edit, Comment and Joins -- also on a page without an
+        # automatic transcription, whose text is then empty (as Browse, 2026-10-27).
+        reading_view = _quick_view_has_reading_view(sys_id, page, current_text)
 
         # Fetch PGP transcription data for Advanced View
         pgp_transcription = None
@@ -1666,6 +1681,12 @@ def open_advanced_dialog(search_state, refs, index, result):
             library_name = get_library_display(library_code, short=False, lang=get_language())
         display_shelfmark = f"{library_name}, {shelfmark}" if library_name else shelfmark
 
+        # The result's snippet stands in for a missing text only on the result's own page
+        # (or when no page was fetched): on another page of the manuscript it is the hit
+        # page's text, not this one's -- there Browse says "No text available".
+        _on_result_page = page is None or str(page.p_num) == str(page_num)
+        snippet_text = snippet.replace('*', '') if (snippet and _on_result_page) else ''
+
         # Use PGP transcription content if available, otherwise fall back to original.
         # PGP-first; then FGP only if it clears the SEED-030 coverage bar (a partial
         # /selected FGP excerpt must not default over the V0.8/HTR — same policy as
@@ -1686,11 +1707,11 @@ def open_advanced_dialog(search_state, refs, index, result):
                 if _dec['source'].get('is_fgp'):
                     display_text = _fgp_text_for_display(display_text)
             else:
-                display_text = current_text or (snippet.replace('*', '') if snippet else '')
+                display_text = current_text or snippet_text
         elif pgp_transcription and pgp_transcription.get('content'):
             display_text = pgp_transcription['content']
         else:
-            display_text = current_text or (snippet.replace('*', '') if snippet else '')
+            display_text = current_text or snippet_text
 
         # Highlight terms come from the snippet's *...* match markers.
         if snippet and '*' in snippet and display_text:
@@ -2100,11 +2121,13 @@ def open_advanced_dialog(search_state, refs, index, result):
                                     with ui.element('div').classes('p-6'):
                                         ui.html(html_str, sanitize=False)
                                 else:
-                                    ui.html('', sanitize=False)
+                                    # a page with no automatic text and no edition (or that text chosen)
+                                    ui.label(tr('No text available')).classes('p-6').style('color: var(--text-muted);')
                         text_content_container.update()
 
-                    # Page Text Section with inline editing
-                    if display_text or adv_state.edit_mode:
+                    # Page Text Section with inline editing. Built on a page with a reading view
+                    # even when nothing is shown yet: the chooser's default renders into it.
+                    if display_text or adv_state.edit_mode or reading_view:
                         with ui.card().classes('w-full').style(f'border-radius: 16px; {panel_border}'):
 
                             if adv_state.edit_mode:
@@ -2121,8 +2144,8 @@ def open_advanced_dialog(search_state, refs, index, result):
 
                                     with ui.row().classes('gap-2'):
                                         ui.button(tr('Cancel'), icon='close', on_click=lambda: cancel_edit(result)).props('flat dense color=grey')
-                                        ui.button(tr('Save'), icon='save', on_click=lambda: save_draft(sys_id, shelfmark, current_p_num, current_text)).props('flat dense color=primary')
-                                        ui.button(tr('Submit'), on_click=lambda: submit_correction(sys_id, shelfmark, current_p_num, current_text, result)).props('unelevated dense color=green')
+                                        ui.button(tr('Save'), icon='save', on_click=lambda: save_draft(sys_id, shelfmark, current_p_num, current_text or '')).props('flat dense color=primary')
+                                        ui.button(tr('Submit'), on_click=lambda: submit_correction(sys_id, shelfmark, current_p_num, current_text or '', result)).props('unelevated dense color=green')
 
                                 # Editable textarea
                                 textarea = ui.textarea(value=adv_state.edit_text).classes('w-full').props(
@@ -2194,8 +2217,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                                         # Copy the version on screen: handle_version_change updates
                                         # current_display_text['value'] (raw text, never the 'html' key).
                                         ui.button(icon='content_copy', on_click=lambda: copy_result_text(current_display_text.get('value') or '')).props(f'flat round size=sm aria-label="{tr("Copy Text")}"').tooltip(tr('Copy Text'))
-                                        if sys_id and current_text:
-                                            ui.button(icon='edit', on_click=lambda: toggle_edit_mode(current_text)).props(f'flat round size=sm aria-label="{tr("Edit")}"').tooltip(tr('Edit'))
+                                        # Edit starts from the automatic text -- empty on a page without
+                                        # one -- and is saved as the reader's version, as in Browse (GS-277).
+                                        if reading_view:
+                                            ui.button(icon='edit', on_click=lambda: toggle_edit_mode(current_text or '')).props(f'flat round size=sm aria-label="{tr("Edit")}"').tooltip(tr('Edit'))
 
                                 # Text content - create container (same scope as outer text_content_container)
                                 text_content_container = ui.element('div').classes('w-full')
@@ -2204,7 +2229,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 render_text_section(text_html)
 
                     # Community Features Row (compact) - only in view mode
-                    if sys_id and current_text and not adv_state.edit_mode:
+                    if reading_view and not adv_state.edit_mode:
                         with ui.row().classes('gap-2 flex-wrap items-center'):
                             from web.components import (
                                 create_version_selector,
@@ -2237,7 +2262,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                             create_version_selector(
                                 document_id=sys_id,
                                 page_number=current_p_num,
-                                original_text=current_text,
+                                original_text=current_text or '',
                                 on_version_change=handle_version_change,
                                 pgp_transcription=pgp_transcription,
                                 all_sources=all_sources,
