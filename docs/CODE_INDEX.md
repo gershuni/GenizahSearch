@@ -1334,6 +1334,14 @@ Public MCP server at `POST /mcp` (docs/plans/MCP_SERVER_PLAN.md; contract in doc
 The NLI image proxy's two disk stores (2026-10-21; docs/plans/NLI_THUMBNAIL_PREFETCH_PLAN.md). Locations from the environment on every call; every error is a miss.
 - **Function** `fl_id_store_get` / `fl_id_store_put` — a manuscript's NLI image ids in `nli_fl_ids.db`, kept `NLI_DISK_CACHE_TTL` (30 days); `web/api.py::_save_nli_persistent_cache` is the one writer
 - **Function** `fl_id_store_prepare` — at startup: drop expired rows (the old `nli_fl_ids_cache.json` is not read)
+- Readers outside the image routes: `web/api.py::nli_fl_ids` (the routes' cached FL-id list, [] for the MARC record's partial one), for `web/page_count.py` (below)
+
+## web/page_count.py
+
+The page count of a manuscript the index holds no pages of (no automatic transcription; its page has `total_pages` 0). Browse Phase B and Quick View, 2026-10-29.
+- **Function** `manuscript_image_count` — BLOCKING: the NLI crossref folio count, else `web/api.py::nli_fl_ids`, of the volume (manifest suffix) the page's images come from (a later volume: its own manifest only); 0 when unknown or synthetic
+- **Function** `apply_page_count` — give a page with no count its count, its page number clamped into it
+- **Function** `count_pages` — async: the count within `PAGE_COUNT_WAIT_S` (0.5 s), else None now and `on_late(count)` when it comes, so no view waits on the NLI manifest
 - **Function** `thumb_path` — where a thumbnail lives, or None (corpus sys_ids only, widths in `NLI_THUMB_CACHE_WIDTHS`); the prefetch script is to use it too
 - **Function** `thumb_get` / `thumb_put` — read / keep a JPEG (atomic write; none past `NLI_THUMB_CACHE_MAX_MB` or below `NLI_THUMB_CACHE_MIN_FREE_MB` free)
 - **Function** `stats` — counters for `/_internal/memstat` (`nli_image_store`)
@@ -1939,12 +1947,14 @@ Variant and Lab preferences of one website visitor, kept in that visitor's stora
 - **Function** `render_results` (Line 115)
 - **Function** `render_preview_results` — the rows found so far, shown under "Still searching" while a search runs (no export/filter/pagination; the result re-renders)
 - **Function** `create_result_card` (Line 345)
+- **Function** `_quick_view_has_reading_view` — whether Quick View builds its version chooser, Edit, Comment and Joins: Browse's `page_has_reading_view`, so also on a page without an automatic transcription (2026-10-29)
 - **Function** `open_advanced_dialog` (Line 752) — Open an enhanced Advanced View dialog with in-place navigation and IIIF image viewer.
 
 ## web/pages/browse_state.py
 
 - **Class** `BrowseState` (Line 23) — Holds the state for the browse page.
     - Method `__init__` (Line 26)
+- **Function** `page_has_reading_view` — whether the reading view offers its versions, Edit, Comment, Notes and Joins: also on a page without an automatic transcription, not on a synthetic catalogue-only record (2026-10-27)
 - **Function** `restore_browse_snapshot` (Line 95) — Hydrate browse snapshot fields; return raw (position, reading_desk) dicts.
 - **Function** `persist_browse_snapshot` (Line 154) — Serialize browse position and reading desk state to app.storage.user.
 - **Function** `clear_browse_snapshot` (Line 196) — Wipe browse snapshot keys.

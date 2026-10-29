@@ -66,3 +66,20 @@ Not measured yet: how many pages have an edition and no automatic text (step 1 m
 Verified on a local server with the rebuilt FGP candidate: T-S NS 243.146 page 1 opens on its FGP edition (row 22952)
 with the version menu, Edit and Comment, and the citation credits the FGP edition; a page with an automatic text
 (MS heb. e.77/6) is unchanged. Not checked live: Edit's save on such a page (needs a signed-in account).
+
+## Quick View (2026-10-29)
+
+Quick View (`web/pages/search_results.py::open_advanced_dialog`) had the same gate: its version chooser, Edit, Comment
+and Joins were built only `if sys_id and current_text`. A reader reaches such a page there by paging from a hit on
+another page of the manuscript, or from a shelfmark or title search for a manuscript with no automatic text at all
+(the result opens on page 1). Unlike Browse, Quick View already showed the edition as the page's text -- it runs
+`choose_default_source` itself -- but unlabelled, with no way to switch versions and none of those buttons. It now
+takes Browse's decision (`_quick_view_has_reading_view` wraps `page_has_reading_view`; with no page fetched it keeps
+the result's own text, as before), builds its text card on such a page so the chooser's default renders into it, and
+says "No text available" when there is nothing -- the result's snippet now stands in for a missing text only on the
+result's own page; paging to another page used to show the hit page's snippet there. Edit starts from the empty
+automatic text, as in Browse (decision 2).
+Quick View has no citation of its own: the "How to cite" chip (z-index 2000) sits beneath dialogs (6000), so
+there is no Quick View citation to credit the edition. Tests:
+`tests/render_smoke/test_quick_view_without_automatic_text_render_smoke.py` (both reach paths, and a catalogue-only
+record) and `tests/test_browse_page_without_automatic_text.py`.

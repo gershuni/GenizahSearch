@@ -423,20 +423,36 @@ def test_fgp_decode_guard_can_fail():
 
 def test_display_text_fallback_keeps_page_text_when_snippet_is_empty():
     """Title/shelfmark results have an empty snippet. Quick View must still show
-    the page text. Every ``display_text = <expr of current_text/snippet>``
-    assignment in render_content is evaluated directly from the source."""
+    the page text. The snippet stands in for a missing text only on the result's
+    own page (``_on_result_page``): on another page of the manuscript it is the hit
+    page's text (2026-10-29). The ``snippet_text = <expr of snippet>`` assignment and
+    every ``display_text = <expr of current_text/snippet_text>`` assignment in
+    render_content are evaluated directly from the source."""
     render_content = _func(_func(_tree(), "open_advanced_dialog"), "render_content")
-    exprs = []
-    for n in ast.walk(render_content):
-        if isinstance(n, ast.Assign) and any(
-                isinstance(t, ast.Name) and t.id == "display_text" for t in n.targets):
-            names = {x.id for x in ast.walk(n.value) if isinstance(x, ast.Name)}
-            if names and names <= {"current_text", "snippet"}:
-                exprs.append(n)
+
+    def assignments(target, allowed):
+        found = []
+        for n in ast.walk(render_content):
+            if isinstance(n, ast.Assign) and any(
+                    isinstance(t, ast.Name) and t.id == target for t in n.targets):
+                names = {x.id for x in ast.walk(n.value) if isinstance(x, ast.Name)}
+                if names and names <= allowed:
+                    found.append(n)
+        return found
+
+    [snippet_assign] = assignments("snippet_text", {"snippet", "_on_result_page"})
+    snippet_code = compile(ast.Expression(snippet_assign.value), "<snippet_text>", "eval")
+    exprs = assignments("display_text", {"current_text", "snippet_text"})
     assert len(exprs) >= 2, "expected the fallback assignments in render_content"
+
+    def shown(code, current_text, snippet, on_result_page=True):
+        snippet_text = eval(snippet_code, {}, {"snippet": snippet, "_on_result_page": on_result_page})
+        return eval(code, {}, {"current_text": current_text, "snippet_text": snippet_text})
+
     for n in exprs:
         code = compile(ast.Expression(n.value), "<display_text>", "eval")
-        assert eval(code, {}, {"current_text": "page text", "snippet": ""}) == "page text", n.lineno
-        assert eval(code, {}, {"current_text": "page text", "snippet": None}) == "page text", n.lineno
-        assert eval(code, {}, {"current_text": "", "snippet": "a *b* c"}) == "a b c", n.lineno
-        assert eval(code, {}, {"current_text": None, "snippet": ""}) == "", n.lineno
+        assert shown(code, "page text", "") == "page text", n.lineno
+        assert shown(code, "page text", None) == "page text", n.lineno
+        assert shown(code, "", "a *b* c") == "a b c", n.lineno
+        assert shown(code, None, "") == "", n.lineno
+        assert shown(code, "", "a *b* c", on_result_page=False) == "", n.lineno
