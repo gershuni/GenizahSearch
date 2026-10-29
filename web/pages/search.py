@@ -5393,12 +5393,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # it (its snapshot, the history entry); another page following it only shows it.
         search_run.owner = search_state
 
-        # The phone fold asks the browser for its width, so it is the first
-        # await of this search -- and it must come AFTER is_running is set:
-        # before it, a double-click or a repeated Enter suspended two calls
-        # at the same await with the guard still open, and both searches ran
-        # over one result state (Codex on #434). Its failure is swallowed.
-        await _collapse_panel_on_phone()
+        # The phone fold asks the browser for its width BESIDE the search, never
+        # before it: awaited here, it first waited for the page to connect, so a
+        # search opened from its address started only once the browser had
+        # loaded the page (+~2 s on the server, ux_timing 2026-10-24..28) and
+        # every other search waited one round trip. It still starts AFTER
+        # is_running is set (Codex on #434). Its failure is swallowed.
+        asyncio.ensure_future(_after_delay(0, _collapse_panel_on_phone))
 
         # ux_timing (web/ux_timing.py): report this search's first visible rows, once.
         _ux = {'sent': False, 'nav': _ux_url_start['nav'], 'generation': search_state.search_generation}

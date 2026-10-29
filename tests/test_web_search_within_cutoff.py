@@ -194,10 +194,15 @@ async def _wait_for(predicate, timeout=15.0, user=None):
 
 
 def _search_within_button(user):
+    # Only a shown one, as a person sees it: the page hides it while a search runs
+    # and turns a click then away. A hidden one was found mid-search ("1+ Results"
+    # is also the count's in-progress text) once the phone fold no longer held
+    # every search back for a second here (2026-10-28).
     from nicegui import ui
     with user._client:
         return next((e for e in user._client.elements.values()
-                     if isinstance(e, ui.button) and str(e.text).startswith('Search within')), None)
+                     if isinstance(e, ui.button) and e.visible
+                     and str(e.text).startswith('Search within')), None)
 
 
 async def _click_search_within(user):
