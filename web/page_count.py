@@ -23,16 +23,21 @@ logger = logging.getLogger(__name__)
 PAGE_COUNT_WAIT_S = 0.5
 
 
-def manuscript_image_count(sys_id: str, folio_images: Optional[List[Dict]] = None) -> int:
+def manuscript_image_count(sys_id: str, folio_images: Optional[List[Dict]] = None, suffix: int = 1) -> int:
     """How many pages (images) a manuscript the index holds none of has.
 
     The NLI crossref folio list (local; ``folio_images`` when the caller has it), else the FL-id list the image
-    route pages through (``web.api.nli_fl_ids``, which may fetch the manifest). 0 when neither is known, or for a
-    synthetic record (no NLI images); callers then show no total. BLOCKING: call it off the event loop.
+    route pages through (``web.api.nli_fl_ids``, which may fetch the manifest). ``suffix`` is the IIIF manifest of
+    the volume (IE) the page's images come from: a later volume is counted from its own manifest, since the
+    crossref lists one set of folios (Codex on #454). 0 when nothing is known, or for a synthetic record (no NLI
+    images); callers then show no total. BLOCKING: call it off the event loop.
     """
     if not sys_id or is_synthetic_sys_id(sys_id):
         return 0
-    if folio_images is None:
+    suffix = suffix or 1
+    if suffix != 1:
+        folio_images = []
+    elif folio_images is None:
         try:
             from shared.nli_crossref_service import get_nli_crossref_service
             crossref = get_nli_crossref_service(thread_safe=True)
@@ -44,7 +49,7 @@ def manuscript_image_count(sys_id: str, folio_images: Optional[List[Dict]] = Non
         return len(folio_images)
     try:
         from web.api import nli_fl_ids
-        return len(nli_fl_ids(sys_id))
+        return len(nli_fl_ids(sys_id, suffix))
     except Exception as e:
         logger.debug("NLI image list unavailable for %s: %s", sys_id, e)
         return 0
@@ -61,14 +66,15 @@ def apply_page_count(page, count: int) -> bool:
     return True
 
 
-async def count_pages(sys_id: str, folio_images: Optional[List[Dict]] = None, *,
+async def count_pages(sys_id: str, folio_images: Optional[List[Dict]] = None, *, suffix: int = 1,
                       on_late: Callable[[int], None]) -> Optional[int]:
-    """The count, if it comes within :data:`PAGE_COUNT_WAIT_S` (0 when it is unknown).
+    """The count of the volume ``suffix`` (as :func:`manuscript_image_count`), if it comes within
+    :data:`PAGE_COUNT_WAIT_S` (0 when it is unknown).
 
     Otherwise None at once, so the caller renders the page without a total, and ``on_late(count)`` is called when
     the count comes; the callback checks that the page it is for is still the one shown.
     """
-    task = asyncio.ensure_future(run.io_bound(manuscript_image_count, sys_id, folio_images))
+    task = asyncio.ensure_future(run.io_bound(manuscript_image_count, sys_id, folio_images, suffix))
     try:
         return await asyncio.wait_for(asyncio.shield(task), PAGE_COUNT_WAIT_S) or 0
     except asyncio.TimeoutError:

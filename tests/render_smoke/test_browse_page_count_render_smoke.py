@@ -27,33 +27,36 @@ from web.services import BrowsePage
 SID = '990051614250205171'  # T-S NS 243.145
 
 
-def _page(p_num):
+def _page(p_num, volume_suffix=1):
     return BrowsePage(uid='', p_num=p_num, text='', full_header='', total_pages=0, current_idx=p_num,
-                      sys_id=SID, shelfmark='T-S NS 243.145', library_code='CUL')
+                      sys_id=SID, shelfmark='T-S NS 243.145', library_code='CUL', volume_suffix=volume_suffix)
 
 
-def _service():
+def _service(volume_suffix=1):
     """The engine's metadata-only page: the requested page, moved by direction, with no count."""
     svc = MagicMock()
     svc.is_ready.return_value = True
     svc.get_browse_page.side_effect = (
-        lambda sys_id, p_num=None, direction=0, volume_ie=None, **_kw: _page(max(1, (p_num or 1) + direction)))
+        lambda sys_id, p_num=None, direction=0, volume_ie=None, **_kw:
+        _page(max(1, (p_num or 1) + direction), volume_suffix))
     svc.get_browse_page_by_fl.return_value = None
     return svc
 
 
-def _run(counts, driver, seconds=0.0):
+def _run(counts, driver, seconds=0.0, volume_suffix=1, asked=None):
     """``counts``: what manuscript_image_count answers, call by call (the last answer repeats), each after
-    ``seconds``."""
+    ``seconds``; ``asked`` collects the volume (suffix) each call was for."""
     answers = list(counts)
 
-    def count(sys_id, folio_images=None):
+    def count(sys_id, folio_images=None, suffix=1):
+        if asked is not None:
+            asked.append(suffix)
         time.sleep(seconds)
         return answers.pop(0) if len(answers) > 1 else answers[0]
 
     crossref = MagicMock()
     crossref.is_available.return_value = False
-    with patch.object(browse, 'get_service', return_value=_service()), \
+    with patch.object(browse, 'get_service', return_value=_service(volume_suffix)), \
             patch('shared.nli_crossref_service.get_nli_crossref_service', return_value=crossref), \
             patch('web.page_count.manuscript_image_count', side_effect=count), \
             patch('web.page_count.PAGE_COUNT_WAIT_S', 0.05), \
@@ -119,3 +122,16 @@ def test_a_slow_count_does_not_hold_up_phase_b():
         assert not _next(user).props.get('disabled')
 
     _run([4], driver, seconds=3.0)
+
+
+def test_the_count_is_of_the_volume_the_images_come_from():
+    # Codex on #454: Browse shows a page's images from its volume's manifest (page.volume_suffix).
+    asked = []
+
+    async def driver(user):
+        await user.open(f'/browse?sys_id={SID}')
+        await _wait_until(lambda: '/ 4' in _labels(user))
+        assert '/ 4' in _labels(user)
+
+    _run([4], driver, volume_suffix=2, asked=asked)
+    assert asked and set(asked) == {2}, asked

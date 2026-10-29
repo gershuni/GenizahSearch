@@ -1339,7 +1339,7 @@ The NLI image proxy's two disk stores (2026-10-21; docs/plans/NLI_THUMBNAIL_PREF
 ## web/page_count.py
 
 The page count of a manuscript the index holds no pages of (no automatic transcription; its page has `total_pages` 0). Browse Phase B and Quick View, 2026-10-29.
-- **Function** `manuscript_image_count` — BLOCKING: the NLI crossref folio count, else `web/api.py::nli_fl_ids`; 0 when unknown or synthetic
+- **Function** `manuscript_image_count` — BLOCKING: the NLI crossref folio count, else `web/api.py::nli_fl_ids`, of the volume (manifest suffix) the page's images come from (a later volume: its own manifest only); 0 when unknown or synthetic
 - **Function** `apply_page_count` — give a page with no count its count, its page number clamped into it
 - **Function** `count_pages` — async: the count within `PAGE_COUNT_WAIT_S` (0.5 s), else None now and `on_late(count)` when it comes, so no view waits on the NLI manifest
 - **Function** `thumb_path` — where a thumbnail lives, or None (corpus sys_ids only, widths in `NLI_THUMB_CACHE_WIDTHS`); the prefetch script is to use it too

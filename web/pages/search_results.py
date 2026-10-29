@@ -33,7 +33,7 @@ from web.page_count import apply_page_count, count_pages
 from shared.synthetic_sys_id import is_synthetic_sys_id
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 from shared.refinement import compute_all_terms_filter, enrich_snippet_with_chain_terms
-from genizah_core import SearchEngine, get_library_display
+from genizah_core import SearchEngine, get_library_display, resolve_volume_suffix
 from web.document_service import (
     get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page,
 )
@@ -1306,7 +1306,9 @@ def open_advanced_dialog(search_state, refs, index, result):
                 adv_state.current_p_num, adv_state.total_pages = page.p_num, page.total_pages
                 render_content(adv_state.results[adv_state.current_result_idx])
 
-        apply_page_count(page, await count_pages(page.sys_id, on_late=late))
+        # the volume whose images render_content shows (its _vol_suffix, from the same IE)
+        suffix = resolve_volume_suffix(page.sys_id, adv_state.volume_ie)
+        apply_page_count(page, await count_pages(page.sys_id, suffix=suffix, on_late=late))
 
     def load_result(idx: int):
         """Load a result into the dialog, updating UI in-place."""

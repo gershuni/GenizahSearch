@@ -89,6 +89,16 @@ def test_the_callers_folio_list_is_used_as_given(registered):
     assert crossref.asked == []
 
 
+def test_a_later_volume_is_counted_from_its_own_manifest(registered):
+    # Codex on #454: the images of volume 2 come from manifest suffix 2; the crossref lists one set of folios.
+    registered['ids'][SID] = ['1', '2', '3', '4']
+    crossref = _Crossref([{}, {}, {}])
+    with patch('shared.nli_crossref_service.get_nli_crossref_service', return_value=crossref):
+        manuscript_image_count(SID, suffix=2)
+        manuscript_image_count(SID, folio_images=[{}, {}], suffix=2)
+    assert registered['fetch'] == [(SID, 2), (SID, 2)] and crossref.asked == []
+
+
 def test_nothing_known_is_zero(registered):
     with patch('shared.nli_crossref_service.get_nli_crossref_service', return_value=_Crossref([], available=False)):
         assert manuscript_image_count(SID) == 0
@@ -114,9 +124,11 @@ def test_an_unknown_count_or_a_page_with_one_changes_nothing(count, total):
     assert page.total_pages == total
 
 
-def _run_count(monkeypatch, seconds, count):
+def _run_count(monkeypatch, seconds, count, asked=None):
     """count_pages over a count that takes ``seconds``; returns (answer, late calls after the count is done)."""
     async def io_bound(fn, *args):
+        if asked is not None:
+            asked.append(args)
         await asyncio.sleep(seconds)
         return count
 
@@ -126,7 +138,7 @@ def _run_count(monkeypatch, seconds, count):
     late = []
 
     async def go():
-        answer = await count_pages(SID, on_late=late.append)
+        answer = await count_pages(SID, suffix=2, on_late=late.append)
         await asyncio.sleep(seconds + 0.1)
         return answer
 
@@ -134,7 +146,9 @@ def _run_count(monkeypatch, seconds, count):
 
 
 def test_a_quick_count_is_the_answer(monkeypatch):
-    assert _run_count(monkeypatch, 0, 4) == (4, [])
+    asked = []
+    assert _run_count(monkeypatch, 0, 4, asked) == (4, [])
+    assert asked == [(SID, None, 2)]  # the volume reaches the count
 
 
 def test_a_slow_count_does_not_hold_the_page_and_comes_later(monkeypatch):

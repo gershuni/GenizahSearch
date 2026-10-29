@@ -693,7 +693,8 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                         refs.update_content()
 
                 if apply_page_count(pg, await count_pages(
-                        pg.sys_id, browse_enrich.get('folio_images'), on_late=_late_page_count)):
+                        pg.sys_id, browse_enrich.get('folio_images'), suffix=pg.volume_suffix or 1,
+                        on_late=_late_page_count)):
                     state.page_input_value = pg.p_num
             # Phase 86: synthetic rows (no NLI crossref fl_id) have empty
             # folio_images but cambridge_images populated via the bridge.

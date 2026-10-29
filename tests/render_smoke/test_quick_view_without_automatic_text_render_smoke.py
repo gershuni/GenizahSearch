@@ -112,7 +112,7 @@ def _quick_view_page(case: str = 'hit'):
         search_results.open_advanced_dialog(search_state, SimpleNamespace(), None, result)
 
 
-def _image_count(sys_id, folio_images=None):
+def _image_count(sys_id, folio_images=None, suffix=1):
     if sys_id == SLOW_SID:
         time.sleep(3.0)
         return 4
