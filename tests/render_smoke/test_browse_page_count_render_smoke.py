@@ -3,15 +3,17 @@
 
 The index holds no pages of such a manuscript, so its page comes with ``total_pages`` 0
 (``SearchEngine._get_metadata_only_browse_page``): Browse showed "Page 1 / 0" and Next was disabled, so its other
-images could not be reached (T-S NS 243.145 has 4). Phase B now counts its images
-(``web.services.manuscript_image_count``, unit-tested in tests/test_manuscript_image_count.py), Next/Previous keep
-that count while Phase B reruns, and a count that cannot be known is not shown at all.
+images could not be reached (T-S NS 243.145 has 4). Phase B now counts its images (``web/page_count.py``,
+unit-tested in tests/test_manuscript_image_count.py), Next/Previous keep that count while Phase B reruns, a count
+that needs the NLI manifest arrives after the page renders (Codex on #454), and a count that cannot be known is not
+shown at all.
 
 Drives the real ``/browse`` over a stubbed browse service (harness: test_browse_button_icons_render_smoke.py).
 """
 from __future__ import annotations
 
 import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from nicegui import ui
@@ -40,18 +42,21 @@ def _service():
     return svc
 
 
-def _run(counts, driver):
-    """``counts``: what manuscript_image_count answers, call by call (the last answer repeats)."""
+def _run(counts, driver, seconds=0.0):
+    """``counts``: what manuscript_image_count answers, call by call (the last answer repeats), each after
+    ``seconds``."""
     answers = list(counts)
 
     def count(sys_id, folio_images=None):
+        time.sleep(seconds)
         return answers.pop(0) if len(answers) > 1 else answers[0]
 
     crossref = MagicMock()
     crossref.is_available.return_value = False
     with patch.object(browse, 'get_service', return_value=_service()), \
             patch('shared.nli_crossref_service.get_nli_crossref_service', return_value=crossref), \
-            patch('web.services.manuscript_image_count', side_effect=count), \
+            patch('web.page_count.manuscript_image_count', side_effect=count), \
+            patch('web.page_count.PAGE_COUNT_WAIT_S', 0.05), \
             patch.object(browse, 'load_connected_fragments_into', AsyncMock()), \
             patch.object(browse.GlobalAuthState, 'is_logged_in', return_value=False):
         _run_home_smoke(driver, lang='en')
@@ -96,3 +101,21 @@ def test_a_count_that_cannot_be_known_is_not_shown_as_zero():
         assert _next(user).props.get('disabled')
 
     _run([0], driver)
+
+
+def _version_chooser(user):
+    return [b for b in _all_elements(user) if isinstance(b, ui.button) and b.props.get('icon') == 'history']
+
+
+def test_a_slow_count_does_not_hold_up_phase_b():
+    # Codex on #454: a count that needs the NLI manifest must not hold up Phase B (the edition and its chooser).
+    async def driver(user):
+        await user.open(f'/browse?sys_id={SID}')
+        await _wait_until(lambda: _version_chooser(user))
+        assert _version_chooser(user), 'Phase B did not finish'
+        assert '/ 4' not in _labels(user)  # Phase B finished while the count was still on its way
+        await _wait_until(lambda: '/ 4' in _labels(user))
+        assert '/ 4' in _labels(user), sorted(_labels(user))
+        assert not _next(user).props.get('disabled')
+
+    _run([4], driver, seconds=3.0)

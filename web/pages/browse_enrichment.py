@@ -30,6 +30,7 @@ from shared.fgp_service import (
     fgp_image_number_for_displayed_page, fgp_needs_full_htr,
 )
 from web.pages.browse_state import BrowseState, _crossref_cache, page_has_reading_view
+from web.page_count import apply_page_count, count_pages
 from web.safe_storage import safe_user_get, safe_user_set
 from shared.synthetic_sys_id import is_synthetic_sys_id
 
@@ -472,12 +473,6 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
             except Exception as e:
                 logger.error("Browse enrichment crossref error: %s", e)
 
-            # A manuscript the index holds no pages of (no automatic transcription at all) came with
-            # total_pages 0: "Page 1 / 0", and no Next. Its pages are its images.
-            if not _total_pages and _sys_id and not is_synthetic_sys_id(_sys_id):
-                from web.services import manuscript_image_count
-                result['page_count'] = manuscript_image_count(_sys_id, result.get('folio_images'))
-
             # External images from nli_cache (populated by enrich_metadata).
             # Phase 117 Plan 03: delegated to the shared resolve_external_images helper
             # (web/components/image_resolution.py) — one source of truth for D-10.
@@ -687,12 +682,19 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                     pg.folio_label = browse_enrich['folio_images'][0].get('folio_label', '')
                     pg.total_pages = len(browse_enrich['folio_images'])
                     pg.current_idx = 1
-            if not pg.total_pages and browse_enrich.get('page_count'):
-                pg.total_pages = browse_enrich['page_count']
-                clamped = min(max(pg.p_num or 1, 1), pg.total_pages)
-                pg.p_num = clamped
-                pg.current_idx = clamped
-                state.page_input_value = clamped
+            # A manuscript the index holds no pages of (no automatic transcription at all) came with
+            # total_pages 0: "Page 1 / 0", and no Next. Its pages are its images (web/page_count.py);
+            # a count that needs the NLI manifest arrives after this render and renders the page again.
+            if not pg.total_pages and pg.sys_id and not is_synthetic_sys_id(pg.sys_id):
+                def _late_page_count(count, pg=pg):
+                    if (state.current_page is pg and generation == refs.load_generation['value']
+                            and apply_page_count(pg, count)):
+                        state.page_input_value = pg.p_num
+                        refs.update_content()
+
+                if apply_page_count(pg, await count_pages(
+                        pg.sys_id, browse_enrich.get('folio_images'), on_late=_late_page_count)):
+                    state.page_input_value = pg.p_num
             # Phase 86: synthetic rows (no NLI crossref fl_id) have empty
             # folio_images but cambridge_images populated via the bridge.
             # Derive total_pages from cambridge_images so pagination works,

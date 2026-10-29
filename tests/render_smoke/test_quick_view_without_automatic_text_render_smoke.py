@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -41,6 +42,7 @@ NO_EDITION_SID = '990051614270205171'     # T-S NS 243.147 here: page 1 has no a
 NO_TEXT_SID = '990051614250205171'        # T-S NS 243.145: 4 NLI images
 UNCOUNTED_SID = '990051614280205171'      # its images cannot be counted (NLI unreadable, no crossref folios)
 IMAGE_COUNTS = {NO_TEXT_SID: 4}
+SLOW_SID = '990051614290205171'           # 4 images too, but counting them takes the NLI manifest (slow)
 SHELFMARK = 'T-S NS 243.146'
 FGP_TEXT = 'אֵל מְשוך בְטלה / לְנִפְקְדו בַטְלאִ ים ' * 20
 HTR_TEXT = 'שורה ראשונה של הדף השני\nשורה שנייה של הדף השני'
@@ -71,7 +73,7 @@ PAGES = {
 
 class _Service:
     def get_browse_page(self, sys_id, p_num=None, direction=0, volume_ie=None, **_kw):
-        if sys_id in (NO_TEXT_SID, UNCOUNTED_SID):
+        if sys_id in (NO_TEXT_SID, UNCOUNTED_SID, SLOW_SID):
             # SearchEngine._get_metadata_only_browse_page: the requested page, moved by direction, no count
             return _page(sys_id, max(1, (p_num or 1) + direction), '', total_pages=0)
         pages = PAGES.get(sys_id) or []
@@ -95,6 +97,7 @@ RESULTS = {
     'hit': _result(SID, '2', snippet='שורה *שנייה* של הדף השני', full_text=HTR_TEXT),
     'shelfmark': _result(NO_TEXT_SID, ''),
     'uncounted': _result(UNCOUNTED_SID, ''),
+    'slow': _result(SLOW_SID, ''),
     'catalogue': _result(SYNTHETIC_SID, ''),
     'no-edition': _result(NO_EDITION_SID, '2', snippet='שורה *שנייה* של הדף השני', full_text=HTR_TEXT),
 }
@@ -107,6 +110,13 @@ def _quick_view_page(case: str = 'hit'):
                                    translation_data={})
     with using_language('en'):
         search_results.open_advanced_dialog(search_state, SimpleNamespace(), None, result)
+
+
+def _image_count(sys_id, folio_images=None):
+    if sys_id == SLOW_SID:
+        time.sleep(3.0)
+        return 4
+    return IMAGE_COUNTS.get(sys_id, 0)
 
 
 class _Unavailable:
@@ -128,13 +138,14 @@ async def _user():
                 ('get_all_sources_for_fragment', lambda sys_id: []),
                 ('get_fgp_sources_for_fragment',
                  lambda sys_id: [dict(EDITION)] if sys_id in (SID, NO_TEXT_SID) else []),
-                ('manuscript_image_count', lambda sys_id, folio_images=None: IMAGE_COUNTS.get(sys_id, 0)),
                 ('get_document_for_fragment', lambda sys_id, p_num=None: None),
                 # The displayed folio of each page; the edition is on 1r.
                 ('displayed_folio_label', lambda sys_id, p, total=0: {1: '1r', 2: '1v'}.get(p, '')),
                 ('displayed_fgp_image_number', lambda sys_id, p, total=0: ''),
             ]:
                 stack.enter_context(patch.object(search_results, target, value))
+            stack.enter_context(patch('web.page_count.manuscript_image_count', _image_count))
+            stack.enter_context(patch('web.page_count.PAGE_COUNT_WAIT_S', 0.05))
             stack.enter_context(patch('shared.fjms_service.get_fjms_service', return_value=_Unavailable()))
             stack.enter_context(patch('shared.nli_crossref_service.get_nli_crossref_service',
                                       return_value=_Unavailable()))
@@ -297,5 +308,19 @@ def test_a_page_with_no_text_and_no_edition_says_so_not_the_hits_snippet():
         assert 'שנייה' not in _html(user)
         assert _version_label(user) == 'V0.8'
         _assert_reading_view(user)
+
+    _run(driver)
+
+
+def test_a_slow_count_does_not_hold_the_dialog_up():
+    # Codex on #454: a count that needs the NLI manifest must not leave the dialog blank until it comes.
+    async def driver(user):
+        await user.open(f'{PAGE}?case=slow')
+        await _wait_until(lambda: 'Page 1' in _labels(user), timeout=2.5)
+        assert 'Page 1' in _labels(user), 'the page did not render before its count came'
+        assert 'Page 1/4' not in _labels(user)
+        await _wait_until(lambda: 'Page 1/4' in _labels(user))
+        assert 'Page 1/4' in _labels(user), sorted(_labels(user))
+        assert _button(user, 'Next Page')
 
     _run(driver)

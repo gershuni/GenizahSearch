@@ -28,8 +28,8 @@ from web.services import (
     get_service,
     get_oxford_direct_image_url,
     is_oxford_manuscript,
-    manuscript_image_count,
 )
+from web.page_count import apply_page_count, count_pages
 from shared.synthetic_sys_id import is_synthetic_sys_id
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
 from shared.refinement import compute_all_terms_filter, enrich_snippet_with_chain_terms
@@ -1294,11 +1294,19 @@ def open_advanced_dialog(search_state, refs, index, result):
 
     async def count_pages_without_text(page):
         """A manuscript without any automatic text comes with no page count (0): "Page 1/0", and no
-        paging. Its pages are its images (``manuscript_image_count``, as in Browse)."""
-        if page is not None and not page.total_pages:
-            page.total_pages = await run.io_bound(manuscript_image_count, page.sys_id) or 0
-            if page.total_pages:
-                page.p_num = page.current_idx = min(max(page.p_num or 1, 1), page.total_pages)
+        paging. Its pages are its images (``web.page_count``, as in Browse). A count that needs the NLI
+        manifest does not hold the dialog up: the page renders without a total, and again with it."""
+        if page is None or page.total_pages:
+            return
+
+        def late(count):
+            # Still the page on screen, in a dialog still open: render it again with its count.
+            if (adv_state.current_page is page and not adv_state.content_container.is_deleted
+                    and apply_page_count(page, count)):
+                adv_state.current_p_num, adv_state.total_pages = page.p_num, page.total_pages
+                render_content(adv_state.results[adv_state.current_result_idx])
+
+        apply_page_count(page, await count_pages(page.sys_id, on_late=late))
 
     def load_result(idx: int):
         """Load a result into the dialog, updating UI in-place."""
