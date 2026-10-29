@@ -403,6 +403,44 @@ def shape_may_certify(text: str) -> bool:
                               for ch in text)
 
 
+def is_private_use(text: str) -> bool:
+    return any(0xE000 <= ord(ch) <= 0xF8FF for ch in text)
+
+
+def one_character_form(form: str | None) -> str | None:
+    """The one character a repaired copy maps a code to for a glyph read by its name: the registry's form when it is
+    one character, else the Hebrew presentation form of the pointed letter (normalised back to letter + points after
+    extraction, as a shape-certified pointed letter is); ``None`` when there is no such character."""
+    import unicodedata
+    if not form:
+        return None
+    if len(form) == 1:
+        return form
+    nfd = unicodedata.normalize("NFD", form)
+    return next((chr(cp) for cp in range(0xFB1D, 0xFB50)
+                 if unicodedata.normalize("NFD", chr(cp)) == nfd and chr(cp) != nfd), None)
+
+
+PLAIN_HEBREW = frozenset(map(chr, [*range(0x05D0, 0x05EB), *range(0x05B0, 0x05BE), 0x05BF, 0x05C1, 0x05C2]))
+# variants that are no compatibility form of the letter or point they stand beside in a reference font
+HEBREW_VARIANTS = {"ׇ": "ָ", "׆": "נ"}  # qamats qatan -> qamats, nun hafukha -> nun
+
+
+def plain_of(interps) -> str | None:
+    """Tie rule (owner, 2026-10-28): an outline whose readings in the font's typeface are one plain Hebrew letter or
+    point and otherwise only its variant forms (a compatibility form of it, a listed variant, a private-use code)
+    reads as the plain one. Two plain readings, or any other reading beside it, leave the glyph ambiguous."""
+    import unicodedata
+    plain = [x for x in interps if x in PLAIN_HEBREW]
+    if len(plain) != 1:
+        return None
+    p = plain[0]
+    others = [x for x in interps if x != p]
+    ok = all(all(0xE000 <= ord(ch) <= 0xF8FF for ch in o) or unicodedata.normalize("NFKD", o) == p
+             or HEBREW_VARIANTS.get(o) == p for o in others)
+    return p if ok and others else None
+
+
 def typefaces(hit_lists) -> frozenset:
     """The font's typeface: the reference family most of its glyphs match. Families that tie are all kept (a glyph
     then has to agree with any of them): choosing one would follow Python's string hashing, which changes from run
@@ -413,9 +451,14 @@ def typefaces(hit_lists) -> frozenset:
 
 
 def certify_font(tt, by_code: dict, codes, names: dict, ref: dict) -> dict:
-    """Step 3 for one embedded font: {code: decision}. A decision's ``text`` is set only when the glyph's outline is
+    """Step 3 for one embedded font: {code: decision}. A decision's ``text`` is set when the glyph's outline is
     certified: it equals a reference glyph in the font's own typeface (the family most of its glyphs match) and
-    supports exactly the interpretation the name gives (or, without a usable name, exactly one interpretation)."""
+    supports exactly the interpretation the name gives (or, without a usable name, exactly one interpretation, or
+    one plain Hebrew letter or point beside only its variant forms: the tie rule). Owner's ruling of 2026-10-28 (the
+    name rule): a glyph whose outline matches no reference glyph in its typeface is read by its name when the
+    registry reads the name, the reading has no private-use code and fits one character, and any reference glyph the
+    outline does match reads the same; every such shape was checked by eye (``_tmp/fgp_shape_review.html``), and
+    ``run_decisions`` withdraws the reading where the same outline is certified elsewhere as something else."""
     from scripts.fgp_glyph_registry import form_of, text_of
     hits = {}
     for code in codes:
@@ -440,10 +483,11 @@ def certify_font(tt, by_code: dict, codes, names: dict, ref: dict) -> dict:
             d["status"] = "empty"
         elif name in (".notdef",):
             d["status"] = "notdef"
-        elif not hs:
-            d["status"] = "unmatched"
         elif not in_face:
-            d["status"] = "other face"
+            d["status"] = "unmatched" if not hs else "other face"
+            one = one_character_form(form_of(name)) if name_text else None
+            if one and not is_private_use(name_text) and (not hs or name_text in {text_of(chr(cp)) for _, cp in hs}):
+                d["status"], d["text"], d["form"] = "certified by name", name_text, one
         elif name_text is not None:
             if name_text in interps:
                 d["status"], d["text"] = "certified", name_text
@@ -453,9 +497,11 @@ def certify_font(tt, by_code: dict, codes, names: dict, ref: dict) -> dict:
             d["status"], d["text"] = "certified by shape", interps[0]
         elif len(interps) == 1:
             d["status"] = "shape only, not a letter or mark"
+        elif plain_of(interps):
+            d["status"], d["text"] = "certified by plain form", plain_of(interps)
         else:
             d["status"] = "ambiguous"
-        if d["text"]:
+        if d["text"] and not d["form"]:
             # what the repaired copy maps the code to: ONE character, the reference glyph's own code point (a
             # presentation form for a pointed letter or an Arabic shape), so the extractor still sees one glyph; the
             # decoded sequence is normalised to ``text`` after extraction (normalize_presentation)
@@ -539,6 +585,18 @@ def _decide_task(args):
     return sha, rows, None
 
 
+def withdraw_contradicted_names(db: sqlite3.Connection) -> int:
+    """The name rule's last condition (owner, 2026-10-28): no reading by name where the same outline is certified by
+    its shape elsewhere in the corpus as something else. Two fonts that name one outline differently (a holam and a
+    sin dot drawn alike) each keep their own name. Returns the number of readings withdrawn."""
+    db.execute("CREATE INDEX IF NOT EXISTS decisions_outline ON decisions (outline)")
+    return db.execute(
+        "UPDATE decisions SET status = 'name contradicts a shape certified elsewhere', text = NULL, form = NULL "
+        "WHERE status = 'certified by name' AND EXISTS (SELECT 1 FROM decisions e WHERE e.outline = decisions.outline "
+        f"AND e.status IN ({','.join('?' * len(SHAPE_CERTIFIED))}) AND e.text != decisions.text)",
+        SHAPE_CERTIFIED).rowcount
+
+
 def run_decisions(workers: int = 16) -> None:
     """Step 3 over the census: one decision per (PDF, font, drawn code) of every TrueType simple font."""
     from scripts.fgp_glyph_registry import REGISTRY_VERSION
@@ -577,14 +635,18 @@ def run_decisions(workers: int = 16) -> None:
                 print(f"  {k:,} / {len(tasks):,} PDFs, {time.time() - t0:.0f}s", flush=True)
     db.commit()
     db.execute("INSERT INTO meta VALUES ('errors', ?)", (str(errors),))
+    withdrawn = withdraw_contradicted_names(db)
+    db.execute("INSERT INTO meta VALUES ('name_readings_withdrawn', ?)", (str(withdrawn),))
     db.commit()
-    print(f"done: {len(tasks):,} PDFs with TrueType simple fonts, {errors} unreadable, {time.time() - t0:.0f}s")
+    print(f"done: {len(tasks):,} PDFs with TrueType simple fonts, {errors} unreadable, {withdrawn} name readings "
+          f"withdrawn, {time.time() - t0:.0f}s")
 
 
 # --- step 2: the repaired copy ---------------------------------------------------------------------------------------
 
 COPIES = os.path.join(WORK, "copies")
-CERTIFIED = ("certified", "certified by shape")
+SHAPE_CERTIFIED = ("certified", "certified by shape", "certified by plain form")
+CERTIFIED = SHAPE_CERTIFIED + ("certified by name",)
 
 
 def font_maps(sha: str, dec: sqlite3.Connection) -> tuple[dict, list]:
@@ -1168,7 +1230,7 @@ def _deficit(pdf: collections.Counter, text: str) -> int:
 EXCEPTIONS_JSON = os.path.join(WORK, "exceptions.json")
 C6_REASON = "C6: the re-read leaves a glyph the vocabulary repair had filled"
 # Owner, 2026-10-27, after the per-pattern review (_tmp/fgp_glyph_reread_patterns.html): these patterns may ship as
-# recorded exceptions; digits/Latin reordered, a stray character and a change of direction stay held.
+# recorded exceptions; digits/Latin reordered stays held.
 APPROVED_PATTERNS = (
     "other characters moved: brackets re-paired",
     "rows grouped differently",
@@ -1176,6 +1238,9 @@ APPROVED_PATTERNS = (
     "other characters moved: Hebrew or Arabic reordered",
     # owner, 2026-10-27, after the page of all 83 rows (_tmp/fgp_glyph_reread_stray.html): "not perfect but good enough"
     "a decoded glyph produced an uncertified character",
+    # owner, 2026-10-28, after the page of all 83 rows (_tmp/fgp_direction_review.html): decoded Arabic letters turn a
+    # line of boxes and symbols right-to-left, which is the correct reading
+    "other characters moved: the row changed direction",
     C6_REASON,
 )
 

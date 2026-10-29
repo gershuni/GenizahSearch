@@ -281,7 +281,9 @@ is the one its name gives, and **certified by shape** when it has no usable name
 of that typeface, which must be a Hebrew or Arabic letter or mark and not a mirrored character (a right-to-left PDF
 draws a bracket with its mirror image; a dagesh can share the dotted circle's outline). Empty outlines and `.notdef`
 never certify. Anything else (no match, another typeface, two characters, a name the shape contradicts) is not
-decoded; the unmatched shapes go to the owner's review by eye, by outline class.
+decoded; the unmatched shapes go to the owner's review by eye, by outline class. (Since the owner's ruling of
+2026-10-28, below, a glyph with no match in its typeface is read by its name, and a plain Hebrew letter or point tied
+with its variant forms is read as the plain one.)
 
 **Repaired copy (step 2).** A font without `/ToUnicode` gets one with an entry for each drawn code whose certified
 character the standard decoding does not already give; codes left out keep MuPDF's own decoding (checked: a partial
@@ -456,3 +458,127 @@ and a stale re-read (other text or other PDF) be refused.
 **Final run on that code:** gate 3 PASS 80/80, two runs `9ae25fa88349ddf6` (re-read digest `8a0d515927a71c41`), every
 expectation held; gate 4 PASS 86/86, two runs `086690023883b4ae`; candidate sha256 `cdcc2268b1a6699a...`, its 59,056
 rows identical to the first step-6 build; `scripts/check_fgp_sidecar.py` passes it.
+
+**Owner's ruling on undecoded named glyphs and ties (2026-10-28).** The local apps still showed boxes (T-S NS 243.146:
+282). Crops of the PDFs showed what they were: final letters, vowel points and Arabic joined letters whose glyphs carry
+clear names (`memfinal`, `qamats`, `meemmedial`) in fonts whose typefaces are not installed here (Simplified and
+Traditional Arabic, Hebrew faces Windows does not ship), and one qamats whose outline is also Narkisim's qamats qatan.
+Every named shape the re-read left undecoded (662 outline + name classes, 372,188 drawn) was put on a review page by
+reading (`_tmp/fgp_shape_review.html`: the shape from the embedded font, a crop of the PDF, what the reader gives today)
+and checked by eye; the points by their measured height against the baseline. All match their names except `sun`
+(draws a circled dot; 1 glyph) and four `uniF0xx` names whose reading is a private-use code (7 glyphs). On one sample
+page each, 100 of the 602 readable classes show a box today (41,745 glyphs), 141 a wrong character with no box (17,271:
+Arabic letters as digits and punctuation; five classes, 2,685 glyphs, as a space, so the letter vanishes: row 18072
+"בידי שמי" for שמים) and 352 already read right. Ruled: "adopt the name rule without private-use readings, and the tie
+rule."
+
+- *Name rule* (`certify_font`, status `certified by name`). A glyph whose outline matches no reference glyph of its
+  typeface is read by its name when the registry reads the name, the reading has no private-use code, it fits one
+  character in the repaired copy (the registry's form, or the Hebrew presentation form of a pointed letter; none for
+  e.g. `finalkafwithsheva`, which stays undecoded), and every reference glyph the outline matches in another typeface
+  reads the same. After all fonts are certified, `withdraw_contradicted_names` withdraws a reading by name wherever the
+  same outline is certified by its shape elsewhere as something else (status `name contradicts a shape certified
+  elsewhere`); two fonts that name one outline differently (a holam and a sin dot drawn alike) each keep their own
+  name. A reading by name never overrides an entry of the producer's own `/ToUnicode` and raises no conflict there.
+- *Tie rule* (status `certified by plain form`). A glyph without a usable name whose readings in its typeface are one
+  plain Hebrew letter or point and otherwise only its variant forms (a compatibility form of it such as the
+  alternative ayin, qamats qatan beside qamats, nun hafukha beside nun, a private-use code) is read as the plain one.
+  Two plain readings, or any other reading beside it (Latin `e` and Cyrillic `е`, the Hebrew geresh beside an
+  apostrophe), stay ambiguous.
+
+Both count as certified for C4 and T14. Tests make each condition fail (a private-use reading, a multi-character form,
+a name the other-typeface shape contradicts, a reading beside the plain one that is no variant, the corpus-wide
+withdrawal, the map policy); six mutations of the code each turn them red.
+
+*Input fixed.* The first rerun read the swapped local sidecar (the candidate itself) as today's text and held 6,481
+rows on C1. Gates 3 and 4 now refuse a gate-4 candidate as `--fgp-db` (`refuse_candidate_as_today`, tested), and both
+runners take `-FgpDb`; this rebuild ran on the June sidecar, `fgp_data/fgp_transcriptions.pre_9110.db`.
+
+*Run (2026-10-28).* Certification: 0 name readings withdrawn; map entries 30,885 (22,989 certified, 5,069 by shape,
+2,820 by name, 7 by plain form). **Gate 3 PASS 80/80**, two runs digest `a5fa797db7d9f7f9`: 1,177 accepted, 701
+exceptions, 371 held (221 by decision 4), 8,634 nothing to decode, 6 unchanged. C5 90.5% recovered (72,429 of 80,042),
+1.7% unresolved (was 85.4% / 6.9%); C3 decoding agreement 99.91% (281,610 of 281,868 characters); C1, C4, C7 pass.
+The "uncertified character" hold now covers 226 rows; in the 142 new ones, 266 of 267 stray glyphs are glyphs the
+untouched extraction dropped (117 shevas, 87 kafs with dagesh, rafes ...) and one is a backslash read as `[` (row 17099).
+Five gate-3 and two gate-4 counts re-declared from these runs (expectation files, with the reason). **Gate 4 PASS
+86/86**, two runs digest `82cd8696401aaa20`: 1,872 rows ship the re-read, 114 the vocabulary repair alone.
+**Candidate** sha256 `1147e977c25a67bb...` (previous `cdcc2268...`, kept as
+`fgp_transcriptions.candidate.glyph_reread_r2.db`), `check_fgp_sidecar.py` PASS; exactly 605 rows' texts change and no
+other field: 450 rows re-read for the first time (boxes 1,238 -> 150), 142 re-read rows improved (1,298 -> 42), and 13
+Arabic rows (17034, 17067, 17078, 17082, 17094, 17096, 17098, 17114, 21168, 33080, 33090, 33093, 33435) shipped
+re-read before and are now held, keeping the vocabulary-repaired text (12,939 -> 13,104 boxes): their newly decoded
+Arabic letters turn lines right-to-left, which C2 holds as "the row changed direction". Boxes in the candidate 74,713
+in 687 rows -> 72,534 in 491; most of the rest sit in rows held for a change of direction (about 36,800), in rows with
+nothing to decode (10,804) and in `original` rows (5,509). Swapped in as the local sidecar the same day.
+
+**Owner's ruling on a change of direction (2026-10-28, after the page of all 83 rows,
+`_tmp/fgp_direction_review.html`: each changed line as the PDF draws it, today's reading and the re-read): approved.**
+"The row changed direction" joins the exception patterns. In the Arabic rows (55 of the 83 PDFs) decoding turns a line
+of boxes and symbols into right-to-left Arabic, which the extractor then orders as such; the re-read matches the PDF
+wording where today's line was boxes. Seen with it and accepted: brackets around a decoded word can come out mirrored or
+moved in right-to-left display, as in today's text. Digits or Latin reordered stays held, and a row ships as an
+exception only when every one of its hold patterns is approved (17 of the 83 stay held for another reason).
+
+Rebuilt: gate 3 counts re-declared from run 1 before run 2 (exceptions 701 -> 767, held 371 -> 305); **gate 3 PASS
+80/80**, two runs digest `eb6fc5341151c6cf`, C5 73,261 of 80,042 recovered (91.5%), 1.7% unresolved, C3 unchanged
+(99.91%). **Gate 4 PASS 86/86**, two runs digest `e162c45e30214592`: 1,938 rows ship the re-read, 89 the vocabulary
+repair alone. Candidate sha256 `ee4940c2690dc3db...` (previous `1147e977...`, kept as
+`fgp_transcriptions.candidate.glyph_reread_r3.db`), `check_fgp_sidecar.py` PASS; exactly the 66 newly approved rows
+change, no other row or field. Boxes in the candidate 72,534 in 491 rows -> **44,190 in 461** (T-S Ar.41.1, row 17099,
+9,588 -> 0; row 17114 2,657 -> 2). Of the 13 Arabic rows held earlier the same day, 12 ship again; 17067 (T-S Ar.40.105)
+stays held for "row without a decoded glyph changed". Swapped in as the local sidecar.
+
+## 10. A team's markings in its Word files (owner's ruling of 2026-10-28; declared before the run)
+
+Plan: `docs/plans/FGP_TEAM_1350001_MARKINGS_PLAN.md`, approved as written. Team folder `1350001` (164 Word files,
+191 gate-3 rows) marks its text by formatting; gate 3 reads that team's Word files (`read_docx(markings=True)`, chosen
+by the unit's folder, `MARKING_TEAMS`) with the marks, every other team's as before:
+
+- **Completion** (a run in the cursive font Guttman Yad, directly or through its run style): the span in square
+  brackets, merged across runs and the spaces between them, spaces outside, never across a line; a span with no letter
+  (a lacuna marker `<..>`) and a span already in brackets are left as written.
+- **Doubtful letter** (Word's outline effect): each letter followed by U+05AF HEBREW MARK MASORA CIRCLE, after the
+  letter's own points; a doubtful completion gets both (`[ד֯]`).
+- **Deleted letters** (strikethrough): the span in `⟦ ⟧`.
+- **Interlinear addition** (superscript; the owner's answer of 2026-10-28): the span between `\` and `/` (Leiden),
+  `\אומרין/`, only where it holds a letter (a superscript `.` or `0` stays as written).
+- **Set apart** (the Rashi font, 433 runs; the owner does not know what it marks, "mark somehow"): the span in half
+  brackets `⸤ ⸥` (U+2E24, U+2E25: no FGP text uses them, they mirror in right-to-left text), `בכי⸤כר⸥`, only where it
+  holds a letter.
+- Spans that start and end together nest in one order: deleted outermost, then interlinear, set apart, completion
+  (`⟦[XXX]⟧`; until 2026-10-28 such a pair crossed, `[⟦XXX]⟧`, in held row 43170).
+
+**Acceptance by letters (T15).** This team's PDF text cannot vouch for its Word text line by line: the PDF draws the
+doubtful letters as strokes (lost), prints bold headings four times, turns number ranges into control characters and
+puts small-font letters on lines of their own. A row of the team whose blocks would hold it is accepted (status
+`approved`, basis `rule:team_markings_letters`, its held blocks dispositioned `approved`) when, Hebrew letters counted
+after NFKD with a letter repeated four times counted once: at least **99%** of the letters today's PDF text shows are in
+the Word text, and the Word text's letters (its doubtful letters set aside: the PDF has them only as strokes) beyond the
+PDF's letters and its boxes are at most **10%** of them (measured before the run: 179 of 183 rows reach 99%; the largest excess 8.9%). A new unit of the team is checked
+the same way against its own PDF. Otherwise the row is held (`team_markings_letters`). T15 fails a row accepted this
+way without both, and any row read with marks outside the team; T09 leaves such rows to T15.
+
+**Run results (2026-10-28).** Gate 3, two identical runs over the June sidecar (digest `fe764d354a75fc53`, PASS 81/81):
+183 of today's rows of the team read with marks; **179 approved** by letters (status approved 10 -> 189, held
+3,790 -> 3,611); 4 held `team_markings_letters`, the Word text finding fewer of the PDF's letters than 99%: 6574
+(96.7%), 18879 (96.6%), 21312 (89.2%), 43170 (98.2%); they keep their PDF reading. 8 new units of the team checked by
+letters, all passing (`pdf_held` -> `checked`). The 179 rows leave the re-read's scope (10,889 -> 10,710 rows). In the
+187 accepted texts: 26,140 doubtful marks, 5,089 completion brackets added (every pair balanced; the 3 unbalanced
+brackets in these texts are the transcribers' own), 62 deleted spans, no control character, no marker left behind.
+35 of the doubtful marks sit on a Latin `X`, the transcribers' sign for an illegible letter, written hollow, in 8 rows
+(e.g. `[X֯]ב֯י֯[X]`, row 3195): kept, as the rule marks every outlined letter. Gate 4, two identical runs (digest
+`55a34824c7b010a8`, PASS 86/86): 176 carried rows ship the marked Word text (`text_source` `gate3:docx`; the other 3
+approved rows, 5404, 18882 and 18883, gate 2 holds), 6 new rows enter (the other 2, units 160055 and 161055, name no
+manuscript: `no_sys_id`), the re-read applies to 1,779 rows (was 1,938). Candidate `8b3ea47a…`, 59,062 rows (was 59,056); text changed
+in the team's rows only; boxes 44,190 in 461 rows -> 44,080 in 450. Checked in both apps: the circle sits above the
+letter in the web reading view and in the desktop's text view, and `⟦ ⟧` renders. The marks legend (the "?" button)
+shows only on Genuzot rows; this team's rows are credited to the Yerushalmi team and have no legend (the owner: the
+marks need no explanation).
+
+**Rebuilt 2026-10-28 with the owner's answers** (interlinear `\ /`, set apart `⸤ ⸥`, one nesting order): gate 3 two
+identical runs, digest `a6faccf29f163a96`, PASS 81/81, the letter check unchanged (179 / 4 / 8) and 3 line-diff counts
+re-declared; gate 4 two identical runs, digest `838fda832936c70d`, PASS 86/86, no count changed. 64 shipped rows of the
+team gain the new marks (their 54 distinct texts: 181 interlinear spans, 264 set apart); with them removed every text
+equals the previous candidate's; no other row changes. Candidate `caeacabf…`, 59,062 rows. One text (rows 31-33, 148)
+has a `\` its transcriber typed on a line of its own; it was there before. Both marks render in the desktop's text
+view and in a browser with David; the half brackets are small low corners.

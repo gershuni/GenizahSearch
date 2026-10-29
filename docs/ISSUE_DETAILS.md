@@ -4120,6 +4120,23 @@ boxes because no reference glyph certifies them (e.g. a qamats whose outline is 
 glyphs that still show a symbol (30 `آ` for kaf and 48 `&` in row 17083), and the 385 glyph shapes awaiting the
 owner's review by eye.
 
+2026-10-28 (owner's ruling after a review of all 662 named shapes, `_tmp/fgp_shape_review.html`): a glyph whose
+typeface is not installed is read by its name, and a plain letter tied with its variant forms as the plain one (rules
+§9). Rebuilt: 1,872 rows ship the re-read (was 1,435), 90.5% of the missing letters recovered (was 85.4%), candidate
+boxes 74,713 in 687 rows -> 72,534 in 491. The same day, after the page of all 83 rows held because decoding turns
+their lines right-to-left (mostly Arabic), the owner approved that pattern: 66 more rows ship the re-read (1,938 in
+all), candidate boxes -> 44,190 in 461 rows, 91.5% of the missing letters recovered. Still open: the 17 of those rows
+held for another reason (e.g. 17067, T-S Ar.40.105: a row without a decoded glyph changed), 10,804 boxes in rows whose
+glyphs carry no usable name or shape, and 5,509 in `original` rows held by decision 4.
+
+2026-10-28 (owner's ruling, plan `docs/plans/FGP_TEAM_1350001_MARKINGS_PLAN.md`, rules §10): the Yerushalmi team
+(folder 1350001) marks its Word files by formatting, and its PDF text lost the hollow (doubtful) letters altogether.
+Gate 3 now reads that team's Word files with completions in `[ ]`, each doubtful letter followed by U+05AF (`עבד֯`) and
+deleted letters in `⟦ ⟧`, and accepts a row when its letters agree with the PDF reading (T15). 176 candidate rows
+switch to the marked Word text and 6 new rows enter; superscript letters (interlinear additions) are written `\…/`
+and the Rashi font's letters set apart in `⸤ ⸥` (candidate `caeacabf…`, 59,062 rows; boxes 44,080 in 450 rows);
+4 rows below the letter bar keep their PDF reading (6574, 18879, 21312, 43170).
+
 ## GS-277
 
 **Editing an edition: what Edit starts from, and how a correction of an FGP or PGP edition is recorded and shown (owner's open question)** · idea · Browse and viewer · ❌ Open · opened 2026-10-27

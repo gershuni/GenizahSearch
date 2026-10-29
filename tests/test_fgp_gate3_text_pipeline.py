@@ -332,7 +332,7 @@ def _reread_counts(**over):
 
 def _t(C):
     return {c["name"]: c["passed"] for c in g3.run_checks([], [], C, {}, "d" * 16, None, True)
-            if c["name"].startswith("T1") and c["name"] != "T10_final_letters_accurate"}
+            if c["name"].startswith("T1") and c["name"] not in ("T10_final_letters_accurate", "T15_team_markings_letters")}
 
 
 def test_reread_checks_pass_a_sound_run():
@@ -362,3 +362,159 @@ def test_t11_fails_a_run_whose_only_pdf_failed():
     for key in ("glyph_reread.errors", "glyph_reread.certify_errors"):
         assert _t(collections.Counter({key: 1}))["T11_glyph_reread_faithful"] == 0
     assert _t(collections.Counter())["T11_glyph_reread_faithful"] == 1
+
+
+# --------------------------------------------------------------------------- marking team (owner, 2026-10-28)
+
+def _marked_docx(path, paragraphs, styles=""):
+    """A DOCX of runs: each paragraph a list of (text, props); props: font, outline, strike, style, br."""
+    import zipfile
+    from xml.sax.saxutils import escape
+    ns = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+
+    def run(text, props):
+        rpr = ""
+        if props.get("style"):
+            rpr += f'<w:rStyle w:val="{props["style"]}"/>'
+        if props.get("font"):
+            rpr += f'<w:rFonts w:ascii="{props["font"]}" w:cs="{props["font"]}"/>'
+        if props.get("outline"):
+            rpr += "<w:outline/>"
+        if props.get("strike"):
+            rpr += "<w:strike/>"
+        if props.get("superscript"):
+            rpr += '<w:vertAlign w:val="superscript"/>'
+        br ="<w:br/>" if props.get("br") else ""
+        return f'<w:r><w:rPr>{rpr}</w:rPr>{br}<w:t xml:space="preserve">{escape(text)}</w:t></w:r>'
+
+    body = "".join("<w:p>" + "".join(run(t, p) for t, p in para) + "</w:p>" for para in paragraphs)
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("word/document.xml", f'<?xml version="1.0" encoding="UTF-8"?><w:document {ns}><w:body>{body}</w:body></w:document>')
+        if styles:
+            z.writestr("word/styles.xml", f'<?xml version="1.0" encoding="UTF-8"?><w:styles {ns}>{styles}</w:styles>')
+
+
+YAD = {"font": "Guttman Yad"}
+OUTLINE = {"outline": True}
+
+
+def _marked(tmp_path, paragraphs, styles="", markings=True):
+    p = str(tmp_path / "t.docx")
+    _marked_docx(p, paragraphs, styles)
+    return g3.docx_text(g3.read_docx(p, markings=markings))
+
+
+def test_completions_are_bracketed_inside_words_and_across_runs(tmp_path):
+    text = _marked(tmp_path, [
+        [("לא", YAD), (" כל שכן", {})],                                 # at a line start
+        [("טעו", {}), ("א", YAD), (" שאר", {})],                          # inside a word
+        [("מה", YAD), (" ", {}), ("את", YAD), (" עבד", {})],              # one span over runs, spaces outside
+    ])
+    assert text.split("\n") == ["[לא] כל שכן", "טעו[א] שאר", "[מה את] עבד"]
+
+
+def test_a_lacuna_marker_or_an_already_bracketed_span_is_left_alone(tmp_path):
+    text = _marked(tmp_path, [[("ביו", {}), ("<..>", YAD)], [("[", {}), ("אב", YAD), ("]ג", {})]])
+    assert text.split("\n") == ["ביו<..>", "[אב]ג"]
+
+
+def test_doubtful_letters_are_marked_after_their_points(tmp_path):
+    mark = g3.DOUBTFUL_MARK
+    text = _marked(tmp_path, [
+        [("עב", {}), ("ד", OUTLINE), (" להון", {})],
+        [("ש", {}), ("בָ", OUTLINE), ("ת", {})],                          # a point stays on its letter
+        [("לא", {}), ("ד", {"font": "Guttman Yad", "outline": True})],     # a doubtful completion
+    ])
+    assert text.split("\n") == [f"עבד{mark} להון", f"שבָ{mark}ת", f"לא[ד{mark}]"]
+
+
+def test_deleted_letters_get_double_brackets(tmp_path):
+    text = _marked(tmp_path, [[("למ", {}), ("ל", {"strike": True}), ("חצה", {})]])
+    assert text == f"למ{g3.DELETED_OPEN}ל{g3.DELETED_CLOSE}חצה"
+
+
+def test_interlinear_additions_get_leiden_slashes(tmp_path):
+    sup = {"superscript": True}
+    text = _marked(tmp_path, [
+        [("והשבים ", {}), ("אומרין", sup), (" מה", {})],
+        [("מ", {}), ("ת", sup), ("נחמהה", {})],
+        [("אינו חייב", {}), ("0", sup), (" עסקיו", {}), (".", sup)],     # a sign without a letter stays as written
+    ])
+    o, c = g3.INTERLINEAR_OPEN, g3.INTERLINEAR_CLOSE
+    assert text.split("\n") == [f"והשבים {o}אומרין{c} מה", f"מ{o}ת{c}נחמהה", "אינו חייב0 עסקיו."]
+
+
+def test_the_rashi_font_is_set_apart(tmp_path):
+    rashi = {"font": "Rashi"}
+    text = _marked(tmp_path, [[("בכי", {}), ("כר", rashi), (" ר' אבון", {})], [("מ<.. ...", {}), (">", rashi)]])
+    assert text.split("\n") == [f"בכי{g3.SET_APART_OPEN}כר{g3.SET_APART_CLOSE} ר' אבון", "מ<.. ...>"]
+
+
+@pytest.mark.parametrize("props, expect", [
+    ({"font": "Guttman Yad", "strike": True}, "{do}[א]{dc}"),
+    ({"superscript": True, "strike": True}, "{do}{io}א{ic}{dc}"),
+    ({"font": "Guttman Yad", "superscript": True}, "{io}[א]{ic}"),
+    ({"font": "Rashi", "superscript": True}, "{io}{so}א{sc}{ic}"),
+])
+def test_marks_on_one_span_nest_in_one_order(tmp_path, props, expect):
+    text = _marked(tmp_path, [[("ב", {}), ("א", props), ("ג", {})]])
+    assert text == "ב" + expect.format(do=g3.DELETED_OPEN, dc=g3.DELETED_CLOSE, io=g3.INTERLINEAR_OPEN,
+                                       ic=g3.INTERLINEAR_CLOSE, so=g3.SET_APART_OPEN, sc=g3.SET_APART_CLOSE) + "ג"
+
+
+def test_marks_come_from_a_run_style_and_never_cross_a_line(tmp_path):
+    styles = ('<w:style w:type="character" w:styleId="Yad"><w:rPr><w:rFonts w:cs="Guttman Yad"/></w:rPr></w:style>')
+    text = _marked(tmp_path, [[("אב", {"style": "Yad"}), ("גד", {"style": "Yad", "br": True})]], styles=styles)
+    assert text.split("\n") == ["[אב]", "[גד]"]
+    assert not g3._SENTINEL_RE.search(text)
+
+
+def test_without_the_marking_profile_the_text_is_plain(tmp_path):
+    text = _marked(tmp_path, [[("לא", YAD), (" עב", {}), ("ד", OUTLINE), (" אומרין", {"superscript": True}),
+                               (" בכי", {}), ("כר", {"font": "Rashi"})]], markings=False)
+    assert text == "לא עבד אומרין בכיכר"
+
+
+@pytest.mark.parametrize("pdf, word, passed", [
+    ("לא ל שכן\x0eר", "[לא] כ֯ל שכן ר", True),                         # the PDF lost the doubtful כ; a box for ר
+    ("שלום עליכם ושלום לכם", "שלום עליכם", False),                     # a line missing from the Word text
+    ("שלום עליכם", "ברוך הבא לכולם", False),                           # another text
+    ("אב", "אבגדהוזחטיכלמנסעפצקרשת", False),                            # far more letters than the PDF shows
+    ("דדדדף ב שלום", "דף ב שלום", True),                                # fake bold: four times one letter
+    ("עב להון", "עבד֯ להון", True),                                      # a doubtful letter the PDF drew as strokes
+])
+def test_team_letter_check(pdf, word, passed):
+    assert g3.team_letters(pdf, word)["passed"] is passed
+
+
+def _team_row(**kw):
+    row = {"row_key": "today:1", "today_id": 1, "unit_table": "u", "unit_id": 1, "basename": "13500010000011",
+           "kind": "transcription", "reader": "docx", "source_path": r"1350001\word\13500010000011.docx",
+           "source_link": "fist_filename_docx", "today_text_source": "pdf_rtl", "status": "approved", "text_replaced": 1,
+           "text_accepted": 1, "acceptance_basis": g3.TEAM_RULE_BASIS, "lost_today_lines": 0, "yardstick": None,
+           "team_letters": json.dumps({"found": 0.995, "excess": 0.05, "pdf_letters": 900, "word_letters": 1000,
+                                       "passed": True})}
+    row.update(kw)
+    return row
+
+
+def _t15(rows):
+    import collections
+    return next(c["passed"] for c in g3.run_checks(rows, [], collections.Counter(), {}, "d" * 16, None, True)
+                if c["name"] == "T15_team_markings_letters")
+
+
+def test_t15_passes_a_team_row_accepted_on_its_letters():
+    assert _t15([_team_row()]) == 1
+
+
+@pytest.mark.parametrize("row", [
+    _team_row(team_letters=json.dumps({"found": 0.97, "excess": 0.05, "pdf_letters": 900, "word_letters": 1000,
+                                       "passed": False})),                       # too few of the PDF's letters
+    _team_row(team_letters=json.dumps({"found": 0.995, "excess": 0.2, "pdf_letters": 900, "word_letters": 1000,
+                                       "passed": False})),                       # far more letters than the PDF
+    _team_row(team_letters=None),                                                # accepted without a check
+    _team_row(source_path=r"2000000\word\20000000000011.docx", acceptance_basis=None),  # marks read in another team
+])
+def test_t15_fails(row):
+    assert _t15([row]) == 0

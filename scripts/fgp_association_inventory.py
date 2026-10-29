@@ -136,6 +136,16 @@ def ro(path: str) -> sqlite3.Connection:
     return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
 
 
+def refuse_candidate_as_today(conn: sqlite3.Connection, path: str) -> None:
+    """Gates 3 and 4 compare FGP's files with the sidecar the candidate is built FROM. A gate-4 candidate (it carries
+    ``text_provenance``) in that place re-processes its own output: 2026-10-28, after the local sidecar was swapped
+    for the candidate, gate 3 held 6,481 rows on C1. Pass the original sidecar with ``--fgp-db``."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(fgp_transcriptions)")}
+    if "text_provenance" in cols:
+        raise SystemExit(f"{path} is a gate-4 candidate, not today's sidecar; pass the sidecar it was built from "
+                         "with --fgp-db (after a local swap: fgp_data/fgp_transcriptions.pre_9110.db)")
+
+
 # --------------------------------------------------------------------------- folder A
 
 

@@ -115,7 +115,9 @@ import unicodedata
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from scripts.fgp_association_inventory import DEFAULT_FIST, DEFAULT_OUT, parse_expectations, ro  # noqa: E402
+from scripts.fgp_association_inventory import (  # noqa: E402
+    DEFAULT_FIST, DEFAULT_OUT, parse_expectations, refuse_candidate_as_today, ro,
+)
 from scripts.fgp_fill_credits_bilingual import build_book_map, build_catalog_map, build_credit_parts  # noqa: E402
 from scripts.fgp_gate2_rules import (  # noqa: E402
     BIBREF_SOURCE, GENERIC_CREDIT, NO_PUBLISH_COMMENT_RE, build_bibref_map, credit_for_unit, load_unit_comments,
@@ -1277,6 +1279,7 @@ def main(argv=None) -> int:
 
     log("loading today's sidecar, gates 2 and 3, the inventory ...")
     db_t = ro(args.fgp_db)
+    refuse_candidate_as_today(db_t, args.fgp_db)
     today, cols_t = load_today(db_t)
     g2_conn = ro(args.gate2)
     g2, aliases = load_gate2(g2_conn)

@@ -83,7 +83,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from scripts.fgp_association_inventory import (  # noqa: E402
-    DEFAULT_FGP_DB, DEFAULT_NOPOS, DEFAULT_OUT, DEFAULT_WITHPOS, NAME_SUFFIX_RE, parse_expectations, ro,
+    DEFAULT_FGP_DB, DEFAULT_NOPOS, DEFAULT_OUT, DEFAULT_WITHPOS, NAME_SUFFIX_RE, parse_expectations,
+    refuse_candidate_as_today, ro,
 )
 from scripts.fgp_rebuild_text_and_credit import parse_fgp_xml  # noqa: E402  (today's XML rows came through it)
 from scripts import fgp_final_letters as fl  # noqa: E402  (GS-276, rules §8)
@@ -159,6 +160,30 @@ BLANK_LINES_RE = re.compile(r"\n[ \t]*\n+")
 # filler) where today's XML parse carried them as class codes, so letters-and-digits equality
 # proves the edition and nothing is replaced.
 VERIFY_ONLY_CLASSES = frozenset(("sigla_rendering", "extra_line"))
+
+# Owner's ruling of 2026-10-28 (docs/plans/FGP_TEAM_1350001_MARKINGS_PLAN.md, rules §10): one team's Word files mark
+# completions with the cursive font Guttman Yad, doubtful letters with Word's outline effect and letters the scribe
+# deleted with strikethrough. Read with those marks, its Word text replaces today's PDF text by the letter check below,
+# since the PDF lost the doubtful letters (drawn as strokes) and garbles the rest. The owner's answers of the same day:
+# superscript letters are interlinear additions, written \אומרין/ (Leiden); the Rashi font marks something the owner
+# cannot name, so its letters are set apart by a pair no FGP text uses, saying nothing more.
+MARKING_TEAMS = frozenset({"1350001"})
+COMPLETION_FONTS = ("guttman yad",)
+SET_APART_FONTS = ("rashi",)
+DOUBTFUL_MARK = "\u05af"            # HEBREW MARK MASORA CIRCLE, after the letter
+DELETED_OPEN, DELETED_CLOSE = "\u27e6", "\u27e7"
+INTERLINEAR_OPEN, INTERLINEAR_CLOSE = "\\", "/"
+SET_APART_OPEN, SET_APART_CLOSE = "\u2e24", "\u2e25"   # BOTTOM LEFT / RIGHT HALF BRACKET
+# private-use sentinels around a marked run while a paragraph is read; never left in a text
+_MARK_SENTINELS = {"completion": ("\ue000", "\ue001"), "deleted": ("\ue002", "\ue003"),
+                   "doubtful": ("\ue004", "\ue005"), "interlinear": ("\ue006", "\ue007"),
+                   "set_apart": ("\ue008", "\ue009")}
+_SENTINEL_RE = re.compile("[\ue000-\ue009]")
+TEAM_LETTERS_MIN = 0.99   # share of the letters today's PDF text shows that the Word text must have
+TEAM_EXCESS_MAX = 0.10    # Word letters beyond the PDF's letters and boxes, as a share of the Word letters
+TEAM_RULE_BASIS = "rule:team_markings_letters"
+# a doubtful letter as marked: the letter, its own points, the mark
+DOUBTFUL_RE = re.compile("[\u05d0-\u05ea][\u0591-\u05ae\u05b0-\u05c7]*" + DOUBTFUL_MARK)
 
 
 def log(msg: str) -> None:
@@ -241,7 +266,7 @@ class DocxText:
 
 class _State:
     __slots__ = ("st", "fn_order", "in_instr", "instr", "skip_result", "numbering", "counters", "style_num",
-                 "hidden_styles")
+                 "hidden_styles", "markings", "char_styles")
 
     def __init__(self, st):
         self.st = st
@@ -253,6 +278,8 @@ class _State:
         self.counters = {}
         self.style_num = {}
         self.hidden_styles = frozenset()
+        self.markings = False
+        self.char_styles = {}
 
 
 def _attr(node, name):
@@ -291,6 +318,13 @@ def _collect(node, out: list, s: _State) -> None:
             va = rpr.find(W + "vertAlign")
             if va is not None and _attr(va, "val") == "superscript":
                 s.st["superscript_runs"] += 1
+        marks = _run_marks(rpr, s) if s.markings else ()
+        if marks:
+            out.extend(_MARK_SENTINELS[m][0] for m in marks)
+            for ch in node:
+                _collect(ch, out, s)
+            out.extend(_MARK_SENTINELS[m][1] for m in reversed(marks))
+            return
     elif tag == W + "t":
         if not s.in_instr and not s.skip_result:
             out.append(node.text or "")
@@ -406,6 +440,193 @@ def _load_styles(z: zipfile.ZipFile) -> tuple:
     return own, frozenset(hidden)
 
 
+def _on(el) -> bool:
+    return el is not None and (_attr(el, "val") or "true") not in ("0", "false", "none")
+
+
+def _run_format(rpr) -> dict:
+    """The run properties the marking teams use: font (complex-script first), outline, strikethrough, superscript."""
+    out = {}
+    if rpr is None:
+        return out
+    rf = rpr.find(W + "rFonts")
+    if rf is not None:
+        font = _attr(rf, "cs") or _attr(rf, "ascii") or _attr(rf, "hAnsi")
+        if font:
+            out["font"] = font
+    for key, tags in (("outline", ("outline",)), ("strike", ("strike", "dstrike"))):
+        els = [rpr.find(W + t) for t in tags]
+        if any(e is not None for e in els):
+            out[key] = any(_on(e) for e in els)
+    va = rpr.find(W + "vertAlign")
+    if va is not None:
+        out["superscript"] = _attr(va, "val") == "superscript"
+    return out
+
+
+def _load_char_styles(z: zipfile.ZipFile) -> dict:
+    """{styleId: run formatting} of every style with run properties; one basedOn hop."""
+    if "word/styles.xml" not in z.namelist():
+        return {}
+    root = _xml(z.read("word/styles.xml"))
+    own, based = {}, {}
+    for st in root.iter(W + "style"):
+        sid = _attr(st, "styleId")
+        b = st.find(W + "basedOn")
+        if b is not None:
+            based[sid] = _attr(b, "val")
+        fmt = _run_format(st.find(W + "rPr"))
+        if fmt:
+            own[sid] = fmt
+    for sid, parent in based.items():
+        if parent in own:
+            own[sid] = {**own[parent], **own.get(sid, {})}
+    return own
+
+
+def _run_marks(rpr, s) -> list:
+    """The marks a run of a marking team carries: its style's formatting, overridden by its own."""
+    fmt = {}
+    rs = rpr.find(W + "rStyle") if rpr is not None else None
+    if rs is not None:
+        fmt.update(s.char_styles.get(_attr(rs, "val"), {}))
+    fmt.update(_run_format(rpr))
+    marks = []
+    font = (fmt.get("font") or "").lower()
+    if font.startswith(COMPLETION_FONTS):
+        marks.append("completion")
+    if font.startswith(SET_APART_FONTS):
+        marks.append("set_apart")
+    if fmt.get("strike"):
+        marks.append("deleted")
+    if fmt.get("outline"):
+        marks.append("doubtful")
+    if fmt.get("superscript"):
+        marks.append("interlinear")
+    return marks
+
+
+def _marked_spans(chars: list, k: int) -> list:
+    """[start, end) spans of the characters carrying mark ``k``: runs on one line, joined across unmarked spaces,
+    trimmed of spaces at both ends."""
+    out, i, n = [], 0, len(chars)
+    while i < n:
+        if not (chars[i][k] and not chars[i][0].isspace()):
+            i += 1
+            continue
+        j = i
+        while True:
+            while j < n and chars[j][k] and chars[j][0] != "\n":
+                j += 1
+            g = j
+            while g < n and chars[g][0] in " \t" and not chars[g][k]:
+                g += 1
+            if j < g < n and chars[g][k] and chars[g][0] != "\n":
+                j = g
+                continue
+            break
+        e = j
+        while e > i and chars[e - 1][0].isspace():
+            e -= 1
+        out.append((i, e))
+        i = j
+    return out
+
+
+def apply_markings(text: str, st=None) -> str:
+    """A paragraph read with the marking sentinels -> its text with the team's marks (the owner's ruling of
+    2026-10-28): a completion in square brackets (not a span that is only a lacuna marker, and not doubled where the
+    span already sits in brackets), each doubtful letter followed by U+05AF after its own points, a deleted span in
+    double brackets, an interlinear addition in ``\\ /`` and a set-apart span in half brackets (these two only where
+    the span holds a letter). Marks never cross a line; spaces stay outside them; spans that start and end together
+    nest in one order, deleted outermost, then interlinear, set apart, completion."""
+    import unicodedata
+    if not _SENTINEL_RE.search(text):
+        return text
+    kinds = ("completion", "deleted", "doubtful", "interlinear", "set_apart")
+    nest = ("deleted", "interlinear", "set_apart", "completion")   # outer to inner
+    opens = {v[0]: kd for kd, v in _MARK_SENTINELS.items()}
+    closes = {v[1]: kd for kd, v in _MARK_SENTINELS.items()}
+    depth = collections.Counter()
+    chars = []
+    for ch in text:
+        if ch in opens:
+            depth[opens[ch]] += 1
+        elif ch in closes:
+            depth[closes[ch]] = max(0, depth[closes[ch]] - 1)
+        else:
+            chars.append((ch,) + tuple(depth[kd] > 0 for kd in kinds))
+    n = len(chars)
+    before = collections.defaultdict(list)   # position -> marks inserted before the character there
+    is_letter = lambda c: unicodedata.category(c).startswith("L")  # noqa: E731
+
+    def wrap(kind, a, e, opening, closing):
+        before[a].append(((2, nest.index(kind)), opening))     # openings outer first
+        before[e].append(((1, -nest.index(kind)), closing))    # closings inner first
+        if st is not None:
+            st[f"{kind}_spans"] += 1
+
+    for a, e in _marked_spans(chars, 1 + kinds.index("completion")):
+        span = "".join(c[0] for c in chars[a:e])
+        if not any(is_letter(c) for c in span):
+            if st is not None:
+                st["completion_spans_without_letters"] += 1
+            continue
+        if (span.startswith("[") and span.endswith("]")) or (a and chars[a - 1][0] == "[" and e < n and chars[e][0] == "]"):
+            if st is not None:
+                st["completion_spans_already_bracketed"] += 1
+            continue
+        wrap("completion", a, e, "[", "]")
+    for a, e in _marked_spans(chars, 1 + kinds.index("deleted")):
+        wrap("deleted", a, e, DELETED_OPEN, DELETED_CLOSE)
+    for kind, opening, closing in (("interlinear", INTERLINEAR_OPEN, INTERLINEAR_CLOSE),
+                                   ("set_apart", SET_APART_OPEN, SET_APART_CLOSE)):
+        for a, e in _marked_spans(chars, 1 + kinds.index(kind)):
+            if not any(is_letter(c[0]) for c in chars[a:e]):
+                if st is not None:
+                    st[f"{kind}_spans_without_letters"] += 1
+                continue
+            wrap(kind, a, e, opening, closing)
+    k_doubtful = 1 + kinds.index("doubtful")
+    for i, c in enumerate(chars):
+        if c[k_doubtful] and is_letter(c[0]):
+            m = i + 1
+            while m < n and unicodedata.category(chars[m][0]).startswith("M"):
+                m += 1
+            before[m].append(((0, 0), DOUBTFUL_MARK))
+            if st is not None:
+                st["doubtful_letters"] += 1
+    out = []
+    for pos in range(n + 1):
+        # at one position: a doubtful mark (it belongs to the letter before), then closings (inner first), then
+        # openings (outer first)
+        out.extend(x for _, x in sorted(before.get(pos, ()), key=lambda t: t[0]))
+        if pos < n:
+            out.append(chars[pos][0])
+    return "".join(out)
+
+
+def _letter_counts(text: str) -> collections.Counter:
+    import unicodedata
+    t = unicodedata.normalize("NFKD", text or "")
+    t = re.sub(r"(.)\1{3}", r"\1", t)  # fake bold: FGP's PDFs print each letter of a bold heading four times
+    return collections.Counter(HEB_LETTER_RE.findall(t))
+
+
+def team_letters(pdf_text: str, word_text: str) -> dict:
+    """The letter check of a marking team's Word text against today's PDF text (order and spacing aside): the share
+    of the letters the PDF text shows that the Word text has, and the Word letters beyond the PDF's letters and its
+    boxes (the PDF drops some letters silently: the doubtful ones, whitespace-coded finals)."""
+    # the Word text's doubtful letters are set aside: the PDF drew them as strokes, never as text
+    p, w = _letter_counts(pdf_text), _letter_counts(DOUBTFUL_RE.sub("", word_text or ""))
+    np_, nw = sum(p.values()), sum(w.values())
+    boxes = len(CTRL_RE.findall(pdf_text or ""))
+    found = sum((p & w).values()) / np_ if np_ else 0.0
+    excess = max(0, sum((w - p).values()) - boxes) / nw if nw else 1.0
+    return {"found": round(found, 4), "excess": round(excess, 4), "pdf_letters": np_, "word_letters": nw,
+            "passed": bool(np_) and found >= TEAM_LETTERS_MIN and excess <= TEAM_EXCESS_MAX}
+
+
 _HEB_ONES = "אבגדהוזחט"
 _HEB_TENS = "יכלמנסעפצ"
 _HEB_HUNDREDS = "קרשת"
@@ -514,16 +735,20 @@ def _part_paragraph_texts(z: zipfile.ZipFile, name: str, s: _State) -> list:
     return out
 
 
-def read_docx(path: str) -> DocxText:
+def read_docx(path: str, markings: bool = False) -> DocxText:
     """Structure-aware text of a DOCX: paragraphs (and table cells) one per line, manual breaks as
     lines, tracked deletions and hidden runs dropped, auto-numbering rendered, footnote references
-    numbered in order and the footnotes returned apart, header/footer text returned apart."""
+    numbered in order and the footnotes returned apart, header/footer text returned apart. With
+    ``markings`` (a marking team's file), completions, doubtful letters and deleted letters are marked
+    (``apply_markings``)."""
     d = DocxText()
     s = _State(d.structure)
     with zipfile.ZipFile(path) as z:
         names = set(z.namelist())
         s.numbering = _load_numbering(z)
         s.style_num, s.hidden_styles = _load_styles(z)
+        if markings:
+            s.markings, s.char_styles = True, _load_char_styles(z)
         root = _xml(z.read("word/document.xml"))
         body = root.find(W + "body")
         if body is None:
@@ -544,7 +769,7 @@ def read_docx(path: str) -> DocxText:
             if has_alternate and any(a.tag == MC + "Fallback" for a in p.iterancestors()):
                 return None  # the same text box twice: keep the Choice rendering only
             parts = [_render_numbering(p, s)]
-            if _HAS_LXML and next(p.iter(*_SLOW_TAGS), None) is None and \
+            if _HAS_LXML and not s.markings and next(p.iter(*_SLOW_TAGS), None) is None and \
                     (not s.hidden_styles or next(p.iter(W + "rStyle"), None) is None):
                 # the common paragraph: plain runs only; count the run properties, join the text
                 parts.extend(t.text or "" for t in p.iter(W + "t"))
@@ -557,7 +782,7 @@ def read_docx(path: str) -> DocxText:
             else:
                 _collect(p, parts, s)
             d.structure["paragraphs"] += 1
-            return "".join(parts)
+            return apply_markings("".join(parts), d.structure) if s.markings else "".join(parts)
 
         def add_lines(text: str) -> None:
             for ln in text.split("\n"):
@@ -602,7 +827,8 @@ def read_docx(path: str) -> DocxText:
                 for p in fn.iter(W + "p"):
                     parts = []
                     _collect(p, parts, s)
-                    paras.append("".join(parts).replace("\n", " "))
+                    para = apply_markings("".join(parts), d.structure) if s.markings else "".join(parts)
+                    paras.append(para.replace("\n", " "))
                 t = ws(" ".join(paras))
                 if t:
                     texts[_attr(fn, "id")] = t
@@ -620,6 +846,8 @@ def read_docx(path: str) -> DocxText:
                     d.headers.append((c, has_page))
             if d.headers:
                 d.structure["header_parts"] += 1
+    if s.markings and any(_SENTINEL_RE.search(x) for x in d.lines + [t for _, t in d.footnotes]):
+        raise RuntimeError(f"a marking sentinel was left in {path}")
     return d
 
 
@@ -1066,6 +1294,7 @@ def load_inputs(inventory: str, gate2: str, fgp_db: str) -> dict:
     rows = [dict(zip(cols, r)) for r in g2.execute(f"SELECT {', '.join(cols)} FROM row_outcomes ORDER BY id")]
     g2.close()
     fgp = ro(fgp_db)
+    refuse_candidate_as_today(fgp, fgp_db)
     today = {}
     for rid, content, rel in fgp.execute("SELECT id, content, rel_path FROM fgp_transcriptions"):
         today[rid] = (content or "", rel)
@@ -1125,11 +1354,12 @@ def pdf_text_of(path: str, cache: sqlite3.Connection | None = None) -> str | Non
 
 
 class UnitText:
-    __slots__ = ("reader", "text", "body", "path", "source_link", "docx", "error", "file_hash")
+    __slots__ = ("reader", "text", "body", "path", "source_link", "docx", "error", "file_hash", "markings")
 
     def __init__(self):
         self.reader, self.text, self.body, self.path, self.source_link, self.docx, self.error, self.file_hash = \
             "none", None, None, None, None, None, None, None
+        self.markings = False
 
 
 def read_unit(unit: dict, inp: dict, nopos: str, withpos: str) -> UnitText:
@@ -1150,10 +1380,11 @@ def read_unit(unit: dict, inp: dict, nopos: str, withpos: str) -> UnitText:
             p = os.path.join(nopos, d, "word", unit["basename"] + ".docx")
             if os.path.isfile(p):
                 try:
-                    dx = read_docx(p)
+                    dx = read_docx(p, markings=d in MARKING_TEAMS)
                 except (zipfile.BadZipFile, OSError, ValueError) as ex:
                     ut.error = f"docx_unreadable:{type(ex).__name__}"
                     break
+                ut.markings = d in MARKING_TEAMS
                 ut.reader, ut.docx, ut.path, ut.source_link = "docx", dx, os.path.relpath(p, nopos), "fist_filename_docx"
                 ut.body, ut.text = docx_text(dx, with_footnotes=False), docx_text(dx)
                 return ut
@@ -1190,7 +1421,8 @@ def build(inp: dict, nopos: str, withpos: str, today_files: str, approvals: dict
                     if text:
                         dx = ut.docx
                         res = {"hash": sha(text), "path": os.path.relpath(p, nopos),
-                               "d": diff_texts(text, ut.body, ut.text, dx.footnotes if dx else [], dx.headers if dx else [])}
+                               "d": diff_texts(text, ut.body, ut.text, dx.footnotes if dx else [], dx.headers if dx else []),
+                               "team": team_letters(text, ut.text) if ut.markings else None}
                     break
         yard_cache[key] = res
         return res
@@ -1210,7 +1442,7 @@ def build(inp: dict, nopos: str, withpos: str, today_files: str, approvals: dict
                 "lost_today_lines": None, "text_replaced": 0, "xml_verified": 0, "text_accepted": 0,
                 "acceptance_basis": None, "gate2_publishable": None, "gate2_hold_reasons": None,
                 "publishable_text": 0, "structure": None, "visibility_hold": 0, "hold_reason": None,
-                "yardstick": None, "yardstick_hash": None}
+                "yardstick": None, "yardstick_hash": None, "team_letters": None}
         base.update(kw)
         return base
 
@@ -1280,6 +1512,12 @@ def build(inp: dict, nopos: str, withpos: str, today_files: str, approvals: dict
             approval = approvals.get((akey, out["today_hash"], new_hash))
             if approval:
                 break
+        # a marking team's Word text against today's PDF text: by letters, not lines (the owner's ruling of 2026-10-28)
+        team = team_letters(content, new_text) if ut.markings and not verify_only else None
+        if team is not None:
+            out["team_letters"] = _j(team)
+            C["team_markings.rows"] += 1
+            C[f"team_markings.letters_{'passed' if team['passed'] else 'failed'}"] += 1
         if new_text.strip() == content.strip():
             status = "identical"
         elif d["held_blocks"] == 0 and verify_only:
@@ -1289,14 +1527,17 @@ def build(inp: dict, nopos: str, withpos: str, today_files: str, approvals: dict
         elif approval:
             status = "verified" if verify_only else "approved"
             out["acceptance_basis"] = "approval:" + str(approval.get("by", ""))
+        elif team is not None and team["passed"]:
+            status = "approved"
+            out["acceptance_basis"] = TEAM_RULE_BASIS
         else:
             status = "held"
         out["status"] = status
         out["text_accepted"] = int(status in ("identical", "accepted", "verified", "approved"))
         out["text_replaced"] = int(status in ("accepted", "approved"))
         if status == "held":
-            out["hold_reason"] = "unclassified_diff" if d["held_blocks"] else \
-                "needs_reading:" + ",".join(sorted(set(d["classes"]) & VERIFY_ONLY_CLASSES))
+            out["hold_reason"] = "team_markings_letters" if team is not None else "unclassified_diff" if d["held_blocks"] \
+                else "needs_reading:" + ",".join(sorted(set(d["classes"]) & VERIFY_ONLY_CLASSES))
         # gate-2 holds that are about today's XML text are lifted when the own record's text agrees
         holds = json.loads(r["hold_reasons"]) if r["hold_reasons"] else []
         xml_holds = [h for h in holds if h.startswith("xml_")]
@@ -1309,7 +1550,8 @@ def build(inp: dict, nopos: str, withpos: str, today_files: str, approvals: dict
         text_rows.append(out)
         for i, b in enumerate(d["blocks"]):
             disp = b["disposition"]
-            if approval and status in ("approved", "verified") and disp in ("held", "verify_only"):
+            if (approval or out["acceptance_basis"] == TEAM_RULE_BASIS) and status in ("approved", "verified") \
+                    and disp in ("held", "verify_only"):
                 disp = "approved"
             line_diffs.append({"row_key": out["row_key"], "block_no": i, "op": b["op"], "today_from": b["today_from"],
                                "today_to": b["today_to"], "new_from": b["new_from"], "new_to": b["new_to"],
@@ -1363,6 +1605,11 @@ def build(inp: dict, nopos: str, withpos: str, today_files: str, approvals: dict
                     # a verify-only agreement (letters and digits equal under typed sigla) never replaces a text,
                     # but a new row has none to replace: it confirms the rendering as it verifies an XML row
                     out["status"] = "checked" if yd["held_blocks"] == 0 else "pdf_held"
+                    if yard["team"] is not None:  # a marking team's file: by letters (the owner's ruling of 2026-10-28)
+                        out["team_letters"] = _j(yard["team"])
+                        C["team_markings.new_rows"] += 1
+                        if out["status"] == "pdf_held" and yard["team"]["passed"]:
+                            out["status"], out["acceptance_basis"] = "checked", TEAM_RULE_BASIS
                 else:
                     out["status"] = "no_comparator"
                 # acceptance under the policy: folder-B text by rule; a DOCX when its rendering is clean against
@@ -1379,14 +1626,17 @@ def build(inp: dict, nopos: str, withpos: str, today_files: str, approvals: dict
                     out["hold_reason"] = "blank_text"
                 else:
                     out["text_accepted"] = 1
-                    out["acceptance_basis"] = "rule:docx_checked_against_pdf" if yard else "rule:docx_no_pdf_text"
+                    out["acceptance_basis"] = out["acceptance_basis"] or (
+                        "rule:docx_checked_against_pdf" if yard else "rule:docx_no_pdf_text")
             text_rows.append(out)
             if yard:
+                team_ok = out["acceptance_basis"] == TEAM_RULE_BASIS
                 for i, b in enumerate(yard["d"]["blocks"]):
+                    disp = "approved" if team_ok and b["disposition"] in ("held", "verify_only") else b["disposition"]
                     line_diffs.append({"row_key": out["row_key"], "block_no": i, "op": b["op"], "today_from": b["today_from"],
                                        "today_to": b["today_to"], "new_from": b["new_from"], "new_to": b["new_to"],
                                        "today_text": b["today_text"], "new_text": b["new_text"], "classes": _j(b["classes"]),
-                                       "disposition": b["disposition"]})
+                                       "disposition": disp})
             C[f"status.{out['status']}"] += 1
             C[f"new.route.{ut.reader}"] += 1
             C["rows.new"] += 1
@@ -1607,10 +1857,25 @@ def run_checks(text_rows: list, line_diffs: list, C: dict, expectations: dict, d
     add("T05_new_rows_need_acceptance", not bad, "0 new rows accepted without a basis", f"{len(bad)}",
         "a row without a comparator is accepted only by a declared rule or an approval")
     bad = [o["row_key"] for o in text_rows if not o["today_id"] and o["text_accepted"] and o["reader"] == "docx"
+           and o["acceptance_basis"] != TEAM_RULE_BASIS
            and (o["status"] == "pdf_held" or (o["yardstick"] and any(b["disposition"] not in ("accepted", "verify_only")
                                                                       for b in by_key[o["row_key"]])))]
     add("T09_accepted_new_docx_rows_clean_against_pdf", not bad, "0", f"{len(bad)}",
-        "an accepted new DOCX row with a PDF yardstick has no held block against it (the owner's ruling of 2026-10-26)")
+        "an accepted new DOCX row with a PDF yardstick has no held block against it (the owner's ruling of 2026-10-26); "
+        "a marking team's row is checked by T15")
+    bad = []
+    for o in text_rows:
+        team = json.loads(o["team_letters"]) if o.get("team_letters") else None
+        in_team = (o["source_path"] or "").replace("\\", "/").split("/")[0] in MARKING_TEAMS
+        if team is not None and not in_team:
+            bad.append(o["row_key"])  # marks read outside the marking teams
+        if o["acceptance_basis"] == TEAM_RULE_BASIS and not (
+                team and team["found"] >= TEAM_LETTERS_MIN and team["excess"] <= TEAM_EXCESS_MAX and team["pdf_letters"]):
+            bad.append(o["row_key"])
+    add("T15_team_markings_letters", not bad, "0", f"{len(bad)}",
+        f"a marking team's row is accepted on its letters only when >= {TEAM_LETTERS_MIN:.0%} of the letters today's PDF "
+        f"text shows are in the Word text and its letters beyond the PDF's and its boxes are <= {TEAM_EXCESS_MAX:.0%}; "
+        "no other team's file is read with marks (the owner's ruling of 2026-10-28)")
     bad = [o["row_key"] for o in text_rows if o["today_text_source"] == "xml" and o["text_replaced"] and (o["lost_today_lines"] or 0) > 0]
     add("T06_no_xml_regression", not bad, "0 replaced XML rows losing a line", f"{len(bad)}",
         "a replaced XML row keeps every line of today's text")

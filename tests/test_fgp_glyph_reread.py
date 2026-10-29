@@ -58,6 +58,86 @@ def test_typefaces_keeps_every_family_that_ties_in_any_order():
     assert g.typefaces([[], []]) == frozenset()
 
 
+# --- name rule and tie rule (owner, 2026-10-28) -----------------------------------------------------------------------
+
+def _certify(monkeypatch, glyphs, names):
+    """certify_font over made-up outlines: ``glyphs`` = {code: (outline, [(reference file, code point)])}."""
+    outlines = {f"g{code}": o for code, (o, _) in glyphs.items()}
+    monkeypatch.setattr(g, "canon_outline", lambda tt, gname: outlines.get(gname))
+    ref = {"index": {o: hits for o, hits in glyphs.values() if hits}}
+    return g.certify_font(object(), {code: f"g{code}" for code in glyphs}, sorted(glyphs), names, ref)
+
+
+def test_name_rule_reads_an_unmatched_glyph_by_its_name(monkeypatch):
+    out = _certify(monkeypatch, {1: ((("a",),), []), 2: ((("b",),), []), 3: ((("c",),), []), 4: ((("d",),), [])},
+                   {1: "memfinal", 2: "vavholam", 3: "uniF020", 4: "finalkafwithsheva"})
+    assert (out[1]["status"], out[1]["text"], out[1]["form"]) == ("certified by name", "ם", "ם")
+    # a pointed letter: the presentation form in the copy, letter + point in the text
+    assert (out[2]["status"], out[2]["text"], out[2]["form"]) == ("certified by name", "וֹ", "וֹ")
+    assert (out[3]["status"], out[3]["text"]) == ("unmatched", None)  # a private-use reading is never applied
+    assert (out[4]["status"], out[4]["text"]) == ("unmatched", None)  # no one-character form
+
+
+def test_name_rule_needs_the_name_to_agree_with_any_shape_the_outline_matches(monkeypatch):
+    out = _certify(monkeypatch, {1: ((("a",),), [("david.ttf", 0x05D0)]),        # three David glyphs make the
+                                 4: ((("e",),), [("david.ttf", 0x05D1)]),        # typeface David
+                                 5: ((("f",),), [("david.ttf", 0x05D2)]),
+                                 2: ((("b",),), [("times.ttf", 0x2E)]),         # a Times period, named period
+                                 3: ((("c",),), [("times.ttf", 0x6F)])},        # a Times "o", named samekh
+                   {1: "alef", 2: "period", 3: "samekh"})
+    assert out[1]["status"] == "certified"
+    assert (out[2]["status"], out[2]["text"]) == ("certified by name", ".")
+    assert (out[3]["status"], out[3]["text"]) == ("other face", None)
+
+
+@pytest.mark.parametrize("interps, plain", [
+    (["ָ", "ׇ"], "ָ"), (["ע", "ﬠ"], "ע"), (["נ", ""], "נ"),
+    (["׆", "נ", ""], "נ"),
+    (["ה", "ח"], None),              # two plain letters
+    (["ע", "e"], None),              # a reading that is no variant of the letter
+    (["e", "е"], None),              # no Hebrew at all
+    (["ּ"], None),                   # nothing tied
+])
+def test_tie_rule_reads_the_plain_letter_beside_only_its_variants(interps, plain):
+    assert g.plain_of(interps) == plain
+
+
+def test_tie_rule_in_certification(monkeypatch):
+    out = _certify(monkeypatch, {1: ((("a",),), [("david.ttf", 0x05D0)]),
+                                 2: ((("q",),), [("david.ttf", 0x05B8), ("david.ttf", 0x05C7)]),
+                                 3: ((("h",),), [("david.ttf", 0x05D4), ("david.ttf", 0x05D7)])},
+                   {1: "alef"})
+    assert (out[2]["status"], out[2]["text"], out[2]["form"]) == ("certified by plain form", "ָ", "ָ")
+    assert (out[3]["status"], out[3]["text"]) == ("ambiguous", None)
+
+
+def test_a_name_reading_is_withdrawn_where_the_shape_is_certified_as_something_else():
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE decisions (sha256, objid, code, status, text, form, outline)")
+    db.executemany("INSERT INTO decisions VALUES (?,?,?,?,?,?,?)", [
+        ("a", 1, 1, "certified by name", "ם", "ם", "X"),
+        ("b", 1, 1, "certified by shape", "ן", "ן", "X"),          # the same outline certified as another letter
+        ("a", 1, 2, "certified by name", "ֹ", "ֹ", "Y"),
+        ("c", 1, 2, "certified by name", "ׂ", "ׂ", "Y"),           # two names for one outline: each kept
+        ("a", 1, 3, "certified by name", "ס", "ס", "Z"),
+        ("d", 1, 3, "certified", "ס", "ס", "Z"),                   # agrees: kept
+    ])
+    assert g.withdraw_contradicted_names(db) == 1
+    assert db.execute("SELECT status, text FROM decisions WHERE sha256='a' AND code=1").fetchone() == (
+        "name contradicts a shape certified elsewhere", None)
+    assert db.execute("SELECT count(*) FROM decisions WHERE status = 'certified by name'").fetchone()[0] == 3
+
+
+def test_font_maps_applies_a_name_reading_but_never_over_the_producers_map():
+    db = _decisions([
+        ("s", 9, 4, None, "certified by name", "ם", 0, None, None, "ם"),        # no map: added
+        ("s", 9, 5, None, "certified by plain form", "ָ", 0, None, None, "ָ"),  # tie rule: added
+        ("s", 7, 6, None, "certified by name", "ן", 1, "ך", 1, "ן"),             # the map's own entry kept, no conflict
+    ])
+    maps, conflicts = g.font_maps("s", db)
+    assert maps == {9: {4: "ם", 5: "ָ"}} and conflicts == []
+
+
 # --- ToUnicode reading and writing -----------------------------------------------------------------------------------
 
 def test_parse_tounicode_reads_bfchar_and_both_bfrange_forms():
@@ -246,3 +326,10 @@ def test_reset_restores_the_paths_and_environment_of_import(tmp_path, monkeypatc
     assert (g.WORK, g.PDF_ROOT, os.environ.get("FGP_GLYPH_REREAD_WORK"),
             os.environ.get("FGP_GLYPH_REREAD_PDF_ROOT")) == before
     assert g._INPUTS is None and g.CENSUS_DB == os.path.join(g.WORK, "census.db")
+
+
+def test_approved_exception_patterns():
+    # owner, 2026-10-28: a change of direction ships as a recorded exception; digits or Latin reordered stays held
+    assert "other characters moved: the row changed direction" in g.APPROVED_PATTERNS
+    assert "other characters moved: digits or Latin reordered" not in g.APPROVED_PATTERNS
+    assert not any(p.startswith("C3") or p.startswith("C1") for p in g.APPROVED_PATTERNS)

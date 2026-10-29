@@ -5,7 +5,8 @@ Status: **plan, revision 3, for owner approval** (2026-10-27). Revision 2 folded
 GO WITH CHANGES, no blockers, no further plan round). Release v9.11.0 waits for this work. **Steps 1-6 done
 2026-10-27** (runs, the owner's exceptions and rulings, and the gate integration recorded in
 FGP_TEXT_PIPELINE_RULES.md section 9). The candidate is rebuilt (1,435 rows re-read, sha256 cdcc2268...). Step 7 done the same day (checks in both apps,
-docs, Codex review in two rounds, fixes folded in); the release resumes on the owner's word.
+docs, Codex review in two rounds, fixes folded in); the release resumes on the owner's word. **2026-10-28**: the owner
+ruled the name rule and the tie rule in (step 3, amended); the candidate is rebuilt through gates 3-4 (rules §9).
 
 ## The problem, measured
 
@@ -89,6 +90,10 @@ keyed by PDF hash, but keep their own decisions.
    (David, Narkisim, Frank Ruehl, Miriam, Times New Roman, Arial ...) are pinned by file hash. Near-misses such as row
    21159's shin dot go to a recorded review by eye, never a similarity threshold. A glyph with no name is decoded only
    by a certified match.
+   *Amended by the owner's ruling of 2026-10-28* (rules §9): where the outline matches no reference glyph of its
+   typeface (the typeface is not installed here), the name decides, after every such shape was checked by eye on a
+   review page and with no private-use reading; and a plain Hebrew letter or point tied with only its variant forms
+   reads as the plain one.
 4. **Occurrence tracing harness.** The re-read script calls the extractor through a tracing wrapper inside its own
    process (no change to `shared/`): each glyph the PDF draws gets an identity (PDF hash, page, content-stream position,
    font resource, byte, glyph id), and the wrapper records which identities the extractor emits, in what order, for U

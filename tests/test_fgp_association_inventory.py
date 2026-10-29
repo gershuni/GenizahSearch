@@ -229,3 +229,16 @@ def test_today_basename_strips_only_the_export_suffix():
     assert inv.today_kind("x_translate_heb.pdf") == "translation"
     assert inv.today_kind("x_trans.pdf") == "transcription"
     assert inv.today_kind("x.pdf") is None
+
+
+def test_a_gate4_candidate_is_refused_as_todays_sidecar(tmp_path):
+    # 2026-10-28: after the local swap, gates 3-4 read the candidate as "today" and held 6,481 rows on C1
+    today, cand = tmp_path / "today.db", tmp_path / "candidate.db"
+    for path, extra in ((today, ""), (cand, ", text_provenance TEXT")):
+        c = sqlite3.connect(path)
+        c.execute(f"CREATE TABLE fgp_transcriptions (id INTEGER, content TEXT, rel_path TEXT{extra})")
+        c.commit()
+        c.close()
+    inv.refuse_candidate_as_today(inv.ro(str(today)), str(today))
+    with pytest.raises(SystemExit, match="gate-4 candidate"):
+        inv.refuse_candidate_as_today(inv.ro(str(cand)), str(cand))
