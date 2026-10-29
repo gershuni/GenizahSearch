@@ -34,8 +34,11 @@
   Then: the decision is checked on the cache entry the images and links come from (`cudl_identity.fresh_external_entry`,
   `entry_decision_stale`) -- a second read could return a newer entry whose current decision vouched for the first
   read's old images, which the memory cache and the Puzzle's disk copy then kept under the new item; the memory and
-  disk caches keep only what a final decision produced, the disk name carries the revision, and `get_thumbnail` writes
-  onto the latest entry instead of putting back the one it read.
+  disk caches keep only what a final decision produced, the disk name carries the revision, and `get_thumbnail` sets
+  its fields on the entry current at the moment of writing, in one locked step (`_BoundedLRUCache.merge_fields`), so
+  it cannot put an older entry over a published enrichment. An image made under a provisional decision is sent
+  `Cache-Control: no-store` by both the Cambridge and the Puzzle image routes (the route wrapper keeps a route's own
+  `no-store`).
 
 ### Tests and tools
 - `tests/test_cudl_identity.py` (fixture table built with the importer's own key; real CUDL labels from both sides of

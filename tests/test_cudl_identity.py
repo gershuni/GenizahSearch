@@ -546,3 +546,97 @@ def test_the_image_routes_never_serve_or_keep_the_old_item_under_the_new_decisio
                                for name, body in on_disk.items()), on_disk.keys()
     finally:
         pis.reset_puzzle_image_service()
+
+
+# --- review of 7b17f2c: thumbnail writes and provisional images ---------------------------
+
+def test_a_thumbnail_write_never_puts_back_an_entry_replaced_meanwhile():
+    """get_thumbnail sets its fields on the entry current at the moment of writing, in one
+    locked step. Modelled: an enrichment lands between its read and its write."""
+    from shared.metadata_manager import _BoundedLRUCache
+
+    old, new = _entries()
+
+    class _EnrichmentLandsBeforeTheNextWrite(_BoundedLRUCache):
+        pending = None
+
+        def get(self, key, default=None):
+            value = super().get(key, default)
+            if value is old:
+                self.pending = (key, new)
+            return value
+
+        def _land(self):
+            if self.pending:
+                key, entry = self.pending
+                self.pending = None
+                super().__setitem__(key, entry)
+
+        def __setitem__(self, key, value):
+            self._land()
+            super().__setitem__(key, value)
+
+        def merge_fields(self, key, fields, default=None):
+            self._land()
+            return super().merge_fields(key, fields, default)
+
+    mm = MetadataManager.__new__(MetadataManager)
+    mm.nli_cache = _EnrichmentLandsBeforeTheNextWrite(data={"S": dict(old, fl_ids=["FL1"])})
+    old = mm.nli_cache.get("S")  # the cached object itself (the subclass keys on identity)
+    with patch.object(MetadataManager, "_resolve_thumbnail", lambda self, fl_ids, size=320: "thumb:1"):
+        assert mm.get_thumbnail("S") == "thumb:1"
+    entry = mm.nli_cache.get("S")
+    assert entry["cambridge_resolution"]["label"] == _NEW_ITEM          # the enrichment stands
+    assert _NEW_ITEM in entry["images_ext"][0]["url"]
+    assert entry["thumb_url"] == "thumb:1" and entry["thumb_checked"] is True
+
+
+class _ProvisionalManager:
+    """A record whose Cambridge decision is not final yet (catalogue still loading)."""
+    supports_cambridge_decision = True
+
+    def __init__(self, sid):
+        _old, new = _entries()
+        self.entry = dict(new, cambridge_resolution={"revision": None, "status": "unavailable"})
+        self.nli_cache = {sid: self.entry}
+
+    def enrich_metadata(self, sid):
+        return self.entry
+
+
+def test_an_image_made_under_a_provisional_decision_is_kept_by_no_cache(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    import shared.puzzle_image_service as pis
+    from web.api import init_api_routes
+    from web.state import state
+
+    monkeypatch.setattr(pis, "get_with_checked_redirects", lambda url, **_kw: SimpleNamespace(
+        status_code=200, headers={"Content-Type": "image/jpeg"}, content=b"jpeg".ljust(200, b"\0")))
+    pis.reset_puzzle_image_service()
+    pis.get_puzzle_image_service(cache_dir=tmp_path / "puzzle")
+    try:
+        sid = "990051109460205171"
+        app = FastAPI()
+        init_api_routes(app_override=app)
+        client = TestClient(app)
+
+        monkeypatch.setattr(state, "meta_mgr", _ProvisionalManager(sid))
+        got = client.get(f"/api/cambridge_image/{sid}", params={"page": 0})
+        assert got.status_code == 200 and got.headers["cache-control"] == "no-store"
+        got = client.get("/api/puzzle_ext_image", params={
+            "sys_id": sid, "page": 0, "provider": "cambridge", "processed": "false"})
+        assert got.status_code == 200 and got.headers["cache-control"] == "no-store"
+        assert not [p for p in (tmp_path / "puzzle").rglob("*") if p.is_file()]
+
+        final = _RacingManager(sid)
+        final.nli_cache = {sid: final.new}
+        monkeypatch.setattr(state, "meta_mgr", final)
+        # Same page: the provisional answer was not kept in memory either.
+        got = client.get(f"/api/cambridge_image/{sid}", params={"page": 0})
+        assert got.status_code == 200 and "max-age" in got.headers["cache-control"]
+    finally:
+        pis.reset_puzzle_image_service()

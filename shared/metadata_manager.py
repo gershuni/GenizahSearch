@@ -201,6 +201,24 @@ class _BoundedLRUCache:
             self._data.move_to_end(key)
             return self._data[key]
 
+    def merge_fields(self, key, fields, default=None):
+        """Set ``fields`` on the entry stored under ``key`` NOW, as one locked step.
+
+        A copy of the current entry (or of ``default`` when there is none) gets the
+        fields and replaces it. A caller that read an entry, waited on the network and
+        then wrote its copy back could put an older entry over one published meanwhile
+        (enrich_metadata publishes whole entries); here the read and the write cannot be
+        separated by another thread's write.
+        """
+        with self._lock:
+            current = self._data.get(key)
+            entry = dict(current if current is not None else (default or {}))
+            entry.update(fields)
+            self._data[key] = entry
+            self._data.move_to_end(key)
+            self._evict_locked()
+            return entry
+
     def items(self):
         with self._lock:
             return list(self._data.items())
@@ -1736,18 +1754,20 @@ class MetadataManager:
 
         thumb_url = self._resolve_thumbnail(fl_ids, size=size)
 
-        # Write onto the entry as it is NOW, as a copy. enrich_metadata publishes whole
-        # entries, so the one read above may have been replaced during the network calls;
-        # putting it back would undo that enrichment and its Cambridge decision.
-        latest = self.nli_cache.get(system_id)
-        if latest is not None:
-            meta = dict(latest)
-        elif meta is None:
-            meta = {'shelfmark': 'Unknown', 'title': '', 'desc': '', 'fl_ids': fl_ids}
-        meta['fl_ids'] = fl_ids
-        meta['thumb_url'] = thumb_url
-        meta['thumb_checked'] = True
-        self.nli_cache[system_id] = meta
+        # Only the thumbnail fields are written, onto the entry as it is at the moment of
+        # writing, in one locked step (_BoundedLRUCache.merge_fields). enrich_metadata
+        # publishes whole entries: putting back the entry read above -- or a copy taken
+        # one step before the write -- could undo an enrichment published meanwhile, and
+        # with it the record's Cambridge decision and images.
+        fields = {'fl_ids': fl_ids, 'thumb_url': thumb_url, 'thumb_checked': True}
+        base = meta if meta is not None else {'shelfmark': 'Unknown', 'title': '', 'desc': ''}
+        merge = getattr(self.nli_cache, 'merge_fields', None)
+        if callable(merge):
+            merge(system_id, fields, default=base)
+        else:  # a plain dict (tests): one thread
+            entry = dict(self.nli_cache.get(system_id) or base)
+            entry.update(fields)
+            self.nli_cache[system_id] = entry
         return thumb_url
 
     def batch_fetch_shelfmarks(self, system_ids, progress_callback=None, use_network=True, check_cancel=None):

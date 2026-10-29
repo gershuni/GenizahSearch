@@ -223,7 +223,8 @@ def _image_cache_headers(route):
     Image bytes (200, ``image/*``) are kept ``IMAGE_HTTP_MAX_AGE`` seconds. Everything
     else -- a 404, "no image", an error, the Oxford redirect to the library -- is
     ``no-store``, so a passing outage is never kept. A 204 (synthetic sys_id) is left
-    as it was.
+    as it was. A route's own ``no-store`` stands: an image made under a provisional
+    Cambridge decision (shared/cudl_identity.py) must not be kept by the browser either.
     """
     @functools.wraps(route)
     def _wrapped(*args, **kwargs):
@@ -231,7 +232,8 @@ def _image_cache_headers(route):
         if not isinstance(response, Response) or response.status_code == 204:
             return response
         is_image = response.headers.get('content-type', '').startswith('image/')
-        if response.status_code == 200 and is_image and IMAGE_HTTP_MAX_AGE:
+        route_no_store = 'no-store' in (response.headers.get('cache-control') or '').lower()
+        if response.status_code == 200 and is_image and IMAGE_HTTP_MAX_AGE and not route_no_store:
             response.headers['Cache-Control'] = f'public, max-age={IMAGE_HTTP_MAX_AGE}'
         else:
             response.headers['Cache-Control'] = 'no-store'
@@ -1245,14 +1247,19 @@ def init_api_routes(app_override=None):
 
         width = max(100, min(int(width or 2000), 2000))
         cache_key = (_CAMBRIDGE_CACHE_VERSION, sys_id, page, width)
+        cacheable = True  # a memory-cache hit was made under a final decision; set below
 
         def _base_headers():
             """Resolver-version metadata on every response (success, fallback,
-            legacy). ETag lets clients revalidate after a deploy."""
-            return {
+            legacy). ETag lets clients revalidate after a deploy. Under a provisional
+            decision, no-store: the browser must not keep what may change."""
+            headers = {
                 "ETag": f'"{sys_id}-p{page}-w{width}-{_CAMBRIDGE_ETAG_VERSION}"',
                 "X-Image-Resolver-Version": str(_CAMBRIDGE_CACHE_VERSION),
             }
+            if not cacheable:
+                headers["Cache-Control"] = "no-store"
+            return headers
 
         cached_entry = _cambridge_image_cache.get(cache_key)
         if cached_entry is not None:
@@ -2102,8 +2109,9 @@ def init_api_routes(app_override=None):
                 pass
 
         content_type = 'image/png' if result_bytes[:4] == b'\x89PNG' else 'image/jpeg'
+        # A provisional Cambridge decision is kept nowhere -- not on disk, not by the browser.
         return Response(content=result_bytes, media_type=content_type,
-                        headers={"Cache-Control": "public, max-age=3600"})
+                        headers={"Cache-Control": "public, max-age=3600" if disk_cache else "no-store"})
 
     @target_app.get('/api/puzzle_folios/{sys_id}')
     def puzzle_folios(sys_id: str):
