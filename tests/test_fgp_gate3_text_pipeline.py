@@ -384,6 +384,8 @@ def _marked_docx(path, paragraphs, styles=""):
             rpr += "<w:strike/>"
         if props.get("superscript"):
             rpr += '<w:vertAlign w:val="superscript"/>'
+        if props.get("rtl"):
+            rpr += "<w:rtl/>"
         br ="<w:br/>" if props.get("br") else ""
         return f'<w:r><w:rPr>{rpr}</w:rPr>{br}<w:t xml:space="preserve">{escape(text)}</w:t></w:r>'
 
@@ -460,6 +462,24 @@ def test_marks_on_one_span_nest_in_one_order(tmp_path, props, expect):
     text = _marked(tmp_path, [[("ב", {}), ("א", props), ("ג", {})]])
     assert text == "ב" + expect.format(do=g3.DELETED_OPEN, dc=g3.DELETED_CLOSE, io=g3.INTERLINEAR_OPEN,
                                        ic=g3.INTERLINEAR_CLOSE, so=g3.SET_APART_OPEN, sc=g3.SET_APART_CLOSE) + "ג"
+
+
+def test_a_latin_shelfmark_typed_right_to_left_keeps_words_direction(tmp_path):
+    """Word shows B.M. Or. 6581,2 [1154,2] + TS 12.183 because the digits, spaces and dots sit in right-to-left runs;
+    the plain characters alone read .Or .M.B. An RLM at each edge of a stretch of such runs keeps Word's display."""
+    rtl = {"rtl": True}
+    text = _marked(tmp_path, [
+        [("12.183 ", rtl), ("TS", {}), (" + [1154,2] 6581,2 .", rtl), ("Or", {}), (" .", rtl), ("M", {}), (".", rtl),
+         ("B", {}), (" ", rtl)],
+        [("מהדורת", rtl), (" האקדמיה: 52", rtl), ("7", rtl), (", 10 ואילך", rtl)],    # Hebrew only: nothing added
+    ])
+    m = g3.RLM
+    first, second = text.split("\n")
+    assert first == f"{m}12.183 {m}TS{m} + [1154,2] 6581,2 .{m}Or{m} .{m}M{m}.{m}B{m}", ascii(first)
+    assert first.replace(m, "") == "12.183 TS + [1154,2] 6581,2 .Or .M.B"   # the trailing space still goes
+    assert second == "מהדורת האקדמיה: 527, 10 ואילך"
+    plain = _marked(tmp_path, [[("12.183 ", rtl), ("TS", {})]], markings=False)
+    assert plain == "12.183 TS"                                                      # other teams: unchanged
 
 
 def test_marks_come_from_a_run_style_and_never_cross_a_line(tmp_path):

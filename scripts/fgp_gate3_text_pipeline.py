@@ -166,7 +166,10 @@ VERIFY_ONLY_CLASSES = frozenset(("sigla_rendering", "extra_line"))
 # deleted with strikethrough. Read with those marks, its Word text replaces today's PDF text by the letter check below,
 # since the PDF lost the doubtful letters (drawn as strokes) and garbles the rest. The owner's answers of the same day:
 # superscript letters are interlinear additions, written \אומרין/ (Leiden); the Rashi font marks something the owner
-# cannot name, so its letters are set apart by a pair no FGP text uses, saying nothing more.
+# cannot name, so its letters are set apart by a pair no FGP text uses, saying nothing more. 2026-10-29: the team typed
+# Latin shelfmarks in right-to-left mode -- digits, spaces and dots in runs Word marks right-to-left (w:rtl) between
+# left-to-right words -- which Word shows as B.M. Or. 6581,2 and plain text as .Or .M.B; such a stretch is kept
+# right-to-left by an RLM at each edge, only in a paragraph that mixes it with a Latin word.
 MARKING_TEAMS = frozenset({"1350001"})
 COMPLETION_FONTS = ("guttman yad",)
 SET_APART_FONTS = ("rashi",)
@@ -174,11 +177,15 @@ DOUBTFUL_MARK = "\u05af"            # HEBREW MARK MASORA CIRCLE, after the lette
 DELETED_OPEN, DELETED_CLOSE = "\u27e6", "\u27e7"
 INTERLINEAR_OPEN, INTERLINEAR_CLOSE = "\\", "/"
 SET_APART_OPEN, SET_APART_CLOSE = "\u2e24", "\u2e25"   # BOTTOM LEFT / RIGHT HALF BRACKET
+RLM = "\u200f"                      # RIGHT-TO-LEFT MARK, at the edges of a right-to-left run
+# ws() drops every direction mark a file carries; the reader writes its own as this stand-in, which docx_text
+# turns into the RLM after ws() (the line comparisons run ws() again, so they never see it)
+_RLM_KEEP = "\ue00c"
 # private-use sentinels around a marked run while a paragraph is read; never left in a text
 _MARK_SENTINELS = {"completion": ("\ue000", "\ue001"), "deleted": ("\ue002", "\ue003"),
                    "doubtful": ("\ue004", "\ue005"), "interlinear": ("\ue006", "\ue007"),
-                   "set_apart": ("\ue008", "\ue009")}
-_SENTINEL_RE = re.compile("[\ue000-\ue009]")
+                   "set_apart": ("\ue008", "\ue009"), "rtl_run": ("\ue00a", "\ue00b")}
+_SENTINEL_RE = re.compile("[\ue000-\ue00b]")
 TEAM_LETTERS_MIN = 0.99   # share of the letters today's PDF text shows that the Word text must have
 TEAM_EXCESS_MAX = 0.10    # Word letters beyond the PDF's letters and boxes, as a share of the Word letters
 TEAM_RULE_BASIS = "rule:team_markings_letters"
@@ -461,6 +468,9 @@ def _run_format(rpr) -> dict:
     va = rpr.find(W + "vertAlign")
     if va is not None:
         out["superscript"] = _attr(va, "val") == "superscript"
+    rtl = rpr.find(W + "rtl")
+    if rtl is not None:
+        out["rtl"] = _on(rtl)
     return out
 
 
@@ -503,6 +513,8 @@ def _run_marks(rpr, s) -> list:
         marks.append("doubtful")
     if fmt.get("superscript"):
         marks.append("interlinear")
+    if fmt.get("rtl"):
+        marks.append("rtl_run")
     return marks
 
 
@@ -543,7 +555,7 @@ def apply_markings(text: str, st=None) -> str:
     import unicodedata
     if not _SENTINEL_RE.search(text):
         return text
-    kinds = ("completion", "deleted", "doubtful", "interlinear", "set_apart")
+    kinds = ("completion", "deleted", "doubtful", "interlinear", "set_apart", "rtl_run")
     nest = ("deleted", "interlinear", "set_apart", "completion")   # outer to inner
     opens = {v[0]: kd for kd, v in _MARK_SENTINELS.items()}
     closes = {v[1]: kd for kd, v in _MARK_SENTINELS.items()}
@@ -587,6 +599,23 @@ def apply_markings(text: str, st=None) -> str:
                     st[f"{kind}_spans_without_letters"] += 1
                 continue
             wrap(kind, a, e, opening, closing)
+    # Word's run direction: in a paragraph that mixes right-to-left runs with a Latin word, an RLM at each edge of
+    # every stretch of right-to-left runs (a line holds it), so its spaces, digits and dots keep the side Word gives them
+    k_rtl = 1 + kinds.index("rtl_run")
+    if any(c[k_rtl] for c in chars) and any(not c[k_rtl] and c[0].isascii() and c[0].isalpha() for c in chars):
+        i = 0
+        while i < n:
+            if not chars[i][k_rtl] or chars[i][0] == "\n":
+                i += 1
+                continue
+            j = i
+            while j < n and chars[j][k_rtl] and chars[j][0] != "\n":
+                j += 1
+            before[i].append(((2, -1), _RLM_KEEP))      # outside every bracket that opens here
+            before[j].append(((1, 99), _RLM_KEEP))      # outside every bracket that closes here
+            if st is not None:
+                st["rtl_runs_marked"] += 1
+            i = j
     k_doubtful = 1 + kinds.index("doubtful")
     for i, c in enumerate(chars):
         if c[k_doubtful] and is_letter(c[0]):
@@ -851,12 +880,33 @@ def read_docx(path: str, markings: bool = False) -> DocxText:
     return d
 
 
+def _ws_keeping_rlm(s: str) -> str:
+    """ws() with the reader's RLM stand-ins kept: the text is exactly ws() of the line without them, and each
+    stand-in goes back where it stood (a space ws() would have dropped is dropped)."""
+    t = ws(s)
+    if _RLM_KEEP not in t:
+        return t
+    target = ws(s.replace(_RLM_KEEP, ""))
+    out, j = [], 0
+    for c in t:
+        if c == _RLM_KEEP:
+            out.append(c)
+        elif j < len(target) and c == target[j]:
+            out.append(c)
+            j += 1
+        elif c != " ":
+            return target  # cannot align: the text without the marks
+    if j != len(target) or not target:
+        return target
+    return re.sub(_RLM_KEEP + "{2,}", _RLM_KEEP, "".join(out))  # marks a dropped space had separated: one is enough
+
+
 def docx_text(d: DocxText, with_footnotes: bool = True) -> str:
     """The published form: body lines (columns separated by one blank line), a blank line, then
     the footnotes as ``<n> <text>``."""
     out, blank = [], False
     for ln in d.lines:
-        t = ws(ln)
+        t = _ws_keeping_rlm(ln)
         if t:
             out.append(t)
             blank = False
@@ -867,8 +917,8 @@ def docx_text(d: DocxText, with_footnotes: bool = True) -> str:
         out.pop()
     body = "\n".join(out)
     if d.footnotes and with_footnotes:
-        body += FOOTNOTE_SEPARATOR + "\n".join(f"{n} {t}" for n, t in d.footnotes)
-    return body
+        body += FOOTNOTE_SEPARATOR + "\n".join(f"{n} {_ws_keeping_rlm(t)}" for n, t in d.footnotes)
+    return body.replace(_RLM_KEEP, RLM)
 
 
 # --------------------------------------------------------------------------- folder-B readers

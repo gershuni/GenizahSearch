@@ -4134,7 +4134,8 @@ glyphs carry no usable name or shape, and 5,509 in `original` rows held by decis
 Gate 3 now reads that team's Word files with completions in `[ ]`, each doubtful letter followed by U+05AF (`עבד֯`) and
 deleted letters in `⟦ ⟧`, and accepts a row when its letters agree with the PDF reading (T15). 176 candidate rows
 switch to the marked Word text and 6 new rows enter; superscript letters (interlinear additions) are written `\…/`
-and the Rashi font's letters set apart in `⸤ ⸥` (candidate `caeacabf…`, 59,062 rows; boxes 44,080 in 450 rows);
+and the Rashi font's letters set apart in `⸤ ⸥`, and Latin shelfmarks typed right-to-left keep Word's display
+(candidate `0afd5b06…`, 59,062 rows; boxes 44,080 in 450 rows);
 4 rows below the letter bar keep their PDF reading (6574, 18879, 21312, 43170).
 
 ## GS-277

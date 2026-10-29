@@ -25,8 +25,8 @@ website and the desktop installer (fgp_data/fgp_transcriptions.db, version 2.0.0
   FIST status is unresolved, a personal contact list and three other non-manuscript files, and smaller groups.
 - The homepage "Scholarly transcriptions" number becomes 33,050 (was 27,593): the PGP editions together with
   FGP's, now that FGP's own files add editions for more manuscripts.
-- Validation: gates 1-4 of docs/plans/FGP_SOURCE_FOLDERS_ASSESSMENT.md (gate 3 digest a6faccf2, 81 checks; gate 4
-  digest 838fda83, 86 checks with the declared expectations); scripts/check_fgp_sidecar.py,
+- Validation: gates 1-4 of docs/plans/FGP_SOURCE_FOLDERS_ASSESSMENT.md (gate 3 digest dc28650e, 81 checks; gate 4
+  digest 12ccd77a, 86 checks with the declared expectations); scripts/check_fgp_sidecar.py,
   scripts/deploy_fgp_sidecar.ps1 -Rows 59062.
 
 Also: the website opens the FGP or PGP edition of a page with no automatic transcription, and in the Joins Lab and
@@ -46,7 +46,7 @@ web deployed from `master-main`.
   recovered; against the Word texts the decoded letters agree 99.97%. Pointed letters are stored as letter plus points,
   Arabic as plain letters. Rows the checks cannot clear keep today's text with the vocabulary repair of the entry
   below (88 rows) or as they were. Rules: `docs/plans/FGP_TEXT_PIPELINE_RULES.md` §9; candidate sidecar rebuilt
-  (gate 3 `a6faccf2`, gate 4 `838fda83`, sha256 `caeacabf…`, 59,062 rows); gate 4 attaches a re-read only to the
+  (gate 3 `dc28650e`, gate 4 `12ccd77a`, sha256 `0afd5b06…`, 59,062 rows); gate 4 attaches a re-read only to the
   stored text and the PDF gate 3 read. The gates now read today's sidecar from `--fgp-db` and refuse a candidate
   passed as today's (`scripts/fgp_association_inventory.py::refuse_candidate_as_today`).
 
@@ -71,6 +71,9 @@ web deployed from `master-main`.
   letters in the Rashi font set apart in `⸤ ⸥`. A row is accepted when its letters agree with the PDF reading (at
   least 99% of the PDF's letters found, at most 10% more; check T15), not by the line diff. 176 transcriptions switch
   to the marked Word text and 6 new ones enter; 4 below the letter bar keep their PDF reading.
+  Latin shelfmarks the team typed in right-to-left mode (`B.M. Or. 6581,2 [1154,2] + TS 12.183`, which plain text
+  reversed to `12.183 TS + [1154,2] 6581,2 .Or .M.B`) keep Word's display: an RLM at each edge of a stretch of
+  right-to-left runs in a paragraph that mixes them with a Latin word (owner, 2026-10-29).
 
 ### A legend for FGP's transcription marks; the desktop keeps `<…>` marks (web + desktop)
 
@@ -132,6 +135,15 @@ web deployed from `master-main`.
     search filter dialog's, now shared: `desktop/widgets/filter_chip.py`.
   - One rule for all three: `shared.joins_lab` (`filter_passes`, `path_passes`, `domain_path`,
     `domain_tree_options`, `facet_rows`).
+
+### Joins Lab: the width-filter note says what turning the filter on does (desktop, PR #451)
+
+- **Joins Lab "Filter ▾" dialog: the note under "Filter by width (cm)" now says what the filter does.** The
+  English UI showed the literal text "Size filter note": the string was looked up by a placeholder key, and
+  `tr()` returns the key itself in English. The Hebrew note ("סינון גודל הוא אופציונאלי — מידות מוצגות כרמז
+  בלבד.") was unclear. Both now give the one fact a user needs before turning the filter on: "With this on,
+  fragments with no recorded width are hidden too." / "כשהסינון פעיל, מוסתרים גם קטעים שאין להם רוחב רשום."
+  The key is the English sentence, following the convention that keys are the English text.
 
 ### The open-issues tracker rebuilt: one line per defect, a backlog, details by ID (ci, PR #449)
 

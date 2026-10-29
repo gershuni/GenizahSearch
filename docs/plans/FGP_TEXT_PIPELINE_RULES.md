@@ -545,6 +545,14 @@ by the unit's folder, `MARKING_TEAMS`) with the marks, every other team's as bef
 - **Set apart** (the Rashi font, 433 runs; the owner does not know what it marks, "mark somehow"): the span in half
   brackets `⸤ ⸥` (U+2E24, U+2E25: no FGP text uses them, they mirror in right-to-left text), `בכי⸤כר⸥`, only where it
   holds a letter.
+- **Word's run direction** (owner, 2026-10-29, after `12.183 TS + [1154,2] 6581,2 .Or .M.B` in the desktop where FJMS shows
+  `B.M. Or. 6581,2 [1154,2] + TS 12.183`): the team typed Latin shelfmarks in right-to-left mode, the digits, spaces
+  and dots in runs Word marks right-to-left (`w:rtl`). In a paragraph that mixes such runs with a Latin word, an RLM
+  (U+200F) goes at each edge of every stretch of right-to-left runs, so both apps show the line as Word does; the
+  text without the marks is unchanged. `ws()` still drops every direction mark a file carries: the reader writes its
+  own as a stand-in that `docx_text` turns into the RLM. Checked on all 163 files: 161 paragraphs marked, each
+  displays as Word's run directions give it (python-bidi), 1,110 marks on 242 lines; the other teams' lines the
+  same census found were reviewed by the owner and left as they are.
 - Spans that start and end together nest in one order: deleted outermost, then interlinear, set apart, completion
   (`⟦[XXX]⟧`; until 2026-10-28 such a pair crossed, `[⟦XXX]⟧`, in held row 43170).
 
@@ -582,3 +590,9 @@ team gain the new marks (their 54 distinct texts: 181 interlinear spans, 264 set
 equals the previous candidate's; no other row changes. Candidate `caeacabf…`, 59,062 rows. One text (rows 31-33, 148)
 has a `\` its transcriber typed on a line of its own; it was there before. Both marks render in the desktop's text
 view and in a browser with David; the half brackets are small low corners.
+
+**Rebuilt 2026-10-29 with Word's run direction** (the RLM rule above): gate 3 two identical runs, digest
+`dc28650e05256ee3`, PASS 81/81, gate 4 two identical runs, digest `12ccd77a18e091e6`, PASS 86/86, no expected count
+changed. 146 shipped rows of the team gain 1,322 marks and differ from the previous candidate by them alone; no other
+row changes. Candidate `0afd5b06…`, 59,062 rows. OR 6581.2 now shows `B.M. Or. 6581,2 [1154,2] + TS 12.183` and
+T-S F17.3 `TS F17/3`.
