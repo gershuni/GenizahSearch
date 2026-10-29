@@ -16,7 +16,8 @@
   nothing, never against them. Candidates come from the existing `cambridge_manifests` key, so the sidecar is
   unchanged. Against CUDL's list and `libraries.csv`: 1,916 records gain a direct link, 4 are corrected, 11 lose a
   wrong one (`reports/cudl_resolution_changes_2026-10-29.csv`). A Mosseri second-series record made of several
-  first-series items keeps linking the first of them (63 records), flagged for a later chooser.
+  first-series items keeps linking the first of them (63 records), flagged for a later chooser -- an interim
+  choice a reviewer judged reasonable; how to present these records is still the owner's decision.
 - Every surface follows that decision: the availability flag (`get_image_sources` no longer probes the table), the
   green-box library link (now the item, not a search), Browse's Cambridge chip (no URL built from the shelfmark), the
   desktop's Cambridge button, viewer and result dialog (no MARC fallback), Joins Lab's details link. The desktop
@@ -26,6 +27,10 @@
   shortcuts (`resolve_external_images`, the image routes, Visual Similarity, the desktop reading desk) re-enrich an
   entry without a current one; `/api/cambridge_image` URLs carry `cv=`, its server cache is at version 3, and the
   Puzzle's disk cache is keyed by the CUDL item. A catalogue still loading is never cached as "no Cambridge item".
+- Review fixes before release: `enrich_metadata` builds the entry on a copy and publishes it whole (in place, a
+  concurrent request saw the new decision beside the old item's images, and the Puzzle cached those pixels under
+  the new item); the desktop result dialog re-enriches an entry cached before the decision (it reused any entry with
+  MARC data); every `/api/puzzle_ext_image` URL carries `cv=` (the browser kept the old bytes for up to an hour).
 
 ### Tests and tools
 - `tests/test_cudl_identity.py` (fixture table built with the importer's own key; real CUDL labels from both sides of

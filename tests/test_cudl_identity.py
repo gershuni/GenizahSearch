@@ -379,3 +379,70 @@ def test_browse_builds_no_cudl_url_from_a_shelfmark():
     src = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
     assert "shelfmark_to_cudl_label" not in src
     assert "cudl.lib.cam.ac.uk/view/{" not in src
+
+
+# --- review of 94f3954: the cache problems -------------------------------------------------
+
+def test_a_concurrent_reader_never_sees_the_new_decision_beside_the_old_images(svc):
+    """enrich_metadata publishes the entry whole. Mutated in place, the entry carried the
+    new (current) decision while its images were still the old item's -- and the Puzzle's
+    disk cache saved those pixels under the new item's name."""
+    wrong, right = "MS-TS-NS-00318-00004-00001", "MS-TS-NS-00318-00041"
+    stale = {"shelfmark": "T-S NS 318.41", "external_provider": "cambridge",
+             "external_url": f"http://cudl.lib.cam.ac.uk/view/{wrong}",
+             "images_ext": [{"label": "1r", "url": f"img:{wrong}"}]}
+    mm = _manager({SID_318_41: stale}, {SID_318_41: {
+        "shelfmark": "T-S NS 318.41", "library_code": "CUL", "call_numbers_raw": ["T-S NS 318.41"]}})
+    seen = []
+
+    def _ext(self, url):
+        entry = mm.nli_cache[SID_318_41]  # what another thread reads mid-enrichment
+        seen.append((resolution_is_current(entry.get("cambridge_resolution")),
+                     [i["url"] for i in entry.get("images_ext") or []]))
+        label = url.rstrip("/").rsplit("/", 1)[-1]
+        return {"canvases": [{"label": "1r", "url": f"img:{label}"}], "metadata": {}, "attribution": ""}
+
+    with patch.object(MetadataManager, "fetch_marc_data", lambda self, s: {}), \
+         patch.object(MetadataManager, "fetch_iiif_manifest", lambda self, s, suffix=1: {}), \
+         patch.object(MetadataManager, "fetch_external_iiif_data", _ext), \
+         patch.object(MetadataManager, "get_part_for_folio", lambda self, s: None), \
+         patch.object(mm_mod, "_get_crossref_service", lambda: svc), \
+         patch.object(mm_mod, "_get_fjms_service", lambda: None):
+        mm.enrich_metadata(SID_318_41)
+
+    assert seen == [(False, [f"img:{wrong}"])]  # the old entry, still marked stale
+    after = mm.nli_cache[SID_318_41]
+    assert resolution_is_current(after["cambridge_resolution"])
+    assert [i["url"] for i in after["images_ext"]] == [f"img:{right}"]
+
+
+def test_the_desktop_result_dialog_reenriches_an_entry_cached_before_the_decision():
+    pytest.importorskip("PyQt6")
+    from desktop.result_dialog import _cached_meta_needs_enrichment
+
+    class _MM:
+        def __init__(self, res):
+            self.nli_cache = {"S": {"marc": {}, "cambridge_resolution": res}}
+
+        def cambridge_resolution_current(self, sid):
+            return resolution_is_current(self.nli_cache[sid].get("cambridge_resolution"))
+
+    current = {"revision": RESOLVER_REVISION, "status": "match"}
+    assert _cached_meta_needs_enrichment(_MM(None), "S", {"marc": {}}) is True        # before the fix
+    assert _cached_meta_needs_enrichment(_MM(current), "S", {"marc": {}}) is False    # current: reuse
+    assert _cached_meta_needs_enrichment(_MM(current), "S", {"title": "x"}) is True   # never enriched
+    assert _cached_meta_needs_enrichment(_MM(current), "S", None) is True
+
+
+def test_every_puzzle_external_image_url_carries_the_decision_revision():
+    """The server keys its disk copy by CUDL item, but a browser keeps an unchanged URL's
+    bytes (max-age): every /api/puzzle_ext_image URL the page builds carries cv=."""
+    import web.pages.puzzle as puzzle
+
+    assert puzzle.EXT_IMAGE_VERSION == f"&cv={RESOLVER_REVISION}"
+    src = (REPO / "web" / "pages" / "puzzle.py").read_text(encoding="utf-8")
+    py_urls = [ln for ln in src.splitlines() if 'f"/api/puzzle_ext_image?' in ln]
+    assert py_urls and all("{EXT_IMAGE_VERSION}" in ln for ln in py_urls)
+    js = puzzle.PUZZLE_CANVAS_JS
+    assert js.count("'/api/puzzle_ext_image?") == js.count("__EXT_IMAGE_VERSION__") == 3
+    assert "PUZZLE_CANVAS_JS.replace('__EXT_IMAGE_VERSION__', EXT_IMAGE_VERSION)" in src

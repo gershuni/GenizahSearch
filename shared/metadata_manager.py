@@ -1147,7 +1147,11 @@ class MetadataManager:
         if system_id not in self.nli_cache:
             self.fetch_nli_data(system_id)
 
-        current_meta = self.nli_cache.get(system_id, {})
+        # Work on a copy and publish it whole at the end (self.nli_cache[system_id] = ...).
+        # Other threads read this entry while the network calls below run; mutating it in
+        # place showed them a new Cambridge decision beside the old item's images, and the
+        # Puzzle's disk cache saved those pixels under the new item's name.
+        current_meta = dict(self.nli_cache.get(system_id) or {})
         current_meta['sys_id'] = system_id  # Store for downstream consumers
         # The catalogue's name is the record's name (get_meta_for_id reads it first too).
         # An entry first fetched from NLI keeps NLI's 942 shelfmark, which for a renamed

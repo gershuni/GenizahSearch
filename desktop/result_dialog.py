@@ -68,6 +68,18 @@ def _saved_text_pt():
     return max(TEXT_PT_MIN, min(TEXT_PT_MAX, pt))
 
 
+
+def _cached_meta_needs_enrichment(meta_mgr, sys_id, cached_meta) -> bool:
+    """Must the dialog enrich this record before showing it, rather than reuse the cache?
+
+    Yes when nothing is cached, when the entry was never enriched (no MARC), and when it
+    was enriched before the record's current Cambridge decision: such an entry may hold
+    another item's CUDL link and images (shared/cudl_identity.py).
+    """
+    from shared.cudl_identity import cached_decision_stale
+    return (not cached_meta or 'marc' not in cached_meta
+            or cached_decision_stale(meta_mgr, sys_id))
+
 class _ReadingTextSize(QObject):
     """The transcription text size, one for the Manuscript Viewer and the Browse
     tab (owner, 2026-10-24: "option to change the size of the texts"): saved under
@@ -3665,7 +3677,7 @@ class ResultDialog(QDialog):
                     pass  # dialog deleted after close; the answer has no home
             threading.Thread(target=worker, daemon=True).start()
 
-        if not cached_meta or 'marc' not in cached_meta:
+        if _cached_meta_needs_enrichment(self.meta_mgr, self.current_sys_id, cached_meta):
             # Disconnect old enrich worker to prevent stale signals and GC crash
             if hasattr(self, 'enrich_worker') and self.enrich_worker is not None:
                 try:
