@@ -56,19 +56,22 @@ def test_login_and_register_are_named_icon_buttons_on_a_phone():
 
 
 def test_the_search_form_folds_once_the_search_is_marked_running():
-    """The fold is execute_search's first await, so it must sit behind the guard.
+    """The fold starts behind the guard, and runs beside the search, not before it.
 
     Before `search_state.is_running = True`, a double-click or a repeated Enter
     suspended two calls at the same await with the guard still open, and both
-    searches ran over one result state (Codex on #434).
+    searches ran over one result state (Codex on #434). Awaited, the fold first
+    waited for the page to connect: a search opened from its address started
+    only once the browser had loaded the page (ux_timing, 2026-10-28).
     """
     search = _read('web/pages/search.py')
     body = search[search.index('    async def execute_search('):]
     ready = body.index('if not state.is_ready():')
     running = body.index('search_state.is_running = True')
-    fold = body.index('await _collapse_panel_on_phone()')
+    fold = body.index('asyncio.ensure_future(_after_delay(0, _collapse_panel_on_phone))')
     feedback = body.index("search_btn.style('display: none;')")
-    assert ready < running < fold < feedback, 'the fold must come after the running guard is set and before the search shows'
+    assert ready < running < fold < feedback, 'the fold must start after the running guard is set and before the search shows'
+    assert 'await _collapse_panel_on_phone()' not in search, 'awaited, the fold holds the search until the page has connected'
     assert 'await' not in body[body.index('if search_state.is_running:'):running], 'no await may sit between the guard and the running flag'
     assert "await ui.run_javascript('window.innerWidth'" in search
     assert 'width <= 640' in search
