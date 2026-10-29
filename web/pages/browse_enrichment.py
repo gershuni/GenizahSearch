@@ -682,9 +682,21 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                     pg.folio_label = browse_enrich['folio_images'][0].get('folio_label', '')
                     pg.total_pages = len(browse_enrich['folio_images'])
                     pg.current_idx = 1
+            # Phase 86: synthetic rows (no NLI crossref fl_id) have empty
+            # folio_images but cambridge_images populated via the bridge.
+            # Derive total_pages from cambridge_images so pagination works,
+            # and clamp p_num/current_idx into [1, total_pages].
+            if not pg.total_pages and pg.cambridge_images:
+                pg.total_pages = len(pg.cambridge_images)
+                clamped = pg.p_num if pg.p_num and 1 <= pg.p_num <= pg.total_pages else 1
+                pg.p_num = clamped
+                pg.current_idx = clamped
+                state.page_input_value = clamped
             # A manuscript the index holds no pages of (no automatic transcription at all) came with
-            # total_pages 0: "Page 1 / 0", and no Next. Its pages are its images (web/page_count.py);
-            # a count that needs the NLI manifest arrives after this render and renders the page again.
+            # total_pages 0: "Page 1 / 0", and no Next. Its pages are its images (web/page_count.py) --
+            # after the external list above, which resolve_image_url shows first when there is one
+            # (Manchester, JTS, an aligned CUDL; Codex on #454). A count that needs the NLI manifest
+            # arrives after this render and renders the page again.
             if not pg.total_pages and pg.sys_id and not is_synthetic_sys_id(pg.sys_id):
                 def _late_page_count(count, pg=pg):
                     if (state.current_page is pg and generation == refs.load_generation['value']
@@ -696,16 +708,6 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                         pg.sys_id, browse_enrich.get('folio_images'), suffix=pg.volume_suffix or 1,
                         on_late=_late_page_count)):
                     state.page_input_value = pg.p_num
-            # Phase 86: synthetic rows (no NLI crossref fl_id) have empty
-            # folio_images but cambridge_images populated via the bridge.
-            # Derive total_pages from cambridge_images so pagination works,
-            # and clamp p_num/current_idx into [1, total_pages].
-            if not pg.total_pages and pg.cambridge_images:
-                pg.total_pages = len(pg.cambridge_images)
-                clamped = pg.p_num if pg.p_num and 1 <= pg.p_num <= pg.total_pages else 1
-                pg.p_num = clamped
-                pg.current_idx = clamped
-                state.page_input_value = clamped
 
         # Physical metadata from crossref_data (independent of browse_enrich success)
         if crossref_data and crossref_data.get('physical_metadata'):

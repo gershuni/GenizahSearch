@@ -43,9 +43,10 @@ def _service(volume_suffix=1):
     return svc
 
 
-def _run(counts, driver, seconds=0.0, volume_suffix=1, asked=None):
+def _run(counts, driver, seconds=0.0, volume_suffix=1, asked=None, external=None):
     """``counts``: what manuscript_image_count answers, call by call (the last answer repeats), each after
-    ``seconds``; ``asked`` collects the volume (suffix) each call was for."""
+    ``seconds``; ``asked`` collects the volume (suffix) each call was for; ``external``: (provider, image count)
+    of an external image list (``resolve_external_images``)."""
     answers = list(counts)
 
     def count(sys_id, folio_images=None, suffix=1):
@@ -56,7 +57,12 @@ def _run(counts, driver, seconds=0.0, volume_suffix=1, asked=None):
 
     crossref = MagicMock()
     crossref.is_available.return_value = False
+    provider, n_external = external or ('', 0)
+    external_images = {'cambridge_images': [{'url': f'https://example.org/iiif/{i}/full/max/0/default.jpg'}
+                                            for i in range(n_external)],
+                       'external_provider': provider, 'cambridge_alignment': None}
     with patch.object(browse, 'get_service', return_value=_service(volume_suffix)), \
+            patch('web.components.image_resolution.resolve_external_images', return_value=external_images), \
             patch('shared.nli_crossref_service.get_nli_crossref_service', return_value=crossref), \
             patch('web.page_count.manuscript_image_count', side_effect=count), \
             patch('web.page_count.PAGE_COUNT_WAIT_S', 0.05), \
@@ -135,3 +141,16 @@ def test_the_count_is_of_the_volume_the_images_come_from():
 
     _run([4], driver, volume_suffix=2, asked=asked)
     assert asked and set(asked) == {2}, asked
+
+
+def test_an_external_image_list_counts_the_pages_it_shows():
+    # Codex on #454: resolve_image_url shows JTS (and Manchester) images first; the pages are theirs, as before.
+    asked = []
+
+    async def driver(user):
+        await user.open(f'/browse?sys_id={SID}')
+        await _wait_until(lambda: '/ 3' in _labels(user))
+        assert '/ 3' in _labels(user) and '/ 4' not in _labels(user), sorted(_labels(user))
+
+    _run([4], driver, asked=asked, external=('jts', 3))
+    assert asked == []  # no NLI count asked for

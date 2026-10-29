@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from types import SimpleNamespace
@@ -43,6 +44,10 @@ NO_TEXT_SID = '990051614250205171'        # T-S NS 243.145: 4 NLI images
 UNCOUNTED_SID = '990051614280205171'      # its images cannot be counted (NLI unreadable, no crossref folios)
 IMAGE_COUNTS = {NO_TEXT_SID: 4}
 SLOW_SID = '990051614290205171'           # 4 images too, but counting them takes the NLI manifest (slow)
+SLOW_FETCH_SID = '990051614300205171'     # 2 images; its page takes longer to fetch than SLOW_SID's count
+IMAGE_COUNTS[SLOW_FETCH_SID] = 2
+SLOW_COUNT_DONE = threading.Event()       # SLOW_SID's count has come
+SLOW_FETCH_DONE = threading.Event()       # SLOW_FETCH_SID's page has come
 SHELFMARK = 'T-S NS 243.146'
 FGP_TEXT = 'אֵל מְשוך בְטלה / לְנִפְקְדו בַטְלאִ ים ' * 20
 HTR_TEXT = 'שורה ראשונה של הדף השני\nשורה שנייה של הדף השני'
@@ -73,7 +78,10 @@ PAGES = {
 
 class _Service:
     def get_browse_page(self, sys_id, p_num=None, direction=0, volume_ie=None, **_kw):
-        if sys_id in (NO_TEXT_SID, UNCOUNTED_SID, SLOW_SID):
+        if sys_id == SLOW_FETCH_SID:
+            time.sleep(4.5)
+            SLOW_FETCH_DONE.set()
+        if sys_id in (NO_TEXT_SID, UNCOUNTED_SID, SLOW_SID, SLOW_FETCH_SID):
             # SearchEngine._get_metadata_only_browse_page: the requested page, moved by direction, no count
             return _page(sys_id, max(1, (p_num or 1) + direction), '', total_pages=0)
         pages = PAGES.get(sys_id) or []
@@ -98,6 +106,7 @@ RESULTS = {
     'shelfmark': _result(NO_TEXT_SID, ''),
     'uncounted': _result(UNCOUNTED_SID, ''),
     'slow': _result(SLOW_SID, ''),
+    'slow-fetch': _result(SLOW_FETCH_SID, ''),
     'catalogue': _result(SYNTHETIC_SID, ''),
     'no-edition': _result(NO_EDITION_SID, '2', snippet='שורה *שנייה* של הדף השני', full_text=HTR_TEXT),
 }
@@ -105,16 +114,19 @@ RESULTS = {
 
 @ui.page(PAGE)
 def _quick_view_page(case: str = 'hit'):
-    result = RESULTS[case]
-    search_state = SimpleNamespace(displayed_results=[result], title_translations={}, printed_ids=set(),
+    # 'a,b': two results, opened on the first with Next/Previous result enabled
+    results = [RESULTS[c] for c in case.split(',')]
+    search_state = SimpleNamespace(displayed_results=results, title_translations={}, printed_ids=set(),
                                    translation_data={})
     with using_language('en'):
-        search_results.open_advanced_dialog(search_state, SimpleNamespace(), None, result)
+        search_results.open_advanced_dialog(search_state, SimpleNamespace(), 0 if len(results) > 1 else None,
+                                            results[0])
 
 
 def _image_count(sys_id, folio_images=None, suffix=1):
     if sys_id == SLOW_SID:
         time.sleep(3.0)
+        SLOW_COUNT_DONE.set()
         return 4
     return IMAGE_COUNTS.get(sys_id, 0)
 
@@ -322,5 +334,27 @@ def test_a_slow_count_does_not_hold_the_dialog_up():
         await _wait_until(lambda: 'Page 1/4' in _labels(user))
         assert 'Page 1/4' in _labels(user), sorted(_labels(user))
         assert _button(user, 'Next Page')
+
+    _run(driver)
+
+
+def test_a_late_count_does_not_render_over_the_next_result():
+    # Codex on #454: Next result selects it before its page arrives; the first result's late count must not render
+    # the second result over the first one's page.
+    SLOW_COUNT_DONE.clear()
+    SLOW_FETCH_DONE.clear()
+
+    async def driver(user):
+        await user.open(f'{PAGE}?case=slow,slow-fetch')
+        await _wait_until(lambda: 'Page 1' in _labels(user), timeout=2.5)
+        [next_result] = _button(user, 'Next')
+        _click(user, next_result)
+        await _wait_until(lambda: 'Result 2 / 2' in _labels(user))
+        await _wait_until(SLOW_COUNT_DONE.is_set, timeout=10)
+        await asyncio.sleep(0.3)  # past the late count's callback
+        assert SLOW_COUNT_DONE.is_set() and not SLOW_FETCH_DONE.is_set(), 'the window was not reached'
+        assert 'Page 1/4' not in _labels(user), sorted(_labels(user))
+        await _wait_until(lambda: 'Page 1/2' in _labels(user))
+        assert 'Page 1/2' in _labels(user), sorted(_labels(user))
 
     _run(driver)

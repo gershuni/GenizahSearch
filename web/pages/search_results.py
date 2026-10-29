@@ -1299,9 +1299,15 @@ def open_advanced_dialog(search_state, refs, index, result):
         if page is None or page.total_pages:
             return
 
+        selected = (adv_state.current_result_idx, adv_state.current_sys_id)
+
         def late(count):
-            # Still the page on screen, in a dialog still open: render it again with its count.
-            if (adv_state.current_page is page and not adv_state.content_container.is_deleted
+            # Still the page on screen, of the result still selected (Next/Previous result changes the
+            # selection before its own page arrives; Codex on #454), in a dialog still open: render it
+            # again with its count.
+            if (adv_state.current_page is page and page.sys_id == adv_state.current_sys_id
+                    and (adv_state.current_result_idx, adv_state.current_sys_id) == selected
+                    and not adv_state.content_container.is_deleted
                     and apply_page_count(page, count)):
                 adv_state.current_p_num, adv_state.total_pages = page.p_num, page.total_pages
                 render_content(adv_state.results[adv_state.current_result_idx])
