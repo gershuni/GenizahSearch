@@ -23,9 +23,10 @@ import shared.metadata_manager as mm_mod
 from shared.browse_map_utils import normalize_shelfmark
 from shared.cudl_identity import (
     RESOLVER_REVISION,
-    cached_decision_stale,
     candidate_key,
     cudl_label_to_shelfmark,
+    entry_decision_stale,
+    fresh_external_entry,
     label_signature,
     name_signature,
     resolution_is_current,
@@ -289,7 +290,7 @@ def test_a_stale_wrong_cambridge_entry_is_replaced_whole(svc):
     mm = _manager({SID_318_41: stale}, {SID_318_41: {
         "shelfmark": "T-S NS 318.41", "library_code": "CUL",
         "call_numbers_raw": ["Ms. T-S NS 318.41", "T-S NS 318.41"]}})
-    assert cached_decision_stale(mm, SID_318_41)
+    assert entry_decision_stale(mm, mm.nli_cache[SID_318_41])
 
     meta = _enrich(mm, SID_318_41, svc)
     right = "MS-TS-NS-00318-00041"
@@ -301,7 +302,7 @@ def test_a_stale_wrong_cambridge_entry_is_replaced_whole(svc):
     assert meta["image_source_info"]["cambridge"] is True
     assert meta["library_viewer_url"]["url"] == f"https://cudl.lib.cam.ac.uk/view/{right}"
     assert meta["cambridge_resolution"]["revision"] == RESOLVER_REVISION
-    assert not cached_decision_stale(mm, SID_318_41)
+    assert not entry_decision_stale(mm, mm.nli_cache[SID_318_41])
 
 
 def test_catalogue_name_replaces_a_cached_nli_name(svc):
@@ -335,19 +336,18 @@ def test_a_catalogue_still_loading_is_not_a_final_no(svc):
     meta = _enrich(mm, SID_318_41, svc)
     assert meta["cambridge_resolution"]["status"] == "unavailable"
     assert meta["cambridge_resolution"]["revision"] is None
-    assert cached_decision_stale(mm, SID_318_41)  # the next request decides again
+    assert entry_decision_stale(mm, mm.nli_cache[SID_318_41])  # the next request decides again
 
 
 def test_image_shortcut_reenriches_an_entry_cached_before_the_decision():
     from web.components.image_resolution import resolve_external_images
 
     class _MM:
+        supports_cambridge_decision = True
+
         def __init__(self):
             self.nli_cache = {"S": {"images_ext": [{"url": "img:old"}], "external_provider": "cambridge"}}
             self.calls = 0
-
-        def cambridge_resolution_current(self, sid):
-            return resolution_is_current(self.nli_cache[sid].get("cambridge_resolution"))
 
         def enrich_metadata(self, sid):
             self.calls += 1
@@ -421,17 +421,15 @@ def test_the_desktop_result_dialog_reenriches_an_entry_cached_before_the_decisio
     from desktop.result_dialog import _cached_meta_needs_enrichment
 
     class _MM:
-        def __init__(self, res):
-            self.nli_cache = {"S": {"marc": {}, "cambridge_resolution": res}}
-
-        def cambridge_resolution_current(self, sid):
-            return resolution_is_current(self.nli_cache[sid].get("cambridge_resolution"))
+        supports_cambridge_decision = True
 
     current = {"revision": RESOLVER_REVISION, "status": "match"}
-    assert _cached_meta_needs_enrichment(_MM(None), "S", {"marc": {}}) is True        # before the fix
-    assert _cached_meta_needs_enrichment(_MM(current), "S", {"marc": {}}) is False    # current: reuse
-    assert _cached_meta_needs_enrichment(_MM(current), "S", {"title": "x"}) is True   # never enriched
-    assert _cached_meta_needs_enrichment(_MM(current), "S", None) is True
+    mm = _MM()
+    # The entry the dialog shows is the one checked -- not a re-read of the cache.
+    assert _cached_meta_needs_enrichment(mm, "S", {"marc": {}}) is True                      # before the fix
+    assert _cached_meta_needs_enrichment(mm, "S", {"marc": {}, "cambridge_resolution": current}) is False
+    assert _cached_meta_needs_enrichment(mm, "S", {"title": "x", "cambridge_resolution": current}) is True
+    assert _cached_meta_needs_enrichment(mm, "S", None) is True
 
 
 def test_every_puzzle_external_image_url_carries_the_decision_revision():
@@ -446,3 +444,105 @@ def test_every_puzzle_external_image_url_carries_the_decision_revision():
     js = puzzle.PUZZLE_CANVAS_JS
     assert js.count("'/api/puzzle_ext_image?") == js.count("__EXT_IMAGE_VERSION__") == 3
     assert "PUZZLE_CANVAS_JS.replace('__EXT_IMAGE_VERSION__', EXT_IMAGE_VERSION)" in src
+
+
+# --- review of a85b805: the decision is checked on the entry the images come from --------
+
+_OLD_ITEM, _NEW_ITEM = "MS-TS-NS-00318-00004-00001", "MS-TS-NS-00318-00041"
+
+
+def _entries():
+    old = {"images_ext": [{"label": "1r", "url": f"https://images.lib.cam.ac.uk/iiif/{_OLD_ITEM}-000-00001.jp2"}],
+           "external_provider": "cambridge"}                       # cached before the decision
+    new = {"images_ext": [{"label": "1r", "url": f"https://images.lib.cam.ac.uk/iiif/{_NEW_ITEM}-000-00001.jp2"}],
+           "external_provider": "cambridge",
+           "external_url": f"https://cudl.lib.cam.ac.uk/view/{_NEW_ITEM}",
+           "cambridge_resolution": {"revision": RESOLVER_REVISION, "status": "match", "label": _NEW_ITEM,
+                                    "viewer_url": f"https://cudl.lib.cam.ac.uk/view/{_NEW_ITEM}"}}
+    return old, new
+
+
+class _PublishedRightAfterRead(dict):
+    """An nli_cache whose old entry another thread replaces right after this one reads it:
+    a check of the decision on a SECOND read sees the new entry's current revision while
+    the reader already holds the old entry's images."""
+
+    def __init__(self, sid, old, new):
+        super().__init__({sid: old})
+        self._old, self._new = old, new
+
+    def get(self, key, default=None):
+        value = super().get(key, default)
+        if value is self._old:
+            super().__setitem__(key, self._new)
+        return value
+
+
+class _RacingManager:
+    supports_cambridge_decision = True
+
+    def __init__(self, sid):
+        old, self.new = _entries()
+        self.nli_cache = _PublishedRightAfterRead(sid, old, self.new)
+        self.enriched = 0
+
+    def enrich_metadata(self, sid):
+        self.enriched += 1
+        self.nli_cache[sid] = self.new
+        return self.new
+
+
+def test_a_replacement_published_between_read_and_check_cannot_vouch_for_old_images():
+    from web.components.image_resolution import resolve_external_images
+
+    mm = _RacingManager("S")
+    entry = fresh_external_entry(mm, "S")
+    assert [i["url"] for i in entry["images_ext"]] == [i["url"] for i in mm.new["images_ext"]]
+    assert mm.enriched == 1
+
+    mm = _RacingManager("S")
+    got = resolve_external_images("S", meta_mgr=mm)
+    assert _NEW_ITEM in got["cambridge_images"][0]["url"]
+    assert got["cambridge_resolution"]["label"] == _NEW_ITEM      # from the same entry
+    assert got["external_url"].endswith(_NEW_ITEM)
+
+
+def test_the_image_routes_never_serve_or_keep_the_old_item_under_the_new_decision(tmp_path, monkeypatch):
+    """The reported failure: the old image saved on disk under the corrected item's name,
+    surviving a cleared memory cache. Real routes; only the network is replaced."""
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    import shared.puzzle_image_service as pis
+    from web.api import init_api_routes
+    from web.state import state
+
+    def _fetch(url, **_kw):
+        label = _NEW_ITEM if _NEW_ITEM in url else _OLD_ITEM
+        return SimpleNamespace(status_code=200, headers={"Content-Type": "image/jpeg"},
+                               content=f"jpeg-bytes-of-{label}".encode().ljust(200, b"\0"))
+
+    monkeypatch.setattr(pis, "get_with_checked_redirects", _fetch)
+    pis.reset_puzzle_image_service()
+    service = pis.get_puzzle_image_service(cache_dir=tmp_path / "puzzle")
+    try:
+        sid = "990051109460205171"
+        app = FastAPI()
+        init_api_routes(app_override=app)
+        client = TestClient(app)
+
+        monkeypatch.setattr(state, "meta_mgr", _RacingManager(sid))
+        got = client.get(f"/api/cambridge_image/{sid}", params={"page": 0})
+        assert got.status_code == 200 and _NEW_ITEM.encode() in got.content
+
+        monkeypatch.setattr(state, "meta_mgr", _RacingManager(sid))
+        got = client.get("/api/puzzle_ext_image", params={
+            "sys_id": sid, "page": 0, "provider": "cambridge", "processed": "false"})
+        assert got.status_code == 200 and _NEW_ITEM.encode() in got.content
+        on_disk = {p.name: p.read_bytes() for p in (tmp_path / "puzzle").rglob("*") if p.is_file()}
+        assert on_disk and all(_NEW_ITEM in name and _NEW_ITEM.encode() in body
+                               for name, body in on_disk.items()), on_disk.keys()
+    finally:
+        pis.reset_puzzle_image_service()

@@ -282,9 +282,11 @@ def test_only_nli_image_ids_name_a_fragment_image(puzzle_app, name):
 def test_an_external_page_image_request_uses_the_preset_size(puzzle_app):
     app, service, _signed_in, _cache_dir = puzzle_app
     cached = b'image-already-cached-for-page-0'
-    # A Cambridge entry is keyed by the CUDL item the record's decision names; with no
-    # metadata manager there is none ('nocudl').
-    path = service.get_cache_path('cambridge_990000000000001_nocudl_page0', 800, 30.0, True, False)
+    # A Cambridge entry is keyed by the decision revision and the CUDL item the record's
+    # decision names; with no metadata manager there is none ('nocudl').
+    from shared.cudl_identity import RESOLVER_REVISION
+    path = service.get_cache_path(f'cambridge_990000000000001_r{RESOLVER_REVISION}_nocudl_page0',
+                                  800, 30.0, True, False)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(cached)
 

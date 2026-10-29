@@ -76,9 +76,10 @@ def _cached_meta_needs_enrichment(meta_mgr, sys_id, cached_meta) -> bool:
     was enriched before the record's current Cambridge decision: such an entry may hold
     another item's CUDL link and images (shared/cudl_identity.py).
     """
-    from shared.cudl_identity import cached_decision_stale
+    from shared.cudl_identity import entry_decision_stale
+    # The decision of THIS entry -- the one the dialog would show -- not a re-read.
     return (not cached_meta or 'marc' not in cached_meta
-            or cached_decision_stale(meta_mgr, sys_id))
+            or entry_decision_stale(meta_mgr, cached_meta))
 
 class _ReadingTextSize(QObject):
     """The transcription text size, one for the Manuscript Viewer and the Browse

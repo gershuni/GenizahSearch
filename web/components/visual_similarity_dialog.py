@@ -207,11 +207,12 @@ def _resolve_preview_image_url_sync(sys_id: str, shelfmark: str = '') -> str | N
     shelfmark = shelfmark or csv_meta.get('shelfmark', '')
 
     cached = meta_mgr.nli_cache.get(sys_id, {}) if getattr(meta_mgr, 'nli_cache', None) else {}
-    from shared.cudl_identity import cached_decision_stale
-    if (not cached.get('images_ext') and not cached.get('image_source_info')) or cached_decision_stale(meta_mgr, sys_id):
+    from shared.cudl_identity import entry_decision_stale
+    # The decision is checked on the entry the preview is picked from (not a re-read).
+    if (not cached.get('images_ext') and not cached.get('image_source_info')) or entry_decision_stale(meta_mgr, cached):
         try:
-            meta_mgr.enrich_metadata(sys_id)
-            cached = meta_mgr.nli_cache.get(sys_id, {})
+            fresh = meta_mgr.enrich_metadata(sys_id)
+            cached = fresh if isinstance(fresh, dict) else meta_mgr.nli_cache.get(sys_id, {})
         except Exception as e:
             logger.debug("VS dialog: enrich_metadata error for %s: %s", sys_id, e)
 

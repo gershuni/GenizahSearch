@@ -10192,11 +10192,12 @@ class GenizahGUI(QMainWindow):
         if not sys_id:
             return
         meta = self.meta_mgr.nli_cache.get(sys_id, {})
-        from shared.cudl_identity import cached_decision_stale
+        from shared.cudl_identity import entry_decision_stale
         # An entry cached before the record's current Cambridge decision may hold
-        # another item's images (shared/cudl_identity.py): enrich it again.
+        # another item's images (shared/cudl_identity.py): enrich it again. The
+        # decision checked is this entry's own, not a re-read of the cache.
         if ((meta.get('images_nli') or meta.get('images_ext'))
-                and not cached_decision_stale(self.meta_mgr, sys_id)):
+                and not entry_decision_stale(self.meta_mgr, meta)):
             return
 
         # Initialise the tracking dict lazily — create_browse_tab also does this

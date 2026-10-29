@@ -467,13 +467,11 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                 result['cambridge_images'] = _ext['cambridge_images']
                 result['external_provider'] = _ext['external_provider']
                 result['cambridge_alignment'] = _ext['cambridge_alignment']
-                # The record's Cambridge decision, as enrich_metadata cached it
-                # (shared/cudl_identity.py), is the only source of "Cambridge" on this
-                # page: the availability flag, the CUDL link and the library link all
-                # follow it. A CUDL URL cached without that decision is never shown.
-                _cached_after = (state_mod.meta_mgr.nli_cache.get(_sys_id, {})
-                                 if hasattr(state_mod.meta_mgr, 'nli_cache') else {})
-                _cam = _cached_after.get('cambridge_resolution') or {}
+                # The record's Cambridge decision is the only source of "Cambridge" on
+                # this page: the availability flag, the CUDL link and the library link
+                # all follow it -- the decision from the SAME cache entry as the images
+                # above (resolve_external_images), never a later re-read of the cache.
+                _cam = _ext.get('cambridge_resolution') or {}
                 _cam_url = _cam.get('viewer_url') if _cam.get('status') == 'match' else None
                 if _cam_url:
                     result['is_cambridge'] = True
@@ -483,7 +481,7 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                         result['external_url'] = _cam_url
                 elif not result.get('external_url'):
                     # Other providers' links (JTS / Manchester) resolved by enrich_metadata.
-                    cached_url = _cached_after.get('external_url') or ''
+                    cached_url = _ext.get('external_url') or ''
                     if cached_url and 'cudl.lib.cam.ac.uk' not in cached_url.lower():
                         result['external_url'] = cached_url
                 if crossref_svc is not None and crossref_svc.is_available():

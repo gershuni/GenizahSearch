@@ -31,6 +31,11 @@
   concurrent request saw the new decision beside the old item's images, and the Puzzle cached those pixels under
   the new item); the desktop result dialog re-enriches an entry cached before the decision (it reused any entry with
   MARC data); every `/api/puzzle_ext_image` URL carries `cv=` (the browser kept the old bytes for up to an hour).
+  Then: the decision is checked on the cache entry the images and links come from (`cudl_identity.fresh_external_entry`,
+  `entry_decision_stale`) -- a second read could return a newer entry whose current decision vouched for the first
+  read's old images, which the memory cache and the Puzzle's disk copy then kept under the new item; the memory and
+  disk caches keep only what a final decision produced, the disk name carries the revision, and `get_thumbnail` writes
+  onto the latest entry instead of putting back the one it read.
 
 ### Tests and tools
 - `tests/test_cudl_identity.py` (fixture table built with the importer's own key; real CUDL labels from both sides of

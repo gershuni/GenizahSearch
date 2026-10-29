@@ -279,6 +279,8 @@ class MetadataManager:
     # The desktop and the scripts leave it False and fetch as before.
     checked_library_fetches = False
     _csv_bank_loaded = False
+    # Entries carry a Cambridge decision (shared/cudl_identity.py::entry_decision_stale).
+    supports_cambridge_decision = True
 
     def __init__(self, *, checked_library_fetches: bool = False):
         self.checked_library_fetches = bool(checked_library_fetches)
@@ -561,15 +563,6 @@ class MetadataManager:
         res = resolve_record(names, library_code, lambda _key, _guess: (), marc_url=marc_url)
         res['revision'] = None
         return res
-
-    def cambridge_resolution_current(self, system_id) -> bool:
-        """True when the cached entry holds a final Cambridge decision of this revision.
-
-        A shortcut that serves cached external images must check this first: an entry
-        cached before the decision changed still carries the old item's images.
-        """
-        from shared.cudl_identity import resolution_is_current
-        return resolution_is_current(self.nli_cache.get(system_id, {}).get('cambridge_resolution'))
 
     def save_caches(self):
         try:
@@ -1743,7 +1736,13 @@ class MetadataManager:
 
         thumb_url = self._resolve_thumbnail(fl_ids, size=size)
 
-        if meta is None:
+        # Write onto the entry as it is NOW, as a copy. enrich_metadata publishes whole
+        # entries, so the one read above may have been replaced during the network calls;
+        # putting it back would undo that enrichment and its Cambridge decision.
+        latest = self.nli_cache.get(system_id)
+        if latest is not None:
+            meta = dict(latest)
+        elif meta is None:
             meta = {'shelfmark': 'Unknown', 'title': '', 'desc': '', 'fl_ids': fl_ids}
         meta['fl_ids'] = fl_ids
         meta['thumb_url'] = thumb_url

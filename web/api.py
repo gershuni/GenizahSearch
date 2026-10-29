@@ -1184,8 +1184,10 @@ def init_api_routes(app_override=None):
     # WARNING (once per process lifetime, per sys_id — not per request).
     _cambridge_degraded_warned = set()
 
-    def _ensure_images_ext(sys_id: str) -> list:
-        """Return nli_cache images_ext for sys_id, enriching ONCE on a cold cache.
+    def _external_entry(sys_id: str) -> dict:
+        """The nli_cache entry to take sys_id's external images, links and Cambridge
+        decision from -- all from this one entry (shared/cudl_identity.py::
+        fresh_external_entry), enriched first when cold or decided under older rules.
 
         SEED-010: the provider image endpoints (cambridge/manchester/jts) used to
         404 whenever nli_cache was cold (e.g. a Joins-Lab grid thumbnail requested
@@ -1198,19 +1200,17 @@ def init_api_routes(app_override=None):
         """
         mm = state.meta_mgr
         if not mm or not hasattr(mm, 'nli_cache'):
-            return []
-        from shared.cudl_identity import cached_decision_stale
-        images_ext = mm.nli_cache.get(sys_id, {}).get('images_ext', [])
-        # An entry cached before the record's current Cambridge decision may hold
-        # another item's canvases: enrich it again rather than serve them.
-        if not images_ext or cached_decision_stale(mm, sys_id):
-            try:
-                mm.enrich_metadata(sys_id)
-                images_ext = mm.nli_cache.get(sys_id, {}).get('images_ext', [])
-            except Exception as e:
-                logger.warning("_ensure_images_ext: enrich failed for %s: %s", sys_id, e)
-                images_ext = []
-        return images_ext
+            return {}
+        from shared.cudl_identity import fresh_external_entry
+        try:
+            return fresh_external_entry(mm, sys_id)
+        except Exception as e:
+            logger.warning("_external_entry: enrich failed for %s: %s", sys_id, e)
+            return {}
+
+    def _ensure_images_ext(sys_id: str) -> list:
+        """images_ext of _external_entry (Manchester / JTS routes)."""
+        return _external_entry(sys_id).get('images_ext', []) or []
 
     @target_app.get('/api/cambridge_image/{sys_id}')
     @_image_cache_headers
@@ -1232,8 +1232,16 @@ def init_api_routes(app_override=None):
         All responses carry X-Image-Resolver-Version and ETag headers so
         downstream caches (browser + CDN) can revalidate after a deploy.
         """
+        return _cambridge_image(sys_id, page, width)
+
+    def _cambridge_image(sys_id: str, page: int = 0, width: int = 2000, entry=None):
+        """cambridge_image's body. ``entry``: the nli_cache entry the caller took its
+        Cambridge decision from (the Puzzle names its disk copy after it); without one,
+        _external_entry. The canvases come from that same entry, and bytes are kept in
+        the memory cache only when its decision is final."""
         # Imported locally to avoid adding a hot-path import at module load.
         from shared.nli_crossref_service import resolve_cambridge_canvas_for_page
+        from shared.cudl_identity import entry_decision_stale
 
         width = max(100, min(int(width or 2000), 2000))
         cache_key = (_CAMBRIDGE_CACHE_VERSION, sys_id, page, width)
@@ -1258,7 +1266,12 @@ def init_api_routes(app_override=None):
         if not state.meta_mgr or not hasattr(state.meta_mgr, 'nli_cache'):
             return Response(content="Metadata not available", status_code=503)
 
-        images_ext = _ensure_images_ext(sys_id)
+        if entry is None:
+            entry = _external_entry(sys_id)
+        images_ext = entry.get('images_ext', []) or []
+        # A decision still unavailable (catalogue loading) may change: nothing it led to
+        # is kept, so a later request decides and fetches again.
+        cacheable = not entry_decision_stale(state.meta_mgr, entry)
 
         if not images_ext:
             # No CUDL canvases for this manuscript — fall back to the NLI image
@@ -1270,7 +1283,8 @@ def init_api_routes(app_override=None):
                 return Response(content="No Cambridge images available", status_code=404)
             content, ct, _resolved_fl_id = got
             extra_headers = {"X-Image-Fallback-Source": "nli"}
-            _cambridge_image_cache.set(cache_key, (content, ct, extra_headers))
+            if cacheable:
+                _cambridge_image_cache.set(cache_key, (content, ct, extra_headers))
             resp_headers = _base_headers()
             resp_headers.update(extra_headers)
             return Response(content=content, media_type=ct, headers=resp_headers)
@@ -1343,7 +1357,8 @@ def init_api_routes(app_override=None):
             extra_headers = {"X-Image-Fallback-Source": "nli"}
             if matched_folio_side:
                 extra_headers["X-Folio-Matched"] = matched_folio_side
-            _cambridge_image_cache.set(cache_key, (content, ct, extra_headers))
+            if cacheable:
+                _cambridge_image_cache.set(cache_key, (content, ct, extra_headers))
             resp_headers = _base_headers()
             resp_headers.update(extra_headers)
             return Response(content=content, media_type=ct, headers=resp_headers)
@@ -1368,7 +1383,8 @@ def init_api_routes(app_override=None):
                 extra_headers = {}
                 if matched_folio_side:
                     extra_headers["X-Folio-Matched"] = matched_folio_side
-                _cambridge_image_cache.set(cache_key, (resp.content, content_type, extra_headers))
+                if cacheable:
+                    _cambridge_image_cache.set(cache_key, (resp.content, content_type, extra_headers))
                 resp_headers = _base_headers()
                 resp_headers.update(extra_headers)
                 return Response(
@@ -2033,16 +2049,22 @@ def init_api_routes(app_override=None):
         # by the CUDL item the record's decision names (shared/cudl_identity.py): when the
         # decision moves, the old item's image is never served from here again.
         cache_id = f"{provider}_{sys_id}_page{page}"
+        cam_entry = None
+        disk_cache = True
         if provider == 'cambridge':
-            _ensure_images_ext(sys_id)
-            _cam = (state.meta_mgr.nli_cache.get(sys_id, {}).get('cambridge_resolution') or {}
-                    if state.meta_mgr and hasattr(state.meta_mgr, 'nli_cache') else {})
-            cache_id = f"cambridge_{sys_id}_{_cam.get('label') or 'nocudl'}_page{page}"
+            # The name of the disk copy and the image in it come from ONE cache entry
+            # (_external_entry); only a final decision names a disk copy at all.
+            from shared.cudl_identity import RESOLVER_REVISION, entry_decision_stale
+            cam_entry = _external_entry(sys_id)
+            _cam = cam_entry.get('cambridge_resolution') or {}
+            disk_cache = not entry_decision_stale(state.meta_mgr, cam_entry)
+            cache_id = (f"cambridge_{sys_id}_r{RESOLVER_REVISION}_{_cam.get('label') or 'nocudl'}"
+                        f"_page{page}")
         service = get_puzzle_image_service()
         cache_path = service.get_cache_path(cache_id, size, threshold, processed, is_cul=False)
 
         # Return cached if exists
-        if cache_path.exists():
+        if disk_cache and cache_path.exists():
             try:
                 cached = cache_path.read_bytes()
                 content_type = 'image/png' if cached[:4] == b'\x89PNG' else 'image/jpeg'
@@ -2052,7 +2074,10 @@ def init_api_routes(app_override=None):
                 pass
 
         # Delegate to existing provider-specific proxy to fetch raw image bytes
-        proxy_resp = _fetch_provider_image(provider, sys_id, page)
+        if provider == 'cambridge':
+            proxy_resp = _cambridge_image(sys_id, page, entry=cam_entry)
+        else:
+            proxy_resp = _fetch_provider_image(provider, sys_id, page)
         if proxy_resp.status_code != 200:
             return proxy_resp  # Pass through error
 
@@ -2070,10 +2095,11 @@ def init_api_routes(app_override=None):
             result_bytes = raw_bytes
 
         # Cache result (create only: an existing file is kept)
-        try:
-            _write_new_file(cache_path, result_bytes)
-        except OSError:
-            pass
+        if disk_cache:
+            try:
+                _write_new_file(cache_path, result_bytes)
+            except OSError:
+                pass
 
         content_type = 'image/png' if result_bytes[:4] == b'\x89PNG' else 'image/jpeg'
         return Response(content=result_bytes, media_type=content_type,

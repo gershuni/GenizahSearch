@@ -240,14 +240,35 @@ def resolution_is_current(res) -> bool:
     return bool(res) and res.get('revision') == RESOLVER_REVISION
 
 
-def cached_decision_stale(meta_mgr, sys_id) -> bool:
-    """True when ``meta_mgr``'s cached entry for ``sys_id`` has no current Cambridge
-    decision -- made before these rules, or while the answer was unavailable. Every
-    shortcut that serves cached external images (``images_ext``) without re-running
-    enrich_metadata must treat such an entry as cold: it may hold another item's images.
-    A metadata manager without the check (a test stub) is taken as current."""
-    check = getattr(meta_mgr, 'cambridge_resolution_current', None)
-    return callable(check) and not check(sys_id)
+def entry_decision_stale(meta_mgr, entry) -> bool:
+    """True when this cached ``entry`` holds no current Cambridge decision -- made before
+    these rules, or while the answer was unavailable -- so its external images and links
+    may be another item's.
+
+    Check the entry the images and links come FROM: the cache is replaced whole by every
+    enrichment, so a second read can return a newer entry whose current decision would
+    vouch for the older entry's images. A metadata manager that makes no Cambridge
+    decisions (a test stub, ``supports_cambridge_decision`` not True) is taken as current.
+    """
+    if getattr(meta_mgr, 'supports_cambridge_decision', False) is not True:
+        return False
+    return not resolution_is_current((entry or {}).get('cambridge_resolution'))
+
+
+def fresh_external_entry(meta_mgr, sys_id) -> dict:
+    """The cached entry to take ``sys_id``'s external images, links and Cambridge decision
+    from -- all three from this one entry. Enriched first when it holds no external images
+    or its decision is stale; then the entry enrich_metadata published is the answer, not
+    a re-read of the cache. Exceptions from enrich_metadata propagate to the caller.
+    """
+    cache = getattr(meta_mgr, 'nli_cache', None)
+    if cache is None:
+        return {}
+    entry = cache.get(sys_id) or {}
+    if entry.get('images_ext') and not entry_decision_stale(meta_mgr, entry):
+        return entry
+    fresh = meta_mgr.enrich_metadata(sys_id)
+    return fresh if isinstance(fresh, dict) else (cache.get(sys_id) or {})
 
 
 def unavailable() -> dict:
