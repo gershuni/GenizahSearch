@@ -279,6 +279,22 @@ def _save_nli_persistent_cache(
 # can monkey-patch and call the breaker-guarded NLI fetch path.
 _api_test_seam: dict = {}
 
+#: ``fetch_fl_ids_from_nli`` and ``_fl_ids_complete`` as init_api_routes() registered them.
+_registered_nli_fl_ids: dict = {}
+
+
+def nli_fl_ids(sys_id: str, suffix: int = 1) -> list:
+    """The manuscript's NLI image FL ids in manifest order: the list ``/api/nli_image_by_sysid`` pages through.
+
+    BLOCKING (the routes' cache, then the 30-day store, then the manifest itself): call it off the event loop.
+    Empty when the routes are not set up, NLI cannot be read, or only the MARC record's partial list was found.
+    """
+    fetch, complete = _registered_nli_fl_ids.get('fetch'), _registered_nli_fl_ids.get('complete')
+    if fetch is None or not sys_id:
+        return []
+    fl_ids = fetch(sys_id, suffix) or []
+    return list(fl_ids) if complete(sys_id, suffix) else []
+
 
 #: The download-completion handshake. A browser-initiated download is a
 #: NAVIGATION (the findings page starts one from its export control):
@@ -1120,6 +1136,9 @@ def init_api_routes(app_override=None):
     # Audit SEED-021 #36: expose the image route so tests can assert the
     # non-200/non-429/non-5xx status logging without going through TestClient.
     _api_test_seam['nli_image'] = nli_image
+    # For nli_fl_ids() below: the page code's way to the same cached FL-id list.
+    _registered_nli_fl_ids['fetch'] = fetch_fl_ids_from_nli
+    _registered_nli_fl_ids['complete'] = _fl_ids_complete
 
     @target_app.get('/api/nli_image_by_sysid/{sys_id}')
     @_image_cache_headers

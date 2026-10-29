@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from genizah_core import (
     get_library_display,
 )
-from shared.synthetic_sys_id import is_synthetic_sys_id  # noqa: F401  Phase 85 D-06/D-08/D-14: imported as defensive marker for Phase 86 AUDIT-03. Synthetic-aware page-count plumbing flows through web/pages/browse_enrichment.py:250 (Phase B cambridge_images population) — NOT through this file. The plan's pseudo-code expected a dict-with-canvases shape from get_cambridge_manifest_with_bridge, but that function returns a single manifest URL string. See .planning/phases/85-synthetic-fjms-inventory-rows/85-04-AUDIT.md "web/services.py" section for details.
+from shared.synthetic_sys_id import is_synthetic_sys_id  # Phase 85 D-06/D-08/D-14. A synthetic record's page count comes from its Cambridge images in web/pages/browse_enrichment.py (Phase B); manuscript_image_count() below counts NLI images, which it has none of (Phase 86 AUDIT-03: .planning/phases/85-synthetic-fjms-inventory-rows/85-04-AUDIT.md).
 from web.state import state
 from shared.sys_id_patterns import CORPUS_SYS_ID_PATTERN
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
@@ -280,6 +280,36 @@ def get_oxford_direct_image_url(shelfmark: str = '', page_idx: int = 0, folio_of
     folio_num = int(folio) + folio_offset
     side = 'b' if int(page_idx or 0) % 2 == 1 else 'a'
     return f"https://hebrew.bodleian.ox.ac.uk/fragments/full/MS_HEB_{letter}_{volume}_{folio_num}{side}.jpg"
+
+
+def manuscript_image_count(sys_id: str, folio_images: Optional[List[Dict]] = None) -> int:
+    """How many pages a manuscript the index holds none of has: one without any automatic transcription.
+
+    The index gives such a page ``total_pages`` 0 (``SearchEngine._get_metadata_only_browse_page``), so Browse
+    and Quick View showed "Page 1/0" and could not page on. Its pages are its NLI images: the NLI crossref folio
+    list (local; ``folio_images`` when the caller has it), else the FL-id list the image route pages through
+    (``web.api.nli_fl_ids``; it may fetch the manifest, so it is not asked when the crossref knows the
+    manuscript -- Browse's Phase B waits on this). 0 when neither is known, or for a synthetic record (no NLI
+    images); callers then show no total. BLOCKING: call it off the event loop.
+    """
+    if not sys_id or is_synthetic_sys_id(sys_id):
+        return 0
+    if folio_images is None:
+        try:
+            from shared.nli_crossref_service import get_nli_crossref_service
+            crossref = get_nli_crossref_service(thread_safe=True)
+            folio_images = crossref.get_folio_images(sys_id) if crossref.is_available() else []
+        except Exception as e:
+            logger.debug("NLI crossref folios unavailable for %s: %s", sys_id, e)
+            folio_images = []
+    if folio_images:
+        return len(folio_images)
+    try:
+        from web.api import nli_fl_ids  # web.api imports this module
+        return len(nli_fl_ids(sys_id))
+    except Exception as e:
+        logger.debug("NLI image list unavailable for %s: %s", sys_id, e)
+        return 0
 
 # ============================================================================
 # Service Proxy

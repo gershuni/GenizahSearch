@@ -1163,6 +1163,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 return  # Superseded by newer load
 
             if page:
+                # A manuscript without automatic text comes with no page count (0); keep the one
+                # Phase B counted for its previous page, so the total and Next hold while it reruns.
+                _prev = state.current_page
+                if not page.total_pages and _prev is not None and _prev.sys_id == page.sys_id and _prev.total_pages:
+                    page.total_pages = _prev.total_pages
                 state.sys_id = page.sys_id  # Update in case fl_id resolved differently
                 state.current_page = page
                 state.page_input_value = page.p_num
@@ -1327,8 +1332,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         """Navigate to a specific page number."""
         if new_page < 1:
             new_page = 1
-        if state.current_page and new_page > state.current_page.total_pages:
-            new_page = state.current_page.total_pages
+        if state.current_page and state.current_page.total_pages and new_page > state.current_page.total_pages:
+            new_page = state.current_page.total_pages  # an unknown count (0) is no ceiling
         await load_page(p_num=new_page)
 
     async def navigate_shelfmark(direction: int):
@@ -2459,10 +2464,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 else:
                                     ui.label(_meta_title).classes(f'text-sm {_meta_dir}').style('color: var(--text-primary);')
 
-                        # Total Pages
-                        with ui.column().classes('gap-1'):
-                            ui.label(tr('Pages')).classes('text-xs font-bold').style('color: var(--text-secondary);')
-                            ui.label(str(page.total_pages)).classes('text-sm').style('color: var(--text-primary);')
+                        # Total Pages (0: not known)
+                        if page.total_pages:
+                            with ui.column().classes('gap-1'):
+                                ui.label(tr('Pages')).classes('text-xs font-bold').style('color: var(--text-secondary);')
+                                ui.label(str(page.total_pages)).classes('text-sm').style('color: var(--text-primary);')
 
                         # FL ID (if available)
                         if page.fl_id:
@@ -4476,7 +4482,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 ).classes('w-20').props('dense outlined')
                             else:
                                 page_input = ui.number(
-                                    value=page.p_num, min=1, max=page.total_pages
+                                    value=page.p_num, min=1, max=page.total_pages or None
                                 ).classes('w-24').props('dense outlined')
 
                                 async def handle_go_click():
@@ -4490,7 +4496,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     tr('Go'), icon='arrow_back' if is_rtl() else 'arrow_forward', on_click=handle_go_click,
                                 ).props(f'flat dense color=green size=sm data-ux=browse_page aria-label="{tr("Go")}"').classes('browse-icon-collapse')
 
-                            ui.label(f"/ {page.total_pages}").classes('text-xs').style('color: var(--text-secondary);')
+                            if page.total_pages:  # 0: not known (yet) -- never "/ 0"
+                                ui.label(f"/ {page.total_pages}").classes('text-xs').style('color: var(--text-secondary);')
 
                             next_disabled = _is_single_page or page.current_idx >= page.total_pages
                             ui.button(

@@ -472,6 +472,12 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
             except Exception as e:
                 logger.error("Browse enrichment crossref error: %s", e)
 
+            # A manuscript the index holds no pages of (no automatic transcription at all) came with
+            # total_pages 0: "Page 1 / 0", and no Next. Its pages are its images.
+            if not _total_pages and _sys_id and not is_synthetic_sys_id(_sys_id):
+                from web.services import manuscript_image_count
+                result['page_count'] = manuscript_image_count(_sys_id, result.get('folio_images'))
+
             # External images from nli_cache (populated by enrich_metadata).
             # Phase 117 Plan 03: delegated to the shared resolve_external_images helper
             # (web/components/image_resolution.py) — one source of truth for D-10.
@@ -681,6 +687,12 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                     pg.folio_label = browse_enrich['folio_images'][0].get('folio_label', '')
                     pg.total_pages = len(browse_enrich['folio_images'])
                     pg.current_idx = 1
+            if not pg.total_pages and browse_enrich.get('page_count'):
+                pg.total_pages = browse_enrich['page_count']
+                clamped = min(max(pg.p_num or 1, 1), pg.total_pages)
+                pg.p_num = clamped
+                pg.current_idx = clamped
+                state.page_input_value = clamped
             # Phase 86: synthetic rows (no NLI crossref fl_id) have empty
             # folio_images but cambridge_images populated via the bridge.
             # Derive total_pages from cambridge_images so pagination works,

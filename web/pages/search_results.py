@@ -28,6 +28,7 @@ from web.services import (
     get_service,
     get_oxford_direct_image_url,
     is_oxford_manuscript,
+    manuscript_image_count,
 )
 from shared.synthetic_sys_id import is_synthetic_sys_id
 from shared.metadata_manager import OXFORD_IMAGE_CREDIT_EN
@@ -132,6 +133,11 @@ def _hit_scope_phrase(snippet, adv_state, page):
         adv_state.hit_scope = current
         return phrase
     return phrase if adv_state.hit_scope == current else None
+
+
+def _page_of_pages(p_num, total_pages) -> str:
+    """'Page 2/4'; just 'Page 2' while the count is not known (0) -- never 'Page 1/0'."""
+    return f"{tr('Page')} {p_num}/{total_pages}" if total_pages else f"{tr('Page')} {p_num}"
 
 
 def _quick_view_has_reading_view(sys_id, page, current_text) -> bool:
@@ -1286,6 +1292,14 @@ def open_advanced_dialog(search_state, refs, index, result):
             adv_state.hit_scope = None
             load_result(new_idx)
 
+    async def count_pages_without_text(page):
+        """A manuscript without any automatic text comes with no page count (0): "Page 1/0", and no
+        paging. Its pages are its images (``manuscript_image_count``, as in Browse)."""
+        if page is not None and not page.total_pages:
+            page.total_pages = await run.io_bound(manuscript_image_count, page.sys_id) or 0
+            if page.total_pages:
+                page.p_num = page.current_idx = min(max(page.p_num or 1, 1), page.total_pages)
+
     def load_result(idx: int):
         """Load a result into the dialog, updating UI in-place."""
         result = adv_state.results[idx]
@@ -1342,6 +1356,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                     adv_state.current_sys_id, p_num=adv_state.current_p_num,
                     volume_ie=adv_state.volume_ie
                 )))
+                await count_pages_without_text(page)
                 adv_state.current_page = page
                 if page:
                     adv_state.total_pages = page.total_pages
@@ -1396,6 +1411,7 @@ def open_advanced_dialog(search_state, refs, index, result):
         )))
 
         if page:
+            await count_pages_without_text(page)
             adv_state.current_page = page
             adv_state.current_p_num = page.p_num
             adv_state.total_pages = page.total_pages
@@ -1757,7 +1773,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                             ).props(f'flat round size=sm aria-label="{tr("Previous Page")}"').tooltip(tr('Previous Page'))
                             prev_pg_btn.set_enabled(current_p_num > 1)
 
-                            ui.label(f"{tr('Page')} {current_p_num}/{total_pages}").classes('text-sm font-medium')
+                            ui.label(_page_of_pages(current_p_num, total_pages)).classes('text-sm font-medium')
 
                             next_pg_btn = ui.button(
                                 icon='chevron_left' if is_rtl() else 'chevron_right',
@@ -2016,7 +2032,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                             'background: var(--accent-blue); color: white;'
                         ):
                             ui.icon('description').classes('text-xs')
-                            ui.label(f"{tr('Page')} {current_p_num}/{total_pages}").classes('text-xs font-medium')
+                            ui.label(_page_of_pages(current_p_num, total_pages)).classes('text-xs font-medium')
 
                         with ui.element('div').classes('flex items-center gap-1 px-2 py-0.5 rounded-full').style(
                             'background: var(--bg-tertiary); color: var(--text-secondary);'

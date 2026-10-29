@@ -37,6 +37,10 @@ PAGE = '/_render_smoke/quick-view'
 SID = '990051614260205171'                # T-S NS 243.146
 SYNTHETIC_SID = '990001234560000000'      # a catalogue-only record (shared/synthetic_sys_id.py)
 NO_EDITION_SID = '990051614270205171'     # T-S NS 243.147 here: page 1 has no automatic text and no edition
+# Manuscripts the index holds no pages of (no automatic text at all): the engine's page has total_pages 0.
+NO_TEXT_SID = '990051614250205171'        # T-S NS 243.145: 4 NLI images
+UNCOUNTED_SID = '990051614280205171'      # its images cannot be counted (NLI unreadable, no crossref folios)
+IMAGE_COUNTS = {NO_TEXT_SID: 4}
 SHELFMARK = 'T-S NS 243.146'
 FGP_TEXT = 'אֵל מְשוך בְטלה / לְנִפְקְדו בַטְלאִ ים ' * 20
 HTR_TEXT = 'שורה ראשונה של הדף השני\nשורה שנייה של הדף השני'
@@ -67,6 +71,9 @@ PAGES = {
 
 class _Service:
     def get_browse_page(self, sys_id, p_num=None, direction=0, volume_ie=None, **_kw):
+        if sys_id in (NO_TEXT_SID, UNCOUNTED_SID):
+            # SearchEngine._get_metadata_only_browse_page: the requested page, moved by direction, no count
+            return _page(sys_id, max(1, (p_num or 1) + direction), '', total_pages=0)
         pages = PAGES.get(sys_id) or []
         idx = (p_num or 1) - 1 + direction
         return pages[idx] if 0 <= idx < len(pages) else None
@@ -86,7 +93,8 @@ def _result(sys_id, img, snippet='', full_text=''):
 # A hit on page 2; a shelfmark-search row for a manuscript with no automatic text (img '', no snippet).
 RESULTS = {
     'hit': _result(SID, '2', snippet='שורה *שנייה* של הדף השני', full_text=HTR_TEXT),
-    'shelfmark': _result(SID, ''),
+    'shelfmark': _result(NO_TEXT_SID, ''),
+    'uncounted': _result(UNCOUNTED_SID, ''),
     'catalogue': _result(SYNTHETIC_SID, ''),
     'no-edition': _result(NO_EDITION_SID, '2', snippet='שורה *שנייה* של הדף השני', full_text=HTR_TEXT),
 }
@@ -118,7 +126,9 @@ async def _user():
                 ('get_service', lambda: _Service()),
                 ('web_fgp_enabled', lambda: True),
                 ('get_all_sources_for_fragment', lambda sys_id: []),
-                ('get_fgp_sources_for_fragment', lambda sys_id: [dict(EDITION)] if sys_id == SID else []),
+                ('get_fgp_sources_for_fragment',
+                 lambda sys_id: [dict(EDITION)] if sys_id in (SID, NO_TEXT_SID) else []),
+                ('manuscript_image_count', lambda sys_id, folio_images=None: IMAGE_COUNTS.get(sys_id, 0)),
                 ('get_document_for_fragment', lambda sys_id, p_num=None: None),
                 # The displayed folio of each page; the edition is on 1r.
                 ('displayed_folio_label', lambda sys_id, p, total=0: {1: '1r', 2: '1v'}.get(p, '')),
@@ -239,6 +249,25 @@ def test_a_shelfmark_result_without_any_automatic_text_opens_on_its_edition():
         await _wait_until(lambda: _edition_shown(user))
         assert _edition_shown(user), (sorted(_labels(user)), _html(user)[:300])
         _assert_reading_view(user)
+        # The index has no pages of it (total_pages 0): its 4 images are its pages, not "Page 1/0".
+        assert 'Page 1/4' in _labels(user), sorted(_labels(user))
+
+        [following] = _button(user, 'Next Page')
+        _click(user, following)
+        await _wait_until(lambda: 'Page 2/4' in _labels(user))
+        assert 'Page 2/4' in _labels(user)
+        assert 'מְשוך' not in _html(user)  # the edition is of folio 1r
+
+    _run(driver)
+
+
+def test_a_page_count_that_cannot_be_known_is_not_shown_as_zero():
+    async def driver(user):
+        await user.open(f'{PAGE}?case=uncounted')
+        await _wait_until(lambda: 'Page 1' in _labels(user))
+        await asyncio.sleep(0.3)
+        labels = _labels(user)
+        assert 'Page 1' in labels and not [label for label in labels if label.endswith('/0')], sorted(labels)
 
     _run(driver)
 
