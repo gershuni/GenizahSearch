@@ -1175,8 +1175,10 @@ def init_api_routes(app_override=None):
     # _CAMBRIDGE_ETAG_VERSION is the matching ETag suffix exposed to clients;
     # bump BOTH in lockstep when the resolver contract changes so browsers
     # and CDNs revalidate via ETag too.
-    _CAMBRIDGE_CACHE_VERSION = 2
-    _CAMBRIDGE_ETAG_VERSION = "v2"
+    # 3: the record-level Cambridge decision (shared/cudl_identity.py) -- an entry made
+    # before it may hold another item's image.
+    _CAMBRIDGE_CACHE_VERSION = 3
+    _CAMBRIDGE_ETAG_VERSION = "v3"
     _cambridge_image_cache = _make_image_cache('image_cambridge')
     # sys_ids for which we have already logged a "degraded: legacy positional"
     # WARNING (once per process lifetime, per sys_id — not per request).
@@ -1197,8 +1199,11 @@ def init_api_routes(app_override=None):
         mm = state.meta_mgr
         if not mm or not hasattr(mm, 'nli_cache'):
             return []
+        from shared.cudl_identity import cached_decision_stale
         images_ext = mm.nli_cache.get(sys_id, {}).get('images_ext', [])
-        if not images_ext:
+        # An entry cached before the record's current Cambridge decision may hold
+        # another item's canvases: enrich it again rather than serve them.
+        if not images_ext or cached_decision_stale(mm, sys_id):
             try:
                 mm.enrich_metadata(sys_id)
                 images_ext = mm.nli_cache.get(sys_id, {}).get('images_ext', [])
@@ -2023,8 +2028,16 @@ def init_api_routes(app_override=None):
         if provider not in valid_providers:
             return Response(content=f"Unknown provider: {provider}", status_code=400)
 
-        # Cache key: includes provider to avoid collisions between libraries sharing sys_ids
+        # Cache key: includes provider to avoid collisions between libraries sharing sys_ids.
+        # This cache is on disk and outlives restarts, so a Cambridge entry is also keyed
+        # by the CUDL item the record's decision names (shared/cudl_identity.py): when the
+        # decision moves, the old item's image is never served from here again.
         cache_id = f"{provider}_{sys_id}_page{page}"
+        if provider == 'cambridge':
+            _ensure_images_ext(sys_id)
+            _cam = (state.meta_mgr.nli_cache.get(sys_id, {}).get('cambridge_resolution') or {}
+                    if state.meta_mgr and hasattr(state.meta_mgr, 'nli_cache') else {})
+            cache_id = f"cambridge_{sys_id}_{_cam.get('label') or 'nocudl'}_page{page}"
         service = get_puzzle_image_service()
         cache_path = service.get_cache_path(cache_id, size, threshold, processed, is_cul=False)
 

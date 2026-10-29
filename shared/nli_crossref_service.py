@@ -25,9 +25,6 @@ from shared.thread_local_db import ThreadLocalConnection
 
 logger = logging.getLogger(__name__)
 
-# Phase 84: WARNING-once flag for shelfmark_bridge import failures (Gemini LOW).
-_BRIDGE_IMPORT_WARNED = False
-
 
 # ── Folio Label Parsing (Phase 31: IMG-04) ───────────────────────
 
@@ -347,68 +344,70 @@ class NliCrossrefService:
             logger.error(f"NliCrossrefService.get_cambridge_manifest_by_label error for {label}: {e}")
             return None
 
+    def _cambridge_candidates(self, key: str, guess: Optional[str]):
+        """(label, manifest_url) rows whose key is ``key`` or whose label is ``guess``.
+
+        Raises when the table cannot be read: "could not look" must never pass for
+        "names nothing" (a resolution made from it would be cached as final).
+        """
+        if self._conn is None:
+            raise RuntimeError("nli_crossref sidecar is not open")
+        if guess:
+            cursor = self._conn.execute(
+                "SELECT label, manifest_url FROM cambridge_manifests "
+                "WHERE normalized_shelfmark = ? OR label = ?",
+                (key, guess),
+            )
+        else:
+            cursor = self._conn.execute(
+                "SELECT label, manifest_url FROM cambridge_manifests "
+                "WHERE normalized_shelfmark = ?",
+                (key,),
+            )
+        return [(row["label"], row["manifest_url"]) for row in cursor.fetchall()]
+
+    def match_cambridge_name(self, shelfmark: str, library_code: Optional[str] = None) -> dict:
+        """The CUDL item one shelfmark names, by structure (``shared/cudl_identity.py``).
+
+        Returns ``{'status': 'match'|'ambiguous'|'none'|'unavailable', 'label',
+        'manifest_url', 'labels'}``.
+        """
+        from shared.cudl_identity import match_name
+        try:
+            return match_name(shelfmark, library_code, self._cambridge_candidates)
+        except Exception as e:
+            logger.error(f"NliCrossrefService.match_cambridge_name error for {shelfmark}: {e}")
+            return {'status': 'unavailable', 'label': None, 'manifest_url': None, 'labels': []}
+
+    def resolve_cambridge_record(self, names, library_code: Optional[str],
+                                 marc_url: Optional[str] = None) -> dict:
+        """The CUDL item a catalogue record links to (``cudl_identity.resolve_record``).
+
+        ``names``: the record's catalogue names, main name first. A table that cannot
+        be read gives status ``unavailable`` with no ``revision``: not a final answer.
+        """
+        from shared.cudl_identity import resolve_record, unavailable
+        try:
+            return resolve_record(list(names or ()), library_code, self._cambridge_candidates,
+                                  marc_url=marc_url)
+        except Exception as e:
+            logger.error(f"NliCrossrefService.resolve_cambridge_record error for {names!r}: {e}")
+            return unavailable()
+
     def get_cambridge_manifest_with_bridge(self, shelfmark: str) -> Optional[str]:
-        """Phase 84: Try canonical normalized lookup, then CUDL-bridge fallbacks.
+        """Manifest URL of the one CUDL item ``shelfmark`` names, else None.
 
-        cambridge_manifests.normalized_shelfmark is stored in CUDL classmark form,
-        so the bridge's cudl_normalize() is the appropriate normalizer for queries
-        against this table — different from the rest of the codebase.
-
-        The wrapper takes a RAW shelfmark and performs canonical normalization
-        internally — callers should NOT pre-normalize. This is the contract
-        genizah_core.py relies on after the option-(b) migration (Plan 04).
+        Takes a RAW shelfmark. The match is structural (``shared/cudl_identity.py``):
+        a candidate whose letters and numbers differ from the shelfmark's -- in value
+        or in order -- is never returned, and a shelfmark that matches several items
+        returns None. With no library code a Mosseri-form name ("Ms. III 27O") is read
+        as Mosseri; record-level callers use ``resolve_cambridge_record``, which also
+        checks that the record is Cambridge's.
         """
         if not shelfmark or self._conn is None:
             return None
-        global _BRIDGE_IMPORT_WARNED
-        try:
-            from shared.browse_map_utils import normalize_shelfmark
-            from shared.shelfmark_bridge import cudl_normalize, shelfmark_to_cudl_label
-        except ImportError as _e:
-            # Round 3 Codex MEDIUM — degraded path must STILL normalize before lookup.
-            # Pre-phase callers passed normalize_shelfmark(shelfmark) to
-            # get_cambridge_manifest; after option-(b) migration callers pass raw,
-            # so the wrapper must normalize internally even in the import-failure branch.
-            if not _BRIDGE_IMPORT_WARNED:
-                logger.warning("shelfmark_bridge unavailable in nli_crossref (degrading): %s", _e)
-                _BRIDGE_IMPORT_WARNED = True
-            try:
-                from shared.browse_map_utils import normalize_shelfmark as _ns
-                return self.get_cambridge_manifest(_ns(shelfmark))
-            except Exception:
-                # Last-resort: hand the raw shelfmark in. Worse than canonical but
-                # preserves at least exact-match behavior on already-canonical inputs.
-                return self.get_cambridge_manifest(shelfmark)
-
-        # 1. Existing canonical path (preserves pre-phase-84 behavior).
-        url = self.get_cambridge_manifest(normalize_shelfmark(shelfmark))
-        if url:
-            return url
-        # 2. cudl_normalize fallback (cambridge_manifests stores CUDL form).
-        url = self.get_cambridge_manifest(cudl_normalize(shelfmark))
-        if url:
-            return url
-        # 3. Mosseri-specific forward-label fallback:
-        #    construct_mosseri_cudl_label() returns the actual CUDL `label` form,
-        #    e.g. 'MS-MOSSERI-III-00027-O', which is what `cambridge_manifests.label`
-        #    stores. Using slug.upper() would NOT match.
-        try:
-            from genizah_core import construct_mosseri_cudl_label
-            mosseri_label = construct_mosseri_cudl_label(shelfmark)
-            if mosseri_label:
-                url = self.get_cambridge_manifest_by_label(mosseri_label)
-                if url:
-                    return url
-        except ImportError:
-            pass  # already warned above
-
-        # 4. Generic forward-label fallback via shelfmark_to_cudl_label (T-S / Add. / Or.).
-        slug = shelfmark_to_cudl_label(shelfmark)
-        if slug:
-            url = self.get_cambridge_manifest(slug)
-            if url:
-                return url
-        return None
+        res = self.match_cambridge_name(shelfmark)
+        return res['manifest_url'] if res['status'] == 'match' else None
 
     # ── Metadata (Phase 32: META-01, META-02) ───────────────────────
 
@@ -445,7 +444,8 @@ class NliCrossrefService:
             logger.error(f"NliCrossrefService.get_physical_metadata error for {sys_id}: {e}")
             return None
 
-    def get_library_viewer_url(self, sys_id: str) -> Optional[dict]:
+    def get_library_viewer_url(self, sys_id: str,
+                               cambridge_viewer_url: Optional[str] = None) -> Optional[dict]:
         """
         Get holding library digital collection URL for a manuscript.
 
@@ -455,6 +455,9 @@ class NliCrossrefService:
 
         Args:
             sys_id: The Alma/system ID for the manuscript.
+            cambridge_viewer_url: The CUDL item the record's Cambridge decision
+                named (``resolve_cambridge_record``). A CUL record gets it instead
+                of a CUDL keyword search; without it, the search stays.
 
         Returns:
             Dict with keys: url, label, library_abbrev, library_name_eng.
@@ -484,8 +487,10 @@ class NliCrossrefService:
             label = None
 
             if abbrev == "CUL":
-                # Cambridge: search-based fallback URL
-                url = f"https://cudl.lib.cam.ac.uk/search?keyword={url_quote(shelfmark)}"
+                # Cambridge: the item itself when the decision named it; otherwise a
+                # keyword search (it may find the item; it never claims to be it).
+                url = cambridge_viewer_url or (
+                    f"https://cudl.lib.cam.ac.uk/search?keyword={url_quote(shelfmark)}")
                 label = "Cambridge Digital Library"
             elif abbrev == "JTS":
                 # JTS / Princeton: try detail catalog page from sidecar, fall back to search
@@ -896,30 +901,29 @@ class NliCrossrefService:
         sys_id: str,
         normalized_shelfmark: str = None,
         shelfmark: Optional[str] = None,
+        cambridge: bool = False,
     ) -> dict:
         """
         Quick check of which image sources exist for a manuscript.
 
         Args:
             sys_id: The Alma/system ID for the manuscript.
-            normalized_shelfmark: Optional canonical-normalized shelfmark for direct
-                Cambridge lookup (the historical path).
-            shelfmark: Optional RAW shelfmark. When provided, the Cambridge probe
-                falls through to `get_cambridge_manifest_with_bridge()` if the
-                direct query misses — closes the Phase 84 gap where CUDL-form
-                classmarks (slash/comma/leading-zero/Mosseri-label/Or.-numeric-collapse)
-                resolve via the bridge in get_cambridge_manifest_with_bridge but were
-                NOT reflected in image_source_info, leaving `_has_cambridge` False
-                in browse and suppressing the Cambridge button + images.
+            normalized_shelfmark: Gates the JTS probe (unchanged).
+            shelfmark: Unused; kept so existing callers keep working.
+            cambridge: The record's Cambridge decision (``resolve_cambridge_record``
+                status ``match``), reported as is. This method no longer probes
+                ``cambridge_manifests`` itself: a separate count let the availability
+                flag say "Cambridge" for a record the decision had refused (a lossy
+                normalized key, another library's record).
 
         Returns:
             Dict with keys:
                 - nli_fgp (bool): True if any FGPImageNumberId is non-empty
-                - cambridge (bool): True if a Cambridge manifest is reachable
+                - cambridge (bool): the ``cambridge`` argument
                 - image_count (int): Count of rows with non-empty FGPImageNumberId
         """
         result = {
-            "nli_fgp": False, "cambridge": False,
+            "nli_fgp": False, "cambridge": bool(cambridge),
             "manchester": False, "jts": False,
             "image_count": 0,
         }
@@ -938,27 +942,6 @@ class NliCrossrefService:
             if row and row["cnt"] > 0:
                 result["nli_fgp"] = True
                 result["image_count"] = row["cnt"]
-
-            # Check Cambridge manifests — direct canonical path first (preserves
-            # pre-Phase-84 behavior for already-matching rows).
-            if normalized_shelfmark:
-                cam_cursor = self._conn.execute(
-                    "SELECT COUNT(*) as cnt FROM cambridge_manifests "
-                    "WHERE normalized_shelfmark = ?",
-                    (normalized_shelfmark,),
-                )
-                cam_row = cam_cursor.fetchone()
-                if cam_row and cam_row["cnt"] > 0:
-                    result["cambridge"] = True
-
-            # Phase 84 follow-up: bridge fallback. When the direct query missed but
-            # a raw shelfmark is available, ask the bridge wrapper. This mirrors the
-            # 4-tier cascade used by genizah_core.py 2a-supplement / 2a-mosseri so
-            # browse's `_has_cambridge` flag stays consistent with the resolved
-            # external_url.
-            if not result["cambridge"] and shelfmark:
-                if self.get_cambridge_manifest_with_bridge(shelfmark):
-                    result["cambridge"] = True
 
         except Exception as e:
             logger.error(f"NliCrossrefService.get_image_sources error for {sys_id}: {e}")

@@ -8314,10 +8314,6 @@ class GenizahGUI(QMainWindow):
         provider = (display_meta.get('external_provider') or '').lower()
         if provider == 'cambridge':
             return True
-        marc = display_meta.get('marc', {}) if display_meta else {}
-        url = (marc.get('external_iiif_link') or '').lower()
-        if 'cudl.lib.cam.ac.uk' in url:
-            return True
         for img in display_meta.get('images_ext', []) or []:
             iurl = (img.get('url', '') or '').lower()
             if 'cudl.lib.cam.ac.uk' in iurl:
@@ -8764,7 +8760,9 @@ class GenizahGUI(QMainWindow):
             self.btn_b_find_joins.setEnabled(True)
 
         # Populate external library link button
-        self._browse_external_url = meta.get('external_url') or meta.get('marc', {}).get('external_iiif_link')
+        # external_url carries the record's Cambridge decision (enrich_metadata); the raw
+        # MARC 856 link does not.
+        self._browse_external_url = meta.get('external_url')
         # Prefer library_viewer_url (catalog page) over manifest URL for JTS/Manchester
         _b_lib_viewer = meta.get('library_viewer_url')
         if _b_lib_viewer and _b_lib_viewer.get('url'):
@@ -10194,7 +10192,11 @@ class GenizahGUI(QMainWindow):
         if not sys_id:
             return
         meta = self.meta_mgr.nli_cache.get(sys_id, {})
-        if meta.get('images_nli') or meta.get('images_ext'):
+        from shared.cudl_identity import cached_decision_stale
+        # An entry cached before the record's current Cambridge decision may hold
+        # another item's images (shared/cudl_identity.py): enrich it again.
+        if ((meta.get('images_nli') or meta.get('images_ext'))
+                and not cached_decision_stale(self.meta_mgr, sys_id)):
             return
 
         # Initialise the tracking dict lazily — create_browse_tab also does this

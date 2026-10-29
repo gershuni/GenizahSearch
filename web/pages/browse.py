@@ -29,22 +29,6 @@ from web.citation_chip import browse_page_citation, retrieved_today, set_page_ci
 
 logger = logging.getLogger(__name__)
 
-# Phase 84: WARNING-once flag for shelfmark_bridge import failures (Gemini LOW + Codex HIGH #4 Round 2).
-# Must be module-level — the ImportError branch cannot reference the failed-import symbol.
-_BRIDGE_IMPORT_WARNED = False
-
-
-def _warn_bridge_import_failed(exc: Exception) -> None:
-    """Log shelfmark_bridge import failure at WARNING once per process."""
-    global _BRIDGE_IMPORT_WARNED
-    if _BRIDGE_IMPORT_WARNED:
-        return
-    _BRIDGE_IMPORT_WARNED = True
-    import logging as _logging
-    _logging.getLogger(__name__).warning(
-        "shelfmark_bridge unavailable in browse.py (degrading to v7.10 fallback): %s", exc
-    )
-
 
 def _merge_fgp_sources(sys_id: str, pgp_sources):
     """Append FGP transcription sources (when enabled) to a PGP source list.
@@ -4312,19 +4296,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     _source_chip('NLI', open_nli_viewer, nli_style, tr('Open in NLI KTIV'), opens_external=True)
 
                             if _has_cambridge:
+                                # Only the item the record's Cambridge decision named
+                                # (browse_enrichment): a URL built from the shelfmark is
+                                # a guess, and CUDL answers most guesses "Page Not Found".
                                 cudl_url = page.external_url or ''
-                                if not cudl_url and page.shelfmark:
-                                    _cudl_slug = None
-                                    try:
-                                        from shared.shelfmark_bridge import shelfmark_to_cudl_label
-                                        _cudl_slug = shelfmark_to_cudl_label(page.shelfmark)
-                                    except ImportError as _e:
-                                        _warn_bridge_import_failed(_e)
-                                    except Exception:
-                                        _cudl_slug = None
-                                    if not _cudl_slug:
-                                        _cudl_slug = page.shelfmark.replace(' ', '-')  # Pre-Phase-84 fallback
-                                    cudl_url = f"https://cudl.lib.cam.ac.uk/view/{_cudl_slug}"
                                 if cudl_url:
                                     cudl_style = (
                                         'background: #2196f3; color: white; border: 1.5px solid #2196f3; border-radius: 12px; min-height: 22px; font-weight: 600;'

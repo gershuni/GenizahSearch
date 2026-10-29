@@ -75,7 +75,10 @@ def test_pick_preview_image_url_uses_cambridge_proxy_when_aligned():
         },
     )
 
-    assert out == "/api/cambridge_image/990051537270205171?page=0&width=600"
+    # cv=: the Cambridge decision's revision, so a browser's week-long copy of an older
+    # decision's image is not reused (shared/cudl_identity.py).
+    from shared.cudl_identity import RESOLVER_REVISION
+    assert out == f"/api/cambridge_image/990051537270205171?page=0&width=600&cv={RESOLVER_REVISION}"
 
 
 def test_pick_preview_image_url_falls_back_to_nli_when_cambridge_misaligned():

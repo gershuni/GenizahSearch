@@ -107,6 +107,24 @@ def _clean_date(value: Any) -> Optional[str]:
     return None if text in _NO_DATE else text
 
 
+def _cudl_item_url(sys_id: str, meta_mgr: Any, svc: Any) -> Optional[str]:
+    """The CUDL item this record's Cambridge decision names (shared/cudl_identity.py),
+    so the Library link opens the item rather than a CUDL search. The decision
+    enrich_metadata cached when it is current, else one made from the catalogue names
+    alone; None (search link kept) without ``meta_mgr`` or an answer."""
+    if meta_mgr is None or not hasattr(meta_mgr, "resolve_cambridge"):
+        return None
+    try:
+        res = (getattr(meta_mgr, "nli_cache", None) or {}).get(sys_id, {}).get("cambridge_resolution")
+        from shared.cudl_identity import resolution_is_current
+        if not resolution_is_current(res):
+            res = meta_mgr.resolve_cambridge(sys_id, crossref_svc=svc)
+        return res.get("viewer_url") if res.get("status") == "match" else None
+    except Exception as e:
+        logger.debug("fragment_details: Cambridge decision failed for %s: %s", sys_id, e)
+        return None
+
+
 def _oxford_link(sys_id: str, meta_mgr: Any) -> Optional[dict]:
     """The Bodleian page of the Oxford part this folio belongs to, if known locally."""
     if meta_mgr is None:
@@ -168,7 +186,8 @@ def fetch_fragment_details(
     library_link = None
     try:
         from shared.nli_crossref_service import get_nli_crossref_service
-        viewer = get_nli_crossref_service(thread_safe=True).get_library_viewer_url(sid)
+        svc = get_nli_crossref_service(thread_safe=True)
+        viewer = svc.get_library_viewer_url(sid, cambridge_viewer_url=_cudl_item_url(sid, meta_mgr, svc))
         if viewer and viewer.get("url"):
             library_link = {
                 "key": "library",

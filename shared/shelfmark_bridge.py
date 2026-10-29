@@ -2,12 +2,15 @@
 """Bridge module for CUDL shelfmark normalization (Phase 84).
 
 Layered on top of genizah_core.normalize_shelfmark() — does NOT replace it.
-Used only at the four cross-system lookup sites listed in Phase 84 D-08:
+Used at the cross-system lookup sites listed in Phase 84 D-08:
 
   1. Shelfmark search fallback (genizah_core.py shelfmark-mode search)
-  2. Browse CUDL external-link builder (web/pages/browse.py)
-  3. cambridge_manifests reverse lookup (shared/nli_crossref_service.py)
-  4. Orphan-scanner unification (scripts/scan_cudl_orphans.py)
+  2. Orphan-scanner unification (scripts/scan_cudl_orphans.py)
+
+Since 2026-10-29 the two other sites -- the Browse CUDL link (web/pages/browse.py)
+and the cambridge_manifests lookup (shared/nli_crossref_service.py) -- use
+shared/cudl_identity.py instead: a record's CUDL item is decided by structure,
+because the normalized keys here collide (T-S NS 318.41 / 318.4.1).
 
 Wiring is NOT done in this module — see Plan 04 of Phase 84.
 

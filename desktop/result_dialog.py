@@ -4003,7 +4003,9 @@ class ResultDialog(QDialog):
             self.external_pane.setVisible(False)
             self.btn_toggle_image.setChecked(False)
 
-        self.external_url = meta.get('external_url') or meta.get('marc', {}).get('external_iiif_link')
+        # external_url carries the record's Cambridge decision (enrich_metadata); the raw
+        # MARC 856 link does not.
+        self.external_url = meta.get('external_url')
         # Prefer library_viewer_url (catalog page) over manifest URL for JTS/Manchester
         lib_viewer = meta.get('library_viewer_url')
         if lib_viewer and lib_viewer.get('url'):

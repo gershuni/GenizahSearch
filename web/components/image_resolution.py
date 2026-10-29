@@ -38,6 +38,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
+from shared.cudl_identity import RESOLVER_REVISION as CUDL_RESOLVER_REVISION
+
 from web.services import get_oxford_direct_image_url
 from shared.synthetic_sys_id import is_synthetic_sys_id
 
@@ -229,7 +231,10 @@ def resolve_image_url(
             img_url = f"/api/oxford_image/{sys_id}?page={page_idx}{cache_bust_api}{_width_api}"
     elif active_source == 'cambridge' and _has_cambridge_images and not is_oxford:
         has_image = True
-        img_url = f"/api/cambridge_image/{sys_id}?page={page_idx}{cache_bust_api}{_width_api}"
+        # cv=: browsers keep these a week (IMAGE_HTTP_MAX_AGE) and never ask again in
+        # that time, so a new Cambridge decision needs a new URL (cudl_identity).
+        img_url = (f"/api/cambridge_image/{sys_id}?page={page_idx}{cache_bust_api}{_width_api}"
+                   f"&cv={CUDL_RESOLVER_REVISION}")
     elif active_source == 'manchester' and _has_manchester_images and not is_oxford:
         has_image = True
         # For multi-IE manuscripts, Manchester canvases span all volumes
@@ -316,10 +321,12 @@ def resolve_external_images(
             'cambridge_alignment': None,
         }
 
+    from shared.cudl_identity import cached_decision_stale
     cached = getattr(meta_mgr, 'nli_cache', {}).get(sys_id, {})
-    if not cached.get('images_ext'):
-        # nli_cache not yet populated — call enrich_metadata to resolve
-        # Manchester/Cambridge/JTS images from crossref sidecar + IIIF.
+    if not cached.get('images_ext') or cached_decision_stale(meta_mgr, sys_id):
+        # nli_cache not yet populated -- or populated before the record's current
+        # Cambridge decision, so its images may be another item's -- call
+        # enrich_metadata to resolve Manchester/Cambridge/JTS images from crossref sidecar + IIIF.
         # enrich_metadata is Phase-98-NLI-breaker-guarded; failure degrades
         # to empty image fields (no raise), mirroring browse_enrichment.py:249-250.
         try:
