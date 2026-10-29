@@ -5,8 +5,8 @@ Runs on the dev machine (against the gate-4 candidate) and on the server (agains
 swap and after the restart), so one check decides both sides of the deploy. Opens the file read-only; standard
 library only, so the server runs it from /tmp without a code deploy.
 
-  python scripts/check_fgp_sidecar.py --db fgp_data/inventory/fgp_transcriptions.candidate.db --version 2.0.0 --rows 59082
-  python3 /tmp/check_fgp_sidecar.py --db fgp_data/fgp_transcriptions.db.new --sha256 <hex> --version 2.0.0 --rows 59082
+  python scripts/check_fgp_sidecar.py --db fgp_data/inventory/fgp_transcriptions.candidate.db --version 2.0.0 --rows 59062
+  python3 /tmp/check_fgp_sidecar.py --db fgp_data/fgp_transcriptions.db.new --sha256 <hex> --version 2.0.0 --rows 59062
   --gate4-summary PATH also requires the file to be the one that run built and left unchanged (its sha256 == the
   run's meta.candidate_sha256, and fgp_meta.built_at == the run's run_at) and every check of that run to have
   passed. A summary that records no checksum (a run before 2026-10-26) is refused: rerun gate 4.

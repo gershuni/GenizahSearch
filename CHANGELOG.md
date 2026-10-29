@@ -4,6 +4,160 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [9.11.0] - 2026-10-29 — FGP transcriptions from FGP's own files
+
+The Friedberg Genizah Project transcriptions are rebuilt from the files FGP keeps for each transcription (the
+original Word file, and the per-line text of the position data) instead of the PDF copies. One file serves the
+website and the desktop installer (fgp_data/fgp_transcriptions.db, version 2.0.0, 59,062 rows).
+
+- About 14,600 new transcriptions (14,578: 12,992 whole-document, 1,586 per image).
+- About 27,800 existing transcriptions read more cleanly (27,849), 176 of them the Yerushalmi team's, now with the
+  team's completions, doubtful letters, deletions and interlinear additions marked.
+- Letters restored in about 1,900 transcriptions that keep their PDF text (1,779 read from the PDF fonts' glyph
+  names, 88 final letters by vocabulary).
+- About 550 entries withdrawn: 391 XML editions that could not be matched to their own record, 97 held by the
+  identity and credit rules (FGP's do-not-publish note, its not-to-display flag, files missing from the delivery,
+  XML of the wrong region, another edition, unconfirmed links), 50 duplicates FGP retired, 9 test files and
+  keyboard noise, 3 empty files.
+- Held back, each with a recorded reason: 4,506 earlier versions FGP has replaced, 3,666 entries the
+  one-edition-per-page chooser cannot show yet, 1,136 whose image the library gallery lists under another
+  manuscript, 782 Word files whose rendering differs from FGP's PDF, 322 with no manuscript, 50 translations whose
+  FIST status is unresolved, a personal contact list and three other non-manuscript files, and smaller groups.
+- The homepage "Scholarly transcriptions" number becomes 33,050 (was 27,593): the PGP editions together with
+  FGP's, now that FGP's own files add editions for more manuscripts.
+- Validation: gates 1-4 of docs/plans/FGP_SOURCE_FOLDERS_ASSESSMENT.md (gate 3 digest a6faccf2, 81 checks; gate 4
+  digest 838fda83, 86 checks with the declared expectations); scripts/check_fgp_sidecar.py,
+  scripts/deploy_fgp_sidecar.ps1 -Rows 59062.
+
+Also: the website opens the FGP or PGP edition of a page with no automatic transcription, and in the Joins Lab and
+Visual Similarity the Library and Domain filters show only or hide what you choose (PR #450). Installer 9.11.0;
+web deployed from `master-main`.
+
+### FGP: letters restored by reading the PDF fonts' own glyph names (web + desktop)
+
+- **Letters restored in 1,779 FGP transcriptions that keep their PDF text** (GS-276). FGP's PDFs name every glyph
+  in their embedded fonts, but most carry no Unicode map, so extraction showed final letters, vowel points and Arabic
+  letters as boxes, left whitespace-coded letters out, or showed wrong symbols. Gate 3 now decodes each drawn glyph by
+  its font and byte code -- through a reviewed glyph-name registry (`scripts/fgp_glyph_registry.py`) and an exact
+  outline match against pinned reference fonts -- re-extracts a repaired copy of the PDF and checks every change glyph
+  by glyph (`scripts/fgp_glyph_reread.py`; checks T11-T14). The owner's rulings of 2026-10-28 read a glyph whose
+  typeface is not installed by its name, a plain letter tied with its variants as the plain one, and accept rows
+  whose lines decoding turns right-to-left. 91.4% of the Hebrew letters missing from these texts are
+  recovered; against the Word texts the decoded letters agree 99.97%. Pointed letters are stored as letter plus points,
+  Arabic as plain letters. Rows the checks cannot clear keep today's text with the vocabulary repair of the entry
+  below (88 rows) or as they were. Rules: `docs/plans/FGP_TEXT_PIPELINE_RULES.md` §9; candidate sidecar rebuilt
+  (gate 3 `a6faccf2`, gate 4 `838fda83`, sha256 `caeacabf…`, 59,062 rows); gate 4 attaches a re-read only to the
+  stored text and the PDF gate 3 read. The gates now read today's sidecar from `--fgp-db` and refuse a candidate
+  passed as today's (`scripts/fgp_association_inventory.py::refuse_candidate_as_today`).
+
+### FGP: final letters restored in the transcriptions that keep their PDF text (web + desktop)
+
+- **Final letters restored in 1,174 FGP transcriptions** (GS-276). FGP's PDF copies left the final letters
+  ך ם ן ף ץ as control characters, so readers saw boxes; the rows with no Word or line text kept them. Gate 3 now reads
+  each row's code-to-letter mapping off the row's own words against the vocabulary of the clean FGP texts
+  (`scripts/fgp_final_letters.py`) and applies a code only on clear evidence (at least two votes, 70% of them);
+  measured on the 5,392 rows that exist both ways, 6,421 of 6,426 applied codes are right (check T10, every run).
+  1,967 codes (119,522 occurrences) are restored; codes with weaker evidence and codes standing inside words (vowel
+  points and dots) stay as typed. Rules: `docs/plans/FGP_TEXT_PIPELINE_RULES.md` §8. On most of these rows the
+  glyph re-read of the next entry now replaces the vocabulary repair; 88 keep it.
+
+### FGP: the Yerushalmi team's transcriptions with their completions and doubtful letters (web + desktop)
+
+- **The Yerushalmi team's FGP transcriptions now come from its Word files, with their markings** (GS-276; plan
+  `docs/plans/FGP_TEAM_1350001_MARKINGS_PLAN.md`, rules `docs/plans/FGP_TEXT_PIPELINE_RULES.md` §10). The team (FGP
+  folder 1350001) marks its text by formatting, and its PDF copies lost the hollow (doubtful) letters altogether. Gate 3
+  now reads that team's Word files with completions in square brackets (`[לא]`), each doubtful letter followed by
+  U+05AF HEBREW MARK MASORA CIRCLE (`עבד֯`), deleted letters in `⟦ ⟧`, interlinear additions in `\ /` (`\יהא/`) and
+  letters in the Rashi font set apart in `⸤ ⸥`. A row is accepted when its letters agree with the PDF reading (at
+  least 99% of the PDF's letters found, at most 10% more; check T15), not by the line diff. 176 transcriptions switch
+  to the marked Word text and 6 new ones enter; 4 below the letter bar keep their PDF reading.
+
+### A legend for FGP's transcription marks; the desktop keeps `<…>` marks (web + desktop)
+
+- **A "?" beside a Genuzot transcription opens the team's legend of marks** (GS-274, option A), on the website
+  (the version selector) and on the desktop (Browse and the Manuscript Viewer). The Genuzot team types its
+  marks into the text (`?ב?` a doubtful letter, `@…@` a piyyut, `<…>` a line filler, …); the legend shows the
+  team's two lists, for prayer and piyyut fragments (2024) and for Talmud fragments transcribed for Hachi Garsinan
+  (2014). One source serves both apps: `shared/fgp_marks_legend.py`. The text itself is unchanged; drawing the marks (option B) waits on FGP.
+
+- **The version chooser shows no text of an FGP transcription** (owner, 2026-10-27). It named each FGP entry by
+  its opening words, which for many Genuzot texts is a line of lacuna dots; now entries that would read alike are
+  numbered ("FGP Transcription 1", "2", …), on the website and the desktop (`shared.fgp_service.number_repeated_labels`,
+  replacing `fgp_incipit`).
+
+### Fixed
+- **Desktop: `<…>` marks in PGP and FGP editions are shown again** (GS-275). The text went to Qt's `setHtml`
+  unescaped, so every `<…>` was read as a tag and dropped with its contents: FGP's line fillers (`<רא>`, 9,729 of
+  the FGP rows) and a PGP editor's added letters (`מיב<מ>נא` read `מיבנא`, 315 PGP transcriptions). All
+  text-to-HTML sites in Browse, View All and the viewer now escape first (`desktop.widgets.text_lines_to_html`),
+  and a test fails any new site that does not; the visual-similarity preview shows its text as plain text.
+- **FGP's stored HTML entities are decoded once, for every surface** (GS-60). The sidecar keeps `&deg;` where the
+  Genuzot team typed its margin sign `°`; the website's Quick View decoded it, its Browse showed `&deg;`, and the
+  desktop decoded it only through the bug above. `shared.fgp_service` now decodes well-formed entities when it
+  reads a row (`decode_stored_entities`), so all show `°`.
+
+### Web: editions on pages without an automatic transcription (web)
+
+- **A page without an automatic transcription now opens its FGP or PGP edition.** The reading view built its
+  version menu -- and its Edit, Comment, Notes and Joins buttons -- only when the page had an automatic text, so on
+  such a page an edition could not be reached at all (T-S NS 243.146, page 1). The page's automatic text is now
+  taken as empty: the menu is always there, the usual default rule chooses the edition when there is one, and the
+  page's citation credits that edition. Edit there starts from the empty text and is saved as the reader's own
+  version, as elsewhere (the question of editing an edition itself is GS-277). A catalogue-only record without a
+  page still gets none of these (`web/pages/browse_state.py::page_has_reading_view`). Plan and the owner's
+  decisions: `docs/plans/EDITIONS_WITHOUT_AUTOMATIC_TEXT_PLAN.md`.
+
+### Joins Lab and Visual Similarity: Library and Domain shown only or hidden, the domain tree, counts that follow each other (web + desktop, PR #450)
+
+- **The Library and Domain filters can hide what you choose, and take several values everywhere.** Each list now
+  opens with a **Show only | Hide** switch: Show only keeps the candidates in the chosen libraries or domains, as
+  before; Hide leaves them out and keeps the rest, a candidate with no library or domain included. Nothing chosen
+  still shows every candidate.
+- **Domains are a tree** (owner, after trying the desktop): the FJMS hierarchy, parent → domain → sub-domain, in
+  its canonical order (`shared/domain_hierarchy.py`, as the search page's filter); choosing a parent takes in its
+  whole branch. A fragment is still placed by its first domain, as its card shows it.
+- **Each filter counts what the others keep**: choosing or hiding domains updates the library counts, and the
+  other way round; every value keeps its row, at (0) when none is left.
+  - Website Joins Lab: the switch sits at the top of the toolbar's Library and Domain lists and applies with the
+    picks when the list closes; while values are hidden the label reads "Library · Hiding" / "Domain · Hiding"
+    above their names. The Domain list is indented by level. The choices (`libraries_mode` / `domains_mode` in the
+    filter state) are kept in the saved session and in a copied link; a link from before them shows only.
+  - Website Visual Similarity window: the same switch and nested Domain list, applied at once, like its picks;
+    the other list's counts follow at once. The Hebrew UI now lists domains in the tree's order, as the English.
+  - Desktop Joins Lab: the Filter dialog's Library and Domain are checklists (Domain the tree; a parent checked,
+    partly checked or not by its branch), each with **Select All / Select None** and the Show only / Hide choice,
+    and their counts change as you check, before Apply. Under the results toolbar a row of **chips** names every
+    filter that is on (text, material, library, domain, dimensions, triage, width); each chip removes its filter,
+    "Clear all" removes them all, and the Filter button shows how many are on ("Filter (2) ▾"). The chip is the
+    search filter dialog's, now shared: `desktop/widgets/filter_chip.py`.
+  - One rule for all three: `shared.joins_lab` (`filter_passes`, `path_passes`, `domain_path`,
+    `domain_tree_options`, `facet_rows`).
+
+### The open-issues tracker rebuilt: one line per defect, a backlog, details by ID (ci, PR #449)
+
+- `docs/OPEN_ISSUES.md` had grown to 179 KB: 256 paragraph-long rows in insertion order, a
+  10 KB log of count changes, hand-kept counts that had drifted (P2 48 claimed, 45 marked
+  open), and sections for milestones long closed. Every open row, and the 18 discovery items
+  parked in `docs/archive/OPEN_ISSUES_V9_DISCOVERY_OPEN_ITEMS.md` on 2026-10-23, was re-checked
+  against the code at `ca809c56` (eleven agents, one batch each; every "fixed" verdict had to
+  cite code, and each closure was confirmed by a second reading before it moved).
+- Result: 9 rows closed into `docs/archive/OPEN_ISSUES_ARCHIVE.md` (fixed or overtaken by
+  v9.8-v9.10 work, each with its evidence), 158 open defects in the tracker (P1 0, P2 38,
+  P3 120) at 40 KB, and 109 items in the new `docs/BACKLOG.md` -- deferred defects, code debt,
+  test gaps, ideas, server and owner tasks. One new defect found by the triage and reproduced:
+  list sync fails scenario invariant 14 on seeds 11362 and 11917 (an edit made during an upload
+  can lose a website entry).
+- Every row has a stable ID (`GS-<n>`), sits under its priority and area, and links to its
+  full text in the new `docs/ISSUE_DETAILS.md` (each old row quoted verbatim, then its triage
+  note). The Summary is generated: `scripts/open_issues_model.py` defines the form,
+  `scripts/collect_open_issues.py` folds fragments in (new fragment form `## P3 search:
+  headline`, `Where:`, details; the old form is still accepted) and with `--check` reports
+  drift, `scripts/archive_closed_issues.py` moves a `✅` row and its details to the archive and
+  never reuses an ID. `tests/test_open_issues_fragments.py` fails CI when the three files
+  disagree or a count, an order or a heading drifts.
+- `scripts/check_docs.py`: the tracker's ceiling is lowered from 180,000 to 80,000 bytes, and a
+  line-number citation of `BACKLOG.md` or `ISSUE_DETAILS.md` fails like one of the tracker.
+
 ## [9.10.0] - 2026-10-25 — Desktop UI improvements
 
 The desktop gets an optional side menu, Go to (Ctrl+G) with the last manuscripts opened, saved

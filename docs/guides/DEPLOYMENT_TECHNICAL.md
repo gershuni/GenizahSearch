@@ -1267,7 +1267,9 @@ at `%LOCALAPPDATA%\GenizahSearchPro\data\pgp_data\pgp.db`, which
 
 **Recompute the homepage stats.** `web/stats_service.py::CORPUS_STATS` is hardcoded, and
 one of its five numbers (`scholarly_transcriptions`) is derived from
-`document_sources.doc_relation LIKE '%Edition%'`. It only changes on a refresh + redeploy.
+`document_sources.doc_relation LIKE '%Edition%'` together with the FGP sidecar's `Digital Edition` rows. It only
+changes on a PGP or FGP refresh + redeploy (`tests/test_seed023_stats_service.py` fails on a stale value when the
+sidecars are present).
 
 #### Traps this procedure exists to avoid
 

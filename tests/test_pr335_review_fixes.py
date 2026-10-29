@@ -530,11 +530,16 @@ def test_a_metadata_only_record_gets_no_citation():
     """
     code = _code_only(BROWSE)
     body = code.split('def _update_citation_chip', 1)[1].split('\n    def ', 1)[0]
-    assert "if not (page.text or '').strip():" in body, (
+    guard = "if not (page.text or '').strip() and not shown_edition:"
+    assert guard in body, (
         'a page with no transcription still produces a page citation')
-    assert body.index("if not (page.text or '').strip():") < body.index(
+    assert body.index(guard) < body.index(
         'set_page_citation(browse_page_citation('), (
         'the empty-text check runs after the citation is built')
+    # Since 2026-10-27 a page without an automatic text cites the edition shown on it -- and only an edition or
+    # the reader's approved version: the automatic text's own source never lifts the guard.
+    shown = body.split('shown_edition = ', 1)[1].split('\n', 1)[0]
+    assert "in ('fgp', 'pgp', 'translation', 'user')" in shown, shown
 
 
 def test_the_chip_is_cleared_when_the_manuscript_goes_away():

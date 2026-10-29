@@ -767,7 +767,7 @@ from version import APP_VERSION
 # Names the CONTENT wave, not a release: the seen flag is stored per browser
 # as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
-WHATS_NEW_VERSION = "9.9.0-wildcards"
+WHATS_NEW_VERSION = "9.11.0-fgp"
 # The What's New entry for each combination of live AI listings (web/ai_listings.py).
 AI_LAUNCH_WHATS_NEW = {
     ('ChatGPT', 'Claude'): "New: GenizahSearch in ChatGPT and Claude - ask about the manuscripts in your own words, from the AI tools page.",
@@ -1789,6 +1789,10 @@ def create_layout():
                                 "view while you scroll"), '/joins-lab'))
     _new_surfaces.insert(0, (tr("Better wildcard search in Responsa style (the * operator): "
                                 "the site now finds fuller results"), '/search'))
+    # v9.11.0 (2026-10-28), ungated like the FGP transcriptions themselves: the
+    # owner-approved line, leading to Browse, where the version chooser shows them.
+    _new_surfaces.insert(0, (tr("New: about 14,600 more Friedberg Genizah Project transcriptions, "
+                                "and cleaner text in about 27,800 more."), '/browse'))
 
     _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
     # Each listing launch lights the unread dot again (whats_new_suffix).

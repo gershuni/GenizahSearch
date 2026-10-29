@@ -10,8 +10,8 @@
 # failed step runs. The swap is two renames in one directory while the service still holds the old file open;
 # the restart makes it read the new one.
 #
-#   powershell -File scripts/deploy_fgp_sidecar.ps1 -Rows 59082            # check, upload, verify, swap, restart
-#   powershell -File scripts/deploy_fgp_sidecar.ps1 -Rows 59082 -DryRun    # local check only; print the rest
+#   powershell -File scripts/deploy_fgp_sidecar.ps1 -Rows 59062            # check, upload, verify, swap, restart
+#   powershell -File scripts/deploy_fgp_sidecar.ps1 -Rows 59062 -DryRun    # local check only; print the rest
 #
 # Rollback (prints the exact names at the end):
 #   ssh <host> "cd /home/ubuntu/GenizahSearch/fgp_data && mv fgp_transcriptions.db.prev-<stamp> fgp_transcriptions.db && sudo systemctl restart genizah-web"

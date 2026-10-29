@@ -99,7 +99,7 @@ class UpdateNotificationBar(QFrame):
 # keeps the value and shows nothing to whoever already read it (9.6.0, owner
 # 2026-10-07: no desktop What's New). Change it together with the bar and dialog
 # texts.
-WHATS_NEW_CONTENT_VERSION = "9.10.0"
+WHATS_NEW_CONTENT_VERSION = "9.11.0"
 
 
 class WhatsNewBar(QFrame):
@@ -177,7 +177,9 @@ class WhatsNewBar(QFrame):
         # (approved with the release texts, 2026-10-19).
         # v9.10.0: the four features a user can reach at once (approved with the
         # release texts, 2026-10-25).
-        self.lbl_msg.setText(tr("New: a side menu as an option, Go to (Ctrl+G), saved searches, and larger text in the result lists"))
+        # v9.11.0: the FGP transcriptions from FGP's own files (approved with the
+        # release texts, 2026-10-28).
+        self.lbl_msg.setText(tr("New: about 14,600 more Friedberg Genizah Project transcriptions, and cleaner text in about 27,800 more"))
         self.show()
 
     def on_learn_more(self):
@@ -310,16 +312,16 @@ class WhatsNewDialog(QDialog):
         layout.addWidget(title)
 
         is_heb = CURRENT_LANG == 'he'
-        # v9.10.0 (2026-10-25). Five bullets, the Hebrew in the owner's own words:
-        # the side menu and its keys, Go to, saved searches, text size, and the
-        # rest in one line. The website-only changes are in the CHANGELOG, README
-        # and GitHub release.
+        # v9.11.0 (2026-10-28). Five bullets, the Hebrew in the owner's own words and the
+        # English following it: the new FGP transcriptions, the cleaner ones, the
+        # Jerusalem Talmud team's markings, the Genuzot "?" and the Joins Lab filters.
+        # The website-only changes are in the CHANGELOG, README and GitHub release.
         items = [
-            tr('The menu can move to the side of the window: Settings > Menu: Side menu, or ☰ > Move the menu to the side. Ctrl+1 to Ctrl+7 open the sections, Ctrl+8 the Fragment Puzzle and Ctrl+9 the Joins Lab.'),
-            tr('Go to (Ctrl+G): type a shelfmark or system number, and the manuscript opens in Browse by Shelfmark from anywhere in the program; type Hebrew or Arabic words in the same box to search the corpus for them. The last ten manuscripts you opened are listed under the box, for quick access.'),
-            tr('Saved searches: click ☆ beside a search in the history menu of Search or Composition Search, and it stays at the top of the list; clearing the history leaves it.'),
-            tr('Text size: Settings > Text size in result lists, Ctrl+= / Ctrl+- (Ctrl+0 for normal), or A- / A+ beside the tabs. To enlarge or shrink the transcriptions, click the A- / A+ buttons beside them.'),
-            tr('More features: a short tip at each start (turn it off or on in Settings > Show a tip when the program starts), the window opens where and as large as it was closed, F1 opens Help at the section in front, clicking your name on the Login button opens an account menu so you no longer log out by accident, and clear explanations in the Composition Search tooltips.'),
+            tr('About 14,600 more transcriptions of the Friedberg Genizah Project (FGP), read from the project\'s own Word files and line data.'),
+            tr('Cleaner text in about 27,800 FGP transcriptions that were already in the program: final and vocalised letters, the order of the lines, lines that mix Hebrew and Arabic, and Arabic script now appear as the transcriber wrote them; in about 1,900 more, letters that showed as boxes or wrong symbols are restored.'),
+            tr('Transcriptions of the Jerusalem Talmud now distinguish completions (in square brackets), doubtful letters (with a small circle above them) and additions between the lines. Please note: these transcriptions are not the final text, which is found in "Ginze Yerushalmi", edited by Y. Sussmann.'),
+            tr('A new "?" button beside transcriptions by FGP\'s Genuzot team explains the transcribers\' sigla.'),
+            tr('In the Joins Lab and Visual Similarity, you can choose several libraries or domains, and show or hide them, to find matches faster.'),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

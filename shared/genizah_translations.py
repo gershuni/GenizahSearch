@@ -6209,6 +6209,25 @@ TRANSLATIONS.update({
         'תכונות נוספות: טיפ קצר בכל פתיחה (ניתן לבטל או להפעיל בהגדרות > הצגת טיפ בפתיחת התוכנה), החלון נפתח במקום ובגודל שבו נסגר, F1 פותח את העזרה בנושא הלשונית הפתוחה, לחיצה על שמכם בכפתור הכניסה פותחת תפריט חשבון כדי למנוע התנתקות אקראית, ונוספו הסברים ברורים בחלוניות העזר של חיפוש חיבורים.',
 })
 
+# v9.11.0 desktop What's New bar and dialog, and the web What's New entry (2026-10-28).
+# The Hebrew is the owner's own; the English keys follow it.
+TRANSLATIONS.update({
+    'New: about 14,600 more Friedberg Genizah Project transcriptions, and cleaner text in about 27,800 more':
+        'חדש: כ-14,600 העתקות נוספות של פרויקט פרידברג, וטקסט נקי יותר בכ-27,800 העתקות',
+    'About 14,600 more transcriptions of the Friedberg Genizah Project (FGP), read from the project\'s own Word files and line data.':
+        'כ-14,600 העתקות נוספות של פרויקט פרידברג לחקר הגניזה (FGP), שנקראו מקובצי הוורד ומנתוני השורות של הפרויקט עצמו.',
+    'Cleaner text in about 27,800 FGP transcriptions that were already in the program: final and vocalised letters, the order of the lines, lines that mix Hebrew and Arabic, and Arabic script now appear as the transcriber wrote them; in about 1,900 more, letters that showed as boxes or wrong symbols are restored.':
+        'טקסט נקי יותר בכ-27,800 העתקות FGP שכבר היו בתוכנה: אותיות סופיות ומנוקדות, סדר השורות, שורות המשלבות עברית וערבית, והכתב הערבי מופיעים עתה כפי שכתב אותם המתעתק; ובכ-1,900 העתקות נוספות שוחזרו אותיות שהופיעו כריבועים או כסימנים שגויים.',
+    'Transcriptions of the Jerusalem Talmud now distinguish completions (in square brackets), doubtful letters (with a small circle above them) and additions between the lines. Please note: these transcriptions are not the final text, which is found in "Ginze Yerushalmi", edited by Y. Sussmann.':
+        'בהעתקות התלמוד הירושלמי נערכת עתה הבחנה: השלמות בסוגריים מרובעים, אותיות מסופקות בעיגול קטן מעליהן, ותוספות בין השיטין. תשומת לב: העתקות אלה אינן הנוסח הסופי, שאותו ניתן למצוא ב"גנזי הירושלמי" בעריכת י\' זוסמן.',
+    'A new "?" button beside transcriptions by FGP\'s Genuzot team explains the transcribers\' sigla.':
+        'נוסף כפתור "?" ליד העתקות של צוות גנוזות של פרויקט פרידברג, המסביר את סימולי המתעתקים.',
+    'In the Joins Lab and Visual Similarity, you can choose several libraries or domains, and show or hide them, to find matches faster.':
+        'במעבדת הצירופים ובדמיון החזותי, תוכלו לבחור כמה ספריות או תחומים, ולבחור הצגה או הסתרה שלהם, לשם מציאת התאמות מהירה יותר.',
+    'New: about 14,600 more Friedberg Genizah Project transcriptions, and cleaner text in about 27,800 more.':
+        'חדש: כ-14,600 העתקות נוספות של פרויקט פרידברג, וטקסט נקי יותר בכ-27,800 העתקות.',
+})
+
 # Phone layout (2026-10-22): the search toolbar's phone menu, the browse image
 # panel's slider toggle, and the catalog-browse sidebar toggle.
 TRANSLATIONS.update({

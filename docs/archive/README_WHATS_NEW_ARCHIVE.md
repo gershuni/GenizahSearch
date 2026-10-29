@@ -7,6 +7,26 @@ The authoritative release history is [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
+## What's New in Version 9.10.0? (the README's own text, 2026-10-25)
+
+**Desktop UI improvements** (installer 9.10.0):
+
+- **A side menu, if you prefer it**: Settings > Menu switches between the tabs at the top (still
+  the default) and a side menu with every section, the Fragment Puzzle, the Joins Lab and
+  Settings. Ctrl+1 to Ctrl+9 open them in either layout.
+- **Go to (Ctrl+G)** opens a manuscript by shelfmark or system number from anywhere, and lists the
+  last ten you opened.
+- **Saved searches**: a ☆ in the search history keeps a search at the top, whatever its age.
+- **Text size** for the result lists (Settings, Ctrl+= / Ctrl+-, A- / A+), and A- / A+ for the
+  Browse transcription.
+- **Startup tips**, one per start about a feature that is easy to miss; the window reopens where
+  you left it; F1, Ctrl+, and Ctrl+F; an account menu under your name.
+- **Website**: every contributor has a public name — accounts without one get an alias such as
+  "Curious Scribe", and the site asks once how your name should appear. Responsa notes on a Hebrew
+  page are now in Hebrew.
+
+---
+
 ## What's New in Version 9.9.0? (the README's own text, 2026-10-23)
 
 **True wildcards in Responsa search** (installer 9.9.0):

@@ -158,15 +158,15 @@ For the owner:
 ## 4. Recommended plan, in order
 
 **A. The release (web and desktop, one release).** Effort: a day plus the installer build.
-0. **Web deploy script (2026-10-26 evening):** `powershell -File scripts/deploy_fgp_sidecar.ps1 -Rows 59056` (the
+0. **Web deploy script (2026-10-26 evening):** `powershell -File scripts/deploy_fgp_sidecar.ps1 -Rows 59062` (59,062 rows since 2026-10-28; the
    owner runs it; `-DryRun` checks the file only). It checks the candidate locally with `scripts/check_fgp_sidecar.py`
    (the passing gate-4 run built it), uploads it as `fgp_transcriptions.db.new`, checks checksum, integrity, version
    and rows on the server, renames the served file to `fgp_transcriptions.db.prev-<stamp>`, swaps, restarts, checks
    the served file, and prints the rollback. No code deploy is needed for the data. **For the desktop build** the
-   candidate must sit at `fgp_data/fgp_transcriptions.db` (keep today's as e.g. `fgp_transcriptions.v1-pdf.db`);
+   candidate must sit at `fgp_data/fgp_transcriptions.db` (today's is kept as `fgp_transcriptions.pre_9110.db`);
    after that the gates' default `--fgp-db` reads the candidate as "today's", so a rerun of this record must pass
    `--fgp-db` the kept v1 file. Check the copy before building: `python scripts/check_fgp_sidecar.py --db
-   fgp_data/fgp_transcriptions.db --version 2.0.0 --rows 59056 --gate4-summary fgp_data/inventory/gate4_summary.json`.
+   fgp_data/fgp_transcriptions.db --version 2.0.0 --rows 59062 --gate4-summary fgp_data/inventory/gate4_summary.json`.
 1. Web: copy the candidate to the server as `fgp_data/fgp_transcriptions.db` **before** the code (the deploy rule:
    sidecars by `scp` first, then `git pull`; the auto-mode classifier blocks `scp` from a Claude session, so the owner
    runs it). The app code needs no change for the candidate's schema (the gates drove the real service over it; the

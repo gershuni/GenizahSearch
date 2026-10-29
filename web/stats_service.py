@@ -31,11 +31,12 @@ logger = get_logger(__name__)
 #   images                   NLI + Cambridge + Manchester + JTS image/manifest records
 #   scholarly_transcriptions DISTINCT manuscripts: PGP %Edition% ∪ FGP 'Digital Edition'
 #   automatic_transcriptions DISTINCT manuscripts in the deduped GENIZAH browse_map
+# scholarly_transcriptions re-verified 2026-10-28 against the v9.11.0 FGP sidecar (gate-4 candidate caeacabf).
 CORPUS_STATS: Dict[str, int] = {
     "manuscripts": 255_723,
     "catalog_entries": 731_354,
     "images": 1_019_886,
-    "scholarly_transcriptions": 27_593,
+    "scholarly_transcriptions": 33_050,
     "automatic_transcriptions": 232_450,
 }
 

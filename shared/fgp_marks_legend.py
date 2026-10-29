@@ -1,7 +1,7 @@
 """The Genuzot team's transcription marks: the legend shown beside their texts.
 
 FGP's Genuzot team ("צוות FGP להעתקות -גנוזות" / "FGP Transcriptions Team -
-Genuzos", 35,639 of the 59,056 rows in the 2026-10 source-folders sidecar)
+Genuzos", 35,639 of the 59,062 rows in the 2026-10 source-folders sidecar)
 types its marks into the transcription itself: ``?ב?`` for a doubtful letter,
 ``@...@`` around a piyyut, ``<...>`` for a line filler. Both apps show the text
 as typed. Beside a Genuzot transcription they show a "?" that opens this
