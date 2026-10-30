@@ -94,7 +94,8 @@ class LayoutProofShortcuts(QObject):
     application, this sees a key press that no shortcut took and matches it
     by its virtual-key code, which is the same in every layout. A press a
     QShortcut did take never arrives as a key press, so nothing fires twice;
-    only the window's own presses count, not a dialog's.
+    only the window's own presses count, not a dialog's, nor those of a popup
+    open over it, such as the search history (Codex review), as with Qt's own.
     """
 
     _MODIFIERS = (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
@@ -110,7 +111,8 @@ class LayoutProofShortcuts(QObject):
     def eventFilter(self, obj, event):  # noqa: N802 - Qt API
         if event.type() != QEvent.Type.KeyPress:
             return False
-        if QApplication.activeModalWidget() is not None or QApplication.activeWindow() is not self.window:
+        if (QApplication.activeModalWidget() is not None or QApplication.activePopupWidget() is not None
+                or QApplication.activeWindow() is not self.window):
             return False
         slot = self.bindings.get((event.nativeVirtualKey(), event.modifiers() & self._MODIFIERS))
         if slot is None:

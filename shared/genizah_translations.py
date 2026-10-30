@@ -5596,8 +5596,12 @@ TRANSLATIONS.update({
     "For example T-S 12.123": "למשל T-S 12.123",
     "Recent manuscripts": "כתבי יד אחרונים",
     # The keyboard shortcuts card (Ctrl+/, 2026-10-30; desktop/shortcuts_dialog.py).
-    "Open a section, with the cursor in its search box where it has one":
-        "פתיחת לשונית, עם הסמן בתיבת החיפוש שלה, אם יש בה",
+    "Open a section, with the cursor in its results (Search, Composition Search) or its search box":
+        "פתיחת לשונית, עם הסמן בתוצאות שלה (חפש, חיפוש חיבורים) או בתיבת החיפוש שלה",
+    "In a text box, such as Find, Ctrl with the arrows moves the cursor word by word, as usual.":
+        "בתיבת טקסט, כמו מצא, Ctrl עם החצים מזיז את הסמן מילה אחר מילה, כרגיל.",
+    "Put the cursor in the results list of the section in front":
+        "העברת הסמן לרשימת התוצאות של הלשונית הפתוחה",
     "Put the cursor in the search box of the section in front":
         "העברת הסמן לתיבת החיפוש של הלשונית הפתוחה",
     "In the search box: the search history (Enter runs a search, Delete removes it)":
@@ -6281,8 +6285,8 @@ TRANSLATIONS.update({
     # Mirrored in Hebrew (owner, 2026-10-30): there Ctrl+Left goes to the next result.
     'In the Manuscript Viewer, Ctrl+Right and Ctrl+Left move to the next and previous result, Ctrl+PgDown and Ctrl+PgUp to the next and previous image, and Ctrl+B opens it in Browse.':
         'בחלון "צפייה בכתב יד", Ctrl+חץ שמאלה ו-Ctrl+חץ ימינה עוברים לתוצאה הבאה ולקודמת, Ctrl+PgDown ו-Ctrl+PgUp לתמונה הבאה ולקודמת, ו-Ctrl+B פותח אותה בעיון לפי מספר מדף.',
-    'Ctrl+1 to Ctrl+7 open the tabs with the cursor in their search box; Ctrl+O opens Go to, like Ctrl+G.':
-        'Ctrl+1 עד Ctrl+7 פותחים את הלשוניות עם הסמן בתיבת החיפוש שלהן; Ctrl+O פותח את "מעבר אל", כמו Ctrl+G.',
+    'Ctrl+1 to Ctrl+7 open the tabs: in Search and Composition Search the cursor goes to the results when there are any, otherwise to the search box; Ctrl+R goes to the results list; Ctrl+O opens Go to, like Ctrl+G.':
+        'Ctrl+1 עד Ctrl+7 פותחים את הלשוניות: בחפש ובחיפוש חיבורים הסמן עובר לתוצאות כשיש כאלה, ואחרת לתיבת החיפוש; Ctrl+R מעביר לרשימת התוצאות; Ctrl+O פותח את "מעבר אל", כמו Ctrl+G.',
     'All the keys on one card: Ctrl+/, the ⌨ button beside A−, or Keyboard shortcuts in the ☰ menu.':
         'כל המקשים בכרטיס אחד: Ctrl+/‎, הכפתור ⌨ ליד A−‎, או "קיצורי מקלדת" בתפריט ☰.',
 })

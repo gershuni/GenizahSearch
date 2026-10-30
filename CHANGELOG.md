@@ -4,6 +4,48 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [9.12.1] - 2026-10-30 — Keyboard shortcuts, round two
+
+Ctrl+A ticks the Search results again (in 9.12.0 it raised an error and ticked nothing); going back to
+Search or Composition Search -- by Ctrl+1 / Ctrl+2 or a click on its tab or side-menu entry -- puts the
+cursor in its results when it has any; Ctrl+R goes to the results list of the section in front; and the
+fixes from two Codex review rounds of the 9.12.0 keys (Composition Search's tree, popups under the
+Hebrew layout, the Manuscript Viewer's Find, image buttons after a My Library document, tooltips, the
+card and Help). Desktop only: installer 9.12.1; the desktop What's New stays 9.12.0, its third bullet
+corrected (owner approved the Hebrew). Released without a PR (owner).
+
+### Ctrl+A ticks the results again; back to a search lands in its results; Ctrl+R (desktop)
+
+### Fixes
+- **Ctrl+A in the Search results raised a TypeError and ticked nothing (9.12.0).** The header box is a
+  `CheckBoxHeader`, whose `isChecked` is a field and whose `setChecked` only repaints; `_tick_all_results`
+  called `isChecked()` and relied on a `toggled` that never comes. It now sets the header's look and ticks
+  the rows itself (`on_search_select_all_toggled`). Each press had written a "Crash at" entry to
+  `crash_log.txt`. The test now uses the real `CheckBoxHeader`, not a QCheckBox stand-in.
+
+### Improvements
+- **Going back to Search or Composition Search lands in its results** (owner, 2026-10-30): Ctrl+1 / Ctrl+2,
+  a click on their tab or on their entry in the side menu put the cursor in the results list when it
+  shows rows -- the current row, or the first -- and in the search box only when there are none
+  (`_open_section`, `_land_in_results`; a click on the tab already in front changes nothing).
+- **Ctrl+R** puts the cursor in the results list of the section in front -- Search, Composition Search,
+  Browse by Identification, Personal Lists -- and does nothing when it shows no row or the section has
+  no list (`_focus_section_results`, `_focus_results_view`); also by the physical key in a Hebrew layout.
+  On the keyboard shortcuts card and in Help.
+
+### Fixes from the Codex review of the keys
+- A click on Search's or Composition Search's tab or side-menu entry with no results puts the cursor in
+  its search box, as Ctrl+1 / Ctrl+2 do (`_land_after_click`); before, it stayed where Qt left it.
+- In Composition Search's tree the cursor lands on the first result that shows, not on a group heading
+  ("Main Results"), which Enter cannot open, nor on a result left current under a group the user collapsed.
+- With the Hebrew keyboard layout, Ctrl+R, Ctrl+F, Ctrl+G and the other physical-key shortcuts no longer
+  act behind an open popup such as the search history (`LayoutProofShortcuts`).
+- Manuscript Viewer: Ctrl+F brings the text back when its toggle hid it beside the image; after a one-page
+  My Library document in an all-sources list, the next Genizah result's image buttons (and Ctrl+PgDown /
+  Ctrl+PgUp) work again -- they stayed disabled; A− and A+ name their keys, as on Browse by Shelfmark.
+- The card and Help say that in a text box, such as Find, Ctrl with the arrows moves word by word, as in
+  any text box, and that Ctrl+A ticks the Search results only.
+
 ## [9.12.0] - 2026-10-30 — Keyboard shortcuts
 
 The desktop app works from the keyboard: the cursor is in the search box from the moment the window shows

@@ -2363,13 +2363,15 @@ class GenizahGUI(QMainWindow):
         # Ctrl+8 the Fragment Puzzle, Ctrl+9 the Joins Lab (owner, 2026-10-25).
         # Ctrl+O Go to as well (owner, 2026-10-30: "they both can mean the same"),
         # Ctrl+E the search box as well (File Explorer's and Outlook's key for
-        # it), Ctrl+/ the list of keys (owner, 2026-10-30).
+        # it), Ctrl+R the section's results list, Ctrl+/ the list of keys
+        # (owner, 2026-10-30).
         for keys, slot in (("Ctrl+G", self.open_go_to),
                            ("Ctrl+O", self.open_go_to),
                            ("F1", self.open_help_for_current_section),
                            ("Ctrl+,", self._open_settings_dialog),
                            ("Ctrl+F", self._focus_section_field),
                            ("Ctrl+E", self._focus_section_field),
+                           ("Ctrl+R", self._focus_section_results),
                            ("Ctrl+/", self.open_shortcuts),
                            ("Ctrl+8", self._open_puzzle_window),
                            ("Ctrl+9", self.open_join_workbench)):
@@ -2385,6 +2387,7 @@ class GenizahGUI(QMainWindow):
                 ('O', Qt.KeyboardModifier.ControlModifier): self.open_go_to,
                 ('F', Qt.KeyboardModifier.ControlModifier): self._focus_section_field,
                 ('E', Qt.KeyboardModifier.ControlModifier): self._focus_section_field,
+                ('R', Qt.KeyboardModifier.ControlModifier): self._focus_section_results,
                 ('/', Qt.KeyboardModifier.ControlModifier): self.open_shortcuts,
                 (',', Qt.KeyboardModifier.ControlModifier): self._open_settings_dialog,
             })
@@ -2554,9 +2557,17 @@ class GenizahGUI(QMainWindow):
             btn = self.side_nav.add_section(
                 section_icons.get(self.tabs.widget(i), "\u2022"), self.tabs.tabText(i),
                 section_keys[i])
-            btn.clicked.connect(lambda _c=False, idx=i: self.tabs.setCurrentIndex(idx))
+            btn.clicked.connect(lambda _c=False, idx=i: (self.tabs.setCurrentIndex(idx),
+                                                         self._land_after_click()))
         self.side_nav.set_current(self.tabs.currentIndex())
         self.tabs.currentChanged.connect(self.side_nav.set_current)
+        # A click on Search's or Composition Search's tab puts the cursor in its
+        # results, else in its search box, as their keys do (_land_after_click);
+        # the tab changes after the press, so this waits a turn; a click on the
+        # tab already in front changes nothing.
+        self.tabs.tabBarClicked.connect(
+            lambda i: None if i == self.tabs.currentIndex()
+            else QTimer.singleShot(0, self._land_after_click))
 
         self.side_nav.add_separator()
         self.nav_puzzle_btn = self.side_nav.add_button("\U0001F9E9", tr("Fragment Puzzle"), shortcut="Ctrl+8")
@@ -7815,12 +7826,12 @@ class GenizahGUI(QMainWindow):
         self.btn_b_text_smaller = QToolButton()
         # Left-to-right marks: in the Hebrew UI a bare "A-" displays as "-A".
         self.btn_b_text_smaller.setText("\u200eA\u2212\u200e")
-        self.btn_b_text_smaller.setToolTip(tr("Smaller text"))
+        self.btn_b_text_smaller.setToolTip(f"{tr('Smaller text')} ({key_label('Ctrl+-', CURRENT_LANG == 'he')})")
         self.btn_b_text_smaller.setAccessibleName(tr("Smaller text"))
         self.btn_b_text_smaller.clicked.connect(lambda: self._browse_step_text_size(-TEXT_PT_STEP))
         self.btn_b_text_larger = QToolButton()
         self.btn_b_text_larger.setText("\u200eA+\u200e")
-        self.btn_b_text_larger.setToolTip(tr("Larger text"))
+        self.btn_b_text_larger.setToolTip(f"{tr('Larger text')} ({key_label('Ctrl+=', CURRENT_LANG == 'he')})")
         self.btn_b_text_larger.setAccessibleName(tr("Larger text"))
         self.btn_b_text_larger.clicked.connect(lambda: self._browse_step_text_size(TEXT_PT_STEP))
         for _b in (self.btn_b_text_smaller, self.btn_b_text_larger):
@@ -16830,11 +16841,97 @@ class GenizahGUI(QMainWindow):
         return self._focus_section_field()
 
     def _open_section(self, index):
-        """Ctrl+1 .. Ctrl+7: the section, with the cursor in its own search box
-        (owner, 2026-10-30), since a key was pressed to type next. A click on a
-        tab leaves the cursor where it was: in the results, Space pages down."""
+        """Ctrl+1 .. Ctrl+7: the section, with the cursor in its results when
+        Search or Composition Search shows some (owner, 2026-10-30: going back
+        to a search is going back to its results), else in its search box."""
         self.tabs.setCurrentIndex(index)
-        return self._focus_section_field()
+        landed = self._land_in_results()
+        return landed if landed is not None else self._focus_section_field()
+
+    # The results list of each section (Ctrl+R).
+    _SECTION_RESULTS = (('search_tab', 'results_table'), ('composition_tab', 'comp_tree'),
+                        ('catalog_browse_tab', 'catalog_results_table'),
+                        ('lists_tab', 'lists_items_table'))
+
+    def _land_in_results(self):
+        """Arriving on Search or Composition Search -- by its key or a click on
+        its tab -- with results: the cursor in them (owner, 2026-10-30). None
+        elsewhere, and with no results; the other sections keep their way."""
+        current = self.tabs.currentWidget()
+        if current is getattr(self, 'search_tab', None) or current is getattr(self, 'composition_tab', None):
+            return self._focus_section_results()
+        return None
+
+    def _land_after_click(self):
+        """A click on Search's or Composition Search's tab or side-menu entry
+        lands as its key does: in the results, else in the search box (Codex
+        review). A click on another section leaves the cursor to Qt."""
+        current = self.tabs.currentWidget()
+        if current is not getattr(self, 'search_tab', None) and current is not getattr(self, 'composition_tab', None):
+            return None
+        landed = self._land_in_results()
+        return landed if landed is not None else self._focus_section_field()
+
+    def _focus_section_results(self):
+        """Ctrl+R: the cursor in the results list of the section in front, on
+        its current row -- the first shown one when there is none. Nothing when
+        the section has no list or its list shows no row."""
+        current = self.tabs.currentWidget()
+        for tab, name in self._SECTION_RESULTS:
+            view = getattr(self, name, None)
+            if getattr(self, tab, None) is current and view is not None:
+                return self._focus_results_view(view)
+        return None
+
+    def _focus_results_view(self, view):
+        """The cursor in ``view`` (a table or a tree), on a shown row; None when
+        no row shows. A current row that shows is kept -- in a tree, one under a
+        collapsed group does not show (Codex review); with none, the first shown
+        row becomes current, nothing selected: in the Search results not on the
+        check box column, in a tree the first result rather than a group's
+        heading, which Enter cannot open."""
+        from PyQt6.QtCore import QItemSelectionModel, QModelIndex
+        model = view.model()
+        if isinstance(view, QTreeWidget):
+            def shown_rows(parent=QModelIndex()):
+                for r in range(model.rowCount(parent)):
+                    if not view.isRowHidden(r, parent):
+                        index = model.index(r, 0, parent)
+                        yield index
+                        if view.isExpanded(index):
+                            yield from shown_rows(index)
+
+            def shows(index):
+                while index.isValid():
+                    parent = index.parent()
+                    if view.isRowHidden(index.row(), parent) or (
+                            parent.isValid() and not view.isExpanded(parent)):
+                        return False
+                    index = parent
+                return True
+
+            first = next(shown_rows(), None)
+            if first is not None:
+                first = next((i for i in shown_rows()
+                              if isinstance(i.data(Qt.ItemDataRole.UserRole), dict)), first)
+            skip = None
+        else:
+            def shows(index):
+                return not view.isRowHidden(index.row())
+
+            row = next((r for r in range(model.rowCount()) if not view.isRowHidden(r)), None)
+            first = None if row is None else model.index(row, 0)
+            skip = self.COL_CHECKBOX if view is getattr(self, 'results_table', None) else None
+        if first is None:
+            return None
+        current = view.currentIndex()
+        if not current.isValid() or not shows(current):
+            col = next((c for c in range(model.columnCount(first.parent()))
+                        if c != skip and not view.isColumnHidden(c)), 0)
+            view.selectionModel().setCurrentIndex(
+                first.siblingAtColumn(col), QItemSelectionModel.SelectionFlag.NoUpdate)
+        view.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        return view
 
     # -- startup tips (desktop/startup_tips.py, owner 2026-10-25) --------------
     # One tip at each start, in the strip under the notice bars: not on the
@@ -27138,10 +27235,11 @@ class GenizahGUI(QMainWindow):
         if not boxes:
             return None
         tick = not all(b.checkState() == Qt.CheckState.Checked for b in boxes)
-        if self.chk_search_header.isChecked() != tick:
-            self.chk_search_header.setChecked(tick)   # its toggled handler ticks the rows
-        else:
-            self.on_search_select_all_toggled(tick)
+        # The header box is a CheckBoxHeader: its isChecked is a field, and its
+        # setChecked only repaints -- it sends no toggled -- so the rows are
+        # ticked here (9.12.0 called isChecked() and raised a TypeError).
+        self.chk_search_header.setChecked(tick)
+        self.on_search_select_all_toggled(tick)
         return tick
 
     def _lists_table_key(self, event):

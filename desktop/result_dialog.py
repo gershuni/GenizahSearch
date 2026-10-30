@@ -259,6 +259,9 @@ class ResultDialog(QDialog):
                            ("Ctrl+-", -TEXT_PT_STEP)):
             bind(keys, lambda s=step: self._change_text_size(s))
         bind("Ctrl+0", lambda: reading_text_size().set(TEXT_PT_DEFAULT))
+        for button, tip, keys in ((self.btn_text_smaller, tr("Smaller text"), "Ctrl+-"),
+                                  (self.btn_text_larger, tr("Larger text"), "Ctrl+=")):
+            button.setToolTip(f"{tip} ({key_label(keys, CURRENT_LANG == 'he')})")
         if sys.platform == 'win32':
             self._layout_keys = LayoutProofShortcuts(self, {
                 ('B', Qt.KeyboardModifier.ControlModifier): self.btn_view_transcription.click,
@@ -267,7 +270,10 @@ class ResultDialog(QDialog):
             QApplication.instance().installEventFilter(self._layout_keys)
 
     def _focus_find(self):
-        """Ctrl+F: the cursor in "Find in text", its text selected."""
+        """Ctrl+F: the cursor in "Find in text", its text selected -- the text
+        brought back first when its toggle hid it beside the image (Codex review)."""
+        if not self.btn_toggle_text.isChecked():
+            self.btn_toggle_text.setChecked(True)
         self.find_ms_input.setFocus(Qt.FocusReason.ShortcutFocusReason)
         self.find_ms_input.selectAll()
 
@@ -3319,8 +3325,13 @@ class ResultDialog(QDialog):
                 return self.load_local_page(offset=offset, target=target)
         except ImportError:
             pass  # Fall through to Genizah path on import failure (defensive)
+        # A LOCAL document disables the image buttons at its first or last page;
+        # here they always work, since get_browse_page answers None at the ends
+        # (Codex review: after a one-page LOCAL result in an all-sources list,
+        # a Genizah result's image buttons, and their keys, stayed dead).
+        self._set_local_page_nav_enabled(prev=True, nxt=True)
         self.cancel_image_thread()
-        
+
         # Determine strict navigation source
         # If target (Spinbox jump) is set -> Use p_num logic (target)
         # If offset (Next/Prev) is set -> Use internal_index logic (prevents loops)

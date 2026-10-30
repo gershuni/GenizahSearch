@@ -322,7 +322,7 @@ class WhatsNewDialog(QDialog):
         items = [
             tr('The cursor is in the search box as soon as the program opens, so you can type a search right away.'),
             tr('When a search finds results, the cursor moves to the results: Space ticks a result, Enter opens it, and Ctrl+Enter or Ctrl+B opens it in Browse; Ctrl+F or Ctrl+E brings you back to the search box.'),
-            tr('Ctrl+1 to Ctrl+7 open the tabs with the cursor in their search box; Ctrl+O opens Go to, like Ctrl+G.'),
+            tr('Ctrl+1 to Ctrl+7 open the tabs: in Search and Composition Search the cursor goes to the results when there are any, otherwise to the search box; Ctrl+R goes to the results list; Ctrl+O opens Go to, like Ctrl+G.'),
             tr('In the Manuscript Viewer, Ctrl+Right and Ctrl+Left move to the next and previous result, Ctrl+PgDown and Ctrl+PgUp to the next and previous image, and Ctrl+B opens it in Browse.'),
             tr('All the keys on one card: Ctrl+/, the ⌨ button beside A−, or Keyboard shortcuts in the ☰ menu.'),
         ]

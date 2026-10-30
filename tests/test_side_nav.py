@@ -455,10 +455,11 @@ def test_layout_proof_shortcuts_match_the_physical_key(monkeypatch):
     from desktop.widgets import side_nav
     from desktop.widgets.side_nav import LayoutProofShortcuts, windows_virtual_key
     win = QWidget()
-    state = {"active": win, "modal": None}
+    state = {"active": win, "modal": None, "popup": None}
     monkeypatch.setattr(side_nav, "QApplication", type("App", (), {
         "activeWindow": staticmethod(lambda: state["active"]),
-        "activeModalWidget": staticmethod(lambda: state["modal"])}))
+        "activeModalWidget": staticmethod(lambda: state["modal"]),
+        "activePopupWidget": staticmethod(lambda: state["popup"])}))
     fired = []
     filt = LayoutProofShortcuts(win, {('G', Qt.KeyboardModifier.ControlModifier): lambda: fired.append('G'),
                                       (',', Qt.KeyboardModifier.ControlModifier): lambda: fired.append(',')})
@@ -474,7 +475,9 @@ def test_layout_proof_shortcuts_match_the_physical_key(monkeypatch):
     assert not press(0x48)
     state["modal"] = QWidget()                 # a dialog is open: its keys are its own
     assert not press(0x47)
-    state["modal"], state["active"] = None, QWidget()   # another window in front
+    state["modal"], state["popup"] = None, QWidget()    # a popup over the window, the
+    assert not press(0x47)                               # search history: its keys (Codex)
+    state["popup"], state["active"] = None, QWidget()   # another window in front
     assert not press(0x47)
     assert fired == ['G', ',']
 

@@ -67,6 +67,12 @@ class _Window:
     _restore_session_then_lists_sync = GenizahGUI._restore_session_then_lists_sync
     _focus_on_launch = GenizahGUI._focus_on_launch
     _window_focus = GenizahGUI._window_focus
+    _land_in_results = GenizahGUI._land_in_results
+    _land_after_click = GenizahGUI._land_after_click
+    _focus_section_results = GenizahGUI._focus_section_results
+    _focus_results_view = GenizahGUI._focus_results_view
+    _SECTION_RESULTS = GenizahGUI._SECTION_RESULTS
+    COL_CHECKBOX = 0
     _refocus_after_restore = GenizahGUI._refocus_after_restore
     _SECTION_HELP = GenizahGUI._SECTION_HELP
     _SECTION_FIND_FIELD = GenizahGUI._SECTION_FIND_FIELD
@@ -83,6 +89,9 @@ class _Window:
         self.browse_find_input = QLineEdit(self.browse_tab)
         self.catalog_author_input = QLineEdit(self.catalog_browse_tab)
         self.lists_filter_input = QLineEdit(self.lists_tab)
+        from PyQt6.QtWidgets import QTableWidget, QTreeWidget
+        self.results_table = QTableWidget(0, 3, self.search_tab)      # no results yet
+        self.comp_tree = QTreeWidget(self.composition_tab)
         self.browse_sys_input = QLineEdit()
         self.browse_shelf_input = QLineEdit(self.browse_tab)
         self.browse_fl_input = QLineEdit()
@@ -185,6 +194,121 @@ def test_a_section_key_opens_the_section_with_the_cursor_in_its_box():
     assert w._open_section(0) is w.query_input and w.tabs.focusWidget() is w.query_input
     assert w._open_section(5) is None                     # Community: the section, no box
     assert w.tabs.currentWidget() is w.community_tab
+
+
+def _fill_results(w, rows=3):
+    from PyQt6.QtWidgets import QTableWidgetItem
+    w.results_table.setRowCount(rows)
+    for r in range(rows):
+        w.results_table.setItem(r, 1, QTableWidgetItem(f"row{r}"))
+
+
+def test_back_to_search_with_results_lands_in_them():
+    """Owner, 2026-10-30: going back to a search is going back to its results."""
+    w = _Window()
+    _fill_results(w)
+    w.tabs.setCurrentWidget(w.browse_tab)
+    assert w._open_section(0) is w.results_table
+    assert w.focusWidget() is w.results_table
+    assert (w.results_table.currentRow(), w.results_table.currentColumn()) == (0, 1)   # not the box column
+    assert w.results_table.selectedIndexes() == []
+    w.results_table.setCurrentCell(2, 2)                   # the row the user was on stays
+    w._open_section(2)
+    w._open_section(0)
+    assert (w.results_table.currentRow(), w.results_table.currentColumn()) == (2, 2)
+
+
+def test_composition_with_results_lands_in_them_and_without_in_its_text():
+    from PyQt6.QtWidgets import QTreeWidgetItem
+    w = _Window()
+    assert w._open_section(1) is w.comp_text_area           # no results: the source text
+    w.comp_tree.addTopLevelItems([QTreeWidgetItem(["ms0"]), QTreeWidgetItem(["ms1"])])
+    w.comp_tree.topLevelItem(0).setHidden(True)              # a filter hides the first
+    w._open_section(2)
+    assert w._open_section(1) is w.comp_tree
+    assert w.focusWidget() is w.comp_tree and w.comp_tree.currentItem().text(0) == "ms1"
+
+
+def _comp_groups(w):
+    """Composition Search's tree as it is drawn: group headings, results under them."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QTreeWidgetItem
+    main = QTreeWidgetItem(w.comp_tree, ["Main Results (2)"])
+    for name in ("ms0", "ms1"):
+        QTreeWidgetItem(main, [name]).setData(0, Qt.ItemDataRole.UserRole, {"sys_id": name})
+    filt = QTreeWidgetItem(w.comp_tree, ["Filtered (1)"])
+    QTreeWidgetItem(filt, ["ms2"]).setData(0, Qt.ItemDataRole.UserRole, {"sys_id": "ms2"})
+    main.setExpanded(True)
+    return main, filt
+
+
+def test_in_composition_the_cursor_lands_on_a_result_that_shows_not_a_heading():
+    """Codex review: Enter cannot open a group's heading, and a result under a
+    collapsed group does not show, though Qt keeps it current."""
+    w = _Window()
+    main, filt = _comp_groups(w)
+    w.tabs.setCurrentWidget(w.composition_tab)
+    assert w._focus_section_results() is w.comp_tree
+    assert w.comp_tree.currentItem().text(0) == "ms0"        # the first result, not its heading
+    w.comp_tree.setCurrentItem(main.child(1))
+    main.setExpanded(False)                                   # its group collapsed by the user
+    assert w.comp_tree.currentItem() is main.child(1)         # Qt leaves it current, unseen
+    filt.setExpanded(True)
+    w._focus_section_results()
+    assert w.comp_tree.currentItem().text(0) == "ms2"         # the first result that shows
+    filt.setExpanded(False)
+    w._focus_section_results()                                # no result shows: the first heading
+    assert w.comp_tree.currentItem() is main
+    main.setExpanded(True)
+    w.comp_tree.setCurrentItem(filt)                          # a row the user chose that shows stays
+    w._focus_section_results()
+    assert w.comp_tree.currentItem() is filt
+
+
+def test_a_click_on_search_or_composition_lands_as_its_key_does():
+    """Codex review: a click on their tab or side-menu entry with no results
+    puts the cursor in the search box, as Ctrl+1 / Ctrl+2 do, not where Qt
+    left it; a click on another section leaves the cursor to Qt."""
+    w = _Window()
+    w.gap_input.setFocus()
+    assert w._land_after_click() is w.query_input and w.focusWidget() is w.query_input
+    _fill_results(w)
+    assert w._land_after_click() is w.results_table and w.focusWidget() is w.results_table
+    w.tabs.setCurrentWidget(w.composition_tab)
+    assert w._land_after_click() is w.comp_text_area
+    w.tabs.setCurrentWidget(w.catalog_browse_tab)
+    w.tabs.tabBar().setFocus()                                # not its author box
+    assert w._land_after_click() is None and w.focusWidget() is w.tabs.tabBar()
+
+
+def test_ctrl_r_goes_to_the_sections_results_and_does_nothing_without_them():
+    w = _Window()
+    w.query_input.setFocus()
+    assert w._focus_section_results() is None               # Search with no results
+    assert w.focusWidget() is w.query_input
+    _fill_results(w, 2)
+    for r in range(2):
+        w.results_table.setRowHidden(r, True)
+    assert w._focus_section_results() is None               # every row hidden: none shown
+    w.results_table.setRowHidden(1, False)
+    assert w._focus_section_results() is w.results_table
+    assert w.results_table.currentRow() == 1
+    w.tabs.setCurrentWidget(w.browse_tab)
+    w.browse_shelf_input.setFocus()
+    assert w._focus_section_results() is None               # Browse has no results list
+    assert w.focusWidget() is w.browse_shelf_input
+
+
+def test_clicks_on_a_section_land_in_results_and_ctrl_r_is_bound():
+    src = _app_source()
+    init_ui = _init_ui_source()
+    assert '("Ctrl+R", self._focus_section_results)' in init_ui
+    assert "('R', Qt.KeyboardModifier.ControlModifier): self._focus_section_results" in init_ui
+    assert "self.tabs.tabBarClicked.connect(" in init_ui and "QTimer.singleShot(0, self._land_after_click)" in init_ui
+    assert "lambda i: None if i == self.tabs.currentIndex()" in init_ui   # the tab in front: nothing
+    assert "self._land_after_click()))" in init_ui                       # the side menu's sections
+    opened = _method_source(src, "_open_section")
+    assert "landed = self._land_in_results()" in opened and "self._focus_section_field()" in opened
 
 
 def _restore_into(w, words=None, fails=False, during=None, section=None):
@@ -411,6 +535,9 @@ def test_the_card_shows_each_key_beside_what_it_does_under_its_heading(hebrew):
         expected.append(("#", tr(title)))
         expected += [(key_label(keys, hebrew), tr(what)) for keys, what in rows]
     assert shown == expected
+    from PyQt6.QtWidgets import QLabel
+    from desktop.shortcuts_dialog import TEXT_BOX_NOTE                # under the list (Codex review)
+    assert tr(TEXT_BOX_NOTE) in [label.text() for label in dlg.findChildren(QLabel)]
     if hebrew:
         assert shown[1][0] == "‏Ctrl+1‎‏ … ‏Ctrl+7‎"
         assert any("חץ שמאלה" in keys for keys, _w in shown)   # חץ שמאלה
@@ -846,8 +973,9 @@ class _ResultLists:
 
     def __init__(self):
         from PyQt6.QtCore import Qt
-        from PyQt6.QtWidgets import (QCheckBox, QPushButton, QTableWidget, QTableWidgetItem,
+        from PyQt6.QtWidgets import (QPushButton, QTableWidget, QTableWidgetItem,
                                      QTreeWidget, QTreeWidgetItem)
+        from desktop.ui_widgets import CheckBoxHeader
         self.calls = []
         self.results_table = QTableWidget(4, 3)
         for r in range(4):
@@ -859,7 +987,10 @@ class _ResultLists:
             sid = QTableWidgetItem(f"99{r}")
             sid.setData(Qt.ItemDataRole.UserRole, {"uid": f"u{r}"})
             self.results_table.setItem(r, 1, sid)
-        self.chk_search_header = QCheckBox()
+        # The real header box (9.12.0's Ctrl+A broke on it while a QCheckBox
+        # stand-in passed): isChecked is a field, setChecked sends nothing.
+        self.chk_search_header = CheckBoxHeader(self.results_table)
+        self.results_table.setHorizontalHeader(self.chk_search_header)
         self.chk_search_header.toggled.connect(self.on_search_select_all_toggled)
         self.lists_items_table = QTableWidget(2, 2)
         for r in range(2):
@@ -940,9 +1071,10 @@ def test_ctrl_a_ticks_every_shown_result_and_again_unticks_them():
     ctrl_a = _key(Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
     assert w.eventFilter(w.results_table, ctrl_a) is True
     assert [w.box(r) for r in range(4)] == [Qt.CheckState.Checked] * 3 + [Qt.CheckState.Unchecked]
-    assert w.chk_search_header.isChecked()
+    assert w.chk_search_header.isChecked is True                # the header box shows it
     assert w._results_table_key(ctrl_a) is True
     assert all(w.box(r) == Qt.CheckState.Unchecked for r in range(4))
+    assert w.chk_search_header.isChecked is False
 
 
 def test_lists_and_composition_results_open_with_enter_and_ctrl_enter():
@@ -1011,8 +1143,14 @@ class _Viewer(QWidget):
         self.btn_res_next_ms.setToolTip("next ms")
         self.btn_res_prev_ms.setToolTip("prev ms")
         self.btn_view_transcription.setToolTip("Browse manuscript")
-        self.find_ms_input = QLineEdit(self)
+        self.btn_text_smaller, self.btn_text_larger = QPushButton("A-", self), QPushButton("A+", self)
+        self.ms_widget = QWidget(self)                    # the text pane, with Find in it
+        self.find_ms_input = QLineEdit(self.ms_widget)
         self.find_ms_input.setText("abc")
+        self.btn_toggle_text = QPushButton("text", self)  # hides the text beside the image
+        self.btn_toggle_text.setCheckable(True)
+        self.btn_toggle_text.setChecked(True)
+        self.btn_toggle_text.toggled.connect(self.ms_widget.setVisible)
 
     def _change_text_size(self, delta):
         self.sizes.append(delta)
@@ -1051,6 +1189,14 @@ def test_the_viewer_keys_press_their_buttons_and_mirror_in_hebrew(monkeypatch, h
         assert v.clicked == []
         keys["Ctrl+F"].activated.emit()
         assert v.focusWidget() is v.find_ms_input and v.find_ms_input.selectedText() == "abc"
+        v.btn_toggle_text.setChecked(False)                        # the text hidden (Codex review)
+        v.btn_res_next.setFocus()
+        keys["Ctrl+F"].activated.emit()
+        assert v.btn_toggle_text.isChecked() and v.ms_widget.isVisible()
+        assert v.focusWidget() is v.find_ms_input
+        for button, tip, k in ((v.btn_text_smaller, "Smaller text", "Ctrl+-"),
+                               (v.btn_text_larger, "Larger text", "Ctrl+=")):
+            assert button.toolTip() == f"{rd.tr(tip)} ({key_label(k, hebrew)})"
         for k in ("Ctrl+=", "Ctrl++", "Ctrl+-"):
             keys[k].activated.emit()
         keys["Ctrl+0"].activated.emit()
@@ -1061,6 +1207,56 @@ def test_the_viewer_keys_press_their_buttons_and_mirror_in_hebrew(monkeypatch, h
         if layout_keys is not None:
             QApplication.instance().removeEventFilter(layout_keys)
         v.deleteLater()
+
+
+def test_a_viewer_key_typed_in_find_moves_by_word_there(monkeypatch):
+    """Real key presses (Codex review): Ctrl+Right pages the results, but in
+    the Find box Qt keeps it for moving by word, as the card and Help say."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    import desktop.result_dialog as rd
+    monkeypatch.setattr(rd, "CURRENT_LANG", "en")
+    v = _Viewer()
+    v.show()
+    v._install_shortcuts()
+    try:
+        v.activateWindow()
+        if not QTest.qWaitForWindowActive(v):
+            pytest.skip("the window cannot become active on this platform")
+        v.btn_res_prev.setFocus()
+        QTest.keyClick(v.btn_res_prev, Qt.Key.Key_Right, Qt.KeyboardModifier.ControlModifier)
+        assert v.clicked == ["btn_res_next"]
+        v.find_ms_input.setFocus()
+        v.find_ms_input.setCursorPosition(0)
+        QTest.keyClick(v.find_ms_input, Qt.Key.Key_Right, Qt.KeyboardModifier.ControlModifier)
+        assert v.clicked == ["btn_res_next"]                       # no second result
+        assert v.find_ms_input.cursorPosition() == 3               # one word on
+    finally:
+        layout_keys = getattr(v, "_layout_keys", None)
+        if layout_keys is not None:
+            QApplication.instance().removeEventFilter(layout_keys)
+        v.deleteLater()
+
+
+def test_a_genizah_result_after_a_one_page_local_one_has_working_image_keys():
+    """Codex review: a one-page My Library document disables the image buttons
+    (and so Ctrl+PgDown / Ctrl+PgUp); the next Genizah result in an all-sources
+    list enables them again."""
+    from PyQt6.QtWidgets import QPushButton
+    import desktop.result_dialog as rd
+    names = ("btn_pg_next", "btn_pg_prev", "btn_compact_pg_next", "btn_compact_pg_prev")
+    v = type("V", (), {})()
+    for name in names:
+        button = QPushButton()
+        button.setEnabled(False)
+        setattr(v, name, button)
+    v._set_local_page_nav_enabled = rd.ResultDialog._set_local_page_nav_enabled.__get__(v)
+    v.cancel_image_thread = lambda: None
+    v.current_sys_id = "990001234560205171"
+    v.current_internal_idx, v.current_p_num, v.current_volume_ie = 0, 1, None
+    v.searcher = type("S", (), {"get_browse_page": lambda *_a, **_k: None})()
+    rd.ResultDialog.load_page(v, offset=1)
+    assert [getattr(v, n).isEnabled() for n in names] == [True] * 4
 
 
 def test_the_viewer_installs_its_keys_once_its_buttons_exist():

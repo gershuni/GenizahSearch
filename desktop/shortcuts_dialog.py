@@ -55,14 +55,21 @@ def key_label(keys: str, hebrew: bool) -> str:
     return _RLM + "".join(shown)
 
 
+# Under the list: in a text box Qt keeps Ctrl+arrow (and Ctrl+Shift+arrow) for
+# moving and selecting by word, so there those keys do not page (Codex review).
+TEXT_BOX_NOTE = "In a text box, such as Find, Ctrl with the arrows moves the cursor word by word, as usual."
+
+
 def shortcut_sections(hebrew: bool):
     """[(section title, [(keys as shown, what they do)])]. " / " separates keys
     that do the two halves of a row (or the same thing), " … " spans a run."""
     nxt, prev = arrow_keys(hebrew)
     return [
         ("In the whole window", [
-            ("Ctrl+1 … Ctrl+7", "Open a section, with the cursor in its search box where it has one"),
+            ("Ctrl+1 … Ctrl+7",
+             "Open a section, with the cursor in its results (Search, Composition Search) or its search box"),
             ("Ctrl+F / Ctrl+E", "Put the cursor in the search box of the section in front"),
+            ("Ctrl+R", "Put the cursor in the results list of the section in front"),
             ("Down", "In the search box: the search history (Enter runs a search, Delete removes it)"),
             ("Esc", "Stop a running search (Search, Composition Search)"),
             ("Ctrl+G / Ctrl+O", "Go to: open a manuscript by its shelfmark or system number"),
@@ -133,6 +140,8 @@ class ShortcutsDialog(QDialog):
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setWidget(body)
         layout.addWidget(scroll)
+        note = QLabel(tr(TEXT_BOX_NOTE))
+        layout.addWidget(note)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.button(QDialogButtonBox.StandardButton.Close).setText(tr("Close"))
         buttons.rejected.connect(self.reject)
@@ -140,7 +149,7 @@ class ShortcutsDialog(QDialog):
         # As tall as the list, within the screen.
         hint = body.sizeHint()
         screen = self.screen().availableGeometry() if self.screen() else None
-        height = hint.height() + 130     # the margins and the Close row: no scroll bar
+        height = hint.height() + note.sizeHint().height() + 130   # margins, Close row: no scroll bar
         if screen is not None:
             height = min(height, int(screen.height() * 0.85))
         self.resize(hint.width() + 60, height)
