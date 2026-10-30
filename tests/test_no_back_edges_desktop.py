@@ -77,6 +77,7 @@ DESKTOP_MODULES = [
     # 2026-10-24: the side menu, the optional second menu layout.
     "desktop/widgets/side_nav.py",
     "desktop/go_to_dialog.py",           # the Go to box (Ctrl+G), 2026-10-24
+    "desktop/shortcuts_dialog.py",       # the keyboard shortcuts card (Ctrl+/), 2026-10-30
     "desktop/startup_tips.py",           # one tip at each start, 2026-10-25
     "desktop/marks_legend.py",           # the Genuzot marks legend "?", 2026-10-27 (GS-274)
     # 2026-09-25: one running copy per data folder.

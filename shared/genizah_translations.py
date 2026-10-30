@@ -5595,6 +5595,20 @@ TRANSLATIONS.update({
         "מילים בעברית או בערבית נשלחות לחיפוש.",
     "For example T-S 12.123": "למשל T-S 12.123",
     "Recent manuscripts": "כתבי יד אחרונים",
+    # The keyboard shortcuts card (Ctrl+/, 2026-10-30; desktop/shortcuts_dialog.py).
+    "Open a section, with the cursor in its search box where it has one":
+        "פתיחת לשונית, עם הסמן בתיבת החיפוש שלה, אם יש בה",
+    "Put the cursor in the search box of the section in front":
+        "העברת הסמן לתיבת החיפוש של הלשונית הפתוחה",
+    "In the search box: the search history (Enter runs a search, Delete removes it)":
+        "בתיבת החיפוש: היסטוריית החיפושים (Enter מריץ חיפוש, Delete מוחק אותו)",
+    "In the search results: a page down, a page up": "ברשימת תוצאות החיפוש: עמוד למטה, עמוד למעלה",
+    "Composition Search: stop the search": "חיפוש חיבורים: עצירת החיפוש",
+    "Go to: open a manuscript by its shelfmark or system number":
+        "מעבר אל: פתיחת כתב יד לפי מספר מדף או מספר מערכת",
+    "Larger, smaller or normal text": "טקסט גדול יותר, קטן יותר או בגודל הרגיל",
+    "Help, at the section in front": "עזרה, בפרק של הלשונית הפתוחה",
+    "This list": "הרשימה הזו",
     # Saved searches: the star in the search history menus (2026-10-25).
     "Saved searches": "חיפושים שמורים",
     "Clear history (saved searches stay)": "ניקוי ההיסטוריה (החיפושים השמורים נשארים)",

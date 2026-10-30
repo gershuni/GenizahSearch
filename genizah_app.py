@@ -71,6 +71,7 @@ from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
 from desktop.widgets.side_nav import LayoutProofShortcuts, LinkedButton, SideNav, ltr, popup_point
 from desktop.go_to_dialog import GoToDialog
+from desktop.shortcuts_dialog import ShortcutsDialog
 from shared.quick_open import quick_open_target
 from desktop.widgets.line_number_text_edit import (
     apply_line_numbered_text,
@@ -1732,6 +1733,7 @@ class GenizahGUI(QMainWindow):
         self._programmatic_tab_change = False
 
         self.init_ui()
+        self._focus_on_launch()
 
         # Step 2: Start heavy initialization in background
         self.status_label.setText(tr("Initializing components... Please wait."))
@@ -2354,14 +2356,15 @@ class GenizahGUI(QMainWindow):
         # Settings Dialog (persistent, created once)
         self.settings_dialog = SettingsDialog(self)
 
-        # Ctrl+1 .. Ctrl+7 open the sections, in either menu layout; each tab's
-        # tooltip names its shortcut (and its full name, when the tab is elided).
+        # Ctrl+1 .. Ctrl+7 open the sections, in either menu layout, with the
+        # cursor in the section's search box; each tab's tooltip names its
+        # shortcut (and its full name, when the tab is elided).
         self._section_shortcuts = []
         section_keys = []
         for i in range(self.tabs.count()):
             seq = QKeySequence(f"Ctrl+{i + 1}")
             shortcut = QShortcut(seq, self)
-            shortcut.activated.connect(lambda idx=i: self.tabs.setCurrentIndex(idx))
+            shortcut.activated.connect(lambda idx=i: self._open_section(idx))
             self._section_shortcuts.append(shortcut)
             key = seq.toString(QKeySequence.SequenceFormat.NativeText)
             section_keys.append(key)
@@ -2375,10 +2378,16 @@ class GenizahGUI(QMainWindow):
         # Ctrl+G Go to, F1 Help for the section in front, Ctrl+, Settings,
         # Ctrl+F the section's own search or find field (owner, 2026-10-24).
         # Ctrl+8 the Fragment Puzzle, Ctrl+9 the Joins Lab (owner, 2026-10-25).
+        # Ctrl+O Go to as well (owner, 2026-10-30: "they both can mean the same"),
+        # Ctrl+E the search box as well (File Explorer's and Outlook's key for
+        # it), Ctrl+/ the list of keys (owner, 2026-10-30).
         for keys, slot in (("Ctrl+G", self.open_go_to),
+                           ("Ctrl+O", self.open_go_to),
                            ("F1", self.open_help_for_current_section),
                            ("Ctrl+,", self._open_settings_dialog),
                            ("Ctrl+F", self._focus_section_field),
+                           ("Ctrl+E", self._focus_section_field),
+                           ("Ctrl+/", self.open_shortcuts),
                            ("Ctrl+8", self._open_puzzle_window),
                            ("Ctrl+9", self.open_join_workbench)):
             shortcut = QShortcut(QKeySequence(keys), self)
@@ -2390,7 +2399,10 @@ class GenizahGUI(QMainWindow):
         if sys.platform == 'win32':
             self._layout_shortcuts = LayoutProofShortcuts(self, {
                 ('G', Qt.KeyboardModifier.ControlModifier): self.open_go_to,
+                ('O', Qt.KeyboardModifier.ControlModifier): self.open_go_to,
                 ('F', Qt.KeyboardModifier.ControlModifier): self._focus_section_field,
+                ('E', Qt.KeyboardModifier.ControlModifier): self._focus_section_field,
+                ('/', Qt.KeyboardModifier.ControlModifier): self.open_shortcuts,
                 (',', Qt.KeyboardModifier.ControlModifier): self._open_settings_dialog,
             })
             QApplication.instance().installEventFilter(self._layout_shortcuts)
@@ -2473,6 +2485,17 @@ class GenizahGUI(QMainWindow):
             QPushButton:hover { background-color: #1a73e8; color: white; }
         """)
         corner_widget.add(self.corner_website_btn, 4)
+
+        # Keyboard shortcuts, beside A- (owner, 2026-10-30): the side menu has
+        # its own entry.
+        self.corner_shortcuts_btn = QPushButton("⌨️")
+        self.corner_shortcuts_btn.setFlat(True)
+        self.corner_shortcuts_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.corner_shortcuts_btn.setToolTip(f"{tr('Keyboard shortcuts')} ({ltr('Ctrl+/')})")
+        self.corner_shortcuts_btn.setStyleSheet("font-size: 16px; padding: 1px 2px;")
+        self.corner_shortcuts_btn.setFixedWidth(30)
+        self.corner_shortcuts_btn.clicked.connect(self.open_shortcuts)
+        corner_widget.add(self.corner_shortcuts_btn, 3)
 
         # Text size, the buttons beside the keys (owner, 2026-10-25): the
         # transcription on the Browse tab, the result lists elsewhere.
@@ -2563,6 +2586,9 @@ class GenizahGUI(QMainWindow):
         self.side_nav.add_separator(footer=True)
         self.nav_help_btn = self.side_nav.add_button("\u2753", tr("Help"), footer=True, shortcut="F1")
         self.nav_help_btn.clicked.connect(self.open_help_for_current_section)
+        self.nav_shortcuts_btn = self.side_nav.add_button(
+            "⌨️", tr("Keyboard shortcuts"), footer=True, shortcut="Ctrl+/")
+        self.nav_shortcuts_btn.clicked.connect(self.open_shortcuts)
         self.nav_settings_btn = self.side_nav.add_button(
             "\u2699\uFE0F", tr("Settings"), footer=True, shortcut="Ctrl+,")
         self.nav_settings_btn.clicked.connect(self._open_settings_dialog)
@@ -16730,6 +16756,10 @@ class GenizahGUI(QMainWindow):
                        if getattr(self, name, None) is current), None)
         self.open_help_center(anchor=anchor)
 
+    def open_shortcuts(self):
+        """Ctrl+/ and the menus' Keyboard shortcuts: every key on one card."""
+        ShortcutsDialog(self).exec()
+
     # Ctrl+F: the field each section searches or filters with.
     _SECTION_FIND_FIELD = (('search_tab', 'query_input'), ('composition_tab', 'comp_text_area'),
                            ('browse_tab', 'browse_find_input'),
@@ -16741,10 +16771,61 @@ class GenizahGUI(QMainWindow):
         for tab, field_name in self._SECTION_FIND_FIELD:
             field = getattr(self, field_name, None)
             if getattr(self, tab, None) is current and field is not None:
+                # Browse with no manuscript open has no text to find in: the
+                # shelfmark is what is typed there first (owner, 2026-10-30).
+                # (A QComboBox has a length, so these test for None, not truth.)
+                shelf = getattr(self, 'browse_shelf_input', None)
+                if tab == 'browse_tab' and getattr(self, 'current_browse_sid', None) is None and shelf is not None:
+                    field = shelf
+                # PGP Tags mode hides the query row: the tag box is the search box.
+                mode = getattr(self, 'mode_combo', None)
+                tags = getattr(self, 'tag_search_combo', None)
+                if (tab == 'search_tab' and mode is not None and tags is not None
+                        and mode.currentIndex() == self.MODE_PGP_TAGS):
+                    field = tags
                 field.setFocus(Qt.FocusReason.ShortcutFocusReason)
-                field.selectAll()
+                edit = field.lineEdit() if isinstance(field, QComboBox) else field
+                if edit is not None:
+                    edit.selectAll()
                 return field
         return None
+
+    def _focus_on_launch(self):
+        """The cursor in the open section's search box from the moment the
+        window shows (owner, 2026-10-30), so typing works while the index loads."""
+        field = self._launch_focus_field = self._focus_section_field()
+        self._launch_focus_tab = self.tabs.currentWidget()
+        self._typed_since_launch = False
+        # textEdited is the user's typing or pasting only; isModified() is
+        # reset by the prefix handling's setText (Codex review).
+        if isinstance(field, QLineEdit):
+            field.textEdited.connect(lambda _t: setattr(self, '_typed_since_launch', True))
+        return field
+
+    def _refocus_after_restore(self, section_before=None):
+        """After the session restore: the search box of the section in front,
+        its restored text selected so typing replaces it -- unless the user
+        typed there, went to another section (``section_before``, the one in
+        front as the restore began, is not the launch one), or put the cursor
+        elsewhere while the program loaded (Codex review: the restore runs only
+        once the index has loaded, seconds after the window shows). A box the
+        restore hid -- the saved section in front, or PGP Tags mode -- gives way
+        to the one that shows."""
+        field = getattr(self, '_launch_focus_field', None)
+        if field is None or getattr(self, '_typed_since_launch', False):
+            return None
+        if section_before is not getattr(self, '_launch_focus_tab', None):
+            return None
+        if self._window_focus() is not field and field.isVisibleTo(field.window()):
+            return None
+        return self._focus_section_field()
+
+    def _open_section(self, index):
+        """Ctrl+1 .. Ctrl+7: the section, with the cursor in its own search box
+        (owner, 2026-10-30), since a key was pressed to type next. A click on a
+        tab leaves the cursor where it was: in the results, Space pages down."""
+        self.tabs.setCurrentIndex(index)
+        return self._focus_section_field()
 
     # -- startup tips (desktop/startup_tips.py, owner 2026-10-25) --------------
     # One tip at each start, in the strip under the notice bars: not on the
@@ -22635,7 +22716,12 @@ class GenizahGUI(QMainWindow):
         if getattr(self, '_rerun_search_after_filter', False):
             self._rerun_search_after_filter = False
             if self.query_input.text().strip() and not getattr(self, 'is_searching', False):
+                # Where the cursor was when this search was asked for (Search
+                # pressed, or a history entry picked), not where the user put
+                # it while the lookup ran (Codex review).
+                asked_from = getattr(self, '_deferred_search_focus', None)
                 self.start_search()
+                self._focus_at_search_start = asked_from
         if getattr(self, '_rerun_comp_after_filter', False):
             self._rerun_comp_after_filter = False
             custom_text = getattr(self, '_rerun_comp_custom_text', None)
@@ -23106,10 +23192,16 @@ class GenizahGUI(QMainWindow):
     def start_search(self):
         query = self.query_input.text().strip()
         if not query: return
+        # Where the cursor is as the search is asked for (_focus_results_after_search).
+        # A search that waits for the filter lookup below keeps it apart, as the
+        # queued one's: a search still running keeps its own (Codex review).
+        asked_from = self._window_focus()
         # #17 / K-14: never on a scope still being computed, or one that
         # could not be computed.
         if self._pre_search_filters_blocked(rerun='search'):
+            self._deferred_search_focus = asked_from
             return
+        self._focus_at_search_start = asked_from
         self._set_local_scope_strip_visible(False)
         self._local_scope_hint_blocked = False
 
@@ -24389,10 +24481,58 @@ class GenizahGUI(QMainWindow):
             self.statusBar().showMessage(
                 f"{tr('Search completed in')} {elapsed_str} \u2014 {len(results)} {tr('Results')}{partial_tag}", 0
             )
+        if not restoring:
+            self._focus_results_after_search()
         # Phase 114 USAGE-03: emit telemetry for non-empty search completion.
         # _app_shutting_down guard is first-line inside _emit_search_telemetry (REVIEWS HIGH-2).
         # emitted guard prevents double-emit if stop_search already fired (D-09).
         self._emit_search_telemetry('cancelled' if was_cancelled else 'completed', len(results))
+
+    def _window_focus(self):
+        """The window's focus widget (QWidget.focusWidget), or None for the
+        tests' stand-in windows, which have no Qt window behind them."""
+        try:
+            return self.focusWidget()
+        except (AttributeError, RuntimeError, TypeError):
+            return None
+
+    def _first_shown_result_row(self):
+        """The first row of the results table a filter or exclusion does not
+        hide, or None."""
+        table = self.results_table
+        return next((r for r in range(table.rowCount()) if not table.isRowHidden(r)), None)
+
+    def _focus_results_after_search(self):
+        """A search with results ends with the cursor in the results table, so
+        Space pages and the arrow keys move at once (owner, 2026-10-30); Ctrl+F
+        or Ctrl+E goes back to the box. Only on the Search tab, only when a row
+        shows (the all-terms filter or the exclusions can hide every one), and
+        only while the cursor is still where the search started from
+        (``_focus_at_search_start``, kept by start_search and the tag search):
+        a field or a section the user has gone to meanwhile keeps it."""
+        tabs = getattr(self, 'tabs', None)
+        table = getattr(self, 'results_table', None)
+        if tabs is None or table is None or tabs.currentWidget() is not getattr(self, 'search_tab', None):
+            return False
+        first_row = self._first_shown_result_row()
+        if first_row is None:
+            return False
+        current = self._window_focus()
+        if current is table:
+            return True                                  # already there: the user's own cell stays
+        if current is not None and current is not getattr(self, '_focus_at_search_start', None):
+            return False
+        # Qt makes the first cell current when a table takes the focus with none:
+        # the check box, where Space ticks instead of paging (Codex review).
+        if not table.currentIndex().isValid() or table.currentColumn() == self.COL_CHECKBOX:
+            col = next((c for c in range(table.columnCount())
+                        if c != self.COL_CHECKBOX and not table.isColumnHidden(c)), None)
+            if col is not None:
+                from PyQt6.QtCore import QItemSelectionModel
+                table.selectionModel().setCurrentIndex(
+                    table.model().index(first_row, col), QItemSelectionModel.SelectionFlag.NoUpdate)
+        table.setFocus(Qt.FocusReason.OtherFocusReason)
+        return True
 
     def _on_search_preview(self, thread, rows):
         """Show the first rows of a search that is still running
@@ -24451,6 +24591,9 @@ class GenizahGUI(QMainWindow):
         self.load_next_batch(batch_size=missing)
         for col in (self.COL_SYS_ID, self.COL_LIBRARY, self.COL_SHELF, self.COL_IMG):
             self.results_table.resizeColumnToContents(col)
+        # The exclusions may have hidden every row of the first paint: the
+        # first shown one may be here (Codex review).
+        self._focus_results_after_search()
 
     # ---- Phase 55: Refinement chain methods ----
 
@@ -24799,6 +24942,10 @@ class GenizahGUI(QMainWindow):
             if hasattr(self, '_update_refinement_strip'):
                 self._update_refinement_strip()
         self._apply_all_terms_filter_and_rerender()
+        # No shown row holds every term: the cursor goes back to the box, not an
+        # empty table (the end of the search may have put it there; Codex review).
+        if self._first_shown_result_row() is None and self._window_focus() is self.results_table:
+            self._focus_section_field()
 
     def _forget_chain_sets(self):
         """The filter scope changed under the chain: each step's manuscripts were found
@@ -25861,6 +26008,7 @@ class GenizahGUI(QMainWindow):
         }
         self.status_label.setText(tr("Searching tag: {}...").format(tag))
         self.statusBar().clearMessage()          # the last search's "Search completed in ..."
+        self._focus_at_search_start = self._window_focus()   # see _focus_results_after_search
         self._pgp_tag_search_worker = PGPTagSearchWorker(tag)
         # CR-114-01: bind THIS run's token into the slot so a stale slot from a superseded
         # worker carries its OLD token and is skipped by the emit helper's token guard.
@@ -26008,6 +26156,7 @@ class GenizahGUI(QMainWindow):
         # `tag` and `len(formatted)` are safe; only the bucket is included, not the count (D-04).
         # The tag text itself MUST NOT appear in any prop — only len(formatted) → bucket.
         self._emit_pgp_tag_search_telemetry('completed', len(formatted), token=token)
+        self._focus_results_after_search()
 
 
     def _search_by_pgp_tag(self, tag):
@@ -34905,6 +35054,11 @@ class GenizahGUI(QMainWindow):
         Legacy entries that still carry a 'results' snapshot are restored
         instantly for backward compatibility.
         """
+        # Where the cursor is as the entry is picked: the shown snapshot's, or the
+        # queued search's when the re-run waits for a filter lookup without
+        # passing through start_search; a search already running keeps its own
+        # (Codex review).
+        picked_from = self._window_focus()
         # Query and scope change here with signals blocked, and the re-run may
         # be deferred behind a filter recompute or skipped -- the strip from the
         # previous run must not survive into the restored one.
@@ -34968,6 +35122,7 @@ class GenizahGUI(QMainWindow):
             self.last_results = results
             self._last_search_params = None   # a stored snapshot: no params of a run here
             self._search_cutoff = dict(state.get('search_cutoff') or {'capped': False, 'interrupted': False})
+            self._focus_at_search_start = picked_from
             self.on_search_finished(results)
             self._schedule_session_save()
             return
@@ -34975,6 +35130,7 @@ class GenizahGUI(QMainWindow):
         # Re-run the search. If pre-search filters are still recomputing on a
         # worker, defer the run to _on_restore_filter_finished; else run now.
         if filter_pending:
+            self._deferred_search_focus = picked_from
             self._rerun_search_after_filter = True
         elif self.query_input.text().strip() and not getattr(self, 'is_searching', False):
             self.start_search()
@@ -35534,11 +35690,18 @@ class GenizahGUI(QMainWindow):
 
     def _restore_session_then_lists_sync(self):
         """Startup: restore the session (its questions are modal, so they are
-        answered first), then turn list sync on for a saved sign-in -- also when the
-        restore returns early or raises."""
+        answered first), put the cursor back in the search box with the restored
+        text selected (_refocus_after_restore), then turn list sync on for a saved
+        sign-in -- also when the restore returns early or raises."""
+        tabs = getattr(self, 'tabs', None)
+        section_before = tabs.currentWidget() if tabs is not None else None
         try:
             self._restore_session()
         finally:
+            try:
+                self._refocus_after_restore(section_before)
+            except Exception:
+                logger.exception("Could not put the cursor in the search box")
             self._start_restored_lists_sync()
 
     def _start_restored_lists_sync(self):
