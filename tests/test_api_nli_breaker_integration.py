@@ -96,6 +96,14 @@ class TestCircuitGuardsInFetchFlIdsFromNli:
             br.record_failure(failure_type='timeout', path='preload')
         assert br.is_open()
 
+        # The 30-day FL-id store is read before the breaker (a stored answer
+        # needs no NLI), and conftest gives each test a new, empty store. Create
+        # it here, outside the timed window, which is about the breaker: its
+        # creation inside the window took the test to 0.55 s on a Windows
+        # runner (PR #456).
+        from web import nli_image_store
+        nli_image_store.fl_id_store_get('warmup', api_mod.NLI_DISK_CACHE_TTL)
+
         # Now call into web.api — should short-circuit WITHOUT touching the session
         get_calls = {'n': 0}
 
