@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 9.11.1
+# Dicta Genizah Search Pro 9.12.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,15 +8,19 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 9.11.0?
+## What's New in Version 9.12.0?
 
-**FGP transcriptions from FGP's own files**
+**Keyboard shortcuts**
 
-About 14,600 new Friedberg Genizah Project transcriptions and cleaner text in about 27,800 more,
-now read from FGP's own files. Website and desktop.
+The desktop app is ready for the keyboard: the cursor waits in the search box when it opens and
+moves to the results when a search finds them, where Space ticks a result, Enter opens it and
+Ctrl+Enter or Ctrl+B opens it in Browse; Ctrl+1 to Ctrl+7 open the tabs with the cursor in their search box,
+the Manuscript Viewer moves between results and images with Ctrl and the arrow and page keys, and
+Ctrl+/ shows every key on one card. On the website, the Parallels Word
+export marks the matched words. Desktop and website.
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md). The README's previous What's New sections
-(8.1.0 to 9.10.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
+(8.1.0 to 9.11.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
 
 ---
 
@@ -91,7 +95,7 @@ Add **GenizahSearch to ChatGPT** from [genizahsearch.com/ai](https://genizahsear
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V9.11.1_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
+1. **Download:** the installer (`GenizahSearchPro_V9.12.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

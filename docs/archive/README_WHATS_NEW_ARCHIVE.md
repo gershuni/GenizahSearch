@@ -7,6 +7,15 @@ The authoritative release history is [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
+## What's New in Version 9.11.0? (the README's own text, 2026-10-29)
+
+**FGP transcriptions from FGP's own files**
+
+About 14,600 new Friedberg Genizah Project transcriptions and cleaner text in about 27,800 more,
+now read from FGP's own files. Website and desktop.
+
+---
+
 ## What's New in Version 9.10.0? (the README's own text, 2026-10-25)
 
 **Desktop UI improvements** (installer 9.10.0):

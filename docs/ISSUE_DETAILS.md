@@ -4172,3 +4172,32 @@ Fix sketch: re-harvest CUDL's Genizah collection manifest into `cambridge_geniza
 copy of the sidecar, review the delta (`reports/cudl_resolution_changes_2026-10-29.csv` is the shape), deploy the
 sidecar first, and bump `shared/cudl_identity.py::RESOLVER_REVISION` in the same change so cached decisions and
 browser image URLs refresh.
+
+## GS-281
+
+**Collecting the Joins Lab compare-details Qt test makes the Responsa refusal tests fail** · P3 · Build, CI and tests · ❌ Open · opened 2026-10-30
+
+Where: `tests/test_join_workbench_compare_details_qt.py` (the polluter); `tests/test_responsa_api_refusal.py`, `tests/test_responsa_refusal_surfaces.py`, `tests/test_responsa_star_crossings.py` (the victims)
+
+Found in the v9.12.0 release pre-flight. In one pytest process, `test_responsa_api_refusal.py` with
+`test_join_workbench_compare_details_qt.py` fails `test_the_api_answers_a_refused_query_with_its_code` (an
+assertion on the refusal payload, with an event loop's `.time` in the diff); each file alone passes, and so do
+the three Responsa files together (87 passed). The lanes of `scripts/run_local_tests.py` put them in one chunk,
+so the local pre-flight showed 8 Responsa failures (9 on a rerun with the five files). It is not from the
+release: on a clean checkout of `master-main` before it (6645240d) the same pair fails the same way. Fix sketch:
+find what the Joins Lab module leaves behind at import or in a fixture (a QApplication or event loop, a patched
+clock or `asyncio` policy) and scope it to its own tests, then pin the pair in one test run.
+
+## GS-282
+
+**The Fragment Puzzle close tests and the update-check thread tests fail when run with other desktop tests** · P3 · Build, CI and tests · ❌ Open · opened 2026-10-30
+
+Where: `tests/test_puzzle_canvas_integrity.py`, `tests/test_update_check_thread_lifetime_qt.py` (victims; polluter not found yet)
+
+Found in the v9.12.0 release work. In one pytest process with the ~60 test files that mention `ResultDialog`,
+`result_dialog`, `startup_tips`, the Personal Lists table or the Composition text (the set used to check that
+release), 36 tests of these two files fail -- the close-during-a-prompt and close-silences-the-update-check
+cases. The two files alone pass (141), and with `tests/test_quick_open.py` too (209). It is not from the
+release: the same set on the commit before it fails the same 36. Fix sketch: bisect the file list for the
+module that leaves a window, a modal or an application event filter behind (compare GS-281, the same kind of
+leak between the Joins Lab and Responsa tests), and scope it to its own tests.

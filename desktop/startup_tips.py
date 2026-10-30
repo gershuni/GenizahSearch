@@ -162,8 +162,10 @@ TIPS = (
     Tip('side_menu',
         "Prefer a menu down the side of the window? ☰ > **Move the menu to the side**.",
         show='menu', used='side_menu'),
-    Tip('space_scroll',
-        "In the results, Space pages down and Shift+Space pages up.",
+    # 'result_keys', not the old 'space_scroll' (owner, 2026-10-30: Space ticks
+    # now): a user who read the paging tip is shown this one.
+    Tip('result_keys',
+        "In the search results, Space ticks a result, Enter opens it, and Ctrl+Enter or Ctrl+B opens it in **Browse by Shelfmark**.",
         show=None, used=None),
     Tip('xlsx_export',
         "The **XLSX** button exports a research workbook: the results, the manuscripts, a bibliography and credits, with a link to each image. Tick rows first to export only those.",

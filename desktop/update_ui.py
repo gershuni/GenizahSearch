@@ -99,7 +99,7 @@ class UpdateNotificationBar(QFrame):
 # keeps the value and shows nothing to whoever already read it (9.6.0, owner
 # 2026-10-07: no desktop What's New). Change it together with the bar and dialog
 # texts.
-WHATS_NEW_CONTENT_VERSION = "9.11.0"
+WHATS_NEW_CONTENT_VERSION = "9.12.0"
 
 
 class WhatsNewBar(QFrame):
@@ -179,7 +179,9 @@ class WhatsNewBar(QFrame):
         # release texts, 2026-10-25).
         # v9.11.0: the FGP transcriptions from FGP's own files (approved with the
         # release texts, 2026-10-28).
-        self.lbl_msg.setText(tr("New: about 14,600 more Friedberg Genizah Project transcriptions, and cleaner text in about 27,800 more"))
+        # v9.12.0: keyboard shortcuts and the cursor in the search box (approved
+        # with the release texts, 2026-10-30).
+        self.lbl_msg.setText(tr("New: keyboard shortcuts, and the cursor waits in the search box from the moment the program opens"))
         self.show()
 
     def on_learn_more(self):
@@ -312,19 +314,17 @@ class WhatsNewDialog(QDialog):
         layout.addWidget(title)
 
         is_heb = CURRENT_LANG == 'he'
-        # v9.11.0 (2026-10-28). Five bullets, the Hebrew in the owner's own words and the
-        # English following it: the new FGP transcriptions, the cleaner ones, the
-        # Jerusalem Talmud team's markings, the Genuzot "?" and the Joins Lab filters.
-        # The website-only changes are in the CHANGELOG, README and GitHub release.
+        # v9.12.0 (2026-10-30, approved with the release texts). Five bullets: the
+        # cursor at launch, the result lists' keys, the section keys and Ctrl+O,
+        # the Manuscript Viewer's keys, and the keyboard shortcuts card. The
+        # website's Parallels Word export fix is in the CHANGELOG, README and
+        # GitHub release.
         items = [
-            tr('About 14,600 more transcriptions of the Friedberg Genizah Project (FGP), read from the project\'s own Word files and line data.'),
-            tr('Cleaner text in about 27,800 FGP transcriptions that were already in the program: final and vocalised letters, the order of the lines, lines that mix Hebrew and Arabic, and Arabic script now appear as the transcriber wrote them; in about 1,900 more, letters that showed as boxes or wrong symbols are restored.'),
-            tr('Transcriptions of the Jerusalem Talmud now distinguish completions (in square brackets), doubtful letters (with a small circle above them) and additions between the lines. Please note: these transcriptions are not the final text, which is found in "Ginze Yerushalmi", edited by Y. Sussmann.'),
-            tr('A new "?" button beside transcriptions by FGP\'s Genuzot team explains the transcribers\' sigla.'),
-            tr('In the Joins Lab and Visual Similarity, you can choose several libraries or domains, and show or hide them, to find matches faster.'),
-            # v9.11.1 (2026-10-30): the owner's own Hebrew line. WHATS_NEW_CONTENT_VERSION
-            # stays 9.11.0 (owner): whoever dismissed the 9.11.0 bar is not shown it again.
-            tr('Corrected and added links to the Cambridge Digital Library (CUDL).'),
+            tr('The cursor is in the search box as soon as the program opens, so you can type a search right away.'),
+            tr('When a search finds results, the cursor moves to the results: Space ticks a result, Enter opens it, and Ctrl+Enter or Ctrl+B opens it in Browse; Ctrl+F or Ctrl+E brings you back to the search box.'),
+            tr('Ctrl+1 to Ctrl+7 open the tabs with the cursor in their search box; Ctrl+O opens Go to, like Ctrl+G.'),
+            tr('In the Manuscript Viewer, Ctrl+Right and Ctrl+Left move to the next and previous result, Ctrl+PgDown and Ctrl+PgUp to the next and previous image, and Ctrl+B opens it in Browse.'),
+            tr('All the keys on one card: Ctrl+/, the ⌨ button beside A−, or Keyboard shortcuts in the ☰ menu.'),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

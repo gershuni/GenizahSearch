@@ -333,44 +333,110 @@ def _init_ui_source():
     return src[src.index("    def init_ui(self):"):src.index("    def _update_corner_login_state(self):")]
 
 
-def test_the_shortcuts_card_names_every_bound_key_and_only_those():
+def _app_source():
+    from pathlib import Path
+    return (Path(__file__).resolve().parent.parent / "genizah_app.py").read_text(encoding="utf-8")
+
+
+def _card_keys(rows):
+    return {key for keys, _what in rows for key in keys.replace(" … ", " / ").split(" / ")}
+
+
+def test_the_card_names_every_window_key_and_only_those():
     import re
-    from desktop.shortcuts_dialog import SHORTCUTS
+    from desktop.shortcuts_dialog import shortcut_sections
     init_ui = _init_ui_source()
     bound = set(re.findall(r'\("((?:Ctrl\+|F\d)[^"]*)", (?:self\.|-?\d)', init_ui))
     assert {"Ctrl+G", "F1", "Ctrl+=", "Ctrl+/"} <= bound          # the pattern finds them
     bound.discard("Ctrl++")                                       # Ctrl+= by another name
-    shown = {key for keys, _what in SHORTCUTS
-             for key in keys.replace(" … ", " / ").split(" / ")}
-    assert bound - shown == set()
-    # Ctrl+1 .. Ctrl+7 are bound in a loop; the others are one widget's own keys,
-    # bound where that widget is: Down in the search box, Space in the results,
-    # Esc on Composition Search's text.
+    window = _card_keys(dict(shortcut_sections(False))["In the whole window"])
+    assert bound - window == set()
+    # Ctrl+1 .. Ctrl+7 are bound in a loop; Down in the search box, Esc on the
+    # Search tab and on Composition Search's text.
     assert 'QKeySequence(f"Ctrl+{i + 1}")' in init_ui
-    assert shown - bound == {"Ctrl+1", "Ctrl+7", "Down", "Space", "Shift+Space", "Esc"}
-    from pathlib import Path
-    src = (Path(__file__).resolve().parent.parent / "genizah_app.py").read_text(encoding="utf-8")
+    assert window - bound == {"Ctrl+1", "Ctrl+7", "Down", "Esc"}
+    src = _app_source()
     events = _method_source(src, "eventFilter")
     assert "event.key() == Qt.Key.Key_Down" in events and "self._show_search_history_menu()" in events
-    assert "event.key() == Qt.Key.Key_Space" in events and "source is self.results_table" in events
     assert 'QShortcut(QKeySequence("Escape"), self.comp_text_area)' in src
+    search_tab = _method_source(src, "create_search_tab")
+    assert 'stop_key = QShortcut(QKeySequence("Escape"), panel)' in search_tab
+    assert "self.stop_search() if self.is_searching else None" in search_tab
 
 
-def test_the_shortcuts_card_shows_each_key_beside_what_it_does():
+@pytest.mark.parametrize("hebrew", [False, True])
+def test_the_card_names_the_list_browse_and_viewer_keys_as_bound(hebrew):
+    """The keys of the other sections, per language: the arrows mirrored in
+    Hebrew (owner, 2026-10-30). What each key does is pinned below."""
+    from desktop.shortcuts_dialog import arrow_keys, shortcut_sections
+    nxt, prev = arrow_keys(hebrew)
+    assert (nxt, prev) == (("Left", "Right") if hebrew else ("Right", "Left"))
+    sections = dict(shortcut_sections(hebrew))
+    assert list(sections) == ["In the whole window", "In a list of results", "Composition Search",
+                              "Browse by Shelfmark", "Manuscript Viewer"]
+    assert _card_keys(sections["In a list of results"]) == {"Space", "Ctrl+A", "Enter", "Ctrl+Enter", "Ctrl+B"}
+    assert _card_keys(sections["Composition Search"]) == {"Ctrl+Enter"}
+    moves = {"Ctrl+PgDown", "Ctrl+PgUp", f"Ctrl+Shift+{nxt}", f"Ctrl+Shift+{prev}"}
+    assert _card_keys(sections["Browse by Shelfmark"]) == moves
+    assert _card_keys(sections["Manuscript Viewer"]) == moves | {
+        f"Ctrl+{nxt}", f"Ctrl+{prev}", "Ctrl+B", "Ctrl+F", "Ctrl+=", "Ctrl+-", "Ctrl+0", "Esc"}
+    # Browse by Shelfmark: bound on its tab, to its buttons.
+    browse = _method_source(_app_source(), "create_browse_tab")
+    for needle in ("nxt, prev = arrow_keys(CURRENT_LANG == 'he')",
+                   '("Ctrl+PgDown", self.btn_b_next,', '("Ctrl+PgUp", self.btn_b_prev,',
+                   '(f"Ctrl+Shift+{nxt}", self.btn_next_ms,', '(f"Ctrl+Shift+{prev}", self.btn_prev_ms,',
+                   "shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)",
+                   "shortcut.activated.connect(button.click)"):
+        assert needle in browse
+
+
+@pytest.mark.parametrize("hebrew", [False, True])
+def test_the_card_shows_each_key_beside_what_it_does_under_its_heading(hebrew):
     from PyQt6.QtWidgets import QFormLayout
-    from desktop.shortcuts_dialog import SHORTCUTS, ShortcutsDialog
-    from desktop.widgets.side_nav import ltr, windows_virtual_key
+    from desktop.shortcuts_dialog import ShortcutsDialog, key_label, shortcut_sections
+    from desktop.widgets.side_nav import windows_virtual_key
     from genizah_core import tr
-    dlg = ShortcutsDialog(None)
+    dlg = ShortcutsDialog(None, hebrew=hebrew)
     form = dlg.findChild(QFormLayout)
-    assert form.rowCount() == len(SHORTCUTS)
-    rows = [(form.itemAt(r, QFormLayout.ItemRole.LabelRole).widget().text(),
-             form.itemAt(r, QFormLayout.ItemRole.FieldRole).widget().text())
-            for r in range(form.rowCount())]
-    assert rows == [(ltr(keys), tr(what)) for keys, what in SHORTCUTS]
-    assert rows[0][0] == "‎Ctrl+1 … Ctrl+7‎"
+    shown = []
+    for r in range(form.rowCount()):
+        span = form.itemAt(r, QFormLayout.ItemRole.SpanningRole)
+        if span is not None:
+            shown.append(("#", span.widget().text()))
+        else:
+            shown.append((form.itemAt(r, QFormLayout.ItemRole.LabelRole).widget().text(),
+                          form.itemAt(r, QFormLayout.ItemRole.FieldRole).widget().text()))
+    expected = []
+    for title, rows in shortcut_sections(hebrew):
+        expected.append(("#", tr(title)))
+        expected += [(key_label(keys, hebrew), tr(what)) for keys, what in rows]
+    assert shown == expected
+    if hebrew:
+        assert shown[1][0] == "‏Ctrl+1‎‏ … ‏Ctrl+7‎"
+        assert any("חץ שמאלה" in keys for keys, _w in shown)   # חץ שמאלה
+    else:
+        assert shown[1][0] == "‎Ctrl+1 … Ctrl+7‎"
     assert windows_virtual_key("/") == 0xBF                       # Ctrl+/ on a Hebrew layout
     dlg.deleteLater()
+
+
+def test_hebrew_key_names_read_right_to_left_like_their_text():
+    """Hebrew names for the keys named in words (owner, 2026-10-30), Ctrl first
+    on the right, the first of a pair on the right as "הבא / הקודם" is, and a
+    trailing "/" or "," kept with its key; English unchanged."""
+    from desktop.shortcuts_dialog import key_label
+    from desktop.widgets.side_nav import ltr
+    lrm, rlm = "‎", "‏"
+    assert key_label("Ctrl+Shift+Left / Ctrl+Shift+Right", True) == (
+        f"{rlm}Ctrl+Shift+חץ שמאלה{lrm}{rlm} / {rlm}"
+        f"Ctrl+Shift+חץ ימינה{lrm}")
+    assert key_label("Space", True) == f"{rlm}רווח{lrm}"          # רווח
+    assert key_label("Down", True) == f"{rlm}חץ למטה{lrm}"   # חץ למטה
+    assert key_label("Ctrl+,", True) == f"{rlm}Ctrl+,{lrm}"
+    assert key_label("Ctrl++", True) == f"{rlm}Ctrl++{lrm}"
+    assert key_label("Ctrl+PgDown / Ctrl+PgUp", True) == f"{rlm}Ctrl+PgDown{lrm}{rlm} / {rlm}Ctrl+PgUp{lrm}"
+    for keys in ("Ctrl+Shift+Left / Ctrl+Shift+Right", "Space", "Ctrl+,"):
+        assert key_label(keys, False) == ltr(keys)
 
 
 class _SearchTab:
@@ -416,16 +482,14 @@ def _start_search_from(w, widget):
 
 
 @pytest.mark.parametrize("start", ["query_input", "btn_search", "gap_input"])
-def test_a_search_ends_in_the_results_on_a_cell_where_space_pages(start):
-    """From the box, the button, or wherever Go to left the cursor; the current
-    cell is not the check box, where Space ticks instead of paging (Codex review)."""
-    from genizah_app import space_scroll_action
+def test_a_search_ends_in_the_results_on_the_first_row(start):
+    """From the box, the button, or wherever Go to left the cursor; the first
+    row is current, so Space and Enter act on it at once."""
     w = _SearchTab()
     _start_search_from(w, getattr(w, start))
     assert w._focus_results_after_search() is True
     assert w.focusWidget() is w.results_table
     assert (w.results_table.currentRow(), w.results_table.currentColumn()) == (0, 1)
-    assert space_scroll_action(w.results_table.currentColumn(), w.COL_CHECKBOX, False) == 'page_down'
     assert w.results_table.selectedIndexes() == []        # nothing selected, nothing opened
 
 
@@ -752,3 +816,254 @@ def test_main_window_wiring():
     assert "self._step_text_size(s)" in init_ui and 'tr("Larger text"), footer=True, shortcut="Ctrl+="' in init_ui
     go = src[src.index("    def open_go_to(self):"):src.index("    def _go_to_recent_items(")]
     assert "recent=self._go_to_recent_items()" in go and "self._open_recent_item(value)" in go
+
+
+# ---- The keys of the result lists and the Manuscript Viewer (owner, 2026-10-30) ----
+
+def _key(key, mods=None):
+    from PyQt6.QtCore import QEvent, Qt
+    from PyQt6.QtGui import QKeyEvent
+    return QKeyEvent(QEvent.Type.KeyPress, key, mods or Qt.KeyboardModifier.NoModifier)
+
+
+class _ResultLists:
+    """The Search results, Personal Lists and Composition Search's tree and text,
+    with the real key methods; what a key opens is recorded."""
+
+    _enter_action = GenizahGUI._enter_action
+    _open_action = GenizahGUI._open_action
+    _KEY_MODIFIERS = GenizahGUI._KEY_MODIFIERS
+    _results_table_key = GenizahGUI._results_table_key
+    _current_result_res = GenizahGUI._current_result_res
+    _tick_current_result = GenizahGUI._tick_current_result
+    _tick_all_results = GenizahGUI._tick_all_results
+    on_search_select_all_toggled = GenizahGUI.on_search_select_all_toggled
+    _lists_table_key = GenizahGUI._lists_table_key
+    _comp_tree_key = GenizahGUI._comp_tree_key
+    _comp_text_key = GenizahGUI._comp_text_key
+    eventFilter = GenizahGUI.eventFilter
+    COL_CHECKBOX, COL_SYS_ID = 0, 1
+
+    def __init__(self):
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtWidgets import (QCheckBox, QPushButton, QTableWidget, QTableWidgetItem,
+                                     QTreeWidget, QTreeWidgetItem)
+        self.calls = []
+        self.results_table = QTableWidget(4, 3)
+        for r in range(4):
+            box = QTableWidgetItem()
+            box.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled
+                         | Qt.ItemFlag.ItemIsSelectable)
+            box.setCheckState(Qt.CheckState.Unchecked)
+            self.results_table.setItem(r, 0, box)
+            sid = QTableWidgetItem(f"99{r}")
+            sid.setData(Qt.ItemDataRole.UserRole, {"uid": f"u{r}"})
+            self.results_table.setItem(r, 1, sid)
+        self.chk_search_header = QCheckBox()
+        self.chk_search_header.toggled.connect(self.on_search_select_all_toggled)
+        self.lists_items_table = QTableWidget(2, 2)
+        for r in range(2):
+            item = QTableWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, f"item{r}")
+            self.lists_items_table.setItem(r, 0, item)
+        self.comp_tree = QTreeWidget()
+        self.comp_tree.addTopLevelItems([QTreeWidgetItem([f"ms{r}"]) for r in range(2)])
+        self.comp_text_area = QPlainTextEdit()
+        self.btn_comp_run = QPushButton("Analyze")
+        self.btn_comp_run.clicked.connect(lambda: self.calls.append("run"))
+        self.is_comp_running = False
+
+    def box(self, row):
+        return self.results_table.item(row, 0).checkState()
+
+    def show_full_text_for_result(self, res):
+        self.calls.append(("view", res["uid"]))
+
+    def open_result_in_browse_from_table(self, res):
+        self.calls.append(("browse", res["uid"]))
+
+    def _update_search_export_label(self):
+        pass
+
+    def lists_quick_view_by_id(self, item_id):
+        self.calls.append(("quick_view", item_id))
+
+    def lists_browse_by_id(self, item_id):
+        self.calls.append(("lists_browse", item_id))
+
+    def on_comp_item_double_clicked(self, item, column, browse=False):
+        self.calls.append(("comp", item.text(0), browse))
+
+
+def test_space_ticks_the_current_result_in_any_column_and_again_unticks_it():
+    from PyQt6.QtCore import Qt
+    w = _ResultLists()
+    w.results_table.setCurrentCell(2, 2)                   # not the check box column
+    assert w.eventFilter(w.results_table, _key(Qt.Key.Key_Space)) is True
+    assert w.box(2) == Qt.CheckState.Checked and w.box(1) == Qt.CheckState.Unchecked
+    assert w.eventFilter(w.results_table, _key(Qt.Key.Key_Space)) is True
+    assert w.box(2) == Qt.CheckState.Unchecked
+    assert w.calls == []                                   # Space opens nothing
+
+
+@pytest.mark.parametrize("mods", ["ControlModifier", "ShiftModifier"])
+def test_ctrl_space_and_shift_space_do_nothing(mods):
+    from PyQt6.QtCore import Qt
+    w = _ResultLists()
+    w.results_table.setCurrentCell(1, 1)
+    assert w._results_table_key(_key(Qt.Key.Key_Space, getattr(Qt.KeyboardModifier, mods))) is True
+    assert all(w.box(r) == Qt.CheckState.Unchecked for r in range(4))
+
+
+def test_enter_opens_the_result_and_ctrl_enter_opens_it_in_browse():
+    from PyQt6.QtCore import Qt
+    w = _ResultLists()
+    w.results_table.setCurrentCell(3, 1)
+    assert w.eventFilter(w.results_table, _key(Qt.Key.Key_Return)) is True
+    assert w.eventFilter(w.results_table, _key(Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)) is True
+    # the keypad's Enter too, and Ctrl+B as in the Manuscript Viewer
+    assert w.eventFilter(w.results_table, _key(Qt.Key.Key_Enter, Qt.KeyboardModifier.KeypadModifier)) is True
+    assert w.eventFilter(w.results_table, _key(Qt.Key.Key_B, Qt.KeyboardModifier.ControlModifier)) is True
+    assert w.calls == [("view", "u3"), ("browse", "u3"), ("view", "u3"), ("browse", "u3")]
+    assert w._results_table_key(_key(Qt.Key.Key_Return, Qt.KeyboardModifier.AltModifier)) is False
+    assert w._results_table_key(_key(Qt.Key.Key_B)) is False      # B alone: Qt's own
+    w.results_table.setRowHidden(3, True)                   # a hidden row opens nothing
+    w._results_table_key(_key(Qt.Key.Key_Return))
+    assert len(w.calls) == 4
+
+
+def test_ctrl_a_ticks_every_shown_result_and_again_unticks_them():
+    from PyQt6.QtCore import Qt
+    w = _ResultLists()
+    w.results_table.setRowHidden(3, True)
+    w.results_table.item(0, 0).setCheckState(Qt.CheckState.Checked)
+    ctrl_a = _key(Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+    assert w.eventFilter(w.results_table, ctrl_a) is True
+    assert [w.box(r) for r in range(4)] == [Qt.CheckState.Checked] * 3 + [Qt.CheckState.Unchecked]
+    assert w.chk_search_header.isChecked()
+    assert w._results_table_key(ctrl_a) is True
+    assert all(w.box(r) == Qt.CheckState.Unchecked for r in range(4))
+
+
+def test_lists_and_composition_results_open_with_enter_and_ctrl_enter():
+    from PyQt6.QtCore import Qt
+    w = _ResultLists()
+    ctrl = Qt.KeyboardModifier.ControlModifier
+    w.lists_items_table.setCurrentCell(1, 1)
+    assert w.eventFilter(w.lists_items_table, _key(Qt.Key.Key_Return)) is True
+    assert w.eventFilter(w.lists_items_table, _key(Qt.Key.Key_Return, ctrl)) is True
+    assert w.eventFilter(w.lists_items_table, _key(Qt.Key.Key_B, ctrl)) is True
+    w.comp_tree.setCurrentItem(w.comp_tree.topLevelItem(1))
+    assert w.eventFilter(w.comp_tree, _key(Qt.Key.Key_Return)) is True
+    assert w.eventFilter(w.comp_tree, _key(Qt.Key.Key_Enter, ctrl | Qt.KeyboardModifier.KeypadModifier)) is True
+    assert w.eventFilter(w.comp_tree, _key(Qt.Key.Key_B, ctrl)) is True
+    assert w.calls == [("quick_view", "item1"), ("lists_browse", "item1"), ("lists_browse", "item1"),
+                       ("comp", "ms1", False), ("comp", "ms1", True), ("comp", "ms1", True)]
+    assert w._lists_table_key(_key(Qt.Key.Key_Space)) is False   # Qt's own Space there
+
+
+def test_ctrl_enter_runs_composition_search_from_its_text_and_never_stops_it():
+    from PyQt6.QtCore import Qt
+    w = _ResultLists()
+    ctrl_enter = _key(Qt.Key.Key_Return, Qt.KeyboardModifier.ControlModifier)
+    assert w._comp_text_key(_key(Qt.Key.Key_Return)) is False     # Enter stays a new line
+    assert w._comp_text_key(_key(Qt.Key.Key_B, Qt.KeyboardModifier.ControlModifier)) is False  # not a run
+    assert w.eventFilter(w.comp_text_area, ctrl_enter) is True
+    assert w.calls == ["run"]
+    w.is_comp_running = True                                       # running: Ctrl+Enter is not Stop
+    assert w._comp_text_key(ctrl_enter) is True and w.calls == ["run"]
+    w.is_comp_running = False
+    w.btn_comp_run.setEnabled(False)
+    w._comp_text_key(ctrl_enter)
+    assert w.calls == ["run"]
+
+
+def test_the_icons_name_their_keys_and_the_lists_take_them():
+    src = _app_source()
+    keys = "key_label('Ctrl+Enter / Ctrl+B', CURRENT_LANG == 'he')"
+    assert f"f\"{{tr('Browse manuscript')}} ({{{keys}}})\"" in src
+    assert "f\"{tr('View result')} ({ltr('Enter')})\"" in src
+    assert "f\"{tr('Quick View')} ({ltr('Enter')})\"" in src and f"f\"{{tr('Browse')}} ({{{keys}}})\"" in src
+    assert "self.comp_tree.installEventFilter(self)" in src and "self.comp_text_area.installEventFilter(self)" in src
+    assert "self.lists_items_table.installEventFilter(self)" in src
+    done = _method_source(src, "on_comp_item_double_clicked")
+    assert "def on_comp_item_double_clicked(self, item, column, browse=False):" in done
+    assert done.index("if browse:") < done.index("self._show_result_dialog(")
+    assert "self.open_result_in_browse(entry," in done
+
+
+class _Viewer(QWidget):
+    """The Manuscript Viewer's buttons, with its real key installer."""
+
+    def __init__(self):
+        from PyQt6.QtWidgets import QPushButton
+        import desktop.result_dialog as rd
+        super().__init__()
+        self._install_shortcuts = rd.ResultDialog._install_shortcuts.__get__(self)
+        self._focus_find = rd.ResultDialog._focus_find.__get__(self)
+        self.clicked, self.sizes = [], []
+        for name in ("btn_res_next", "btn_res_prev", "btn_res_next_ms", "btn_res_prev_ms",
+                     "btn_pg_next", "btn_pg_prev", "btn_compact_pg_next", "btn_compact_pg_prev",
+                     "btn_view_transcription"):
+            button = QPushButton(name, self)
+            button.clicked.connect(lambda _c=False, n=name: self.clicked.append(n))
+            setattr(self, name, button)
+        self.btn_res_next_ms.setToolTip("next ms")
+        self.btn_res_prev_ms.setToolTip("prev ms")
+        self.btn_view_transcription.setToolTip("Browse manuscript")
+        self.find_ms_input = QLineEdit(self)
+        self.find_ms_input.setText("abc")
+
+    def _change_text_size(self, delta):
+        self.sizes.append(delta)
+
+
+@pytest.mark.parametrize("hebrew", [False, True])
+def test_the_viewer_keys_press_their_buttons_and_mirror_in_hebrew(monkeypatch, hebrew):
+    import desktop.result_dialog as rd
+    from desktop.shortcuts_dialog import key_label
+    monkeypatch.setattr(rd, "CURRENT_LANG", "he" if hebrew else "en")
+    reset = []
+    monkeypatch.setattr(rd, "reading_text_size", lambda: type("S", (), {"set": lambda _s, pt: reset.append(pt)})())
+    v = _Viewer()
+    v.show()
+    v._install_shortcuts()
+    try:
+        keys = {sc.key().toString(): sc for sc in v._shortcuts}
+        assert len(keys) == len(v._shortcuts)                     # no key bound twice
+        nxt, prev = ("Left", "Right") if hebrew else ("Right", "Left")
+        presses = {f"Ctrl+{nxt}": "btn_res_next", f"Ctrl+{prev}": "btn_res_prev",
+                   f"Ctrl+Shift+{nxt}": "btn_res_next_ms", f"Ctrl+Shift+{prev}": "btn_res_prev_ms",
+                   "Ctrl+PgDown": "btn_pg_next", "Ctrl+PgUp": "btn_pg_prev",
+                   "Ctrl+B": "btn_view_transcription"}
+        for k, name in presses.items():
+            v.clicked.clear()
+            keys[k].activated.emit()
+            assert v.clicked == [name], k
+            assert getattr(v, name).toolTip().endswith(f"({key_label(k, hebrew)})")
+        assert v.btn_compact_pg_next.toolTip().endswith(f"({key_label('Ctrl+PgDown', hebrew)})")
+        assert v.btn_res_next_ms.toolTip() == f"next ms ({key_label(f'Ctrl+Shift+{nxt}', hebrew)})"
+        if hebrew:                                                 # the Hebrew key name
+            assert "חץ שמאלה" in v.btn_res_next.toolTip()
+        v.btn_res_next.setEnabled(False)                           # a disabled button: nothing
+        v.clicked.clear()
+        keys[f"Ctrl+{nxt}"].activated.emit()
+        assert v.clicked == []
+        keys["Ctrl+F"].activated.emit()
+        assert v.focusWidget() is v.find_ms_input and v.find_ms_input.selectedText() == "abc"
+        for k in ("Ctrl+=", "Ctrl++", "Ctrl+-"):
+            keys[k].activated.emit()
+        keys["Ctrl+0"].activated.emit()
+        assert v.sizes == [rd.TEXT_PT_STEP, rd.TEXT_PT_STEP, -rd.TEXT_PT_STEP]
+        assert reset == [rd.TEXT_PT_DEFAULT]
+    finally:
+        layout_keys = getattr(v, "_layout_keys", None)
+        if layout_keys is not None:
+            QApplication.instance().removeEventFilter(layout_keys)
+        v.deleteLater()
+
+
+def test_the_viewer_installs_its_keys_once_its_buttons_exist():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parent.parent / "desktop" / "result_dialog.py").read_text(encoding="utf-8")
+    assert "        self.init_ui()\n        self._install_shortcuts()\n" in src.replace("\r\n", "\n")

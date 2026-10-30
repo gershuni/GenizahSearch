@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-10-30 (archived GS-21, GS-280). 165 open: P1 0, P2 41, P3 124.
+> **Last Updated:** 2026-10-30 (folded 1 fragment(s) from `docs/open_issues.d/`: 2026-10-30-puzzle-and-update-check-tests-polluted.md). 167 open: P1 0, P2 41, P3 126.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -30,10 +30,10 @@ owner tasks -- is in [`BACKLOG.md`](BACKLOG.md). Closed history:
 | Discovery | 0 | 2 | 11 | 13 |
 | Accounts and community | 0 | 8 | 27 | 35 |
 | Data and sidecars | 0 | 5 | 6 | 11 |
-| Build, CI and tests | 0 | 0 | 1 | 1 |
+| Build, CI and tests | 0 | 0 | 3 | 3 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 2 | 1 | 3 |
-| **Total** | **0** | **41** | **124** | **165** |
+| **Total** | **0** | **41** | **126** | **167** |
 
 ## P1 - Critical
 
@@ -292,6 +292,8 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-281](ISSUE_DETAILS.md#gs-281) | Collecting the Joins Lab compare-details Qt test makes the Responsa refusal tests fail | `tests/test_join_workbench_compare_details_qt.py` (the polluter); `tests/test_responsa_api_refusal.py`, `tests/test_responsa_refusal_surfaces.py`, `tests/test_responsa_star_crossings.py` (the victims) | 2026-10-30 | ❌ Open |
+| [GS-282](ISSUE_DETAILS.md#gs-282) | The Fragment Puzzle close tests and the update-check thread tests fail when run with other desktop tests | `tests/test_puzzle_canvas_integrity.py`, `tests/test_update_check_thread_lifetime_qt.py` (victims; polluter not found yet) | 2026-10-30 | ❌ Open |
 | [GS-271](ISSUE_DETAILS.md#gs-271) | The tracker scripts' atomic write does not keep a POSIX file's group | `scripts/open_issues_model.py::write_text` | 2026-10-25 | ❌ Open |
 
 ### Documentation

@@ -64,7 +64,7 @@ def test_next_tip_skips_what_was_shown_or_is_in_use():
     assert next_tip(["go_to"], ["saved_search"]).key == "letter_level"
     assert next_tip([t.key for t in TIPS], []) is None
     # a tip with no feature to watch is skipped only once shown
-    assert next_tip([t.key for t in TIPS if t.key != "space_scroll"], ["anything"]).key == "space_scroll"
+    assert next_tip([t.key for t in TIPS if t.key != "result_keys"], ["anything"]).key == "result_keys"
 
 
 def test_state_in_config(cfg):
@@ -97,7 +97,7 @@ def test_the_strip():
     for b in (strip.btn_show, strip.btn_next, strip.btn_close, strip.btn_off):
         b.click()
     assert got == [TIPS[0], "next", "close", "off"]
-    strip.set_tip(TIPS_BY_KEY["space_scroll"], None, has_next=False)
+    strip.set_tip(TIPS_BY_KEY["result_keys"], None, has_next=False)
     assert strip.btn_show.isHidden() and strip.btn_next.isHidden()
 
 

@@ -2,13 +2,12 @@
 
 Contains:
   - Six web source/static guards (read web/pages/search.py + web/pages/search_results.py source as strings).
-  - One pure desktop helper decision test: imports the REAL genizah_app.space_scroll_action (no QApplication).
+  - One desktop source guard: Space in the desktop results ticks instead of paging (2026-10-30).
 
 This file is intentionally NOT registered in conftest._GUI_TEST_FILES so these tests run in
 the bulk `-m "not gui"` slice with no PyQt6 import required at collection time.
 
 Web guards go GREEN once Task 2 lands (setup_space_scroll injected into search.py).
-Desktop decision test goes GREEN once 128-02 adds space_scroll_action to genizah_app.py.
 """
 from __future__ import annotations
 
@@ -114,44 +113,15 @@ def test_existing_shortcuts_preserved():
 
 
 # ---------------------------------------------------------------------------
-# Desktop pure-helper decision test (SCROLL-02)
-# No QApplication required — exercises the REAL production decision function.
-# RED until 128-02 adds space_scroll_action to genizah_app.py.
+# Desktop (owner, 2026-10-30): Space in the Search results ticks the result
+# instead of paging -- Page Down pages. The behaviour is pinned in
+# tests/test_quick_open.py and tests/test_space_scroll_gui.py; this guard keeps
+# the old paging helper from coming back beside it. The website keeps its own
+# Space paging (the guards above).
 # ---------------------------------------------------------------------------
 
-def test_desktop_space_scroll_action_decision():
-    """Pure decision test for the desktop space_scroll_action helper.
-
-    Imports and calls the REAL genizah_app.space_scroll_action (no QApplication).
-    COL_CHECKBOX == 0 throughout.
-
-    RED until 128-02 adds the helper. Do NOT skip or stub this test.
-    """
-    from genizah_app import space_scroll_action  # noqa: PLC0415 — import inside test (intentional)
-
-    COL_CHECKBOX = 0
-
-    # Checkbox column → let Qt toggle (None)
-    assert space_scroll_action(0, COL_CHECKBOX, False) is None, (
-        "Space on COL_CHECKBOX should return None (let Qt toggle the checkbox)"
-    )
-
-    # Non-checkbox column, no shift → page down
-    assert space_scroll_action(3, COL_CHECKBOX, False) == "page_down", (
-        "Space on non-checkbox column should return 'page_down'"
-    )
-
-    # Non-checkbox column, shift → page up
-    assert space_scroll_action(3, COL_CHECKBOX, True) == "page_up", (
-        "Shift+Space on non-checkbox column should return 'page_up'"
-    )
-
-    # No current item (col == -1), no shift → page down (Open Question 2 RESOLVED)
-    assert space_scroll_action(-1, COL_CHECKBOX, False) == "page_down", (
-        "Space with no current item (col==-1) should return 'page_down'"
-    )
-
-    # No current item (col == -1), shift → page up
-    assert space_scroll_action(-1, COL_CHECKBOX, True) == "page_up", (
-        "Shift+Space with no current item (col==-1) should return 'page_up'"
-    )
+def test_desktop_space_ticks_instead_of_paging():
+    src = (_REPO_ROOT / "genizah_app.py").read_text(encoding="utf-8")
+    assert "def space_scroll_action" not in src
+    assert "SliderPageStepAdd" not in src
+    assert "def _results_table_key(self, event):" in src

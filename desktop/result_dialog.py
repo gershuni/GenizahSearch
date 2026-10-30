@@ -1,6 +1,7 @@
 """ResultDialog -- manuscript result viewer dialog (extracted from genizah_app.py, v7.9)."""
 
 import re
+import sys
 import threading
 
 from PyQt6.QtWidgets import (
@@ -10,7 +11,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QMargins, QObject, QPoint, QRect, QSize, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6 import sip
-from PyQt6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QPalette, QPixmap
+from PyQt6.QtGui import (
+    QColor, QDesktopServices, QFont, QGuiApplication, QKeySequence, QPalette, QPixmap, QShortcut,
+)
 
 from genizah_core import (
     CURRENT_LANG, get_library_display, get_logger,
@@ -45,6 +48,8 @@ from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import (
     PINNED, OverflowRow, explicitly_hidden,
 )
+from desktop.widgets.side_nav import LayoutProofShortcuts
+from desktop.shortcuts_dialog import arrow_keys, key_label
 from shared.synthetic_sys_id import is_synthetic_sys_id
 
 logger = get_logger(__name__)
@@ -218,8 +223,53 @@ class ResultDialog(QDialog):
         self.ext_canvases = []
 
         self.init_ui()
+        self._install_shortcuts()
         self.metadata_loaded.connect(self.on_metadata_loaded)
         self.load_result_by_index(self.current_result_idx)
+
+    def _install_shortcuts(self):
+        """The window's keys (owner, 2026-10-30): Ctrl+arrow the next / previous
+        result, Ctrl+Shift+arrow the next / previous manuscript -- the arrows
+        mirrored in Hebrew -- Ctrl+PgDown / Ctrl+PgUp the next / previous image,
+        Ctrl+B Browse, Ctrl+F the Find box, Ctrl+= / Ctrl+- / Ctrl+0 the text
+        size; Esc closes it, as it closes any dialog. A key presses its button,
+        so a disabled one does nothing, and the button's tooltip names the key.
+        Ctrl+B and Ctrl+F also answer to the physical key in a Hebrew layout."""
+        nxt, prev = arrow_keys(CURRENT_LANG == 'he')
+        self._shortcuts = []
+
+        def bind(keys, slot):
+            shortcut = QShortcut(QKeySequence(keys), self)
+            shortcut.activated.connect(slot)
+            self._shortcuts.append(shortcut)
+
+        for keys, buttons, tip in (
+                (f"Ctrl+{nxt}", (self.btn_res_next,), tr("Next result")),
+                (f"Ctrl+{prev}", (self.btn_res_prev,), tr("Previous result")),
+                (f"Ctrl+Shift+{nxt}", (self.btn_res_next_ms,), self.btn_res_next_ms.toolTip()),
+                (f"Ctrl+Shift+{prev}", (self.btn_res_prev_ms,), self.btn_res_prev_ms.toolTip()),
+                ("Ctrl+PgDown", (self.btn_pg_next, self.btn_compact_pg_next), tr("Next image")),
+                ("Ctrl+PgUp", (self.btn_pg_prev, self.btn_compact_pg_prev), tr("Previous image")),
+                ("Ctrl+B", (self.btn_view_transcription,), self.btn_view_transcription.toolTip())):
+            bind(keys, buttons[0].click)
+            for button in buttons:
+                button.setToolTip(f"{tip} ({key_label(keys, CURRENT_LANG == 'he')})")
+        bind("Ctrl+F", self._focus_find)
+        for keys, step in (("Ctrl+=", TEXT_PT_STEP), ("Ctrl++", TEXT_PT_STEP),
+                           ("Ctrl+-", -TEXT_PT_STEP)):
+            bind(keys, lambda s=step: self._change_text_size(s))
+        bind("Ctrl+0", lambda: reading_text_size().set(TEXT_PT_DEFAULT))
+        if sys.platform == 'win32':
+            self._layout_keys = LayoutProofShortcuts(self, {
+                ('B', Qt.KeyboardModifier.ControlModifier): self.btn_view_transcription.click,
+                ('F', Qt.KeyboardModifier.ControlModifier): self._focus_find,
+            })
+            QApplication.instance().installEventFilter(self._layout_keys)
+
+    def _focus_find(self):
+        """Ctrl+F: the cursor in "Find in text", its text selected."""
+        self.find_ms_input.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        self.find_ms_input.selectAll()
 
     def fit_on_screen(self, center=None, screen=None):
         """Size and place the viewer so it fits ``screen`` with its title bar visible.

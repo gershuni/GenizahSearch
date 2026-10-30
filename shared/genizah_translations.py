@@ -5602,13 +5602,29 @@ TRANSLATIONS.update({
         "העברת הסמן לתיבת החיפוש של הלשונית הפתוחה",
     "In the search box: the search history (Enter runs a search, Delete removes it)":
         "בתיבת החיפוש: היסטוריית החיפושים (Enter מריץ חיפוש, Delete מוחק אותו)",
-    "In the search results: a page down, a page up": "ברשימת תוצאות החיפוש: עמוד למטה, עמוד למעלה",
-    "Composition Search: stop the search": "חיפוש חיבורים: עצירת החיפוש",
+    "Stop a running search (Search, Composition Search)": "עצירת חיפוש שרץ (חפש, חיפוש חיבורים)",
     "Go to: open a manuscript by its shelfmark or system number":
         "מעבר אל: פתיחת כתב יד לפי מספר מדף או מספר מערכת",
     "Larger, smaller or normal text": "טקסט גדול יותר, קטן יותר או בגודל הרגיל",
     "Help, at the section in front": "עזרה, בפרק של הלשונית הפתוחה",
     "This list": "הרשימה הזו",
+    # Its sections, and the keys of the result lists, Browse and the Manuscript
+    # Viewer (owner, 2026-10-30).
+    "In the whole window": "בכל החלון",
+    "In a list of results": "ברשימת תוצאות",
+    "Tick or untick the result (Search)": "סימון התוצאה או ביטול הסימון (חפש)",
+    "Tick every result, or untick them all (Search)": "סימון כל התוצאות, או ביטול כל הסימונים (חפש)",
+    "Open the result (Search, Composition Search, Personal Lists)":
+        "פתיחת התוצאה (חפש, חיפוש חיבורים, רשימות אישיות)",
+    "Open it in Browse by Shelfmark": "פתיחה בעיון לפי מספר מדף",
+    "In the source text: run the search": "בטקסט המקור: הרצת החיפוש",
+    "Next / previous image": "התמונה הבאה / הקודמת",
+    "Next / previous manuscript": "כתב היד הבא / הקודם",
+    "Next / previous result": "התוצאה הבאה / הקודמת",
+    "Find in the text": "חיפוש בטקסט",
+    "Close the window": "סגירת החלון",
+    "Next result": "התוצאה הבאה",
+    "Previous result": "התוצאה הקודמת",
     # Saved searches: the star in the search history menus (2026-10-25).
     "Saved searches": "חיפושים שמורים",
     "Clear history (saved searches stay)": "ניקוי ההיסטוריה (החיפושים השמורים נשארים)",
@@ -5806,8 +5822,8 @@ TRANSLATIONS.update({
         "Ctrl+= ו-Ctrl+- מגדילים ומקטינים את הכתב ברשימות התוצאות, ו-Ctrl+0 מחזיר לגודל הרגיל; **A−** ו-**A+** משנים את גודל התעתיק.",
     "Prefer a menu down the side of the window? ☰ > **Move the menu to the side**.":
         "מעדיפים תפריט לאורך צד החלון? ☰ > **העברת התפריט לצד**.",
-    "In the results, Space pages down and Shift+Space pages up.":
-        "ברשימת התוצאות, מקש הרווח מדפדף עמוד למטה, ו-Shift+רווח – עמוד למעלה.",
+    "In the search results, Space ticks a result, Enter opens it, and Ctrl+Enter or Ctrl+B opens it in **Browse by Shelfmark**.":
+        "ברשימת תוצאות החיפוש, מקש הרווח מסמן תוצאה, Enter פותח אותה, ו-Ctrl+Enter או Ctrl+B פותחים אותה ב**עיון לפי מספר מדף**.",
     "The **XLSX** button exports a research workbook: the results, the manuscripts, a bibliography and credits, with a link to each image. Tick rows first to export only those.":
         "הכפתור **XLSX** מייצא חוברת עבודה למחקר: התוצאות, כתבי היד, ביבליוגרפיה וקרדיטים, עם קישור לכל תמונה. סמנו שורות מראש כדי לייצא רק אותן.",
     "Is a search taking a long time? ⏸ pauses it and ▶ resumes it from the same point; **Stop** keeps everything found so far.":
@@ -6251,6 +6267,24 @@ TRANSLATIONS.update({
         "חדש: תיקון והוספה של קישורים לספרייה הדיגיטלית של קיימברידג' (CUDL)",
     'Corrected and added links to the Cambridge Digital Library (CUDL).':
         "תיקון והוספה של קישורים לספרייה הדיגיטלית של קיימברידג' (CUDL).",
+})
+
+# v9.12.0 desktop What's New bar and dialog (2026-10-30), approved with the release texts.
+# The left-to-right marks after "Ctrl+/" and "A−" keep the "/" and "−" beside their keys.
+TRANSLATIONS.update({
+    'New: keyboard shortcuts, and the cursor waits in the search box from the moment the program opens':
+        'חדש: קיצורי מקלדת, והסמן מחכה בתיבת החיפוש כבר בפתיחת התוכנה',
+    'The cursor is in the search box as soon as the program opens, so you can type a search right away.':
+        'הסמן נמצא בתיבת החיפוש מרגע פתיחת התוכנה, כך שאפשר להקליד חיפוש מיד.',
+    'When a search finds results, the cursor moves to the results: Space ticks a result, Enter opens it, and Ctrl+Enter or Ctrl+B opens it in Browse; Ctrl+F or Ctrl+E brings you back to the search box.':
+        'כשחיפוש מוצא תוצאות, הסמן עובר לרשימת התוצאות: מקש הרווח מסמן תוצאה, Enter פותח אותה, ו-Ctrl+Enter או Ctrl+B פותחים אותה בעיון לפי מספר מדף; Ctrl+F או Ctrl+E מחזירים לתיבת החיפוש.',
+    # Mirrored in Hebrew (owner, 2026-10-30): there Ctrl+Left goes to the next result.
+    'In the Manuscript Viewer, Ctrl+Right and Ctrl+Left move to the next and previous result, Ctrl+PgDown and Ctrl+PgUp to the next and previous image, and Ctrl+B opens it in Browse.':
+        'בחלון "צפייה בכתב יד", Ctrl+חץ שמאלה ו-Ctrl+חץ ימינה עוברים לתוצאה הבאה ולקודמת, Ctrl+PgDown ו-Ctrl+PgUp לתמונה הבאה ולקודמת, ו-Ctrl+B פותח אותה בעיון לפי מספר מדף.',
+    'Ctrl+1 to Ctrl+7 open the tabs with the cursor in their search box; Ctrl+O opens Go to, like Ctrl+G.':
+        'Ctrl+1 עד Ctrl+7 פותחים את הלשוניות עם הסמן בתיבת החיפוש שלהן; Ctrl+O פותח את "מעבר אל", כמו Ctrl+G.',
+    'All the keys on one card: Ctrl+/, the ⌨ button beside A−, or Keyboard shortcuts in the ☰ menu.':
+        'כל המקשים בכרטיס אחד: Ctrl+/‎, הכפתור ⌨ ליד A−‎, או "קיצורי מקלדת" בתפריט ☰.',
 })
 
 # Phone layout (2026-10-22): the search toolbar's phone menu, the browse image

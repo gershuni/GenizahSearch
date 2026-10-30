@@ -4,6 +4,75 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [9.12.0] - 2026-10-30 — Keyboard shortcuts
+
+The desktop app works from the keyboard: the cursor is in the search box from the moment the window shows
+and moves to the results when a search finds them, where Space ticks a result, Enter opens it and Ctrl+Enter
+or Ctrl+B opens it in Browse; Ctrl+1 .. Ctrl+7 open a tab with the cursor in its search box, Ctrl+E and Ctrl+O join
+Ctrl+F and Ctrl+G, the Manuscript Viewer and Browse move between results, images and manuscripts with Ctrl
+and the arrow and page keys, and Ctrl+/ shows every key on one card. On the website, the
+Parallels Word export marks the matched words (GS-21, PR #456). Installer 9.12.0; desktop What's New 9.12.0,
+no web What's New.
+
+### Keyboard shortcuts and where the cursor goes (desktop)
+
+- **At launch** the cursor is in the open section's search box from the moment the window
+  shows (`_focus_on_launch`), so typing works while the index loads. After the session restore
+  the restored words are selected (`_refocus_after_restore`), unless the user has typed or
+  pasted there (`textEdited`), opened another section, or moved the cursor meanwhile.
+- **Ctrl+1 .. Ctrl+7** open a section with the cursor in its search box (`_open_section`),
+  the same field Ctrl+F picks. A click on a tab leaves the cursor where it was.
+- **Ctrl+E** puts the cursor in the search box as Ctrl+F does (File Explorer's and Outlook's
+  key for it). On **Browse by Shelfmark** with no manuscript open, both go to the shelfmark
+  box rather than Find; in **PGP Tags** mode, to the tag box.
+- **When a search finds results** (a text search or a PGP tag search) the cursor moves to the
+  results table, on the first shown row, so the list's keys work at once
+  (`_focus_results_after_search`). Only on the Search tab and only while
+  the cursor is still where the search was asked for (`_focus_at_search_start`; a search that
+  waits for the filter lookup keeps its own in `_deferred_search_focus`, so a running search and
+  a queued one never share it): a field or section the user went to meanwhile keeps it. No shown
+  row (no results, the all-terms filter, exclusions) leaves it in the box, and the rest of the
+  first page gets a second look; a session restore does not move it.
+- **Keys of the result lists** (owner, 2026-10-30): in the Search results **Space** ticks or unticks
+  the current result, in any column (Ctrl+Space and Shift+Space do nothing; Space no longer pages,
+  Page Down does), **Enter** opens it in the Manuscript Viewer as 👁 does and **Ctrl+Enter** or
+  **Ctrl+B** (as in the viewer) in Browse by Shelfmark as 📖 does -- their tooltips name the keys -- and
+  **Ctrl+A** ticks every shown result, or unticks them all (`_results_table_key`, `_open_action`).
+  Enter / Ctrl+Enter / Ctrl+B also in Composition Search's results
+  (`_comp_tree_key`; `on_comp_item_double_clicked(browse=True)`) and Personal Lists
+  (`_lists_table_key`). **Ctrl+Enter** in Composition Search's source text runs it (`_comp_text_key`;
+  Enter alone stays a new line), and **Esc** stops a running search on the Search tab, as it already
+  did on Composition Search.
+- **Manuscript Viewer** (`ResultDialog._install_shortcuts`): **Ctrl+Right / Ctrl+Left** the next /
+  previous result and **Ctrl+Shift+arrow** the next / previous manuscript -- mirrored in Hebrew, where
+  Ctrl+Left goes forward (`shortcuts_dialog.arrow_keys`) -- **Ctrl+PgDown / Ctrl+PgUp** the next /
+  previous image, **Ctrl+B** Browse, **Ctrl+F** the Find box, **Ctrl+= / Ctrl+- / Ctrl+0** the text
+  size. Each presses its button (a disabled one does nothing) and the button's tooltip names the key;
+  Ctrl+B and Ctrl+F answer to the physical key in a Hebrew layout too. **Browse by Shelfmark** takes the
+  same image and manuscript keys.
+- The startup tip about Space paging is replaced by one about these keys, under a new key
+  (`result_keys`), so whoever read the old one sees it.
+- **Ctrl+O** opens Go to, as Ctrl+G does.
+- **Keyboard shortcuts** (`desktop/shortcuts_dialog.py`): every key on one card, in sections by
+  where it works (`shortcut_sections`), from Ctrl+/, an entry in the ☰ menu and the side menu, and
+  a ⌨ button beside A− in the tab layout's top row. Its list is checked against the keys the
+  program binds. Reviewed by Codex (round 1:
+  six MEDIUM and one LOW; round 2: five P2 edge cases; rounds 3-5: two, one and one P2
+  regressions of those fixes, the last closed by keeping a queued search's place apart; all
+  fixed).
+- Ctrl+O, Ctrl+E and Ctrl+/ also answer to the physical key on a Hebrew layout
+  (`LayoutProofShortcuts`). Help (both languages) names the new keys. Pinned in
+  `tests/test_quick_open.py`.
+
+### The Parallels Word export marks the matched words (web)
+
+- **The Parallels Word export now marks the matched words, as its Excel export does (GS-21).** Since
+  2026-08-23 the Excel export has shown each match in red and bold in both Source Context and Manuscript
+  Match, but the Word export removed the marks and printed both texts plain. For a short source text the two
+  read almost the same, and the two downloads of one search disagreed about what matched. The Word export
+  now shows the marked words in bold with a yellow highlight, as the web search's Word export already does
+  (`web/export_service.py::export_parallels_word`).
+
 ## [9.11.1] - 2026-10-30 — Cambridge links fixed
 
 Which Cambridge Digital Library (CUDL) item a record links to is now one decision, made by comparing the item's

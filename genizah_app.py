@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTreeWidget, QTreeWidgetItem, QListWidget, QPlainTextEdit, QStyle, QFormLayout,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QSizePolicy, QInputDialog,
-                             QToolButton, QAbstractSlider, QAbstractItemView,
+                             QToolButton, QAbstractItemView,
                              QCompleter)
 from PyQt6.QtCore import (Qt, QTimer, QUrl, pyqtSignal, QThread, QEventLoop, QEvent, QPoint, QByteArray)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QColor,
@@ -69,9 +69,11 @@ from desktop.qthread_exit import settle_running_threads
 from desktop.qt_translations import install_qt_translations
 from desktop.widgets.flow_layout import FlowWidget
 from desktop.widgets.overflow_row import OverflowRow
-from desktop.widgets.side_nav import LayoutProofShortcuts, LinkedButton, SideNav, ltr, popup_point
+from desktop.widgets.side_nav import (
+    LayoutProofShortcuts, LinkedButton, SideNav, ltr, popup_point, windows_virtual_key,
+)
 from desktop.go_to_dialog import GoToDialog
-from desktop.shortcuts_dialog import ShortcutsDialog
+from desktop.shortcuts_dialog import ShortcutsDialog, arrow_keys, key_label
 from shared.quick_open import quick_open_target
 from desktop.widgets.line_number_text_edit import (
     apply_line_numbered_text,
@@ -148,25 +150,6 @@ from desktop.corrections_ui import (
 )
 
 logger = get_logger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Phase 128 SCROLL-02: Desktop results-table Space-scroll decision helper
-# ---------------------------------------------------------------------------
-
-def space_scroll_action(current_column: int, checkbox_column: int, is_shift: bool) -> str | None:
-    """Pure decision for desktop results-table Space-scroll.
-
-    Returns 'page_up' | 'page_down' | None.
-    None means "let Qt handle it" (e.g. checkbox toggle on the checkbox column).
-    current_column == -1 (no current item) routes to scroll, not a no-op.
-
-    This function is pure (no Qt imports, no side effects) so it can be imported
-    and tested directly without constructing a QApplication.
-    """
-    if current_column == checkbox_column:
-        return None
-    return 'page_up' if is_shift else 'page_down'
 
 
 # ---------------------------------------------------------------------------
@@ -6673,6 +6656,12 @@ class GenizahGUI(QMainWindow):
         
         layout.addLayout(bot)
         panel.setLayout(layout)
+        # Esc stops a running search, as on Composition Search (owner, 2026-10-30):
+        # while the cursor is anywhere on this tab.
+        stop_key = QShortcut(QKeySequence("Escape"), panel)
+        stop_key.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        stop_key.activated.connect(lambda: self.stop_search() if self.is_searching else None)
+        self._search_stop_key = stop_key
         return panel
 
     def set_results_loading(self, is_loading: bool):
@@ -7203,6 +7192,8 @@ class GenizahGUI(QMainWindow):
         from PyQt6.QtGui import QShortcut, QKeySequence
         comp_cancel_shortcut = QShortcut(QKeySequence("Escape"), self.comp_text_area)
         comp_cancel_shortcut.activated.connect(lambda: self.cancel_composition() if self.is_comp_running else None)
+        # Ctrl+Enter runs the search (_comp_text_key; owner, 2026-10-30).
+        self.comp_text_area.installEventFilter(self)
 
         # Composition search timing state
         self.comp_search_start_time = 0.0
@@ -7228,6 +7219,7 @@ class GenizahGUI(QMainWindow):
         )
 
         self.comp_tree.itemDoubleClicked.connect(self.on_comp_item_double_clicked)
+        self.comp_tree.installEventFilter(self)   # Enter / Ctrl+Enter (_comp_tree_key)
         self.comp_tree.itemExpanded.connect(self._on_comp_item_expanded)
         self.comp_tree.itemCollapsed.connect(self._on_comp_item_collapsed)
 
@@ -7999,6 +7991,23 @@ class GenizahGUI(QMainWindow):
         self._rd_text_sync_handler = None  # stored ref for targeted disconnect
         self._rd_image_sync_handler = None  # stored ref for targeted disconnect
         self._browse_rd_enrich_threads = {}  # sys_id -> EnrichMetadataThread
+
+        # Keys of this tab, as in the Manuscript Viewer (owner, 2026-10-30):
+        # Ctrl+PgDown / Ctrl+PgUp the next / previous image, Ctrl+Shift+arrow the
+        # next / previous manuscript -- the arrows mirrored in Hebrew. Each
+        # presses its button, so a disabled one does nothing.
+        nxt, prev = arrow_keys(CURRENT_LANG == 'he')
+        self._browse_keys = []
+        for keys, button, tip in (
+                ("Ctrl+PgDown", self.btn_b_next, tr("Next image")),
+                ("Ctrl+PgUp", self.btn_b_prev, tr("Previous image")),
+                (f"Ctrl+Shift+{nxt}", self.btn_next_ms, self.btn_next_ms.toolTip()),
+                (f"Ctrl+Shift+{prev}", self.btn_prev_ms, self.btn_prev_ms.toolTip())):
+            shortcut = QShortcut(QKeySequence(keys), panel)
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(button.click)
+            self._browse_keys.append(shortcut)
+            button.setToolTip(f"{tip} ({key_label(keys, CURRENT_LANG == 'he')})")
 
         return panel
 
@@ -13695,10 +13704,10 @@ class GenizahGUI(QMainWindow):
             # Action buttons
             actions_widget = ActionsHoverWidget()
 
-            btn_view = self._create_action_button("👁️", tr("Quick View"), lambda _, iid=item_id: self.lists_quick_view_by_id(iid), parent=self.lists_items_table)
+            btn_view = self._create_action_button("👁️", f"{tr('Quick View')} ({ltr('Enter')})", lambda _, iid=item_id: self.lists_quick_view_by_id(iid), parent=self.lists_items_table)
             actions_widget.add_btn(btn_view)
 
-            btn_browse = self._create_action_button("📖", tr("Browse"), lambda _, iid=item_id: self.lists_browse_by_id(iid), parent=self.lists_items_table)
+            btn_browse = self._create_action_button("📖", f"{tr('Browse')} ({key_label('Ctrl+Enter / Ctrl+B', CURRENT_LANG == 'he')})", lambda _, iid=item_id: self.lists_browse_by_id(iid), parent=self.lists_items_table)
             actions_widget.add_btn(btn_browse)
 
             btn_copy = self._create_action_button("📋", tr("Copy Info"), lambda _, iid=item_id: self.lists_copy_info_by_id(iid), parent=self.lists_items_table)
@@ -24100,8 +24109,13 @@ class GenizahGUI(QMainWindow):
             list_btn.clicked.connect(lambda _, r=res, b=list_btn: self.search_add_row_to_list(r, b))
             list_btn.setProperty("action_role", "list_star")
 
-            browse_btn = self._create_action_button("📖", tr("Browse manuscript"), lambda _, r=res: self.open_result_in_browse_from_table(r))
-            view_btn = self._create_action_button("👁", tr("View result"), lambda _, r=res: self.show_full_text_for_result(r))
+            # The tooltips name the keys that do the same on the current row.
+            browse_btn = self._create_action_button(
+                "📖", f"{tr('Browse manuscript')} ({key_label('Ctrl+Enter / Ctrl+B', CURRENT_LANG == 'he')})",
+                lambda _, r=res: self.open_result_in_browse_from_table(r))
+            view_btn = self._create_action_button(
+                "👁", f"{tr('View result')} ({ltr('Enter')})",
+                lambda _, r=res: self.show_full_text_for_result(r))
 
             if is_hebrew:
                 # Hebrew: Star on Left (added first), then others expand to Right
@@ -24504,8 +24518,9 @@ class GenizahGUI(QMainWindow):
 
     def _focus_results_after_search(self):
         """A search with results ends with the cursor in the results table, so
-        Space pages and the arrow keys move at once (owner, 2026-10-30); Ctrl+F
-        or Ctrl+E goes back to the box. Only on the Search tab, only when a row
+        the list's keys work at once -- the arrows move, Space ticks, Enter opens
+        (_results_table_key; owner, 2026-10-30); Ctrl+F or Ctrl+E goes back to
+        the box. Only on the Search tab, only when a row
         shows (the all-terms filter or the exclusions can hide every one), and
         only while the cursor is still where the search started from
         (``_focus_at_search_start``, kept by start_search and the tag search):
@@ -24522,8 +24537,8 @@ class GenizahGUI(QMainWindow):
             return True                                  # already there: the user's own cell stays
         if current is not None and current is not getattr(self, '_focus_at_search_start', None):
             return False
-        # Qt makes the first cell current when a table takes the focus with none:
-        # the check box, where Space ticks instead of paging (Codex review).
+        # The first shown row is current, so Space and Enter act on the first
+        # result at once; on a text column, not the check box.
         if not table.currentIndex().isValid() or table.currentColumn() == self.COL_CHECKBOX:
             col = next((c for c in range(table.columnCount())
                         if c != self.COL_CHECKBOX and not table.isColumnHidden(c)), None)
@@ -26856,22 +26871,22 @@ class GenizahGUI(QMainWindow):
                 if key == Qt.Key.Key_Delete:
                     self._delete_history_item(action._history_type, action._history_index, reopen=True)
                     return True
-        # Phase 128 SCROLL-02: Space / Shift+Space page-scrolls the results table
-        if (hasattr(self, 'results_table')
-                and source is self.results_table
-                and event.type() == QEvent.Type.KeyPress
-                and event.key() == Qt.Key.Key_Space):
-            col = self.results_table.currentColumn()
-            is_shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-            action = space_scroll_action(col, self.COL_CHECKBOX, is_shift)
-            if action is not None:
-                bar = self.results_table.verticalScrollBar()
-                if action == 'page_up':
-                    bar.triggerAction(QAbstractSlider.SliderAction.SliderPageStepSub)
-                else:
-                    bar.triggerAction(QAbstractSlider.SliderAction.SliderPageStepAdd)
-                return True  # consumed — do NOT let Qt toggle the current item
-            # action is None (col == COL_CHECKBOX): fall through to super() for checkbox toggle
+        # The keys of the result lists (owner, 2026-10-30): Space ticks, Enter
+        # opens, Ctrl+Enter opens in Browse, Ctrl+A ticks all -- and Ctrl+Enter
+        # runs Composition Search from its source text.
+        if event.type() == QEvent.Type.KeyPress:
+            if hasattr(self, 'results_table') and source is self.results_table:
+                if self._results_table_key(event):
+                    return True
+            elif hasattr(self, 'lists_items_table') and source is self.lists_items_table:
+                if self._lists_table_key(event):
+                    return True
+            elif hasattr(self, 'comp_tree') and source is self.comp_tree:
+                if self._comp_tree_key(event):
+                    return True
+            elif hasattr(self, 'comp_text_area') and source is self.comp_text_area:
+                if self._comp_text_key(event):
+                    return True
         # Smart tooltips for truncated cell text in results table
         if hasattr(self, 'results_table') and source == self.results_table.viewport() and event.type() == QEvent.Type.ToolTip:
             pos = event.pos()
@@ -27032,6 +27047,139 @@ class GenizahGUI(QMainWindow):
             title = display.get('title', '')
         fl_id = self._extract_fl_id(res)
         self.open_result_in_browse(res, shelfmark=shelf, title=title, fl_id=fl_id)
+
+    # ---- Keys of the result lists (owner, 2026-10-30) -------------------------
+    # Space ticks the Search result's box (in any column; Ctrl+Space and
+    # Shift+Space do nothing -- Space no longer pages, Page Down does), Enter
+    # opens the result as 👁 does and Ctrl+Enter or Ctrl+B in Browse as 📖 does,
+    # Ctrl+A ticks every shown result or, all ticked, unticks them. The same
+    # Enter, Ctrl+Enter and Ctrl+B in Composition Search's results and in
+    # Personal Lists.
+    _KEY_MODIFIERS = (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+                      | Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.MetaModifier)
+
+    @classmethod
+    def _enter_action(cls, event):
+        """'open' for Enter, 'browse' for Ctrl+Enter (either Enter key), else None."""
+        if event.key() not in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            return None
+        mods = event.modifiers() & cls._KEY_MODIFIERS
+        if mods == Qt.KeyboardModifier.NoModifier:
+            return 'open'
+        if mods == Qt.KeyboardModifier.ControlModifier:
+            return 'browse'
+        return None
+
+    @classmethod
+    def _open_action(cls, event):
+        """In a result list: 'open' for Enter; 'browse' for Ctrl+Enter or Ctrl+B,
+        as Ctrl+B opens Browse in the Manuscript Viewer (owner, 2026-10-30) -- by
+        the physical B in a Hebrew layout too; else None."""
+        action = cls._enter_action(event)
+        if action is None and (event.modifiers() & cls._KEY_MODIFIERS) == Qt.KeyboardModifier.ControlModifier and (
+                event.key() == Qt.Key.Key_B
+                or (sys.platform == 'win32' and event.nativeVirtualKey() == windows_virtual_key('B'))):
+            return 'browse'
+        return action
+
+    def _results_table_key(self, event):
+        """A key in the Search results: True when it was taken."""
+        mods = event.modifiers() & self._KEY_MODIFIERS
+        if event.key() == Qt.Key.Key_Space:
+            if mods == Qt.KeyboardModifier.NoModifier:
+                self._tick_current_result()
+            return True                    # Ctrl+Space, Shift+Space: nothing
+        action = self._open_action(event)
+        if action is not None:
+            res = self._current_result_res()
+            if res:
+                if action == 'browse':
+                    self.open_result_in_browse_from_table(res)
+                else:
+                    self.show_full_text_for_result(res)
+            return True
+        if mods == Qt.KeyboardModifier.ControlModifier and (
+                event.key() == Qt.Key.Key_A
+                or (sys.platform == 'win32' and event.nativeVirtualKey() == windows_virtual_key('A'))):
+            self._tick_all_results()       # the physical A, in a Hebrew layout too
+            return True
+        return False
+
+    def _current_result_res(self):
+        """The result of the current row of the Search results, or None."""
+        table = self.results_table
+        row = table.currentRow()
+        if row < 0 or table.isRowHidden(row):
+            return None
+        item = table.item(row, self.COL_SYS_ID)
+        return item.data(Qt.ItemDataRole.UserRole) if item else None
+
+    def _tick_current_result(self):
+        """Tick or untick the current row's box (itemChanged keeps the header
+        box and the export label in step)."""
+        table = self.results_table
+        row = table.currentRow()
+        if row < 0 or table.isRowHidden(row):
+            return None
+        item = table.item(row, self.COL_CHECKBOX)
+        if item is None or not item.flags() & Qt.ItemFlag.ItemIsUserCheckable:
+            return None
+        ticked = item.checkState() != Qt.CheckState.Checked
+        item.setCheckState(Qt.CheckState.Checked if ticked else Qt.CheckState.Unchecked)
+        return ticked
+
+    def _tick_all_results(self):
+        """Ctrl+A: tick every shown result, or untick them when all are ticked
+        -- what the header box does."""
+        table = self.results_table
+        boxes = [table.item(r, self.COL_CHECKBOX) for r in range(table.rowCount())
+                 if not table.isRowHidden(r)]
+        boxes = [b for b in boxes if b is not None]
+        if not boxes:
+            return None
+        tick = not all(b.checkState() == Qt.CheckState.Checked for b in boxes)
+        if self.chk_search_header.isChecked() != tick:
+            self.chk_search_header.setChecked(tick)   # its toggled handler ticks the rows
+        else:
+            self.on_search_select_all_toggled(tick)
+        return tick
+
+    def _lists_table_key(self, event):
+        """Enter: Quick View (👁️), Ctrl+Enter or Ctrl+B: Browse (📖), on Personal
+        Lists' current row."""
+        action = self._open_action(event)
+        if action is None:
+            return False
+        table = self.lists_items_table
+        row = table.currentRow()
+        item = table.item(row, 0) if row >= 0 and not table.isRowHidden(row) else None
+        item_id = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if item_id:
+            if action == 'browse':
+                self.lists_browse_by_id(item_id)
+            else:
+                self.lists_quick_view_by_id(item_id)
+        return True
+
+    def _comp_tree_key(self, event):
+        """Enter opens Composition Search's current result in the viewer, as a
+        double-click does; Ctrl+Enter or Ctrl+B opens it in Browse."""
+        action = self._open_action(event)
+        if action is None:
+            return False
+        item = self.comp_tree.currentItem()
+        if item is not None:
+            self.on_comp_item_double_clicked(item, 0, browse=action == 'browse')
+        return True
+
+    def _comp_text_key(self, event):
+        """Ctrl+Enter in Composition Search's source text runs the search (Enter
+        alone stays a new line); never a Stop."""
+        if self._enter_action(event) != 'browse':
+            return False
+        if not getattr(self, 'is_comp_running', False) and self.btn_comp_run.isEnabled():
+            self.btn_comp_run.click()
+        return True
 
     def on_search_select_all_toggled(self, checked):
         """Handle Select All checkbox toggle (skips hidden/excluded rows)."""
@@ -36793,9 +36941,10 @@ class GenizahGUI(QMainWindow):
             },
         }
 
-    def on_comp_item_double_clicked(self, item, column):
+    def on_comp_item_double_clicked(self, item, column, browse=False):
         """Open the Manuscript Viewer on the clicked result, with the WHOLE result list
-        the tree shows -- as the user filtered it -- for Next/Prev.
+        the tree shows -- as the user filtered it -- for Next/Prev. ``browse``
+        (Ctrl+Enter, _comp_tree_key): open that result in Browse instead.
 
         The list is built from the recorded result groups (`_comp_view_groups`), not
         from widgets, through the same rule the tree uses (desktop/comp_view_filter.py):
@@ -36856,6 +37005,13 @@ class GenizahGUI(QMainWindow):
                 pass
             return
 
+        if browse:
+            entry = flat_list[target_index]
+            display = entry.get('display') or {}
+            self.open_result_in_browse(entry, shelfmark=display.get('shelfmark', ''),
+                                       title=display.get('title', ''),
+                                       fl_id=self._extract_fl_id(entry))
+            return
         try:
             self._show_result_dialog(
                 flat_list, target_index, filter_summary=self._comp_filter_summary())
