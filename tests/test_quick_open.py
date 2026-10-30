@@ -9,7 +9,10 @@ Help at the section in front; and that Ctrl+F puts the cursor in the section's
 own search or find field. And (owner, 2026-10-25) the recent manuscripts under
 the box: one row per manuscript, narrowed by typing, picked with Down, and
 opened the way Browse's own Recently Viewed list opens them; the hint no longer
-names FL numbers.
+names FL numbers. And (owner, 2026-10-30) Ctrl+O is Go to too, Ctrl+E the
+search box too, and the cursor starts in the search box: at launch, and on
+Ctrl+1 .. Ctrl+7 -- on Browse with nothing open, the shelfmark box; Ctrl+/ shows
+every key, a list checked against the keys the window binds.
 """
 
 import os
@@ -60,6 +63,11 @@ class _Window:
     go_to = GenizahGUI.go_to
     open_help_for_current_section = GenizahGUI.open_help_for_current_section
     _focus_section_field = GenizahGUI._focus_section_field
+    _open_section = GenizahGUI._open_section
+    _restore_session_then_lists_sync = GenizahGUI._restore_session_then_lists_sync
+    _focus_on_launch = GenizahGUI._focus_on_launch
+    _window_focus = GenizahGUI._window_focus
+    _refocus_after_restore = GenizahGUI._refocus_after_restore
     _SECTION_HELP = GenizahGUI._SECTION_HELP
     _SECTION_FIND_FIELD = GenizahGUI._SECTION_FIND_FIELD
 
@@ -70,13 +78,15 @@ class _Window:
             setattr(self, name, QWidget())
             self.tabs.addTab(getattr(self, name), name)
         self.query_input = QLineEdit(self.search_tab)
+        self.gap_input = QLineEdit(self.search_tab)       # another field of the Search tab
         self.comp_text_area = QPlainTextEdit(self.composition_tab)
         self.browse_find_input = QLineEdit(self.browse_tab)
         self.catalog_author_input = QLineEdit(self.catalog_browse_tab)
         self.lists_filter_input = QLineEdit(self.lists_tab)
         self.browse_sys_input = QLineEdit()
-        self.browse_shelf_input = QLineEdit()
+        self.browse_shelf_input = QLineEdit(self.browse_tab)
         self.browse_fl_input = QLineEdit()
+        self.current_browse_sid = None                    # no manuscript open in Browse
         self.is_searching = False
         self.calls = []
         self.help_anchors = []
@@ -85,6 +95,9 @@ class _Window:
 
     def _set_active_tab(self, target):
         self.tabs.setCurrentWidget(target)
+
+    def focusWidget(self):                               # noqa: N802 - Qt API
+        return self.tabs.focusWidget()
 
     def _set_last_browse_field(self, name):
         self.calls.append(("last", name))
@@ -141,6 +154,7 @@ def test_f1_opens_help_at_the_section_in_front():
 def test_ctrl_f_focuses_the_sections_own_field():
     w = _Window()
     w.tabs.setCurrentWidget(w.browse_tab)
+    w.current_browse_sid = "990001234560205171"          # a manuscript is open
     w.browse_find_input.setText("abc")
     assert w._focus_section_field() is w.browse_find_input
     assert w.browse_find_input.selectedText() == "abc"
@@ -148,6 +162,422 @@ def test_ctrl_f_focuses_the_sections_own_field():
     assert w._focus_section_field() is w.lists_filter_input
     w.tabs.setCurrentWidget(w.community_tab)
     assert w._focus_section_field() is None                # nothing to search there
+
+
+def test_browse_with_nothing_open_takes_the_shelfmark():
+    """Nothing to find in yet: the cursor goes where a shelfmark is typed."""
+    w = _Window()
+    w.browse_shelf_input.setText("T-S 12.123")
+    assert w._open_section(2) is w.browse_shelf_input
+    assert w.tabs.focusWidget() is w.browse_shelf_input
+    assert w.browse_shelf_input.selectedText() == "T-S 12.123"
+    w.current_browse_sid = "990001234560205171"
+    assert w._focus_section_field() is w.browse_find_input
+
+
+def test_a_section_key_opens_the_section_with_the_cursor_in_its_box():
+    w = _Window()
+    w.comp_text_area.setPlainText("abc")
+    assert w._open_section(1) is w.comp_text_area
+    assert w.tabs.currentWidget() is w.composition_tab
+    assert w.tabs.focusWidget() is w.comp_text_area
+    assert w.comp_text_area.textCursor().selectedText() == "abc"
+    assert w._open_section(0) is w.query_input and w.tabs.focusWidget() is w.query_input
+    assert w._open_section(5) is None                     # Community: the section, no box
+    assert w.tabs.currentWidget() is w.community_tab
+
+
+def _restore_into(w, words=None, fails=False, during=None, section=None):
+    """Run the startup restore on ``w``: ``during`` stands for what the user did
+    while the index loaded; the restore may put ``words`` in the box and bring
+    the saved ``section`` to the front."""
+    def restore():
+        w.calls.append("restore")
+        if words is not None:
+            w.query_input.setText(words)
+        if section is not None:
+            w.tabs.setCurrentWidget(section)
+        if fails:
+            raise RuntimeError("restore failed")
+
+    w._restore_session = restore
+    w._start_restored_lists_sync = lambda: w.calls.append(("sync", w.focusWidget()))
+    if during is not None:
+        during()
+    if fails:
+        with pytest.raises(RuntimeError):
+            w._restore_session_then_lists_sync()
+    else:
+        w._restore_session_then_lists_sync()
+
+
+def test_the_cursor_is_in_the_box_as_the_window_first_shows():
+    w = _Window()
+    assert w._focus_on_launch() is w.query_input
+    assert w.focusWidget() is w.query_input
+
+
+@pytest.mark.parametrize("restore_fails", [False, True])
+def test_after_the_restore_the_restored_words_are_selected_before_list_sync(restore_fails):
+    """After the restore (its questions are modal) and before list sync, whose
+    sync choice may be a dialog: closing it gives the cursor back to the box."""
+    w = _Window()
+    w._focus_on_launch()
+    _restore_into(w, words="restored words", fails=restore_fails)
+    assert w.calls == ["restore", ("sync", w.query_input)]
+    assert w.query_input.selectedText() == "restored words"   # typing replaces it
+
+
+def test_typing_while_the_index_loads_is_not_selected_away():
+    """The restore runs once the index has loaded, seconds after the window
+    shows: what the user typed meanwhile must not be selected (Codex review)."""
+    from PyQt6.QtTest import QTest
+    w = _Window()
+    w._focus_on_launch()
+    _restore_into(w, during=lambda: QTest.keyClicks(w.query_input, "abc"))
+    assert w.query_input.text() == "abc" and w.query_input.selectedText() == ""
+    assert w.focusWidget() is w.query_input
+
+
+def test_a_pasted_prefix_still_counts_as_typing():
+    """Pasting "= words" makes the prefix handling setText the words, which
+    clears isModified(); the user's text must still not be selected (Codex review)."""
+    from PyQt6.QtTest import QTest
+    w = _Window()
+    w._focus_on_launch()
+
+    def paste_with_prefix():
+        QTest.keyClicks(w.query_input, "= abc")
+        w.query_input.setText("abc")                      # the prefix handling
+        assert not w.query_input.isModified()
+
+    _restore_into(w, during=paste_with_prefix)
+    assert w.query_input.selectedText() == ""
+
+
+def test_a_cursor_moved_while_the_index_loads_stays_put():
+    w = _Window()
+    w._focus_on_launch()
+    _restore_into(w, words="restored", during=w.gap_input.setFocus)
+    assert w.calls == ["restore", ("sync", w.gap_input)]
+    assert w.query_input.selectedText() == ""
+
+
+def test_a_restored_section_gets_the_cursor_in_its_box():
+    """The session brings Composition Search to the front: its source text is
+    the box, selected -- the restore moved the section, not the user (Codex review)."""
+    w = _Window()
+    w._focus_on_launch()
+    w.comp_text_area.setPlainText("restored source")
+    _restore_into(w, section=w.composition_tab)
+    assert w.focusWidget() is w.comp_text_area
+    assert w.comp_text_area.textCursor().selectedText() == "restored source"
+
+
+def test_a_section_opened_while_the_index_loads_keeps_what_was_typed_there():
+    """Search's box is hidden then (its tab is not in front), which is not the
+    PGP Tags case: Composition's text must not be selected (Codex review)."""
+    w = _Window()
+    w._focus_on_launch()
+
+    def type_in_composition():
+        w.tabs.setCurrentWidget(w.composition_tab)
+        w.comp_text_area.setFocus()
+        w.comp_text_area.setPlainText("source text")
+
+    _restore_into(w, during=type_in_composition)
+    assert w.comp_text_area.textCursor().selectedText() == ""
+    assert w.focusWidget() is w.comp_text_area
+
+
+def _pgp_tags_mode(w):
+    """The Search tab in PGP Tags mode: the query row hidden, the tag box shown."""
+    from PyQt6.QtWidgets import QComboBox
+    w.MODE_PGP_TAGS = 7
+    w.mode_combo = QComboBox(w.search_tab)
+    w.mode_combo.addItems([str(i) for i in range(8)])
+    w.tag_search_combo = QComboBox(w.search_tab)
+    w.tag_search_combo.setEditable(True)
+    w.tag_search_combo.setCurrentText("Letter")
+    w.mode_combo.setCurrentIndex(7)
+    w.query_input.hide()
+    w.mode_combo.show()                                   # made after the window showed
+    w.tag_search_combo.show()
+
+
+def test_pgp_tags_mode_takes_the_tag_box():
+    w = _Window()
+    _pgp_tags_mode(w)
+    assert w._focus_section_field() is w.tag_search_combo
+    assert w.focusWidget() is w.tag_search_combo
+    assert w.tag_search_combo.lineEdit().selectedText() == "Letter"
+    w.mode_combo.setCurrentIndex(0)
+    assert w._focus_section_field() is w.query_input
+
+
+def test_a_restored_pgp_tags_mode_gives_the_cursor_to_the_tag_box():
+    w = _Window()
+    w._focus_on_launch()
+    _restore_into(w, during=lambda: _pgp_tags_mode(w))   # the restore hid the query row
+    assert w.focusWidget() is w.tag_search_combo
+
+
+def _method_source(src, name):
+    start = src.index(f"    def {name}(")
+    return src[start:src.index("\n    def ", start + 1)]
+
+
+def _init_ui_source():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parent.parent / "genizah_app.py").read_text(encoding="utf-8")
+    return src[src.index("    def init_ui(self):"):src.index("    def _update_corner_login_state(self):")]
+
+
+def test_the_shortcuts_card_names_every_bound_key_and_only_those():
+    import re
+    from desktop.shortcuts_dialog import SHORTCUTS
+    init_ui = _init_ui_source()
+    bound = set(re.findall(r'\("((?:Ctrl\+|F\d)[^"]*)", (?:self\.|-?\d)', init_ui))
+    assert {"Ctrl+G", "F1", "Ctrl+=", "Ctrl+/"} <= bound          # the pattern finds them
+    bound.discard("Ctrl++")                                       # Ctrl+= by another name
+    shown = {key for keys, _what in SHORTCUTS
+             for key in keys.replace(" … ", " / ").split(" / ")}
+    assert bound - shown == set()
+    # Ctrl+1 .. Ctrl+7 are bound in a loop; the others are one widget's own keys,
+    # bound where that widget is: Down in the search box, Space in the results,
+    # Esc on Composition Search's text.
+    assert 'QKeySequence(f"Ctrl+{i + 1}")' in init_ui
+    assert shown - bound == {"Ctrl+1", "Ctrl+7", "Down", "Space", "Shift+Space", "Esc"}
+    from pathlib import Path
+    src = (Path(__file__).resolve().parent.parent / "genizah_app.py").read_text(encoding="utf-8")
+    events = _method_source(src, "eventFilter")
+    assert "event.key() == Qt.Key.Key_Down" in events and "self._show_search_history_menu()" in events
+    assert "event.key() == Qt.Key.Key_Space" in events and "source is self.results_table" in events
+    assert 'QShortcut(QKeySequence("Escape"), self.comp_text_area)' in src
+
+
+def test_the_shortcuts_card_shows_each_key_beside_what_it_does():
+    from PyQt6.QtWidgets import QFormLayout
+    from desktop.shortcuts_dialog import SHORTCUTS, ShortcutsDialog
+    from desktop.widgets.side_nav import ltr, windows_virtual_key
+    from genizah_core import tr
+    dlg = ShortcutsDialog(None)
+    form = dlg.findChild(QFormLayout)
+    assert form.rowCount() == len(SHORTCUTS)
+    rows = [(form.itemAt(r, QFormLayout.ItemRole.LabelRole).widget().text(),
+             form.itemAt(r, QFormLayout.ItemRole.FieldRole).widget().text())
+            for r in range(form.rowCount())]
+    assert rows == [(ltr(keys), tr(what)) for keys, what in SHORTCUTS]
+    assert rows[0][0] == "‎Ctrl+1 … Ctrl+7‎"
+    assert windows_virtual_key("/") == 0xBF                       # Ctrl+/ on a Hebrew layout
+    dlg.deleteLater()
+
+
+class _SearchTab:
+    """The Search tab's parts the end of a search looks at."""
+
+    _focus_results_after_search = GenizahGUI._focus_results_after_search
+    _first_shown_result_row = GenizahGUI._first_shown_result_row
+    _window_focus = GenizahGUI._window_focus
+    _all_terms_after_completion = GenizahGUI._all_terms_after_completion
+    _run_deferred_after_filter = GenizahGUI._run_deferred_after_filter
+    COL_CHECKBOX = 0
+    is_searching = False
+
+    def __init__(self):
+        from PyQt6.QtWidgets import QComboBox, QHBoxLayout, QPushButton, QTableWidget, QVBoxLayout
+        self.tabs = QTabWidget()
+        self.search_tab, self.browse_tab = QWidget(), QWidget()
+        self.tabs.addTab(self.search_tab, "search")
+        self.tabs.addTab(self.browse_tab, "browse")
+        page = QVBoxLayout(self.search_tab)
+        self.search_row1_container = QWidget()
+        row1 = QHBoxLayout(self.search_row1_container)
+        self.query_input, self.btn_search = QLineEdit(), QPushButton("Search")
+        self.mode_combo = QComboBox()                     # in the query row too
+        row1.addWidget(self.query_input)
+        row1.addWidget(self.mode_combo)
+        row1.addWidget(self.btn_search)
+        self.gap_input = QLineEdit()                      # a field of another row
+        self.results_table = QTableWidget(3, 4)           # column 0: the check boxes
+        for w in (self.search_row1_container, self.gap_input, self.results_table):
+            page.addWidget(w)
+        self.browse_field = QLineEdit(self.browse_tab)
+        self.tabs.show()
+        QApplication.processEvents()
+
+    def focusWidget(self):                               # noqa: N802 - Qt API
+        return self.tabs.focusWidget()
+
+
+def _start_search_from(w, widget):
+    widget.setFocus()
+    w._focus_at_search_start = w.focusWidget()           # as start_search keeps it
+
+
+@pytest.mark.parametrize("start", ["query_input", "btn_search", "gap_input"])
+def test_a_search_ends_in_the_results_on_a_cell_where_space_pages(start):
+    """From the box, the button, or wherever Go to left the cursor; the current
+    cell is not the check box, where Space ticks instead of paging (Codex review)."""
+    from genizah_app import space_scroll_action
+    w = _SearchTab()
+    _start_search_from(w, getattr(w, start))
+    assert w._focus_results_after_search() is True
+    assert w.focusWidget() is w.results_table
+    assert (w.results_table.currentRow(), w.results_table.currentColumn()) == (0, 1)
+    assert space_scroll_action(w.results_table.currentColumn(), w.COL_CHECKBOX, False) == 'page_down'
+    assert w.results_table.selectedIndexes() == []        # nothing selected, nothing opened
+
+
+def test_the_first_shown_cell_takes_it():
+    w = _SearchTab()
+    w.results_table.setRowHidden(0, True)                 # a filter hides the first row
+    w.results_table.setColumnHidden(1, True)
+    _start_search_from(w, w.query_input)
+    assert w._focus_results_after_search() is True
+    assert (w.results_table.currentRow(), w.results_table.currentColumn()) == (1, 2)
+
+
+def test_a_cell_the_user_chose_in_the_results_stays():
+    w = _SearchTab()
+    _start_search_from(w, w.query_input)
+    w.results_table.setCurrentCell(2, 3)
+    w.results_table.setFocus()                            # clicked a row while it ran
+    assert w._focus_results_after_search() is True
+    assert (w.results_table.currentRow(), w.results_table.currentColumn()) == (2, 3)
+
+
+def test_the_end_of_a_search_leaves_a_cursor_the_user_moved():
+    w = _SearchTab()
+    _start_search_from(w, w.query_input)
+    w.mode_combo.setFocus()                               # moved, even within the query row
+    assert w._focus_results_after_search() is False
+    assert w.focusWidget() is w.mode_combo
+    w.gap_input.setFocus()                                # or to another field
+    assert w._focus_results_after_search() is False
+    w.query_input.setFocus()
+    w.tabs.setCurrentWidget(w.browse_tab)                 # or to another section
+    w.browse_field.setFocus()
+    assert w._focus_results_after_search() is False
+    assert w.focusWidget() is w.browse_field
+    w.browse_field.clearFocus()                           # another section, nothing focused
+    assert w.focusWidget() is None
+    assert w._focus_results_after_search() is False
+    assert w.tabs.currentWidget() is w.browse_tab and w.focusWidget() is None
+
+
+@pytest.mark.parametrize("hide", ["no_rows", "all_hidden"])
+def test_no_shown_row_leaves_the_cursor_in_the_box(hide):
+    w = _SearchTab()
+    if hide == "no_rows":
+        w.results_table.setRowCount(0)
+    else:
+        for r in range(w.results_table.rowCount()):
+            w.results_table.setRowHidden(r, True)
+    _start_search_from(w, w.query_input)
+    assert w._focus_results_after_search() is False
+    assert w.focusWidget() is w.query_input
+
+
+def _hide_every_row(table):
+    for r in range(table.rowCount()):
+        table.setRowHidden(r, True)
+
+
+@pytest.mark.parametrize("rerender", [lambda t: t.setRowCount(0), _hide_every_row],
+                         ids=["no_rows", "excluded_rows_hidden"])
+def test_an_all_terms_filter_that_shows_no_row_gives_the_box_back(rerender):
+    w = _SearchTab()
+    _start_search_from(w, w.query_input)
+    w._focus_results_after_search()
+    w._apply_all_terms_filter_and_rerender = lambda: rerender(w.results_table)
+    w._focus_section_field = lambda: w.query_input.setFocus()
+    w._all_terms_after_completion(None)
+    assert w.focusWidget() is w.query_input
+
+
+def _queue_search_from(w, widget):
+    """A search asked for from ``widget`` that waits for the filter lookup (as
+    start_search and a picked history entry queue it)."""
+    widget.setFocus()
+    w._deferred_search_focus = w.focusWidget()
+    w._rerun_search_after_filter = True
+
+
+def test_a_search_that_waited_for_the_filters_keeps_where_it_was_asked_for():
+    """The user pressed Search in the box, then went to another field while the
+    filter lookup ran: the deferred start must not take that field as its
+    starting point (Codex review)."""
+    w = _SearchTab()
+    w.query_input.setText("words")
+    _queue_search_from(w, w.query_input)
+    w.gap_input.setFocus()                                # meanwhile
+    w.start_search = lambda: setattr(w, '_focus_at_search_start', w.focusWidget())
+    w._run_deferred_after_filter()
+    assert w._focus_at_search_start is w.query_input
+    assert w._focus_results_after_search() is False       # the field keeps the cursor
+    assert w.focusWidget() is w.gap_input
+
+
+def test_a_queued_search_does_not_inherit_the_running_searchs_place():
+    """Search started from the button; while it ran, a history entry that waits
+    for the filters was picked from the box. The first search ends; the queued
+    one starts later and must count from the box (Codex review, round 5)."""
+    w = _SearchTab()
+    w.query_input.setText("words")
+    _start_search_from(w, w.btn_search)                   # the running search's place
+    _queue_search_from(w, w.query_input)                  # the history pick's
+    assert w._focus_at_search_start is w.btn_search       # the running one keeps its own
+    w.start_search = lambda: setattr(w, '_focus_at_search_start', w.focusWidget())
+    w._run_deferred_after_filter()
+    assert w._focus_at_search_start is w.query_input
+    assert w._focus_results_after_search() is True
+    assert w.focusWidget() is w.results_table
+
+
+def test_search_end_and_corner_button_wiring():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parent.parent / "genizah_app.py").read_text(encoding="utf-8")
+    done = src[src.index("    def on_search_finished(self, results):"):src.index("    def _focus_results_after_search(self):")]
+    # Results only (no results returns earlier, the cursor stays in the box), not on restore.
+    assert done.index("        if not results:") < done.index("self._focus_results_after_search()")
+    assert "        if not restoring:\n            self._focus_results_after_search()" in done
+    # Where the cursor was when a search started: a text search, a tag search.
+    keep = "self._focus_at_search_start = self._window_focus()"
+    start = _method_source(src, "start_search").replace("\r\n", "\n")
+    # Read before the filter lookup can make it wait; a waiting search keeps it
+    # as the queued one's, a starting one as its own (Codex review, rounds 2-5).
+    assert start.index("asked_from = self._window_focus()") < start.index(
+        "self._pre_search_filters_blocked(rerun='search')")
+    assert ("if self._pre_search_filters_blocked(rerun='search'):\n"
+            "            self._deferred_search_focus = asked_from\n"
+            "            return\n"
+            "        self._focus_at_search_start = asked_from\n") in start
+    assert keep in _method_source(src, "_execute_tag_search")
+    # A history entry: the shown snapshot's place, or the queued search's -- never
+    # over a running search's own.
+    history = _method_source(src, "_restore_regular_search_from_state")
+    assert keep not in history
+    assert history.index("picked_from = self._window_focus()") < history.index("if results:")
+    snapshot = history[history.index("if results:"):history.index("if filter_pending:")]
+    assert snapshot.index("self._focus_at_search_start = picked_from") < snapshot.index(
+        "self.on_search_finished(results)")
+    queued = history[history.index("if filter_pending:"):history.index("self._rerun_search_after_filter = True")]
+    assert "self._deferred_search_focus = picked_from" in queued
+    assert "self._focus_at_search_start" not in queued
+    # The first shown row may come with the rest of the first page.
+    fill = _method_source(src, "_fill_first_results_page")
+    assert (fill.index("self.load_next_batch(batch_size=missing)")
+            < fill.index("        self._focus_results_after_search()\n"))
+    tag_done = _method_source(src, "_on_tag_search_results")
+    assert tag_done.rstrip().endswith("self._focus_results_after_search()")
+    # The cursor in the box from the start, before the index loads.
+    assert "        self.init_ui()\n        self._focus_on_launch()\n" in src
+    init_ui = _init_ui_source()
+    assert "self.corner_shortcuts_btn.clicked.connect(self.open_shortcuts)" in init_ui
+    assert ("corner_widget.add(self.corner_shortcuts_btn, 3)" in init_ui
+            and init_ui.index("corner_widget.add(self.corner_shortcuts_btn, 3)")
+            < init_ui.index("('corner_text_smaller_btn'"))     # beside A-
 
 
 def test_the_dialog_returns_what_was_typed_and_leaves_browses_completer_alone():
@@ -305,8 +735,19 @@ def test_main_window_wiring():
     assert '("Ctrl+8", self._open_puzzle_window)' in init_ui and '("Ctrl+9", self.open_join_workbench)' in init_ui
     assert 'tr("Fragment Puzzle"), shortcut="Ctrl+8")' in init_ui
     assert 'tr("Joins Lab"), shortcut="Ctrl+9")' in init_ui
-    # Ctrl+G / Ctrl+F / Ctrl+, also by the physical key on Windows.
+    # Ctrl+O is Go to as well, Ctrl+E the search box as well, Ctrl+/ the list of
+    # keys (owner, 2026-10-30); Ctrl+1 .. Ctrl+7 move the cursor too.
+    assert '("Ctrl+O", self.open_go_to)' in init_ui
+    assert '("Ctrl+E", self._focus_section_field)' in init_ui
+    assert '("Ctrl+/", self.open_shortcuts)' in init_ui
+    assert 'tr("Keyboard shortcuts"), footer=True, shortcut="Ctrl+/")' in init_ui
+    assert "self.nav_shortcuts_btn.clicked.connect(self.open_shortcuts)" in init_ui
+    assert "lambda idx=i: self._open_section(idx)" in init_ui
+    # Ctrl+G / Ctrl+O / Ctrl+F / Ctrl+E / Ctrl+, / Ctrl+/ also by the physical key on Windows.
     assert "LayoutProofShortcuts(self, {" in init_ui and "('G', Qt.KeyboardModifier.ControlModifier): self.open_go_to" in init_ui
+    for key, slot in (("O", "self.open_go_to"), ("E", "self._focus_section_field"),
+                      ("/", "self.open_shortcuts")):
+        assert f"('{key}', Qt.KeyboardModifier.ControlModifier): {slot}" in init_ui
     # A- / A+ beside the tabs and in the side menu.
     assert "self._step_text_size(s)" in init_ui and 'tr("Larger text"), footer=True, shortcut="Ctrl+="' in init_ui
     go = src[src.index("    def open_go_to(self):"):src.index("    def _go_to_recent_items(")]

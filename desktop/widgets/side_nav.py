@@ -75,7 +75,7 @@ def glyph_icon(glyph: str, color: QColor, size: int = ICON_SIZE) -> QIcon:
 
 # Windows virtual-key codes of the keys LayoutProofShortcuts takes besides
 # letters and digits (whose codes are their upper-case ASCII).
-_WINDOWS_VK = {',': 0xBC, '-': 0xBD, '.': 0xBE, '=': 0xBB}
+_WINDOWS_VK = {',': 0xBC, '-': 0xBD, '.': 0xBE, '=': 0xBB, '/': 0xBF}
 
 
 def windows_virtual_key(char: str):
