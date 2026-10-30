@@ -507,6 +507,14 @@ def test_a_replacement_published_between_read_and_check_cannot_vouch_for_old_ima
     assert got["external_url"].endswith(_NEW_ITEM)
 
 
+def _canvases_by_position(monkeypatch):
+    """Page N is the entry's Nth canvas, as when nli_crossref.db has no folio rows for the
+    record (CI has no sidecar). With the real sidecar this sys_id's folios match none of the
+    fixture canvases, so the route takes the NLI fallback, which these tests do not fake."""
+    import shared.nli_crossref_service as ncs
+    monkeypatch.setattr(ncs, "resolve_cambridge_canvas_for_page", lambda *a, **k: {"degraded": True})
+
+
 def test_the_image_routes_never_serve_or_keep_the_old_item_under_the_new_decision(tmp_path, monkeypatch):
     """The reported failure: the old image saved on disk under the corrected item's name,
     surviving a cleared memory cache. Real routes; only the network is replaced."""
@@ -525,6 +533,7 @@ def test_the_image_routes_never_serve_or_keep_the_old_item_under_the_new_decisio
                                content=f"jpeg-bytes-of-{label}".encode().ljust(200, b"\0"))
 
     monkeypatch.setattr(pis, "get_with_checked_redirects", _fetch)
+    _canvases_by_position(monkeypatch)
     pis.reset_puzzle_image_service()
     service = pis.get_puzzle_image_service(cache_dir=tmp_path / "puzzle")
     try:
@@ -616,6 +625,7 @@ def test_an_image_made_under_a_provisional_decision_is_kept_by_no_cache(tmp_path
 
     monkeypatch.setattr(pis, "get_with_checked_redirects", lambda url, **_kw: SimpleNamespace(
         status_code=200, headers={"Content-Type": "image/jpeg"}, content=b"jpeg".ljust(200, b"\0")))
+    _canvases_by_position(monkeypatch)
     pis.reset_puzzle_image_service()
     pis.get_puzzle_image_service(cache_dir=tmp_path / "puzzle")
     try:
