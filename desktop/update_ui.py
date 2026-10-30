@@ -322,6 +322,9 @@ class WhatsNewDialog(QDialog):
             tr('Transcriptions of the Jerusalem Talmud now distinguish completions (in square brackets), doubtful letters (with a small circle above them) and additions between the lines. Please note: these transcriptions are not the final text, which is found in "Ginze Yerushalmi", edited by Y. Sussmann.'),
             tr('A new "?" button beside transcriptions by FGP\'s Genuzot team explains the transcribers\' sigla.'),
             tr('In the Joins Lab and Visual Similarity, you can choose several libraries or domains, and show or hide them, to find matches faster.'),
+            # v9.11.1 (2026-10-30): the owner's own Hebrew line. WHATS_NEW_CONTENT_VERSION
+            # stays 9.11.0 (owner): whoever dismissed the 9.11.0 bar is not shown it again.
+            tr('Corrected and added links to the Cambridge Digital Library (CUDL).'),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

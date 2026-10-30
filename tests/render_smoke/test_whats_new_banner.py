@@ -133,6 +133,7 @@ def test_toast_advertises_the_new_entry_and_letter_level_parallels():
         assert _banner(elements) is not None
         assert _parallels_hrefs(elements), 'the toast advertised no parallels link'
         text = _texts(elements)
+        assert 'corrected and added links to the Cambridge Digital Library' in text      # v9.11.1
         assert 'about 14,600 more Friedberg Genizah Project transcriptions' in text      # v9.11.0
         assert 'Better wildcard search in Responsa style' in text      # v9.9.0
         assert 'The Joins Lab and Personal Lists now fit a phone' in text      # v9.9.0
@@ -269,7 +270,9 @@ def test_toast_is_translated_rather_than_leaking_english_into_the_hebrew_ui():
         assert 'תכונות חדשות!' in text
         assert 'חיפוש מקבילות ברמת האות' in text
         assert 'בסגנון פרויקט השו"ת (שימוש באופרטור *)' in text      # v9.9.0
+        assert "תיקון והוספה של קישורים לספרייה הדיגיטלית של קיימברידג'" in text      # v9.11.1
         assert 'כ-14,600 העתקות נוספות של פרויקט פרידברג' in text      # v9.11.0
+        assert 'corrected and added links to the Cambridge Digital Library' not in text
         assert 'Friedberg Genizah Project transcriptions' not in text
         assert 'Letter-level parallels search' not in text
         assert 'Better wildcard search in Responsa style' not in text

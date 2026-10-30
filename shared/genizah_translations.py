@@ -6231,6 +6231,14 @@ TRANSLATIONS.update({
         'חדש: כ-14,600 העתקות נוספות של פרויקט פרידברג, וטקסט נקי יותר בכ-27,800 העתקות.',
 })
 
+# v9.11.1 web What's New entry and desktop What's New bullet (2026-10-30), the owner's own Hebrew.
+TRANSLATIONS.update({
+    'New: corrected and added links to the Cambridge Digital Library (CUDL)':
+        "חדש: תיקון והוספה של קישורים לספרייה הדיגיטלית של קיימברידג' (CUDL)",
+    'Corrected and added links to the Cambridge Digital Library (CUDL).':
+        "תיקון והוספה של קישורים לספרייה הדיגיטלית של קיימברידג' (CUDL).",
+})
+
 # Phone layout (2026-10-22): the search toolbar's phone menu, the browse image
 # panel's slider toggle, and the catalog-browse sidebar toggle.
 TRANSLATIONS.update({

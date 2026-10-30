@@ -4,6 +4,98 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [9.11.1] - 2026-10-30 — Cambridge links fixed
+
+Which Cambridge Digital Library (CUDL) item a record links to is now one decision, made by comparing the item's
+label with the record's catalogue names letter by letter and number by number, and every surface in both apps
+follows it: 1,916 records gain a direct CUDL link and 15 others are corrected
+(`reports/cudl_resolution_changes_2026-10-29.csv`); the sidecar is unchanged. On the website, Quick View offers the
+version chooser on a page without automatic text, Browse and Quick View count the pages of such a manuscript, and a
+search opened from a link starts at once (PRs #453-#455). Installer 9.11.1; web deployed from `master-main`.
+
+### Cambridge links: the right item, by structure (web + desktop)
+
+- **Cambridge (CUDL) links were missing for renamed and bracketed shelfmarks, and some opened another
+  fragment.** Reported 2026-10-29 by Adiel Breuer. A record was matched to CUDL through a lossy normalized key that
+  drops every other dot of a number run and all brackets: T-S Ar.18(1).6 and Or.1080 3.45 never matched their own
+  items (the green box offered a CUDL search instead), while T-S NS 318.41/.42 and T-S Ar.7.31/.32 opened 318.4.1/.4.2
+  and 7.3.1/.3.2 -- other fragments, images included. The desktop tried only its cached name, which for an entry first
+  fetched from NLI is NLI's old one ("Ms. T-S Loan Collection 180" for T-S Misc.36.180), and a fallback read any
+  "Ms. <Roman> N" as Mosseri, so eight AIU and JTS records opened Mosseri items.
+- Now one decision per record (`shared/cudl_identity.py`, through `MetadataManager.resolve_cambridge`): a CUDL item
+  is the record's only when its label has the same letters and numbers in the same order as one of the record's
+  catalogue names (`Ja` = `J-A`, zero padding and separators aside; `T-S F 6.1` is not `T-S 6F1`); only CUL and
+  Mosseri records; the main name decides, the other names when it names nothing; a name with characters it cannot
+  read, or a number range, names nothing; the NLI catalogue's own link (MARC 856) is used when the names name
+  nothing, never against them. Candidates come from the existing `cambridge_manifests` key, so the sidecar is
+  unchanged. Against CUDL's list and `libraries.csv`: 1,916 records gain a direct link, 4 are corrected, 11 lose a
+  wrong one (`reports/cudl_resolution_changes_2026-10-29.csv`). A Mosseri second-series record made of several
+  first-series items keeps linking the first of them (63 records), flagged for a later chooser -- an interim
+  choice a reviewer judged reasonable; how to present these records is still the owner's decision.
+- Every surface follows that decision: the availability flag (`get_image_sources` no longer probes the table), the
+  green-box library link (now the item, not a search), Browse's Cambridge chip (no URL built from the shelfmark), the
+  desktop's Cambridge button, viewer and result dialog (no MARC fallback), Joins Lab's details link. The desktop
+  header shows the catalogue's name.
+- Cached state cannot bring an old link back: `enrich_metadata` drops what an earlier run derived from Cambridge
+  (link, images, alignment, credit) before deciding again; each decision carries `RESOLVER_REVISION`, and the image
+  shortcuts (`resolve_external_images`, the image routes, Visual Similarity, the desktop reading desk) re-enrich an
+  entry without a current one; `/api/cambridge_image` URLs carry `cv=`, its server cache is at version 3, and the
+  Puzzle's disk cache is keyed by the CUDL item. A catalogue still loading is never cached as "no Cambridge item".
+- Review fixes before release: `enrich_metadata` builds the entry on a copy and publishes it whole (in place, a
+  concurrent request saw the new decision beside the old item's images, and the Puzzle cached those pixels under
+  the new item); the desktop result dialog re-enriches an entry cached before the decision (it reused any entry with
+  MARC data); every `/api/puzzle_ext_image` URL carries `cv=` (the browser kept the old bytes for up to an hour).
+  Then: the decision is checked on the cache entry the images and links come from (`cudl_identity.fresh_external_entry`,
+  `entry_decision_stale`) -- a second read could return a newer entry whose current decision vouched for the first
+  read's old images, which the memory cache and the Puzzle's disk copy then kept under the new item; the memory and
+  disk caches keep only what a final decision produced, the disk name carries the revision, and `get_thumbnail` sets
+  its fields on the entry current at the moment of writing, in one locked step (`_BoundedLRUCache.merge_fields`), so
+  it cannot put an older entry over a published enrichment. An image made under a provisional decision is sent
+  `Cache-Control: no-store` by both the Cambridge and the Puzzle image routes (the route wrapper keeps a route's own
+  `no-store`).
+
+- Tests and tools: `tests/test_cudl_identity.py` (fixture table built with the importer's own key; real CUDL labels from both sides of
+  every collision). `tests/fixtures/cudl_baseline_resolved.csv`: the 8 rows that pinned the four wrong items corrected,
+  listed in `tests/fixtures/cudl_baseline_ledger.csv`. `scripts/audit_cudl_saved_work.py` lists saved and published
+  joins that reference a corrected or removed record.
+
+### Web: Quick View on pages without an automatic transcription (web)
+
+- **Quick View now offers the version chooser on a page without an automatic transcription**, as Browse has since
+  2026-10-27. Such a page is reached in Quick View by paging from a hit on another page of the manuscript, or from
+  a shelfmark or title search for a manuscript with no automatic text at all. Quick View already showed an edition
+  of such a page as its text, but with no label saying whose it was, no way to switch versions, and no Edit,
+  Comment or Joins: it built them only when the page had an automatic text. It now takes Browse's decision
+  (`web/pages/browse_state.py::page_has_reading_view`, through
+  `web/pages/search_results.py::_quick_view_has_reading_view`): the chooser names the edition shown (FGP or PGP)
+  and offers the others, and Edit starts from the empty automatic text, as in Browse (GS-277). A page with nothing
+  to show says "No text available": paging there from a hit used to show the hit page's snippet as if it were that
+  page's text. A catalogue-only record still gets none of these. Quick View has no citation of its own (the "How to
+  cite" chip sits beneath dialogs), so nothing there is cited.
+
+### Web: the page count of a manuscript without automatic text (web)
+
+- **Browse and Quick View showed "Page 1 / 0" for a manuscript without any automatic transcription, and could not
+  page on.** The index holds no pages of such a manuscript, so its page came with no count; Browse's only fallback
+  read an `fl_id` the NLI crossref folios never carry (Cambridge images aside), and Quick View had none. Next was
+  disabled, so only the first image could be seen (T-S NS 243.145 has 4). Both now count its images
+  (`web/page_count.py`): the NLI crossref folio list, else the NLI image list the image route already pages
+  through (`web/api.py::nli_fl_ids`, the same 30-day cache; the manifest is fetched only for a manuscript the
+  crossref does not know; a later volume is counted from its own manifest, the one its images come from). An
+  external image list Browse shows first (Manchester, JTS, CUDL) keeps its own count, as before. Neither view waits
+  for a manifest: past half a second the page renders without a total
+  and gains it when the count comes. Browse keeps the count across Next/Previous while its enrichment reruns; a
+  count that cannot be known is left out rather than shown as 0.
+
+### Web: a search opened from its address starts at once (web)
+
+- **A `/search?q=` search no longer waits for the page to connect before it starts** (PR #453). The phone-layout fold
+  (v9.8.3) awaited `ui.run_javascript('window.innerWidth')` first, and in NiceGUI 3 an awaited call waits for the
+  client to connect; the fold now runs beside the search (`web/pages/search.py`), still after `is_running` is set.
+  Locally, on the same queries, 1.98 / 2.53 s -> 1.52 / 1.52 s server time; at phone width the form still folds.
+- Tests: `tests/test_cudl_identity.py`'s two image-route tests take the canvases by position, as CI does, so they pass
+  beside a real `nli_crossref.db`.
+
 ## [9.11.0] - 2026-10-29 — FGP transcriptions from FGP's own files
 
 The Friedberg Genizah Project transcriptions are rebuilt from the files FGP keeps for each transcription (the

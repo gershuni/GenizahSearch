@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-10-27 (folded 1 fragment(s) from `docs/open_issues.d/`: 2026-10-27-web-fgp-reading-view-gaps.md). 165 open: P1 0, P2 42, P3 123.
+> **Last Updated:** 2026-10-30 (folded 2 fragment(s) from `docs/open_issues.d/`: 2026-10-29-cudl-item-list-out-of-date.md, 2026-10-29-web-source-badge-without-automatic-text.md). 167 open: P1 0, P2 42, P3 125.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -23,17 +23,17 @@ owner tasks -- is in [`BACKLOG.md`](BACKLOG.md). Closed history:
 | Area | P1 | P2 | P3 | Total |
 |------|------|------|------|------|
 | Search | 0 | 4 | 21 | 25 |
-| Browse and viewer | 0 | 4 | 5 | 9 |
+| Browse and viewer | 0 | 4 | 6 | 10 |
 | Desktop app | 0 | 9 | 25 | 34 |
 | Website | 0 | 6 | 23 | 29 |
 | API and AI | 0 | 2 | 1 | 3 |
 | Discovery | 0 | 2 | 11 | 13 |
 | Accounts and community | 0 | 8 | 27 | 35 |
-| Data and sidecars | 0 | 5 | 5 | 10 |
+| Data and sidecars | 0 | 5 | 6 | 11 |
 | Build, CI and tests | 0 | 0 | 1 | 1 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 2 | 1 | 3 |
-| **Total** | **0** | **42** | **123** | **165** |
+| **Total** | **0** | **42** | **125** | **167** |
 
 ## P1 - Critical
 
@@ -160,6 +160,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-280](ISSUE_DETAILS.md#gs-280) | The page's "V0.8" source badge shows on a page that has no automatic transcription | `web/pages/browse.py` (the source badge beside "Page N": `'V0.7' if 'V0.7' in page.full_header else 'V0.8'`) | 2026-10-29 | ❌ Open |
 | [GS-61](ISSUE_DETAILS.md#gs-61) | Browse: a paged deep-link URL still carries `highlight`, so a reload lets the NEW folio claim the search phrase | `web/pages/browse.py::_update_browser_url` (877-906), _search_scope_phrase (835-859) | 2026-09-03 | ❌ Open |
 | [GS-62](ISSUE_DETAILS.md#gs-62) | `switchImageCredit()` updates the FIRST `data-role="image-credit"` node in the document — a hidden earlier Advanced View, not the open one | `web/static/manuscript_viewer.js::switchImageCredit`; `search_results.py::open_advanced_dialog` | 2026-09-03 | ❌ Open |
 | [GS-63](ISSUE_DETAILS.md#gs-63) | FGP version menu still lists whole-document rows unrelated to the displayed folio (demoted from the default, not hidden) | `shared/fgp_service.py::choose_default_source`, _select_fgp_editions_by_similarity | 2026-09-02 | ❌ Open |
@@ -282,6 +283,7 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-279](ISSUE_DETAILS.md#gs-279) | Our copy of CUDL's item list lacks items CUDL publishes, so their records get no Cambridge link | `cambridge_genizah.json` -> `nli_data/nli_crossref.db` (`cambridge_manifests`, built by `scripts/import_nli_crossref.py`) | 2026-10-29 | ❌ Open |
 | [GS-272](ISSUE_DETAILS.md#gs-272) | FIST's RecordStatus 1 / 5 and PermissionCommentCode 5309 have no ruling before FGP new rows ship | `fist_data/FIST.db` `dbo_Signature.RecordStatus`, `PermissionCommentCode`; `scripts/fgp_gate2_rules.py`, `scripts/fgp_gate4_chooser_validation.py` | 2026-10-26 | ❌ Partly fixed |
 | [GS-151](ISSUE_DETAILS.md#gs-151) | A failed NLI metadata fetch is cached as "Unknown" (and saved, on the desktop) | `shared/metadata_manager.py::fetch_nli_data`, `batch_fetch_shelfmarks` (+ `save_caches`) | 2026-09-25 | ❌ Open |
 | [GS-152](ISSUE_DETAILS.md#gs-152) | PGP import can still produce a sidecar that is wrong but passes every check | `scripts/import_pgp_full.py`, `import_pgp_sections.py`, `pgp_transcriptions_export.py` | 2026-09-22 | ❌ Open |

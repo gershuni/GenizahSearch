@@ -4168,3 +4168,36 @@ re-read, which only made more pointed texts reachable. The unpointed re-read tex
 d.34/59, `השרץ בחבית`). Fix sketch: build the term pattern with optional marks between letters (U+0591-U+05C7), the
 rule `shared/fgp_service.py::_normalize_for_contains` already uses for the default choice. The desktop's highlight
 path was not checked against pointed text. Found in the GS-276 step-7 app checks.
+
+## GS-279
+
+**Our copy of CUDL's item list lacks items CUDL publishes, so their records get no Cambridge link** · P3 · Data and sidecars · ❌ Open · opened 2026-10-29
+
+Where: `cambridge_genizah.json` -> `nli_data/nli_crossref.db` (`cambridge_manifests`, built by `scripts/import_nli_crossref.py`)
+
+Since 2026-10-29 a record links to a CUDL item only when the item's label has the record's letters and numbers
+in the same order (`shared/cudl_identity.py`). Before, the lossy normalized key linked "Moss. X,2.1"
+(990053810430205171) to Mosseri X.21, a different letter; that link is gone, and the record now has no direct
+CUDL link, because `cambridge_genizah.json` (141,368 items) does not hold MS-MOSSERI-X-00002-00001 -- which CUDL
+does publish (`https://cudl.lib.cam.ac.uk/iiif/MS-MOSSERI-X-00002-00001` answered 200, "Genizah fragment (Mosseri
+X.2.1)", 2026-10-29). Other records may be in the same position; how many is unknown until the list is refreshed.
+"Moss. III,25.1" and "Moss. IX,12.2" were linked to III.251 and IX.122 the same way (IX.122 is record
+990053816210205171's medical book); CUDL answered 500 for III.25.1 and IX.12.2, so those two may have no CUDL item.
+Fix sketch: re-harvest CUDL's Genizah collection manifest into `cambridge_genizah.json`, rebuild the table on a
+copy of the sidecar, review the delta (`reports/cudl_resolution_changes_2026-10-29.csv` is the shape), deploy the
+sidecar first, and bump `shared/cudl_identity.py::RESOLVER_REVISION` in the same change so cached decisions and
+browser image URLs refresh.
+
+## GS-280
+
+**The page's "V0.8" source badge shows on a page that has no automatic transcription** · P3 · Browse and viewer · ❌ Open · opened 2026-10-29
+
+Where: `web/pages/browse.py` (the source badge beside "Page N": `'V0.7' if 'V0.7' in page.full_header else 'V0.8'`)
+
+Browse labels every page's automatic text "V0.8" (or "V0.7") beside the page number. On a page without any automatic
+transcription -- since 2026-10-27 it opens on its FGP or PGP edition, and its `full_header` is empty when the index
+holds no pages of the manuscript -- the badge still says "V0.8" while an edition is shown and no V0.8 text exists
+(seen on a local server, 2026-10-29: T-S NS 243.145 with its FGP edition; the version chooser beside the text says
+"FGP"). Quick View's info bar has the same chip from the search result's `display['source']`, which is right for the
+result's own page but not for another page reached by paging. Fix sketch: no badge when the page has no automatic
+text (`not page.text`); the version chooser already names the text shown.
