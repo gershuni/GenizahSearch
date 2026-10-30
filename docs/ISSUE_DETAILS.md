@@ -306,21 +306,6 @@ Moved 2026-10-25 from `1. Outstanding Bugs / P2 - Medium`, where it read:
 
 *Triage 2026-10-25:* partly fixed. web/static/js/reconnect_backoff.js and web/reconnect_backoff.py exist (commits f15f0bc6, 3ce1b27b, 569bb423, all 2026-10-21) and framework_patches.py counts handshakes (_record_handshake :540, _patch_handshake_counter :574). Not verifiable from code: behavior at an actual restart. **Still open:** A client not connected 60 s after creation is still pruned under sustained saturation; confirm at the next restart that unknown_client spikes once and /browse latency stays normal.
 
-## GS-21
-
-**Parallels Word export still strips highlight markers while xlsx now renders them** · P2 · Website · ❌ Open · opened 2026-08-23
-
-Where: `web/export_service.py` (`export_parallels_word`)
-
-Moved 2026-10-25 from `1. Outstanding Bugs / P2 - Medium`, where it read:
-
-- **Issue:** **Parallels Word export still strips highlight markers while xlsx now renders them**
-- **File:** `web/export_service.py` (`export_parallels_word`)
-- **Status:** ❌ Open (found 2026-08-23 by the PR #325 review workflow)
-- **Notes:** `export_parallels_excel` renders `*span*` as red+bold runs; `export_parallels_word` still calls `remove_highlight_markers`, so the same search exported to the two formats disagrees about what matched. Low severity (no data loss, no wrong data) but a visible inconsistency now that xlsx shows the spans. python-docx supports bold runs, so the fix mirrors the xlsx one.
-
-*Triage 2026-10-25:* still open. web/export_service.py:1335 and 1340 still wrap the source context and the manuscript match in remove_highlight_markers(...) and add them as plain paragraphs (no bold runs).
-
 ## GS-22
 
 **Cloudflare caches no page/API response: HTML, robots, sitemap, manifest still get a re-signed Set-Cookie; assets and image routes fixed** · P2 · Website · ❌ Partly fixed · opened 2026-07-30
@@ -4187,17 +4172,3 @@ Fix sketch: re-harvest CUDL's Genizah collection manifest into `cambridge_geniza
 copy of the sidecar, review the delta (`reports/cudl_resolution_changes_2026-10-29.csv` is the shape), deploy the
 sidecar first, and bump `shared/cudl_identity.py::RESOLVER_REVISION` in the same change so cached decisions and
 browser image URLs refresh.
-
-## GS-280
-
-**The page's "V0.8" source badge shows on a page that has no automatic transcription** · P3 · Browse and viewer · ❌ Open · opened 2026-10-29
-
-Where: `web/pages/browse.py` (the source badge beside "Page N": `'V0.7' if 'V0.7' in page.full_header else 'V0.8'`)
-
-Browse labels every page's automatic text "V0.8" (or "V0.7") beside the page number. On a page without any automatic
-transcription -- since 2026-10-27 it opens on its FGP or PGP edition, and its `full_header` is empty when the index
-holds no pages of the manuscript -- the badge still says "V0.8" while an edition is shown and no V0.8 text exists
-(seen on a local server, 2026-10-29: T-S NS 243.145 with its FGP edition; the version chooser beside the text says
-"FGP"). Quick View's info bar has the same chip from the search result's `display['source']`, which is right for the
-result's own page but not for another page reached by paging. Fix sketch: no badge when the page has no automatic
-text (`not page.text`); the version chooser already names the text shown.

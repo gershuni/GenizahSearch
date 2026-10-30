@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-10-30 (folded 2 fragment(s) from `docs/open_issues.d/`: 2026-10-29-cudl-item-list-out-of-date.md, 2026-10-29-web-source-badge-without-automatic-text.md). 167 open: P1 0, P2 42, P3 125.
+> **Last Updated:** 2026-10-30 (archived GS-21, GS-280). 165 open: P1 0, P2 41, P3 124.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -23,9 +23,9 @@ owner tasks -- is in [`BACKLOG.md`](BACKLOG.md). Closed history:
 | Area | P1 | P2 | P3 | Total |
 |------|------|------|------|------|
 | Search | 0 | 4 | 21 | 25 |
-| Browse and viewer | 0 | 4 | 6 | 10 |
+| Browse and viewer | 0 | 4 | 5 | 9 |
 | Desktop app | 0 | 9 | 25 | 34 |
-| Website | 0 | 6 | 23 | 29 |
+| Website | 0 | 5 | 23 | 28 |
 | API and AI | 0 | 2 | 1 | 3 |
 | Discovery | 0 | 2 | 11 | 13 |
 | Accounts and community | 0 | 8 | 27 | 35 |
@@ -33,7 +33,7 @@ owner tasks -- is in [`BACKLOG.md`](BACKLOG.md). Closed history:
 | Build, CI and tests | 0 | 0 | 1 | 1 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 2 | 1 | 3 |
-| **Total** | **0** | **42** | **125** | **167** |
+| **Total** | **0** | **41** | **124** | **165** |
 
 ## P1 - Critical
 
@@ -80,7 +80,6 @@ _None open._
 | [GS-18](ISSUE_DETAILS.md#gs-18) | Visual Similarity / Joins Lab thumbnails of manuscripts nobody opened come up blank, and different ones on each redraw | `web/api.py::fetch_fl_ids_from_nli`, `web/nli_image_store.py` | 2026-10-21 | ❌ Partly fixed |
 | [GS-19](ISSUE_DETAILS.md#gs-19) | /browse page change still rebuilds the whole content area in Phase B to fill its placeholders | `web/pages/browse_enrichment.py::load_enrichment`, `web/pages/browse.py::update_content` | 2026-10-21 | ❌ Partly fixed |
 | [GS-20](ISSUE_DETAILS.md#gs-20) | Website restart can set off reload loops from open pages; backoff shipped 2026-10-21, saturation case and live check remain | `web/static/js/reconnect_backoff.js`, `web/reconnect_backoff.py`, `web/framework_patches.py:540-625` | 2026-10-21 | ❌ Partly fixed |
-| [GS-21](ISSUE_DETAILS.md#gs-21) | Parallels Word export still strips highlight markers while xlsx now renders them | `web/export_service.py` (`export_parallels_word`) | 2026-08-23 | ❌ Open |
 | [GS-22](ISSUE_DETAILS.md#gs-22) | Cloudflare caches no page/API response: HTML, robots, sitemap, manifest still get a re-signed Set-Cookie; assets and image routes fixed | `web/framework_patches.py:96-124,166-189` | 2026-07-30 | ❌ Partly fixed |
 | [GS-23](ISSUE_DETAILS.md#gs-23) | Web Joins Lab grid thumbnails for CUL/Manchester/JTS go to the NLI proxy until the breaker opens (3 failures); proxy has no provider fallbac | `web/components/candidate_grid.py:484-547`, `web/api.py:1126` | 2026-06-21 | ❌ Open |
 
@@ -160,7 +159,6 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
-| [GS-280](ISSUE_DETAILS.md#gs-280) | The page's "V0.8" source badge shows on a page that has no automatic transcription | `web/pages/browse.py` (the source badge beside "Page N": `'V0.7' if 'V0.7' in page.full_header else 'V0.8'`) | 2026-10-29 | ❌ Open |
 | [GS-61](ISSUE_DETAILS.md#gs-61) | Browse: a paged deep-link URL still carries `highlight`, so a reload lets the NEW folio claim the search phrase | `web/pages/browse.py::_update_browser_url` (877-906), _search_scope_phrase (835-859) | 2026-09-03 | ❌ Open |
 | [GS-62](ISSUE_DETAILS.md#gs-62) | `switchImageCredit()` updates the FIRST `data-role="image-credit"` node in the document — a hidden earlier Advanced View, not the open one | `web/static/manuscript_viewer.js::switchImageCredit`; `search_results.py::open_advanced_dialog` | 2026-09-03 | ❌ Open |
 | [GS-63](ISSUE_DETAILS.md#gs-63) | FGP version menu still lists whole-document rows unrelated to the displayed folio (demoted from the default, not hidden) | `shared/fgp_service.py::choose_default_source`, _select_fgp_editions_by_similarity | 2026-09-02 | ❌ Open |

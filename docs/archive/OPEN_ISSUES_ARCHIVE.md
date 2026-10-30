@@ -2174,3 +2174,45 @@ desktop no longer renders FGP text as Qt HTML (it escapes, f4044f98), so nothing
 Quick View's own `html.unescape` stays as a guard and is a no-op on sidecar text. Named entities are decoded only
 when the whole name is one, numeric ones with or without `;` (row 8767's `&amp;#40age`), two layers at most.
 Tests: `tests/test_fgp_stored_entities.py`.
+
+---
+
+## Closed entries moved out of the tracker on 2026-10-30
+
+Moved by `scripts/archive_closed_issues.py`: each row as it stood, then its details. The IDs are not reused.
+
+| ID | Issue | Where | Opened | Status |
+|----|-------|-------|--------|--------|
+| GS-21 (OPEN_ISSUES.md) | Parallels Word export still strips highlight markers while xlsx now renders them | `web/export_service.py` (`export_parallels_word`) | 2026-08-23 | ✅ Fixed (2026-10-30, 14b973d2) |
+| GS-280 (OPEN_ISSUES.md) | The page's "V0.8" source badge shows on a page that has no automatic transcription | `web/pages/browse.py` (the source badge beside "Page N": `'V0.7' if 'V0.7' in page.full_header else 'V0.8'`) | 2026-10-29 | ✅ By design (2026-10-30, owner) |
+
+### GS-21
+
+**Parallels Word export still strips highlight markers while xlsx now renders them** · P2 · Website · ❌ Open · opened 2026-08-23
+
+Where: `web/export_service.py` (`export_parallels_word`)
+
+Moved 2026-10-25 from `1. Outstanding Bugs / P2 - Medium`, where it read:
+
+- **Issue:** **Parallels Word export still strips highlight markers while xlsx now renders them**
+- **File:** `web/export_service.py` (`export_parallels_word`)
+- **Status:** ❌ Open (found 2026-08-23 by the PR #325 review workflow)
+- **Notes:** `export_parallels_excel` renders `*span*` as red+bold runs; `export_parallels_word` still calls `remove_highlight_markers`, so the same search exported to the two formats disagrees about what matched. Low severity (no data loss, no wrong data) but a visible inconsistency now that xlsx shows the spans. python-docx supports bold runs, so the fix mirrors the xlsx one.
+
+*Triage 2026-10-25:* still open. web/export_service.py:1335 and 1340 still wrap the source context and the manuscript match in remove_highlight_markers(...) and add them as plain paragraphs (no bold runs).
+
+### GS-280
+
+**The page's "V0.8" source badge shows on a page that has no automatic transcription** · P3 · Browse and viewer · ❌ Open · opened 2026-10-29
+
+Where: `web/pages/browse.py` (the source badge beside "Page N": `'V0.7' if 'V0.7' in page.full_header else 'V0.8'`)
+
+Browse labels every page's automatic text "V0.8" (or "V0.7") beside the page number. On a page without any automatic
+transcription -- since 2026-10-27 it opens on its FGP or PGP edition, and its `full_header` is empty when the index
+holds no pages of the manuscript -- the badge still says "V0.8" while an edition is shown and no V0.8 text exists
+(seen on a local server, 2026-10-29: T-S NS 243.145 with its FGP edition; the version chooser beside the text says
+"FGP"). Quick View's info bar has the same chip from the search result's `display['source']`, which is right for the
+result's own page but not for another page reached by paging. Fix sketch: no badge when the page has no automatic
+text (`not page.text`); the version chooser already names the text shown.
+
+*Closed 2026-10-30:* by design (owner): the badge stays on a page without automatic text. Not a defect.

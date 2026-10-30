@@ -51,7 +51,7 @@ CREDITS_TEXT = [
 from shared_export_utils import (
     sanitize_text_for_excel,
     clean_text_single_line,
-    remove_highlight_markers,
+    remove_highlight_markers as remove_highlight_markers,  # re-exported for tests
     make_safe_filename,
     encode_filename_for_header as encode_filename_for_header,  # re-exported for web.api
     # Phase 94 Wave 3 (MUST-FIX 94-03-B): contains_any_term + extract_search_terms
@@ -1329,15 +1329,18 @@ class ExportService:
                 if title:
                     add_hebrew_paragraph(doc, title)
 
+                # GS-21: keep the `*` markers and render them, as the xlsx
+                # export does -- stripped, the two formats of one search
+                # disagreed about what matched.
                 # Source Context
                 label_p = doc.add_paragraph()
                 label_p.add_run("Source Context:").bold = True
-                add_hebrew_paragraph(doc, remove_highlight_markers(item.get('source_ctx', '')))
+                add_highlighted_hebrew_paragraph(doc, item.get('source_ctx') or '')
 
                 # Manuscript Match
                 label_p2 = doc.add_paragraph()
                 label_p2.add_run("Manuscript Match:").bold = True
-                add_hebrew_paragraph(doc, remove_highlight_markers(item.get('text', '')))
+                add_highlighted_hebrew_paragraph(doc, item.get('text') or '')
 
                 doc.add_paragraph("_" * 60)
 

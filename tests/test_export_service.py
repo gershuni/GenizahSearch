@@ -15,6 +15,7 @@ import pytest
 import io
 import openpyxl
 from docx import Document
+from docx.oxml.ns import qn
 from unittest.mock import MagicMock
 
 # Import the export service module
@@ -677,6 +678,38 @@ class TestExportService:
 
         assert isinstance(content, bytes)
         assert filename == "parallels_results.docx"
+
+    def test_export_parallels_word_keeps_the_marked_spans(self, export_service):
+        """GS-21: the Word export marks the same words the xlsx does, in
+        both text sections -- it used to strip the `*` markers, so the two
+        formats of one search disagreed about what matched."""
+        from io import BytesIO
+
+        rows = [{
+            'raw_header': 'header_9912345678901234_page1',
+            'score': 85,
+            'source_ctx': 'ברוך *אתה* יי',
+            'text': 'ברוך *את* יי אלהינו',
+        }]
+        content, _ = export_service.export_parallels_word(rows, [])
+        paragraphs = Document(BytesIO(content)).paragraphs
+        assert not any('*' in p.text for p in paragraphs)
+
+        def marked_after(label):
+            idx = next(i for i, p in enumerate(paragraphs) if p.text == label)
+            body = paragraphs[idx + 1]
+            return body.text, [
+                r.text for r in body.runs
+                if r.bold and r._r.rPr.find(qn('w:highlight')) is not None]
+
+        assert marked_after('Source Context:') == ('ברוך אתה יי', ['אתה'])
+        assert marked_after('Manuscript Match:') == ('ברוך את יי אלהינו', ['את'])
+
+    def test_export_parallels_word_handles_missing_text(self, export_service):
+        rows = [{'raw_header': 'header_9912345678901234_page1', 'score': 1,
+                 'source_ctx': None, 'text': None}]
+        content, _ = export_service.export_parallels_word(rows, [])
+        assert isinstance(content, bytes)
 
     def test_export_browse_word(self, export_service, sample_browse_data):
         """Should export browse data to valid Word file."""
