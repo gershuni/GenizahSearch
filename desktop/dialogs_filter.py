@@ -1266,7 +1266,8 @@ class CriteriaDialog(QDialog):
             centuries = QHBoxLayout()
             centuries.setSpacing(2)
             # The web's presets (Catalog Browse), so both list the same manuscripts.
-            for lo, hi, text in [(c, c, f"{c + 1}th") for c in range(9, 15)] + [(16, 19, "16-19")]:
+            # The 16th century is the 1500s: "16-19" is 1500-1899 (1b's 11645f0c).
+            for lo, hi, text in [(c, c, f"{c + 1}th") for c in range(9, 15)] + [(15, 18, "16-19")]:
                 btn = QPushButton(tr(text))
                 btn.setStyleSheet("QPushButton { font-size: 10px; padding: 1px 4px; }")
                 btn.clicked.connect(lambda _c=False, a=lo * 100, b=hi * 100 + 99: self._set_range('period', a, b))

@@ -245,6 +245,22 @@ def test_a_bound_is_a_number_or_nothing(svc):
         dlg.deleteLater()
 
 
+def test_the_century_buttons_set_their_centuries(svc):
+    """GitHub Codex on PR 1b: "16-19" set 1600-1999; the 16th century is the 1500s."""
+    from PyQt6.QtWidgets import QPushButton
+    expected = {f"{c + 1}th": (c * 100, c * 100 + 99) for c in range(9, 15)}
+    expected["16-19"] = (1500, 1899)
+    dlg = _open()
+    try:
+        buttons = {b.text(): b for b in dlg.findChildren(QPushButton)}
+        for text, (lo, hi) in expected.items():
+            buttons[dialogs_filter.tr(text)].click()
+            period = dlg.get_criteria()['period']
+            assert (period.get('min'), period.get('max')) == (lo, hi), text
+    finally:
+        dlg.deleteLater()
+
+
 def test_support_not_known_drops_nothing(svc, monkeypatch):
     """K-16: a file whose schema could not be read is not known to lack anything."""
     monkeypatch.setattr(svc, 'criteria_support', lambda: fjms_service.FILTER_SUPPORT_UNKNOWN)
