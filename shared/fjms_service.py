@@ -1865,21 +1865,32 @@ class FjmsService:
         return {'corpus': len(universe), 'uncatalogued': len(uncatalogued),
                 'uncatalogued_sized': len(uncatalogued & sized)}
 
-    def criterion_value_labels(self, key: str) -> dict:
+    def criterion_value_labels(self, key: str, cached_only: bool = False) -> Optional[dict]:
         """``{value: Hebrew label}`` of a list criterion, from the catalogue
-        (cached with its values). Raises FilterUnavailable as they do."""
-        return {v['value']: v['label_he'] for v in self.get_criterion_values(key)
-                if v.get('label_he')}
+        (cached with its values). Raises FilterUnavailable as they do.
+        ``cached_only``: None while they are not loaded, never a query -- for
+        code on an event loop or a UI thread, which loads them elsewhere."""
+        if cached_only:
+            cache = self.__dict__.get("_criterion_values_cache", {})
+            values = cache.get((key, 'either', _universe_token(None)))
+            if values is None:
+                return None
+        else:
+            values = self.get_criterion_values(key)
+        return {v['value']: v['label_he'] for v in values if v.get('label_he')}
 
-    def criteria_chips(self, criteria, lang: str = 'en') -> list:
+    def criteria_chips(self, criteria, lang: str = 'en', cached_only: bool = False) -> list:
         """``[(key, text)]``: one chip per active criterion, values in the
         catalogue's Hebrew where ``lang`` is 'he' (shared/catalog_criteria.py::
-        criteria_chips). Never raises for a missing label."""
-        return _criteria_chips(criteria, lang, self.criterion_value_labels)
+        criteria_chips). Never raises for a missing label. ``cached_only``:
+        never queries; a value whose labels are not loaded shows in English."""
+        return _criteria_chips(
+            criteria, lang, lambda key: self.criterion_value_labels(key, cached_only))
 
-    def criteria_summary(self, criteria, lang: str = 'en', sep: str = '; ') -> str:
+    def criteria_summary(self, criteria, lang: str = 'en', sep: str = '; ',
+                         cached_only: bool = False) -> str:
         """The chips as one line (history entries)."""
-        return sep.join(text for _key, text in self.criteria_chips(criteria, lang))
+        return sep.join(text for _key, text in self.criteria_chips(criteria, lang, cached_only))
 
     def match_result_criteria(self, criteria, sys_ids) -> Optional[set]:
         """The post-search filters (D20): which of a search's result
