@@ -576,6 +576,20 @@ added); cache keys compared by hash could still confuse two unequal corpora with
 built deliberately; the key is now the set itself). Not taken up: a `.start()` -> `.run()`
 mutation in `_catalog_start_async_refresh` survives, in code this PR did not change.
 
+**PR 1c code, round 1** (`e362f59a..561fdc31`), brief `_tmp/criteria_1c_review_brief.md` (worktree
+`claude/criteria-1c-desktop-d01dce`), log `_tmp/criteria_1c_codex_round1.log`. Codex: **SHIP WITH FIXES**,
+4 MED + 3 LOW. Fixed in `4b4a0c3e`: restore notices replaced by "Session restored"; the Catalog list
+painting a superseded refresh; the hand-off waiting for libraries.csv on the UI thread; date-only history
+rows without a summary; "results" for manuscripts; a lone "."; the order of kept values. Logged as
+inherited: `docs/open_issues.d/2026-11-01-desktop-catalog-handoff-scope.md` (hand-off drops text/PGP/edition
+filters; "Search only in..." drops a handed-over library).
+
+**PR 1c code, round 2** (`561fdc31..4b4a0c3e`), brief `_tmp/criteria_1c_review_brief_r2.md`, log
+`_tmp/criteria_1c_codex_round2.log`. Codex: **SHIP WITH FIXES**: 2 MED + 3 LOW, all in the fold-in, fixed
+after it -- notices lost when the restore itself fails; the refresh guard dropping the author/work lists a
+superseded refresh asked for; `.5` typed as `5`; the corpus note not coming back after Clear All; a kept
+special value out of order. The two-round budget ends here.
+
 ---
 
 ## 11. Changes by revision

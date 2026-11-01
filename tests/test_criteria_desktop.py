@@ -176,6 +176,34 @@ def test_only_the_latest_catalog_refresh_paints(svc, monkeypatch):
     assert not hasattr(w2, '_catalog_results_data'), "a superseded answer was painted"
 
 
+def test_a_superseded_refresh_leaves_its_author_and_work_lists_to_the_next(svc, monkeypatch):
+    """Codex, PR 1c round 2: a domain click asks for new author/work lists; a
+    text term added before it answers supersedes it, and must ask for them too."""
+    made = []
+
+    class _Worker:
+        def __init__(self, parent, **kwargs):
+            made.append(kwargs)
+            self.done = SimpleNamespace(connect=lambda fn: None)
+
+        def start(self):
+            pass
+    monkeypatch.setattr(genizah_app, '_CatalogRefreshWorker', _Worker)
+    w = _catalog_window()
+    w.catalog_results_table = SimpleNamespace(setRowCount=lambda n: None)
+    w._catalog_count_label = QLabel()
+    w._catalog_start_async_refresh(refresh_authors=True, refresh_works=True)
+    w._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
+    assert (made[1]['refresh_authors'], made[1]['refresh_works']) == (True, True)
+    from PyQt6.QtWidgets import QTableWidget
+    w.catalog_results_table = QTableWidget()
+    w._catalog_update_chips = w._catalog_update_text_summary = lambda: None
+    w._catalog_on_async_refresh_done({'data': {'error': True}}, w._catalog_refresh_gen)
+    w._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
+    assert (made[2]['refresh_authors'], made[2]['refresh_works']) == (False, False), (
+        "once answered, nothing is outstanding")
+
+
 def test_the_hand_off_never_waits_for_the_corpus_on_the_ui_thread(svc, monkeypatch):
     """Codex, PR 1c round 1: before libraries.csv is read, the hand-off says
     "try again" at once instead of freezing the window for up to 30 s."""

@@ -1066,7 +1066,7 @@ class CriteriaDialog(QDialog):
         self.setMinimumSize(840, 620)
         self._validators = {
             True: QRegularExpressionValidator(QRegularExpression(r"^\d{0,5}$"), self),
-            False: QRegularExpressionValidator(QRegularExpression(r"^(\d{1,4}(\.\d{0,2})?)?$"), self),
+            False: QRegularExpressionValidator(QRegularExpression(r"^\d{0,4}(\.\d{1,2})?$"), self),
         }
         saved = clean_criteria(criteria, strict=False)[0]
         self._sections = [s for s in SECTIONS if sections is None or s.key in sections]
@@ -1358,25 +1358,33 @@ class CriteriaDialog(QDialog):
         widget = controls['values']
         widget.blockSignals(True)
         widget.clear()
-        offered = {value['value'] for value in values}
+        offered = {value['value']: value for value in values}
         # A saved value this file does not offer stays chosen and shown --
         # dropping it silently would widen the search -- after the offered
-        # values, before Unknown / Cannot be determined / Not recorded.
+        # values; Unknown, Cannot be determined and Not recorded stay last,
+        # in that order, whether offered or kept.
         kept = [value for value in chosen if value not in offered]
         for value in values:
-            if kept and value['value'] in _TAIL_VALUES:
-                for saved in kept:
-                    self._add_value_item(widget, saved, tr(saved), True)
-                kept = []
-            self._add_value_item(widget, value['value'], f"{_value_label(key, value)} ({value['count']:,})",
-                                 value['value'] in chosen)
+            if value['value'] not in _TAIL_VALUES:
+                self._add_offered_item(widget, key, value, chosen)
         for saved in kept:
-            self._add_value_item(widget, saved, tr(saved), True)
+            if saved not in _TAIL_VALUES:
+                self._add_value_item(widget, saved, tr(saved), True)
+        for name in _TAIL_VALUES:
+            if name in offered:
+                self._add_offered_item(widget, key, offered[name], chosen)
+            elif name in kept:
+                self._add_value_item(widget, name, tr(name) if name != "_none" else _value_label(key, {
+                    'value': name, 'label_en': 'Not recorded', 'label_he': 'לא נרשם'}), True)
         widget.blockSignals(False)
         controls['loaded'] = source
         self._pending.pop(key, None)
         controls['search'].setVisible(widget.count() > _LONG_LIST)
         self._filter_values(key, controls['search'].text())
+
+    def _add_offered_item(self, widget, key, value, chosen):
+        self._add_value_item(widget, value['value'], f"{_value_label(key, value)} ({value['count']:,})",
+                             value['value'] in chosen)
 
     @staticmethod
     def _add_value_item(widget, value, text, checked):
@@ -1471,7 +1479,22 @@ class CriteriaDialog(QDialog):
 
     def _changed(self, *_args):
         self._refresh_badges()
+        self._check_bounds()
         self._count_timer.start()
+
+    def _check_bounds(self):
+        """A bound being typed that is not a number yet (".", "12.") would be
+        read as no bound: Apply waits for it, and the field says so."""
+        unfinished = False
+        for controls in self._controls.values():
+            if controls['kind'] != 'range':
+                continue
+            for bound in ('min', 'max'):
+                edit = controls[bound]
+                bad = bool(edit.text().strip()) and not edit.hasAcceptableInput()
+                edit.setStyleSheet("border: 1px solid #e74c3c;" if bad else "")
+                unfinished = unfinished or bad
+        self.ok_btn.setEnabled(not unfinished)
 
     def _refresh_badges(self):
         """Each section's name with the number of its active criteria."""
@@ -1530,7 +1553,7 @@ class CriteriaDialog(QDialog):
                 "catalogue size).").format(corpus=f"{note['corpus']:,}",
                                            uncatalogued=f"{note['uncatalogued']:,}",
                                            sized=f"{note['uncatalogued_sized']:,}"))
-            self.note_label.setVisible(True)
+        self.note_label.setVisible(self._within is None and bool(self.note_label.text()))
 
     def _on_count_failed(self, tag, reason):
         if tag != self._count_tag:

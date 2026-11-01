@@ -12080,6 +12080,13 @@ class GenizahGUI(QMainWindow):
             refresh_works: Re-fetch the works sidebar list.
         Results are always re-fetched.
         """
+        # A refresh not yet answered may have been asked for the author and
+        # work lists; this one supersedes it, so it asks for them too.
+        pending_authors, pending_works = getattr(self, '_catalog_sidebar_pending', (False, False))
+        refresh_authors = refresh_authors or pending_authors
+        refresh_works = refresh_works or pending_works
+        self._catalog_sidebar_pending = (refresh_authors, refresh_works)
+
         # Show loading state immediately
         self.catalog_results_table.setRowCount(0)
         self._catalog_count_label.setText(tr("Loading..."))
@@ -12116,6 +12123,7 @@ class GenizahGUI(QMainWindow):
         from PyQt6 import sip
         if generation is not None and generation != getattr(self, '_catalog_refresh_gen', generation):
             return
+        self._catalog_sidebar_pending = (False, False)
         if sip.isdeleted(self.catalog_results_table):
             return
 
@@ -36202,6 +36210,10 @@ class GenizahGUI(QMainWindow):
 
         except Exception as e:
             logger.error("Failed to restore session: %s", e)
+            # What was already changed (filters dropped, rows not shown) is
+            # still said, even though the restore stopped (Codex, round 2).
+            if self._restore_notices:
+                self.statusBar().showMessage("  ".join(self._restore_notices), 15000)
         finally:
             self._restoring_session = False
             self._restore_notices = None

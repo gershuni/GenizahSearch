@@ -1240,6 +1240,35 @@ def test_the_restore_notices_outlive_session_restored(restore, monkeypatch):
     assert w._restore_notices is None, "after the restore, notices go straight to the status bar"
 
 
+def test_the_restore_notices_are_said_even_when_the_restore_fails(window, monkeypatch):
+    """Codex, PR 1c round 2: a restore that stops half-way had already dropped
+    criteria; its notice was discarded with the restore."""
+    import desktop.dialogs_filter as dialogs_filter
+    import genizah_core
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", "en")
+    monkeypatch.setattr(app, "FilterCountWorker", _IdleFilterWorker)
+    monkeypatch.setattr(app.QTimer, "singleShot", staticmethod(lambda *a: None))
+    monkeypatch.setattr(dialogs_filter, "criteria_unavailable_keys", lambda service=None: frozenset({"lines"}))
+    monkeypatch.setattr(app, "load_app_config", lambda: {"restore_mode": "always"})
+    state = _session_state(results=[_res(A, 1)])
+    state["post_criteria"] = {"lines": {"min": 20}}
+    state["active_tab"] = "0"  # a malformed saved value: the restore stops at it
+    monkeypatch.setattr(session_persistence, "load_session_state", lambda: state)
+    w = window
+    for name in ("_update_local_filter_btn_search", "_update_local_filter_btn_composition",
+                 "_update_local_filter_btn_parallels", "_honour_deferred_comp_method",
+                 "_apply_default_comp_method", "_refresh_search_history", "_refresh_comp_history"):
+        setattr(w, name, lambda *a, **k: None)
+    w._restore_comp_passage_preferences = lambda comp, absent_method=None: None
+    w._passage_snapshot_must_wait = lambda comp: False
+    w._display_restored_comp_snapshot = lambda comp: False
+    w.tabs = SimpleNamespace(count=lambda: 3, setCurrentIndex=lambda i: None)
+    w._restore_session()
+    assert w._post_criteria == {}
+    assert w.statusBar().currentMessage() == (
+        "Some saved filters were removed: this catalog data is not available.")
+
+
 def test_a_saved_catalog_date_range_becomes_the_period(restore, monkeypatch):
     """D18: a Catalog tab session from before the manuscript features."""
     monkeypatch.setattr(app.QTimer, "singleShot", staticmethod(lambda *a: None))

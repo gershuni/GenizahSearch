@@ -197,10 +197,16 @@ def test_a_bound_is_a_number_or_nothing(svc):
     dlg = _open()
     try:
         width, period = dlg._controls['width']['min'].validator(), dlg._controls['period']['min'].validator()
-        for text, state in (('.', QValidator.State.Invalid), ('12.', QValidator.State.Acceptable),
-                            ('12.5', QValidator.State.Acceptable), ('', QValidator.State.Acceptable)):
+        for text, state in (('.', QValidator.State.Intermediate), ('.5', QValidator.State.Acceptable),
+                            ('12.', QValidator.State.Intermediate), ('12.5', QValidator.State.Acceptable),
+                            ('', QValidator.State.Acceptable)):
             assert width.validate(text, len(text))[0] == state, text
         assert period.validate('1.', 2)[0] == QValidator.State.Invalid, "a year is whole"
+        edit = dlg._controls['width']['min']
+        edit.setText('.')
+        assert not dlg.ok_btn.isEnabled(), "Apply would drop a bound being typed"
+        edit.setText('.5')
+        assert dlg.ok_btn.isEnabled() and dlg.get_criteria()['width']['min'] == 0.5
     finally:
         dlg.deleteLater()
 
@@ -225,6 +231,35 @@ def test_clear_section_and_clear_all(svc):
         assert dlg.get_criteria() == {}
         dlg._update_count()
         assert dlg.total_label.text() == "No features chosen."
+    finally:
+        dlg.deleteLater()
+
+
+def test_a_kept_special_value_keeps_the_special_order(svc):
+    """Codex, PR 1c round 2: a saved "Cannot be determined" the file does not
+    offer goes between Unknown and Not recorded, not before Unknown."""
+    dlg = _open({'region': {'values': ['Cannot be determined', 'Byzantine']}})
+    try:
+        _visit_all(dlg)
+        assert _texts(dlg, 'region') == [
+            'Oriental (1)', 'Spanish (1)', 'Yemenite (1)', 'Byzantine', 'Unknown (1)',
+            'Cannot be determined', 'Not recorded (3)']
+    finally:
+        dlg.deleteLater()
+
+
+def test_the_corpus_note_comes_back_after_clear_all(svc):
+    """Codex, PR 1c round 2: read once, it showed only until the first Clear All."""
+    dlg = _open({'region': {'values': ['Oriental']}})
+    try:
+        assert not dlg.note_label.isHidden()
+        dlg._clear_all()
+        dlg._update_count()
+        assert dlg.note_label.isHidden()
+        _visit_all(dlg)
+        _tick(dlg, 'region', 'Spanish')
+        dlg._update_count()
+        assert not dlg.note_label.isHidden() and dlg.note_label.text().startswith("These criteria cover")
     finally:
         dlg.deleteLater()
 
