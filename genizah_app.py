@@ -12816,19 +12816,25 @@ class GenizahGUI(QMainWindow):
         filters = self._catalog_build_browse_filters()
         if not filters:
             return
+        # The library selection and mode as they are at this click: the answer
+        # is installed with them, as its filters are, whatever the tab shows by
+        # then (GitHub Codex on #458).
+        library = (list(self._catalog_library_filter or []), self._catalog_library_mode)
         self._catalog_handoff_gen = getattr(self, '_catalog_handoff_gen', 0) + 1
         worker = _CatalogHandoffWorker(
-            filters, getattr(self, 'meta_mgr', None), self._catalog_library_mode,
+            filters, getattr(self, 'meta_mgr', None), library[1],
             self._catalog_handoff_gen, self)
         worker.done.connect(
-            lambda generation, restrict, library_ids, reason, f=filters, t=tab:
-            self._catalog_on_handoff_scope(generation, f, restrict, library_ids, reason, t))
+            lambda generation, restrict, library_ids, reason, f=filters, t=tab, lib=library:
+            self._catalog_on_handoff_scope(generation, f, restrict, library_ids, reason, t, lib))
         self._catalog_handoff_worker = worker
         self.statusBar().showMessage(tr("Loading..."), 5000)
         worker.start()
 
-    def _catalog_on_handoff_scope(self, generation, filters, restrict, library_ids, reason, tab):
-        """Install a hand-off's scope (the worker's answer) and open ``tab``."""
+    def _catalog_on_handoff_scope(self, generation, filters, restrict, library_ids, reason, tab, library):
+        """Install a hand-off's scope (the worker's answer) and open ``tab``.
+        ``library``: the (selection, mode) of the Catalog tab's library filter
+        at the click, never the tab's state now."""
         if generation != getattr(self, '_catalog_handoff_gen', None):
             return  # a later hand-off replaced this one
         if reason:
@@ -12840,14 +12846,15 @@ class GenizahGUI(QMainWindow):
         # GAP-H / DMF-07: library filter handoff -- Show-only carries the allowlist;
         # Hide mode SUPPRESSES the restriction (Codex HIGH #4: do NOT invert a Hide-set
         # into an include-list; the full-corpus complement is out of scope for restrict_sys_ids).
-        if self._catalog_library_filter:
-            if self._catalog_library_mode == 'show_only':
+        selection, mode = library
+        if selection:
+            if mode == 'show_only':
                 # WR-02: fail-open if resolution is empty.
                 if not library_ids:
                     import logging as _log
                     _log.getLogger(__name__).warning(
                         "library filter %s resolved to empty on the hand-off -- skipping (fail-open)",
-                        self._catalog_library_filter,
+                        selection,
                     )
                 elif self.pre_search_restrict_sys_ids is None:
                     self.pre_search_restrict_sys_ids = set(library_ids)

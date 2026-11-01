@@ -705,7 +705,8 @@ def test_catalog_search_in_results_hide_no_restrict_and_notice(monkeypatch):
     worker.run()
     assert answers and answers[-1][2] is None and answers[-1][3] == '', answers
     genizah_app.GenizahGUI._catalog_on_handoff_scope(
-        fake_self, 1, {'domains': ['Bible']}, {'990001'}, None, '', 0)
+        fake_self, 1, {'domains': ['Bible']}, {'990001'}, None, '', 0,
+        (fake_self._catalog_library_filter, fake_self._catalog_library_mode))
     assert fake_self.pre_search_restrict_sys_ids == {'990001'}, "Hide mode must not narrow the scope"
 
     # Assert: resolve_library_sys_ids was NOT called for a library restriction

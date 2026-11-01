@@ -254,8 +254,42 @@ def test_a_failed_hand_off_changes_nothing_and_a_late_one_is_dropped(svc, monkey
     w._catalog_parallels_in_results()
     assert warned and (w.pre_search_filters, w.pre_search_restrict_sys_ids) == ({'domains': ['Bible']}, {A})
     assert w.tabs_opened == []
-    w._catalog_on_handoff_scope(w._catalog_handoff_gen - 1, {'criteria': LINES}, {C}, None, '', 1)
+    w._catalog_on_handoff_scope(w._catalog_handoff_gen - 1, {'criteria': LINES}, {C}, None, '', 1, ([], 'hide'))
     assert w.pre_search_filters == {'domains': ['Bible']}, "an older hand-off's answer was installed"
+
+
+class _MetaWithLibraries(_Meta):
+    csv_bank = {sid: {'library_code': code} for sid, code in LIBRARY.items()}
+
+
+HIDE_NOTICE = "Library Hide filter not applied to search/composition"
+
+
+@pytest.mark.parametrize('at_click,edit,scope,notice', [
+    # Show only CUL at the click; the user then clears the list, or turns it to Hide.
+    ('show_only', {'_catalog_library_filter': []}, {C, F}, ''),
+    ('show_only', {'_catalog_library_mode': 'hide'}, {C, F}, ''),
+    # Hide CUL at the click; the user then turns it to Show only.
+    ('hide', {'_catalog_library_mode': 'show_only'}, {B, C, D, E, F}, HIDE_NOTICE),
+])
+def test_the_hand_off_keeps_the_library_choice_of_its_click(svc, at_click, edit, scope, notice):
+    """GitHub Codex on #458: the tab stays editable while the hand-off's
+    worker runs; its answer is installed with the library selection and mode
+    of the click -- the ones its filters (and so its chip) carry -- not the
+    tab's state when it arrives."""
+    from PyQt6.QtCore import QCoreApplication
+    w = _handoff_window(EXCEPT_ORIENTAL)
+    w.meta_mgr = _MetaWithLibraries()
+    w._catalog_library_filter, w._catalog_library_mode = ['CUL'], at_click
+    w._catalog_search_in_results()
+    for name, value in edit.items():
+        setattr(w, name, value)
+    assert w._catalog_handoff_worker.wait(10000)
+    QCoreApplication.processEvents()
+    assert w.tabs_opened == [0]
+    assert w.pre_search_filters.get('library') == (['CUL'] if at_click == 'show_only' else None)
+    assert w.pre_search_restrict_sys_ids == scope
+    assert w.statusBar().currentMessage() == (notice or genizah_app.tr("Loading..."))
 
 
 def test_a_history_row_names_an_old_date_range_as_the_period(svc):
