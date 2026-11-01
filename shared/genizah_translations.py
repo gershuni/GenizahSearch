@@ -6296,6 +6296,45 @@ TRANSLATIONS.update({
         'כל המקשים בכרטיס אחד: Ctrl+/‎, הכפתור ⌨ ליד A−‎, או "קיצורי מקלדת" בתפריט ☰.',
 })
 
+# Catalogue criteria, PR 1c (2026-11-01): the desktop Manuscript features window
+# (desktop/dialogs_filter.py::CriteriaDialog), its button, chips and notices.
+TRANSLATIONS.update({
+    "Manuscript features": "מאפייני כתב היד",
+    "Catalogue or measured": "קטלוג או מדידה",
+    "Catalogue only": "קטלוג בלבד",
+    "Measured only": "מדידה בלבד",
+    "Only these": "רק אלה",
+    "All except these": "הכול חוץ מאלה",
+    "Filter values...": "סינון ערכים...",
+    "or: not recorded": "או: לא נרשם",
+    "Recorded for {n} of {total}": "רשום ב-{n} מתוך {total}",
+    "The values could not be read.": "לא ניתן היה לקרוא את הערכים.",
+    "Clear section": "ניקוי הסעיף",
+    "A manuscript matches when it has any of the ticked attributes.":
+        "כתב יד נכלל אם יש לו לפחות אחת מהתכונות המסומנות.",
+    "This catalogue data file is too old for this criterion: it needs version 5.1.0 or later.":
+        "קובץ נתוני הקטלוג ישן מדי למאפיין זה: נדרשת גרסה 5.1.0 ומעלה.",
+    "No features chosen: all manuscripts are included.": "לא נבחרו מאפיינים: כל כתבי היד נכללים.",
+    "No features chosen: every result is shown.": "לא נבחרו מאפיינים: כל התוצאות מוצגות.",
+    "{n} manuscripts have these features": "ל-{n} כתבי יד יש מאפיינים אלה",
+    "{n} of {total} results match": "{n} מתוך {total} התוצאות מתאימים",
+    "(of which {n} with nothing recorded for {criterion})": "(מהם {n} שלא נרשם להם {criterion})",
+    "These criteria cover all {total} manuscripts. {n} have no FJMS catalogue record: "
+    "they match \"Not recorded\", \"all except\" and measured data.":
+        "המאפיינים חלים על כל {total} כתבי היד. ל-{n} מהם אין רשומה בקטלוג FJMS: "
+        "הם נכללים ב\"לא נרשם\", ב\"הכול חוץ מאלה\" ובנתונים הממוחשבים.",
+    "The catalog data these features need is not available.":
+        "נתוני הקטלוג הדרושים למאפיינים אלה אינם זמינים.",
+    "The measurement filters could not be applied: every result is shown.":
+        "לא ניתן היה להחיל את סינון המידות: כל התוצאות מוצגות.",
+    "The saved results were found with filters that have changed. Search again to see them.":
+        "התוצאות השמורות נמצאו לפי מסננים שהשתנו. חפשו שוב כדי לראות אותן.",
+    "Manuscripts of the corpus with no FJMS catalogue record: they are listed after the catalogued ones.":
+        "כתבי יד שאין להם רשומה בקטלוג FJMS: הם מוצגים אחרי כתבי היד המקוטלגים.",
+    "dpi": "dpi",
+    "per 10 cm": "ל-10 ס\"מ",
+})
+
 # Catalogue criteria, PR 1a (2026-11-01): Catalog Browse lists the whole corpus,
 # and a failed browse query is an error, not "no manuscripts match".
 TRANSLATIONS.update({
