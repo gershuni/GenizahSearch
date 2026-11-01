@@ -34,6 +34,7 @@ from shared.catalog_numbers import span_label
 from shared.catalog_criteria import (
     CriteriaUnavailable, clean_criteria, criteria_token, criterion_values, match_criteria,
 )
+from shared.catalog_criteria import criteria_chips as _criteria_chips  # FjmsService.criteria_chips
 from shared.thread_local_db import ThreadLocalConnection
 # Phase 78 (Concern #3): APIError from neutral shared module — NOT from web layer.
 # Plan 03 R2-#3: validate_filter_values uses APIError to fail closed when
@@ -985,6 +986,9 @@ class FjmsService:
         # Script filter choices per filter key (see get_script_values).
         self._script_values_cache: dict = {}
         self._script_values_lock = threading.Lock()
+        # Post-search criteria (match_result_criteria): the last few answers.
+        self._result_match_cache: dict = {}
+        self._result_match_lock = threading.Lock()
         # SEED-023: per-thread registry of populated catalog-filter TEMP tables
         # (name -> token). The PGP/edition membership sets are static per process,
         # so each thread's TEMP table is built once and reused across requests.
@@ -1798,6 +1802,55 @@ class FjmsService:
                                     filters=(key,)) from e
         cache[token] = values
         return copy.deepcopy(values)
+
+    def criterion_value_labels(self, key: str) -> dict:
+        """``{value: Hebrew label}`` of a list criterion, from the catalogue
+        (cached with its values). Raises FilterUnavailable as they do."""
+        return {v['value']: v['label_he'] for v in self.get_criterion_values(key)
+                if v.get('label_he')}
+
+    def criteria_chips(self, criteria, lang: str = 'en') -> list:
+        """``[(key, text)]``: one chip per active criterion, values in the
+        catalogue's Hebrew where ``lang`` is 'he' (shared/catalog_criteria.py::
+        criteria_chips). Never raises for a missing label."""
+        return _criteria_chips(criteria, lang, self.criterion_value_labels)
+
+    def criteria_summary(self, criteria, lang: str = 'en', sep: str = '; ') -> str:
+        """The chips as one line (history entries)."""
+        return sep.join(text for _key, text in self.criteria_chips(criteria, lang))
+
+    def match_result_criteria(self, criteria, sys_ids) -> Optional[set]:
+        """The post-search filters (D20): which of a search's result
+        ``sys_ids`` the criteria keep, by the panel's rules -- the result is
+        the universe, so "not recorded" and "all except" are counted within
+        it. None when no criterion is active. Cached for the last few calls
+        (every re-render applies the filters again). Raises
+        FilterUnavailable like get_filter_sys_ids: never an empty set for an
+        error."""
+        criteria = clean_criteria(criteria)[0] if criteria else {}
+        if not criteria:
+            return None
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        universe = frozenset(str(s) for s in sys_ids or () if s)
+        token = (criteria_token(criteria), universe)
+        with self._result_match_lock:
+            cached = self._result_match_cache.get(token)
+        if cached is not None:
+            return set(cached)
+        try:
+            matched = match_criteria(self._conn, criteria, set(universe))
+        except CriteriaUnavailable as e:
+            raise FilterUnavailable(e.reason, e.message, filters=e.filters) from e
+        except Exception as e:
+            logger.error("FjmsService.match_result_criteria error: %s", e, exc_info=True)
+            raise FilterUnavailable('query_failed', 'the result filter lookup failed') from e
+        with self._result_match_lock:
+            self._result_match_cache[token] = frozenset(matched)
+            while len(self._result_match_cache) > 8:
+                self._result_match_cache.pop(next(iter(self._result_match_cache)))
+        return set(matched)
 
     def get_script_values(self, kind: str) -> list[dict]:
         """The choices a script filter offers, most manuscripts first.

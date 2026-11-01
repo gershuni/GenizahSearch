@@ -122,6 +122,18 @@ def test_measured_pages(conn, criteria, expected):
     assert m(conn, criteria) == expected
 
 
+@pytest.mark.parametrize("criteria, expected", [
+    ({"region": {"values": ["Oriental"], "mode": "except"}}, {B, C, D, E, F}),
+    ({"dpi": {"not_recorded": True}}, set(UNIVERSE)),
+    ({"region": {"values": ["Oriental"], "mode": "except"},
+      "style": {"values": ["Semi-Cursive"]}}, {B}),
+])
+def test_a_frozen_universe(conn, criteria, expected):
+    # The service passes the corpus as a frozenset (_resolve_universe), so
+    # "all except" and "not recorded" parts are frozensets too.
+    assert match_criteria(conn, criteria, frozenset(UNIVERSE)) == expected
+
+
 def test_width_and_height_are_one_catalogue_record(conn):
     # A has 10x15 and 13x20: width 13 with height 15 is no single record.
     assert m(conn, {"width": {"min": 13, "max": 13, "source": "catalogue"},
