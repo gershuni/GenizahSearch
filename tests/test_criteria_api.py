@@ -234,13 +234,16 @@ def test_values_are_checked_against_the_corpus_as_listed(client, searcher, svc):
            'unresolvable_filter_value')
 
 
-def test_nothing_recorded_is_an_unknown_value_not_an_outage(client, searcher, svc):
-    """With no corpus list (no metadata manager yet) an empty value list is
-    still an answer read from the file: the value is unknown (400), not 503."""
-    from web.state import state
-    state.meta_mgr = None
-    _error(_search(client, {'criteria': {'alphabet': {'values': ['Latin']}}}), 400,
-           'unresolvable_filter_value')
+def test_nothing_recorded_is_an_unknown_value_not_an_outage(svc, monkeypatch):
+    """An empty value list read from the file is an answer: the value is
+    unknown (400), not 503 (Codex). With the corpus every recordable list
+    holds "_none", so only a list with nothing at all shows it."""
+    from shared.api_errors import APIError
+    monkeypatch.setattr(svc, 'get_criterion_values', lambda key, universe=None, source='either': [])
+    with pytest.raises(APIError) as exc:
+        svc.validate_filter_values({'criteria': {'attributes': {'values': ['illustration']}}},
+                                   universe=UNIVERSE)
+    assert (exc.value.code, exc.value.http_status) == ('unresolvable_filter_value', 400)
 
 
 @pytest.mark.parametrize('key', ['script_styles', 'script_places'])
@@ -276,12 +279,31 @@ def _unloaded(timeout=30.0):
 
 
 @pytest.mark.parametrize('meta', [_meta(_unloaded), None])
-def test_no_corpus_list_is_503_for_all_except(client, searcher, svc, meta):
+@pytest.mark.parametrize('filters', [
+    {'criteria': {'region': {'values': ['Oriental'], 'mode': 'except'}}},
+    # Every criterion: the API never answers one catalogue-wide (Codex, round 2).
+    {'criteria': {'style': {'values': ['Square']}}},
+    {'criteria': {'lines': {'min': 20}}},
+    {'materials': ['Paper']},
+    {'date_from': 1000},
+])
+def test_no_corpus_list_is_503_for_any_criterion(client, searcher, svc, meta, filters):
     from web.state import state
     state.meta_mgr = meta
-    r = _search(client, {'criteria': {'region': {'values': ['Oriental'], 'mode': 'except'}}})
-    assert 'corpus_unavailable' in _error(r, 503, 'filter_unavailable')
+    assert 'corpus_unavailable' in _error(_search(client, filters), 503, 'filter_unavailable')
     assert not searcher.search_calls
+
+
+def test_the_older_filters_need_no_corpus_list(client, searcher, monkeypatch):
+    """Domains, authors and works keep working before the corpus list exists."""
+    from web.state import state
+    state.meta_mgr = None
+    seen = {}
+    monkeypatch.setattr(fjms_service, 'validate_filter_values', lambda d, **kw: None)
+    monkeypatch.setattr(fjms_service, 'get_filter_sys_ids', lambda **kw: seen.update(kw) or {A})
+    assert _search(client, {'domains': ['Liturgy']}).status_code == 200
+    assert (seen['domains'], seen['criteria'], seen['universe']) == (['Liturgy'], {}, None)
+    assert _restricted(searcher) == {'A'}
 
 
 # ── GET /api/criteria ───────────────────────────────────────────────────

@@ -494,7 +494,7 @@ def _resolve_fjms_filters_sync(filters_dict: dict, meta_mgr=None) -> Optional[se
     from the catalogue; Period of copy, span overlap), and the corpus list of
     ``meta_mgr`` is the universe, so "not recorded" and "all except" reach the
     uncatalogued manuscripts as on the website (D14). Without a metadata
-    manager those two raise FilterUnavailable('corpus_unavailable').
+    manager any criterion raises FilterUnavailable('corpus_unavailable').
 
     Both steps read the FJMS SQLite sidecar (a date filter can take seconds),
     so the async endpoints must not call them inline: uvicorn runs a single
@@ -515,12 +515,18 @@ def _resolve_fjms_filters_sync(filters_dict: dict, meta_mgr=None) -> Optional[se
     """
     from shared import fjms_service as _fjms_module
     universe = getattr(meta_mgr, 'corpus_sys_ids', None)
+    criteria = criteria_with_legacy_keys(filters_dict)
+    if criteria and universe is None:
+        # The API answers criteria over the corpus only, as GET /api/criteria
+        # lists them: never catalogue-wide (no metadata manager yet).
+        raise _fjms_module.FilterUnavailable('corpus_unavailable',
+                                             'the list of all manuscripts is not loaded yet')
     _fjms_module.validate_filter_values(filters_dict, universe=universe)
     return _fjms_module.get_filter_sys_ids(
         domains=filters_dict.get('domains'),
         authors=filters_dict.get('authors'),
         works=filters_dict.get('works'),
-        criteria=criteria_with_legacy_keys(filters_dict),
+        criteria=criteria,
         universe=universe,
     )
 

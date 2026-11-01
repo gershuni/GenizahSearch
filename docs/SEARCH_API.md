@@ -1169,8 +1169,9 @@ with each other and with the other filters:
   where whole numbers are required) is 400 `invalid_request`; a value `GET /api/criteria` does not
   list under the chosen source is 400 `unresolvable_filter_value`; `materials` or `date_from`/`date_to` sent together with
   `criteria.material` / `criteria.period` is 400 `invalid_combination`; a criterion this
-  deployment cannot answer is 503 `filter_unavailable`. A request is never run without a
-  filter it asked for.
+  deployment cannot answer is 503 `filter_unavailable`, and so is any criterion (`materials`
+  and the dates included) in the moments after a restart before the list of all manuscripts
+  has loaded. A request is never run without a filter it asked for.
 
 ## Naming Inconsistency: parallels.mode vs search.search_mode
 

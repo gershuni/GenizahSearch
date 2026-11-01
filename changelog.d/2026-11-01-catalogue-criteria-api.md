@@ -14,8 +14,9 @@ manuscript features as the website's panel.
   is `available: false`. Built once per process (about 20 s cold on the full file).
   `FjmsService.criteria_vocabulary`.
 - Checks: a malformed entry is 400 `invalid_request`; a value the catalogue does not record under the
-  chosen source is 400 `unresolvable_filter_value`; a criterion the file cannot answer, or "all
-  except" / "not recorded" before the corpus list has loaded, is 503 `filter_unavailable`.
+  chosen source is 400 `unresolvable_filter_value` (values are checked over the corpus, exactly as
+  `GET /api/criteria` lists them); a criterion the file cannot answer, or any criterion (`materials`
+  and the dates included) before the corpus list has loaded, is 503 `filter_unavailable`.
 - Older keys: `materials` is read as Material from the catalogue (unchanged results); `date_from` /
   `date_to` as Period of copy, so they now match a copy-date span overlapping the range (1000-1200:
   4,702 manuscripts, 4,561 by start year). Either one beside its criterion is 400
