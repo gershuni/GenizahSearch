@@ -20,7 +20,7 @@ from web.components.typography import h2, h3, h4
 from web.clipboard import copy_text_to_clipboard
 from web.components.filter_panel import (
     build_domain_options, build_author_options, build_work_options,
-    build_filter_summary, has_active_filters, persist_value,
+    build_filter_summary, has_active_filters, load_history_labels_then, persist_value,
     load_filter_state, consume_incoming_filters, recompute_filter_count,
     corpus_universe, create_filter_handlers, filter_unavailable_message,
     apply_criteria, retire_old_saved_filters, restore_saved_criteria,
@@ -819,7 +819,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     with ui.column().classes('items-center gap-0'):
                         history_btn = ui.button(icon='history', on_click=lambda: (
                             _refresh_history_menu(), history_menu.open()
-                        )).props(f'flat dense aria-label="{tr("Search History")}"').tooltip(tr('Search History'))
+                        )).props(f'flat dense aria-label="{tr("Search History")}"').tooltip(
+                            tr('Search History')).mark('search-history-button')
 
                         history_menu = ui.menu()
 
@@ -4778,7 +4779,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         render_results(filtered, page=0, reset_expansion=reset_expansion)
 
     # --- Search History UI Helpers ---
-    def _refresh_history_menu():
+    def _refresh_history_menu(load_labels: bool = True):
         """Refresh the history dropdown menu contents."""
         history_menu.clear()
         history = get_search_history()
@@ -4817,6 +4818,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             ui.menu_item(tr('Clear all'), on_click=lambda: (
                 clear_search_history(), _refresh_history_menu()
             ))
+        if load_labels:
+            load_history_labels_then(history, get_language(), _redraw_history_menu)
+
+    def _redraw_history_menu():
+        if not history_menu.is_deleted:
+            with history_menu:
+                _refresh_history_menu(load_labels=False)
 
     async def _on_history_item_clicked(index: int):
         """Restore state from a search history entry."""

@@ -47,7 +47,7 @@ OLD_MARKS = ('filter-line-height-row', 'filter-measurements-group', 'filter-scri
 
 
 @asynccontextmanager
-async def _user(saved: dict, written: dict):
+async def _user(saved: dict, written: dict, lang: str = 'en'):
     real_get = _safe_storage.safe_user_get
 
     def _get(key, default=None):
@@ -66,7 +66,7 @@ async def _user(saved: dict, written: dict):
         prepare_simulation()
         set_storage_secret('search-criteria-render-smoke-secret', {})
         async with AsyncExitStack() as stack:
-            stack.enter_context(patch('web.main._resolve_ui_language', return_value='en'))
+            stack.enter_context(patch('web.main._resolve_ui_language', return_value=lang))
             stack.enter_context(patch.object(_safe_storage, 'safe_user_get', _get))
             stack.enter_context(patch.object(_safe_storage, 'safe_user_set', _set))
             stack.enter_context(patch.object(_filter_panel, 'persist_value', _set))
@@ -250,3 +250,34 @@ def test_post_search_measurements_filter_the_shown_rows_as_the_panel(tmp_path, m
         nicegui_context.slot_stack.extend(saved_slots)
     assert any(t.startswith('3 / 6 Results') for t in seen['texts']), [
         t for t in seen['texts'] if 'Results' in t]
+
+
+def test_the_hebrew_history_menu_loads_its_labels_off_the_loop(tmp_path, monkeypatch):
+    """GitHub Codex on PR 1b: the menu is drawn on the event loop, so its
+    chips read the value labels from the cache only (the English value at
+    first); the labels load off the loop and the menu is drawn again."""
+    svc = FjmsService(db_path=build_criteria_sidecar(tmp_path / 's.db'))
+    monkeypatch.setattr(fjms_service, '_default_service', svc)
+    entry = {'query': 'abc', 'result_count': 1, 'mode': 'exact',
+             'params': {'filters': {'criteria': {'style': {'values': ['Square'], 'mode': 'only'}}}}}
+    seen = {}
+    saved_slots = list(nicegui_context.slot_stack)
+
+    async def run():
+        async with _user({'search_history': [entry]}, {}, lang='he') as user:
+            await user.open('/search')
+            user.find(marker='search-history-button').click()
+            seen['first'] = [t for t in _texts(user) if 'Square' in t]
+            deadline = asyncio.get_running_loop().time() + 5.0
+            while (not any('מרובע' in t for t in _texts(user))
+                   and asyncio.get_running_loop().time() < deadline):
+                await asyncio.sleep(0.05)
+            seen['then'] = [t for t in _texts(user) if 'מרובע' in t]
+
+    try:
+        run_bounded(run())
+    finally:
+        nicegui_context.slot_stack.clear()
+        nicegui_context.slot_stack.extend(saved_slots)
+    assert seen['first'], seen     # drawn at once, from the cache: still English
+    assert seen['then'], seen      # then with the catalogue's Hebrew label

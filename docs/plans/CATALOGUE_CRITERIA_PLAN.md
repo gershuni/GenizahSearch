@@ -612,7 +612,12 @@ a criterion removed while its search ran left the history entry and parallels' e
 `_tmp/criteria_1b_codex_round3.log`. Codex: the three fixed, no new HIGH/MED, none outstanding;
 **SHIP**. The GitHub Codex review of `12db1ddb` repeated round 2's history finding and found one more:
 the "16-19" period button set 1600-1999 (carried over from the old Catalog Browse; the desktop's
-button has it too, for PR 1c) -> 1500-1899 (MED).
+button has it too, for PR 1c) -> 1500-1899 (MED). Its review of `c59f44b8` found two more (MED):
+an address with only a malformed criterion (`?columns=oops`) brought back the saved session under the
+"not understood" notice -> a dropped parameter makes the address the page's state; the history menus,
+drawn on the event loop, read Hebrew value labels with a sidecar query on a cold cache ->
+`criteria_chips(..., cached_only=True)` (shared, `8bb36b78`) and `load_history_labels_then` loads
+the missing labels off the loop and redraws once.
 
 ---
 

@@ -1992,10 +1992,13 @@ def create_catalog_browse_page(
                 pagination_container['ref'] = ui.column().classes('w-full')
 
     # ── Initial data load ──────────────────────────────────────────
+    # A parameter dropped as not understood still makes the address the
+    # page's state: the saved session does not come back under its notice
+    # (GitHub Codex on PR 1b: ?columns=oops restored the saved criteria).
     _has_url_params = any([
         initial_domain, initial_author, initial_work,
         initial_text_all, initial_text_any, initial_text_not,
-        initial_criteria,
+        initial_criteria, address_problems,
     ])
 
     async def _restore_session_filters():

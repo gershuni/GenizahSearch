@@ -1136,6 +1136,9 @@ on `/catalog-browse` (sidebar card, chips under the button) and in "Search only 
 - **Function** `active_criteria_count` — the badge.
 - **Function** `unsupported_criteria` / `drop_unsupported` — the criteria a 5.0.0 file is KNOWN not to answer (rule 9):
   disabled in the panel, dropped (with a notice) from a saved session or an address.
+- Related, in `web/components/filter_panel.py`: `restore_saved_criteria` (every restore path), `retire_old_saved_filters`
+  (R2), `load_history_labels_then` (the history menus read Hebrew value labels from the cache only and load missing
+  ones off the event loop, then redraw once).
 
 ## web/components/shelfmark_picker.py
 

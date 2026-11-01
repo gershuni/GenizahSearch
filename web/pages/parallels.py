@@ -26,7 +26,7 @@ from datetime import datetime
 from web.components.typography import h1, h2, h3, h4
 from web.components.filter_panel import (
     build_domain_options, build_author_options, build_work_options,
-    build_filter_summary, has_active_filters, persist_value,
+    build_filter_summary, has_active_filters, load_history_labels_then, persist_value,
     apply_criteria, restore_saved_criteria,
     load_filter_state, consume_incoming_filters, recompute_filter_count,
     corpus_universe, create_filter_handlers, filter_unavailable_message,
@@ -4381,7 +4381,7 @@ def create_parallels_page(initial_text: str = None):
         ui.run_javascript('if (window.__hideLoadingBar) window.__hideLoadingBar();')
 
     # --- Composition History UI Helpers ---
-    def _refresh_comp_history_menu():
+    def _refresh_comp_history_menu(load_labels: bool = True):
         """Refresh the composition history dropdown menu contents."""
         comp_history_menu.clear()
         history = _get_comp_history()
@@ -4416,6 +4416,13 @@ def create_parallels_page(initial_text: str = None):
             ui.menu_item(tr('Clear all'), on_click=lambda: (
                 _clear_comp_history(), _refresh_comp_history_menu()
             ))
+        if load_labels:
+            load_history_labels_then(history, get_language(), _redraw_comp_history_menu)
+
+    def _redraw_comp_history_menu():
+        if not comp_history_menu.is_deleted:
+            with comp_history_menu:
+                _refresh_comp_history_menu(load_labels=False)
 
     async def _on_comp_history_clicked(index: int):
         """Restore state from a composition history entry."""

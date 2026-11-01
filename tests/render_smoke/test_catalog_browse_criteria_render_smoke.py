@@ -215,6 +215,22 @@ def test_a_5_0_0_file_drops_what_it_cannot_answer_from_the_session(old_sidecar):
     _run_with(_patched(fake), driver)
 
 
+def test_a_malformed_address_does_not_bring_back_the_saved_session(sidecar):
+    """GitHub Codex on PR 1b: ?columns=oops alone restored the visitor's saved
+    criteria under the notice that the address was not understood."""
+    fake = _Recording(sidecar)
+
+    async def driver(user: User) -> None:
+        _session_rules(user, {'criteria': {'region': {'values': ['Spanish']}}})
+        await user.open('/catalog-browse?columns=oops')
+        assert await _until(lambda: fake.result_criteria)
+        await asyncio.sleep(0.3)
+        assert not any(fake.result_criteria), fake.result_criteria
+        assert any('columns' in n for n in _notices(user)), _notices(user)
+
+    _run_with(_patched(fake), driver)
+
+
 def _chip_close_button(user: User, chip_text: str):
     for element in list(user._client.elements.values()):
         if not isinstance(element, ui.button) or element.props.get('icon') != 'close':

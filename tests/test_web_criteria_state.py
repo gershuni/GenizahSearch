@@ -257,6 +257,46 @@ def test_the_history_summary_names_the_criteria(svc):
     assert summary == '[exclude: Bible] [include: Region: all except Oriental]', summary
 
 
+def test_the_history_summary_reads_labels_from_the_cache_only(svc):
+    """GitHub Codex on PR 1b: drawn on the event loop, never a query."""
+    entry = {'criteria': {'style': {'values': ['Square'], 'mode': 'only'}}}
+    assert 'Square' in fp.build_filter_summary(entry, lambda t: t, lambda: 'he', 200)
+    svc.criterion_value_labels('style')
+    assert 'מרובע' in fp.build_filter_summary(
+        entry, lambda t: t, lambda: 'he', 200)
+
+
+def test_history_labels_load_off_the_loop_then_redraw_once(svc):
+    history = [{'params': {'filters': {'criteria': {
+        'style': {'values': ['Square']}, 'period': {'min': 1000}}}}},
+        {'params': {'filters': None}}, 'not an entry']
+
+    async def go(lang):
+        redraws = []
+        fp.load_history_labels_then(history, lang, lambda: redraws.append(1))
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            if redraws:
+                break
+        await asyncio.sleep(0.05)
+        return redraws
+
+    assert asyncio.run(go('en')) == []                       # English: nothing to load
+    assert svc.criterion_value_labels('style', cached_only=True) is None
+    assert asyncio.run(go('he')) == [1]                      # loaded, drawn again once
+    assert svc.criterion_value_labels('style', cached_only=True)['Square']
+    assert asyncio.run(go('he')) == []                       # already loaded
+
+
+@pytest.mark.parametrize('page, menu', [('web/pages/search.py', '_refresh_history_menu'),
+                                        ('web/pages/parallels.py', '_refresh_comp_history_menu')])
+def test_both_history_menus_load_their_labels(page, menu):
+    src = (ROOT / page).read_text(encoding='utf-8')
+    body = src[src.index(f'    def {menu}('):]
+    body = body[:body.index('\n    def ', 10)]
+    assert 'load_history_labels_then(history, get_language(),' in body, page
+
+
 def test_an_old_history_entry_summarises_its_dates_as_the_period(svc):
     assert fp.build_filter_summary({'date_from': 1000, 'date_to': 1200}, lambda t: t,
                                    lambda: 'en', max_len=200) == \

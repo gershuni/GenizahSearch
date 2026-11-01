@@ -7,6 +7,7 @@ UI layout construction remains in each page -- only data/logic functions are sha
 """
 
 from nicegui import run
+import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -267,8 +268,11 @@ def build_filter_summary(filters: dict, tr_func, get_language_func, max_len: int
     if criteria:
         lang = get_language_func()
         try:
+            # Drawn on the event loop: labels from the cache only (the menus
+            # load the missing ones off the loop, load_history_labels_then).
             from shared.fjms_service import get_fjms_service
-            chips = get_fjms_service(thread_safe=True).criteria_chips(criteria, lang)
+            chips = get_fjms_service(thread_safe=True).criteria_chips(
+                criteria, lang, cached_only=True)
         except Exception:
             from shared.catalog_criteria import criteria_chips
             chips = criteria_chips(criteria, lang)
@@ -286,6 +290,56 @@ def build_filter_summary(filters: dict, tr_func, get_language_func, max_len: int
             cut = cut[:-1]
         summary = cut + '...]'
     return summary
+
+
+def _history_labels_missing(history, lang) -> list:
+    """The list criteria of the history entries whose Hebrew value labels are
+    not loaded yet."""
+    if lang != 'he':
+        return []
+    from shared.catalog_criteria import BY_KEY
+    keys = []
+    for entry in history or []:
+        filters = (entry.get('params') or {}).get('filters') if isinstance(entry, dict) else None
+        if not isinstance(filters, dict):
+            continue
+        for key in saved_criteria_of(filters):
+            if BY_KEY[key].kind == 'list' and key not in keys:
+                keys.append(key)
+    if not keys:
+        return []
+    try:
+        from shared.fjms_service import get_fjms_service
+        service = get_fjms_service(thread_safe=True)
+        return [k for k in keys if service.criterion_value_labels(k, cached_only=True) is None]
+    except Exception:
+        return []
+
+
+def _load_criterion_labels(keys) -> None:
+    from shared.fjms_service import get_fjms_service
+    service = get_fjms_service(thread_safe=True)
+    for key in keys:
+        try:
+            service.criterion_value_labels(key)
+        except Exception as e:
+            logger.info("criterion labels for %s not loaded: %s", key, e)
+
+
+def load_history_labels_then(history, lang, redraw) -> None:
+    """A history menu is drawn on the event loop, where build_filter_summary
+    reads the criteria's Hebrew value labels from the cache only. When the
+    entries need labels not loaded yet, load them off the loop, then call
+    ``redraw()`` once (GitHub Codex on PR 1b: a cold cache stalled every
+    visitor while the menu opened). A label that cannot be read stays English."""
+    keys = _history_labels_missing(history, lang)
+    if not keys:
+        return
+
+    async def load_then_redraw():
+        await run.io_bound(_load_criterion_labels, keys)
+        redraw()
+    asyncio.ensure_future(load_then_redraw())
 
 
 def has_active_filters(state) -> bool:
