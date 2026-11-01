@@ -32,9 +32,11 @@ from typing import Optional
 from shared import domain_hierarchy as _domain_hierarchy
 from shared.catalog_numbers import span_label
 from shared.catalog_criteria import (
-    CriteriaUnavailable, clean_criteria, criteria_token, criterion_values, match_criteria,
+    NOT_RECORDED, CriteriaUnavailable, clean_criteria, criteria_token, criterion_values,
+    match_criteria,
 )
-from shared.catalog_criteria import criteria_chips as _criteria_chips  # FjmsService.criteria_chips
+from shared.catalog_criteria import criteria_chips as _criteria_chips
+from shared.catalog_criteria import recorded_count as _recorded_count
 from shared.thread_local_db import ThreadLocalConnection
 # Phase 78 (Concern #3): APIError from neutral shared module — NOT from web layer.
 # Plan 03 R2-#3: validate_filter_values uses APIError to fail closed when
@@ -1791,6 +1793,7 @@ class FjmsService:
         if self._conn is None:
             raise FilterUnavailable('sidecar_unavailable',
                                     'the FJMS catalog sidecar is not available')
+        universe = _resolve_universe(universe)
         cache = self.__dict__.setdefault("_criterion_values_cache", {})
         token = (key, source, _universe_token(universe))
         if token in cache:
@@ -1802,6 +1805,63 @@ class FjmsService:
                                     filters=(key,)) from e
         cache[token] = values
         return copy.deepcopy(values)
+
+    def get_criterion_coverage(self, key: str, universe, source: str = 'either') -> int:
+        """How many manuscripts of ``universe`` (a set, or a callable giving
+        it) have ``key`` recorded by ``source`` -- "recorded for N of M"
+        (rule 8). Cached per process. Raises FilterUnavailable."""
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        universe = _resolve_universe(universe)
+        if universe is None:
+            raise FilterUnavailable('corpus_unavailable',
+                                    'the list of all manuscripts is not loaded yet', (key,))
+        cache = self.__dict__.setdefault("_criterion_coverage_cache", {})
+        token = (key, source, _universe_token(universe))
+        if token not in cache:
+            try:
+                cache[token] = _recorded_count(self._conn, key, universe, source)
+            except Exception as e:
+                raise FilterUnavailable('query_failed', f'the {key} coverage could not be read',
+                                        filters=(key,)) from e
+        return cache[token]
+
+    def criteria_live_total(self, criteria, universe) -> dict:
+        """The panel's live total: ``{'total': N, 'not_recorded': {key: M}}``
+        -- how many manuscripts of the corpus the criteria select (None when
+        none is active), and for each "all except" list how many of those
+        have nothing recorded for it (rule 2: "225,375, of which 218,786
+        not recorded"). Raises FilterUnavailable."""
+        criteria = clean_criteria(criteria)[0] if criteria else {}
+        universe = _resolve_universe(universe)
+        matched = self.get_filter_sys_ids(criteria=criteria, universe=universe)
+        out = {'total': None if matched is None else len(matched), 'not_recorded': {}}
+        for key, spec in criteria.items():
+            if spec.get('mode') != 'except':
+                continue
+            missing = self.get_filter_sys_ids(
+                criteria={key: {'values': [NOT_RECORDED],
+                                **({'source': spec['source']} if 'source' in spec else {})}},
+                universe=universe)
+            out['not_recorded'][key] = len(matched & missing)
+        return out
+
+    def criteria_corpus_note(self, universe) -> dict:
+        """The figures of the panel's note under the total (§6.3):
+        ``{'corpus': N, 'uncatalogued': U, 'uncatalogued_sized': S}`` -- the
+        corpus, those with no catalogue record, and how many of those have
+        an unflagged catalogue size. Raises FilterUnavailable."""
+        universe = _resolve_universe(universe)
+        if universe is None:
+            raise FilterUnavailable('corpus_unavailable',
+                                    'the list of all manuscripts is not loaded yet')
+        uncatalogued = universe - self.catalogued_ids()
+        sized = universe - (self.get_filter_sys_ids(
+            criteria={'width': {'not_recorded': True, 'source': 'catalogue'}},
+            universe=universe) or set())
+        return {'corpus': len(universe), 'uncatalogued': len(uncatalogued),
+                'uncatalogued_sized': len(uncatalogued & sized)}
 
     def criterion_value_labels(self, key: str) -> dict:
         """``{value: Hebrew label}`` of a list criterion, from the catalogue

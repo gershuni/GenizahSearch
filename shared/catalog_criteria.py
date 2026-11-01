@@ -155,6 +155,10 @@ CRITERIA = (
 BY_KEY = {c.key: c for c in CRITERIA}
 CRITERIA_KEYS = tuple(BY_KEY)
 
+# Criteria answered from the 5.1.0 tables (criteria_numbers / criteria_values):
+# a 5.0.0 file cannot answer them at all (rule 9), so the panel disables them
+# and a saved or addressed one is dropped when the file is KNOWN to lack them.
+NEW_TABLE_KEYS = tuple(c.key for c in CRITERIA if c.number_key or c.value_key)
 # Ranges that hold on one measured page together (R1, D21).
 PAGE_KEYS = tuple(c.key for c in CRITERIA if c.page_column)
 # Measured-only ranges: always on the page, whatever the other sources.
@@ -283,6 +287,22 @@ def clean_criteria(raw, *, strict: bool = True):
         if cleaned is not None:
             clean[key] = cleaned
     return {k: clean[k] for k in CRITERIA_KEYS if k in clean}, problems
+
+
+def period_from_dates(date_from=None, date_to=None, include_undated=False) -> dict:
+    """Saved date filters read into Period of copy (D18): ``{"period":
+    spec}``, or {} when neither bound is set (include undated alone never
+    filtered). A bound that is not a whole year is dropped."""
+    def year(value):
+        try:
+            return _number(value, True)
+        except ValueError:
+            return None
+    spec = {"min": year(date_from), "max": year(date_to)}
+    if spec["min"] is None and spec["max"] is None:
+        return {}
+    spec["not_recorded"] = bool(include_undated)
+    return clean_criteria({"period": spec}, strict=False)[0]
 
 
 def criteria_token(criteria) -> str:
@@ -711,6 +731,12 @@ def criterion_values(conn, key: str, universe=None, source: str = "either") -> l
         out.append({"value": NOT_RECORDED, "label_en": "Not recorded",
                     "label_he": "לא נרשם", "count": len(missing)})
     return out
+
+
+def recorded_count(conn, key: str, universe, source: str = "either") -> int:
+    """How many manuscripts of ``universe`` have ``key`` recorded by
+    ``source`` (a section's coverage, rule 8)."""
+    return len(_Matcher(conn, universe).recorded(key, source) & universe)
 
 
 # ── Chip and summary text (§6.3) ─────────────────────────────────────────
