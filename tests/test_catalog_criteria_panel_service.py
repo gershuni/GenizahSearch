@@ -120,3 +120,24 @@ def test_saved_dates_as_the_period(args, expected):
 def test_the_criteria_a_5_0_0_file_cannot_answer():
     assert set(NEW_TABLE_KEYS) == {k for k, c in BY_KEY.items() if c.number_key or c.value_key}
     assert set(NEW_TABLE_KEYS) == {"period", "vocal_extent", "columns", "lines", "attributes"}
+
+
+def test_cached_only_labels_never_query(tmp_path, monkeypatch):
+    """GitHub Codex on PR 1b: the history menus are drawn on the event loop;
+    their chips read the Hebrew value labels from the cache only, and show
+    the English value until the labels are loaded elsewhere."""
+    from shared import fjms_service
+    fresh = FjmsService(db_path=build_criteria_sidecar(tmp_path / "f.db"))
+    calls = []
+    real = fjms_service.criterion_values
+    monkeypatch.setattr(fjms_service, "criterion_values",
+                        lambda *a, **k: calls.append(a[1]) or real(*a, **k))
+    square = {"style": {"values": ["Square"], "mode": "only"}}
+    assert fresh.criterion_value_labels("style", cached_only=True) is None
+    assert "Square" in fresh.criteria_summary(square, "he", cached_only=True)
+    assert calls == []
+    assert fresh.criterion_value_labels("style")["Square"] == "מרובע"
+    assert calls == ["style"]
+    assert "מרובע" in fresh.criteria_summary(square, "he", cached_only=True)
+    assert fresh.criterion_value_labels("style", cached_only=True)["Square"] == "מרובע"
+    assert calls == ["style"]
