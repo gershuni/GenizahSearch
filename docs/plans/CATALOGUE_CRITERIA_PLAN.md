@@ -588,6 +588,18 @@ added); cache keys compared by hash could still confuse two unequal corpora with
 built deliberately; the key is now the set itself). Not taken up: a `.start()` -> `.run()`
 mutation in `_catalog_start_async_refresh` survives, in code this PR did not change.
 
+**PR 1b code, round 1** (`e362f59a..ca0f0116`), brief `_tmp/criteria_1b_review_brief.md`, log
+`_tmp/criteria_1b_codex_round1.log` (worktree). Codex: **DO NOT SHIP**, 10 findings, all fixed in
+`560c04af` (shared) and `703e6fd4` (web): Apply ran the page's refresh in the slot of a dialog deleted
+on hide (HIGH); retired R2 rows left the run that restores them as a finished search with no rows, and
+runs dropped old dates (HIGH); history, runs, page snapshots and handoffs restored criteria a 5.0.0
+file cannot answer (MED); history/export copied the criteria late (MED); post-search renders could
+query the sidecar on the event loop (MED); a Material source switch hid a ticked value (MED);
+Attributes "all except" broke the live total (MED); two quick opens shared one panel (MED); an empty
+handoff or Clear All let saved criteria or old dates come back (MED); "לא נרשם" did not agree with
+feminine names -> "ללא רישום" (LOW). Not changed, by reasoning: run snapshots live in server memory
+and do not survive the release's restart; old history entries never stored measurement filters.
+
 ---
 
 ## 11. Changes by revision
