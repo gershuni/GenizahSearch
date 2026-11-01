@@ -1908,7 +1908,14 @@ class PreSearchFilterDialog(QDialog):
         self.count_label.setText(tr("Counting..."))
         if hasattr(self, 'ok_btn'):
             self.ok_btn.setEnabled(False)
-        self._count_worker = FilterCountWorker(filters, self)
+        # D17: Exclude-only filters keep the manuscripts with no catalogue
+        # record, so the count needs the corpus list (read only if it applies).
+        try:
+            owner = self.parent()
+        except RuntimeError:  # a dialog whose Qt side was never built (tests)
+            owner = None
+        corpus = getattr(getattr(owner, 'meta_mgr', None), 'corpus_sys_ids', None)
+        self._count_worker = FilterCountWorker(filters, self, universe=corpus)
         self._count_worker.finished.connect(
             lambda result_set, gen=generation: self._on_count_finished(result_set, gen)
         )

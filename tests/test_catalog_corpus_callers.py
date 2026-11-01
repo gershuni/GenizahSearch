@@ -73,6 +73,21 @@ def test_desktop_worker_passes_the_corpus(monkeypatch):
     assert seen['universe']() == frozenset({"990001000205171"})
 
 
+def test_desktop_count_worker_passes_the_corpus(monkeypatch):
+    import shared.fjms_service as fjms_mod
+    from desktop.gui_threads import FilterCountWorker
+    seen = {}
+    fake = MagicMock()
+    fake.get_filter_sys_ids.side_effect = lambda **k: seen.update(k) or set()
+    monkeypatch.setattr(fjms_mod, 'FjmsService', lambda **_: fake)  # the worker builds its own
+    corpus = lambda timeout=30.0: frozenset({"990001000205171"})  # noqa: E731
+    worker = FilterCountWorker({'domains': ['Bible'], 'include_mode': False}, None,
+                               universe=corpus)
+    worker.run()
+    assert seen['universe'] is corpus
+    assert seen['domains_exclude'] == ['Bible']
+
+
 def test_desktop_worker_reports_a_failed_list_as_an_error(monkeypatch):
     fake = MagicMock()
     fake.get_browse_results.side_effect = FilterUnavailable('query_failed', 'boom')

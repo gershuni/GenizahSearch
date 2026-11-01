@@ -18,8 +18,9 @@ from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import tr, is_rtl, get_language
 from web.components.typography import h1
 from shared.fjms_service import (
-    BROWSE_MEASUREMENT_TRAITS, MEASUREMENT_MATERIALS, clean_traits, get_fjms_service,
-    measurement_filters_available, resolve_library_sys_ids,
+    BROWSE_MEASUREMENT_TRAITS, FILTER_SUPPORT_UNKNOWN, FILTER_SUPPORTED, FILTER_UNSUPPORTED,
+    MEASUREMENT_MATERIALS, clean_traits, get_fjms_service, measurement_filter_support,
+    resolve_library_sys_ids,
 )
 from shared.browse_map_utils import LIBRARY_CODES, get_library_display, sanitize_library_codes, library_codes_with_manuscripts
 
@@ -147,12 +148,14 @@ def create_catalog_browse_page(
     # saved filters kept the removed filter. The page's own client never goes.
     page_client = ui.context.client
     # Measurement traits are offered only when the open catalog is KNOWN to have
-    # the data; a value arriving without it is dropped, and the page says so.
+    # the data; a value arriving is dropped (and the page says so) only when the
+    # catalog is KNOWN to lack it -- a check that could not run keeps it (K-16).
     try:
-        meas_ok = measurement_filters_available(fjms)
+        meas_support = measurement_filter_support(fjms)
     except Exception:
         logger.warning("catalog_browse: measurement capability check failed", exc_info=True)
-        meas_ok = False
+        meas_support = FILTER_SUPPORT_UNKNOWN
+    meas_ok = meas_support == FILTER_SUPPORTED
 
     # ── State ──────────────────────────────────────────────────────
     current_domain = {'value': initial_domain, 'display': initial_domain}
@@ -241,7 +244,8 @@ def create_catalog_browse_page(
     def _drop_unavailable_traits(traits: dict) -> dict:
         """*traits* without measurement traits the open catalog is known to lack
         (with a notice when that drops something)."""
-        if meas_ok or not any(k in traits for k in BROWSE_MEASUREMENT_TRAITS):
+        if (meas_support != FILTER_UNSUPPORTED
+                or not any(k in traits for k in BROWSE_MEASUREMENT_TRAITS)):
             return traits
         ui.notify(tr('Some saved filters were removed: this catalog data is not available.'),
                   type='warning')

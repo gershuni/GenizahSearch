@@ -448,7 +448,9 @@ class _Matcher:
                 self.require(key, "catalog_fields")
             if criterion.value_key:
                 self.require(key, "criteria_values")
-            if criterion.number_key and (not criterion.sources or source != "measured"):
+            if criterion.number_key:
+                # Every source mode: on a 5.0.0 file the whole Lines section is
+                # unavailable (rule 9), not just its catalogue half.
                 self.require(key, "criteria_numbers")
             if key == "material" and source != "catalogue":
                 self.require(key, "manuscript_measurements", "material")

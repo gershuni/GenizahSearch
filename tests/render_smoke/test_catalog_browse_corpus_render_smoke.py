@@ -10,6 +10,8 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 import web.main as web_main  # noqa: F401  (registers /catalog-browse)
 import web.pages.catalog_browse as catalog_browse
 from shared.fjms_service import FilterUnavailable
@@ -70,11 +72,16 @@ def test_the_page_lists_the_corpus_and_marks_uncatalogued_rows():
 
 
 class _FailingFjms(_FakeFjms):
+    def __init__(self, reason):
+        super().__init__()
+        self.reason = reason
+
     def get_browse_results(self, *args, **kwargs):
-        raise FilterUnavailable('query_failed', 'boom')
+        raise FilterUnavailable(self.reason, 'boom')
 
 
-def test_a_list_that_cannot_be_read_is_an_error_not_no_matches():
+@pytest.mark.parametrize('reason', ['query_failed', 'corpus_unavailable', 'sidecar_unavailable'])
+def test_a_list_that_cannot_be_read_is_an_error_not_no_matches(reason):
     async def driver(user):
         await user.open('/catalog-browse')
         await _wait_for(user, 'could not be listed')
@@ -82,6 +89,6 @@ def test_a_list_that_cannot_be_read_is_an_error_not_no_matches():
         assert 'The catalog could not be listed. Try again in a moment.' in text, text
         assert 'No manuscripts match the current filters' not in text, text
 
-    with patch.object(catalog_browse, 'get_fjms_service', return_value=_FailingFjms()), \
+    with patch.object(catalog_browse, 'get_fjms_service', return_value=_FailingFjms(reason)), \
             patch.object(state, 'meta_mgr', _meta()):
         _run(driver)

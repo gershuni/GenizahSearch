@@ -892,7 +892,19 @@ _FJMS_SUBCHILD_IDX = _domain_hierarchy.FJMS_SUBCHILD_IDX
 def _resolve_universe(universe):
     """A universe given as a set, a callable returning one, or None."""
     universe = universe() if callable(universe) else universe
-    return set(universe) if universe is not None and not isinstance(universe, (set, frozenset))         else universe
+    # A frozenset, so that its hash (the cache key) is computed once.
+    if universe is not None and not isinstance(universe, frozenset):
+        universe = frozenset(universe)
+    return universe
+
+
+def _universe_token(universe):
+    """A cache key for a universe by its contents (not its size: two corpora
+    of one size must not share cached results)."""
+    if universe is None:
+        return None
+    frozen = universe if isinstance(universe, frozenset) else frozenset(universe)
+    return (len(frozen), hash(frozen))
 
 
 def _sidecar_version(path: Optional[str]) -> Optional[tuple]:
@@ -1690,6 +1702,8 @@ class FjmsService:
                 ids = matched if ids is None else ids & matched
             return ids
 
+        except FilterUnavailable:
+            raise  # e.g. corpus_sys_ids: keep its reason
         except CriteriaUnavailable as e:
             raise FilterUnavailable(e.reason, e.message, filters=e.filters) from e
         except Exception as e:
@@ -1773,7 +1787,7 @@ class FjmsService:
             raise FilterUnavailable('sidecar_unavailable',
                                     'the FJMS catalog sidecar is not available')
         cache = self.__dict__.setdefault("_criterion_values_cache", {})
-        token = (key, source, len(universe) if universe is not None else None)
+        token = (key, source, _universe_token(universe))
         if token in cache:
             return copy.deepcopy(cache[token])
         try:
@@ -2542,6 +2556,7 @@ class FjmsService:
         "_browse_filter_edition",
         "_browse_filter_library",
         "_browse_filter_criteria",
+        "_browse_filter_outside",
     )
 
     def _ensure_filter_temp(self, name: str, sys_ids, token) -> bool:
@@ -2865,15 +2880,16 @@ class FjmsService:
                   for a manuscript with no catalogue record: its text fields
                   are empty)
                 - total: int (total matching count before pagination)
-            Returns {"results": [], "total": 0} if conn is None.
 
         Raises:
-            FilterUnavailable: the query failed or a criterion cannot be
-                answered (rule 9): never reported as an empty list.
+            FilterUnavailable: no sidecar ('sidecar_unavailable'), the query
+                failed, or a criterion cannot be answered (rule 9): never
+                reported as an empty list.
         """
         empty = {"results": [], "total": 0}
         if self._conn is None:
-            return empty
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
         universe = _resolve_universe(universe)
 
         try:
@@ -2895,6 +2911,7 @@ class FjmsService:
                 traits=traits,
             )
             matched = self._browse_criteria_condition(criteria, universe, conditions)
+            self._browse_universe_condition(universe, conditions)
 
             # SEED-026: library filter.  The token is CONTENT-derived from the
             # selection (not len) so that two same-size-but-different library
@@ -3040,7 +3057,7 @@ class FjmsService:
         if not criteria:
             return None
         matched = match_criteria(self._conn, criteria, universe)
-        token = (criteria_token(criteria), len(universe) if universe is not None else None)
+        token = (criteria_token(criteria), _universe_token(universe))
         if not matched:
             conditions.append("0")
         elif self._ensure_filter_temp("_browse_filter_criteria", matched, token):
@@ -3049,6 +3066,20 @@ class FjmsService:
         else:
             raise FilterUnavailable('query_failed', 'the criteria could not be applied')
         return matched
+
+    def _browse_universe_condition(self, universe, conditions):
+        """Keep the catalogued rows inside the universe: the catalogue has
+        sys_ids that are not in libraries.csv (one in the 5.0.0 file)."""
+        if universe is None:
+            return
+        outside = self.catalogued_ids() - universe
+        if not outside:
+            return
+        if self._ensure_filter_temp("_browse_filter_outside", outside, _universe_token(universe)):
+            conditions.append('NOT EXISTS (SELECT 1 FROM "_browse_filter_outside" t '
+                              "WHERE t.AlmaId = c.AlmaId)")
+        else:
+            raise FilterUnavailable('query_failed', 'the manuscript list could not be applied')
 
     def _browse_uncatalogued(self, universe, matched, *, inclusion, pgp_filter=None,
                              pgp_sys_ids=None, editions_filter=None, edition_sys_ids=None,
@@ -3134,16 +3165,18 @@ class FjmsService:
                 counted too.
 
         Returns:
-            ``{library_code: count}`` dict.  Returns ``{}`` when ``_conn`` is None
-            or ``sys_id_to_library`` is None/not-callable.
+            ``{library_code: count}`` dict.  Returns ``{}`` when
+            ``sys_id_to_library`` is None/not-callable.
 
         Raises:
-            FilterUnavailable: the query failed (never shown as zero counts).
+            FilterUnavailable: no sidecar, or the query failed (never shown
+                as zero counts).
         """
-        if self._conn is None:
-            return {}
         if sys_id_to_library is None or not callable(sys_id_to_library):
             return {}
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
         universe = _resolve_universe(universe)
 
         try:
@@ -3166,6 +3199,7 @@ class FjmsService:
                 traits=traits,
             )
             matched = self._browse_criteria_condition(criteria, universe, conditions)
+            self._browse_universe_condition(universe, conditions)
             where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 
             # Single SQL-bounded DISTINCT query — mirrors COUNT(DISTINCT c.AlmaId)

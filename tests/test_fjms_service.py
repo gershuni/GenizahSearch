@@ -1274,11 +1274,16 @@ def test_browse_works_cache(test_db):
 
 
 def test_browse_graceful_degradation():
-    """All browse methods return empty results when connection is None."""
+    """The side lists are empty when connection is None; the browse list
+    itself raises, since "0 manuscripts" would be a false answer (rule 9 of
+    docs/plans/CATALOGUE_CRITERIA_PLAN.md)."""
+    from shared.fjms_service import FilterUnavailable
     svc = FjmsService(db_path="nonexistent_browse_test.db")
     assert svc.get_browse_authors() == []
     assert svc.get_browse_works() == []
-    assert svc.get_browse_results() == {"results": [], "total": 0}
+    with pytest.raises(FilterUnavailable) as err:
+        svc.get_browse_results()
+    assert err.value.reason == "sidecar_unavailable"
     assert svc.get_unclassified_count() == 0
     svc.close()
 

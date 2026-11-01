@@ -378,7 +378,9 @@ class MetadataManager:
         try:
             self._load_csv_bank()
         finally:
-            self._csv_bank_done.set()
+            done = getattr(self, "_csv_bank_done", None)
+            if done is not None:
+                done.set()
         # Load codicological parts after CSV is ready
         self.codico_mgr.load(csv_bank=self.csv_bank)
 

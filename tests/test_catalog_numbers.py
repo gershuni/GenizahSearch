@@ -20,6 +20,7 @@ REAL_SIDECAR = Path(__file__).resolve().parent.parent / "fist_data" / "fjms_enri
     ("19-21", [(19, 21)]),
     ("22,25", [(22, 22), (25, 25)]),
     ("16–31", [(16, 31)]),             # en dash
+    ("5—7", [(5, 7)]),                  # em dash
     ("19­-24", [(19, 24)]),            # soft hyphen before the dash
     ("22-­24", [(22, 24)]),            # soft hyphen after it
     ("8-9-12", [(8, 12)]),                  # a chain is min..max

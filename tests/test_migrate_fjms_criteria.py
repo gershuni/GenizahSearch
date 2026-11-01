@@ -9,7 +9,8 @@ from scripts.migrate_fjms_criteria import (
 )
 
 
-def build(path, *, version="5.0.0", instatution=False, measurements=True):
+def build(path, *, version="5.0.0", instatution=False, free_desc_instatution=False,
+          measurements=True):
     con = sqlite3.connect(str(path))
     con.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
     con.execute("INSERT INTO meta VALUES ('version', ?)", (version,))
@@ -33,6 +34,8 @@ def build(path, *, version="5.0.0", instatution=False, measurements=True):
                     [(1, "Full", "x"), (-1, "Unknown", "y")])
     con.execute("CREATE TABLE catalog_free_desc (AlmaId TEXT, SignatureId INTEGER,"
                 " SourceName TEXT)")
+    if free_desc_instatution:
+        con.execute("INSERT INTO catalog_free_desc VALUES ('990001', 9, 'Instatution')")
     con.execute("CREATE TABLE catalog_fields (AlmaId TEXT, UnitCatalogRecId INTEGER,"
                 " FieldCategory TEXT, FieldValue TEXT, FieldValueHeb TEXT)")
     if measurements:
@@ -107,7 +110,42 @@ def test_refuses_a_file_that_still_has_instatution_rows(tmp_path):
     assert db.read_bytes() == before
 
 
-@pytest.mark.parametrize("version", ["4.2.0", "", "6.0.0"])
+def test_refuses_instatution_rows_in_free_descriptions_too(tmp_path):
+    db = build(tmp_path / "s.db", free_desc_instatution=True)
+    assert main(["--db", str(db), "--apply"]) == EXIT_INSTATUTION
+
+
+def test_refuses_a_5_1_0_file_with_instatution_rows(tmp_path):
+    db = build(tmp_path / "s.db")
+    assert main(["--db", str(db), "--apply"]) == EXIT_OK
+    con = sqlite3.connect(str(db))
+    con.execute("UPDATE catalog SET SourceName = 'Instatution' WHERE UnitCatalogRecId = 4")
+    con.commit()
+    con.close()
+    assert main(["--db", str(db), "--apply"]) == EXIT_INSTATUTION
+
+
+def test_a_run_that_fails_half_way_leaves_the_5_0_0_file(tmp_path, monkeypatch):
+    import scripts.migrate_fjms_criteria as mig
+    db = build(tmp_path / "s.db")
+
+    def fail(conn):
+        conn.execute("ALTER TABLE manuscript_measurements ADD COLUMN avg_line_height_mm REAL")
+        raise RuntimeError("stopped half-way")
+    monkeypatch.setattr(mig, "add_line_height", fail)
+    with pytest.raises(RuntimeError):
+        main(["--db", str(db), "--apply"])
+    assert read(db, "SELECT value FROM meta WHERE key='version'") == [("5.0.0",)]
+    tables = {n for (n,) in read(db, "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "criteria_numbers" not in tables
+    columns = {r[1] for r in read(db, "PRAGMA table_info(manuscript_measurements)")}
+    assert "avg_line_height_mm" not in columns
+    monkeypatch.undo()
+    assert main(["--db", str(db), "--apply"]) == EXIT_OK      # and it can be re-run
+    assert read(db, "SELECT avg_line_height_mm FROM manuscript_measurements") == [(5.0,)]
+
+
+@pytest.mark.parametrize("version", ["4.2.0", "", "6.0.0", "5.0.garbage", "5.0"])
 def test_refuses_other_versions(tmp_path, version):
     db = build(tmp_path / "s.db", version=version)
     before = db.read_bytes()

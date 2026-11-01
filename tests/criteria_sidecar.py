@@ -43,6 +43,8 @@ _FIELDS = [
     (A, 1, "TypeOfScriptPlace", "Oriental", "מזרחי"),
     (A, 2, "TypeOfScriptPlace", "Yemenite", "תימני"),
     (A, 1, "FragmentMaterial", "Paper", "נייר"),
+    (A, 1, "GenizahLanguages", "Hebrew", "עברית"),
+    (B, 3, "GenizahLanguages", "Arabic", "ערבית"),
     (A, 2, "FragmentMaterial", "Vellum", "קלף"),
     (B, 3, "TypeOfScriptStyle", "Semi-Cursive", "בינוני"),
     (B, 3, "TypeOfScriptPlace", "Spanish", "ספרדי"),
@@ -114,6 +116,7 @@ def build_criteria_sidecar(path, *, upgrade: bool = True, fts: bool = True) -> s
     con.execute("INSERT INTO manuscript_measurements (AlmaId, material) VALUES (?, 'Paper')", (D,))
     con.execute("CREATE TABLE domains (AlmaId TEXT, Domain TEXT, ParentDomain TEXT,"
                 " DomainHeb TEXT, ParentDomainHeb TEXT)")
+    con.execute("INSERT INTO domains VALUES (?, 'Bible', NULL, 'מקרא', NULL)", (A,))
     if fts:  # the catalogue-text filters' index (text all/any/not)
         con.execute("CREATE VIRTUAL TABLE catalog_fts USING fts5(Title)")
         con.execute("INSERT INTO catalog_fts (rowid, Title) SELECT rowid, Title FROM catalog")

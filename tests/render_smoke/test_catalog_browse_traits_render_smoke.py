@@ -73,6 +73,29 @@ def test_traits_in_the_address_reach_the_list_the_chips_and_the_handoff():
         _run(driver)
 
 
+class _UnknownSupportFjms(_TraitFjms):
+    """A catalog whose capability check cannot run (it is not KNOWN to lack
+    measurements)."""
+
+    def measurement_filter_support(self):
+        raise RuntimeError('schema probe failed')
+
+
+def test_a_capability_check_that_fails_keeps_the_saved_size():
+    fake = _UnknownSupportFjms()
+
+    async def driver(user: User) -> None:
+        await user.open('/catalog-browse?width=10-20')
+        deadline = asyncio.get_running_loop().time() + 5.0
+        while not fake.result_traits and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.05)
+        assert fake.result_traits[-1] == {'width_min': 10.0, 'width_max': 20.0}, fake.result_traits
+
+    with patch.object(catalog_browse, 'get_fjms_service', return_value=fake), \
+            patch.object(catalog_browse.ui.navigate, 'to', lambda *a, **k: None):
+        _run(driver)
+
+
 def _chip_close_button(user: User, chip_text: str):
     """The close button of the chip whose label starts with *chip_text*."""
     for element in list(user._client.elements.values()):

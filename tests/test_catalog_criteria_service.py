@@ -66,6 +66,16 @@ def test_criteria_that_need_the_corpus_fail_closed_without_it(svc):
     assert err.value.reason == "corpus_unavailable"
 
 
+def test_a_corpus_list_that_is_not_loaded_keeps_its_reason(svc):
+    def not_loaded():
+        raise FilterUnavailable('corpus_unavailable', 'loading')
+    with pytest.raises(FilterUnavailable) as err:
+        svc.get_filter_sys_ids(material_exclude=["Vellum"], universe=not_loaded)
+    assert err.value.reason == "corpus_unavailable"
+    # Not needed, not called: an inclusion filter never waits for the corpus.
+    assert svc.get_filter_sys_ids(material_include=["Paper"], universe=not_loaded) == {A}
+
+
 def test_a_5_0_0_file_reports_the_new_criteria_as_missing(old_svc):
     with pytest.raises(FilterUnavailable) as err:
         old_svc.get_filter_sys_ids(criteria={"columns": {"min": 1}}, universe=U)
@@ -117,6 +127,27 @@ def test_browse_with_criteria(svc):
 
 def test_browse_inclusion_filters_drop_uncatalogued_rows(svc):
     assert ids(svc.get_browse_results(date_from=1000, universe=U)) == [A, B]
+    assert ids(svc.get_browse_results(domain="Bible", universe=U)) == [A]
+    assert ids(svc.get_browse_results(text_any=["Title"], universe=U)) == CATALOGUED_ORDER
+
+
+def test_browse_stays_inside_the_corpus(svc):
+    # The catalogue has a sys_id libraries.csv lacks (one in the 5.0.0 file):
+    # the corpus list bounds the catalogued rows too.
+    inside = U - {F}
+    result = svc.get_browse_results(universe=inside)
+    assert F not in ids(result) and result["total"] == 5
+    assert svc.get_browse_library_facets(sys_id_to_library=lambda s: "X",
+                                         universe=inside) == {"X": 5}
+
+
+def test_cached_results_follow_the_corpus_contents(svc):
+    # Two corpora of one size must not share a cached criteria result.
+    vellum = {"material": {"values": ["Vellum"]}}
+    assert svc.get_filter_sys_ids(criteria=vellum, universe={A}) == {A}
+    assert svc.get_filter_sys_ids(criteria=vellum, universe={B}) == {B}
+    assert ids(svc.get_browse_results(criteria=vellum, universe={A})) == [A]
+    assert ids(svc.get_browse_results(criteria=vellum, universe={B})) == [B]
 
 
 def test_browse_exclusion_filters_keep_uncatalogued_rows(svc):

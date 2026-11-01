@@ -2288,9 +2288,12 @@ class FilterCountWorker(QThread):
     finished = pyqtSignal(object)  # set or None
     failed = pyqtSignal(str)
 
-    def __init__(self, filters: dict, parent=None, *, meta_mgr=None):
+    def __init__(self, filters: dict, parent=None, *, meta_mgr=None, universe=None):
         super().__init__(parent)
         self.filters = filters
+        # The corpus list (a callable, MetadataManager.corpus_sys_ids) for D17:
+        # given alone, it does not turn on the library recompute below.
+        self._universe = universe
         # FINDING 2 (129-07): optional meta_mgr for library restriction recompute.
         # When provided, the worker intersects filters['library'] into the result
         # set so chip-removal does not silently drop the library restriction.
@@ -2352,7 +2355,8 @@ class FilterCountWorker(QThread):
             # D17: uncatalogued manuscripts pass filters that only exclude; the
             # corpus list is read only when that applies.
             result = fjms.get_filter_sys_ids(
-                universe=getattr(self._meta_mgr, 'corpus_sys_ids', None),
+                universe=(self._universe if self._universe is not None
+                          else getattr(self._meta_mgr, 'corpus_sys_ids', None)),
                 **kwargs)
             # FINDING 2 (129-07): intersect library restriction into the recomputed set.
             # Runs on this worker QThread (off the UI thread) — correct for an O(255K)

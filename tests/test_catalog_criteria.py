@@ -42,6 +42,8 @@ def m(conn, criteria, universe=UNIVERSE):
 
 @pytest.mark.parametrize("criteria, expected", [
     ({"style": {"values": ["Square"]}}, {A}),
+    ({"language": {"values": ["Hebrew"]}}, {A}),
+    ({"language": {"values": ["Arabic"], "mode": "except"}}, {A, C, D, E, F}),
     ({"region": {"values": ["Yemenite"]}}, {A}),                      # D4: any record
     ({"region": {"values": ["Oriental"], "mode": "except"}}, {B, C, D, E, F}),
     ({"region": {"values": ["Oriental", NOT_RECORDED], "mode": "except"}}, {B, C}),
@@ -150,6 +152,7 @@ def test_the_universe_bounds_the_result(conn):
 @pytest.mark.parametrize("criteria", [
     {"lines": {"min": 20}},                          # either needs the catalogue half
     {"lines": {"min": 20, "source": "catalogue"}},
+    {"lines": {"min": 20, "source": "measured"}},    # the whole section, any source
     {"columns": {"min": 1}},
     {"period": {"min": 1000}},
     {"vocal_extent": {"values": ["Full"]}},
@@ -164,7 +167,7 @@ def test_a_5_0_0_file_cannot_answer_the_new_criteria(old_conn, criteria):
 
 def test_a_5_0_0_file_still_answers_the_rest(old_conn):
     assert m(old_conn, {"style": {"values": ["Square"]}}) == {A}
-    assert m(old_conn, {"lines": {"min": 20, "max": 20, "source": "measured"}}) == {A}
+    assert m(old_conn, {"width": {"min": 10, "max": 11, "source": "measured"}}) == {A, D}
 
 
 # ── value lists ─────────────────────────────────────────────────────────
