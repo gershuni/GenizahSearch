@@ -118,6 +118,14 @@ def _get_filter_sets():
     return cached
 
 
+def _corpus_sys_ids(app_state):
+    """The corpus for Catalog Browse (D16), as a callable the service calls:
+    MetadataManager.corpus_sys_ids waits for libraries.csv and raises
+    FilterUnavailable rather than return part of it. None (no metadata
+    manager yet) lists the catalogued manuscripts only, as before."""
+    return getattr(getattr(app_state, 'meta_mgr', None), 'corpus_sys_ids', None)
+
+
 def create_catalog_browse_page(
     initial_domain: str = None,
     initial_author: str = None,
@@ -375,9 +383,9 @@ def create_catalog_browse_page(
             pgp_ids, ed_ids = _get_filter_sets()
         # SEED-026: resolve library codes → sys_id set inside io_bound (O(255K), Pitfall 2).
         # Fail-open: empty selection passes None for both args (Pitfall 5 — never set()).
+        from web.state import state as _state
         lib_sys_ids = None
         if library_codes:
-            from web.state import state as _state
             resolved = resolve_library_sys_ids(library_codes, _state.meta_mgr)
             lib_sys_ids = resolved if resolved else None  # empty set → None (fail-open)
         return fjms.get_browse_results(
@@ -391,6 +399,10 @@ def create_catalog_browse_page(
             library_sys_ids=lib_sys_ids,
             library_mode=library_mode,
             traits=traits,
+            # D16: the whole corpus, the manuscripts with no catalogue record
+            # after the catalogued ones. Waits for libraries.csv; raises
+            # FilterUnavailable rather than list part of it.
+            universe=_corpus_sys_ids(_state),
         )
 
     async def fetch_results():
@@ -456,6 +468,7 @@ def create_catalog_browse_page(
                 sys_id_to_library=(_state.meta_mgr.get_library_for_id
                                    if _state.meta_mgr else None),
                 traits=traits,
+                universe=_corpus_sys_ids(_state),
             )
         except Exception as e:
             logger.warning("catalog_browse: facet fetch failed: %s", e)
@@ -547,8 +560,11 @@ def create_catalog_browse_page(
         try:
             data = await fetch_results()
         except Exception as e:
+            # Rule 9: a list that could not be read is an error, never
+            # "no manuscripts match".
             logger.error(f"catalog_browse fetch_results error: {e}")
-            data = {"results": [], "total": 0}
+            data = {"results": [], "total": 0,
+                    "error": tr("The catalog could not be listed. Try again in a moment.")}
 
         if this_refresh != refresh_serial['value']:
             return  # superseded: the newer refresh owns the indicators
@@ -621,6 +637,8 @@ def create_catalog_browse_page(
             else:
                 title = r.get('title', '') or r.get('title_heb', '')
             identification = f"{author} - {title}" if author and title else (author or title)
+            if r.get('catalogued') is False:
+                identification = tr("No catalogue record")
 
             date_val = r.get('copy_date', '')
 
@@ -673,21 +691,27 @@ def create_catalog_browse_page(
                 '_is_printed': meta.get('is_printed', False),
             })
 
-        render_results_table(rows, total)
+        render_results_table(rows, total, error=data.get('error'))
         render_pagination(total)
         render_chips()
         _update_search_buttons()
         update_url()
 
     # ── Render: Results table with inline expandable detail ────────
-    def render_results_table(rows, total):
-        """Render the results table with expandable detail rows."""
+    def render_results_table(rows, total, error=None):
+        """Render the results table with expandable detail rows; ``error``
+        replaces the table when the list could not be read."""
         container = results_container['ref']
         if not container:
             return
         container.clear()
 
         with container:
+            if error:
+                with ui.column().classes('w-full items-center py-12'):
+                    ui.icon('error_outline').classes('text-5xl mb-4').style('color: var(--text-muted)')
+                    ui.label(error).classes('text-lg').style('color: var(--text-secondary)')
+                return
             if not rows:
                 with ui.column().classes('w-full items-center py-12'):
                     ui.icon('search_off').classes('text-5xl mb-4').style('color: var(--text-muted)')

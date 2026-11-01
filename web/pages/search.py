@@ -23,7 +23,7 @@ from web.components.filter_panel import (
     build_script_options, build_script_filter_row,
     build_filter_summary, has_active_filters, persist_value,
     load_filter_state, consume_incoming_filters, recompute_filter_count,
-    create_filter_handlers, filter_unavailable_message,
+    corpus_universe, create_filter_handlers, filter_unavailable_message,
 )
 from web.search_bootstrap import resolve_search_bootstrap, VALID_SEARCH_MODES
 from web.pages.search_state import (
@@ -5555,7 +5555,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # raises FilterUnavailable (handled below) instead of running
                 # the search over the whole corpus (#17).
                 fjms = get_fjms_service(thread_safe=True)
-                return fjms.get_filter_sys_ids(**filter_kwargs)
+                return fjms.get_filter_sys_ids(universe=corpus_universe(), **filter_kwargs)
 
             def _stop_before_running():
                 # Undo the "searching" UI set above: no run will clear it.

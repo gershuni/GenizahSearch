@@ -2349,7 +2349,11 @@ class FilterCountWorker(QThread):
                 kwargs['domains_exclude'] = _domains
                 kwargs['authors_exclude'] = _authors
                 kwargs['works_exclude'] = _works
-            result = fjms.get_filter_sys_ids(**kwargs)
+            # D17: uncatalogued manuscripts pass filters that only exclude; the
+            # corpus list is read only when that applies.
+            result = fjms.get_filter_sys_ids(
+                universe=getattr(self._meta_mgr, 'corpus_sys_ids', None),
+                **kwargs)
             # FINDING 2 (129-07): intersect library restriction into the recomputed set.
             # Runs on this worker QThread (off the UI thread) — correct for an O(255K)
             # csv_bank scan. No-op when meta_mgr is None or no 'library' key present.

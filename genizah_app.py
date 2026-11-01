@@ -704,10 +704,14 @@ class _CatalogRefreshWorker(QThread):
                 library_sys_ids=(library_sys_ids or None),
                 library_mode=self._library_mode,   # DMF-07: 'show_only' | 'hide'
                 traits=self._traits,
+                # D16: the whole corpus, catalogued manuscripts first. Waits for
+                # libraries.csv; raises rather than list part of it (rule 9).
+                universe=_catalog_corpus_ids(self._meta_mgr),
             )
             self.done.emit(result)
         except Exception:
-            self.done.emit({'data': {'results': [], 'total': 0}})  # Operation failed; emit empty/None so caller handles gracefully
+            # Rule 9: a list that could not be read is an error, never "no results".
+            self.done.emit({'data': {'results': [], 'total': 0, 'error': True}})
 
 
 class _CatalogFacetWorker(QThread):
@@ -771,10 +775,19 @@ class _CatalogFacetWorker(QThread):
                 sys_id_to_library=(self._meta_mgr.get_library_for_id
                                    if self._meta_mgr else None),
                 traits=self._traits,
+                universe=_catalog_corpus_ids(self._meta_mgr),
             )
             self.done.emit(result)
         except Exception:
             self.done.emit({})  # Facet query failed; emit empty dict so dialog opens name-only
+
+
+def _catalog_corpus_ids(meta_mgr):
+    """The corpus for the Catalog tab (D16), as a callable the service calls:
+    MetadataManager.corpus_sys_ids waits for libraries.csv and raises
+    FilterUnavailable rather than return part of it. None (no metadata
+    manager: tests) lists the catalogued manuscripts only, as before."""
+    return getattr(meta_mgr, 'corpus_sys_ids', None)
 
 
 def _format_list_star(in_list=False):
@@ -12258,6 +12271,13 @@ class GenizahGUI(QMainWindow):
         results = data.get("results", [])
         total = data.get("total", 0)
         self._catalog_results_data = results
+        if data.get('error'):
+            self.catalog_results_table.setRowCount(0)
+            self._catalog_count_label.setText(
+                tr("The catalog could not be listed. Try again in a moment."))
+            self._catalog_update_chips()
+            self._catalog_update_text_summary()
+            return
         self.catalog_results_table.setSortingEnabled(False)
         self._catalog_hovered_row = -1
         self.catalog_results_table.setRowCount(len(results))
@@ -12277,6 +12297,8 @@ class GenizahGUI(QMainWindow):
             if not title:
                 title = r.get("title", "") or r.get("title_heb", "")
             ident = f"{author_str} - {title}" if author_str and title else (author_str or title or "")
+            if r.get("catalogued") is False:
+                ident = tr("No catalogue record")
             date_str = r.get("copy_date", "")
             align = Qt.AlignmentFlag.AlignLeft if is_hebrew else Qt.AlignmentFlag.AlignRight
             actions_widget = ActionsHoverWidget(alignment=align)
@@ -12881,8 +12903,9 @@ class GenizahGUI(QMainWindow):
         # Codex HIGH #4: suppress the restriction in Hide mode with a user notice instead).
         if self._catalog_library_filter and self._catalog_library_mode == 'show_only':
             filters['library'] = list(self._catalog_library_filter)
-        # Script / measurement traits under the names "Search only in..." uses.
-        for key, value in self._catalog_traits.items():
+        # Script / measurement traits under the names "Search only in..." uses
+        # (absent on a window whose Catalog tab was never built).
+        for key, value in (getattr(self, '_catalog_traits', None) or {}).items():
             filters[key] = list(value) if isinstance(value, list) else value
         return filters
 

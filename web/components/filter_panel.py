@@ -369,6 +369,15 @@ def load_filter_state(state, storage_prefix: str) -> list:
     return dropped
 
 
+def corpus_universe():
+    """The corpus list for get_filter_sys_ids (D17 of
+    docs/plans/CATALOGUE_CRITERIA_PLAN.md: uncatalogued manuscripts pass
+    filters that only exclude), as a callable the service calls only when
+    it needs it, or None before the app state has a metadata manager."""
+    from web.state import state as _app_state
+    return getattr(getattr(_app_state, 'meta_mgr', None), 'corpus_sys_ids', None)
+
+
 def filter_unavailable_message(exc, tr_func) -> str:
     """The notice for a search not run because its filters could not be
     applied (#17), chosen by ``FilterUnavailable.reason``."""
@@ -582,7 +591,7 @@ async def recompute_filter_count(state, update_chip_bar_fn, on_state=None):
             kwargs['domains_exclude'] = _domains
             kwargs['authors_exclude'] = _authors
             kwargs['works_exclude'] = _works
-        return fjms.get_filter_sys_ids(**kwargs)
+        return fjms.get_filter_sys_ids(universe=corpus_universe(), **kwargs)
 
     try:
         result = await run.io_bound(_compute)

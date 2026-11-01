@@ -28,7 +28,7 @@ from web.components.filter_panel import (
     build_script_options, build_script_filter_row,
     build_filter_summary, has_active_filters, persist_value,
     load_filter_state, consume_incoming_filters, recompute_filter_count,
-    create_filter_handlers, filter_unavailable_message,
+    corpus_universe, create_filter_handlers, filter_unavailable_message,
 )
 
 logger = logging.getLogger(__name__)
@@ -4890,7 +4890,7 @@ def create_parallels_page(initial_text: str = None):
                 # raises FilterUnavailable (handled below) instead of running
                 # the search over the whole corpus (#17).
                 fjms = get_fjms_service(thread_safe=True)
-                return fjms.get_filter_sys_ids(**filter_kwargs)
+                return fjms.get_filter_sys_ids(universe=corpus_universe(), **filter_kwargs)
 
             from shared.fjms_service import FilterUnavailable
             try:

@@ -889,6 +889,12 @@ _FJMS_CHILD_IDX = _domain_hierarchy.FJMS_CHILD_IDX
 _FJMS_SUBCHILD_IDX = _domain_hierarchy.FJMS_SUBCHILD_IDX
 
 
+def _resolve_universe(universe):
+    """A universe given as a set, a callable returning one, or None."""
+    universe = universe() if callable(universe) else universe
+    return set(universe) if universe is not None and not isinstance(universe, (set, frozenset))         else universe
+
+
 def _sidecar_version(path: Optional[str]) -> Optional[tuple]:
     """meta.version of a sidecar as a tuple of ints, or None when the file is
     missing, unreadable or unversioned. Read-only: never creates a file."""
@@ -1334,8 +1340,10 @@ class FjmsService:
                 with the rest. Not affected by include/exclude mode.
             criteria: Catalogue criteria (shared/catalog_criteria.py), ANDed
                 with everything else.
-            universe: The set of every corpus sys_id (``corpus_sys_ids``).
-                With it, uncatalogued manuscripts can match: criteria such as
+            universe: The set of every corpus sys_id, or a callable returning
+                it (``MetadataManager.corpus_sys_ids``, called only when
+                needed, so a search without such filters never waits for
+                libraries.csv). With it, uncatalogued manuscripts can match: criteria such as
                 "not recorded" select them (D14), and when every older filter
                 set is an exclusion (Exclude domains/authors/works/material,
                 text "not") they pass it, since nothing says they belong to
@@ -1676,9 +1684,9 @@ class FjmsService:
                     or date_to is not None or material_include or text_all or text_any
                     or script_styles or script_places or _has_measurement_filter)
                 if universe is not None and not inclusion:
-                    ids |= set(universe) - self.catalogued_ids()
+                    ids |= set(_resolve_universe(universe)) - self.catalogued_ids()
             if criteria:
-                matched = match_criteria(self._conn, criteria, universe)
+                matched = match_criteria(self._conn, criteria, _resolve_universe(universe))
                 ids = matched if ids is None else ids & matched
             return ids
 
@@ -2866,6 +2874,7 @@ class FjmsService:
         empty = {"results": [], "total": 0}
         if self._conn is None:
             return empty
+        universe = _resolve_universe(universe)
 
         try:
             # Build shared non-library conditions (domain/author/work/date/text/pgp/editions)
@@ -3135,6 +3144,7 @@ class FjmsService:
             return {}
         if sys_id_to_library is None or not callable(sys_id_to_library):
             return {}
+        universe = _resolve_universe(universe)
 
         try:
             # Reuse the shared condition-builders (domain/author/work/date/text/pgp/editions).

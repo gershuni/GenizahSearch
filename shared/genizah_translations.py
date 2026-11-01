@@ -6296,6 +6296,14 @@ TRANSLATIONS.update({
         'כל המקשים בכרטיס אחד: Ctrl+/‎, הכפתור ⌨ ליד A−‎, או "קיצורי מקלדת" בתפריט ☰.',
 })
 
+# Catalogue criteria, PR 1a (2026-11-01): Catalog Browse lists the whole corpus,
+# and a failed browse query is an error, not "no manuscripts match".
+TRANSLATIONS.update({
+    "No catalogue record": "אין רשומה בקטלוג",
+    "The catalog could not be listed. Try again in a moment.":
+        "לא ניתן היה להציג את רשימת כתבי היד. נסו שוב בעוד רגע.",
+})
+
 # Phone layout (2026-10-22): the search toolbar's phone menu, the browse image
 # panel's slider toggle, and the catalog-browse sidebar toggle.
 TRANSLATIONS.update({

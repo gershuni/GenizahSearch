@@ -309,6 +309,8 @@ class MetadataManager:
         # True once libraries.csv has been read to the end: until then a sys_id missing
         # from csv_bank may simply not have been reached yet.
         self._csv_bank_loaded = False
+        # Set when the load of libraries.csv has ended, read or not.
+        self._csv_bank_done = threading.Event()
         self._shelfmark_index = None
         self.nli_executor = ThreadPoolExecutor(max_workers=2)
         self.ns = {'marc': 'http://www.loc.gov/MARC21/slim'}
@@ -373,9 +375,32 @@ class MetadataManager:
                 LOGGER.warning("Failed to load metadata cache from %s: %s", Config.CACHE_META, e)
 
     def _load_heavy_caches_bg(self):
-        self._load_csv_bank()
+        try:
+            self._load_csv_bank()
+        finally:
+            self._csv_bank_done.set()
         # Load codicological parts after CSV is ready
         self.codico_mgr.load(csv_bank=self.csv_bank)
+
+    def corpus_sys_ids(self, timeout: float = 30.0) -> frozenset:
+        """Every corpus sys_id of libraries.csv: the universe of the catalogue
+        criteria and of Catalog Browse (docs/plans/CATALOGUE_CRITERIA_PLAN.md,
+        D14, D16). Waits up to ``timeout`` seconds for the background load to
+        read the whole file and never returns a partial list (rule 9): raises
+        FilterUnavailable('corpus_unavailable') when it has not."""
+        if not self._csv_bank_loaded:
+            done = getattr(self, "_csv_bank_done", None)
+            if done is not None:
+                done.wait(timeout)
+        if not self._csv_bank_loaded:
+            from shared.fjms_service import FilterUnavailable
+            raise FilterUnavailable('corpus_unavailable',
+                                    'the list of all manuscripts is not loaded yet')
+        cached = getattr(self, "_corpus_ids", None)
+        if cached is None or cached[0] != len(self.csv_bank):
+            ids = frozenset(s for s in list(self.csv_bank) if CORPUS_SYS_ID_RE.fullmatch(s))
+            cached = self._corpus_ids = (len(self.csv_bank), ids)
+        return cached[1]
 
     def _load_csv_bank(self):
         """Load the massive CSV file into memory for instant lookup."""
