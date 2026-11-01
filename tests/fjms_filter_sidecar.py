@@ -52,6 +52,60 @@ def build_sidecar(path, *, with_line_height: bool = True,
     return str(path)
 
 
+SCRIPT_FIELDS = [
+    # AlmaId, catalogue record, category, value, Hebrew
+    ("990001", 1, "TypeOfScriptStyle", "Square", "מרובע"),
+    ("990001", 1, "TypeOfScriptPlace", "Spanish", "ספרדי"),
+    ("990002", 2, "TypeOfScriptStyle", "Semi-Cursive", "בינוני"),
+    ("990002", 2, "TypeOfScriptPlace", "Oriental", "מזרחי"),
+    # Two records of one manuscript that disagree: either value matches it.
+    ("990003", 3, "TypeOfScriptStyle", "Square", "מרובע"),
+    ("990003", 3, "TypeOfScriptPlace", "Oriental", "מזרחי"),
+    ("990003", 4, "TypeOfScriptPlace", "Yemenite", "תימני"),
+    # A third record repeating a value: the manuscript is counted once.
+    ("990003", 5, "TypeOfScriptStyle", "Square", "מרובע"),
+    # Recorded, but describes no script: never offered.
+    ("990004", 6, "TypeOfScriptPlace", "Unknown", "לא ידוע"),
+    ("990005", 7, "FragmentMaterial", "Paper", "נייר"),
+]
+# 990006 has no catalog_fields rows at all.
+SCRIPT_DATES = {"990001": "1100", "990002": "1300", "990003": "1150",
+                "990004": "1200", "990005": "1100", "990006": "1100"}
+
+
+def build_script_sidecar(path) -> str:
+    """A sidecar with the catalogue's script fields (the Script Style / Script
+    Place filters): SCRIPT_FIELDS over the manuscripts of SCRIPT_DATES."""
+    con = sqlite3.connect(str(path))
+    con.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
+    con.execute("INSERT INTO meta VALUES ('version', '5.0.0')")
+    con.execute("CREATE TABLE catalog (AlmaId TEXT PRIMARY KEY, CopyDate TEXT)")
+    con.executemany("INSERT INTO catalog VALUES (?, ?)", SCRIPT_DATES.items())
+    con.execute("CREATE TABLE catalog_fields (AlmaId TEXT NOT NULL, UnitCatalogRecId INTEGER NOT NULL,"
+                " FieldCategory TEXT NOT NULL, FieldValue TEXT, FieldValueHeb TEXT)")
+    con.executemany("INSERT INTO catalog_fields VALUES (?, ?, ?, ?, ?)", SCRIPT_FIELDS)
+    con.commit()
+    con.close()
+    return str(path)
+
+
+# A history summary long enough that truncation can cut between its two
+# brackets: exclude mode puts the script value in a bracket of its own.
+LONG_EXCLUDE = {'include_mode': False, 'domains': ['Bible', 'Liturgy', 'Halakha'],
+                'date_from': 1000, 'date_to': 1300, 'script_places': ['Spanish']}
+LONG_EXCLUDE_50 = '[exclude: Bible, Liturgy, Halakha, 1000-1300...]'
+
+
+def brackets_balanced(s: str) -> bool:
+    """Every '[' closed before the next opens, and nothing left open."""
+    depth = 0
+    for ch in s:
+        depth += {'[': 1, ']': -1}.get(ch, 0)
+        if depth not in (0, 1):
+            return False
+    return depth == 0
+
+
 class FailingFinalExecute:
     """Wraps a real connection; the filter's final SELECT raises OperationalError.
 

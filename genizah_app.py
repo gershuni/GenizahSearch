@@ -22639,6 +22639,14 @@ class GenizahGUI(QMainWindow):
             if filters.get('material_exclude'):
                 self._add_filter_chip(chip_layout, tr("Exclude Printed"), 'material_exclude')
 
+            # Script style / place chips
+            if filters.get('script_styles') or filters.get('script_places'):
+                from shared.fjms_service import script_value_label
+                for _skey in ('script_styles', 'script_places'):
+                    for _sv in filters.get(_skey) or []:
+                        self._add_filter_chip(
+                            chip_layout, script_value_label(_skey, _sv, CURRENT_LANG == 'he'), (_skey, _sv))
+
             # Text filter chips
             for t in filters.get('text_all', []):
                 self._add_filter_chip(chip_layout, f"+ {t}", ('text_all', t))
@@ -35123,11 +35131,26 @@ class GenizahGUI(QMainWindow):
             parts.append(tr("No printed"))
         elif filters.get('material_include'):
             parts.append(tr("Printed only"))
-        if not parts:
+        script_parts = []
+        if filters.get('script_styles') or filters.get('script_places'):
+            from shared.fjms_service import script_value_label
+            for _skey in ('script_styles', 'script_places'):
+                for _sv in filters.get(_skey) or []:
+                    script_parts.append(script_value_label(_skey, str(_sv), CURRENT_LANG == 'he'))
+        # Exclude mode never turns the script filter around: under "exclude" a
+        # script value would say the opposite of what was searched.
+        if filters.get('include_mode', True):
+            parts += script_parts
+            script_parts = []
+        groups = [(prefix, parts), (tr('include'), script_parts)]
+        summary = ' '.join(f"[{p}: {', '.join(g)}]" for p, g in groups if g)
+        if not summary:
             return ''
-        summary = f"[{prefix}: {', '.join(parts)}]"
         if len(summary) > max_len:
-            summary = summary[:max_len - 4] + '...]'
+            cut = summary[:max_len - 4].rstrip()
+            if cut.endswith(']'):  # cut between two brackets: continue the first
+                cut = cut[:-1]
+            summary = cut + '...]'
         return summary
 
     # Every baked witness suffix, anywhere, in either language, with the

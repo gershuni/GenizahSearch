@@ -2313,6 +2313,8 @@ class FilterCountWorker(QThread):
                 include_undated=self.filters.get('include_undated', False),
                 material_include=self.filters.get('material_include'),
                 material_exclude=self.filters.get('material_exclude'),
+                script_styles=self.filters.get('script_styles') or None,
+                script_places=self.filters.get('script_places') or None,
                 text_all=self.filters.get('text_all') or None,
                 text_any=self.filters.get('text_any') or None,
                 text_not=self.filters.get('text_not') or None,

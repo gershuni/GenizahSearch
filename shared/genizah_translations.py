@@ -2793,6 +2793,8 @@ TRANSLATIONS = {
     "Number of Columns": "מספר טורים",
     "Number of Lines": "מספר שורות",
     "Script Place": "מקום כתב",
+    "From the catalogue records: manuscripts whose records do not describe the script are not included.":
+        "לפי המידע הקטלוגי; כתבי יד שהכתב שלהם לא תואר בו אינם נכללים.",
 
     # --- Catalog Dialog Sections ---
     "Shelfmark Description": "תיאור מספר מדף",

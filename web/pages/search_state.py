@@ -72,6 +72,8 @@ class SearchUIState:
         self.filter_date_from: int = None   # Date range start
         self.filter_date_to: int = None     # Date range end
         self.filter_material_exclude: list = []  # Material types to exclude (e.g., ['Printed'])
+        self.filter_script_styles: list = []  # Catalogue script styles (e.g., ['Square'])
+        self.filter_script_places: list = []  # Catalogue script places (e.g., ['Spanish'])
         self.filter_manuscript_count: int = None  # Count of manuscripts matching current filters
         self.restrict_sys_ids: set = None   # Computed from filters, passed to search engine
         self.filter_text_all: list = []     # FTS5 text: all words must match
@@ -261,6 +263,7 @@ _SEARCH_FILTER_KEYS = (
     'search_filter_include_mode', 'search_filter_date_from',
     'search_filter_date_to', 'search_filter_material_exclude',
     'search_filter_text_all', 'search_filter_text_any', 'search_filter_text_not',
+    'search_filter_script_styles', 'search_filter_script_places',
 )
 _SEARCH_FILTER_MEASUREMENT_KEYS = (
     'search_filter_width_min', 'search_filter_width_max',
@@ -279,6 +282,7 @@ RUN_FILTER_FIELDS = tuple(key[len('search_'):] for key in _SEARCH_FILTER_KEYS + 
 _LIST_FILTER_FIELDS = frozenset({
     'filter_domains', 'filter_authors', 'filter_works', 'filter_material_exclude',
     'filter_text_all', 'filter_text_any', 'filter_text_not', 'filter_measurement_material',
+    'filter_script_styles', 'filter_script_places',
 })
 
 

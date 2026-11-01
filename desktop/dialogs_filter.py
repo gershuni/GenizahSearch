@@ -995,7 +995,11 @@ class PreSearchFilterDialog(QDialog):
         if not self._current_filters.get('domains') and self._current_filters.get('domain'):
             self._check_tree_item(self.domain_tree, self._current_filters['domain'], True)
         domain_layout.addWidget(self.domain_tree)
-        body_layout.addWidget(domain_group, 1)  # stretch factor 1
+        # Below it: Script Style / Script Place
+        left_layout = QVBoxLayout()
+        left_layout.addWidget(domain_group, 1)
+        left_layout.addWidget(self._build_script_group())
+        body_layout.addLayout(left_layout, 1)  # stretch factor 1
 
         # RIGHT column: Author, Work, Date, Material, Text
         right_layout = QVBoxLayout()
@@ -1285,6 +1289,43 @@ class PreSearchFilterDialog(QDialog):
 
         # Initial count update
         self._update_count()
+
+    def _build_script_group(self):
+        """Script Style / Script Place, as the catalogue records them: two
+        checkable lists, most manuscripts first. Hidden when the catalogue
+        offers no values and none is saved."""
+        from shared.fjms_service import script_filter_options
+        group = QGroupBox(tr("Script"))
+        outer = QVBoxLayout(group)
+        lists_row = QHBoxLayout()
+        self._script_lists = {}
+        for key, label in (('script_styles', tr("Script Style")), ('script_places', tr("Script Place"))):
+            column = QVBoxLayout()
+            column.addWidget(QLabel(label))
+            list_widget = QListWidget()
+            list_widget.setMaximumHeight(110)
+            options = script_filter_options(key, CURRENT_LANG == 'he')
+            chosen = list(self._current_filters.get(key) or [])
+            # A saved value the catalogue does not offer stays chosen and
+            # shown: dropping it silently would widen the search.
+            for value in list(options) + [v for v in chosen if v not in options]:
+                item = QListWidgetItem(options.get(value, value))
+                item.setData(Qt.ItemDataRole.UserRole, value)
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Checked if value in chosen else Qt.CheckState.Unchecked)
+                list_widget.addItem(item)
+            list_widget.itemChanged.connect(self._on_filter_changed)
+            column.addWidget(list_widget)
+            lists_row.addLayout(column)
+            self._script_lists[key] = list_widget
+        outer.addLayout(lists_row)
+        hint = QLabel(tr("From the catalogue records: manuscripts whose records do not "
+                         "describe the script are not included."))
+        hint.setWordWrap(True)
+        hint.setStyleSheet("font-size: 11px; color: #7f8c8d;")
+        outer.addWidget(hint)
+        group.setVisible(any(lw.count() for lw in self._script_lists.values()))
+        return group
 
     @staticmethod
     def _check_list_item(list_widget, data_value, checked):
@@ -1619,6 +1660,13 @@ class PreSearchFilterDialog(QDialog):
                 tr("Printed only"), '#ffebee',
                 lambda: self.material_combo.setCurrentIndex(0)))
 
+        # Script style / place chips
+        for key, list_widget in self._script_lists.items():
+            for value in self._get_checked_items(list_widget):
+                self.chip_bar_layout.addWidget(self._make_chip(
+                    self._script_label(key, value), '#efebe9',
+                    lambda checked=False, lw=list_widget, v=value: self._check_list_item(lw, v, False)))
+
         # Text term chips
         for mode, prefix, terms in [('all', '+', self._text_all), ('any', '~', self._text_any), ('not', '-', self._text_not)]:
             for t in terms:
@@ -1687,6 +1735,10 @@ class PreSearchFilterDialog(QDialog):
             filters['material_exclude'] = ['Printed']
         elif mat_mode == 'printed_only':
             filters['material_include'] = ['Printed']
+        for key, list_widget in self._script_lists.items():
+            chosen = self._get_checked_items(list_widget)
+            if chosen:
+                filters[key] = chosen
         if self._text_all:
             filters['text_all'] = list(self._text_all)
         if self._text_any:
@@ -1729,6 +1781,11 @@ class PreSearchFilterDialog(QDialog):
         """Get display name (without count) from data map."""
         text = data_map.get(key, key)
         return text.rsplit(' (', 1)[0].strip().lstrip().strip() if isinstance(text, str) else str(key)
+
+    @staticmethod
+    def _script_label(kind, value):
+        from shared.fjms_service import script_value_label
+        return script_value_label(kind, value, CURRENT_LANG == 'he')
 
     def _update_count(self):
         """Recompute manuscript count in background thread."""
@@ -1807,6 +1864,11 @@ class PreSearchFilterDialog(QDialog):
         self.spin_date_to.setValue(0)
         self.chk_include_undated.setChecked(False)
         self.material_combo.setCurrentIndex(0)
+        for list_widget in self._script_lists.values():
+            list_widget.blockSignals(True)
+            for i in range(list_widget.count()):
+                list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
+            list_widget.blockSignals(False)
         self._text_all.clear()
         self._text_any.clear()
         self._text_not.clear()

@@ -20,6 +20,7 @@ from web.components.typography import h2, h3, h4
 from web.clipboard import copy_text_to_clipboard
 from web.components.filter_panel import (
     build_domain_options, build_author_options, build_work_options,
+    build_script_options, build_script_filter_row,
     build_filter_summary, has_active_filters, persist_value,
     load_filter_state, consume_incoming_filters, recompute_filter_count,
     create_filter_handlers, filter_unavailable_message,
@@ -387,6 +388,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         s = search_state
         n = len(s.filter_domains or []) + len(s.filter_authors or []) + len(s.filter_works or [])
         n += len(s.filter_material_exclude or [])
+        n += len(s.filter_script_styles or []) + len(s.filter_script_places or [])
         n += len(s.filter_measurement_material or [])  # Codex on #434: the chips showed it, the badge did not
         # Text position is not in has_active_filters (it changes the search's
         # semantics rather than its scope) but the chip bar shows it, so the
@@ -1159,6 +1161,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             search_state.filter_date_from = None
                             search_state.filter_date_to = None
                             search_state.filter_material_exclude = []
+                            search_state.filter_script_styles = []
+                            search_state.filter_script_places = []
                             search_state.filter_text_all = []
                             search_state.filter_text_any = []
                             search_state.filter_text_not = []
@@ -1171,6 +1175,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             date_from_input.value = None
                             date_to_input.value = None
                             exclude_printed_cb.value = False
+                            _filter_refs['script_styles'].value = []
+                            _filter_refs['script_places'].value = []
                             if _filter_refs.get('text_input'):
                                 _filter_refs['text_input'].value = ''
                             # Clear measurement filters (Phase 54)
@@ -1195,6 +1201,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                         ui.button(tr('Clear All'), icon='clear_all',
                                   on_click=_clear_all_adv_filters).props('flat dense no-caps')
+
+                # Script style / place (catalogue)
+                build_script_filter_row(search_state, _filter_refs, tr)
 
                 # Text filter row
                 with ui.row().classes('w-full gap-2 items-end'):
@@ -1536,6 +1545,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             on_click=lambda: None, color='red-2',
                         ).on('remove', lambda m=mat: _remove_filter('material', m))
 
+                # Script style / place chips
+                for _skey in ('script_styles', 'script_places'):
+                    _sopts = _filter_refs[_skey].options or {}
+                    for _sv in getattr(search_state, f'filter_{_skey}'):
+                        ui.chip(
+                            _get_display_name(_sv, _sopts), icon='draw', removable=True,
+                            on_click=lambda: None, color='brown-2',
+                        ).on('remove', lambda _k=_skey, _v=_sv: _remove_filter(_k, _v))
+
                 # Text filter chips
                 for t in search_state.filter_text_all:
                     ui.chip(f"+ {t}", icon='check_circle', removable=True,
@@ -1649,6 +1667,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     search_state.filter_material_exclude.remove(value)
                     persist_value('search_filter_material_exclude', search_state.filter_material_exclude)
                     exclude_printed_cb.value = 'Printed' in search_state.filter_material_exclude
+            elif filter_type in ('script_styles', 'script_places'):
+                _vals = [v for v in getattr(search_state, f'filter_{filter_type}') if v != value]
+                setattr(search_state, f'filter_{filter_type}', _vals)
+                _filter_refs[filter_type].value = list(_vals)
+                persist_value(f'search_filter_{filter_type}', _vals)
             await _recompute_filter_count()
             _update_chip_bar()
 
@@ -1712,6 +1735,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         date_from_input.on('blur', _handlers['on_date_from_change'])
         date_to_input.on('blur', _handlers['on_date_to_change'])
         exclude_printed_cb.on('update:model-value', _handlers['on_exclude_printed_change'])
+        _filter_refs['script_styles'].on('update:model-value', _handlers['on_script_styles_change'])
+        _filter_refs['script_places'].on('update:model-value', _handlers['on_script_places_change'])
 
         # #22: chip bar + updater now exist — mark ready so early callbacks may call it.
         _chip_bar_ready['value'] = True
@@ -5061,6 +5086,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.filter_date_from = filters.get('date_from')
             search_state.filter_date_to = filters.get('date_to')
             search_state.filter_material_exclude = list(filters.get('material_exclude') or [])
+            search_state.filter_script_styles = list(filters.get('script_styles') or [])
+            search_state.filter_script_places = list(filters.get('script_places') or [])
             search_state.filter_text_all = list(filters.get('text_all') or [])
             search_state.filter_text_any = list(filters.get('text_any') or [])
             search_state.filter_text_not = list(filters.get('text_not') or [])
@@ -5072,6 +5099,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             date_from_input.value = search_state.filter_date_from
             date_to_input.value = search_state.filter_date_to
             exclude_printed_cb.value = 'Printed' in search_state.filter_material_exclude
+            _filter_refs['script_styles'].value = list(search_state.filter_script_styles)
+            _filter_refs['script_places'].value = list(search_state.filter_script_places)
+            persist_value('search_filter_script_styles', search_state.filter_script_styles)
+            persist_value('search_filter_script_places', search_state.filter_script_places)
             # Persist restored filters
             persist_value('search_filter_domains', search_state.filter_domains)
             persist_value('search_filter_authors', search_state.filter_authors)
@@ -5490,6 +5521,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 date_from=search_state.filter_date_from,
                 date_to=search_state.filter_date_to,
                 material_exclude=_copied(search_state.filter_material_exclude),
+                script_styles=_copied(search_state.filter_script_styles),
+                script_places=_copied(search_state.filter_script_places),
                 text_all=_copied(search_state.filter_text_all),
                 text_any=_copied(search_state.filter_text_any),
                 text_not=_copied(search_state.filter_text_not),
@@ -5815,6 +5848,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 'date_from': getattr(search_state, 'filter_date_from', None),
                 'date_to': getattr(search_state, 'filter_date_to', None),
                 'material_exclude': list(getattr(search_state, 'filter_material_exclude', None) or []),
+                'script_styles': list(getattr(search_state, 'filter_script_styles', None) or []),
+                'script_places': list(getattr(search_state, 'filter_script_places', None) or []),
                 'text_all': list(getattr(search_state, 'filter_text_all', None) or []),
                 'text_any': list(getattr(search_state, 'filter_text_any', None) or []),
                 'text_not': list(getattr(search_state, 'filter_text_not', None) or []),
@@ -5937,6 +5972,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             'date_from': getattr(search_state, 'filter_date_from', None),
             'date_to': getattr(search_state, 'filter_date_to', None),
             'material_exclude': list(getattr(search_state, 'filter_material_exclude', None) or []),
+            'script_styles': list(getattr(search_state, 'filter_script_styles', None) or []),
+            'script_places': list(getattr(search_state, 'filter_script_places', None) or []),
             'text_all': list(getattr(search_state, 'filter_text_all', None) or []),
             'text_any': list(getattr(search_state, 'filter_text_any', None) or []),
             'text_not': list(getattr(search_state, 'filter_text_not', None) or []),
@@ -6092,6 +6129,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             'date_from': search_state.filter_date_from,
                             'date_to': search_state.filter_date_to,
                             'material_exclude': list(search_state.filter_material_exclude or []),
+                            'script_styles': list(search_state.filter_script_styles or []),
+                            'script_places': list(search_state.filter_script_places or []),
                             'text_all': list(search_state.filter_text_all or []),
                             'text_any': list(search_state.filter_text_any or []),
                             'text_not': list(search_state.filter_text_not or []),
@@ -6573,6 +6612,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             return
         work_select.options = w
         work_select.update()
+        s = await run.io_bound(build_script_options, lang)
+        if s is None:
+            return
+        for _skey, _sopts in s.items():
+            _filter_refs[_skey].options = _sopts
+            _filter_refs[_skey].update()
         _update_chip_bar()
 
     # Cat-2: deferred select option population - filter selects must be mounted.

@@ -86,6 +86,15 @@ MEASUREMENT_FILTER_KEYS = (
     'text_density_min', 'text_density_max', 'measurement_material',
 )
 
+# Script filters: the script style and script place the catalogue records give
+# (catalog_fields, one row per catalogue record). Filter key -> FieldCategory.
+SCRIPT_FILTER_CATEGORIES = {
+    'script_styles': 'TypeOfScriptStyle',
+    'script_places': 'TypeOfScriptPlace',
+}
+# Recorded values that describe no script: never offered as a choice.
+_SCRIPT_NON_VALUES = frozenset({'Unknown', 'Cannot be determined'})
+
 # Default sidecar filename
 _SIDECAR_FILENAME = "fjms_enrichment.db"
 _SIDECAR_DIR = "fist_data"
@@ -795,6 +804,9 @@ class FjmsService:
         # None = not yet computed. Empty set = computed but vocabulary is empty
         # (which validate_filter_values treats as fail-closed, NOT allow-all).
         self._materials_cache: Optional[set] = None
+        # Script filter choices per filter key (see get_script_values).
+        self._script_values_cache: dict = {}
+        self._script_values_lock = threading.Lock()
         # SEED-023: per-thread registry of populated catalog-filter TEMP tables
         # (name -> token). The PGP/edition membership sets are static per process,
         # so each thread's TEMP table is built once and reused across requests.
@@ -1126,6 +1138,8 @@ class FjmsService:
         line_height_min: float = None, line_height_max: float = None,
         text_density_min: float = None, text_density_max: float = None,
         measurement_material: list[str] = None,
+        script_styles: list[str] = None,
+        script_places: list[str] = None,
     ) -> Optional[set]:
         """Return the set of sys_ids matching all provided filter criteria (intersection).
 
@@ -1155,6 +1169,11 @@ class FjmsService:
             text_all: FTS5 terms that must ALL appear (AND).
             text_any: FTS5 terms where ANY must appear (OR).
             text_not: FTS5 terms that must NOT appear.
+            script_styles: Script styles (TypeOfScriptStyle values, e.g. 'Square').
+            script_places: Script places (TypeOfScriptPlace values, e.g. 'Spanish').
+                A manuscript matches when any of its catalogue records gives one
+                of the chosen values; the two filters AND with each other and
+                with the rest. Not affected by include/exclude mode.
 
         Returns:
             None when ALL filter params are None/empty (meaning "no restriction").
@@ -1197,6 +1216,8 @@ class FjmsService:
             or line_height_min is not None or line_height_max is not None
             or text_density_min is not None or text_density_max is not None
             or measurement_material
+            or script_styles
+            or script_places
         )
         if not has_any:
             return None
@@ -1404,6 +1425,19 @@ class FjmsService:
                 )
                 params.extend(material_exclude)
 
+            # Script style / place filters
+            for values, category in ((script_styles, SCRIPT_FILTER_CATEGORIES['script_styles']),
+                                     (script_places, SCRIPT_FILTER_CATEGORIES['script_places'])):
+                if values:
+                    placeholders = ','.join('?' * len(values))
+                    conditions.append(
+                        f"c.AlmaId IN ("
+                        f"SELECT AlmaId FROM catalog_fields "
+                        f"WHERE FieldCategory = ? AND FieldValue IN ({placeholders}))"
+                    )
+                    params.append(category)
+                    params.extend(values)
+
             # Text filters (FTS5 hybrid: catalog_fts + domain LIKE)
             if text_all or text_any or text_not:
                 def _fts_escape(term: str) -> str:
@@ -1562,6 +1596,45 @@ class FjmsService:
             self._materials_cache = set()
             return self._materials_cache
 
+    def get_script_values(self, kind: str) -> list[dict]:
+        """The choices a script filter offers, most manuscripts first.
+
+        Args:
+            kind: a SCRIPT_FILTER_CATEGORIES key ('script_styles' or 'script_places').
+
+        Returns:
+            [{'value': 'Square', 'value_heb': 'מרובע', 'count': N}, ...], where
+            count is the number of manuscripts any of whose catalogue records
+            gives the value. Empty when the sidecar is absent or the lookup
+            failed (not cached then, so a later call retries).
+        """
+        category = SCRIPT_FILTER_CATEGORIES.get(kind)
+        if category is None:
+            raise ValueError(f"unknown script filter {kind!r}")
+        with self._script_values_lock:
+            cached = self._script_values_cache.get(kind)
+            if cached is not None:
+                return cached
+            if self._conn is None:
+                return []
+            try:
+                cursor = self._conn.execute(
+                    "SELECT FieldValue, MAX(FieldValueHeb), COUNT(DISTINCT AlmaId) "
+                    "FROM catalog_fields WHERE FieldCategory = ? "
+                    "AND FieldValue IS NOT NULL AND FieldValue != '' "
+                    "GROUP BY FieldValue ORDER BY 3 DESC, 1",
+                    (category,),
+                )
+                values = [
+                    {'value': row[0], 'value_heb': row[1] or '', 'count': row[2]}
+                    for row in cursor if row[0] not in _SCRIPT_NON_VALUES
+                ]
+            except Exception as e:
+                logger.error("FjmsService.get_script_values(%s) error: %s", kind, e)
+                return []
+            self._script_values_cache[kind] = values
+            return values
+
     def validate_filter_values(self, filters: dict) -> None:
         """Probe each filter value against FJMS lookup tables (R2-#3 policy).
 
@@ -1575,7 +1648,8 @@ class FjmsService:
 
         Args:
             filters: dict with optional keys 'domains', 'authors', 'works',
-                     'library', 'library_filter_mode', 'materials', 'date_from',
+                     'library', 'library_filter_mode', 'materials',
+                     'script_styles', 'script_places', 'date_from',
                      'date_to' (D-15 shape, post-Pydantic validation).
                      'library' is validated against LIBRARY_CODES (Phase 129).
                      'library_filter_mode' is intentionally not validated here —
@@ -1721,6 +1795,26 @@ class FjmsService:
                     raise APIError(
                         'unresolvable_filter_value',
                         f"filter materials={v!r} not found in FJMS pipeline",
+                        http_status=400,
+                    )
+
+        # ---- Script styles / places: the choices the filter controls offer.
+        for key in SCRIPT_FILTER_CATEGORIES:
+            values = filters.get(key)
+            if not values:
+                continue
+            valid = {item['value'] for item in self.get_script_values(key)}
+            if not valid:
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    f'The {key} filter vocabulary is unavailable or empty',
+                    http_status=503,
+                )
+            for v in values:
+                if v not in valid:
+                    raise APIError(
+                        'unresolvable_filter_value',
+                        f"filter {key}={v!r} is not a script value the catalogue records",
                         http_status=400,
                     )
         # date_from / date_to: any int is a valid token; range matching is FJMS's job.
@@ -4020,6 +4114,31 @@ def get_filter_sys_ids(**kwargs):
     Raises FilterUnavailable exactly as the method does.
     """
     return get_fjms_service(thread_safe=True).get_filter_sys_ids(**kwargs)
+
+
+def script_filter_options(kind: str, is_heb: bool, service=None) -> dict:
+    """{value: 'label (count)'} for a script filter's choices, most manuscripts
+    first; the label is Hebrew when *is_heb* and the catalogue has one. Empty
+    when the catalogue cannot answer. Reads the sidecar on its first call per
+    kind -- call it off the UI thread / event loop."""
+    svc = service if service is not None else get_fjms_service(thread_safe=True)
+    return {
+        item['value']: f"{(item['value_heb'] if is_heb and item['value_heb'] else item['value'])} "
+                       f"({item['count']:,})"
+        for item in svc.get_script_values(kind)
+    }
+
+
+def script_value_label(kind: str, value: str, is_heb: bool, service=None) -> str:
+    """A chosen script value as the user reads it (Hebrew when *is_heb*). Uses
+    the choices already loaded; the stored value itself when they are not."""
+    if not is_heb:
+        return value
+    svc = service if service is not None else get_fjms_service(thread_safe=True)
+    for item in svc._script_values_cache.get(kind) or ():
+        if item['value'] == value:
+            return item['value_heb'] or value
+    return value
 
 
 # ── #17: what the open catalog can answer (for the filter controls) ───────
