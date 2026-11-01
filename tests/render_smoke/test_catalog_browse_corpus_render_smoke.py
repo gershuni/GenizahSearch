@@ -71,6 +71,31 @@ def test_the_page_lists_the_corpus_and_marks_uncatalogued_rows():
         _run(driver)
 
 
+class _SpanFjms(_CorpusFjms):
+    def get_browse_results(self, *args, **kwargs):
+        return {'results': [
+            {'sys_id': '990000000010205171', 'title': 'Spanned', 'copy_date': '944',
+             'copy_span': '944–1100', 'catalogued': True},
+            {'sys_id': '990000000020205171', 'title': 'Undated', 'copy_date': '-99',
+             'copy_span': '', 'catalogued': True},
+            {'sys_id': '990000000030205171', 'title': 'Older row', 'copy_date': '1200'},
+        ], 'total': 3}
+
+
+def test_the_date_column_shows_the_copy_span():
+    async def driver(user):
+        await user.open('/catalog-browse')
+        await _wait_for(user, 'Older row')
+        text = _page_text(user)
+        assert '944–1100' in text, text
+        assert '-99' not in text, text            # no date: an empty cell
+        assert '1200' in text, text               # a row without copy_span
+
+    with patch.object(catalog_browse, 'get_fjms_service', return_value=_SpanFjms()), \
+            patch.object(state, 'meta_mgr', _meta()):
+        _run(driver)
+
+
 class _FailingFjms(_FakeFjms):
     def __init__(self, reason):
         super().__init__()

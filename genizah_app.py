@@ -12299,7 +12299,9 @@ class GenizahGUI(QMainWindow):
             ident = f"{author_str} - {title}" if author_str and title else (author_str or title or "")
             if r.get("catalogued") is False:
                 ident = tr("No catalogue record")
-            date_str = r.get("copy_date", "")
+            # The copy span over the records ('944–1100', D18); a row from
+            # before the span existed keeps its start year.
+            date_str = r["copy_span"] if "copy_span" in r else r.get("copy_date", "")
             align = Qt.AlignmentFlag.AlignLeft if is_hebrew else Qt.AlignmentFlag.AlignRight
             actions_widget = ActionsHoverWidget(alignment=align)
             actions_widget.setLayoutDirection(Qt.LayoutDirection.LeftToRight)

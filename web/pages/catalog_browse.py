@@ -644,7 +644,9 @@ def create_catalog_browse_page(
             if r.get('catalogued') is False:
                 identification = tr("No catalogue record")
 
-            date_val = r.get('copy_date', '')
+            # The copy span over the records ('944–1100', D18); a row from
+            # before the span existed keeps its start year.
+            date_val = r['copy_span'] if 'copy_span' in r else r.get('copy_date', '')
 
             # Textual frame for detail
             textual_frame = r.get('textual_frame_heb', '') if lang == 'he' else r.get('textual_frame_eng', '')
