@@ -969,7 +969,8 @@ def drop_unavailable_criteria(criteria, service=None):
 def migrate_saved_filters(filters):
     """Saved pre-search filters in today's form (plan §6.4).
 
-    A date range and "include undated" become Period of copy (D18). The old
+    A date range and "include undated" become Period of copy (D18), when
+    the state is older than the criteria (no 'criteria' key). The old
     measurement bounds are not restored (R2, owner: "the least work"); a
     search saved with them must not show its stored rows, which were found
     with a filter that is no longer shown -- hence the second value. The
@@ -985,7 +986,9 @@ def migrate_saved_filters(filters):
         filters.pop(key, None)
     criteria = clean_criteria(filters.get('criteria'), strict=False)[0]
     date_from, date_to, undated = (filters.pop(k, None) for k in _OLD_DATE_KEYS)
-    if 'period' not in criteria:
+    # Saved criteria, even empty ones, are the answer: old dates are read only
+    # from state saved before there were criteria.
+    if 'criteria' not in filters:
         criteria = clean_criteria(dict(criteria, **period_from_dates(
             date_from or None, date_to or None, bool(undated))), strict=False)[0]
     if criteria:
@@ -1375,7 +1378,7 @@ class CriteriaDialog(QDialog):
                 self._add_offered_item(widget, key, offered[name], chosen)
             elif name in kept:
                 self._add_value_item(widget, name, tr(name) if name != "_none" else _value_label(key, {
-                    'value': name, 'label_en': 'Not recorded', 'label_he': 'לא נרשם'}), True)
+                    'value': name, 'label_en': 'Not recorded', 'label_he': 'ללא רישום'}), True)
         widget.blockSignals(False)
         controls['loaded'] = source
         self._pending.pop(key, None)

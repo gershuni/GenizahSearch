@@ -474,6 +474,9 @@ def test_saved_dates_become_the_period_and_old_measurements_are_dropped():
     kept = {'criteria': {'period': {'min': 1000}}, 'date_from': 900}
     assert dialogs_filter.migrate_saved_filters(kept)[0] == {'criteria': {'period': {'min': 1000}}}, (
         "a saved period wins over a stray old date")
+    newer = {'criteria': {}, 'date_from': 900}
+    assert dialogs_filter.migrate_saved_filters(newer)[0] == {}, (
+        "saved criteria, even none, are the answer: a stray old date is not read")
 
 
 @pytest.mark.parametrize("restore", ["_restore_regular_search_from_state",

@@ -36140,7 +36140,7 @@ class GenizahGUI(QMainWindow):
             cat = state.get('browse_catalog', {})
             from desktop.dialogs_filter import drop_unavailable_criteria, migrate_saved_filters
             _cat_migrated, _ = migrate_saved_filters(
-                {k: cat.get(k) for k in ('date_from', 'date_to', 'include_undated', 'criteria')})
+                {k: cat[k] for k in ('date_from', 'date_to', 'include_undated', 'criteria') if k in cat})
             _cat_criteria, _cat_dropped = drop_unavailable_criteria(_cat_migrated.get('criteria'))
             if _cat_dropped:
                 self._restore_notice(tr('Some saved filters were removed: this catalog data is not available.'))

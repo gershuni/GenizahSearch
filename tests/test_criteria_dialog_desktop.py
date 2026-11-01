@@ -288,7 +288,7 @@ def test_hebrew_labels_english_values(monkeypatch, tmp_path):
     try:
         _visit_all(dlg)
         texts = _texts(dlg, 'material')
-        assert texts == ['נייר (1)', 'קלף', 'לא נרשם (5)'], (
+        assert texts == ['נייר (1)', 'קלף', 'ללא רישום (5)'], (
             "the catalogue's Hebrew; the saved value this source does not offer, before Not recorded")
         assert dlg.get_criteria() == {'material': {'source': 'measured', 'values': ['Vellum'],
                                                    'mode': 'only'}}
