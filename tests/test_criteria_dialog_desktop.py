@@ -142,8 +142,10 @@ def test_the_live_total_is_the_service_answer_and_names_the_unrecorded(svc):
         expected = svc.get_filter_sys_ids(criteria=criteria, universe=UNIVERSE)
         assert len(expected) == 5
         assert dlg.total_label.text() == (
-            "5 manuscripts have these features (of which 3 with nothing recorded for Region)")
-        assert dlg.note_label.text().startswith("These criteria cover all 6 manuscripts. 2 have no")
+            "5 manuscripts have these features, of which 3 have no Region recorded")
+        assert dlg.note_label.text() == (
+            "These criteria cover all 6 manuscripts. 2 have no FJMS catalogue record: they match "
+            "'Not recorded', 'all except' and measured data (0 also have a catalogue size).")
     finally:
         dlg.deleteLater()
 
@@ -152,7 +154,7 @@ def test_a_count_that_cannot_run_is_an_error_not_a_number(svc):
     """No corpus list: "all except" cannot be counted (corpus_unavailable)."""
     dlg = _open({'region': {'values': ['Oriental'], 'mode': 'except'}}, universe=None)
     try:
-        assert dlg.total_label.text() == "Could not update filter count"
+        assert dlg.total_label.text() == "The count could not be computed."
     finally:
         dlg.deleteLater()
 
@@ -206,7 +208,7 @@ def test_clear_section_and_clear_all(svc):
         dlg._clear_all()
         assert dlg.get_criteria() == {}
         dlg._update_count()
-        assert dlg.total_label.text() == "No features chosen: all manuscripts are included."
+        assert dlg.total_label.text() == "No features chosen."
     finally:
         dlg.deleteLater()
 
@@ -288,8 +290,8 @@ def test_coverage_per_criterion(svc):
     dlg = _open()
     try:
         _visit_all(dlg)
-        assert dlg._controls['region']['coverage'].text() == "Recorded for 3 of 6"
-        assert dlg._controls['lines']['coverage'].text() == "Recorded for 4 of 6"
+        assert dlg._controls['region']['coverage'].text() == "recorded for 3 of 6"
+        assert dlg._controls['lines']['coverage'].text() == "recorded for 4 of 6"
     finally:
         dlg.deleteLater()
 

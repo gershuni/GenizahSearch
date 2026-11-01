@@ -2430,19 +2430,21 @@ class CriteriaCountWorker(QThread):
     itself ticked).
 
     Emits ``counted(tag, total, info)`` -- info: {'unrecorded': {key: n},
-    'universe': size or None, 'uncatalogued': n or None} -- or
-    ``failed(tag, reason)``. ``tag`` is the caller's, returned unchanged (a
+    'note': None, or with ``note=True`` {'corpus', 'uncatalogued', 'sized'}:
+    the corpus, its manuscripts with no catalogue record, and how many of
+    those have a catalogue size} -- or ``failed(tag, reason)``. ``tag`` is the caller's, returned unchanged (a
     newer count supersedes this one). Not ``finished``: that is QThread's own
     signal, which _keep_until_finished listens to."""
 
     counted = pyqtSignal(int, int, object)
     failed = pyqtSignal(int, str)
 
-    def __init__(self, criteria, universe=None, tag=0, parent=None):
+    def __init__(self, criteria, universe=None, tag=0, parent=None, *, note=False):
         super().__init__(parent)
         self._criteria = dict(criteria or {})
         self._universe = universe
         self._tag = tag
+        self._note = note
 
     def run(self):
         from shared.catalog_criteria import NOT_RECORDED, clean_criteria
@@ -2451,10 +2453,14 @@ class CriteriaCountWorker(QThread):
             criteria = clean_criteria(self._criteria)[0]
             universe = self._universe() if callable(self._universe) else self._universe
             fjms = get_fjms_service()
-            info = {'unrecorded': {}, 'universe': None, 'uncatalogued': None}
-            if universe is not None:
-                info['universe'] = len(universe)
-                info['uncatalogued'] = len(set(universe) - fjms.catalogued_ids())
+            info = {'unrecorded': {}, 'note': None}
+            if self._note and universe is not None:
+                uncatalogued = set(universe) - fjms.catalogued_ids()
+                no_size = [fjms.get_filter_sys_ids(
+                    criteria={key: {'not_recorded': True, 'source': 'catalogue'}}, universe=universe)
+                    for key in ('width', 'height')]
+                info['note'] = {'corpus': len(universe), 'uncatalogued': len(uncatalogued),
+                                'sized': len(uncatalogued - (no_size[0] & no_size[1]))}
             found = fjms.get_filter_sys_ids(criteria=criteria, universe=universe)
             if found is None:  # no criteria: the whole universe
                 self.counted.emit(self._tag, len(universe or ()), info)

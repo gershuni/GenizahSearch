@@ -1100,9 +1100,15 @@ class CriteriaDialog(QDialog):
             self.section_list.addItem(item)
             page = QWidget()
             page_layout = QVBoxLayout(page)
-            for criterion in (c for c in self._criteria if c.section == section.key):
+            members = [c for c in self._criteria if c.section == section.key]
+            for criterion in members:
                 build = self._build_list if criterion.kind == 'list' else self._build_range
                 page_layout.addWidget(build(criterion, saved.get(criterion.key, {})))
+            for help_text in self._section_help(members):
+                hint = QLabel(help_text)
+                hint.setWordWrap(True)
+                hint.setStyleSheet(_NOTE_STYLE)
+                page_layout.addWidget(hint)
             page_layout.addStretch()
             scroll = QScrollArea()
             scroll.setWidget(page)
@@ -1156,6 +1162,16 @@ class CriteriaDialog(QDialog):
         self._update_count()
 
     # -- building ---------------------------------------------------------------
+    @staticmethod
+    def _section_help(members):
+        """The panel's help lines (rules 3 and 4) for a section's criteria."""
+        lines = []
+        if any(c.category for c in members):
+            lines.append(tr("A manuscript matches when any of its catalogue records gives a ticked value."))
+        if any(c.page_column for c in members):
+            lines.append(tr("Measured values: every range set here holds on one measured page."))
+        return lines
+
     def _source_combo(self, criterion, spec):
         combo = QComboBox()
         for value, text in _SOURCE_CHOICES:
@@ -1191,7 +1207,7 @@ class CriteriaDialog(QDialog):
         top.addWidget(coverage)
         box.addLayout(top)
         search = QLineEdit()
-        search.setPlaceholderText(tr("Filter values..."))
+        search.setPlaceholderText(tr("Filter values"))
         search.setClearButtonEnabled(True)
         search.setVisible(False)
         search.textChanged.connect(lambda text, k=key: self._filter_values(k, text))
@@ -1202,7 +1218,7 @@ class CriteriaDialog(QDialog):
         values.itemChanged.connect(self._changed)
         box.addWidget(values)
         if key == 'attributes':
-            hint = QLabel(tr("A manuscript matches when it has any of the ticked attributes."))
+            hint = QLabel(tr("Any of the ticked attributes."))
             hint.setStyleSheet(_NOTE_STYLE)
             box.addWidget(hint)
         self._pending[key] = list(spec.get('values', []))
@@ -1370,7 +1386,7 @@ class CriteriaDialog(QDialog):
         controls = self._controls.get(key)
         if controls is None or source != self._source_of(key):
             return
-        controls['coverage'].setText(tr("Recorded for {n} of {total}").format(
+        controls['coverage'].setText(tr("recorded for {n} of {total}").format(
             n=f"{recorded:,}", total=f"{of:,}"))
 
     def _on_values_failed(self, key, source, reason):
@@ -1381,7 +1397,7 @@ class CriteriaDialog(QDialog):
         widget = controls['values']
         widget.blockSignals(True)
         widget.clear()
-        widget.addItem(QListWidgetItem(tr("The values could not be read.")))
+        widget.addItem(QListWidgetItem(tr("These values could not be read.")))
         widget.blockSignals(False)
 
     def _filter_values(self, key, text):
@@ -1470,9 +1486,7 @@ class CriteriaDialog(QDialog):
         self._count_tag += 1
         criteria = self.get_criteria()
         if not criteria:
-            self.total_label.setText(tr("No features chosen: all manuscripts are included.")
-                                     if self._within is None else
-                                     tr("No features chosen: every result is shown."))
+            self.total_label.setText(tr("No features chosen."))
             self.total_label.setStyleSheet(_COUNT_STYLE_OK)
             self.note_label.setVisible(False)
             return
@@ -1480,7 +1494,7 @@ class CriteriaDialog(QDialog):
         self.total_label.setStyleSheet(_COUNT_STYLE_OK)
         worker = CriteriaCountWorker(
             criteria, universe=self._within if self._within is not None else self._corpus,
-            tag=self._count_tag)
+            tag=self._count_tag, note=self._within is None and not self.note_label.text())
         worker.counted.connect(self._on_counted)
         worker.failed.connect(self._on_count_failed)
         worker.start()
@@ -1499,16 +1513,16 @@ class CriteriaDialog(QDialog):
             text = tr("{n} manuscripts have these features").format(n=f"{total:,}")
         for key, n in (info.get('unrecorded') or {}).items():
             if n:
-                text += " " + tr("(of which {n} with nothing recorded for {criterion})").format(
-                    n=f"{n:,}", criterion=_label(BY_KEY[key]))
+                text += tr(", of which {m} have no {label} recorded").format(
+                    m=f"{n:,}", label=_label(BY_KEY[key]))
         self.total_label.setText(text)
         self.total_label.setStyleSheet(_COUNT_STYLE_OK if total else _COUNT_STYLE_ERROR)
-        corpus, uncatalogued = info.get('universe'), info.get('uncatalogued')
-        if self._within is None and corpus and uncatalogued is not None:
+        note = info.get('note')
+        if note:  # read once per window
             self.note_label.setText(tr(
-                "These criteria cover all {total} manuscripts. {n} have no FJMS catalogue record: "
-                "they match \"Not recorded\", \"all except\" and measured data.").format(
-                    total=f"{corpus:,}", n=f"{uncatalogued:,}"))
+                "These criteria cover all {corpus} manuscripts. {uncatalogued} have no FJMS catalogue "
+                "record: they match 'Not recorded', 'all except' and measured data ({sized} also have a "
+                "catalogue size).").format(**{k: f"{v:,}" for k, v in note.items()}))
             self.note_label.setVisible(True)
 
     def _on_count_failed(self, tag, reason):
@@ -1517,7 +1531,7 @@ class CriteriaDialog(QDialog):
         self.total_label.setText(
             tr("The catalog data these features need is not available.")
             if reason in ('column_missing', 'sidecar_unavailable')
-            else tr("Could not update filter count"))
+            else tr("The count could not be computed."))
         self.total_label.setStyleSheet(_COUNT_STYLE_ERROR)
 
 

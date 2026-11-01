@@ -6305,24 +6305,29 @@ TRANSLATIONS.update({
     "Measured only": "מדידה בלבד",
     "Only these": "רק אלה",
     "All except these": "הכול חוץ מאלה",
-    "Filter values...": "סינון ערכים...",
+    "Filter values": "סינון ערכים",
     "or: not recorded": "או: לא נרשם",
-    "Recorded for {n} of {total}": "רשום ב-{n} מתוך {total}",
-    "The values could not be read.": "לא ניתן היה לקרוא את הערכים.",
+    "recorded for {n} of {total}": "רשום ל־{n} מתוך {total}",
+    "These values could not be read.": "לא ניתן היה לקרוא את הערכים.",
     "Clear section": "ניקוי הסעיף",
-    "A manuscript matches when it has any of the ticked attributes.":
-        "כתב יד נכלל אם יש לו לפחות אחת מהתכונות המסומנות.",
+    "Any of the ticked attributes.": "אחת לפחות מהתכונות המסומנות.",
+    "A manuscript matches when any of its catalogue records gives a ticked value.":
+        "כתב יד נכלל אם אחת מרשומות הקטלוג שלו נותנת ערך מסומן.",
+    "Measured values: every range set here holds on one measured page.":
+        "ערכים נמדדים: כל הטווחים שנבחרו כאן מתקיימים באותו עמוד נמדד.",
     "This catalogue data file is too old for this criterion: it needs version 5.1.0 or later.":
         "קובץ נתוני הקטלוג ישן מדי למאפיין זה: נדרשת גרסה 5.1.0 ומעלה.",
-    "No features chosen: all manuscripts are included.": "לא נבחרו מאפיינים: כל כתבי היד נכללים.",
-    "No features chosen: every result is shown.": "לא נבחרו מאפיינים: כל התוצאות מוצגות.",
-    "{n} manuscripts have these features": "ל-{n} כתבי יד יש מאפיינים אלה",
+    "No features chosen.": "לא נבחרו מאפיינים.",
+    "The count could not be computed.": "לא ניתן היה לחשב את המספר.",
+    "{n} manuscripts have these features": "ל־{n} כתבי יד יש מאפיינים אלה",
     "{n} of {total} results match": "{n} מתוך {total} התוצאות מתאימים",
-    "(of which {n} with nothing recorded for {criterion})": "(מהם {n} שלא נרשם להם {criterion})",
-    "These criteria cover all {total} manuscripts. {n} have no FJMS catalogue record: "
-    "they match \"Not recorded\", \"all except\" and measured data.":
-        "המאפיינים חלים על כל {total} כתבי היד. ל-{n} מהם אין רשומה בקטלוג FJMS: "
-        "הם נכללים ב\"לא נרשם\", ב\"הכול חוץ מאלה\" ובנתונים הממוחשבים.",
+    ", of which {m} have no {label} recorded": ", מהם {m} שלא נרשם להם {label}",
+    "These criteria cover all {corpus} manuscripts. {uncatalogued} have no FJMS catalogue "
+    "record: they match 'Not recorded', 'all except' and measured data ({sized} also have a "
+    "catalogue size).":
+        "המאפיינים חלים על כל {corpus} כתבי היד. ל־{uncatalogued} אין רשומה בקטלוג FJMS: "
+        "הם נכללים ב'לא נרשם', ב'הכול חוץ מ' ובנתונים הנמדדים (ל־{sized} מהם יש גם מידה "
+        "בקטלוג).",
     "The catalog data these features need is not available.":
         "נתוני הקטלוג הדרושים למאפיינים אלה אינם זמינים.",
     "The measurement filters could not be applied: every result is shown.":
@@ -6332,7 +6337,7 @@ TRANSLATIONS.update({
     "Manuscripts of the corpus with no FJMS catalogue record: they are listed after the catalogued ones.":
         "כתבי יד שאין להם רשומה בקטלוג FJMS: הם מוצגים אחרי כתבי היד המקוטלגים.",
     "dpi": "dpi",
-    "per 10 cm": "ל-10 ס\"מ",
+    "per 10 cm": "ל־10 ס\"מ",
 })
 
 # Catalogue criteria, PR 1a (2026-11-01): Catalog Browse lists the whole corpus,
