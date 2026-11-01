@@ -497,8 +497,10 @@ def _parallels_state():
 
 
 def test_parallels_a_filter_removed_while_its_lookup_waits_still_runs_the_search_pressed(server):  # noqa: F811
-    """Finding 1 (/parallels): as on /search, with the date filter -- read inside
-    the worker until now (domains/authors/works were already read before it)."""
+    """Finding 1 (/parallels): as on /search, with the catalogue criteria (the
+    date filter until PR 1b of the criteria plan) -- read, and copied deeply,
+    before the worker: a chip removed or a value edited in place while the
+    lookup waits must not change the search that was pressed."""
     _parallels_ready(server)
     held = _HeldFilterLookup(server.monkeypatch, answer={'M1'})
 
@@ -506,17 +508,18 @@ def test_parallels_a_filter_removed_while_its_lookup_waits_still_runs_the_search
         try:
             await a.open('/parallels')
             p_state = _parallels_state()
-            p_state.filter_date_from = 900
+            p_state.filter_criteria = {'period': {'min': 900}}
             _find_parallels(a)
             await _wait_for(held.entered.is_set)
-            p_state.filter_date_from = None             # the chip's x, while the lookup waits
+            p_state.filter_criteria['period']['min'] = 1500   # edited in place, while it waits
+            p_state.filter_criteria = {}                      # then the chip's x
             held.release.set()
             await wait_for_payloads(server.queue, 1)
         finally:
             held.release.set()
 
     run(driver)
-    assert held.kwargs and held.kwargs[0].get('date_from') == 900, held.kwargs
+    assert held.kwargs and held.kwargs[0].get('criteria') == {'period': {'min': 900}}, held.kwargs
     assert _restrict_sent(server.queue) == [{'M1'}]
 
 

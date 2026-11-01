@@ -876,7 +876,7 @@ The application fetches metadata and images from:
                     ui.markdown(desc).style('color: var(--text-secondary);')
 
         ui.markdown('''
-The **Search History** button (clock icon) near the **Search** button lists your recent searches. Clicking one restores its query, its search mode (with its variant level), **Gap** and **Text Position**, and its domain, author, work, date range, **Exclude Printed** and **Text Filter** choices under **Search only in...**, then runs the search again (an older entry that saved its results shows them instead). Other options — for example **Exclude Words** and the Responsa-style checkboxes — stay as they are.
+The **Search History** button (clock icon) near the **Search** button lists your recent searches. Clicking one restores its query, its search mode (with its variant level), **Gap** and **Text Position**, and its domain, author, work, **Manuscript features**, **Exclude Printed** and **Text Filter** choices under **Search only in...**, then runs the search again (an older entry that saved its results shows them instead). Other options — for example **Exclude Words** and the Responsa-style checkboxes — stay as they are.
         ''').style('color: var(--text-secondary);').classes('mb-4')
 
         h3('Text Position (for join detection)', classes='text-lg font-semibold mb-2 mt-2', style='color: var(--text-primary);')
@@ -986,7 +986,7 @@ Use the **Search only in...** panel (available on both Search and Parallels page
 - **Domain:** Filter by scholarly classification (e.g., Bible, Talmud, Poetry)
 - **Author:** Filter by attributed author
 - **Work:** Filter by specific work title
-- **Date Range:** Filter by manuscript dating
+- **Manuscript features:** a window of catalogue criteria — period of copy, language and script, script style and region, vocalization, columns, lines, physical status, material, attributes, and computer-generated measurements. Each list can take "only these" or "all except these"; lines, size and material can come from the catalogue, the measurement, or either. The window shows how many manuscripts match before you apply it. The same window is on the **Browse by Identification** page, which lists the manuscripts themselves
 - **Material:** Filter by material type (manuscript vs. printed)
 
 **How it works:**
@@ -1685,7 +1685,7 @@ def _create_hebrew_content(precision=None, band_counts=None):
                     ui.markdown(desc).style('color: var(--text-secondary);')
 
         ui.markdown('''
-כפתור **היסטוריית חיפוש** (סמל השעון) שליד כפתור **חפש** מציג את החיפושים האחרונים שלכם. לחיצה על אחד מהם משחזרת את השאילתא, את מצב החיפוש (עם רמת הווריאנטים שלו), את **מרווח** ואת **מיקום בטקסט**, ואת הבחירות של תחום, מחבר, חיבור, טווח תאריכים, **הסתר מודפסים** ו**סינון טקסט** שתחת **חפש רק ב...**, ואז מריצה את החיפוש מחדש (רשומה ישנה ששמרה את תוצאותיה מציגה אותן במקום זאת). אפשרויות אחרות — למשל **מילים להחרגה** ותיבות הסימון של חיפוש בסגנון פרויקט השו"ת — נשארות כפי שהן.
+כפתור **היסטוריית חיפוש** (סמל השעון) שליד כפתור **חפש** מציג את החיפושים האחרונים שלכם. לחיצה על אחד מהם משחזרת את השאילתא, את מצב החיפוש (עם רמת הווריאנטים שלו), את **מרווח** ואת **מיקום בטקסט**, ואת הבחירות של תחום, מחבר, חיבור, **מאפייני כתב היד**, **הסתר מודפסים** ו**סינון טקסט** שתחת **חפש רק ב...**, ואז מריצה את החיפוש מחדש (רשומה ישנה ששמרה את תוצאותיה מציגה אותן במקום זאת). אפשרויות אחרות — למשל **מילים להחרגה** ותיבות הסימון של חיפוש בסגנון פרויקט השו"ת — נשארות כפי שהן.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
 
         h3('מיקום בטקסט (לאיתור צירופים)', classes='text-lg font-semibold mb-2 mt-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
@@ -1796,7 +1796,7 @@ def _create_hebrew_content(precision=None, band_counts=None):
 - **תחום:** סינון לפי סיווג מדעי (כגון תנ"ך, תלמוד, שירה)
 - **מחבר:** סינון לפי מחבר מיוחס
 - **יצירה:** סינון לפי שם יצירה
-- **טווח תאריכים:** סינון לפי תיארוך כתב היד
+- **מאפייני כתב היד:** חלון של מאפיינים מהקטלוג — תקופת העתקה, שפה ואות, כתב ואזור, ניקוד, מספר טורים, מספר שורות, מצב פיזי, חומר, תכונות ונתונים ממוחשבים. בכל רשימה אפשר לבחור "רק אלה" או "הכול חוץ מאלה"; שורות, מידות וחומר יכולים לבוא מהקטלוג, מהמדידה או מאחד מהם. החלון מראה כמה כתבי יד מתאימים לפני שמחילים אותו. אותו חלון נמצא גם בדף **עיון לפי זיהוי**, שמציג את כתבי היד עצמם
 - **חומר:** סינון לפי סוג חומר (כתב יד מול דפוס)
 
 **אופן השימוש:**

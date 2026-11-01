@@ -121,41 +121,86 @@ def build_work_options(lang: str, domain=None, author=None) -> dict:
     return options
 
 
-def build_script_options(lang: str) -> dict:
-    """Options for the two script filter selects: {filter key: {value: 'label (count)'}}.
+# The catalogue criteria a "Search only in..." search runs with (PR 1b of
+# docs/plans/CATALOGUE_CRITERIA_PLAN.md): one value, ``state.filter_criteria``,
+# stored under '{prefix}_filter_criteria'. The keys below are what it replaced.
+LEGACY_DATE_KEYS = ('filter_date_from', 'filter_date_to')
+LEGACY_SCRIPT_KEYS = ('filter_script_styles', 'filter_script_places')
+# Saved measurement filters are not restored (R2, "the least work"): the
+# page drops them, and the rows stored with them, before it reads either.
+LEGACY_MEASUREMENT_KEYS = (
+    'filter_width_min', 'filter_width_max', 'filter_height_min', 'filter_height_max',
+    'filter_line_count_min', 'filter_line_count_max', 'filter_line_height_min',
+    'filter_line_height_max', 'filter_text_density_min', 'filter_text_density_max',
+    'filter_measurement_material',
+)
 
-    Args:
-        lang: Language code ('he' or 'en'), passed explicitly as for
-              build_domain_options. Reads the sidecar: run it in run.io_bound().
-    """
-    from shared.fjms_service import SCRIPT_FILTER_CATEGORIES, script_filter_options
-    return {key: script_filter_options(key, lang == 'he') for key in SCRIPT_FILTER_CATEGORIES}
+
+def saved_criteria_of(filters: dict) -> dict:
+    """The criteria a saved filter dict (a history entry, a run, an incoming
+    handoff) carries: its 'criteria'; a dict saved before the criteria
+    existed (no 'criteria' at all, not even empty) has its old date range
+    read in as the period of copy instead (D18). Old measurement keys are
+    not read (R2)."""
+    from shared.catalog_criteria import clean_criteria, period_from_dates
+    filters = filters if isinstance(filters, dict) else {}
+    if filters.get('criteria') is not None:
+        return clean_criteria(filters.get('criteria'), strict=False)[0]
+    return period_from_dates(filters.get('date_from'), filters.get('date_to'),
+                             bool(filters.get('include_undated')))
 
 
-def build_script_filter_row(state, filter_refs: dict, tr_func):
-    """The Script Style / Script Place selects of a "Search only in..." panel.
+def restore_saved_criteria(filters: dict, notify: bool = True) -> dict:
+    """``saved_criteria_of`` without the criteria the open catalogue file is
+    KNOWN not to answer (rule 9) -- every restore path goes through it (a
+    history entry, a run, a page snapshot, a handoff), so none brings back a
+    criterion the file cannot answer. Says so when it drops one."""
+    criteria, dropped = drop_unsupported_criteria(saved_criteria_of(filters))
+    if dropped and notify:
+        notify_dropped_filters()
+    return criteria
 
-    Their options are loaded after the page renders (build_script_options). The
-    selects go into filter_refs under 'script_styles' / 'script_places'; the page
-    wires create_filter_handlers' handlers of the same names to them.
-    """
-    from nicegui import ui
-    with ui.row().classes('w-full gap-4 flex-wrap items-end').mark('filter-script-row'):
-        for key, label in (('script_styles', tr_func('Script Style')),
-                           ('script_places', tr_func('Script Place'))):
-            with ui.column().classes('gap-1 min-w-48 flex-grow'):
-                ui.label(label).classes('text-xs font-medium').style('color: var(--text-secondary);')
-                filter_refs[key] = ui.select(
-                    options={},
-                    value=list(getattr(state, f'filter_{key}', None) or []),
-                    multiple=True,
-                    with_input=True,
-                    clearable=True,
-                ).classes('w-full').props('outlined dense use-chips')
-        ui.label(tr_func('From the catalogue records: manuscripts whose records do not '
-                         'describe the script are not included.')).classes(
-            'text-xs w-full'
-        ).style('color: var(--text-muted);')
+
+def notify_dropped_filters() -> None:
+    """The one notice for saved filters the open catalog cannot answer (#17)."""
+    try:
+        from nicegui import ui
+        from web.translations import tr
+        ui.notify(tr('Some saved filters were removed: this catalog data is not available.'),
+                  type='info')
+    except Exception:  # no page context (a worker, a test): the drop stands, unannounced
+        logger.debug("notify_dropped_filters: no page context", exc_info=True)
+
+
+def drop_unsupported_criteria(criteria: dict) -> tuple[dict, list]:
+    """*criteria* without those the open catalogue file is KNOWN not to
+    answer (a 5.0.0 file, rule 9), and the keys dropped."""
+    from shared.fjms_service import get_fjms_service
+    from web.components.criteria_panel import drop_unsupported
+    try:
+        fjms = get_fjms_service(thread_safe=True)
+    except Exception:
+        return dict(criteria or {}), []
+    return drop_unsupported(criteria, fjms)
+
+
+def retire_old_saved_filters(storage_prefix: str, reset=None) -> bool:
+    """R2: saved measurement filters from before the criteria are not
+    restored. When any is set, clear them -- and the search saved with them
+    (``reset``: storage key -> its empty value: the rows, and the run that
+    would restore them as a finished search with no rows), so that what is
+    shown is what runs: the search runs again. Called at page open, before
+    the saved rows are read. True when something was retired."""
+    from web.safe_storage import safe_user_get as _sg
+    pfx = storage_prefix
+    stale = [k for k in LEGACY_MEASUREMENT_KEYS if _sg(f'{pfx}_{k}', None) not in (None, [], ())]
+    for key in LEGACY_MEASUREMENT_KEYS + LEGACY_SCRIPT_KEYS:
+        if _sg(f'{pfx}_{key}', None) is not None:
+            persist_value(f'{pfx}_{key}', None)
+    if stale:
+        for key, empty in (reset or {}).items():
+            persist_value(key, empty)
+    return bool(stale)
 
 
 def build_filter_summary(filters: dict, tr_func, get_language_func, max_len: int = 50) -> str:
@@ -163,8 +208,8 @@ def build_filter_summary(filters: dict, tr_func, get_language_func, max_len: int
 
     Args:
         filters: Dict with keys: include_mode, domains, authors, works,
-                 date_from, date_to, material_exclude, material_include,
-                 script_styles, script_places.
+                 material_exclude, material_include, criteria (an entry saved
+                 before the criteria: date_from, date_to).
         tr_func: Translation function (page-context-dependent).
         get_language_func: Language getter function (page-context-dependent).
         max_len: Maximum summary string length.
@@ -204,30 +249,27 @@ def build_filter_summary(filters: dict, tr_func, get_language_func, max_len: int
     n_work = len(filters.get('works', []))
     if n_work:
         parts.append(f"{tr_func('Work')} \u00d7{n_work}")
-    df, dt = filters.get('date_from'), filters.get('date_to')
-    if df and dt:
-        parts.append(f"{df}-{dt}")
-    elif df:
-        parts.append(f"{df}+")
-    elif dt:
-        parts.append(f"-{dt}")
     if filters.get('material_exclude'):
         parts.append(tr_func("No printed"))
     elif filters.get('material_include'):
         parts.append(tr_func("Printed only"))
-    script_parts = []
-    if filters.get('script_styles') or filters.get('script_places'):
-        from shared.fjms_service import SCRIPT_FILTER_CATEGORIES, script_value_label
-        is_heb = get_language_func() == 'he'
-        for key in SCRIPT_FILTER_CATEGORIES:
-            for v in filters.get(key) or []:
-                script_parts.append(script_value_label(key, str(v), is_heb))
-    # Exclude mode never turns the script filter around: under "exclude" a
-    # script value would say the opposite of what was searched.
+    # The criteria: one chip text each. Exclude mode never turns them around
+    # (rule 7), so they are never listed under "exclude".
+    criteria_parts = []
+    criteria = saved_criteria_of(filters)
+    if criteria:
+        lang = get_language_func()
+        try:
+            from shared.fjms_service import get_fjms_service
+            chips = get_fjms_service(thread_safe=True).criteria_chips(criteria, lang)
+        except Exception:
+            from shared.catalog_criteria import criteria_chips
+            chips = criteria_chips(criteria, lang)
+        criteria_parts = [text for _key, text in chips]
     if filters.get('include_mode', True):
-        parts += script_parts
-        script_parts = []
-    groups = [(prefix, parts), (tr_func('include'), script_parts)]
+        parts += criteria_parts
+        criteria_parts = []
+    groups = [(prefix, parts), (tr_func('include'), criteria_parts)]
     summary = ' '.join(f"[{p}: {', '.join(g)}]" for p, g in groups if g)
     if not summary:
         return ''
@@ -244,33 +286,19 @@ def has_active_filters(state) -> bool:
 
     Args:
         state: Any object with filter_domains, filter_authors, filter_works,
-               filter_date_from, filter_date_to, filter_material_exclude,
-               filter_text_all, filter_text_any, filter_text_not attributes.
+               filter_material_exclude, filter_text_all, filter_text_any,
+               filter_text_not and filter_criteria attributes.
     """
+    from shared.catalog_criteria import clean_criteria
     return any([
         state.filter_domains,
         state.filter_authors,
         state.filter_works,
-        state.filter_date_from is not None,
-        state.filter_date_to is not None,
         state.filter_material_exclude,
-        bool(getattr(state, 'filter_script_styles', None)),
-        bool(getattr(state, 'filter_script_places', None)),
         state.filter_text_all,
         state.filter_text_any,
         state.filter_text_not,
-        # Measurement filters (Phase 54)
-        getattr(state, 'filter_width_min', None) is not None,
-        getattr(state, 'filter_width_max', None) is not None,
-        getattr(state, 'filter_height_min', None) is not None,
-        getattr(state, 'filter_height_max', None) is not None,
-        getattr(state, 'filter_line_count_min', None) is not None,
-        getattr(state, 'filter_line_count_max', None) is not None,
-        getattr(state, 'filter_line_height_min', None) is not None,
-        getattr(state, 'filter_line_height_max', None) is not None,
-        getattr(state, 'filter_text_density_min', None) is not None,
-        getattr(state, 'filter_text_density_max', None) is not None,
-        bool(getattr(state, 'filter_measurement_material', None)),
+        bool(clean_criteria(getattr(state, 'filter_criteria', None), strict=False)[0]),
     ])
 
 
@@ -304,11 +332,15 @@ def load_filter_state(state, storage_prefix: str) -> list:
         storage_prefix: Storage key prefix (e.g., 'search' or 'parallels').
 
     Returns:
-        The keys of saved measurement filters removed (from state AND from
-        storage) because the open catalog is KNOWN not to have that data
-        (#17); empty otherwise -- including when there is no catalog at all,
+        The keys of saved criteria removed (from state AND from storage)
+        because the open catalog is KNOWN not to have that data (rule 9,
+        #17); empty otherwise -- including when there is no catalog at all,
         which may be temporary, so nothing is dropped then. The caller shows
         one notice when the list is non-empty.
+
+    A session saved before the criteria keeps its date range as the period
+    of copy (D18); its measurement filters were retired before this runs
+    (``retire_old_saved_filters``, R2).
     """
     from web.safe_storage import safe_user_get as _sg
     pfx = storage_prefix
@@ -323,49 +355,30 @@ def load_filter_state(state, storage_prefix: str) -> list:
     _fw = _sg(f'{pfx}_filter_works')
     state.filter_works = _fw if _fw is not None else ([_legacy_work] if _legacy_work else [])
     state.filter_include_mode = _sg(f'{pfx}_filter_include_mode', True)
-    state.filter_date_from = _sg(f'{pfx}_filter_date_from', None)
-    state.filter_date_to = _sg(f'{pfx}_filter_date_to', None)
     _fme = _sg(f'{pfx}_filter_material_exclude')
     state.filter_material_exclude = _fme if _fme is not None else []
-    for _key in ('script_styles', 'script_places'):
-        _fs = _sg(f'{pfx}_filter_{_key}')
-        setattr(state, f'filter_{_key}', list(_fs) if isinstance(_fs, list) else [])
     _fta = _sg(f'{pfx}_filter_text_all')
     state.filter_text_all = _fta if _fta is not None else []
     _ftany = _sg(f'{pfx}_filter_text_any')
     state.filter_text_any = _ftany if _ftany is not None else []
     _ftn = _sg(f'{pfx}_filter_text_not')
     state.filter_text_not = _ftn if _ftn is not None else []
-    # Measurement filters (Phase 54)
-    state.filter_width_min = _sg(f'{pfx}_filter_width_min', None)
-    state.filter_width_max = _sg(f'{pfx}_filter_width_max', None)
-    state.filter_height_min = _sg(f'{pfx}_filter_height_min', None)
-    state.filter_height_max = _sg(f'{pfx}_filter_height_max', None)
-    state.filter_line_count_min = _sg(f'{pfx}_filter_line_count_min', None)
-    state.filter_line_count_max = _sg(f'{pfx}_filter_line_count_max', None)
-    state.filter_line_height_min = _sg(f'{pfx}_filter_line_height_min', None)
-    state.filter_line_height_max = _sg(f'{pfx}_filter_line_height_max', None)
-    state.filter_text_density_min = _sg(f'{pfx}_filter_text_density_min', None)
-    state.filter_text_density_max = _sg(f'{pfx}_filter_text_density_max', None)
-    _fmm = _sg(f'{pfx}_filter_measurement_material')
-    state.filter_measurement_material = _fmm if _fmm is not None else []
+    # Catalogue criteria; a session from before them: its dates (D18).
+    saved = {'criteria': _sg(f'{pfx}_filter_criteria', None),
+             'date_from': _sg(f'{pfx}_filter_date_from', None),
+             'date_to': _sg(f'{pfx}_filter_date_to', None)}
+    criteria = saved_criteria_of(saved)
+    if saved['date_from'] is not None or saved['date_to'] is not None:
+        persist_value(f'{pfx}_filter_date_from', None)
+        persist_value(f'{pfx}_filter_date_to', None)
+        persist_value(f'{pfx}_filter_criteria', criteria)
 
-    # #17: a saved filter the open catalog is known not to answer would make
-    # every search fail; drop it here, once, and say so.
-    try:
-        from shared.fjms_service import unavailable_measurement_filter_keys
-        bad = unavailable_measurement_filter_keys()
-    except Exception:
-        logger.debug("load_filter_state: catalog capability check failed", exc_info=True)
-        bad = frozenset()
-    dropped = []
-    for key in sorted(bad):
-        attr = f'filter_{key}'
-        empty = [] if key == 'measurement_material' else None
-        if getattr(state, attr, None) not in (None, [], ()):
-            dropped.append(key)
-            setattr(state, attr, empty)
-            persist_value(f'{pfx}_filter_{key}', empty)
+    # #17 / rule 9: a saved criterion the open catalog is known not to
+    # answer would make every search fail; drop it here, once, and say so.
+    criteria, dropped = drop_unsupported_criteria(criteria)
+    if dropped:
+        persist_value(f'{pfx}_filter_criteria', criteria)
+    state.filter_criteria = criteria
     return dropped
 
 
@@ -426,23 +439,16 @@ def consume_incoming_filters(state, storage_prefix: str, require_from_browse: bo
     if incoming.get('work'):
         state.filter_works = [str(incoming['work'])]
         persist_value(f'{pfx}_filter_works', [str(incoming['work'])])
-    if incoming.get('date_from') is not None:
-        state.filter_date_from = int(incoming['date_from'])
-        persist_value(f'{pfx}_filter_date_from', int(incoming['date_from']))
-    if incoming.get('date_to') is not None:
-        state.filter_date_to = int(incoming['date_to'])
-        persist_value(f'{pfx}_filter_date_to', int(incoming['date_to']))
     if incoming.get('material_exclude'):
         state.filter_material_exclude = incoming['material_exclude']
         persist_value(f'{pfx}_filter_material_exclude', incoming['material_exclude'])
-    # Catalog Browse traits. Measurement traits only on /search: /parallels has no
-    # controls or chips for them, so applied there they would be invisible.
-    from shared.fjms_service import BROWSE_MEASUREMENT_TRAITS, BROWSE_SCRIPT_TRAITS, clean_traits
-    traits = clean_traits(incoming)
-    for key in BROWSE_SCRIPT_TRAITS + (BROWSE_MEASUREMENT_TRAITS if pfx == 'search' else ()):
-        if key in traits:
-            setattr(state, f'filter_{key}', traits[key])
-            persist_value(f'{pfx}_filter_{key}', traits[key])
+    # Catalogue criteria: a browse list hands them on unchanged (§6.3), to
+    # /search and /parallels alike.
+    # Authoritative even when empty: a list with no criteria must not search
+    # under criteria an earlier visit saved.
+    criteria = restore_saved_criteria(incoming)
+    state.filter_criteria = criteria
+    persist_value(f'{pfx}_filter_criteria', criteria)
     # GAP-F (2026-06-28): thread library selection from catalog browse to /search.
     # DMF (T-130-02-06 / HIGH-1): browse->search handoff stamps mode='show_only' and
     # persists the new {'mode','codes'} dict shape (NOT a bare list).  Without the mode
@@ -540,27 +546,13 @@ async def recompute_filter_count(state, update_chip_bar_fn, on_state=None):
     _domains = state.filter_domains or None
     _authors = state.filter_authors or None
     _works = state.filter_works or None
-    # Snapshot date/text filter values before io_bound (they live on state, not closure)
-    _date_from = state.filter_date_from
-    _date_to = state.filter_date_to
+    # Snapshot the filter values before io_bound (they live on state, not closure)
+    import copy as _copy
     _material_exclude = state.filter_material_exclude or None
-    _script_styles = list(getattr(state, 'filter_script_styles', None) or []) or None
-    _script_places = list(getattr(state, 'filter_script_places', None) or []) or None
     _text_all = state.filter_text_all or None
     _text_any = state.filter_text_any or None
     _text_not = state.filter_text_not or None
-    # Measurement filter snapshots (Phase 54)
-    _width_min = getattr(state, 'filter_width_min', None)
-    _width_max = getattr(state, 'filter_width_max', None)
-    _height_min = getattr(state, 'filter_height_min', None)
-    _height_max = getattr(state, 'filter_height_max', None)
-    _line_count_min = getattr(state, 'filter_line_count_min', None)
-    _line_count_max = getattr(state, 'filter_line_count_max', None)
-    _line_height_min = getattr(state, 'filter_line_height_min', None)
-    _line_height_max = getattr(state, 'filter_line_height_max', None)
-    _text_density_min = getattr(state, 'filter_text_density_min', None)
-    _text_density_max = getattr(state, 'filter_text_density_max', None)
-    _measurement_material = getattr(state, 'filter_measurement_material', None) or None
+    _criteria = _copy.deepcopy(getattr(state, 'filter_criteria', None) or {}) or None
 
     def _compute():
         # No is_available() short-cut: with no sidecar get_filter_sys_ids
@@ -568,20 +560,11 @@ async def recompute_filter_count(state, update_chip_bar_fn, on_state=None):
         # -- never as "all manuscripts" (#17).
         fjms = get_fjms_service(thread_safe=True)
         kwargs = dict(
-            date_from=_date_from,
-            date_to=_date_to,
             material_exclude=_material_exclude,
-            script_styles=_script_styles,
-            script_places=_script_places,
             text_all=_text_all,
             text_any=_text_any,
             text_not=_text_not,
-            width_min=_width_min, width_max=_width_max,
-            height_min=_height_min, height_max=_height_max,
-            line_count_min=_line_count_min, line_count_max=_line_count_max,
-            line_height_min=_line_height_min, line_height_max=_line_height_max,
-            text_density_min=_text_density_min, text_density_max=_text_density_max,
-            measurement_material=_measurement_material,
+            criteria=_criteria,
         )
         if include_mode:
             kwargs['domains'] = _domains
@@ -636,6 +619,7 @@ def create_filter_handlers(state, storage_prefix, filter_refs, refresh_author_fn
         refresh_author_fn: Async function to refresh author select options.
         refresh_work_fn: Async function to refresh work select options.
         recompute_fn: Async function to recompute filter counts.
+        (The criteria are set by ``apply_criteria``, from the criteria panel.)
         update_chip_fn: Function to update the chip bar UI.
 
     Returns:
@@ -673,20 +657,6 @@ def create_filter_handlers(state, storage_prefix, filter_refs, refresh_author_fn
         await recompute_fn()
         update_chip_fn()
 
-    async def on_date_from_change(e=None):
-        val = filter_refs['date_from'].value
-        state.filter_date_from = int(val) if val is not None and val != '' else None
-        persist_value(f'{pfx}_filter_date_from', state.filter_date_from)
-        await recompute_fn()
-        update_chip_fn()
-
-    async def on_date_to_change(e=None):
-        val = filter_refs['date_to'].value
-        state.filter_date_to = int(val) if val is not None and val != '' else None
-        persist_value(f'{pfx}_filter_date_to', state.filter_date_to)
-        await recompute_fn()
-        update_chip_fn()
-
     async def on_exclude_printed_change(e=None):
         if filter_refs['exclude_printed'].value:
             if 'Printed' not in state.filter_material_exclude:
@@ -698,23 +668,22 @@ def create_filter_handlers(state, storage_prefix, filter_refs, refresh_author_fn
         await recompute_fn()
         update_chip_fn()
 
-    def _script_change(key):
-        async def on_change(e=None):
-            val = filter_refs[key].value or []
-            setattr(state, f'filter_{key}', list(val) if isinstance(val, list) else [val])
-            persist_value(f'{pfx}_filter_{key}', getattr(state, f'filter_{key}'))
-            await recompute_fn()
-            update_chip_fn()
-        return on_change
-
     return {
-        'on_script_styles_change': _script_change('script_styles'),
-        'on_script_places_change': _script_change('script_places'),
         'on_domain_change': on_domain_change,
         'on_author_change': on_author_change,
         'on_work_change': on_work_change,
         'on_mode_change': on_mode_change,
-        'on_date_from_change': on_date_from_change,
-        'on_date_to_change': on_date_to_change,
         'on_exclude_printed_change': on_exclude_printed_change,
     }
+
+
+def apply_criteria(state, storage_prefix: str, criteria) -> bool:
+    """Set the page's criteria (the panel's Apply, a chip removed, Clear
+    All) and save them. True when they changed."""
+    from shared.catalog_criteria import clean_criteria
+    criteria = clean_criteria(criteria, strict=False)[0]
+    if criteria == (getattr(state, 'filter_criteria', None) or {}):
+        return False
+    state.filter_criteria = criteria
+    persist_value(f'{storage_prefix}_filter_criteria', criteria)
+    return True

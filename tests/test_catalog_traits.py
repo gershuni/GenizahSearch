@@ -8,13 +8,12 @@ style / script place lists and the width / height / lines / material bounds.
 
 Pinned here: the browse query lists exactly what "Search only in..." would
 restrict a search to (one definition of each trait); the count, the library
-facets and the date filter combine with the traits; the /catalog-browse address
-carries them; and a browse list hands them on to /search (all of them) and to
-/parallels (the script ones only: it has no size controls).
+facets and the date filter combine with the traits. The page itself now uses the
+catalogue criteria (PR 1b of docs/plans/CATALOGUE_CRITERIA_PLAN.md); the service's
+``traits`` stay for the API until PR 2.
 """
 import os
 import sys
-from types import SimpleNamespace
 
 import pytest
 
@@ -23,8 +22,6 @@ from fjms_filter_sidecar import build_browse_sidecar  # noqa: E402
 
 from shared import fjms_service  # noqa: E402
 from shared.fjms_service import FjmsService, clean_traits  # noqa: E402
-from web.pages.catalog_browse import traits_from_query, traits_to_query  # noqa: E402
-import web.components.filter_panel as fp  # noqa: E402
 
 
 @pytest.fixture
@@ -76,49 +73,3 @@ def test_clean_traits_keeps_only_real_values():
         'measurement_material': 'Paper',
     }) == {'script_places': ['Spanish'], 'width_min': 12.5, 'line_count_max': 18,
            'measurement_material': ['Paper']}
-
-
-def test_the_address_carries_the_traits_both_ways():
-    traits = {'script_styles': ['Square', 'Semi-Cursive'], 'script_places': ['Spanish'],
-              'width_min': 10.0, 'width_max': 20.5, 'line_count_min': 15,
-              'measurement_material': ['Vellum']}
-    params = dict(p.split('=', 1) for p in traits_to_query(traits))
-    from urllib.parse import unquote
-    back = traits_from_query(script_style=unquote(params['script_style']),
-                             script_place=params['script_place'], width=params['width'],
-                             lines=params['lines'], material=params['material'])
-    assert back == traits
-    assert params['lines'] == '15-' and params['width'] == '10-20.5'
-    # A malformed value is ignored, never an error.
-    assert traits_from_query(width='10-20-30', height='tall', lines='') == {}
-
-
-def _consume(monkeypatch, incoming, prefix):
-    import web.safe_storage as ss
-    store = {'incoming_filters': incoming}
-    monkeypatch.setattr(ss, 'safe_user_get', lambda key, default=None: store.get(key, default))
-    monkeypatch.setattr(ss, 'safe_user_pop', lambda key, default=None: store.pop(key, default))
-    written = {}
-    monkeypatch.setattr(fp, 'persist_value', lambda key, value: written.__setitem__(key, value))
-    st = SimpleNamespace(filter_script_styles=[], filter_script_places=[], filter_width_min=None,
-                         filter_measurement_material=[])
-    assert fp.consume_incoming_filters(st, prefix)
-    return st, written
-
-
-HANDOFF = {'script_places': ['Spanish'], 'width_min': 14.0, 'measurement_material': ['Paper']}
-
-
-def test_a_browse_list_hands_every_trait_to_search(monkeypatch):
-    st, written = _consume(monkeypatch, dict(HANDOFF), 'search')
-    assert st.filter_script_places == ['Spanish'] and st.filter_width_min == 14.0
-    assert st.filter_measurement_material == ['Paper']
-    assert written['search_filter_width_min'] == 14.0
-
-
-def test_parallels_takes_only_the_script_traits(monkeypatch):
-    """/parallels has no size controls or chips: applied there they would be invisible."""
-    st, written = _consume(monkeypatch, dict(HANDOFF), 'parallels')
-    assert st.filter_script_places == ['Spanish']
-    assert st.filter_width_min is None and st.filter_measurement_material == []
-    assert not any('width' in k or 'material' in k for k in written), written

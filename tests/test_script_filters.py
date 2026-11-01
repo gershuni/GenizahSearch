@@ -4,24 +4,20 @@
 A user asked whether the site finds manuscripts by their script, as the
 Friedberg site did. The catalogue records it per catalogue record
 (catalog_fields TypeOfScriptStyle / TypeOfScriptPlace). These tests pin the
-lookup, the choices offered, the API's checks, and every web call site that
-carries the two lists to the lookup -- a list dropped on the way would run the
-search over every manuscript.
+lookup, the choices offered and the API's checks (the API keeps the two lists
+until PR 2 of docs/plans/CATALOGUE_CRITERIA_PLAN.md). The web pages now use the
+catalogue criteria: tests/test_web_criteria_state.py.
 """
-import ast
-import asyncio
 import os
 import sqlite3
 import sys
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fjms_filter_sidecar import (  # noqa: E402
-    LONG_EXCLUDE, LONG_EXCLUDE_50, brackets_balanced, build_script_sidecar,
+    build_script_sidecar,
 )
 
 from shared import fjms_service  # noqa: E402
@@ -29,7 +25,6 @@ from shared.api_errors import APIError  # noqa: E402
 from shared.fjms_service import (  # noqa: E402
     FilterUnavailable, FjmsService, script_filter_options, script_value_label,
 )
-import web.components.filter_panel as fp  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -158,138 +153,3 @@ def test_api_and_mcp_accept_the_fields_and_pass_them_to_the_lookup(monkeypatch):
     monkeypatch.setattr(fjms_service, 'get_filter_sys_ids', lambda **kw: seen.update(kw) or {'990001'})
     assert search_api._resolve_fjms_filters_sync(filters) == {'990001'}
     assert seen['script_styles'] == ['Square'] and seen['script_places'] == ['Spanish']
-
-
-# -- the web panel --
-
-def _state(**over):
-    s = SimpleNamespace(
-        filter_include_mode=True, filter_domains=[], filter_authors=[], filter_works=[],
-        filter_date_from=None, filter_date_to=None, filter_material_exclude=[],
-        filter_script_styles=[], filter_script_places=[],
-        filter_text_all=[], filter_text_any=[], filter_text_not=[],
-        filter_measurement_material=[],
-        filter_manuscript_count='untouched', restrict_sys_ids='untouched',
-    )
-    for k, v in over.items():
-        setattr(s, k, v)
-    return s
-
-
-def _recompute(state, monkeypatch):
-    async def _to_thread(fn, *a, **kw):
-        return await asyncio.to_thread(fn, *a, **kw)
-    monkeypatch.setattr(fp.run, 'io_bound', _to_thread)
-    statuses = []
-    asyncio.run(fp.recompute_filter_count(state, lambda: None, on_state=statuses.append))
-    return statuses
-
-
-def test_the_live_count_applies_both_lists(svc, monkeypatch):
-    st = _state(filter_script_styles=['Square'], filter_script_places=['Oriental'])
-    assert fp.has_active_filters(st)
-    assert _recompute(st, monkeypatch)[-1] == 'done'
-    assert st.restrict_sys_ids == {'990003'} and st.filter_manuscript_count == 1
-
-
-def test_include_exclude_mode_does_not_turn_the_script_filter_around(svc, monkeypatch):
-    st = _state(filter_include_mode=False, filter_script_places=['Spanish'])
-    _recompute(st, monkeypatch)
-    assert st.restrict_sys_ids == {'990001'}
-
-
-def test_saved_choices_load_per_page(monkeypatch):
-    import web.safe_storage as ss
-    saved = {'parallels_filter_script_places': ['Yemenite'], 'search_filter_script_styles': ['Square']}
-    monkeypatch.setattr(ss, 'safe_user_get', lambda key, default=None: saved.get(key, default))
-    monkeypatch.setattr(fp, 'persist_value', lambda key, value: None)
-    st = SimpleNamespace()
-    fp.load_filter_state(st, 'parallels')
-    assert st.filter_script_places == ['Yemenite'] and st.filter_script_styles == []
-
-
-def test_the_change_handler_saves_and_recounts(monkeypatch):
-    written, calls = {}, []
-    monkeypatch.setattr(fp, 'persist_value', lambda key, value: written.__setitem__(key, value))
-
-    async def recompute():
-        calls.append('recompute')
-    refs = {'script_places': SimpleNamespace(value=['Spanish', 'Italian'])}
-    st = _state()
-    handlers = fp.create_filter_handlers(st, 'search', refs, None, None, recompute,
-                                         lambda: calls.append('chips'))
-    asyncio.run(handlers['on_script_places_change']())
-    assert st.filter_script_places == ['Spanish', 'Italian']
-    assert written == {'search_filter_script_places': ['Spanish', 'Italian']}
-    assert calls == ['recompute', 'chips']
-
-
-def test_history_summary_names_the_script(svc):
-    svc.get_script_values('script_places')  # the panel has loaded its choices
-    summary = fp.build_filter_summary({'script_places': ['Spanish']}, lambda s: s, lambda: 'he', 80)
-    assert summary == '[include: ספרדי]'
-
-
-@pytest.mark.parametrize('include_mode,expected', [
-    (True, '[include: Bible, Spanish]'),
-    # Exclude mode turns the domain around, never the script (Codex round 1).
-    (False, '[exclude: Bible] [include: Spanish]'),
-])
-def test_history_summary_never_puts_a_script_under_exclude(svc, include_mode, expected):
-    filters = {'include_mode': include_mode, 'domains': ['Bible'], 'script_places': ['Spanish']}
-    assert fp.build_filter_summary(filters, lambda s: s, lambda: 'en', 80) == expected
-
-
-def test_a_truncated_summary_keeps_its_brackets_balanced(svc):
-    """Codex round 2: the cut fell between the two brackets and left "] ...]"."""
-    summary = fp.build_filter_summary(LONG_EXCLUDE, lambda s: s, lambda: 'en', 50)
-    assert summary == LONG_EXCLUDE_50 and len(summary) <= 50
-    for max_len in range(20, 70):  # every cut point, inside either bracket or between them
-        s = fp.build_filter_summary(LONG_EXCLUDE, lambda s: s, lambda: 'en', max_len)
-        assert len(s) <= max_len and brackets_balanced(s), (max_len, s)
-
-
-def _filter_kwargs_values(path: Path) -> list:
-    """{keyword: the state attributes its value reads} for every
-    ``filter_kwargs = dict(...)`` in a page."""
-    tree = ast.parse(path.read_text(encoding='utf-8'))
-    return [
-        {kw.arg: {n.attr for n in ast.walk(kw.value) if isinstance(n, ast.Attribute)}
-         for kw in node.value.keywords}
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
-        and getattr(node.value.func, 'id', None) == 'dict'
-        and any(getattr(t, 'id', None) == 'filter_kwargs' for t in node.targets)
-    ]
-
-
-@pytest.mark.parametrize('page', ['web/pages/search.py', 'web/pages/parallels.py'])
-def test_the_search_itself_is_restricted_by_both_lists(page):
-    """The count is one call site; the search's own lookup is another. Each
-    keyword must READ its own state list -- ``script_places=None`` would not."""
-    found = _filter_kwargs_values(ROOT / page)
-    assert found, f"{page}: no filter_kwargs = dict(...) found; update this guard"
-    for kws in found:
-        for key in ('script_styles', 'script_places'):
-            assert f'filter_{key}' in kws.get(key, set()), (page, key, kws.get(key))
-
-
-def test_run_filters_and_clear_all_carry_the_lists():
-    storage = {}
-    with patch('web.pages.search_state.app') as mock_app, patch('web.safe_storage.app') as mock_safe:
-        mock_app.storage.user = storage
-        mock_safe.storage.user = storage
-        from web.pages.search_state import (
-            SearchUIState, apply_run_filter_state, clear_search_filters, run_filter_state,
-        )
-        st = SearchUIState()
-        st.filter_script_styles = ['Square']
-        saved = run_filter_state(st)
-        assert saved['filter_script_styles'] == ['Square']
-        assert saved['filter_script_styles'] is not st.filter_script_styles, "a run never shares a list"
-        fresh = SearchUIState()
-        apply_run_filter_state(fresh, saved)
-        assert fresh.filter_script_styles == ['Square'] and fresh.filter_script_places == []
-        storage['search_filter_script_places'] = ['Spanish']
-        clear_search_filters()
-        assert storage['search_filter_script_places'] == [] and storage['search_filter_script_styles'] == []

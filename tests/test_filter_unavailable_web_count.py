@@ -3,9 +3,9 @@
 
 Drives web.components.filter_panel.recompute_filter_count (the live count of
 /search and /parallels) against the real FjmsService singleton pointed at a
-small sidecar without the line-height column, and at no sidecar. Also drives
-load_filter_state, which drops a saved bound only when the open catalog is
-KNOWN to lack it.
+small 5.0.0 sidecar (no criteria tables), and at no sidecar. Also drives
+load_filter_state, which drops a saved criterion only when the open catalog
+is KNOWN to lack its data (rule 9 of docs/plans/CATALOGUE_CRITERIA_PLAN.md).
 """
 import asyncio
 import os
@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fjms_filter_sidecar import build_sidecar, unknown_schema_service  # noqa: E402
+from fjms_filter_sidecar import ROWS, build_sidecar  # noqa: E402
 
 from shared import fjms_service  # noqa: E402
 from shared.fjms_service import FjmsService  # noqa: E402
@@ -25,14 +25,8 @@ import web.components.filter_panel as fp  # noqa: E402
 def _state(**over):
     s = SimpleNamespace(
         filter_include_mode=True, filter_domains=[], filter_authors=[], filter_works=[],
-        filter_date_from=None, filter_date_to=None, filter_material_exclude=[],
-        filter_text_all=[], filter_text_any=[], filter_text_not=[],
-        filter_width_min=None, filter_width_max=None,
-        filter_height_min=None, filter_height_max=None,
-        filter_line_count_min=None, filter_line_count_max=None,
-        filter_line_height_min=None, filter_line_height_max=None,
-        filter_text_density_min=None, filter_text_density_max=None,
-        filter_measurement_material=[], filter_library=[],
+        filter_material_exclude=[], filter_criteria={},
+        filter_text_all=[], filter_text_any=[], filter_text_not=[], filter_library=[],
         filter_manuscript_count='untouched', restrict_sys_ids='untouched',
     )
     for k, v in over.items():
@@ -50,9 +44,10 @@ def _recompute(state, monkeypatch):
 
 
 @pytest.fixture
-def no_lh(monkeypatch, tmp_path):
-    svc = FjmsService(db_path=build_sidecar(tmp_path / "s.db", with_line_height=False))
+def old_file(monkeypatch, tmp_path):
+    svc = FjmsService(db_path=build_sidecar(tmp_path / "s.db"))
     monkeypatch.setattr(fjms_service, "_default_service", svc)
+    return svc
 
 
 @pytest.fixture
@@ -61,24 +56,24 @@ def absent(monkeypatch, tmp_path):
     monkeypatch.setattr(fjms_service, "_default_service", svc)
 
 
-def test_missing_column_shows_error_not_zero(no_lh, monkeypatch):
-    st = _state(filter_line_height_min=3.0)
+def test_missing_data_shows_error_not_zero(old_file, monkeypatch):
+    st = _state(filter_criteria={'columns': {'min': 2, 'max': 2}})
     statuses = _recompute(st, monkeypatch)
     assert st.filter_manuscript_count != 0, "a lookup that could not run was shown as 0 manuscripts"
     assert statuses[-1] == 'error', statuses
 
 
 def test_missing_sidecar_shows_error_not_all(absent, monkeypatch):
-    st = _state(filter_date_from=1000)
+    st = _state(filter_criteria={'period': {'min': 1000}})
     statuses = _recompute(st, monkeypatch)
     assert statuses[-1] == 'error', statuses
 
 
-def test_working_lookup_still_counts(no_lh, monkeypatch):
-    st = _state(filter_width_min=10)
+def test_working_lookup_still_counts(old_file, monkeypatch):
+    st = _state(filter_criteria={'material': {'values': ['Paper'], 'source': 'measured'}})
     statuses = _recompute(st, monkeypatch)
     assert statuses[-1] == 'done'
-    assert st.filter_manuscript_count == 2
+    assert st.filter_manuscript_count == len(ROWS)
 
 
 # -- saved values (load_filter_state) --
@@ -94,31 +89,32 @@ def _load(monkeypatch, saved, prefix='search'):
     return st, dropped, written
 
 
-SAVED = {'search_filter_line_height_min': 3.0, 'search_filter_width_min': 10.0,
-         'parallels_filter_line_height_max': 6.0}
+SAVED = {'search_filter_criteria': {'columns': {'min': 2}, 'width': {'min': 10.0}},
+         'parallels_filter_criteria': {'attributes': {'values': ['colophon']}}}
 
 
-@pytest.mark.parametrize('prefix,key', [('search', 'line_height_min'),
-                                        ('parallels', 'line_height_max')])
-def test_saved_line_height_is_dropped_when_the_catalog_lacks_it(no_lh, monkeypatch, prefix, key):
+@pytest.mark.parametrize('prefix,key', [('search', 'columns'), ('parallels', 'attributes')])
+def test_a_saved_criterion_is_dropped_when_the_catalog_lacks_it(old_file, monkeypatch, prefix, key):
     st, dropped, written = _load(monkeypatch, SAVED, prefix)
     assert dropped == [key], dropped
-    assert getattr(st, f'filter_{key}') is None
-    assert written == {f'{prefix}_filter_{key}': None}, (
+    assert key not in st.filter_criteria
+    assert key not in written[f'{prefix}_filter_criteria'], (
         "the dropped value must also leave storage, or it comes back next visit")
     if prefix == 'search':
-        assert st.filter_width_min == 10.0, "only the unsupported filter is dropped"
+        assert st.filter_criteria == {'width': {'min': 10, 'source': 'either'}}, (
+            "only the unsupported criterion is dropped")
 
 
 def test_saved_values_are_kept_when_there_is_no_catalog(absent, monkeypatch):
     st, dropped, written = _load(monkeypatch, SAVED)
     assert dropped == [] and written == {}
-    assert st.filter_line_height_min == 3.0
+    assert 'columns' in st.filter_criteria
 
 
-def test_saved_values_are_kept_when_the_schema_could_not_be_read(monkeypatch, tmp_path):
-    svc = unknown_schema_service(build_sidecar(tmp_path / "u.db", with_line_height=False))
-    monkeypatch.setattr(fjms_service, "_default_service", svc)
+def test_saved_values_are_kept_when_the_schema_could_not_be_read(old_file, monkeypatch):
+    def unreadable():
+        raise RuntimeError("database is locked")
+    monkeypatch.setattr(old_file, 'criteria_support', unreadable)
     st, dropped, written = _load(monkeypatch, SAVED)
     assert dropped == [] and written == {}
-    assert st.filter_line_height_min == 3.0
+    assert 'columns' in st.filter_criteria

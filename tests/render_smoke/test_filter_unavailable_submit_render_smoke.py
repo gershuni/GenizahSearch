@@ -2,8 +2,8 @@
 """Render-smoke (C-9, K-18): web submit handlers when the filters cannot be applied (#17).
 
 Drives the REAL /search and /parallels pages in a NiceGUI User simulation:
-a saved date filter is active (seeded through the storage reader the pages
-use), the FJMS singleton is either absent (no sidecar) or a real sidecar
+a saved "exclude printed" filter is active (seeded through the storage reader
+the pages use), the FJMS singleton is either absent (no sidecar) or a real sidecar
 whose filter query fails, and the visitor presses the page's own Search /
 Find Parallels control. Each case must:
 
@@ -13,7 +13,7 @@ Find Parallels control. Each case must:
 * put the page back to idle (buttons, progress, results area).
 
 Also K-18: /parallels shows the "saved filters were removed" notice when a
-saved measurement filter is one the open catalog is known to lack.
+saved criterion is one the open catalog is known to lack.
 
 And a search-history entry never shares a list with the live filters, in
 either direction: a chip removal edits the live list IN PLACE, so a shared
@@ -173,7 +173,7 @@ def test_search_submit_with_unappliable_filters_runs_nothing_and_says_why(reques
     seen = {}
 
     async def go():
-        async with _user(engine, {'search_filter_date_from': 1000}) as user:
+        async with _user(engine, {'search_filter_material_exclude': ['Printed']}) as user:
             await user.open('/search')
             query = next(e for e in _elements(user, ui.input)
                          if e.props.get('placeholder') == 'Enter Hebrew text to search')
@@ -209,7 +209,7 @@ def test_parallels_submit_with_unappliable_filters_runs_nothing_and_says_why(req
     seen = {}
 
     async def go():
-        async with _user(engine, {'parallels_filter_date_from': 1000}) as user:
+        async with _user(engine, {'parallels_filter_material_exclude': ['Printed']}) as user:
             await user.open('/parallels')
             text_box = next(e for e in _elements(user, ui.textarea)
                             if e.props.get('placeholder') == 'Paste your Hebrew text here...')
@@ -240,14 +240,15 @@ def test_parallels_submit_with_unappliable_filters_runs_nothing_and_says_why(req
 
 
 def test_parallels_drops_a_saved_filter_the_catalog_lacks_with_a_notice(monkeypatch, tmp_path):
-    """K-18: /parallels consumes load_filter_state's dropped keys."""
+    """K-18: /parallels consumes load_filter_state's dropped keys: a saved
+    criterion a 5.0.0 file cannot answer (rule 9)."""
     monkeypatch.setattr(fjms_service, '_default_service', FjmsService(
         db_path=build_sidecar(tmp_path / 'no_lh.db', with_line_height=False)))
     engine = _Engine()
     notices = []
 
     async def go():
-        async with _user(engine, {'parallels_filter_line_height_min': 3.0}) as user:
+        async with _user(engine, {'parallels_filter_criteria': {'columns': {'min': 2}}}) as user:
             await user.open('/parallels')
             notices.extend(user.notify.messages)
 

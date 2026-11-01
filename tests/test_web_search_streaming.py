@@ -359,8 +359,8 @@ def test_early_rows_shown_only_when_no_filter_could_hide_one():
         {'pgp_filter': 'only_pgp'},
         {'library_filter': ['CUL']},
         {'_all_terms_filter': True, 'refinement_chain': [object()]},
-        {'post_filter_width_min': 10},
-        {'post_filter_measurement_material': ['paper']},
+        {'post_filter_criteria': {'width': {'min': 10}}},
+        {'post_filter_criteria': {'material': {'values': ['Paper']}}},
     ]
     for fields in hidden:
         assert not preview_shows_final_rows(_state(**fields)), fields

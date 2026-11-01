@@ -1122,6 +1122,21 @@ desktop.Y.X` identity holds via the facades.
     - Method `__init__` (Line 1741)
     - Method `run` (Line 1751)
 
+## web/components/criteria_panel.py
+
+The "Manuscript features" control (catalogue criteria, docs/plans/CATALOGUE_CRITERIA_PLAN.md §6.3, PR 1b):
+on `/catalog-browse` (sidebar card, chips under the button) and in "Search only in..." on `/search` and
+`/parallels` (chips in the page's chip bar).
+
+- **Class** `CriteriaControl(get_criteria, on_apply, fjms, universe, mark, show_chips, on_chips)` — the button with
+  its badge, the chips (`chips`, `refresh()`, `remove(key)`), and `open()`: the panel (a window over the page, full
+  screen under 640 px) with the sections beside their controls, value lists with counts and a filter box, the
+  only/all-except toggle, the source choice (D6), ranges with "or: not recorded", per-criterion coverage, the live
+  total (`FjmsService.criteria_live_total`) and Clear section / Clear all / Apply. Sidecar reads run in `run.io_bound`.
+- **Function** `active_criteria_count` — the badge.
+- **Function** `unsupported_criteria` / `drop_unsupported` — the criteria a 5.0.0 file is KNOWN not to answer (rule 9):
+  disabled in the panel, dropped (with a notice) from a saved session or an address.
+
 ## web/components/shelfmark_picker.py
 
 - **Function** `open_shelfmark_picker(container, items, on_pick, query)` — "Select Manuscript" dialog for a shelfmark naming several records (reading desk, Joins Lab load box, Fragment Puzzle); entered in an explicit container; close = cancel.

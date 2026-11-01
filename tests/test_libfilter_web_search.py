@@ -748,9 +748,10 @@ def test_chip_placement_post_search_container():
         "GAP-D: only the library chip block must be removed; all other chip types must remain."
     )
 
-    # Measurement chips: 'filter_width_min' or 'straighten' icon (measurement chip icon)
-    assert 'filter_width_min' in update_chip_bar_src or 'straighten' in update_chip_bar_src, (
-        "Measurement chip block appears to be missing from _update_chip_bar. "
+    # Criteria chips (the "Manuscript features" panel, PR 1b of the criteria plan;
+    # they replaced the measurement chips): 'criteria_control.chips'
+    assert 'criteria_control.chips' in update_chip_bar_src, (
+        "Criteria chip block appears to be missing from _update_chip_bar. "
         "GAP-D: only the library chip block must be removed; all other chip types must remain."
     )
 

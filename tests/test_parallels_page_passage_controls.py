@@ -853,7 +853,7 @@ def test_identity_state_covers_library_and_every_filter_field():
     assert 'sanitize_library_codes' in seg
     assert 'p_state.library_mode' in seg and 'p_state.library_filter' in seg
     for field in ('filter_domains', 'filter_authors', 'filter_works',
-                  'filter_include_mode', 'filter_date_from', 'filter_date_to',
+                  'filter_include_mode', 'filter_criteria',
                   'filter_material_exclude', 'filter_text_all',
                   'filter_text_any', 'filter_text_not'):
         assert 'p_state.%s' % field in seg, ('filter field missing', field)
