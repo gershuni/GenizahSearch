@@ -67,7 +67,7 @@ _CODES = [(36, 1, "Full", "מלא"), (36, 2, "None", "אין"), (36, 3, "Partial
           (36, -2, "Cannot be determined", "לא ניתן לדעת")]
 
 
-def build_criteria_sidecar(path, *, upgrade: bool = True) -> str:
+def build_criteria_sidecar(path, *, upgrade: bool = True, fts: bool = True) -> str:
     con = sqlite3.connect(str(path))
     con.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
     con.execute("INSERT INTO meta VALUES ('version', '5.0.0')")
@@ -114,6 +114,9 @@ def build_criteria_sidecar(path, *, upgrade: bool = True) -> str:
     con.execute("INSERT INTO manuscript_measurements (AlmaId, material) VALUES (?, 'Paper')", (D,))
     con.execute("CREATE TABLE domains (AlmaId TEXT, Domain TEXT, ParentDomain TEXT,"
                 " DomainHeb TEXT, ParentDomainHeb TEXT)")
+    if fts:  # the catalogue-text filters' index (text all/any/not)
+        con.execute("CREATE VIRTUAL TABLE catalog_fts USING fts5(Title)")
+        con.execute("INSERT INTO catalog_fts (rowid, Title) SELECT rowid, Title FROM catalog")
     con.commit()
     con.close()
     if upgrade:

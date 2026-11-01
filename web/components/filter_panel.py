@@ -372,7 +372,7 @@ def load_filter_state(state, storage_prefix: str) -> list:
 def filter_unavailable_message(exc, tr_func) -> str:
     """The notice for a search not run because its filters could not be
     applied (#17), chosen by ``FilterUnavailable.reason``."""
-    if getattr(exc, 'reason', 'query_failed') == 'query_failed':
+    if getattr(exc, 'reason', 'query_failed') in ('query_failed', 'corpus_unavailable'):
         return tr_func("The filters could not be applied, so the search was not run. "
                        "Try again, or remove the filters.")
     return tr_func("The catalog data these filters need is not available, so the search "

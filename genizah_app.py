@@ -22805,7 +22805,7 @@ class GenizahGUI(QMainWindow):
         """The message for a search not run because its filters could not be
         applied, chosen by FilterUnavailable.reason ('error' = any other
         failure)."""
-        if reason in ('query_failed', 'error', None, ''):
+        if reason in ('query_failed', 'corpus_unavailable', 'error', None, ''):
             return tr("The filters could not be applied, so the search was not run. "
                       "Try again, or remove the filters.")
         return tr("The catalog data these filters need is not available, so the search "
