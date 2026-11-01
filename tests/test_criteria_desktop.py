@@ -507,13 +507,23 @@ def test_a_history_entry_with_the_old_bounds_reruns_instead_of_showing_its_snaps
 
 # -- post-search filters (D20) -----------------------------------------------------
 
-def test_post_search_filters_keep_what_the_window_counts(svc):
+@pytest.fixture
+def sync_post(monkeypatch):
+    """The post-search worker, run on this thread."""
+    class _Sync(genizah_app._PostCriteriaWorker):
+        def start(self):
+            self.run()
+    monkeypatch.setattr(genizah_app, '_PostCriteriaWorker', _Sync)
+
+
+def test_post_search_filters_keep_what_the_window_counts(svc, sync_post):
     """D20: the main window's post-search set is the same answer the window's
     own total gives over the results, by the panel's rules."""
     from desktop.gui_threads import CriteriaCountWorker
     criteria = {'width': {'min': 11}, 'lines': {'min': 20, 'max': 25, 'not_recorded': True}}
     results = [{'display': {'id': sid}} for sid in (A, B, C, D)]
     w = _window(last_results=results, _post_criteria=criteria)
+    w._apply_results_table_filters = lambda: None
     w._recompute_post_criteria()
     counted = []
     worker = CriteriaCountWorker(criteria, universe=frozenset({A, B, C, D}))
@@ -524,17 +534,18 @@ def test_post_search_filters_keep_what_the_window_counts(svc):
     assert w._post_criteria_error is None
 
 
-def test_post_search_filters_that_cannot_run_hide_nothing_and_say_so(svc, monkeypatch):
+def test_post_search_filters_that_cannot_run_hide_nothing_and_say_so(svc, monkeypatch, sync_post):
     monkeypatch.setattr(svc, 'match_result_criteria', lambda c, ids: (_ for _ in ()).throw(
         fjms_service.FilterUnavailable('query_failed')))
     w = _window(last_results=[{'display': {'id': A}}], _post_criteria=dict(LINES))
+    w._apply_results_table_filters = lambda: None
     w._recompute_post_criteria()
     assert w._post_criteria_ids is None and w._post_criteria_error == 'query_failed'
     assert w.statusBar().currentMessage() == (
         "The measurement filters could not be applied: every result is shown.")
 
 
-def test_the_enrichment_step_computes_the_post_search_set(svc, monkeypatch):
+def test_the_enrichment_step_computes_the_post_search_set(svc, monkeypatch, sync_post):
     """The call site: _launch_enrichment_workers (after every search)."""
     class _Inert(QObject):
         finished = pyqtSignal(object)
@@ -561,7 +572,7 @@ def test_the_enrichment_step_computes_the_post_search_set(svc, monkeypatch):
     assert w._measurement_fetch_complete and w.btn_measurement_filter.isEnabled()
 
 
-def test_the_post_search_button_opens_the_panel_on_its_sections(svc, monkeypatch):
+def test_the_post_search_button_opens_the_panel_on_its_sections(svc, monkeypatch, sync_post):
     seen = {}
 
     class _Dialog:
@@ -581,4 +592,37 @@ def test_the_post_search_button_opens_the_panel_on_its_sections(svc, monkeypatch
     w._open_measurement_filter_dialog()
     assert seen['sections'] == ('lines', 'material', 'measured')
     assert seen['within'] == frozenset({A, B})
-    assert applied == [{B}]
+    assert applied[-1] == {B}
+
+
+def test_post_search_matching_runs_off_the_ui_thread(svc, monkeypatch):
+    """GitHub Codex on #458: match_result_criteria scans the sidecar (about
+    half a second on the real file) and ran on the UI thread after every
+    search. The rows show until the worker answers."""
+    import threading
+    from PyQt6.QtCore import QCoreApplication
+    threads, real = [], svc.match_result_criteria
+    monkeypatch.setattr(svc, 'match_result_criteria',
+                        lambda c, ids: threads.append(threading.get_ident()) or real(c, ids))
+    results = [{'display': {'id': sid}} for sid in (A, B)]
+    w = _window(last_results=results, _post_criteria={'region': {'values': ['Spanish']}})
+    applied = []
+    w._apply_results_table_filters = lambda: applied.append(w._post_criteria_ids)
+    w._recompute_post_criteria()
+    assert (w._post_criteria_ids, w._measurement_fetch_complete) == (None, False), "rows show meanwhile"
+    assert w._post_criteria_worker.wait(10000)
+    QCoreApplication.processEvents()
+    assert threads and threads[0] != threading.get_ident(), "matched on the UI thread"
+    assert applied == [{B}] and w._measurement_fetch_complete
+
+
+def test_a_late_post_search_answer_for_an_older_search_is_dropped(svc, sync_post):
+    results = [{'display': {'id': sid}} for sid in (A, B)]
+    w = _window(last_results=results, _post_criteria={'region': {'values': ['Spanish']}})
+    w._apply_results_table_filters = lambda: None
+    w._recompute_post_criteria()
+    old = w._post_criteria_gen
+    w._post_criteria_gen += 1  # a new search started (start_search bumps it)
+    w._post_criteria_ids = None
+    w._on_post_criteria_matched(old, {A}, '')
+    assert w._post_criteria_ids is None, "an answer for the previous results judged this run's rows"

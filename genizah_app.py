@@ -770,6 +770,34 @@ class _CatalogFacetWorker(QThread):
             self.done.emit({})  # Facet query failed; emit empty dict so dialog opens name-only
 
 
+class _PostCriteriaWorker(QThread):
+    """Which of a search's results the post-search criteria keep (D20), off
+    the UI thread: FjmsService.match_result_criteria scans the sidecar's
+    criteria tables (about half a second on the real file). Emits
+    ``matched(generation, ids, '')``, or ``matched(generation, None,
+    reason)`` when it cannot be read; ``generation`` is the caller's, so an
+    answer for an older search or older criteria is recognised and dropped."""
+
+    matched = pyqtSignal(int, object, str)
+
+    def __init__(self, criteria, sys_ids, generation, parent=None):
+        super().__init__(parent)
+        self._criteria = dict(criteria)
+        self._sys_ids = frozenset(sys_ids)
+        self._generation = generation
+
+    def run(self):
+        from shared.fjms_service import FilterUnavailable, get_fjms_service
+        try:
+            ids = get_fjms_service(thread_safe=True).match_result_criteria(self._criteria, self._sys_ids)
+            self.matched.emit(self._generation, ids, '')
+        except FilterUnavailable as exc:
+            self.matched.emit(self._generation, None, exc.reason or 'error')
+        except Exception:
+            logger.exception("_PostCriteriaWorker: the post-search criteria could not be matched")
+            self.matched.emit(self._generation, None, 'error')
+
+
 class _CatalogUncataloguedWorker(QThread):
     """How many corpus manuscripts have no catalogue record (D16), for the
     domain tree's "No catalogue record" entry: waits for libraries.csv off the
@@ -22341,21 +22369,35 @@ class GenizahGUI(QMainWindow):
         """Which results the post-search criteria keep, computed once per
         criteria and result set with the same shared code as Manuscript
         features (D20): over the results, so "not recorded" and "all except"
-        are read against them. A lookup that cannot run keeps every row and
-        says so: hiding them all would read as "nothing matches"."""
-        from shared.fjms_service import FilterUnavailable, get_fjms_service
+        are read against them -- in a worker (_PostCriteriaWorker); until it
+        answers every row shows."""
+        self._post_criteria_gen = getattr(self, '_post_criteria_gen', 0) + 1
         self._post_criteria_error = None
+        self._post_criteria_ids = None
         if not self._post_criteria:
-            self._post_criteria_ids = None
+            self._measurement_fetch_complete = True
             return
-        try:
-            self._post_criteria_ids = get_fjms_service().match_result_criteria(
-                self._post_criteria, self._post_criteria_result_ids())
-        except FilterUnavailable as exc:
+        self._measurement_fetch_complete = False
+        worker = _PostCriteriaWorker(self._post_criteria, self._post_criteria_result_ids(),
+                                     self._post_criteria_gen, self)
+        worker.matched.connect(self._on_post_criteria_matched)
+        self._post_criteria_worker = worker
+        worker.start()
+
+    def _on_post_criteria_matched(self, generation, ids, reason):
+        """The post-search worker's answer. A lookup that cannot run keeps
+        every row and says so: hiding them all would read as "nothing matches"."""
+        if generation != getattr(self, '_post_criteria_gen', None):
+            return  # for an older search or older criteria
+        if reason:
             self._post_criteria_ids = None
-            self._post_criteria_error = exc.reason
+            self._post_criteria_error = reason
             self.statusBar().showMessage(
                 tr("The measurement filters could not be applied: every result is shown."), 8000)
+        else:
+            self._post_criteria_ids = ids
+        self._measurement_fetch_complete = True
+        self._apply_results_table_filters()
 
     def _open_measurement_filter_dialog(self):
         """Filter the results by lines, material and measurements: the
@@ -23372,6 +23414,7 @@ class GenizahGUI(QMainWindow):
         self._has_result_domains = False
         self.btn_domain_filter.setEnabled(False)
         self._post_criteria_ids = None
+        self._post_criteria_gen = getattr(self, '_post_criteria_gen', 0) + 1  # drops a late answer
         self._measurement_fetch_complete = False
 
         # Every signal that writes the table or the status line is dropped
@@ -25110,9 +25153,8 @@ class GenizahGUI(QMainWindow):
                 self._printed_badge_worker.start()
 
                 # Phase 54 / D20: which results the post-search criteria keep
-                self._measurement_fetch_complete = False
+                # (in a worker; the rows show until it answers)
                 self._recompute_post_criteria()
-                self._measurement_fetch_complete = True
                 if hasattr(self, 'btn_measurement_filter'):
                     self.btn_measurement_filter.setEnabled(True)
             else:

@@ -2532,6 +2532,7 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
   criterion's coverage, off the UI thread; **Class** `CriteriaCountWorker` — the dialog's live total and "of
   which N not recorded" (signal `counted`, not `finished`).
 - `genizah_app.py`: **Class** `_CatalogUncataloguedWorker` — the domain tree's "No catalogue record (N)";
+  **Class** `_PostCriteriaWorker` — the post-search criteria's matches among the results, off the UI thread;
   `GenizahGUI._catalog_open_criteria_dialog` / `_catalog_set_criteria` / `_catalog_remove_criterion`;
   `_migrate_saved_pre_search_filters` (history and session restores); `_recompute_post_criteria` /
   `_open_measurement_filter_dialog` — post-search filters by the panel's rules

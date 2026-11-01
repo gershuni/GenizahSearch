@@ -2525,7 +2525,9 @@ def test_the_standing_filters_survive_the_launch(window, monkeypatch):
     # Only this run's data is reset: what the user chose to hide stays chosen.
     w = window
     _previous_run_left(w, domains=True, measurements=True)
+    generation = getattr(w, '_post_criteria_gen', 0)
     _start_a_search_that_never_lands(w, monkeypatch)
+    assert w._post_criteria_gen > generation, "a late post-search answer could judge this run's rows"
     assert w._domain_exclusions == {"Uncategorized"} and w._post_criteria == {"width": {"min": 10.0}}
     assert (w._result_domain_map, w._has_result_domains, w._measurement_fetch_complete) == ({}, False, False)
     assert w._post_criteria_ids is None, "the previous run's matches must not judge this run's rows"
