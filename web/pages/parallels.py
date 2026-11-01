@@ -4611,6 +4611,7 @@ def create_parallels_page(initial_text: str = None):
         # The criteria this search runs with, read once: its lookup, history
         # entry, export and saved configuration say the same (Codex on PR 1b).
         _dispatch_criteria = copy.deepcopy(p_state.filter_criteria or {})
+        _dispatch_had_filters = _has_active_filters()
 
         # Disable button immediately to prevent rageclicks (re-enabled in finally block of _run_search_wrapper)
         run_btn.disable()
@@ -5151,7 +5152,7 @@ def create_parallels_page(initial_text: str = None):
                     'text_all': list(getattr(p_state, 'filter_text_all', None) or []),
                     'text_any': list(getattr(p_state, 'filter_text_any', None) or []),
                     'text_not': list(getattr(p_state, 'filter_text_not', None) or []),
-                } if _has_active_filters() else None
+                } if _dispatch_had_filters or _has_active_filters() else None
                 # Search identity: ONE definition, in export_state --
                 # executable by tests, canonicalizing its own set-like
                 # inputs (PR #325 rounds 2-5, plus the workflow review
@@ -5359,7 +5360,7 @@ def create_parallels_page(initial_text: str = None):
                                 'text_all': list(p_state.filter_text_all or []),
                                 'text_any': list(p_state.filter_text_any or []),
                                 'text_not': list(p_state.filter_text_not or []),
-                            } if _has_active_filters() else None,
+                            } if _dispatch_had_filters or _has_active_filters() else None,
                         },
                         state_snapshot={
                             'source_text': source_text,

@@ -37,7 +37,7 @@ from web.pages.search_state import (
     compact_result_rows, preview_shows_final_rows, engine_mode,
     run_filter_state, apply_run_filter_state, save_post_filters_with_run,
     live_search_run, start_search_run, url_stamp_of, apply_run_start_snapshot, save_search_run,
-    discard_search_run, post_criteria_matches, result_sys_id,
+    discard_search_run, post_criteria_matches, result_sys_id, PostMatchRefill,
 )
 from web import search_runs
 from web.pages.search_results import (
@@ -200,7 +200,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # search. Without this signal, Back would fire a fresh search and lose state.
     # R2: a session saved with the old measurement filters is not restored
     # with them; its stored rows go too, so the search runs again.
-    retire_old_saved_filters('search', reset={
+    retire_old_saved_filters('search', run_key='search_last_run', reset={
         'search_results': [], 'search_last_run': None, 'search_refinement_chain': [],
         'search_result_count_capped': False, 'search_result_partial': False})
     _saved_active_snapshot = get_search_active_snapshot(initial_run)
@@ -4115,22 +4115,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         else:
             search_state._post_match_failed = None
 
-    _post_refill = {'task': None}
+    def _rerender_after_refill():
+        with _page_client:
+            _apply_manuscript_exclusions(reset_expansion=False)
+
+    # A render met rows not checked yet (e.g. a new search's): check them off
+    # the loop, then render the list again through the whole cascade.
+    _post_refill = PostMatchRefill(_prefetch_post_matches, _rerender_after_refill,
+                                   busy=lambda: search_state.is_running)
 
     def _refill_post_matches(results):
-        """A render met rows not checked yet (e.g. a new search's): check them
-        off the loop, then render the list again through the whole cascade."""
-        if _post_refill['task'] is not None and not _post_refill['task'].done():
-            return
-        generation = search_state.search_generation
-
-        async def refill():
-            await _prefetch_post_matches(results)
-            if search_state.search_generation != generation:
-                return
-            with _page_client:
-                _apply_manuscript_exclusions(reset_expansion=False)
-        _post_refill['task'] = asyncio.ensure_future(refill())
+        _post_refill.request(results)
 
     def _apply_measurement_post_filters(results: list, state) -> list:
         """Apply the post-search measurement filters (D20) to a results list.
@@ -5081,6 +5076,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # The criteria this search runs with, read once: its lookup, history
         # entry and export say the same even if the panel changes meanwhile.
         _dispatch_criteria = copy.deepcopy(search_state.filter_criteria or {})
+        _dispatch_had_filters = _has_active_filters()
 
         # Handle PGP tag search mode — navigate to tag results page
         if mode_select.value == 'pgp_tags':
@@ -5880,7 +5876,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             'text_all': list(search_state.filter_text_all or []),
                             'text_any': list(search_state.filter_text_any or []),
                             'text_not': list(search_state.filter_text_not or []),
-                        } if _has_active_filters() else None,
+                        } if _dispatch_had_filters or _has_active_filters() else None,
                     },
                     state_snapshot={
                         'domain_exclusions': sorted(search_state.domain_exclusions),

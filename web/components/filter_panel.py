@@ -184,16 +184,23 @@ def drop_unsupported_criteria(criteria: dict) -> tuple[dict, list]:
     return drop_unsupported(criteria, fjms)
 
 
-def retire_old_saved_filters(storage_prefix: str, reset=None) -> bool:
+def retire_old_saved_filters(storage_prefix: str, reset=None, run_key=None) -> bool:
     """R2: saved measurement filters from before the criteria are not
     restored. When any is set, clear them -- and the search saved with them
     (``reset``: storage key -> its empty value: the rows, and the run that
     would restore them as a finished search with no rows), so that what is
     shown is what runs: the search runs again. Called at page open, before
-    the saved rows are read. True when something was retired."""
+    the saved rows are read. ``run_key``: the saved run whose
+    ``pre_search_filters`` may hold them too (a search whose filters were
+    cleared afterwards keeps its rows and its run; Codex round 2 on PR 1b).
+    True when something was retired."""
     from web.safe_storage import safe_user_get as _sg
     pfx = storage_prefix
     stale = [k for k in LEGACY_MEASUREMENT_KEYS if _sg(f'{pfx}_{k}', None) not in (None, [], ())]
+    run = _sg(run_key, None) if run_key else None
+    run_filters = run.get('pre_search_filters') if isinstance(run, dict) else None
+    if isinstance(run_filters, dict):
+        stale += [k for k in LEGACY_MEASUREMENT_KEYS if run_filters.get(k) not in (None, [], ())]
     for key in LEGACY_MEASUREMENT_KEYS + LEGACY_SCRIPT_KEYS:
         if _sg(f'{pfx}_{key}', None) is not None:
             persist_value(f'{pfx}_{key}', None)

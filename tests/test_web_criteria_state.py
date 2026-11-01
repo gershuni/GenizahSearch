@@ -422,3 +422,107 @@ def test_the_search_page_renders_post_filters_from_the_cache_only():
     body = body[:body.index('\n    def ', 10)]
     assert 'post_criteria_matches(state, results, fetch=False)' in body
     assert '_refill_post_matches(results)' in body
+
+
+# ── Codex round 2 ───────────────────────────────────────────────────────
+
+def test_a_saved_run_with_old_measurement_filters_retires_too(storage):
+    """A search with width >= 10, then Clear All without a new search: the
+    flat keys are empty, but the rows and the run that ran them remain."""
+    storage.update({'search_results': [{'sys_id': A}],
+                    'search_last_run': {'pre_search_filters': {'filter_width_min': 10.0}}})
+    assert fp.retire_old_saved_filters('search', reset=_RESET, run_key='search_last_run')
+    assert storage['search_results'] == [] and storage['search_last_run'] is None
+    storage.update({'search_results': [{'sys_id': A}],
+                    'search_last_run': {'pre_search_filters': {'filter_criteria': {}}}})
+    assert not fp.retire_old_saved_filters('search', reset=_RESET, run_key='search_last_run')
+    assert storage['search_results'] == [{'sys_id': A}]
+
+
+@pytest.mark.parametrize('page', ['web/pages/search.py', 'web/pages/parallels.py'])
+def test_whether_a_search_had_filters_is_decided_when_it_is_pressed(page):
+    """Codex round 2: the only criterion removed while the search ran left its
+    history entry (and parallels' export) with no filters at all."""
+    src = (ROOT / page).read_text(encoding='utf-8')
+    assert '_dispatch_had_filters = _has_active_filters()' in src
+    late = re.findall(r"\} if (_dispatch_had_filters or )?_has_active_filters\(\) else None", src)
+    assert late and all(late), (page, late)
+    if page.endswith('search.py'):
+        assert "retire_old_saved_filters('search', run_key='search_last_run'" in src
+
+
+class _Gate:
+    def __init__(self):
+        self.calls, self.events = [], []
+
+    async def prefetch(self, rows):
+        self.calls.append(list(rows))
+        event = asyncio.Event()
+        self.events.append(event)
+        await event.wait()
+
+
+def test_the_refill_keeps_a_request_made_while_it_runs():
+    async def go():
+        gate, renders = _Gate(), []
+        refill = ss.PostMatchRefill(gate.prefetch, lambda: renders.append(True))
+        refill.request([A])
+        await asyncio.sleep(0)
+        refill.request([A, B])              # an exclusion removed meanwhile
+        gate.events[0].set()
+        await asyncio.sleep(0)
+        assert gate.calls == [[A], [A, B]], gate.calls
+        assert renders == []                 # not before the last rows are checked
+        gate.events[1].set()
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert renders == [True] and refill.task is None
+    asyncio.run(go())
+
+
+def test_a_miss_met_by_the_rerender_starts_a_new_check():
+    async def go():
+        gate = _Gate()
+        refill = None
+
+        def rerender():
+            if len(gate.calls) == 1:
+                refill.request([B])          # the re-render met another unchecked row
+        refill = ss.PostMatchRefill(gate.prefetch, rerender)
+        refill.request([A])
+        await asyncio.sleep(0)
+        gate.events[0].set()
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert gate.calls == [[A], [B]] and refill.task is not None
+        gate.events[1].set()
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert refill.task is None
+    asyncio.run(go())
+
+
+def test_the_refill_does_not_render_over_a_running_search():
+    async def go():
+        renders = []
+
+        async def prefetch(rows):
+            return None
+        refill = ss.PostMatchRefill(prefetch, lambda: renders.append(True), busy=lambda: True)
+        refill.request([A])
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert renders == []
+    asyncio.run(go())
+
+
+def test_a_worker_whose_criteria_changed_does_not_publish(svc, monkeypatch):
+    st = _state(post_filter_criteria={'width': {'min': 10, 'max': 12}})
+    real = FjmsService.match_result_criteria
+
+    def changes_meanwhile(self, criteria, sys_ids):
+        st.post_filter_criteria = {'width': {'min': 30}}
+        return real(self, criteria, sys_ids)
+    monkeypatch.setattr(FjmsService, 'match_result_criteria', changes_meanwhile)
+    assert ss.post_criteria_matches(st, _rows([A, B])) == {A, B}   # its own answer
+    assert getattr(st, '_post_match', None) is None                 # not published

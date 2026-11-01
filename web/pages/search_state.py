@@ -11,6 +11,8 @@ and pure logic that operates on app.storage or SearchUIState fields.
 """
 from __future__ import annotations
 
+import asyncio
+
 from dataclasses import dataclass
 from typing import Any, Optional, List, Set
 from datetime import datetime
@@ -387,8 +389,50 @@ def post_criteria_matches(state: 'SearchUIState', results, fetch: bool = True):
         found = get_fjms_service(thread_safe=True).match_result_criteria(criteria, missing)
         cache['ids'] |= found or set()
         cache['checked'] |= missing
-    state._post_match = cache
+    # A worker whose criteria changed while it ran does not publish its answer
+    # over the new criteria's (Codex round 2 on PR 1b).
+    if criteria_token(state.post_filter_criteria or {}) == token:
+        state._post_match = cache
     return cache['ids']
+
+
+class PostMatchRefill:
+    """Checks result rows for the post-search filters off the event loop, then
+    re-renders (D20). Every request is kept: rows asked for while a check runs
+    are checked next, in the same task; the task lets go before the re-render,
+    so a miss the re-render meets starts a new check (Codex round 2 on PR 1b:
+    a request made meanwhile was dropped, and the list stayed short).
+
+    ``prefetch(rows)`` is awaited (it fills the cache); ``rerender()`` draws
+    the list from it; ``busy()`` says a search is running, whose own render
+    will follow -- the re-render is skipped then."""
+
+    def __init__(self, prefetch, rerender, busy=lambda: False):
+        self._prefetch = prefetch
+        self._rerender = rerender
+        self._busy = busy
+        self._rows = []
+        self._again = False
+        self.task = None
+
+    def request(self, rows) -> None:
+        self._rows = list(rows)
+        if self.task is not None and not self.task.done():
+            self._again = True
+            return
+        self.task = asyncio.ensure_future(self._run())
+
+    async def _run(self):
+        try:
+            while True:
+                self._again = False
+                await self._prefetch(self._rows)
+                if not self._again:
+                    break
+        finally:
+            self.task = None
+        if not self._busy():
+            self._rerender()
 
 
 def preview_shows_final_rows(state: 'SearchUIState') -> bool:
