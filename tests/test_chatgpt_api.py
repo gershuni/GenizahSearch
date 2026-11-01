@@ -21,7 +21,7 @@ def payload(n=20):
 
 def client_for(handler):
     app = FastAPI()
-    for name in ('search', 'parallels', 'browse', 'capabilities'):
+    for name in ('search', 'parallels', 'browse', 'capabilities', 'criteria'):
         app.add_api_route('/' + name, handler, methods=['POST', 'GET'])
     register_chatgpt_api(app)
     parent = FastAPI()

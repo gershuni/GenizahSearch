@@ -32,6 +32,16 @@ MODERN = '2026-07-28'
 HEBREW = 'בראשית ברא אלהים "את" השמים '
 
 
+def criteria_payload(values=3):
+    """GET /api/criteria's shape (web/search_api.py::criteria_endpoint), one list criterion."""
+    return {'schema_version': 1, 'request': {}, 'corpus': 255723, 'uncatalogued': 29169, 'sections': [
+        {'key': 'status', 'label_en': 'Physical status', 'label_he': 'מצב פיזי', 'criteria': [
+            {'key': 'status', 'kind': 'list', 'label_en': 'Physical status', 'label_he': 'מצב פיזי',
+             'not_recorded': True, 'available': True, 'recorded': 106369,
+             'values': [{'value': f'Value {i}', 'label_en': f'Value {i}', 'label_he': HEBREW,
+                         'count': 1000 + i} for i in range(values)]}]}]}
+
+
 def search_payload(n=25, chars=300):
     text = (HEBREW * (chars // 20 + 1))[:chars]
     return {'schema_version': 1, 'source': 'search', 'generated_at': '2026-10-09T00:00:00Z',
@@ -49,6 +59,7 @@ class Engine:
         self.gate = asyncio.Event()
         self.gate.set()
         self.payload = search_payload()
+        self.criteria = criteria_payload()
         self.failure = None  # (status, body, headers): the engine's own failure
         self.browse = {'schema_version': 1, 'source': 'browse', 'locator': {'sys_id': '990001', 'p_num': 1},
                        'shelfmark': 'T-S 1', 'library': {'code': 'CUL', 'name': 'Cambridge University Library'},
@@ -61,6 +72,8 @@ class Engine:
             return JSONResponse(self.browse)
         if request.url.path.endswith('/capabilities'):
             return JSONResponse({'search_modes': ['exact']})
+        if request.url.path.endswith('/criteria'):
+            return JSONResponse(self.criteria)
         await self.gate.wait()
         if self.failure:
             status, failure, headers = self.failure
@@ -82,7 +95,7 @@ def stack(monkeypatch):
                         lambda app, owner: real_register(app, owner, loader=lambda s, sec: (rows, 'available')))
     engine = Engine()
     child = FastAPI()
-    for kind in ('search', 'parallels', 'browse', 'capabilities'):
+    for kind in ('search', 'parallels', 'browse', 'capabilities', 'criteria'):
         child.add_api_route('/' + kind, engine, methods=['POST', 'GET'])
     register_chatgpt_api(child)
 
@@ -124,7 +137,7 @@ def run(host, script, mode='legacy', sizes=None):
 
 # --- the tool list -------------------------------------------------------------------------------
 
-def test_seven_tools_with_the_planned_annotations(stack):
+def test_eight_tools_with_the_planned_annotations(stack):
     host, _, _ = stack
 
     async def script(client):
@@ -133,6 +146,7 @@ def test_seven_tools_with_the_planned_annotations(stack):
     assert {name: (t.annotations.read_only_hint, t.annotations.idempotent_hint, t.annotations.destructive_hint,
                    t.annotations.open_world_hint) for name, t in tools.items()} == {
         'get_capabilities': (True, True, False, False),
+        'list_manuscript_features': (True, True, False, False),
         'browse_manuscript_page': (True, True, False, False),
         'search_manuscripts': (False, False, False, False),
         'find_passage_parallels': (False, False, False, False),
@@ -517,18 +531,48 @@ def test_a_failed_search_is_an_error_with_its_job_id_not_pending(stack):
 def test_every_argument_reaches_the_facade_unchanged(stack):
     host, _, engine = stack
     responsa = {'variants': True, 'ja': False, 'flex_spacing': True, 'bidirectional': True}
-    filters = {'library': ['CUL'], 'library_filter_mode': 'exclude', 'materials': ['paper'],
+    filters = {'library': ['CUL'], 'library_filter_mode': 'exclude', 'materials': ['Paper'],
                'domains': ['d'], 'authors': ['a'], 'works': ['w'], 'date_from': 1000, 'date_to': 1200}
+    criteria = {'style': {'values': ['Square', '_none'], 'mode': 'except'},
+                'lines': {'min': 20, 'max': 25, 'not_recorded': True, 'source': 'measured'}}
 
     async def script(client):
         await client.call_tool('search_manuscripts', {'query': 'א', 'search_mode': 'responsa', 'limit': 7,
                                                       'gap': 2, 'responsa_options': responsa, 'filters': filters})
-        await client.call_tool('find_passage_parallels', {'text': 'א', 'filters': {'library': ['JTS']}})
+        await client.call_tool('find_passage_parallels', {'text': 'א', 'filters': {'library': ['JTS'],
+                                                                                    'criteria': criteria}})
     run(host, script)
     assert [sent for _, sent in engine.calls] == [
         {'query': 'א', 'search_mode': 'responsa', 'limit': 7, 'gap': 2, 'responsa_options': responsa,
          'filters': filters},
-        {'method': 'passage', 'text': 'א', 'filters': {'library': ['JTS']}}]
+        {'method': 'passage', 'text': 'א', 'filters': {'library': ['JTS'], 'criteria': criteria}}]
+
+
+def test_the_features_tool_reads_the_vocabulary_unchanged(stack):
+    host, _, engine = stack
+
+    async def script(client):
+        return await client.call_tool('list_manuscript_features', {})
+    result = run(host, script)
+    assert result.is_error is False and body(result) == engine.criteria
+    assert engine.calls == [('/chatgpt/criteria', {})]
+
+
+@pytest.mark.parametrize('criteria', [
+    {'scribe': {'values': ['x']}},                      # no such criterion
+    {'style': {'values': ['Square'], 'among': 'x'}},    # no such field
+    {'style': {'values': 'Square'}},                    # values must be a list
+    {'lines': {'min': 'many'}},                         # bounds are numbers
+    {'style': {'values': ['Square'], 'mode': 'not'}},   # only / except
+])
+def test_a_malformed_criterion_never_reaches_the_facade(stack, criteria):
+    host, _, engine = stack
+
+    async def script(client):
+        return await client.call_tool('search_manuscripts', {'query': 'א', 'search_mode': 'exact',
+                                                             'filters': {'criteria': criteria}})
+    assert refused_by_the_tool_schema(run(host, script))
+    assert engine.calls == []
 
 
 # --- the word-gap limit (docs/plans/DESKTOP_NATIVE_MATCHING_PLAN.md 3.6) -------------------------
@@ -703,11 +747,13 @@ def test_every_tool_stays_under_the_bound_on_the_wire(stack, mode):
     host, _, engine = stack
     engine.payload = search_payload(n=40, chars=2500)     # pages near the MCP budget
     engine.browse['text'] = (HEBREW * 400)[:10_000]        # the largest text_cap
+    engine.criteria = criteria_payload(values=200)         # the real file lists ~160 values
     section = sorted(SECTIONS)[0]
     sizes = []
 
     async def script(client):
         results = [await client.call_tool('get_capabilities', {}),
+                   await client.call_tool('list_manuscript_features', {}),
                    await client.call_tool('browse_manuscript_page', {'sys_id': '990001', 'p_num': 1,
                                                                      'text_cap': 10_000}),
                    await client.call_tool('get_manuscript_details', {'sys_id': '990001', 'section': section})]
@@ -718,7 +764,7 @@ def test_every_tool_stays_under_the_bound_on_the_wire(stack, mode):
                     await client.call_tool('find_chunk_parallels', {'text': 'א ב ג', 'chunk_size': 2})]
         return results
     results = run(host, script, mode, sizes)
-    assert len(sizes) == 7 and max(sizes) <= MCP_RESPONSE_BYTES
+    assert len(sizes) == 8 and max(sizes) <= MCP_RESPONSE_BYTES
     assert not any(result.is_error for result in results)
 
 

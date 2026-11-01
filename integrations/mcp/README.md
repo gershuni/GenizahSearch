@@ -10,7 +10,7 @@ Contract: the "MCP server" section of [`docs/SEARCH_API.md`](../../docs/SEARCH_A
 ## How it works
 
 `web/mcp_server.py` registers an exact `POST /mcp` route on the web app when `MCP_ENABLED=1` and the
-`/api/chatgpt` facade is registered. Its seven tools call that facade in-process as the visitor who
+`/api/chatgpt` facade is registered. Its eight tools call that facade in-process as the visitor who
 called them, so the facade's mode gate, rate limits, validation and research jobs apply unchanged. No
 corpus logic lives in the adapter.
 

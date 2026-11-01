@@ -127,6 +127,7 @@ def test_capabilities_endpoints_list(client, clean_env):
     body = r.json()
     assert body['endpoints'] == [
         '/api/search', '/api/browse', '/api/parallels', '/api/capabilities',
+        '/api/criteria',
     ]
 
 
@@ -205,13 +206,14 @@ def test_capabilities_limits_full_set(client, clean_env):
     the environment until the first `acquire()` rebuilds it; see
     test_capabilities_concurrency_follows_env_before_first_acquire.
     """
-    from web.search_api import _HeavySemaphoreState, _PassageSemaphoreState
+    from web.search_api import _HeavySemaphoreState, _PassageSemaphoreState, _criteria_rate_limiter
     r = _get(client)
     limits = r.json()['limits']
     assert limits['search_requests_per_minute'] == _rate_limiter._current_limit()
     assert limits['browse_requests_per_minute'] == _browse_rate_limiter._current_limit()
     assert limits['parallels_requests_per_minute'] == _parallels_rate_limiter._current_limit()
     assert limits['capabilities_requests_per_minute'] == _capabilities_rate_limiter._current_limit()
+    assert limits['criteria_requests_per_minute'] == _criteria_rate_limiter._current_limit()
     assert limits['heavy_concurrency'] == _HeavySemaphoreState.resolve_capacity() == 2
     assert limits['passage_concurrency'] == _PassageSemaphoreState.resolve_capacity() == 4
 

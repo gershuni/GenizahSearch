@@ -15,7 +15,7 @@ def make_app(monkeypatch, handler):
     monkeypatch.setattr('web.chatgpt_api._job_owner', lambda request: request.client.host)
     monkeypatch.setattr('web.chatgpt_jobs.POLL_SECONDS', 0.01)
     child = FastAPI()
-    for kind in ('search', 'parallels', 'browse', 'capabilities'):
+    for kind in ('search', 'parallels', 'browse', 'capabilities', 'criteria'):
         child.add_api_route('/' + kind, handler, methods=['POST', 'GET'])
     register_chatgpt_api(child)
     parent = FastAPI()

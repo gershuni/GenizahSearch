@@ -4,8 +4,9 @@
     python integrations/mcp/smoke_test.py http://localhost:8084
 
 Connects with the MCP SDK under both protocol generations and runs a short research path
-on public example data: list the tools, read capabilities, look up a shelfmark, wait for
-the job, read the first page with its citation, and read one details section. Prints one
+on public example data: list the tools, read capabilities and the manuscript features, look
+up a shelfmark, wait for the job, read the first page with its citation, and read one details
+section. Prints one
 line per call with status, latency and size; exits 1 on any failure. Proves the HTTP path,
 not a client: run integrations/mcp/acceptance-tests.md in real clients too.
 """
@@ -19,7 +20,8 @@ import time
 from mcp.client import Client
 
 EXPECTED_TOOLS = {'get_capabilities', 'search_manuscripts', 'find_passage_parallels', 'find_chunk_parallels',
-                  'get_research_job', 'browse_manuscript_page', 'get_manuscript_details'}
+                  'get_research_job', 'browse_manuscript_page', 'get_manuscript_details',
+                  'list_manuscript_features'}
 SHELFMARK = 'ENA 1628.38'
 CHUNK_TEXT = 'ברוך אתה ה אלהינו מלך העולם'   # short: one chunk job holds a shared research worker
 CHUNK_BUSY_TRIES = 5
@@ -66,6 +68,9 @@ async def run(base_url, mode, failures):
         if tools != EXPECTED_TOOLS:
             failures.append(f'{mode}: tools {sorted(tools)}')
         await call(client, failures, 'get_capabilities', {})
+        features = await call(client, failures, 'list_manuscript_features', {})
+        if features is not None and not features.get('sections'):
+            failures.append(f'{mode}: list_manuscript_features listed no sections')
         found = await call(client, failures, 'search_manuscripts', {'query': SHELFMARK, 'search_mode': 'shelfmark'})
         found = await wait_for_job(client, failures, found)
         if found is None:

@@ -162,7 +162,7 @@ def test_filters_that_match_nothing_still_give_the_texts_warnings(client, clean_
     expected = [w for w in searched.json().get('warnings', [])
                 if isinstance(w, dict) and w.get('code') in _NOTICE_CODES]
     real_engine.build_tantivy_query.reset_mock()
-    monkeypatch.setattr(search_api, '_resolve_fjms_filters_sync', lambda filters: set())
+    monkeypatch.setattr(search_api, '_resolve_fjms_filters_sync', lambda filters, meta_mgr=None: set())
     empty = client.post('/api/parallels', json={**payload, 'filters': {'domains': ['Halakha']}})
     assert empty.status_code == 200, empty.text
     assert empty.json()['results'] == []

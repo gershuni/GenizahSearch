@@ -199,7 +199,8 @@ def register_chatgpt_api(app):
 
         return endpoint
 
-    for kind, method in [('search', 'POST'), ('parallels', 'POST'), ('browse', 'GET'), ('capabilities', 'GET')]:
+    for kind, method in [('search', 'POST'), ('parallels', 'POST'), ('browse', 'GET'), ('capabilities', 'GET'),
+                         ('criteria', 'GET')]:
         app.add_api_route('/chatgpt/' + kind, wrapped(kind), methods=[method], include_in_schema=False)
 
     async def schema():

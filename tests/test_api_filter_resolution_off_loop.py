@@ -106,7 +106,7 @@ def recorder(monkeypatch):
     from shared import fjms_service as fjms_module
     calls = []
 
-    def _validate(d):
+    def _validate(d, **kw):
         calls.append(('validate', _on_loop()))
 
     def _lookup(**kw):
@@ -152,7 +152,7 @@ def test_offloaded_filter_validation_error_still_returns_4xx_on_both_endpoints(c
     from shared.api_errors import APIError
     lookup = MagicMock(return_value=None)
 
-    def _validate(d):
+    def _validate(d, **kw):
         raise APIError('unresolvable_filter_value', 'no such domain', http_status=400)
 
     monkeypatch.setattr(fjms_module, 'validate_filter_values', _validate)

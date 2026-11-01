@@ -28,11 +28,12 @@ request bodies as their synchronous counterparts and return URLs for polling,
 result retrieval, and cancellation. See [research job limits and lifecycle](search-matching-timeouts.md#background-api).
 Job status envelopes are separate from the four result contracts below.
 
-All four endpoints return JSON, and every successful response carries `schema_version`. Beyond that the four are NOT uniform, so do not write one envelope parser for all of them:
+All five endpoints return JSON, and every successful response carries `schema_version`. Beyond that the five are NOT uniform, so do not write one envelope parser for all of them:
 
 - `/search` and `/parallels` carry `source`, `generated_at`, `count`, `total`, `warnings[]` and `results[]`.
 - `/browse` carries `source` and `generated_at`, but returns its payload as top-level fields rather than a `results[]` list, and has no `count`/`total`.
 - `/capabilities` is a fixed-shape descriptor: it has **no `source`** and no `generated_at`. Its top-level key set is exhaustively listed in its own section below.
+- `/criteria` lists the manuscript features `filters.criteria` accepts: like `/capabilities`, no `source` and no `generated_at`.
 
 Failures return `{"error": {"code": "...", "message": "..."}}` with an HTTP 4xx/5xx status -- but see "Error Envelope" for the two cases that carry something else.
 
@@ -219,12 +220,13 @@ For full credits including hosting and development attribution, see the [Credits
 
 ## Overview
 
-This search-helper API exposes four endpoints — `POST /api/search`, `GET /api/browse`,
-`POST /api/parallels`, and `GET /api/capabilities` — that together let a research consumer
+This search-helper API exposes five endpoints — `POST /api/search`, `GET /api/browse`,
+`POST /api/parallels`, `GET /api/capabilities` and `GET /api/criteria` — that together let a research consumer
 execute a Tantivy keyword/Responsa search, drill down into a single manuscript page (with
 PGP/FJMS/NLI enrichment), run a composition-parallels job over an arbitrary input text
 (including the beta letter-level `method='passage'` engine and multi-witness search), and
-cheaply discover which flag-gated features are live on a given deployment. A reference
+cheaply discover which flag-gated features are live on a given deployment and which
+manuscript features (script, region, lines, material...) the filters accept. A reference
 consumer is the [`cairo-genizah-research` Claude skill](../skills/cairo-genizah-research/SKILL.md),
 which demonstrates the full search → browse → rank workflow. The first three endpoints share
 a common hardening shell: per-IP rate limiting (independent token bucket per endpoint, all
@@ -233,7 +235,8 @@ that permits run-time disabling or loopback-only restriction without restart, a 
 envelope, sampled PostHog observability, and a Phase-77-locked JSON envelope shape produced
 by the sole serializer at `shared/search_serializer.py`. `/api/capabilities` shares the mode
 gate and the uniform envelope but has its own rate-limit bucket and does no index/database
-work. All four endpoints are stateless: the same request produces the same body regardless
+work; `/api/criteria` likewise has its own bucket and reads only the catalogue sidecar. All
+five endpoints are stateless: the same request produces the same body regardless
 of session.
 
 ## Endpoint: POST /api/search
@@ -285,7 +288,7 @@ when the offending key is the legacy `mode` field (renamed to `search_mode` in P
 | `responsa_options` | object \| null | valid only when `search_mode="responsa"` | `null` | see sub-table below |
 | `gap` | integer | `>= 0`; must be `0` when `search_mode in {title, shelfmark}`; at most `10` unless `search_mode == 'responsa'` (2026-10-12) | `0` | proximity slop for keyword search |
 | `limit` | integer | `1..100` for non-fuzzy modes (`MAX_LIMIT=100`); `1..SEARCH_API_FUZZY_MAX_LIMIT` (default 500, max 2000) for `fuzzy` | `50` (fuzzy with no explicit limit widens to a recall-oriented default of 250) | P9X: fuzzy recall-over-precision — non-fuzzy boundary unchanged |
-| `filters` | object \| null | all sub-fields nullable; unknown filter keys → 400 `invalid_request` (Pydantic `extra='forbid'`); unknown values → 400 `unresolvable_filter_value` | `null` | `library` (library codes, e.g. `["CUL","JTS","Oxford"]` — inclusion or exclusion filter depending on `library_filter_mode`; intersected with the other filters BEFORE the result cap; SEED-026); `library_filter_mode` (`"include"` default, omitted≡include — restrict to the given set; `"exclude"` — restrict to the complement, i.e. manuscripts whose `library_code` is NOT in the set; invalid value → 400 `invalid_request`; applies to both `POST /api/search` and `POST /api/parallels`; Phase 132 DMF-11); `domains`, `authors`, `works`, `materials` (string lists); `script_styles` (e.g. `["Square","Semi-Cursive"]`) and `script_places` (e.g. `["Spanish","Yemenite"]`) — the script style / script place the FJMS catalogue records give, any listed value matches, manuscripts whose records give none are not included (2026-11-01); `date_from`, `date_to` (int years) |
+| `filters` | object \| null | all sub-fields nullable; unknown filter keys → 400 `invalid_request` (Pydantic `extra='forbid'`); unknown values → 400 `unresolvable_filter_value` | `null` | `library` (library codes, e.g. `["CUL","JTS","Oxford"]` — inclusion or exclusion filter depending on `library_filter_mode`; intersected with the other filters BEFORE the result cap; SEED-026); `library_filter_mode` (`"include"` default, omitted≡include — restrict to the given set; `"exclude"` — restrict to the complement, i.e. manuscripts whose `library_code` is NOT in the set; invalid value → 400 `invalid_request`; applies to both `POST /api/search` and `POST /api/parallels`; Phase 132 DMF-11); `domains`, `authors`, `works` (string lists); `criteria` — the manuscript features (script style and region, language, vocalization, columns, lines, physical status, material, attributes, period of copy, measured sizes): see [Manuscript features](#manuscript-features-filterscriteria) below, and `GET /api/criteria` for the keys and values; `materials` (catalogue values such as `["Paper","Vellum"]`, read as `criteria.material` with source `catalogue`); `date_from`, `date_to` (int years CE, read as `criteria.period`: a catalogue record whose copy-date span overlaps the range matches — since 2026-11, see Changelog). An older key and the criterion it is read as in one request → 400 `invalid_combination` |
 
 ### `responsa_options` sub-fields
 
@@ -920,10 +923,10 @@ document alone (which cannot say whether a given deployment currently has, say,
 `PASSAGE_PARALLELS_ENABLED=1`). `GET /api/capabilities` answers that cheaply: **no index
 load, no database, no search** — it reads live config and returns a small JSON object.
 
-It shares the same mode gate and error envelope as the other three endpoints — `enforce_mode_gate`
+It shares the same mode gate and error envelope as the other endpoints — `enforce_mode_gate`
 applies, so `SEARCH_API_MODE=disabled` still returns 503 `disabled` and `localhost-only`
 still returns 403 `localhost_only` for non-loopback callers — and it is rate-limited through
-its own bucket (`SEARCH_API_RATE_LIMIT`, same ceiling as the other three buckets, tracked
+its own bucket (`SEARCH_API_RATE_LIMIT`, same ceiling as the other buckets, tracked
 independently — see Rate Limiting & Buckets below), so hammering `/api/capabilities` cannot
 starve `/api/search`, `/api/browse`, or `/api/parallels` and vice versa.
 
@@ -949,7 +952,7 @@ curl -s https://genizahsearch.com/api/capabilities | python -m json.tool
   "schema_version": 1,
   "request": {},
   "api_version": "9.2.0",
-  "endpoints": ["/api/search", "/api/browse", "/api/parallels", "/api/capabilities"],
+  "endpoints": ["/api/search", "/api/browse", "/api/parallels", "/api/capabilities", "/api/criteria"],
   "search_modes": ["exact", "variants", "variants_extended", "responsa", "title", "shelfmark", "fuzzy"],
   "background_job_modes": ["variants_extended"],
   "features": {
@@ -969,6 +972,7 @@ curl -s https://genizahsearch.com/api/capabilities | python -m json.tool
     "browse_requests_per_minute": 120,
     "parallels_requests_per_minute": 120,
     "capabilities_requests_per_minute": 120,
+    "criteria_requests_per_minute": 120,
     "heavy_concurrency": 2,
     "passage_concurrency": 4
   },
@@ -992,7 +996,7 @@ curl -s https://genizahsearch.com/api/capabilities | python -m json.tool
 | `schema_version` | Always `1` — this endpoint is an additive change under the Stability commitment above, so adding it does not move the version. |
 | `request` | Always `{}`. Present for uniformity with `/search` and `/parallels`, which carry an effective-request echo here; `/browse` has no `request` key (it uses `locator`). This endpoint takes no input, so there is nothing to echo. |
 | `api_version` | The site release this deployment is running (`version.py::APP_VERSION`), read live — NOT a hardcoded string, and NOT the same thing as `schema_version`. |
-| `endpoints` | The four public paths as absolute `/api/...` strings — what a client actually calls, regardless of what path prefix this router happens to be mounted under. |
+| `endpoints` | The five public paths as absolute `/api/...` strings — what a client actually calls, regardless of what path prefix this router happens to be mounted under. |
 | `search_modes` | The live `search_mode` enum accepted by `POST /api/search`, in the order documented above. |
 | `background_job_modes` | The `search_mode` values accepted only by `POST /api/search/jobs` (synchronously: 400 `background_job_required`; added 2026-10-11). |
 | `features.passage` | `web.passage_assets.passage_available()` — both `PASSAGE_PARALLELS_ENABLED=1` AND a successfully-loaded passage index. |
@@ -1011,6 +1015,163 @@ The JSON above shows this deployment's *current defaults*; every value is read f
 live resolvers at request time, not typed in as a literal, specifically so this response
 cannot drift out of sync with reality the way the header of this document once did (see
 "Edge-Timeout Ceiling" below for that history).
+
+## Endpoint: GET /api/criteria
+
+The manuscript features `filters.criteria` accepts — the sections of the website's
+"Manuscript features" panel (FJMS's own section names), each criterion's kind and sources,
+and every value a list criterion offers, with how many manuscripts of the whole corpus
+(255,723, the 29,169 with no FJMS catalogue record included) have it. Call it before
+filtering by a feature, and copy values exactly: an unlisted value is a 400
+`unresolvable_filter_value`, never a silent no-match. Added 2026-11 (catalogue criteria,
+`docs/plans/CATALOGUE_CRITERIA_PLAN.md`).
+
+Same mode gate and error envelope as the other endpoints, its own rate-limit bucket. The
+list is built from the catalogue sidecar once per process: the first call after a restart
+can take about 20 seconds, later ones are immediate. It fails closed: no sidecar, the corpus
+list not loaded yet (shortly after a restart) or a failed read is 503
+`filter_vocabulary_unavailable`, never a partial list.
+
+### Request
+
+No parameters, no body.
+
+```bash
+curl -s https://genizahsearch.com/api/criteria | python -m json.tool
+```
+
+### Response example
+
+Truncated: three of the ten sections and a few values each, with the real figures of the
+catalogue as of 2026-11.
+
+```json
+{
+  "schema_version": 1,
+  "request": {},
+  "corpus": 255723,
+  "uncatalogued": 29169,
+  "sections": [
+    {
+      "key": "period",
+      "label_en": "Period of copy",
+      "label_he": "תקופת העתקה",
+      "criteria": [
+        {
+          "key": "period",
+          "kind": "range",
+          "label_en": "Period of copy",
+          "label_he": "תקופת העתקה",
+          "whole_numbers": true,
+          "not_recorded": true,
+          "available": true,
+          "recorded": 13121
+        }
+      ]
+    },
+    {
+      "key": "script",
+      "label_en": "Script",
+      "label_he": "כתיבה",
+      "criteria": [
+        {
+          "key": "style",
+          "kind": "list",
+          "label_en": "Style",
+          "label_he": "כתב",
+          "not_recorded": true,
+          "available": true,
+          "recorded": 45125,
+          "values": [
+            {"value": "Semi-Cursive", "label_en": "Semi-Cursive", "label_he": "בינוני", "count": 23418},
+            {"value": "Square", "label_en": "Square", "label_he": "מרובע", "count": 21270},
+            {"value": "_none", "label_en": "Not recorded", "label_he": "ללא רישום", "count": 210598}
+          ]
+        }
+      ]
+    },
+    {
+      "key": "material",
+      "label_en": "Material",
+      "label_he": "חומר",
+      "criteria": [
+        {
+          "key": "material",
+          "kind": "list",
+          "label_en": "Material",
+          "label_he": "חומר",
+          "sources": ["either", "catalogue", "measured"],
+          "not_recorded": true,
+          "available": true,
+          "recorded": 147667,
+          "recorded_by_source": {"catalogue": 136546, "measured": 17804},
+          "values": [
+            {"value": "Paper", "label_en": "Paper", "label_he": "נייר", "count": 106513,
+             "count_by_source": {"catalogue": 96761, "measured": 14564}},
+            {"value": "_none", "label_en": "Not recorded", "label_he": "ללא רישום", "count": 108056,
+             "count_by_source": {"catalogue": 119177, "measured": 237919}}
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Field semantics
+
+| Field | Meaning |
+| ----- | ------- |
+| `corpus`, `uncatalogued` | Every corpus manuscript, and how many of them have no FJMS catalogue record. Those have no catalogue values: they match "not recorded", "all except" and measured values, and catalogue width / height for the few (13) that have a catalogue size record. |
+| `sections[]` | In the panel's order: `period`, `language`, `script`, `vocalization`, `columns`, `lines`, `status`, `material`, `attributes`, `measured`. |
+| `criteria[].key` | The key to send in `filters.criteria`. |
+| `kind` | `list` (send `values`) or `range` (send `min` / `max`). |
+| `sources` | Only on criteria with two sources (lines, material, width, height): `either` (the default — the catalogue or a measurement), `catalogue` or `measured`. |
+| `whole_numbers`, `unit` | Ranges: whether bounds must be whole numbers, and the unit (`cm`, `mm`, `per 10 cm`, `dpi`). |
+| `not_recorded` | Whether the criterion has "nothing recorded" (`"_none"` in a list, `not_recorded: true` on a range). Attributes do not. |
+| `available` | `false` when this deployment's catalogue file cannot answer the criterion (catalogue lines and columns, period of copy, vocalization extent and attributes need data file 5.1.0); then no figures are given, and filtering by it is 503 `filter_unavailable`. |
+| `recorded`, `recorded_by_source` | How many corpus manuscripts have the criterion recorded (by source where it has two). |
+| `values[]` | A list's values by manuscript count, then the catalogue's own `Unknown` / `Cannot be determined`, then `_none` (Not recorded). `count` is for source `either`; `count_by_source` gives the other two. Labels are English and Hebrew; send `value`. |
+
+### Manuscript features (`filters.criteria`)
+
+One entry per criterion, keyed as `GET /api/criteria` lists them. Entries combine with AND,
+with each other and with the other filters:
+
+```json
+{
+  "query": "ברוך",
+  "search_mode": "exact",
+  "filters": {
+    "criteria": {
+      "style": {"values": ["Square", "Semi-Cursive"]},
+      "region": {"values": ["Oriental"], "mode": "except"},
+      "lines": {"min": 20, "max": 25, "source": "measured"},
+      "period": {"min": 1000, "max": 1200, "not_recorded": true}
+    }
+  }
+}
+```
+
+- **Lists** — `{"values": [...], "mode": "only" | "except", "source": ...}`. Any one value
+  matches (Attributes too: any of). `"except"` is every other manuscript of the corpus,
+  including those with nothing recorded unless `"_none"` is among the values. A manuscript
+  with several catalogue records matches when any record gives the value.
+- **Ranges** — `{"min": n, "max": n, "not_recorded": true | false, "source": ...}`; either
+  bound may be left out; reversed bounds are swapped. `not_recorded: true` adds the
+  manuscripts with nothing recorded; with no bounds, it selects only those.
+- **Measured values** hold on one measured page: every measured condition of a request
+  (lines, width, height, written area, margins, line height, density, resolution) must be
+  met by the same photographed page; catalogue width and height by the same size record.
+- **Period of copy** matches a catalogue record whose copy-date span overlaps the range.
+- **Errors:** a malformed entry (unknown key or field, `mode` on a range, `"_none"` among the
+  Attributes, a `source` other than `either` on a criterion with one source, a fractional bound
+  where whole numbers are required) is 400 `invalid_request`; a value `GET /api/criteria` does not
+  list under the chosen source is 400 `unresolvable_filter_value`; `materials` or `date_from`/`date_to` sent together with
+  `criteria.material` / `criteria.period` is 400 `invalid_combination`; a criterion this
+  deployment cannot answer is 503 `filter_unavailable`, and so is any criterion (`materials`
+  and the dates included) in the moments after a restart before the list of all manuscripts
+  has loaded. A request is never run without a filter it asked for.
 
 ## Naming Inconsistency: parallels.mode vs search.search_mode
 
@@ -1116,14 +1277,14 @@ public API surface — renaming any is a breaking change).
 | Code | HTTP status | Typical raise condition |
 | ---- | ----------- | ----------------------- |
 | `invalid_request` | 400 | malformed JSON; Pydantic structural validation failure (incl. unknown field — emits "unknown field 'mode' — use search_mode instead" hint per Phase 81A D-13); bad query-param int casts in browse; missing required browse locator; bad `text_cap` bounds; bad `p_num` |
-| `invalid_combination` | 400 | cross-field rejection: `responsa_options` with non-Responsa mode; `gap != 0` with title/shelfmark; `gap > 10` outside Responsa |
+| `invalid_combination` | 400 | cross-field rejection: `responsa_options` with non-Responsa mode; `gap != 0` with title/shelfmark; `gap > 10` outside Responsa; `filters.materials` or `filters.date_from`/`date_to` together with `filters.criteria.material` / `criteria.period` |
 | `invalid_mode` | 400 | reserved (mode validation) |
 | `query_required` | 400 | post-strip empty `query` |
 | `query_too_long` | 400 | `len(query) > 1000` |
 | `limit_too_high` | 400 | `req.limit > MAX_LIMIT` (100) for non-fuzzy modes, or `req.limit > SEARCH_API_FUZZY_MAX_LIMIT` for fuzzy. Pydantic still rejects `limit > 2000` (FUZZY_HARD_MAX) with `invalid_request`. **Contract change (heavy-tier release):** a non-fuzzy `limit` in `101..2000` now returns `limit_too_high` (was `invalid_request` when the Pydantic bound was `le=100`). The request is still rejected with HTTP 400; only the error `code` changed (now the more specific `limit_too_high`). Clients that branch on `invalid_request` for over-limit values should also accept `limit_too_high`. |
 | `unknown_filter_key` | 400 | reserved in `ERROR_CODES` for future use; in practice, an unknown `filters` key is caught first by Pydantic `extra='forbid'` and returns `invalid_request` (not this code) |
-| `unresolvable_filter_value` | 400 | filter value not in vocabulary |
-| `filter_vocabulary_unavailable` | 503 | vocabulary loader failed (Phase 78 R2-#3 fail-closed) |
+| `unresolvable_filter_value` | 400 | filter value not in vocabulary (for `filters.criteria`: not among the values `GET /api/criteria` lists for that source) |
+| `filter_vocabulary_unavailable` | 503 | vocabulary loader failed (Phase 78 R2-#3 fail-closed); `GET /api/criteria` when the list cannot be built |
 | `filter_unavailable` | 503 | the filters were valid but could not be applied (the catalog sidecar is absent, or the filter lookup failed). The request is never run without its filters. No `Retry-After`; retry later or drop `filters`. Unfiltered and Library-only requests are unaffected. |
 | `rate_limited` | 429 + `Retry-After` | per-IP sliding window exhausted on the endpoint's own bucket |
 | `heavy_search_busy` | 503 + `Retry-After` | heavy-mode (variants/fuzzy/parallels) concurrency budget (`SEARCH_API_HEAVY_CONCURRENCY`, default 2) exhausted; fail-fast instead of queueing unboundedly; retry shortly |
@@ -1197,7 +1358,7 @@ echo divergence; user-facing display should surface the warning message verbatim
 
 ## Environment Variables
 
-Every server-side var that affects the four endpoints, plus the two skill-side vars.
+Every server-side var that affects the five endpoints, plus the two skill-side vars.
 
 | Var | Default | Scope | Notes |
 | --- | ------- | ----- | ----- |
@@ -1226,7 +1387,7 @@ above; the two skill-side vars are documented in
 
 ## Rate Limiting & Buckets
 
-Four INDEPENDENT per-IP buckets, all reading the same `SEARCH_API_RATE_LIMIT` env-var
+Five INDEPENDENT per-IP buckets, all reading the same `SEARCH_API_RATE_LIMIT` env-var
 ceiling on every request:
 
 | Bucket | Limiter instance | Endpoint |
@@ -1235,17 +1396,18 @@ ceiling on every request:
 | browse | `_browse_rate_limiter` | `GET /api/browse` |
 | parallels | `_parallels_rate_limiter` | `POST /api/parallels` |
 | capabilities | its own `RateLimiter` instance | `GET /api/capabilities` |
+| criteria | `_criteria_rate_limiter` | `GET /api/criteria` |
 
-Bursting one endpoint's bucket does NOT exhaust the other three. A client making sustained
-calls to all four endpoints sees roughly 4× the per-IP allowance compared with hammering
+Bursting one endpoint's bucket does NOT exhaust the others. A client making sustained
+calls to all five endpoints sees roughly 5× the per-IP allowance compared with hammering
 one endpoint alone. The three-bucket version of this was a deliberate contract choice made
 at the initial public release (Phase 80 D-05; Phase 79 D-18 R-10 captures it as a
 monitoring obligation, not a contract change); `/api/capabilities` added a fourth bucket
-under the same reasoning when it shipped.
+and `/api/criteria` a fifth under the same reasoning.
 
 429 responses include a `Retry-After: <seconds>` header.
 
-The `SEARCH_API_MODE` env var gates all four endpoints uniformly:
+The `SEARCH_API_MODE` env var gates all five endpoints uniformly:
 
 - `open` (default) — all callers permitted.
 - `localhost-only` — non-loopback callers receive a 403 `localhost_only` envelope.
@@ -1329,7 +1491,7 @@ docstrings in [web/search_api.py](../web/search_api.py).
 
 - Not authenticated. There are no API keys today; access is anonymous and rate-limited per-IP. Future versions may add optional keys for higher quotas.
 - Not browse-page parity. Only the subset of fields the skill ranks against is exposed; UI-only fields (corrections, comments, lists, puzzles) are not.
-- Not a write API. All three endpoints are read-only over the public corpus.
+- Not a write API. Every endpoint is read-only over the public corpus.
 - Not a bulk-export interface. For full-corpus access, use the [interactive search](https://genizahsearch.com) directly or contact the project for the underlying transcription dataset (see [Attribution & Citation](#attribution--citation)).
 - Not a long-running job runner. Composition-parallels requests run synchronously within the request timeout; a future async-job API may ship in v7.11+.
 
@@ -1351,6 +1513,27 @@ The following improvements are documented here as future work but are NOT implem
 ---
 
 ## Changelog
+
+### 2026-11 — Manuscript features: `filters.criteria` and `GET /api/criteria`
+
+- `filters.criteria` on `POST /api/search` and `POST /api/parallels` (and their background
+  jobs, and the MCP tools the ChatGPT app and Claude use; the retiring custom GPT's Actions
+  schema, `integrations/chatgpt/openapi.json`, is not extended): the website's "Manuscript features" — script style
+  and region, language and alphabet, vocalization, columns, lines, physical status, material,
+  attributes, period of copy and measured sizes over the whole corpus: lists with "only" / "all
+  except", and "not recorded" wherever the criterion has it (all but Attributes). See [Manuscript features](#manuscript-features-filterscriteria).
+- `GET /api/criteria` lists the keys and values with corpus counts; `/api/capabilities` lists it
+  in `endpoints` and its bucket in `limits.criteria_requests_per_minute`.
+- **Changed meaning:** `date_from` / `date_to` now match a catalogue record whose copy-date span
+  overlaps the range (they matched the start year only): 1000-1200 gives 4,702 manuscripts, 4,561
+  before. `materials` is unchanged (catalogue values, any record); its documented examples
+  `'paper'` / `'parchment'` were wrong — the values are `Paper`, `Vellum`, ... and a wrong one is
+  a 400, as it always was.
+- `date_from`/`date_to` and `materials` sent together with `criteria.period` / `criteria.material` (even an empty one)
+  is 400 `invalid_combination` (no silent precedence).
+- The `script_styles` / `script_places` lists of an unreleased build are gone: `criteria.style` and
+  `criteria.region` replace them.
+- MCP: a new read-only tool, `list_manuscript_features`, and `criteria` in every tool's `filters`.
 
 ### 2026-10-21 — `exact` matches whole words, as the website's Exact does
 
@@ -1663,6 +1846,7 @@ in-process as the visitor who made the call.
 | Tool | Facade route | Annotations |
 | --- | --- | --- |
 | `get_capabilities` | `GET /api/chatgpt/capabilities` | read-only |
+| `list_manuscript_features` | `GET /api/chatgpt/criteria` (`GET /api/criteria` above) | read-only |
 | `search_manuscripts` | `POST /api/chatgpt/search/jobs`, then polls | starts a job (`readOnlyHint=false`, not idempotent) |
 | `find_passage_parallels` | `POST /api/chatgpt/parallels/jobs` (`method=passage` fixed), then polls | starts a job |
 | `find_chunk_parallels` | `POST /api/chatgpt/parallels/jobs` (`method=chunk` fixed; `chunk_size`, `mode`), then polls | starts a job; one at a time for all callers (`research_jobs_busy`, `Retry-After: 30`) |

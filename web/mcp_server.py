@@ -39,6 +39,7 @@ from shared.search_engine import MAX_WORD_GAP
 from version import APP_VERSION
 from web.api_hardening import API_CHANNEL_SCOPE_KEY, _resolve_rate_limit_key, capture_mcp_tool_event
 from web.chatgpt_pagination import MCP_RESPONSE_BYTES
+from web.criteria_models import CriteriaModel
 from web.feature_flags import MCP_ENABLED
 
 MCP_PATH = '/mcp'
@@ -158,16 +159,17 @@ class SearchFilters(BaseModel):
     domains: list[str] | None = None
     authors: list[str] | None = None
     works: list[str] | None = None
-    materials: list[str] | None = Field(None, description='Physical support (paper, parchment), not genre.')
-    script_styles: list[str] | None = Field(
-        None, description='Catalogued script style: Square, Semi-Cursive, Cursive, Rabbinical, Naskhi, Karaitic.')
-    script_places: list[str] | None = Field(
-        None, description='Catalogued script place: Oriental, Spanish, Syrian, Yemenite, Ashkenazi, '
-                          'North African, Italian, Byzantine, Persian.')
+    materials: list[str] | None = Field(None, description='Writing material as catalogued (Paper, Vellum, '
+                                                          'Papyrus), not genre; or criteria.material, not both.')
     library: list[str] | None = Field(None, description='Known library codes, e.g. CUL, JTS, Oxford.')
     library_filter_mode: Literal['include', 'exclude'] | None = None
-    date_from: int | None = Field(None, strict=True)
+    date_from: int | None = Field(None, strict=True, description='Year CE; a copy-date span overlapping '
+                                                                 'date_from..date_to matches. Or criteria.period, '
+                                                                 'not both.')
     date_to: int | None = Field(None, strict=True)
+    criteria: CriteriaModel | None = Field(
+        None, description='Manuscript features (script, region, language, vocalization, lines, size, '
+                          'material...). Take keys and values from list_manuscript_features; never guess them.')
 
 
 class Witness(BaseModel):
@@ -611,6 +613,22 @@ def build_server(facade_app) -> MCPServer:
     )
     async def get_capabilities(ctx: Context) -> CallToolResult:
         return await _call_tool(target, ctx, 'get_capabilities', 'GET', '/chatgpt/capabilities')
+
+    @server.tool(
+        name='list_manuscript_features',
+        title='List manuscript features',
+        description=(
+            "The manuscript features filters.criteria accepts (the website's Manuscript features "
+            'panel): script style and region, language and alphabet, vocalization, columns, lines, '
+            'physical status, material, attributes, period of copy and measured sizes, each with its '
+            'kind (list or range), sources and, for a list, its values with manuscript counts. Call it '
+            'before filtering by a feature and copy values exactly; a list value of "_none" means '
+            'nothing recorded. available=false: this deployment cannot filter by that feature.'),
+        annotations=READ_ONLY,
+        structured_output=False,
+    )
+    async def list_manuscript_features(ctx: Context) -> CallToolResult:
+        return await _call_tool(target, ctx, 'list_manuscript_features', 'GET', '/chatgpt/criteria')
 
     @server.tool(
         name='browse_manuscript_page',

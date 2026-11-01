@@ -70,6 +70,7 @@ _REF_SECTIONS = {
     "browse": "## Endpoint: GET /api/browse",
     "parallels": "## Endpoint: POST /api/parallels",
     "capabilities": "## Endpoint: GET /api/capabilities",
+    "criteria": "## Endpoint: GET /api/criteria",
 }
 
 ENDPOINTS = tuple(sorted(_REF_SECTIONS))
@@ -105,6 +106,7 @@ _NON_RESPONSE_BLOCKS = (
     ('"sys_id": "990001234560205171",\n  "volume_ie"', "drill-down locator fragment"),
     ('"code": "invalid_combination"', "error envelope example"),
     ('"warnings": ["query_downgraded', "warnings-array worked example"),
+    ('"filters": {\n    "criteria": {', "filters.criteria request example"),
 )
 
 

@@ -305,6 +305,35 @@ def period_from_dates(date_from=None, date_to=None, include_undated=False) -> di
     return clean_criteria({"period": spec}, strict=False)[0]
 
 
+# The API's older filter keys and the criterion each is read as (§6.4).
+LEGACY_FILTER_KEYS = {"materials": "material", "date_from": "period", "date_to": "period"}
+
+
+def legacy_conflicts(filters) -> list:
+    """``[(old_key, criterion_key)]`` for each older API key sent together
+    with ``criteria`` for the criterion it is read as: refused, never one of
+    the two silently preferred."""
+    filters = filters or {}
+    criteria = filters.get("criteria") or {}
+    return [(old, key) for old, key in LEGACY_FILTER_KEYS.items()
+            if filters.get(old) not in (None, [], "") and key in criteria]
+
+
+def criteria_with_legacy_keys(filters) -> dict:
+    """The criteria an API request asks for: ``filters['criteria']`` with the
+    older keys read in -- ``materials`` as Material from the catalogue, and
+    ``date_from`` / ``date_to`` as Period of copy (span overlap, D18). Call
+    once ``legacy_conflicts`` has found none. Raises ``ValueError`` like
+    ``clean_criteria``."""
+    filters = filters or {}
+    raw = dict(filters.get("criteria") or {})
+    if filters.get("materials"):
+        raw["material"] = {"values": list(filters["materials"]), "mode": "only",
+                           "source": "catalogue"}
+    raw.update(period_from_dates(filters.get("date_from"), filters.get("date_to")))
+    return clean_criteria(raw)[0]
+
+
 def criteria_token(criteria) -> str:
     """A stable text form, for caches keyed on a selection."""
     return json.dumps(criteria or {}, sort_keys=True, ensure_ascii=False)

@@ -159,7 +159,7 @@ def test_include_mode_is_default_same_as_omitted(client, stub_searcher, clean_en
         include_calls.append(codes)
         return {'9911111111111111', '9911111111111112'}
 
-    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d: None)
+    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d, **kw: None)
     monkeypatch.setattr(fjms_module, 'get_filter_sys_ids', lambda **kw: None)
     monkeypatch.setattr(fjms_module, 'resolve_library_sys_ids', _fake_include)
     monkeypatch.setattr(
@@ -202,7 +202,7 @@ def test_omit_mode_equals_include(client, stub_searcher, clean_env, monkeypatch)
     """
     from shared import fjms_service as fjms_module
 
-    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d: None)
+    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d, **kw: None)
     monkeypatch.setattr(fjms_module, 'get_filter_sys_ids', lambda **kw: None)
     monkeypatch.setattr(
         fjms_module, 'resolve_library_sys_ids',
@@ -247,7 +247,7 @@ def test_exclude_restricts_to_complement(client, stub_searcher, clean_env, monke
         include_calls.append(codes)
         return {'9911111111111111', '9911111111111112'}
 
-    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d: None)
+    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d, **kw: None)
     monkeypatch.setattr(fjms_module, 'get_filter_sys_ids', lambda **kw: None)
     monkeypatch.setattr(fjms_module, 'resolve_library_sys_ids', _fake_include)
     # Patch complement helper — may not exist yet; use setattr to install stub
@@ -303,7 +303,7 @@ def test_include_vs_exclude_disjoint(client, stub_searcher, clean_env, monkeypat
         complement_calls.append(list(codes))
         return COMPLEMENT_SYS_IDS
 
-    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d: None)
+    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d, **kw: None)
     monkeypatch.setattr(fjms_module, 'get_filter_sys_ids', lambda **kw: None)
     monkeypatch.setattr(fjms_module, 'resolve_library_sys_ids', _fake_include)
     monkeypatch.setattr(
@@ -366,7 +366,7 @@ def test_parallels_exclude_mode(client, stub_searcher, clean_env, monkeypatch):
 
     COMPLEMENT_SYS_IDS = {'9922222222222221', '9922222222222222'}
 
-    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d: None)
+    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d, **kw: None)
     monkeypatch.setattr(fjms_module, 'get_filter_sys_ids', lambda **kw: None)
     monkeypatch.setattr(
         fjms_module, 'resolve_library_sys_ids',
@@ -437,7 +437,7 @@ def test_mode_without_library_is_noop(client, stub_searcher, clean_env, monkeypa
         resolve_calls.append(('complement', codes))
         return set()
 
-    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d: None)
+    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d, **kw: None)
     monkeypatch.setattr(fjms_module, 'get_filter_sys_ids', lambda **kw: None)
     monkeypatch.setattr(fjms_module, 'resolve_library_sys_ids', _boom)
     monkeypatch.setattr(

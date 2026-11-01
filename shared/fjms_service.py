@@ -36,6 +36,9 @@ from shared.catalog_criteria import (
     match_criteria,
 )
 from shared.catalog_criteria import BY_KEY as _CRITERIA_BY_KEY
+from shared.catalog_criteria import CRITERIA as _CRITERIA
+from shared.catalog_criteria import NEW_TABLE_KEYS as _NEW_TABLE_KEYS
+from shared.catalog_criteria import SECTIONS as _CRITERIA_SECTIONS
 from shared.catalog_criteria import criteria_chips as _criteria_chips
 from shared.catalog_criteria import recorded_count as _recorded_count
 from shared.thread_local_db import ThreadLocalConnection
@@ -98,65 +101,6 @@ MEASUREMENT_FILTER_KEYS = (
     'line_count_min', 'line_count_max', 'line_height_min', 'line_height_max',
     'text_density_min', 'text_density_max', 'measurement_material',
 )
-
-# Script filters: the script style and script place the catalogue records give
-# (catalog_fields, one row per catalogue record). Filter key -> FieldCategory.
-SCRIPT_FILTER_CATEGORIES = {
-    'script_styles': 'TypeOfScriptStyle',
-    'script_places': 'TypeOfScriptPlace',
-}
-# Recorded values that describe no script: never offered as a choice.
-_SCRIPT_NON_VALUES = frozenset({'Unknown', 'Cannot be determined'})
-
-# Traits Catalog Browse lists manuscripts by (a ``traits`` dict of these keys):
-# the script filters and the measurement filters of "Search only in...",
-# with the same meaning as the get_filter_sys_ids arguments of the same names.
-BROWSE_SCRIPT_TRAITS = tuple(SCRIPT_FILTER_CATEGORIES)
-BROWSE_MEASUREMENT_TRAITS = (
-    'width_min', 'width_max', 'height_min', 'height_max',
-    'line_count_min', 'line_count_max', 'measurement_material',
-)
-BROWSE_TRAIT_KEYS = BROWSE_SCRIPT_TRAITS + BROWSE_MEASUREMENT_TRAITS
-# Physical support as manuscript_measurements records it.
-MEASUREMENT_MATERIALS = ('Paper', 'Vellum', 'Papyrus', 'Mix', 'Wood')
-
-
-def clean_traits(traits) -> dict:
-    """The active traits of *traits*: known keys only, lists as lists of
-    strings, bounds as numbers (line counts as ints). Empty values dropped."""
-    out = {}
-    for key, value in (traits or {}).items():
-        if key not in BROWSE_TRAIT_KEYS or value in (None, '', [], ()):
-            continue
-        if key in BROWSE_SCRIPT_TRAITS or key == 'measurement_material':
-            values = [str(v) for v in (value if isinstance(value, (list, tuple, set)) else [value]) if v]
-            if values:
-                out[key] = values
-        else:
-            try:
-                number = float(value)
-                out[key] = int(number) if key.startswith('line_count') else number
-            except (TypeError, ValueError):
-                continue
-    return out
-
-
-def _script_conditions(script_styles=None, script_places=None):
-    """(conditions, params) restricting ``c.AlmaId`` to manuscripts any of
-    whose catalogue records gives one of the chosen values, per list."""
-    conditions, params = [], []
-    for values, category in ((script_styles, SCRIPT_FILTER_CATEGORIES['script_styles']),
-                             (script_places, SCRIPT_FILTER_CATEGORIES['script_places'])):
-        if values:
-            placeholders = ','.join('?' * len(values))
-            conditions.append(
-                f"c.AlmaId IN ("
-                f"SELECT AlmaId FROM catalog_fields "
-                f"WHERE FieldCategory = ? AND FieldValue IN ({placeholders}))"
-            )
-            params.append(category)
-            params.extend(values)
-    return conditions, params
 
 
 def _measurement_conditions(width_min=None, width_max=None, height_min=None, height_max=None,
@@ -986,12 +930,12 @@ class FjmsService:
         # None = not yet computed. Empty set = computed but vocabulary is empty
         # (which validate_filter_values treats as fail-closed, NOT allow-all).
         self._materials_cache: Optional[set] = None
-        # Script filter choices per filter key (see get_script_values).
-        self._script_values_cache: dict = {}
-        self._script_values_lock = threading.Lock()
         # Post-search criteria (match_result_criteria): the last few answers.
         self._result_match_cache: dict = {}
         self._result_match_lock = threading.Lock()
+        # GET /api/criteria (criteria_vocabulary): one build at a time -- a cold
+        # build reads the whole catalogue (~20 s on the full file).
+        self._criteria_vocabulary_lock = threading.Lock()
         # SEED-023: per-thread registry of populated catalog-filter TEMP tables
         # (name -> token). The PGP/edition membership sets are static per process,
         # so each thread's TEMP table is built once and reused across requests.
@@ -1320,8 +1264,6 @@ class FjmsService:
         line_height_min: float = None, line_height_max: float = None,
         text_density_min: float = None, text_density_max: float = None,
         measurement_material: list[str] = None,
-        script_styles: list[str] = None,
-        script_places: list[str] = None,
         criteria: dict = None,
         universe=None,
     ) -> Optional[set]:
@@ -1353,11 +1295,6 @@ class FjmsService:
             text_all: FTS5 terms that must ALL appear (AND).
             text_any: FTS5 terms where ANY must appear (OR).
             text_not: FTS5 terms that must NOT appear.
-            script_styles: Script styles (TypeOfScriptStyle values, e.g. 'Square').
-            script_places: Script places (TypeOfScriptPlace values, e.g. 'Spanish').
-                A manuscript matches when any of its catalogue records gives one
-                of the chosen values; the two filters AND with each other and
-                with the rest. Not affected by include/exclude mode.
             criteria: Catalogue criteria (shared/catalog_criteria.py), ANDed
                 with everything else.
             universe: The set of every corpus sys_id, or a callable returning
@@ -1414,8 +1351,6 @@ class FjmsService:
             or line_height_min is not None or line_height_max is not None
             or text_density_min is not None or text_density_max is not None
             or measurement_material
-            or script_styles
-            or script_places
         )
         if not old_active and not criteria:
             return None
@@ -1623,11 +1558,6 @@ class FjmsService:
                 )
                 params.extend(material_exclude)
 
-            # Script style / place filters
-            script_conds, script_params = _script_conditions(script_styles, script_places)
-            conditions.extend(script_conds)
-            params.extend(script_params)
-
             # Text filters (FTS5 hybrid: catalog_fts + domain LIKE)
             if text_all or text_any or text_not:
                 def _fts_escape(term: str) -> str:
@@ -1702,7 +1632,7 @@ class FjmsService:
                 inclusion = bool(
                     domains or authors or works or date_from is not None
                     or date_to is not None or material_include or text_all or text_any
-                    or script_styles or script_places or _has_measurement_filter)
+                    or _has_measurement_filter)
                 if universe is not None and not inclusion:
                     ids |= set(_resolve_universe(universe)) - self.catalogued_ids()
             if criteria:
@@ -1865,6 +1795,73 @@ class FjmsService:
         return {'corpus': len(universe), 'uncatalogued': len(uncatalogued),
                 'uncatalogued_sized': len(uncatalogued & sized)}
 
+    def criteria_vocabulary(self, universe) -> dict:
+        """What GET /api/criteria serves: every section and criterion in the
+        panel's order, with what a caller needs to send it -- kind, sources,
+        unit, whether "not recorded" exists -- and, over the corpus, how many
+        manuscripts have it recorded (``recorded``, per source in
+        ``recorded_by_source``) and a list criterion's values with their
+        counts (``count_by_source`` where it has sources; the list ends with
+        "_none", Not recorded, except for Attributes). A criterion this file
+        cannot answer (a 5.0.0 file: catalogue lines and columns, period,
+        vocalization extent, attributes) is ``available: false`` with no
+        figures. Cached per corpus. Raises FilterUnavailable."""
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        universe = _resolve_universe(universe)
+        if universe is None:
+            raise FilterUnavailable('corpus_unavailable',
+                                    'the list of all manuscripts is not loaded yet')
+        cache = self.__dict__.setdefault("_criteria_vocabulary_cache", {})
+        token = _universe_token(universe)
+        with self._criteria_vocabulary_lock:
+            if token not in cache:
+                cache[token] = self._build_criteria_vocabulary(universe)
+            return copy.deepcopy(cache[token])
+
+    def _build_criteria_vocabulary(self, universe: frozenset) -> dict:
+        unsupported = self.criteria_support() == FILTER_UNSUPPORTED
+        sections = []
+        for section in _CRITERIA_SECTIONS:
+            entries = []
+            for criterion in _CRITERIA:
+                if criterion.section != section.key:
+                    continue
+                key = criterion.key
+                entry = {'key': key, 'kind': criterion.kind,
+                         'label_en': criterion.label_en, 'label_he': criterion.label_he}
+                if criterion.sources:
+                    entry['sources'] = ['either', *criterion.sources]
+                if criterion.kind == 'range':
+                    entry['whole_numbers'] = criterion.integer
+                    if criterion.unit:
+                        entry['unit'] = criterion.unit
+                entry['not_recorded'] = criterion.not_recordable
+                entry['available'] = not (unsupported and key in _NEW_TABLE_KEYS)
+                if entry['available']:
+                    entry['recorded'] = self.get_criterion_coverage(key, universe)
+                    if criterion.sources:
+                        entry['recorded_by_source'] = {
+                            s: self.get_criterion_coverage(key, universe, s)
+                            for s in criterion.sources}
+                    if criterion.kind == 'list':
+                        values = self.get_criterion_values(key, universe)
+                        if criterion.sources:
+                            counts = {s: {v['value']: v['count']
+                                          for v in self.get_criterion_values(key, universe, s)}
+                                      for s in criterion.sources}
+                            for value in values:
+                                value['count_by_source'] = {
+                                    s: counts[s].get(value['value'], 0) for s in criterion.sources}
+                        entry['values'] = values
+                entries.append(entry)
+            sections.append({'key': section.key, 'label_en': section.label_en,
+                             'label_he': section.label_he, 'criteria': entries})
+        note = self.criteria_corpus_note(universe)
+        return {'corpus': note['corpus'], 'uncatalogued': note['uncatalogued'],
+                'sections': sections}
+
     def criterion_value_labels(self, key: str, cached_only: bool = False) -> Optional[dict]:
         """``{value: Hebrew label}`` of a list criterion, from the catalogue
         (cached with its values). Raises FilterUnavailable as they do.
@@ -1925,46 +1922,7 @@ class FjmsService:
                 self._result_match_cache.pop(next(iter(self._result_match_cache)))
         return set(matched)
 
-    def get_script_values(self, kind: str) -> list[dict]:
-        """The choices a script filter offers, most manuscripts first.
-
-        Args:
-            kind: a SCRIPT_FILTER_CATEGORIES key ('script_styles' or 'script_places').
-
-        Returns:
-            [{'value': 'Square', 'value_heb': 'מרובע', 'count': N}, ...], where
-            count is the number of manuscripts any of whose catalogue records
-            gives the value. Empty when the sidecar is absent or the lookup
-            failed (not cached then, so a later call retries).
-        """
-        category = SCRIPT_FILTER_CATEGORIES.get(kind)
-        if category is None:
-            raise ValueError(f"unknown script filter {kind!r}")
-        with self._script_values_lock:
-            cached = self._script_values_cache.get(kind)
-            if cached is not None:
-                return cached
-            if self._conn is None:
-                return []
-            try:
-                cursor = self._conn.execute(
-                    "SELECT FieldValue, MAX(FieldValueHeb), COUNT(DISTINCT AlmaId) "
-                    "FROM catalog_fields WHERE FieldCategory = ? "
-                    "AND FieldValue IS NOT NULL AND FieldValue != '' "
-                    "GROUP BY FieldValue ORDER BY 3 DESC, 1",
-                    (category,),
-                )
-                values = [
-                    {'value': row[0], 'value_heb': row[1] or '', 'count': row[2]}
-                    for row in cursor if row[0] not in _SCRIPT_NON_VALUES
-                ]
-            except Exception as e:
-                logger.error("FjmsService.get_script_values(%s) error: %s", kind, e)
-                return []
-            self._script_values_cache[kind] = values
-            return values
-
-    def validate_filter_values(self, filters: dict) -> None:
+    def validate_filter_values(self, filters: dict, universe=None) -> None:
         """Probe each filter value against FJMS lookup tables (R2-#3 policy).
 
         - Unknown token in a loaded vocabulary → APIError(http_status=400,
@@ -1978,12 +1936,15 @@ class FjmsService:
         Args:
             filters: dict with optional keys 'domains', 'authors', 'works',
                      'library', 'library_filter_mode', 'materials',
-                     'script_styles', 'script_places', 'date_from',
-                     'date_to' (D-15 shape, post-Pydantic validation).
+                     'date_from', 'date_to', 'criteria' (D-15 shape,
+                     post-Pydantic validation; 'criteria' cleaned).
                      'library' is validated against LIBRARY_CODES (Phase 129).
                      'library_filter_mode' is intentionally not validated here —
                      it is a Pydantic Literal field with no server-side vocabulary
                      table; it is consumed by _intersect_library_filter.
+            universe: the corpus (a set, or a callable returning it), so a
+                     criteria value is checked against the values GET
+                     /api/criteria lists -- those with a corpus manuscript.
         """
         if not filters:
             return
@@ -2127,26 +2088,55 @@ class FjmsService:
                         http_status=400,
                     )
 
-        # ---- Script styles / places: the choices the filter controls offer.
-        for key in SCRIPT_FILTER_CATEGORIES:
-            values = filters.get(key)
+        # ---- Catalogue criteria (PR 2 of docs/plans/CATALOGUE_CRITERIA_PLAN.md).
+        criteria = filters.get('criteria')
+        if criteria:
+            self._validate_criteria_values(criteria, universe)
+        # date_from / date_to: any int is a valid token; range matching is FJMS's job.
+
+    def _validate_criteria_values(self, criteria: dict, universe=None) -> None:
+        """Each value of a list criterion must be one the catalogue (or, for
+        Material, a measurement) records under the chosen source for a
+        manuscript of ``universe`` -- the values GET /api/criteria lists
+        (Attributes too: only those present). ``criteria`` is already cleaned
+        (strict), so keys, shapes, attribute names and "_none" are checked.
+        Ranges have no vocabulary. A criterion this file cannot answer at all
+        is left to the lookup, which raises FilterUnavailable('column_missing')
+        for it; so is a corpus list that cannot be had (it raises
+        FilterUnavailable('corpus_unavailable') here)."""
+        unsupported = self.criteria_support() == FILTER_UNSUPPORTED
+        resolved = False
+        for key, spec in clean_criteria(criteria)[0].items():
+            criterion = _CRITERIA_BY_KEY[key]
+            if criterion.kind != 'list':
+                continue
+            if unsupported and key in _NEW_TABLE_KEYS:
+                continue
+            values = [v for v in spec['values'] if v != NOT_RECORDED]
             if not values:
                 continue
-            valid = {item['value'] for item in self.get_script_values(key)}
-            if not valid:
+            source = spec.get('source', 'either')
+            if not resolved:
+                universe, resolved = _resolve_universe(universe), True
+            try:
+                # An empty list read successfully is an answer: nothing is
+                # recorded, so every value is unknown (400), not a 503.
+                known = {item['value'] for item in self.get_criterion_values(key, universe, source)}
+            except FilterUnavailable as exc:
                 raise APIError(
                     'filter_vocabulary_unavailable',
-                    f'The {key} filter vocabulary is unavailable or empty',
+                    f'The criteria.{key} vocabulary could not be read',
                     http_status=503,
-                )
+                ) from exc
             for v in values:
-                if v not in valid:
+                if v not in known:
+                    where = f" under source {source!r}" if criterion.sources else ''
                     raise APIError(
                         'unresolvable_filter_value',
-                        f"filter {key}={v!r} is not a script value the catalogue records",
+                        f"filter criteria.{key}={v!r} is not a value the catalogue records{where}; "
+                        f"GET /api/criteria lists them",
                         http_status=400,
                     )
-        # date_from / date_to: any int is a valid token; range matching is FJMS's job.
 
     def get_all_domains(self) -> list[dict]:
         """
@@ -2744,9 +2734,8 @@ class FjmsService:
         pgp_sys_ids=None,
         editions_filter=None,
         edition_sys_ids=None,
-        traits=None,
     ):
-        """Build the shared WHERE conditions (domain/author/work/date/text/pgp/editions/traits).
+        """Build the shared WHERE conditions (domain/author/work/date/text/pgp/editions).
 
         Used by both ``get_browse_results`` and ``get_browse_library_facets`` so that
         the facet counts honour the same non-library filters as the browse query.
@@ -2901,18 +2890,6 @@ class FjmsService:
                     f"WHERE t.AlmaId = c.AlmaId)"
                 )
 
-        # Script / measurement traits: the conditions get_filter_sys_ids uses,
-        # so browse and "Search only in..." never disagree about a manuscript.
-        traits = clean_traits(traits)
-        if traits:
-            for conds, prms in (
-                _script_conditions(traits.get('script_styles'), traits.get('script_places')),
-                _measurement_conditions(**{k: v for k, v in traits.items()
-                                           if k in BROWSE_MEASUREMENT_TRAITS}),
-            ):
-                conditions.extend(conds)
-                params.extend(prms)
-
         return conditions, params
 
     def get_browse_results(
@@ -2935,7 +2912,6 @@ class FjmsService:
         library_codes: list = None,
         library_sys_ids=None,
         library_mode: str = 'show_only',
-        traits: dict = None,
         criteria: dict = None,
         universe=None,
     ) -> dict:
@@ -2984,20 +2960,14 @@ class FjmsService:
                 AlmaId is NOT in the resolved set (denylist / NOT EXISTS).
                 Omitted or unrecognised values fall back to ``'show_only'``
                 (fail-safe, today's behaviour).
-            traits: Script and measurement traits, a dict of BROWSE_TRAIT_KEYS
-                (``{'script_places': ['Spanish'], 'width_min': 10}``), meaning
-                what the get_filter_sys_ids arguments of the same names mean.
-                Measurement traits need the manuscript_measurements table:
-                callers drop them when ``measurement_filters_available()`` is
-                False.
             criteria: Catalogue criteria (shared/catalog_criteria.py).
             universe: The set of every corpus sys_id. With it the list is the
                 whole corpus (D16): catalogued manuscripts first, then those
                 with no catalogue record (D22), which pass the PGP, edition,
                 library and criteria filters like any manuscript, and every
                 older filter that only excludes, but no filter that picks
-                something in (domain, author, work, date, text all/any,
-                traits; D17). Without it, catalogued manuscripts only.
+                something in (domain, author, work, date, text all/any;
+                D17). Without it, catalogued manuscripts only.
 
         Returns:
             Dict with keys:
@@ -3035,7 +3005,6 @@ class FjmsService:
                 pgp_sys_ids=pgp_sys_ids,
                 editions_filter=editions_filter,
                 edition_sys_ids=edition_sys_ids,
-                traits=traits,
             )
             matched = self._browse_criteria_condition(criteria, universe, conditions)
             self._browse_universe_condition(universe, conditions)
@@ -3090,7 +3059,7 @@ class FjmsService:
             uncatalogued = self._browse_uncatalogued(
                 universe, matched,
                 inclusion=self._browse_inclusion_active(
-                    domain, author, work, date_from, date_to, text_all, text_any, traits),
+                    domain, author, work, date_from, date_to, text_all, text_any),
                 pgp_filter=pgp_filter, pgp_sys_ids=pgp_sys_ids,
                 editions_filter=editions_filter, edition_sys_ids=edition_sys_ids,
                 library_sys_ids=library_sys_ids if library_active else None,
@@ -3170,12 +3139,12 @@ class FjmsService:
 
     @staticmethod
     def _browse_inclusion_active(domain, author, work, date_from, date_to,
-                                 text_all, text_any, traits) -> bool:
+                                 text_all, text_any) -> bool:
         """A browse filter that picks something IN: a manuscript with no
         catalogue record cannot pass it (D17)."""
         return bool(domain is not None or author is not None or work is not None
                     or date_from is not None or date_to is not None
-                    or text_all or text_any or clean_traits(traits))
+                    or text_all or text_any)
 
     def _browse_criteria_condition(self, criteria, universe, conditions):
         """Add the criteria to a browse WHERE (via a per-thread TEMP table of
@@ -3259,7 +3228,6 @@ class FjmsService:
         editions_filter=None,
         edition_sys_ids=None,
         sys_id_to_library=None,
-        traits=None,
         criteria=None,
         universe=None,
     ) -> dict:
@@ -3277,7 +3245,7 @@ class FjmsService:
         Args:
             domain, author, work, date_from, date_to, include_undated,
             text_all, text_any, text_not, pgp_filter, pgp_sys_ids,
-            editions_filter, edition_sys_ids, traits:
+            editions_filter, edition_sys_ids:
                 Same semantics as ``get_browse_results`` — the non-library subset.
             sys_id_to_library: A CALLABLE (e.g. a bound
                 ``MetadataManager.get_library_for_id`` method, or a ``dict.get`` bound
@@ -3323,7 +3291,6 @@ class FjmsService:
                 pgp_sys_ids=pgp_sys_ids,
                 editions_filter=editions_filter,
                 edition_sys_ids=edition_sys_ids,
-                traits=traits,
             )
             matched = self._browse_criteria_condition(criteria, universe, conditions)
             self._browse_universe_condition(universe, conditions)
@@ -3342,7 +3309,7 @@ class FjmsService:
             ids += self._browse_uncatalogued(
                 universe, matched,
                 inclusion=self._browse_inclusion_active(
-                    domain, author, work, date_from, date_to, text_all, text_any, traits),
+                    domain, author, work, date_from, date_to, text_all, text_any),
                 pgp_filter=pgp_filter, pgp_sys_ids=pgp_sys_ids,
                 editions_filter=editions_filter, edition_sys_ids=edition_sys_ids,
             )
@@ -4605,14 +4572,14 @@ def reset_fjms_service():
         _default_service = None
 
 
-def validate_filter_values(filters: dict) -> None:
+def validate_filter_values(filters: dict, universe=None) -> None:
     """Module-level shorthand for FjmsService.validate_filter_values.
 
     Phase 78 Plan 03 (D-17, API-07, R2-#3 fail-closed). Uses the
     thread-safe singleton — see FjmsService.validate_filter_values
     for the policy contract.
     """
-    return get_fjms_service(thread_safe=True).validate_filter_values(filters)
+    return get_fjms_service(thread_safe=True).validate_filter_values(filters, universe)
 
 
 def get_filter_sys_ids(**kwargs):
@@ -4626,31 +4593,6 @@ def get_filter_sys_ids(**kwargs):
     Raises FilterUnavailable exactly as the method does.
     """
     return get_fjms_service(thread_safe=True).get_filter_sys_ids(**kwargs)
-
-
-def script_filter_options(kind: str, is_heb: bool, service=None) -> dict:
-    """{value: 'label (count)'} for a script filter's choices, most manuscripts
-    first; the label is Hebrew when *is_heb* and the catalogue has one. Empty
-    when the catalogue cannot answer. Reads the sidecar on its first call per
-    kind -- call it off the UI thread / event loop."""
-    svc = service if service is not None else get_fjms_service(thread_safe=True)
-    return {
-        item['value']: f"{(item['value_heb'] if is_heb and item['value_heb'] else item['value'])} "
-                       f"({item['count']:,})"
-        for item in svc.get_script_values(kind)
-    }
-
-
-def script_value_label(kind: str, value: str, is_heb: bool, service=None) -> str:
-    """A chosen script value as the user reads it (Hebrew when *is_heb*). Uses
-    the choices already loaded; the stored value itself when they are not."""
-    if not is_heb:
-        return value
-    svc = service if service is not None else get_fjms_service(thread_safe=True)
-    for item in svc._script_values_cache.get(kind) or ():
-        if item['value'] == value:
-            return item['value_heb'] or value
-    return value
 
 
 # ── #17: what the open catalog can answer (for the filter controls) ───────

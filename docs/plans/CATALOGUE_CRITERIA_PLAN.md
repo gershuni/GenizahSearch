@@ -479,6 +479,21 @@ its summary.
    re-run at start-up; history entries re-run, as they always did. (c) The century presets keep the web's
    ranges (`16-19` = 1600-1999, `10th` = 900-999), a quirk both surfaces share; reported, not changed.
 4. **PR 2 — API/MCP:** `filters.criteria`, `/api/criteria`, docs.
+   **As built (2026-11-01, branch `claude/criteria-pr2-api`):** as above, with these choices. (a) The request
+   model is built from the registry (`web/criteria_models.py`), shared by the API and the MCP tools, so a
+   new criterion needs no API change. (b) The MCP server gets an eighth, read-only tool,
+   `list_manuscript_features` (`GET /api/chatgpt/criteria`), and its instructions point filters at it.
+   (c) `GET /api/criteria` gives per section each criterion's kind, sources, unit, coverage over the corpus
+   and a list's values with counts (per source where it has two); a criterion a 5.0.0 file cannot answer is
+   `available: false`. It is built once per process (about 20 s cold on the full file, measured on a
+   5.1.0 copy). (d) A list value must be one the catalogue records under the chosen source (400
+   `unresolvable_filter_value`). (e) The API passes the corpus as the universe, as the website does: "not
+   recorded" and "all except" reach the uncatalogued manuscripts; without the corpus list any criterion is
+   503. (f) `script_styles` / `script_places` left the API (never released), and with the owner's OK
+   (2026-11-01) the code only they and 2.2's browse traits used is removed: `SCRIPT_FILTER_CATEGORIES`,
+   `get_script_values`, `script_filter_options`, `script_value_label`, `clean_traits`, the `traits`
+   arguments, `get_filter_sys_ids(script_styles=, script_places=)`, their tests and the 2.1/2.2 changelog
+   fragments (2.2's chip-removal fix moved to the core fragment).
 5. **Release (D11)** — one release, web and desktop, after 1a-1c and 2; nothing in between is
    deployed. Before it: the 5.1.0 file built from the fixed base (§6.5); the owner copies it to the
    server before the code; the installer bundles it.

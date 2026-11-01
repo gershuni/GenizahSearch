@@ -77,7 +77,7 @@ def app_for(monkeypatch):
     async def handler(request: Request):
         calls.append(await request.json())
         return JSONResponse(payload())
-    for name in ('search', 'parallels', 'browse', 'capabilities'):
+    for name in ('search', 'parallels', 'browse', 'capabilities', 'criteria'):
         app.add_api_route('/' + name, handler, methods=['POST', 'GET'])
     register_chatgpt_api(app)
     return app, calls

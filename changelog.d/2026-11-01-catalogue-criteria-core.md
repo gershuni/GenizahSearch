@@ -23,3 +23,6 @@ Underneath:
   `avg_line_height_mm` (which revives the Line Height filter, dead in production). The build sequence, with
   the 'Instatution' fix after every export, is in `docs/guides/DEPLOYMENT_TECHNICAL.md`. The desktop opens a
   downloaded data file only when it is at least as new as the bundled one.
+- Fixed on the way (web Catalog Browse): removing ANY filter chip left the removed filter in the address
+  and the saved session -- the refresh's `ui.run_javascript` ran in the chip's own, just-deleted
+  context and raised. It now goes through the page's client.
