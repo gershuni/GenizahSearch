@@ -1840,6 +1840,13 @@ def main():
         print(f"  genizah_titles:            {gt_count:>10,} rows")
         print(f"  code_values:               {cv_count:>10,} rows")
         print(f"  File size: {file_size_mb:.1f} MB")
+        # This export rebuilds catalog and catalog_free_desc from FIST.db, which
+        # undoes the 'Instatution' fix (lost this way in May 2026). The rest of
+        # the build sequence (docs/guides/DEPLOYMENT_TECHNICAL.md) must follow.
+        print("\nNot deployable yet. Continue the build sequence:")
+        print("  2. python scripts/import_measurements.py")
+        print("  3. python scripts/fix_instatution_sources.py --db <this file> --apply")
+        print("  4. python scripts/migrate_fjms_criteria.py --db <this file> --apply")
 
     finally:
         source_conn.close()

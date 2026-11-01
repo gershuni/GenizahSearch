@@ -1184,6 +1184,24 @@ sudo systemctl restart genizah-web
 
 **Note:** All sidecar databases are read-only at runtime. The web app opens them in `?mode=ro` URI mode. No write operations occur during normal operation.
 
+**FJMS sidecar build sequence (5.1.0, catalogue criteria; `docs/plans/CATALOGUE_CRITERIA_PLAN.md` §6.5).**
+`export_fist_enrichment.py` alone does NOT give a deployable file. Run on a copy, in this order:
+
+1. `python scripts/export_fist_enrichment.py` (fresh export only; it rebuilds `catalog` and
+   `catalog_free_desc` from FIST.db);
+2. `python scripts/import_measurements.py` (fresh export only: the measurement tables);
+3. `python scripts/fix_instatution_sources.py --db <copy> --no-backup --apply` — after EVERY export.
+   The export brings back 267,481 + 47,809 rows whose source is the typo 'Instatution', which hides the
+   named teams of about 30,600 manuscripts; the May 2026 re-export lost the April fix exactly this way;
+4. `python scripts/migrate_fjms_criteria.py --db <copy> --apply` — adds `criteria_numbers`, the
+   `catalog_fields(FieldCategory, FieldValue, AlmaId)` index and `avg_line_height_mm`, sets
+   `meta.version` 5.1.0. It refuses a file that still has 'Instatution' rows (exit 3) or is not 5.0.x
+   (exit 2), and does nothing on a complete 5.1.0;
+5. check: `SELECT COUNT(*) FROM catalog WHERE SourceName='Instatution'` = 0, the other tables' row
+   counts unchanged, `PRAGMA quick_check` = ok.
+
+Then copy the file to the server before the code that needs it, and bundle it in the installer.
+
 **FJMS Performance Indexes (v6.5.4):** The export script creates 6 performance indexes at build time for domain and catalog queries used during search enrichment. These indexes must be present in the sidecar — they cannot be created at runtime (read-only connection). If you rebuild `fjms_enrichment.db`, verify indexes exist: `idx_domains_parent`, `idx_domains_group`, `idx_domains_domain_alma`, `idx_domains_parent_alma`, `idx_catalog_author`, `idx_catalog_title`.
 
 ### PGP Data Maintenance
