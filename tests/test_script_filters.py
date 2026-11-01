@@ -4,9 +4,9 @@
 A user asked whether the site finds manuscripts by their script, as the
 Friedberg site did. The catalogue records it per catalogue record
 (catalog_fields TypeOfScriptStyle / TypeOfScriptPlace). These tests pin the
-lookup, the choices offered and the API's checks (the API keeps the two lists
-until PR 2 of docs/plans/CATALOGUE_CRITERIA_PLAN.md). The web pages now use the
-catalogue criteria: tests/test_web_criteria_state.py.
+lookup and the choices offered. Every surface now uses the catalogue criteria
+(web: tests/test_web_criteria_state.py; API: tests/test_criteria_api.py), and
+the API refuses the two lists, which were never released.
 """
 import os
 import sqlite3
@@ -21,7 +21,6 @@ from fjms_filter_sidecar import (  # noqa: E402
 )
 
 from shared import fjms_service  # noqa: E402
-from shared.api_errors import APIError  # noqa: E402
 from shared.fjms_service import (  # noqa: E402
     FilterUnavailable, FjmsService, script_filter_options, script_value_label,
 )
@@ -122,34 +121,13 @@ def test_a_script_filter_alone_restricts_the_search(absent):
     assert exc.value.reason == 'sidecar_unavailable'
 
 
-# -- the API's checks --
+# -- the API: the two lists were never released; criteria replaced them (PR 2) --
 
-def test_known_values_pass_validation(svc):
-    svc.validate_filter_values({'script_styles': ['Square'], 'script_places': ['Oriental', 'Yemenite']})
-
-
-@pytest.mark.parametrize('key,value', [('script_styles', 'square'), ('script_places', 'Sephardic'),
-                                       ('script_places', 'Unknown')])
-def test_unknown_values_are_400(svc, key, value):
-    with pytest.raises(APIError) as exc:
-        svc.validate_filter_values({key: [value]})
-    assert (exc.value.code, exc.value.http_status) == ('unresolvable_filter_value', 400)
-
-
-def test_no_vocabulary_is_503_never_allow_all(absent):
-    with pytest.raises(APIError) as exc:
-        absent.validate_filter_values({'script_places': ['Spanish']})
-    assert (exc.value.code, exc.value.http_status) == ('filter_vocabulary_unavailable', 503)
-
-
-def test_api_and_mcp_accept_the_fields_and_pass_them_to_the_lookup(monkeypatch):
+@pytest.mark.parametrize('key', ['script_styles', 'script_places'])
+def test_the_api_and_mcp_refuse_the_unreleased_lists(key):
+    from pydantic import ValidationError
     from web import search_api
     from web.mcp_server import SearchFilters
-    body = {'script_styles': ['Square'], 'script_places': ['Spanish']}
-    assert SearchFilters(**body).model_dump(exclude_none=True) == body
-    filters = search_api.FiltersModel(**body).model_dump(exclude_none=True)
-    seen = {}
-    monkeypatch.setattr(fjms_service, 'validate_filter_values', lambda f: None)
-    monkeypatch.setattr(fjms_service, 'get_filter_sys_ids', lambda **kw: seen.update(kw) or {'990001'})
-    assert search_api._resolve_fjms_filters_sync(filters) == {'990001'}
-    assert seen['script_styles'] == ['Square'] and seen['script_places'] == ['Spanish']
+    for model in (search_api.FiltersModel, SearchFilters):
+        with pytest.raises(ValidationError):
+            model(**{key: ['Square']})

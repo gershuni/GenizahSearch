@@ -45,6 +45,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError as PydanticValidationError, model_validator
 
 from web.state import state
+from web.criteria_models import CriteriaModel
 from web.api_hardening import (
     RateLimiter,
     enforce_mode_gate,
@@ -56,6 +57,7 @@ from web.api_hardening import (
 )
 # Concern #3: APIError from neutral location.
 from shared.api_errors import APIError
+from shared.catalog_criteria import clean_criteria, criteria_with_legacy_keys, legacy_conflicts
 from shared.responsa import _MAX_GAP_TOKEN
 from shared.search_engine import MAX_WORD_GAP
 from shared.responsa_match import ResponsaQueryRefused
@@ -105,6 +107,9 @@ _parallels_rate_limiter = RateLimiter(default_limit=120)
 # to poll for a flag flip must not be able to exhaust (or be starved by) any
 # of the three heavier buckets, and vice versa.
 _capabilities_rate_limiter = RateLimiter(default_limit=120)
+
+# GET /api/criteria (catalogue criteria, PR 2): its own bucket, as above.
+_criteria_rate_limiter = RateLimiter(default_limit=120)
 
 
 # ---------------------------------------------------------------------------
@@ -166,34 +171,55 @@ class FiltersModel(BaseModel):
     )
     materials: Optional[List[str]] = Field(
         default=None,
-        description="Material type (e.g. 'paper', 'parchment'). Unknown values -> 400 unresolvable_filter_value.",
-    )
-    script_styles: Optional[List[str]] = Field(
-        default=None,
         description=(
-            "Script style as the catalogue records it (e.g. 'Square', 'Semi-Cursive', "
-            "'Cursive', 'Rabbinical', 'Naskhi', 'Karaitic'). Any one matches; manuscripts "
-            "whose catalogue records give no script style are not included. Unknown "
-            "values -> 400 unresolvable_filter_value."
-        ),
-    )
-    script_places: Optional[List[str]] = Field(
-        default=None,
-        description=(
-            "Script place (regional script type) as the catalogue records it (e.g. "
-            "'Oriental', 'Spanish', 'Yemenite', 'Ashkenazi', 'Italian', 'Byzantine'). Any "
-            "one matches; manuscripts whose catalogue records give none are not included. "
-            "Unknown values -> 400 unresolvable_filter_value."
+            "Writing material as the catalogue records it (e.g. 'Paper', 'Vellum', "
+            "'Papyrus'); any one matches. Read as criteria.material with source "
+            "'catalogue'; sending both -> 400 invalid_combination. Unknown values -> 400 "
+            "unresolvable_filter_value."
         ),
     )
     date_from: Optional[int] = Field(
         default=None,
-        description="Inclusive lower bound on manuscript estimated year (CE). Combine with date_to.",
+        description=(
+            "Lower bound (year CE) of the period of copy: a manuscript matches when a "
+            "catalogue record's copy-date span overlaps date_from..date_to. Read as "
+            "criteria.period; sending both -> 400 invalid_combination."
+        ),
     )
     date_to: Optional[int] = Field(
         default=None,
-        description="Inclusive upper bound on manuscript estimated year (CE). Combine with date_from.",
+        description="Upper bound (year CE) of the period of copy; see date_from.",
     )
+    criteria: Optional[CriteriaModel] = Field(
+        default=None,
+        description=(
+            "Manuscript features (the website's 'Manuscript features' panel): one entry per "
+            "criterion, ANDed with each other and with the other filters. Keys, values and "
+            "counts: GET /api/criteria. Malformed -> 400 invalid_request; a value the "
+            "catalogue does not record -> 400 unresolvable_filter_value."
+        ),
+    )
+
+    @model_validator(mode='after')
+    def _check_criteria(self):
+        """Strict cleaning (whole-number bounds, a source only where the
+        criterion has two) and no older key beside the criterion it is read
+        as (§6.4: no silent precedence)."""
+        if self.criteria is None:
+            return self
+        raw = self.criteria.model_dump(exclude_none=True)
+        try:
+            cleaned, _ = clean_criteria(raw)
+        except ValueError as exc:
+            raise APIError('invalid_request', f'filters.{exc}', http_status=400) from None
+        for old, key in legacy_conflicts({**self.model_dump(exclude_none=True), 'criteria': cleaned}):
+            raise APIError(
+                'invalid_combination',
+                f"filters.{old} and filters.criteria.{key} both set: {old} is read as "
+                f"criteria.{key}, so send one of them",
+                http_status=400,
+            )
+        return self
 
 
 class ResponsaOptions(BaseModel):
@@ -458,8 +484,15 @@ def _resolve_passage_timeout() -> float:
     return _read_timeout('SEARCH_API_PASSAGE_TIMEOUT', DEFAULT_PASSAGE_TIMEOUT)
 
 
-def _resolve_fjms_filters_sync(filters_dict: dict) -> Optional[set]:
+def _resolve_fjms_filters_sync(filters_dict: dict, meta_mgr=None) -> Optional[set]:
     """Validate ``filters_dict`` and resolve it to a restrict set. BLOCKING.
+
+    The catalogue criteria (PR 2 of docs/plans/CATALOGUE_CRITERIA_PLAN.md):
+    ``materials`` and ``date_from``/``date_to`` are read as criteria (Material
+    from the catalogue; Period of copy, span overlap), and the corpus list of
+    ``meta_mgr`` is the universe, so "not recorded" and "all except" reach the
+    uncatalogued manuscripts as on the website (D14). Without a metadata
+    manager those two raise FilterUnavailable('corpus_unavailable').
 
     Both steps read the FJMS SQLite sidecar (a date filter can take seconds),
     so the async endpoints must not call them inline: uvicorn runs a single
@@ -484,11 +517,8 @@ def _resolve_fjms_filters_sync(filters_dict: dict) -> Optional[set]:
         domains=filters_dict.get('domains'),
         authors=filters_dict.get('authors'),
         works=filters_dict.get('works'),
-        material_include=filters_dict.get('materials'),
-        script_styles=filters_dict.get('script_styles'),
-        script_places=filters_dict.get('script_places'),
-        date_from=filters_dict.get('date_from'),
-        date_to=filters_dict.get('date_to'),
+        criteria=criteria_with_legacy_keys(filters_dict),
+        universe=getattr(meta_mgr, 'corpus_sys_ids', None),
     )
 
 
@@ -505,14 +535,15 @@ def _filter_unavailable_error(exc) -> APIError:
     )
 
 
-async def _resolve_fjms_filters(filters_dict: dict) -> Optional[set]:
+async def _resolve_fjms_filters(filters_dict: dict, meta_mgr=None) -> Optional[set]:
     """Await ``_resolve_fjms_filters_sync`` off the event loop; a lookup that
     could not run becomes 503 ``filter_unavailable`` (#17), never a 200 with
     zero results or with the filters silently ignored."""
     from shared.fjms_service import FilterUnavailable
     loop = asyncio.get_running_loop()
     try:
-        return await loop.run_in_executor(None, _resolve_fjms_filters_sync, filters_dict)
+        return await loop.run_in_executor(
+            None, _resolve_fjms_filters_sync, filters_dict, meta_mgr)
     except FilterUnavailable as exc:
         raise _filter_unavailable_error(exc) from exc
 
@@ -1727,7 +1758,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 # shared.fjms_service for test fixtures). A lookup that could
                 # not run is 503 filter_unavailable (#17); the engine is
                 # never called.
-                restrict_sys_ids = await _resolve_fjms_filters(filters_dict)
+                restrict_sys_ids = await _resolve_fjms_filters(filters_dict, state.meta_mgr)
                 # SEED-026: intersect the library filter BEFORE the result cap.
                 restrict_sys_ids = await _intersect_library_filter(
                     restrict_sys_ids, filters_dict, state.meta_mgr
@@ -2390,7 +2421,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # Off the event loop (blocking FJMS SQLite reads); an APIError from
             # validation re-raises at the await, and a lookup that could not
             # run is 503 filter_unavailable (#17).
-            restrict_sys_ids = await _resolve_fjms_filters(filters_dict)
+            restrict_sys_ids = await _resolve_fjms_filters(filters_dict, state.meta_mgr)
             # SEED-026: intersect the library filter BEFORE the result cap (parity
             # with /api/search; otherwise filters.library would be silently ignored).
             restrict_sys_ids = await _intersect_library_filter(
@@ -2958,6 +2989,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             'api_version': _app_version,
             'endpoints': [
                 '/api/search', '/api/browse', '/api/parallels', '/api/capabilities',
+                '/api/criteria',
             ],
             # Derived from the real mode enum (not a literal list) -- dict
             # insertion order is preserved, and _SEARCH_MODE_TO_INTERNAL's
@@ -2997,6 +3029,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 'browse_requests_per_minute': _browse_rate_limiter._current_limit(),
                 'parallels_requests_per_minute': _parallels_rate_limiter._current_limit(),
                 'capabilities_requests_per_minute': _capabilities_rate_limiter._current_limit(),
+                'criteria_requests_per_minute': _criteria_rate_limiter._current_limit(),
                 # effective_capacity(), which is neither _capacity (what the
                 # semaphore was BUILT with -- lags env) nor resolve_capacity()
                 # (what env ASKS for -- over-reports while a rebuild is blocked
@@ -3035,10 +3068,57 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             },
         }
 
+    # -----------------------------------------------------------------------
+    # GET /api/criteria -- the values filters.criteria accepts (PR 2 of
+    # docs/plans/CATALOGUE_CRITERIA_PLAN.md, §6.4), so a caller discovers them
+    # instead of guessing: every section and criterion of the website's
+    # "Manuscript features" panel, with corpus counts. Built from the FJMS
+    # sidecar once per process (FjmsService.criteria_vocabulary caches it).
+    # -----------------------------------------------------------------------
+    @target_app.get(
+        f'{path_prefix}/criteria',
+        summary="List the manuscript features (catalogue criteria) filters.criteria accepts.",
+        tags=["criteria"],
+        openapi_extra={
+            "responses": _openapi_responses_for("Sections, criteria, values and corpus counts."),
+        },
+    )
+    @wrap_endpoint(endpoint_name='criteria')
+    async def criteria_endpoint(request: Request, *, captured_state: dict):
+        """GET /api/criteria -- reads the FJMS sidecar off the event loop.
+        Fails closed: a vocabulary that cannot be read (no sidecar, the corpus
+        list not loaded yet, a failed query) is 503
+        ``filter_vocabulary_unavailable``, never a partial list."""
+        captured_state['mode'] = None
+        captured_state['search_mode_value'] = None
+        captured_state['responsa_options_count'] = 0
+        captured_state['result_count'] = None
+
+        enforce_mode_gate(request)
+        client_ip = _resolve_rate_limit_key(request)
+        _criteria_rate_limiter.check(client_ip)
+
+        from shared import fjms_service as _fjms_module
+        from shared.fjms_service import FilterUnavailable
+        universe = getattr(state.meta_mgr, 'corpus_sys_ids', None)
+        loop = asyncio.get_running_loop()
+        try:
+            vocabulary = await loop.run_in_executor(
+                None, _fjms_module.get_fjms_service(thread_safe=True).criteria_vocabulary,
+                universe)
+        except FilterUnavailable as exc:
+            raise APIError(
+                'filter_vocabulary_unavailable',
+                'The manuscript features could not be listed right now '
+                f'({exc.reason}). Retry later.',
+                http_status=503,
+            ) from exc
+        return {'schema_version': 1, 'request': {}, **vocabulary}
+
     from web.research_api import register_research_api
     register_research_api(target_app, path_prefix, search_endpoint, parallels_endpoint)
 
     logger.info(
         "Search API routes initialized: POST /api/search, GET /api/browse, "
-        "POST /api/parallels, GET /api/capabilities"
+        "POST /api/parallels, GET /api/capabilities, GET /api/criteria"
     )

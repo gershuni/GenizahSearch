@@ -1341,7 +1341,7 @@ Which AI listings are live, from production settings (docs/plans/AI_LISTINGS_LAU
 
 Public MCP server at `POST /mcp` (docs/plans/MCP_SERVER_PLAN.md; contract in docs/SEARCH_API.md "MCP server").
 - **Function** `register_mcp_server` — adds the exact POST route, the `/mcp/` redirect and the SDK manager in the host lifespan; no route unless `MCP_ENABLED` and the facade
-- **Function** `build_server` — the seven tools over one facade (`get_capabilities`, `search_manuscripts`, `find_passage_parallels`, `find_chunk_parallels`, `get_research_job`, `browse_manuscript_page`, `get_manuscript_details`; chunk tool and variant levels: docs/plans/MCP_CHUNK_AND_VARIANT_LEVELS_PLAN.md)
+- **Function** `build_server` — the eight tools over one facade (`get_capabilities`, `list_manuscript_features`, `search_manuscripts`, `find_passage_parallels`, `find_chunk_parallels`, `get_research_job`, `browse_manuscript_page`, `get_manuscript_details`; chunk tool and variant levels: docs/plans/MCP_CHUNK_AND_VARIANT_LEVELS_PLAN.md)
 - **Class** `_RequestGuard` — before dispatch: 64 KiB body, id/name lengths, undeclared arguments refused
 - **Class** `_ReplyCap` — every reply within 100,000 bytes; streams never held; ASGI order kept
 - **Function** `_run_tool` / `_start_and_wait` — one `mcp_tool_call` event per call; coded errors; in-tool wait of three polls
@@ -2530,6 +2530,8 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
   per source (uncatalogued included), one measured page for every measured range, one catalogue size
   record; raises `CriteriaUnavailable` ('column_missing' / 'corpus_unavailable').
 - **Function** `criterion_values` — a list criterion's choices with corpus counts, Unknown last, then Not recorded.
+- **Function** `legacy_conflicts` / `criteria_with_legacy_keys` — the API's older keys (`materials`,
+  `date_from` / `date_to`) read as Material from the catalogue and Period of copy; refused beside their criterion.
 
 ## shared/catalog_numbers.py
 
@@ -2560,6 +2562,22 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
   `_migrate_saved_pre_search_filters` (history and session restores); `_recompute_post_criteria` /
   `_open_measurement_filter_dialog` — post-search filters by the panel's rules
   (`FjmsService.match_result_criteria`, D20).
+
+## Catalogue criteria in the API and MCP (PR 2)
+
+- `web/criteria_models.py`: **Class** `CriteriaModel` — `filters.criteria`, built from the registry
+  (`ListCriterion` / `RangeCriterion` per key); shared by `web/search_api.py::FiltersModel` and the MCP
+  `SearchFilters`.
+- `web/search_api.py`: `FiltersModel._check_criteria` — strict cleaning and the 400 `invalid_combination` for an
+  older key beside its criterion; `_resolve_fjms_filters_sync(filters, meta_mgr)` — the older keys read as
+  criteria, the corpus (`MetadataManager.corpus_sys_ids`) as the universe; **Route** `GET /api/criteria`
+  (`criteria_endpoint`, its own `_criteria_rate_limiter`), 503 `filter_vocabulary_unavailable` when it cannot
+  be built.
+- `shared/fjms_service.py`: `FjmsService.criteria_vocabulary(universe)` — what `GET /api/criteria` serves,
+  built once per corpus under a lock; `_validate_criteria_values` — a list value must be one the catalogue
+  records under the chosen source (400 `unresolvable_filter_value`).
+- `web/chatgpt_api.py`: `GET /api/chatgpt/criteria`; `web/mcp_server.py`: the `list_manuscript_features` tool
+  and `criteria` in `SearchFilters`.
 
 ## shared/text_normalize.py
 

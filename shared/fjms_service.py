@@ -36,6 +36,9 @@ from shared.catalog_criteria import (
     match_criteria,
 )
 from shared.catalog_criteria import BY_KEY as _CRITERIA_BY_KEY
+from shared.catalog_criteria import CRITERIA as _CRITERIA
+from shared.catalog_criteria import NEW_TABLE_KEYS as _NEW_TABLE_KEYS
+from shared.catalog_criteria import SECTIONS as _CRITERIA_SECTIONS
 from shared.catalog_criteria import criteria_chips as _criteria_chips
 from shared.catalog_criteria import recorded_count as _recorded_count
 from shared.thread_local_db import ThreadLocalConnection
@@ -992,6 +995,9 @@ class FjmsService:
         # Post-search criteria (match_result_criteria): the last few answers.
         self._result_match_cache: dict = {}
         self._result_match_lock = threading.Lock()
+        # GET /api/criteria (criteria_vocabulary): one build at a time -- a cold
+        # build reads the whole catalogue (~20 s on the full file).
+        self._criteria_vocabulary_lock = threading.Lock()
         # SEED-023: per-thread registry of populated catalog-filter TEMP tables
         # (name -> token). The PGP/edition membership sets are static per process,
         # so each thread's TEMP table is built once and reused across requests.
@@ -1865,6 +1871,73 @@ class FjmsService:
         return {'corpus': len(universe), 'uncatalogued': len(uncatalogued),
                 'uncatalogued_sized': len(uncatalogued & sized)}
 
+    def criteria_vocabulary(self, universe) -> dict:
+        """What GET /api/criteria serves: every section and criterion in the
+        panel's order, with what a caller needs to send it -- kind, sources,
+        unit, whether "not recorded" exists -- and, over the corpus, how many
+        manuscripts have it recorded (``recorded``, per source in
+        ``recorded_by_source``) and a list criterion's values with their
+        counts (``count_by_source`` where it has sources; the list ends with
+        "_none", Not recorded, except for Attributes). A criterion this file
+        cannot answer (a 5.0.0 file: catalogue lines and columns, period,
+        vocalization extent, attributes) is ``available: false`` with no
+        figures. Cached per corpus. Raises FilterUnavailable."""
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        universe = _resolve_universe(universe)
+        if universe is None:
+            raise FilterUnavailable('corpus_unavailable',
+                                    'the list of all manuscripts is not loaded yet')
+        cache = self.__dict__.setdefault("_criteria_vocabulary_cache", {})
+        token = _universe_token(universe)
+        with self._criteria_vocabulary_lock:
+            if token not in cache:
+                cache[token] = self._build_criteria_vocabulary(universe)
+            return copy.deepcopy(cache[token])
+
+    def _build_criteria_vocabulary(self, universe: frozenset) -> dict:
+        unsupported = self.criteria_support() == FILTER_UNSUPPORTED
+        sections = []
+        for section in _CRITERIA_SECTIONS:
+            entries = []
+            for criterion in _CRITERIA:
+                if criterion.section != section.key:
+                    continue
+                key = criterion.key
+                entry = {'key': key, 'kind': criterion.kind,
+                         'label_en': criterion.label_en, 'label_he': criterion.label_he}
+                if criterion.sources:
+                    entry['sources'] = ['either', *criterion.sources]
+                if criterion.kind == 'range':
+                    entry['whole_numbers'] = criterion.integer
+                    if criterion.unit:
+                        entry['unit'] = criterion.unit
+                entry['not_recorded'] = criterion.not_recordable
+                entry['available'] = not (unsupported and key in _NEW_TABLE_KEYS)
+                if entry['available']:
+                    entry['recorded'] = self.get_criterion_coverage(key, universe)
+                    if criterion.sources:
+                        entry['recorded_by_source'] = {
+                            s: self.get_criterion_coverage(key, universe, s)
+                            for s in criterion.sources}
+                    if criterion.kind == 'list':
+                        values = self.get_criterion_values(key, universe)
+                        if criterion.sources:
+                            counts = {s: {v['value']: v['count']
+                                          for v in self.get_criterion_values(key, universe, s)}
+                                      for s in criterion.sources}
+                            for value in values:
+                                value['count_by_source'] = {
+                                    s: counts[s].get(value['value'], 0) for s in criterion.sources}
+                        entry['values'] = values
+                entries.append(entry)
+            sections.append({'key': section.key, 'label_en': section.label_en,
+                             'label_he': section.label_he, 'criteria': entries})
+        note = self.criteria_corpus_note(universe)
+        return {'corpus': note['corpus'], 'uncatalogued': note['uncatalogued'],
+                'sections': sections}
+
     def criterion_value_labels(self, key: str, cached_only: bool = False) -> Optional[dict]:
         """``{value: Hebrew label}`` of a list criterion, from the catalogue
         (cached with its values). Raises FilterUnavailable as they do.
@@ -1978,8 +2051,8 @@ class FjmsService:
         Args:
             filters: dict with optional keys 'domains', 'authors', 'works',
                      'library', 'library_filter_mode', 'materials',
-                     'script_styles', 'script_places', 'date_from',
-                     'date_to' (D-15 shape, post-Pydantic validation).
+                     'date_from', 'date_to', 'criteria' (D-15 shape,
+                     post-Pydantic validation; 'criteria' cleaned).
                      'library' is validated against LIBRARY_CODES (Phase 129).
                      'library_filter_mode' is intentionally not validated here —
                      it is a Pydantic Literal field with no server-side vocabulary
@@ -2127,26 +2200,53 @@ class FjmsService:
                         http_status=400,
                     )
 
-        # ---- Script styles / places: the choices the filter controls offer.
-        for key in SCRIPT_FILTER_CATEGORIES:
-            values = filters.get(key)
+        # ---- Catalogue criteria (PR 2 of docs/plans/CATALOGUE_CRITERIA_PLAN.md).
+        criteria = filters.get('criteria')
+        if criteria:
+            self._validate_criteria_values(criteria)
+        # date_from / date_to: any int is a valid token; range matching is FJMS's job.
+
+    def _validate_criteria_values(self, criteria: dict) -> None:
+        """Each value of a list criterion must be one the catalogue (or, for
+        Material, a measurement) records under the chosen source -- the values
+        GET /api/criteria lists. ``criteria`` is already cleaned (strict), so
+        keys, shapes, Attributes and "_none" are checked. Ranges have no
+        vocabulary. A criterion this file cannot answer at all is left to the
+        lookup, which raises FilterUnavailable('column_missing') for it."""
+        unsupported = self.criteria_support() == FILTER_UNSUPPORTED
+        for key, spec in clean_criteria(criteria)[0].items():
+            criterion = _CRITERIA_BY_KEY[key]
+            if criterion.kind != 'list' or key == 'attributes':
+                continue
+            if unsupported and key in _NEW_TABLE_KEYS:
+                continue
+            values = [v for v in spec['values'] if v != NOT_RECORDED]
             if not values:
                 continue
-            valid = {item['value'] for item in self.get_script_values(key)}
-            if not valid:
+            source = spec.get('source', 'either')
+            try:
+                known = {item['value'] for item in self.get_criterion_values(key, source=source)}
+            except FilterUnavailable as exc:
                 raise APIError(
                     'filter_vocabulary_unavailable',
-                    f'The {key} filter vocabulary is unavailable or empty',
+                    f'The criteria.{key} vocabulary could not be read',
+                    http_status=503,
+                ) from exc
+            if not known:
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    f'The criteria.{key} vocabulary is empty',
                     http_status=503,
                 )
             for v in values:
-                if v not in valid:
+                if v not in known:
+                    where = f" under source {source!r}" if criterion.sources else ''
                     raise APIError(
                         'unresolvable_filter_value',
-                        f"filter {key}={v!r} is not a script value the catalogue records",
+                        f"filter criteria.{key}={v!r} is not a value the catalogue records{where}; "
+                        f"GET /api/criteria lists them",
                         http_status=400,
                     )
-        # date_from / date_to: any int is a valid token; range matching is FJMS's job.
 
     def get_all_domains(self) -> list[dict]:
         """

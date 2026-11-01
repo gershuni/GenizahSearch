@@ -151,6 +151,14 @@ Response shape (truncated):
 ```json
 {"schema_version": 1, "request": {}, "endpoints": []}
 ```
+
+## Endpoint: GET /api/criteria
+
+### Response example
+
+```json
+{"schema_version": 1, "request": {}, "sections": []}
+```
 """
 
 

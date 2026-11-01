@@ -60,7 +60,8 @@ def test_details_pending_is_retried_not_failed():
 
 def test_a_result_without_a_page_number_is_reported_not_read_as_page_one(monkeypatch):
     page0 = {'results': [{'uid': '1', 'locator': {'sys_id': '990001', 'p_num': None}}]}
-    replies = {'get_capabilities': result({}), 'search_manuscripts': result(page0)}
+    replies = {'get_capabilities': result({}), 'list_manuscript_features': result({'sections': [{}]}),
+               'search_manuscripts': result(page0)}
     tools = SimpleNamespace(tools=[SimpleNamespace(name=n) for n in smoke.EXPECTED_TOOLS])
 
     class Fake(FakeClient):
