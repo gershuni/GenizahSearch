@@ -1,5 +1,5 @@
 ## P3 desktop: "Search in these results" drops the Catalog tab's text, PGP and edition filters
-Where: `genizah_app.py::_catalog_build_browse_filters`, `_apply_catalog_handoff_filters`
+Where: `genizah_app.py::_catalog_build_browse_filters`, `_CatalogHandoffWorker`, `_catalog_on_handoff_scope`
 Opened: 2026-11-01
 
 Found by Codex reviewing PR 1c (catalogue criteria, desktop); it predates that PR. The Catalog tab lists
