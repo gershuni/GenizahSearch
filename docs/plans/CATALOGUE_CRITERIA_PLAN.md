@@ -443,6 +443,15 @@ its summary.
    corpus, show errors, a "no catalogue record" label). Today's date and measurement controls and
    2.2's traits keep working, with today's meanings, until 1b/1c replace them; the new period rule
    arrives with the panel.
+   **As built (2026-11-01, commits `125d5f20`..):** as above, with four differences from §6-§7.
+   (a) Catalog Browse keeps its catalogue SQL for the catalogued rows (criteria joined through a
+   per-thread TEMP table of the matching sys_ids) and appends the uncatalogued ones from the corpus
+   set in Python, instead of one temp table of all corpus ids. (b) The 5.1.0 step also stores the
+   copy-date spans and the coded values (`criteria_values`), see §6.5. (c) The universe may be passed
+   as a callable (`MetadataManager.corpus_sys_ids`), called only when a filter needs it, so a search
+   without such filters never waits for libraries.csv; with no metadata manager at all (tests, a
+   startup race on the web) the lists stay catalogued-only, as before. (d) `web/search_api.py` is not
+   wired: the API has no exclusion filters, so D17 changes nothing there until PR 2 adds criteria.
 2. **PR 1b — web:** the panel, Catalog Browse with the D8 address, `/search` and `/parallels`,
    post-search filters (D20), state migration, render-smoke tests.
 3. **PR 1c — desktop:** `CriteriaDialog`, the Catalog tab, "Search only in...", post-search
