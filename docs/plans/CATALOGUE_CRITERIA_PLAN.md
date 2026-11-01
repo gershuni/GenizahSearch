@@ -554,6 +554,23 @@ Disposition:
 
 The reviews have converged (REWORK -> SHIP WITH FIXES on both); a third round is optional.
 
+**PR 1a code, round 1** (`4a820fb3..456b5463`), brief `_tmp/criteria_1a_review_brief.md`, log
+`_tmp/criteria_1a_codex_round1.log`. Codex: **SHIP WITH FIXES**. Fixed in `f70855c3`: the migration
+in one transaction; refusals for a malformed version and for an 'Instatution' row in a 5.1.0 file;
+measured-only Lines needs the 5.1.0 table; a missing sidecar raises on Browse and facets; Browse
+bounded by the corpus; cache keys by the corpus's contents; the desktop dialog's count gets the
+corpus; `corpus_unavailable` keeps its reason; a failed capability probe keeps a saved size.
+Deferred (LOW): facet failures show names without counts until the 1b panel; the unused
+synchronous `GenizahGUI._catalog_refresh`.
+
+**PR 1a code, round 2** (`f70855c3`), brief `_tmp/criteria_1a_review_brief_r2.md`, log
+`_tmp/criteria_1a_codex_round2.log`. Codex: **SHIP WITH FIXES**; 8 of 9 findings FIXED. Fixed
+after: an existing desktop test (`test_focus_search_waits_for_latest_filter_result`) broke on the
+dialog's `self.parent()` (MED; test doubles updated, a test that the dialog passes the corpus
+added); cache keys compared by hash could still confuse two unequal corpora with one hash (LOW,
+built deliberately; the key is now the set itself). Not taken up: a `.start()` -> `.run()`
+mutation in `_catalog_start_async_refresh` survives, in code this PR did not change.
+
 ---
 
 ## 11. Changes by revision

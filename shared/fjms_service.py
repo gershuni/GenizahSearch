@@ -899,12 +899,13 @@ def _resolve_universe(universe):
 
 
 def _universe_token(universe):
-    """A cache key for a universe by its contents (not its size: two corpora
-    of one size must not share cached results)."""
+    """A cache key for a universe: the set itself, compared in full (neither
+    its size nor its hash alone -- two corpora must never share cached
+    results). Wrapped in a tuple, whose comparison checks identity first, so
+    the usual case (the one cached corpus object) costs no set comparison."""
     if universe is None:
         return None
-    frozen = universe if isinstance(universe, frozenset) else frozenset(universe)
-    return (len(frozen), hash(frozen))
+    return (universe if isinstance(universe, frozenset) else frozenset(universe),)
 
 
 def _sidecar_version(path: Optional[str]) -> Optional[tuple]:

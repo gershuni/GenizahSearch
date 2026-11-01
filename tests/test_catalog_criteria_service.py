@@ -150,6 +150,26 @@ def test_cached_results_follow_the_corpus_contents(svc):
     assert ids(svc.get_browse_results(criteria=vellum, universe={B})) == [B]
 
 
+class _OneHash(frozenset):
+    """Unequal sets that hash alike (Codex built a real 66-id pair)."""
+
+    def __hash__(self):
+        return 1
+
+
+def test_cached_results_follow_the_corpus_not_its_hash(svc):
+    vellum = {"material": {"values": ["Vellum"]}}
+    first, second = _OneHash({A, C}), _OneHash({B, C})
+    assert ids(svc.get_browse_results(criteria=vellum, universe=first)) == [A]
+    assert ids(svc.get_browse_results(criteria=vellum, universe=second)) == [B]
+    assert ids(svc.get_browse_results(universe=first)) == [A, C]
+    assert ids(svc.get_browse_results(universe=second)) == [B, C]
+    def styles(universe):
+        return [v["value"] for v in svc.get_criterion_values("style", universe=universe)]
+    assert styles(first) == ["Square", "_none"]         # C: not recorded (D5)
+    assert styles(second) == ["Semi-Cursive", "_none"]
+
+
 def test_browse_exclusion_filters_keep_uncatalogued_rows(svc):
     assert ids(svc.get_browse_results(text_not=["zzz"], universe=U))[-2:] == UNCATALOGUED_ORDER
 
