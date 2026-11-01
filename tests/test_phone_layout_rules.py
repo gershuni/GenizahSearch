@@ -131,7 +131,9 @@ def test_the_filter_badge_counts_every_pre_search_filter_the_predicate_knows():
     search = _read('web/pages/search.py')
     counter = search[search.index('def _active_filter_count('):search.index('def _domain_display_name(')]
     names = sorted(set(re.findall(r"filter_[a-z_]+", predicate)))
-    assert len(names) >= 20, names
+    # domains, authors, works, material_exclude, text x3, criteria (the date, script
+    # and measurement fields folded into filter_criteria: the catalogue criteria).
+    assert len(names) >= 8 and 'filter_criteria' in names, names
     missing = [n for n in names if n not in counter]
     assert not missing, f'the badge does not count {missing}'
     # ...and the one constraint the chip bar shows that the predicate does not hold.

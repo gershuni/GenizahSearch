@@ -243,7 +243,8 @@ def test_back_navigation_restores_saved_mode_when_saved_mode_is_title():
 
 _RESPONSA_QUERY = '(מאמתי/מאימתי) (קורין/קוריין)'
 _CODE = 'k3J9xQ_a'
-_RUN_FILTERS = {'filter_domains': ['Halakha'], 'filter_include_mode': True, 'filter_date_from': 1000}
+_RUN_FILTERS = {'filter_domains': ['Halakha'], 'filter_include_mode': True,
+                'filter_criteria': {'period': {'min': 1000}}}
 _ABSENT = object()
 
 
@@ -669,12 +670,12 @@ def test_applying_a_runs_filters_resets_the_fields_it_lacks():
     page = SearchUIState()
     page.filter_authors = ['other tab']
     page.filter_include_mode = False
-    page.filter_height_max = 30
+    page.filter_criteria = {'height': {'max': 30}}
     assert apply_run_filter_state(page, {'filter_domains': ['Halakha']}) is True
     assert page.filter_domains == ['Halakha']
     assert page.filter_authors == []
     assert page.filter_include_mode is True
-    assert page.filter_height_max is None
+    assert page.filter_criteria == {}
 
     page.filter_authors = ['kept']
     assert apply_run_filter_state(page, None) is False

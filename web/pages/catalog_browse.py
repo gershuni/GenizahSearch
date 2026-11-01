@@ -17,11 +17,11 @@ from nicegui import ui, run
 from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import tr, is_rtl, get_language
 from web.components.typography import h1
-from shared.fjms_service import (
-    BROWSE_MEASUREMENT_TRAITS, FILTER_SUPPORT_UNKNOWN, FILTER_SUPPORTED, FILTER_UNSUPPORTED,
-    MEASUREMENT_MATERIALS, clean_traits, get_fjms_service, measurement_filter_support,
-    resolve_library_sys_ids,
+from shared.catalog_criteria import (
+    clean_criteria, criteria_from_params, criteria_to_params, period_from_dates,
 )
+from shared.fjms_service import get_fjms_service, resolve_library_sys_ids
+from web.components.criteria_panel import CriteriaControl, drop_unsupported
 from shared.browse_map_utils import LIBRARY_CODES, get_library_display, sanitize_library_codes, library_codes_with_manuscripts
 
 import asyncio
@@ -32,45 +32,33 @@ logger = logging.getLogger(__name__)
 
 PAGE_SIZE = 50
 
-# Trait URL parameters: lists are comma-separated, ranges are "min-max", "min-" or "-max".
-_TRAIT_LIST_PARAMS = (('script_style', 'script_styles'), ('script_place', 'script_places'),
-                      ('material', 'measurement_material'))
-_TRAIT_RANGE_PARAMS = (('width', 'width'), ('height', 'height'), ('lines', 'line_count'))
+# The page's own address parameters; every other one is a criterion
+# (shared/catalog_criteria.py, ruling D8) or is reported as not understood.
+_PAGE_PARAMS = frozenset({'domain', 'author', 'work', 'page', 'text_all', 'text_any', 'text_not'})
+# Parameters that links from elsewhere add (analytics), never reported.
+_IGNORED_PARAM_PREFIXES = ('utm_', 'fbclid', 'gclid', 'ref', '_')
 
 
-def traits_from_query(script_style=None, script_place=None, width=None, height=None,
-                      lines=None, material=None) -> dict:
-    """The traits a /catalog-browse address names (see _TRAIT_*_PARAMS); a
-    malformed value is ignored, never an error."""
-    given = {'script_style': script_style, 'script_place': script_place, 'material': material,
-             'width': width, 'height': height, 'lines': lines}
-    traits = {}
-    for param, key in _TRAIT_LIST_PARAMS:
-        if given[param]:
-            traits[key] = [v.strip() for v in str(given[param]).split(',') if v.strip()]
-    for param, prefix in _TRAIT_RANGE_PARAMS:
-        raw = str(given[param] or '').strip()
-        if raw.count('-') != 1:
-            continue
-        lo, hi = raw.split('-')
-        traits[f'{prefix}_min'], traits[f'{prefix}_max'] = lo.strip() or None, hi.strip() or None
-    return clean_traits(traits)
+def criteria_from_address(params) -> tuple[dict, list]:
+    """The criteria a /catalog-browse address carries, and the names of the
+    parameters dropped: unknown ones and malformed values (§6.4, "dropped
+    and the page says so")."""
+    params = {str(k): str(v) for k, v in dict(params or {}).items()}
+    criteria, problems = criteria_from_params(params)
+    dropped = [key for key, _msg in problems]
+    from shared.catalog_criteria import CRITERIA_KEYS
+    for name in params:
+        if (name not in _PAGE_PARAMS and name not in CRITERIA_KEYS
+                and not name.startswith(_IGNORED_PARAM_PREFIXES)):
+            dropped.append(name)
+    return criteria, list(dict.fromkeys(dropped))
 
 
-def traits_to_query(traits) -> list:
-    """The URL parameters ('name=value', values quoted) for *traits*."""
+def criteria_to_query(criteria) -> list:
+    """The address parameters ('name=value', values quoted) for *criteria*."""
     from urllib.parse import quote
-    traits = clean_traits(traits)
-    params = []
-    for param, key in _TRAIT_LIST_PARAMS:
-        if traits.get(key):
-            params.append(f"{param}={quote(','.join(traits[key]), safe='')}")
-    for param, prefix in _TRAIT_RANGE_PARAMS:
-        lo, hi = traits.get(f'{prefix}_min'), traits.get(f'{prefix}_max')
-        if lo is not None or hi is not None:
-            fmt = lambda v: '' if v is None else f'{v:g}'  # noqa: E731
-            params.append(f"{param}={fmt(lo)}-{fmt(hi)}")
-    return params
+    return [f"{name}={quote(value, safe=',:!.')}"
+            for name, value in criteria_to_params(criteria).items()]
 
 # ── SEED-023: corpus-wide PGP / scholarly-transcription membership sets ──────
 # Static per process (refresh on restart after a data update). Computed once,
@@ -127,6 +115,11 @@ def _corpus_sys_ids(app_state):
     return getattr(getattr(app_state, 'meta_mgr', None), 'corpus_sys_ids', None)
 
 
+def _app_state_for_universe():
+    from web.state import state as _state
+    return _state
+
+
 def create_catalog_browse_page(
     initial_domain: str = None,
     initial_author: str = None,
@@ -135,9 +128,14 @@ def create_catalog_browse_page(
     initial_text_all: str = None,
     initial_text_any: str = None,
     initial_text_not: str = None,
-    initial_traits: dict = None,
+    initial_criteria: dict = None,
+    address_problems: list = None,
 ):
-    """Create the catalog browse page with domain tree, author/work search, and results."""
+    """Create the catalog browse page with domain tree, author/work search, and results.
+
+    ``initial_criteria``: the catalogue criteria of the address
+    (``criteria_from_address``); ``address_problems`` the parameters it
+    dropped, which the page names in a notice."""
 
     fjms = get_fjms_service(thread_safe=True)
     lang = get_language()
@@ -147,31 +145,20 @@ def create_catalog_browse_page(
     # just deleted, so ui.run_javascript raised there and the address and the
     # saved filters kept the removed filter. The page's own client never goes.
     page_client = ui.context.client
-    # Measurement traits are offered only when the open catalog is KNOWN to have
-    # the data; a value arriving is dropped (and the page says so) only when the
-    # catalog is KNOWN to lack it -- a check that could not run keeps it (K-16).
-    try:
-        meas_support = measurement_filter_support(fjms)
-    except Exception:
-        logger.warning("catalog_browse: measurement capability check failed", exc_info=True)
-        meas_support = FILTER_SUPPORT_UNKNOWN
-    meas_ok = meas_support == FILTER_SUPPORTED
 
     # ── State ──────────────────────────────────────────────────────
     current_domain = {'value': initial_domain, 'display': initial_domain}
     current_author = {'value': initial_author}
     current_work = {'value': initial_work}
-    current_date_from = {'value': None}
-    current_date_to = {'value': None}
-    current_include_undated = {'value': False}
     # Parse comma-separated text filter URL params
     _parse_csv = lambda s: [t.strip() for t in s.split(',') if t.strip()] if s else []
     current_text_all = {'value': _parse_csv(initial_text_all)}  # AND terms
     current_text_any = {'value': _parse_csv(initial_text_any)}  # OR terms
     current_text_not = {'value': _parse_csv(initial_text_not)}  # NOT terms
     current_page = {'value': (initial_page or 1)}
-    # Script / measurement traits: a clean_traits() dict (BROWSE_TRAIT_KEYS).
-    current_traits = {'value': clean_traits(initial_traits)}
+    # Catalogue criteria (shared/catalog_criteria.py): the "Manuscript
+    # features" panel, the period of copy among them (D18).
+    current_criteria = {'value': clean_criteria(initial_criteria, strict=False)[0]}
     sidebar_visible = {'value': True}
     # SEED-023 availability filters — 3-state, persisted via safe_storage.
     # Clamp persisted values to the known set so a stale/corrupted entry degrades
@@ -228,9 +215,6 @@ def create_catalog_browse_page(
     pagination_container = {'ref': None}
     author_select_ref = {'ref': None}
     work_select_ref = {'ref': None}
-    date_from_ref = {'ref': None}
-    date_to_ref = {'ref': None}
-    undated_checkbox_ref = {'ref': None}
     loading_spinner = {'ref': None}
     sidebar_ref = {'ref': None}
     sidebar_toggle_ref = {'ref': None}
@@ -239,19 +223,22 @@ def create_catalog_browse_page(
     pgp_filter_btn_ref = {'ref': None}
     editions_filter_btn_ref = {'ref': None}
     library_filter_btn_ref = {'ref': None}  # GAP-E: button opens _open_library_filter_dialog()
-    trait_refs = {}  # trait key -> its control (script selects, min/max inputs, material select)
+    criteria_control = {'ref': None}
+    uncatalogued_label_ref = {'ref': None}
 
-    def _drop_unavailable_traits(traits: dict) -> dict:
-        """*traits* without measurement traits the open catalog is known to lack
-        (with a notice when that drops something)."""
-        if (meas_support != FILTER_UNSUPPORTED
-                or not any(k in traits for k in BROWSE_MEASUREMENT_TRAITS)):
-            return traits
-        ui.notify(tr('Some saved filters were removed: this catalog data is not available.'),
-                  type='warning')
-        return {k: v for k, v in traits.items() if k not in BROWSE_MEASUREMENT_TRAITS}
+    def _drop_unavailable_criteria(criteria: dict) -> dict:
+        """*criteria* without those the open file is KNOWN not to answer (a
+        5.0.0 file, rule 9), with a notice when that drops something."""
+        kept, dropped = drop_unsupported(criteria, fjms)
+        if dropped:
+            ui.notify(tr('Some criteria were removed: this catalogue data is not available '
+                         'on this site yet.'), type='warning')
+        return kept
 
-    current_traits['value'] = _drop_unavailable_traits(current_traits['value'])
+    current_criteria['value'] = _drop_unavailable_criteria(current_criteria['value'])
+    if address_problems:
+        ui.notify(tr('Some parts of the address were not understood and were ignored: {names}')
+                  .format(names=', '.join(address_problems)), type='warning')
 
     # ── Deep linking helper ────────────────────────────────────────
     def update_url():
@@ -264,19 +251,13 @@ def create_catalog_browse_page(
             params.append(f"author={quote(str(current_author['value']), safe='')}")
         if current_work['value']:
             params.append(f"work={quote(str(current_work['value']), safe='')}")
-        if current_date_from['value'] is not None:
-            params.append(f"date_from={current_date_from['value']}")
-        if current_date_to['value'] is not None:
-            params.append(f"date_to={current_date_to['value']}")
-        if current_include_undated['value']:
-            params.append("undated=1")
         if current_text_all['value']:
             params.append(f"text_all={quote(','.join(current_text_all['value']), safe='')}")
         if current_text_any['value']:
             params.append(f"text_any={quote(','.join(current_text_any['value']), safe='')}")
         if current_text_not['value']:
             params.append(f"text_not={quote(','.join(current_text_not['value']), safe='')}")
-        params.extend(traits_to_query(current_traits['value']))
+        params.extend(criteria_to_query(current_criteria['value']))
         if current_page['value'] and current_page['value'] > 1:
             params.append(f"page={current_page['value']}")
         qs = '?' + '&'.join(params) if params else ''
@@ -290,13 +271,10 @@ def create_catalog_browse_page(
             'domain_display': current_domain.get('display'),
             'author': current_author['value'],
             'work': current_work['value'],
-            'date_from': current_date_from['value'],
-            'date_to': current_date_to['value'],
-            'undated': current_include_undated['value'],
             'text_all': current_text_all['value'],
             'text_any': current_text_any['value'],
             'text_not': current_text_not['value'],
-            'traits': current_traits['value'],
+            'criteria': current_criteria['value'],
         })
         page_client.run_javascript(
             f"sessionStorage.setItem('catalog_browse_filters', {_json.dumps(state)})"
@@ -373,9 +351,9 @@ def create_catalog_browse_page(
         sel.update()
 
     def _fetch_results_blocking(
-        offset, domain, author, work, date_from, date_to, undated,
+        offset, domain, author, work,
         text_all, text_any, text_not, pgp_state, ed_state, library_codes, library_mode,
-        traits=None,
+        criteria=None,
     ):
         """Blocking browse fetch (runs in io_bound). Resolves the corpus-wide
         PGP/edition sets (cached) and the selected-library sys_id set only when the
@@ -394,7 +372,7 @@ def create_catalog_browse_page(
             lib_sys_ids = resolved if resolved else None  # empty set → None (fail-open)
         return fjms.get_browse_results(
             domain, author, work, offset, PAGE_SIZE,
-            date_from, date_to, undated, text_all, text_any, text_not,
+            text_all=text_all, text_any=text_any, text_not=text_not,
             pgp_filter=(pgp_state if pgp_state in ('has_pgp', 'no_pgp') else None),
             pgp_sys_ids=(pgp_ids if pgp_state in ('has_pgp', 'no_pgp') else None),
             editions_filter=(ed_state if ed_state in ('has_edition', 'no_edition') else None),
@@ -402,7 +380,7 @@ def create_catalog_browse_page(
             library_codes=(library_codes or None),
             library_sys_ids=lib_sys_ids,
             library_mode=library_mode,
-            traits=traits,
+            criteria=criteria,
             # D16: the whole corpus, the manuscripts with no catalogue record
             # after the catalogued ones. Waits for libraries.csv; raises
             # FilterUnavailable rather than list part of it.
@@ -418,9 +396,6 @@ def create_catalog_browse_page(
             current_domain['value'],
             current_author['value'],
             current_work['value'],
-            current_date_from['value'],
-            current_date_to['value'],
-            current_include_undated['value'],
             current_text_all['value'] or None,
             current_text_any['value'] or None,
             current_text_not['value'] or None,
@@ -431,13 +406,13 @@ def create_catalog_browse_page(
             list(current_library_filter['value']) or None,
             current_library_mode['value'],
             # A copy, for the same reason as the library selection above.
-            dict(current_traits['value']),
+            dict(current_criteria['value']),
         )
         return data
 
     def _fetch_library_facets_blocking(
-        domain, author, work, date_from, date_to, undated,
-        text_all, text_any, text_not, pgp_state, ed_state, traits=None,
+        domain, author, work,
+        text_all, text_any, text_not, pgp_state, ed_state, criteria=None,
     ):
         """Fetch TRUE full-set library facet counts (DMF-12). Runs in io_bound.
 
@@ -455,9 +430,6 @@ def create_catalog_browse_page(
                 domain=domain,
                 author=author,
                 work=work,
-                date_from=date_from,
-                date_to=date_to,
-                include_undated=undated,
                 text_all=text_all,
                 text_any=text_any,
                 text_not=text_not,
@@ -471,7 +443,7 @@ def create_catalog_browse_page(
                 # pass None so get_browse_library_facets returns {} gracefully (WR-05).
                 sys_id_to_library=(_state.meta_mgr.get_library_for_id
                                    if _state.meta_mgr else None),
-                traits=traits,
+                criteria=criteria,
                 universe=_corpus_sys_ids(_state),
             )
         except Exception as e:
@@ -591,15 +563,12 @@ def create_catalog_browse_page(
                 current_domain['value'],
                 current_author['value'],
                 current_work['value'],
-                current_date_from['value'],
-                current_date_to['value'],
-                current_include_undated['value'],
                 current_text_all['value'] or None,
                 current_text_any['value'] or None,
                 current_text_not['value'] or None,
                 current_pgp_filter['value'],
                 current_editions_filter['value'],
-                dict(current_traits['value']),
+                dict(current_criteria['value']),
             )
             # None (cancelled or app stopping): no counts, as when the lookup fails.
             current_library_facets['value'] = new_facets if new_facets is not None else {}
@@ -933,14 +902,12 @@ def create_catalog_browse_page(
             current_domain['value'],
             current_author['value'],
             current_work['value'],
-            current_date_from['value'] is not None,
-            current_date_to['value'] is not None,
             current_text_all['value'],
             current_text_any['value'],
             current_text_not['value'],
             current_pgp_filter['value'] != 'all',
             current_editions_filter['value'] != 'all',
-            bool(current_traits['value']),
+            bool(current_criteria['value']),
             # SEED-026 (smoke 2026-06-29): library filter has NO chip — its state
             # lives on the library filter button (red + "shown/total"), so it must
             # NOT force the chip bar to appear.
@@ -989,18 +956,6 @@ def create_catalog_browse_page(
                 # filter state is shown on the library filter button itself
                 # (red + "Filter Libraries (shown/total)"). See _update_library_filter_btn.
 
-                if current_date_from['value'] is not None or current_date_to['value'] is not None:
-                    df = current_date_from['value']
-                    dt = current_date_to['value']
-                    if df is not None and dt is not None:
-                        date_label = f"{tr('Date')}: {df}-{dt}"
-                    elif df is not None:
-                        date_label = f"{tr('Date')}: {df}+"
-                    else:
-                        date_label = f"{tr('Date')}: -{dt}"
-                    if current_include_undated['value']:
-                        date_label += f" (+{tr('Include undated')})"
-                    _make_chip(date_label, lambda: clear_filter('date'))
 
                 for t in current_text_all['value']:
                     _make_chip(
@@ -1021,73 +976,19 @@ def create_catalog_browse_page(
                         color='red',
                     )
 
-                for text, key, value in _trait_chips():
-                    _make_chip(text, lambda k=key, v=value: clear_trait(k, v))
+                # The criteria chips are drawn under the "Manuscript features"
+                # button (criteria_panel.CriteriaControl), one per criterion.
 
                 ui.button(tr('Clear All'), on_click=clear_all_filters).props(
                     'flat dense size=sm color=red'
                 )
 
-    _TRAIT_RANGES = (('width', 'Width', 'cm'), ('height', 'Height', 'cm'), ('line_count', 'Lines', ''))
-
-    def _trait_chips() -> list:
-        """(chip text, trait key, value) for every active trait; a range is one
-        chip keyed by its prefix ('width', 'height', 'line_count')."""
-        import re
-        traits = current_traits['value']
-        chips = []
-        for key, label in (('script_styles', 'Script Style'), ('script_places', 'Script Place')):
-            options = getattr(trait_refs.get(key), 'options', None) or {}
-            for v in traits.get(key, []):
-                shown = re.sub(r'\s*\([\d,]+\)\s*$', '', str(options.get(v, v)))
-                chips.append((f"{tr(label)}: {shown}", key, v))
-        for prefix, label, unit in _TRAIT_RANGES:
-            lo, hi = traits.get(f'{prefix}_min'), traits.get(f'{prefix}_max')
-            if lo is None and hi is None:
-                continue
-            if lo is not None and hi is not None:
-                span = f"{lo:g}–{hi:g}"
-            else:
-                span = f"≥{lo:g}" if lo is not None else f"≤{hi:g}"
-            chips.append((f"{tr(label)}: {span}{' ' + tr(unit) if unit else ''}", prefix, None))
-        for v in traits.get('measurement_material', []):
-            chips.append((f"{tr('Material (measured)')}: {tr(v)}", 'measurement_material', v))
-        return chips
-
-    def _sync_trait_controls():
-        """Show current_traits in the trait controls (no change events: code-set values)."""
-        traits = current_traits['value']
-        for key, ref in trait_refs.items():
-            value = traits.get(key)
-            if key in ('script_styles', 'script_places', 'measurement_material'):
-                ref.value = list(value or [])
-            else:
-                ref.value = '' if value is None else f'{value:g}'
-
-    async def on_traits_changed(_=None):
-        """A trait control changed: read them all, and refresh when that changes the filter."""
-        if not initial_load_complete['value']:
+    async def on_criteria_applied(criteria):
+        """The panel's Apply, or a criteria chip removed: list by the new criteria."""
+        criteria = clean_criteria(criteria, strict=False)[0]
+        if criteria == current_criteria['value']:
             return
-        traits = {}
-        for key, ref in trait_refs.items():
-            traits[key] = list(ref.value or []) if isinstance(ref.value, (list, tuple)) else ref.value
-        new = clean_traits(traits)
-        if new == current_traits['value']:
-            return
-        current_traits['value'] = new
-        current_page['value'] = 1
-        await refresh_results()
-
-    async def clear_trait(key, value=None):
-        """Remove one trait value (a list item), or a whole range (key = its prefix)."""
-        traits = dict(current_traits['value'])
-        if value is None:
-            for k in (key, f'{key}_min', f'{key}_max'):
-                traits.pop(k, None)
-        else:
-            traits[key] = [v for v in traits.get(key, []) if v != value]
-        current_traits['value'] = clean_traits(traits)
-        _sync_trait_controls()
+        current_criteria['value'] = criteria
         current_page['value'] = 1
         await refresh_results()
 
@@ -1169,30 +1070,6 @@ def create_catalog_browse_page(
             current_work['value'] = None
         current_page['value'] = 1
         await refresh_results()
-
-    async def on_date_changed():
-        """Handle date filter change from From/To inputs."""
-        df_ref = date_from_ref['ref']
-        dt_ref = date_to_ref['ref']
-        df_val = df_ref.value if df_ref and df_ref.value else None
-        dt_val = dt_ref.value if dt_ref and dt_ref.value else None
-        try:
-            current_date_from['value'] = int(df_val) if df_val else None
-        except (ValueError, TypeError):
-            current_date_from['value'] = None
-        try:
-            current_date_to['value'] = int(dt_val) if dt_val else None
-        except (ValueError, TypeError):
-            current_date_to['value'] = None
-        current_page['value'] = 1
-        await refresh_results()
-
-    async def on_undated_changed(e):
-        """Handle include-undated checkbox change."""
-        current_include_undated['value'] = e.value
-        if current_date_from['value'] is not None or current_date_to['value'] is not None:
-            current_page['value'] = 1
-            await refresh_results()
 
     # ── Availability filters (PGP / Editions) — SEED-023 ───────────
     _PGP_STATES = ('all', 'has_pgp', 'no_pgp')
@@ -1574,28 +1451,6 @@ def create_catalog_browse_page(
         current_page['value'] = 1
         await refresh_results()
 
-    async def _set_century_range(lo_century: int, hi_century: int):
-        """Set From/To spanning multiple centuries."""
-        current_date_from['value'] = lo_century * 100
-        current_date_to['value'] = hi_century * 100 + 99
-        if date_from_ref['ref']:
-            date_from_ref['ref'].value = str(current_date_from['value'])
-        if date_to_ref['ref']:
-            date_to_ref['ref'].value = str(current_date_to['value'])
-        current_page['value'] = 1
-        await refresh_results()
-
-    async def on_century_preset(century: int):
-        """Set From/To to a century range and refresh."""
-        current_date_from['value'] = century * 100
-        current_date_to['value'] = century * 100 + 99
-        if date_from_ref['ref']:
-            date_from_ref['ref'].value = str(current_date_from['value'])
-        if date_to_ref['ref']:
-            date_to_ref['ref'].value = str(current_date_to['value'])
-        current_page['value'] = 1
-        await refresh_results()
-
     async def clear_filter(filter_name: str):
         """Clear a specific filter and refresh."""
         if filter_name == 'domain':
@@ -1609,16 +1464,6 @@ def create_catalog_browse_page(
             current_work['value'] = None
             if work_select_ref['ref']:
                 work_select_ref['ref'].value = None
-        elif filter_name == 'date':
-            current_date_from['value'] = None
-            current_date_to['value'] = None
-            current_include_undated['value'] = False
-            if date_from_ref['ref']:
-                date_from_ref['ref'].value = ''
-            if date_to_ref['ref']:
-                date_to_ref['ref'].value = ''
-            if undated_checkbox_ref['ref']:
-                undated_checkbox_ref['ref'].value = False
         elif filter_name == 'text':
             current_text_all['value'] = []
             current_text_any['value'] = []
@@ -1649,9 +1494,6 @@ def create_catalog_browse_page(
         current_domain['display'] = None
         current_author['value'] = None
         current_work['value'] = None
-        current_date_from['value'] = None
-        current_date_to['value'] = None
-        current_include_undated['value'] = False
         current_text_all['value'] = []
         current_text_any['value'] = []
         current_text_not['value'] = []
@@ -1659,8 +1501,9 @@ def create_catalog_browse_page(
         current_editions_filter['value'] = 'all'
         current_library_filter['value'] = []
         current_library_mode['value'] = 'hide'
-        current_traits['value'] = {}
-        _sync_trait_controls()
+        current_criteria['value'] = {}
+        if criteria_control['ref'] is not None:
+            criteria_control['ref'].refresh()
         safe_user_set('catalog_pgp_filter', 'all')
         safe_user_set('catalog_editions_filter', 'all')
         # DMF-08 (131-04): persist dict shape — NEVER a bare list (D-09/DMF-10).
@@ -1673,12 +1516,6 @@ def create_catalog_browse_page(
             author_select_ref['ref'].value = None
         if work_select_ref['ref']:
             work_select_ref['ref'].value = None
-        if date_from_ref['ref']:
-            date_from_ref['ref'].value = ''
-        if date_to_ref['ref']:
-            date_to_ref['ref'].value = ''
-        if undated_checkbox_ref['ref']:
-            undated_checkbox_ref['ref'].value = False
         if text_input_ref['ref']:
             text_input_ref['ref'].value = ''
         await fetch_authors()
@@ -1695,13 +1532,11 @@ def create_catalog_browse_page(
             current_domain['value'],
             current_author['value'],
             current_work['value'],
-            current_date_from['value'] is not None,
-            current_date_to['value'] is not None,
             current_text_all['value'],
             current_text_any['value'],
             current_text_not['value'],
             current_library_filter['value'],  # GAP-F: library selection enables "Search in these results"
-            bool(current_traits['value']),
+            bool(current_criteria['value']),
         ])
 
     def _has_active_filters_excluding_library() -> bool:
@@ -1716,21 +1551,18 @@ def create_catalog_browse_page(
             current_domain['value'],
             current_author['value'],
             current_work['value'],
-            current_date_from['value'] is not None,
-            current_date_to['value'] is not None,
             current_text_all['value'],
             current_text_any['value'],
             current_text_not['value'],
-            # Parallels applies script traits, not measurement ones (no controls for them there).
-            any(current_traits['value'].get(k) for k in ('script_styles', 'script_places')),
+            bool(current_criteria['value']),
         ])
 
-    def _build_incoming_filters(include_library: bool = True, include_measurements: bool = True) -> dict:
+    def _build_incoming_filters(include_library: bool = True) -> dict:
         """Build incoming_filters dict from all active browse filters.
 
         include_library=False strips the library selection from the handoff — used for
         the Parallels target, which cannot apply a library filter (Codex MEDIUM).
-        include_measurements=False strips the measurement traits, for the same target.
+        The criteria go unchanged to both targets (§6.3).
         """
         incoming = {}
         if current_domain['value']:
@@ -1742,10 +1574,6 @@ def create_catalog_browse_page(
         if current_work['value']:
             incoming['work'] = current_work['value']
             incoming['work_name'] = _resolve_work_display(current_work['value'])
-        if current_date_from['value'] is not None:
-            incoming['date_from'] = current_date_from['value']
-        if current_date_to['value'] is not None:
-            incoming['date_to'] = current_date_to['value']
         # Text filters carry over as lists
         if current_text_all['value']:
             incoming['text_all'] = current_text_all['value']
@@ -1762,10 +1590,9 @@ def create_catalog_browse_page(
                 'mode': current_library_mode['value'],
                 'codes': list(current_library_filter['value']),
             }
-        # Script / measurement traits under the names "Search only in..." uses.
-        for key, value in current_traits['value'].items():
-            if include_measurements or key not in BROWSE_MEASUREMENT_TRAITS:
-                incoming[key] = list(value) if isinstance(value, list) else value
+        if current_criteria['value']:
+            import copy as _copy
+            incoming['criteria'] = _copy.deepcopy(current_criteria['value'])
         return incoming
 
     def _update_search_buttons():
@@ -1801,13 +1628,11 @@ def create_catalog_browse_page(
         from the handoff (include_library=False) so it is not silently dropped, and tell
         the user if they had a library selection that won't carry over.
         """
-        incoming = _build_incoming_filters(include_library=False, include_measurements=False)
+        incoming = _build_incoming_filters(include_library=False)
         if not incoming:
             return
         if current_library_filter['value']:
             ui.notify(tr('Library filter is not applied to parallel search'), type='info')
-        if any(k in current_traits['value'] for k in BROWSE_MEASUREMENT_TRAITS):
-            ui.notify(tr('Size filters are not applied to parallel search'), type='info')
         # Class N/A — bare write, no wrapper. safe_user_set absorbs prune-race.
         safe_user_set('incoming_filters', incoming)
         ui.navigate.to('/parallels')
@@ -2019,6 +1844,13 @@ def create_catalog_browse_page(
                             ui.label(
                                 f"{tr('Unclassified')} ({unclassified_count:,})"
                             ).classes('text-sm pl-2 py-1').style('color: var(--text-muted)')
+                        # The corpus manuscripts with no catalogue record (D16), so
+                        # that the tree adds up to the list's total; counted once
+                        # the corpus list is loaded (_load_uncatalogued_count).
+                        uncatalogued_label_ref['ref'] = ui.label('').classes(
+                            'text-sm pl-2 py-1').style('color: var(--text-muted)').mark(
+                            'catalog-uncatalogued-count')
+                        uncatalogued_label_ref['ref'].set_visibility(False)
 
                 # Availability Filter Card (PGP / Editions) — SEED-023
                 with ui.card().classes('w-full p-4 mt-2'):
@@ -2091,81 +1923,16 @@ def create_catalog_browse_page(
                         work_sel.value = initial_work
                     work_select_ref['ref'] = work_sel
 
-                # Date Filter Card
-                with ui.card().classes('w-full p-4 mt-2'):
-                    ui.label(tr('Date')).classes(
-                        'text-sm font-bold uppercase tracking-wide mb-2'
-                    ).style('color: var(--text-secondary)')
-
-                    with ui.row().classes('w-full items-center gap-2'):
-                        df_input = ui.input(
-                            label=tr('From year'),
-                        ).props('dense outlined type=number').classes('flex-1').style('min-width: 0')
-                        df_input.on('change', lambda _: on_date_changed())
-                        date_from_ref['ref'] = df_input
-
-                        ui.label('–').style('color: var(--text-muted)')
-
-                        dt_input = ui.input(
-                            label=tr('To year'),
-                        ).props('dense outlined type=number').classes('flex-1').style('min-width: 0')
-                        dt_input.on('change', lambda _: on_date_changed())
-                        date_to_ref['ref'] = dt_input
-
-                    # Century presets
-                    with ui.row().classes('w-full flex-wrap gap-1 mt-2'):
-                        for c in range(9, 15):
-                            btn_label = tr(f"{c+1}th")
-                            ui.button(
-                                btn_label,
-                                on_click=lambda e, cent=c: on_century_preset(cent),
-                            ).props('flat dense size=xs no-caps').classes('text-xs')
-                        ui.button(
-                            tr("16-19"),
-                            on_click=lambda e, lo=16, hi=19: _set_century_range(lo, hi),
-                        ).props('flat dense size=xs no-caps').classes('text-xs')
-
-                    undated_cb = ui.checkbox(
-                        tr('Include undated'),
-                        on_change=on_undated_changed,
-                    ).classes('mt-1').props('dense')
-                    undated_checkbox_ref['ref'] = undated_cb
-
-                # Script and size card: list manuscripts by a trait, no text needed.
-                # Script options load after the page renders (_load_script_options).
-                with ui.card().classes('w-full p-4 mt-2').mark('catalog-traits-card'):
-                    ui.label(tr('Script and size')).classes(
-                        'text-sm font-bold uppercase tracking-wide mb-2'
-                    ).style('color: var(--text-secondary)')
-                    for key, label in (('script_styles', tr('Script Style')),
-                                       ('script_places', tr('Script Place'))):
-                        sel = ui.select(
-                            options={}, multiple=True, with_input=True, clearable=True,
-                            label=label, value=list(current_traits['value'].get(key, [])),
-                        ).props('dense outlined use-chips').classes('w-full mt-1')
-                        sel.on('update:model-value', on_traits_changed)
-                        trait_refs[key] = sel
-                    if meas_ok:
-                        for prefix, label in (('width', tr('Width (cm)')), ('height', tr('Height (cm)')),
-                                              ('line_count', tr('Lines'))):
-                            with ui.row().classes('w-full items-center gap-2 mt-2 no-wrap'):
-                                ui.label(label).classes('text-xs').style('min-width: 72px')
-                                for bound, placeholder in (('min', tr('Min')), ('max', tr('Max'))):
-                                    inp = ui.input(placeholder=placeholder).props(
-                                        'dense outlined type=number'
-                                    ).classes('flex-1').style('min-width: 0')
-                                    inp.on('change', on_traits_changed)
-                                    trait_refs[f'{prefix}_{bound}'] = inp
-                        mat = ui.select(
-                            {m: tr(m) for m in MEASUREMENT_MATERIALS}, multiple=True, clearable=True,
-                            label=tr('Material (measured)'),
-                        ).props('dense outlined use-chips').classes('w-full mt-2')
-                        mat.on('update:model-value', on_traits_changed)
-                        trait_refs['measurement_material'] = mat
-                    ui.label(tr('Only manuscripts with a recorded value are included.')).classes(
-                        'text-xs mt-2'
-                    ).style('color: var(--text-muted)')
-                    _sync_trait_controls()
+                # Manuscript features: the period of copy, script, size and the
+                # rest of the catalogue criteria, in one panel (plan §6.3).
+                with ui.card().classes('w-full p-4 mt-2').mark('catalog-criteria-card'):
+                    criteria_control['ref'] = CriteriaControl(
+                        get_criteria=lambda: current_criteria['value'],
+                        on_apply=on_criteria_applied,
+                        fjms=lambda: fjms,
+                        universe=lambda: _corpus_sys_ids(_app_state_for_universe()),
+                        mark='catalog-criteria',
+                    ).build()
 
                 # Text Filter Card
                 with ui.card().classes('w-full p-4 mt-2'):
@@ -2225,10 +1992,13 @@ def create_catalog_browse_page(
                 pagination_container['ref'] = ui.column().classes('w-full')
 
     # ── Initial data load ──────────────────────────────────────────
+    # A parameter dropped as not understood still makes the address the
+    # page's state: the saved session does not come back under its notice
+    # (GitHub Codex on PR 1b: ?columns=oops restored the saved criteria).
     _has_url_params = any([
         initial_domain, initial_author, initial_work,
         initial_text_all, initial_text_any, initial_text_not,
-        initial_traits,
+        initial_criteria, address_problems,
     ])
 
     async def _restore_session_filters():
@@ -2260,20 +2030,6 @@ def create_catalog_browse_page(
             if work_select_ref['ref']:
                 work_select_ref['ref'].value = state['work']
             restored = True
-        if state.get('date_from') is not None:
-            current_date_from['value'] = state['date_from']
-            if date_from_ref['ref']:
-                date_from_ref['ref'].value = str(state['date_from'])
-            restored = True
-        if state.get('date_to') is not None:
-            current_date_to['value'] = state['date_to']
-            if date_to_ref['ref']:
-                date_to_ref['ref'].value = str(state['date_to'])
-            restored = True
-        if state.get('undated'):
-            current_include_undated['value'] = True
-            if undated_checkbox_ref['ref']:
-                undated_checkbox_ref['ref'].value = True
         if state.get('text_all'):
             current_text_all['value'] = state['text_all']
             restored = True
@@ -2283,24 +2039,41 @@ def create_catalog_browse_page(
         if state.get('text_not'):
             current_text_not['value'] = state['text_not']
             restored = True
-        traits = _drop_unavailable_traits(clean_traits(state.get('traits')))
-        if traits:
-            current_traits['value'] = traits
-            _sync_trait_controls()
+        # Criteria; a session saved before them keeps its dates as the
+        # period of copy (D18). Its 'traits' (2.2) never shipped: not read.
+        criteria = clean_criteria(state.get('criteria'), strict=False)[0]
+        if 'period' not in criteria:
+            criteria.update(period_from_dates(state.get('date_from'), state.get('date_to'),
+                                              bool(state.get('undated'))))
+        criteria = _drop_unavailable_criteria(criteria)
+        if criteria:
+            current_criteria['value'] = criteria
+            if criteria_control['ref'] is not None:
+                criteria_control['ref'].refresh()
             restored = True
         return restored
 
-    async def _load_script_options():
-        """Fill the two script selects (their choices read the sidecar: off the loop)."""
-        from web.components.filter_panel import build_script_options
-        options = await run.io_bound(build_script_options, lang)
-        if not options:
-            return  # cancelled, app stopping, or no catalog: the selects stay empty
-        for key, opts in options.items():
-            sel = trait_refs.get(key)
-            if sel is not None:
-                sel.options = opts
-                sel.update()
+    def _uncatalogued_count_blocking():
+        """How many corpus manuscripts have no catalogue record (D16)."""
+        from web.state import state as _state
+        corpus = _corpus_sys_ids(_state)
+        if corpus is None:
+            return None
+        return len(set(corpus()) - fjms.catalogued_ids())
+
+    async def _load_uncatalogued_count():
+        """The domain tree's "No catalogue record (N)" line; left hidden when
+        the corpus or the catalogue cannot be read."""
+        try:
+            n = await run.io_bound(_uncatalogued_count_blocking)
+        except Exception:
+            logger.info("catalog_browse: uncatalogued count failed", exc_info=True)
+            return
+        label = uncatalogued_label_ref['ref']
+        if not n or label is None or label.is_deleted:
+            return
+        label.set_text(tr('No catalogue record ({n})').format(n=f"{n:,}"))
+        label.set_visibility(True)
 
     async def initial_load():
         """Load initial data and fetch results on page open."""
@@ -2313,8 +2086,8 @@ def create_catalog_browse_page(
                 logger.warning("catalog_browse: filter restore failed", exc_info=True)
             await fetch_authors()
             await fetch_works()
-            await _load_script_options()
             await refresh_results()
+            await _load_uncatalogued_count()
         finally:
             initial_load_complete['value'] = True
 

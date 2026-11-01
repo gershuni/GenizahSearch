@@ -2823,8 +2823,6 @@ def joins_lab_page_route(
 def catalog_browse_page_route(
     domain: str = None, author: str = None, work: str = None, page: int = None,
     text_all: str = None, text_any: str = None, text_not: str = None,
-    script_style: str = None, script_place: str = None, width: str = None,
-    height: str = None, lines: str = None, material: str = None,
 ):
     safe_user_set('current_page', '/catalog-browse')
     _catalog_parts = [p for p in [domain, author, work] if p]
@@ -2854,7 +2852,11 @@ def catalog_browse_page_route(
 
     content = create_layout()
     with content:
-        from web.pages.catalog_browse import create_catalog_browse_page, traits_from_query
+        from web.pages.catalog_browse import create_catalog_browse_page, criteria_from_address
+        # One parameter per catalogue criterion (D8), read from the registry.
+        _request = getattr(ui.context.client, 'request', None)
+        _criteria, _dropped = criteria_from_address(
+            _request.query_params if _request is not None else {})
         create_catalog_browse_page(
             initial_domain=domain,
             initial_author=author,
@@ -2863,7 +2865,8 @@ def catalog_browse_page_route(
             initial_text_all=text_all,
             initial_text_any=text_any,
             initial_text_not=text_not,
-            initial_traits=traits_from_query(script_style, script_place, width, height, lines, material),
+            initial_criteria=_criteria,
+            address_problems=_dropped,
         )
 
 @ui.page('/lists', title='My Lists | הרשימות שלי — Dicta Genizah Search')

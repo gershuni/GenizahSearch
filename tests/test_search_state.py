@@ -125,6 +125,8 @@ def test_clear_search_filters_preserves_live_search_state():
         'search_filter_domains': ['d1', 'd2'],
         'search_filter_authors': [42],
         'search_filter_include_mode': False,
+        'search_filter_criteria': {'style': {'values': ['Square']}},
+        # Replaced by the criteria (PR 1b): cleared too, never read again.
         'search_filter_date_from': 1000,
         'search_filter_width_min': 5.0,
         'search_filter_measurement_material': ['Parchment'],
@@ -149,9 +151,10 @@ def test_clear_search_filters_preserves_live_search_state():
         assert storage['search_filter_domains'] == []
         assert storage['search_filter_authors'] == []
         assert storage['search_filter_include_mode'] is True
+        assert storage['search_filter_criteria'] == {}
         assert storage['search_filter_date_from'] is None
         assert storage['search_filter_width_min'] is None
-        assert storage['search_filter_measurement_material'] == []
+        assert storage['search_filter_measurement_material'] is None
 
 
 def test_stale_version_discards_snapshot():

@@ -1,25 +1,23 @@
 # -*- coding: utf-8 -*-
-"""/search hides the measurement filters the catalog data cannot answer (#17).
+"""/search with the catalogue criteria (PR 1b of
+docs/plans/CATALOGUE_CRITERIA_PLAN.md), on the real page in a NiceGUI User
+simulation with the FJMS singleton pointed at a small sidecar file.
 
-Opens the real /search page in a NiceGUI User simulation with the FJMS
-singleton pointed at a small sidecar file, and checks the marked rows the
-page builds at open:
-
-* 'filter-line-height-row' / 'post-filter-line-height-row' -- the Line Height
-  rows of the pre-search and post-search Measurements panels;
-* 'filter-measurements-group' / 'post-filter-measurements-group' -- the two
-  Measurements expansions.
-
-Each case is asserted both ways (data present -> visible, data missing ->
-hidden) so a page that hides the row unconditionally, or never, fails.
-Absence is asserted on the page's own marks, never on body text.
-
-Also: a saved Line Height filter the catalog is known to lack is dropped at
-page open WITH a notice (owner ruling), and kept when there is no catalog.
+* The "Manuscript features" button replaced the date range, the script lists
+  and the pre-search Measurements group: the old marks are gone, the button
+  is there, and saved criteria come back as chips with the badge counted.
+* Saved dates are read in as the period of copy (D18).
+* Saved measurement filters are not restored, silently, and the rows saved
+  with them are dropped so the search runs again (R2).
+* A 5.0.0 file drops a saved criterion it cannot answer, with a notice
+  (rule 9); with no catalog at all nothing is dropped.
+* The post-search Measurements group shows when the catalog has
+  measurements (#17).
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -34,35 +32,47 @@ from nicegui.ui_run import set_storage_secret
 from tests.render_smoke._bounded_run import run_bounded
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from criteria_sidecar import build_criteria_sidecar  # noqa: E402
 from fjms_filter_sidecar import build_sidecar  # noqa: E402
 
 import web.main  # noqa: E402,F401  (registers the /search route)
+import web.components.filter_panel as _filter_panel  # noqa: E402
+import web.pages.search_state as _search_state  # noqa: E402
 import web.safe_storage as _safe_storage  # noqa: E402
 from shared import fjms_service  # noqa: E402
 from shared.fjms_service import FjmsService  # noqa: E402
 
 DROPPED_NOTICE = 'Some saved filters were removed: this catalog data is not available.'
-MARKS = ('filter-line-height-row', 'post-filter-line-height-row',
-         'filter-measurements-group', 'post-filter-measurements-group')
+OLD_MARKS = ('filter-line-height-row', 'filter-measurements-group', 'filter-script-row')
 
 
 @asynccontextmanager
-async def _user(saved: dict):
+async def _user(saved: dict, written: dict, lang: str = 'en'):
     real_get = _safe_storage.safe_user_get
 
     def _get(key, default=None):
+        if key in written:
+            return written[key]
         if key in saved:
             return saved[key]
         return real_get(key, default)
+
+    def _set(key, value):
+        written[key] = value
 
     saved_handlers = list(core.app._startup_handlers)
     core.app._startup_handlers.clear()
     try:
         prepare_simulation()
-        set_storage_secret('measurement-filters-render-smoke-secret', {})
+        set_storage_secret('search-criteria-render-smoke-secret', {})
         async with AsyncExitStack() as stack:
-            stack.enter_context(patch('web.main._resolve_ui_language', return_value='en'))
+            stack.enter_context(patch('web.main._resolve_ui_language', return_value=lang))
             stack.enter_context(patch.object(_safe_storage, 'safe_user_get', _get))
+            stack.enter_context(patch.object(_safe_storage, 'safe_user_set', _set))
+            stack.enter_context(patch.object(_filter_panel, 'persist_value', _set))
+            # search_state reads the saved rows through its own names.
+            stack.enter_context(patch.object(_search_state, 'safe_user_get', _get))
+            stack.enter_context(patch.object(_search_state, 'safe_user_set', _set))
             os.environ['NICEGUI_USER_SIMULATION'] = 'true'
             try:
                 await stack.enter_async_context(core.app.router.lifespan_context(core.app))
@@ -82,20 +92,31 @@ def _marked(user, mark):
                 if mark in (getattr(e, '_markers', None) or [])]
 
 
-def _open_search(monkeypatch, svc, saved=None):
-    """Open /search on ``svc``; return (visibility by mark, notices seen)."""
+def _texts(user):
+    with user._client:
+        return [getattr(e, 'text', '') or '' for e in user._client.elements.values()]
+
+
+def _open_search(monkeypatch, svc, saved=None, wait_for=None):
+    """Open /search on ``svc``; return (page facts, notices, storage writes)."""
     monkeypatch.setattr(fjms_service, '_default_service', svc)
-    out = {}
-    notices = []
+    facts, notices, written = {}, [], {}
     saved_slots = list(nicegui_context.slot_stack)
 
     async def run():
-        async with _user(saved or {}) as user:
+        async with _user(saved or {}, written) as user:
             await user.open('/search')
-            for mark in MARKS:
+            if wait_for:
+                deadline = asyncio.get_running_loop().time() + 5.0
+                while (not any(wait_for in t for t in _texts(user))
+                       and asyncio.get_running_loop().time() < deadline):
+                    await asyncio.sleep(0.05)
+            for mark in OLD_MARKS + ('search-criteria-button', 'post-filter-measurements-group'):
                 found = _marked(user, mark)
-                assert len(found) == 1, f"{mark}: expected one marked element, found {len(found)}"
-                out[mark] = found[0].visible
+                facts[mark] = found[0].visible if found else None
+            badge = _marked(user, 'search-criteria-badge')
+            facts['badge'] = (badge[0].text, badge[0].visible) if badge else None
+            facts['texts'] = _texts(user)
             notices.extend(user.notify.messages)
 
     try:
@@ -103,40 +124,160 @@ def _open_search(monkeypatch, svc, saved=None):
     finally:
         nicegui_context.slot_stack.clear()
         nicegui_context.slot_stack.extend(saved_slots)
-    return out, notices
+    return facts, notices, written
 
 
-def test_line_height_rows_show_when_the_data_has_line_heights(tmp_path, monkeypatch):
-    vis, _ = _open_search(monkeypatch, FjmsService(
-        db_path=build_sidecar(tmp_path / 's.db', with_line_height=True)))
-    assert vis == {'filter-line-height-row': True, 'post-filter-line-height-row': True,
-                   'filter-measurements-group': True, 'post-filter-measurements-group': True}, vis
+def test_the_button_replaces_the_old_controls(tmp_path, monkeypatch):
+    facts, _, _ = _open_search(monkeypatch, FjmsService(
+        db_path=build_criteria_sidecar(tmp_path / 's.db')))
+    for mark in OLD_MARKS:
+        assert facts[mark] is None, (mark, facts)
+    assert facts['search-criteria-button'] is True, facts
+    assert facts['badge'] == ('0', False), facts
 
 
-def test_line_height_rows_hide_when_the_data_lacks_them(tmp_path, monkeypatch):
-    vis, _ = _open_search(monkeypatch, FjmsService(
-        db_path=build_sidecar(tmp_path / 's.db', with_line_height=False)))
-    assert vis == {'filter-line-height-row': False, 'post-filter-line-height-row': False,
-                   'filter-measurements-group': True, 'post-filter-measurements-group': True}, vis
+def test_saved_criteria_come_back_as_chips(tmp_path, monkeypatch):
+    facts, _, _ = _open_search(
+        monkeypatch, FjmsService(db_path=build_criteria_sidecar(tmp_path / 's.db')),
+        saved={'search_filter_criteria': {'region': {'values': ['Oriental'], 'mode': 'except'},
+                                          'lines': {'min': 20, 'max': 25}}},
+        wait_for='Region: all except Oriental')
+    assert 'Region: all except Oriental' in facts['texts'], facts['texts']
+    assert 'Lines: 20–25' in facts['texts'], facts['texts']
+    assert facts['badge'] == ('2', True), facts
 
 
-def test_measurements_hide_when_the_data_has_no_measurements(tmp_path, monkeypatch):
-    vis, _ = _open_search(monkeypatch, FjmsService(
-        db_path=build_sidecar(tmp_path / 's.db', with_measurements=False)))
-    assert vis['filter-measurements-group'] is False, vis
-    assert vis['post-filter-measurements-group'] is False, vis
+def test_saved_dates_are_read_in_as_the_period(tmp_path, monkeypatch):
+    facts, _, written = _open_search(
+        monkeypatch, FjmsService(db_path=build_criteria_sidecar(tmp_path / 's.db')),
+        saved={'search_filter_date_from': 1000, 'search_filter_date_to': 1200},
+        wait_for='Period: 1000')
+    assert written['search_filter_criteria'] == {'period': {'min': 1000, 'max': 1200}}, written
+    assert written['search_filter_date_from'] is None and written['search_filter_date_to'] is None
+    assert 'Period: 1000–1200' in facts['texts'], facts['texts']
 
 
-def test_a_saved_line_height_the_catalog_lacks_is_dropped_with_a_notice(tmp_path, monkeypatch):
-    _, notices = _open_search(
+def test_saved_measurement_filters_are_retired_with_their_rows(tmp_path, monkeypatch):
+    facts, notices, written = _open_search(
+        monkeypatch, FjmsService(db_path=build_criteria_sidecar(tmp_path / 's.db')),
+        saved={'search_filter_width_min': 10.0, 'search_filter_measurement_material': ['Paper'],
+               'search_results': [{'sys_id': '990000000010205171'}]})
+    assert written.get('search_filter_width_min', 'unset') is None, written
+    assert written.get('search_filter_measurement_material', 'unset') is None, written
+    assert written.get('search_results') == [], written       # the search runs again
+    assert written.get('search_last_run', 'unset') is None, written   # not "a finished search"
+    assert DROPPED_NOTICE not in notices, notices              # R2: no note
+    assert facts['badge'] == ('0', False), facts
+
+
+def test_unchanged_saved_rows_are_kept(tmp_path, monkeypatch):
+    _, _, written = _open_search(
+        monkeypatch, FjmsService(db_path=build_criteria_sidecar(tmp_path / 's.db')),
+        saved={'search_filter_criteria': {'style': {'values': ['Square']}}})
+    assert 'search_results' not in written, written
+
+
+def test_a_5_0_0_file_drops_a_saved_criterion_it_cannot_answer(tmp_path, monkeypatch):
+    facts, notices, written = _open_search(
         monkeypatch,
-        FjmsService(db_path=build_sidecar(tmp_path / 's.db', with_line_height=False)),
-        saved={'search_filter_line_height_min': 3.0})
+        FjmsService(db_path=build_criteria_sidecar(tmp_path / 's.db', upgrade=False)),
+        saved={'search_filter_criteria': {'columns': {'min': 2, 'max': 2},
+                                          'style': {'values': ['Square']}}})
     assert DROPPED_NOTICE in notices, notices
+    assert written['search_filter_criteria'] == {
+        'style': {'values': ['Square'], 'mode': 'only'}}, written
 
 
-def test_saved_filters_are_kept_silently_when_there_is_no_catalog(tmp_path, monkeypatch):
-    _, notices = _open_search(
+def test_saved_criteria_are_kept_silently_when_there_is_no_catalog(tmp_path, monkeypatch):
+    _, notices, written = _open_search(
         monkeypatch, FjmsService(db_path=str(tmp_path / 'absent.db')),
-        saved={'search_filter_line_height_min': 3.0})
+        saved={'search_filter_criteria': {'columns': {'min': 2, 'max': 2}}})
     assert DROPPED_NOTICE not in notices, notices
+    assert 'search_filter_criteria' not in written, written
+
+
+def test_post_search_measurements_show_with_measurement_data(tmp_path, monkeypatch):
+    facts, _, _ = _open_search(monkeypatch, FjmsService(
+        db_path=build_sidecar(tmp_path / 's.db', with_line_height=False)))
+    assert facts['post-filter-measurements-group'] is True, facts
+
+
+def test_post_search_measurements_hide_without_measurement_data(tmp_path, monkeypatch):
+    facts, _, _ = _open_search(monkeypatch, FjmsService(
+        db_path=build_sidecar(tmp_path / 's.db', with_measurements=False)))
+    assert facts['post-filter-measurements-group'] is False, facts
+
+
+def test_post_search_measurements_filter_the_shown_rows_as_the_panel(tmp_path, monkeypatch):
+    """D20 at the page: the restored rows, a width range in the post-search
+    Measurements, Apply Filters -> the rows the panel's rules keep (A by its
+    catalogue size, B and D by a measured page; C's size is flagged)."""
+    from criteria_sidecar import A, B, C, D, E, F
+    from nicegui import ui
+    from nicegui.testing.user_interaction import UserInteraction
+    svc = FjmsService(db_path=build_criteria_sidecar(tmp_path / 's.db'))
+    monkeypatch.setattr(fjms_service, '_default_service', svc)
+    rows = [{'sys_id': sid, 'display': {'id': sid, 'shelfmark': f'T-S {sid[-6:]}', 'title': 'x'},
+             'snippet': 'x'} for sid in (A, B, C, D, E, F)]
+    saved = {'search_query': 'שבת', 'search_mode': 'exact', 'search_results': rows}
+    seen = {}
+    saved_slots = list(nicegui_context.slot_stack)
+
+    async def run():
+        written = {}
+        async with _user(saved, written) as user:
+            await user.open('/search?q=שבת')
+            row = _marked(user, 'post-filter-width-row')[0]
+            with user._client:
+                low, high = [e for e in row.descendants() if isinstance(e, ui.number)]
+                low.value, high.value = 10, 12
+            for box in (low, high):
+                UserInteraction(user, {box}, None).trigger('blur')
+            with user._client:
+                apply = next(e for e in user._client.elements.values()
+                             if isinstance(e, ui.button) and e.text == 'Apply Filters')
+            UserInteraction(user, {apply}, None).click()
+            deadline = asyncio.get_running_loop().time() + 5.0
+            while (not any(' / 6 Results' in t for t in _texts(user))
+                   and asyncio.get_running_loop().time() < deadline):
+                await asyncio.sleep(0.05)
+            seen['texts'] = _texts(user)
+
+    try:
+        run_bounded(run())
+    finally:
+        nicegui_context.slot_stack.clear()
+        nicegui_context.slot_stack.extend(saved_slots)
+    assert any(t.startswith('3 / 6 Results') for t in seen['texts']), [
+        t for t in seen['texts'] if 'Results' in t]
+
+
+def test_the_hebrew_history_menu_loads_its_labels_off_the_loop(tmp_path, monkeypatch):
+    """GitHub Codex on PR 1b: the menu is drawn on the event loop, so its
+    chips read the value labels from the cache only (the English value at
+    first); the labels load off the loop and the menu is drawn again."""
+    svc = FjmsService(db_path=build_criteria_sidecar(tmp_path / 's.db'))
+    monkeypatch.setattr(fjms_service, '_default_service', svc)
+    entry = {'query': 'abc', 'result_count': 1, 'mode': 'exact',
+             'params': {'filters': {'criteria': {'style': {'values': ['Square'], 'mode': 'only'}}}}}
+    seen = {}
+    saved_slots = list(nicegui_context.slot_stack)
+
+    async def run():
+        async with _user({'search_history': [entry]}, {}, lang='he') as user:
+            await user.open('/search')
+            user.find(marker='search-history-button').click()
+            seen['first'] = [t for t in _texts(user) if 'Square' in t]
+            deadline = asyncio.get_running_loop().time() + 5.0
+            while (not any('מרובע' in t for t in _texts(user))
+                   and asyncio.get_running_loop().time() < deadline):
+                await asyncio.sleep(0.05)
+            seen['then'] = [t for t in _texts(user) if 'מרובע' in t]
+
+    try:
+        run_bounded(run())
+    finally:
+        nicegui_context.slot_stack.clear()
+        nicegui_context.slot_stack.extend(saved_slots)
+    assert seen['first'], seen     # drawn at once, from the cache: still English
+    assert seen['then'], seen      # then with the catalogue's Hebrew label

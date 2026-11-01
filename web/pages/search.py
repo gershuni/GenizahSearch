@@ -20,11 +20,12 @@ from web.components.typography import h2, h3, h4
 from web.clipboard import copy_text_to_clipboard
 from web.components.filter_panel import (
     build_domain_options, build_author_options, build_work_options,
-    build_script_options, build_script_filter_row,
-    build_filter_summary, has_active_filters, persist_value,
+    build_filter_summary, has_active_filters, load_history_labels_then, persist_value,
     load_filter_state, consume_incoming_filters, recompute_filter_count,
     corpus_universe, create_filter_handlers, filter_unavailable_message,
+    apply_criteria, retire_old_saved_filters, restore_saved_criteria,
 )
+from web.components.criteria_panel import CriteriaControl, active_criteria_count
 from web.search_bootstrap import resolve_search_bootstrap, VALID_SEARCH_MODES
 from web.pages.search_state import (
     SearchUIState, SearchPageRefs,
@@ -36,7 +37,7 @@ from web.pages.search_state import (
     compact_result_rows, preview_shows_final_rows, engine_mode,
     run_filter_state, apply_run_filter_state, save_post_filters_with_run,
     live_search_run, start_search_run, url_stamp_of, apply_run_start_snapshot, save_search_run,
-    discard_search_run,
+    discard_search_run, post_criteria_matches, result_sys_id, PostMatchRefill,
 )
 from web import search_runs
 from web.pages.search_results import (
@@ -72,6 +73,7 @@ from shared.fgp_service import get_sys_ids_with_fgp_sources
 from shared.search_regex import SearchBudgetExceeded
 from shared.transcription_service import union_manual_transcriptions
 from urllib.parse import quote
+import copy
 import logging
 import json
 import html
@@ -79,6 +81,13 @@ import asyncio
 import time
 
 logger = logging.getLogger(__name__)
+
+
+def _get_fjms_for_criteria():
+    """The FJMS service the "Manuscript features" panel and the post-search
+    criteria read (looked up when used, as everywhere on this page)."""
+    from shared.fjms_service import get_fjms_service
+    return get_fjms_service(thread_safe=True)
 
 
 def _web_fgp_sys_ids(sys_ids):
@@ -169,15 +178,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         except Exception as e:
             logger.error("_after_delay error in %s: %s", coro_func.__name__, e, exc_info=True)
 
-    # Measurement material options (value -> translated label)
-    MEASUREMENT_MATERIALS = {
-        'Paper': tr('Paper'),
-        'Vellum': tr('Vellum'),
-        'Papyrus': tr('Papyrus'),
-        'Mix': tr('Mix'),
-        'Wood': tr('Wood'),
-    }
-
     # Resolve which persisted search state, if any, should be reused for this request.
     # 2026-05-12: pruned-session AssertionError fix — route through safe_user_get
     # so a fresh page handler racing with prune_user_storage degrades to defaults
@@ -198,6 +198,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # count combined with URL `q` matching saved_query means the browser restored
     # a URL this session stamped via history.replaceState at end of a successful
     # search. Without this signal, Back would fire a fresh search and lose state.
+    # R2: a session saved with the old measurement filters is not restored
+    # with them; its stored rows go too, so the search runs again.
+    retire_old_saved_filters('search', run_key='search_last_run', reset={
+        'search_results': [], 'search_last_run': None, 'search_refinement_chain': [],
+        'search_result_count_capped': False, 'search_result_partial': False})
     _saved_active_snapshot = get_search_active_snapshot(initial_run)
     _saved_results = (
         _saved_active_snapshot.get('results', [])
@@ -388,20 +393,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         s = search_state
         n = len(s.filter_domains or []) + len(s.filter_authors or []) + len(s.filter_works or [])
         n += len(s.filter_material_exclude or [])
-        n += len(s.filter_script_styles or []) + len(s.filter_script_places or [])
-        n += len(s.filter_measurement_material or [])  # Codex on #434: the chips showed it, the badge did not
+        n += active_criteria_count(s.filter_criteria)  # one per criterion, as its chips
         # Text position is not in has_active_filters (it changes the search's
         # semantics rather than its scope) but the chip bar shows it, so the
         # badge counts it too (Codex on #434). The select exists before the
         # first call: _panel_toggles['ready'] is set after the form is built.
         n += 1 if (text_position_select.value or 'anywhere') != 'anywhere' else 0
-        n += 1 if (s.filter_date_from is not None or s.filter_date_to is not None) else 0
         n += 1 if (s.filter_text_all or s.filter_text_any or s.filter_text_not) else 0
-        n += 1 if any(getattr(s, k, None) is not None for k in (
-            'filter_width_min', 'filter_width_max', 'filter_height_min', 'filter_height_max',
-            'filter_line_count_min', 'filter_line_count_max', 'filter_line_height_min',
-            'filter_line_height_max', 'filter_text_density_min', 'filter_text_density_max',
-        )) else 0
         return n
 
     # _domain_display_name closure wrapper (delegates to module-level function with search_state)
@@ -821,7 +819,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     with ui.column().classes('items-center gap-0'):
                         history_btn = ui.button(icon='history', on_click=lambda: (
                             _refresh_history_menu(), history_menu.open()
-                        )).props(f'flat dense aria-label="{tr("Search History")}"').tooltip(tr('Search History'))
+                        )).props(f'flat dense aria-label="{tr("Search History")}"').tooltip(
+                            tr('Search History')).mark('search-history-button')
 
                         history_menu = ui.menu()
 
@@ -1125,21 +1124,24 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         _filter_refs['work'] = work_select
 
                 with ui.row().classes('w-full gap-4 flex-wrap items-end'):
-                    # Date range
+                    # Manuscript features: period of copy, script, size and the
+                    # rest of the catalogue criteria (replaced the date range, the
+                    # script lists and the Measurements group). Its chips are in
+                    # the chip bar below.
                     with ui.column().classes('gap-1 min-w-32'):
-                        ui.label(tr('Date Range')).classes('text-xs font-medium').style('color: var(--text-secondary);')
-                        with ui.row().classes('items-center gap-2'):
-                            date_from_input = ui.number(
-                                label=tr('From Year'),
-                                value=search_state.filter_date_from,
-                            ).classes('w-28').props('outlined dense')
-                            ui.label('\u2013').style('color: var(--text-muted);')
-                            date_to_input = ui.number(
-                                label=tr('To Year'),
-                                value=search_state.filter_date_to,
-                            ).classes('w-28').props('outlined dense')
-                        _filter_refs['date_from'] = date_from_input
-                        _filter_refs['date_to'] = date_to_input
+                        async def _on_criteria_applied(criteria):
+                            if apply_criteria(search_state, 'search', criteria):
+                                await _recompute_filter_count()
+                            _update_chip_bar()
+                        criteria_control = CriteriaControl(
+                            get_criteria=lambda: search_state.filter_criteria,
+                            on_apply=_on_criteria_applied,
+                            fjms=lambda: _get_fjms_for_criteria(),
+                            universe=corpus_universe,
+                            mark='search-criteria',
+                            show_chips=False,
+                            on_chips=lambda _chips: _update_chip_bar() if _chip_bar_ready['value'] else None,
+                        ).build()
 
                     # Material exclude (Printed)
                     with ui.column().classes('gap-1 min-w-48'):
@@ -1158,11 +1160,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             search_state.filter_authors = []
                             search_state.filter_works = []
                             search_state.filter_include_mode = True
-                            search_state.filter_date_from = None
-                            search_state.filter_date_to = None
                             search_state.filter_material_exclude = []
-                            search_state.filter_script_styles = []
-                            search_state.filter_script_places = []
+                            search_state.filter_criteria = {}
                             search_state.filter_text_all = []
                             search_state.filter_text_any = []
                             search_state.filter_text_not = []
@@ -1172,25 +1171,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             author_select.value = []
                             work_select.value = []
                             filter_mode_toggle.value = True
-                            date_from_input.value = None
-                            date_to_input.value = None
                             exclude_printed_cb.value = False
-                            _filter_refs['script_styles'].value = []
-                            _filter_refs['script_places'].value = []
                             if _filter_refs.get('text_input'):
                                 _filter_refs['text_input'].value = ''
-                            # Clear measurement filters (Phase 54)
-                            search_state.filter_width_min = None
-                            search_state.filter_width_max = None
-                            search_state.filter_height_min = None
-                            search_state.filter_height_max = None
-                            search_state.filter_line_count_min = None
-                            search_state.filter_line_count_max = None
-                            search_state.filter_line_height_min = None
-                            search_state.filter_line_height_max = None
-                            search_state.filter_text_density_min = None
-                            search_state.filter_text_density_max = None
-                            search_state.filter_measurement_material = []
+                            criteria_control.refresh()
                             # Reset filter-only storage keys (Phase 74: narrower helper).
                             # clear_search_snapshot() was too broad here - it wiped
                             # live search_results / exclusions / refinement chain
@@ -1201,9 +1185,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                         ui.button(tr('Clear All'), icon='clear_all',
                                   on_click=_clear_all_adv_filters).props('flat dense no-caps')
-
-                # Script style / place (catalogue)
-                build_script_filter_row(search_state, _filter_refs, tr)
 
                 # Text filter row
                 with ui.row().classes('w-full gap-2 items-end'):
@@ -1291,104 +1272,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # Initialize text chips on page load
                 _rebuild_text_chips()
 
-                # --- Measurement filters (Phase 54, DIM-02) ---
-                # #17: shown only when the open catalog is known to have the
-                # data. Hidden controls keep their objects (the chip bar and
-                # the restore below reference them).
-                from shared.fjms_service import (
-                    measurement_filters_available, line_height_filter_available,
-                )
-                _meas_ok = measurement_filters_available()
-                _lh_ok = line_height_filter_available()
-                with ui.expansion(tr('Measurements'), icon='straighten').classes('w-full').props(
-                    'dense default-closed header-class="text-sm"'
-                ).mark('filter-measurements-group') as _meas_expansion:
-                    _meas_expansion.set_visibility(_meas_ok)
-                    with ui.column().classes('gap-2 w-full'):
-                        def _make_meas_range_row(label, suffix=''):
-                            with ui.row().classes('gap-1 items-center w-full'):
-                                ui.label(label).classes('text-xs w-28 shrink-0')
-                                min_inp = ui.number(placeholder=tr('Min'), format='%.1f').props(
-                                    'outlined dense type=number step=0.1'
-                                ).classes('w-20')
-                                ui.label('\u2013').classes('text-xs')
-                                max_inp = ui.number(placeholder=tr('Max'), format='%.1f').props(
-                                    'outlined dense type=number step=0.1'
-                                ).classes('w-20')
-                                if suffix:
-                                    ui.label(suffix).classes('text-xs text-gray-500')
-                            return min_inp, max_inp
-
-                        meas_width_min_inp, meas_width_max_inp = _make_meas_range_row(tr('Width'), tr('cm'))
-                        meas_height_min_inp, meas_height_max_inp = _make_meas_range_row(tr('Height'), tr('cm'))
-
-                        # Line count: integer inputs (no decimals)
-                        with ui.row().classes('gap-1 items-center w-full'):
-                            ui.label(tr('Lines')).classes('text-xs w-28 shrink-0')
-                            meas_lc_min_inp = ui.number(placeholder=tr('Min'), format='%d').props(
-                                'outlined dense type=number step=1'
-                            ).classes('w-20')
-                            ui.label('\u2013').classes('text-xs')
-                            meas_lc_max_inp = ui.number(placeholder=tr('Max'), format='%d').props(
-                                'outlined dense type=number step=1'
-                            ).classes('w-20')
-
-                        with ui.element('div').classes('w-full').mark('filter-line-height-row') as _lh_row:
-                            meas_lh_min_inp, meas_lh_max_inp = _make_meas_range_row(tr('Line Height'), tr('mm'))
-                        _lh_row.set_visibility(_lh_ok)
-                        meas_td_min_inp, meas_td_max_inp = _make_meas_range_row(tr('Text Density'), '/10' + tr('cm') + '\u00b2')
-
-                        meas_material_select = ui.select(
-                            options=MEASUREMENT_MATERIALS,
-                            label=tr('Material (measured)'),
-                            multiple=True,
-                        ).props('outlined dense clearable use-chips').classes('w-full')
-
-                        # Restore values from state
-                        meas_width_min_inp.value = search_state.filter_width_min
-                        meas_width_max_inp.value = search_state.filter_width_max
-                        meas_height_min_inp.value = search_state.filter_height_min
-                        meas_height_max_inp.value = search_state.filter_height_max
-                        meas_lc_min_inp.value = search_state.filter_line_count_min
-                        meas_lc_max_inp.value = search_state.filter_line_count_max
-                        meas_lh_min_inp.value = search_state.filter_line_height_min
-                        meas_lh_max_inp.value = search_state.filter_line_height_max
-                        meas_td_min_inp.value = search_state.filter_text_density_min
-                        meas_td_max_inp.value = search_state.filter_text_density_max
-                        meas_material_select.value = search_state.filter_measurement_material
-
-                        # Change handlers -- fire on blur for debounced recompute
-                        def _on_meas_blur(attr_name, inp_widget, is_int=False):
-                            async def handler(e=None):
-                                val = inp_widget.value
-                                if val is not None and val != '':
-                                    val = int(val) if is_int else float(val)
-                                else:
-                                    val = None
-                                setattr(search_state, f'filter_{attr_name}', val)
-                                persist_value(f'search_filter_{attr_name}', val)
-                                await _recompute_filter_count()
-                                _update_chip_bar()
-                            return handler
-
-                        meas_width_min_inp.on('blur', _on_meas_blur('width_min', meas_width_min_inp))
-                        meas_width_max_inp.on('blur', _on_meas_blur('width_max', meas_width_max_inp))
-                        meas_height_min_inp.on('blur', _on_meas_blur('height_min', meas_height_min_inp))
-                        meas_height_max_inp.on('blur', _on_meas_blur('height_max', meas_height_max_inp))
-                        meas_lc_min_inp.on('blur', _on_meas_blur('line_count_min', meas_lc_min_inp, is_int=True))
-                        meas_lc_max_inp.on('blur', _on_meas_blur('line_count_max', meas_lc_max_inp, is_int=True))
-                        meas_lh_min_inp.on('blur', _on_meas_blur('line_height_min', meas_lh_min_inp))
-                        meas_lh_max_inp.on('blur', _on_meas_blur('line_height_max', meas_lh_max_inp))
-                        meas_td_min_inp.on('blur', _on_meas_blur('text_density_min', meas_td_min_inp))
-                        meas_td_max_inp.on('blur', _on_meas_blur('text_density_max', meas_td_max_inp))
-
-                        async def _on_meas_material_change(e=None):
-                            search_state.filter_measurement_material = meas_material_select.value or []
-                            persist_value('search_filter_measurement_material', search_state.filter_measurement_material)
-                            await _recompute_filter_count()
-                            _update_chip_bar()
-                        meas_material_select.on('update:model-value', _on_meas_material_change)
-
                 # Phase 56: Exclude manuscripts shortcut in pre-search panel
                 ui.separator()
                 with ui.row().classes('items-center gap-2 flex-wrap'):
@@ -1458,7 +1341,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             SEED-026 (smoke 2026-06-29): there are NO library chips. The library filter state
             is shown on library_filter_btn itself (red + "Filter Libraries (shown/total)").
             chip_bar_container is the PRE-search 'search only in…' bar and only shows
-            domain/text-position/material/measurement chips.
+            domain/text-position/material/criteria chips.
             """
             chip_bar_container.clear()
             _pos = (text_position_select.value or 'anywhere')
@@ -1528,15 +1411,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         on_click=lambda: None, color='teal-2',
                     ).on('remove', lambda _w=w: _remove_filter('work', _w))
 
-                # Date range chip
-                if search_state.filter_date_from is not None or search_state.filter_date_to is not None:
-                    df = search_state.filter_date_from or '...'
-                    dt = search_state.filter_date_to or '...'
-                    ui.chip(
-                        f"{df}\u2013{dt}", icon='date_range', removable=True,
-                        on_click=lambda: None, color='orange-2',
-                    ).on('remove', lambda: _remove_filter('date'))
-
                 # Material exclude chip
                 if search_state.filter_material_exclude:
                     for mat in search_state.filter_material_exclude:
@@ -1545,14 +1419,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             on_click=lambda: None, color='red-2',
                         ).on('remove', lambda m=mat: _remove_filter('material', m))
 
-                # Script style / place chips
-                for _skey in ('script_styles', 'script_places'):
-                    _sopts = _filter_refs[_skey].options or {}
-                    for _sv in getattr(search_state, f'filter_{_skey}'):
+                # Manuscript features: one chip per criterion (its text read by
+                # the control, off the loop; drawn when it arrives).
+                _active_keys = set(search_state.filter_criteria or {})
+                for _ckey, _ctext in criteria_control.chips:
+                    if _ckey in _active_keys:
                         ui.chip(
-                            _get_display_name(_sv, _sopts), icon='draw', removable=True,
+                            _ctext, icon='tune', removable=True,
                             on_click=lambda: None, color='brown-2',
-                        ).on('remove', lambda _k=_skey, _v=_sv: _remove_filter(_k, _v))
+                        ).on('remove', lambda _k=_ckey: criteria_control.remove(_k)).mark(
+                            'search-criteria-chip')
 
                 # Text filter chips
                 for t in search_state.filter_text_all:
@@ -1567,55 +1443,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ui.chip(f"- {t}", icon='block', removable=True,
                             color='red-2', on_click=lambda: None,
                     ).on('remove', lambda _t=t: _remove_text_term('not', _t))
-
-                # Measurement filter chips (Phase 54, teal color, removable)
-                def _fmt_range_chip(prefix, vmin, vmax, unit=''):
-                    u = f' {tr(unit)}' if unit else ''
-                    if vmin is not None and vmax is not None:
-                        return f"{prefix}: {vmin}\u2013{vmax}{u}"
-                    elif vmin is not None:
-                        return f"{prefix}: \u2265{vmin}{u}"
-                    elif vmax is not None:
-                        return f"{prefix}: \u2264{vmax}{u}"
-                    return None
-                _meas_chips = [
-                    (_fmt_range_chip(tr('Width'), search_state.filter_width_min, search_state.filter_width_max, 'cm'),
-                     ['width_min', 'width_max'], [meas_width_min_inp, meas_width_max_inp]),
-                    (_fmt_range_chip(tr('Height'), search_state.filter_height_min, search_state.filter_height_max, 'cm'),
-                     ['height_min', 'height_max'], [meas_height_min_inp, meas_height_max_inp]),
-                    (_fmt_range_chip(tr('Lines'), search_state.filter_line_count_min, search_state.filter_line_count_max),
-                     ['line_count_min', 'line_count_max'], [meas_lc_min_inp, meas_lc_max_inp]),
-                    (_fmt_range_chip(tr('Line Height'), search_state.filter_line_height_min, search_state.filter_line_height_max, 'mm'),
-                     ['line_height_min', 'line_height_max'], [meas_lh_min_inp, meas_lh_max_inp]),
-                    (_fmt_range_chip(tr('Text Density'), search_state.filter_text_density_min, search_state.filter_text_density_max),
-                     ['text_density_min', 'text_density_max'], [meas_td_min_inp, meas_td_max_inp]),
-                ]
-                for _chip_text, _attrs, _widgets in _meas_chips:
-                    if _chip_text:
-                        async def _clear_meas(attrs=_attrs, widgets=_widgets):
-                            for a in attrs:
-                                setattr(search_state, f'filter_{a}', None)
-                                persist_value(f'search_filter_{a}', None)
-                            for w in widgets:
-                                w.value = None
-                            _update_chip_bar()
-                            await _recompute_filter_count()
-                        ui.chip(
-                            _chip_text, icon='straighten', removable=True,
-                            on_click=lambda: None, color='teal-2',
-                        ).on('remove', _clear_meas)
-                for _mat in (search_state.filter_measurement_material or []):
-                    async def _clear_mat(m=_mat):
-                        if m in search_state.filter_measurement_material:
-                            search_state.filter_measurement_material.remove(m)
-                        meas_material_select.value = search_state.filter_measurement_material
-                        persist_value('search_filter_measurement_material', search_state.filter_measurement_material)
-                        _update_chip_bar()
-                        await _recompute_filter_count()
-                    ui.chip(
-                        tr(_mat), icon='layers', removable=True,
-                        on_click=lambda: None, color='teal-2',
-                    ).on('remove', _clear_mat)
 
                 # Manuscript count badge
                 if search_state.filter_manuscript_count is not None:
@@ -1655,23 +1482,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     search_state.filter_works = []
                 work_select.value = search_state.filter_works
                 persist_value('search_filter_works', search_state.filter_works)
-            elif filter_type == 'date':
-                search_state.filter_date_from = None
-                search_state.filter_date_to = None
-                date_from_input.value = None
-                date_to_input.value = None
-                persist_value('search_filter_date_from', None)
-                persist_value('search_filter_date_to', None)
             elif filter_type == 'material':
                 if value and value in search_state.filter_material_exclude:
                     search_state.filter_material_exclude.remove(value)
                     persist_value('search_filter_material_exclude', search_state.filter_material_exclude)
                     exclude_printed_cb.value = 'Printed' in search_state.filter_material_exclude
-            elif filter_type in ('script_styles', 'script_places'):
-                _vals = [v for v in getattr(search_state, f'filter_{filter_type}') if v != value]
-                setattr(search_state, f'filter_{filter_type}', _vals)
-                _filter_refs[filter_type].value = list(_vals)
-                persist_value(f'search_filter_{filter_type}', _vals)
             await _recompute_filter_count()
             _update_chip_bar()
 
@@ -1732,11 +1547,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         author_select.on('update:model-value', _handlers['on_author_change'])
         work_select.on('update:model-value', _handlers['on_work_change'])
         filter_mode_toggle.on('update:model-value', _handlers['on_mode_change'])
-        date_from_input.on('blur', _handlers['on_date_from_change'])
-        date_to_input.on('blur', _handlers['on_date_to_change'])
         exclude_printed_cb.on('update:model-value', _handlers['on_exclude_printed_change'])
-        _filter_refs['script_styles'].on('update:model-value', _handlers['on_script_styles_change'])
-        _filter_refs['script_places'].on('update:model-value', _handlers['on_script_places_change'])
 
         # #22: chip bar + updater now exist — mark ready so early callbacks may call it.
         _chip_bar_ready['value'] = True
@@ -2471,81 +2282,52 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         placeholder=tr('Filter by text')
                     ).classes('w-full').props('outlined dense clearable').style('direction: rtl;')
 
-                # Post-search measurement filters (Phase 54, DIM-03)
-                # #17: same visibility rule as the pre-search panel. Post-search
-                # values are not persisted (only these inputs set them).
-                from shared.fjms_service import (
-                    measurement_filters_available as _post_meas_available,
-                    line_height_filter_available as _post_lh_available,
-                )
+                # Post-search measurement filters (Phase 54, DIM-03), with the
+                # panel's meaning (D20): width, height and lines from the catalogue
+                # or a measured page, line height and text density on a measured
+                # page -- every measured range on ONE page -- and material from the
+                # catalogue or the measurement. Not persisted (only these inputs
+                # set them). Shown when the open catalog has measurements (#17).
+                from shared.fjms_service import measurement_filters_available as _post_meas_available
                 with ui.expansion(tr('Measurements'), icon='straighten').classes('w-full').props(
                     'dense default-closed header-class="text-sm"'
                 ).mark('post-filter-measurements-group') as _post_meas_expansion:
                     _post_meas_expansion.set_visibility(_post_meas_available())
                     with ui.column().classes('gap-2 w-full'):
-                        def _make_post_meas_row(label, suffix=''):
-                            with ui.row().classes('gap-1 items-center w-full'):
+                        def _make_post_meas_row(label, key, suffix='', integer=False):
+                            with ui.row().classes('gap-1 items-center w-full').mark(f'post-filter-{key}-row'):
                                 ui.label(label).classes('text-xs w-28 shrink-0')
-                                min_inp = ui.number(placeholder=tr('Min'), format='%.1f').props(
-                                    'outlined dense type=number step=0.1'
+                                fmt, step = ('%d', 1) if integer else ('%.1f', 0.1)
+                                min_inp = ui.number(placeholder=tr('Min'), format=fmt).props(
+                                    f'outlined dense type=number step={step}'
                                 ).classes('w-20')
                                 ui.label('\u2013').classes('text-xs')
-                                max_inp = ui.number(placeholder=tr('Max'), format='%.1f').props(
-                                    'outlined dense type=number step=0.1'
+                                max_inp = ui.number(placeholder=tr('Max'), format=fmt).props(
+                                    f'outlined dense type=number step={step}'
                                 ).classes('w-20')
                                 if suffix:
                                     ui.label(suffix).classes('text-xs text-gray-500')
+                            for bound, inp in (('min', min_inp), ('max', max_inp)):
+                                inp.on('blur', lambda _=None, k=key, b=bound, w=inp, i=integer:
+                                       _set_post_bound(k, b, w.value, i))
                             return min_inp, max_inp
 
-                        post_w_min, post_w_max = _make_post_meas_row(tr('Width'), tr('cm'))
-                        post_h_min, post_h_max = _make_post_meas_row(tr('Height'), tr('cm'))
-
-                        # Line count: integer inputs
-                        with ui.row().classes('gap-1 items-center w-full'):
-                            ui.label(tr('Lines')).classes('text-xs w-28 shrink-0')
-                            post_lc_min = ui.number(placeholder=tr('Min'), format='%d').props(
-                                'outlined dense type=number step=1'
-                            ).classes('w-20')
-                            ui.label('\u2013').classes('text-xs')
-                            post_lc_max = ui.number(placeholder=tr('Max'), format='%d').props(
-                                'outlined dense type=number step=1'
-                            ).classes('w-20')
-
-                        with ui.element('div').classes('w-full').mark('post-filter-line-height-row') as _post_lh_row:
-                            post_lh_min, post_lh_max = _make_post_meas_row(tr('Line Height'), tr('mm'))
-                        _post_lh_row.set_visibility(_post_lh_available())
-                        post_td_min, post_td_max = _make_post_meas_row(tr('Text Density'), '/10' + tr('cm') + '\u00b2')
+                        _make_post_meas_row(tr('Width'), 'width', tr('cm'))
+                        _make_post_meas_row(tr('Height'), 'height', tr('cm'))
+                        _make_post_meas_row(tr('Lines'), 'lines', integer=True)
+                        _make_post_meas_row(tr('Line Height'), 'line_height', tr('mm'))
+                        _make_post_meas_row(tr('Text Density'), 'text_density',
+                                            '/10' + tr('cm') + '\u00b2')
 
                         post_mat_select = ui.select(
-                            options=MEASUREMENT_MATERIALS,
-                            label=tr('Material (measured)'),
+                            options={},
+                            label=tr('Material'),
                             multiple=True,
-                        ).props('outlined dense clearable use-chips').classes('w-full')
-
-                        # Wire blur handlers for post-search measurement inputs
-                        def _on_post_meas_blur(attr_name, inp_widget, is_int=False):
-                            def handler(e=None):
-                                val = inp_widget.value
-                                if val is not None and val != '':
-                                    val = int(val) if is_int else float(val)
-                                else:
-                                    val = None
-                                setattr(search_state, f'post_filter_{attr_name}', val)
-                            return handler
-
-                        post_w_min.on('blur', _on_post_meas_blur('width_min', post_w_min))
-                        post_w_max.on('blur', _on_post_meas_blur('width_max', post_w_max))
-                        post_h_min.on('blur', _on_post_meas_blur('height_min', post_h_min))
-                        post_h_max.on('blur', _on_post_meas_blur('height_max', post_h_max))
-                        post_lc_min.on('blur', _on_post_meas_blur('line_count_min', post_lc_min, is_int=True))
-                        post_lc_max.on('blur', _on_post_meas_blur('line_count_max', post_lc_max, is_int=True))
-                        post_lh_min.on('blur', _on_post_meas_blur('line_height_min', post_lh_min))
-                        post_lh_max.on('blur', _on_post_meas_blur('line_height_max', post_lh_max))
-                        post_td_min.on('blur', _on_post_meas_blur('text_density_min', post_td_min))
-                        post_td_max.on('blur', _on_post_meas_blur('text_density_max', post_td_max))
+                        ).props('outlined dense clearable use-chips').classes('w-full').mark(
+                            'post-filter-material')
 
                         def _on_post_mat_change(e=None):
-                            search_state.post_filter_measurement_material = post_mat_select.value or []
+                            _set_post_criterion('material', {'values': list(post_mat_select.value or [])})
                         post_mat_select.on('update:model-value', _on_post_mat_change)
 
                 # Phase 56: Exclude manuscripts (D-01 entry point 2: filter panel)
@@ -3135,10 +2917,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         filters_visible['value'] = not filters_visible['value']
         filters_panel.set_visibility(filters_visible['value'])
 
-    def apply_filters():
+    async def apply_filters():
         """Apply filters to results."""
         if not search_state.results:
             return
+        # The measured matches are read off the loop; the filter below then
+        # finds them cached.
+        await _prefetch_post_matches(search_state.results)
 
         filtered = []
         shelfmark_filter = (filter_shelfmark.value or '').lower().strip()
@@ -3174,17 +2959,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         filter_title.value = ''
         filter_snippet.value = ''
         # Clear post-search measurement state (Phase 54)
-        search_state.post_filter_width_min = None
-        search_state.post_filter_width_max = None
-        search_state.post_filter_height_min = None
-        search_state.post_filter_height_max = None
-        search_state.post_filter_line_count_min = None
-        search_state.post_filter_line_count_max = None
-        search_state.post_filter_line_height_min = None
-        search_state.post_filter_line_height_max = None
-        search_state.post_filter_text_density_min = None
-        search_state.post_filter_text_density_max = None
-        search_state.post_filter_measurement_material = []
+        search_state.post_filter_criteria = {}
         # Note: do NOT clear _measurement_cache here — it's enrichment data,
         # not filter state. Clearing it would break reapplying filters later.
 
@@ -4311,77 +4086,72 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     # --- Measurement post-filter helpers (Phase 54, review concern #1) ---
 
-    def _has_any_post_measurement_filter(state) -> bool:
-        """Check if any post-search measurement filters are active."""
-        return any([
-            getattr(state, 'post_filter_width_min', None) is not None,
-            getattr(state, 'post_filter_width_max', None) is not None,
-            getattr(state, 'post_filter_height_min', None) is not None,
-            getattr(state, 'post_filter_height_max', None) is not None,
-            getattr(state, 'post_filter_line_count_min', None) is not None,
-            getattr(state, 'post_filter_line_count_max', None) is not None,
-            getattr(state, 'post_filter_line_height_min', None) is not None,
-            getattr(state, 'post_filter_line_height_max', None) is not None,
-            getattr(state, 'post_filter_text_density_min', None) is not None,
-            getattr(state, 'post_filter_text_density_max', None) is not None,
-            bool(getattr(state, 'post_filter_measurement_material', None)),
-        ])
+    def _set_post_criterion(key, spec):
+        """One post-search criterion changed (an input left, a material ticked)."""
+        from shared.catalog_criteria import clean_criteria
+        criteria = dict(search_state.post_filter_criteria or {})
+        criteria[key] = spec
+        search_state.post_filter_criteria = clean_criteria(criteria, strict=False)[0]
+
+    def _set_post_bound(key, bound, value, integer):
+        spec = dict((search_state.post_filter_criteria or {}).get(key) or {})
+        spec.pop(bound, None)
+        if value is not None and value != '':
+            spec[bound] = int(value) if integer else float(value)
+        _set_post_criterion(key, spec)
+
+    async def _prefetch_post_matches(results):
+        """Work out the post-search matches of *results* off the loop, so the
+        render that follows finds them cached. A failure is kept: the render
+        then shows the rows unfiltered and says so."""
+        from shared.catalog_criteria import criteria_token
+        if not search_state.post_filter_criteria:
+            return
+        token = criteria_token(search_state.post_filter_criteria)
+        try:
+            await run.io_bound(post_criteria_matches, search_state, list(results))
+        except Exception:
+            logger.info("post-search criteria lookup failed", exc_info=True)
+            search_state._post_match_failed = token
+        else:
+            search_state._post_match_failed = None
+
+    def _rerender_after_refill():
+        with _page_client:
+            _apply_manuscript_exclusions(reset_expansion=False)
+
+    # A render met rows not checked yet (e.g. a new search's): check them off
+    # the loop, then render the list again through the whole cascade.
+    _post_refill = PostMatchRefill(_prefetch_post_matches, _rerender_after_refill,
+                                   busy=lambda: search_state.is_running)
+
+    def _refill_post_matches(results):
+        _post_refill.request(results)
 
     def _apply_measurement_post_filters(results: list, state) -> list:
-        """Apply measurement post-filters to a results list.
-        Reads from state.post_filter_* and state._measurement_cache.
-        Returns filtered list. Called from ALL rerender paths.
-        (Review concern #1: domain exclusion, printed toggle, history restore, enrichment all call this.)
-        """
-        _pw_min = state.post_filter_width_min
-        _pw_max = state.post_filter_width_max
-        _ph_min = state.post_filter_height_min
-        _ph_max = state.post_filter_height_max
-        _plc_min = state.post_filter_line_count_min
-        _plc_max = state.post_filter_line_count_max
-        _plh_min = state.post_filter_line_height_min
-        _plh_max = state.post_filter_line_height_max
-        _ptd_min = state.post_filter_text_density_min
-        _ptd_max = state.post_filter_text_density_max
-        _pm_mat = state.post_filter_measurement_material or []
-
-        _has_meas_filter = any([
-            _pw_min is not None, _pw_max is not None,
-            _ph_min is not None, _ph_max is not None,
-            _plc_min is not None, _plc_max is not None,
-            _plh_min is not None, _plh_max is not None,
-            _ptd_min is not None, _ptd_max is not None,
-            _pm_mat,
-        ])
-
-        if not _has_meas_filter:
+        """Apply the post-search measurement filters (D20) to a results list.
+        Called from ALL rerender paths (review concern #1: domain exclusion,
+        printed toggle, history restore, enrichment) -- from the cache only:
+        the event loop never waits for the sidecar here. Rows not checked yet
+        stay out until they are (``_refill_post_matches``). A lookup that
+        could not run leaves the list as it is and says so -- never an empty
+        list (rule 9)."""
+        from shared.catalog_criteria import criteria_token
+        criteria = getattr(state, 'post_filter_criteria', None)
+        if not criteria:
             return results
-
-        cache = getattr(state, '_measurement_cache', {})
-
-        def _in_range(val, vmin, vmax):
-            if val is None and (vmin is not None or vmax is not None):
-                return False
-            if vmin is not None and val < vmin:
-                return False
-            if vmax is not None and val > vmax:
-                return False
-            return True
-
-        filtered = []
-        for res in results:
-            sid = res.get('sys_id') or res.get('display', {}).get('id', '')
-            md = cache.get(sid)
-            if md is None:
-                continue  # D-26: exclude without data
-            if not _in_range(md.get('width_cm'), _pw_min, _pw_max): continue
-            if not _in_range(md.get('height_cm'), _ph_min, _ph_max): continue
-            if not _in_range(md.get('avg_num_lines'), _plc_min, _plc_max): continue
-            if not _in_range(md.get('avg_line_height_mm'), _plh_min, _plh_max): continue
-            if not _in_range(md.get('avg_text_density'), _ptd_min, _ptd_max): continue
-            if _pm_mat and (md.get('material') is None or md.get('material') not in _pm_mat): continue
-            filtered.append(res)
-        return filtered
+        if getattr(state, '_post_match_failed', None) == criteria_token(criteria):
+            try:
+                ui.notify(tr('The manuscript features could not be applied to these results.'),
+                          type='warning')
+            except RuntimeError:  # a render outside the page's context: the log has it
+                pass
+            return results
+        matched = post_criteria_matches(state, results, fetch=False)
+        if matched is None:
+            _refill_post_matches(results)
+            matched = state._post_match['ids']
+        return [r for r in results if result_sys_id(r) in matched]
 
     def _apply_printed_filter(results_list):
         """Apply printed material filter to a results list and return filtered list."""
@@ -5009,7 +4779,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         render_results(filtered, page=0, reset_expansion=reset_expansion)
 
     # --- Search History UI Helpers ---
-    def _refresh_history_menu():
+    def _refresh_history_menu(load_labels: bool = True):
         """Refresh the history dropdown menu contents."""
         history_menu.clear()
         history = get_search_history()
@@ -5048,6 +4818,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             ui.menu_item(tr('Clear all'), on_click=lambda: (
                 clear_search_history(), _refresh_history_menu()
             ))
+        if load_labels:
+            load_history_labels_then(history, get_language(), _redraw_history_menu)
+
+    def _redraw_history_menu():
+        if not history_menu.is_deleted:
+            with history_menu:
+                _refresh_history_menu(load_labels=False)
 
     async def _on_history_item_clicked(index: int):
         """Restore state from a search history entry."""
@@ -5083,11 +4860,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.filter_authors = _a
             search_state.filter_works = _w
             search_state.filter_include_mode = filters.get('include_mode', True)
-            search_state.filter_date_from = filters.get('date_from')
-            search_state.filter_date_to = filters.get('date_to')
             search_state.filter_material_exclude = list(filters.get('material_exclude') or [])
-            search_state.filter_script_styles = list(filters.get('script_styles') or [])
-            search_state.filter_script_places = list(filters.get('script_places') or [])
+            # An entry from before the criteria: its dates as the period (D18).
+            search_state.filter_criteria = restore_saved_criteria(filters)
             search_state.filter_text_all = list(filters.get('text_all') or [])
             search_state.filter_text_any = list(filters.get('text_any') or [])
             search_state.filter_text_not = list(filters.get('text_not') or [])
@@ -5096,20 +4871,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             author_select.value = search_state.filter_authors
             work_select.value = search_state.filter_works
             filter_mode_toggle.value = search_state.filter_include_mode
-            date_from_input.value = search_state.filter_date_from
-            date_to_input.value = search_state.filter_date_to
             exclude_printed_cb.value = 'Printed' in search_state.filter_material_exclude
-            _filter_refs['script_styles'].value = list(search_state.filter_script_styles)
-            _filter_refs['script_places'].value = list(search_state.filter_script_places)
-            persist_value('search_filter_script_styles', search_state.filter_script_styles)
-            persist_value('search_filter_script_places', search_state.filter_script_places)
+            persist_value('search_filter_criteria', search_state.filter_criteria)
+            criteria_control.refresh()
             # Persist restored filters
             persist_value('search_filter_domains', search_state.filter_domains)
             persist_value('search_filter_authors', search_state.filter_authors)
             persist_value('search_filter_works', search_state.filter_works)
             persist_value('search_filter_include_mode', search_state.filter_include_mode)
-            persist_value('search_filter_date_from', search_state.filter_date_from)
-            persist_value('search_filter_date_to', search_state.filter_date_to)
             persist_value('search_filter_material_exclude', search_state.filter_material_exclude)
             persist_value('search_filter_text_all', search_state.filter_text_all)
             persist_value('search_filter_text_any', search_state.filter_text_any)
@@ -5123,6 +4892,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Restore results and state from snapshot
         if state_snapshot.get('results'):
             search_state.results = state_snapshot['results']
+            await _prefetch_post_matches(search_state.results)
             search_state.responsa_warning = responsa_note_of(state_snapshot['results'])
             # An entry from a build that kept the rows: their variant settings are
             # unknown, never those of the search shown before (a step recorded from
@@ -5193,6 +4963,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _apply_printed_filter_and_render(search_state.results)
             else:
                 # Apply measurement post-filters on history restore (Phase 54)
+                await _prefetch_post_matches(search_state.results)
                 _restored = _apply_measurement_post_filters(search_state.results, search_state)
                 render_results(_restored, page=0)
 
@@ -5310,6 +5081,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if search_state.is_running:
             ux_ignored(_page_client, 'search_results')
             return
+        # The criteria this search runs with, read once: its lookup, history
+        # entry and export say the same even if the panel changes meanwhile.
+        _dispatch_criteria = copy.deepcopy(search_state.filter_criteria or {})
+        _dispatch_had_filters = _has_active_filters()
 
         # Handle PGP tag search mode — navigate to tag results page
         if mode_select.value == 'pgp_tags':
@@ -5517,12 +5292,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     return None
                 return list(values) if isinstance(values, (list, tuple, set, frozenset)) else values
 
+            import copy as _copy
             filter_kwargs = dict(
-                date_from=search_state.filter_date_from,
-                date_to=search_state.filter_date_to,
                 material_exclude=_copied(search_state.filter_material_exclude),
-                script_styles=_copied(search_state.filter_script_styles),
-                script_places=_copied(search_state.filter_script_places),
+                criteria=_copy.deepcopy(_dispatch_criteria) or None,
                 text_all=_copied(search_state.filter_text_all),
                 text_any=_copied(search_state.filter_text_any),
                 text_not=_copied(search_state.filter_text_not),
@@ -5535,20 +5308,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 filter_kwargs['domains_exclude'] = _copied(search_state.filter_domains)
                 filter_kwargs['authors_exclude'] = _copied(search_state.filter_authors)
                 filter_kwargs['works_exclude'] = _copied(search_state.filter_works)
-            # Measurement filter params (Phase 54)
-            filter_kwargs.update(dict(
-                width_min=search_state.filter_width_min,
-                width_max=search_state.filter_width_max,
-                height_min=search_state.filter_height_min,
-                height_max=search_state.filter_height_max,
-                line_count_min=search_state.filter_line_count_min,
-                line_count_max=search_state.filter_line_count_max,
-                line_height_min=search_state.filter_line_height_min,
-                line_height_max=search_state.filter_line_height_max,
-                text_density_min=search_state.filter_text_density_min,
-                text_density_max=search_state.filter_text_density_max,
-                measurement_material=_copied(search_state.filter_measurement_material),
-            ))
 
             def _compute_restrict():
                 # No is_available() short-cut: with no sidecar the lookup
@@ -5845,11 +5604,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 'authors': list(getattr(search_state, 'filter_authors', None) or []),
                 'works': list(getattr(search_state, 'filter_works', None) or []),
                 'include_mode': getattr(search_state, 'filter_include_mode', True),
-                'date_from': getattr(search_state, 'filter_date_from', None),
-                'date_to': getattr(search_state, 'filter_date_to', None),
                 'material_exclude': list(getattr(search_state, 'filter_material_exclude', None) or []),
-                'script_styles': list(getattr(search_state, 'filter_script_styles', None) or []),
-                'script_places': list(getattr(search_state, 'filter_script_places', None) or []),
+                'criteria': copy.deepcopy(_dispatch_criteria),
                 'text_all': list(getattr(search_state, 'filter_text_all', None) or []),
                 'text_any': list(getattr(search_state, 'filter_text_any', None) or []),
                 'text_not': list(getattr(search_state, 'filter_text_not', None) or []),
@@ -5969,11 +5725,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             'authors': list(getattr(search_state, 'filter_authors', None) or []),
             'works': list(getattr(search_state, 'filter_works', None) or []),
             'include_mode': getattr(search_state, 'filter_include_mode', True),
-            'date_from': getattr(search_state, 'filter_date_from', None),
-            'date_to': getattr(search_state, 'filter_date_to', None),
             'material_exclude': list(getattr(search_state, 'filter_material_exclude', None) or []),
-            'script_styles': list(getattr(search_state, 'filter_script_styles', None) or []),
-            'script_places': list(getattr(search_state, 'filter_script_places', None) or []),
+            'criteria': copy.deepcopy(_dispatch_criteria),
             'text_all': list(getattr(search_state, 'filter_text_all', None) or []),
             'text_any': list(getattr(search_state, 'filter_text_any', None) or []),
             'text_not': list(getattr(search_state, 'filter_text_not', None) or []),
@@ -6126,15 +5879,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             'authors': list(search_state.filter_authors or []),
                             'works': list(search_state.filter_works or []),
                             'include_mode': search_state.filter_include_mode,
-                            'date_from': search_state.filter_date_from,
-                            'date_to': search_state.filter_date_to,
                             'material_exclude': list(search_state.filter_material_exclude or []),
-                            'script_styles': list(search_state.filter_script_styles or []),
-                            'script_places': list(search_state.filter_script_places or []),
+                            'criteria': copy.deepcopy(_dispatch_criteria),
                             'text_all': list(search_state.filter_text_all or []),
                             'text_any': list(search_state.filter_text_any or []),
                             'text_not': list(search_state.filter_text_not or []),
-                        } if _has_active_filters() else None,
+                        } if _dispatch_had_filters or _has_active_filters() else None,
                     },
                     state_snapshot={
                         'domain_exclusions': sorted(search_state.domain_exclusions),
@@ -6612,13 +6362,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             return
         work_select.options = w
         work_select.update()
-        s = await run.io_bound(build_script_options, lang)
-        if s is None:
-            return
-        for _skey, _sopts in s.items():
-            _filter_refs[_skey].options = _sopts
-            _filter_refs[_skey].update()
         _update_chip_bar()
+        # The post-search Material values (catalogue and measured, D20).
+        try:
+            mats = await run.io_bound(_get_fjms_for_criteria().get_criterion_values, 'material')
+        except Exception:
+            logger.info("post-search material values failed", exc_info=True)
+            mats = None
+        if mats:
+            post_mat_select.options = {
+                m['value']: (m.get('label_he') if lang == 'he' else m.get('label_en')) or m['value']
+                for m in mats}
+            post_mat_select.update()
 
     # Cat-2: deferred select option population - filter selects must be mounted.
     asyncio.ensure_future(_after_delay(0.1, _deferred_filter_init))

@@ -452,8 +452,25 @@ its summary.
    without such filters never waits for libraries.csv; with no metadata manager at all (tests, a
    startup race on the web) the lists stay catalogued-only, as before. (d) `web/search_api.py` is not
    wired: the API has no exclusion filters, so D17 changes nothing there until PR 2 adds criteria.
+   **Not built in 1a**, although §7 lists them there: `validate_filter_values` for `criteria` moves
+   to PR 2 (the API is its only caller); the chip/summary text and the D20 post-search matcher
+   (`match_criteria` over a search's result ids, behind an `FjmsService` method) move to 1b, which
+   builds them first so 1c can use the same code.
 2. **PR 1b — web:** the panel, Catalog Browse with the D8 address, `/search` and `/parallels`,
    post-search filters (D20), state migration, render-smoke tests.
+   **As built (2026-11-01, branch `claude/criteria-1b-web-44557e`):** as above, with these choices.
+   (a) On `/search` and `/parallels` the criteria chips are drawn in the page's existing chip bar
+   (visible while "Search only in..." is folded), not under the button; Catalog Browse draws them
+   under the button in its sidebar card. (b) The `/search` post-search Measurements keep their inputs
+   (width, height, lines, line height, text density, material) and now mean what the panel means
+   (D20); a lookup that cannot run leaves the rows unfiltered with a notice rather than emptying
+   them. (c) A saved criterion a 5.0.0 file cannot answer is dropped with the existing notice (as
+   #17 did for measurement filters); an address names what it dropped. (d) Old Catalog Browse
+   sessions' `date_from`/`date_to`/`undated` and old `/search`/`/parallels` dates, history entries
+   and browse handoffs are read in as the period (D18). (e) Shared code added for both surfaces:
+   chip text, `match_result_criteria`, `get_criterion_coverage`, `criteria_live_total`,
+   `criteria_corpus_note`, `period_from_dates`, `NEW_TABLE_KEYS`; and a 1a fix (`match_criteria`
+   failed every "all except" when the corpus came as a frozenset).
 3. **PR 1c — desktop:** `CriteriaDialog`, the Catalog tab, "Search only in...", post-search
    filters (D20), session migration, the domain-tree minimum height.
    **As built (2026-11-01):** as above, with three differences. (a) The chip text and the post-search
@@ -575,6 +592,37 @@ dialog's `self.parent()` (MED; test doubles updated, a test that the dialog pass
 added); cache keys compared by hash could still confuse two unequal corpora with one hash (LOW,
 built deliberately; the key is now the set itself). Not taken up: a `.start()` -> `.run()`
 mutation in `_catalog_start_async_refresh` survives, in code this PR did not change.
+
+**PR 1b code, round 1** (`e362f59a..ca0f0116`), brief `_tmp/criteria_1b_review_brief.md`, log
+`_tmp/criteria_1b_codex_round1.log` (worktree). Codex: **DO NOT SHIP**, 10 findings, all fixed in
+`560c04af` (shared) and `703e6fd4` (web): Apply ran the page's refresh in the slot of a dialog deleted
+on hide (HIGH); retired R2 rows left the run that restores them as a finished search with no rows, and
+runs dropped old dates (HIGH); history, runs, page snapshots and handoffs restored criteria a 5.0.0
+file cannot answer (MED); history/export copied the criteria late (MED); post-search renders could
+query the sidecar on the event loop (MED); a Material source switch hid a ticked value (MED);
+Attributes "all except" broke the live total (MED); two quick opens shared one panel (MED); an empty
+handoff or Clear All let saved criteria or old dates come back (MED); "לא נרשם" did not agree with
+feminine names -> "ללא רישום" (LOW). Not changed, by reasoning: run snapshots live in server memory
+and do not survive the release's restart; old history entries never stored measurement filters.
+
+**PR 1b code, round 2** (`ca0f0116..12db1ddb`), brief `_tmp/criteria_1b_review_brief_r2.md`, log
+`_tmp/criteria_1b_codex_round2.log`. Codex: round-1 fold-ins verified; **SHIP WITH FIXES**, three
+regressions, fixed in `c59f44b8`: a search saved with old measurement filters that were cleared later
+kept its rows and run, since only the flat keys were read -> the run's `pre_search_filters` too (HIGH);
+a criterion removed while its search ran left the history entry and parallels' export without filters
+(MED); a post-search refill asked for while one ran was dropped, so the list stayed short ->
+`PostMatchRefill` keeps every request (MED).
+
+**PR 1b code, round 3** (`12db1ddb..c59f44b8`), brief `_tmp/criteria_1b_review_brief_r3.md`, log
+`_tmp/criteria_1b_codex_round3.log`. Codex: the three fixed, no new HIGH/MED, none outstanding;
+**SHIP**. The GitHub Codex review of `12db1ddb` repeated round 2's history finding and found one more:
+the "16-19" period button set 1600-1999 (carried over from the old Catalog Browse; the desktop's
+button has it too, for PR 1c) -> 1500-1899 (MED). Its review of `c59f44b8` found two more (MED):
+an address with only a malformed criterion (`?columns=oops`) brought back the saved session under the
+"not understood" notice -> a dropped parameter makes the address the page's state; the history menus,
+drawn on the event loop, read Hebrew value labels with a sidecar query on a cold cache ->
+`criteria_chips(..., cached_only=True)` (shared, `8bb36b78`) and `load_history_labels_then` loads
+the missing labels off the loop and redraws once.
 
 **PR 1c code, round 1** (`e362f59a..561fdc31`), brief `_tmp/criteria_1c_review_brief.md` (worktree
 `claude/criteria-1c-desktop-d01dce`), log `_tmp/criteria_1c_codex_round1.log`. Codex: **SHIP WITH FIXES**,

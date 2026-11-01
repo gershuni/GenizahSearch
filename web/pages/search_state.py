@@ -11,6 +11,8 @@ and pure logic that operates on app.storage or SearchUIState fields.
 """
 from __future__ import annotations
 
+import asyncio
+
 from dataclasses import dataclass
 from typing import Any, Optional, List, Set
 from datetime import datetime
@@ -69,11 +71,11 @@ class SearchUIState:
         self.filter_authors: list = []      # Selected authors (person_ids, multi-select)
         self.filter_works: list = []        # Selected works (title_ids, multi-select)
         self.filter_include_mode: bool = True  # True=include, False=exclude
-        self.filter_date_from: int = None   # Date range start
-        self.filter_date_to: int = None     # Date range end
         self.filter_material_exclude: list = []  # Material types to exclude (e.g., ['Printed'])
-        self.filter_script_styles: list = []  # Catalogue script styles (e.g., ['Square'])
-        self.filter_script_places: list = []  # Catalogue script places (e.g., ['Spanish'])
+        # Catalogue criteria ("Manuscript features", shared/catalog_criteria.py):
+        # period of copy, script, size, ... -- replaced the date range, the script
+        # lists and the measurement filters (PR 1b of CATALOGUE_CRITERIA_PLAN.md).
+        self.filter_criteria: dict = {}
         self.filter_manuscript_count: int = None  # Count of manuscripts matching current filters
         self.restrict_sys_ids: set = None   # Computed from filters, passed to search engine
         self.filter_text_all: list = []     # FTS5 text: all words must match
@@ -81,30 +83,10 @@ class SearchUIState:
         self.filter_text_not: list = []     # FTS5 text: exclude these words
         self.word_search_excluded_ids: set = set()  # Per-manuscript exclusions for word search mode
         self.word_search_excluded_results: list = []  # Results hidden by word search exclusion
-        # Pre-search measurement filter state (DIM-02, Phase 54)
-        self.filter_width_min = None
-        self.filter_width_max = None
-        self.filter_height_min = None
-        self.filter_height_max = None
-        self.filter_line_count_min = None
-        self.filter_line_count_max = None
-        self.filter_line_height_min = None
-        self.filter_line_height_max = None
-        self.filter_text_density_min = None
-        self.filter_text_density_max = None
-        self.filter_measurement_material: list = []
-        # Post-search measurement filter state (DIM-03, Phase 54) -- SEPARATE from pre-search
-        self.post_filter_width_min = None
-        self.post_filter_width_max = None
-        self.post_filter_height_min = None
-        self.post_filter_height_max = None
-        self.post_filter_line_count_min = None
-        self.post_filter_line_count_max = None
-        self.post_filter_line_height_min = None
-        self.post_filter_line_height_max = None
-        self.post_filter_text_density_min = None
-        self.post_filter_text_density_max = None
-        self.post_filter_measurement_material: list = []
+        # Post-search measurement filters (DIM-03, Phase 54) -- SEPARATE from the
+        # pre-search criteria, with the same meaning (D20): a criteria dict of the
+        # measured-data keys, matched by FjmsService.match_result_criteria.
+        self.post_filter_criteria: dict = {}
         self._measurement_cache: dict = {}  # {sys_id: summary_dict}
         # Translation enrichment (Phase 46)
         self.translation_data: dict = {}  # sys_id -> {description_he, document_type_he}
@@ -260,29 +242,29 @@ _SEARCH_SNAPSHOT_KEYS = (
 # Filter keys cleared by clear_search_snapshot (read/written by filter_panel).
 _SEARCH_FILTER_KEYS = (
     'search_filter_domains', 'search_filter_authors', 'search_filter_works',
-    'search_filter_include_mode', 'search_filter_date_from',
-    'search_filter_date_to', 'search_filter_material_exclude',
+    'search_filter_include_mode', 'search_filter_material_exclude',
     'search_filter_text_all', 'search_filter_text_any', 'search_filter_text_not',
-    'search_filter_script_styles', 'search_filter_script_places',
+    'search_filter_criteria',
 )
-_SEARCH_FILTER_MEASUREMENT_KEYS = (
-    'search_filter_width_min', 'search_filter_width_max',
-    'search_filter_height_min', 'search_filter_height_max',
-    'search_filter_line_count_min', 'search_filter_line_count_max',
-    'search_filter_line_height_min', 'search_filter_line_height_max',
-    'search_filter_text_density_min', 'search_filter_text_density_max',
-    'search_filter_measurement_material',
-)
+# What the criteria replaced: cleared with the filters, never read again
+# (the dates are read in once by filter_panel.load_filter_state, D18).
+_SEARCH_LEGACY_FILTER_KEYS = tuple(
+    f'search_{key}' for key in ('filter_date_from', 'filter_date_to', 'filter_script_styles',
+                                'filter_script_places', 'filter_width_min', 'filter_width_max',
+                                'filter_height_min', 'filter_height_max',
+                                'filter_line_count_min', 'filter_line_count_max',
+                                'filter_line_height_min', 'filter_line_height_max',
+                                'filter_text_density_min', 'filter_text_density_max',
+                                'filter_measurement_material'))
 
 # The pre-search filters a search ran with, as SearchUIState attribute names. They
 # are saved with its run (last_run['pre_search_filters']) so that a stamped Back
 # restores the filters ITS rows were searched with -- not the shared current filter
 # keys, which another tab may have changed since (Codex, PR #436).
-RUN_FILTER_FIELDS = tuple(key[len('search_'):] for key in _SEARCH_FILTER_KEYS + _SEARCH_FILTER_MEASUREMENT_KEYS)
+RUN_FILTER_FIELDS = tuple(key[len('search_'):] for key in _SEARCH_FILTER_KEYS)
 _LIST_FILTER_FIELDS = frozenset({
     'filter_domains', 'filter_authors', 'filter_works', 'filter_material_exclude',
-    'filter_text_all', 'filter_text_any', 'filter_text_not', 'filter_measurement_material',
-    'filter_script_styles', 'filter_script_places',
+    'filter_text_all', 'filter_text_any', 'filter_text_not',
 })
 
 
@@ -293,6 +275,9 @@ def _filter_value(name: str, value):
         return list(value) if isinstance(value, (list, tuple, set, frozenset)) else []
     if name == 'filter_include_mode':
         return True if value is None else bool(value)
+    if name == 'filter_criteria':
+        from shared.catalog_criteria import clean_criteria
+        return clean_criteria(value, strict=False)[0]  # a fresh dict, never shared
     return value
 
 
@@ -308,6 +293,12 @@ def apply_run_filter_state(state: 'SearchUIState', filters) -> bool:
         return False
     for name in RUN_FILTER_FIELDS:
         setattr(state, name, _filter_value(name, filters.get(name)))
+    # A run saved before the criteria: its dates as the period (D18); and
+    # nothing the open catalogue file cannot answer (rule 9, with the notice).
+    from web.components.filter_panel import restore_saved_criteria
+    state.filter_criteria = restore_saved_criteria({
+        'criteria': filters.get('filter_criteria'),
+        'date_from': filters.get('filter_date_from'), 'date_to': filters.get('filter_date_to')})
     return True
 
 
@@ -368,11 +359,80 @@ def engine_mode(mode: str) -> str:
     return 'literal' if mode == 'exact' else mode
 
 
-_MEASUREMENT_POST_FILTERS = (
-    'width_min', 'width_max', 'height_min', 'height_max',
-    'line_count_min', 'line_count_max', 'line_height_min', 'line_height_max',
-    'text_density_min', 'text_density_max', 'measurement_material',
-)
+def result_sys_id(res: dict) -> str:
+    """The manuscript a result row is from."""
+    return res.get('sys_id') or res.get('display', {}).get('id', '')
+
+
+def post_criteria_matches(state: 'SearchUIState', results, fetch: bool = True):
+    """The sys_ids among *results* the post-search measurement filters keep:
+    the panel's criteria and rules (D20), the result rows being the universe
+    (FjmsService.match_result_criteria). Kept on the state per criteria, so
+    every re-render reuses them; only rows not checked yet are asked for --
+    and with ``fetch=False`` (a render on the event loop) not asked: None
+    then says some rows are not checked yet. Raises FilterUnavailable: the
+    caller shows the rows unfiltered and says so, never an empty list
+    (rule 9)."""
+    from shared.catalog_criteria import criteria_token
+    from shared.fjms_service import get_fjms_service
+    criteria = state.post_filter_criteria or {}
+    token = criteria_token(criteria)
+    cache = getattr(state, '_post_match', None)
+    if not cache or cache.get('token') != token:
+        cache = {'token': token, 'checked': set(), 'ids': set()}
+    wanted = {sid for sid in (result_sys_id(r) for r in results) if sid}
+    missing = wanted - cache['checked']
+    if missing and not fetch:
+        state._post_match = cache
+        return None
+    if missing:
+        found = get_fjms_service(thread_safe=True).match_result_criteria(criteria, missing)
+        cache['ids'] |= found or set()
+        cache['checked'] |= missing
+    # A worker whose criteria changed while it ran does not publish its answer
+    # over the new criteria's (Codex round 2 on PR 1b).
+    if criteria_token(state.post_filter_criteria or {}) == token:
+        state._post_match = cache
+    return cache['ids']
+
+
+class PostMatchRefill:
+    """Checks result rows for the post-search filters off the event loop, then
+    re-renders (D20). Every request is kept: rows asked for while a check runs
+    are checked next, in the same task; the task lets go before the re-render,
+    so a miss the re-render meets starts a new check (Codex round 2 on PR 1b:
+    a request made meanwhile was dropped, and the list stayed short).
+
+    ``prefetch(rows)`` is awaited (it fills the cache); ``rerender()`` draws
+    the list from it; ``busy()`` says a search is running, whose own render
+    will follow -- the re-render is skipped then."""
+
+    def __init__(self, prefetch, rerender, busy=lambda: False):
+        self._prefetch = prefetch
+        self._rerender = rerender
+        self._busy = busy
+        self._rows = []
+        self._again = False
+        self.task = None
+
+    def request(self, rows) -> None:
+        self._rows = list(rows)
+        if self.task is not None and not self.task.done():
+            self._again = True
+            return
+        self.task = asyncio.ensure_future(self._run())
+
+    async def _run(self):
+        try:
+            while True:
+                self._again = False
+                await self._prefetch(self._rows)
+                if not self._again:
+                    break
+        finally:
+            self.task = None
+        if not self._busy():
+            self._rerender()
 
 
 def preview_shows_final_rows(state: 'SearchUIState') -> bool:
@@ -388,8 +448,7 @@ def preview_shows_final_rows(state: 'SearchUIState') -> bool:
             or state.printed_filter != 'all' or state.pgp_filter != 'all' or state.library_filter
             or (state._all_terms_filter and state.refinement_chain)):
         return False
-    return not any(getattr(state, f'post_filter_{name}', None) not in (None, [], ())
-                   for name in _MEASUREMENT_POST_FILTERS)
+    return not getattr(state, 'post_filter_criteria', None)
 
 
 def search_run_snapshot(state: 'SearchUIState', *, with_results: bool = True) -> dict:
@@ -685,7 +744,8 @@ def clear_search_snapshot() -> None:
 
     Replaces the scattered blocks at search.py:~805-832 and search.py:~2019-2025.
     Clears both the core snapshot keys (_SEARCH_SNAPSHOT_KEYS) and the filter keys
-    (_SEARCH_FILTER_KEYS / _SEARCH_FILTER_MEASUREMENT_KEYS) owned by filter_panel.
+    (_SEARCH_FILTER_KEYS, and the _SEARCH_LEGACY_FILTER_KEYS the criteria
+    replaced) owned by filter_panel.
 
     Does NOT touch cross_page_preference keys (session_persistence_enabled,
     search_history, show_translations) or the cross-page signal 'incoming_filters'
@@ -717,23 +777,10 @@ def clear_search_snapshot() -> None:
                 'search_all_terms_filter', 'search_snapshot_schema_version'):
         safe_user_pop(key, None)
     # Filter keys (match search.py:806-832 reset block).
-    # Defaults match LIVE field types verified in web/pages/search_state.py:60, :82
-    # and web/components/filter_panel.py:248, :271 (review-revision: Codex HIGH #2):
+    # Defaults match LIVE field types (review-revision: Codex HIGH #2):
     #   filter_include_mode is bool (default True) - NOT string 'any'
-    #   filter_measurement_material is list (default []) - NOT None
-    for key in _SEARCH_FILTER_KEYS:
-        if key == 'search_filter_include_mode':
-            safe_user_set(key, True)  # bool, matches filter_panel.py:248
-        elif key in ('search_filter_date_from', 'search_filter_date_to'):
-            safe_user_set(key, None)
-        else:
-            safe_user_set(key, [])
-    # Measurement keys: mins/maxes default to None (numeric), material to [].
-    for key in _SEARCH_FILTER_MEASUREMENT_KEYS:
-        if key == 'search_filter_measurement_material':
-            safe_user_set(key, [])  # list, matches filter_panel.py:271
-        else:
-            safe_user_set(key, None)  # numeric min/max
+    #   filter_criteria is a dict (default {})
+    clear_search_filters()
 
 
 def clear_search_filters() -> None:
@@ -748,15 +795,12 @@ def clear_search_filters() -> None:
     for key in _SEARCH_FILTER_KEYS:
         if key == 'search_filter_include_mode':
             safe_user_set(key, True)
-        elif key in ('search_filter_date_from', 'search_filter_date_to'):
-            safe_user_set(key, None)
+        elif key == 'search_filter_criteria':
+            safe_user_set(key, {})
         else:
             safe_user_set(key, [])
-    for key in _SEARCH_FILTER_MEASUREMENT_KEYS:
-        if key == 'search_filter_measurement_material':
-            safe_user_set(key, [])
-        else:
-            safe_user_set(key, None)
+    for key in _SEARCH_LEGACY_FILTER_KEYS:
+        safe_user_set(key, None)
 
 
 # ---------------------------------------------------------------------------
