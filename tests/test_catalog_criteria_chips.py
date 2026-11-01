@@ -36,9 +36,9 @@ def old_svc(tmp_path_factory):
     ("region", {"values": ["Oriental"], "mode": "except"},
      "Region: all except Oriental", "אזור: הכול חוץ ממזרחי"),
     ("region", {"values": ["Oriental", NOT_RECORDED], "mode": "except"},
-     "Region: all except Oriental, not recorded", "אזור: הכול חוץ ממזרחי, לא נרשם"),
+     "Region: all except Oriental, not recorded", "אזור: הכול חוץ ממזרחי, ללא רישום"),
     ("material", {"values": ["Vellum", NOT_RECORDED], "mode": "only", "source": "catalogue"},
-     "Material (catalogue): Vellum, not recorded", "חומר (קטלוג): קלף, לא נרשם"),
+     "Material (catalogue): Vellum, not recorded", "חומר (קטלוג): קלף, ללא רישום"),
     ("material", {"values": ["Wood"], "mode": "only", "source": "measured"},
      "Material (measured): Wood", "חומר (מדידה): עץ"),
     ("attributes", {"values": ["illustration", "colophon"], "mode": "only"},
@@ -48,8 +48,8 @@ def old_svc(tmp_path_factory):
     ("lines", {"min": 20, "max": 25, "source": "measured"},
      "Lines (measured): 20–25", "שורות (מדידה): 20–25"),
     ("columns", {"min": 2, "max": 2, "not_recorded": True},
-     "Columns: 2, or not recorded", "טורים: 2, או לא נרשם"),
-    ("columns", {"not_recorded": True}, "Columns: not recorded", "טורים: לא נרשם"),
+     "Columns: 2, or not recorded", "טורים: 2, או ללא רישום"),
+    ("columns", {"not_recorded": True}, "Columns: not recorded", "טורים: ללא רישום"),
     ("lines", {"max": 25, "source": "either"}, "Lines: up to 25", "שורות: עד 25"),
     ("period", {"min": 1000}, "Period: 1000 or more", "תקופה: 1000 ומעלה"),
     ("width", {"min": 10, "max": 15.5, "source": "either"},
@@ -90,7 +90,7 @@ def test_malformed_criteria_give_no_chip():
 
 
 def test_value_label_defaults():
-    assert value_label("region", NOT_RECORDED, "he") == "לא נרשם"
+    assert value_label("region", NOT_RECORDED, "he") == "ללא רישום"
     assert value_label("attributes", "palimpsest", "en") == "Palimpsest"
     assert value_label("style", "Square", "he") == "Square"   # no labels given
 
@@ -145,6 +145,14 @@ def test_post_search_universe_is_the_result(svc):
     assert svc.match_result_criteria({"region": {"values": ["Oriental"], "mode": "except"}},
                                      [B, E, F]) == {B, E, F}
     assert svc.match_result_criteria({"width": {"not_recorded": True}}, [A, E]) == {E}
+
+
+def test_post_search_answers_depend_on_the_result_ids(svc):
+    # Same criteria, two results: the cache keys on the result ids too.
+    width = {"width": {"min": 10, "max": 12}}
+    assert svc.match_result_criteria(width, [A, C]) == {A}
+    assert svc.match_result_criteria(width, [B, D]) == {B, D}
+    assert svc.match_result_criteria(width, [A, C]) == {A}
 
 
 def test_post_search_without_criteria_is_no_restriction(svc):

@@ -35,6 +35,7 @@ from shared.catalog_criteria import (
     NOT_RECORDED, CriteriaUnavailable, clean_criteria, criteria_token, criterion_values,
     match_criteria,
 )
+from shared.catalog_criteria import BY_KEY as _CRITERIA_BY_KEY
 from shared.catalog_criteria import criteria_chips as _criteria_chips
 from shared.catalog_criteria import recorded_count as _recorded_count
 from shared.thread_local_db import ThreadLocalConnection
@@ -1838,7 +1839,8 @@ class FjmsService:
         matched = self.get_filter_sys_ids(criteria=criteria, universe=universe)
         out = {'total': None if matched is None else len(matched), 'not_recorded': {}}
         for key, spec in criteria.items():
-            if spec.get('mode') != 'except':
+            # Attributes have no "not recorded" (D5 follow-up): nothing to say.
+            if spec.get('mode') != 'except' or not _CRITERIA_BY_KEY[key].not_recordable:
                 continue
             missing = self.get_filter_sys_ids(
                 criteria={key: {'values': [NOT_RECORDED],

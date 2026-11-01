@@ -6304,6 +6304,51 @@ TRANSLATIONS.update({
         "לא ניתן היה להציג את רשימת כתבי היד. נסו שוב בעוד רגע.",
 })
 
+# Catalogue criteria, PR 1b (web, 2026-11-01): the "Manuscript features"
+# button, its chips and panel (web/components/criteria_panel.py), on Catalog
+# Browse, /search and /parallels.
+TRANSLATIONS.update({
+    "Manuscript features": "מאפייני כתב היד",
+    "Clear section": "ניקוי הסעיף",
+    "Catalogue or measured": "קטלוג או מדידה",
+    "Catalogue only": "קטלוג בלבד",
+    "Measured only": "מדידה בלבד",
+    "Only these": "רק אלה",
+    "All except these": "הכול חוץ מאלה",
+    "A manuscript matches when any of its catalogue records gives a ticked value.":
+        "כתב יד נכלל אם אחת מרשומות הקטלוג שלו נותנת ערך מסומן.",
+    "Measured values: every range set here holds on one measured page.":
+        "ערכים נמדדים: כל הטווחים שנבחרו כאן מתקיימים באותו עמוד נמדד.",
+    "Any of the ticked attributes.": "אחת לפחות מהתכונות המסומנות.",
+    "This catalogue data is not available on this site yet.":
+        "נתוני קטלוג אלה עדיין אינם זמינים באתר.",
+    "recorded for {n} of {total}": "רשום ל־{n} מתוך {total}",
+    "The list of all manuscripts is still loading. Try again in a moment.":
+        "רשימת כל כתבי היד עדיין נטענת. נסו שוב בעוד רגע.",
+    "These values could not be read.": "לא ניתן היה לקרוא את הערכים.",
+    "Filter values": "סינון ערכים",
+    "or: not recorded": "או: ללא רישום",
+    "per 10 cm": "ל־10 ס\"מ",
+    "dpi": "dpi",
+    "No features chosen.": "לא נבחרו מאפיינים.",
+    "The count could not be computed.": "לא ניתן היה לחשב את המספר.",
+    "{n} manuscripts have these features": "ל־{n} כתבי יד יש מאפיינים אלה",
+    ", of which {m} have no {label} recorded": ", מהם {m} ללא רישום של {label}",
+    "These criteria cover all {corpus} manuscripts. {uncatalogued} have no FJMS catalogue "
+    "record: they match 'Not recorded', 'all except' and measured data ({sized} also have a "
+    "catalogue size).":
+        "המאפיינים חלים על כל {corpus} כתבי היד. ל־{uncatalogued} אין רשומה בקטלוג FJMS: "
+        "הם נכללים ב'ללא רישום', ב'הכול חוץ מ' ובנתונים הנמדדים (ל־{sized} מהם יש גם מידה "
+        "בקטלוג).",
+    "Some criteria were removed: this catalogue data is not available on this site yet.":
+        "חלק מהמאפיינים הוסרו: נתוני קטלוג אלה עדיין אינם זמינים באתר.",
+    "Some parts of the address were not understood and were ignored: {names}":
+        "חלקים מהכתובת לא הובנו והושמטו: {names}",
+    "No catalogue record ({n})": "אין רשומה בקטלוג ({n})",
+    "The manuscript features could not be applied to these results.":
+        "לא ניתן היה להחיל את מאפייני כתב היד על התוצאות האלה.",
+})
+
 # Phone layout (2026-10-22): the search toolbar's phone menu, the browse image
 # panel's slider toggle, and the catalog-browse sidebar toggle.
 TRANSLATIONS.update({

@@ -74,6 +74,13 @@ def test_live_total_follows_the_source_of_an_except_list(svc):
     assert total == {"total": 4, "not_recorded": {"material": 4}}   # C, D, E, F
 
 
+def test_live_total_of_attributes_all_except(svc):
+    # Attributes have no "not recorded": the total alone (Codex round 1).
+    total = svc.criteria_live_total({"attributes": {"values": ["illustration"],
+                                                    "mode": "except"}}, U)
+    assert total == {"total": 5, "not_recorded": {}}
+
+
 def test_live_total_without_criteria(svc):
     assert svc.criteria_live_total({}, U) == {"total": None, "not_recorded": {}}
 
@@ -94,7 +101,7 @@ def test_the_corpus_note(svc):
 
 def test_criterion_values_take_the_corpus_as_a_callable(svc):
     values = svc.get_criterion_values("region", lambda: U)
-    assert values[-1] == {"value": "_none", "label_en": "Not recorded", "label_he": "לא נרשם",
+    assert values[-1] == {"value": "_none", "label_en": "Not recorded", "label_he": "ללא רישום",
                           "count": 3}
 
 
