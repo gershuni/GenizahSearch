@@ -209,10 +209,12 @@ class FiltersModel(BaseModel):
             return self
         raw = self.criteria.model_dump(exclude_none=True)
         try:
-            cleaned, _ = clean_criteria(raw)
+            clean_criteria(raw)
         except ValueError as exc:
             raise APIError('invalid_request', f'filters.{exc}', http_status=400) from None
-        for old, key in legacy_conflicts({**self.model_dump(exclude_none=True), 'criteria': cleaned}):
+        # On the keys as sent: an entry that cleans to nothing ({"period": {}})
+        # still says which of the two the caller meant.
+        for old, key in legacy_conflicts(self.model_dump(exclude_none=True)):
             raise APIError(
                 'invalid_combination',
                 f"filters.{old} and filters.criteria.{key} both set: {old} is read as "
@@ -512,13 +514,14 @@ def _resolve_fjms_filters_sync(filters_dict: dict, meta_mgr=None) -> Optional[se
     monkeypatch ``validate_filter_values`` / ``get_filter_sys_ids``.
     """
     from shared import fjms_service as _fjms_module
-    _fjms_module.validate_filter_values(filters_dict)
+    universe = getattr(meta_mgr, 'corpus_sys_ids', None)
+    _fjms_module.validate_filter_values(filters_dict, universe=universe)
     return _fjms_module.get_filter_sys_ids(
         domains=filters_dict.get('domains'),
         authors=filters_dict.get('authors'),
         works=filters_dict.get('works'),
         criteria=criteria_with_legacy_keys(filters_dict),
-        universe=getattr(meta_mgr, 'corpus_sys_ids', None),
+        universe=universe,
     )
 
 

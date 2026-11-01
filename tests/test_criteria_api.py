@@ -170,6 +170,9 @@ def test_dates_are_the_period_span_overlap(client, searcher, svc):
     {'materials': ['Paper'], 'criteria': {'material': {'values': ['Vellum']}}},
     {'date_from': 1000, 'criteria': {'period': {'max': 1200}}},
     {'date_to': 1100, 'criteria': {'period': {'not_recorded': True}}},
+    # An entry that asks nothing still says which of the two the caller meant (Codex).
+    {'date_from': 1000, 'criteria': {'period': {}}},
+    {'materials': ['Paper'], 'criteria': {'material': {'values': []}}},
 ])
 def test_an_older_key_beside_its_criterion_is_refused(client, searcher, svc, filters):
     message = _error(_search(client, filters), 400, 'invalid_combination')
@@ -200,6 +203,10 @@ def test_legacy_helpers():
     ({'attributes': {'values': ['gilded']}}, 'invalid_request'),
     ({'style': {'values': ['square']}}, 'unresolvable_filter_value'),  # values are exact
     ({'material': {'values': ['Vellum'], 'source': 'measured'}}, 'unresolvable_filter_value'),
+    # Nothing recorded at all: every value is unknown -- a 400, not a 503 (Codex).
+    ({'alphabet': {'values': ['Latin']}}, 'unresolvable_filter_value'),
+    # Attributes are checked too: only those present are listed (Codex).
+    ({'attributes': {'values': ['autograph']}}, 'unresolvable_filter_value'),
 ])
 def test_malformed_or_unknown_criteria_are_400(client, searcher, svc, criteria, code):
     r = _search(client, {'criteria': criteria})
@@ -214,6 +221,26 @@ def test_an_unknown_value_names_its_source_and_where_to_look(client, searcher, s
                                                                 'source': 'measured'}}}),
                      400, 'unresolvable_filter_value')
     assert "source 'measured'" in message and '/api/criteria' in message
+
+
+def test_values_are_checked_against_the_corpus_as_listed(client, searcher, svc):
+    """Validation and GET /api/criteria agree: a value no corpus manuscript has
+    is not listed, and is refused (Codex: validation had no universe)."""
+    from web.state import state
+    state.meta_mgr = _meta(lambda timeout=30.0: UNIVERSE - {A})
+    listed = {v['value'] for v in _criterion(client.get('/api/criteria').json(), 'style')['values']}
+    assert 'Square' not in listed
+    _error(_search(client, {'criteria': {'style': {'values': ['Square']}}}), 400,
+           'unresolvable_filter_value')
+
+
+def test_nothing_recorded_is_an_unknown_value_not_an_outage(client, searcher, svc):
+    """With no corpus list (no metadata manager yet) an empty value list is
+    still an answer read from the file: the value is unknown (400), not 503."""
+    from web.state import state
+    state.meta_mgr = None
+    _error(_search(client, {'criteria': {'alphabet': {'values': ['Latin']}}}), 400,
+           'unresolvable_filter_value')
 
 
 @pytest.mark.parametrize('key', ['script_styles', 'script_places'])

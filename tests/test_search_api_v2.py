@@ -816,7 +816,7 @@ def test_request_echo_filters_passthrough(client, stub_searcher, monkeypatch):
     # Stub fjms_service so an arbitrary filter validates and short-circuits
     # to a non-empty restricted set.
     from shared import fjms_service as fjms_module
-    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d: None)
+    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d, **kw: None)
     monkeypatch.setattr(
         fjms_module, 'get_filter_sys_ids',
         lambda **kw: {'9912345678901234'},
@@ -1391,7 +1391,7 @@ def test_library_filter_echo_passthrough(client, stub_searcher, monkeypatch):
     """A valid filters.library round-trips into the request echo and the request
     is accepted (validation + intersect wired)."""
     from shared import fjms_service as fjms_module
-    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d: None)
+    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d, **kw: None)
     monkeypatch.setattr(fjms_module, 'get_filter_sys_ids', lambda **kw: None)
     monkeypatch.setattr(
         fjms_module, 'resolve_library_sys_ids',
@@ -1422,7 +1422,7 @@ def test_library_filter_extra_field_allowed_in_model(client, stub_searcher, monk
     Regression guard: before SEED-026 the contract doc advertised it but the
     model would 400 it as an unknown field."""
     from shared import fjms_service as fjms_module
-    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d: None)
+    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d, **kw: None)
     monkeypatch.setattr(fjms_module, 'get_filter_sys_ids', lambda **kw: None)
     monkeypatch.setattr(
         fjms_module, 'resolve_library_sys_ids', lambda codes, mgr: {'9912345678901234'})

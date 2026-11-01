@@ -1122,7 +1122,7 @@ catalogue as of 2026-11.
 
 | Field | Meaning |
 | ----- | ------- |
-| `corpus`, `uncatalogued` | Every corpus manuscript, and how many of them have no FJMS catalogue record. Those match "not recorded", "all except" and measured values only. |
+| `corpus`, `uncatalogued` | Every corpus manuscript, and how many of them have no FJMS catalogue record. Those have no catalogue values: they match "not recorded", "all except" and measured values, and catalogue width / height for the few (13) that have a catalogue size record. |
 | `sections[]` | In the panel's order: `period`, `language`, `script`, `vocalization`, `columns`, `lines`, `status`, `material`, `attributes`, `measured`. |
 | `criteria[].key` | The key to send in `filters.criteria`. |
 | `kind` | `list` (send `values`) or `range` (send `min` / `max`). |
@@ -1164,10 +1164,10 @@ with each other and with the other filters:
   (lines, width, height, written area, margins, line height, density, resolution) must be
   met by the same photographed page; catalogue width and height by the same size record.
 - **Period of copy** matches a catalogue record whose copy-date span overlaps the range.
-- **Errors:** a malformed entry (unknown key or field, a `source` on a criterion with one
-  source, a fractional bound where whole numbers are required) is 400 `invalid_request`; a
-  value the catalogue does not record under the chosen source is 400
-  `unresolvable_filter_value`; `materials` or `date_from`/`date_to` sent together with
+- **Errors:** a malformed entry (unknown key or field, `mode` on a range, `"_none"` among the
+  Attributes, a `source` other than `either` on a criterion with one source, a fractional bound
+  where whole numbers are required) is 400 `invalid_request`; a value `GET /api/criteria` does not
+  list under the chosen source is 400 `unresolvable_filter_value`; `materials` or `date_from`/`date_to` sent together with
   `criteria.material` / `criteria.period` is 400 `invalid_combination`; a criterion this
   deployment cannot answer is 503 `filter_unavailable`. A request is never run without a
   filter it asked for.
@@ -1518,8 +1518,8 @@ The following improvements are documented here as future work but are NOT implem
 - `filters.criteria` on `POST /api/search` and `POST /api/parallels` (and their background
   jobs, the MCP tools and the ChatGPT app): the website's "Manuscript features" — script style
   and region, language and alphabet, vocalization, columns, lines, physical status, material,
-  attributes, period of copy and measured sizes, each with "only" / "all except" and "not
-  recorded", over the whole corpus. See [Manuscript features](#manuscript-features-filterscriteria).
+  attributes, period of copy and measured sizes over the whole corpus: lists with "only" / "all
+  except", and "not recorded" wherever the criterion has it (all but Attributes). See [Manuscript features](#manuscript-features-filterscriteria).
 - `GET /api/criteria` lists the keys and values with corpus counts; `/api/capabilities` lists it
   in `endpoints` and its bucket in `limits.criteria_requests_per_minute`.
 - **Changed meaning:** `date_from` / `date_to` now match a catalogue record whose copy-date span
@@ -1527,7 +1527,7 @@ The following improvements are documented here as future work but are NOT implem
   before. `materials` is unchanged (catalogue values, any record); its documented examples
   `'paper'` / `'parchment'` were wrong — the values are `Paper`, `Vellum`, ... and a wrong one is
   a 400, as it always was.
-- `date_from`/`date_to` and `materials` sent together with `criteria.period` / `criteria.material`
+- `date_from`/`date_to` and `materials` sent together with `criteria.period` / `criteria.material` (even an empty one)
   is 400 `invalid_combination` (no silent precedence).
 - The `script_styles` / `script_places` lists of an unreleased build are gone: `criteria.style` and
   `criteria.region` replace them.

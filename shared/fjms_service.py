@@ -2037,7 +2037,7 @@ class FjmsService:
             self._script_values_cache[kind] = values
             return values
 
-    def validate_filter_values(self, filters: dict) -> None:
+    def validate_filter_values(self, filters: dict, universe=None) -> None:
         """Probe each filter value against FJMS lookup tables (R2-#3 policy).
 
         - Unknown token in a loaded vocabulary → APIError(http_status=400,
@@ -2057,6 +2057,9 @@ class FjmsService:
                      'library_filter_mode' is intentionally not validated here —
                      it is a Pydantic Literal field with no server-side vocabulary
                      table; it is consumed by _intersect_library_filter.
+            universe: the corpus (a set, or a callable returning it), so a
+                     criteria value is checked against the values GET
+                     /api/criteria lists -- those with a corpus manuscript.
         """
         if not filters:
             return
@@ -2203,20 +2206,24 @@ class FjmsService:
         # ---- Catalogue criteria (PR 2 of docs/plans/CATALOGUE_CRITERIA_PLAN.md).
         criteria = filters.get('criteria')
         if criteria:
-            self._validate_criteria_values(criteria)
+            self._validate_criteria_values(criteria, universe)
         # date_from / date_to: any int is a valid token; range matching is FJMS's job.
 
-    def _validate_criteria_values(self, criteria: dict) -> None:
+    def _validate_criteria_values(self, criteria: dict, universe=None) -> None:
         """Each value of a list criterion must be one the catalogue (or, for
-        Material, a measurement) records under the chosen source -- the values
-        GET /api/criteria lists. ``criteria`` is already cleaned (strict), so
-        keys, shapes, Attributes and "_none" are checked. Ranges have no
-        vocabulary. A criterion this file cannot answer at all is left to the
-        lookup, which raises FilterUnavailable('column_missing') for it."""
+        Material, a measurement) records under the chosen source for a
+        manuscript of ``universe`` -- the values GET /api/criteria lists
+        (Attributes too: only those present). ``criteria`` is already cleaned
+        (strict), so keys, shapes, attribute names and "_none" are checked.
+        Ranges have no vocabulary. A criterion this file cannot answer at all
+        is left to the lookup, which raises FilterUnavailable('column_missing')
+        for it; so is a corpus list that cannot be had (it raises
+        FilterUnavailable('corpus_unavailable') here)."""
         unsupported = self.criteria_support() == FILTER_UNSUPPORTED
+        resolved = False
         for key, spec in clean_criteria(criteria)[0].items():
             criterion = _CRITERIA_BY_KEY[key]
-            if criterion.kind != 'list' or key == 'attributes':
+            if criterion.kind != 'list':
                 continue
             if unsupported and key in _NEW_TABLE_KEYS:
                 continue
@@ -2224,20 +2231,18 @@ class FjmsService:
             if not values:
                 continue
             source = spec.get('source', 'either')
+            if not resolved:
+                universe, resolved = _resolve_universe(universe), True
             try:
-                known = {item['value'] for item in self.get_criterion_values(key, source=source)}
+                # An empty list read successfully is an answer: nothing is
+                # recorded, so every value is unknown (400), not a 503.
+                known = {item['value'] for item in self.get_criterion_values(key, universe, source)}
             except FilterUnavailable as exc:
                 raise APIError(
                     'filter_vocabulary_unavailable',
                     f'The criteria.{key} vocabulary could not be read',
                     http_status=503,
                 ) from exc
-            if not known:
-                raise APIError(
-                    'filter_vocabulary_unavailable',
-                    f'The criteria.{key} vocabulary is empty',
-                    http_status=503,
-                )
             for v in values:
                 if v not in known:
                     where = f" under source {source!r}" if criterion.sources else ''
@@ -4705,14 +4710,14 @@ def reset_fjms_service():
         _default_service = None
 
 
-def validate_filter_values(filters: dict) -> None:
+def validate_filter_values(filters: dict, universe=None) -> None:
     """Module-level shorthand for FjmsService.validate_filter_values.
 
     Phase 78 Plan 03 (D-17, API-07, R2-#3 fail-closed). Uses the
     thread-safe singleton — see FjmsService.validate_filter_values
     for the policy contract.
     """
-    return get_fjms_service(thread_safe=True).validate_filter_values(filters)
+    return get_fjms_service(thread_safe=True).validate_filter_values(filters, universe)
 
 
 def get_filter_sys_ids(**kwargs):
