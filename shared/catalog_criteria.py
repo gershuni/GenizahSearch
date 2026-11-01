@@ -646,7 +646,9 @@ def match_criteria(conn, criteria, universe=None):
         grouped = matcher.ranges_with_not_recorded(group)
         if grouped is not None:
             parts.append(grouped)
-    result = set.intersection(*parts) if parts else set()
+    # set(parts[0]): a part may be a frozenset (universe - found, when the
+    # corpus comes as one), and set.intersection takes no frozenset as self.
+    result = set(parts[0]).intersection(*parts[1:]) if parts else set()
     if universe is not None:
         result &= universe
     return result
@@ -709,3 +711,128 @@ def criterion_values(conn, key: str, universe=None, source: str = "either") -> l
         out.append({"value": NOT_RECORDED, "label_en": "Not recorded",
                     "label_he": "לא נרשם", "count": len(missing)})
     return out
+
+
+# ── Chip and summary text (§6.3) ─────────────────────────────────────────
+
+# Shorter names for chips where the panel's label is long.
+_CHIP_LABELS = {
+    "lines": ("שורות", "Lines"),
+    "columns": ("טורים", "Columns"),
+    "period": ("תקופה", "Period"),
+    "vocal_extent": ("ניקוד", "Vocalization"),
+    "vocal_type": ("סוג ניקוד", "Vocalization type"),
+}
+_SOURCE_WORDS = {"catalogue": ("קטלוג", "catalogue"), "measured": ("מדידה", "measured")}
+_UNIT_WORDS = {"cm": ('ס"מ', "cm"), "mm": ('מ"מ', "mm"),
+               "per 10 cm": ('ל־10 ס"מ', "per 10 cm"), "dpi": ("dpi", "dpi")}
+_NOT_RECORDED_WORDS = ("לא נרשם", "not recorded")
+# Measured materials with no catalogue value of the same name (D6).
+_MEASURED_ONLY_HEBREW = {"Mix": "מעורב", "Wood": "עץ"}
+
+
+def _pick(pair, lang):
+    return pair[0] if lang == "he" else pair[1]
+
+
+def criterion_label(key: str, lang: str = "en", *, short: bool = False) -> str:
+    """A criterion's name; ``short`` gives the chip form ("Lines")."""
+    criterion = BY_KEY[key]
+    if short and key in _CHIP_LABELS:
+        return _pick(_CHIP_LABELS[key], lang)
+    return criterion.label_he if lang == "he" else criterion.label_en
+
+
+def section_label(key: str, lang: str = "en") -> str:
+    for section in SECTIONS:
+        if section.key == key:
+            return section.label_he if lang == "he" else section.label_en
+    raise KeyError(key)
+
+
+def value_label(key: str, value: str, lang: str = "en", labels=None) -> str:
+    """How ``value`` of list criterion ``key`` is shown. ``labels`` maps a
+    value to its Hebrew label (from ``criterion_values``: the catalogue's own
+    ``FieldValueHeb`` / ``code_values.HebDesc``); without one the English
+    value is shown."""
+    if value == NOT_RECORDED:
+        return _pick(_NOT_RECORDED_WORDS, lang)
+    if key == "attributes" and value in ATTRIBUTES:
+        return _pick(ATTRIBUTES[value][:2], lang)
+    if lang == "he":
+        hebrew = (labels or {}).get(value) or _MEASURED_ONLY_HEBREW.get(value)
+        if hebrew:
+            return hebrew
+    return value
+
+
+def _number_text(value) -> str:
+    return _format_number(value)
+
+
+def _range_text(criterion: Criterion, spec: dict, lang: str) -> str:
+    low, high = spec.get("min"), spec.get("max")
+    if low is not None and high is not None:
+        text = (_number_text(low) if low == high
+                else f"{_number_text(low)}–{_number_text(high)}")
+    elif low is not None:
+        text = (f"{_number_text(low)} ומעלה" if lang == "he"
+                else f"{_number_text(low)} or more")
+    elif high is not None:
+        text = f"עד {_number_text(high)}" if lang == "he" else f"up to {_number_text(high)}"
+    else:
+        return _pick(_NOT_RECORDED_WORDS, lang)
+    if criterion.unit:
+        text += " " + _pick(_UNIT_WORDS.get(criterion.unit, (criterion.unit,) * 2), lang)
+    if spec.get("not_recorded"):
+        text += ", או לא נרשם" if lang == "he" else ", or not recorded"
+    return text
+
+
+def _list_text(key: str, spec: dict, lang: str, labels) -> str:
+    shown = [value_label(key, v, lang, labels) for v in spec["values"]]
+    if spec.get("mode") != "except":
+        return ", ".join(shown)
+    if lang == "he":
+        first = shown[0]
+        # "הכול חוץ ממזרחי": the preposition joins a Hebrew word.
+        joined = ("מ" if "א" <= first[:1] <= "ת" else "מ־") + first
+        return "הכול חוץ " + ", ".join([joined, *shown[1:]])
+    return "all except " + ", ".join(shown)
+
+
+def criterion_chip(key: str, spec: dict, lang: str = "en", labels=None) -> str:
+    """One chip's text: "כתב: מרובע, בינוני", "Region: all except Oriental",
+    "Lines (measured): 20–25", "Columns: 2, or not recorded". ``labels`` as
+    for ``value_label``. ``spec`` must be clean (``clean_criteria``)."""
+    criterion = BY_KEY[key]
+    name = criterion_label(key, lang, short=True)
+    source = spec.get("source", "either")
+    if source != "either":
+        name += f" ({_pick(_SOURCE_WORDS[source], lang)})"
+    body = (_list_text(key, spec, lang, labels) if criterion.kind == "list"
+            else _range_text(criterion, spec, lang))
+    return f"{name}: {body}"
+
+
+def criteria_chips(criteria, lang: str = "en", labels_for=None) -> list:
+    """``[(key, text)]``, one per active criterion, in the registry's order.
+    ``labels_for(key)`` returns that criterion's ``{value: Hebrew label}``
+    (or None); a lookup that raises is ignored and the English value shown,
+    since a chip must never fail for want of a label."""
+    clean, _ = clean_criteria(criteria, strict=False)
+    chips = []
+    for key, spec in clean.items():
+        labels = None
+        if labels_for is not None and lang == "he" and BY_KEY[key].kind == "list":
+            try:
+                labels = labels_for(key)
+            except Exception:  # noqa: BLE001 - a label is never worth a failed chip
+                labels = None
+        chips.append((key, criterion_chip(key, spec, lang, labels)))
+    return chips
+
+
+def criteria_summary(criteria, lang: str = "en", labels_for=None, sep: str = "; ") -> str:
+    """The chips as one line, for history entries and window titles."""
+    return sep.join(text for _key, text in criteria_chips(criteria, lang, labels_for))
