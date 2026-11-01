@@ -13,7 +13,8 @@ criterion removes it.
 - Catalog Browse: the address carries one parameter per criterion (D8: `style=Square`,
   `region=!Oriental`, `lines=meas:20..25`, `columns=2..2,_none`); an unknown or malformed parameter
   is dropped and named in a notice. The domain tree gains "No catalogue record (N)". "Search in these
-  results" and "Parallel search in these results" hand the criteria on unchanged.
+  results" and "Parallel search in these results" hand the criteria on unchanged. The "16-19" period
+  button sets 1500-1899 (it set 1600-1999).
 - `/search`, `/parallels`: the criteria are saved (`{prefix}_filter_criteria`), counted, sent with the
   search, kept in history entries and runs; a saved date range is read in as the period of copy
   (D18); saved measurement filters are not restored, and the rows saved with them are dropped so the

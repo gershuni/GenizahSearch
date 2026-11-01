@@ -600,6 +600,20 @@ handoff or Clear All let saved criteria or old dates come back (MED); "לא נר
 feminine names -> "ללא רישום" (LOW). Not changed, by reasoning: run snapshots live in server memory
 and do not survive the release's restart; old history entries never stored measurement filters.
 
+**PR 1b code, round 2** (`ca0f0116..12db1ddb`), brief `_tmp/criteria_1b_review_brief_r2.md`, log
+`_tmp/criteria_1b_codex_round2.log`. Codex: round-1 fold-ins verified; **SHIP WITH FIXES**, three
+regressions, fixed in `c59f44b8`: a search saved with old measurement filters that were cleared later
+kept its rows and run, since only the flat keys were read -> the run's `pre_search_filters` too (HIGH);
+a criterion removed while its search ran left the history entry and parallels' export without filters
+(MED); a post-search refill asked for while one ran was dropped, so the list stayed short ->
+`PostMatchRefill` keeps every request (MED).
+
+**PR 1b code, round 3** (`12db1ddb..c59f44b8`), brief `_tmp/criteria_1b_review_brief_r3.md`, log
+`_tmp/criteria_1b_codex_round3.log`. Codex: the three fixed, no new HIGH/MED, none outstanding;
+**SHIP**. The GitHub Codex review of `12db1ddb` repeated round 2's history finding and found one more:
+the "16-19" period button set 1600-1999 (carried over from the old Catalog Browse; the desktop's
+button has it too, for PR 1c) -> 1500-1899 (MED).
+
 ---
 
 ## 11. Changes by revision

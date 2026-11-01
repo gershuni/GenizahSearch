@@ -526,7 +526,9 @@ class CriteriaControl:
                 for c in range(9, 15):
                     ui.button(tr(f"{c + 1}th"), on_click=century(c, c)).props(
                         'flat dense size=xs no-caps').classes('text-xs')
-                ui.button(tr('16-19'), on_click=century(16, 19)).props(
+                # The 16th-19th centuries: 1500-1899, as "16th" would be 1500-1599
+                # (it said 1600-1999 before; GitHub Codex on PR 1b).
+                ui.button(tr('16-19'), on_click=century(15, 18)).props(
                     'flat dense size=xs no-caps').classes('text-xs')
 
     # -- live total ----------------------------------------------------

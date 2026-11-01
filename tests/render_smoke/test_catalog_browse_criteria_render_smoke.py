@@ -305,6 +305,27 @@ def test_the_panel_disables_what_a_5_0_0_file_cannot_answer(old_sidecar):
     _run_with(_patched(fake), driver)
 
 
+def test_the_century_buttons_set_their_centuries(sidecar):
+    """GitHub Codex on PR 1b: "16-19" set 1600-1999, one century late."""
+    fake = _Recording(sidecar)
+
+    async def driver(user: User) -> None:
+        await user.open('/catalog-browse')
+        assert await _until(lambda: fake.result_criteria)
+        user.find(marker='catalog-criteria-button').click()
+        assert await _until(lambda: 'Period of copy' in _page_text(user))
+        user.find(marker='catalog-criteria-section-period').click()
+        assert await _until(lambda: '16-19' in _page_text(user))
+        for label, years in (('10th', (900, 999)), ('15th', (1400, 1499)),
+                             ('16-19', (1500, 1899))):
+            user.find(kind=ui.button, content=label).click()
+            low = user.find(marker='catalog-criteria-min-period').elements.pop()
+            high = user.find(marker='catalog-criteria-max-period').elements.pop()
+            assert (low.value, high.value) == years, (label, low.value, high.value)
+
+    _run_with(_patched(fake), driver)
+
+
 def test_the_tree_counts_the_uncatalogued_manuscripts(sidecar):
     fake = _Recording(sidecar)
 
