@@ -637,8 +637,9 @@ class _CatalogRefreshWorker(QThread):
                  text_all=None, text_any=None, text_not=None,
                  refresh_authors=True, refresh_works=True,
                  pgp_filter='all', editions_filter='all',
-                 library_filter=None, library_mode='hide', meta_mgr=None):
+                 library_filter=None, library_mode='hide', meta_mgr=None, traits=None):
         super().__init__(parent)
+        self._traits = dict(traits or {})  # script / measurement traits (BROWSE_TRAIT_KEYS)
         self._domain = domain
         self._author = author
         self._work = work
@@ -702,6 +703,7 @@ class _CatalogRefreshWorker(QThread):
                 library_codes=(self._library_filter or None),
                 library_sys_ids=(library_sys_ids or None),
                 library_mode=self._library_mode,   # DMF-07: 'show_only' | 'hide'
+                traits=self._traits,
             )
             self.done.emit(result)
         except Exception:
@@ -726,8 +728,9 @@ class _CatalogFacetWorker(QThread):
                  date_from=None, date_to=None, include_undated=False,
                  text_all=None, text_any=None, text_not=None,
                  pgp_filter='all', editions_filter='all',
-                 meta_mgr=None):
+                 meta_mgr=None, traits=None):
         super().__init__(parent)
+        self._traits = dict(traits or {})
         self._domain = domain
         self._author = author
         self._work = work
@@ -767,6 +770,7 @@ class _CatalogFacetWorker(QThread):
                 # Full-corpus callable resolver (WR-05 None-guard for startup race).
                 sys_id_to_library=(self._meta_mgr.get_library_for_id
                                    if self._meta_mgr else None),
+                traits=self._traits,
             )
             self.done.emit(result)
         except Exception:
@@ -11639,6 +11643,7 @@ class GenizahGUI(QMainWindow):
         # SEED-026 desktop parity — library filter (LIBFILTER-03).
         self._catalog_library_filter = []       # [] = all; list of library codes when active
         self._catalog_library_mode = 'hide'     # 'show_only' | 'hide' (DMF D-05 default; in-memory only)
+        self._catalog_traits = {}               # script / measurement traits (fjms_service.BROWSE_TRAIT_KEYS)
         self._catalog_authors_cache = []
         self._catalog_works_cache = []
         self._catalog_tree_loaded = False
@@ -11816,6 +11821,13 @@ class GenizahGUI(QMainWindow):
         self._catalog_undated_cb.setStyleSheet("font-size: 11px; margin-top: 2px;")
         self._catalog_undated_cb.toggled.connect(self._catalog_on_undated_changed)
         left_layout.addWidget(self._catalog_undated_cb)
+
+        # Script and size: list manuscripts by a trait, no text needed (CatalogTraitsDialog)
+        self._catalog_traits_btn = QPushButton(tr("Script and size") + "…")
+        self._catalog_traits_btn.setStyleSheet(
+            "QPushButton { text-align: left; padding: 2px 8px; font-size: 11px; margin-top: 6px; }")
+        self._catalog_traits_btn.clicked.connect(self._catalog_open_traits_dialog)
+        left_layout.addWidget(self._catalog_traits_btn)
 
         # --- Text Filter ---
         text_filter_label = QLabel(tr("Text Filter"))
@@ -12220,6 +12232,7 @@ class GenizahGUI(QMainWindow):
             library_filter=list(self._catalog_library_filter),
             library_mode=self._catalog_library_mode,    # DMF-07
             meta_mgr=self.meta_mgr,
+            traits=dict(self._catalog_traits),
         )
         self._catalog_refresh_worker.done.connect(self._catalog_on_async_refresh_done)
         self._catalog_refresh_worker.start()
@@ -12501,6 +12514,7 @@ class GenizahGUI(QMainWindow):
             pgp_filter=self._catalog_pgp_filter,
             editions_filter=self._catalog_editions_filter,
             meta_mgr=self.meta_mgr,
+            traits=dict(self._catalog_traits),
         )
         self._catalog_facet_worker.done.connect(_on_facets_done)
         try:
@@ -12603,6 +12617,7 @@ class GenizahGUI(QMainWindow):
             self._catalog_library_filter = []
             self._catalog_library_mode = 'hide'
             self._catalog_update_library_filter_btn()
+            self._catalog_traits = {}
             refresh_authors = True
             refresh_works = True
         elif filter_type == "pgp":
@@ -12646,6 +12661,57 @@ class GenizahGUI(QMainWindow):
             self._catalog_render_text_chips()
         self._catalog_current_page = 0
         self._catalog_start_async_refresh(refresh_authors=refresh_authors, refresh_works=refresh_works)
+
+    def _catalog_open_traits_dialog(self):
+        """Script and size: choose traits, then list the manuscripts that have them."""
+        from desktop.dialogs_filter import CatalogTraitsDialog
+        dlg = CatalogTraitsDialog(self, self._catalog_traits)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        traits = dlg.get_traits()
+        if traits == self._catalog_traits:
+            return
+        self._catalog_traits = traits
+        self._catalog_current_page = 0
+        self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
+        self._catalog_update_chips()
+
+    def _catalog_remove_trait(self, key, value=None):
+        """Remove one trait value (a list item), or a whole range (key = its prefix)."""
+        from shared.fjms_service import clean_traits
+        traits = dict(self._catalog_traits)
+        if value is None:
+            for k in (key, f'{key}_min', f'{key}_max'):
+                traits.pop(k, None)
+        else:
+            traits[key] = [v for v in traits.get(key, []) if v != value]
+        self._catalog_traits = clean_traits(traits)
+        self._catalog_current_page = 0
+        self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
+        self._catalog_update_chips()
+
+    def _catalog_trait_chips(self):
+        """(chip text, trait key, value) for every active trait; a range is one
+        chip keyed by its prefix ('width', 'height', 'line_count')."""
+        from shared.fjms_service import script_value_label
+        traits = self._catalog_traits
+        chips = []
+        for key, label in (('script_styles', 'Script Style'), ('script_places', 'Script Place')):
+            for v in traits.get(key, []):
+                chips.append((f"{tr(label)}: {script_value_label(key, v, CURRENT_LANG == 'he')}", key, v))
+        for prefix, label, unit in (('width', 'Width', 'cm'), ('height', 'Height', 'cm'),
+                                    ('line_count', 'Lines', '')):
+            lo, hi = traits.get(f'{prefix}_min'), traits.get(f'{prefix}_max')
+            if lo is None and hi is None:
+                continue
+            if lo is not None and hi is not None:
+                span = f"{lo:g}\u2013{hi:g}"
+            else:
+                span = f"\u2265{lo:g}" if lo is not None else f"\u2264{hi:g}"
+            chips.append((f"{tr(label)}: {span}{' ' + tr(unit) if unit else ''}", prefix, None))
+        for v in traits.get('measurement_material', []):
+            chips.append((f"{tr('Material (measured)')}: {tr(v)}", 'measurement_material', v))
+        return chips
 
     def _resolve_catalog_author_display(self, author_val):
         """Resolve author value to display name from cached authors list."""
@@ -12772,6 +12838,15 @@ class GenizahGUI(QMainWindow):
             btn.clicked.connect(lambda: self._catalog_remove_filter("editions"))
             self._catalog_chips_layout.addWidget(btn)
 
+        for text, key, value in self._catalog_trait_chips():
+            has_any = True
+            btn = QPushButton(f"{text}  \u00d7")
+            btn.setStyleSheet(chip_style)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(24)
+            btn.clicked.connect(lambda _, k=key, v=value: self._catalog_remove_trait(k, v))
+            self._catalog_chips_layout.addWidget(btn)
+
         # SEED-026 (smoke 2026-06-29): NO per-library chips — the library filter
         # state is shown on the catalog library button itself (red + "shown/total",
         # see _catalog_update_library_filter_btn). An active library filter must still
@@ -12806,6 +12881,9 @@ class GenizahGUI(QMainWindow):
         # Codex HIGH #4: suppress the restriction in Hide mode with a user notice instead).
         if self._catalog_library_filter and self._catalog_library_mode == 'show_only':
             filters['library'] = list(self._catalog_library_filter)
+        # Script / measurement traits under the names "Search only in..." uses.
+        for key, value in self._catalog_traits.items():
+            filters[key] = list(value) if isinstance(value, list) else value
         return filters
 
     def _apply_catalog_handoff_filters(self, filters) -> bool:
@@ -12817,7 +12895,7 @@ class GenizahGUI(QMainWindow):
         new filters, or set an empty one ("no manuscripts match").
         Returns True when the filters were applied.
         """
-        from shared.fjms_service import get_fjms_service, FilterUnavailable
+        from shared.fjms_service import BROWSE_TRAIT_KEYS, get_fjms_service, FilterUnavailable
         try:
             restrict = get_fjms_service().get_filter_sys_ids(
                 domain=filters.get('domain'),
@@ -12825,6 +12903,7 @@ class GenizahGUI(QMainWindow):
                 work=filters.get('work'),
                 date_from=filters.get('date_from'),
                 date_to=filters.get('date_to'),
+                **{k: v for k, v in filters.items() if k in BROWSE_TRAIT_KEYS},
             )
         except FilterUnavailable as exc:
             QMessageBox.warning(self, tr("Filters"), self._filter_unavailable_text(exc.reason))
@@ -35921,6 +36000,7 @@ class GenizahGUI(QMainWindow):
                     'text_all': getattr(self, '_catalog_text_all', []),
                     'text_any': getattr(self, '_catalog_text_any', []),
                     'text_not': getattr(self, '_catalog_text_not', []),
+                    'traits': dict(getattr(self, '_catalog_traits', {})),
                 },
             }
             # Add composition summary text
@@ -36020,7 +36100,7 @@ class GenizahGUI(QMainWindow):
             has_data = (reg.get('results') or comp.get('results') or comp.get('filtered_results') or comp.get('source_text')
                         or browse.get('sys_id') or browse.get('shelfmark') or browse.get('fl_id')
                         or cat.get('domain') or cat.get('author') or cat.get('work')
-                        or cat.get('date_from') or cat.get('date_to')
+                        or cat.get('date_from') or cat.get('date_to') or cat.get('traits')
                         or cat.get('text_all') or cat.get('text_any') or cat.get('text_not')
                         or cat.get('include_undated')
                         # Feature 2 (Phase 96 fix-7): LOCAL Browse state counts as restorable data.
@@ -36263,9 +36343,15 @@ class GenizahGUI(QMainWindow):
 
             # Restore catalog browse filters (Browse by Identification)
             cat = state.get('browse_catalog', {})
+            from shared.fjms_service import clean_traits, drop_unavailable_measurement_filters
+            _cat_traits, _cat_dropped = drop_unavailable_measurement_filters(clean_traits(cat.get('traits')))
+            if _cat_dropped:
+                self.statusBar().showMessage(
+                    tr('Some saved filters were removed: this catalog data is not available.'), 8000)
             if any([cat.get('domain'), cat.get('author'), cat.get('work'),
                     cat.get('date_from'), cat.get('date_to'), cat.get('include_undated'),
-                    cat.get('text_all'), cat.get('text_any'), cat.get('text_not')]):
+                    cat.get('text_all'), cat.get('text_any'), cat.get('text_not'), _cat_traits]):
+                self._catalog_traits = _cat_traits
                 self._catalog_current_domain = cat.get('domain')
                 self._catalog_current_author = cat.get('author')
                 self._catalog_current_work = cat.get('work')

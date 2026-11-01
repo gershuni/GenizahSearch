@@ -426,6 +426,14 @@ def consume_incoming_filters(state, storage_prefix: str, require_from_browse: bo
     if incoming.get('material_exclude'):
         state.filter_material_exclude = incoming['material_exclude']
         persist_value(f'{pfx}_filter_material_exclude', incoming['material_exclude'])
+    # Catalog Browse traits. Measurement traits only on /search: /parallels has no
+    # controls or chips for them, so applied there they would be invisible.
+    from shared.fjms_service import BROWSE_MEASUREMENT_TRAITS, BROWSE_SCRIPT_TRAITS, clean_traits
+    traits = clean_traits(incoming)
+    for key in BROWSE_SCRIPT_TRAITS + (BROWSE_MEASUREMENT_TRAITS if pfx == 'search' else ()):
+        if key in traits:
+            setattr(state, f'filter_{key}', traits[key])
+            persist_value(f'{pfx}_filter_{key}', traits[key])
     # GAP-F (2026-06-28): thread library selection from catalog browse to /search.
     # DMF (T-130-02-06 / HIGH-1): browse->search handoff stamps mode='show_only' and
     # persists the new {'mode','codes'} dict shape (NOT a bare list).  Without the mode

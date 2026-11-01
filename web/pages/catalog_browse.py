@@ -17,7 +17,10 @@ from nicegui import ui, run
 from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import tr, is_rtl, get_language
 from web.components.typography import h1
-from shared.fjms_service import get_fjms_service, resolve_library_sys_ids
+from shared.fjms_service import (
+    BROWSE_MEASUREMENT_TRAITS, MEASUREMENT_MATERIALS, clean_traits, get_fjms_service,
+    measurement_filters_available, resolve_library_sys_ids,
+)
 from shared.browse_map_utils import LIBRARY_CODES, get_library_display, sanitize_library_codes, library_codes_with_manuscripts
 
 import asyncio
@@ -27,6 +30,46 @@ import threading
 logger = logging.getLogger(__name__)
 
 PAGE_SIZE = 50
+
+# Trait URL parameters: lists are comma-separated, ranges are "min-max", "min-" or "-max".
+_TRAIT_LIST_PARAMS = (('script_style', 'script_styles'), ('script_place', 'script_places'),
+                      ('material', 'measurement_material'))
+_TRAIT_RANGE_PARAMS = (('width', 'width'), ('height', 'height'), ('lines', 'line_count'))
+
+
+def traits_from_query(script_style=None, script_place=None, width=None, height=None,
+                      lines=None, material=None) -> dict:
+    """The traits a /catalog-browse address names (see _TRAIT_*_PARAMS); a
+    malformed value is ignored, never an error."""
+    given = {'script_style': script_style, 'script_place': script_place, 'material': material,
+             'width': width, 'height': height, 'lines': lines}
+    traits = {}
+    for param, key in _TRAIT_LIST_PARAMS:
+        if given[param]:
+            traits[key] = [v.strip() for v in str(given[param]).split(',') if v.strip()]
+    for param, prefix in _TRAIT_RANGE_PARAMS:
+        raw = str(given[param] or '').strip()
+        if raw.count('-') != 1:
+            continue
+        lo, hi = raw.split('-')
+        traits[f'{prefix}_min'], traits[f'{prefix}_max'] = lo.strip() or None, hi.strip() or None
+    return clean_traits(traits)
+
+
+def traits_to_query(traits) -> list:
+    """The URL parameters ('name=value', values quoted) for *traits*."""
+    from urllib.parse import quote
+    traits = clean_traits(traits)
+    params = []
+    for param, key in _TRAIT_LIST_PARAMS:
+        if traits.get(key):
+            params.append(f"{param}={quote(','.join(traits[key]), safe='')}")
+    for param, prefix in _TRAIT_RANGE_PARAMS:
+        lo, hi = traits.get(f'{prefix}_min'), traits.get(f'{prefix}_max')
+        if lo is not None or hi is not None:
+            fmt = lambda v: '' if v is None else f'{v:g}'  # noqa: E731
+            params.append(f"{param}={fmt(lo)}-{fmt(hi)}")
+    return params
 
 # ── SEED-023: corpus-wide PGP / scholarly-transcription membership sets ──────
 # Static per process (refresh on restart after a data update). Computed once,
@@ -83,12 +126,25 @@ def create_catalog_browse_page(
     initial_text_all: str = None,
     initial_text_any: str = None,
     initial_text_not: str = None,
+    initial_traits: dict = None,
 ):
     """Create the catalog browse page with domain tree, author/work search, and results."""
 
     fjms = get_fjms_service(thread_safe=True)
     lang = get_language()
     rtl = is_rtl()
+    # update_url runs at the end of a refresh, and a refresh started by a chip's
+    # remove button runs in that button's context -- which render_chips() has
+    # just deleted, so ui.run_javascript raised there and the address and the
+    # saved filters kept the removed filter. The page's own client never goes.
+    page_client = ui.context.client
+    # Measurement traits are offered only when the open catalog is KNOWN to have
+    # the data; a value arriving without it is dropped, and the page says so.
+    try:
+        meas_ok = measurement_filters_available(fjms)
+    except Exception:
+        logger.warning("catalog_browse: measurement capability check failed", exc_info=True)
+        meas_ok = False
 
     # ── State ──────────────────────────────────────────────────────
     current_domain = {'value': initial_domain, 'display': initial_domain}
@@ -103,6 +159,8 @@ def create_catalog_browse_page(
     current_text_any = {'value': _parse_csv(initial_text_any)}  # OR terms
     current_text_not = {'value': _parse_csv(initial_text_not)}  # NOT terms
     current_page = {'value': (initial_page or 1)}
+    # Script / measurement traits: a clean_traits() dict (BROWSE_TRAIT_KEYS).
+    current_traits = {'value': clean_traits(initial_traits)}
     sidebar_visible = {'value': True}
     # SEED-023 availability filters — 3-state, persisted via safe_storage.
     # Clamp persisted values to the known set so a stale/corrupted entry degrades
@@ -170,6 +228,18 @@ def create_catalog_browse_page(
     pgp_filter_btn_ref = {'ref': None}
     editions_filter_btn_ref = {'ref': None}
     library_filter_btn_ref = {'ref': None}  # GAP-E: button opens _open_library_filter_dialog()
+    trait_refs = {}  # trait key -> its control (script selects, min/max inputs, material select)
+
+    def _drop_unavailable_traits(traits: dict) -> dict:
+        """*traits* without measurement traits the open catalog is known to lack
+        (with a notice when that drops something)."""
+        if meas_ok or not any(k in traits for k in BROWSE_MEASUREMENT_TRAITS):
+            return traits
+        ui.notify(tr('Some saved filters were removed: this catalog data is not available.'),
+                  type='warning')
+        return {k: v for k, v in traits.items() if k not in BROWSE_MEASUREMENT_TRAITS}
+
+    current_traits['value'] = _drop_unavailable_traits(current_traits['value'])
 
     # ── Deep linking helper ────────────────────────────────────────
     def update_url():
@@ -194,10 +264,11 @@ def create_catalog_browse_page(
             params.append(f"text_any={quote(','.join(current_text_any['value']), safe='')}")
         if current_text_not['value']:
             params.append(f"text_not={quote(','.join(current_text_not['value']), safe='')}")
+        params.extend(traits_to_query(current_traits['value']))
         if current_page['value'] and current_page['value'] > 1:
             params.append(f"page={current_page['value']}")
         qs = '?' + '&'.join(params) if params else ''
-        ui.run_javascript(
+        page_client.run_javascript(
             f"history.replaceState(null, '', '/catalog-browse{qs}')"
         )
         # Persist filter state in sessionStorage for same-session return visits
@@ -213,8 +284,9 @@ def create_catalog_browse_page(
             'text_all': current_text_all['value'],
             'text_any': current_text_any['value'],
             'text_not': current_text_not['value'],
+            'traits': current_traits['value'],
         })
-        ui.run_javascript(
+        page_client.run_javascript(
             f"sessionStorage.setItem('catalog_browse_filters', {_json.dumps(state)})"
         )
 
@@ -291,6 +363,7 @@ def create_catalog_browse_page(
     def _fetch_results_blocking(
         offset, domain, author, work, date_from, date_to, undated,
         text_all, text_any, text_not, pgp_state, ed_state, library_codes, library_mode,
+        traits=None,
     ):
         """Blocking browse fetch (runs in io_bound). Resolves the corpus-wide
         PGP/edition sets (cached) and the selected-library sys_id set only when the
@@ -317,6 +390,7 @@ def create_catalog_browse_page(
             library_codes=(library_codes or None),
             library_sys_ids=lib_sys_ids,
             library_mode=library_mode,
+            traits=traits,
         )
 
     async def fetch_results():
@@ -340,12 +414,14 @@ def create_catalog_browse_page(
             # Snapshot so chip removal mutating the list cannot race the io_bound resolver.
             list(current_library_filter['value']) or None,
             current_library_mode['value'],
+            # A copy, for the same reason as the library selection above.
+            dict(current_traits['value']),
         )
         return data
 
     def _fetch_library_facets_blocking(
         domain, author, work, date_from, date_to, undated,
-        text_all, text_any, text_not, pgp_state, ed_state,
+        text_all, text_any, text_not, pgp_state, ed_state, traits=None,
     ):
         """Fetch TRUE full-set library facet counts (DMF-12). Runs in io_bound.
 
@@ -379,6 +455,7 @@ def create_catalog_browse_page(
                 # pass None so get_browse_library_facets returns {} gracefully (WR-05).
                 sys_id_to_library=(_state.meta_mgr.get_library_for_id
                                    if _state.meta_mgr else None),
+                traits=traits,
             )
         except Exception as e:
             logger.warning("catalog_browse: facet fetch failed: %s", e)
@@ -502,6 +579,7 @@ def create_catalog_browse_page(
                 current_text_not['value'] or None,
                 current_pgp_filter['value'],
                 current_editions_filter['value'],
+                dict(current_traits['value']),
             )
             # None (cancelled or app stopping): no counts, as when the lookup fails.
             current_library_facets['value'] = new_facets if new_facets is not None else {}
@@ -832,6 +910,7 @@ def create_catalog_browse_page(
             current_text_not['value'],
             current_pgp_filter['value'] != 'all',
             current_editions_filter['value'] != 'all',
+            bool(current_traits['value']),
             # SEED-026 (smoke 2026-06-29): library filter has NO chip — its state
             # lives on the library filter button (red + "shown/total"), so it must
             # NOT force the chip bar to appear.
@@ -912,9 +991,75 @@ def create_catalog_browse_page(
                         color='red',
                     )
 
+                for text, key, value in _trait_chips():
+                    _make_chip(text, lambda k=key, v=value: clear_trait(k, v))
+
                 ui.button(tr('Clear All'), on_click=clear_all_filters).props(
                     'flat dense size=sm color=red'
                 )
+
+    _TRAIT_RANGES = (('width', 'Width', 'cm'), ('height', 'Height', 'cm'), ('line_count', 'Lines', ''))
+
+    def _trait_chips() -> list:
+        """(chip text, trait key, value) for every active trait; a range is one
+        chip keyed by its prefix ('width', 'height', 'line_count')."""
+        import re
+        traits = current_traits['value']
+        chips = []
+        for key, label in (('script_styles', 'Script Style'), ('script_places', 'Script Place')):
+            options = getattr(trait_refs.get(key), 'options', None) or {}
+            for v in traits.get(key, []):
+                shown = re.sub(r'\s*\([\d,]+\)\s*$', '', str(options.get(v, v)))
+                chips.append((f"{tr(label)}: {shown}", key, v))
+        for prefix, label, unit in _TRAIT_RANGES:
+            lo, hi = traits.get(f'{prefix}_min'), traits.get(f'{prefix}_max')
+            if lo is None and hi is None:
+                continue
+            if lo is not None and hi is not None:
+                span = f"{lo:g}–{hi:g}"
+            else:
+                span = f"≥{lo:g}" if lo is not None else f"≤{hi:g}"
+            chips.append((f"{tr(label)}: {span}{' ' + tr(unit) if unit else ''}", prefix, None))
+        for v in traits.get('measurement_material', []):
+            chips.append((f"{tr('Material (measured)')}: {tr(v)}", 'measurement_material', v))
+        return chips
+
+    def _sync_trait_controls():
+        """Show current_traits in the trait controls (no change events: code-set values)."""
+        traits = current_traits['value']
+        for key, ref in trait_refs.items():
+            value = traits.get(key)
+            if key in ('script_styles', 'script_places', 'measurement_material'):
+                ref.value = list(value or [])
+            else:
+                ref.value = '' if value is None else f'{value:g}'
+
+    async def on_traits_changed(_=None):
+        """A trait control changed: read them all, and refresh when that changes the filter."""
+        if not initial_load_complete['value']:
+            return
+        traits = {}
+        for key, ref in trait_refs.items():
+            traits[key] = list(ref.value or []) if isinstance(ref.value, (list, tuple)) else ref.value
+        new = clean_traits(traits)
+        if new == current_traits['value']:
+            return
+        current_traits['value'] = new
+        current_page['value'] = 1
+        await refresh_results()
+
+    async def clear_trait(key, value=None):
+        """Remove one trait value (a list item), or a whole range (key = its prefix)."""
+        traits = dict(current_traits['value'])
+        if value is None:
+            for k in (key, f'{key}_min', f'{key}_max'):
+                traits.pop(k, None)
+        else:
+            traits[key] = [v for v in traits.get(key, []) if v != value]
+        current_traits['value'] = clean_traits(traits)
+        _sync_trait_controls()
+        current_page['value'] = 1
+        await refresh_results()
 
     def _build_text_filter_summary() -> str:
         """Build a human-readable summary of active text filters."""
@@ -1484,6 +1629,8 @@ def create_catalog_browse_page(
         current_editions_filter['value'] = 'all'
         current_library_filter['value'] = []
         current_library_mode['value'] = 'hide'
+        current_traits['value'] = {}
+        _sync_trait_controls()
         safe_user_set('catalog_pgp_filter', 'all')
         safe_user_set('catalog_editions_filter', 'all')
         # DMF-08 (131-04): persist dict shape — NEVER a bare list (D-09/DMF-10).
@@ -1524,6 +1671,7 @@ def create_catalog_browse_page(
             current_text_any['value'],
             current_text_not['value'],
             current_library_filter['value'],  # GAP-F: library selection enables "Search in these results"
+            bool(current_traits['value']),
         ])
 
     def _has_active_filters_excluding_library() -> bool:
@@ -1543,13 +1691,16 @@ def create_catalog_browse_page(
             current_text_all['value'],
             current_text_any['value'],
             current_text_not['value'],
+            # Parallels applies script traits, not measurement ones (no controls for them there).
+            any(current_traits['value'].get(k) for k in ('script_styles', 'script_places')),
         ])
 
-    def _build_incoming_filters(include_library: bool = True) -> dict:
+    def _build_incoming_filters(include_library: bool = True, include_measurements: bool = True) -> dict:
         """Build incoming_filters dict from all active browse filters.
 
         include_library=False strips the library selection from the handoff — used for
         the Parallels target, which cannot apply a library filter (Codex MEDIUM).
+        include_measurements=False strips the measurement traits, for the same target.
         """
         incoming = {}
         if current_domain['value']:
@@ -1581,6 +1732,10 @@ def create_catalog_browse_page(
                 'mode': current_library_mode['value'],
                 'codes': list(current_library_filter['value']),
             }
+        # Script / measurement traits under the names "Search only in..." uses.
+        for key, value in current_traits['value'].items():
+            if include_measurements or key not in BROWSE_MEASUREMENT_TRAITS:
+                incoming[key] = list(value) if isinstance(value, list) else value
         return incoming
 
     def _update_search_buttons():
@@ -1616,11 +1771,13 @@ def create_catalog_browse_page(
         from the handoff (include_library=False) so it is not silently dropped, and tell
         the user if they had a library selection that won't carry over.
         """
-        incoming = _build_incoming_filters(include_library=False)
+        incoming = _build_incoming_filters(include_library=False, include_measurements=False)
         if not incoming:
             return
         if current_library_filter['value']:
             ui.notify(tr('Library filter is not applied to parallel search'), type='info')
+        if any(k in current_traits['value'] for k in BROWSE_MEASUREMENT_TRAITS):
+            ui.notify(tr('Size filters are not applied to parallel search'), type='info')
         # Class N/A — bare write, no wrapper. safe_user_set absorbs prune-race.
         safe_user_set('incoming_filters', incoming)
         ui.navigate.to('/parallels')
@@ -1944,6 +2101,42 @@ def create_catalog_browse_page(
                     ).classes('mt-1').props('dense')
                     undated_checkbox_ref['ref'] = undated_cb
 
+                # Script and size card: list manuscripts by a trait, no text needed.
+                # Script options load after the page renders (_load_script_options).
+                with ui.card().classes('w-full p-4 mt-2').mark('catalog-traits-card'):
+                    ui.label(tr('Script and size')).classes(
+                        'text-sm font-bold uppercase tracking-wide mb-2'
+                    ).style('color: var(--text-secondary)')
+                    for key, label in (('script_styles', tr('Script Style')),
+                                       ('script_places', tr('Script Place'))):
+                        sel = ui.select(
+                            options={}, multiple=True, with_input=True, clearable=True,
+                            label=label, value=list(current_traits['value'].get(key, [])),
+                        ).props('dense outlined use-chips').classes('w-full mt-1')
+                        sel.on('update:model-value', on_traits_changed)
+                        trait_refs[key] = sel
+                    if meas_ok:
+                        for prefix, label in (('width', tr('Width (cm)')), ('height', tr('Height (cm)')),
+                                              ('line_count', tr('Lines'))):
+                            with ui.row().classes('w-full items-center gap-2 mt-2 no-wrap'):
+                                ui.label(label).classes('text-xs').style('min-width: 72px')
+                                for bound, placeholder in (('min', tr('Min')), ('max', tr('Max'))):
+                                    inp = ui.input(placeholder=placeholder).props(
+                                        'dense outlined type=number'
+                                    ).classes('flex-1').style('min-width: 0')
+                                    inp.on('change', on_traits_changed)
+                                    trait_refs[f'{prefix}_{bound}'] = inp
+                        mat = ui.select(
+                            {m: tr(m) for m in MEASUREMENT_MATERIALS}, multiple=True, clearable=True,
+                            label=tr('Material (measured)'),
+                        ).props('dense outlined use-chips').classes('w-full mt-2')
+                        mat.on('update:model-value', on_traits_changed)
+                        trait_refs['measurement_material'] = mat
+                    ui.label(tr('Only manuscripts with a recorded value are included.')).classes(
+                        'text-xs mt-2'
+                    ).style('color: var(--text-muted)')
+                    _sync_trait_controls()
+
                 # Text Filter Card
                 with ui.card().classes('w-full p-4 mt-2'):
                     ui.label(tr('Text Filter')).classes(
@@ -2005,6 +2198,7 @@ def create_catalog_browse_page(
     _has_url_params = any([
         initial_domain, initial_author, initial_work,
         initial_text_all, initial_text_any, initial_text_not,
+        initial_traits,
     ])
 
     async def _restore_session_filters():
@@ -2059,7 +2253,24 @@ def create_catalog_browse_page(
         if state.get('text_not'):
             current_text_not['value'] = state['text_not']
             restored = True
+        traits = _drop_unavailable_traits(clean_traits(state.get('traits')))
+        if traits:
+            current_traits['value'] = traits
+            _sync_trait_controls()
+            restored = True
         return restored
+
+    async def _load_script_options():
+        """Fill the two script selects (their choices read the sidecar: off the loop)."""
+        from web.components.filter_panel import build_script_options
+        options = await run.io_bound(build_script_options, lang)
+        if not options:
+            return  # cancelled, app stopping, or no catalog: the selects stay empty
+        for key, opts in options.items():
+            sel = trait_refs.get(key)
+            if sel is not None:
+                sel.options = opts
+                sel.update()
 
     async def initial_load():
         """Load initial data and fetch results on page open."""
@@ -2072,6 +2283,7 @@ def create_catalog_browse_page(
                 logger.warning("catalog_browse: filter restore failed", exc_info=True)
             await fetch_authors()
             await fetch_works()
+            await _load_script_options()
             await refresh_results()
         finally:
             initial_load_complete['value'] = True

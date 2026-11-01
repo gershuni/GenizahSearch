@@ -2795,6 +2795,9 @@ TRANSLATIONS = {
     "Script Place": "מקום כתב",
     "From the catalogue records: manuscripts whose records do not describe the script are not included.":
         "לפי המידע הקטלוגי; כתבי יד שהכתב שלהם לא תואר בו אינם נכללים.",
+    "Script and size": "כתב ומידות",
+    "Only manuscripts with a recorded value are included.": "נכללים רק כתבי יד שיש להם ערך רשום.",
+    "Size filters are not applied to parallel search": "סינון לפי מידות אינו חל על חיפוש מקבילות",
 
     # --- Catalog Dialog Sections ---
     "Shelfmark Description": "תיאור מספר מדף",

@@ -95,6 +95,122 @@ SCRIPT_FILTER_CATEGORIES = {
 # Recorded values that describe no script: never offered as a choice.
 _SCRIPT_NON_VALUES = frozenset({'Unknown', 'Cannot be determined'})
 
+# Traits Catalog Browse lists manuscripts by (a ``traits`` dict of these keys):
+# the script filters and the measurement filters of "Search only in...",
+# with the same meaning as the get_filter_sys_ids arguments of the same names.
+BROWSE_SCRIPT_TRAITS = tuple(SCRIPT_FILTER_CATEGORIES)
+BROWSE_MEASUREMENT_TRAITS = (
+    'width_min', 'width_max', 'height_min', 'height_max',
+    'line_count_min', 'line_count_max', 'measurement_material',
+)
+BROWSE_TRAIT_KEYS = BROWSE_SCRIPT_TRAITS + BROWSE_MEASUREMENT_TRAITS
+# Physical support as manuscript_measurements records it.
+MEASUREMENT_MATERIALS = ('Paper', 'Vellum', 'Papyrus', 'Mix', 'Wood')
+
+
+def clean_traits(traits) -> dict:
+    """The active traits of *traits*: known keys only, lists as lists of
+    strings, bounds as numbers (line counts as ints). Empty values dropped."""
+    out = {}
+    for key, value in (traits or {}).items():
+        if key not in BROWSE_TRAIT_KEYS or value in (None, '', [], ()):
+            continue
+        if key in BROWSE_SCRIPT_TRAITS or key == 'measurement_material':
+            values = [str(v) for v in (value if isinstance(value, (list, tuple, set)) else [value]) if v]
+            if values:
+                out[key] = values
+        else:
+            try:
+                number = float(value)
+                out[key] = int(number) if key.startswith('line_count') else number
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def _script_conditions(script_styles=None, script_places=None):
+    """(conditions, params) restricting ``c.AlmaId`` to manuscripts any of
+    whose catalogue records gives one of the chosen values, per list."""
+    conditions, params = [], []
+    for values, category in ((script_styles, SCRIPT_FILTER_CATEGORIES['script_styles']),
+                             (script_places, SCRIPT_FILTER_CATEGORIES['script_places'])):
+        if values:
+            placeholders = ','.join('?' * len(values))
+            conditions.append(
+                f"c.AlmaId IN ("
+                f"SELECT AlmaId FROM catalog_fields "
+                f"WHERE FieldCategory = ? AND FieldValue IN ({placeholders}))"
+            )
+            params.append(category)
+            params.extend(values)
+    return conditions, params
+
+
+def _measurement_conditions(width_min=None, width_max=None, height_min=None, height_max=None,
+                            line_count_min=None, line_count_max=None,
+                            line_height_min=None, line_height_max=None,
+                            text_density_min=None, text_density_max=None,
+                            measurement_material=None):
+    """(conditions, params) restricting ``c.AlmaId`` by manuscript_measurements;
+    no conditions when no bound is set. Reversed min/max are swapped (D-19)."""
+    width_min, width_max = _normalize_range(width_min, width_max)
+    height_min, height_max = _normalize_range(height_min, height_max)
+    line_count_min, line_count_max = _normalize_range(line_count_min, line_count_max)
+    line_height_min, line_height_max = _normalize_range(line_height_min, line_height_max)
+    text_density_min, text_density_max = _normalize_range(text_density_min, text_density_max)
+
+    mm_conds = []
+    mm_params = []
+    # Width: COALESCE prefers catalog, falls back to computed (review concern #10)
+    # catalog_width_cm = MAX across catalogers from Catalog_Sizes sheet
+    # max_computed_width_cm = MAX across image-derived measurements from Computed_Measurements sheet
+    if width_min is not None:
+        mm_conds.append("COALESCE(m.catalog_width_cm, m.max_computed_width_cm) >= ?")
+        mm_params.append(width_min)
+    if width_max is not None:
+        mm_conds.append("COALESCE(m.catalog_width_cm, m.max_computed_width_cm) <= ?")
+        mm_params.append(width_max)
+    # Height: same COALESCE strategy as width
+    # catalog_height_cm = MAX across catalogers; max_computed_height_cm = MAX across images
+    if height_min is not None:
+        mm_conds.append("COALESCE(m.catalog_height_cm, m.max_computed_height_cm) >= ?")
+        mm_params.append(height_min)
+    if height_max is not None:
+        mm_conds.append("COALESCE(m.catalog_height_cm, m.max_computed_height_cm) <= ?")
+        mm_params.append(height_max)
+    # Line count: avg_num_lines = AVG across unflagged image measurements
+    if line_count_min is not None:
+        mm_conds.append("m.avg_num_lines >= ?")
+        mm_params.append(line_count_min)
+    if line_count_max is not None:
+        mm_conds.append("m.avg_num_lines <= ?")
+        mm_params.append(line_count_max)
+    # Line height (mm): avg_line_height_mm = AVG of Avg_Line_Height_Text_mm (unflagged)
+    if line_height_min is not None:
+        mm_conds.append("m.avg_line_height_mm >= ?")
+        mm_params.append(line_height_min)
+    if line_height_max is not None:
+        mm_conds.append("m.avg_line_height_mm <= ?")
+        mm_params.append(line_height_max)
+    # Text density: avg_text_density = AVG of Text_Density_per10cm (per 10cm^2)
+    if text_density_min is not None:
+        mm_conds.append("m.avg_text_density >= ?")
+        mm_params.append(text_density_min)
+    if text_density_max is not None:
+        mm_conds.append("m.avg_text_density <= ?")
+        mm_params.append(text_density_max)
+    # Material: IN clause for multi-value list (review concern #2)
+    if measurement_material:
+        ph = ','.join('?' * len(measurement_material))
+        mm_conds.append(f"m.material IN ({ph})")
+        mm_params.extend(measurement_material)
+
+    if not mm_conds:
+        return [], []
+    mm_where = " AND ".join(mm_conds)
+    return ([f"c.AlmaId IN (SELECT m.AlmaId FROM manuscript_measurements m WHERE {mm_where})"],
+            mm_params)
+
 # Default sidecar filename
 _SIDECAR_FILENAME = "fjms_enrichment.db"
 _SIDECAR_DIR = "fist_data"
@@ -1426,17 +1542,9 @@ class FjmsService:
                 params.extend(material_exclude)
 
             # Script style / place filters
-            for values, category in ((script_styles, SCRIPT_FILTER_CATEGORIES['script_styles']),
-                                     (script_places, SCRIPT_FILTER_CATEGORIES['script_places'])):
-                if values:
-                    placeholders = ','.join('?' * len(values))
-                    conditions.append(
-                        f"c.AlmaId IN ("
-                        f"SELECT AlmaId FROM catalog_fields "
-                        f"WHERE FieldCategory = ? AND FieldValue IN ({placeholders}))"
-                    )
-                    params.append(category)
-                    params.extend(values)
+            script_conds, script_params = _script_conditions(script_styles, script_places)
+            conditions.extend(script_conds)
+            params.extend(script_params)
 
             # Text filters (FTS5 hybrid: catalog_fts + domain LIKE)
             if text_all or text_any or text_not:
@@ -1496,63 +1604,11 @@ class FjmsService:
 
             # Measurement filters (D-15, D-21) — subquery on manuscript_measurements
             if _has_measurement_filter:
-                # Backend guard: normalize reversed min/max per D-19 (review concern #3)
-                width_min, width_max = _normalize_range(width_min, width_max)
-                height_min, height_max = _normalize_range(height_min, height_max)
-                line_count_min, line_count_max = _normalize_range(line_count_min, line_count_max)
-                line_height_min, line_height_max = _normalize_range(line_height_min, line_height_max)
-                text_density_min, text_density_max = _normalize_range(text_density_min, text_density_max)
-
-                mm_conds = []
-                mm_params = []
-                # Width: COALESCE prefers catalog, falls back to computed (review concern #10)
-                # catalog_width_cm = MAX across catalogers from Catalog_Sizes sheet
-                # max_computed_width_cm = MAX across image-derived measurements from Computed_Measurements sheet
-                if width_min is not None:
-                    mm_conds.append("COALESCE(m.catalog_width_cm, m.max_computed_width_cm) >= ?")
-                    mm_params.append(width_min)
-                if width_max is not None:
-                    mm_conds.append("COALESCE(m.catalog_width_cm, m.max_computed_width_cm) <= ?")
-                    mm_params.append(width_max)
-                # Height: same COALESCE strategy as width
-                # catalog_height_cm = MAX across catalogers; max_computed_height_cm = MAX across images
-                if height_min is not None:
-                    mm_conds.append("COALESCE(m.catalog_height_cm, m.max_computed_height_cm) >= ?")
-                    mm_params.append(height_min)
-                if height_max is not None:
-                    mm_conds.append("COALESCE(m.catalog_height_cm, m.max_computed_height_cm) <= ?")
-                    mm_params.append(height_max)
-                # Line count: avg_num_lines = AVG across unflagged image measurements
-                if line_count_min is not None:
-                    mm_conds.append("m.avg_num_lines >= ?")
-                    mm_params.append(line_count_min)
-                if line_count_max is not None:
-                    mm_conds.append("m.avg_num_lines <= ?")
-                    mm_params.append(line_count_max)
-                # Line height (mm): avg_line_height_mm = AVG of Avg_Line_Height_Text_mm (unflagged)
-                if line_height_min is not None:
-                    mm_conds.append("m.avg_line_height_mm >= ?")
-                    mm_params.append(line_height_min)
-                if line_height_max is not None:
-                    mm_conds.append("m.avg_line_height_mm <= ?")
-                    mm_params.append(line_height_max)
-                # Text density: avg_text_density = AVG of Text_Density_per10cm (per 10cm^2)
-                if text_density_min is not None:
-                    mm_conds.append("m.avg_text_density >= ?")
-                    mm_params.append(text_density_min)
-                if text_density_max is not None:
-                    mm_conds.append("m.avg_text_density <= ?")
-                    mm_params.append(text_density_max)
-                # Material: IN clause for multi-value list (review concern #2)
-                if measurement_material:
-                    ph = ','.join('?' * len(measurement_material))
-                    mm_conds.append(f"m.material IN ({ph})")
-                    mm_params.extend(measurement_material)
-
-                mm_where = " AND ".join(mm_conds)
-                conditions.append(
-                    f"c.AlmaId IN (SELECT m.AlmaId FROM manuscript_measurements m WHERE {mm_where})"
-                )
+                mm_conds, mm_params = _measurement_conditions(
+                    width_min, width_max, height_min, height_max,
+                    line_count_min, line_count_max, line_height_min, line_height_max,
+                    text_density_min, text_density_max, measurement_material)
+                conditions.extend(mm_conds)
                 params.extend(mm_params)
 
             where = " WHERE " + " AND ".join(conditions) if conditions else ""
@@ -2413,8 +2469,9 @@ class FjmsService:
         pgp_sys_ids=None,
         editions_filter=None,
         edition_sys_ids=None,
+        traits=None,
     ):
-        """Build the shared WHERE conditions (domain/author/work/date/text/pgp/editions).
+        """Build the shared WHERE conditions (domain/author/work/date/text/pgp/editions/traits).
 
         Used by both ``get_browse_results`` and ``get_browse_library_facets`` so that
         the facet counts honour the same non-library filters as the browse query.
@@ -2569,6 +2626,18 @@ class FjmsService:
                     f"WHERE t.AlmaId = c.AlmaId)"
                 )
 
+        # Script / measurement traits: the conditions get_filter_sys_ids uses,
+        # so browse and "Search only in..." never disagree about a manuscript.
+        traits = clean_traits(traits)
+        if traits:
+            for conds, prms in (
+                _script_conditions(traits.get('script_styles'), traits.get('script_places')),
+                _measurement_conditions(**{k: v for k, v in traits.items()
+                                           if k in BROWSE_MEASUREMENT_TRAITS}),
+            ):
+                conditions.extend(conds)
+                params.extend(prms)
+
         return conditions, params
 
     def get_browse_results(
@@ -2591,6 +2660,7 @@ class FjmsService:
         library_codes: list = None,
         library_sys_ids=None,
         library_mode: str = 'show_only',
+        traits: dict = None,
     ) -> dict:
         """
         Get paginated browse results matching all provided filters (intersection).
@@ -2637,6 +2707,12 @@ class FjmsService:
                 AlmaId is NOT in the resolved set (denylist / NOT EXISTS).
                 Omitted or unrecognised values fall back to ``'show_only'``
                 (fail-safe, today's behaviour).
+            traits: Script and measurement traits, a dict of BROWSE_TRAIT_KEYS
+                (``{'script_places': ['Spanish'], 'width_min': 10}``), meaning
+                what the get_filter_sys_ids arguments of the same names mean.
+                Measurement traits need the manuscript_measurements table:
+                callers drop them when ``measurement_filters_available()`` is
+                False (a failed query here returns no results).
 
         Returns:
             Dict with keys:
@@ -2666,6 +2742,7 @@ class FjmsService:
                 pgp_sys_ids=pgp_sys_ids,
                 editions_filter=editions_filter,
                 edition_sys_ids=edition_sys_ids,
+                traits=traits,
             )
 
             # SEED-026: library filter.  The token is CONTENT-derived from the
@@ -2774,6 +2851,7 @@ class FjmsService:
         editions_filter=None,
         edition_sys_ids=None,
         sys_id_to_library=None,
+        traits=None,
     ) -> dict:
         """Return true full-set per-library manuscript counts honoring active non-library filters.
 
@@ -2789,7 +2867,7 @@ class FjmsService:
         Args:
             domain, author, work, date_from, date_to, include_undated,
             text_all, text_any, text_not, pgp_filter, pgp_sys_ids,
-            editions_filter, edition_sys_ids:
+            editions_filter, edition_sys_ids, traits:
                 Same semantics as ``get_browse_results`` — the non-library subset.
             sys_id_to_library: A CALLABLE (e.g. a bound
                 ``MetadataManager.get_library_for_id`` method, or a ``dict.get`` bound
@@ -2825,6 +2903,7 @@ class FjmsService:
                 pgp_sys_ids=pgp_sys_ids,
                 editions_filter=editions_filter,
                 edition_sys_ids=edition_sys_ids,
+                traits=traits,
             )
             where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 

@@ -89,6 +89,45 @@ def build_script_sidecar(path) -> str:
     return str(path)
 
 
+# Measurements of the SCRIPT_DATES manuscripts (990004 and 990006 have none).
+# AlmaId: (catalog_width, computed_width, catalog_height, lines, material)
+BROWSE_MEASUREMENTS = {
+    "990001": (12.0, None, 20.0, 18, "Vellum"),
+    "990002": (25.0, None, 30.0, 30, "Paper"),
+    "990003": (None, 15.0, 22.0, 25, "Paper"),  # width only from the images
+    "990005": (30.0, None, 40.0, 40, "Paper"),
+}
+
+
+def build_browse_sidecar(path) -> str:
+    """build_script_sidecar plus what Catalog Browse reads: the catalog's
+    display columns, domains, and manuscript_measurements."""
+    con = sqlite3.connect(str(path))
+    con.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
+    con.execute("INSERT INTO meta VALUES ('version', '5.0.0')")
+    con.execute("CREATE TABLE catalog (AlmaId TEXT, Title TEXT, TitleHeb TEXT, AuthorText TEXT,"
+                " CopyDate TEXT, TextualFrameHeb TEXT, TextualFrameEng TEXT)")
+    con.executemany("INSERT INTO catalog VALUES (?, ?, '', '', ?, '', '')",
+                    [(alma, f"Title {alma}", date) for alma, date in SCRIPT_DATES.items()])
+    con.execute("CREATE TABLE domains (AlmaId TEXT, Domain TEXT, DomainHeb TEXT,"
+                " ParentDomain TEXT, ParentDomainHeb TEXT)")
+    con.execute("INSERT INTO domains VALUES ('990001', 'Liturgy', 'ליטורגיה', NULL, NULL)")
+    con.execute("CREATE TABLE catalog_fields (AlmaId TEXT NOT NULL, UnitCatalogRecId INTEGER NOT NULL,"
+                " FieldCategory TEXT NOT NULL, FieldValue TEXT, FieldValueHeb TEXT)")
+    con.executemany("INSERT INTO catalog_fields VALUES (?, ?, ?, ?, ?)", SCRIPT_FIELDS)
+    con.execute(
+        "CREATE TABLE manuscript_measurements (AlmaId TEXT PRIMARY KEY,"
+        " catalog_width_cm REAL, max_computed_width_cm REAL,"
+        " catalog_height_cm REAL, max_computed_height_cm REAL,"
+        " avg_num_lines REAL, avg_text_density REAL, material TEXT, avg_line_height_mm REAL)")
+    con.executemany(
+        "INSERT INTO manuscript_measurements VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, NULL)",
+        [(alma, *values) for alma, values in BROWSE_MEASUREMENTS.items()])
+    con.commit()
+    con.close()
+    return str(path)
+
+
 # A history summary long enough that truncation can cut between its two
 # brackets: exclude mode puts the script value in a bracket of its own.
 LONG_EXCLUDE = {'include_mode': False, 'domains': ['Bible', 'Liturgy', 'Halakha'],
