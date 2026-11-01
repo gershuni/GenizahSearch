@@ -456,6 +456,11 @@ its summary.
    post-search filters (D20), state migration, render-smoke tests.
 3. **PR 1c — desktop:** `CriteriaDialog`, the Catalog tab, "Search only in...", post-search
    filters (D20), session migration, the domain-tree minimum height.
+   **As built (2026-11-01):** as above, with three differences. (a) The chip text and the post-search
+   matcher are 1b's shared commit (`5a4f2286`, cherry-picked). (b) A session saved with the old
+   measurement bounds keeps its query but not its rows, with a status-bar line ("search again"): it is not
+   re-run at start-up; history entries re-run, as they always did. (c) The century presets keep the web's
+   ranges (`16-19` = 1600-1999, `10th` = 900-999), a quirk both surfaces share; reported, not changed.
 4. **PR 2 — API/MCP:** `filters.criteria`, `/api/criteria`, docs.
 5. **Release (D11)** — one release, web and desktop, after 1a-1c and 2; nothing in between is
    deployed. Before it: the 5.1.0 file built from the fixed base (§6.5); the owner copies it to the

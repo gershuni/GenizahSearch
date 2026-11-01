@@ -12489,12 +12489,12 @@ class GenizahGUI(QMainWindow):
         """Manuscript features: choose criteria, then list the manuscripts that have them."""
         from desktop.dialogs_filter import CriteriaDialog
         dlg = CriteriaDialog(self, self._catalog_criteria)
-        if dlg.dropped_saved_criteria:
-            self._catalog_criteria = {k: v for k, v in self._catalog_criteria.items()
-                                      if k not in dlg.dropped_saved_criteria}
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        self._catalog_set_criteria(dlg.get_criteria())
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._catalog_set_criteria(dlg.get_criteria())
+        elif dlg.dropped_saved_criteria:
+            # Dropped with a notice (this file cannot answer them): gone on Cancel too.
+            self._catalog_set_criteria({k: v for k, v in self._catalog_criteria.items()
+                                        if k not in dlg.dropped_saved_criteria})
 
     def _catalog_set_criteria(self, criteria):
         """Make ``criteria`` the tab's manuscript features and list again."""

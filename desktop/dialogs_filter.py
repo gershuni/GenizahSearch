@@ -973,11 +973,13 @@ def migrate_saved_filters(filters):
     measurement bounds are not restored (R2, owner: "the least work"); a
     search saved with them must not show its stored rows, which were found
     with a filter that is no longer shown -- hence the second value. The
-    criteria are cleaned (a malformed one is dropped). Returns (a new dict,
+    criteria are cleaned (a malformed one is dropped). Returns (a deep copy:
+    a chip removed later must not edit a saved history entry,
     had_old_measurements)."""
+    import copy
     from shared.catalog_criteria import clean_criteria
     from shared.fjms_service import MEASUREMENT_FILTER_KEYS
-    filters = dict(filters or {})
+    filters = copy.deepcopy(dict(filters or {}))
     had_measurements = any(filters.get(k) not in (None, '', [], ()) for k in MEASUREMENT_FILTER_KEYS)
     for key in MEASUREMENT_FILTER_KEYS + _UNSHIPPED_KEYS:
         filters.pop(key, None)
@@ -1016,7 +1018,10 @@ def _value_label(key, value: dict) -> str:
     from shared.catalog_criteria import NOT_RECORDED, value_label
     if value['value'] == NOT_RECORDED:
         return value['label_he'] if _lang() == 'he' else value['label_en']
-    return value_label(key, value['value'], _lang(), {value['value']: value.get('label_he')})
+    label = value_label(key, value['value'], _lang(), {value['value']: value.get('label_he')})
+    # A value the catalogue gives no Hebrew for here (measured Paper, under
+    # "Measured only"): the app's own translation.
+    return tr(label) if label == value['value'] else label
 
 
 def _range_number(text: str):
@@ -1077,6 +1082,7 @@ class CriteriaDialog(QDialog):
         self._controls = {}
         self._pending = {}      # list key -> saved values not yet shown (values still loading)
         self._requested = set()  # (key, source) asked of a values worker
+        self._answers = {}       # (key, source) -> {'values': [...], 'coverage': (n, of)}
         self._count_tag = 0
         self._count_timer = QTimer(self)
         self._count_timer.setSingleShot(True)
@@ -1239,7 +1245,8 @@ class CriteriaDialog(QDialog):
         if key == 'period':
             centuries = QHBoxLayout()
             centuries.setSpacing(2)
-            for lo, hi, text in [(c, c, f"{c + 1}th") for c in range(9, 15)] + [(15, 18, "16-19")]:
+            # The web's presets (Catalog Browse), so both list the same manuscripts.
+            for lo, hi, text in [(c, c, f"{c + 1}th") for c in range(9, 15)] + [(16, 19, "16-19")]:
                 btn = QPushButton(tr(text))
                 btn.setStyleSheet("QPushButton { font-size: 10px; padding: 1px 4px; }")
                 btn.clicked.connect(lambda _c=False, a=lo * 100, b=hi * 100 + 99: self._set_range('period', a, b))
@@ -1305,7 +1312,15 @@ class CriteriaDialog(QDialog):
                        if c.section == section and c.key not in self._unavailable])
 
     def _request(self, needs):
+        """Ask for each (key, source) once; one already answered is shown again
+        from its answer (a source switched back must not wait for a worker)."""
         from desktop.gui_threads import CriterionValuesWorker, _keep_until_finished
+        for need in needs:
+            for kind, answer in self._answers.get(need, {}).items():
+                if kind == 'values':
+                    self._on_values_loaded(*need, answer)
+                else:
+                    self._on_coverage(*need, *answer)
         needs = [n for n in needs if n not in self._requested]
         if not needs:
             return
@@ -1318,6 +1333,7 @@ class CriteriaDialog(QDialog):
         _keep_until_finished(worker)  # after start(): it lets go of a worker not running
 
     def _on_values_loaded(self, key, source, values):
+        self._answers.setdefault((key, source), {})['values'] = values
         controls = self._controls.get(key)
         if controls is None or source != self._source_of(key):
             return
@@ -1350,6 +1366,7 @@ class CriteriaDialog(QDialog):
         widget.addItem(item)
 
     def _on_coverage(self, key, source, recorded, of):
+        self._answers.setdefault((key, source), {})['coverage'] = (recorded, of)
         controls = self._controls.get(key)
         if controls is None or source != self._source_of(key):
             return

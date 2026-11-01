@@ -2519,6 +2519,24 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
   pinned by `tests/fixtures/catalog_numbers_golden.json`.
 - **Function** `copy_span` / `span_label` — a record's copy-date span (ruling D18) and its label (`944–1100`).
 
+## Catalogue criteria on the desktop (PR 1c)
+
+- `desktop/dialogs_filter.py`: **Class** `CriteriaDialog` — "Manuscript features": sections in a list, each
+  section's controls beside it, the live total; opened from the Catalog tab, from "Search only in..." and
+  (with `sections` / `within`) for the post-search filters. **Function** `migrate_saved_filters` — saved
+  pre-search filters as they run today (dates → Period of copy, D18; old measurement bounds dropped, R2);
+  `criteria_unavailable_keys` / `drop_unavailable_criteria` — what a 5.0.0 file is KNOWN unable to answer
+  (rule 9, K-16); `criteria_chip_texts` — chips via `FjmsService.criteria_chips`. `CatalogTraitsDialog` and
+  `build_script_lists` were removed.
+- `desktop/gui_threads.py`: **Class** `CriterionValuesWorker` — a list's values with corpus counts and each
+  criterion's coverage, off the UI thread; **Class** `CriteriaCountWorker` — the dialog's live total and "of
+  which N not recorded" (signal `counted`, not `finished`).
+- `genizah_app.py`: **Class** `_CatalogUncataloguedWorker` — the domain tree's "No catalogue record (N)";
+  `GenizahGUI._catalog_open_criteria_dialog` / `_catalog_set_criteria` / `_catalog_remove_criterion`;
+  `_migrate_saved_pre_search_filters` (history and session restores); `_recompute_post_criteria` /
+  `_open_measurement_filter_dialog` — post-search filters by the panel's rules
+  (`FjmsService.match_result_criteria`, D20).
+
 ## shared/text_normalize.py
 
 - **Function** `strip_nikud` (Line 17) — Remove Hebrew vowel marks (nikud) and cantillation marks from text.
