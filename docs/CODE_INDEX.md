@@ -2526,7 +2526,8 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
   (with `sections` / `within`) for the post-search filters. **Function** `migrate_saved_filters` — saved
   pre-search filters as they run today (dates → Period of copy, D18; old measurement bounds dropped, R2);
   `criteria_unavailable_keys` / `drop_unavailable_criteria` — what a 5.0.0 file is KNOWN unable to answer
-  (rule 9, K-16); `criteria_chip_texts` — chips via `FjmsService.criteria_chips`. `CatalogTraitsDialog` and
+  (rule 9, K-16); `criteria_chip_texts` — chips via `FjmsService.criteria_chips(cached_only=True)`: on the UI
+  thread, labels from the cache only. `CatalogTraitsDialog` and
   `build_script_lists` were removed.
 - `desktop/gui_threads.py`: **Class** `CriterionValuesWorker` — a list's values with corpus counts and each
   criterion's coverage, off the UI thread; **Class** `CriteriaCountWorker` — the dialog's live total and "of
@@ -2535,7 +2536,8 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
   **Class** `_PostCriteriaWorker` — the post-search criteria's matches among the results, off the UI thread;
   **Class** `_CatalogHandoffWorker` — the scope of "Search / Parallel search in these results", off the UI
   thread (`_catalog_hand_off` / `_catalog_on_handoff_scope`); `_warm_criteria_labels` — the chips' Hebrew
-  value labels, read at start-up;
+  value labels, read at start-up by **Class** `_FjmsWarmupThread` (`GenizahGUI._start_fjms_warmup`), whose
+  end draws the chips again (`_redraw_criteria_chips`);
   `GenizahGUI._catalog_open_criteria_dialog` / `_catalog_set_criteria` / `_catalog_remove_criterion`;
   `_migrate_saved_pre_search_filters` (history and session restores); `_recompute_post_criteria` /
   `_open_measurement_filter_dialog` — post-search filters by the panel's rules

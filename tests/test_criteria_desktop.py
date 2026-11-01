@@ -472,6 +472,58 @@ def test_main_window_chips_and_their_removal(svc, monkeypatch):
     assert w.pre_search_filters == {}, "the last criterion gone, no filter is left"
 
 
+def _hebrew(monkeypatch):
+    for module in (genizah_core, genizah_app, dialogs_filter):
+        monkeypatch.setattr(module, 'CURRENT_LANG', 'he')
+
+
+def test_a_chip_never_reads_the_sidecar_on_the_ui_thread(svc, monkeypatch):
+    """1b's 8bb36b78 (GitHub Codex on PR 1b): on a cold cache a Hebrew chip's
+    labels were a sidecar query on the UI thread; it shows the English value
+    until the labels are loaded off it, then the catalogue's Hebrew."""
+    _hebrew(monkeypatch)
+    queried, real = [], svc.get_criterion_values
+    monkeypatch.setattr(svc, 'get_criterion_values', lambda key, **k: queried.append(key) or real(key, **k))
+    [(_key, text)] = dialogs_filter.criteria_chip_texts(EXCEPT_ORIENTAL)
+    assert queried == [], "a chip queried the sidecar"
+    assert 'Oriental' in text
+    hebrew = svc.criterion_value_labels('region')['Oriental']  # what the workers do, off the UI thread
+    queried.clear()
+    [(_key, text)] = dialogs_filter.criteria_chip_texts(EXCEPT_ORIENTAL)
+    assert queried == [] and hebrew in text and 'Oriental' not in text
+
+
+def test_the_start_up_warm_up_draws_the_chips_again_in_hebrew(svc, monkeypatch):
+    """Chips drawn before the labels were loaded (a restored session's) get
+    them when the start-up warm-up ends -- on both main-window bars and the
+    Catalog tab."""
+    from PyQt6.QtCore import QCoreApplication
+    _hebrew(monkeypatch)
+    monkeypatch.setattr(svc, 'pre_warm_caches', lambda: None)
+    w = _catalog_window(EXCEPT_ORIENTAL)
+    host = QWidget()
+    w._catalog_chips_layout = QHBoxLayout(host)
+    w._catalog_clear_all_btn = QPushButton()
+    for prefix in ('', 'comp_'):
+        bar = QWidget()
+        setattr(w, f'{prefix}filter_chip_bar', bar)
+        setattr(w, f'{prefix}filter_chip_bar_layout', QHBoxLayout(bar))
+        setattr(w, f'{prefix}filter_chip_count_label', QLabel())
+    w.pre_search_filters = {'include_mode': True, 'criteria': EXCEPT_ORIENTAL}
+    w._update_filter_chip_bar()
+    w._catalog_update_chips()
+    layouts = (w.filter_chip_bar_layout, w.comp_filter_chip_bar_layout, w._catalog_chips_layout)
+    for layout in layouts:
+        assert any('Oriental' in t for t in _chip_texts(layout)), "the cache was not cold"
+    w._start_fjms_warmup()
+    assert w._fjms_warmup_thread.wait(10000)
+    QCoreApplication.processEvents()
+    hebrew = svc.criterion_value_labels('region', cached_only=True)['Oriental']
+    for layout in layouts:
+        texts = _chip_texts(layout)
+        assert any(hebrew in t for t in texts) and not any('Oriental' in t for t in texts), texts
+
+
 @pytest.mark.parametrize('include_mode,expected', [
     (True, '[include: Bible, Region: Spanish]'),
     (False, '[exclude: Bible] [include: Region: Spanish]'),

@@ -877,6 +877,24 @@ def _warm_criteria_labels(fjms):
                 logger.debug("criteria labels for %s not read: %s", criterion.key, e)
 
 
+class _FjmsWarmupThread(QThread):
+    """Start-up: the FJMS caches the Catalog tab opens with, then (in Hebrew)
+    the catalogue's value labels the criteria chips show, so a chip never
+    reads them on the UI thread (desktop/dialogs_filter.py::criteria_chip_texts)."""
+
+    def __init__(self, fjms, parent=None):
+        super().__init__(parent)
+        self._fjms = fjms
+
+    def run(self):
+        try:
+            self._fjms.pre_warm_caches()
+        except Exception as e:
+            logger.debug(f"FJMS warmup failed: {e}")
+        if CURRENT_LANG == 'he':
+            _warm_criteria_labels(self._fjms)
+
+
 def _format_list_star(in_list=False):
     return "⭐" if in_list else "☆"
 
@@ -2788,27 +2806,33 @@ class GenizahGUI(QMainWindow):
         self._apply_nav_layout(load_app_config().get('nav_layout', 'tabs'))
         self._apply_results_text_level(load_app_config().get(self.RESULTS_TEXT_KEY, 0))
 
-        # Pre-warm FJMS caches in background so catalog browse tab opens instantly.
-        # thread_safe=True is required because the QThread will use the same connection.
+        self._start_fjms_warmup()
+
+    def _start_fjms_warmup(self):
+        """Pre-warm FJMS caches in background so catalog browse tab opens instantly.
+        thread_safe=True is required because the QThread will use the same connection."""
         self._fjms_warmup_thread = None
         try:
             from shared.fjms_service import get_fjms_service
             fjms = get_fjms_service(thread_safe=True)
             if fjms.is_available():
-                class _FjmsWarmupThread(QThread):
-                    def run(self_t):
-                        try:
-                            fjms.pre_warm_caches()
-                        except Exception as e:
-                            logger.debug(f"FJMS warmup failed: {e}")
-                        # The catalogue's Hebrew value labels the criteria chips
-                        # show, so a chip never reads them on the UI thread.
-                        if CURRENT_LANG == 'he':
-                            _warm_criteria_labels(fjms)
-                self._fjms_warmup_thread = _FjmsWarmupThread(self)
+                self._fjms_warmup_thread = _FjmsWarmupThread(fjms, self)
+                # Chips drawn meanwhile (a restored session's) read the labels
+                # from the cache only and showed English values: draw them again.
+                self._fjms_warmup_thread.finished.connect(self._redraw_criteria_chips)
                 self._fjms_warmup_thread.start()
         except Exception:
             pass  # Cache operation failed; continue without cached data
+
+    def _redraw_criteria_chips(self):
+        """The catalogue's Hebrew value labels are loaded: the chips that show
+        criteria, drawn with English values before, get them."""
+        if CURRENT_LANG != 'he':
+            return
+        if (getattr(self, 'pre_search_filters', None) or {}).get('criteria'):
+            self._update_filter_chip_bar()
+        if getattr(self, '_catalog_criteria', None) and hasattr(self, '_catalog_chips_layout'):
+            self._catalog_update_chips()
 
     def _update_corner_login_state(self):
         """Update the login button (and its side-menu twin) based on login state (and Sync lists now,

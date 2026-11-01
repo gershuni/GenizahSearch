@@ -1001,9 +1001,13 @@ def migrate_saved_filters(filters):
 def criteria_chip_texts(criteria) -> list:
     """(key, text) for each criterion, one chip per list or range, values in
     the catalogue's own Hebrew (FjmsService.criteria_chips: never fails for
-    want of a label)."""
+    want of a label). Every caller is on the UI thread, so the labels come
+    from the service's cache only, never a sidecar query (1b's 8bb36b78): a
+    value whose labels are not loaded yet shows in English. They are loaded
+    by the start-up warm-up, which then draws the chips again
+    (genizah_app.py::_FjmsWarmupThread), and by CriterionValuesWorker."""
     from shared.fjms_service import get_fjms_service
-    return get_fjms_service().criteria_chips(criteria, _lang())
+    return get_fjms_service().criteria_chips(criteria, _lang(), cached_only=True)
 
 
 def _lang() -> str:
