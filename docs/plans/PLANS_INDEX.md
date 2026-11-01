@@ -1,6 +1,6 @@
 # GenizahSearch - Plans Index
 
-**Last Updated:** 2026-10-26
+**Last Updated:** 2026-11-01
 
 ---
 
@@ -8,6 +8,7 @@
 
 | Plan | Status | Description |
 |------|--------|-------------|
+| [CATALOGUE_CRITERIA_PLAN.md](CATALOGUE_CRITERIA_PLAN.md) | rev. 4, settled by the owner (2026-11-01); D1-D22, R1-R3 ruled; PR 1a in progress | Find manuscripts by what the FJMS catalogue records (script, language, vocalization, columns, lines, physical status, material, attributes, computed data, bibliography): one criteria list in `shared/`, one FJMS-style panel for Catalog Browse and "Search only in..." on web and desktop, the API |
 | [FGP_SOURCE_FOLDERS_HANDOFF.md](FGP_SOURCE_FOLDERS_HANDOFF.md) | Handoff (2026-10-26); candidate built, not deployed | Where the FGP source-folders work stands, what exists and how to rerun it, the open decisions, the recommended order: release (web + desktop together), the chooser's one-row-per-image rule, the PDF-held Word rows, positions |
 | [FGP_SOURCE_FOLDERS_ASSESSMENT.md](FGP_SOURCE_FOLDERS_ASSESSMENT.md) | Gates 1-5 run (2026-10-25/26), Revisions 12-17 | The two FGP deliveries (FIST file store, word positions) against today's sidecar; the gate plan and its records; rules in FGP_IDENTITY_CREDIT_VISIBILITY_RULES.md, FGP_TEXT_PIPELINE_RULES.md, FGP_CHOOSER_VALIDATION_RULES.md, FGP_POSITIONS_RULES.md |
 | [FGP_DOCX_STRUCTURE_RULES.md](FGP_DOCX_STRUCTURE_RULES.md) | Rulings applied 2026-10-26 (`8ba4111c`) | The Word features that held 17,124 new rows (hidden runs, numbering, tables, footnotes, tracked changes), one rule each, the PDF yardstick, the run record |

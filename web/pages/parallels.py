@@ -25,9 +25,10 @@ from datetime import datetime
 from web.components.typography import h1, h2, h3, h4
 from web.components.filter_panel import (
     build_domain_options, build_author_options, build_work_options,
+    build_script_options, build_script_filter_row,
     build_filter_summary, has_active_filters, persist_value,
     load_filter_state, consume_incoming_filters, recompute_filter_count,
-    create_filter_handlers, filter_unavailable_message,
+    corpus_universe, create_filter_handlers, filter_unavailable_message,
 )
 
 logger = logging.getLogger(__name__)
@@ -253,6 +254,8 @@ def create_parallels_page(initial_text: str = None):
             self.filter_date_from: int = None
             self.filter_date_to: int = None
             self.filter_material_exclude: list = []
+            self.filter_script_styles: list = []
+            self.filter_script_places: list = []
             self.filter_text_all: list = []
             self.filter_text_any: list = []
             self.filter_text_not: list = []
@@ -550,6 +553,8 @@ def create_parallels_page(initial_text: str = None):
                 p_state.filter_date_from = _f.get('date_from')
                 p_state.filter_date_to = _f.get('date_to')
                 p_state.filter_material_exclude = list(_f.get('material_exclude') or [])
+                p_state.filter_script_styles = list(_f.get('script_styles') or [])
+                p_state.filter_script_places = list(_f.get('script_places') or [])
                 p_state.filter_text_all = list(_f.get('text_all') or [])
                 p_state.filter_text_any = list(_f.get('text_any') or [])
                 p_state.filter_text_not = list(_f.get('text_not') or [])
@@ -1911,6 +1916,8 @@ def create_parallels_page(initial_text: str = None):
                             p_state.filter_date_from = None
                             p_state.filter_date_to = None
                             p_state.filter_material_exclude = []
+                            p_state.filter_script_styles = []
+                            p_state.filter_script_places = []
                             p_state.filter_text_all = []
                             p_state.filter_text_any = []
                             p_state.filter_text_not = []
@@ -1924,6 +1931,8 @@ def create_parallels_page(initial_text: str = None):
                             p_date_from_input.value = None
                             p_date_to_input.value = None
                             p_exclude_printed_cb.value = False
+                            _filter_refs['script_styles'].value = []
+                            _filter_refs['script_places'].value = []
                             if _filter_refs.get('text_input'):
                                 _filter_refs['text_input'].value = ''
                             # Reset filter storage to clean defaults
@@ -1934,6 +1943,8 @@ def create_parallels_page(initial_text: str = None):
                             safe_user_set('parallels_filter_date_from', None)
                             safe_user_set('parallels_filter_date_to', None)
                             safe_user_set('parallels_filter_material_exclude', [])
+                            safe_user_set('parallels_filter_script_styles', [])
+                            safe_user_set('parallels_filter_script_places', [])
                             safe_user_set('parallels_filter_text_all', [])
                             safe_user_set('parallels_filter_text_any', [])
                             safe_user_set('parallels_filter_text_not', [])
@@ -1941,6 +1952,9 @@ def create_parallels_page(initial_text: str = None):
 
                         ui.button(tr('Clear All'), icon='clear_all',
                                   on_click=_clear_all_p_adv_filters).props('flat dense no-caps')
+
+                # Script style / place (catalogue)
+                build_script_filter_row(p_state, _filter_refs, tr)
 
                 # Text filter row
                 with ui.row().classes('w-full gap-2 items-end'):
@@ -2128,6 +2142,15 @@ def create_parallels_page(initial_text: str = None):
                             color='red-2',
                         ).on('remove', lambda m=mat: _remove_p_filter('material', m))
 
+                # Script style / place chips
+                for _skey in ('script_styles', 'script_places'):
+                    _sopts = _filter_refs[_skey].options or {}
+                    for _sv in getattr(p_state, f'filter_{_skey}'):
+                        ui.chip(
+                            _get_p_display_name(_sv, _sopts), icon='draw', removable=True,
+                            on_click=lambda: None, color='brown-2',
+                        ).on('remove', lambda _k=_skey, _v=_sv: _remove_p_filter(_k, _v))
+
                 # Text filter chips
                 for t in p_state.filter_text_all:
                     ui.chip(f"+ {t}", icon='check_circle', removable=True,
@@ -2196,6 +2219,11 @@ def create_parallels_page(initial_text: str = None):
                     p_state.filter_material_exclude.remove(value)
                     persist_value('parallels_filter_material_exclude', p_state.filter_material_exclude)
                     p_exclude_printed_cb.value = 'Printed' in p_state.filter_material_exclude
+            elif filter_type in ('script_styles', 'script_places'):
+                _vals = [v for v in getattr(p_state, f'filter_{filter_type}') if v != value]
+                setattr(p_state, f'filter_{filter_type}', _vals)
+                _filter_refs[filter_type].value = list(_vals)
+                persist_value(f'parallels_filter_{filter_type}', _vals)
             asyncio.ensure_future(_recompute_p_filter_count())
             _update_p_chip_bar()
 
@@ -2253,6 +2281,8 @@ def create_parallels_page(initial_text: str = None):
         p_date_from_input.on('blur', _p_handlers['on_date_from_change'])
         p_date_to_input.on('blur', _p_handlers['on_date_to_change'])
         p_exclude_printed_cb.on('update:model-value', _p_handlers['on_exclude_printed_change'])
+        _filter_refs['script_styles'].on('update:model-value', _p_handlers['on_script_styles_change'])
+        _filter_refs['script_places'].on('update:model-value', _p_handlers['on_script_places_change'])
 
         # Initialize chip bar on page load
         _update_p_chip_bar()
@@ -4442,6 +4472,8 @@ def create_parallels_page(initial_text: str = None):
             p_state.filter_date_from = filters.get('date_from')
             p_state.filter_date_to = filters.get('date_to')
             p_state.filter_material_exclude = list(filters.get('material_exclude') or [])
+            p_state.filter_script_styles = list(filters.get('script_styles') or [])
+            p_state.filter_script_places = list(filters.get('script_places') or [])
             p_state.filter_text_all = list(filters.get('text_all') or [])
             p_state.filter_text_any = list(filters.get('text_any') or [])
             p_state.filter_text_not = list(filters.get('text_not') or [])
@@ -4453,6 +4485,10 @@ def create_parallels_page(initial_text: str = None):
             p_date_from_input.value = p_state.filter_date_from
             p_date_to_input.value = p_state.filter_date_to
             p_exclude_printed_cb.value = 'Printed' in p_state.filter_material_exclude
+            _filter_refs['script_styles'].value = list(p_state.filter_script_styles)
+            _filter_refs['script_places'].value = list(p_state.filter_script_places)
+            persist_value('parallels_filter_script_styles', p_state.filter_script_styles)
+            persist_value('parallels_filter_script_places', p_state.filter_script_places)
             # Persist restored filters
             persist_value('parallels_filter_domains', p_state.filter_domains)
             persist_value('parallels_filter_authors', p_state.filter_authors)
@@ -4820,6 +4856,8 @@ def create_parallels_page(initial_text: str = None):
                 date_from=p_state.filter_date_from,
                 date_to=p_state.filter_date_to,
                 material_exclude=_copied(p_state.filter_material_exclude),
+                script_styles=_copied(p_state.filter_script_styles),
+                script_places=_copied(p_state.filter_script_places),
                 text_all=_copied(p_state.filter_text_all),
                 text_any=_copied(p_state.filter_text_any),
                 text_not=_copied(p_state.filter_text_not),
@@ -4852,7 +4890,7 @@ def create_parallels_page(initial_text: str = None):
                 # raises FilterUnavailable (handled below) instead of running
                 # the search over the whole corpus (#17).
                 fjms = get_fjms_service(thread_safe=True)
-                return fjms.get_filter_sys_ids(**filter_kwargs)
+                return fjms.get_filter_sys_ids(universe=corpus_universe(), **filter_kwargs)
 
             from shared.fjms_service import FilterUnavailable
             try:
@@ -5155,6 +5193,8 @@ def create_parallels_page(initial_text: str = None):
                     'date_from': getattr(p_state, 'filter_date_from', None),
                     'date_to': getattr(p_state, 'filter_date_to', None),
                     'material_exclude': list(getattr(p_state, 'filter_material_exclude', None) or []),
+                    'script_styles': list(getattr(p_state, 'filter_script_styles', None) or []),
+                    'script_places': list(getattr(p_state, 'filter_script_places', None) or []),
                     'text_all': list(getattr(p_state, 'filter_text_all', None) or []),
                     'text_any': list(getattr(p_state, 'filter_text_any', None) or []),
                     'text_not': list(getattr(p_state, 'filter_text_not', None) or []),
@@ -5364,6 +5404,8 @@ def create_parallels_page(initial_text: str = None):
                                 'date_from': p_state.filter_date_from,
                                 'date_to': p_state.filter_date_to,
                                 'material_exclude': list(p_state.filter_material_exclude or []),
+                                'script_styles': list(p_state.filter_script_styles or []),
+                                'script_places': list(p_state.filter_script_places or []),
                                 'text_all': list(p_state.filter_text_all or []),
                                 'text_any': list(p_state.filter_text_any or []),
                                 'text_not': list(p_state.filter_text_not or []),
@@ -6715,6 +6757,12 @@ def create_parallels_page(initial_text: str = None):
         p_work_select.options = w
         p_work_select.props(remove='loading')
         p_work_select.update()
+        s = await run.io_bound(build_script_options, lang)
+        if s is None:
+            return
+        for _skey, _sopts in s.items():
+            _filter_refs[_skey].options = _sopts
+            _filter_refs[_skey].update()
         _update_p_chip_bar()
 
     async def _deferred_p_filter_init_wrapper():

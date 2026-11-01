@@ -2496,6 +2496,29 @@ reads shelfmarks as the NLI catalogue writes them (`Cambridge University Library
 - **Function** `t1_exact_entries` — the resolver's exact candidates for many inputs, with the prefix rule (`scoped=False`: without it); pinned to the baseline by `tests/test_catalog_shelfmark_real.py`.
 - **Function** `resolve_many` — exact stage + union of candidates (D0 unpadded exact within the institution, long form, Mosseri `Moss.` form, rest within the institution, the whole input for a named alias, whole input when none named; Mosseri parent only if empty), one pass for many inputs. `prefix_rule=False` answers as before the library-prefix rule (the real-data gate's comparison).
 
+## shared/catalog_criteria.py
+
+Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): one definition of every
+"manuscript feature" for Catalog Browse, "Search only in..." and the API. Must not import
+`shared.fjms_service` (which imports it).
+
+- **Constants** `SECTIONS`, `CRITERIA` / `BY_KEY` — sections (FJMS's Hebrew names) and criteria (list / range,
+  sources, `catalog_fields` category, `criteria_values` / `criteria_numbers` key, measured-page column);
+  `ATTRIBUTES` — the attribute conditions (also used by the 5.1.0 migration); `NOT_RECORDED` (`"_none"`).
+- **Function** `clean_criteria` — the canonical list / range shapes; strict (API) or drop-and-report.
+- **Function** `criteria_to_params` / `criteria_from_params` — the address grammar of D8
+  (`region=!Oriental`, `material=cat:Vellum,_none`, `lines=meas:20..25`, `columns=_none`).
+- **Function** `match_criteria` — the matching sys_ids: any record, all except = universe − only, Not recorded
+  per source (uncatalogued included), one measured page for every measured range, one catalogue size
+  record; raises `CriteriaUnavailable` ('column_missing' / 'corpus_unavailable').
+- **Function** `criterion_values` — a list criterion's choices with corpus counts, Unknown last, then Not recorded.
+
+## shared/catalog_numbers.py
+
+- **Function** `parse_number_text` — the catalogue's free-text line / column counts as intervals (ruling D7);
+  pinned by `tests/fixtures/catalog_numbers_golden.json`.
+- **Function** `copy_span` / `span_label` — a record's copy-date span (ruling D18) and its label (`944–1100`).
+
 ## shared/text_normalize.py
 
 - **Function** `strip_nikud` (Line 17) — Remove Hebrew vowel marks (nikud) and cantillation marks from text.

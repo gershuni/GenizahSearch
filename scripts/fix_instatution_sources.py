@@ -26,11 +26,19 @@ For `catalog_free_desc` the join is via the row's SignatureId directly
 Idempotent: only UPDATEs rows where SourceName='Instatution' — safe to
 rerun; never overwrites already-correct names.
 
+Must run AFTER every re-export (scripts/export_fist_enrichment.py rebuilds
+both tables and undoes it -- that is how the fix was lost in May 2026), and
+before scripts/migrate_fjms_criteria.py, which refuses a file that still has
+'Instatution' rows.
+
 Usage
 -----
     python scripts/fix_instatution_sources.py              # dry-run
     python scripts/fix_instatution_sources.py --apply      # commit changes
     python scripts/fix_instatution_sources.py --sample ID  # dry-run single sys_id
+    python scripts/fix_instatution_sources.py --db COPY.db --apply  # a copy
+
+Even a dry run opens the enrichment file writable: run it on a copy.
 
 Exit codes
 ----------
@@ -238,10 +246,20 @@ def backup_enrichment() -> Path:
 
 
 def main() -> int:
+    global ENRICHMENT_DB, FIST_DB
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--apply", action="store_true", help="Commit changes to enrichment DB")
     ap.add_argument("--sample", metavar="ALMA_ID", help="Dry-run single sys_id (e.g. 990051720350205171)")
+    ap.add_argument("--db", metavar="PATH", help=f"enrichment file to fix (default {ENRICHMENT_DB})")
+    ap.add_argument("--fist", metavar="PATH", help=f"FIST.db to resolve names from (default {FIST_DB})")
+    ap.add_argument("--no-backup", action="store_true",
+                    help="skip the backup copy (when --db is already a copy of the original)")
     args = ap.parse_args()
+
+    if args.db:
+        ENRICHMENT_DB = Path(args.db)
+    if args.fist:
+        FIST_DB = Path(args.fist)
 
     if not FIST_DB.exists():
         log(f"FATAL: {FIST_DB} not found")
@@ -301,8 +319,11 @@ def main() -> int:
             return 0
 
         # APPLY mode
-        backup = backup_enrichment()
-        log(f"Backup written: {backup}")
+        if args.no_backup:
+            log("Backup skipped (--no-backup)")
+        else:
+            backup = backup_enrichment()
+            log(f"Backup written: {backup}")
 
         # Show before-counts for observability
         before_cat = enrich_conn.execute(

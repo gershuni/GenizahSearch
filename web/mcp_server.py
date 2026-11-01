@@ -159,6 +159,11 @@ class SearchFilters(BaseModel):
     authors: list[str] | None = None
     works: list[str] | None = None
     materials: list[str] | None = Field(None, description='Physical support (paper, parchment), not genre.')
+    script_styles: list[str] | None = Field(
+        None, description='Catalogued script style: Square, Semi-Cursive, Cursive, Rabbinical, Naskhi, Karaitic.')
+    script_places: list[str] | None = Field(
+        None, description='Catalogued script place: Oriental, Spanish, Syrian, Yemenite, Ashkenazi, '
+                          'North African, Italian, Byzantine, Persian.')
     library: list[str] | None = Field(None, description='Known library codes, e.g. CUL, JTS, Oxford.')
     library_filter_mode: Literal['include', 'exclude'] | None = None
     date_from: int | None = Field(None, strict=True)

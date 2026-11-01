@@ -1,7 +1,7 @@
 """Regression tests for Composition Search printed filtering."""
 
 import os
-from types import MethodType
+from types import MethodType, SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -187,9 +187,10 @@ class _Signal:
 class _FilterWorker:
     instances = []
 
-    def __init__(self, filters, parent):
+    def __init__(self, filters, parent, universe=None):
         self.filters = filters
         self.parent = parent
+        self.universe = universe   # the corpus list, for Hide filters (D17)
         self.finished = _Signal()
         self.failed = _Signal()   # #17: the dialog also handles a lookup that could not run
         self.started = False
@@ -213,6 +214,24 @@ class _FilterDialogHarness:
 
     def _get_current_filter_dict(self):
         return dict(self.filters)
+
+    def parent(self):
+        return getattr(self, "owner", None)
+
+
+def test_the_count_reads_the_corpus_from_the_main_window(monkeypatch):
+    monkeypatch.setattr(dialogs_filter, "FilterCountWorker", _FilterWorker)
+    _FilterWorker.instances.clear()
+    dialog = _FilterDialogHarness()
+    corpus = lambda timeout=30.0: frozenset({"990001000205171"})  # noqa: E731
+    dialog.owner = SimpleNamespace(meta_mgr=SimpleNamespace(corpus_sys_ids=corpus))
+
+    dialogs_filter.PreSearchFilterDialog._update_count(dialog)
+    assert _FilterWorker.instances[-1].universe is corpus
+
+    dialog.owner = None   # no main window: catalogued manuscripts only
+    dialogs_filter.PreSearchFilterDialog._update_count(dialog)
+    assert _FilterWorker.instances[-1].universe is None
 
 
 def test_focus_search_waits_for_latest_filter_result(monkeypatch):

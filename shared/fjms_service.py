@@ -9,9 +9,11 @@ database. Used by both the web app and desktop app.
 All methods handle errors gracefully, returning empty results rather than
 raising exceptions. When the sidecar database is missing, the service
 degrades gracefully (is_available() returns False, all queries return empty).
-The exception is get_filter_sys_ids: an active filter it cannot evaluate
-raises FilterUnavailable, because an empty result there would mean "no
-manuscript matches" and None would mean "no filter" (#17).
+The exceptions are get_filter_sys_ids and Catalog Browse
+(get_browse_results, get_browse_library_facets): an active filter they
+cannot evaluate raises FilterUnavailable, because an empty result there
+would mean "no manuscript matches" and None would mean "no filter" (#17;
+docs/plans/CATALOGUE_CRITERIA_PLAN.md rule 9).
 
 Thread-safe: uses per-thread SQLite connections via ThreadLocalConnection
 so concurrent NiceGUI run.io_bound() calls each get their own connection.
@@ -28,6 +30,10 @@ from pathlib import Path
 from typing import Optional
 
 from shared import domain_hierarchy as _domain_hierarchy
+from shared.catalog_numbers import span_label
+from shared.catalog_criteria import (
+    CriteriaUnavailable, clean_criteria, criteria_token, criterion_values, match_criteria,
+)
 from shared.thread_local_db import ThreadLocalConnection
 # Phase 78 (Concern #3): APIError from neutral shared module — NOT from web layer.
 # Plan 03 R2-#3: validate_filter_values uses APIError to fail closed when
@@ -54,10 +60,13 @@ class FilterUnavailable(RuntimeError):
                                ``filters`` names which: ('line_height',) or
                                ('measurements',);
       'query_failed'        -- the SQL raised (I/O error, locked or replaced
-                               file, per-thread connection failed to open).
+                               file, per-thread connection failed to open);
+      'corpus_unavailable'  -- a criterion needs the list of every corpus
+                               manuscript (Not recorded, all except, Catalog
+                               Browse over the corpus) and the caller had none.
     """
 
-    REASONS = ('sidecar_unavailable', 'column_missing', 'query_failed')
+    REASONS = ('sidecar_unavailable', 'column_missing', 'query_failed', 'corpus_unavailable')
 
     def __init__(self, reason='query_failed', message='', filters=()):
         # No validation that raises: BaseException pickling re-calls
@@ -85,6 +94,131 @@ MEASUREMENT_FILTER_KEYS = (
     'line_count_min', 'line_count_max', 'line_height_min', 'line_height_max',
     'text_density_min', 'text_density_max', 'measurement_material',
 )
+
+# Script filters: the script style and script place the catalogue records give
+# (catalog_fields, one row per catalogue record). Filter key -> FieldCategory.
+SCRIPT_FILTER_CATEGORIES = {
+    'script_styles': 'TypeOfScriptStyle',
+    'script_places': 'TypeOfScriptPlace',
+}
+# Recorded values that describe no script: never offered as a choice.
+_SCRIPT_NON_VALUES = frozenset({'Unknown', 'Cannot be determined'})
+
+# Traits Catalog Browse lists manuscripts by (a ``traits`` dict of these keys):
+# the script filters and the measurement filters of "Search only in...",
+# with the same meaning as the get_filter_sys_ids arguments of the same names.
+BROWSE_SCRIPT_TRAITS = tuple(SCRIPT_FILTER_CATEGORIES)
+BROWSE_MEASUREMENT_TRAITS = (
+    'width_min', 'width_max', 'height_min', 'height_max',
+    'line_count_min', 'line_count_max', 'measurement_material',
+)
+BROWSE_TRAIT_KEYS = BROWSE_SCRIPT_TRAITS + BROWSE_MEASUREMENT_TRAITS
+# Physical support as manuscript_measurements records it.
+MEASUREMENT_MATERIALS = ('Paper', 'Vellum', 'Papyrus', 'Mix', 'Wood')
+
+
+def clean_traits(traits) -> dict:
+    """The active traits of *traits*: known keys only, lists as lists of
+    strings, bounds as numbers (line counts as ints). Empty values dropped."""
+    out = {}
+    for key, value in (traits or {}).items():
+        if key not in BROWSE_TRAIT_KEYS or value in (None, '', [], ()):
+            continue
+        if key in BROWSE_SCRIPT_TRAITS or key == 'measurement_material':
+            values = [str(v) for v in (value if isinstance(value, (list, tuple, set)) else [value]) if v]
+            if values:
+                out[key] = values
+        else:
+            try:
+                number = float(value)
+                out[key] = int(number) if key.startswith('line_count') else number
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def _script_conditions(script_styles=None, script_places=None):
+    """(conditions, params) restricting ``c.AlmaId`` to manuscripts any of
+    whose catalogue records gives one of the chosen values, per list."""
+    conditions, params = [], []
+    for values, category in ((script_styles, SCRIPT_FILTER_CATEGORIES['script_styles']),
+                             (script_places, SCRIPT_FILTER_CATEGORIES['script_places'])):
+        if values:
+            placeholders = ','.join('?' * len(values))
+            conditions.append(
+                f"c.AlmaId IN ("
+                f"SELECT AlmaId FROM catalog_fields "
+                f"WHERE FieldCategory = ? AND FieldValue IN ({placeholders}))"
+            )
+            params.append(category)
+            params.extend(values)
+    return conditions, params
+
+
+def _measurement_conditions(width_min=None, width_max=None, height_min=None, height_max=None,
+                            line_count_min=None, line_count_max=None,
+                            line_height_min=None, line_height_max=None,
+                            text_density_min=None, text_density_max=None,
+                            measurement_material=None):
+    """(conditions, params) restricting ``c.AlmaId`` by manuscript_measurements;
+    no conditions when no bound is set. Reversed min/max are swapped (D-19)."""
+    width_min, width_max = _normalize_range(width_min, width_max)
+    height_min, height_max = _normalize_range(height_min, height_max)
+    line_count_min, line_count_max = _normalize_range(line_count_min, line_count_max)
+    line_height_min, line_height_max = _normalize_range(line_height_min, line_height_max)
+    text_density_min, text_density_max = _normalize_range(text_density_min, text_density_max)
+
+    mm_conds = []
+    mm_params = []
+    # Width: COALESCE prefers catalog, falls back to computed (review concern #10)
+    # catalog_width_cm = MAX across catalogers from Catalog_Sizes sheet
+    # max_computed_width_cm = MAX across image-derived measurements from Computed_Measurements sheet
+    if width_min is not None:
+        mm_conds.append("COALESCE(m.catalog_width_cm, m.max_computed_width_cm) >= ?")
+        mm_params.append(width_min)
+    if width_max is not None:
+        mm_conds.append("COALESCE(m.catalog_width_cm, m.max_computed_width_cm) <= ?")
+        mm_params.append(width_max)
+    # Height: same COALESCE strategy as width
+    # catalog_height_cm = MAX across catalogers; max_computed_height_cm = MAX across images
+    if height_min is not None:
+        mm_conds.append("COALESCE(m.catalog_height_cm, m.max_computed_height_cm) >= ?")
+        mm_params.append(height_min)
+    if height_max is not None:
+        mm_conds.append("COALESCE(m.catalog_height_cm, m.max_computed_height_cm) <= ?")
+        mm_params.append(height_max)
+    # Line count: avg_num_lines = AVG across unflagged image measurements
+    if line_count_min is not None:
+        mm_conds.append("m.avg_num_lines >= ?")
+        mm_params.append(line_count_min)
+    if line_count_max is not None:
+        mm_conds.append("m.avg_num_lines <= ?")
+        mm_params.append(line_count_max)
+    # Line height (mm): avg_line_height_mm = AVG of Avg_Line_Height_Text_mm (unflagged)
+    if line_height_min is not None:
+        mm_conds.append("m.avg_line_height_mm >= ?")
+        mm_params.append(line_height_min)
+    if line_height_max is not None:
+        mm_conds.append("m.avg_line_height_mm <= ?")
+        mm_params.append(line_height_max)
+    # Text density: avg_text_density = AVG of Text_Density_per10cm (per 10cm^2)
+    if text_density_min is not None:
+        mm_conds.append("m.avg_text_density >= ?")
+        mm_params.append(text_density_min)
+    if text_density_max is not None:
+        mm_conds.append("m.avg_text_density <= ?")
+        mm_params.append(text_density_max)
+    # Material: IN clause for multi-value list (review concern #2)
+    if measurement_material:
+        ph = ','.join('?' * len(measurement_material))
+        mm_conds.append(f"m.material IN ({ph})")
+        mm_params.extend(measurement_material)
+
+    if not mm_conds:
+        return [], []
+    mm_where = " AND ".join(mm_conds)
+    return ([f"c.AlmaId IN (SELECT m.AlmaId FROM manuscript_measurements m WHERE {mm_where})"],
+            mm_params)
 
 # Default sidecar filename
 _SIDECAR_FILENAME = "fjms_enrichment.db"
@@ -755,6 +889,59 @@ _FJMS_CHILD_IDX = _domain_hierarchy.FJMS_CHILD_IDX
 _FJMS_SUBCHILD_IDX = _domain_hierarchy.FJMS_SUBCHILD_IDX
 
 
+def _resolve_universe(universe):
+    """A universe given as a set, a callable returning one, or None."""
+    universe = universe() if callable(universe) else universe
+    # A frozenset, so that its hash (the cache key) is computed once.
+    if universe is not None and not isinstance(universe, frozenset):
+        universe = frozenset(universe)
+    return universe
+
+
+def _universe_token(universe):
+    """A cache key for a universe: the set itself, compared in full (neither
+    its size nor its hash alone -- two corpora must never share cached
+    results). Wrapped in a tuple, whose comparison checks identity first, so
+    the usual case (the one cached corpus object) costs no set comparison."""
+    if universe is None:
+        return None
+    return (universe if isinstance(universe, frozenset) else frozenset(universe),)
+
+
+def _sidecar_version(path: Optional[str]) -> Optional[tuple]:
+    """meta.version of a sidecar as a tuple of ints, or None when the file is
+    missing, unreadable or unversioned. Read-only: never creates a file."""
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{Path(path).as_posix()}?mode=ro", uri=True, timeout=5.0)
+        try:
+            row = conn.execute("SELECT value FROM meta WHERE key = 'version'").fetchone()
+        finally:
+            conn.close()
+        return tuple(int(part) for part in str(row[0]).split(".")) if row else None
+    except Exception:
+        return None
+
+
+def _choose_sidecar(user_path: Optional[str], bundled_path: Optional[str]) -> Optional[str]:
+    """The desktop's downloaded copy (%LOCALAPPDATA%) wins only when it is at
+    least as new as the bundled one, so an installer that ships a newer file
+    (5.1.0, the catalogue criteria) is not masked by an older download."""
+    user_ok = bool(user_path) and os.path.isfile(user_path)
+    bundled_ok = bool(bundled_path) and os.path.isfile(bundled_path)
+    if user_ok and bundled_ok:
+        user_v, bundled_v = _sidecar_version(user_path), _sidecar_version(bundled_path)
+        if user_v is not None and (bundled_v is None or user_v >= bundled_v):
+            return user_path
+        logger.info("FjmsService: bundled sidecar %s is newer than the downloaded %s",
+                    bundled_v, user_v)
+        return bundled_path
+    if user_ok:
+        return user_path
+    return bundled_path
+
+
 class FjmsService:
     """Service for accessing FJMS enrichment data from the SQLite sidecar."""
 
@@ -795,6 +982,9 @@ class FjmsService:
         # None = not yet computed. Empty set = computed but vocabulary is empty
         # (which validate_filter_values treats as fail-closed, NOT allow-all).
         self._materials_cache: Optional[set] = None
+        # Script filter choices per filter key (see get_script_values).
+        self._script_values_cache: dict = {}
+        self._script_values_lock = threading.Lock()
         # SEED-023: per-thread registry of populated catalog-filter TEMP tables
         # (name -> token). The PGP/edition membership sets are static per process,
         # so each thread's TEMP table is built once and reused across requests.
@@ -816,12 +1006,9 @@ class FjmsService:
                     os.environ.get('LOCALAPPDATA', ''),
                     'GenizahSearchPro', 'data', _SIDECAR_DIR, _SIDECAR_FILENAME
                 )
-                if os.path.isfile(user_path):
-                    db_path = user_path
-                else:
-                    root = _find_project_root()
-                    if root:
-                        db_path = str(root / _SIDECAR_DIR / _SIDECAR_FILENAME)
+                root = _find_project_root()
+                bundled = str(root / _SIDECAR_DIR / _SIDECAR_FILENAME) if root else None
+                db_path = _choose_sidecar(user_path, bundled)
 
         if db_path is None:
             logger.warning("FjmsService: No db_path provided and project root not found")
@@ -1126,6 +1313,10 @@ class FjmsService:
         line_height_min: float = None, line_height_max: float = None,
         text_density_min: float = None, text_density_max: float = None,
         measurement_material: list[str] = None,
+        script_styles: list[str] = None,
+        script_places: list[str] = None,
+        criteria: dict = None,
+        universe=None,
     ) -> Optional[set]:
         """Return the set of sys_ids matching all provided filter criteria (intersection).
 
@@ -1155,6 +1346,23 @@ class FjmsService:
             text_all: FTS5 terms that must ALL appear (AND).
             text_any: FTS5 terms where ANY must appear (OR).
             text_not: FTS5 terms that must NOT appear.
+            script_styles: Script styles (TypeOfScriptStyle values, e.g. 'Square').
+            script_places: Script places (TypeOfScriptPlace values, e.g. 'Spanish').
+                A manuscript matches when any of its catalogue records gives one
+                of the chosen values; the two filters AND with each other and
+                with the rest. Not affected by include/exclude mode.
+            criteria: Catalogue criteria (shared/catalog_criteria.py), ANDed
+                with everything else.
+            universe: The set of every corpus sys_id, or a callable returning
+                it (``MetadataManager.corpus_sys_ids``, called only when
+                needed, so a search without such filters never waits for
+                libraries.csv). With it, uncatalogued manuscripts can match: criteria such as
+                "not recorded" select them (D14), and when every older filter
+                set is an exclusion (Exclude domains/authors/works/material,
+                text "not") they pass it, since nothing says they belong to
+                what is excluded (D17). Without it the older filters answer
+                for catalogued manuscripts only, as before, and criteria that
+                need it raise FilterUnavailable('corpus_unavailable').
 
         Returns:
             None when ALL filter params are None/empty (meaning "no restriction").
@@ -1176,8 +1384,10 @@ class FjmsService:
         if work is not None and not works:
             works = [work]
 
+        criteria = clean_criteria(criteria)[0] if criteria else {}
+
         # Fast path: no filters active -> None means "no restriction"
-        has_any = (
+        old_active = bool(
             domains
             or domains_exclude
             or authors
@@ -1197,8 +1407,10 @@ class FjmsService:
             or line_height_min is not None or line_height_max is not None
             or text_density_min is not None or text_density_max is not None
             or measurement_material
+            or script_styles
+            or script_places
         )
-        if not has_any:
+        if not old_active and not criteria:
             return None
 
         if self._conn is None:
@@ -1404,6 +1616,11 @@ class FjmsService:
                 )
                 params.extend(material_exclude)
 
+            # Script style / place filters
+            script_conds, script_params = _script_conditions(script_styles, script_places)
+            conditions.extend(script_conds)
+            params.extend(script_params)
+
             # Text filters (FTS5 hybrid: catalog_fts + domain LIKE)
             if text_all or text_any or text_not:
                 def _fts_escape(term: str) -> str:
@@ -1462,70 +1679,34 @@ class FjmsService:
 
             # Measurement filters (D-15, D-21) — subquery on manuscript_measurements
             if _has_measurement_filter:
-                # Backend guard: normalize reversed min/max per D-19 (review concern #3)
-                width_min, width_max = _normalize_range(width_min, width_max)
-                height_min, height_max = _normalize_range(height_min, height_max)
-                line_count_min, line_count_max = _normalize_range(line_count_min, line_count_max)
-                line_height_min, line_height_max = _normalize_range(line_height_min, line_height_max)
-                text_density_min, text_density_max = _normalize_range(text_density_min, text_density_max)
-
-                mm_conds = []
-                mm_params = []
-                # Width: COALESCE prefers catalog, falls back to computed (review concern #10)
-                # catalog_width_cm = MAX across catalogers from Catalog_Sizes sheet
-                # max_computed_width_cm = MAX across image-derived measurements from Computed_Measurements sheet
-                if width_min is not None:
-                    mm_conds.append("COALESCE(m.catalog_width_cm, m.max_computed_width_cm) >= ?")
-                    mm_params.append(width_min)
-                if width_max is not None:
-                    mm_conds.append("COALESCE(m.catalog_width_cm, m.max_computed_width_cm) <= ?")
-                    mm_params.append(width_max)
-                # Height: same COALESCE strategy as width
-                # catalog_height_cm = MAX across catalogers; max_computed_height_cm = MAX across images
-                if height_min is not None:
-                    mm_conds.append("COALESCE(m.catalog_height_cm, m.max_computed_height_cm) >= ?")
-                    mm_params.append(height_min)
-                if height_max is not None:
-                    mm_conds.append("COALESCE(m.catalog_height_cm, m.max_computed_height_cm) <= ?")
-                    mm_params.append(height_max)
-                # Line count: avg_num_lines = AVG across unflagged image measurements
-                if line_count_min is not None:
-                    mm_conds.append("m.avg_num_lines >= ?")
-                    mm_params.append(line_count_min)
-                if line_count_max is not None:
-                    mm_conds.append("m.avg_num_lines <= ?")
-                    mm_params.append(line_count_max)
-                # Line height (mm): avg_line_height_mm = AVG of Avg_Line_Height_Text_mm (unflagged)
-                if line_height_min is not None:
-                    mm_conds.append("m.avg_line_height_mm >= ?")
-                    mm_params.append(line_height_min)
-                if line_height_max is not None:
-                    mm_conds.append("m.avg_line_height_mm <= ?")
-                    mm_params.append(line_height_max)
-                # Text density: avg_text_density = AVG of Text_Density_per10cm (per 10cm^2)
-                if text_density_min is not None:
-                    mm_conds.append("m.avg_text_density >= ?")
-                    mm_params.append(text_density_min)
-                if text_density_max is not None:
-                    mm_conds.append("m.avg_text_density <= ?")
-                    mm_params.append(text_density_max)
-                # Material: IN clause for multi-value list (review concern #2)
-                if measurement_material:
-                    ph = ','.join('?' * len(measurement_material))
-                    mm_conds.append(f"m.material IN ({ph})")
-                    mm_params.extend(measurement_material)
-
-                mm_where = " AND ".join(mm_conds)
-                conditions.append(
-                    f"c.AlmaId IN (SELECT m.AlmaId FROM manuscript_measurements m WHERE {mm_where})"
-                )
+                mm_conds, mm_params = _measurement_conditions(
+                    width_min, width_max, height_min, height_max,
+                    line_count_min, line_count_max, line_height_min, line_height_max,
+                    text_density_min, text_density_max, measurement_material)
+                conditions.extend(mm_conds)
                 params.extend(mm_params)
 
-            where = " WHERE " + " AND ".join(conditions) if conditions else ""
-            sql = f"SELECT DISTINCT c.AlmaId FROM catalog c{where}"
-            cursor = self._conn.execute(sql, params)
-            return {row["AlmaId"] for row in cursor}
+            ids = None
+            if old_active:
+                where = " WHERE " + " AND ".join(conditions) if conditions else ""
+                sql = f"SELECT DISTINCT c.AlmaId FROM catalog c{where}"
+                cursor = self._conn.execute(sql, params)
+                ids = {row["AlmaId"] for row in cursor}
+                inclusion = bool(
+                    domains or authors or works or date_from is not None
+                    or date_to is not None or material_include or text_all or text_any
+                    or script_styles or script_places or _has_measurement_filter)
+                if universe is not None and not inclusion:
+                    ids |= set(_resolve_universe(universe)) - self.catalogued_ids()
+            if criteria:
+                matched = match_criteria(self._conn, criteria, _resolve_universe(universe))
+                ids = matched if ids is None else ids & matched
+            return ids
 
+        except FilterUnavailable:
+            raise  # e.g. corpus_sys_ids: keep its reason
+        except CriteriaUnavailable as e:
+            raise FilterUnavailable(e.reason, e.message, filters=e.filters) from e
         except Exception as e:
             # An empty set here would read as "nothing matches" (#17).
             logger.error("FjmsService.get_filter_sys_ids error: %s", e, exc_info=True)
@@ -1562,6 +1743,101 @@ class FjmsService:
             self._materials_cache = set()
             return self._materials_cache
 
+    # ------------------------------------------------------------------
+    # Catalogue criteria (docs/plans/CATALOGUE_CRITERIA_PLAN.md, PR 1a)
+    # ------------------------------------------------------------------
+
+    def catalogued_ids(self) -> frozenset:
+        """Every sys_id with a catalogue record, read once per process.
+        Raises FilterUnavailable when it cannot be read."""
+        cached = getattr(self, "_catalogued_ids_cache", None)
+        if cached is not None:
+            return cached
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        try:
+            ids = frozenset(row[0] for row in self._conn.execute(
+                "SELECT DISTINCT AlmaId FROM catalog") if row[0])
+        except Exception as e:
+            raise FilterUnavailable('query_failed', 'the catalog could not be read') from e
+        self._catalogued_ids_cache = ids
+        return ids
+
+    def criteria_support(self) -> str:
+        """Whether this file can answer the criteria that need the 5.1.0
+        tables (catalogue lines and columns, periods, vocalization extent,
+        attributes): FILTER_SUPPORTED / FILTER_UNSUPPORTED (the schema was
+        read and lacks them: the panel disables those controls) /
+        FILTER_SUPPORT_UNKNOWN (no file, or the schema could not be read)."""
+        if self._conn is None:
+            return FILTER_SUPPORT_UNKNOWN
+        try:
+            names = {row[0] for row in self._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name IN ('criteria_numbers', 'criteria_values')")}
+        except Exception:
+            return FILTER_SUPPORT_UNKNOWN
+        return FILTER_SUPPORTED if len(names) == 2 else FILTER_UNSUPPORTED
+
+    def get_criterion_values(self, key: str, universe=None, source: str = 'either') -> list:
+        """The choices a list criterion offers, with corpus counts (see
+        shared/catalog_criteria.py::criterion_values), cached per process.
+        Raises FilterUnavailable when they cannot be read."""
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        cache = self.__dict__.setdefault("_criterion_values_cache", {})
+        token = (key, source, _universe_token(universe))
+        if token in cache:
+            return copy.deepcopy(cache[token])
+        try:
+            values = criterion_values(self._conn, key, universe, source)
+        except Exception as e:
+            raise FilterUnavailable('query_failed', f'the {key} values could not be read',
+                                    filters=(key,)) from e
+        cache[token] = values
+        return copy.deepcopy(values)
+
+    def get_script_values(self, kind: str) -> list[dict]:
+        """The choices a script filter offers, most manuscripts first.
+
+        Args:
+            kind: a SCRIPT_FILTER_CATEGORIES key ('script_styles' or 'script_places').
+
+        Returns:
+            [{'value': 'Square', 'value_heb': 'מרובע', 'count': N}, ...], where
+            count is the number of manuscripts any of whose catalogue records
+            gives the value. Empty when the sidecar is absent or the lookup
+            failed (not cached then, so a later call retries).
+        """
+        category = SCRIPT_FILTER_CATEGORIES.get(kind)
+        if category is None:
+            raise ValueError(f"unknown script filter {kind!r}")
+        with self._script_values_lock:
+            cached = self._script_values_cache.get(kind)
+            if cached is not None:
+                return cached
+            if self._conn is None:
+                return []
+            try:
+                cursor = self._conn.execute(
+                    "SELECT FieldValue, MAX(FieldValueHeb), COUNT(DISTINCT AlmaId) "
+                    "FROM catalog_fields WHERE FieldCategory = ? "
+                    "AND FieldValue IS NOT NULL AND FieldValue != '' "
+                    "GROUP BY FieldValue ORDER BY 3 DESC, 1",
+                    (category,),
+                )
+                values = [
+                    {'value': row[0], 'value_heb': row[1] or '', 'count': row[2]}
+                    for row in cursor if row[0] not in _SCRIPT_NON_VALUES
+                ]
+            except Exception as e:
+                logger.error("FjmsService.get_script_values(%s) error: %s", kind, e)
+                return []
+            self._script_values_cache[kind] = values
+            return values
+
     def validate_filter_values(self, filters: dict) -> None:
         """Probe each filter value against FJMS lookup tables (R2-#3 policy).
 
@@ -1575,7 +1851,8 @@ class FjmsService:
 
         Args:
             filters: dict with optional keys 'domains', 'authors', 'works',
-                     'library', 'library_filter_mode', 'materials', 'date_from',
+                     'library', 'library_filter_mode', 'materials',
+                     'script_styles', 'script_places', 'date_from',
                      'date_to' (D-15 shape, post-Pydantic validation).
                      'library' is validated against LIBRARY_CODES (Phase 129).
                      'library_filter_mode' is intentionally not validated here —
@@ -1721,6 +1998,26 @@ class FjmsService:
                     raise APIError(
                         'unresolvable_filter_value',
                         f"filter materials={v!r} not found in FJMS pipeline",
+                        http_status=400,
+                    )
+
+        # ---- Script styles / places: the choices the filter controls offer.
+        for key in SCRIPT_FILTER_CATEGORIES:
+            values = filters.get(key)
+            if not values:
+                continue
+            valid = {item['value'] for item in self.get_script_values(key)}
+            if not valid:
+                raise APIError(
+                    'filter_vocabulary_unavailable',
+                    f'The {key} filter vocabulary is unavailable or empty',
+                    http_status=503,
+                )
+            for v in values:
+                if v not in valid:
+                    raise APIError(
+                        'unresolvable_filter_value',
+                        f"filter {key}={v!r} is not a script value the catalogue records",
                         http_status=400,
                     )
         # date_from / date_to: any int is a valid token; range matching is FJMS's job.
@@ -2259,6 +2556,8 @@ class FjmsService:
         "_browse_filter_pgp",
         "_browse_filter_edition",
         "_browse_filter_library",
+        "_browse_filter_criteria",
+        "_browse_filter_outside",
     )
 
     def _ensure_filter_temp(self, name: str, sys_ids, token) -> bool:
@@ -2319,8 +2618,9 @@ class FjmsService:
         pgp_sys_ids=None,
         editions_filter=None,
         edition_sys_ids=None,
+        traits=None,
     ):
-        """Build the shared WHERE conditions (domain/author/work/date/text/pgp/editions).
+        """Build the shared WHERE conditions (domain/author/work/date/text/pgp/editions/traits).
 
         Used by both ``get_browse_results`` and ``get_browse_library_facets`` so that
         the facet counts honour the same non-library filters as the browse query.
@@ -2475,6 +2775,18 @@ class FjmsService:
                     f"WHERE t.AlmaId = c.AlmaId)"
                 )
 
+        # Script / measurement traits: the conditions get_filter_sys_ids uses,
+        # so browse and "Search only in..." never disagree about a manuscript.
+        traits = clean_traits(traits)
+        if traits:
+            for conds, prms in (
+                _script_conditions(traits.get('script_styles'), traits.get('script_places')),
+                _measurement_conditions(**{k: v for k, v in traits.items()
+                                           if k in BROWSE_MEASUREMENT_TRAITS}),
+            ):
+                conditions.extend(conds)
+                params.extend(prms)
+
         return conditions, params
 
     def get_browse_results(
@@ -2497,6 +2809,9 @@ class FjmsService:
         library_codes: list = None,
         library_sys_ids=None,
         library_mode: str = 'show_only',
+        traits: dict = None,
+        criteria: dict = None,
+        universe=None,
     ) -> dict:
         """
         Get paginated browse results matching all provided filters (intersection).
@@ -2543,18 +2858,40 @@ class FjmsService:
                 AlmaId is NOT in the resolved set (denylist / NOT EXISTS).
                 Omitted or unrecognised values fall back to ``'show_only'``
                 (fail-safe, today's behaviour).
+            traits: Script and measurement traits, a dict of BROWSE_TRAIT_KEYS
+                (``{'script_places': ['Spanish'], 'width_min': 10}``), meaning
+                what the get_filter_sys_ids arguments of the same names mean.
+                Measurement traits need the manuscript_measurements table:
+                callers drop them when ``measurement_filters_available()`` is
+                False.
+            criteria: Catalogue criteria (shared/catalog_criteria.py).
+            universe: The set of every corpus sys_id. With it the list is the
+                whole corpus (D16): catalogued manuscripts first, then those
+                with no catalogue record (D22), which pass the PGP, edition,
+                library and criteria filters like any manuscript, and every
+                older filter that only excludes, but no filter that picks
+                something in (domain, author, work, date, text all/any,
+                traits; D17). Without it, catalogued manuscripts only.
 
         Returns:
             Dict with keys:
                 - results: list of dicts with keys: sys_id, title, title_heb,
-                  author, copy_date, textual_frame_heb, textual_frame_eng,
-                  domains, domains_heb
+                  author, copy_date, copy_span ('944–1100'), textual_frame_heb,
+                  textual_frame_eng, domains, domains_heb, catalogued (False
+                  for a manuscript with no catalogue record: its text fields
+                  are empty)
                 - total: int (total matching count before pagination)
-            Returns {"results": [], "total": 0} if conn is None.
+
+        Raises:
+            FilterUnavailable: no sidecar ('sidecar_unavailable'), the query
+                failed, or a criterion cannot be answered (rule 9): never
+                reported as an empty list.
         """
         empty = {"results": [], "total": 0}
         if self._conn is None:
-            return empty
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        universe = _resolve_universe(universe)
 
         try:
             # Build shared non-library conditions (domain/author/work/date/text/pgp/editions)
@@ -2572,12 +2909,16 @@ class FjmsService:
                 pgp_sys_ids=pgp_sys_ids,
                 editions_filter=editions_filter,
                 edition_sys_ids=edition_sys_ids,
+                traits=traits,
             )
+            matched = self._browse_criteria_condition(criteria, universe, conditions)
+            self._browse_universe_condition(universe, conditions)
 
             # SEED-026: library filter.  The token is CONTENT-derived from the
             # selection (not len) so that two same-size-but-different library
             # selections on the same thread correctly rebuild the TEMP table and
             # return distinct result sets (Codex REQUIRED CHANGE 1).
+            library_active = False
             if library_codes and library_sys_ids:
                 # Content-derived token (Codex REQUIRED CHANGE 1 / SEED-026):
                 # same-size but different selections get different tokens.
@@ -2587,6 +2928,7 @@ class FjmsService:
                 if self._ensure_filter_temp(
                     "_browse_filter_library", library_sys_ids, _lib_token
                 ):
+                    library_active = True
                     # Dual-mode (DMF-07/08): 'hide' flips to NOT EXISTS so the
                     # total and pagination are over the denylist-excluded set.
                     # Any unrecognised mode falls back to 'show_only' (fail-safe).
@@ -2615,29 +2957,44 @@ class FjmsService:
                 f"SELECT COUNT(DISTINCT c.AlmaId) as total "
                 f"FROM catalog c{where}"
             )
-            total = self._conn.execute(count_sql, params).fetchone()["total"]
+            catalogued_total = self._conn.execute(count_sql, params).fetchone()["total"]
 
+            # D16: the manuscripts with no catalogue record, after the
+            # catalogued ones (D22).
+            uncatalogued = self._browse_uncatalogued(
+                universe, matched,
+                inclusion=self._browse_inclusion_active(
+                    domain, author, work, date_from, date_to, text_all, text_any, traits),
+                pgp_filter=pgp_filter, pgp_sys_ids=pgp_sys_ids,
+                editions_filter=editions_filter, edition_sys_ids=edition_sys_ids,
+                library_sys_ids=library_sys_ids if library_active else None,
+                library_mode=library_mode,
+            )
+            total = catalogued_total + len(uncatalogued)
             if total == 0:
                 return empty
 
-            # Results query -- pick first non-empty value per grouped AlmaId
-            # Use GROUP BY + aggregation to deduplicate
-            results_sql = (
-                f"SELECT c.AlmaId, "
-                f"  MAX(CASE WHEN c.Title IS NOT NULL AND c.Title != '' THEN c.Title END) as Title, "
-                f"  MAX(CASE WHEN c.TitleHeb IS NOT NULL AND c.TitleHeb != '' THEN c.TitleHeb END) as TitleHeb, "
-                f"  MAX(CASE WHEN c.AuthorText IS NOT NULL AND c.AuthorText != '' THEN c.AuthorText END) as AuthorText, "
-                f"  MAX(CASE WHEN c.CopyDate IS NOT NULL AND c.CopyDate != '' THEN c.CopyDate END) as CopyDate, "
-                f"  MAX(CASE WHEN c.TextualFrameHeb IS NOT NULL AND c.TextualFrameHeb != '' THEN c.TextualFrameHeb END) as TextualFrameHeb, "
-                f"  MAX(CASE WHEN c.TextualFrameEng IS NOT NULL AND c.TextualFrameEng != '' THEN c.TextualFrameEng END) as TextualFrameEng "
-                f"FROM catalog c{where} "
-                f"GROUP BY c.AlmaId "
-                f"ORDER BY c.AlmaId "
-                f"LIMIT ? OFFSET ?"
-            )
-            result_params = list(params) + [limit, offset]
-            cursor = self._conn.execute(results_sql, result_params)
-            rows = cursor.fetchall()
+            rows = []
+            if offset < catalogued_total:
+                # Results query -- pick first non-empty value per grouped AlmaId
+                # Use GROUP BY + aggregation to deduplicate
+                span = self._copy_span_columns()
+                results_sql = (
+                    f"SELECT c.AlmaId, "
+                    f"  MAX(CASE WHEN c.Title IS NOT NULL AND c.Title != '' THEN c.Title END) as Title, "
+                    f"  MAX(CASE WHEN c.TitleHeb IS NOT NULL AND c.TitleHeb != '' THEN c.TitleHeb END) as TitleHeb, "
+                    f"  MAX(CASE WHEN c.AuthorText IS NOT NULL AND c.AuthorText != '' THEN c.AuthorText END) as AuthorText, "
+                    f"  MAX(CASE WHEN c.CopyDate IS NOT NULL AND c.CopyDate != '' THEN c.CopyDate END) as CopyDate, "
+                    f"  {span}, "
+                    f"  MAX(CASE WHEN c.TextualFrameHeb IS NOT NULL AND c.TextualFrameHeb != '' THEN c.TextualFrameHeb END) as TextualFrameHeb, "
+                    f"  MAX(CASE WHEN c.TextualFrameEng IS NOT NULL AND c.TextualFrameEng != '' THEN c.TextualFrameEng END) as TextualFrameEng "
+                    f"FROM catalog c{where} "
+                    f"GROUP BY c.AlmaId "
+                    f"ORDER BY c.AlmaId "
+                    f"LIMIT ? OFFSET ?"
+                )
+                result_params = list(params) + [limit, offset]
+                rows = self._conn.execute(results_sql, result_params).fetchall()
 
             # Batch-fetch domains for result sys_ids
             sys_ids = [row["AlmaId"] for row in rows]
@@ -2653,16 +3010,112 @@ class FjmsService:
                     "title_heb": row["TitleHeb"] or "",
                     "author": row["AuthorText"] or "",
                     "copy_date": row["CopyDate"] or "",
+                    "copy_span": span_label((row["SpanFrom"], row["SpanTo"])
+                                            if row["SpanFrom"] else None),
                     "textual_frame_heb": row["TextualFrameHeb"] or "",
                     "textual_frame_eng": row["TextualFrameEng"] or "",
                     "domains": list({d["domain"] for d in dom_info}),
                     "domains_heb": list({d["domain_heb"] for d in dom_info if d.get("domain_heb")}),
+                    "catalogued": True,
                 })
 
+            room = limit - len(results)
+            if room > 0 and uncatalogued:
+                first = max(0, offset - catalogued_total)
+                for sid in uncatalogued[first:first + room]:
+                    results.append({
+                        "sys_id": sid, "title": "", "title_heb": "", "author": "",
+                        "copy_date": "", "copy_span": "", "textual_frame_heb": "",
+                        "textual_frame_eng": "", "domains": [], "domains_heb": [],
+                        "catalogued": False,
+                    })
+
             return {"results": results, "total": total}
+        except FilterUnavailable:
+            raise
+        except CriteriaUnavailable as e:
+            raise FilterUnavailable(e.reason, e.message, filters=e.filters) from e
         except Exception as e:
-            logger.error(f"FjmsService.get_browse_results error: {e}")
-            return empty
+            # An empty list would read as "nothing matches" (rule 9).
+            logger.error("FjmsService.get_browse_results error: %s", e, exc_info=True)
+            raise FilterUnavailable('query_failed', 'the catalog browse query failed') from e
+
+    # -- Catalog Browse over the corpus (D16, D17, D22) -------------------
+
+    @staticmethod
+    def _browse_inclusion_active(domain, author, work, date_from, date_to,
+                                 text_all, text_any, traits) -> bool:
+        """A browse filter that picks something IN: a manuscript with no
+        catalogue record cannot pass it (D17)."""
+        return bool(domain is not None or author is not None or work is not None
+                    or date_from is not None or date_to is not None
+                    or text_all or text_any or clean_traits(traits))
+
+    def _browse_criteria_condition(self, criteria, universe, conditions):
+        """Add the criteria to a browse WHERE (via a per-thread TEMP table of
+        the matching sys_ids) and return that set, or None without criteria."""
+        criteria = clean_criteria(criteria)[0] if criteria else {}
+        if not criteria:
+            return None
+        matched = match_criteria(self._conn, criteria, universe)
+        token = (criteria_token(criteria), _universe_token(universe))
+        if not matched:
+            conditions.append("0")
+        elif self._ensure_filter_temp("_browse_filter_criteria", matched, token):
+            conditions.append('EXISTS (SELECT 1 FROM "_browse_filter_criteria" t '
+                              "WHERE t.AlmaId = c.AlmaId)")
+        else:
+            raise FilterUnavailable('query_failed', 'the criteria could not be applied')
+        return matched
+
+    def _browse_universe_condition(self, universe, conditions):
+        """Keep the catalogued rows inside the universe: the catalogue has
+        sys_ids that are not in libraries.csv (one in the 5.0.0 file)."""
+        if universe is None:
+            return
+        outside = self.catalogued_ids() - universe
+        if not outside:
+            return
+        if self._ensure_filter_temp("_browse_filter_outside", outside, _universe_token(universe)):
+            conditions.append('NOT EXISTS (SELECT 1 FROM "_browse_filter_outside" t '
+                              "WHERE t.AlmaId = c.AlmaId)")
+        else:
+            raise FilterUnavailable('query_failed', 'the manuscript list could not be applied')
+
+    def _browse_uncatalogued(self, universe, matched, *, inclusion, pgp_filter=None,
+                             pgp_sys_ids=None, editions_filter=None, edition_sys_ids=None,
+                             library_sys_ids=None, library_mode='show_only') -> list:
+        """The sorted sys_ids with no catalogue record that the browse lists."""
+        if universe is None or inclusion:
+            return []
+        ids = set(universe) - self.catalogued_ids()
+        if matched is not None:
+            ids &= matched
+        if pgp_filter in ("has_pgp", "no_pgp") and pgp_sys_ids:
+            ids = ids & set(pgp_sys_ids) if pgp_filter == "has_pgp" else ids - set(pgp_sys_ids)
+        if editions_filter in ("has_edition", "no_edition") and edition_sys_ids:
+            ids = (ids & set(edition_sys_ids) if editions_filter == "has_edition"
+                   else ids - set(edition_sys_ids))
+        if library_sys_ids:
+            ids = ids - set(library_sys_ids) if library_mode == "hide" else ids & set(library_sys_ids)
+        return sorted(ids)
+
+    def _copy_span_columns(self) -> str:
+        """SELECT terms SpanFrom / SpanTo: a manuscript's copy span over its
+        records (D18: an earlier or missing CopyToDate = the start year)."""
+        has_end = getattr(self, "_has_copy_to_date", None)
+        if has_end is None:
+            try:
+                has_end = any(row[1] == "CopyToDate" for row in
+                              self._conn.execute("PRAGMA table_info(catalog)"))
+            except Exception:
+                has_end = False
+            self._has_copy_to_date = has_end
+        start = "CAST(c.CopyDate AS INTEGER)"
+        end = (f"(CASE WHEN CAST(c.CopyToDate AS INTEGER) > {start} "
+               f"THEN CAST(c.CopyToDate AS INTEGER) ELSE {start} END)") if has_end else start
+        return (f"MIN(CASE WHEN {start} > 0 THEN {start} END) as SpanFrom, "
+                f"MAX(CASE WHEN {start} > 0 THEN {end} END) as SpanTo")
 
     def get_browse_library_facets(
         self,
@@ -2680,6 +3133,9 @@ class FjmsService:
         editions_filter=None,
         edition_sys_ids=None,
         sys_id_to_library=None,
+        traits=None,
+        criteria=None,
+        universe=None,
     ) -> dict:
         """Return true full-set per-library manuscript counts honoring active non-library filters.
 
@@ -2695,7 +3151,7 @@ class FjmsService:
         Args:
             domain, author, work, date_from, date_to, include_undated,
             text_all, text_any, text_not, pgp_filter, pgp_sys_ids,
-            editions_filter, edition_sys_ids:
+            editions_filter, edition_sys_ids, traits:
                 Same semantics as ``get_browse_results`` — the non-library subset.
             sys_id_to_library: A CALLABLE (e.g. a bound
                 ``MetadataManager.get_library_for_id`` method, or a ``dict.get`` bound
@@ -2705,14 +3161,24 @@ class FjmsService:
                 If ``None``, not callable, or the call returns a falsy/blank value,
                 that AlmaId is skipped.  ``'LOCAL'`` is always skipped.
 
+            criteria, universe: as ``get_browse_results``: with a universe the
+                manuscripts with no catalogue record that the list shows are
+                counted too.
+
         Returns:
-            ``{library_code: count}`` dict.  Returns ``{}`` when ``_conn`` is None,
-            ``sys_id_to_library`` is None/not-callable, or on any error (fail-open).
+            ``{library_code: count}`` dict.  Returns ``{}`` when
+            ``sys_id_to_library`` is None/not-callable.
+
+        Raises:
+            FilterUnavailable: no sidecar, or the query failed (never shown
+                as zero counts).
         """
-        if self._conn is None:
-            return {}
         if sys_id_to_library is None or not callable(sys_id_to_library):
             return {}
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        universe = _resolve_universe(universe)
 
         try:
             # Reuse the shared condition-builders (domain/author/work/date/text/pgp/editions).
@@ -2731,7 +3197,10 @@ class FjmsService:
                 pgp_sys_ids=pgp_sys_ids,
                 editions_filter=editions_filter,
                 edition_sys_ids=edition_sys_ids,
+                traits=traits,
             )
+            matched = self._browse_criteria_condition(criteria, universe, conditions)
+            self._browse_universe_condition(universe, conditions)
             where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 
             # Single SQL-bounded DISTINCT query — mirrors COUNT(DISTINCT c.AlmaId)
@@ -2743,18 +3212,29 @@ class FjmsService:
             # Map each distinct AlmaId to a library_code via the caller-supplied
             # CALLABLE (the surface passes the full-corpus get_library_for_id bound
             # method — NOT page-local _resolve_all — so off-page libraries appear).
+            ids = [row["AlmaId"] if hasattr(row, "keys") else row[0] for row in rows]
+            ids += self._browse_uncatalogued(
+                universe, matched,
+                inclusion=self._browse_inclusion_active(
+                    domain, author, work, date_from, date_to, text_all, text_any, traits),
+                pgp_filter=pgp_filter, pgp_sys_ids=pgp_sys_ids,
+                editions_filter=editions_filter, edition_sys_ids=edition_sys_ids,
+            )
             counts: dict[str, int] = {}
-            for row in rows:
-                alma_id = row["AlmaId"] if hasattr(row, "keys") else row[0]
+            for alma_id in ids:
                 lib = sys_id_to_library(alma_id)
                 if not lib or lib == "LOCAL":
                     continue
                 counts[lib] = counts.get(lib, 0) + 1
 
             return counts
+        except FilterUnavailable:
+            raise
+        except CriteriaUnavailable as e:
+            raise FilterUnavailable(e.reason, e.message, filters=e.filters) from e
         except Exception as e:
-            logger.error(f"FjmsService.get_browse_library_facets error: {e}")
-            return {}
+            logger.error("FjmsService.get_browse_library_facets error: %s", e, exc_info=True)
+            raise FilterUnavailable('query_failed', 'the library counts could not be read') from e
 
     def _batch_domains(self, sys_ids: list[str]) -> dict:
         """Fetch domains for a batch of sys_ids efficiently.
@@ -4020,6 +4500,31 @@ def get_filter_sys_ids(**kwargs):
     Raises FilterUnavailable exactly as the method does.
     """
     return get_fjms_service(thread_safe=True).get_filter_sys_ids(**kwargs)
+
+
+def script_filter_options(kind: str, is_heb: bool, service=None) -> dict:
+    """{value: 'label (count)'} for a script filter's choices, most manuscripts
+    first; the label is Hebrew when *is_heb* and the catalogue has one. Empty
+    when the catalogue cannot answer. Reads the sidecar on its first call per
+    kind -- call it off the UI thread / event loop."""
+    svc = service if service is not None else get_fjms_service(thread_safe=True)
+    return {
+        item['value']: f"{(item['value_heb'] if is_heb and item['value_heb'] else item['value'])} "
+                       f"({item['count']:,})"
+        for item in svc.get_script_values(kind)
+    }
+
+
+def script_value_label(kind: str, value: str, is_heb: bool, service=None) -> str:
+    """A chosen script value as the user reads it (Hebrew when *is_heb*). Uses
+    the choices already loaded; the stored value itself when they are not."""
+    if not is_heb:
+        return value
+    svc = service if service is not None else get_fjms_service(thread_safe=True)
+    for item in svc._script_values_cache.get(kind) or ():
+        if item['value'] == value:
+            return item['value_heb'] or value
+    return value
 
 
 # ── #17: what the open catalog can answer (for the filter controls) ───────

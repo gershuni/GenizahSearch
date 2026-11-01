@@ -932,6 +932,143 @@ _COUNT_STYLE_OK = "font-size: 12px; font-weight: bold; color: #2980b9; padding: 
 _COUNT_STYLE_ERROR = "font-size: 12px; font-weight: bold; color: #e74c3c; padding: 4px;"
 
 
+def build_script_lists(chosen_filters, on_change):
+    """Script Style / Script Place, as the catalogue records them: two checkable
+    lists, most manuscripts first, in a group hidden when the catalogue offers no
+    values and none is saved. Returns (group, {filter key: QListWidget});
+    *on_change* is connected to each list's itemChanged after it is filled."""
+    from shared.fjms_service import script_filter_options
+    group = QGroupBox(tr("Script"))
+    outer = QVBoxLayout(group)
+    lists_row = QHBoxLayout()
+    lists = {}
+    for key, label in (('script_styles', tr("Script Style")), ('script_places', tr("Script Place"))):
+        column = QVBoxLayout()
+        column.addWidget(QLabel(label))
+        list_widget = QListWidget()
+        list_widget.setMaximumHeight(110)
+        options = script_filter_options(key, CURRENT_LANG == 'he')
+        chosen = list((chosen_filters or {}).get(key) or [])
+        # A saved value the catalogue does not offer stays chosen and
+        # shown: dropping it silently would widen the search.
+        for value in list(options) + [v for v in chosen if v not in options]:
+            item = QListWidgetItem(options.get(value, value))
+            item.setData(Qt.ItemDataRole.UserRole, value)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if value in chosen else Qt.CheckState.Unchecked)
+            list_widget.addItem(item)
+        list_widget.itemChanged.connect(on_change)
+        column.addWidget(list_widget)
+        lists_row.addLayout(column)
+        lists[key] = list_widget
+    outer.addLayout(lists_row)
+    hint = QLabel(tr("From the catalogue records: manuscripts whose records do not "
+                     "describe the script are not included."))
+    hint.setWordWrap(True)
+    hint.setStyleSheet("font-size: 11px; color: #7f8c8d;")
+    outer.addWidget(hint)
+    group.setVisible(any(lw.count() for lw in lists.values()))
+    return group, lists
+
+
+def _checked_values(list_widget):
+    return [list_widget.item(i).data(Qt.ItemDataRole.UserRole) for i in range(list_widget.count())
+            if list_widget.item(i).checkState() == Qt.CheckState.Checked]
+
+
+class CatalogTraitsDialog(QDialog):
+    """Catalog tab: list manuscripts by script and size, with no text search.
+
+    get_traits() returns a shared.fjms_service.clean_traits dict -- the keys
+    "Search only in..." uses, so a browse list hands on to a search unchanged.
+    """
+
+    _RANGES = (('width', "Width (cm)", 100, 1), ('height', "Height (cm)", 100, 1),
+               ('line_count', "Lines", 200, 0))
+
+    def __init__(self, parent=None, traits=None):
+        from shared.fjms_service import (
+            BROWSE_MEASUREMENT_TRAITS, FILTER_SUPPORTED, FILTER_UNSUPPORTED, MEASUREMENT_MATERIALS,
+            clean_traits, measurement_filter_support,
+        )
+        super().__init__(parent)
+        self.setWindowTitle(tr("Script and size"))
+        traits = clean_traits(traits)
+        support = measurement_filter_support()
+        self._meas_ok = support == FILTER_SUPPORTED
+        # Hidden controls keep a saved value unless the catalog is KNOWN to lack the data (K-16).
+        self._kept_measurements = {} if support == FILTER_UNSUPPORTED else {
+            k: v for k, v in traits.items() if k in BROWSE_MEASUREMENT_TRAITS}
+        layout = QVBoxLayout(self)
+
+        group, self._script_lists = build_script_lists(traits, lambda *_: None)
+        layout.addWidget(group)
+
+        meas = QGroupBox(tr("Measurements"))
+        grid = QGridLayout(meas)
+        self._spins = {}
+        for row, (prefix, label, max_val, decimals) in enumerate(self._RANGES):
+            grid.addWidget(QLabel(tr(label)), row, 0)
+            for col, bound in ((1, 'min'), (2, 'max')):
+                spin = QDoubleSpinBox()
+                spin.setRange(0, max_val)
+                spin.setDecimals(decimals)
+                spin.setSpecialValueText("")  # 0 = no bound
+                spin.setPrefix(tr("Min" if bound == 'min' else "Max") + ": ")
+                spin.setValue(traits.get(f'{prefix}_{bound}') or 0)
+                grid.addWidget(spin, row, col)
+                self._spins[f'{prefix}_{bound}'] = spin
+        grid.addWidget(QLabel(tr("Material (measured)")), len(self._RANGES), 0)
+        materials = QHBoxLayout()
+        self._material_checks = {}
+        for mat in MEASUREMENT_MATERIALS:
+            cb = QCheckBox(tr(mat))
+            cb.setChecked(mat in traits.get('measurement_material', []))
+            materials.addWidget(cb)
+            self._material_checks[mat] = cb
+        grid.addLayout(materials, len(self._RANGES), 1, 1, 2)
+        meas.setVisible(self._meas_ok)
+        layout.addWidget(meas)
+
+        hint = QLabel(tr('Only manuscripts with a recorded value are included.'))
+        hint.setStyleSheet("font-size: 11px; color: #7f8c8d;")
+        layout.addWidget(hint)
+
+        buttons = QHBoxLayout()
+        clear_btn = QPushButton(tr("Clear All"))
+        clear_btn.clicked.connect(self._clear)
+        buttons.addWidget(clear_btn)
+        buttons.addStretch()
+        ok_btn = QPushButton(tr("OK"))
+        ok_btn.setDefault(True)
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton(tr("Cancel"))
+        cancel_btn.clicked.connect(self.reject)
+        buttons.addWidget(ok_btn)
+        buttons.addWidget(cancel_btn)
+        layout.addLayout(buttons)
+
+    def _clear(self):
+        for list_widget in self._script_lists.values():
+            for i in range(list_widget.count()):
+                list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
+        for spin in self._spins.values():
+            spin.setValue(0)
+        for cb in self._material_checks.values():
+            cb.setChecked(False)
+        self._kept_measurements = {}
+
+    def get_traits(self) -> dict:
+        from shared.fjms_service import clean_traits
+        traits = {key: _checked_values(lw) for key, lw in self._script_lists.items()}
+        if self._meas_ok:
+            traits.update({key: spin.value() for key, spin in self._spins.items() if spin.value() > 0})
+            traits['measurement_material'] = [m for m, cb in self._material_checks.items() if cb.isChecked()]
+        else:
+            traits.update(self._kept_measurements)
+        return clean_traits(traits)
+
+
 class PreSearchFilterDialog(QDialog):
     """Pre-search filter dialog with multi-select domain, author, work, date range,
     include/exclude mode, text filters, and material controls.
@@ -995,7 +1132,11 @@ class PreSearchFilterDialog(QDialog):
         if not self._current_filters.get('domains') and self._current_filters.get('domain'):
             self._check_tree_item(self.domain_tree, self._current_filters['domain'], True)
         domain_layout.addWidget(self.domain_tree)
-        body_layout.addWidget(domain_group, 1)  # stretch factor 1
+        # Below it: Script Style / Script Place
+        left_layout = QVBoxLayout()
+        left_layout.addWidget(domain_group, 1)
+        left_layout.addWidget(self._build_script_group())
+        body_layout.addLayout(left_layout, 1)  # stretch factor 1
 
         # RIGHT column: Author, Work, Date, Material, Text
         right_layout = QVBoxLayout()
@@ -1285,6 +1426,10 @@ class PreSearchFilterDialog(QDialog):
 
         # Initial count update
         self._update_count()
+
+    def _build_script_group(self):
+        group, self._script_lists = build_script_lists(self._current_filters, self._on_filter_changed)
+        return group
 
     @staticmethod
     def _check_list_item(list_widget, data_value, checked):
@@ -1619,6 +1764,13 @@ class PreSearchFilterDialog(QDialog):
                 tr("Printed only"), '#ffebee',
                 lambda: self.material_combo.setCurrentIndex(0)))
 
+        # Script style / place chips
+        for key, list_widget in self._script_lists.items():
+            for value in self._get_checked_items(list_widget):
+                self.chip_bar_layout.addWidget(self._make_chip(
+                    self._script_label(key, value), '#efebe9',
+                    lambda checked=False, lw=list_widget, v=value: self._check_list_item(lw, v, False)))
+
         # Text term chips
         for mode, prefix, terms in [('all', '+', self._text_all), ('any', '~', self._text_any), ('not', '-', self._text_not)]:
             for t in terms:
@@ -1687,6 +1839,10 @@ class PreSearchFilterDialog(QDialog):
             filters['material_exclude'] = ['Printed']
         elif mat_mode == 'printed_only':
             filters['material_include'] = ['Printed']
+        for key, list_widget in self._script_lists.items():
+            chosen = self._get_checked_items(list_widget)
+            if chosen:
+                filters[key] = chosen
         if self._text_all:
             filters['text_all'] = list(self._text_all)
         if self._text_any:
@@ -1730,6 +1886,11 @@ class PreSearchFilterDialog(QDialog):
         text = data_map.get(key, key)
         return text.rsplit(' (', 1)[0].strip().lstrip().strip() if isinstance(text, str) else str(key)
 
+    @staticmethod
+    def _script_label(kind, value):
+        from shared.fjms_service import script_value_label
+        return script_value_label(kind, value, CURRENT_LANG == 'he')
+
     def _update_count(self):
         """Recompute manuscript count in background thread."""
         self._count_generation += 1
@@ -1747,7 +1908,14 @@ class PreSearchFilterDialog(QDialog):
         self.count_label.setText(tr("Counting..."))
         if hasattr(self, 'ok_btn'):
             self.ok_btn.setEnabled(False)
-        self._count_worker = FilterCountWorker(filters, self)
+        # D17: Exclude-only filters keep the manuscripts with no catalogue
+        # record, so the count needs the corpus list (read only if it applies).
+        try:
+            owner = self.parent()
+        except RuntimeError:  # a dialog whose Qt side was never built (tests)
+            owner = None
+        corpus = getattr(getattr(owner, 'meta_mgr', None), 'corpus_sys_ids', None)
+        self._count_worker = FilterCountWorker(filters, self, universe=corpus)
         self._count_worker.finished.connect(
             lambda result_set, gen=generation: self._on_count_finished(result_set, gen)
         )
@@ -1807,6 +1975,11 @@ class PreSearchFilterDialog(QDialog):
         self.spin_date_to.setValue(0)
         self.chk_include_undated.setChecked(False)
         self.material_combo.setCurrentIndex(0)
+        for list_widget in self._script_lists.values():
+            list_widget.blockSignals(True)
+            for i in range(list_widget.count()):
+                list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
+            list_widget.blockSignals(False)
         self._text_all.clear()
         self._text_any.clear()
         self._text_not.clear()

@@ -4201,3 +4201,19 @@ cases. The two files alone pass (141), and with `tests/test_quick_open.py` too (
 release: the same set on the commit before it fails the same 36. Fix sketch: bisect the file list for the
 module that leaves a window, a modal or an application event filter behind (compare GS-281, the same kind of
 leak between the Joins Lab and Responsa tests), and scope it to its own tests.
+
+## GS-283
+
+**Catalogue criteria: FJMS's "Additional conditions" section, dropped from the criteria plan, to look into later** · idea · Search · ❌ Open · opened 2026-11-01
+
+Where: `docs/plans/CATALOGUE_CRITERIA_PLAN.md` §4 (FJMS section 15), §9 D12
+
+Owner, 2026-11-01, ruling D12 of the catalogue criteria plan: drop the whole section from the plan and record
+it here. FJMS's "Only if the chosen shelfmarks also have (in this site)": Image(s); Identifications [at least N];
+Bibliographies [more than N]; Transcription(s); English / Hebrew Translation(s); Catalog Scans. Each term needs
+a meaning of ours before it can be built: "has an image" = one we can show (about 232k manuscripts have pages);
+"identifications" probably = catalogue records per manuscript (1: 47,146 · 2: 55,283 · 3: 45,177); bibliography
+entries per manuscript from `bibliography` (133,088 manuscripts have at least one); transcription = the existing
+"scholarly transcription" filter (Princeton edition or FGP) or `bibliography.TranscriptionType`; translations =
+PGP / FGP translations or `bibliography.TranslationType`. We have no catalog scans. Settle the meanings against
+a few FJMS examples before building.

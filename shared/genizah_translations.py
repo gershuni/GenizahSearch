@@ -2793,6 +2793,11 @@ TRANSLATIONS = {
     "Number of Columns": "מספר טורים",
     "Number of Lines": "מספר שורות",
     "Script Place": "מקום כתב",
+    "From the catalogue records: manuscripts whose records do not describe the script are not included.":
+        "לפי המידע הקטלוגי; כתבי יד שהכתב שלהם לא תואר בו אינם נכללים.",
+    "Script and size": "כתב ומידות",
+    "Only manuscripts with a recorded value are included.": "נכללים רק כתבי יד שיש להם ערך רשום.",
+    "Size filters are not applied to parallel search": "סינון לפי מידות אינו חל על חיפוש מקבילות",
 
     # --- Catalog Dialog Sections ---
     "Shelfmark Description": "תיאור מספר מדף",
@@ -6289,6 +6294,14 @@ TRANSLATIONS.update({
         'Ctrl+1 עד Ctrl+7 פותחים את הלשוניות: בחפש ובחיפוש חיבורים הסמן עובר לתוצאות כשיש כאלה, ואחרת לתיבת החיפוש; Ctrl+R מעביר לרשימת התוצאות; Ctrl+O פותח את "מעבר אל", כמו Ctrl+G.',
     'All the keys on one card: Ctrl+/, the ⌨ button beside A−, or Keyboard shortcuts in the ☰ menu.':
         'כל המקשים בכרטיס אחד: Ctrl+/‎, הכפתור ⌨ ליד A−‎, או "קיצורי מקלדת" בתפריט ☰.',
+})
+
+# Catalogue criteria, PR 1a (2026-11-01): Catalog Browse lists the whole corpus,
+# and a failed browse query is an error, not "no manuscripts match".
+TRANSLATIONS.update({
+    "No catalogue record": "אין רשומה בקטלוג",
+    "The catalog could not be listed. Try again in a moment.":
+        "לא ניתן היה להציג את רשימת כתבי היד. נסו שוב בעוד רגע.",
 })
 
 # Phone layout (2026-10-22): the search toolbar's phone menu, the browse image

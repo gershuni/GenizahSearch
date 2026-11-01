@@ -12,6 +12,8 @@ import inspect
 import pathlib
 from unittest.mock import MagicMock
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -321,16 +323,19 @@ def test_facets_skips_local_library_code():
     assert result == {}, f"Expected empty dict when all codes are LOCAL; got {result}"
 
 
-def test_facets_returns_empty_when_conn_is_none():
-    """get_browse_library_facets returns {} when _conn is None (fail-open)."""
-    from shared.fjms_service import FjmsService
+def test_facets_raise_when_conn_is_none():
+    """get_browse_library_facets raises when _conn is None: counts that cannot
+    be read are an error, never zero (rule 9 of docs/plans/CATALOGUE_CRITERIA_PLAN.md;
+    it used to return {})."""
+    from shared.fjms_service import FilterUnavailable, FjmsService
 
     svc = FjmsService.__new__(FjmsService)
     svc._conn = None
 
     mapper = {"A": "CUL"}.get
-    result = svc.get_browse_library_facets(sys_id_to_library=mapper)
-    assert result == {}, f"Expected {{}} when _conn is None; got {result}"
+    with pytest.raises(FilterUnavailable) as err:
+        svc.get_browse_library_facets(sys_id_to_library=mapper)
+    assert err.value.reason == "sidecar_unavailable"
 
 
 def test_facets_returns_empty_when_no_mapper():

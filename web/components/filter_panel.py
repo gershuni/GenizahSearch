@@ -121,12 +121,50 @@ def build_work_options(lang: str, domain=None, author=None) -> dict:
     return options
 
 
+def build_script_options(lang: str) -> dict:
+    """Options for the two script filter selects: {filter key: {value: 'label (count)'}}.
+
+    Args:
+        lang: Language code ('he' or 'en'), passed explicitly as for
+              build_domain_options. Reads the sidecar: run it in run.io_bound().
+    """
+    from shared.fjms_service import SCRIPT_FILTER_CATEGORIES, script_filter_options
+    return {key: script_filter_options(key, lang == 'he') for key in SCRIPT_FILTER_CATEGORIES}
+
+
+def build_script_filter_row(state, filter_refs: dict, tr_func):
+    """The Script Style / Script Place selects of a "Search only in..." panel.
+
+    Their options are loaded after the page renders (build_script_options). The
+    selects go into filter_refs under 'script_styles' / 'script_places'; the page
+    wires create_filter_handlers' handlers of the same names to them.
+    """
+    from nicegui import ui
+    with ui.row().classes('w-full gap-4 flex-wrap items-end').mark('filter-script-row'):
+        for key, label in (('script_styles', tr_func('Script Style')),
+                           ('script_places', tr_func('Script Place'))):
+            with ui.column().classes('gap-1 min-w-48 flex-grow'):
+                ui.label(label).classes('text-xs font-medium').style('color: var(--text-secondary);')
+                filter_refs[key] = ui.select(
+                    options={},
+                    value=list(getattr(state, f'filter_{key}', None) or []),
+                    multiple=True,
+                    with_input=True,
+                    clearable=True,
+                ).classes('w-full').props('outlined dense use-chips')
+        ui.label(tr_func('From the catalogue records: manuscripts whose records do not '
+                         'describe the script are not included.')).classes(
+            'text-xs w-full'
+        ).style('color: var(--text-muted);')
+
+
 def build_filter_summary(filters: dict, tr_func, get_language_func, max_len: int = 50) -> str:
     """Build compact filter summary like [include: Bible, Tosefta. 1000-1300].
 
     Args:
         filters: Dict with keys: include_mode, domains, authors, works,
-                 date_from, date_to, material_exclude, material_include.
+                 date_from, date_to, material_exclude, material_include,
+                 script_styles, script_places.
         tr_func: Translation function (page-context-dependent).
         get_language_func: Language getter function (page-context-dependent).
         max_len: Maximum summary string length.
@@ -177,11 +215,27 @@ def build_filter_summary(filters: dict, tr_func, get_language_func, max_len: int
         parts.append(tr_func("No printed"))
     elif filters.get('material_include'):
         parts.append(tr_func("Printed only"))
-    if not parts:
+    script_parts = []
+    if filters.get('script_styles') or filters.get('script_places'):
+        from shared.fjms_service import SCRIPT_FILTER_CATEGORIES, script_value_label
+        is_heb = get_language_func() == 'he'
+        for key in SCRIPT_FILTER_CATEGORIES:
+            for v in filters.get(key) or []:
+                script_parts.append(script_value_label(key, str(v), is_heb))
+    # Exclude mode never turns the script filter around: under "exclude" a
+    # script value would say the opposite of what was searched.
+    if filters.get('include_mode', True):
+        parts += script_parts
+        script_parts = []
+    groups = [(prefix, parts), (tr_func('include'), script_parts)]
+    summary = ' '.join(f"[{p}: {', '.join(g)}]" for p, g in groups if g)
+    if not summary:
         return ''
-    summary = f"[{prefix}: {', '.join(parts)}]"
     if len(summary) > max_len:
-        summary = summary[:max_len - 4] + '...]'
+        cut = summary[:max_len - 4].rstrip()
+        if cut.endswith(']'):  # cut between two brackets: continue the first
+            cut = cut[:-1]
+        summary = cut + '...]'
     return summary
 
 
@@ -200,6 +254,8 @@ def has_active_filters(state) -> bool:
         state.filter_date_from is not None,
         state.filter_date_to is not None,
         state.filter_material_exclude,
+        bool(getattr(state, 'filter_script_styles', None)),
+        bool(getattr(state, 'filter_script_places', None)),
         state.filter_text_all,
         state.filter_text_any,
         state.filter_text_not,
@@ -271,6 +327,9 @@ def load_filter_state(state, storage_prefix: str) -> list:
     state.filter_date_to = _sg(f'{pfx}_filter_date_to', None)
     _fme = _sg(f'{pfx}_filter_material_exclude')
     state.filter_material_exclude = _fme if _fme is not None else []
+    for _key in ('script_styles', 'script_places'):
+        _fs = _sg(f'{pfx}_filter_{_key}')
+        setattr(state, f'filter_{_key}', list(_fs) if isinstance(_fs, list) else [])
     _fta = _sg(f'{pfx}_filter_text_all')
     state.filter_text_all = _fta if _fta is not None else []
     _ftany = _sg(f'{pfx}_filter_text_any')
@@ -310,10 +369,19 @@ def load_filter_state(state, storage_prefix: str) -> list:
     return dropped
 
 
+def corpus_universe():
+    """The corpus list for get_filter_sys_ids (D17 of
+    docs/plans/CATALOGUE_CRITERIA_PLAN.md: uncatalogued manuscripts pass
+    filters that only exclude), as a callable the service calls only when
+    it needs it, or None before the app state has a metadata manager."""
+    from web.state import state as _app_state
+    return getattr(getattr(_app_state, 'meta_mgr', None), 'corpus_sys_ids', None)
+
+
 def filter_unavailable_message(exc, tr_func) -> str:
     """The notice for a search not run because its filters could not be
     applied (#17), chosen by ``FilterUnavailable.reason``."""
-    if getattr(exc, 'reason', 'query_failed') == 'query_failed':
+    if getattr(exc, 'reason', 'query_failed') in ('query_failed', 'corpus_unavailable'):
         return tr_func("The filters could not be applied, so the search was not run. "
                        "Try again, or remove the filters.")
     return tr_func("The catalog data these filters need is not available, so the search "
@@ -367,6 +435,14 @@ def consume_incoming_filters(state, storage_prefix: str, require_from_browse: bo
     if incoming.get('material_exclude'):
         state.filter_material_exclude = incoming['material_exclude']
         persist_value(f'{pfx}_filter_material_exclude', incoming['material_exclude'])
+    # Catalog Browse traits. Measurement traits only on /search: /parallels has no
+    # controls or chips for them, so applied there they would be invisible.
+    from shared.fjms_service import BROWSE_MEASUREMENT_TRAITS, BROWSE_SCRIPT_TRAITS, clean_traits
+    traits = clean_traits(incoming)
+    for key in BROWSE_SCRIPT_TRAITS + (BROWSE_MEASUREMENT_TRAITS if pfx == 'search' else ()):
+        if key in traits:
+            setattr(state, f'filter_{key}', traits[key])
+            persist_value(f'{pfx}_filter_{key}', traits[key])
     # GAP-F (2026-06-28): thread library selection from catalog browse to /search.
     # DMF (T-130-02-06 / HIGH-1): browse->search handoff stamps mode='show_only' and
     # persists the new {'mode','codes'} dict shape (NOT a bare list).  Without the mode
@@ -468,6 +544,8 @@ async def recompute_filter_count(state, update_chip_bar_fn, on_state=None):
     _date_from = state.filter_date_from
     _date_to = state.filter_date_to
     _material_exclude = state.filter_material_exclude or None
+    _script_styles = list(getattr(state, 'filter_script_styles', None) or []) or None
+    _script_places = list(getattr(state, 'filter_script_places', None) or []) or None
     _text_all = state.filter_text_all or None
     _text_any = state.filter_text_any or None
     _text_not = state.filter_text_not or None
@@ -493,6 +571,8 @@ async def recompute_filter_count(state, update_chip_bar_fn, on_state=None):
             date_from=_date_from,
             date_to=_date_to,
             material_exclude=_material_exclude,
+            script_styles=_script_styles,
+            script_places=_script_places,
             text_all=_text_all,
             text_any=_text_any,
             text_not=_text_not,
@@ -511,7 +591,7 @@ async def recompute_filter_count(state, update_chip_bar_fn, on_state=None):
             kwargs['domains_exclude'] = _domains
             kwargs['authors_exclude'] = _authors
             kwargs['works_exclude'] = _works
-        return fjms.get_filter_sys_ids(**kwargs)
+        return fjms.get_filter_sys_ids(universe=corpus_universe(), **kwargs)
 
     try:
         result = await run.io_bound(_compute)
@@ -618,7 +698,18 @@ def create_filter_handlers(state, storage_prefix, filter_refs, refresh_author_fn
         await recompute_fn()
         update_chip_fn()
 
+    def _script_change(key):
+        async def on_change(e=None):
+            val = filter_refs[key].value or []
+            setattr(state, f'filter_{key}', list(val) if isinstance(val, list) else [val])
+            persist_value(f'{pfx}_filter_{key}', getattr(state, f'filter_{key}'))
+            await recompute_fn()
+            update_chip_fn()
+        return on_change
+
     return {
+        'on_script_styles_change': _script_change('script_styles'),
+        'on_script_places_change': _script_change('script_places'),
         'on_domain_change': on_domain_change,
         'on_author_change': on_author_change,
         'on_work_change': on_work_change,

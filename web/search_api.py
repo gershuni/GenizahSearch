@@ -168,6 +168,24 @@ class FiltersModel(BaseModel):
         default=None,
         description="Material type (e.g. 'paper', 'parchment'). Unknown values -> 400 unresolvable_filter_value.",
     )
+    script_styles: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Script style as the catalogue records it (e.g. 'Square', 'Semi-Cursive', "
+            "'Cursive', 'Rabbinical', 'Naskhi', 'Karaitic'). Any one matches; manuscripts "
+            "whose catalogue records give no script style are not included. Unknown "
+            "values -> 400 unresolvable_filter_value."
+        ),
+    )
+    script_places: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Script place (regional script type) as the catalogue records it (e.g. "
+            "'Oriental', 'Spanish', 'Yemenite', 'Ashkenazi', 'Italian', 'Byzantine'). Any "
+            "one matches; manuscripts whose catalogue records give none are not included. "
+            "Unknown values -> 400 unresolvable_filter_value."
+        ),
+    )
     date_from: Optional[int] = Field(
         default=None,
         description="Inclusive lower bound on manuscript estimated year (CE). Combine with date_to.",
@@ -467,6 +485,8 @@ def _resolve_fjms_filters_sync(filters_dict: dict) -> Optional[set]:
         authors=filters_dict.get('authors'),
         works=filters_dict.get('works'),
         material_include=filters_dict.get('materials'),
+        script_styles=filters_dict.get('script_styles'),
+        script_places=filters_dict.get('script_places'),
         date_from=filters_dict.get('date_from'),
         date_to=filters_dict.get('date_to'),
     )
