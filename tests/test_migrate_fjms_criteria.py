@@ -14,14 +14,23 @@ def build(path, *, version="5.0.0", instatution=False, measurements=True):
     con.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
     con.execute("INSERT INTO meta VALUES ('version', ?)", (version,))
     con.execute("CREATE TABLE catalog (AlmaId TEXT, UnitCatalogRecId INTEGER,"
-                " NumRow TEXT, NumColumn TEXT, SourceName TEXT)")
+                " NumRow TEXT, NumColumn TEXT, SourceName TEXT, CopyDate TEXT,"
+                " CopyToDate TEXT, PartVocalCode INTEGER, IllustrationCode INTEGER,"
+                " PalimpsestCode INTEGER, Colophon TEXT, CantillationCode INTEGER,"
+                " Massorah INTEGER, Autograph INTEGER)")
     source = "Instatution" if instatution else "GRU – Cambridge"
-    con.executemany("INSERT INTO catalog VALUES (?, ?, ?, ?, ?)", [
-        ("990001", 1, "19-21", "2", "NLI Aleph Catalog"),
-        ("990001", 2, "0", "0", source),          # 0 = not recorded
-        ("990002", 3, "22,25", "1-1", "Inventory"),
-        ("990003", 4, None, "", "Inventory"),
+    con.executemany("INSERT INTO catalog (AlmaId, UnitCatalogRecId, NumRow, NumColumn,"
+                    " SourceName, CopyDate, CopyToDate, PartVocalCode, IllustrationCode,"
+                    " Colophon) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+        ("990001", 1, "19-21", "2", "NLI Aleph Catalog", "1050", "1100", 1036, 1038, None),
+        ("990001", 2, "0", "0", source, "-99", "1200", None, None, None),  # 0 = not recorded
+        ("990002", 3, "22,25", "1-1", "Inventory", "1027", "8", -1036, 2038, "text"),
+        ("990003", 4, None, "", "Inventory", None, None, None, None, None),
     ])
+    con.execute("CREATE TABLE code_values (FCDTableId INTEGER, Code INTEGER,"
+                " EngDesc TEXT, HebDesc TEXT)")
+    con.executemany("INSERT INTO code_values VALUES (36, ?, ?, ?)",
+                    [(1, "Full", "x"), (-1, "Unknown", "y")])
     con.execute("CREATE TABLE catalog_free_desc (AlmaId TEXT, SignatureId INTEGER,"
                 " SourceName TEXT)")
     con.execute("CREATE TABLE catalog_fields (AlmaId TEXT, UnitCatalogRecId INTEGER,"
@@ -65,12 +74,21 @@ def test_apply_builds_the_5_1_0_file(tmp_path):
     assert rows == [
         ("990001", 1, "columns", 2, 2),
         ("990001", 1, "lines", 19, 21),
+        ("990001", 1, "period", 1050, 1100),
         ("990002", 3, "columns", 1, 1),
         ("990002", 3, "lines", 22, 22),
         ("990002", 3, "lines", 25, 25),
-    ]  # the '0' record and the empty one give nothing
+        ("990002", 3, "period", 1027, 1027),
+    ]  # '0' and empty texts give nothing; -99 with an end is no date
+    values = read(db, "SELECT AlmaId, key, value FROM criteria_values ORDER BY AlmaId, key, value")
+    assert values == [
+        ("990001", "attributes", "illustration"),
+        ("990001", "vocal_extent", "Full"),
+        ("990002", "attributes", "colophon"),
+        ("990002", "vocal_extent", "Unknown"),
+    ]  # IllustrationCode 2038 is "No"
     indexes = {name for (name,) in read(db, "SELECT name FROM sqlite_master WHERE type='index'")}
-    assert {"idx_critnum_key_range", "idx_catfld_cat_val"} <= indexes
+    assert {"idx_critnum_key_range", "idx_critval_key_value", "idx_catfld_cat_val"} <= indexes
     assert read(db, "SELECT avg_line_height_mm FROM manuscript_measurements") == [(5.0,)]
 
 

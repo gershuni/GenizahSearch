@@ -1193,7 +1193,8 @@ sudo systemctl restart genizah-web
 3. `python scripts/fix_instatution_sources.py --db <copy> --no-backup --apply` — after EVERY export.
    The export brings back 267,481 + 47,809 rows whose source is the typo 'Instatution', which hides the
    named teams of about 30,600 manuscripts; the May 2026 re-export lost the April fix exactly this way;
-4. `python scripts/migrate_fjms_criteria.py --db <copy> --apply` — adds `criteria_numbers`, the
+4. `python scripts/migrate_fjms_criteria.py --db <copy> --apply` — adds `criteria_numbers` (lines,
+   columns, copy-date spans), `criteria_values` (vocalization extent, attributes), the
    `catalog_fields(FieldCategory, FieldValue, AlmaId)` index and `avg_line_height_mm`, sets
    `meta.version` 5.1.0. It refuses a file that still has 'Instatution' rows (exit 3) or is not 5.0.x
    (exit 2), and does nothing on a complete 5.1.0;

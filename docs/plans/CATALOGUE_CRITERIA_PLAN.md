@@ -373,7 +373,11 @@ its summary.
      The export rebuilds `catalog` and `catalog_free_desc` and undoes the fix — that is how it was
      lost in May (`scripts/export_fist_enrichment.py:1756`);
   4. the criteria step (`scripts/migrate_fjms_criteria.py`, new): `criteria_numbers(AlmaId, key,
-     lo, hi)` from `NumRow` / `NumColumn` by the D7 rules, index `(key, lo, hi)`; index
+     lo, hi)` from `NumRow` / `NumColumn` by the D7 rules and each record's copy-date span (D18),
+     index `(key, lo, hi)`; `criteria_values(AlmaId, key, value)` for the coded columns
+     (vocalization extent, attributes), index `(key, value)` — built in 1a after measuring that
+     the period, vocalization and attribute lookups scanned the whole catalog (2-14 s; 0.01-0.3 s
+     with the tables); index
      `catalog_fields(FieldCategory, FieldValue, AlmaId)`; `manuscript_measurements.
      avg_line_height_mm` through `migrate_add_line_height` (revives today's dead Line Height
      post-search filter in production); `meta.version` -> 5.1.0;

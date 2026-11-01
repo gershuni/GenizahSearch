@@ -8,7 +8,13 @@ Reads only the file's own tables (no FIST.db), and adds:
   - criteria_numbers(AlmaId, UnitCatalogRecId, key, lo, hi): the catalogue's
     line and column counts (catalog.NumRow / NumColumn, free text) parsed by
     shared/catalog_numbers.py::parse_number_text (ruling D7), one row per
-    interval, key 'lines' or 'columns'; index (key, lo, hi, AlmaId);
+    interval, key 'lines' or 'columns'; and each record's copy-date span,
+    key 'period' (copy_span, ruling D18); index (key, lo, hi, AlmaId);
+  - criteria_values(AlmaId, UnitCatalogRecId, key, value): the coded catalog
+    columns as values, key 'vocal_extent' (PartVocalCode -> code_values
+    label) and 'attributes' (shared/catalog_criteria.py::ATTRIBUTES); index
+    (key, value, AlmaId). Without these two tables each such lookup scans
+    the whole catalog table (2-14 s);
   - index catalog_fields(FieldCategory, FieldValue, AlmaId) for the list
     criteria;
   - manuscript_measurements.avg_line_height_mm, via
@@ -39,13 +45,16 @@ REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from shared.catalog_numbers import parse_number_text  # noqa: E402
+from shared.catalog_criteria import ATTRIBUTES, stored_code  # noqa: E402
+from shared.catalog_numbers import copy_span, parse_number_text  # noqa: E402
 
 DEFAULT_DB = Path("fist_data/fjms_enrichment.db")
 TARGET_VERSION = "5.1.0"
 NUMBER_COLUMNS = (("lines", "NumRow"), ("columns", "NumColumn"))
 NUMBERS_INDEX = "idx_critnum_key_range"
+VALUES_INDEX = "idx_critval_key_value"
 FIELDS_INDEX = "idx_catfld_cat_val"
+VOCAL_EXTENT_TABLE = 36  # code_values table of catalog.PartVocalCode
 
 EXIT_OK, EXIT_REFUSED, EXIT_INSTATUTION = 0, 2, 3
 
@@ -84,6 +93,10 @@ def missing_parts(conn) -> list[str]:
         missing.append("rows in criteria_numbers")
     if not has_index(conn, NUMBERS_INDEX):
         missing.append(f"index {NUMBERS_INDEX}")
+    if not has_table(conn, "criteria_values"):
+        missing.append("table criteria_values")
+    if not has_index(conn, VALUES_INDEX):
+        missing.append(f"index {VALUES_INDEX}")
     if not has_index(conn, FIELDS_INDEX):
         missing.append(f"index {FIELDS_INDEX}")
     if has_table(conn, "manuscript_measurements") and not has_column(
@@ -103,7 +116,8 @@ def instatution_rows(conn) -> int:
 
 
 def number_rows(conn) -> list[tuple]:
-    """(AlmaId, UnitCatalogRecId, key, lo, hi) for every parsed interval."""
+    """(AlmaId, UnitCatalogRecId, key, lo, hi) for every parsed interval and
+    every dated record."""
     rows = []
     for key, column in NUMBER_COLUMNS:
         for alma, ucr, text in conn.execute(
@@ -111,17 +125,38 @@ def number_rows(conn) -> list[tuple]:
                 f"WHERE {column} IS NOT NULL AND TRIM({column}) <> ''"):
             for lo, hi in parse_number_text(text):
                 rows.append((alma, ucr, key, lo, hi))
+    for alma, ucr, start, end in conn.execute(
+            "SELECT AlmaId, UnitCatalogRecId, CopyDate, CopyToDate FROM catalog "
+            "WHERE CopyDate IS NOT NULL AND TRIM(CopyDate) <> ''"):
+        span = copy_span(start, end)
+        if span:
+            rows.append((alma, ucr, "period", *span))
     return rows
 
 
-def summarize(rows: list[tuple]) -> None:
-    for key, _column in NUMBER_COLUMNS:
+def value_rows(conn) -> list[tuple]:
+    """(AlmaId, UnitCatalogRecId, key, value) for the coded catalog columns."""
+    labels = {stored_code(code, VOCAL_EXTENT_TABLE): eng for code, eng in conn.execute(
+        "SELECT Code, EngDesc FROM code_values WHERE FCDTableId = ?", [VOCAL_EXTENT_TABLE])}
+    rows = [(alma, ucr, "vocal_extent", labels[stored])
+            for alma, ucr, stored in conn.execute(
+                "SELECT AlmaId, UnitCatalogRecId, PartVocalCode FROM catalog "
+                "WHERE PartVocalCode IS NOT NULL")
+            if stored in labels]
+    for value, (_he, _en, condition) in ATTRIBUTES.items():
+        rows += [(alma, ucr, "attributes", value) for alma, ucr in conn.execute(
+            f"SELECT AlmaId, UnitCatalogRecId FROM catalog WHERE {condition}")]
+    return rows
+
+
+def summarize(rows: list[tuple], what: str) -> None:
+    for key in sorted({r[2] for r in rows}):
         keyed = [r for r in rows if r[2] == key]
-        log(f"  {key:8} {len(keyed):>9,} intervals, "
+        log(f"  {key:13} {len(keyed):>9,} {what}, "
             f"{len({r[0] for r in keyed}):>9,} manuscripts")
 
 
-def apply(conn, rows: list[tuple]) -> None:
+def apply(conn, rows: list[tuple], values: list[tuple]) -> None:
     from scripts.import_measurements import migrate_add_line_height
 
     conn.execute("BEGIN")
@@ -133,6 +168,14 @@ def apply(conn, rows: list[tuple]) -> None:
     )
     conn.executemany("INSERT INTO criteria_numbers VALUES (?, ?, ?, ?, ?)", rows)
     conn.execute(f"CREATE INDEX {NUMBERS_INDEX} ON criteria_numbers(key, lo, hi, AlmaId)")
+    conn.execute("DROP TABLE IF EXISTS criteria_values")
+    conn.execute(
+        "CREATE TABLE criteria_values ("
+        " AlmaId TEXT NOT NULL, UnitCatalogRecId INTEGER,"
+        " key TEXT NOT NULL, value TEXT NOT NULL)"
+    )
+    conn.executemany("INSERT INTO criteria_values VALUES (?, ?, ?, ?)", values)
+    conn.execute(f"CREATE INDEX {VALUES_INDEX} ON criteria_values(key, value, AlmaId)")
     conn.execute(f"CREATE INDEX IF NOT EXISTS {FIELDS_INDEX} "
                  "ON catalog_fields(FieldCategory, FieldValue, AlmaId)")
     conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('version', ?)",
@@ -173,12 +216,15 @@ def run(db: Path, do_apply: bool) -> int:
             return EXIT_INSTATUTION
 
         rows = number_rows(conn)
+        values = value_rows(conn)
         log("criteria_numbers:")
-        summarize(rows)
+        summarize(rows, "intervals")
+        log("criteria_values:")
+        summarize(values, "values")
         if not do_apply:
             log("Dry run: no writes. Re-run with --apply.")
             return EXIT_OK
-        apply(conn, rows)
+        apply(conn, rows, values)
         missing = missing_parts(conn)
         if missing:
             log(f"FAILED: still missing {', '.join(missing)}")
