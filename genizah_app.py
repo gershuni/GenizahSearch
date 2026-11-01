@@ -798,6 +798,44 @@ class _PostCriteriaWorker(QThread):
             self.matched.emit(self._generation, None, 'error')
 
 
+class _CatalogHandoffWorker(QThread):
+    """The scope of a Catalog hand-off ("Search / Parallel search in these
+    results"), off the UI thread: the criteria scan the sidecar, the corpus
+    list may still be loading (D14 needs it for "not recorded" / "all
+    except"), and a Show-only library list is resolved over the whole
+    csv_bank. Emits ``done(generation, restrict, library_ids, reason)``:
+    ``reason`` '' on success, else a FilterUnavailable reason or 'error'."""
+
+    done = pyqtSignal(int, object, object, str)
+
+    def __init__(self, filters, meta_mgr, library_mode, generation, parent=None):
+        super().__init__(parent)
+        self._filters = dict(filters)
+        self._meta_mgr = meta_mgr
+        self._library_mode = library_mode
+        self._generation = generation
+
+    def run(self):
+        from shared.fjms_service import FilterUnavailable, get_fjms_service, resolve_library_sys_ids
+        try:
+            restrict = get_fjms_service(thread_safe=True).get_filter_sys_ids(
+                domain=self._filters.get('domain'),
+                author=self._filters.get('author'),
+                work=self._filters.get('work'),
+                criteria=self._filters.get('criteria'),
+                universe=_catalog_corpus_ids(self._meta_mgr),
+            )
+            library_ids = None
+            if self._filters.get('library') and self._library_mode == 'show_only':
+                library_ids = resolve_library_sys_ids(self._filters['library'], self._meta_mgr)
+            self.done.emit(self._generation, restrict, library_ids, '')
+        except FilterUnavailable as exc:
+            self.done.emit(self._generation, None, None, exc.reason or 'error')
+        except Exception:
+            logger.exception("_CatalogHandoffWorker: the hand-off scope could not be computed")
+            self.done.emit(self._generation, None, None, 'error')
+
+
 class _CatalogUncataloguedWorker(QThread):
     """How many corpus manuscripts have no catalogue record (D16), for the
     domain tree's "No catalogue record" entry: waits for libraries.csv off the
@@ -826,11 +864,17 @@ def _catalog_corpus_ids(meta_mgr):
     return getattr(meta_mgr, 'corpus_sys_ids', None)
 
 
-def _catalog_corpus_now(meta_mgr):
-    """As _catalog_corpus_ids, for the UI thread: raises corpus_unavailable at
-    once while libraries.csv is still loading, never waits for it."""
-    corpus = getattr(meta_mgr, 'corpus_sys_ids', None)
-    return None if corpus is None else (lambda: corpus(timeout=0))
+def _warm_criteria_labels(fjms):
+    """Read every list criterion's value labels into the service's cache (on
+    a worker thread): FjmsService.criteria_chips reads them from there, and
+    the chips are drawn on the UI thread (GitHub Codex on #458)."""
+    from shared.catalog_criteria import CRITERIA
+    for criterion in CRITERIA:
+        if criterion.kind == 'list':
+            try:
+                fjms.criterion_value_labels(criterion.key)
+            except Exception as e:  # a chip then shows the English value
+                logger.debug("criteria labels for %s not read: %s", criterion.key, e)
 
 
 def _format_list_star(in_list=False):
@@ -2757,6 +2801,10 @@ class GenizahGUI(QMainWindow):
                             fjms.pre_warm_caches()
                         except Exception as e:
                             logger.debug(f"FJMS warmup failed: {e}")
+                        # The catalogue's Hebrew value labels the criteria chips
+                        # show, so a chip never reads them on the UI thread.
+                        if CURRENT_LANG == 'he':
+                            _warm_criteria_labels(fjms)
                 self._fjms_warmup_thread = _FjmsWarmupThread(self)
                 self._fjms_warmup_thread.start()
         except Exception:
@@ -12724,106 +12772,69 @@ class GenizahGUI(QMainWindow):
             filters['criteria'] = {k: dict(v) for k, v in criteria.items()}
         return filters
 
-    def _apply_catalog_handoff_filters(self, filters) -> bool:
+    def _catalog_search_in_results(self):
+        """Search tab, scoped to the browse list (the hand-off)."""
+        self._catalog_hand_off(0)
+
+    def _catalog_parallels_in_results(self):
+        """Composition tab, scoped to the browse list (the hand-off)."""
+        self._catalog_hand_off(1)
+
+    def _catalog_hand_off(self, tab):
         """Make the catalog browse filters the pre-search filters (#17).
 
-        The scope is computed FIRST. If the lookup cannot run (no catalog,
-        or the query failed), the user is told and neither the filters nor
-        the scope change -- the old code kept the previous scope under the
-        new filters, or set an empty one ("no manuscripts match").
-        Returns True when the filters were applied.
-        """
-        from shared.fjms_service import get_fjms_service, FilterUnavailable
-        try:
-            restrict = get_fjms_service().get_filter_sys_ids(
-                domain=filters.get('domain'),
-                author=filters.get('author'),
-                work=filters.get('work'),
-                criteria=filters.get('criteria'),
-                # "Not recorded" and "all except" need the corpus list (D14);
-                # this runs on the UI thread, so it never waits for it: before
-                # libraries.csv is read the user is told to try again.
-                universe=_catalog_corpus_now(getattr(self, 'meta_mgr', None)),
-            )
-        except FilterUnavailable as exc:
-            QMessageBox.warning(self, tr("Filters"), self._filter_unavailable_text(exc.reason))
-            return False
-        self._supersede_filter_lookup()
-        self.pre_search_filters = filters
-        self.pre_search_restrict_sys_ids = restrict
-        return True
-
-    def _catalog_search_in_results(self):
-        """Navigate to search tab with browse filters as pre-search filters."""
+        The scope -- the criteria scan the sidecar, the corpus list may still
+        be loading, the library list is read over the whole csv_bank -- is
+        computed in a worker (_CatalogHandoffWorker, GitHub Codex on #458) and
+        installed only if this is still the latest hand-off. If it cannot be
+        computed, the user is told and neither the filters nor the scope
+        change."""
         filters = self._catalog_build_browse_filters()
         if not filters:
             return
-        # #17: the browse filters replace the search filters only if they
-        # could be applied; otherwise nothing changes and the user is told.
-        if not self._apply_catalog_handoff_filters(filters):
+        self._catalog_handoff_gen = getattr(self, '_catalog_handoff_gen', 0) + 1
+        worker = _CatalogHandoffWorker(
+            filters, getattr(self, 'meta_mgr', None), self._catalog_library_mode,
+            self._catalog_handoff_gen, self)
+        worker.done.connect(
+            lambda generation, restrict, library_ids, reason, f=filters, t=tab:
+            self._catalog_on_handoff_scope(generation, f, restrict, library_ids, reason, t))
+        self._catalog_handoff_worker = worker
+        self.statusBar().showMessage(tr("Loading..."), 5000)
+        worker.start()
+
+    def _catalog_on_handoff_scope(self, generation, filters, restrict, library_ids, reason, tab):
+        """Install a hand-off's scope (the worker's answer) and open ``tab``."""
+        if generation != getattr(self, '_catalog_handoff_gen', None):
+            return  # a later hand-off replaced this one
+        if reason:
+            QMessageBox.warning(self, tr("Filters"), self._filter_unavailable_text(reason))
             return
-        from shared.fjms_service import resolve_library_sys_ids
-        # GAP-H / DMF-07: library filter handoff — Show-only carries the allowlist;
+        self._supersede_filter_lookup()
+        self.pre_search_filters = filters
+        self.pre_search_restrict_sys_ids = restrict
+        # GAP-H / DMF-07: library filter handoff -- Show-only carries the allowlist;
         # Hide mode SUPPRESSES the restriction (Codex HIGH #4: do NOT invert a Hide-set
         # into an include-list; the full-corpus complement is out of scope for restrict_sys_ids).
         if self._catalog_library_filter:
             if self._catalog_library_mode == 'show_only':
-                # Show-only: intersect the selected-library sys_ids into the restrict scope.
                 # WR-02: fail-open if resolution is empty.
-                lib_ids = resolve_library_sys_ids(self._catalog_library_filter, self.meta_mgr)
-                if not lib_ids:
+                if not library_ids:
                     import logging as _log
                     _log.getLogger(__name__).warning(
-                        "library filter %s resolved to empty on search-in-results — skipping (fail-open)",
+                        "library filter %s resolved to empty on the hand-off -- skipping (fail-open)",
                         self._catalog_library_filter,
                     )
                 elif self.pre_search_restrict_sys_ids is None:
-                    self.pre_search_restrict_sys_ids = lib_ids
+                    self.pre_search_restrict_sys_ids = set(library_ids)
                 else:
-                    self.pre_search_restrict_sys_ids &= lib_ids
+                    self.pre_search_restrict_sys_ids &= library_ids
             else:
-                # Hide mode: suppress the library restriction with a brief notice.
-                # (Do NOT invert — the complement is not a valid restrict_sys_ids set.)
                 self.statusBar().showMessage(
                     tr("Library Hide filter not applied to search/composition"), 5000
                 )
         self._update_filter_chip_bar()
-        self._set_active_tab(0)  # Switch to search tab
-
-    def _catalog_parallels_in_results(self):
-        """Navigate to composition tab with browse filters as pre-search filters."""
-        filters = self._catalog_build_browse_filters()
-        if not filters:
-            return
-        # #17: the browse filters replace the search filters only if they
-        # could be applied; otherwise nothing changes and the user is told.
-        if not self._apply_catalog_handoff_filters(filters):
-            return
-        from shared.fjms_service import resolve_library_sys_ids
-        # GAP-H / DMF-07: library filter handoff — Show-only carries the allowlist;
-        # Hide mode SUPPRESSES the restriction (Codex HIGH #4).
-        if self._catalog_library_filter:
-            if self._catalog_library_mode == 'show_only':
-                # Show-only: intersect the selected-library sys_ids into the restrict scope.
-                # WR-02: fail-open if resolution is empty.
-                lib_ids = resolve_library_sys_ids(self._catalog_library_filter, self.meta_mgr)
-                if not lib_ids:
-                    import logging as _log
-                    _log.getLogger(__name__).warning(
-                        "library filter %s resolved to empty on parallels-in-results — skipping (fail-open)",
-                        self._catalog_library_filter,
-                    )
-                elif self.pre_search_restrict_sys_ids is None:
-                    self.pre_search_restrict_sys_ids = lib_ids
-                else:
-                    self.pre_search_restrict_sys_ids &= lib_ids
-            else:
-                # Hide mode: suppress the library restriction with a brief notice.
-                self.statusBar().showMessage(
-                    tr("Library Hide filter not applied to search/composition"), 5000
-                )
-        self._update_filter_chip_bar()
-        self._set_active_tab(1)  # Switch to composition tab
+        self._set_active_tab(tab)
 
     def _catalog_view_result(self, index):
         """Double-click result row: open ResultDialog with prev/next navigation."""

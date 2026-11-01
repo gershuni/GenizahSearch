@@ -150,6 +150,40 @@ def test_the_live_total_is_the_service_answer_and_names_the_unrecorded(svc):
         dlg.deleteLater()
 
 
+def test_all_except_an_attribute_is_counted(svc):
+    """GitHub Codex on #458: Attributes have no "not recorded", so "all
+    except" has no "of which" -- and the count must not fail for it."""
+    dlg = _open({'attributes': {'values': ['colophon'], 'mode': 'except'}})
+    try:
+        assert dlg.total_label.text() == "5 manuscripts have these features"
+    finally:
+        dlg.deleteLater()
+
+
+def test_the_values_worker_reads_the_chip_labels_off_the_ui_thread(svc, monkeypatch):
+    """GitHub Codex on #458: the chips' Hebrew labels (an unscoped read) were
+    first read on the UI thread at Apply; the window's worker reads them."""
+    read = []
+    real = svc.criterion_value_labels
+    monkeypatch.setattr(svc, 'criterion_value_labels', lambda key: read.append(key) or real(key))
+    dlg = _open()
+    try:
+        _visit_all(dlg)
+        assert {'region', 'style', 'material', 'attributes'} <= set(read)
+        assert 'lines' not in read, "ranges have no value labels"
+    finally:
+        dlg.deleteLater()
+
+
+def test_the_start_up_warm_up_reads_every_list_label(svc, monkeypatch):
+    import genizah_app
+    from shared.catalog_criteria import CRITERIA
+    read = []
+    monkeypatch.setattr(svc, 'criterion_value_labels', read.append)
+    genizah_app._warm_criteria_labels(svc)
+    assert read == [c.key for c in CRITERIA if c.kind == 'list']
+
+
 def test_a_count_that_cannot_run_is_an_error_not_a_number(svc):
     """No corpus list: "all except" cannot be counted (corpus_unavailable)."""
     dlg = _open({'region': {'values': ['Oriental'], 'mode': 'except'}}, universe=None)

@@ -75,6 +75,16 @@ def absent_singleton(monkeypatch, tmp_path):
                         FjmsService(db_path=str(tmp_path / "absent.db")))
 
 
+@pytest.fixture(autouse=True)
+def _sync_handoff(monkeypatch):
+    """The Catalog hand-off computes its scope in a worker; here it runs on
+    this thread, so each test sees its outcome at once."""
+    class _Sync(genizah_app._CatalogHandoffWorker):
+        def start(self):
+            self.run()
+    monkeypatch.setattr(genizah_app, '_CatalogHandoffWorker', _Sync)
+
+
 def _catalog_window():
     w = _bare_window()
     w._catalog_current_domain = None

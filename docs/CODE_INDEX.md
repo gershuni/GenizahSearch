@@ -2533,6 +2533,9 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
   which N not recorded" (signal `counted`, not `finished`).
 - `genizah_app.py`: **Class** `_CatalogUncataloguedWorker` — the domain tree's "No catalogue record (N)";
   **Class** `_PostCriteriaWorker` — the post-search criteria's matches among the results, off the UI thread;
+  **Class** `_CatalogHandoffWorker` — the scope of "Search / Parallel search in these results", off the UI
+  thread (`_catalog_hand_off` / `_catalog_on_handoff_scope`); `_warm_criteria_labels` — the chips' Hebrew
+  value labels, read at start-up;
   `GenizahGUI._catalog_open_criteria_dialog` / `_catalog_set_criteria` / `_catalog_remove_criterion`;
   `_migrate_saved_pre_search_filters` (history and session restores); `_recompute_post_criteria` /
   `_open_measurement_filter_dialog` — post-search filters by the panel's rules

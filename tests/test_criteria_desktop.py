@@ -204,23 +204,58 @@ def test_a_superseded_refresh_leaves_its_author_and_work_lists_to_the_next(svc, 
         "once answered, nothing is outstanding")
 
 
-def test_the_hand_off_never_waits_for_the_corpus_on_the_ui_thread(svc, monkeypatch):
-    """Codex, PR 1c round 1: before libraries.csv is read, the hand-off says
-    "try again" at once instead of freezing the window for up to 30 s."""
+@pytest.fixture
+def sync_handoff(monkeypatch):
+    """The hand-off worker, run on this thread."""
+    class _Sync(genizah_app._CatalogHandoffWorker):
+        def start(self):
+            self.run()
+    monkeypatch.setattr(genizah_app, '_CatalogHandoffWorker', _Sync)
+
+
+def _handoff_window(criteria):
+    w = _catalog_window(criteria)
+    w.tabs_opened = []
+    w._update_filter_chip_bar = lambda: None
+    w._set_active_tab = w.tabs_opened.append
+    return w
+
+
+def test_the_hand_off_scope_is_computed_off_the_ui_thread(svc, monkeypatch):
+    """GitHub Codex on #458 (and PR 1c round 1): the criteria scan the sidecar
+    and the corpus list may still be loading -- in a worker; nothing changes
+    until it answers."""
+    import threading
+    from PyQt6.QtCore import QCoreApplication
+    threads, real = [], svc.get_filter_sys_ids
+    monkeypatch.setattr(svc, 'get_filter_sys_ids',
+                        lambda **k: threads.append(threading.get_ident()) or real(**k))
+    w = _handoff_window(EXCEPT_ORIENTAL)
+    w.pre_search_filters, w.pre_search_restrict_sys_ids = {'domains': ['Bible']}, {A}
+    w._catalog_search_in_results()
+    assert (w.pre_search_filters, w.tabs_opened) == ({'domains': ['Bible']}, []), "installed before its answer"
+    assert w._catalog_handoff_worker.wait(10000)
+    QCoreApplication.processEvents()
+    assert threads and threads[0] != threading.get_ident(), "the scope was computed on the UI thread"
+    assert w.pre_search_restrict_sys_ids == {B, C, D, E, F} and w.tabs_opened == [0]
+
+
+def test_a_failed_hand_off_changes_nothing_and_a_late_one_is_dropped(svc, monkeypatch, sync_handoff):
     from shared.fjms_service import FilterUnavailable
-    asked, warned = [], []
+    warned = []
     monkeypatch.setattr(genizah_app.QMessageBox, 'warning', staticmethod(lambda *a, **k: warned.append(a)))
 
     class _Loading(_Meta):
         def corpus_sys_ids(self, timeout=30.0):
-            asked.append(timeout)
             raise FilterUnavailable('corpus_unavailable', 'loading')
-    w = _catalog_window(EXCEPT_ORIENTAL)
+    w = _handoff_window(EXCEPT_ORIENTAL)
     w.meta_mgr = _Loading()
     w.pre_search_filters, w.pre_search_restrict_sys_ids = {'domains': ['Bible']}, {A}
-    assert not w._apply_catalog_handoff_filters(w._catalog_build_browse_filters())
-    assert asked == [0], "the UI thread waited for libraries.csv"
+    w._catalog_parallels_in_results()
     assert warned and (w.pre_search_filters, w.pre_search_restrict_sys_ids) == ({'domains': ['Bible']}, {A})
+    assert w.tabs_opened == []
+    w._catalog_on_handoff_scope(w._catalog_handoff_gen - 1, {'criteria': LINES}, {C}, None, '', 1)
+    assert w.pre_search_filters == {'domains': ['Bible']}, "an older hand-off's answer was installed"
 
 
 def test_a_history_row_names_an_old_date_range_as_the_period(svc):
@@ -253,18 +288,17 @@ def test_the_library_counts_get_the_criteria(svc, monkeypatch):
     assert _Recorder.made[-1]['criteria'] == EXCEPT_ORIENTAL
 
 
-def test_search_in_these_results_carries_the_criteria_and_their_scope(svc, monkeypatch):
+def test_search_in_these_results_carries_the_criteria_and_their_scope(svc, monkeypatch, sync_handoff):
     """A browse list hands its criteria on unchanged (§6.3); the scope is the
     same set, uncatalogued manuscripts included (they have no region)."""
     warned = []
     monkeypatch.setattr(genizah_app.QMessageBox, 'warning', staticmethod(lambda *a, **k: warned.append(a)))
-    w = _catalog_window(EXCEPT_ORIENTAL)
-    filters = w._catalog_build_browse_filters()
-    assert filters == {'criteria': EXCEPT_ORIENTAL}
-    assert w._apply_catalog_handoff_filters(filters)
+    w = _handoff_window(EXCEPT_ORIENTAL)
+    assert w._catalog_build_browse_filters() == {'criteria': EXCEPT_ORIENTAL}
+    w._catalog_search_in_results()
     assert w.pre_search_filters == {'criteria': EXCEPT_ORIENTAL}
     assert w.pre_search_restrict_sys_ids == {B, C, D, E, F}
-    assert warned == []
+    assert (warned, w.tabs_opened) == ([], [0])
 
 
 def _chip_texts(layout):

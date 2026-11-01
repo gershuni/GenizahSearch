@@ -2405,6 +2405,9 @@ class CriterionValuesWorker(QThread):
                 if BY_KEY[key].kind == 'list':
                     self.loaded.emit(key, source, fjms.get_criterion_values(
                         key, universe=universe, source=source))
+                    # The labels the chips read (unscoped, cached by the
+                    # service), here rather than on the UI thread at Apply.
+                    fjms.criterion_value_labels(key)
                 if universe is not None:
                     self.coverage.emit(key, source, fjms.get_criterion_coverage(
                         key, universe, source), len(universe))
