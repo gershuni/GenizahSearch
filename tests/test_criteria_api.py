@@ -249,6 +249,10 @@ def test_nothing_recorded_is_an_unknown_value_not_an_outage(svc, monkeypatch):
 @pytest.mark.parametrize('key', ['script_styles', 'script_places'])
 def test_the_unreleased_script_lists_are_refused(client, searcher, svc, key):
     _error(_search(client, {key: ['Square']}), 400, 'invalid_request')
+    from pydantic import ValidationError
+    from web.mcp_server import SearchFilters
+    with pytest.raises(ValidationError):
+        SearchFilters(**{key: ['Square']})
 
 
 def test_the_request_model_offers_every_registry_criterion():

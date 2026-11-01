@@ -1517,7 +1517,8 @@ The following improvements are documented here as future work but are NOT implem
 ### 2026-11 — Manuscript features: `filters.criteria` and `GET /api/criteria`
 
 - `filters.criteria` on `POST /api/search` and `POST /api/parallels` (and their background
-  jobs, the MCP tools and the ChatGPT app): the website's "Manuscript features" — script style
+  jobs, and the MCP tools the ChatGPT app and Claude use; the retiring custom GPT's Actions
+  schema, `integrations/chatgpt/openapi.json`, is not extended): the website's "Manuscript features" — script style
   and region, language and alphabet, vocalization, columns, lines, physical status, material,
   attributes, period of copy and measured sizes over the whole corpus: lists with "only" / "all
   except", and "not recorded" wherever the criterion has it (all but Attributes). See [Manuscript features](#manuscript-features-filterscriteria).

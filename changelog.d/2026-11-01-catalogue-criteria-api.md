@@ -4,7 +4,8 @@ PR 2 of `docs/plans/CATALOGUE_CRITERIA_PLAN.md`. The public API and the MCP serv
 manuscript features as the website's panel.
 
 - `filters.criteria` on `POST /api/search` and `POST /api/parallels` (their background jobs, the
-  ChatGPT facade and the MCP tools too): one entry per criterion, as the panel stores them — lists
+  `/api/chatgpt` facade and the MCP tools too -- the ChatGPT app is the MCP plugin; the custom GPT,
+  retiring 2026-12-11, keeps its Actions schema unchanged): one entry per criterion, as the panel stores them — lists
   with `values`, `mode` ("only" / "except") and `source`, ranges with `min`, `max`, `not_recorded`
   and `source`; "_none" is Not recorded. The request model is built from the registry
   (`web/criteria_models.py`). The corpus is the universe, so "not recorded" and "all except" reach
