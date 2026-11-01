@@ -945,12 +945,12 @@ def criteria_unavailable_keys(service=None) -> frozenset:
     columns, lines (in any source mode), vocalization extent, attributes
     (rule 9). A file that could not be read is not known to lack anything
     (K-16): its criteria stay, and the lookup reports the error."""
-    from shared.catalog_criteria import CRITERIA
+    from shared.catalog_criteria import NEW_TABLE_KEYS
     from shared.fjms_service import FILTER_UNSUPPORTED, get_fjms_service
     service = service if service is not None else get_fjms_service()
     if service.criteria_support() != FILTER_UNSUPPORTED:
         return frozenset()
-    return frozenset(c.key for c in CRITERIA if c.number_key or c.value_key)
+    return frozenset(NEW_TABLE_KEYS)
 
 
 def drop_unavailable_criteria(criteria, service=None):
@@ -977,7 +977,7 @@ def migrate_saved_filters(filters):
     a chip removed later must not edit a saved history entry,
     had_old_measurements)."""
     import copy
-    from shared.catalog_criteria import clean_criteria
+    from shared.catalog_criteria import clean_criteria, period_from_dates
     from shared.fjms_service import MEASUREMENT_FILTER_KEYS
     filters = copy.deepcopy(dict(filters or {}))
     had_measurements = any(filters.get(k) not in (None, '', [], ()) for k in MEASUREMENT_FILTER_KEYS)
@@ -985,9 +985,9 @@ def migrate_saved_filters(filters):
         filters.pop(key, None)
     criteria = clean_criteria(filters.get('criteria'), strict=False)[0]
     date_from, date_to, undated = (filters.pop(k, None) for k in _OLD_DATE_KEYS)
-    if (date_from or date_to) and 'period' not in criteria:
-        period = {'min': date_from or None, 'max': date_to or None, 'not_recorded': bool(undated)}
-        criteria = clean_criteria(dict(criteria, period=period), strict=False)[0]
+    if 'period' not in criteria:
+        criteria = clean_criteria(dict(criteria, **period_from_dates(
+            date_from or None, date_to or None, bool(undated))), strict=False)[0]
     if criteria:
         filters['criteria'] = criteria
     else:
@@ -1032,6 +1032,7 @@ def _range_number(text: str):
 
 
 _LONG_LIST = 12  # a value list longer than this gets a filter box
+_TAIL_VALUES = ("Unknown", "Cannot be determined", "_none")  # listed last, in this order
 _SOURCE_CHOICES = (('either', "Catalogue or measured"), ('catalogue', "Catalogue only"),
                    ('measured', "Measured only"))
 _NOTE_STYLE = "font-size: 11px; color: #7f8c8d;"
@@ -1065,7 +1066,7 @@ class CriteriaDialog(QDialog):
         self.setMinimumSize(840, 620)
         self._validators = {
             True: QRegularExpressionValidator(QRegularExpression(r"^\d{0,5}$"), self),
-            False: QRegularExpressionValidator(QRegularExpression(r"^\d{0,4}(\.\d{0,2})?$"), self),
+            False: QRegularExpressionValidator(QRegularExpression(r"^(\d{1,4}(\.\d{0,2})?)?$"), self),
         }
         saved = clean_criteria(criteria, strict=False)[0]
         self._sections = [s for s in SECTIONS if sections is None or s.key in sections]
@@ -1357,16 +1358,20 @@ class CriteriaDialog(QDialog):
         widget = controls['values']
         widget.blockSignals(True)
         widget.clear()
-        offered = set()
+        offered = {value['value'] for value in values}
+        # A saved value this file does not offer stays chosen and shown --
+        # dropping it silently would widen the search -- after the offered
+        # values, before Unknown / Cannot be determined / Not recorded.
+        kept = [value for value in chosen if value not in offered]
         for value in values:
-            offered.add(value['value'])
+            if kept and value['value'] in _TAIL_VALUES:
+                for saved in kept:
+                    self._add_value_item(widget, saved, tr(saved), True)
+                kept = []
             self._add_value_item(widget, value['value'], f"{_value_label(key, value)} ({value['count']:,})",
                                  value['value'] in chosen)
-        # A saved value this file does not offer stays chosen and shown:
-        # dropping it silently would widen the search.
-        for value in chosen:
-            if value not in offered:
-                self._add_value_item(widget, value, tr(value), True)
+        for saved in kept:
+            self._add_value_item(widget, saved, tr(saved), True)
         widget.blockSignals(False)
         controls['loaded'] = source
         self._pending.pop(key, None)
@@ -1505,7 +1510,7 @@ class CriteriaDialog(QDialog):
         if tag != self._count_tag:
             return
         if self._within is not None:
-            text = tr("{n} of {total} results match").format(
+            text = tr("{n} of the {total} manuscripts in the results match").format(
                 n=f"{total:,}", total=f"{len(self._within):,}")
         elif total == 0:
             text = tr("No manuscripts match")
@@ -1522,7 +1527,9 @@ class CriteriaDialog(QDialog):
             self.note_label.setText(tr(
                 "These criteria cover all {corpus} manuscripts. {uncatalogued} have no FJMS catalogue "
                 "record: they match 'Not recorded', 'all except' and measured data ({sized} also have a "
-                "catalogue size).").format(**{k: f"{v:,}" for k, v in note.items()}))
+                "catalogue size).").format(corpus=f"{note['corpus']:,}",
+                                           uncatalogued=f"{note['uncatalogued']:,}",
+                                           sized=f"{note['uncatalogued_sized']:,}"))
             self.note_label.setVisible(True)
 
     def _on_count_failed(self, tag, reason):

@@ -1218,6 +1218,28 @@ def test_the_catalog_and_post_search_criteria_survive_a_restart(window, restore,
     assert timers, "the restored Catalog tab lists again"
 
 
+def test_the_restore_notices_outlive_session_restored(restore, monkeypatch):
+    """Codex, PR 1c round 1: "Session restored" replaced every notice of the
+    restore -- saved criteria the file cannot answer (pre-search, Catalog tab,
+    post-search) dropped silently, and the "search again" of R2 lost."""
+    import desktop.dialogs_filter as dialogs_filter
+    import genizah_core
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", "en")  # the messages are compared in English
+    monkeypatch.setattr(app, "FilterCountWorker", _IdleFilterWorker)
+    monkeypatch.setattr(app.QTimer, "singleShot", staticmethod(lambda *a: None))
+    monkeypatch.setattr(dialogs_filter, "criteria_unavailable_keys", lambda service=None: frozenset({"lines"}))
+    state = _session_state(results=[_res(A, 1)])
+    state["pre_search_filters"] = {"include_mode": True, "width_min": 10.0}
+    state["post_criteria"] = {"lines": {"min": 20}}
+    w = restore(state, "always")
+    message = w.statusBar().currentMessage()
+    assert message.startswith("Session restored")
+    assert "Some saved filters were removed: this catalog data is not available." in message
+    assert "Search again to see them." in message
+    assert w._post_criteria == {}
+    assert w._restore_notices is None, "after the restore, notices go straight to the status bar"
+
+
 def test_a_saved_catalog_date_range_becomes_the_period(restore, monkeypatch):
     """D18: a Catalog tab session from before the manuscript features."""
     monkeypatch.setattr(app.QTimer, "singleShot", staticmethod(lambda *a: None))

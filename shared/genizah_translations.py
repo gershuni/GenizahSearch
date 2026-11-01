@@ -6320,7 +6320,7 @@ TRANSLATIONS.update({
     "No features chosen.": "לא נבחרו מאפיינים.",
     "The count could not be computed.": "לא ניתן היה לחשב את המספר.",
     "{n} manuscripts have these features": "ל־{n} כתבי יד יש מאפיינים אלה",
-    "{n} of {total} results match": "{n} מתוך {total} התוצאות מתאימים",
+    "{n} of the {total} manuscripts in the results match": "{n} מתוך {total} כתבי היד שבתוצאות מתאימים",
     ", of which {m} have no {label} recorded": ", מהם {m} שלא נרשם להם {label}",
     "These criteria cover all {corpus} manuscripts. {uncatalogued} have no FJMS catalogue "
     "record: they match 'Not recorded', 'all except' and measured data ({sized} also have a "

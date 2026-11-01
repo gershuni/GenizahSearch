@@ -2391,7 +2391,7 @@ class CriterionValuesWorker(QThread):
         self._universe = universe  # a set, or a callable returning one
 
     def run(self):
-        from shared.catalog_criteria import BY_KEY, NOT_RECORDED
+        from shared.catalog_criteria import BY_KEY
         from shared.fjms_service import FilterUnavailable, get_fjms_service
         try:
             universe = self._universe() if callable(self._universe) else self._universe
@@ -2403,18 +2403,11 @@ class CriterionValuesWorker(QThread):
             try:
                 fjms = get_fjms_service()
                 if BY_KEY[key].kind == 'list':
-                    values = fjms.get_criterion_values(key, universe=universe, source=source)
-                    self.loaded.emit(key, source, values)
-                    missing = [v['count'] for v in values if v['value'] == NOT_RECORDED]
-                    if universe is not None and missing:
-                        self.coverage.emit(key, source, len(universe) - missing[0], len(universe))
-                    continue
-                spec = {'not_recorded': True}
-                if BY_KEY[key].sources:
-                    spec['source'] = source
-                missing = fjms.get_filter_sys_ids(criteria={key: spec}, universe=universe) or set()
-                total = len(universe or ())
-                self.coverage.emit(key, source, total - len(missing), total)
+                    self.loaded.emit(key, source, fjms.get_criterion_values(
+                        key, universe=universe, source=source))
+                if universe is not None:
+                    self.coverage.emit(key, source, fjms.get_criterion_coverage(
+                        key, universe, source), len(universe))
             except FilterUnavailable as exc:
                 self.failed.emit(key, source, exc.reason)
             except Exception:
@@ -2430,9 +2423,8 @@ class CriteriaCountWorker(QThread):
     itself ticked).
 
     Emits ``counted(tag, total, info)`` -- info: {'unrecorded': {key: n},
-    'note': None, or with ``note=True`` {'corpus', 'uncatalogued', 'sized'}:
-    the corpus, its manuscripts with no catalogue record, and how many of
-    those have a catalogue size} -- or ``failed(tag, reason)``. ``tag`` is the caller's, returned unchanged (a
+    'note': None, or with ``note=True`` FjmsService.criteria_corpus_note} --
+    or ``failed(tag, reason)``. ``tag`` is the caller's, returned unchanged (a
     newer count supersedes this one). Not ``finished``: that is QThread's own
     signal, which _keep_until_finished listens to."""
 
@@ -2447,30 +2439,18 @@ class CriteriaCountWorker(QThread):
         self._note = note
 
     def run(self):
-        from shared.catalog_criteria import NOT_RECORDED, clean_criteria
+        from shared.catalog_criteria import clean_criteria
         from shared.fjms_service import FilterUnavailable, get_fjms_service
         try:
             criteria = clean_criteria(self._criteria)[0]
             universe = self._universe() if callable(self._universe) else self._universe
             fjms = get_fjms_service()
-            info = {'unrecorded': {}, 'note': None}
+            live = fjms.criteria_live_total(criteria, universe)
+            info = {'unrecorded': live['not_recorded'], 'note': None}
             if self._note and universe is not None:
-                uncatalogued = set(universe) - fjms.catalogued_ids()
-                no_size = [fjms.get_filter_sys_ids(
-                    criteria={key: {'not_recorded': True, 'source': 'catalogue'}}, universe=universe)
-                    for key in ('width', 'height')]
-                info['note'] = {'corpus': len(universe), 'uncatalogued': len(uncatalogued),
-                                'sized': len(uncatalogued - (no_size[0] & no_size[1]))}
-            found = fjms.get_filter_sys_ids(criteria=criteria, universe=universe)
-            if found is None:  # no criteria: the whole universe
-                self.counted.emit(self._tag, len(universe or ()), info)
-                return
-            for key, spec in criteria.items():
-                if spec.get('mode') == 'except' and NOT_RECORDED not in spec['values']:
-                    recorded_only = dict(criteria, **{key: dict(spec, values=[*spec['values'], NOT_RECORDED])})
-                    kept = fjms.get_filter_sys_ids(criteria=recorded_only, universe=universe)
-                    info['unrecorded'][key] = len(found) - len(kept)
-            self.counted.emit(self._tag, len(found), info)
+                info['note'] = fjms.criteria_corpus_note(universe)
+            total = live['total'] if live['total'] is not None else len(universe or ())
+            self.counted.emit(self._tag, total, info)
         except FilterUnavailable as exc:
             self.failed.emit(self._tag, exc.reason)
         except Exception:

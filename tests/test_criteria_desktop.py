@@ -137,11 +137,76 @@ def test_the_tab_refresh_passes_a_copy_of_its_criteria(svc, monkeypatch):
     w = _catalog_window(EXCEPT_ORIENTAL)
     w.catalog_results_table = SimpleNamespace(setRowCount=lambda n: None)
     w._catalog_count_label = SimpleNamespace(setText=lambda s: None)
-    w._catalog_on_async_refresh_done = lambda result: None
+    w._catalog_on_async_refresh_done = lambda *a: None
     w._catalog_start_async_refresh()
     assert _Recorder.made[-1]['criteria'] == EXCEPT_ORIENTAL
     assert _Recorder.made[-1]['criteria'] is not w._catalog_criteria, "the worker gets a copy"
     assert 'date_from' not in _Recorder.made[-1], "the old date range moved into the criteria"
+
+
+def test_only_the_latest_catalog_refresh_paints(svc, monkeypatch):
+    """Codex, PR 1c round 1: an earlier refresh answering after a later one
+    must not show its rows under the later chips."""
+    callbacks = []
+
+    class _Worker:
+        def __init__(self, parent, **kwargs):
+            self.done = SimpleNamespace(connect=callbacks.append)
+
+        def start(self):
+            pass
+    monkeypatch.setattr(genizah_app, '_CatalogRefreshWorker', _Worker)
+    w = _catalog_window(EXCEPT_ORIENTAL)
+    w.catalog_results_table = SimpleNamespace(setRowCount=lambda n: None)
+    w._catalog_count_label = QLabel()
+    painted = []
+    w._catalog_on_async_refresh_done = lambda result, gen=None: painted.append(
+        (result, gen == w._catalog_refresh_gen))
+    w._catalog_start_async_refresh()
+    w._catalog_start_async_refresh()
+    callbacks[1]({'data': 'new'})
+    callbacks[0]({'data': 'old'})
+    assert painted == [({'data': 'new'}, True), ({'data': 'old'}, False)], (
+        "the handler must learn which refresh answered")
+    from PyQt6.QtWidgets import QTableWidget
+    w2 = _catalog_window()
+    w2.catalog_results_table = QTableWidget()
+    w2._catalog_refresh_gen = 2
+    GenizahGUI._catalog_on_async_refresh_done(w2, {'data': {'error': True}}, 1)
+    assert not hasattr(w2, '_catalog_results_data'), "a superseded answer was painted"
+
+
+def test_the_hand_off_never_waits_for_the_corpus_on_the_ui_thread(svc, monkeypatch):
+    """Codex, PR 1c round 1: before libraries.csv is read, the hand-off says
+    "try again" at once instead of freezing the window for up to 30 s."""
+    from shared.fjms_service import FilterUnavailable
+    asked, warned = [], []
+    monkeypatch.setattr(genizah_app.QMessageBox, 'warning', staticmethod(lambda *a, **k: warned.append(a)))
+
+    class _Loading(_Meta):
+        def corpus_sys_ids(self, timeout=30.0):
+            asked.append(timeout)
+            raise FilterUnavailable('corpus_unavailable', 'loading')
+    w = _catalog_window(EXCEPT_ORIENTAL)
+    w.meta_mgr = _Loading()
+    w.pre_search_filters, w.pre_search_restrict_sys_ids = {'domains': ['Bible']}, {A}
+    assert not w._apply_catalog_handoff_filters(w._catalog_build_browse_filters())
+    assert asked == [0], "the UI thread waited for libraries.csv"
+    assert warned and (w.pre_search_filters, w.pre_search_restrict_sys_ids) == ({'domains': ['Bible']}, {A})
+
+
+def test_a_history_row_names_an_old_date_range_as_the_period(svc):
+    """Codex, PR 1c round 1: the row says what selecting it runs (D18)."""
+    from PyQt6.QtWidgets import QMenu
+    from test_saved_searches import _Host
+    host = _Host()
+    host._add_history_menu_item(host.menu, 'regular', 0, {
+        'query': 'word', 'result_count': 3, 'timestamp': '2026-01-01T00:00:00',
+        'pre_search_filters': {'include_mode': True, 'date_from': 1000, 'date_to': 1100}})
+    texts = [label.text() for action in host.menu.actions()
+             for label in action.defaultWidget().findChildren(QLabel)]
+    assert any("Period: 1000–1100" in t for t in texts), texts
+    assert isinstance(host.menu, QMenu)
 
 
 def test_the_library_counts_get_the_criteria(svc, monkeypatch):

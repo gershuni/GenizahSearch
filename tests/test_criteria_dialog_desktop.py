@@ -160,11 +160,13 @@ def test_a_count_that_cannot_run_is_an_error_not_a_number(svc):
 
 
 def test_a_saved_value_the_file_does_not_offer_stays_ticked(svc):
-    """Dropping it silently would widen the search."""
+    """Dropping it silently would widen the search. It stays among the values,
+    before Unknown and Not recorded."""
     dlg = _open({'region': {'values': ['Byzantine']}})
     try:
         _visit_all(dlg)
-        assert 'Byzantine' in _texts(dlg, 'region')
+        assert _texts(dlg, 'region') == [
+            'Oriental (1)', 'Spanish (1)', 'Yemenite (1)', 'Byzantine', 'Unknown (1)', 'Not recorded (3)']
         assert dlg.get_criteria() == {'region': {'values': ['Byzantine'], 'mode': 'only'}}
     finally:
         dlg.deleteLater()
@@ -187,6 +189,20 @@ def test_a_5_0_0_file_disables_and_drops_what_needs_the_new_tables(monkeypatch, 
     finally:
         dlg.deleteLater()
         service.close()
+
+
+def test_a_bound_is_a_number_or_nothing(svc):
+    """Codex, PR 1c round 1: a lone "." was accepted and then dropped the bound."""
+    from PyQt6.QtGui import QValidator
+    dlg = _open()
+    try:
+        width, period = dlg._controls['width']['min'].validator(), dlg._controls['period']['min'].validator()
+        for text, state in (('.', QValidator.State.Invalid), ('12.', QValidator.State.Acceptable),
+                            ('12.5', QValidator.State.Acceptable), ('', QValidator.State.Acceptable)):
+            assert width.validate(text, len(text))[0] == state, text
+        assert period.validate('1.', 2)[0] == QValidator.State.Invalid, "a year is whole"
+    finally:
+        dlg.deleteLater()
 
 
 def test_support_not_known_drops_nothing(svc, monkeypatch):
@@ -237,8 +253,8 @@ def test_hebrew_labels_english_values(monkeypatch, tmp_path):
     try:
         _visit_all(dlg)
         texts = _texts(dlg, 'material')
-        assert texts == ['נייר (1)', 'לא נרשם (5)', 'קלף'], (
-            "the catalogue's Hebrew, Not recorded, then the saved value this source does not offer")
+        assert texts == ['נייר (1)', 'קלף', 'לא נרשם (5)'], (
+            "the catalogue's Hebrew; the saved value this source does not offer, before Not recorded")
         assert dlg.get_criteria() == {'material': {'source': 'measured', 'values': ['Vellum'],
                                                    'mode': 'only'}}
         assert dialogs_filter._label(dlg._sections[0]) == 'תקופת העתקה'
@@ -254,8 +270,8 @@ def test_changing_the_source_reloads_the_values_and_keeps_the_ticks(svc):
         assert _texts(dlg, 'material')[:2] == ['Vellum (2)', 'Paper (1)']
         combo = dlg._controls['material']['source']
         combo.setCurrentIndex(combo.findData('measured'))
-        assert _texts(dlg, 'material') == ['Paper (1)', 'Not recorded (5)', 'Vellum'], (
-            "measured values, then the kept tick")
+        assert _texts(dlg, 'material') == ['Paper (1)', 'Vellum', 'Not recorded (5)'], (
+            "measured values, the kept tick, then Not recorded")
         assert dlg.get_criteria()['material'] == {'source': 'measured', 'values': ['Vellum'],
                                                   'mode': 'only'}
     finally:
@@ -307,7 +323,7 @@ def test_the_post_search_form_counts_within_the_results(svc):
         criteria = dlg.get_criteria()
         assert criteria == clean_criteria(saved)[0]
         kept = svc.match_result_criteria(criteria, results)
-        assert dlg.total_label.text() == f"{len(kept)} of 3 results match"
+        assert dlg.total_label.text() == f"{len(kept)} of the 3 manuscripts in the results match"
         assert dlg.note_label.isHidden()
     finally:
         dlg.deleteLater()

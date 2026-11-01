@@ -798,6 +798,13 @@ def _catalog_corpus_ids(meta_mgr):
     return getattr(meta_mgr, 'corpus_sys_ids', None)
 
 
+def _catalog_corpus_now(meta_mgr):
+    """As _catalog_corpus_ids, for the UI thread: raises corpus_unavailable at
+    once while libraries.csv is still loading, never waits for it."""
+    corpus = getattr(meta_mgr, 'corpus_sys_ids', None)
+    return None if corpus is None else (lambda: corpus(timeout=0))
+
+
 def _format_list_star(in_list=False):
     return "⭐" if in_list else "☆"
 
@@ -12096,12 +12103,19 @@ class GenizahGUI(QMainWindow):
             meta_mgr=self.meta_mgr,
             criteria=dict(self._catalog_criteria),
         )
-        self._catalog_refresh_worker.done.connect(self._catalog_on_async_refresh_done)
+        # Only the latest refresh paints: an earlier one that answers later
+        # would show its rows under the newer chips.
+        self._catalog_refresh_gen = getattr(self, '_catalog_refresh_gen', 0) + 1
+        self._catalog_refresh_worker.done.connect(
+            lambda result, gen=self._catalog_refresh_gen: self._catalog_on_async_refresh_done(result, gen))
         self._catalog_refresh_worker.start()
 
-    def _catalog_on_async_refresh_done(self, result):
-        """Handle results from background refresh thread."""
+    def _catalog_on_async_refresh_done(self, result, generation=None):
+        """Handle results from background refresh thread (``generation``: of the
+        refresh that produced them; a superseded one is ignored)."""
         from PyQt6 import sip
+        if generation is not None and generation != getattr(self, '_catalog_refresh_gen', generation):
+            return
         if sip.isdeleted(self.catalog_results_table):
             return
 
@@ -12690,8 +12704,10 @@ class GenizahGUI(QMainWindow):
                 author=filters.get('author'),
                 work=filters.get('work'),
                 criteria=filters.get('criteria'),
-                # "Not recorded" and "all except" need the corpus list (D14).
-                universe=_catalog_corpus_ids(getattr(self, 'meta_mgr', None)),
+                # "Not recorded" and "all except" need the corpus list (D14);
+                # this runs on the UI thread, so it never waits for it: before
+                # libraries.csv is read the user is told to try again.
+                universe=_catalog_corpus_now(getattr(self, 'meta_mgr', None)),
             )
         except FilterUnavailable as exc:
             QMessageBox.warning(self, tr("Filters"), self._filter_unavailable_text(exc.reason))
@@ -34982,8 +34998,10 @@ class GenizahGUI(QMainWindow):
         else:
             label_text = f"{query}  ({results_word})"
 
-        # Build filter summary from pre_search_filters
-        psf = entry.get('pre_search_filters', {})
+        # Build filter summary from pre_search_filters, as they run today: an
+        # old date range is shown as the Period of copy it is read into (D18).
+        from desktop.dialogs_filter import migrate_saved_filters
+        psf = migrate_saved_filters(entry.get('pre_search_filters'))[0]
         filter_summary = self._build_filter_summary(psf)
 
         labels_col = QVBoxLayout()
@@ -35089,9 +35107,18 @@ class GenizahGUI(QMainWindow):
         if criteria:
             filters['criteria'] = criteria
         if dropped:
-            self.statusBar().showMessage(
-                tr('Some saved filters were removed: this catalog data is not available.'), 8000)
+            self._restore_notice(tr('Some saved filters were removed: this catalog data is not available.'))
         return filters, had_measurements
+
+    def _restore_notice(self, text):
+        """Tell the user what a restore changed. During the session restore
+        the notices are collected and shown with "Session restored", which
+        would otherwise replace them at once (Codex, PR 1c round 1)."""
+        notices = getattr(self, '_restore_notices', None)
+        if notices is None:
+            self.statusBar().showMessage(text, 8000)
+        elif text not in notices:
+            notices.append(text)
 
     def _restore_regular_search_from_state(self, state, entry=None):
         """Apply a history entry and re-run the regular search.
@@ -35764,6 +35791,7 @@ class GenizahGUI(QMainWindow):
         """Restore search state from saved session on startup."""
         from shared.session_persistence import load_session_state
         self._restoring_session = True
+        self._restore_notices = []  # shown with "Session restored" (_restore_notice)
         # Phase 96 fix-8: track whether notify_session_restored() has been called
         # so the finally block can fire it exactly once.  It must fire regardless
         # of early returns (no-data, user-declined, restore_mode='never') so that
@@ -35831,16 +35859,18 @@ class GenizahGUI(QMainWindow):
                 reg = state['regular_search'] = dict(reg, results=[])
                 comp = state['composition_search'] = dict(
                     comp, results=[], filtered_results=[], summary_text='')
-                self.statusBar().showMessage(tr(
+                self._restore_notice(tr(
                     "The saved results were found with filters that have changed. "
-                    "Search again to see them."), 15000)
+                    "Search again to see them."))
             # Post-search criteria (D20); the old 'post_measurement_filters' are not
             # restored (R2).
             from desktop.dialogs_filter import drop_unavailable_criteria
             from shared.catalog_criteria import BY_KEY, clean_criteria
             _post = {k: v for k, v in clean_criteria(state.get('post_criteria'), strict=False)[0].items()
                      if BY_KEY[k].section in self.POST_CRITERIA_SECTIONS}
-            self._post_criteria, _ = drop_unavailable_criteria(_post)
+            self._post_criteria, _post_dropped = drop_unavailable_criteria(_post)
+            if _post_dropped:
+                self._restore_notice(tr('Some saved filters were removed: this catalog data is not available.'))
             self._post_criteria_ids = None
 
             # Show loading indicator now that we're committed to restoring
@@ -36063,8 +36093,7 @@ class GenizahGUI(QMainWindow):
                 {k: cat.get(k) for k in ('date_from', 'date_to', 'include_undated', 'criteria')})
             _cat_criteria, _cat_dropped = drop_unavailable_criteria(_cat_migrated.get('criteria'))
             if _cat_dropped:
-                self.statusBar().showMessage(
-                    tr('Some saved filters were removed: this catalog data is not available.'), 8000)
+                self._restore_notice(tr('Some saved filters were removed: this catalog data is not available.'))
             if any([cat.get('domain'), cat.get('author'), cat.get('work'),
                     cat.get('text_all'), cat.get('text_any'), cat.get('text_not'), _cat_criteria]):
                 self._catalog_criteria = _cat_criteria
@@ -36162,9 +36191,11 @@ class GenizahGUI(QMainWindow):
             self.search_progress.setVisible(False)
             saved_at = state.get('saved_at', '')
             ts_display = saved_at[:16].replace('T', ' ') if saved_at else ''
+            notices = self._restore_notices or []
             self.statusBar().showMessage(
-                tr("Session restored") + (f" ({ts_display})" if ts_display else ""),
-                5000
+                "  ".join([tr("Session restored") + (f" ({ts_display})" if ts_display else ""),
+                           *notices]),
+                15000 if notices else 5000
             )
 
             logger.info("Session restored from %s", saved_at)
@@ -36173,6 +36204,7 @@ class GenizahGUI(QMainWindow):
             logger.error("Failed to restore session: %s", e)
         finally:
             self._restoring_session = False
+            self._restore_notices = None
             # Whichever way the startup race went, this is where the
             # letter-level default becomes safe to apply: the stored method
             # is known, and the chunk knobs hold the values a cache may keep.
