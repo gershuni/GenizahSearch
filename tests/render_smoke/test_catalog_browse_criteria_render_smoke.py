@@ -86,9 +86,11 @@ def _notices(user) -> list:
 
 
 def _patched(fake, **extra):
+    # Not ui.navigate.to: the test User puts its own navigator into ui.navigate
+    # whenever it is used, so a patch on the object found here never applies
+    # (tests that click a handoff patch user.navigate instead).
     patches = [patch.object(catalog_browse, 'get_fjms_service', return_value=fake),
-               patch.object(state, 'meta_mgr', _meta()),
-               patch.object(catalog_browse.ui.navigate, 'to', lambda *a, **k: None)]
+               patch.object(state, 'meta_mgr', _meta())]
     patches += [patch.object(catalog_browse, name, value) for name, value in extra.items()]
     return patches
 
@@ -115,6 +117,13 @@ def test_the_address_reaches_the_list_the_chips_and_the_handoff(sidecar):
 
     async def driver(user: User) -> None:
         await user.open(_ADDRESS)
+        went = []
+        # The User's own navigator (ui.navigate is it while the User runs): a
+        # handoff stays on this page, and says where it would go. (A patch on
+        # ui.navigate taken before the User existed never applied: the first
+        # click opened /search in the background, and the second button was
+        # gone when CI was slow.)
+        user.navigate.to = lambda target, *a, **k: went.append(target)
         assert await _until(lambda: fake.facet_criteria), fake.result_criteria
         assert fake.result_criteria[-1] == _WANTED, fake.result_criteria
         assert fake.facet_criteria[-1] == _WANTED
@@ -129,6 +138,7 @@ def test_the_address_reaches_the_list_the_chips_and_the_handoff(sidecar):
         user.find(kind=ui.button, content='Parallel search in these results').click()
         await asyncio.sleep(0.1)
         assert handed['incoming_filters']['criteria'] == _WANTED, handed
+        assert went == ['/search?from_browse=1', '/parallels'], went
 
     _run_with(_patched(fake, safe_user_set=lambda k, v: handed.__setitem__(k, v)), driver)
 
