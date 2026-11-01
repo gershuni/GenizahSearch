@@ -2311,28 +2311,16 @@ class FilterCountWorker(QThread):
             fjms = FjmsService(thread_safe=True)
             include_mode = self.filters.get('include_mode', True)
             kwargs = dict(
-                date_from=self.filters.get('date_from'),
-                date_to=self.filters.get('date_to'),
-                include_undated=self.filters.get('include_undated', False),
                 material_include=self.filters.get('material_include'),
                 material_exclude=self.filters.get('material_exclude'),
-                script_styles=self.filters.get('script_styles') or None,
-                script_places=self.filters.get('script_places') or None,
                 text_all=self.filters.get('text_all') or None,
                 text_any=self.filters.get('text_any') or None,
                 text_not=self.filters.get('text_not') or None,
-                # Measurement filters (Phase 54)
-                width_min=self.filters.get('width_min'),
-                width_max=self.filters.get('width_max'),
-                height_min=self.filters.get('height_min'),
-                height_max=self.filters.get('height_max'),
-                line_count_min=self.filters.get('line_count_min'),
-                line_count_max=self.filters.get('line_count_max'),
-                line_height_min=self.filters.get('line_height_min'),
-                line_height_max=self.filters.get('line_height_max'),
-                text_density_min=self.filters.get('text_density_min'),
-                text_density_max=self.filters.get('text_density_max'),
-                measurement_material=self.filters.get('measurement_material'),
+                # Manuscript features (catalogue criteria): the period of copy,
+                # script, measurements ... (docs/plans/CATALOGUE_CRITERIA_PLAN.md).
+                # The older date and measurement keys are read into them, or
+                # dropped, when saved filters are restored (migrate_saved_filters).
+                criteria=self.filters.get('criteria') or None,
             )
             _domains = self.filters.get('domains') or None
             _authors = self.filters.get('authors') or None
@@ -2380,3 +2368,94 @@ class FilterCountWorker(QThread):
         except Exception:
             logger.exception("FilterCountWorker: filter lookup failed")
             self.failed.emit('error')
+
+
+class CriterionValuesWorker(QThread):
+    """The choices of list criteria, with their corpus counts, and how many
+    manuscripts record each criterion, read off the UI thread for the
+    Manuscript features dialog (desktop/dialogs_filter.py::CriteriaDialog).
+
+    ``needs`` is a list of (key, source). Emits, per need, ``loaded(key,
+    source, values)`` for a list criterion (values as FjmsService.
+    get_criterion_values) or ``coverage(key, source, recorded, of)`` for a
+    range; ``failed(key, source, reason)`` when it cannot be read (a
+    FilterUnavailable reason, or 'error')."""
+
+    loaded = pyqtSignal(str, str, object)
+    coverage = pyqtSignal(str, str, int, int)
+    failed = pyqtSignal(str, str, str)
+
+    def __init__(self, needs, universe=None, parent=None):
+        super().__init__(parent)
+        self._needs = list(needs)
+        self._universe = universe  # a set, or a callable returning one
+
+    def run(self):
+        from shared.catalog_criteria import BY_KEY
+        from shared.fjms_service import FilterUnavailable, get_fjms_service
+        try:
+            universe = self._universe() if callable(self._universe) else self._universe
+        except FilterUnavailable as exc:  # the corpus list is not loaded
+            for key, source in self._needs:
+                self.failed.emit(key, source, exc.reason)
+            return
+        for key, source in self._needs:
+            try:
+                fjms = get_fjms_service()
+                if BY_KEY[key].kind == 'list':
+                    self.loaded.emit(key, source, fjms.get_criterion_values(
+                        key, universe=universe, source=source))
+                    # The labels the chips read (unscoped, cached by the
+                    # service), here rather than on the UI thread at Apply.
+                    fjms.criterion_value_labels(key)
+                if universe is not None:
+                    self.coverage.emit(key, source, fjms.get_criterion_coverage(
+                        key, universe, source), len(universe))
+            except FilterUnavailable as exc:
+                self.failed.emit(key, source, exc.reason)
+            except Exception:
+                logger.exception("CriterionValuesWorker: %s could not be read", key)
+                self.failed.emit(key, source, 'error')
+
+
+class CriteriaCountWorker(QThread):
+    """The live total of the Manuscript features dialog: how many manuscripts
+    of ``universe`` (the corpus, or a search's results) the criteria select,
+    and, for each list in "all except" mode, how many of them have nothing
+    recorded for it (rule 2: they pass "all except" unless "Not recorded" is
+    itself ticked).
+
+    Emits ``counted(tag, total, info)`` -- info: {'unrecorded': {key: n},
+    'note': None, or with ``note=True`` FjmsService.criteria_corpus_note} --
+    or ``failed(tag, reason)``. ``tag`` is the caller's, returned unchanged (a
+    newer count supersedes this one). Not ``finished``: that is QThread's own
+    signal, which _keep_until_finished listens to."""
+
+    counted = pyqtSignal(int, int, object)
+    failed = pyqtSignal(int, str)
+
+    def __init__(self, criteria, universe=None, tag=0, parent=None, *, note=False):
+        super().__init__(parent)
+        self._criteria = dict(criteria or {})
+        self._universe = universe
+        self._tag = tag
+        self._note = note
+
+    def run(self):
+        from shared.catalog_criteria import clean_criteria
+        from shared.fjms_service import FilterUnavailable, get_fjms_service
+        try:
+            criteria = clean_criteria(self._criteria)[0]
+            universe = self._universe() if callable(self._universe) else self._universe
+            fjms = get_fjms_service()
+            live = fjms.criteria_live_total(criteria, universe)
+            info = {'unrecorded': live['not_recorded'], 'note': None}
+            if self._note and universe is not None:
+                info['note'] = fjms.criteria_corpus_note(universe)
+            total = live['total'] if live['total'] is not None else len(universe or ())
+            self.counted.emit(self._tag, total, info)
+        except FilterUnavailable as exc:
+            self.failed.emit(self._tag, exc.reason)
+        except Exception:
+            logger.exception("CriteriaCountWorker: the count failed")
+            self.failed.emit(self._tag, 'error')

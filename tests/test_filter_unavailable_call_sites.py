@@ -16,11 +16,13 @@ call site from skipping the handling:
    restriction".
 3. /parallels passes an ``on_state`` renderer to recompute_filter_count, so
    a failed count is visible there too.
-4. The history restores copy the saved filter dict instead of aliasing it.
-5. The session restore passes BOTH saved filter dicts (pre-search and
-   post-search measurement) through drop_unavailable_measurement_filters,
-   so a bound the open catalog is known to lack is dropped with a notice
-   instead of failing (pre) or hiding every row (post).
+4. The history restores copy the saved filter dict instead of aliasing it
+   (``_migrate_saved_pre_search_filters`` returns a deep copy).
+5. The session restore passes the saved pre-search filters through
+   ``_migrate_saved_pre_search_filters`` and the post-search criteria through
+   ``drop_unavailable_criteria`` (catalogue criteria, PR 1c), so a criterion
+   the open catalog is known unable to answer is dropped with a notice instead
+   of failing (pre) or hiding every row (post).
 """
 import ast
 from pathlib import Path
@@ -127,7 +129,7 @@ def test_history_restores_copy_the_saved_filters():
                     seen.add(fn.name)
                     text = ast.unparse(node.value)
                     if not (text.startswith("dict(")
-                            or "drop_unavailable_measurement_filters" in text):
+                            or "_migrate_saved_pre_search_filters" in text):
                         problems.append(f"genizah_app.py:{node.lineno} {fn.name}: "
                                         "psf aliases the history entry")
     assert seen == {"_restore_regular_search_from_state", "_restore_comp_search_from_state"}, (
@@ -139,13 +141,12 @@ def test_session_restore_drops_known_unsupported_saved_filters():
     src, tree = _parse(REPO / "genizah_app.py")
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, ast.FunctionDef) and n.name == "_restore_session")
-    wrapped = set()
-    for node in ast.walk(fn):
-        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                and node.func.id == "drop_unavailable_measurement_filters"):
-            arg = ast.unparse(node.args[0]) if node.args else ""
-            for key in ("pre_search_filters", "post_measurement_filters"):
-                if f"'{key}'" in arg:
-                    wrapped.add(key)
-    assert wrapped == {"pre_search_filters", "post_measurement_filters"}, (
-        f"session restore reads saved filters without dropping known-unsupported keys: {wrapped}")
+    calls = [(ast.unparse(node.func), " ".join(ast.unparse(a) for a in node.args))
+             for node in ast.walk(fn) if isinstance(node, ast.Call)]
+    pre = any(func.endswith("_migrate_saved_pre_search_filters") and "'pre_search_filters'" in args
+              for func, args in calls)
+    post = (any(func == "clean_criteria" and "'post_criteria'" in args for func, args in calls)
+            and any(func == "drop_unavailable_criteria" for func, _args in calls))
+    assert (pre, post) == (True, True), (
+        "session restore reads saved filters without dropping what the catalog cannot answer: "
+        f"pre-search {pre}, post-search {post}")

@@ -3,9 +3,9 @@
 import re
 
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
+    QCheckBox, QComboBox, QDialog, QFileDialog,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QPlainTextEdit, QPushButton, QSpinBox, QToolTip,
+    QListWidget, QListWidgetItem, QPlainTextEdit, QPushButton, QToolTip,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 from PyQt6.QtCore import QEvent, Qt
@@ -932,141 +932,645 @@ _COUNT_STYLE_OK = "font-size: 12px; font-weight: bold; color: #2980b9; padding: 
 _COUNT_STYLE_ERROR = "font-size: 12px; font-weight: bold; color: #e74c3c; padding: 4px;"
 
 
-def build_script_lists(chosen_filters, on_change):
-    """Script Style / Script Place, as the catalogue records them: two checkable
-    lists, most manuscripts first, in a group hidden when the catalogue offers no
-    values and none is saved. Returns (group, {filter key: QListWidget});
-    *on_change* is connected to each list's itemChanged after it is filled."""
-    from shared.fjms_service import script_filter_options
-    group = QGroupBox(tr("Script"))
-    outer = QVBoxLayout(group)
-    lists_row = QHBoxLayout()
-    lists = {}
-    for key, label in (('script_styles', tr("Script Style")), ('script_places', tr("Script Place"))):
-        column = QVBoxLayout()
-        column.addWidget(QLabel(label))
-        list_widget = QListWidget()
-        list_widget.setMaximumHeight(110)
-        options = script_filter_options(key, CURRENT_LANG == 'he')
-        chosen = list((chosen_filters or {}).get(key) or [])
-        # A saved value the catalogue does not offer stays chosen and
-        # shown: dropping it silently would widen the search.
-        for value in list(options) + [v for v in chosen if v not in options]:
-            item = QListWidgetItem(options.get(value, value))
-            item.setData(Qt.ItemDataRole.UserRole, value)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked if value in chosen else Qt.CheckState.Unchecked)
-            list_widget.addItem(item)
-        list_widget.itemChanged.connect(on_change)
-        column.addWidget(list_widget)
-        lists_row.addLayout(column)
-        lists[key] = list_widget
-    outer.addLayout(lists_row)
-    hint = QLabel(tr("From the catalogue records: manuscripts whose records do not "
-                     "describe the script are not included."))
-    hint.setWordWrap(True)
-    hint.setStyleSheet("font-size: 11px; color: #7f8c8d;")
-    outer.addWidget(hint)
-    group.setVisible(any(lw.count() for lw in lists.values()))
-    return group, lists
+# ── Manuscript features: the catalogue criteria (docs/plans/CATALOGUE_CRITERIA_PLAN.md) ──
+
+# Saved "Search only in..." keys from before the catalogue criteria.
+_OLD_DATE_KEYS = ('date_from', 'date_to', 'include_undated')
+_UNSHIPPED_KEYS = ('script_styles', 'script_places')  # PR 2.1's: never released
 
 
-def _checked_values(list_widget):
-    return [list_widget.item(i).data(Qt.ItemDataRole.UserRole) for i in range(list_widget.count())
-            if list_widget.item(i).checkState() == Qt.CheckState.Checked]
+def criteria_unavailable_keys(service=None) -> frozenset:
+    """The criteria the open catalogue file is KNOWN unable to answer: on a
+    5.0.0 file, every one that needs the 5.1.0 tables -- period of copy,
+    columns, lines (in any source mode), vocalization extent, attributes
+    (rule 9). A file that could not be read is not known to lack anything
+    (K-16): its criteria stay, and the lookup reports the error."""
+    from shared.catalog_criteria import NEW_TABLE_KEYS
+    from shared.fjms_service import FILTER_UNSUPPORTED, get_fjms_service
+    service = service if service is not None else get_fjms_service()
+    if service.criteria_support() != FILTER_UNSUPPORTED:
+        return frozenset()
+    return frozenset(NEW_TABLE_KEYS)
 
 
-class CatalogTraitsDialog(QDialog):
-    """Catalog tab: list manuscripts by script and size, with no text search.
+def drop_unavailable_criteria(criteria, service=None):
+    """(criteria, dropped keys): ``criteria`` without what the open file is
+    known unable to answer -- such a criterion could only make every lookup
+    fail (#17)."""
+    criteria = dict(criteria or {})
+    if not criteria:
+        return criteria, []
+    gone = sorted(k for k in criteria if k in criteria_unavailable_keys(service))
+    for key in gone:
+        criteria.pop(key)
+    return criteria, gone
 
-    get_traits() returns a shared.fjms_service.clean_traits dict -- the keys
-    "Search only in..." uses, so a browse list hands on to a search unchanged.
-    """
 
-    _RANGES = (('width', "Width (cm)", 100, 1), ('height', "Height (cm)", 100, 1),
-               ('line_count', "Lines", 200, 0))
+def migrate_saved_filters(filters):
+    """Saved pre-search filters in today's form (plan §6.4).
 
-    def __init__(self, parent=None, traits=None):
-        from shared.fjms_service import (
-            BROWSE_MEASUREMENT_TRAITS, FILTER_SUPPORTED, FILTER_UNSUPPORTED, MEASUREMENT_MATERIALS,
-            clean_traits, measurement_filter_support,
-        )
+    A date range and "include undated" become Period of copy (D18), when
+    the state is older than the criteria (no 'criteria' key). The old
+    measurement bounds are not restored (R2, owner: "the least work"); a
+    search saved with them must not show its stored rows, which were found
+    with a filter that is no longer shown -- hence the second value. The
+    criteria are cleaned (a malformed one is dropped). Returns (a deep copy:
+    a chip removed later must not edit a saved history entry,
+    had_old_measurements)."""
+    import copy
+    from shared.catalog_criteria import clean_criteria, period_from_dates
+    from shared.fjms_service import MEASUREMENT_FILTER_KEYS
+    filters = copy.deepcopy(dict(filters or {}))
+    had_measurements = any(filters.get(k) not in (None, '', [], ()) for k in MEASUREMENT_FILTER_KEYS)
+    for key in MEASUREMENT_FILTER_KEYS + _UNSHIPPED_KEYS:
+        filters.pop(key, None)
+    criteria = clean_criteria(filters.get('criteria'), strict=False)[0]
+    date_from, date_to, undated = (filters.pop(k, None) for k in _OLD_DATE_KEYS)
+    # Saved criteria, even empty ones, are the answer: old dates are read only
+    # from state saved before there were criteria.
+    if 'criteria' not in filters:
+        criteria = clean_criteria(dict(criteria, **period_from_dates(
+            date_from or None, date_to or None, bool(undated))), strict=False)[0]
+    if criteria:
+        filters['criteria'] = criteria
+    else:
+        filters.pop('criteria', None)
+    return filters, had_measurements
+
+
+def criteria_chip_texts(criteria) -> list:
+    """(key, text) for each criterion, one chip per list or range, values in
+    the catalogue's own Hebrew (FjmsService.criteria_chips: never fails for
+    want of a label). Every caller is on the UI thread, so the labels come
+    from the service's cache only, never a sidecar query (1b's 8bb36b78): a
+    value whose labels are not loaded yet shows in English. They are loaded
+    by the start-up warm-up, which then draws the chips again
+    (genizah_app.py::_FjmsWarmupThread), and by CriterionValuesWorker."""
+    from shared.fjms_service import get_fjms_service
+    return get_fjms_service().criteria_chips(criteria, _lang(), cached_only=True)
+
+
+def _lang() -> str:
+    return 'he' if CURRENT_LANG == 'he' else 'en'
+
+
+def _label(entry) -> str:
+    """A section's or a criterion's name in the interface language."""
+    return entry.label_he if CURRENT_LANG == 'he' else entry.label_en
+
+
+def _value_label(key, value: dict) -> str:
+    """A list value as the chips show it (shared.catalog_criteria.value_label);
+    "Not recorded" as a list entry, capitalised."""
+    from shared.catalog_criteria import NOT_RECORDED, value_label
+    if value['value'] == NOT_RECORDED:
+        return value['label_he'] if _lang() == 'he' else value['label_en']
+    label = value_label(key, value['value'], _lang(), {value['value']: value.get('label_he')})
+    # A value the catalogue gives no Hebrew for here (measured Paper, under
+    # "Measured only"): the app's own translation.
+    return tr(label) if label == value['value'] else label
+
+
+def _range_number(text: str):
+    try:
+        return float(text) if text.strip() else None
+    except ValueError:
+        return None  # '-' or '.' while typing
+
+
+_LONG_LIST = 12  # a value list longer than this gets a filter box
+_TAIL_VALUES = ("Unknown", "Cannot be determined", "_none")  # listed last, in this order
+_SOURCE_CHOICES = (('either', "Catalogue or measured"), ('catalogue', "Catalogue only"),
+                   ('measured', "Measured only"))
+_NOTE_STYLE = "font-size: 11px; color: #7f8c8d;"
+
+
+class CriteriaDialog(QDialog):
+    """Manuscript features ("מאפייני כתב היד", D9): the catalogue criteria of
+    shared/catalog_criteria.py, laid out as the web panel -- the sections in a
+    list, each section's controls beside it, the live total below (plan §6.3,
+    D1/D2). Lists show their values by count, then Unknown, Cannot be
+    determined, Not recorded; a long list has a filter box.
+
+    Opened from the Catalog tab and "Search only in..." over the corpus
+    (``universe``: a set or MetadataManager.corpus_sys_ids; by default the
+    parent's), and for the post-search filters with ``sections`` (the ones to
+    show) and ``within`` (the result sys_ids the total counts, and against
+    which "not recorded" and "all except" are read).
+
+    get_criteria() returns clean criteria; a criterion outside ``sections`` is
+    returned unchanged. Criteria the open file is KNOWN unable to answer are
+    shown disabled with a note, and saved values for them are dropped
+    (``dropped_saved_criteria``)."""
+
+    def __init__(self, parent=None, criteria=None, *, universe=None, sections=None, within=None):
+        from PyQt6.QtCore import QRegularExpression, QTimer
+        from PyQt6.QtGui import QRegularExpressionValidator
+        from PyQt6.QtWidgets import QScrollArea, QStackedWidget
+        from shared.catalog_criteria import BY_KEY, CRITERIA, SECTIONS, clean_criteria
         super().__init__(parent)
-        self.setWindowTitle(tr("Script and size"))
-        traits = clean_traits(traits)
-        support = measurement_filter_support()
-        self._meas_ok = support == FILTER_SUPPORTED
-        # Hidden controls keep a saved value unless the catalog is KNOWN to lack the data (K-16).
-        self._kept_measurements = {} if support == FILTER_UNSUPPORTED else {
-            k: v for k, v in traits.items() if k in BROWSE_MEASUREMENT_TRAITS}
+        self.setWindowTitle(tr("Manuscript features"))
+        self.setMinimumSize(840, 620)
+        self._validators = {
+            True: QRegularExpressionValidator(QRegularExpression(r"^\d{0,5}$"), self),
+            False: QRegularExpressionValidator(QRegularExpression(r"^\d{0,4}(\.\d{1,2})?$"), self),
+        }
+        saved = clean_criteria(criteria, strict=False)[0]
+        self._sections = [s for s in SECTIONS if sections is None or s.key in sections]
+        shown = {s.key for s in self._sections}
+        self._criteria = [c for c in CRITERIA if c.section in shown]
+        self._unavailable = criteria_unavailable_keys() if self._criteria else frozenset()
+        self.dropped_saved_criteria = sorted(k for k in saved if k in self._unavailable)
+        saved = {k: v for k, v in saved.items() if k not in self._unavailable}
+        self._outside = {k: v for k, v in saved.items() if BY_KEY[k].section not in shown}
+        if universe is None:
+            universe = getattr(getattr(parent, 'meta_mgr', None), 'corpus_sys_ids', None)
+        self._corpus = universe
+        self._within = within
+        self._controls = {}
+        self._pending = {}      # list key -> saved values not yet shown (values still loading)
+        self._requested = set()  # (key, source) asked of a values worker
+        self._answers = {}       # (key, source) -> {'values': [...], 'coverage': (n, of)}
+        self._count_tag = 0
+        self._count_timer = QTimer(self)
+        self._count_timer.setSingleShot(True)
+        self._count_timer.setInterval(300)
+        self._count_timer.timeout.connect(self._update_count)
+
         layout = QVBoxLayout(self)
+        body = QHBoxLayout()
+        self.section_list = QListWidget()
+        self.section_list.setFixedWidth(200)
+        self.pages = QStackedWidget()
+        for section in self._sections:
+            item = QListWidgetItem(_label(section))
+            item.setData(Qt.ItemDataRole.UserRole, section.key)
+            self.section_list.addItem(item)
+            page = QWidget()
+            page_layout = QVBoxLayout(page)
+            members = [c for c in self._criteria if c.section == section.key]
+            for criterion in members:
+                build = self._build_list if criterion.kind == 'list' else self._build_range
+                page_layout.addWidget(build(criterion, saved.get(criterion.key, {})))
+            for help_text in self._section_help(members):
+                hint = QLabel(help_text)
+                hint.setWordWrap(True)
+                hint.setStyleSheet(_NOTE_STYLE)
+                page_layout.addWidget(hint)
+            page_layout.addStretch()
+            scroll = QScrollArea()
+            scroll.setWidget(page)
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(scroll.Shape.NoFrame)
+            self.pages.addWidget(scroll)
+        body.addWidget(self.section_list)
+        body.addWidget(self.pages, 1)
+        layout.addLayout(body, 1)
 
-        group, self._script_lists = build_script_lists(traits, lambda *_: None)
-        layout.addWidget(group)
-
-        meas = QGroupBox(tr("Measurements"))
-        grid = QGridLayout(meas)
-        self._spins = {}
-        for row, (prefix, label, max_val, decimals) in enumerate(self._RANGES):
-            grid.addWidget(QLabel(tr(label)), row, 0)
-            for col, bound in ((1, 'min'), (2, 'max')):
-                spin = QDoubleSpinBox()
-                spin.setRange(0, max_val)
-                spin.setDecimals(decimals)
-                spin.setSpecialValueText("")  # 0 = no bound
-                spin.setPrefix(tr("Min" if bound == 'min' else "Max") + ": ")
-                spin.setValue(traits.get(f'{prefix}_{bound}') or 0)
-                grid.addWidget(spin, row, col)
-                self._spins[f'{prefix}_{bound}'] = spin
-        grid.addWidget(QLabel(tr("Material (measured)")), len(self._RANGES), 0)
-        materials = QHBoxLayout()
-        self._material_checks = {}
-        for mat in MEASUREMENT_MATERIALS:
-            cb = QCheckBox(tr(mat))
-            cb.setChecked(mat in traits.get('measurement_material', []))
-            materials.addWidget(cb)
-            self._material_checks[mat] = cb
-        grid.addLayout(materials, len(self._RANGES), 1, 1, 2)
-        meas.setVisible(self._meas_ok)
-        layout.addWidget(meas)
-
-        hint = QLabel(tr('Only manuscripts with a recorded value are included.'))
-        hint.setStyleSheet("font-size: 11px; color: #7f8c8d;")
-        layout.addWidget(hint)
+        self.dropped_notice_label = QLabel(
+            tr('Some saved filters were removed: this catalog data is not available.'))
+        self.dropped_notice_label.setWordWrap(True)
+        self.dropped_notice_label.setStyleSheet("color: #e67e22; font-size: 11px; padding: 2px 4px;")
+        self.dropped_notice_label.setVisible(bool(self.dropped_saved_criteria))
+        layout.addWidget(self.dropped_notice_label)
+        self.total_label = QLabel("")
+        self.total_label.setWordWrap(True)
+        self.total_label.setStyleSheet(_COUNT_STYLE_OK)
+        layout.addWidget(self.total_label)
+        self.note_label = QLabel("")
+        self.note_label.setWordWrap(True)
+        self.note_label.setStyleSheet(_NOTE_STYLE)
+        self.note_label.setVisible(False)
+        layout.addWidget(self.note_label)
 
         buttons = QHBoxLayout()
-        clear_btn = QPushButton(tr("Clear All"))
-        clear_btn.clicked.connect(self._clear)
-        buttons.addWidget(clear_btn)
+        clear_section = QPushButton(tr("Clear section"))
+        clear_section.clicked.connect(self._clear_section)
+        buttons.addWidget(clear_section)
+        clear_all = QPushButton(tr("Clear All"))
+        clear_all.clicked.connect(self._clear_all)
+        buttons.addWidget(clear_all)
         buttons.addStretch()
-        ok_btn = QPushButton(tr("OK"))
-        ok_btn.setDefault(True)
-        ok_btn.clicked.connect(self.accept)
-        cancel_btn = QPushButton(tr("Cancel"))
-        cancel_btn.clicked.connect(self.reject)
-        buttons.addWidget(ok_btn)
-        buttons.addWidget(cancel_btn)
+        self.ok_btn = QPushButton(tr("Apply"))
+        self.ok_btn.setDefault(True)
+        self.ok_btn.clicked.connect(self.accept)
+        cancel = QPushButton(tr("Cancel"))
+        cancel.clicked.connect(self.reject)
+        buttons.addWidget(self.ok_btn)
+        buttons.addWidget(cancel)
         layout.addLayout(buttons)
 
-    def _clear(self):
-        for list_widget in self._script_lists.values():
-            for i in range(list_widget.count()):
-                list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
-        for spin in self._spins.values():
-            spin.setValue(0)
-        for cb in self._material_checks.values():
-            cb.setChecked(False)
-        self._kept_measurements = {}
+        self.section_list.currentRowChanged.connect(self._on_section_changed)
+        first = next((i for i, s in enumerate(self._sections)
+                      if any(BY_KEY[k].section == s.key for k in saved)), 0)
+        if self._sections:
+            self.section_list.setCurrentRow(first)
+            self._on_section_changed(first)  # also when row 0 was already current
+        self._refresh_badges()
+        self._update_count()
 
-    def get_traits(self) -> dict:
-        from shared.fjms_service import clean_traits
-        traits = {key: _checked_values(lw) for key, lw in self._script_lists.items()}
-        if self._meas_ok:
-            traits.update({key: spin.value() for key, spin in self._spins.items() if spin.value() > 0})
-            traits['measurement_material'] = [m for m, cb in self._material_checks.items() if cb.isChecked()]
+    # -- building ---------------------------------------------------------------
+    @staticmethod
+    def _section_help(members):
+        """The panel's help lines (rules 3 and 4) for a section's criteria."""
+        lines = []
+        if any(c.category for c in members):
+            lines.append(tr("A manuscript matches when any of its catalogue records gives a ticked value."))
+        if any(c.page_column for c in members):
+            lines.append(tr("Measured values: every range set here holds on one measured page."))
+        return lines
+
+    def _source_combo(self, criterion, spec):
+        combo = QComboBox()
+        for value, text in _SOURCE_CHOICES:
+            combo.addItem(tr(text), value)
+        combo.setCurrentIndex(max(0, combo.findData(spec.get('source', 'either'))))
+        combo.currentIndexChanged.connect(lambda _i, k=criterion.key: self._on_source_changed(k))
+        return combo
+
+    def _unavailable_note(self, group_layout):
+        note = QLabel(tr("This catalogue data file is too old for this criterion: "
+                         "it needs version 5.1.0 or later."))
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #e67e22; font-size: 11px;")
+        group_layout.addWidget(note)
+
+    def _build_list(self, criterion, spec):
+        key = criterion.key
+        group = QGroupBox(_label(criterion))
+        box = QVBoxLayout(group)
+        top = QHBoxLayout()
+        mode = QComboBox()
+        mode.addItem(tr("Only these"), 'only')
+        mode.addItem(tr("All except these"), 'except')
+        mode.setCurrentIndex(1 if spec.get('mode') == 'except' else 0)
+        mode.currentIndexChanged.connect(self._changed)
+        top.addWidget(mode)
+        source = self._source_combo(criterion, spec) if criterion.sources else None
+        if source is not None:
+            top.addWidget(source)
+        top.addStretch()
+        coverage = QLabel("")
+        coverage.setStyleSheet(_NOTE_STYLE)
+        top.addWidget(coverage)
+        box.addLayout(top)
+        search = QLineEdit()
+        search.setPlaceholderText(tr("Filter values"))
+        search.setClearButtonEnabled(True)
+        search.setVisible(False)
+        search.textChanged.connect(lambda text, k=key: self._filter_values(k, text))
+        box.addWidget(search)
+        values = QListWidget()
+        values.setMinimumHeight(120)
+        values.addItem(QListWidgetItem(tr("Loading...")))
+        values.itemChanged.connect(self._changed)
+        box.addWidget(values)
+        if key == 'attributes':
+            hint = QLabel(tr("Any of the ticked attributes."))
+            hint.setStyleSheet(_NOTE_STYLE)
+            box.addWidget(hint)
+        self._pending[key] = list(spec.get('values', []))
+        self._controls[key] = {'kind': 'list', 'mode': mode, 'source': source, 'search': search,
+                               'values': values, 'coverage': coverage, 'loaded': None}
+        if key in self._unavailable:
+            group.setEnabled(False)
+            values.clear()
+            self._unavailable_note(box)
+        return group
+
+    def _build_range(self, criterion, spec):
+        key = criterion.key
+        group = QGroupBox(_label(criterion) + (f" ({tr(criterion.unit)})" if criterion.unit else ""))
+        box = QVBoxLayout(group)
+        row = QHBoxLayout()
+        bounds = []
+        for bound, text in (('min', "From"), ('max', "To")):
+            edit = QLineEdit()
+            edit.setPlaceholderText(tr(text))
+            edit.setMaximumWidth(90)
+            edit.setValidator(self._validators[criterion.integer])
+            if bound in spec:
+                edit.setText(f"{spec[bound]:g}")
+            edit.textChanged.connect(self._changed)
+            row.addWidget(edit)
+            bounds.append(edit)
+        not_recorded = QCheckBox(tr("or: not recorded"))
+        not_recorded.setChecked(bool(spec.get('not_recorded')))
+        not_recorded.toggled.connect(self._changed)
+        row.addWidget(not_recorded)
+        source = self._source_combo(criterion, spec) if criterion.sources else None
+        if source is not None:
+            row.addWidget(source)
+        row.addStretch()
+        coverage = QLabel("")
+        coverage.setStyleSheet(_NOTE_STYLE)
+        row.addWidget(coverage)
+        box.addLayout(row)
+        if key == 'period':
+            centuries = QHBoxLayout()
+            centuries.setSpacing(2)
+            # The web's presets (Catalog Browse), so both list the same manuscripts.
+            # The 16th century is the 1500s: "16-19" is 1500-1899 (1b's 11645f0c).
+            for lo, hi, text in [(c, c, f"{c + 1}th") for c in range(9, 15)] + [(15, 18, "16-19")]:
+                btn = QPushButton(tr(text))
+                btn.setStyleSheet("QPushButton { font-size: 10px; padding: 1px 4px; }")
+                btn.clicked.connect(lambda _c=False, a=lo * 100, b=hi * 100 + 99: self._set_range('period', a, b))
+                centuries.addWidget(btn)
+            centuries.addStretch()
+            box.addLayout(centuries)
+        self._controls[key] = {'kind': 'range', 'min': bounds[0], 'max': bounds[1],
+                               'not_recorded': not_recorded, 'source': source, 'coverage': coverage}
+        if key in self._unavailable:
+            group.setEnabled(False)
+            self._unavailable_note(box)
+        return group
+
+    # -- reading the controls ---------------------------------------------------
+    def _source_of(self, key) -> str:
+        combo = self._controls[key]['source']
+        return combo.currentData() if combo is not None else 'either'
+
+    def _checked(self, key) -> list:
+        values = self._controls[key]['values']
+        out = []
+        for i in range(values.count()):
+            item = values.item(i)
+            data = item.data(Qt.ItemDataRole.UserRole)
+            if data is not None and item.checkState() == Qt.CheckState.Checked:
+                out.append(data)
+        return out
+
+    def _spec(self, key) -> dict:
+        from shared.catalog_criteria import BY_KEY
+        controls = self._controls[key]
+        spec = {}
+        if BY_KEY[key].sources:
+            spec['source'] = self._source_of(key)
+        if controls['kind'] == 'list':
+            spec['values'] = (self._checked(key) if controls['loaded'] is not None
+                              else list(self._pending.get(key, [])))
+            spec['mode'] = controls['mode'].currentData()
+            return spec
+        for bound in ('min', 'max'):
+            number = _range_number(controls[bound].text())
+            if number is not None:
+                spec[bound] = number
+        spec['not_recorded'] = controls['not_recorded'].isChecked()
+        return spec
+
+    def get_criteria(self) -> dict:
+        """The chosen criteria, clean (shared.catalog_criteria.clean_criteria)."""
+        from shared.catalog_criteria import clean_criteria
+        raw = dict(self._outside)
+        for criterion in self._criteria:
+            if criterion.key not in self._unavailable:
+                raw[criterion.key] = self._spec(criterion.key)
+        return clean_criteria(raw, strict=False)[0]
+
+    # -- values and coverage, off the UI thread -----------------------------------
+    def _on_section_changed(self, row):
+        if row < 0:
+            return
+        self.pages.setCurrentIndex(row)
+        section = self._sections[row].key
+        self._request([(c.key, self._source_of(c.key)) for c in self._criteria
+                       if c.section == section and c.key not in self._unavailable])
+
+    def _request(self, needs):
+        """Ask for each (key, source) once; one already answered is shown again
+        from its answer (a source switched back must not wait for a worker)."""
+        from desktop.gui_threads import CriterionValuesWorker, _keep_until_finished
+        for need in needs:
+            for kind, answer in self._answers.get(need, {}).items():
+                if kind == 'values':
+                    self._on_values_loaded(*need, answer)
+                else:
+                    self._on_coverage(*need, *answer)
+        needs = [n for n in needs if n not in self._requested]
+        if not needs:
+            return
+        self._requested.update(needs)
+        worker = CriterionValuesWorker(needs, universe=self._corpus)
+        worker.loaded.connect(self._on_values_loaded)
+        worker.coverage.connect(self._on_coverage)
+        worker.failed.connect(self._on_values_failed)
+        worker.start()
+        _keep_until_finished(worker)  # after start(): it lets go of a worker not running
+
+    def _on_values_loaded(self, key, source, values):
+        self._answers.setdefault((key, source), {})['values'] = values
+        controls = self._controls.get(key)
+        if controls is None or source != self._source_of(key):
+            return
+        chosen = self._checked(key) if controls['loaded'] is not None else self._pending.get(key, [])
+        widget = controls['values']
+        widget.blockSignals(True)
+        widget.clear()
+        offered = {value['value']: value for value in values}
+        # A saved value this file does not offer stays chosen and shown --
+        # dropping it silently would widen the search -- after the offered
+        # values; Unknown, Cannot be determined and Not recorded stay last,
+        # in that order, whether offered or kept.
+        kept = [value for value in chosen if value not in offered]
+        for value in values:
+            if value['value'] not in _TAIL_VALUES:
+                self._add_offered_item(widget, key, value, chosen)
+        for saved in kept:
+            if saved not in _TAIL_VALUES:
+                self._add_value_item(widget, saved, tr(saved), True)
+        for name in _TAIL_VALUES:
+            if name in offered:
+                self._add_offered_item(widget, key, offered[name], chosen)
+            elif name in kept:
+                self._add_value_item(widget, name, tr(name) if name != "_none" else _value_label(key, {
+                    'value': name, 'label_en': 'Not recorded', 'label_he': 'ללא רישום'}), True)
+        widget.blockSignals(False)
+        controls['loaded'] = source
+        self._pending.pop(key, None)
+        controls['search'].setVisible(widget.count() > _LONG_LIST)
+        self._filter_values(key, controls['search'].text())
+
+    def _add_offered_item(self, widget, key, value, chosen):
+        self._add_value_item(widget, value['value'], f"{_value_label(key, value)} ({value['count']:,})",
+                             value['value'] in chosen)
+
+    @staticmethod
+    def _add_value_item(widget, value, text, checked):
+        item = QListWidgetItem(text)
+        item.setData(Qt.ItemDataRole.UserRole, value)
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+        widget.addItem(item)
+
+    def _on_coverage(self, key, source, recorded, of):
+        self._answers.setdefault((key, source), {})['coverage'] = (recorded, of)
+        controls = self._controls.get(key)
+        if controls is None or source != self._source_of(key):
+            return
+        controls['coverage'].setText(tr("recorded for {n} of {total}").format(
+            n=f"{recorded:,}", total=f"{of:,}"))
+
+    def _on_values_failed(self, key, source, reason):
+        self._requested.discard((key, source))  # a later visit retries
+        controls = self._controls.get(key)
+        if controls is None or controls['kind'] != 'list' or controls['loaded'] is not None:
+            return
+        widget = controls['values']
+        widget.blockSignals(True)
+        widget.clear()
+        widget.addItem(QListWidgetItem(tr("These values could not be read.")))
+        widget.blockSignals(False)
+
+    def _filter_values(self, key, text):
+        widget = self._controls[key]['values']
+        needle = (text or '').strip().lower()
+        for i in range(widget.count()):
+            item = widget.item(i)
+            widget.setRowHidden(i, bool(needle) and needle not in item.text().lower()
+                                and item.checkState() != Qt.CheckState.Checked)
+
+    def _on_source_changed(self, key):
+        controls = self._controls[key]
+        controls['coverage'].setText("")
+        if controls['kind'] == 'list':
+            # Values differ by source (measured Mix, Wood): reload, keeping what is ticked.
+            if controls['loaded'] is not None:
+                self._pending[key] = self._checked(key)
+            controls['loaded'] = None
+            controls['values'].blockSignals(True)
+            controls['values'].clear()
+            controls['values'].addItem(QListWidgetItem(tr("Loading...")))
+            controls['values'].blockSignals(False)
+        self._request([(key, self._source_of(key))])
+        self._changed()
+
+    # -- editing ----------------------------------------------------------------
+    def _set_range(self, key, low, high):
+        controls = self._controls[key]
+        controls['min'].setText(str(low))
+        controls['max'].setText(str(high))
+
+    def _reset(self, key):
+        controls = self._controls[key]
+        if controls['source'] is not None:
+            controls['source'].setCurrentIndex(0)
+        if controls['kind'] == 'list':
+            controls['mode'].setCurrentIndex(0)
+            if controls['loaded'] is None:
+                self._pending[key] = []
+            widget = controls['values']
+            widget.blockSignals(True)
+            for i in range(widget.count()):
+                if widget.item(i).data(Qt.ItemDataRole.UserRole) is not None:
+                    widget.item(i).setCheckState(Qt.CheckState.Unchecked)
+            widget.blockSignals(False)
         else:
-            traits.update(self._kept_measurements)
-        return clean_traits(traits)
+            controls['min'].clear()
+            controls['max'].clear()
+            controls['not_recorded'].setChecked(False)
+
+    def _clear_section(self):
+        row = self.section_list.currentRow()
+        if row < 0:
+            return
+        for criterion in self._criteria:
+            if criterion.section == self._sections[row].key and criterion.key not in self._unavailable:
+                self._reset(criterion.key)
+        self._changed()
+
+    def _clear_all(self):
+        self._outside = {}
+        for criterion in self._criteria:
+            if criterion.key not in self._unavailable:
+                self._reset(criterion.key)
+        self._changed()
+
+    def _changed(self, *_args):
+        self._refresh_badges()
+        self._check_bounds()
+        self._count_timer.start()
+
+    def _check_bounds(self):
+        """A bound being typed that is not a number yet (".", "12.") would be
+        read as no bound: Apply waits for it, and the field says so."""
+        unfinished = False
+        for controls in self._controls.values():
+            if controls['kind'] != 'range':
+                continue
+            for bound in ('min', 'max'):
+                edit = controls[bound]
+                bad = bool(edit.text().strip()) and not edit.hasAcceptableInput()
+                edit.setStyleSheet("border: 1px solid #e74c3c;" if bad else "")
+                unfinished = unfinished or bad
+        self.ok_btn.setEnabled(not unfinished)
+
+    def _refresh_badges(self):
+        """Each section's name with the number of its active criteria."""
+        from shared.catalog_criteria import BY_KEY
+        active = self.get_criteria()
+        for i, section in enumerate(self._sections):
+            n = sum(1 for k in active if BY_KEY[k].section == section.key)
+            item = self.section_list.item(i)
+            item.setText(_label(section) + (f"  ({n})" if n else ""))
+            font = item.font()
+            font.setBold(bool(n))
+            item.setFont(font)
+
+    # -- the live total -----------------------------------------------------------
+    def _update_count(self):
+        from desktop.gui_threads import CriteriaCountWorker, _keep_until_finished
+        self._count_tag += 1
+        criteria = self.get_criteria()
+        if not criteria:
+            self.total_label.setText(tr("No features chosen."))
+            self.total_label.setStyleSheet(_COUNT_STYLE_OK)
+            self.note_label.setVisible(False)
+            return
+        self.total_label.setText(tr("Counting..."))
+        self.total_label.setStyleSheet(_COUNT_STYLE_OK)
+        worker = CriteriaCountWorker(
+            criteria, universe=self._within if self._within is not None else self._corpus,
+            tag=self._count_tag, note=self._within is None and not self.note_label.text())
+        worker.counted.connect(self._on_counted)
+        worker.failed.connect(self._on_count_failed)
+        worker.start()
+        _keep_until_finished(worker)  # after start(): it lets go of a worker not running
+
+    def _on_counted(self, tag, total, info):
+        from shared.catalog_criteria import BY_KEY
+        if tag != self._count_tag:
+            return
+        if self._within is not None:
+            text = tr("{n} of the {total} manuscripts in the results match").format(
+                n=f"{total:,}", total=f"{len(self._within):,}")
+        elif total == 0:
+            text = tr("No manuscripts match")
+        else:
+            text = tr("{n} manuscripts have these features").format(n=f"{total:,}")
+        for key, n in (info.get('unrecorded') or {}).items():
+            if n:
+                text += tr(", of which {m} have no {label} recorded").format(
+                    m=f"{n:,}", label=_label(BY_KEY[key]))
+        self.total_label.setText(text)
+        self.total_label.setStyleSheet(_COUNT_STYLE_OK if total else _COUNT_STYLE_ERROR)
+        note = info.get('note')
+        if note:  # read once per window
+            self.note_label.setText(tr(
+                "These criteria cover all {corpus} manuscripts. {uncatalogued} have no FJMS catalogue "
+                "record: they match 'Not recorded', 'all except' and measured data ({sized} also have a "
+                "catalogue size).").format(corpus=f"{note['corpus']:,}",
+                                           uncatalogued=f"{note['uncatalogued']:,}",
+                                           sized=f"{note['uncatalogued_sized']:,}"))
+        self.note_label.setVisible(self._within is None and bool(self.note_label.text()))
+
+    def _on_count_failed(self, tag, reason):
+        if tag != self._count_tag:
+            return
+        self.total_label.setText(
+            tr("The catalog data these features need is not available.")
+            if reason in ('column_missing', 'sidecar_unavailable')
+            else tr("The count could not be computed."))
+        self.total_label.setStyleSheet(_COUNT_STYLE_ERROR)
 
 
 class PreSearchFilterDialog(QDialog):
@@ -1081,8 +1585,13 @@ class PreSearchFilterDialog(QDialog):
         from PyQt6.QtWidgets import QRadioButton, QButtonGroup
         super().__init__(parent)
         self.setWindowTitle(tr("Search only in..."))
-        self.setMinimumSize(780, 720)
-        self._current_filters = current_filters.copy() if current_filters else {}
+        self.setMinimumSize(780, 640)
+        # Saved filters in today's form: dates read into Period of copy, the
+        # old measurement bounds gone (plan §6.4); and no criterion the open
+        # catalogue file is known unable to answer (#17), with a notice below.
+        self._current_filters, _ = migrate_saved_filters(current_filters)
+        self._criteria, self.dropped_saved_filters = drop_unavailable_criteria(
+            self._current_filters.pop('criteria', None))
         self._count_worker = None
         self._count_generation = 0
         self._result_set = None  # computed restrict_sys_ids
@@ -1132,11 +1641,7 @@ class PreSearchFilterDialog(QDialog):
         if not self._current_filters.get('domains') and self._current_filters.get('domain'):
             self._check_tree_item(self.domain_tree, self._current_filters['domain'], True)
         domain_layout.addWidget(self.domain_tree)
-        # Below it: Script Style / Script Place
-        left_layout = QVBoxLayout()
-        left_layout.addWidget(domain_group, 1)
-        left_layout.addWidget(self._build_script_group())
-        body_layout.addLayout(left_layout, 1)  # stretch factor 1
+        body_layout.addWidget(domain_group, 1)  # stretch factor 1
 
         # RIGHT column: Author, Work, Date, Material, Text
         right_layout = QVBoxLayout()
@@ -1189,28 +1694,12 @@ class PreSearchFilterDialog(QDialog):
         work_layout.addWidget(self.work_combo)
         right_layout.addWidget(work_group)
 
-        # Date range
-        date_group = QGroupBox(tr("Date Range"))
-        date_layout = QHBoxLayout(date_group)
-        self.spin_date_from = QSpinBox()
-        self.spin_date_from.setRange(0, 2000)
-        self.spin_date_from.setSpecialValueText(tr("Any"))
-        self.spin_date_from.setValue(self._current_filters.get('date_from') or 0)
-        self.spin_date_from.setPrefix(tr("From") + ": ")
-        self.spin_date_from.valueChanged.connect(self._on_filter_changed)
-        date_layout.addWidget(self.spin_date_from)
-        self.spin_date_to = QSpinBox()
-        self.spin_date_to.setRange(0, 2000)
-        self.spin_date_to.setSpecialValueText(tr("Any"))
-        self.spin_date_to.setValue(self._current_filters.get('date_to') or 0)
-        self.spin_date_to.setPrefix(tr("To") + ": ")
-        self.spin_date_to.valueChanged.connect(self._on_filter_changed)
-        date_layout.addWidget(self.spin_date_to)
-        self.chk_include_undated = QCheckBox(tr("Include undated"))
-        self.chk_include_undated.setChecked(self._current_filters.get('include_undated', False))
-        self.chk_include_undated.stateChanged.connect(self._on_filter_changed)
-        date_layout.addWidget(self.chk_include_undated)
-        right_layout.addWidget(date_group)
+        # Manuscript features: period of copy, script, measurements ... in
+        # one window (CriteriaDialog). Not turned around by Include/Exclude.
+        self.criteria_btn = QPushButton()
+        self.criteria_btn.clicked.connect(self._open_criteria_dialog)
+        right_layout.addWidget(self.criteria_btn)
+        self._update_criteria_button()
 
         # Type filter (3-way dropdown)
         material_group = QGroupBox(tr("Type"))
@@ -1250,126 +1739,6 @@ class PreSearchFilterDialog(QDialog):
         text_layout.addLayout(text_input_layout)
         right_layout.addWidget(text_group)
 
-        # --- Measurement filters (Phase 54, DIM-02) ---
-        # #17: decided ONCE, from the data -- never from widget visibility:
-        # this block runs before meas_group is added to the dialog, so
-        # isVisibleTo() is False for every widget here. Three states (K-16):
-        # controls are SHOWN only when the catalog is known to have the data;
-        # saved values are DROPPED only when it is known NOT to; when it is
-        # not known (no catalog, or its schema could not be read) the values
-        # are kept, hidden or not, and the count below blocks OK until the
-        # lookup runs or the user clears them (K-17).
-        from shared.fjms_service import (
-            FILTER_SUPPORTED, FILTER_UNSUPPORTED,
-            LINE_HEIGHT_FILTER_KEYS, MEASUREMENT_FILTER_KEYS,
-            measurement_filter_support, line_height_filter_support,
-        )
-        _meas_support = measurement_filter_support()
-        _lh_support = line_height_filter_support()
-        meas_ok = _meas_support == FILTER_SUPPORTED
-        lh_ok = _lh_support == FILTER_SUPPORTED
-        meas_keep = _meas_support != FILTER_UNSUPPORTED
-        lh_keep = _lh_support != FILTER_UNSUPPORTED
-        meas_group = QGroupBox(tr("Measurements"))
-        self.meas_group = meas_group
-        meas_layout = QGridLayout(meas_group)
-        MEASUREMENT_MATERIALS = ['Paper', 'Vellum', 'Papyrus', 'Mix', 'Wood']
-
-        def _make_meas_spin(row, label, max_val, decimals, suffix):
-            lbl = QLabel(label)
-            meas_layout.addWidget(lbl, row, 0)
-            spin_min = QDoubleSpinBox()
-            spin_min.setRange(0, max_val)
-            spin_min.setDecimals(decimals)
-            spin_min.setSpecialValueText("")
-            spin_min.setValue(0)
-            if suffix:
-                spin_min.setSuffix(f" {suffix}")
-            spin_min.setPrefix(tr("Min") + ": ")
-            spin_min.editingFinished.connect(self._on_filter_changed)
-            meas_layout.addWidget(spin_min, row, 1)
-            spin_max = QDoubleSpinBox()
-            spin_max.setRange(0, max_val)
-            spin_max.setDecimals(decimals)
-            spin_max.setSpecialValueText("")
-            spin_max.setValue(0)
-            if suffix:
-                spin_max.setSuffix(f" {suffix}")
-            spin_max.setPrefix(tr("Max") + ": ")
-            spin_max.editingFinished.connect(self._on_filter_changed)
-            meas_layout.addWidget(spin_max, row, 2)
-            return lbl, spin_min, spin_max
-
-        _, self.meas_width_min, self.meas_width_max = _make_meas_spin(0, tr("Width (cm)"), 100, 1, "cm")
-        _, self.meas_height_min, self.meas_height_max = _make_meas_spin(1, tr("Height (cm)"), 100, 1, "cm")
-        _, self.meas_lines_min, self.meas_lines_max = _make_meas_spin(2, tr("Lines"), 200, 0, "")
-        (self.meas_line_height_label, self.meas_line_height_min,
-         self.meas_line_height_max) = _make_meas_spin(3, tr("Line Height (mm)"), 20, 1, "mm")
-        _, self.meas_density_min, self.meas_density_max = _make_meas_spin(4, tr("Text Density"), 100, 1, "")
-        if not lh_ok:
-            for _w in (self.meas_line_height_label, self.meas_line_height_min,
-                       self.meas_line_height_max):
-                _w.setVisible(False)
-        if not meas_ok:
-            meas_group.setVisible(False)
-
-        # Material multi-select via checkboxes -- "Material (measured)" per review concern #7
-        meas_layout.addWidget(QLabel(tr("Material (measured)")), 5, 0)
-        self._meas_material_checks = {}
-        mat_widget = QWidget()
-        mat_layout_inner = QHBoxLayout(mat_widget)
-        mat_layout_inner.setContentsMargins(0, 0, 0, 0)
-        for mat in MEASUREMENT_MATERIALS:
-            # Display the translated name; the English value stays the dict key and
-            # the saved measurement_material filter value.
-            cb = QCheckBox(tr(mat))
-            cb.stateChanged.connect(self._on_filter_changed)
-            mat_layout_inner.addWidget(cb)
-            self._meas_material_checks[mat] = cb
-        meas_layout.addWidget(mat_widget, 5, 1, 1, 2)
-
-        # Restore measurement values from current_filters -- unless the
-        # catalog is KNOWN not to have that data (then the value is dropped:
-        # it could only make every search fail). Guarded on the data, never
-        # on visibility (see above).
-        _cf = self._current_filters
-        if meas_keep:
-            if _cf.get('width_min'):
-                self.meas_width_min.setValue(_cf['width_min'])
-            if _cf.get('width_max'):
-                self.meas_width_max.setValue(_cf['width_max'])
-            if _cf.get('height_min'):
-                self.meas_height_min.setValue(_cf['height_min'])
-            if _cf.get('height_max'):
-                self.meas_height_max.setValue(_cf['height_max'])
-            if _cf.get('line_count_min'):
-                self.meas_lines_min.setValue(_cf['line_count_min'])
-            if _cf.get('line_count_max'):
-                self.meas_lines_max.setValue(_cf['line_count_max'])
-            if _cf.get('text_density_min'):
-                self.meas_density_min.setValue(_cf['text_density_min'])
-            if _cf.get('text_density_max'):
-                self.meas_density_max.setValue(_cf['text_density_max'])
-            for mat, cb in self._meas_material_checks.items():
-                cb.setChecked(mat in (_cf.get('measurement_material') or []))
-        if lh_keep:
-            if _cf.get('line_height_min'):
-                self.meas_line_height_min.setValue(_cf['line_height_min'])
-            if _cf.get('line_height_max'):
-                self.meas_line_height_max.setValue(_cf['line_height_max'])
-        # The saved values just dropped (they held something). The restores
-        # drop such values with a notice, but a value kept while the catalog
-        # was absent reaches this dialog once a catalog known to lack it has
-        # opened -- and OK would then lose it silently. The notice is shown
-        # below, above the count.
-        _gone = set()
-        if not meas_keep:
-            _gone.update(MEASUREMENT_FILTER_KEYS)
-        if not lh_keep:
-            _gone.update(LINE_HEIGHT_FILTER_KEYS)
-        self.dropped_saved_filters = sorted(k for k in _gone if _cf.get(k))
-
-        right_layout.addWidget(meas_group)
 
         body_layout.addLayout(right_layout, 1)  # stretch factor 1
         layout.addLayout(body_layout)
@@ -1427,9 +1796,35 @@ class PreSearchFilterDialog(QDialog):
         # Initial count update
         self._update_count()
 
-    def _build_script_group(self):
-        group, self._script_lists = build_script_lists(self._current_filters, self._on_filter_changed)
-        return group
+    def _open_criteria_dialog(self):
+        """Manuscript features: choose criteria in their own window, then recount."""
+        dlg = CriteriaDialog(self, self._criteria, universe=self._corpus())
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._criteria = dlg.get_criteria()
+        self._update_criteria_button()
+        self._on_filter_changed()
+
+    def _update_criteria_button(self):
+        n = len(self._criteria)
+        self.criteria_btn.setText(tr("Manuscript features") + (f" ({n})" if n else "") + "…")
+        font = self.criteria_btn.font()
+        font.setBold(bool(n))
+        self.criteria_btn.setFont(font)
+
+    def _remove_criterion(self, key):
+        self._criteria.pop(key, None)
+        self._update_criteria_button()
+        self._on_filter_changed()
+
+    def _corpus(self):
+        """The corpus list for D17 and the criteria (MetadataManager.corpus_sys_ids
+        of the main window; None in tests without one)."""
+        try:
+            owner = self.parent()
+        except RuntimeError:  # a dialog whose Qt side was never built (tests)
+            owner = None
+        return getattr(getattr(owner, 'meta_mgr', None), 'corpus_sys_ids', None)
 
     @staticmethod
     def _check_list_item(list_widget, data_value, checked):
@@ -1743,16 +2138,6 @@ class PreSearchFilterDialog(QDialog):
                 name, '#fff3e0',
                 lambda checked=False, key=w: (self._selected_works.remove(key), self._on_filter_changed())))
 
-        # Date chip
-        date_from = self.spin_date_from.value()
-        date_to = self.spin_date_to.value()
-        if date_from > 0 or date_to > 0:
-            f_str = str(date_from) if date_from > 0 else '...'
-            t_str = str(date_to) if date_to > 0 else '...'
-            self.chip_bar_layout.addWidget(self._make_chip(
-                f"{f_str}-{t_str}", '#e8f5e9',
-                lambda: (self.spin_date_from.setValue(0), self.spin_date_to.setValue(0))))
-
         # Material chip
         mat_mode = self.material_combo.currentData()
         if mat_mode == 'mss_only':
@@ -1764,12 +2149,10 @@ class PreSearchFilterDialog(QDialog):
                 tr("Printed only"), '#ffebee',
                 lambda: self.material_combo.setCurrentIndex(0)))
 
-        # Script style / place chips
-        for key, list_widget in self._script_lists.items():
-            for value in self._get_checked_items(list_widget):
-                self.chip_bar_layout.addWidget(self._make_chip(
-                    self._script_label(key, value), '#efebe9',
-                    lambda checked=False, lw=list_widget, v=value: self._check_list_item(lw, v, False)))
+        # Manuscript features: one chip per criterion
+        for key, text in criteria_chip_texts(self._criteria):
+            self.chip_bar_layout.addWidget(self._make_chip(
+                text, '#efebe9', lambda checked=False, k=key: self._remove_criterion(k)))
 
         # Text term chips
         for mode, prefix, terms in [('all', '+', self._text_all), ('any', '~', self._text_any), ('not', '-', self._text_not)]:
@@ -1778,40 +2161,6 @@ class PreSearchFilterDialog(QDialog):
                 self.chip_bar_layout.addWidget(self._make_chip(
                     f"{prefix} {t}", color,
                     lambda checked=False, m=mode, term=t: self._remove_text_term(m, term)))
-
-        # Measurement chips (Phase 54, teal #e0f2f1)
-        def _fmt_range_chip(prefix, vmin, vmax, unit=''):
-            u = f' {unit}' if unit else ''
-            if vmin and vmax:
-                return f"{prefix}: {vmin}-{vmax}{u}"
-            elif vmin:
-                return f"{prefix}: \u2265{vmin}{u}"
-            elif vmax:
-                return f"{prefix}: \u2264{vmax}{u}"
-            return None
-        _mf = self._get_measurement_filters()
-        _meas_fields = [
-            (tr('Width'), 'width_min', 'width_max', 'cm', [self.meas_width_min, self.meas_width_max]),
-            (tr('Height'), 'height_min', 'height_max', 'cm', [self.meas_height_min, self.meas_height_max]),
-            (tr('Lines'), 'line_count_min', 'line_count_max', '', [self.meas_lines_min, self.meas_lines_max]),
-            (tr('Line Height'), 'line_height_min', 'line_height_max', 'mm', [self.meas_line_height_min, self.meas_line_height_max]),
-            (tr('Text Density'), 'text_density_min', 'text_density_max', '', [self.meas_density_min, self.meas_density_max]),
-        ]
-        for _label, _kmin, _kmax, _unit, _widgets in _meas_fields:
-            _chip_text = _fmt_range_chip(_label, _mf.get(_kmin), _mf.get(_kmax), _unit)
-            if _chip_text:
-                def _clear_meas(kmin=_kmin, kmax=_kmax, widgets=_widgets):
-                    for w in widgets:
-                        w.setValue(w.minimum())
-                    self._on_filter_changed()
-                self.chip_bar_layout.addWidget(self._make_chip(_chip_text, '#e0f2f1', _clear_meas))
-        for _mat in _mf.get('measurement_material', []):
-            def _clear_mat(m=_mat):
-                cb = self._meas_material_checks.get(m)
-                if cb:
-                    cb.setChecked(False)
-                self._on_filter_changed()
-            self.chip_bar_layout.addWidget(self._make_chip(tr(_mat), '#e0f2f1', _clear_mat))
 
         self.chip_bar_layout.addStretch()
 
@@ -1826,70 +2175,25 @@ class PreSearchFilterDialog(QDialog):
         if self._selected_works:
             filters['works'] = list(self._selected_works)
         filters['include_mode'] = self._rb_include.isChecked()
-        date_from = self.spin_date_from.value()
-        if date_from > 0:
-            filters['date_from'] = date_from
-        date_to = self.spin_date_to.value()
-        if date_to > 0:
-            filters['date_to'] = date_to
-        if self.chk_include_undated.isChecked():
-            filters['include_undated'] = True
         mat_mode = self.material_combo.currentData()
         if mat_mode == 'mss_only':
             filters['material_exclude'] = ['Printed']
         elif mat_mode == 'printed_only':
             filters['material_include'] = ['Printed']
-        for key, list_widget in self._script_lists.items():
-            chosen = self._get_checked_items(list_widget)
-            if chosen:
-                filters[key] = chosen
+        if self._criteria:
+            filters['criteria'] = dict(self._criteria)
         if self._text_all:
             filters['text_all'] = list(self._text_all)
         if self._text_any:
             filters['text_any'] = list(self._text_any)
         if self._text_not:
             filters['text_not'] = list(self._text_not)
-        # Measurement filters (Phase 54)
-        filters.update(self._get_measurement_filters())
         return filters
-
-    def _get_measurement_filters(self) -> dict:
-        """Extract measurement filter values from dialog spin boxes and checkboxes."""
-        result = {}
-        if self.meas_width_min.value() > 0:
-            result['width_min'] = self.meas_width_min.value()
-        if self.meas_width_max.value() > 0:
-            result['width_max'] = self.meas_width_max.value()
-        if self.meas_height_min.value() > 0:
-            result['height_min'] = self.meas_height_min.value()
-        if self.meas_height_max.value() > 0:
-            result['height_max'] = self.meas_height_max.value()
-        if self.meas_lines_min.value() > 0:
-            result['line_count_min'] = int(self.meas_lines_min.value())
-        if self.meas_lines_max.value() > 0:
-            result['line_count_max'] = int(self.meas_lines_max.value())
-        if self.meas_line_height_min.value() > 0:
-            result['line_height_min'] = self.meas_line_height_min.value()
-        if self.meas_line_height_max.value() > 0:
-            result['line_height_max'] = self.meas_line_height_max.value()
-        if self.meas_density_min.value() > 0:
-            result['text_density_min'] = self.meas_density_min.value()
-        if self.meas_density_max.value() > 0:
-            result['text_density_max'] = self.meas_density_max.value()
-        checked = [m for m, cb in self._meas_material_checks.items() if cb.isChecked()]
-        if checked:
-            result['measurement_material'] = checked
-        return result
 
     def _get_display_name(self, key, data_map):
         """Get display name (without count) from data map."""
         text = data_map.get(key, key)
         return text.rsplit(' (', 1)[0].strip().lstrip().strip() if isinstance(text, str) else str(key)
-
-    @staticmethod
-    def _script_label(kind, value):
-        from shared.fjms_service import script_value_label
-        return script_value_label(kind, value, CURRENT_LANG == 'he')
 
     def _update_count(self):
         """Recompute manuscript count in background thread."""
@@ -1971,31 +2275,12 @@ class PreSearchFilterDialog(QDialog):
         self.author_combo.setCurrentIndex(0)
         self.work_combo.setCurrentIndex(0)
         self._rb_include.setChecked(True)
-        self.spin_date_from.setValue(0)
-        self.spin_date_to.setValue(0)
-        self.chk_include_undated.setChecked(False)
         self.material_combo.setCurrentIndex(0)
-        for list_widget in self._script_lists.values():
-            list_widget.blockSignals(True)
-            for i in range(list_widget.count()):
-                list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
-            list_widget.blockSignals(False)
+        self._criteria = {}
+        self._update_criteria_button()
         self._text_all.clear()
         self._text_any.clear()
         self._text_not.clear()
-        # Clear measurement filters (Phase 54)
-        self.meas_width_min.setValue(0)
-        self.meas_width_max.setValue(0)
-        self.meas_height_min.setValue(0)
-        self.meas_height_max.setValue(0)
-        self.meas_lines_min.setValue(0)
-        self.meas_lines_max.setValue(0)
-        self.meas_line_height_min.setValue(0)
-        self.meas_line_height_max.setValue(0)
-        self.meas_density_min.setValue(0)
-        self.meas_density_max.setValue(0)
-        for cb in self._meas_material_checks.values():
-            cb.setChecked(False)
         self._rebuild_dialog_chips()
         self._update_count()
 

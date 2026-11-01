@@ -617,7 +617,8 @@ def window(slot_errors, monkeypatch):
     w._result_domain_map = {}
     w._result_domain_counts = {}
     w._domain_name_map = {}
-    w._post_measurement_filters = {}
+    w._post_criteria = {}
+    w._post_criteria_ids = None
     w._local_filter_state_search = "all"
     w._local_filter_inactive_chip_visible = False
     w._local_file_optouts = set()
@@ -626,7 +627,6 @@ def window(slot_errors, monkeypatch):
     w._printed_sys_ids = set()
     w._manual_transcription_sys_ids = set()
     w._pgp_pages_by_sys_id = {}
-    w._result_measurement_map = {}
     w._measurement_fetch_complete = True
     # exclusions: the right-click set and the Search tab's list
     w.word_excluded_sys_ids = set()
@@ -1144,6 +1144,153 @@ def test_a_restored_search_hides_what_the_restored_exclusions_exclude(restore):
     assert _hidden(w, A) == [True], "the replay ran before the right-click set was restored"
     assert _hidden(w, B) == [True], "the replay ignored the Exclude Manuscripts list"
     assert _hidden(w, C) == [False]
+
+
+# --------------------------------------------------------------------------
+# Catalogue criteria (PR 1c, docs/plans/CATALOGUE_CRITERIA_PLAN.md §6.4):
+# saved filters come back as they run today
+# --------------------------------------------------------------------------
+
+from PyQt6.QtCore import pyqtSignal  # noqa: E402
+
+
+class _IdleFilterWorker(QObject):
+    """Stands in for FilterCountWorker: connected like it, never run."""
+    finished = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, *a, **k):
+        super().__init__()
+
+    def start(self):
+        pass
+
+
+def test_a_search_saved_with_the_old_measurement_bounds_shows_no_stale_rows(restore, monkeypatch):
+    """R2: the old bounds are not restored, so the rows they found are not shown
+    either -- what is shown must be what runs. The query stays, to search again."""
+    monkeypatch.setattr(app, "FilterCountWorker", _IdleFilterWorker)
+    state = _session_state(results=[_res(A, 1), _res(C, 1)])
+    state["pre_search_filters"] = {"include_mode": True, "width_min": 10.0, "domains": ["Bible"]}
+    state["post_measurement_filters"] = {"width_min": 12.0}
+    w = restore(state, "always")
+    assert w.results_table.rowCount() == 0, "rows found under a filter that is no longer shown"
+    assert w.pre_search_filters == {"include_mode": True, "domains": ["Bible"]}
+    assert w._post_criteria == {}, "the old post-search bounds are not restored (R2)"
+    assert w.query_input.text() == "word"
+
+
+def test_saved_dates_become_the_period_of_copy_and_keep_their_rows(restore, monkeypatch):
+    """D18: a saved date range and "include undated" are read into Period of
+    copy. The post-search criteria come back, within their sections."""
+    monkeypatch.setattr(app, "FilterCountWorker", _IdleFilterWorker)
+    state = _session_state(results=[_res(C, 1)])
+    state["pre_search_filters"] = {"include_mode": True, "date_from": 1000, "date_to": 1100,
+                                   "include_undated": True}
+    state["post_criteria"] = {"lines": {"min": 20}, "region": {"values": ["Oriental"]}}
+    w = restore(state, "always")
+    assert w.pre_search_filters == {"include_mode": True, "criteria": {
+        "period": {"min": 1000, "max": 1100, "not_recorded": True}}}
+    assert w.results_table.rowCount() == 1
+    assert w._post_criteria == {"lines": {"source": "either", "min": 20}}
+
+
+def test_the_catalog_and_post_search_criteria_survive_a_restart(window, restore, monkeypatch):
+    """The real _save_session, then the real _restore_session."""
+    saved, timers = [], []
+    monkeypatch.setattr(session_persistence, "save_session_state", saved.append)
+    monkeypatch.setattr(app, "load_app_config", lambda: {"restore_mode": "always"})
+    monkeypatch.setattr(app.QTimer, "singleShot", staticmethod(lambda *a: timers.append(a)))
+    w = window
+    catalog = {"region": {"values": ["Oriental"], "mode": "except"}}
+    post = {"lines": {"source": "either", "min": 20}}
+    w._catalog_criteria, w._post_criteria = dict(catalog), dict(post)
+    GenizahGUI._save_session(w)
+    state = saved[-1]
+    assert state["browse_catalog"]["criteria"] == catalog
+    assert "date_from" not in state["browse_catalog"], "the date range lives in the criteria"
+    assert state["post_criteria"] == post
+    w._catalog_criteria, w._post_criteria = {}, {}
+    state["composition_search"] = {}  # this window has no composition widgets
+    state.pop("active_tab", None)      # nor tabs
+    restore(state, "always")
+    assert (w._catalog_criteria, w._post_criteria) == (catalog, post)
+    assert timers, "the restored Catalog tab lists again"
+
+
+def test_the_restore_notices_outlive_session_restored(restore, monkeypatch):
+    """Codex, PR 1c round 1: "Session restored" replaced every notice of the
+    restore -- saved criteria the file cannot answer (pre-search, Catalog tab,
+    post-search) dropped silently, and the "search again" of R2 lost."""
+    import desktop.dialogs_filter as dialogs_filter
+    import genizah_core
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", "en")  # the messages are compared in English
+    monkeypatch.setattr(app, "FilterCountWorker", _IdleFilterWorker)
+    monkeypatch.setattr(app.QTimer, "singleShot", staticmethod(lambda *a: None))
+    monkeypatch.setattr(dialogs_filter, "criteria_unavailable_keys", lambda service=None: frozenset({"lines"}))
+    state = _session_state(results=[_res(A, 1)])
+    state["pre_search_filters"] = {"include_mode": True, "width_min": 10.0}
+    state["post_criteria"] = {"lines": {"min": 20}}
+    w = restore(state, "always")
+    message = w.statusBar().currentMessage()
+    assert message.startswith("Session restored")
+    assert "Some saved filters were removed: this catalog data is not available." in message
+    assert "Search again to see them." in message
+    assert w._post_criteria == {}
+    assert w._restore_notices is None, "after the restore, notices go straight to the status bar"
+
+
+def test_the_restore_notices_are_said_even_when_the_restore_fails(window, monkeypatch):
+    """Codex, PR 1c round 2: a restore that stops half-way had already dropped
+    criteria; its notice was discarded with the restore."""
+    import desktop.dialogs_filter as dialogs_filter
+    import genizah_core
+    monkeypatch.setattr(genizah_core, "CURRENT_LANG", "en")
+    monkeypatch.setattr(app, "FilterCountWorker", _IdleFilterWorker)
+    monkeypatch.setattr(app.QTimer, "singleShot", staticmethod(lambda *a: None))
+    monkeypatch.setattr(dialogs_filter, "criteria_unavailable_keys", lambda service=None: frozenset({"lines"}))
+    monkeypatch.setattr(app, "load_app_config", lambda: {"restore_mode": "always"})
+    state = _session_state(results=[_res(A, 1)])
+    state["post_criteria"] = {"lines": {"min": 20}}
+    state["active_tab"] = "0"  # a malformed saved value: the restore stops at it
+    monkeypatch.setattr(session_persistence, "load_session_state", lambda: state)
+    w = window
+    for name in ("_update_local_filter_btn_search", "_update_local_filter_btn_composition",
+                 "_update_local_filter_btn_parallels", "_honour_deferred_comp_method",
+                 "_apply_default_comp_method", "_refresh_search_history", "_refresh_comp_history"):
+        setattr(w, name, lambda *a, **k: None)
+    w._restore_comp_passage_preferences = lambda comp, absent_method=None: None
+    w._passage_snapshot_must_wait = lambda comp: False
+    w._display_restored_comp_snapshot = lambda comp: False
+    w.tabs = SimpleNamespace(count=lambda: 3, setCurrentIndex=lambda i: None)
+    w._restore_session()
+    assert w._post_criteria == {}
+    assert w.statusBar().currentMessage() == (
+        "Some saved filters were removed: this catalog data is not available.")
+
+
+def test_a_saved_catalog_date_range_becomes_the_period(restore, monkeypatch):
+    """D18: a Catalog tab session from before the manuscript features."""
+    monkeypatch.setattr(app.QTimer, "singleShot", staticmethod(lambda *a: None))
+    state = _session_state()
+    state["browse_catalog"] = {"date_from": 1000, "date_to": 1200, "include_undated": True,
+                               "traits": {"script_places": ["Spanish"]}}
+    w = restore(state, "always")
+    assert w._catalog_criteria == {"period": {"min": 1000, "max": 1200, "not_recorded": True}}, (
+        "the unreleased 2.2 traits are not read (plan §6.4)")
+
+
+def test_post_search_criteria_hide_the_rows_they_do_not_keep(window):
+    """D20, the visibility pass (step E): once computed for these results, a
+    row whose manuscript the criteria do not keep is hidden."""
+    w = window
+    w._post_criteria = {"width": {"min": 10.0}}
+    w._post_criteria_ids = frozenset({A})
+    _search(w, [_res(A, 1), _res(B, 1)])
+    assert _hidden(w, A) == [False] and _hidden(w, B) == [True]
+    w._post_criteria, w._post_criteria_ids = {}, None
+    w._apply_results_table_filters()
+    assert _hidden(w, B) == [False]
 
 
 # --------------------------------------------------------------------------
@@ -2360,8 +2507,8 @@ def _previous_run_left(w, domains=False, measurements=False):
         w._result_domain_map, w._has_result_domains = {A: ["Liturgy"]}, True
         w._domain_exclusions = {"Uncategorized"}
     if measurements:
-        w._result_measurement_map, w._measurement_fetch_complete = {A: {"width": 20.0}}, True
-        w._post_measurement_filters = {"width_min": 10.0}
+        w._post_criteria_ids, w._measurement_fetch_complete = frozenset({A}), True
+        w._post_criteria = {"width": {"min": 10.0}}
 
 
 @pytest.mark.parametrize("what", ["domains", "measurements"])
@@ -2378,9 +2525,12 @@ def test_the_standing_filters_survive_the_launch(window, monkeypatch):
     # Only this run's data is reset: what the user chose to hide stays chosen.
     w = window
     _previous_run_left(w, domains=True, measurements=True)
+    generation = getattr(w, '_post_criteria_gen', 0)
     _start_a_search_that_never_lands(w, monkeypatch)
-    assert w._domain_exclusions == {"Uncategorized"} and w._post_measurement_filters == {"width_min": 10.0}
+    assert w._post_criteria_gen > generation, "a late post-search answer could judge this run's rows"
+    assert w._domain_exclusions == {"Uncategorized"} and w._post_criteria == {"width": {"min": 10.0}}
     assert (w._result_domain_map, w._has_result_domains, w._measurement_fetch_complete) == ({}, False, False)
+    assert w._post_criteria_ids is None, "the previous run's matches must not judge this run's rows"
 
 
 # --- "Search completed in ..." leaves with its results (owner, 2026-10-04) ------------

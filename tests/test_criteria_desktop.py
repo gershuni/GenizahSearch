@@ -1,0 +1,751 @@
+# -*- coding: utf-8 -*-
+"""Desktop surfaces of the catalogue criteria (PR 1c of
+docs/plans/CATALOGUE_CRITERIA_PLAN.md, §6.3-§6.4): the Catalog tab (button,
+chips, workers, hand-off, the domain tree's "No catalogue record" entry),
+"Search only in..." and the main window (chips, chip removal, history
+summary, saved-filter migration), and the post-search filters (D20).
+
+Each test drives the real GenizahGUI methods (call sites, not only helpers)
+on a window built without __init__, over a small real sidecar
+(tests/criteria_sidecar.py).
+"""
+import os
+import sys
+from types import SimpleNamespace
+
+import pytest
+
+pytestmark = pytest.mark.gui  # imports PyQt6: gui bucket only
+
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal  # noqa: E402
+from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QMainWindow,  # noqa: E402
+                             QPushButton, QWidget)
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from criteria_sidecar import A, B, C, D, E, F, UNIVERSE, build_criteria_sidecar  # noqa: E402
+
+import genizah_app  # noqa: E402
+import genizah_core  # noqa: E402
+import desktop.dialogs_filter as dialogs_filter  # noqa: E402
+from genizah_app import GenizahGUI  # noqa: E402
+from shared import fjms_service  # noqa: E402
+from shared.fjms_service import FjmsService  # noqa: E402
+
+_APP = QApplication.instance() or QApplication([])
+
+EXCEPT_ORIENTAL = {'region': {'values': ['Oriental'], 'mode': 'except'}}
+LINES = {'lines': {'source': 'either', 'min': 20, 'max': 25}}
+LIBRARY = {A: 'CUL', B: 'JTS', C: 'CUL', D: 'JTS', E: 'BL', F: 'CUL'}
+
+
+class _Meta:
+    """The MetadataManager methods these call sites use."""
+
+    def corpus_sys_ids(self, timeout=30.0):
+        return UNIVERSE
+
+    def get_library_for_id(self, sid):
+        return LIBRARY.get(sid, '')
+
+    def get_meta_for_id(self, sid):
+        return f"T-S {sid[-8:-6]}", ''
+
+
+@pytest.fixture
+def svc(tmp_path, monkeypatch):
+    path = build_criteria_sidecar(tmp_path / "c.db")
+    monkeypatch.setenv("GENIZAH_FJMS_DB_PATH", path)
+    service = FjmsService(db_path=path)
+    monkeypatch.setattr(fjms_service, "_default_service", service)
+    for module in (genizah_core, genizah_app, dialogs_filter):
+        monkeypatch.setattr(module, 'CURRENT_LANG', 'en')
+    yield service
+    service.close()
+
+
+def _window(**attrs):
+    w = GenizahGUI.__new__(GenizahGUI)
+    QMainWindow.__init__(w)
+    w.meta_mgr = _Meta()
+    w._schedule_session_save = lambda: None
+    for name, value in attrs.items():
+        setattr(w, name, value)
+    return w
+
+
+def _catalog_window(criteria=None):
+    w = _window()
+    w._catalog_current_domain = w._catalog_current_author = w._catalog_current_work = None
+    w._catalog_text_all, w._catalog_text_any, w._catalog_text_not = [], [], []
+    w._catalog_pgp_filter = w._catalog_editions_filter = 'all'
+    w._catalog_library_filter, w._catalog_library_mode = [], 'hide'
+    w._catalog_criteria = dict(criteria or {})
+    w._catalog_current_page, w._CATALOG_PAGE_SIZE = 0, 50
+    w.pre_search_filters, w.pre_search_restrict_sys_ids = {}, None
+    return w
+
+
+def _run(worker):
+    out = []
+    worker.done.connect(out.append)
+    worker.run()  # synchronously, on this thread
+    return out[-1]
+
+
+# -- Catalog tab ------------------------------------------------------------------
+
+def test_the_tab_has_the_button_and_a_tree_that_cannot_collapse(svc):
+    w = _window()
+    panel = w.create_catalog_browse_tab()  # noqa: F841 - kept: it owns the widgets
+    assert w._catalog_criteria_btn.text() == "Manuscript features…"
+    assert w.catalog_domain_tree.minimumHeight() == 240, "the tree collapsed when the column overflowed"
+    for gone in ('_catalog_date_from_input', '_catalog_undated_cb', '_catalog_traits_btn'):
+        assert not hasattr(w, gone), f"{gone}: the date and traits controls moved into the window"
+
+
+def test_both_catalog_workers_apply_the_criteria_over_the_corpus(svc):
+    """D16/D22: catalogued first, then the uncatalogued, each in sys_id order;
+    the library counts honour the criteria too."""
+    result = _run(genizah_app._CatalogRefreshWorker(
+        None, None, None, None, 0, 50, refresh_authors=False, refresh_works=False,
+        meta_mgr=_Meta(), criteria=EXCEPT_ORIENTAL))
+    assert [r['sys_id'] for r in result['data']['results']] == [B, C, F, D, E]
+    assert result['data']['total'] == len(svc.get_filter_sys_ids(criteria=EXCEPT_ORIENTAL,
+                                                                  universe=UNIVERSE))
+    facets = _run(genizah_app._CatalogFacetWorker(None, None, None, None, meta_mgr=_Meta(),
+                                                  criteria=EXCEPT_ORIENTAL))
+    assert facets == {'JTS': 2, 'CUL': 2, 'BL': 1}
+
+
+class _Recorder:
+    """Stands in for a catalog worker: records its arguments, answers with ``reply``."""
+    made = []
+    reply = {}
+
+    def __init__(self, parent, **kwargs):
+        _Recorder.made.append(kwargs)
+        self._done = []
+        self.done = SimpleNamespace(connect=self._done.append)
+
+    def start(self):
+        QTimer.singleShot(0, lambda: [fn(dict(_Recorder.reply)) for fn in self._done])
+
+
+def test_the_tab_refresh_passes_a_copy_of_its_criteria(svc, monkeypatch):
+    _Recorder.made = []
+    monkeypatch.setattr(genizah_app, '_CatalogRefreshWorker', _Recorder)
+    w = _catalog_window(EXCEPT_ORIENTAL)
+    w.catalog_results_table = SimpleNamespace(setRowCount=lambda n: None)
+    w._catalog_count_label = SimpleNamespace(setText=lambda s: None)
+    w._catalog_on_async_refresh_done = lambda *a: None
+    w._catalog_start_async_refresh()
+    assert _Recorder.made[-1]['criteria'] == EXCEPT_ORIENTAL
+    assert _Recorder.made[-1]['criteria'] is not w._catalog_criteria, "the worker gets a copy"
+    assert 'date_from' not in _Recorder.made[-1], "the old date range moved into the criteria"
+
+
+def test_only_the_latest_catalog_refresh_paints(svc, monkeypatch):
+    """Codex, PR 1c round 1: an earlier refresh answering after a later one
+    must not show its rows under the later chips."""
+    callbacks = []
+
+    class _Worker:
+        def __init__(self, parent, **kwargs):
+            self.done = SimpleNamespace(connect=callbacks.append)
+
+        def start(self):
+            pass
+    monkeypatch.setattr(genizah_app, '_CatalogRefreshWorker', _Worker)
+    w = _catalog_window(EXCEPT_ORIENTAL)
+    w.catalog_results_table = SimpleNamespace(setRowCount=lambda n: None)
+    w._catalog_count_label = QLabel()
+    painted = []
+    w._catalog_on_async_refresh_done = lambda result, gen=None: painted.append(
+        (result, gen == w._catalog_refresh_gen))
+    w._catalog_start_async_refresh()
+    w._catalog_start_async_refresh()
+    callbacks[1]({'data': 'new'})
+    callbacks[0]({'data': 'old'})
+    assert painted == [({'data': 'new'}, True), ({'data': 'old'}, False)], (
+        "the handler must learn which refresh answered")
+    from PyQt6.QtWidgets import QTableWidget
+    w2 = _catalog_window()
+    w2.catalog_results_table = QTableWidget()
+    w2._catalog_refresh_gen = 2
+    GenizahGUI._catalog_on_async_refresh_done(w2, {'data': {'error': True}}, 1)
+    assert not hasattr(w2, '_catalog_results_data'), "a superseded answer was painted"
+
+
+def test_a_superseded_refresh_leaves_its_author_and_work_lists_to_the_next(svc, monkeypatch):
+    """Codex, PR 1c round 2: a domain click asks for new author/work lists; a
+    text term added before it answers supersedes it, and must ask for them too."""
+    made = []
+
+    class _Worker:
+        def __init__(self, parent, **kwargs):
+            made.append(kwargs)
+            self.done = SimpleNamespace(connect=lambda fn: None)
+
+        def start(self):
+            pass
+    monkeypatch.setattr(genizah_app, '_CatalogRefreshWorker', _Worker)
+    w = _catalog_window()
+    w.catalog_results_table = SimpleNamespace(setRowCount=lambda n: None)
+    w._catalog_count_label = QLabel()
+    w._catalog_start_async_refresh(refresh_authors=True, refresh_works=True)
+    w._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
+    assert (made[1]['refresh_authors'], made[1]['refresh_works']) == (True, True)
+    from PyQt6.QtWidgets import QTableWidget
+    w.catalog_results_table = QTableWidget()
+    w._catalog_update_chips = w._catalog_update_text_summary = lambda: None
+    w._catalog_on_async_refresh_done({'data': {'error': True}}, w._catalog_refresh_gen)
+    w._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
+    assert (made[2]['refresh_authors'], made[2]['refresh_works']) == (False, False), (
+        "once answered, nothing is outstanding")
+
+
+@pytest.fixture
+def sync_handoff(monkeypatch):
+    """The hand-off worker, run on this thread."""
+    class _Sync(genizah_app._CatalogHandoffWorker):
+        def start(self):
+            self.run()
+    monkeypatch.setattr(genizah_app, '_CatalogHandoffWorker', _Sync)
+
+
+def _handoff_window(criteria):
+    w = _catalog_window(criteria)
+    w.tabs_opened = []
+    w._update_filter_chip_bar = lambda: None
+    w._set_active_tab = w.tabs_opened.append
+    return w
+
+
+def test_the_hand_off_scope_is_computed_off_the_ui_thread(svc, monkeypatch):
+    """GitHub Codex on #458 (and PR 1c round 1): the criteria scan the sidecar
+    and the corpus list may still be loading -- in a worker; nothing changes
+    until it answers."""
+    import threading
+    from PyQt6.QtCore import QCoreApplication
+    threads, real = [], svc.get_filter_sys_ids
+    monkeypatch.setattr(svc, 'get_filter_sys_ids',
+                        lambda **k: threads.append(threading.get_ident()) or real(**k))
+    w = _handoff_window(EXCEPT_ORIENTAL)
+    w.pre_search_filters, w.pre_search_restrict_sys_ids = {'domains': ['Bible']}, {A}
+    w._catalog_search_in_results()
+    assert (w.pre_search_filters, w.tabs_opened) == ({'domains': ['Bible']}, []), "installed before its answer"
+    assert w._catalog_handoff_worker.wait(10000)
+    QCoreApplication.processEvents()
+    assert threads and threads[0] != threading.get_ident(), "the scope was computed on the UI thread"
+    assert w.pre_search_restrict_sys_ids == {B, C, D, E, F} and w.tabs_opened == [0]
+
+
+def test_a_failed_hand_off_changes_nothing_and_a_late_one_is_dropped(svc, monkeypatch, sync_handoff):
+    from shared.fjms_service import FilterUnavailable
+    warned = []
+    monkeypatch.setattr(genizah_app.QMessageBox, 'warning', staticmethod(lambda *a, **k: warned.append(a)))
+
+    class _Loading(_Meta):
+        def corpus_sys_ids(self, timeout=30.0):
+            raise FilterUnavailable('corpus_unavailable', 'loading')
+    w = _handoff_window(EXCEPT_ORIENTAL)
+    w.meta_mgr = _Loading()
+    w.pre_search_filters, w.pre_search_restrict_sys_ids = {'domains': ['Bible']}, {A}
+    w._catalog_parallels_in_results()
+    assert warned and (w.pre_search_filters, w.pre_search_restrict_sys_ids) == ({'domains': ['Bible']}, {A})
+    assert w.tabs_opened == []
+    w._catalog_on_handoff_scope(w._catalog_handoff_gen - 1, {'criteria': LINES}, {C}, None, '', 1, ([], 'hide'))
+    assert w.pre_search_filters == {'domains': ['Bible']}, "an older hand-off's answer was installed"
+
+
+class _MetaWithLibraries(_Meta):
+    csv_bank = {sid: {'library_code': code} for sid, code in LIBRARY.items()}
+
+
+HIDE_NOTICE = "Library Hide filter not applied to search/composition"
+
+
+@pytest.mark.parametrize('at_click,edit,scope,notice', [
+    # Show only CUL at the click; the user then clears the list, or turns it to Hide.
+    ('show_only', {'_catalog_library_filter': []}, {C, F}, ''),
+    ('show_only', {'_catalog_library_mode': 'hide'}, {C, F}, ''),
+    # Hide CUL at the click; the user then turns it to Show only.
+    ('hide', {'_catalog_library_mode': 'show_only'}, {B, C, D, E, F}, HIDE_NOTICE),
+])
+def test_the_hand_off_keeps_the_library_choice_of_its_click(svc, at_click, edit, scope, notice):
+    """GitHub Codex on #458: the tab stays editable while the hand-off's
+    worker runs; its answer is installed with the library selection and mode
+    of the click -- the ones its filters (and so its chip) carry -- not the
+    tab's state when it arrives."""
+    from PyQt6.QtCore import QCoreApplication
+    w = _handoff_window(EXCEPT_ORIENTAL)
+    w.meta_mgr = _MetaWithLibraries()
+    w._catalog_library_filter, w._catalog_library_mode = ['CUL'], at_click
+    w._catalog_search_in_results()
+    for name, value in edit.items():
+        setattr(w, name, value)
+    assert w._catalog_handoff_worker.wait(10000)
+    QCoreApplication.processEvents()
+    assert w.tabs_opened == [0]
+    assert w.pre_search_filters.get('library') == (['CUL'] if at_click == 'show_only' else None)
+    assert w.pre_search_restrict_sys_ids == scope
+    assert w.statusBar().currentMessage() == (notice or genizah_app.tr("Loading..."))
+
+
+def test_a_history_row_names_an_old_date_range_as_the_period(svc):
+    """Codex, PR 1c round 1: the row says what selecting it runs (D18)."""
+    from PyQt6.QtWidgets import QMenu
+    from test_saved_searches import _Host
+    host = _Host()
+    host._add_history_menu_item(host.menu, 'regular', 0, {
+        'query': 'word', 'result_count': 3, 'timestamp': '2026-01-01T00:00:00',
+        'pre_search_filters': {'include_mode': True, 'date_from': 1000, 'date_to': 1100}})
+    texts = [label.text() for action in host.menu.actions()
+             for label in action.defaultWidget().findChildren(QLabel)]
+    assert any("Period: 1000–1100" in t for t in texts), texts
+    assert isinstance(host.menu, QMenu)
+
+
+def test_the_library_counts_get_the_criteria(svc, monkeypatch):
+    _Recorder.made = []
+    monkeypatch.setattr(genizah_app, '_CatalogFacetWorker', _Recorder)
+
+    class _Rejected:
+        def __init__(self, *a, **k):
+            pass
+
+        def exec(self):
+            return genizah_app.QDialog.DialogCode.Rejected
+    monkeypatch.setattr(genizah_app, 'LibraryFilterDialog', _Rejected)
+    w = _catalog_window(EXCEPT_ORIENTAL)
+    w._open_catalog_library_dialog()
+    assert _Recorder.made[-1]['criteria'] == EXCEPT_ORIENTAL
+
+
+def test_search_in_these_results_carries_the_criteria_and_their_scope(svc, monkeypatch, sync_handoff):
+    """A browse list hands its criteria on unchanged (§6.3); the scope is the
+    same set, uncatalogued manuscripts included (they have no region)."""
+    warned = []
+    monkeypatch.setattr(genizah_app.QMessageBox, 'warning', staticmethod(lambda *a, **k: warned.append(a)))
+    w = _handoff_window(EXCEPT_ORIENTAL)
+    assert w._catalog_build_browse_filters() == {'criteria': EXCEPT_ORIENTAL}
+    w._catalog_search_in_results()
+    assert w.pre_search_filters == {'criteria': EXCEPT_ORIENTAL}
+    assert w.pre_search_restrict_sys_ids == {B, C, D, E, F}
+    assert (warned, w.tabs_opened) == ([], [0])
+
+
+def _chip_texts(layout):
+    return [layout.itemAt(i).widget().text() for i in range(layout.count())
+            if isinstance(layout.itemAt(i).widget(), QPushButton)]
+
+
+def test_catalog_chips_one_per_criterion_and_each_removes_its_own(svc):
+    w = _catalog_window(dict(EXCEPT_ORIENTAL, **LINES))
+    host = QWidget()
+    w._catalog_chips_layout = QHBoxLayout(host)
+    w._catalog_clear_all_btn = QPushButton()
+    refreshed = []
+    w._catalog_start_async_refresh = lambda **k: refreshed.append(dict(w._catalog_criteria))
+    w._catalog_update_chips()
+    assert _chip_texts(w._catalog_chips_layout) == [
+        "Region: all except Oriental  ×", "Lines: 20–25  ×"]
+    assert not w._catalog_clear_all_btn.isHidden()
+    w._catalog_chips_layout.itemAt(0).widget().click()
+    assert w._catalog_criteria == LINES
+    assert refreshed == [LINES], "removing a chip must list again"
+    assert _chip_texts(w._catalog_chips_layout) == ["Lines: 20–25  ×"]
+
+
+def test_the_window_sets_the_tab_criteria(svc, monkeypatch):
+    class _Dialog:
+        dropped_saved_criteria = []
+
+        def __init__(self, parent, criteria):
+            self.seen = criteria
+
+        def exec(self):
+            return genizah_app.QDialog.DialogCode.Accepted
+
+        def get_criteria(self):
+            return dict(LINES)
+    monkeypatch.setattr(dialogs_filter, 'CriteriaDialog', _Dialog)
+    w = _catalog_window()
+    w._catalog_criteria_btn = QPushButton()
+    refreshed = []
+    w._catalog_start_async_refresh = lambda **k: refreshed.append(True)
+    w._catalog_update_chips = lambda: None
+    w._catalog_open_criteria_dialog()
+    assert w._catalog_criteria == LINES and refreshed
+    assert w._catalog_criteria_btn.text() == "Manuscript features (1)…"
+
+
+def test_criteria_the_file_cannot_answer_leave_the_tab_even_on_cancel(svc, monkeypatch):
+    """The window dropped them with a notice; Cancel must not keep them under the list."""
+    class _Dialog:
+        dropped_saved_criteria = ['lines']
+
+        def __init__(self, parent, criteria):
+            pass
+
+        def exec(self):
+            return genizah_app.QDialog.DialogCode.Rejected
+    monkeypatch.setattr(dialogs_filter, 'CriteriaDialog', _Dialog)
+    w = _catalog_window(dict(EXCEPT_ORIENTAL, **LINES))
+    refreshed = []
+    w._catalog_start_async_refresh = lambda **k: refreshed.append(dict(w._catalog_criteria))
+    w._catalog_update_chips = lambda: None
+    w._catalog_open_criteria_dialog()
+    assert w._catalog_criteria == EXCEPT_ORIENTAL and refreshed == [EXCEPT_ORIENTAL]
+
+
+def test_the_domain_tree_counts_the_manuscripts_with_no_catalogue_record(svc):
+    from PyQt6.QtWidgets import QTreeWidget
+    counted = []
+    worker = genizah_app._CatalogUncataloguedWorker(_Meta())
+    worker.counted.connect(counted.append)
+    worker.run()
+    assert counted == [2], "D and E have no catalogue record"
+    w = _catalog_window()
+    w.catalog_domain_tree = QTreeWidget()
+    w.catalog_domain_tree.setColumnCount(2)
+    w._catalog_add_uncatalogued_entry(2)
+    w._catalog_add_uncatalogued_entry(2)  # a second answer updates, never duplicates
+    items = [w.catalog_domain_tree.topLevelItem(i) for i in range(w.catalog_domain_tree.topLevelItemCount())]
+    assert [(i.text(0), i.text(1)) for i in items] == [("No catalogue record", "2")]
+    w._catalog_start_async_refresh = lambda **k: pytest.fail("the entry is not a domain to list")
+    w._catalog_on_domain_select(items[0])
+
+
+def test_rendering_the_tree_adds_the_entry(svc, monkeypatch):
+    """The call site: _catalog_render_tree starts the count and adds its answer."""
+    from PyQt6.QtWidgets import QTreeWidget
+
+    class _Sync(genizah_app._CatalogUncataloguedWorker):
+        def start(self):
+            self.run()
+    monkeypatch.setattr(genizah_app, '_CatalogUncataloguedWorker', _Sync)
+    monkeypatch.setattr(genizah_app.QTimer, 'singleShot', staticmethod(lambda *a: None))
+    w = _catalog_window()
+    w.catalog_domain_tree = QTreeWidget()
+    w.catalog_domain_tree.setColumnCount(2)
+    w._catalog_render_tree({}, 5)
+    tree = w.catalog_domain_tree
+    assert [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())] == [
+        "Unclassified", "No catalogue record"]
+
+
+# -- "Search only in..." and the main window ----------------------------------------
+
+def test_search_only_in_hands_its_criteria_to_the_count(svc, monkeypatch):
+    """The dialog's button sets filters['criteria'], and its count (the call
+    site, FilterCountWorker) applies them over the corpus."""
+    made = []
+
+    class _Worker(QObject):
+        finished = pyqtSignal(object)
+        failed = pyqtSignal(str)
+
+        def __init__(self, filters, parent=None, **kw):
+            super().__init__()
+            made.append((filters, kw))
+
+        def start(self):
+            pass
+    monkeypatch.setattr(dialogs_filter, 'FilterCountWorker', _Worker)
+    owner = QWidget()
+    owner.meta_mgr = _Meta()
+    dlg = dialogs_filter.PreSearchFilterDialog(owner, {'include_mode': True, 'criteria': EXCEPT_ORIENTAL})
+    try:
+        assert made[-1][0]['criteria'] == EXCEPT_ORIENTAL
+        assert made[-1][1]['universe']() == UNIVERSE
+        assert dlg.criteria_btn.text() == "Manuscript features (1)…"
+        dlg._remove_criterion('region')
+        assert 'criteria' not in dlg.get_filters()
+    finally:
+        dlg.deleteLater()
+    from desktop.gui_threads import FilterCountWorker
+    worker = FilterCountWorker({'include_mode': True, 'criteria': EXCEPT_ORIENTAL}, universe=UNIVERSE)
+    got = []
+    worker.finished.connect(got.append)
+    worker.run()
+    assert got == [{B, C, D, E, F}]
+
+
+def _chip_window(filters):
+    w = _window(pre_search_filters=filters, pre_search_restrict_sys_ids={B})
+    for prefix in ('', 'comp_'):
+        bar = QWidget()
+        setattr(w, f'{prefix}filter_chip_bar', bar)
+        setattr(w, f'{prefix}filter_chip_bar_layout', QHBoxLayout(bar))
+        setattr(w, f'{prefix}filter_chip_count_label', QLabel())
+    return w
+
+
+class _IdleWorker(QObject):
+    finished = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, *a, **k):
+        super().__init__()
+
+    def start(self):
+        pass
+
+
+def test_main_window_chips_and_their_removal(svc, monkeypatch):
+    monkeypatch.setattr(genizah_app, 'FilterCountWorker', _IdleWorker)
+    w = _chip_window({'include_mode': True, 'criteria': dict(EXCEPT_ORIENTAL, **LINES)})
+    w._update_filter_chip_bar()
+    texts = _chip_texts(w.filter_chip_bar_layout)
+    assert texts == ["Region: all except Oriental  ×", "Lines: 20–25  ×"], texts
+    w._remove_filter(('criteria', 'region'))
+    assert w.pre_search_filters == {'include_mode': True, 'criteria': LINES}
+    assert w._filter_lookup_pending, "the scope is recomputed for what is left"
+    w._remove_filter(('criteria', 'lines'))
+    assert w.pre_search_filters == {}, "the last criterion gone, no filter is left"
+
+
+def _hebrew(monkeypatch):
+    for module in (genizah_core, genizah_app, dialogs_filter):
+        monkeypatch.setattr(module, 'CURRENT_LANG', 'he')
+
+
+def test_a_chip_never_reads_the_sidecar_on_the_ui_thread(svc, monkeypatch):
+    """1b's 8bb36b78 (GitHub Codex on PR 1b): on a cold cache a Hebrew chip's
+    labels were a sidecar query on the UI thread; it shows the English value
+    until the labels are loaded off it, then the catalogue's Hebrew."""
+    _hebrew(monkeypatch)
+    queried, real = [], svc.get_criterion_values
+    monkeypatch.setattr(svc, 'get_criterion_values', lambda key, **k: queried.append(key) or real(key, **k))
+    [(_key, text)] = dialogs_filter.criteria_chip_texts(EXCEPT_ORIENTAL)
+    assert queried == [], "a chip queried the sidecar"
+    assert 'Oriental' in text
+    hebrew = svc.criterion_value_labels('region')['Oriental']  # what the workers do, off the UI thread
+    queried.clear()
+    [(_key, text)] = dialogs_filter.criteria_chip_texts(EXCEPT_ORIENTAL)
+    assert queried == [] and hebrew in text and 'Oriental' not in text
+
+
+def test_the_start_up_warm_up_draws_the_chips_again_in_hebrew(svc, monkeypatch):
+    """Chips drawn before the labels were loaded (a restored session's) get
+    them when the start-up warm-up ends -- on both main-window bars and the
+    Catalog tab."""
+    from PyQt6.QtCore import QCoreApplication
+    _hebrew(monkeypatch)
+    monkeypatch.setattr(svc, 'pre_warm_caches', lambda: None)
+    w = _catalog_window(EXCEPT_ORIENTAL)
+    host = QWidget()
+    w._catalog_chips_layout = QHBoxLayout(host)
+    w._catalog_clear_all_btn = QPushButton()
+    for prefix in ('', 'comp_'):
+        bar = QWidget()
+        setattr(w, f'{prefix}filter_chip_bar', bar)
+        setattr(w, f'{prefix}filter_chip_bar_layout', QHBoxLayout(bar))
+        setattr(w, f'{prefix}filter_chip_count_label', QLabel())
+    w.pre_search_filters = {'include_mode': True, 'criteria': EXCEPT_ORIENTAL}
+    w._update_filter_chip_bar()
+    w._catalog_update_chips()
+    layouts = (w.filter_chip_bar_layout, w.comp_filter_chip_bar_layout, w._catalog_chips_layout)
+    for layout in layouts:
+        assert any('Oriental' in t for t in _chip_texts(layout)), "the cache was not cold"
+    w._start_fjms_warmup()
+    assert w._fjms_warmup_thread.wait(10000)
+    QCoreApplication.processEvents()
+    hebrew = svc.criterion_value_labels('region', cached_only=True)['Oriental']
+    for layout in layouts:
+        texts = _chip_texts(layout)
+        assert any(hebrew in t for t in texts) and not any('Oriental' in t for t in texts), texts
+
+
+@pytest.mark.parametrize('include_mode,expected', [
+    (True, '[include: Bible, Region: Spanish]'),
+    (False, '[exclude: Bible] [include: Region: Spanish]'),
+])
+def test_the_history_summary_never_puts_a_criterion_under_exclude(svc, include_mode, expected):
+    filters = {'include_mode': include_mode, 'domains': ['Bible'],
+               'criteria': {'region': {'values': ['Spanish']}}}
+    assert GenizahGUI._build_filter_summary(filters, 80) == expected
+
+
+def test_a_truncated_summary_keeps_its_brackets_balanced(svc):
+    from fjms_filter_sidecar import brackets_balanced
+    filters = {'include_mode': False, 'domains': ['Bible', 'Liturgy', 'Halakha'],
+               'criteria': {'period': {'min': 1000, 'max': 1300}, 'region': {'values': ['Spanish']}}}
+    for max_len in range(20, 90):
+        s = GenizahGUI._build_filter_summary(filters, max_len)
+        assert len(s) <= max_len and brackets_balanced(s), (max_len, s)
+
+
+# -- saved filters, as they run today (§6.4) --------------------------------------
+
+def test_saved_dates_become_the_period_and_old_measurements_are_dropped():
+    saved = {'include_mode': False, 'domains': ['Bible'], 'date_from': 1000, 'date_to': 1100,
+             'include_undated': True, 'width_min': 10.0, 'measurement_material': ['Paper'],
+             'script_styles': ['Square']}
+    migrated, had_measurements = dialogs_filter.migrate_saved_filters(saved)
+    assert migrated == {'include_mode': False, 'domains': ['Bible'], 'criteria': {
+        'period': {'min': 1000, 'max': 1100, 'not_recorded': True}}}
+    assert had_measurements is True
+    migrated['domains'].append('Piyyut')
+    assert saved['domains'] == ['Bible'], "a copy: a chip removed later must not edit the saved entry"
+    assert dialogs_filter.migrate_saved_filters({'include_undated': True}) == ({}, False), (
+        '"include undated" alone never filtered')
+    kept = {'criteria': {'period': {'min': 1000}}, 'date_from': 900}
+    assert dialogs_filter.migrate_saved_filters(kept)[0] == {'criteria': {'period': {'min': 1000}}}, (
+        "a saved period wins over a stray old date")
+    newer = {'criteria': {}, 'date_from': 900}
+    assert dialogs_filter.migrate_saved_filters(newer)[0] == {}, (
+        "saved criteria, even none, are the answer: a stray old date is not read")
+
+
+@pytest.mark.parametrize("restore", ["_restore_regular_search_from_state",
+                                     "_restore_comp_search_from_state"])
+def test_a_history_entry_with_the_old_bounds_reruns_instead_of_showing_its_snapshot(
+        svc, monkeypatch, restore):
+    """R2: a legacy snapshot found under the old measurement bounds is not shown."""
+    from PyQt6.QtWidgets import QLineEdit, QPlainTextEdit
+    monkeypatch.setattr(genizah_app, 'FilterCountWorker', _IdleWorker)
+    shown = []
+    w = _window(query_input=QLineEdit(), comp_text_area=QPlainTextEdit(), comp_title_input=QLineEdit(),
+                composition_tab=None, refinement_chain=[], pre_search_filters={},
+                pre_search_restrict_sys_ids=None)
+    w._set_local_scope_strip_visible = lambda v: None
+    w._witness_edits_are_locked = lambda: False
+    w._restore_comp_passage_preferences = lambda params: None
+    w._restore_comp_conditions = lambda conditions: None
+    w._update_filter_chip_bar = lambda: None
+    w._set_active_tab = lambda tab: None
+    w.on_search_finished = lambda results: shown.append(results)
+    w._clear_compound_results = lambda: None
+    w.display_comp_results = lambda *a, **k: shown.append(a)
+    entry = {'query': 'word', 'pre_search_filters': {'include_mode': True, 'width_min': 10.0,
+                                                     'domains': ['Bible']}}
+    state = {'source_text': 'a b c', 'results': [{'display': {'id': A}}],
+             'filtered_results': [{'display': {'id': A}}]}
+    getattr(w, restore)(state, entry)
+    assert shown == [], "a snapshot found under the old measurement bounds was shown"
+    assert w.pre_search_filters == {'include_mode': True, 'domains': ['Bible']}
+
+
+# -- post-search filters (D20) -----------------------------------------------------
+
+@pytest.fixture
+def sync_post(monkeypatch):
+    """The post-search worker, run on this thread."""
+    class _Sync(genizah_app._PostCriteriaWorker):
+        def start(self):
+            self.run()
+    monkeypatch.setattr(genizah_app, '_PostCriteriaWorker', _Sync)
+
+
+def test_post_search_filters_keep_what_the_window_counts(svc, sync_post):
+    """D20: the main window's post-search set is the same answer the window's
+    own total gives over the results, by the panel's rules."""
+    from desktop.gui_threads import CriteriaCountWorker
+    criteria = {'width': {'min': 11}, 'lines': {'min': 20, 'max': 25, 'not_recorded': True}}
+    results = [{'display': {'id': sid}} for sid in (A, B, C, D)]
+    w = _window(last_results=results, _post_criteria=criteria)
+    w._apply_results_table_filters = lambda: None
+    w._recompute_post_criteria()
+    counted = []
+    worker = CriteriaCountWorker(criteria, universe=frozenset({A, B, C, D}))
+    worker.counted.connect(lambda tag, total, info: counted.append(total))
+    worker.run()
+    assert w._post_criteria_ids == svc.get_filter_sys_ids(criteria=criteria, universe={A, B, C, D})
+    assert counted == [len(w._post_criteria_ids)]
+    assert w._post_criteria_error is None
+
+
+def test_post_search_filters_that_cannot_run_hide_nothing_and_say_so(svc, monkeypatch, sync_post):
+    monkeypatch.setattr(svc, 'match_result_criteria', lambda c, ids: (_ for _ in ()).throw(
+        fjms_service.FilterUnavailable('query_failed')))
+    w = _window(last_results=[{'display': {'id': A}}], _post_criteria=dict(LINES))
+    w._apply_results_table_filters = lambda: None
+    w._recompute_post_criteria()
+    assert w._post_criteria_ids is None and w._post_criteria_error == 'query_failed'
+    assert w.statusBar().currentMessage() == (
+        "The measurement filters could not be applied: every result is shown.")
+
+
+def test_the_enrichment_step_computes_the_post_search_set(svc, monkeypatch, sync_post):
+    """The call site: _launch_enrichment_workers (after every search)."""
+    class _Inert(QObject):
+        finished = pyqtSignal(object)
+
+        def __init__(self, *a, **k):
+            super().__init__()
+
+        def start(self):
+            pass
+
+        def isRunning(self):
+            return False
+    import desktop.gui_threads as gui_threads
+    monkeypatch.setattr(gui_threads, 'DomainEnrichmentWorker', _Inert)
+    monkeypatch.setattr(genizah_app, 'PGPBadgeWorker', _Inert)
+    monkeypatch.setattr(genizah_app, 'PrintedBadgeWorker', _Inert)
+    results = [{'display': {'id': sid}} for sid in (A, B)]
+    w = _window(last_results=results, _post_criteria={'region': {'values': ['Spanish']}},
+                _post_criteria_ids=None, _domain_worker=None, _pgp_badge_worker=None,
+                _printed_badge_worker=None, btn_measurement_filter=QPushButton())
+    w._apply_results_table_filters = lambda: None
+    w._launch_enrichment_workers(results, defer=False)
+    assert w._post_criteria_ids == {B}
+    assert w._measurement_fetch_complete and w.btn_measurement_filter.isEnabled()
+
+
+def test_the_post_search_button_opens_the_panel_on_its_sections(svc, monkeypatch, sync_post):
+    seen = {}
+
+    class _Dialog:
+        def __init__(self, parent, criteria, **kwargs):
+            seen.update(kwargs, criteria=criteria)
+
+        def exec(self):
+            return genizah_app.QDialog.DialogCode.Accepted
+
+        def get_criteria(self):
+            return {'region': {'values': ['Spanish'], 'mode': 'only'}}
+    monkeypatch.setattr(dialogs_filter, 'CriteriaDialog', _Dialog)
+    results = [{'display': {'id': sid}} for sid in (A, B)]
+    w = _window(last_results=results, _post_criteria={}, _measurement_fetch_complete=True)
+    applied = []
+    w._apply_results_table_filters = lambda: applied.append(w._post_criteria_ids)
+    w._open_measurement_filter_dialog()
+    assert seen['sections'] == ('lines', 'material', 'measured')
+    assert seen['within'] == frozenset({A, B})
+    assert applied[-1] == {B}
+
+
+def test_post_search_matching_runs_off_the_ui_thread(svc, monkeypatch):
+    """GitHub Codex on #458: match_result_criteria scans the sidecar (about
+    half a second on the real file) and ran on the UI thread after every
+    search. The rows show until the worker answers."""
+    import threading
+    from PyQt6.QtCore import QCoreApplication
+    threads, real = [], svc.match_result_criteria
+    monkeypatch.setattr(svc, 'match_result_criteria',
+                        lambda c, ids: threads.append(threading.get_ident()) or real(c, ids))
+    results = [{'display': {'id': sid}} for sid in (A, B)]
+    w = _window(last_results=results, _post_criteria={'region': {'values': ['Spanish']}})
+    applied = []
+    w._apply_results_table_filters = lambda: applied.append(w._post_criteria_ids)
+    w._recompute_post_criteria()
+    assert (w._post_criteria_ids, w._measurement_fetch_complete) == (None, False), "rows show meanwhile"
+    assert w._post_criteria_worker.wait(10000)
+    QCoreApplication.processEvents()
+    assert threads and threads[0] != threading.get_ident(), "matched on the UI thread"
+    assert applied == [{B}] and w._measurement_fetch_complete
+
+
+def test_a_late_post_search_answer_for_an_older_search_is_dropped(svc, sync_post):
+    results = [{'display': {'id': sid}} for sid in (A, B)]
+    w = _window(last_results=results, _post_criteria={'region': {'values': ['Spanish']}})
+    w._apply_results_table_filters = lambda: None
+    w._recompute_post_criteria()
+    old = w._post_criteria_gen
+    w._post_criteria_gen += 1  # a new search started (start_search bumps it)
+    w._post_criteria_ids = None
+    w._on_post_criteria_matched(old, {A}, '')
+    assert w._post_criteria_ids is None, "an answer for the previous results judged this run's rows"

@@ -6296,6 +6296,23 @@ TRANSLATIONS.update({
         'כל המקשים בכרטיס אחד: Ctrl+/‎, הכפתור ⌨ ליד A−‎, או "קיצורי מקלדת" בתפריט ☰.',
 })
 
+# Catalogue criteria, PR 1c (2026-11-01): the desktop's own strings for the
+# Manuscript features window (desktop/dialogs_filter.py::CriteriaDialog). The
+# strings it shares with the web panel are PR 1b's block, after the PR 1a one.
+TRANSLATIONS.update({
+    "This catalogue data file is too old for this criterion: it needs version 5.1.0 or later.":
+        "קובץ נתוני הקטלוג ישן מדי למאפיין זה: נדרשת גרסה 5.1.0 ומעלה.",
+    "{n} of the {total} manuscripts in the results match": "{n} מתוך {total} כתבי היד שבתוצאות מתאימים",
+    "The catalog data these features need is not available.":
+        "נתוני הקטלוג הדרושים למאפיינים אלה אינם זמינים.",
+    "The measurement filters could not be applied: every result is shown.":
+        "לא ניתן היה להחיל את סינון המידות: כל התוצאות מוצגות.",
+    "The saved results were found with filters that have changed. Search again to see them.":
+        "התוצאות השמורות נמצאו לפי מסננים שהשתנו. חפשו שוב כדי לראות אותן.",
+    "Manuscripts of the corpus with no FJMS catalogue record: they are listed after the catalogued ones.":
+        "כתבי יד שאין להם רשומה בקטלוג FJMS: הם מוצגים אחרי כתבי היד המקוטלגים.",
+})
+
 # Catalogue criteria, PR 1a (2026-11-01): Catalog Browse lists the whole corpus,
 # and a failed browse query is an error, not "no manuscripts match".
 TRANSLATIONS.update({

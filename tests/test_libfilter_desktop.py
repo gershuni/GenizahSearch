@@ -689,17 +689,25 @@ def test_catalog_search_in_results_hide_no_restrict_and_notice(monkeypatch):
     # Return an empty restrict set (so the test verifies no library intersection added)
     fake_self.meta_mgr = MagicMock()
 
-    # Call the recompute path; in Hide mode it should NOT call resolve_library_sys_ids
-    # for a library restriction intersect (and should fire a notice).
-    # We stub _catalog_start_async_refresh and related launchers to prevent real DB calls.
+    # The hand-off runs in two steps since GitHub Codex on #458: its worker
+    # computes the scope (and resolves a Show-only library list), then the UI
+    # thread installs it. Drive both: in Hide mode the worker must NOT call
+    # resolve_library_sys_ids, and the install must fire a notice.
     fake_self._catalog_start_async_refresh = MagicMock()
-    fake_self._catalog_parallels_in_results = MagicMock()
-
-    try:
-        genizah_app.GenizahGUI._catalog_search_in_results(fake_self)
-    except Exception:
-        # The stub may raise; we only care about what ran BEFORE the raise
-        pass
+    fake_self._catalog_handoff_gen = 1
+    answers = []
+    worker = genizah_app._CatalogHandoffWorker(
+        {'domains': ['Bible'], 'library': ['CUL']}, fake_self.meta_mgr, 'hide', 1)
+    worker.done.connect(lambda *a: answers.append(a))
+    fake_service = MagicMock()
+    fake_service.get_filter_sys_ids.return_value = {'990001'}
+    monkeypatch.setattr(fjms_mod, 'get_fjms_service', lambda **k: fake_service)
+    worker.run()
+    assert answers and answers[-1][2] is None and answers[-1][3] == '', answers
+    genizah_app.GenizahGUI._catalog_on_handoff_scope(
+        fake_self, 1, {'domains': ['Bible']}, {'990001'}, None, '', 0,
+        (fake_self._catalog_library_filter, fake_self._catalog_library_mode))
+    assert fake_self.pre_search_restrict_sys_ids == {'990001'}, "Hide mode must not narrow the scope"
 
     # Assert: resolve_library_sys_ids was NOT called for a library restriction
     assert len(resolve_calls) == 0, (

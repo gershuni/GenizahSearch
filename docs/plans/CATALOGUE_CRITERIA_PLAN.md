@@ -473,6 +473,11 @@ its summary.
    failed every "all except" when the corpus came as a frozenset).
 3. **PR 1c — desktop:** `CriteriaDialog`, the Catalog tab, "Search only in...", post-search
    filters (D20), session migration, the domain-tree minimum height.
+   **As built (2026-11-01):** as above, with three differences. (a) The chip text and the post-search
+   matcher are 1b's shared commit (`5a4f2286`, cherry-picked). (b) A session saved with the old
+   measurement bounds keeps its query but not its rows, with a status-bar line ("search again"): it is not
+   re-run at start-up; history entries re-run, as they always did. (c) The century presets keep the web's
+   ranges (`16-19` = 1600-1999, `10th` = 900-999), a quirk both surfaces share; reported, not changed.
 4. **PR 2 — API/MCP:** `filters.criteria`, `/api/criteria`, docs.
 5. **Release (D11)** — one release, web and desktop, after 1a-1c and 2; nothing in between is
    deployed. Before it: the 5.1.0 file built from the fixed base (§6.5); the owner copies it to the
@@ -618,6 +623,20 @@ an address with only a malformed criterion (`?columns=oops`) brought back the sa
 drawn on the event loop, read Hebrew value labels with a sidecar query on a cold cache ->
 `criteria_chips(..., cached_only=True)` (shared, `8bb36b78`) and `load_history_labels_then` loads
 the missing labels off the loop and redraws once.
+
+**PR 1c code, round 1** (`e362f59a..561fdc31`), brief `_tmp/criteria_1c_review_brief.md` (worktree
+`claude/criteria-1c-desktop-d01dce`), log `_tmp/criteria_1c_codex_round1.log`. Codex: **SHIP WITH FIXES**,
+4 MED + 3 LOW. Fixed in `4b4a0c3e`: restore notices replaced by "Session restored"; the Catalog list
+painting a superseded refresh; the hand-off waiting for libraries.csv on the UI thread; date-only history
+rows without a summary; "results" for manuscripts; a lone "."; the order of kept values. Logged as
+inherited: `docs/open_issues.d/2026-11-01-desktop-catalog-handoff-scope.md` (hand-off drops text/PGP/edition
+filters; "Search only in..." drops a handed-over library).
+
+**PR 1c code, round 2** (`561fdc31..4b4a0c3e`), brief `_tmp/criteria_1c_review_brief_r2.md`, log
+`_tmp/criteria_1c_codex_round2.log`. Codex: **SHIP WITH FIXES**: 2 MED + 3 LOW, all in the fold-in, fixed
+after it -- notices lost when the restore itself fails; the refresh guard dropping the author/work lists a
+superseded refresh asked for; `.5` typed as `5`; the corpus note not coming back after Clear All; a kept
+special value out of order. The two-round budget ends here.
 
 ---
 
