@@ -6296,12 +6296,74 @@ TRANSLATIONS.update({
         'כל המקשים בכרטיס אחד: Ctrl+/‎, הכפתור ⌨ ליד A−‎, או "קיצורי מקלדת" בתפריט ☰.',
 })
 
+# Catalogue criteria, PR 1c (2026-11-01): the desktop's own strings for the
+# Manuscript features window (desktop/dialogs_filter.py::CriteriaDialog). The
+# strings it shares with the web panel are PR 1b's block, after the PR 1a one.
+TRANSLATIONS.update({
+    "This catalogue data file is too old for this criterion: it needs version 5.1.0 or later.":
+        "קובץ נתוני הקטלוג ישן מדי למאפיין זה: נדרשת גרסה 5.1.0 ומעלה.",
+    "{n} of the {total} manuscripts in the results match": "{n} מתוך {total} כתבי היד שבתוצאות מתאימים",
+    "The catalog data these features need is not available.":
+        "נתוני הקטלוג הדרושים למאפיינים אלה אינם זמינים.",
+    "The measurement filters could not be applied: every result is shown.":
+        "לא ניתן היה להחיל את סינון המידות: כל התוצאות מוצגות.",
+    "The saved results were found with filters that have changed. Search again to see them.":
+        "התוצאות השמורות נמצאו לפי מסננים שהשתנו. חפשו שוב כדי לראות אותן.",
+    "Manuscripts of the corpus with no FJMS catalogue record: they are listed after the catalogued ones.":
+        "כתבי יד שאין להם רשומה בקטלוג FJMS: הם מוצגים אחרי כתבי היד המקוטלגים.",
+})
+
 # Catalogue criteria, PR 1a (2026-11-01): Catalog Browse lists the whole corpus,
 # and a failed browse query is an error, not "no manuscripts match".
 TRANSLATIONS.update({
     "No catalogue record": "אין רשומה בקטלוג",
     "The catalog could not be listed. Try again in a moment.":
         "לא ניתן היה להציג את רשימת כתבי היד. נסו שוב בעוד רגע.",
+})
+
+# Catalogue criteria, PR 1b (web, 2026-11-01): the "Manuscript features"
+# button, its chips and panel (web/components/criteria_panel.py), on Catalog
+# Browse, /search and /parallels.
+TRANSLATIONS.update({
+    "Manuscript features": "מאפייני כתב היד",
+    "Clear section": "ניקוי הסעיף",
+    "Catalogue or measured": "קטלוג או מדידה",
+    "Catalogue only": "קטלוג בלבד",
+    "Measured only": "מדידה בלבד",
+    "Only these": "רק אלה",
+    "All except these": "הכול חוץ מאלה",
+    "A manuscript matches when any of its catalogue records gives a ticked value.":
+        "כתב יד נכלל אם אחת מרשומות הקטלוג שלו נותנת ערך מסומן.",
+    "Measured values: every range set here holds on one measured page.":
+        "ערכים נמדדים: כל הטווחים שנבחרו כאן מתקיימים באותו עמוד נמדד.",
+    "Any of the ticked attributes.": "אחת לפחות מהתכונות המסומנות.",
+    "This catalogue data is not available on this site yet.":
+        "נתוני קטלוג אלה עדיין אינם זמינים באתר.",
+    "recorded for {n} of {total}": "רשום ל־{n} מתוך {total}",
+    "The list of all manuscripts is still loading. Try again in a moment.":
+        "רשימת כל כתבי היד עדיין נטענת. נסו שוב בעוד רגע.",
+    "These values could not be read.": "לא ניתן היה לקרוא את הערכים.",
+    "Filter values": "סינון ערכים",
+    "or: not recorded": "או: ללא רישום",
+    "per 10 cm": "ל־10 ס\"מ",
+    "dpi": "dpi",
+    "No features chosen.": "לא נבחרו מאפיינים.",
+    "The count could not be computed.": "לא ניתן היה לחשב את המספר.",
+    "{n} manuscripts have these features": "ל־{n} כתבי יד יש מאפיינים אלה",
+    ", of which {m} have no {label} recorded": ", מהם {m} ללא רישום של {label}",
+    "These criteria cover all {corpus} manuscripts. {uncatalogued} have no FJMS catalogue "
+    "record: they match 'Not recorded', 'all except' and measured data ({sized} also have a "
+    "catalogue size).":
+        "המאפיינים חלים על כל {corpus} כתבי היד. ל־{uncatalogued} אין רשומה בקטלוג FJMS: "
+        "הם נכללים ב'ללא רישום', ב'הכול חוץ מ' ובנתונים הנמדדים (ל־{sized} מהם יש גם מידה "
+        "בקטלוג).",
+    "Some criteria were removed: this catalogue data is not available on this site yet.":
+        "חלק מהמאפיינים הוסרו: נתוני קטלוג אלה עדיין אינם זמינים באתר.",
+    "Some parts of the address were not understood and were ignored: {names}":
+        "חלקים מהכתובת לא הובנו והושמטו: {names}",
+    "No catalogue record ({n})": "אין רשומה בקטלוג ({n})",
+    "The manuscript features could not be applied to these results.":
+        "לא ניתן היה להחיל את מאפייני כתב היד על התוצאות האלה.",
 })
 
 # Phone layout (2026-10-22): the search toolbar's phone menu, the browse image

@@ -15,9 +15,9 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QLabel, QLineEdit, QPushButton, QTabWidget, QTableWidget,
                              QTableWidgetItem, QListWidgetItem, QHeaderView, QComboBox, QCheckBox,
                              QTextEdit, QMessageBox, QProgressBar, QSplitter, QDialog,
-                             QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox, QDoubleSpinBox,
+                             QTextBrowser, QFileDialog, QMenu, QGroupBox, QSpinBox,
                              QTreeWidget, QTreeWidgetItem, QListWidget, QPlainTextEdit, QStyle, QFormLayout,
-                             QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
+                             QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QSizePolicy, QInputDialog,
                              QToolButton, QAbstractItemView,
                              QCompleter)
@@ -633,21 +633,18 @@ class _CatalogRefreshWorker(QThread):
     done = pyqtSignal(object)  # dict with keys: authors?, works?, data
 
     def __init__(self, parent, domain, author, work, offset, limit,
-                 date_from=None, date_to=None, include_undated=False,
                  text_all=None, text_any=None, text_not=None,
                  refresh_authors=True, refresh_works=True,
                  pgp_filter='all', editions_filter='all',
-                 library_filter=None, library_mode='hide', meta_mgr=None, traits=None):
+                 library_filter=None, library_mode='hide', meta_mgr=None, criteria=None):
         super().__init__(parent)
-        self._traits = dict(traits or {})  # script / measurement traits (BROWSE_TRAIT_KEYS)
+        # Manuscript features (shared/catalog_criteria.py), the period of copy among them.
+        self._criteria = dict(criteria or {})
         self._domain = domain
         self._author = author
         self._work = work
         self._offset = offset
         self._limit = limit
-        self._date_from = date_from
-        self._date_to = date_to
-        self._include_undated = include_undated
         self._text_all = text_all
         self._text_any = text_any
         self._text_not = text_not
@@ -692,8 +689,6 @@ class _CatalogRefreshWorker(QThread):
             result['data'] = fjms.get_browse_results(
                 domain=self._domain, author=self._author, work=self._work,
                 offset=self._offset, limit=self._limit,
-                date_from=self._date_from, date_to=self._date_to,
-                include_undated=self._include_undated,
                 text_all=self._text_all, text_any=self._text_any,
                 text_not=self._text_not,
                 pgp_filter=(self._pgp_filter if pgp_active else None),
@@ -703,7 +698,7 @@ class _CatalogRefreshWorker(QThread):
                 library_codes=(self._library_filter or None),
                 library_sys_ids=(library_sys_ids or None),
                 library_mode=self._library_mode,   # DMF-07: 'show_only' | 'hide'
-                traits=self._traits,
+                criteria=self._criteria,
                 # D16: the whole corpus, catalogued manuscripts first. Waits for
                 # libraries.csv; raises rather than list part of it (rule 9).
                 universe=_catalog_corpus_ids(self._meta_mgr),
@@ -729,18 +724,14 @@ class _CatalogFacetWorker(QThread):
     done = pyqtSignal(object)  # {library_code: count} dict
 
     def __init__(self, parent, domain, author, work,
-                 date_from=None, date_to=None, include_undated=False,
                  text_all=None, text_any=None, text_not=None,
                  pgp_filter='all', editions_filter='all',
-                 meta_mgr=None, traits=None):
+                 meta_mgr=None, criteria=None):
         super().__init__(parent)
-        self._traits = dict(traits or {})
+        self._criteria = dict(criteria or {})
         self._domain = domain
         self._author = author
         self._work = work
-        self._date_from = date_from
-        self._date_to = date_to
-        self._include_undated = include_undated
         self._text_all = text_all
         self._text_any = text_any
         self._text_not = text_not
@@ -761,9 +752,6 @@ class _CatalogFacetWorker(QThread):
                 domain=self._domain,
                 author=self._author,
                 work=self._work,
-                date_from=self._date_from,
-                date_to=self._date_to,
-                include_undated=self._include_undated,
                 text_all=self._text_all,
                 text_any=self._text_any,
                 text_not=self._text_not,
@@ -774,12 +762,98 @@ class _CatalogFacetWorker(QThread):
                 # Full-corpus callable resolver (WR-05 None-guard for startup race).
                 sys_id_to_library=(self._meta_mgr.get_library_for_id
                                    if self._meta_mgr else None),
-                traits=self._traits,
+                criteria=self._criteria,
                 universe=_catalog_corpus_ids(self._meta_mgr),
             )
             self.done.emit(result)
         except Exception:
             self.done.emit({})  # Facet query failed; emit empty dict so dialog opens name-only
+
+
+class _PostCriteriaWorker(QThread):
+    """Which of a search's results the post-search criteria keep (D20), off
+    the UI thread: FjmsService.match_result_criteria scans the sidecar's
+    criteria tables (about half a second on the real file). Emits
+    ``matched(generation, ids, '')``, or ``matched(generation, None,
+    reason)`` when it cannot be read; ``generation`` is the caller's, so an
+    answer for an older search or older criteria is recognised and dropped."""
+
+    matched = pyqtSignal(int, object, str)
+
+    def __init__(self, criteria, sys_ids, generation, parent=None):
+        super().__init__(parent)
+        self._criteria = dict(criteria)
+        self._sys_ids = frozenset(sys_ids)
+        self._generation = generation
+
+    def run(self):
+        from shared.fjms_service import FilterUnavailable, get_fjms_service
+        try:
+            ids = get_fjms_service(thread_safe=True).match_result_criteria(self._criteria, self._sys_ids)
+            self.matched.emit(self._generation, ids, '')
+        except FilterUnavailable as exc:
+            self.matched.emit(self._generation, None, exc.reason or 'error')
+        except Exception:
+            logger.exception("_PostCriteriaWorker: the post-search criteria could not be matched")
+            self.matched.emit(self._generation, None, 'error')
+
+
+class _CatalogHandoffWorker(QThread):
+    """The scope of a Catalog hand-off ("Search / Parallel search in these
+    results"), off the UI thread: the criteria scan the sidecar, the corpus
+    list may still be loading (D14 needs it for "not recorded" / "all
+    except"), and a Show-only library list is resolved over the whole
+    csv_bank. Emits ``done(generation, restrict, library_ids, reason)``:
+    ``reason`` '' on success, else a FilterUnavailable reason or 'error'."""
+
+    done = pyqtSignal(int, object, object, str)
+
+    def __init__(self, filters, meta_mgr, library_mode, generation, parent=None):
+        super().__init__(parent)
+        self._filters = dict(filters)
+        self._meta_mgr = meta_mgr
+        self._library_mode = library_mode
+        self._generation = generation
+
+    def run(self):
+        from shared.fjms_service import FilterUnavailable, get_fjms_service, resolve_library_sys_ids
+        try:
+            restrict = get_fjms_service(thread_safe=True).get_filter_sys_ids(
+                domain=self._filters.get('domain'),
+                author=self._filters.get('author'),
+                work=self._filters.get('work'),
+                criteria=self._filters.get('criteria'),
+                universe=_catalog_corpus_ids(self._meta_mgr),
+            )
+            library_ids = None
+            if self._filters.get('library') and self._library_mode == 'show_only':
+                library_ids = resolve_library_sys_ids(self._filters['library'], self._meta_mgr)
+            self.done.emit(self._generation, restrict, library_ids, '')
+        except FilterUnavailable as exc:
+            self.done.emit(self._generation, None, None, exc.reason or 'error')
+        except Exception:
+            logger.exception("_CatalogHandoffWorker: the hand-off scope could not be computed")
+            self.done.emit(self._generation, None, None, 'error')
+
+
+class _CatalogUncataloguedWorker(QThread):
+    """How many corpus manuscripts have no catalogue record (D16), for the
+    domain tree's "No catalogue record" entry: waits for libraries.csv off the
+    UI thread. Emits the number; nothing when it cannot be read (no entry)."""
+
+    counted = pyqtSignal(int)
+
+    def __init__(self, meta_mgr, parent=None):
+        super().__init__(parent)
+        self._meta_mgr = meta_mgr
+
+    def run(self):
+        try:
+            from shared.fjms_service import get_fjms_service
+            corpus = self._meta_mgr.corpus_sys_ids()
+            self.counted.emit(len(corpus - get_fjms_service(thread_safe=True).catalogued_ids()))
+        except Exception as exc:
+            logger.info("Catalog tab: no 'No catalogue record' count (%s)", exc)
 
 
 def _catalog_corpus_ids(meta_mgr):
@@ -788,6 +862,37 @@ def _catalog_corpus_ids(meta_mgr):
     FilterUnavailable rather than return part of it. None (no metadata
     manager: tests) lists the catalogued manuscripts only, as before."""
     return getattr(meta_mgr, 'corpus_sys_ids', None)
+
+
+def _warm_criteria_labels(fjms):
+    """Read every list criterion's value labels into the service's cache (on
+    a worker thread): FjmsService.criteria_chips reads them from there, and
+    the chips are drawn on the UI thread (GitHub Codex on #458)."""
+    from shared.catalog_criteria import CRITERIA
+    for criterion in CRITERIA:
+        if criterion.kind == 'list':
+            try:
+                fjms.criterion_value_labels(criterion.key)
+            except Exception as e:  # a chip then shows the English value
+                logger.debug("criteria labels for %s not read: %s", criterion.key, e)
+
+
+class _FjmsWarmupThread(QThread):
+    """Start-up: the FJMS caches the Catalog tab opens with, then (in Hebrew)
+    the catalogue's value labels the criteria chips show, so a chip never
+    reads them on the UI thread (desktop/dialogs_filter.py::criteria_chip_texts)."""
+
+    def __init__(self, fjms, parent=None):
+        super().__init__(parent)
+        self._fjms = fjms
+
+    def run(self):
+        try:
+            self._fjms.pre_warm_caches()
+        except Exception as e:
+            logger.debug(f"FJMS warmup failed: {e}")
+        if CURRENT_LANG == 'he':
+            _warm_criteria_labels(self._fjms)
 
 
 def _format_list_star(in_list=False):
@@ -2701,23 +2806,33 @@ class GenizahGUI(QMainWindow):
         self._apply_nav_layout(load_app_config().get('nav_layout', 'tabs'))
         self._apply_results_text_level(load_app_config().get(self.RESULTS_TEXT_KEY, 0))
 
-        # Pre-warm FJMS caches in background so catalog browse tab opens instantly.
-        # thread_safe=True is required because the QThread will use the same connection.
+        self._start_fjms_warmup()
+
+    def _start_fjms_warmup(self):
+        """Pre-warm FJMS caches in background so catalog browse tab opens instantly.
+        thread_safe=True is required because the QThread will use the same connection."""
         self._fjms_warmup_thread = None
         try:
             from shared.fjms_service import get_fjms_service
             fjms = get_fjms_service(thread_safe=True)
             if fjms.is_available():
-                class _FjmsWarmupThread(QThread):
-                    def run(self_t):
-                        try:
-                            fjms.pre_warm_caches()
-                        except Exception as e:
-                            logger.debug(f"FJMS warmup failed: {e}")
-                self._fjms_warmup_thread = _FjmsWarmupThread(self)
+                self._fjms_warmup_thread = _FjmsWarmupThread(fjms, self)
+                # Chips drawn meanwhile (a restored session's) read the labels
+                # from the cache only and showed English values: draw them again.
+                self._fjms_warmup_thread.finished.connect(self._redraw_criteria_chips)
                 self._fjms_warmup_thread.start()
         except Exception:
             pass  # Cache operation failed; continue without cached data
+
+    def _redraw_criteria_chips(self):
+        """The catalogue's Hebrew value labels are loaded: the chips that show
+        criteria, drawn with English values before, get them."""
+        if CURRENT_LANG != 'he':
+            return
+        if (getattr(self, 'pre_search_filters', None) or {}).get('criteria'):
+            self._update_filter_chip_bar()
+        if getattr(self, '_catalog_criteria', None) and hasattr(self, '_catalog_chips_layout'):
+            self._catalog_update_chips()
 
     def _update_corner_login_state(self):
         """Update the login button (and its side-menu twin) based on login state (and Sync lists now,
@@ -6326,9 +6441,12 @@ class GenizahGUI(QMainWindow):
         self._domain_exclusions = set()
         self._result_domain_counts = {}  # domain_name -> count in current results
         self._result_domain_map = {}  # sys_id -> list of domain names
-        self._result_measurement_map = {}  # Phase 54: sys_id -> measurement summary dict
+        # Post-search criteria (Phase 54, D20): separate from pre_search_filters.
+        # _post_criteria_ids: the result sys_ids they keep (None = not computed).
         self._measurement_fetch_complete = False  # Phase 54: race guard
-        self._post_measurement_filters = {}  # Phase 54: separate from pre_search_filters
+        self._post_criteria = {}
+        self._post_criteria_ids = None
+        self._post_criteria_error = None
         self._has_result_domains = False
 
         # Pre-search Filters button (Phase 45-03)
@@ -11643,9 +11761,6 @@ class GenizahGUI(QMainWindow):
         self._catalog_current_domain = None
         self._catalog_current_author = None
         self._catalog_current_work = None
-        self._catalog_date_from = None
-        self._catalog_date_to = None
-        self._catalog_include_undated = False
         self._catalog_text_all = []   # AND terms
         self._catalog_text_any = []   # OR terms
         self._catalog_text_not = []   # NOT terms
@@ -11656,7 +11771,9 @@ class GenizahGUI(QMainWindow):
         # SEED-026 desktop parity — library filter (LIBFILTER-03).
         self._catalog_library_filter = []       # [] = all; list of library codes when active
         self._catalog_library_mode = 'hide'     # 'show_only' | 'hide' (DMF D-05 default; in-memory only)
-        self._catalog_traits = {}               # script / measurement traits (fjms_service.BROWSE_TRAIT_KEYS)
+        # Manuscript features (shared/catalog_criteria.py): period of copy, script,
+        # measurements ... chosen in CriteriaDialog.
+        self._catalog_criteria = {}
         self._catalog_authors_cache = []
         self._catalog_works_cache = []
         self._catalog_tree_loaded = False
@@ -11740,6 +11857,9 @@ class GenizahGUI(QMainWindow):
             "QTreeWidget::item { padding: 2px 0; }"
             "QTreeWidget::item:selected { background-color: #3498db; color: white; }"
         )
+        # A floor, so the tree keeps its rows when the column overflows: the
+        # column scrolls instead (plan §6.3; it used to collapse to two rows).
+        self.catalog_domain_tree.setMinimumHeight(240)
         left_layout.addWidget(self.catalog_domain_tree, 3)
 
         # b) Author Search
@@ -11786,61 +11906,13 @@ class GenizahGUI(QMainWindow):
         self._catalog_work_timer.timeout.connect(self._catalog_filter_works)
         self.catalog_work_input.textChanged.connect(lambda _: self._catalog_work_timer.start())
 
-        # d) Date Filter
-        date_label = QLabel(tr("Date"))
-        date_label.setStyleSheet("font-weight: bold; font-size: 13px; margin-top: 6px; margin-bottom: 2px;")
-        left_layout.addWidget(date_label)
-
-        date_row = QHBoxLayout()
-        self._catalog_date_from_input = QLineEdit()
-        self._catalog_date_from_input.setPlaceholderText(tr("From year"))
-        self._catalog_date_from_input.setMaximumWidth(80)
-        date_row.addWidget(self._catalog_date_from_input)
-        date_row.addWidget(QLabel("–"))
-        self._catalog_date_to_input = QLineEdit()
-        self._catalog_date_to_input.setPlaceholderText(tr("To year"))
-        self._catalog_date_to_input.setMaximumWidth(80)
-        date_row.addWidget(self._catalog_date_to_input)
-        date_row.addStretch()
-        left_layout.addLayout(date_row)
-
-        # Debounce timer for date input
-        self._catalog_date_timer = QTimer()
-        self._catalog_date_timer.setSingleShot(True)
-        self._catalog_date_timer.setInterval(500)
-        self._catalog_date_timer.timeout.connect(self._catalog_on_date_changed)
-        self._catalog_date_from_input.textChanged.connect(lambda _: self._catalog_date_timer.start())
-        self._catalog_date_to_input.textChanged.connect(lambda _: self._catalog_date_timer.start())
-
-        # Century presets
-        century_row = QHBoxLayout()
-        century_row.setSpacing(2)
-        for c in range(9, 15):
-            btn = QPushButton(tr(f"{c+1}th"))
-            btn.setFixedHeight(22)
-            btn.setStyleSheet("QPushButton { font-size: 10px; padding: 1px 4px; }")
-            btn.clicked.connect(lambda _, cent=c: self._catalog_set_century(cent))
-            century_row.addWidget(btn)
-        btn_late = QPushButton(tr("16-19"))
-        btn_late.setFixedHeight(22)
-        btn_late.setStyleSheet("QPushButton { font-size: 10px; padding: 1px 4px; }")
-        btn_late.clicked.connect(lambda _: self._catalog_set_century_range(16, 19))
-        century_row.addWidget(btn_late)
-        century_row.addStretch()
-        left_layout.addLayout(century_row)
-
-        # Include undated checkbox
-        self._catalog_undated_cb = QCheckBox(tr("Include undated"))
-        self._catalog_undated_cb.setStyleSheet("font-size: 11px; margin-top: 2px;")
-        self._catalog_undated_cb.toggled.connect(self._catalog_on_undated_changed)
-        left_layout.addWidget(self._catalog_undated_cb)
-
-        # Script and size: list manuscripts by a trait, no text needed (CatalogTraitsDialog)
-        self._catalog_traits_btn = QPushButton(tr("Script and size") + "…")
-        self._catalog_traits_btn.setStyleSheet(
+        # d) Manuscript features: period of copy, script, measurements ... (CriteriaDialog)
+        self._catalog_criteria_btn = QPushButton()
+        self._catalog_criteria_btn.setStyleSheet(
             "QPushButton { text-align: left; padding: 2px 8px; font-size: 11px; margin-top: 6px; }")
-        self._catalog_traits_btn.clicked.connect(self._catalog_open_traits_dialog)
-        left_layout.addWidget(self._catalog_traits_btn)
+        self._catalog_criteria_btn.clicked.connect(self._catalog_open_criteria_dialog)
+        left_layout.addWidget(self._catalog_criteria_btn)
+        self._catalog_update_criteria_btn()
 
         # --- Text Filter ---
         text_filter_label = QLabel(tr("Text Filter"))
@@ -11998,119 +12070,6 @@ class GenizahGUI(QMainWindow):
 
     # --- Catalog Browse: Refresh & Data Methods ---
 
-    def _catalog_refresh(self):
-        """Main refresh: re-fetch results with current filters + pagination, update UI."""
-        from shared.fjms_service import get_fjms_service
-        fjms = get_fjms_service()
-        if not fjms.is_available():
-            return
-
-        offset = self._catalog_current_page * self._CATALOG_PAGE_SIZE
-        data = fjms.get_browse_results(
-            domain=self._catalog_current_domain,
-            author=self._catalog_current_author,
-            work=self._catalog_current_work,
-            offset=offset,
-            limit=self._CATALOG_PAGE_SIZE,
-            date_from=self._catalog_date_from,
-            date_to=self._catalog_date_to,
-            include_undated=self._catalog_include_undated,
-            text_all=self._catalog_text_all or None,
-            text_any=self._catalog_text_any or None,
-            text_not=self._catalog_text_not or None,
-        )
-
-        results = data.get("results", [])
-        total = data.get("total", 0)
-
-        # Store result dicts for ResultDialog access
-        self._catalog_results_data = results
-
-        # Disable sorting during population (performance)
-        self.catalog_results_table.setSortingEnabled(False)
-        self._catalog_hovered_row = -1
-
-        # Update results table
-        self.catalog_results_table.setRowCount(len(results))
-        is_hebrew = (CURRENT_LANG == 'he')
-        for row_idx, r in enumerate(results):
-            sys_id = r.get("sys_id", "")
-            # Resolve shelfmark/library from metadata manager
-            shelfmark = "Unknown"
-            library = ""
-            if self.meta_mgr:
-                shelfmark, _ = self.meta_mgr.get_meta_for_id(sys_id)
-                library = self.meta_mgr.get_library_for_id(sys_id)
-
-            # Domain: pick Hebrew/English based on current language
-            domains = r.get("domains_heb", []) if is_hebrew else r.get("domains", [])
-            domain_str = ", ".join(domains) if domains else ""
-
-            # Identification: Author - Title
-            author = r.get("author", "")
-            title = r.get("title_heb", "") if is_hebrew else r.get("title", "")
-            if not title:
-                title = r.get("title", "") or r.get("title_heb", "")
-            ident = f"{author} - {title}" if author and title else (author or title or "")
-
-            date_str = r.get("copy_date", "")
-
-            # Action buttons (column 0)
-            align = Qt.AlignmentFlag.AlignLeft if is_hebrew else Qt.AlignmentFlag.AlignRight
-            actions_widget = ActionsHoverWidget(alignment=align)
-            actions_widget.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-
-            view_btn = self._create_action_button(
-                "👁", tr("View result"),
-                lambda _, ri=row_idx: self._catalog_view_result_by_row(ri),
-                parent=self.catalog_results_table,
-            )
-            browse_btn = self._create_action_button(
-                "📖", tr("Browse manuscript"),
-                lambda _, ri=row_idx: self._catalog_browse_manuscript_by_row(ri),
-                parent=self.catalog_results_table,
-            )
-            actions_widget.add_btn(view_btn)
-            actions_widget.add_btn(browse_btn)
-            self.catalog_results_table.setCellWidget(row_idx, self._CAT_COL_ACTIONS, actions_widget)
-
-            # Data columns
-            item_shelf = QTableWidgetItem(shelfmark)
-            item_shelf.setData(Qt.ItemDataRole.UserRole, sys_id)  # Store sys_id for navigation
-            self.catalog_results_table.setItem(row_idx, self._CAT_COL_SHELF, item_shelf)
-            self.catalog_results_table.setItem(row_idx, self._CAT_COL_LIBRARY, QTableWidgetItem(library))
-            self.catalog_results_table.setItem(row_idx, self._CAT_COL_DOMAIN, QTableWidgetItem(domain_str))
-            self.catalog_results_table.setItem(row_idx, self._CAT_COL_IDENT, QTableWidgetItem(ident))
-            self.catalog_results_table.setItem(row_idx, self._CAT_COL_DATE, QTableWidgetItem(date_str))
-
-        # Re-enable sorting after population
-        self.catalog_results_table.setSortingEnabled(True)
-
-        # Update count label
-        if total > 0:
-            start = offset + 1
-            end = min(offset + self._CATALOG_PAGE_SIZE, total)
-            self._catalog_count_label.setText(
-                tr("Showing {start}-{end} of {total} manuscripts").format(start=start, end=end, total=f"{total:,}")
-            )
-        else:
-            self._catalog_count_label.setText(tr("No results"))
-
-        # Update pagination
-        total_pages = max(1, (total + self._CATALOG_PAGE_SIZE - 1) // self._CATALOG_PAGE_SIZE)
-        current_page_display = self._catalog_current_page + 1
-        self._catalog_page_label.setText(
-            tr("Page {current} of {total}").format(current=current_page_display, total=total_pages)
-        )
-        self._catalog_prev_btn.setEnabled(self._catalog_current_page > 0)
-        self._catalog_next_btn.setEnabled(current_page_display < total_pages)
-
-        # Update chips bar
-        self._catalog_update_chips()
-
-        # Update text filter summary
-        self._catalog_update_text_summary()
-
     def _catalog_update_text_summary(self):
         """Update the human-readable text filter summary label."""
         parts = []
@@ -12203,7 +12162,7 @@ class GenizahGUI(QMainWindow):
     def _catalog_on_domain_select(self, item):
         """Handle domain tree item click."""
         domain_key = item.data(0, Qt.ItemDataRole.UserRole)
-        if domain_key == "__unclassified__":
+        if domain_key in ("__unclassified__", "__uncatalogued__"):
             return
         self._catalog_current_domain = domain_key
         self._catalog_current_author = None
@@ -12221,6 +12180,13 @@ class GenizahGUI(QMainWindow):
             refresh_works: Re-fetch the works sidebar list.
         Results are always re-fetched.
         """
+        # A refresh not yet answered may have been asked for the author and
+        # work lists; this one supersedes it, so it asks for them too.
+        pending_authors, pending_works = getattr(self, '_catalog_sidebar_pending', (False, False))
+        refresh_authors = refresh_authors or pending_authors
+        refresh_works = refresh_works or pending_works
+        self._catalog_sidebar_pending = (refresh_authors, refresh_works)
+
         # Show loading state immediately
         self.catalog_results_table.setRowCount(0)
         self._catalog_count_label.setText(tr("Loading..."))
@@ -12232,9 +12198,6 @@ class GenizahGUI(QMainWindow):
             work=self._catalog_current_work,
             offset=self._catalog_current_page * self._CATALOG_PAGE_SIZE,
             limit=self._CATALOG_PAGE_SIZE,
-            date_from=self._catalog_date_from,
-            date_to=self._catalog_date_to,
-            include_undated=self._catalog_include_undated,
             text_all=self._catalog_text_all or None,
             text_any=self._catalog_text_any or None,
             text_not=self._catalog_text_not or None,
@@ -12245,14 +12208,22 @@ class GenizahGUI(QMainWindow):
             library_filter=list(self._catalog_library_filter),
             library_mode=self._catalog_library_mode,    # DMF-07
             meta_mgr=self.meta_mgr,
-            traits=dict(self._catalog_traits),
+            criteria=dict(self._catalog_criteria),
         )
-        self._catalog_refresh_worker.done.connect(self._catalog_on_async_refresh_done)
+        # Only the latest refresh paints: an earlier one that answers later
+        # would show its rows under the newer chips.
+        self._catalog_refresh_gen = getattr(self, '_catalog_refresh_gen', 0) + 1
+        self._catalog_refresh_worker.done.connect(
+            lambda result, gen=self._catalog_refresh_gen: self._catalog_on_async_refresh_done(result, gen))
         self._catalog_refresh_worker.start()
 
-    def _catalog_on_async_refresh_done(self, result):
-        """Handle results from background refresh thread."""
+    def _catalog_on_async_refresh_done(self, result, generation=None):
+        """Handle results from background refresh thread (``generation``: of the
+        refresh that produced them; a superseded one is ignored)."""
         from PyQt6 import sip
+        if generation is not None and generation != getattr(self, '_catalog_refresh_gen', generation):
+            return
+        self._catalog_sidebar_pending = (False, False)
         if sip.isdeleted(self.catalog_results_table):
             return
 
@@ -12366,51 +12337,6 @@ class GenizahGUI(QMainWindow):
         self._catalog_current_work = work_title
         self._catalog_current_page = 0
         self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
-
-    def _catalog_on_date_changed(self):
-        """Handle date From/To input change."""
-        df_text = self._catalog_date_from_input.text().strip()
-        dt_text = self._catalog_date_to_input.text().strip()
-        try:
-            self._catalog_date_from = int(df_text) if df_text else None
-        except ValueError:
-            self._catalog_date_from = None
-        try:
-            self._catalog_date_to = int(dt_text) if dt_text else None
-        except ValueError:
-            self._catalog_date_to = None
-        self._catalog_current_page = 0
-        self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
-
-    def _catalog_on_undated_changed(self, checked):
-        """Handle include-undated checkbox toggle."""
-        self._catalog_include_undated = checked
-        if self._catalog_date_from is not None or self._catalog_date_to is not None:
-            self._catalog_current_page = 0
-            self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
-
-    def _catalog_set_century(self, century):
-        """Set date range to a single century and refresh."""
-        self._catalog_date_from = century * 100
-        self._catalog_date_to = century * 100 + 99
-        self._catalog_date_from_input.setText(str(self._catalog_date_from))
-        self._catalog_date_to_input.setText(str(self._catalog_date_to))
-
-    def _catalog_set_century_range(self, lo, hi):
-        """Set date range spanning multiple centuries and refresh."""
-        self._catalog_date_from = lo * 100
-        self._catalog_date_to = hi * 100 + 99
-        self._catalog_date_from_input.setText(str(self._catalog_date_from))
-        self._catalog_date_to_input.setText(str(self._catalog_date_to))
-
-    def _catalog_clear_date(self):
-        """Clear date filter state and UI."""
-        self._catalog_date_from = None
-        self._catalog_date_to = None
-        self._catalog_include_undated = False
-        self._catalog_date_from_input.clear()
-        self._catalog_date_to_input.clear()
-        self._catalog_undated_cb.setChecked(False)
 
     def _catalog_add_text_term(self):
         """Add the current text input as a filter term with the selected mode."""
@@ -12529,16 +12455,13 @@ class GenizahGUI(QMainWindow):
             domain=self._catalog_current_domain,
             author=self._catalog_current_author,
             work=self._catalog_current_work,
-            date_from=self._catalog_date_from,
-            date_to=self._catalog_date_to,
-            include_undated=self._catalog_include_undated,
             text_all=self._catalog_text_all or None,
             text_any=self._catalog_text_any or None,
             text_not=self._catalog_text_not or None,
             pgp_filter=self._catalog_pgp_filter,
             editions_filter=self._catalog_editions_filter,
             meta_mgr=self.meta_mgr,
-            traits=dict(self._catalog_traits),
+            criteria=dict(self._catalog_criteria),
         )
         self._catalog_facet_worker.done.connect(_on_facets_done)
         try:
@@ -12628,7 +12551,8 @@ class GenizahGUI(QMainWindow):
             self.catalog_domain_tree.clearSelection()
             self.catalog_author_input.clear()
             self.catalog_work_input.clear()
-            self._catalog_clear_date()
+            self._catalog_criteria = {}
+            self._catalog_update_criteria_btn()
             self._catalog_text_all.clear()
             self._catalog_text_any.clear()
             self._catalog_text_not.clear()
@@ -12641,7 +12565,6 @@ class GenizahGUI(QMainWindow):
             self._catalog_library_filter = []
             self._catalog_library_mode = 'hide'
             self._catalog_update_library_filter_btn()
-            self._catalog_traits = {}
             refresh_authors = True
             refresh_works = True
         elif filter_type == "pgp":
@@ -12675,8 +12598,6 @@ class GenizahGUI(QMainWindow):
             refresh_works = True
         elif filter_type == "work":
             self._catalog_current_work = None
-        elif filter_type == "date":
-            self._catalog_clear_date()
         elif filter_type == "text":
             self._catalog_text_all.clear()
             self._catalog_text_any.clear()
@@ -12686,56 +12607,40 @@ class GenizahGUI(QMainWindow):
         self._catalog_current_page = 0
         self._catalog_start_async_refresh(refresh_authors=refresh_authors, refresh_works=refresh_works)
 
-    def _catalog_open_traits_dialog(self):
-        """Script and size: choose traits, then list the manuscripts that have them."""
-        from desktop.dialogs_filter import CatalogTraitsDialog
-        dlg = CatalogTraitsDialog(self, self._catalog_traits)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
+    def _catalog_open_criteria_dialog(self):
+        """Manuscript features: choose criteria, then list the manuscripts that have them."""
+        from desktop.dialogs_filter import CriteriaDialog
+        dlg = CriteriaDialog(self, self._catalog_criteria)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._catalog_set_criteria(dlg.get_criteria())
+        elif dlg.dropped_saved_criteria:
+            # Dropped with a notice (this file cannot answer them): gone on Cancel too.
+            self._catalog_set_criteria({k: v for k, v in self._catalog_criteria.items()
+                                        if k not in dlg.dropped_saved_criteria})
+
+    def _catalog_set_criteria(self, criteria):
+        """Make ``criteria`` the tab's manuscript features and list again."""
+        if criteria == self._catalog_criteria:
             return
-        traits = dlg.get_traits()
-        if traits == self._catalog_traits:
-            return
-        self._catalog_traits = traits
+        self._catalog_criteria = dict(criteria)
+        self._catalog_update_criteria_btn()
         self._catalog_current_page = 0
         self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
         self._catalog_update_chips()
 
-    def _catalog_remove_trait(self, key, value=None):
-        """Remove one trait value (a list item), or a whole range (key = its prefix)."""
-        from shared.fjms_service import clean_traits
-        traits = dict(self._catalog_traits)
-        if value is None:
-            for k in (key, f'{key}_min', f'{key}_max'):
-                traits.pop(k, None)
-        else:
-            traits[key] = [v for v in traits.get(key, []) if v != value]
-        self._catalog_traits = clean_traits(traits)
-        self._catalog_current_page = 0
-        self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
-        self._catalog_update_chips()
+    def _catalog_remove_criterion(self, key):
+        """Remove one manuscript feature (its chip)."""
+        self._catalog_set_criteria({k: v for k, v in self._catalog_criteria.items() if k != key})
 
-    def _catalog_trait_chips(self):
-        """(chip text, trait key, value) for every active trait; a range is one
-        chip keyed by its prefix ('width', 'height', 'line_count')."""
-        from shared.fjms_service import script_value_label
-        traits = self._catalog_traits
-        chips = []
-        for key, label in (('script_styles', 'Script Style'), ('script_places', 'Script Place')):
-            for v in traits.get(key, []):
-                chips.append((f"{tr(label)}: {script_value_label(key, v, CURRENT_LANG == 'he')}", key, v))
-        for prefix, label, unit in (('width', 'Width', 'cm'), ('height', 'Height', 'cm'),
-                                    ('line_count', 'Lines', '')):
-            lo, hi = traits.get(f'{prefix}_min'), traits.get(f'{prefix}_max')
-            if lo is None and hi is None:
-                continue
-            if lo is not None and hi is not None:
-                span = f"{lo:g}\u2013{hi:g}"
-            else:
-                span = f"\u2265{lo:g}" if lo is not None else f"\u2264{hi:g}"
-            chips.append((f"{tr(label)}: {span}{' ' + tr(unit) if unit else ''}", prefix, None))
-        for v in traits.get('measurement_material', []):
-            chips.append((f"{tr('Material (measured)')}: {tr(v)}", 'measurement_material', v))
-        return chips
+    def _catalog_update_criteria_btn(self):
+        """The button names how many features are chosen ("Manuscript features (2)…")."""
+        if not hasattr(self, '_catalog_criteria_btn'):
+            return
+        n = len(self._catalog_criteria)
+        self._catalog_criteria_btn.setText(tr("Manuscript features") + (f" ({n})" if n else "") + "…")
+        font = self._catalog_criteria_btn.font()
+        font.setBold(bool(n))
+        self._catalog_criteria_btn.setFont(font)
 
     def _resolve_catalog_author_display(self, author_val):
         """Resolve author value to display name from cached authors list."""
@@ -12805,25 +12710,6 @@ class GenizahGUI(QMainWindow):
             btn.clicked.connect(lambda: self._catalog_remove_filter("work"))
             self._catalog_chips_layout.addWidget(btn)
 
-        if self._catalog_date_from is not None or self._catalog_date_to is not None:
-            has_any = True
-            df = self._catalog_date_from
-            dt = self._catalog_date_to
-            if df is not None and dt is not None:
-                date_display = f"{tr('Date')}: {df}-{dt}"
-            elif df is not None:
-                date_display = f"{tr('Date')}: {df}+"
-            else:
-                date_display = f"{tr('Date')}: -{dt}"
-            if self._catalog_include_undated:
-                date_display += f" (+{tr('Include undated')})"
-            btn = QPushButton(f"{date_display}  \u00d7")
-            btn.setStyleSheet(chip_style)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setFixedHeight(24)
-            btn.clicked.connect(lambda: self._catalog_remove_filter("date"))
-            self._catalog_chips_layout.addWidget(btn)
-
         # Text filter chips in top bar
         _text_colors = {'all': '#2196F3', 'any': '#4CAF50', 'not': '#F44336'}
         for mode, terms in [('all', self._catalog_text_all), ('any', self._catalog_text_any), ('not', self._catalog_text_not)]:
@@ -12862,13 +12748,15 @@ class GenizahGUI(QMainWindow):
             btn.clicked.connect(lambda: self._catalog_remove_filter("editions"))
             self._catalog_chips_layout.addWidget(btn)
 
-        for text, key, value in self._catalog_trait_chips():
+        # Manuscript features: one chip per criterion
+        from desktop.dialogs_filter import criteria_chip_texts
+        for key, text in criteria_chip_texts(self._catalog_criteria):
             has_any = True
             btn = QPushButton(f"{text}  \u00d7")
             btn.setStyleSheet(chip_style)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setFixedHeight(24)
-            btn.clicked.connect(lambda _, k=key, v=value: self._catalog_remove_trait(k, v))
+            btn.clicked.connect(lambda _, k=key: self._catalog_remove_criterion(k))
             self._catalog_chips_layout.addWidget(btn)
 
         # SEED-026 (smoke 2026-06-29): NO per-library chips — the library filter
@@ -12895,120 +12783,89 @@ class GenizahGUI(QMainWindow):
             filters['author'] = self._catalog_current_author
         if self._catalog_current_work:
             filters['work'] = self._catalog_current_work
-        if self._catalog_date_from is not None:
-            filters['date_from'] = self._catalog_date_from
-        if self._catalog_date_to is not None:
-            filters['date_to'] = self._catalog_date_to
         # GAP-H / DMF-07: thread library filter into search-within / parallels-within scope.
         # ONLY in Show-only mode: carry the allowlist. In Hide mode do NOT add filters['library']
         # (Hide = complement; silently inverting to an include-list would give wrong results —
         # Codex HIGH #4: suppress the restriction in Hide mode with a user notice instead).
         if self._catalog_library_filter and self._catalog_library_mode == 'show_only':
             filters['library'] = list(self._catalog_library_filter)
-        # Script / measurement traits under the names "Search only in..." uses
-        # (absent on a window whose Catalog tab was never built).
-        for key, value in (getattr(self, '_catalog_traits', None) or {}).items():
-            filters[key] = list(value) if isinstance(value, list) else value
+        # Manuscript features, handed on unchanged (plan §6.3); absent on a
+        # window whose Catalog tab was never built.
+        criteria = getattr(self, '_catalog_criteria', None)
+        if criteria:
+            filters['criteria'] = {k: dict(v) for k, v in criteria.items()}
         return filters
 
-    def _apply_catalog_handoff_filters(self, filters) -> bool:
+    def _catalog_search_in_results(self):
+        """Search tab, scoped to the browse list (the hand-off)."""
+        self._catalog_hand_off(0)
+
+    def _catalog_parallels_in_results(self):
+        """Composition tab, scoped to the browse list (the hand-off)."""
+        self._catalog_hand_off(1)
+
+    def _catalog_hand_off(self, tab):
         """Make the catalog browse filters the pre-search filters (#17).
 
-        The scope is computed FIRST. If the lookup cannot run (no catalog,
-        or the query failed), the user is told and neither the filters nor
-        the scope change -- the old code kept the previous scope under the
-        new filters, or set an empty one ("no manuscripts match").
-        Returns True when the filters were applied.
-        """
-        from shared.fjms_service import BROWSE_TRAIT_KEYS, get_fjms_service, FilterUnavailable
-        try:
-            restrict = get_fjms_service().get_filter_sys_ids(
-                domain=filters.get('domain'),
-                author=filters.get('author'),
-                work=filters.get('work'),
-                date_from=filters.get('date_from'),
-                date_to=filters.get('date_to'),
-                **{k: v for k, v in filters.items() if k in BROWSE_TRAIT_KEYS},
-            )
-        except FilterUnavailable as exc:
-            QMessageBox.warning(self, tr("Filters"), self._filter_unavailable_text(exc.reason))
-            return False
+        The scope -- the criteria scan the sidecar, the corpus list may still
+        be loading, the library list is read over the whole csv_bank -- is
+        computed in a worker (_CatalogHandoffWorker, GitHub Codex on #458) and
+        installed only if this is still the latest hand-off. If it cannot be
+        computed, the user is told and neither the filters nor the scope
+        change."""
+        filters = self._catalog_build_browse_filters()
+        if not filters:
+            return
+        # The library selection and mode as they are at this click: the answer
+        # is installed with them, as its filters are, whatever the tab shows by
+        # then (GitHub Codex on #458).
+        library = (list(self._catalog_library_filter or []), self._catalog_library_mode)
+        self._catalog_handoff_gen = getattr(self, '_catalog_handoff_gen', 0) + 1
+        worker = _CatalogHandoffWorker(
+            filters, getattr(self, 'meta_mgr', None), library[1],
+            self._catalog_handoff_gen, self)
+        worker.done.connect(
+            lambda generation, restrict, library_ids, reason, f=filters, t=tab, lib=library:
+            self._catalog_on_handoff_scope(generation, f, restrict, library_ids, reason, t, lib))
+        self._catalog_handoff_worker = worker
+        self.statusBar().showMessage(tr("Loading..."), 5000)
+        worker.start()
+
+    def _catalog_on_handoff_scope(self, generation, filters, restrict, library_ids, reason, tab, library):
+        """Install a hand-off's scope (the worker's answer) and open ``tab``.
+        ``library``: the (selection, mode) of the Catalog tab's library filter
+        at the click, never the tab's state now."""
+        if generation != getattr(self, '_catalog_handoff_gen', None):
+            return  # a later hand-off replaced this one
+        if reason:
+            QMessageBox.warning(self, tr("Filters"), self._filter_unavailable_text(reason))
+            return
         self._supersede_filter_lookup()
         self.pre_search_filters = filters
         self.pre_search_restrict_sys_ids = restrict
-        return True
-
-    def _catalog_search_in_results(self):
-        """Navigate to search tab with browse filters as pre-search filters."""
-        filters = self._catalog_build_browse_filters()
-        if not filters:
-            return
-        # #17: the browse filters replace the search filters only if they
-        # could be applied; otherwise nothing changes and the user is told.
-        if not self._apply_catalog_handoff_filters(filters):
-            return
-        from shared.fjms_service import resolve_library_sys_ids
-        # GAP-H / DMF-07: library filter handoff — Show-only carries the allowlist;
+        # GAP-H / DMF-07: library filter handoff -- Show-only carries the allowlist;
         # Hide mode SUPPRESSES the restriction (Codex HIGH #4: do NOT invert a Hide-set
         # into an include-list; the full-corpus complement is out of scope for restrict_sys_ids).
-        if self._catalog_library_filter:
-            if self._catalog_library_mode == 'show_only':
-                # Show-only: intersect the selected-library sys_ids into the restrict scope.
+        selection, mode = library
+        if selection:
+            if mode == 'show_only':
                 # WR-02: fail-open if resolution is empty.
-                lib_ids = resolve_library_sys_ids(self._catalog_library_filter, self.meta_mgr)
-                if not lib_ids:
+                if not library_ids:
                     import logging as _log
                     _log.getLogger(__name__).warning(
-                        "library filter %s resolved to empty on search-in-results — skipping (fail-open)",
-                        self._catalog_library_filter,
+                        "library filter %s resolved to empty on the hand-off -- skipping (fail-open)",
+                        selection,
                     )
                 elif self.pre_search_restrict_sys_ids is None:
-                    self.pre_search_restrict_sys_ids = lib_ids
+                    self.pre_search_restrict_sys_ids = set(library_ids)
                 else:
-                    self.pre_search_restrict_sys_ids &= lib_ids
+                    self.pre_search_restrict_sys_ids &= library_ids
             else:
-                # Hide mode: suppress the library restriction with a brief notice.
-                # (Do NOT invert — the complement is not a valid restrict_sys_ids set.)
                 self.statusBar().showMessage(
                     tr("Library Hide filter not applied to search/composition"), 5000
                 )
         self._update_filter_chip_bar()
-        self._set_active_tab(0)  # Switch to search tab
-
-    def _catalog_parallels_in_results(self):
-        """Navigate to composition tab with browse filters as pre-search filters."""
-        filters = self._catalog_build_browse_filters()
-        if not filters:
-            return
-        # #17: the browse filters replace the search filters only if they
-        # could be applied; otherwise nothing changes and the user is told.
-        if not self._apply_catalog_handoff_filters(filters):
-            return
-        from shared.fjms_service import resolve_library_sys_ids
-        # GAP-H / DMF-07: library filter handoff — Show-only carries the allowlist;
-        # Hide mode SUPPRESSES the restriction (Codex HIGH #4).
-        if self._catalog_library_filter:
-            if self._catalog_library_mode == 'show_only':
-                # Show-only: intersect the selected-library sys_ids into the restrict scope.
-                # WR-02: fail-open if resolution is empty.
-                lib_ids = resolve_library_sys_ids(self._catalog_library_filter, self.meta_mgr)
-                if not lib_ids:
-                    import logging as _log
-                    _log.getLogger(__name__).warning(
-                        "library filter %s resolved to empty on parallels-in-results — skipping (fail-open)",
-                        self._catalog_library_filter,
-                    )
-                elif self.pre_search_restrict_sys_ids is None:
-                    self.pre_search_restrict_sys_ids = lib_ids
-                else:
-                    self.pre_search_restrict_sys_ids &= lib_ids
-            else:
-                # Hide mode: suppress the library restriction with a brief notice.
-                self.statusBar().showMessage(
-                    tr("Library Hide filter not applied to search/composition"), 5000
-                )
-        self._update_filter_chip_bar()
-        self._set_active_tab(1)  # Switch to composition tab
+        self._set_active_tab(tab)
 
     def _catalog_view_result(self, index):
         """Double-click result row: open ResultDialog with prev/next navigation."""
@@ -13165,12 +13022,37 @@ class GenizahGUI(QMainWindow):
             uncat_item = QTreeWidgetItem([uncat_display, f"{unclassified_count:,}"])
             uncat_item.setData(0, Qt.ItemDataRole.UserRole, "__unclassified__")
             self.catalog_domain_tree.addTopLevelItem(uncat_item)
+        # Beside it, the corpus manuscripts with no catalogue record, which the
+        # list shows after the catalogued ones (D16): the tree adds up to it.
+        if getattr(self, 'meta_mgr', None) is not None:
+            worker = getattr(self, '_catalog_uncatalogued_worker', None)
+            if worker is None or not worker.isRunning():
+                worker = _CatalogUncataloguedWorker(self.meta_mgr, self)
+                worker.counted.connect(self._catalog_add_uncatalogued_entry)
+                self._catalog_uncatalogued_worker = worker
+                worker.start()
 
         self.catalog_domain_tree.setUpdatesEnabled(True)
 
         # Defer author/work list population
         QTimer.singleShot(0, self._catalog_refresh_authors)
         QTimer.singleShot(0, self._catalog_refresh_works)
+
+    def _catalog_add_uncatalogued_entry(self, count):
+        """The domain tree's "No catalogue record (N)" entry, after "Unclassified"."""
+        from PyQt6 import sip
+        tree = getattr(self, 'catalog_domain_tree', None)
+        if tree is None or sip.isdeleted(tree) or count <= 0:
+            return
+        for i in range(tree.topLevelItemCount()):
+            if tree.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole) == "__uncatalogued__":
+                tree.topLevelItem(i).setText(1, f"{count:,}")
+                return
+        item = QTreeWidgetItem([tr("No catalogue record"), f"{count:,}"])
+        item.setData(0, Qt.ItemDataRole.UserRole, "__uncatalogued__")
+        item.setToolTip(0, tr("Manuscripts of the corpus with no FJMS catalogue record: "
+                              "they are listed after the catalogued ones."))
+        tree.addTopLevelItem(item)
 
     # ==========================================================================
     #  PERSONAL LISTS TAB
@@ -22511,108 +22393,65 @@ class GenizahGUI(QMainWindow):
         self.status_label.setText(
             self._search_status_summary(domains=len(self._domain_exclusions)))
 
-    # ---- Post-search measurement filter dialog (Phase 54) ----
+    # ---- Post-search measurement filters (Phase 54; D20: the panel's rules) ----
+
+    # The sections of Manuscript features the post-search filter offers.
+    POST_CRITERIA_SECTIONS = ('lines', 'material', 'measured')
+
+    def _post_criteria_result_ids(self):
+        """The Genizah sys_ids of the current search results (LOCAL ones have
+        no catalogue data)."""
+        from shared.local_sys_id import is_local_sys_id
+        return frozenset(
+            sid for r in (getattr(self, 'last_results', None) or [])
+            for sid in (((r.get('display') or {}).get('id')),)
+            if sid and not is_local_sys_id(sid))
+
+    def _recompute_post_criteria(self):
+        """Which results the post-search criteria keep, computed once per
+        criteria and result set with the same shared code as Manuscript
+        features (D20): over the results, so "not recorded" and "all except"
+        are read against them -- in a worker (_PostCriteriaWorker); until it
+        answers every row shows."""
+        self._post_criteria_gen = getattr(self, '_post_criteria_gen', 0) + 1
+        self._post_criteria_error = None
+        self._post_criteria_ids = None
+        if not self._post_criteria:
+            self._measurement_fetch_complete = True
+            return
+        self._measurement_fetch_complete = False
+        worker = _PostCriteriaWorker(self._post_criteria, self._post_criteria_result_ids(),
+                                     self._post_criteria_gen, self)
+        worker.matched.connect(self._on_post_criteria_matched)
+        self._post_criteria_worker = worker
+        worker.start()
+
+    def _on_post_criteria_matched(self, generation, ids, reason):
+        """The post-search worker's answer. A lookup that cannot run keeps
+        every row and says so: hiding them all would read as "nothing matches"."""
+        if generation != getattr(self, '_post_criteria_gen', None):
+            return  # for an older search or older criteria
+        if reason:
+            self._post_criteria_ids = None
+            self._post_criteria_error = reason
+            self.statusBar().showMessage(
+                tr("The measurement filters could not be applied: every result is shown."), 8000)
+        else:
+            self._post_criteria_ids = ids
+        self._measurement_fetch_complete = True
+        self._apply_results_table_filters()
 
     def _open_measurement_filter_dialog(self):
-        """Open a dialog to filter results by physical measurements."""
+        """Filter the results by lines, material and measurements: the
+        Manuscript features panel, restricted to those sections (D20)."""
         if not self._measurement_fetch_complete:
             return
-
-        MEASUREMENT_MATERIALS = ['Paper', 'Vellum', 'Papyrus', 'Mix', 'Wood']
-        mf = dict(self._post_measurement_filters)
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle(tr("Measurements"))
-        dlg.setMinimumWidth(400)
-        layout = QVBoxLayout(dlg)
-
-        grid = QGridLayout()
-        grid.setSpacing(6)
-
-        def _add_range_row(row, label, key_min, key_max, max_val, decimals, suffix=''):
-            grid.addWidget(QLabel(label), row, 0)
-            sp_min = QDoubleSpinBox() if decimals else QSpinBox()
-            sp_max = QDoubleSpinBox() if decimals else QSpinBox()
-            for sp, prefix_text in [(sp_min, tr('Min')), (sp_max, tr('Max'))]:
-                if decimals:
-                    sp.setDecimals(decimals)
-                    sp.setSingleStep(0.1)
-                sp.setRange(0, max_val)
-                sp.setSpecialValueText(prefix_text)
-                if suffix:
-                    sp.setSuffix(f" {suffix}")
-            sp_min.setValue(mf.get(key_min) or 0)
-            sp_max.setValue(mf.get(key_max) or 0)
-            grid.addWidget(sp_min, row, 1)
-            grid.addWidget(sp_max, row, 2)
-            return sp_min, sp_max
-
-        w_min, w_max = _add_range_row(0, tr('Width'), 'width_min', 'width_max', 100, 1, tr('cm'))
-        h_min, h_max = _add_range_row(1, tr('Height'), 'height_min', 'height_max', 100, 1, tr('cm'))
-        lc_min, lc_max = _add_range_row(2, tr('Lines'), 'line_count_min', 'line_count_max', 200, 0)
-        lh_min, lh_max = _add_range_row(3, tr('Line Height'), 'line_height_min', 'line_height_max', 20, 1, tr('mm'))
-        td_min, td_max = _add_range_row(4, tr('Text Density'), 'text_density_min', 'text_density_max', 100, 1)
-        # #17: Line Height is shown only when the catalog is known to have it
-        # (the spins keep any value, so a hidden row never drops one by itself).
-        from shared.fjms_service import line_height_filter_available
-        if not line_height_filter_available():
-            for _col in range(3):
-                _item = grid.itemAtPosition(3, _col)
-                if _item is not None and _item.widget() is not None:
-                    _item.widget().setVisible(False)
-
-        # Material checkboxes
-        grid.addWidget(QLabel(tr('Material')), 5, 0)
-        mat_widget = QWidget()
-        mat_layout_inner = QHBoxLayout(mat_widget)
-        mat_layout_inner.setContentsMargins(0, 0, 0, 0)
-        mat_checks = {}
-        current_mats = mf.get('measurement_material', []) or []
-        for mat in MEASUREMENT_MATERIALS:
-            cb = QCheckBox(tr(mat))
-            cb.setChecked(mat in current_mats)
-            mat_layout_inner.addWidget(cb)
-            mat_checks[mat] = cb
-        grid.addWidget(mat_widget, 5, 1, 1, 2)
-
-        layout.addLayout(grid)
-
-        # Buttons
-        btn_layout = QHBoxLayout()
-        btn_clear = QPushButton(tr('Clear'))
-        btn_cancel = QPushButton(tr('Cancel'))
-        btn_apply = QPushButton(tr('Apply'))
-        btn_apply.setDefault(True)
-        btn_layout.addWidget(btn_clear)
-        btn_layout.addStretch()
-        btn_layout.addWidget(btn_cancel)
-        btn_layout.addWidget(btn_apply)
-        layout.addLayout(btn_layout)
-
-        def _clear():
-            for sp in [w_min, w_max, h_min, h_max, lc_min, lc_max, lh_min, lh_max, td_min, td_max]:
-                sp.setValue(0)
-            for cb in mat_checks.values():
-                cb.setChecked(False)
-
-        btn_clear.clicked.connect(_clear)
-        btn_cancel.clicked.connect(dlg.reject)
-        btn_apply.clicked.connect(dlg.accept)
-
+        from desktop.dialogs_filter import CriteriaDialog
+        dlg = CriteriaDialog(self, self._post_criteria, sections=self.POST_CRITERIA_SECTIONS,
+                             within=self._post_criteria_result_ids())
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            new_filters = {}
-            for key, sp in [('width_min', w_min), ('width_max', w_max),
-                            ('height_min', h_min), ('height_max', h_max),
-                            ('line_count_min', lc_min), ('line_count_max', lc_max),
-                            ('line_height_min', lh_min), ('line_height_max', lh_max),
-                            ('text_density_min', td_min), ('text_density_max', td_max)]:
-                v = sp.value()
-                if v > 0:
-                    new_filters[key] = v
-            checked_mats = [m for m, cb in mat_checks.items() if cb.isChecked()]
-            if checked_mats:
-                new_filters['measurement_material'] = checked_mats
-            self._post_measurement_filters = new_filters
+            self._post_criteria = dlg.get_criteria()
+            self._recompute_post_criteria()
             self._apply_results_table_filters()
             self._schedule_session_save()
 
@@ -22731,25 +22570,14 @@ class GenizahGUI(QMainWindow):
                     chip_layout, tr("Library") + f" ({len(_lib_codes)})", 'library'
                 )
 
-            if filters.get('date_from') or filters.get('date_to'):
-                date_str = ""
-                if filters.get('date_from') and filters.get('date_to'):
-                    date_str = f"{filters['date_from']}-{filters['date_to']}"
-                elif filters.get('date_from'):
-                    date_str = f"{filters['date_from']}+"
-                elif filters.get('date_to'):
-                    date_str = f"-{filters['date_to']}"
-                self._add_filter_chip(chip_layout, date_str, 'date')
             if filters.get('material_exclude'):
                 self._add_filter_chip(chip_layout, tr("Exclude Printed"), 'material_exclude')
 
-            # Script style / place chips
-            if filters.get('script_styles') or filters.get('script_places'):
-                from shared.fjms_service import script_value_label
-                for _skey in ('script_styles', 'script_places'):
-                    for _sv in filters.get(_skey) or []:
-                        self._add_filter_chip(
-                            chip_layout, script_value_label(_skey, _sv, CURRENT_LANG == 'he'), (_skey, _sv))
+            # Manuscript features: one chip per criterion
+            if filters.get('criteria'):
+                from desktop.dialogs_filter import criteria_chip_texts
+                for _ckey, _ctext in criteria_chip_texts(filters['criteria']):
+                    self._add_filter_chip(chip_layout, _ctext, ('criteria', _ckey))
 
             # Text filter chips
             for t in filters.get('text_all', []):
@@ -22790,7 +22618,15 @@ class GenizahGUI(QMainWindow):
 
     def _remove_filter(self, filter_key):
         """Remove a single filter and recompute restrict_sys_ids."""
-        if isinstance(filter_key, tuple):
+        if isinstance(filter_key, tuple) and filter_key[0] == 'criteria':
+            # One manuscript feature (its chip)
+            criteria = dict(self.pre_search_filters.get('criteria') or {})
+            criteria.pop(filter_key[1], None)
+            if criteria:
+                self.pre_search_filters['criteria'] = criteria
+            else:
+                self.pre_search_filters.pop('criteria', None)
+        elif isinstance(filter_key, tuple):
             # Multi-select: remove individual item from list
             field, value = filter_key
             if field in self.pre_search_filters and isinstance(self.pre_search_filters[field], list):
@@ -22800,10 +22636,6 @@ class GenizahGUI(QMainWindow):
                     del self.pre_search_filters[field]
             else:
                 self.pre_search_filters.pop(field, None)
-        elif filter_key == 'date':
-            self.pre_search_filters.pop('date_from', None)
-            self.pre_search_filters.pop('date_to', None)
-            self.pre_search_filters.pop('include_undated', None)
         else:
             self.pre_search_filters.pop(filter_key, None)
 
@@ -23623,7 +23455,8 @@ class GenizahGUI(QMainWindow):
         self._result_domain_counts = {}
         self._has_result_domains = False
         self.btn_domain_filter.setEnabled(False)
-        self._result_measurement_map = {}
+        self._post_criteria_ids = None
+        self._post_criteria_gen = getattr(self, '_post_criteria_gen', 0) + 1  # drops a late answer
         self._measurement_fetch_complete = False
 
         # Every signal that writes the table or the status line is dropped
@@ -25361,40 +25194,14 @@ class GenizahGUI(QMainWindow):
                 self._printed_badge_worker.finished.connect(self._on_printed_badges_loaded)
                 self._printed_badge_worker.start()
 
-                # Phase 54: batch fetch measurement summaries for post-search filtering
-                self._measurement_fetch_complete = False
-                try:
-                    from shared.fjms_service import get_fjms_service
-                    fjms = get_fjms_service()
-                    if fjms.is_available():
-                        self._result_measurement_map = fjms.get_measurement_summaries_batch(sys_ids)
-                    else:
-                        self._result_measurement_map = {}
-                except Exception:
-                    self._result_measurement_map = {}  # Lookup failed; use empty dict
-                self._measurement_fetch_complete = True
+                # Phase 54 / D20: which results the post-search criteria keep
+                # (in a worker; the rows show until it answers)
+                self._recompute_post_criteria()
                 if hasattr(self, 'btn_measurement_filter'):
-                    # #17: also off when the catalog is known to have no
-                    # measurement data at all.
-                    from shared.fjms_service import measurement_filters_available
-                    self.btn_measurement_filter.setEnabled(
-                        bool(self._result_measurement_map) and measurement_filters_available())
-                # Initialize post-search measurement filters from pre-search ONLY if
-                # post-search filters are empty (avoids overwriting session-restored state)
-                if not self._post_measurement_filters:
-                    from shared.fjms_service import (
-                        MEASUREMENT_FILTER_KEYS as _meas_keys,
-                        drop_unavailable_measurement_filters,
-                    )
-                    # #17: never a bound the catalog is known to lack -- every
-                    # row has no value for it, so it would hide every row.
-                    self._post_measurement_filters, _ = drop_unavailable_measurement_filters({
-                        k: v for k, v in (getattr(self, 'pre_search_filters', {}) or {}).items()
-                        if k in _meas_keys
-                    })
+                    self.btn_measurement_filter.setEnabled(True)
             else:
                 # All-LOCAL (or no-id) result set — no Genizah enrichment to do.
-                self._result_measurement_map = {}
+                self._post_criteria_ids = frozenset() if self._post_criteria else None
                 self._measurement_fetch_complete = True
                 if hasattr(self, 'btn_measurement_filter'):
                     self.btn_measurement_filter.setEnabled(False)
@@ -25821,12 +25628,10 @@ class GenizahGUI(QMainWindow):
         has_domain_exclusions = bool(self._domain_exclusions) and self._has_result_domains
         hide_uncategorized = "Uncategorized" in self._domain_exclusions if has_domain_exclusions else False
 
-        _has_meas_post = any(
-            getattr(self, '_post_measurement_filters', {}).get(k) is not None
-            for k in ['width_min', 'width_max', 'height_min', 'height_max',
-                       'line_count_min', 'line_count_max', 'line_height_min', 'line_height_max',
-                       'text_density_min', 'text_density_max']
-        ) or getattr(self, '_post_measurement_filters', {}).get('measurement_material')
+        # D20: rows the post-search criteria keep, once computed for these results.
+        _post_ids = getattr(self, '_post_criteria_ids', None)
+        _has_meas_post = (bool(getattr(self, '_post_criteria', None)) and _post_ids is not None
+                          and getattr(self, '_measurement_fetch_complete', False))
         # Phase 95 REQ-6 — LOCAL filter cascade joinpoint (search surface).
         _local_state_search = getattr(self, '_local_filter_state_search', 'all')
         _results_for_local = getattr(self, 'last_results', []) or []
@@ -25912,42 +25717,12 @@ class GenizahGUI(QMainWindow):
                 elif self._printed_filter_state == 'only_printed' and not is_printed:
                     visible = False
 
-            # E. Check Measurement Post-Filters (Phase 54, separate state from pre_search_filters)
-            if visible:
-                mf = getattr(self, '_post_measurement_filters', {})
-                _has_mf = any(mf.get(k) is not None for k in [
-                    'width_min', 'width_max', 'height_min', 'height_max',
-                    'line_count_min', 'line_count_max', 'line_height_min', 'line_height_max',
-                    'text_density_min', 'text_density_max',
-                ]) or mf.get('measurement_material')
-                if _has_mf:
-                    # Review concern #8: only filter if fetch is complete
-                    if not getattr(self, '_measurement_fetch_complete', False):
-                        pass  # Data still loading -- show row
-                    else:
-                        item = self.results_table.item(row, self.COL_SYS_ID)
-                        sys_id = item.text().strip() if item else None
-                        md = getattr(self, '_result_measurement_map', {}).get(sys_id)
-                        if md is None:
-                            visible = False  # D-26: exclude without data (fetch completed)
-                        else:
-                            def _meas_check(val, vmin_key, vmax_key):
-                                vmin = mf.get(vmin_key)
-                                vmax = mf.get(vmax_key)
-                                if val is None and (vmin is not None or vmax is not None):
-                                    return False
-                                if vmin is not None and val < vmin:
-                                    return False
-                                if vmax is not None and val > vmax:
-                                    return False
-                                return True
-                            if not _meas_check(md.get('width_cm'), 'width_min', 'width_max'): visible = False
-                            elif not _meas_check(md.get('height_cm'), 'height_min', 'height_max'): visible = False
-                            elif not _meas_check(md.get('avg_num_lines'), 'line_count_min', 'line_count_max'): visible = False
-                            elif not _meas_check(md.get('avg_line_height_mm'), 'line_height_min', 'line_height_max'): visible = False
-                            elif not _meas_check(md.get('avg_text_density'), 'text_density_min', 'text_density_max'): visible = False
-                            elif mf.get('measurement_material'):
-                                if md.get('material') not in mf['measurement_material']: visible = False
+            # E. Post-search criteria (Phase 54, D20; separate from pre_search_filters).
+            # Until they are computed for this run's rows the row shows (review concern #8).
+            if visible and _has_meas_post:
+                item = self.results_table.item(row, self.COL_SYS_ID)
+                if (item.text().strip() if item else None) not in _post_ids:
+                    visible = False
 
             # F. Phase 95 REQ-6 — LOCAL filter (applied after printed filter per cascade discipline).
             if visible and _local_visible_sys_ids is not None:
@@ -35224,29 +34999,20 @@ class GenizahGUI(QMainWindow):
         n_work = len(filters.get('works', []))
         if n_work:
             parts.append(f"{tr('Work')} \u00d7{n_work}")
-        df, dt = filters.get('date_from'), filters.get('date_to')
-        if df and dt:
-            parts.append(f"{df}-{dt}")
-        elif df:
-            parts.append(f"{df}+")
-        elif dt:
-            parts.append(f"-{dt}")
         if filters.get('material_exclude'):
             parts.append(tr("No printed"))
         elif filters.get('material_include'):
             parts.append(tr("Printed only"))
-        script_parts = []
-        if filters.get('script_styles') or filters.get('script_places'):
-            from shared.fjms_service import script_value_label
-            for _skey in ('script_styles', 'script_places'):
-                for _sv in filters.get(_skey) or []:
-                    script_parts.append(script_value_label(_skey, str(_sv), CURRENT_LANG == 'he'))
-        # Exclude mode never turns the script filter around: under "exclude" a
-        # script value would say the opposite of what was searched.
+        criteria_parts = []
+        if filters.get('criteria'):
+            from desktop.dialogs_filter import criteria_chip_texts
+            criteria_parts = [text for _key, text in criteria_chip_texts(filters['criteria'])]
+        # Exclude mode never turns the manuscript features around: under
+        # "exclude" one would say the opposite of what was searched.
         if filters.get('include_mode', True):
-            parts += script_parts
-            script_parts = []
-        groups = [(prefix, parts), (tr('include'), script_parts)]
+            parts += criteria_parts
+            criteria_parts = []
+        groups = [(prefix, parts), (tr('include'), criteria_parts)]
         summary = ' '.join(f"[{p}: {', '.join(g)}]" for p, g in groups if g)
         if not summary:
             return ''
@@ -35324,8 +35090,10 @@ class GenizahGUI(QMainWindow):
         else:
             label_text = f"{query}  ({results_word})"
 
-        # Build filter summary from pre_search_filters
-        psf = entry.get('pre_search_filters', {})
+        # Build filter summary from pre_search_filters, as they run today: an
+        # old date range is shown as the Period of copy it is read into (D18).
+        from desktop.dialogs_filter import migrate_saved_filters
+        psf = migrate_saved_filters(entry.get('pre_search_filters'))[0]
         filter_summary = self._build_filter_summary(psf)
 
         labels_col = QVBoxLayout()
@@ -35417,6 +35185,33 @@ class GenizahGUI(QMainWindow):
             if reopen:
                 self._show_comp_history_menu()
 
+    def _migrate_saved_pre_search_filters(self, saved):
+        """Saved "Search only in..." filters as they run today (plan §6.4): a
+        date range read into Period of copy (D18), the old measurement bounds
+        not restored (R2), and no criterion the open catalogue file is known
+        unable to answer (#17, with a notice). A COPY: a later chip removal
+        must not edit the saved entry. Returns (filters,
+        had_old_measurements): the stored rows of a search saved with those
+        bounds are not shown -- they were found with a filter no longer shown."""
+        from desktop.dialogs_filter import drop_unavailable_criteria, migrate_saved_filters
+        filters, had_measurements = migrate_saved_filters(saved)
+        criteria, dropped = drop_unavailable_criteria(filters.pop('criteria', None))
+        if criteria:
+            filters['criteria'] = criteria
+        if dropped:
+            self._restore_notice(tr('Some saved filters were removed: this catalog data is not available.'))
+        return filters, had_measurements
+
+    def _restore_notice(self, text):
+        """Tell the user what a restore changed. During the session restore
+        the notices are collected and shown with "Session restored", which
+        would otherwise replace them at once (Codex, PR 1c round 1)."""
+        notices = getattr(self, '_restore_notices', None)
+        if notices is None:
+            self.statusBar().showMessage(text, 8000)
+        elif text not in notices:
+            notices.append(text)
+
     def _restore_regular_search_from_state(self, state, entry=None):
         """Apply a history entry and re-run the regular search.
 
@@ -35437,6 +35232,7 @@ class GenizahGUI(QMainWindow):
         # previous run must not survive into the restored one.
         self._set_local_scope_strip_visible(False)
         filter_pending = False
+        old_measurements = False
         if entry:
             self.query_input.setText(entry.get('query', ''))
             params = entry.get('search_params', {})
@@ -35460,15 +35256,9 @@ class GenizahGUI(QMainWindow):
                         self.corpus_scope_combo.blockSignals(True)
                         self.corpus_scope_combo.setCurrentIndex(_idx)
                         self.corpus_scope_combo.blockSignals(False)
-            # Restore pre-search filters. #17: a COPY (assigning the entry
-            # itself let a later chip removal edit the saved history), without
-            # a measurement bound the open catalog is known not to have.
-            from shared.fjms_service import drop_unavailable_measurement_filters
-            psf, _dropped = drop_unavailable_measurement_filters(
-                entry.get('pre_search_filters') or {})
-            if _dropped:
-                self.statusBar().showMessage(
-                    tr('Some saved filters were removed: this catalog data is not available.'), 8000)
+            # Restore pre-search filters, as they run today (a copy).
+            psf, old_measurements = self._migrate_saved_pre_search_filters(
+                entry.get('pre_search_filters'))
             self.pre_search_filters = psf
             if psf and any(k != 'include_mode' for k in psf):
                 # FINDING 2 (129-07): pass meta_mgr so library restriction is
@@ -35489,7 +35279,8 @@ class GenizahGUI(QMainWindow):
         # stands until New, like the right-click exclusions, and replacing
         # only its ids here left the label and the dialog showing another list.
 
-        results = state.get('results', [])
+        # R2: a snapshot found under the old measurement filters is not shown; it re-runs.
+        results = [] if old_measurements else state.get('results', [])
         if results:
             # Legacy entry with a stored snapshot — restore instantly.
             self.last_results = results
@@ -35526,6 +35317,7 @@ class GenizahGUI(QMainWindow):
         if self._witness_edits_are_locked():
             return
         filter_pending = False
+        old_measurements = False
         if entry:
             self.comp_text_area.setPlainText(state.get('source_text', ''))
             if entry.get('query'):
@@ -35561,15 +35353,9 @@ class GenizahGUI(QMainWindow):
             # Replaces the current conditions -- and clears them for an entry
             # that had none (every entry older than conditions).
             self._restore_comp_conditions((params or {}).get('comp_conditions'))
-            # Restore pre-search filters. #17: a COPY (assigning the entry
-            # itself let a later chip removal edit the saved history), without
-            # a measurement bound the open catalog is known not to have.
-            from shared.fjms_service import drop_unavailable_measurement_filters
-            psf, _dropped = drop_unavailable_measurement_filters(
-                entry.get('pre_search_filters') or {})
-            if _dropped:
-                self.statusBar().showMessage(
-                    tr('Some saved filters were removed: this catalog data is not available.'), 8000)
+            # Restore pre-search filters, as they run today (a copy).
+            psf, old_measurements = self._migrate_saved_pre_search_filters(
+                entry.get('pre_search_filters'))
             self.pre_search_filters = psf
             if psf and any(k != 'include_mode' for k in psf):
                 # FINDING 2 (129-07): pass meta_mgr so library restriction is
@@ -35592,8 +35378,9 @@ class GenizahGUI(QMainWindow):
 
         results = state.get('results', [])
         filtered = state.get('filtered_results', [])
-        if (results or filtered) and _snapshot_has_compound_rows(results, filtered):
-            # Rows judged by conditions are never re-shown from a snapshot.
+        if (results or filtered) and (old_measurements or _snapshot_has_compound_rows(results, filtered)):
+            # Rows judged by conditions are never re-shown from a snapshot, nor
+            # rows found under the old measurement filters (R2).
             results, filtered = [], []
         if results or filtered:
             # Legacy entry with a stored snapshot — restore instantly.
@@ -35988,7 +35775,8 @@ class GenizahGUI(QMainWindow):
                 'was_interrupted': getattr(self, 'is_comp_running', False),
                 # Pre-search filters (Phase 45-03) -- shared across search/composition
                 'pre_search_filters': getattr(self, 'pre_search_filters', {}),
-                'post_measurement_filters': getattr(self, '_post_measurement_filters', {}),
+                # D20 criteria; the old 'post_measurement_filters' are not restored (R2).
+                'post_criteria': getattr(self, '_post_criteria', {}),
                 'word_excluded_sys_ids': sorted(getattr(self, 'word_excluded_sys_ids', set())),
                 # Phase 96 D-F1: per-file LOCAL opt-out paths (cross-surface, single source of truth).
                 # Top-level placement — DIFFERENT from Phase 95's local_filter (nested in regular_search).
@@ -36019,13 +35807,10 @@ class GenizahGUI(QMainWindow):
                     'domain': getattr(self, '_catalog_current_domain', None),
                     'author': getattr(self, '_catalog_current_author', None),
                     'work': getattr(self, '_catalog_current_work', None),
-                    'date_from': getattr(self, '_catalog_date_from', None),
-                    'date_to': getattr(self, '_catalog_date_to', None),
-                    'include_undated': getattr(self, '_catalog_include_undated', False),
                     'text_all': getattr(self, '_catalog_text_all', []),
                     'text_any': getattr(self, '_catalog_text_any', []),
                     'text_not': getattr(self, '_catalog_text_not', []),
-                    'traits': dict(getattr(self, '_catalog_traits', {})),
+                    'criteria': dict(getattr(self, '_catalog_criteria', {})),
                 },
             }
             # Add composition summary text
@@ -36098,6 +35883,7 @@ class GenizahGUI(QMainWindow):
         """Restore search state from saved session on startup."""
         from shared.session_persistence import load_session_state
         self._restoring_session = True
+        self._restore_notices = []  # shown with "Session restored" (_restore_notice)
         # Phase 96 fix-8: track whether notify_session_restored() has been called
         # so the finally block can fire it exactly once.  It must fire regardless
         # of early returns (no-data, user-declined, restore_mode='never') so that
@@ -36125,7 +35911,7 @@ class GenizahGUI(QMainWindow):
             has_data = (reg.get('results') or comp.get('results') or comp.get('filtered_results') or comp.get('source_text')
                         or browse.get('sys_id') or browse.get('shelfmark') or browse.get('fl_id')
                         or cat.get('domain') or cat.get('author') or cat.get('work')
-                        or cat.get('date_from') or cat.get('date_to') or cat.get('traits')
+                        or cat.get('date_from') or cat.get('date_to') or cat.get('criteria')
                         or cat.get('text_all') or cat.get('text_any') or cat.get('text_not')
                         or cat.get('include_undated')
                         # Feature 2 (Phase 96 fix-7): LOCAL Browse state counts as restorable data.
@@ -36154,6 +35940,30 @@ class GenizahGUI(QMainWindow):
                         self.combo_restore_mode.setCurrentIndex({'always': 1, 'never': 2}[new_mode])
                 if reply != QMessageBox.StandardButton.Yes:
                     return
+
+            # Saved filters as they run today (plan §6.4), read BEFORE the stored
+            # rows: those of a search saved with the old measurement bounds are
+            # not shown (R2) -- they were found with a filter no longer shown.
+            _restored_pre_search, _old_measurements = self._migrate_saved_pre_search_filters(
+                state.get('pre_search_filters'))
+            if _old_measurements:
+                state = dict(state)
+                reg = state['regular_search'] = dict(reg, results=[])
+                comp = state['composition_search'] = dict(
+                    comp, results=[], filtered_results=[], summary_text='')
+                self._restore_notice(tr(
+                    "The saved results were found with filters that have changed. "
+                    "Search again to see them."))
+            # Post-search criteria (D20); the old 'post_measurement_filters' are not
+            # restored (R2).
+            from desktop.dialogs_filter import drop_unavailable_criteria
+            from shared.catalog_criteria import BY_KEY, clean_criteria
+            _post = {k: v for k, v in clean_criteria(state.get('post_criteria'), strict=False)[0].items()
+                     if BY_KEY[k].section in self.POST_CRITERIA_SECTIONS}
+            self._post_criteria, _post_dropped = drop_unavailable_criteria(_post)
+            if _post_dropped:
+                self._restore_notice(tr('Some saved filters were removed: this catalog data is not available.'))
+            self._post_criteria_ids = None
 
             # Show loading indicator now that we're committed to restoring
             n_reg = len(reg.get('results', []))
@@ -36366,41 +36176,27 @@ class GenizahGUI(QMainWindow):
                     self.browse_load_page()
                 QTimer.singleShot(300, _restore_browse)
 
-            # Restore catalog browse filters (Browse by Identification)
+            # Restore catalog browse filters (Browse by Identification). A date
+            # range saved before the manuscript features is read into Period of
+            # copy (D18); a criterion the open file cannot answer is dropped (#17).
             cat = state.get('browse_catalog', {})
-            from shared.fjms_service import clean_traits, drop_unavailable_measurement_filters
-            _cat_traits, _cat_dropped = drop_unavailable_measurement_filters(clean_traits(cat.get('traits')))
+            from desktop.dialogs_filter import drop_unavailable_criteria, migrate_saved_filters
+            _cat_migrated, _ = migrate_saved_filters(
+                {k: cat[k] for k in ('date_from', 'date_to', 'include_undated', 'criteria') if k in cat})
+            _cat_criteria, _cat_dropped = drop_unavailable_criteria(_cat_migrated.get('criteria'))
             if _cat_dropped:
-                self.statusBar().showMessage(
-                    tr('Some saved filters were removed: this catalog data is not available.'), 8000)
+                self._restore_notice(tr('Some saved filters were removed: this catalog data is not available.'))
             if any([cat.get('domain'), cat.get('author'), cat.get('work'),
-                    cat.get('date_from'), cat.get('date_to'), cat.get('include_undated'),
-                    cat.get('text_all'), cat.get('text_any'), cat.get('text_not'), _cat_traits]):
-                self._catalog_traits = _cat_traits
+                    cat.get('text_all'), cat.get('text_any'), cat.get('text_not'), _cat_criteria]):
+                self._catalog_criteria = _cat_criteria
+                if hasattr(self, '_catalog_update_criteria_btn'):
+                    self._catalog_update_criteria_btn()
                 self._catalog_current_domain = cat.get('domain')
                 self._catalog_current_author = cat.get('author')
                 self._catalog_current_work = cat.get('work')
-                self._catalog_date_from = cat.get('date_from')
-                self._catalog_date_to = cat.get('date_to')
-                self._catalog_include_undated = cat.get('include_undated', False)
                 self._catalog_text_all = cat.get('text_all', [])
                 self._catalog_text_any = cat.get('text_any', [])
                 self._catalog_text_not = cat.get('text_not', [])
-                # Block signals on date/undated widgets to prevent duplicate refreshes
-                if hasattr(self, '_catalog_date_from_input'):
-                    self._catalog_date_from_input.blockSignals(True)
-                    if cat.get('date_from'):
-                        self._catalog_date_from_input.setText(str(cat['date_from']))
-                    self._catalog_date_from_input.blockSignals(False)
-                if hasattr(self, '_catalog_date_to_input'):
-                    self._catalog_date_to_input.blockSignals(True)
-                    if cat.get('date_to'):
-                        self._catalog_date_to_input.setText(str(cat['date_to']))
-                    self._catalog_date_to_input.blockSignals(False)
-                if hasattr(self, '_catalog_undated_cb'):
-                    self._catalog_undated_cb.blockSignals(True)
-                    self._catalog_undated_cb.setChecked(self._catalog_include_undated)
-                    self._catalog_undated_cb.blockSignals(False)
                 # Note: catalog_author_input / catalog_work_input are search filter
                 # boxes, not display fields. The selected author/work is shown via
                 # the chip bar. Don't populate these with query keys (often person_ids).
@@ -36421,14 +36217,8 @@ class GenizahGUI(QMainWindow):
             # Restore pre-search filters (Phase 45-03). #17: without a
             # measurement bound the open catalog is KNOWN not to have (never
             # just because the catalog is missing), with one notice.
-            from shared.fjms_service import drop_unavailable_measurement_filters
-            self.pre_search_filters, _dropped_pre = drop_unavailable_measurement_filters(
-                state.get('pre_search_filters') or {})
-            self._post_measurement_filters, _dropped_post = drop_unavailable_measurement_filters(
-                state.get('post_measurement_filters') or {})
-            if _dropped_pre or _dropped_post:
-                self.statusBar().showMessage(
-                    tr('Some saved filters were removed: this catalog data is not available.'), 8000)
+            # (Migrated at the top of this restore, before the stored rows.)
+            self.pre_search_filters = _restored_pre_search
             if self.pre_search_filters:
                 # Recompute restrict_sys_ids from saved filters.
                 # FINDING 2 (129-07): pass meta_mgr so library restriction is
@@ -36493,17 +36283,24 @@ class GenizahGUI(QMainWindow):
             self.search_progress.setVisible(False)
             saved_at = state.get('saved_at', '')
             ts_display = saved_at[:16].replace('T', ' ') if saved_at else ''
+            notices = self._restore_notices or []
             self.statusBar().showMessage(
-                tr("Session restored") + (f" ({ts_display})" if ts_display else ""),
-                5000
+                "  ".join([tr("Session restored") + (f" ({ts_display})" if ts_display else ""),
+                           *notices]),
+                15000 if notices else 5000
             )
 
             logger.info("Session restored from %s", saved_at)
 
         except Exception as e:
             logger.error("Failed to restore session: %s", e)
+            # What was already changed (filters dropped, rows not shown) is
+            # still said, even though the restore stopped (Codex, round 2).
+            if self._restore_notices:
+                self.statusBar().showMessage("  ".join(self._restore_notices), 15000)
         finally:
             self._restoring_session = False
+            self._restore_notices = None
             # Whichever way the startup race went, this is where the
             # letter-level default becomes safe to apply: the stored method
             # is known, and the chunk knobs hold the values a cache may keep.

@@ -32,8 +32,12 @@ from typing import Optional
 from shared import domain_hierarchy as _domain_hierarchy
 from shared.catalog_numbers import span_label
 from shared.catalog_criteria import (
-    CriteriaUnavailable, clean_criteria, criteria_token, criterion_values, match_criteria,
+    NOT_RECORDED, CriteriaUnavailable, clean_criteria, criteria_token, criterion_values,
+    match_criteria,
 )
+from shared.catalog_criteria import BY_KEY as _CRITERIA_BY_KEY
+from shared.catalog_criteria import criteria_chips as _criteria_chips
+from shared.catalog_criteria import recorded_count as _recorded_count
 from shared.thread_local_db import ThreadLocalConnection
 # Phase 78 (Concern #3): APIError from neutral shared module — NOT from web layer.
 # Plan 03 R2-#3: validate_filter_values uses APIError to fail closed when
@@ -985,6 +989,9 @@ class FjmsService:
         # Script filter choices per filter key (see get_script_values).
         self._script_values_cache: dict = {}
         self._script_values_lock = threading.Lock()
+        # Post-search criteria (match_result_criteria): the last few answers.
+        self._result_match_cache: dict = {}
+        self._result_match_lock = threading.Lock()
         # SEED-023: per-thread registry of populated catalog-filter TEMP tables
         # (name -> token). The PGP/edition membership sets are static per process,
         # so each thread's TEMP table is built once and reused across requests.
@@ -1787,6 +1794,7 @@ class FjmsService:
         if self._conn is None:
             raise FilterUnavailable('sidecar_unavailable',
                                     'the FJMS catalog sidecar is not available')
+        universe = _resolve_universe(universe)
         cache = self.__dict__.setdefault("_criterion_values_cache", {})
         token = (key, source, _universe_token(universe))
         if token in cache:
@@ -1798,6 +1806,124 @@ class FjmsService:
                                     filters=(key,)) from e
         cache[token] = values
         return copy.deepcopy(values)
+
+    def get_criterion_coverage(self, key: str, universe, source: str = 'either') -> int:
+        """How many manuscripts of ``universe`` (a set, or a callable giving
+        it) have ``key`` recorded by ``source`` -- "recorded for N of M"
+        (rule 8). Cached per process. Raises FilterUnavailable."""
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        universe = _resolve_universe(universe)
+        if universe is None:
+            raise FilterUnavailable('corpus_unavailable',
+                                    'the list of all manuscripts is not loaded yet', (key,))
+        cache = self.__dict__.setdefault("_criterion_coverage_cache", {})
+        token = (key, source, _universe_token(universe))
+        if token not in cache:
+            try:
+                cache[token] = _recorded_count(self._conn, key, universe, source)
+            except Exception as e:
+                raise FilterUnavailable('query_failed', f'the {key} coverage could not be read',
+                                        filters=(key,)) from e
+        return cache[token]
+
+    def criteria_live_total(self, criteria, universe) -> dict:
+        """The panel's live total: ``{'total': N, 'not_recorded': {key: M}}``
+        -- how many manuscripts of the corpus the criteria select (None when
+        none is active), and for each "all except" list how many of those
+        have nothing recorded for it (rule 2: "225,375, of which 218,786
+        not recorded"). Raises FilterUnavailable."""
+        criteria = clean_criteria(criteria)[0] if criteria else {}
+        universe = _resolve_universe(universe)
+        matched = self.get_filter_sys_ids(criteria=criteria, universe=universe)
+        out = {'total': None if matched is None else len(matched), 'not_recorded': {}}
+        for key, spec in criteria.items():
+            # Attributes have no "not recorded" (D5 follow-up): nothing to say.
+            if spec.get('mode') != 'except' or not _CRITERIA_BY_KEY[key].not_recordable:
+                continue
+            missing = self.get_filter_sys_ids(
+                criteria={key: {'values': [NOT_RECORDED],
+                                **({'source': spec['source']} if 'source' in spec else {})}},
+                universe=universe)
+            out['not_recorded'][key] = len(matched & missing)
+        return out
+
+    def criteria_corpus_note(self, universe) -> dict:
+        """The figures of the panel's note under the total (§6.3):
+        ``{'corpus': N, 'uncatalogued': U, 'uncatalogued_sized': S}`` -- the
+        corpus, those with no catalogue record, and how many of those have
+        an unflagged catalogue size. Raises FilterUnavailable."""
+        universe = _resolve_universe(universe)
+        if universe is None:
+            raise FilterUnavailable('corpus_unavailable',
+                                    'the list of all manuscripts is not loaded yet')
+        uncatalogued = universe - self.catalogued_ids()
+        sized = universe - (self.get_filter_sys_ids(
+            criteria={'width': {'not_recorded': True, 'source': 'catalogue'}},
+            universe=universe) or set())
+        return {'corpus': len(universe), 'uncatalogued': len(uncatalogued),
+                'uncatalogued_sized': len(uncatalogued & sized)}
+
+    def criterion_value_labels(self, key: str, cached_only: bool = False) -> Optional[dict]:
+        """``{value: Hebrew label}`` of a list criterion, from the catalogue
+        (cached with its values). Raises FilterUnavailable as they do.
+        ``cached_only``: None while they are not loaded, never a query -- for
+        code on an event loop or a UI thread, which loads them elsewhere."""
+        if cached_only:
+            cache = self.__dict__.get("_criterion_values_cache", {})
+            values = cache.get((key, 'either', _universe_token(None)))
+            if values is None:
+                return None
+        else:
+            values = self.get_criterion_values(key)
+        return {v['value']: v['label_he'] for v in values if v.get('label_he')}
+
+    def criteria_chips(self, criteria, lang: str = 'en', cached_only: bool = False) -> list:
+        """``[(key, text)]``: one chip per active criterion, values in the
+        catalogue's Hebrew where ``lang`` is 'he' (shared/catalog_criteria.py::
+        criteria_chips). Never raises for a missing label. ``cached_only``:
+        never queries; a value whose labels are not loaded shows in English."""
+        return _criteria_chips(
+            criteria, lang, lambda key: self.criterion_value_labels(key, cached_only))
+
+    def criteria_summary(self, criteria, lang: str = 'en', sep: str = '; ',
+                         cached_only: bool = False) -> str:
+        """The chips as one line (history entries)."""
+        return sep.join(text for _key, text in self.criteria_chips(criteria, lang, cached_only))
+
+    def match_result_criteria(self, criteria, sys_ids) -> Optional[set]:
+        """The post-search filters (D20): which of a search's result
+        ``sys_ids`` the criteria keep, by the panel's rules -- the result is
+        the universe, so "not recorded" and "all except" are counted within
+        it. None when no criterion is active. Cached for the last few calls
+        (every re-render applies the filters again). Raises
+        FilterUnavailable like get_filter_sys_ids: never an empty set for an
+        error."""
+        criteria = clean_criteria(criteria)[0] if criteria else {}
+        if not criteria:
+            return None
+        if self._conn is None:
+            raise FilterUnavailable('sidecar_unavailable',
+                                    'the FJMS catalog sidecar is not available')
+        universe = frozenset(str(s) for s in sys_ids or () if s)
+        token = (criteria_token(criteria), universe)
+        with self._result_match_lock:
+            cached = self._result_match_cache.get(token)
+        if cached is not None:
+            return set(cached)
+        try:
+            matched = match_criteria(self._conn, criteria, set(universe))
+        except CriteriaUnavailable as e:
+            raise FilterUnavailable(e.reason, e.message, filters=e.filters) from e
+        except Exception as e:
+            logger.error("FjmsService.match_result_criteria error: %s", e, exc_info=True)
+            raise FilterUnavailable('query_failed', 'the result filter lookup failed') from e
+        with self._result_match_lock:
+            self._result_match_cache[token] = frozenset(matched)
+            while len(self._result_match_cache) > 8:
+                self._result_match_cache.pop(next(iter(self._result_match_cache)))
+        return set(matched)
 
     def get_script_values(self, kind: str) -> list[dict]:
         """The choices a script filter offers, most manuscripts first.

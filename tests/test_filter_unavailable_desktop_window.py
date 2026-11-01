@@ -22,6 +22,7 @@ from PyQt6.QtCore import QObject, pyqtSignal  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QLineEdit, QMainWindow, QPlainTextEdit  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from criteria_sidecar import A, build_criteria_sidecar  # noqa: E402
 from fjms_filter_sidecar import FailingFinalExecute, build_sidecar  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
@@ -30,6 +31,10 @@ import genizah_app  # noqa: E402
 from genizah_app import GenizahGUI  # noqa: E402
 from shared import fjms_service  # noqa: E402
 from shared.fjms_service import FjmsService  # noqa: E402
+
+
+# A manuscript feature (catalogue criterion) as the stand-in for "a filter is set".
+REGION = {'region': {'values': ['Oriental'], 'mode': 'only'}}
 
 
 class _Stop(Exception):
@@ -70,13 +75,22 @@ def absent_singleton(monkeypatch, tmp_path):
                         FjmsService(db_path=str(tmp_path / "absent.db")))
 
 
+@pytest.fixture(autouse=True)
+def _sync_handoff(monkeypatch):
+    """The Catalog hand-off computes its scope in a worker; here it runs on
+    this thread, so each test sees its outcome at once."""
+    class _Sync(genizah_app._CatalogHandoffWorker):
+        def start(self):
+            self.run()
+    monkeypatch.setattr(genizah_app, '_CatalogHandoffWorker', _Sync)
+
+
 def _catalog_window():
     w = _bare_window()
     w._catalog_current_domain = None
     w._catalog_current_author = None
     w._catalog_current_work = None
-    w._catalog_date_from = 1000
-    w._catalog_date_to = 1100
+    w._catalog_criteria = dict(REGION)
     w._catalog_library_filter = []
     w._catalog_library_mode = 'show_only'
     w.pre_search_filters = {'domains': ['Piyyut']}
@@ -99,11 +113,11 @@ def test_catalog_hand_off_that_cannot_apply_its_filters_changes_nothing(
 
 def test_catalog_hand_off_that_works_still_scopes(monkeypatch, tmp_path, warned):
     monkeypatch.setattr(fjms_service, "_default_service",
-                        FjmsService(db_path=build_sidecar(tmp_path / "ok.db")))
+                        FjmsService(db_path=build_criteria_sidecar(tmp_path / "ok.db")))
     w = _catalog_window()
     w._catalog_search_in_results()
-    assert w.pre_search_filters == {'date_from': 1000, 'date_to': 1100}
-    assert w.pre_search_restrict_sys_ids == {'990001'}
+    assert w.pre_search_filters == {'criteria': REGION}
+    assert w.pre_search_restrict_sys_ids == {A}
     assert not warned
 
 
@@ -111,7 +125,7 @@ def test_catalog_hand_off_that_works_still_scopes(monkeypatch, tmp_path, warned)
 
 def test_lookup_failure_cancels_both_deferred_reruns(warned):
     w = _bare_window()
-    w.pre_search_filters = {'date_from': 1000}
+    w.pre_search_filters = {'criteria': dict(REGION)}
     w.pre_search_restrict_sys_ids = {'990001'}
     w._rerun_search_after_filter = True
     w._rerun_comp_after_filter = True
@@ -132,7 +146,7 @@ class _FakeWorker(QObject):
 def test_a_superseded_worker_cannot_block_or_rescope(warned):
     """Only the most recent pre-search recompute may set the scope or the error."""
     w = _bare_window()
-    w.pre_search_filters = {'date_from': 1000}
+    w.pre_search_filters = {'criteria': dict(REGION)}
     w.pre_search_restrict_sys_ids = None
     old, new = _FakeWorker(), _FakeWorker()
     w._connect_filter_worker(old, w._on_filter_recompute_finished)
@@ -149,7 +163,7 @@ def test_a_superseded_worker_cannot_block_or_rescope(warned):
 def _search_window(error):
     w = _bare_window()
     w.query_input = QLineEdit("word")
-    w.pre_search_filters = {'date_from': 1000}
+    w.pre_search_filters = {'criteria': dict(REGION)}
     w.pre_search_restrict_sys_ids = None
     if error is not None:
         w._pre_search_filter_error = error
@@ -181,7 +195,7 @@ def test_search_gate_tolerates_a_window_built_without_init(warned):
 def _comp_window():
     w = _bare_window()
     w.comp_text_area = QPlainTextEdit("some composition text")
-    w.pre_search_filters = {'date_from': 1000}
+    w.pre_search_filters = {'criteria': dict(REGION)}
 
     class _Title:
         def text(self):
@@ -321,7 +335,7 @@ def test_dialog_ok_supersedes_a_pending_lookup(monkeypatch, warned):
     """A scope the dialog computed replaces any lookup still running; the
     late answer of the old one must not overwrite it."""
     w = _bare_window()
-    w.pre_search_filters = {'date_from': 1000}
+    w.pre_search_filters = {'criteria': dict(REGION)}
     old = _FakeWorker()
     w._connect_filter_worker(old, w._on_filter_recompute_finished)
 
@@ -333,7 +347,7 @@ def test_dialog_ok_supersedes_a_pending_lookup(monkeypatch, warned):
             return genizah_app.QDialog.DialogCode.Accepted
 
         def get_filters(self):
-            return {'include_mode': True, 'date_from': 1100}
+            return {'include_mode': True, 'criteria': {'style': {'values': ['Square'], 'mode': 'only'}}}
 
         def get_restrict_sys_ids(self):
             return {'990002'}
@@ -355,7 +369,7 @@ class _AcceptedDialog:
         return genizah_app.QDialog.DialogCode.Accepted
 
     def get_filters(self):
-        return {'include_mode': True, 'date_from': 1100}
+        return {'include_mode': True, 'criteria': {'style': {'values': ['Square'], 'mode': 'only'}}}
 
     def get_restrict_sys_ids(self):
         return {'990002'}
@@ -365,6 +379,8 @@ def test_replacing_the_filters_cancels_a_waiting_search(monkeypatch, warned):
     """Search pressed while a lookup runs waits for it. When the filters are then
     replaced (dialog OK), the wait is cancelled and the status bar says so: left
     armed, the search started when a later, unrelated lookup answered."""
+    import genizah_core
+    monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'en')  # the message is compared in English
     w = _search_window(None)
     w._connect_filter_worker(_FakeWorker(), w._on_filter_recompute_finished)
     try:
@@ -393,7 +409,7 @@ def test_removing_the_last_filter_cancels_a_waiting_composition(warned):
     except _Stop:
         pytest.fail("run_composition ran on the old scope while the filter lookup was running")
     assert w._rerun_comp_after_filter is True
-    w._remove_filter('date_from')
+    w._remove_filter(('criteria', 'region'))
     assert w.pre_search_filters == {}
     assert (w._rerun_comp_after_filter, w._rerun_comp_custom_text) == (False, None)
     ran = []
