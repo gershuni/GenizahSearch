@@ -1,4 +1,4 @@
-## [Unreleased] -- Catalogue criteria, desktop: the Manuscript features window (desktop, PR 1c)
+## [Unreleased] -- Catalogue criteria, desktop: the Manuscript features window (desktop, branch `claude/criteria-1c-desktop-d01dce`)
 
 PR 1c of `docs/plans/CATALOGUE_CRITERIA_PLAN.md`: the desktop surfaces of the catalogue criteria
 (released together with the web panel and the API, ruling D11).
