@@ -729,7 +729,7 @@ def criterion_values(conn, key: str, universe=None, source: str = "either") -> l
     if universe is not None and criterion.not_recordable:
         missing = _Matcher(conn, universe).not_recorded(key, source)
         out.append({"value": NOT_RECORDED, "label_en": "Not recorded",
-                    "label_he": "לא נרשם", "count": len(missing)})
+                    "label_he": "ללא רישום", "count": len(missing)})
     return out
 
 
@@ -752,7 +752,8 @@ _CHIP_LABELS = {
 _SOURCE_WORDS = {"catalogue": ("קטלוג", "catalogue"), "measured": ("מדידה", "measured")}
 _UNIT_WORDS = {"cm": ('ס"מ', "cm"), "mm": ('מ"מ', "mm"),
                "per 10 cm": ('ל־10 ס"מ', "per 10 cm"), "dpi": ("dpi", "dpi")}
-_NOT_RECORDED_WORDS = ("לא נרשם", "not recorded")
+# Neutral in Hebrew: "לא נרשם" would not agree with feminine names (תקופה, שפה).
+_NOT_RECORDED_WORDS = ("ללא רישום", "not recorded")
 # Measured materials with no catalogue value of the same name (D6).
 _MEASURED_ONLY_HEBREW = {"Mix": "מעורב", "Wood": "עץ"}
 
@@ -811,7 +812,7 @@ def _range_text(criterion: Criterion, spec: dict, lang: str) -> str:
     if criterion.unit:
         text += " " + _pick(_UNIT_WORDS.get(criterion.unit, (criterion.unit,) * 2), lang)
     if spec.get("not_recorded"):
-        text += ", או לא נרשם" if lang == "he" else ", or not recorded"
+        text += ", או ללא רישום" if lang == "he" else ", or not recorded"
     return text
 
 
