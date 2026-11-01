@@ -1,6 +1,6 @@
 # GenizahSearch - Backlog
 
-> **Last Updated:** 2026-10-27 (GS-277 added: the owner's open question on editing an edition). 111 items.
+> **Last Updated:** 2026-10-27 (GS-277 added: the owner's open question on editing an edition). 112 items.
 
 What is not an open defect: deferred defects, code debt, test gaps, ideas and extensions,
 and server or owner tasks. Same row form and the same ID space as
@@ -13,7 +13,7 @@ move one to the tracker by moving its row and changing its section to a priority
 
 | Area | Deferred defects | Code debt | Test gaps | Ideas and extensions | Server and owner tasks | Total |
 |------|------|------|------|------|------|------|
-| Search | 0 | 5 | 0 | 6 | 0 | 11 |
+| Search | 0 | 5 | 0 | 7 | 0 | 12 |
 | Browse and viewer | 0 | 0 | 0 | 2 | 1 | 3 |
 | Desktop app | 2 | 12 | 1 | 8 | 0 | 23 |
 | Website | 0 | 7 | 0 | 3 | 2 | 12 |
@@ -22,7 +22,7 @@ move one to the tracker by moving its row and changing its section to a priority
 | Data and sidecars | 2 | 0 | 0 | 0 | 2 | 4 |
 | Build, CI and tests | 0 | 6 | 24 | 0 | 0 | 30 |
 | Server and operations | 0 | 0 | 0 | 0 | 3 | 3 |
-| **Total** | **4** | **40** | **28** | **26** | **13** | **111** |
+| **Total** | **4** | **40** | **28** | **27** | **13** | **112** |
 
 ## Deferred defects
 
@@ -163,6 +163,7 @@ move one to the tracker by moving its row and changing its section to a priority
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-283](ISSUE_DETAILS.md#gs-283) | Catalogue criteria: FJMS's "Additional conditions" (has image / identifications / bibliography count / transcription / translation / catalog scans) — dropped from the criteria plan, to look into later | `docs/plans/CATALOGUE_CRITERIA_PLAN.md` §4 (FJMS #15), §9 D12 | 2026-11-01 | ❌ Open |
 | [GS-231](ISSUE_DETAILS.md#gs-231) | Composition Search conditions (must / must not appear): built and released in v9.7.0, still awaiting the user's G8 cases and scope answer | `shared/compound_query.py`; `shared/passage_parallels.py::search_composition_logic`; `genizah_app.py` | 2026-10-14 | ❌ Partly fixed |
 | [GS-232](ISSUE_DETAILS.md#gs-232) | Variants verification could check words against the spelling set instead of one long regex | `shared/search_engine.py` (variant regex 2763-2791, _variant_alternation 796) | 2026-10-07 | ❌ Open |
 | [GS-233](ISSUE_DETAILS.md#gs-233) | Lab Mode results in a search-within chain | `desktop/gui_threads.py::LabSearchThread`, `genizah_app.py::_enter_refine_mode` | 2026-10-04 | ❌ Open |
