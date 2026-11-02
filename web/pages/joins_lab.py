@@ -635,6 +635,7 @@ def create_joins_lab_page(
     # The catalogue data could not be read: the filters that read the enrichment
     # are not applied (compute_filtered's catalogue_ok), and the page says so.
     _catalogue_failed: dict = {'value': False}
+    _enrich_gen: dict = {'value': 0}   # bumped per enrichment batch and per new anchor
     # The Manuscript features' answer for the candidates now shown: which of their
     # manuscripts the features keep (FjmsService.match_result_criteria, D20), for
     # 'key' = (criteria token, those manuscripts). 'state': 'idle' (no feature
@@ -1114,10 +1115,17 @@ def create_joins_lab_page(
 
         SEED-008 (D-20): the WHOLE body is wrapped in ``try/except RuntimeError``
         so a client-deleted teardown does not propagate out of the task.
+
+        Only the newest batch lands (_enrich_gen): an older one -- a search run
+        again, or a new anchor, before it finished -- neither overwrites the newer
+        candidates' enrichment nor, failing late, marks their catalogue data
+        unreadable (Codex on #462).
         """
         try:
             if not candidates_snap:
                 return
+            _enrich_gen['value'] += 1
+            my_gen = _enrich_gen['value']
             sys_ids = list(_get_enrichment_sys_ids(candidates_snap))
             # A3: include anchor sys_id in the enrichment batch (deduped)
             anchor_sid = _anchor_state.get('sys_id')
@@ -1127,10 +1135,14 @@ def create_joins_lab_page(
             try:
                 enrichment = await _enrich_candidates(sys_ids)
             except CatalogueUnavailable:
+                if my_gen != _enrich_gen['value']:
+                    return   # superseded: the newer batch decides
                 # Every candidate stays, and the page names the filters not applied.
                 _catalogue_failed['value'] = True
                 _re_render_candidates_surface()
                 return
+            if my_gen != _enrich_gen['value']:
+                return   # superseded: the newer batch's enrichment stands
             if enrichment is None:
                 return  # cancelled or app stopping (run.io_bound returned None)
             # Store in the page-level dict (shared with filter dialog + table cells)
@@ -2817,6 +2829,7 @@ def create_joins_lab_page(
         _enrichment.clear()
         _enrichment_ready['value'] = False
         _catalogue_failed['value'] = False
+        _enrich_gen['value'] += 1   # a batch for the old anchor lands nowhere
         _current_page['value'] = 0
 
         # Phase 119 D-06: VS invalidate on re-anchor — clear cached look-alikes

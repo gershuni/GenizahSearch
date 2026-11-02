@@ -3529,6 +3529,49 @@ def test_applying_the_filters_again_retries_a_failed_features_check(joins_lab_sm
     joins_lab_smoke_runner(driver)
 
 
+def test_a_superseded_enrichment_failing_late_changes_nothing(joins_lab_smoke_runner):
+    """The search is run again before its first enrichment batch finished; the
+    newer batch lands, then the older one fails. The newer candidates keep their
+    enrichment and their Domain filter, with no "could not be read" notice
+    (Codex on #462)."""
+    from unittest.mock import patch
+
+    from nicegui import ElementFilter, ui
+
+    from web.pages.joins_lab import CatalogueUnavailable
+
+    calls = []
+
+    async def driver(user):
+        release = asyncio.Event()
+
+        async def enrich(sys_ids):
+            calls.append(list(sys_ids))
+            if len(calls) == 1:
+                await release.wait()
+                raise CatalogueUnavailable('the first batch fails late')
+            return dict(_LIB_DOM_ENRICH)
+
+        with patch('web.pages.joins_lab._enrich_candidates', new=enrich):
+            await user.open(
+                f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table", domains=["Bible"])}')
+            await asyncio.sleep(1.5)
+            assert len(calls) == 1                          # still waiting
+            with user._client:
+                [run] = [b for b in ElementFilter(kind=ui.button)
+                         if b._props.get('icon') == 'search' and b.visible]
+            _click_element(user, run)                       # the search again
+            await asyncio.sleep(1.0)
+            assert len(calls) == 2
+            assert _table_sids(user) == {_LIB_DOM_SIDS[1]}  # Bible: the newer batch
+            release.set()                                   # the older one fails now
+            await asyncio.sleep(0.5)
+            assert _table_sids(user) == {_LIB_DOM_SIDS[1]}
+            assert _notices(user) == []
+
+    joins_lab_smoke_runner(driver, mock_search_results=_lib_dom_results())
+
+
 def test_unreadable_catalogue_data_keeps_the_candidates_under_the_domain_filter(
         joins_lab_smoke_runner):
     """The Domain filter reads the enrichment: when the catalogue data cannot be
