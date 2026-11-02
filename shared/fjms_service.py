@@ -936,6 +936,14 @@ class FjmsService:
         # GET /api/criteria (criteria_vocabulary): one build at a time -- a cold
         # build reads the whole catalogue (~20 s on the full file).
         self._criteria_vocabulary_lock = threading.Lock()
+        # The panel's values, coverage and corpus note: one cold build at a
+        # time PER KEY (_build_once), so a visitor who asks while the
+        # server-start warm-up is still building that key waits for the build
+        # instead of running the same corpus-wide query beside it, and other
+        # keys still build side by side (GitHub Codex on PR 461). Taken inside
+        # _criteria_vocabulary_lock, never around it.
+        self._criteria_key_locks: dict = {}
+        self._criteria_key_locks_guard = threading.Lock()
         # SEED-023: per-thread registry of populated catalog-filter TEMP tables
         # (name -> token). The PGP/edition membership sets are static per process,
         # so each thread's TEMP table is built once and reused across requests.
@@ -1727,15 +1735,31 @@ class FjmsService:
         universe = _resolve_universe(universe)
         cache = self.__dict__.setdefault("_criterion_values_cache", {})
         token = (key, source, _universe_token(universe))
+
+        def build():
+            try:
+                return criterion_values(self._conn, key, universe, source)
+            except Exception as e:
+                raise FilterUnavailable('query_failed', f'the {key} values could not be read',
+                                        filters=(key,)) from e
+        return copy.deepcopy(self._build_once('values', cache, token, build))
+
+    def _build_once(self, name: str, cache: dict, token, build):
+        """``cache[token]``, built by ``build()`` when missing -- by one
+        thread at a time for that key: the others wait for its answer (one
+        corpus-wide query, not one each), while other keys build beside it.
+        A build that raises caches nothing; the next caller tries again."""
         if token in cache:
-            return copy.deepcopy(cache[token])
-        try:
-            values = criterion_values(self._conn, key, universe, source)
-        except Exception as e:
-            raise FilterUnavailable('query_failed', f'the {key} values could not be read',
-                                    filters=(key,)) from e
-        cache[token] = values
-        return copy.deepcopy(values)
+            return cache[token]
+        with self._criteria_key_locks_guard:
+            lock = self._criteria_key_locks.setdefault((name, token), threading.Lock())
+        with lock:
+            if token not in cache:
+                cache[token] = build()
+        with self._criteria_key_locks_guard:
+            # Built: every later caller finds it in the cache without the lock.
+            self._criteria_key_locks.pop((name, token), None)
+        return cache[token]
 
     def get_criterion_coverage(self, key: str, universe, source: str = 'either') -> int:
         """How many manuscripts of ``universe`` (a set, or a callable giving
@@ -1750,13 +1774,14 @@ class FjmsService:
                                     'the list of all manuscripts is not loaded yet', (key,))
         cache = self.__dict__.setdefault("_criterion_coverage_cache", {})
         token = (key, source, _universe_token(universe))
-        if token not in cache:
+
+        def build():
             try:
-                cache[token] = _recorded_count(self._conn, key, universe, source)
+                return _recorded_count(self._conn, key, universe, source)
             except Exception as e:
                 raise FilterUnavailable('query_failed', f'the {key} coverage could not be read',
                                         filters=(key,)) from e
-        return cache[token]
+        return self._build_once('coverage', cache, token, build)
 
     def criteria_live_total(self, criteria, universe) -> dict:
         """The panel's live total: ``{'total': N, 'not_recorded': {key: M}}``
@@ -1783,17 +1808,22 @@ class FjmsService:
         """The figures of the panel's note under the total (§6.3):
         ``{'corpus': N, 'uncatalogued': U, 'uncatalogued_sized': S}`` -- the
         corpus, those with no catalogue record, and how many of those have
-        an unflagged catalogue size. Raises FilterUnavailable."""
+        an unflagged catalogue size. Cached per corpus: the panel asks for it
+        beside every "recorded for N of M". Raises FilterUnavailable."""
         universe = _resolve_universe(universe)
         if universe is None:
             raise FilterUnavailable('corpus_unavailable',
                                     'the list of all manuscripts is not loaded yet')
-        uncatalogued = universe - self.catalogued_ids()
-        sized = universe - (self.get_filter_sys_ids(
-            criteria={'width': {'not_recorded': True, 'source': 'catalogue'}},
-            universe=universe) or set())
-        return {'corpus': len(universe), 'uncatalogued': len(uncatalogued),
-                'uncatalogued_sized': len(uncatalogued & sized)}
+        cache = self.__dict__.setdefault("_criteria_note_cache", {})
+
+        def build():
+            uncatalogued = universe - self.catalogued_ids()
+            sized = universe - (self.get_filter_sys_ids(
+                criteria={'width': {'not_recorded': True, 'source': 'catalogue'}},
+                universe=universe) or set())
+            return {'corpus': len(universe), 'uncatalogued': len(uncatalogued),
+                    'uncatalogued_sized': len(uncatalogued & sized)}
+        return dict(self._build_once('note', cache, _universe_token(universe), build))
 
     def criteria_vocabulary(self, universe) -> dict:
         """What GET /api/criteria serves: every section and criterion in the
