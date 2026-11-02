@@ -9,6 +9,8 @@ Over the real FjmsService and the criteria fixture sidecar (tests/criteria_sidec
 """
 import os
 import sys
+import threading
+import time
 
 import pytest
 
@@ -42,12 +44,16 @@ def new_file(tmp_path_factory):
 
 def _panel_reads(svc, universe):
     """What the panel asks for, section by section: each criterion's coverage
-    and, for a list, its values, for every source it offers."""
+    with the corpus note beside it ("recorded for N of M", _load_coverage)
+    and, for a list, its values, for every source it offers; then the note
+    under the total (_load_note)."""
     for criterion in CRITERIA:
         for source in ('either', *criterion.sources):
             svc.get_criterion_coverage(criterion.key, universe, source)
+            svc.criteria_corpus_note(universe)
             if criterion.kind == 'list':
                 svc.get_criterion_values(criterion.key, universe, source)
+    svc.criteria_corpus_note(universe)
 
 
 def _no_query(*_a, **_k):
@@ -62,7 +68,59 @@ def test_after_the_warm_up_the_panel_runs_no_query(new_file, monkeypatch):
     assert meta.timeouts == [300.0]
     monkeypatch.setattr(fjms_service, 'criterion_values', _no_query)
     monkeypatch.setattr(fjms_service, '_recorded_count', _no_query)
+    # the corpus note's width query (GitHub Codex on PR 461)
+    monkeypatch.setattr(svc, 'get_filter_sys_ids', _no_query)
     _panel_reads(svc, meta.corpus_sys_ids)       # the panel hands the service the callable
+
+
+def _counted(calls, real, pause=0.2):
+    def slow(*a, **k):
+        calls.append(1)
+        time.sleep(pause)                        # long enough for the others to arrive
+        return real(*a, **k)
+    return slow
+
+
+def _together(read, n=4):
+    """``read()`` from n threads at once; their answers."""
+    answers, errors = [], []
+
+    def run():
+        try:
+            answers.append(read())
+        except Exception as e:                   # pragma: no cover - reported below
+            errors.append(e)
+    threads = [threading.Thread(target=run) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    assert not errors, errors
+    assert len(answers) == n
+    return answers
+
+
+@pytest.mark.parametrize('read', ['coverage', 'values', 'note'])
+def test_readers_during_the_warm_up_share_one_build(new_file, monkeypatch, read):
+    """A visitor who opens the panel while the start is still building it
+    waits for that build rather than running the same corpus-wide query
+    beside it (GitHub Codex on PR 461): one query, however many ask."""
+    svc = FjmsService(db_path=new_file)
+    svc.catalogued_ids()                         # cached already; not what is counted
+    calls = []
+    if read == 'coverage':
+        monkeypatch.setattr(fjms_service, '_recorded_count',
+                            _counted(calls, fjms_service._recorded_count))
+        answers = _together(lambda: svc.get_criterion_coverage('material', UNIVERSE))
+    elif read == 'values':
+        monkeypatch.setattr(fjms_service, 'criterion_values',
+                            _counted(calls, fjms_service.criterion_values))
+        answers = _together(lambda: svc.get_criterion_values('material', UNIVERSE))
+    else:
+        monkeypatch.setattr(svc, 'get_filter_sys_ids', _counted(calls, svc.get_filter_sys_ids))
+        answers = _together(lambda: svc.criteria_corpus_note(UNIVERSE))
+    assert len(calls) == 1
+    assert all(a == answers[0] for a in answers)
 
 
 def test_without_the_warm_up_the_panel_queries(new_file, monkeypatch):

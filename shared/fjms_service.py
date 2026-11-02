@@ -936,6 +936,12 @@ class FjmsService:
         # GET /api/criteria (criteria_vocabulary): one build at a time -- a cold
         # build reads the whole catalogue (~20 s on the full file).
         self._criteria_vocabulary_lock = threading.Lock()
+        # The panel's values, coverage and corpus note: one cold build at a
+        # time, so a visitor who asks while the server-start warm-up is still
+        # building them waits for that build instead of running the same
+        # corpus-wide query beside it (GitHub Codex on PR 461). Taken inside
+        # _criteria_vocabulary_lock, never around it.
+        self._criteria_build_lock = threading.RLock()
         # SEED-023: per-thread registry of populated catalog-filter TEMP tables
         # (name -> token). The PGP/edition membership sets are static per process,
         # so each thread's TEMP table is built once and reused across requests.
@@ -1727,15 +1733,15 @@ class FjmsService:
         universe = _resolve_universe(universe)
         cache = self.__dict__.setdefault("_criterion_values_cache", {})
         token = (key, source, _universe_token(universe))
-        if token in cache:
-            return copy.deepcopy(cache[token])
-        try:
-            values = criterion_values(self._conn, key, universe, source)
-        except Exception as e:
-            raise FilterUnavailable('query_failed', f'the {key} values could not be read',
-                                    filters=(key,)) from e
-        cache[token] = values
-        return copy.deepcopy(values)
+        if token not in cache:
+            with self._criteria_build_lock:
+                if token not in cache:
+                    try:
+                        cache[token] = criterion_values(self._conn, key, universe, source)
+                    except Exception as e:
+                        raise FilterUnavailable('query_failed', f'the {key} values could not be read',
+                                                filters=(key,)) from e
+        return copy.deepcopy(cache[token])
 
     def get_criterion_coverage(self, key: str, universe, source: str = 'either') -> int:
         """How many manuscripts of ``universe`` (a set, or a callable giving
@@ -1751,11 +1757,13 @@ class FjmsService:
         cache = self.__dict__.setdefault("_criterion_coverage_cache", {})
         token = (key, source, _universe_token(universe))
         if token not in cache:
-            try:
-                cache[token] = _recorded_count(self._conn, key, universe, source)
-            except Exception as e:
-                raise FilterUnavailable('query_failed', f'the {key} coverage could not be read',
-                                        filters=(key,)) from e
+            with self._criteria_build_lock:
+                if token not in cache:
+                    try:
+                        cache[token] = _recorded_count(self._conn, key, universe, source)
+                    except Exception as e:
+                        raise FilterUnavailable('query_failed', f'the {key} coverage could not be read',
+                                                filters=(key,)) from e
         return cache[token]
 
     def criteria_live_total(self, criteria, universe) -> dict:
@@ -1783,17 +1791,24 @@ class FjmsService:
         """The figures of the panel's note under the total (§6.3):
         ``{'corpus': N, 'uncatalogued': U, 'uncatalogued_sized': S}`` -- the
         corpus, those with no catalogue record, and how many of those have
-        an unflagged catalogue size. Raises FilterUnavailable."""
+        an unflagged catalogue size. Cached per corpus: the panel asks for it
+        beside every "recorded for N of M". Raises FilterUnavailable."""
         universe = _resolve_universe(universe)
         if universe is None:
             raise FilterUnavailable('corpus_unavailable',
                                     'the list of all manuscripts is not loaded yet')
-        uncatalogued = universe - self.catalogued_ids()
-        sized = universe - (self.get_filter_sys_ids(
-            criteria={'width': {'not_recorded': True, 'source': 'catalogue'}},
-            universe=universe) or set())
-        return {'corpus': len(universe), 'uncatalogued': len(uncatalogued),
-                'uncatalogued_sized': len(uncatalogued & sized)}
+        cache = self.__dict__.setdefault("_criteria_note_cache", {})
+        token = _universe_token(universe)
+        if token not in cache:
+            with self._criteria_build_lock:
+                if token not in cache:
+                    uncatalogued = universe - self.catalogued_ids()
+                    sized = universe - (self.get_filter_sys_ids(
+                        criteria={'width': {'not_recorded': True, 'source': 'catalogue'}},
+                        universe=universe) or set())
+                    cache[token] = {'corpus': len(universe), 'uncatalogued': len(uncatalogued),
+                                    'uncatalogued_sized': len(uncatalogued & sized)}
+        return dict(cache[token])
 
     def criteria_vocabulary(self, universe) -> dict:
         """What GET /api/criteria serves: every section and criterion in the
