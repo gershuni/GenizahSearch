@@ -550,21 +550,22 @@ def material_display(material: str) -> str:
     return material
 
 
-def _restored_criteria(raw) -> dict:
-    """The Manuscript features of a saved Joins Lab session: cleaned (a malformed
-    one dropped), without those the open catalogue file is KNOWN not to answer (a
-    5.0.0 file, rule 9). A file that could not be read keeps them: their check
-    then says it failed."""
+def _restored_criteria(raw) -> tuple:
+    """(criteria, dropped keys): the Manuscript features of a saved Joins Lab
+    session, cleaned (a malformed one dropped), without those the open catalogue
+    file is KNOWN not to answer (a 5.0.0 file, rule 9) -- *dropped* names those,
+    for the restore's notice. A file that could not be read keeps them: their
+    check then says it failed."""
     from shared.catalog_criteria import clean_criteria
     criteria = clean_criteria(raw, strict=False)[0]
     if not criteria:
-        return {}
+        return {}, []
     try:
         from desktop.dialogs_filter import drop_unavailable_criteria
-        criteria, _dropped = drop_unavailable_criteria(criteria)
+        return drop_unavailable_criteria(criteria)
     except Exception:
         logger.debug("Joins Lab: the saved features' support could not be read", exc_info=True)
-    return criteria
+        return criteria, []
 
 
 # ---------------------------------------------------------------------------
@@ -2725,6 +2726,7 @@ if _QT_AVAILABLE:
             self._criteria_tag = 0
             self._criteria_pending: dict = {}     # worker tag -> the key it checks
             self._dialog_recount = None           # the open Filter dialog's recount
+            self._dropped_notice = False          # a restore dropped saved features
             self._search_thread = None
             # SEED-024 follow-up: Stop-search toggle state (parity with main search)
             self._is_searching = False
@@ -3873,7 +3875,14 @@ if _QT_AVAILABLE:
                 notices.append(tr("Checking manuscript features…"))
             elif self._criteria_state == "failed":
                 notices.append(tr("The manuscript features could not be applied to these results."))
+            if self._dropped_notice:
+                notices.append(tr("Some saved filters were removed: this catalog data is not available."))
             return notices
+
+        def _note_dropped_criteria(self):
+            """A restored session lost features the open catalogue file cannot answer:
+            the status line says so until the filters are next applied or cleared."""
+            self._dropped_notice = True
 
         def _chosen_names(self, key: str) -> list:
             """The chosen libraries or domains as the user reads them; of domains, only
@@ -4326,6 +4335,7 @@ if _QT_AVAILABLE:
             self._criteria = {}
             self._criteria_key, self._criteria_state = None, "idle"
             self._criteria_pending.clear()   # a check still running answers no one
+            self._dropped_notice = False
             try:
                 self.filter_in.clear()
                 self.tri_filter.setCurrentIndex(0)
@@ -4606,6 +4616,7 @@ if _QT_AVAILABLE:
                     self._criteria = dict(draft["criteria"])
                 if self._criteria_state == "failed":
                     self._criteria_key = None   # applied again: checked again
+                self._dropped_notice = False    # the user has seen the filters since
                 # Library / Domain by value; one no longer among the results (new
                 # results may have come meanwhile) is dropped.
                 for key, checklist, mode in (("libraries", dlg_lib, dlg_lib_mode),
@@ -6703,7 +6714,15 @@ if _QT_AVAILABLE:
                 # dropped (rule 9). A session from before them saved the old Material
                 # combo's row ("mat_filter_idx"), which never restored (the list was
                 # filled later, from the results): nothing to carry over.
-                pane._criteria = _restored_criteria(state.get("criteria"))
+                pane._criteria, dropped = _restored_criteria(state.get("criteria"))
+                if dropped:
+                    # Said in the Joins Lab's status line, and with the main window's
+                    # other restore notices (Codex on #462: not silently)
+                    pane._note_dropped_criteria()
+                    restore_notice = getattr(self._app, "_restore_notice", None)
+                    if callable(restore_notice):
+                        restore_notice(tr("Some saved filters were removed: "
+                                          "this catalog data is not available."))
                 tri_filter_idx = int(state.get("tri_filter_idx", 0))
                 if 0 <= tri_filter_idx < pane.tri_filter.count():
                     pane.tri_filter.setCurrentIndex(tri_filter_idx)

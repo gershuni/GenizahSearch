@@ -3493,6 +3493,42 @@ def test_a_failed_features_check_hides_no_candidate(joins_lab_smoke_runner):
     joins_lab_smoke_runner(driver)
 
 
+def test_applying_the_filters_again_retries_a_failed_features_check(joins_lab_smoke_runner):
+    """A check that failed is tried again when the filters are applied again
+    (Codex on #462): the same features over the same candidates are not left on
+    the failed answer once the catalogue service is back."""
+    from unittest.mock import patch
+
+    from nicegui import ElementFilter, ui
+
+    fjms = _FeaturesFjms(keep={_CAND_TEXT_SID}, fail=True)
+
+    async def driver(user):
+        with patch('web.pages.joins_lab.get_fjms_service', return_value=fjms):
+            await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table")}')
+            await asyncio.sleep(1.5)
+            assert _table_sids(user) == {_CAND_TEXT_SID, _CAND_VS_SID}
+            assert len(_notices(user)) == 1
+            asked = len(fjms.asked)
+
+            fjms.fail = False                               # the service is back
+            with user._client:
+                [more] = [b for b in ElementFilter(kind=ui.button, marker='joins-more-filters')
+                          if b.visible]
+            _click_element(user, more)
+            await asyncio.sleep(0.3)
+            with user._client:
+                apply_btn = next(b for b in ElementFilter(kind=ui.button).within(kind=ui.dialog)
+                                 if b._props.get('label') in ('Apply', 'החל'))
+            _click_element(user, apply_btn)
+            await asyncio.sleep(0.5)
+            assert len(fjms.asked) == asked + 1
+            assert _table_sids(user) == {_CAND_TEXT_SID}
+            assert _notices(user) == []
+
+    joins_lab_smoke_runner(driver)
+
+
 def test_unreadable_catalogue_data_keeps_the_candidates_under_the_domain_filter(
         joins_lab_smoke_runner):
     """The Domain filter reads the enrichment: when the catalogue data cannot be

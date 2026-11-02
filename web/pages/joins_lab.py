@@ -1397,6 +1397,8 @@ def create_joins_lab_page(
 
         def _on_filter_apply() -> None:
             # filter_state was already mutated in place by the dialog.
+            if _criteria_match['state'] == 'failed':
+                _criteria_match['key'] = None   # applied again: checked again (Codex on #462)
             _current_page['value'] = 0  # reset to page 0 on filter change
             _re_render_candidates_surface()
             # PST-01: persist filter change (on event loop; filter dialog runs synchronously)

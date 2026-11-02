@@ -233,24 +233,60 @@ def test_reset_and_clear_drop_the_features(svc, workers, monkeypatch):
     assert pane._criteria == {}
 
 
+def _restore(pane, criteria):
+    """The window's real restore_state, on a stand-in window around *pane*;
+    returns the notices it gave the main window."""
+    from types import SimpleNamespace
+
+    from desktop.join_workbench import JoinWorkbenchWindow
+    notices = []
+    window = SimpleNamespace(_candidate_pane=pane, _app=SimpleNamespace(
+        _restore_notice=notices.append), set_anchor=lambda res: None)
+    JoinWorkbenchWindow.restore_state(window, {"anchor": {}, "criteria": criteria})
+    return notices
+
+
 def test_a_saved_session_brings_the_features_back_cleaned(svc):
     """restore_state reads the saved features through _restored_criteria: a
-    malformed one is dropped."""
-    from desktop.join_workbench import _restored_criteria
-    assert _restored_criteria({"material": {"values": ["Vellum"]},
-                               "lines": {"min": "many"}, "evil": {}}) == {
+    malformed one is dropped, with no notice (nothing the file cannot answer)."""
+    pane = _pane()
+    notices = _restore(pane, {"material": {"values": ["Vellum"]},
+                              "lines": {"min": "many"}, "evil": {}})
+    assert pane._criteria == {
         "material": {"source": "either", "values": ["Vellum"], "mode": "only"}}
-    assert _restored_criteria(None) == {}
-
-
-def test_a_5_0_0_file_drops_the_features_it_cannot_answer(tmp_path, monkeypatch):
+    assert notices == []
     from desktop.join_workbench import _restored_criteria
+    assert _restored_criteria(None) == ({}, [])
+
+
+def test_a_5_0_0_file_drops_the_features_it_cannot_answer_and_says_so(
+        tmp_path, monkeypatch, workers):
+    """A feature the open (5.0.0) file cannot answer is dropped on restore, and
+    the restore says so: with the main window's restore notices, and in the Joins
+    Lab's status line until the filters are next applied (Codex on #462)."""
+    import desktop.join_workbench as jw
+    import genizah_core
     from shared import fjms_service
     from shared.fjms_service import FjmsService
     service = FjmsService(db_path=build_criteria_sidecar(tmp_path / "old.db", upgrade=False))
     monkeypatch.setattr(fjms_service, "_default_service", service)
+    for module in (genizah_core, jw):
+        monkeypatch.setattr(module, "CURRENT_LANG", "en")
+    notice = "Some saved filters were removed: this catalog data is not available."
     try:
-        assert _restored_criteria({"period": {"min": 1000}, **VELLUM}) == {
+        pane = _pane()
+        notices = _restore(pane, {"period": {"min": 1000}, **VELLUM})
+        assert pane._criteria == {
             "material": {"source": "either", "values": ["Vellum"], "mode": "only"}}
+        assert notices == [notice]
+        pane.apply_filters()
+        assert notice in pane.status.text()
+
+        def drive(dlg):
+            from PyQt6.QtWidgets import QPushButton
+            next(b for b in dlg.findChildren(QPushButton) if b.text() == "Apply").click()
+        monkeypatch.setattr(jw.QDialog, "exec", lambda dlg: (drive(dlg), 1)[1])
+        pane._open_filter_dialog()
+        assert notice not in pane.status.text()
     finally:
         service.close()
