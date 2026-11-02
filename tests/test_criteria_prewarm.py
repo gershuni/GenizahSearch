@@ -123,6 +123,29 @@ def test_readers_during_the_warm_up_share_one_build(new_file, monkeypatch, read)
     assert all(a == answers[0] for a in answers)
 
 
+def test_different_features_are_built_side_by_side(new_file, monkeypatch):
+    """One build at a time per feature, not for all of them: a visitor who
+    opens Language while the warm-up is still counting Material does not wait
+    for Material (GitHub Codex on PR 461, round 3). The two counts must be
+    inside the query together to pass the barrier."""
+    svc = FjmsService(db_path=new_file)
+    barrier = threading.Barrier(2, timeout=3)
+    real = fjms_service._recorded_count
+
+    def meet(*a, **k):
+        barrier.wait()                           # BrokenBarrierError when serialized
+        return real(*a, **k)
+    monkeypatch.setattr(fjms_service, '_recorded_count', meet)
+    keys = iter(['material', 'language'])
+    lock = threading.Lock()
+
+    def read():
+        with lock:
+            key = next(keys)
+        return svc.get_criterion_coverage(key, UNIVERSE)
+    _together(read, n=2)
+
+
 def test_without_the_warm_up_the_panel_queries(new_file, monkeypatch):
     """The check above can fail: a cold service does query."""
     svc = FjmsService(db_path=new_file)

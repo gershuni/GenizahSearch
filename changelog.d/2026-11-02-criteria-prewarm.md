@@ -8,4 +8,5 @@
 - The note under the total ("These criteria cover all N manuscripts...") and the "of M" beside every count
   are cached too (`FjmsService.criteria_corpus_note`): each section opened ran a corpus-wide width query
   for them, every time. A visitor who opens the window while the start is still computing waits for that
-  computation instead of running the same query beside it (`_criteria_build_lock`; GitHub Codex on PR 461).
+  computation instead of running the same query beside it, while other features are still computed side by
+  side (`FjmsService._build_once`, one lock per feature; GitHub Codex on PR 461).
