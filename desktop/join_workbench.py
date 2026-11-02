@@ -3795,10 +3795,10 @@ if _QT_AVAILABLE:
             if not criteria:
                 return None
             key = self._criteria_key_of(criteria)
-            if key in self._criteria_answers:
-                return self._criteria_answers[key]
-            self._start_criteria_check(criteria, key)
-            return None
+            if key not in self._criteria_answers:
+                self._start_criteria_check(criteria, key)
+            # A check with no manuscripts to ask about is answered at once
+            return self._criteria_answers.get(key)
 
         def _applied_criteria_ids(self):
             """_criteria_ids_for the applied features, keeping _criteria_state."""
@@ -3806,19 +3806,22 @@ if _QT_AVAILABLE:
                 self._criteria_key, self._criteria_state = None, "idle"
                 return None
             key = self._criteria_key_of(self._criteria)
-            if key in self._criteria_answers:
+            if key not in self._criteria_answers:
+                if key == self._criteria_key and self._criteria_state == "failed":
+                    return None   # it failed: tried again when the features are applied again
+                self._criteria_key, self._criteria_state = key, "pending"
+                self._start_criteria_check(self._criteria, key)
+            if key in self._criteria_answers:   # known, or answered at once (Codex on #462)
                 self._criteria_key, self._criteria_state = key, "ready"
                 return self._criteria_answers[key]
-            if key == self._criteria_key and self._criteria_state == "failed":
-                return None   # it failed: tried again when the features are applied again
-            self._criteria_key, self._criteria_state = key, "pending"
-            self._start_criteria_check(self._criteria, key)
             return None
 
         def _start_criteria_check(self, criteria, key):
             if key in self._criteria_pending.values():
                 return
             if not key[1]:
+                # No corpus manuscript among the results (none, or only LOCAL ones):
+                # nothing to ask, and none of them has catalogue data to match.
                 self._remember_criteria_answer(key, set())
                 return
             from desktop.gui_threads import CriteriaMatchWorker

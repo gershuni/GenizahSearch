@@ -130,6 +130,20 @@ def test_the_candidates_are_the_universe(svc, workers):
     assert workers.started == []
 
 
+def test_results_with_no_corpus_manuscript_are_answered_at_once(svc, workers):
+    """No corpus manuscript to ask about (only LOCAL "My Library" ids): the answer
+    is empty and final on the same pass -- no worker, no "Checking" left on the
+    status line, and the LOCAL candidates (no catalogue data) do not pass the
+    features (Codex on #462)."""
+    pane = _pane(rows=(("970000000000000001", 1), ("970000000000000002", 4)))
+    pane._criteria = dict(VELLUM)
+    pane.apply_filters()
+    assert workers.started == []
+    assert _shown(pane) == []
+    assert pane._criteria_state == "ready"
+    assert "Checking" not in pane.status.text()
+
+
 def test_a_failed_check_hides_nothing_and_says_so(svc, workers, monkeypatch):
     from shared.fjms_service import FilterUnavailable
 
