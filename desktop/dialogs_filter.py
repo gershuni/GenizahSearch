@@ -1802,6 +1802,9 @@ class PreSearchFilterDialog(QDialog):
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
         self._criteria = dlg.get_criteria()
+        if self._criteria:
+            from desktop import startup_tips  # noqa: PLC0415
+            startup_tips.mark_used('features')  # its startup tips are no longer needed
         self._update_criteria_button()
         self._on_filter_changed()
 

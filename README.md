@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 9.12.1
+# Dicta Genizah Search Pro 9.13.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,22 +8,22 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 9.12.1?
+## What's New in Version 9.13.0?
 
-**Keyboard shortcuts, round two**
+**Find manuscripts by features**
 
-Going back to Search or Composition Search puts the cursor in its results, Ctrl+R goes to the
-results list of the tab in front, and Ctrl+A ticks every Search result; plus smaller fixes to the
-9.12.0 keys. Desktop only.
-
-9.12.0 brought the keyboard shortcuts: the cursor waits in the search box when the app opens and
-moves to the results when a search finds them, where Space ticks a result, Enter opens it and
-Ctrl+Enter or Ctrl+B opens it in Browse; Ctrl+1 to Ctrl+7 open the tabs, the Manuscript Viewer
-moves between results and images with Ctrl and the arrow and page keys, and Ctrl+/ shows every key
-on one card. On the website, the Parallels Word export marks the matched words.
+A new **Manuscript features** button, on Browse by Identification and under "Search only in..." (the desktop
+app's **Focus Search**), opens one window with what the catalogue records about each manuscript: period of copy,
+language and alphabet, script style and region, vocalization, columns and lines, physical status, material,
+attributes (illustration, colophon, massorah...) and measurements computed from the photographs. Tick values,
+choose "all except these", or ask for "not recorded"; every value shows how many manuscripts have it, and
+the window counts the matches before you apply it. Browse by Identification now lists all 255,723
+manuscripts, including the 29,169 with no catalogue record, and shows each record's full range of dates.
+The same features are in the public API (`filters.criteria`, `GET /api/criteria`) and in GenizahSearch for
+ChatGPT and Claude.
 
 Earlier releases: [CHANGELOG.md](CHANGELOG.md). The README's previous What's New sections
-(8.1.0 to 9.11.0) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
+(8.1.0 to 9.12.1) are kept in [docs/archive/README_WHATS_NEW_ARCHIVE.md](docs/archive/README_WHATS_NEW_ARCHIVE.md).
 
 ---
 
@@ -98,7 +98,7 @@ Add **GenizahSearch to ChatGPT** from [genizahsearch.com/ai](https://genizahsear
 
 ### Desktop Installation
 
-1. **Download:** the installer (`GenizahSearchPro_V9.12.1_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
+1. **Download:** the installer (`GenizahSearchPro_V9.13.0_Setup.exe`, about 512 MB) from the [latest GitHub release](https://github.com/gershuni/GenizahSearch/releases/latest)
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

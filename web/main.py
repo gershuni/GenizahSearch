@@ -767,7 +767,7 @@ from version import APP_VERSION
 # Names the CONTENT wave, not a release: the seen flag is stored per browser
 # as this exact string, so it must change whenever the announcement does, and
 # "9.0.0" was already spent on the 2026-08-16 web release.
-WHATS_NEW_VERSION = "9.11.1-cudl"
+WHATS_NEW_VERSION = "9.13.0-features"
 # The What's New entry for each combination of live AI listings (web/ai_listings.py).
 AI_LAUNCH_WHATS_NEW = {
     ('ChatGPT', 'Claude'): "New: GenizahSearch in ChatGPT and Claude - ask about the manuscripts in your own words, from the AI tools page.",
@@ -1776,12 +1776,6 @@ def create_layout():
         _new_surfaces.append(
             (tr("New: ask the Genizah in ChatGPT - the GenizahSearch GPT, a research "
                 "skill for other AI assistants, and the public API, from the AI tools page."), '/ai'))
-    # v9.8.0 (2026-10-19), ungated: opens with the owner's own Hebrew. It leads
-    # to the Joins Lab: the Visual Similarity window is a dialog inside Browse,
-    # with no page. Kept below the 9.9.0 entries (owner); the 9.7.0 entry went.
-    _new_surfaces.insert(0, (tr("New in the Joins Lab and the Visual Similarity window: sort and "
-                                "filter by library and domain, image and card sizes, a link to "
-                                "share the screen, and a fuller Compare window"), '/joins-lab'))
     # v9.9.0 (2026-10-23), ungated, both in the owner's own Hebrew: the phone layout
     # of the Joins Lab and Personal Lists, then the Responsa stars on top.
     _new_surfaces.insert(0, (tr("The Joins Lab and Personal Lists now fit a phone: Compare shows "
@@ -1796,6 +1790,12 @@ def create_layout():
     # v9.11.1 (2026-10-30), ungated: the owner's own Hebrew line, above the FGP one.
     _new_surfaces.insert(0, (tr("New: corrected and added links to the Cambridge Digital Library (CUDL)"),
                              '/browse'))
+    # v9.13.0 (2026-11-01), ungated: the Manuscript features, leading to Browse by
+    # Identification. The 9.8.0 Joins Lab entry went to make room (owner).
+    _new_surfaces.insert(0, (tr("New: find manuscripts by their features — script, region, period, "
+                                "vocalization, lines, size, material and more — with the Manuscript "
+                                "features button, on Browse by Identification and in Search only in..."),
+                             '/catalog-browse'))
 
     _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
     # Each listing launch lights the unread dot again (whats_new_suffix).

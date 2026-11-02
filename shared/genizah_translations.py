@@ -5755,6 +5755,8 @@ TRANSLATIONS.update({
     "Tips are off. You can turn them on again in Settings.":
         "הטיפים כבויים. אפשר להפעיל אותם שוב בהגדרות.",
     "Show a tip when the program starts": "הצגת טיפ בפתיחת התוכנה",
+    "Show all tips again": "הצגת כל הטיפים מחדש",
+    "The tips are reset and all of them are shown again.": "תצוגת הטיפים תתאפס וכל הטיפים יוצגו מחדש",
     "Ctrl+G opens any manuscript from anywhere: type a shelfmark or system number, or pick one of the last ten you opened.":
         "Ctrl+G פותח כל כתב יד מכל מקום: הקלידו מספר מדף או מספר מערכת, או בחרו אחד מעשרת כתבי היד האחרונים שפתחתם.",
     "The arrow at the end of the query box reruns a recent search; ☆ keeps it at the top of the list for good.":
@@ -6372,4 +6374,34 @@ TRANSLATIONS.update({
     "More actions": "פעולות נוספות",
     "Compact rows": "שורות צפופות",
     "Comfortable rows": "שורות מרווחות",
+})
+
+# v9.13.0 web What's New entry and desktop What's New bar and dialog (2026-11-01),
+# approved with the release texts.
+TRANSLATIONS.update({
+    'New: find manuscripts by their features — script, region, period, vocalization, lines, size, material and more — with the Manuscript features button, on Browse by Identification and in Search only in...':
+        'חדש: איתור כתבי יד לפי המאפיינים שלהם – כתב, אזור, תקופה, ניקוד, שורות, מידות, חומר ועוד – בכפתור "מאפייני כתב היד", בעיון לפי זיהוי וב"חפש רק ב..."',
+    'New: find manuscripts by their features — script, region, period, vocalization, lines, size, material and more':
+        'חדש: איתור כתבי יד לפי המאפיינים שלהם – כתב, אזור, תקופה, ניקוד, שורות, מידות, חומר ועוד',
+    'The new Manuscript features button opens one window with what the catalogue records about each manuscript: period of copy, language and alphabet, script and region, vocalization, number of columns and lines, physical status, material, attributes, and measurements computed from the photographs.':
+        'הכפתור החדש "מאפייני כתב היד" פותח חלון אחד ובו מה שהקטלוג מתעד על כל כתב יד: תקופת העתקה, שפה ואות, כתב ואזור, ניקוד, מספר טורים ושורות, מצב פיזי, חומר, תכונות ונתונים שחושבו מן הצילומים.',
+    'Tick values, or choose "All except these"; "Not recorded" finds the manuscripts the catalogue says nothing about. Each value shows how many manuscripts have it, and the window counts the matches before you apply it.':
+        'סמנו ערכים, או בחרו "הכול חוץ מאלה"; "ללא רישום" מוצא את כתבי היד שהקטלוג אינו מתעד בהם דבר. ליד כל ערך מופיע מספר כתבי היד שיש להם אותו, והחלון סופר את ההתאמות לפני שמחילים אותו.',
+    'On the Browse by Identification tab the window lists the manuscripts; in Focus Search it limits a search to them. Browse by Identification now lists all 255,723 manuscripts, including the 29,169 without a catalogue record.':
+        'בלשונית "עיון לפי זיהוי" החלון מציג את כתבי היד; ב"מקד חיפוש" הוא מגביל אליהם את החיפוש. "עיון לפי זיהוי" מציג עכשיו את כל 255,723 כתבי היד, ובהם 29,169 שאין להם רשומה בקטלוג.',
+    'Lines, width, height and material come from the catalogue, from the measurements, or from either; when you set several measured values, they must all hold on the same page.':
+        'שורות, רוחב, גובה וחומר נלקחים מהקטלוג, מהמדידה או מאחד מהם; כשקובעים כמה ערכים נמדדים, כולם צריכים להתקיים באותו עמוד.',
+    "The period of copy now uses each catalogue record's full range of dates, shown in the results (for example 944–1100), and the catalogue records of about 30,600 more manuscripts show their source.":
+        'תקופת ההעתקה מתחשבת עכשיו בטווח התאריכים המלא של כל רשומת קטלוג, והתוצאות מציגות אותו (למשל 944–1100); ורשומות הקטלוג של עוד כ־30,600 כתבי יד מציגות את מקורן.',
+})
+
+# v9.13.0 startup tips for the Manuscript features (desktop/startup_tips.py),
+# approved 2026-11-02.
+TRANSLATIONS.update({
+    '**Focus Search** > **Manuscript features** searches only manuscripts of the kind you choose: script, region, period of copy, number of lines, size, material and more.':
+        '**מקד חיפוש** > **מאפייני כתב היד** מחפש רק בכתבי יד מהסוג שתבחרו: כתב, אזור, תקופת העתקה, מספר שורות, מידות, חומר ועוד.',
+    '**Manuscript features** on the **Browse by Identification** tab lists the manuscripts that have the features you choose, with how many manuscripts have each value; **Not recorded** finds those the catalogue says nothing about.':
+        '**מאפייני כתב היד** בלשונית **עיון לפי זיהוי** מציג את כתבי היד שיש להם המאפיינים שבחרתם, וליד כל ערך כמה כתבי יד יש לו; **ללא רישום** מוצא את אלה שהקטלוג אינו מתעד בהם דבר.',
+    'Hunting joins? **Focus Search** > **Manuscript features** can keep only manuscripts in the same script, with about the same number of lines and line height as your fragment.':
+        'מחפשים צירופים? **מקד חיפוש** > **מאפייני כתב היד** יכול להשאיר רק כתבי יד באותו כתב ובמספר שורות ובגובה שורה קרובים לאלה של הקטע שלכם.',
 })

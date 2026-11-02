@@ -1,6 +1,6 @@
 # GenizahSearch - Open Issues
 
-> **Last Updated:** 2026-10-30 (folded 1 fragment(s) from `docs/open_issues.d/`: 2026-10-30-puzzle-and-update-check-tests-polluted.md). 167 open: P1 0, P2 41, P3 126.
+> **Last Updated:** 2026-11-02 (archived GS-286). 169 open: P1 0, P2 41, P3 128.
 
 One line per open defect, by priority and area. The full text of every row is in
 [`ISSUE_DETAILS.md`](ISSUE_DETAILS.md) under its ID: **grep `GS-<n>` there, never read it
@@ -24,7 +24,7 @@ owner tasks -- is in [`BACKLOG.md`](BACKLOG.md). Closed history:
 |------|------|------|------|------|
 | Search | 0 | 4 | 21 | 25 |
 | Browse and viewer | 0 | 4 | 5 | 9 |
-| Desktop app | 0 | 9 | 25 | 34 |
+| Desktop app | 0 | 9 | 27 | 36 |
 | Website | 0 | 5 | 23 | 28 |
 | API and AI | 0 | 2 | 1 | 3 |
 | Discovery | 0 | 2 | 11 | 13 |
@@ -33,7 +33,7 @@ owner tasks -- is in [`BACKLOG.md`](BACKLOG.md). Closed history:
 | Build, CI and tests | 0 | 0 | 3 | 3 |
 | Documentation | 0 | 0 | 3 | 3 |
 | Server and operations | 0 | 2 | 1 | 3 |
-| **Total** | **0** | **41** | **126** | **167** |
+| **Total** | **0** | **41** | **128** | **169** |
 
 ## P1 - Critical
 
@@ -169,6 +169,8 @@ _None open._
 
 | ID | Issue | Where | Opened | Status |
 |----|-------|-------|--------|--------|
+| [GS-284](ISSUE_DETAILS.md#gs-284) | "Search in these results" drops the Catalog tab's text, PGP and edition filters | `genizah_app.py::_catalog_build_browse_filters`, `_CatalogHandoffWorker`, `_catalog_on_handoff_scope` | 2026-11-01 | ❌ Open |
+| [GS-285](ISSUE_DETAILS.md#gs-285) | Opening "Search only in..." loses a library restriction handed over from the Catalog tab | `desktop/dialogs_filter.py::PreSearchFilterDialog._get_current_filter_dict` | 2026-11-01 | ❌ Open |
 | [GS-66](ISSUE_DETAILS.md#gs-66) | Desktop image cache: a 400 px thumbnail and the 2000 px viewer image of the same page share one file | `desktop/image_loader.py::ImageLoaderThread.run` (line 68); metadata_manager._resolve_thumbnail | 2026-10-21 | ❌ Open |
 | [GS-67](ISSUE_DETAILS.md#gs-67) | Quit still waits, at interpreter exit, for an NLI request in flight on the shared metadata executor | `shared/metadata_manager.py` (nli_executor, line 289); `genizah_app.py::_stop_meta_loader_for_close` | 2026-10-20 | ❌ Open |
 | [GS-68](ISSUE_DETAILS.md#gs-68) | Desktop Excel export: a search-within whose completion step Stop interrupted exports the plain count | `genizah_app.py::export_results` (`_run_left_matches_out()`), the refinement chain | 2026-10-20 | ❌ Open |

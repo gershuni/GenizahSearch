@@ -3,7 +3,8 @@
 thin strip under the top bars, for the features people miss.
 
 The owner wrote and approved the 55 tips (English and Hebrew; the Hebrew is
-each English text's TRANSLATIONS entry) and chose: the strongest first, a tip
+each English text's TRANSLATIONS entry), and three more for the Manuscript
+features with v9.13.0 (2026-11-02), and chose: the strongest first, a tip
 at every start, the strip rather than a window, and tips that need the
 letter-level index or an account shown to everyone as invitations (their
 button then builds the index or opens the login).
@@ -11,8 +12,9 @@ button then builds the index or opens the login).
 **bold** in a tip is a name on screen (a button, tab or menu item): Hebrew has
 no capitals to mark one.
 
-What is kept, in config.pkl: the tips already shown (each is shown once), the
-features already used (a tip whose feature is in use is skipped: see
+What is kept, in config.pkl: the tips already shown (each is shown once a
+round; when all have been, a new round starts, pick_tip; Settings > Show all
+tips again starts a round of every tip, show_all_again), the features already used (a tip whose feature is in use is skipped: see
 mark_used and GenizahGUI._tip_features_in_use), the number of starts
 (the first start shows no tip), the closes in a row (after
 CLOSES_BEFORE_OFF the tips turn themselves off) and the off switch
@@ -34,6 +36,7 @@ TIPS_SEEN_KEY = 'tips_seen'
 TIPS_STARTS_KEY = 'tips_starts'
 TIPS_CLOSED_KEY = 'tips_closed_in_row'
 FEATURES_USED_KEY = 'features_used'
+TIPS_ALL_KEY = 'tips_all_round'   # this round shows every tip, in use or not (show_all_again)
 CLOSES_BEFORE_OFF = 5
 
 
@@ -63,6 +66,18 @@ TIPS = (
     Tip('responsa_star',
         "In **Responsa** style, * stands for any letters inside a word: כהנ* גדו* finds both כהן גדול and כהנים גדולים.",
         show='responsa', used='responsa_search'),
+    # The Manuscript features (owner, 2026-11-02, v9.13.0): right after the
+    # strongest five, so people who have seen the earlier tips get them next.
+    # Applying a feature in either place retires all three.
+    Tip('features_search',
+        '**Focus Search** > **Manuscript features** searches only manuscripts of the kind you choose: script, region, period of copy, number of lines, size, material and more.',
+        show='search:btn_pre_search_filters', used='features'),
+    Tip('features_browse',
+        '**Manuscript features** on the **Browse by Identification** tab lists the manuscripts that have the features you choose, with how many manuscripts have each value; **Not recorded** finds those the catalogue says nothing about.',
+        show='catalog:_catalog_criteria_btn', used='features'),
+    Tip('features_joins',
+        'Hunting joins? **Focus Search** > **Manuscript features** can keep only manuscripts in the same script, with about the same number of lines and line height as your fragment.',
+        show='search:btn_pre_search_filters', used='features'),
     Tip('mode_signs',
         "Type a sign followed by a space to pick the search mode: ? שלום for **Variants**, ~ for **Fuzzy**, $ for catalog titles, # for shelfmarks, and R and a space for **Responsa** style.",
         show='query', used='mode_sign'),
@@ -246,6 +261,24 @@ def next_tip(seen, used, tips=TIPS):
     return None
 
 
+def pick_tip(seen, used, current=None, tips=TIPS):
+    """(tip, new_round): the next tip not shown yet whose feature is not in use.
+    Once every such tip has been shown, a new round starts (owner, 2026-11-02:
+    the tips used to stop for good): the shown ones may come again, the one on
+    the strip (*current*, a key) last. (None, False) when no tip is left at all."""
+    tip = next_tip(seen, used, tips)
+    if tip is not None:
+        return tip, False
+    tip = next_tip([current] if current else [], used, tips) or next_tip([], used, tips)
+    return tip, tip is not None
+
+
+def has_other_tip(tip, used, tips=TIPS) -> bool:
+    """Whether Next tip has anything to show after *tip*, in this round or the next."""
+    used = set(used or ())
+    return any(t.key != tip.key and not (t.used and t.used in used) for t in tips)
+
+
 _used_cache: set | None = None
 
 
@@ -274,6 +307,22 @@ def record_start() -> int:
     starts = int(load_app_config().get(TIPS_STARTS_KEY) or 0) + 1
     save_app_config({TIPS_STARTS_KEY: starts})
     return starts
+
+
+def start_round() -> None:
+    """Every tip has been shown: forget which, so they can come again. A new
+    round skips the features in use again, after a round of every tip too."""
+    save_app_config({TIPS_SEEN_KEY: [], TIPS_ALL_KEY: False})
+
+
+def show_all_again() -> None:
+    """Settings > Show all tips again (owner, 2026-11-02): one round of every
+    tip from the first, those for features already in use too, with the tips on."""
+    save_app_config({TIPS_SEEN_KEY: [], TIPS_ALL_KEY: True, TIPS_OFF_KEY: False, TIPS_CLOSED_KEY: 0})
+
+
+def all_round() -> bool:
+    return bool(load_app_config().get(TIPS_ALL_KEY, False))
 
 
 def mark_seen(tip: Tip) -> None:

@@ -12612,6 +12612,8 @@ class GenizahGUI(QMainWindow):
         from desktop.dialogs_filter import CriteriaDialog
         dlg = CriteriaDialog(self, self._catalog_criteria)
         if dlg.exec() == QDialog.DialogCode.Accepted:
+            if dlg.get_criteria():
+                startup_tips.mark_used('features')  # its startup tips are no longer needed
             self._catalog_set_criteria(dlg.get_criteria())
         elif dlg.dropped_saved_criteria:
             # Dropped with a notice (this file cannot answer them): gone on Cancel too.
@@ -16941,15 +16943,25 @@ class GenizahGUI(QMainWindow):
 
     def _show_next_tip(self):
         """Show the next tip not shown yet whose feature is not in use; it
-        counts as shown at once. None (and the strip hidden) when none is left."""
+        counts as shown at once. When all have been shown a new round starts
+        (startup_tips.pick_tip). After Settings > Show all tips again the round
+        shows the tips for features in use too, and the next skips them again.
+        None (and the strip hidden) when none is left."""
         seen = list(load_app_config().get(startup_tips.TIPS_SEEN_KEY) or [])
-        used = self._tip_features_in_use()
-        tip = startup_tips.next_tip(seen, used)
+        every_tip = startup_tips.all_round()
+        used = set() if every_tip else self._tip_features_in_use()
+        current = getattr(self.tip_strip.tip, 'key', None)
+        tip, new_round = startup_tips.pick_tip(seen, used, current)
+        if new_round and every_tip:
+            used = self._tip_features_in_use()
+            tip, _ = startup_tips.pick_tip([t.key for t in startup_tips.TIPS], used, current)
         if tip is None:
             self.tip_strip.hide()
             return None
+        if new_round:
+            startup_tips.start_round()
         startup_tips.mark_seen(tip)
-        has_next = startup_tips.next_tip(seen + [tip.key], used) is not None
+        has_next = startup_tips.has_other_tip(tip, used)
         self.tip_strip.set_tip(tip, self._tip_action_label(tip), has_next=has_next)
         return tip
 
@@ -17000,7 +17012,8 @@ class GenizahGUI(QMainWindow):
             tr("Tips are off. You can turn them on again in Settings."), 8000)
 
     _TIP_TABS = {'search': 'search_tab', 'responsa': 'search_tab',
-                 'composition': 'composition_tab', 'browse': 'browse_tab'}
+                 'composition': 'composition_tab', 'browse': 'browse_tab',
+                 'catalog': 'catalog_browse_tab'}
 
     def _run_tip_action(self, action):
         """What a tip's Show me does: open the section and ring the control
@@ -17152,6 +17165,8 @@ class GenizahGUI(QMainWindow):
                         found.add('saved_search')
                     if any(k != 'include_mode' for k in (entry.get('pre_search_filters') or {})):
                         found.add('filters')
+                    if (entry.get('pre_search_filters') or {}).get('criteria'):
+                        found.add('features')
                     if kind == 'composition':
                         if params.get('comp_method') == 'passage':
                             found.add('letter_level')

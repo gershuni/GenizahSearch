@@ -4,6 +4,136 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [9.13.0] - 2026-11-02 — Find manuscripts by features
+
+One panel of catalogue criteria — "Manuscript features" — on Browse by Identification and in "Search only
+in..." on both apps, in the public API and the MCP tools (PRs #457–#460; plan
+`docs/plans/CATALOGUE_CRITERIA_PLAN.md`). Browse by Identification lists the whole corpus. Ships with FJMS data
+file 5.1.0 (`criteria_numbers`, `criteria_values`), built from the corrected 5.0.0 file, which also brings the
+restored catalogue sources to desktop users. Web and desktop: installer 9.13.0; the data file goes to the
+server before the code. Desktop What's New 9.13.0; web `WHATS_NEW_VERSION` "9.13.0-features".
+
+### Catalogue criteria, core: Catalog Browse lists the whole corpus (web + desktop)
+
+PR 1a of `docs/plans/CATALOGUE_CRITERIA_PLAN.md`: the shared base of the "Manuscript features" panel
+(PRs 1b web, 1c desktop, 2 API). No panel yet; what a
+reader already sees changes in three places:
+
+- **Catalog Browse lists all 255,723 manuscripts** (web and desktop), the catalogued ones first, then the
+  29,169 with no FJMS catalogue record, marked "No catalogue record" (rulings D16, D22). Filters that pick
+  something in (domain, author, work, date, catalogue text) list catalogued manuscripts only; PGP, edition
+  and library filters apply to every manuscript.
+- **A list that cannot be read is an error**, not "No manuscripts match the current filters" (rule 9).
+- **"Search only in..." with only exclusions** (Exclude domains/authors/works, catalogue text "not") now
+  searches the manuscripts with no catalogue record too (D17); before, they were silently left out.
+
+Underneath:
+
+- `shared/catalog_criteria.py` (registry, address form, matching) and `shared/catalog_numbers.py` (line,
+  column and copy-date parsing); `FjmsService.get_filter_sys_ids` / `get_browse_results` /
+  `get_browse_library_facets` take `criteria` and the corpus (`MetadataManager.corpus_sys_ids`, which never
+  hands over part of libraries.csv); Catalog Browse fails closed.
+- FJMS sidecar **5.1.0**: `scripts/migrate_fjms_criteria.py` adds `criteria_numbers` (lines, columns,
+  copy-date spans), `criteria_values` (vocalization extent, attributes), an index on `catalog_fields` and
+  `avg_line_height_mm` (which revives the Line Height filter, dead in production). The build sequence, with
+  the 'Instatution' fix after every export, is in `docs/guides/DEPLOYMENT_TECHNICAL.md`. The desktop opens a
+  downloaded data file only when it is at least as new as the bundled one.
+- Fixed on the way (web Catalog Browse): removing ANY filter chip left the removed filter in the address
+  and the saved session -- the refresh's `ui.run_javascript` ran in the chip's own, just-deleted
+  context and raised. It now goes through the page's client.
+
+### Manuscript features on the website: one panel for Catalog Browse and "Search only in..." (web)
+
+PR 1b of `docs/plans/CATALOGUE_CRITERIA_PLAN.md`. One **Manuscript features** button
+(`web/components/criteria_panel.py`) replaces the date range, the script lists, the pre-search
+Measurements group and the "Script and size" card on `/catalog-browse`, `/search` and `/parallels`.
+It opens a window over the page (full screen on a phone): the ten sections beside their controls
+(period of copy, language and script, script, vocalization, columns, lines, physical status,
+material, attributes, computer generated data), value lists with counts and a filter box, "only
+these / all except these", catalogue / measured / either, "or: not recorded", each criterion's
+coverage, a live total and Clear section / Clear all / Apply. A badge counts the criteria; a chip per
+criterion removes it.
+
+- Catalog Browse: the address carries one parameter per criterion (D8: `style=Square`,
+  `region=!Oriental`, `lines=meas:20..25`, `columns=2..2,_none`); an unknown or malformed parameter
+  is dropped and named in a notice. The domain tree gains "No catalogue record (N)". "Search in these
+  results" and "Parallel search in these results" hand the criteria on unchanged. The "16-19" period
+  button sets 1500-1899 (it set 1600-1999).
+- `/search`, `/parallels`: the criteria are saved (`{prefix}_filter_criteria`), counted, sent with the
+  search, kept in history entries and runs; a saved date range is read in as the period of copy
+  (D18); saved measurement filters are not restored, and the rows saved with them are dropped so the
+  search runs again (R2).
+- `/search` post-search Measurements mean what the panel means (D20): width, height and lines from
+  the catalogue or a measured page, every measured range on one page, material from either source
+  (`FjmsService.match_result_criteria`). A lookup that cannot run leaves the rows and says so.
+- A 5.0.0 catalogue file disables the criteria it cannot answer and drops them, with a notice, from a
+  saved session or an address (rule 9).
+- Shared (also used by the desktop, PR 1c): chip text (`criteria_chips`, `criteria_summary`,
+  `FjmsService.criteria_chips`), `match_result_criteria`, `period_from_dates`, `NEW_TABLE_KEYS`;
+  fixed `match_criteria` failing every "all except" search when the corpus came as a frozenset.
+
+### Catalogue criteria, desktop: the Manuscript features window (desktop)
+
+PR 1c of `docs/plans/CATALOGUE_CRITERIA_PLAN.md`: the desktop surfaces of the catalogue criteria
+(released together with the web panel and the API, ruling D11).
+
+- **"Manuscript features" / "מאפייני כתב היד"**: one window, the same on the Catalog tab, in "Search only
+  in..." and for the post-search Measurements filter. Sections on the side (period of copy, language and
+  script, script, vocalization, columns, lines, physical status, material, attributes, computer-generated
+  data), each section's controls beside them; every list sorted by count, then Unknown, Cannot be
+  determined, Not recorded, with "only these / all except these", and a filter box on long lists; ranges
+  with "or: not recorded"; a catalogue / measured / either choice for lines, size and material. The total
+  updates as you choose, and says how many of an "all except" list have nothing recorded.
+- **Catalog tab**: the date fields, century buttons, "Include undated" and "Script and size..." are now
+  inside the window; its choices show as chips above the list. The domain tree no longer collapses to two
+  rows when the column is full (it keeps 240 px and the column scrolls), and it shows "No catalogue record
+  (N)" beside "Unclassified".
+- **Focus Search** (the "Search only in..." window): the date range, script lists and Measurements group are
+  replaced by the one button; chips and the history summary name the chosen features.
+- **Post-search Measurements** filter by the window's rules (ruling D20): either source, one measured page.
+- **Saved searches**: a saved date range becomes Period of copy (D18, which now matches a copy span that
+  overlaps the range). Old measurement filters are not restored, and the stored results of a search saved
+  with them are not shown: search again (ruling R2).
+- On a 5.0.0 catalogue data file, the criteria that need 5.1.0 are shown disabled with a note, and saved
+  ones are removed with a notice (rule 9).
+- **Startup tips**: three new tips for the Manuscript features (Focus Search, Browse by Identification,
+  and hunting joins by script, lines and line height), shown next after the strongest five. Once every tip
+  has been shown a new round starts (they used to stop for good, and **Next tip** on the last one closed the
+  strip); tips for features already in use stay skipped. **Settings > Show all tips again** starts one round of
+  every tip from the first, those for features in use too, and shows the first at once.
+
+### Manuscript features in the API and the MCP tools (web)
+
+PR 2 of `docs/plans/CATALOGUE_CRITERIA_PLAN.md`. The public API and the MCP server filter by the same
+manuscript features as the website's panel.
+
+- `filters.criteria` on `POST /api/search` and `POST /api/parallels` (their background jobs, the
+  `/api/chatgpt` facade and the MCP tools too -- the ChatGPT app is the MCP plugin; the custom GPT,
+  retiring 2026-12-11, keeps its Actions schema unchanged): one entry per criterion, as the panel stores them — lists
+  with `values`, `mode` ("only" / "except") and `source`, ranges with `min`, `max`, `not_recorded`
+  and `source`; "_none" is Not recorded. The request model is built from the registry
+  (`web/criteria_models.py`). The corpus is the universe, so "not recorded" and "all except" reach
+  the 29,169 manuscripts with no catalogue record, as on the website.
+- `GET /api/criteria`: every section and criterion with its kind, sources, unit and coverage, and a
+  list's values with corpus counts (per source for material); a criterion a 5.0.0 file cannot answer
+  is `available: false`. Built once per process (about 20 s cold on the full file).
+  `FjmsService.criteria_vocabulary`.
+- Checks: a malformed entry is 400 `invalid_request`; a value the catalogue does not record under the
+  chosen source is 400 `unresolvable_filter_value` (values are checked over the corpus, exactly as
+  `GET /api/criteria` lists them); a criterion the file cannot answer, or any criterion (`materials`
+  and the dates included) before the corpus list has loaded, is 503 `filter_unavailable`.
+- Older keys: `materials` is read as Material from the catalogue (unchanged results); `date_from` /
+  `date_to` as Period of copy, so they now match a copy-date span overlapping the range (1000-1200:
+  4,702 manuscripts, 4,561 by start year). Either one beside its criterion is 400
+  `invalid_combination`. The unreleased `script_styles` / `script_places` are refused.
+- MCP: a read-only tool `list_manuscript_features` (`GET /api/chatgpt/criteria`) and `criteria` in
+  every tool's `filters`; the server instructions (and the Claude and Gemini packages) point filters
+  at it. `/api/capabilities` lists `/api/criteria` and its rate-limit bucket.
+- `docs/SEARCH_API.md`: the endpoint, the `filters.criteria` shape, the changed date meaning, and the
+  corrected `materials` examples (`Paper`, `Vellum`; `paper` / `parchment` were always a 400).
+- Tests: `tests/test_criteria_api.py` (real endpoints over the fixture sidecar), MCP and facade tests,
+  the documented-example gate.
+
 ## [9.12.1] - 2026-10-30 — Keyboard shortcuts, round two
 
 Ctrl+A ticks the Search results again (in 9.12.0 it raised an error and ticked nothing); going back to

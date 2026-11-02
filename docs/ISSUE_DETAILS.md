@@ -4217,3 +4217,32 @@ entries per manuscript from `bibliography` (133,088 manuscripts have at least on
 "scholarly transcription" filter (Princeton edition or FGP) or `bibliography.TranscriptionType`; translations =
 PGP / FGP translations or `bibliography.TranslationType`. We have no catalog scans. Settle the meanings against
 a few FJMS examples before building.
+
+## GS-284
+
+**"Search in these results" drops the Catalog tab's text, PGP and edition filters** · P3 · Desktop app · ❌ Open · opened 2026-11-01
+
+Where: `genizah_app.py::_catalog_build_browse_filters`, `_CatalogHandoffWorker`, `_catalog_on_handoff_scope`
+
+Found by Codex reviewing PR 1c (catalogue criteria, desktop); it predates that PR. The Catalog tab lists
+manuscripts under domain/author/work, catalogue text (all/any/not), PGP and scholarly-edition filters,
+library and the manuscript features, but the hand-off to Search / Composition carries only
+domain/author/work, the Show-only library and the features. Example on `tests/criteria_sidecar.py`:
+catalogue Material = Vellum plus the catalogue-text term `10205171` lists A alone; the hand-off searches
+A and B (both Vellum). Fix sketch: carry `text_all` / `text_any` / `text_not` into `pre_search_filters`
+(the main window already has chips for them and `FilterCountWorker` applies them); for PGP and editions,
+which "Search only in..." has no control for, either intersect the browse list's own sys_ids into the
+scope or say before the hand-off that those two are not carried.
+
+## GS-285
+
+**Opening "Search only in..." loses a library restriction handed over from the Catalog tab** · P3 · Desktop app · ❌ Open · opened 2026-11-01
+
+Where: `desktop/dialogs_filter.py::PreSearchFilterDialog._get_current_filter_dict`
+
+Found by Codex reviewing PR 1c; it predates that PR. A Catalog hand-off in Show-only library mode puts
+`library` into `pre_search_filters` (`genizah_app.py::_catalog_build_browse_filters`), but the dialog
+rebuilds its filter dict from its own controls and has no library control, so its count, and the scope
+OK installs, drop the library: Vellum + CUL hands over {A}, opening the dialog and pressing OK gives
+{A, B}. Fix sketch: keep keys the dialog does not edit (`library`) in the dict it returns, and pass
+`meta_mgr` to its FilterCountWorker so the count intersects them, as `_remove_filter` already does.

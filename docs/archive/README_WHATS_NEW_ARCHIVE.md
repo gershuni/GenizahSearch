@@ -7,6 +7,22 @@ The authoritative release history is [CHANGELOG.md](../../CHANGELOG.md).
 
 ---
 
+## What's New in Version 9.12.1? (the README's own text, 2026-10-30)
+
+**Keyboard shortcuts, round two**
+
+Going back to Search or Composition Search puts the cursor in its results, Ctrl+R goes to the
+results list of the tab in front, and Ctrl+A ticks every Search result; plus smaller fixes to the
+9.12.0 keys. Desktop only.
+
+9.12.0 brought the keyboard shortcuts: the cursor waits in the search box when the app opens and
+moves to the results when a search finds them, where Space ticks a result, Enter opens it and
+Ctrl+Enter or Ctrl+B opens it in Browse; Ctrl+1 to Ctrl+7 open the tabs, the Manuscript Viewer
+moves between results and images with Ctrl and the arrow and page keys, and Ctrl+/ shows every key
+on one card. On the website, the Parallels Word export marks the matched words.
+
+---
+
 ## What's New in Version 9.11.0? (the README's own text, 2026-10-29)
 
 **FGP transcriptions from FGP's own files**

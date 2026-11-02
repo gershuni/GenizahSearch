@@ -1,8 +1,8 @@
 """Startup tips (desktop/startup_tips.py; owner, 2026-10-25).
 
-Pinned here: the 55 tips the owner approved, each with its Hebrew, in the chosen
-order (the strongest five first); a tip is shown once, and not when its feature
-is already in use; no tip on the first start, beside another notice bar, or once
+Pinned here: the 58 tips the owner approved, each with its Hebrew, in the chosen
+order (the strongest five first); a tip is shown once a round, and not when its
+feature is already in use, and a new round starts when all have been; no tip on the first start, beside another notice bar, or once
 turned off; five closes in a row turn the tips off; a tip that needs the
 letter-level index or an account invites to it; every Show me names a control
 or action the window has; and the strip's direction marks.
@@ -41,10 +41,13 @@ def cfg(monkeypatch):
 
 
 def test_the_owners_tips_in_the_owners_order():
-    assert len(TIPS) == 55
-    assert len(TIPS_BY_KEY) == 55                     # keys are unique
+    assert len(TIPS) == 58
+    assert len(TIPS_BY_KEY) == 58                     # keys are unique
     assert [t.key for t in TIPS[:5]] == [
         "go_to", "saved_searches", "letter_level", "witnesses", "responsa_star"]
+    # the Manuscript features (2026-11-02) come next, so tip readers meet them soon
+    assert [t.key for t in TIPS[5:8]] == ["features_search", "features_browse", "features_joins"]
+    assert {t.used for t in TIPS[5:8]} == {"features"}
     for tip in TIPS:
         assert TRANSLATIONS.get(tip.text), tip.key     # every tip has its Hebrew
         assert tip.text.count("**") % 2 == 0, tip.key
@@ -144,6 +147,73 @@ def test_no_tip_on_the_first_start_beside_whats_new_or_when_off(cfg, monkeypatch
     assert host._maybe_show_startup_tip() is None
 
 
+def test_a_new_round_when_every_tip_was_shown_or_is_in_use(cfg, monkeypatch):
+    """The owner's case (2026-11-02): 42 starts, every tip shown or its feature
+    in use, so no tip at start, and Next tip closed the strip. A new round now
+    starts; Next on a round's last tip goes on to another tip, never the same."""
+    monkeypatch.setattr("shared.session_persistence.get_history", lambda *a: {"regular": [], "composition": []})
+    # every feature in use but go_to's: go_to and the tips nothing retires are left
+    cfg[startup_tips.FEATURES_USED_KEY] = sorted({t.used for t in TIPS if t.used and t.key != "go_to"})
+    cfg[startup_tips.TIPS_SEEN_KEY] = [t.key for t in TIPS]
+    cfg[startup_tips.TIPS_STARTS_KEY] = 41
+    eligible = [t.key for t in TIPS if not t.used or t.key == "go_to"]
+    assert eligible[:2] == ["go_to", "flexible_shelfmark"]
+    host = _Host()
+    assert host._maybe_show_startup_tip().key == "go_to"            # a new round, from the top
+    assert cfg[startup_tips.TIPS_SEEN_KEY] == ["go_to"]
+    assert not host.tip_strip.btn_next.isHidden()
+    for key in eligible[1:]:
+        host._tip_next()
+        assert host.tip_strip.tip.key == key and not host.tip_strip.isHidden()
+    host._tip_next()                                                 # the round's end: on, not closed
+    assert host.tip_strip.tip.key == "go_to" and not host.tip_strip.isHidden()
+    assert cfg[startup_tips.TIPS_SEEN_KEY] == ["go_to"]
+    # the strip's tip is shown last in the new round, not again at once
+    assert startup_tips.pick_tip([t.key for t in TIPS], [], "go_to") == (TIPS_BY_KEY["saved_searches"], True)
+    # nothing left at all: no tip, and Next is not offered for a tip alone
+    only = TIPS_BY_KEY["go_to"]
+    assert startup_tips.pick_tip([], [], None, tips=(only,)) == (only, False)
+    assert startup_tips.pick_tip(["go_to"], ["go_to"], "go_to", tips=(only,)) == (None, False)
+    assert not startup_tips.has_other_tip(only, [], tips=(only,))
+
+
+def test_show_all_tips_again_includes_the_features_in_use_for_one_round(cfg, monkeypatch):
+    """Settings > Show all tips again (owner, 2026-11-02): every tip from the
+    first, those for features in use too, the tips on, the first on the strip at
+    once; the round after it skips the features in use again."""
+    from PyQt6.QtWidgets import QCheckBox
+
+    from desktop import settings_dialogs
+    from desktop.settings_dialogs import SettingsDialog
+
+    monkeypatch.setattr("shared.session_persistence.get_history", lambda *a: {"regular": [], "composition": []})
+    monkeypatch.setattr(genizah_app.passage_lifecycle, "passage_available", lambda: False)
+    for name in ("load_app_config", "save_app_config"):
+        monkeypatch.setattr(settings_dialogs, name, getattr(genizah_app, name))
+    cfg[startup_tips.FEATURES_USED_KEY] = sorted({t.used for t in TIPS if t.used})
+    cfg[startup_tips.TIPS_SEEN_KEY] = [t.key for t in TIPS]
+    cfg[startup_tips.TIPS_OFF_KEY] = True
+    host = _Host()
+    dialog = type("D", (), {"chk_startup_tips": QCheckBox(), "main_win": host,
+                            "_CANCEL_DEFAULTS": SettingsDialog._CANCEL_DEFAULTS, "reject": lambda self: None})()
+    # Cancel in Settings undoes the button, though the round flag was never saved before
+    SettingsDialog.refresh_config_snapshot(dialog)
+    SettingsDialog._show_all_tips_again(dialog)
+    assert startup_tips.all_round()
+    SettingsDialog._on_cancel(dialog)
+    assert not startup_tips.all_round() and startup_tips.tips_off()
+    host.tip_strip.tip = None
+    SettingsDialog._show_all_tips_again(dialog)
+    assert dialog.chk_startup_tips.isChecked() and not startup_tips.tips_off()
+    assert host.tip_strip.tip.key == "go_to" and not host.tip_strip.isHidden()   # in use, shown anyway
+    for tip in TIPS[1:]:
+        host._tip_next()
+        assert host.tip_strip.tip.key == tip.key
+    host._tip_next()                                   # the round is over: features in use skipped again
+    assert host.tip_strip.tip.key == "flexible_shelfmark" and not host.tip_strip.isHidden()
+    assert cfg[startup_tips.TIPS_ALL_KEY] is False and cfg[startup_tips.TIPS_SEEN_KEY] == ["flexible_shelfmark"]
+
+
 def test_invitations_and_show_me(cfg, monkeypatch):
     monkeypatch.setattr("shared.session_persistence.get_history", lambda *a: {"regular": [], "composition": []})
     monkeypatch.setattr(genizah_app.passage_lifecycle, "passage_available", lambda: False)
@@ -165,7 +235,8 @@ def test_features_in_use_are_read_from_what_is_kept(cfg, monkeypatch):
     history = {"regular": [
         {"query": "#שלום# [2] (א/ב)", "search_params": {"mode_index": 2}, "pinned": True},
         {"query": "x", "search_params": {"mode_index": 0, "text_position": 2},
-         "pre_search_filters": {"include_mode": True, "domains": ["Bible"]}}],
+         "pre_search_filters": {"include_mode": True, "domains": ["Bible"],
+                                "criteria": {"region": {"values": ["x"]}}}}],
         "composition": [{"query": "t", "search_params": {"comp_method": "passage"}}]}
     monkeypatch.setattr("shared.session_persistence.get_history", lambda *a: history)
     cfg["nav_layout"] = "side"
@@ -174,7 +245,7 @@ def test_features_in_use_are_read_from_what_is_kept(cfg, monkeypatch):
                                      "get_projects": lambda self: [], "get_all_tags": lambda self: ["x"]})()
     found = host._tip_derived_features()
     assert {"responsa_search", "responsa_affixes", "responsa_or_gap", "saved_search", "position",
-            "filters", "letter_level", "side_menu", "list_items", "projects"} <= found
+            "filters", "features", "letter_level", "side_menu", "list_items", "projects"} <= found
     # and they retire their tips
     assert next_tip([], host._tip_features_in_use()).key == "go_to"
     assert next_tip(["go_to"], found).key == "witnesses"     # saved searches and letter-level are in use
@@ -182,13 +253,14 @@ def test_features_in_use_are_read_from_what_is_kept(cfg, monkeypatch):
 
 def test_every_show_me_and_wire_names_what_the_window_has():
     kinds = {"query", "responsa", "help", "history", "go_to", "pgp_tags", "witness_dialog", "joins_lab",
-             "settings", "search_settings", "menu", "recent_list", "tab", "search", "composition", "browse"}
+             "settings", "search_settings", "menu", "recent_list", "tab", "search", "composition", "browse",
+             "catalog"}
     for tip in TIPS:
         if not tip.show:
             continue
         kind, _, target = tip.show.partition(":")
         assert kind in kinds, tip.key
-        if target and kind in ("tab", "search", "responsa", "composition", "browse"):
+        if target and kind in ("tab", "search", "responsa", "composition", "browse", "catalog"):
             assert f"self.{target} = " in _SRC, (tip.key, target)
         assert f"elif kind == '{kind}'" in _SRC or kind in GenizahGUI._TIP_TABS, kind
     for name, _signal, _feature, _cond in GenizahGUI._TIP_WIRES:

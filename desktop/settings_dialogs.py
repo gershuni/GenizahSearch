@@ -1105,7 +1105,8 @@ class SettingsDialog(QDialog):
         # key absent from the snapshot kept the value chosen in the dialog
         # (Codex review of PR #448, 2026-10-25).
         from desktop import startup_tips  # noqa: PLC0415
-        for key, default in self._CANCEL_DEFAULTS + ((startup_tips.TIPS_OFF_KEY, False),):
+        for key, default in self._CANCEL_DEFAULTS + ((startup_tips.TIPS_OFF_KEY, False),
+                                                     (startup_tips.TIPS_ALL_KEY, False)):
             self._config_snapshot.setdefault(key, default)
 
     def _on_cancel(self):
@@ -1174,8 +1175,14 @@ class SettingsDialog(QDialog):
         self.chk_startup_tips = QCheckBox(tr("Show a tip when the program starts"))
         self.chk_startup_tips.setChecked(not startup_tips.tips_off())
         self.chk_startup_tips.toggled.connect(lambda on: startup_tips.set_tips_off(not on))
+        # Every tip has been shown, or is about a feature in use (owner, 2026-11-02).
+        self.btn_tips_again = QPushButton(tr("Show all tips again"))
+        self.btn_tips_again.setToolTip(tr("The tips are reset and all of them are shown again."))
+        self.btn_tips_again.clicked.connect(self._show_all_tips_again)
         tips_row = QHBoxLayout()
         tips_row.addWidget(self.chk_startup_tips)
+        tips_row.addSpacing(12)
+        tips_row.addWidget(self.btn_tips_again)
         tips_row.addStretch()
         layout.addLayout(tips_row)
         layout.addSpacing(4)
@@ -1672,6 +1679,17 @@ class SettingsDialog(QDialog):
         return page
 
     # ── Helpers ───────────────────────────────────────────────────
+    def _show_all_tips_again(self):
+        """A round of every tip, from the first; the first is on the strip at once."""
+        from desktop import startup_tips  # noqa: PLC0415
+        startup_tips.show_all_again()
+        self.chk_startup_tips.blockSignals(True)
+        self.chk_startup_tips.setChecked(True)
+        self.chk_startup_tips.blockSignals(False)
+        show_next = getattr(self.main_win, '_show_next_tip', None)
+        if show_next is not None:
+            show_next()
+
     def _section_label(self, text):
         lbl = QLabel(text)
         lbl.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {self._text};")

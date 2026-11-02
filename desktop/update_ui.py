@@ -99,7 +99,7 @@ class UpdateNotificationBar(QFrame):
 # keeps the value and shows nothing to whoever already read it (9.6.0, owner
 # 2026-10-07: no desktop What's New). Change it together with the bar and dialog
 # texts.
-WHATS_NEW_CONTENT_VERSION = "9.12.0"
+WHATS_NEW_CONTENT_VERSION = "9.13.0"
 
 
 class WhatsNewBar(QFrame):
@@ -181,7 +181,8 @@ class WhatsNewBar(QFrame):
         # release texts, 2026-10-28).
         # v9.12.0: keyboard shortcuts and the cursor in the search box (approved
         # with the release texts, 2026-10-30).
-        self.lbl_msg.setText(tr("New: keyboard shortcuts, and the cursor waits in the search box from the moment the program opens"))
+        # v9.13.0: the Manuscript features (approved with the release texts, 2026-11-01).
+        self.lbl_msg.setText(tr('New: find manuscripts by their features — script, region, period, vocalization, lines, size, material and more'))
         self.show()
 
     def on_learn_more(self):
@@ -314,17 +315,16 @@ class WhatsNewDialog(QDialog):
         layout.addWidget(title)
 
         is_heb = CURRENT_LANG == 'he'
-        # v9.12.0 (2026-10-30, approved with the release texts). Five bullets: the
-        # cursor at launch, the result lists' keys, the section keys and Ctrl+O,
-        # the Manuscript Viewer's keys, and the keyboard shortcuts card. The
-        # website's Parallels Word export fix is in the CHANGELOG, README and
-        # GitHub release.
+        # v9.13.0 (2026-11-01, approved with the release texts). Five bullets: the
+        # Manuscript features window, its lists and counts, where it opens and Browse by
+        # Identification over the whole corpus, catalogue or measured sources, and the
+        # period's full date range with the restored catalogue sources.
         items = [
-            tr('The cursor is in the search box as soon as the program opens, so you can type a search right away.'),
-            tr('When a search finds results, the cursor moves to the results: Space ticks a result, Enter opens it, and Ctrl+Enter or Ctrl+B opens it in Browse; Ctrl+F or Ctrl+E brings you back to the search box.'),
-            tr('Ctrl+1 to Ctrl+7 open the tabs: in Search and Composition Search the cursor goes to the results when there are any, otherwise to the search box; Ctrl+R goes to the results list; Ctrl+O opens Go to, like Ctrl+G.'),
-            tr('In the Manuscript Viewer, Ctrl+Right and Ctrl+Left move to the next and previous result, Ctrl+PgDown and Ctrl+PgUp to the next and previous image, and Ctrl+B opens it in Browse.'),
-            tr('All the keys on one card: Ctrl+/, the ⌨ button beside A−, or Keyboard shortcuts in the ☰ menu.'),
+            tr('The new Manuscript features button opens one window with what the catalogue records about each manuscript: period of copy, language and alphabet, script and region, vocalization, number of columns and lines, physical status, material, attributes, and measurements computed from the photographs.'),
+            tr('Tick values, or choose "All except these"; "Not recorded" finds the manuscripts the catalogue says nothing about. Each value shows how many manuscripts have it, and the window counts the matches before you apply it.'),
+            tr('On the Browse by Identification tab the window lists the manuscripts; in Focus Search it limits a search to them. Browse by Identification now lists all 255,723 manuscripts, including the 29,169 without a catalogue record.'),
+            tr('Lines, width, height and material come from the catalogue, from the measurements, or from either; when you set several measured values, they must all hold on the same page.'),
+            tr("The period of copy now uses each catalogue record's full range of dates, shown in the results (for example 944–1100), and the catalogue records of about 30,600 more manuscripts show their source."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)
