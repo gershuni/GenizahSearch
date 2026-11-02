@@ -550,6 +550,23 @@ def material_display(material: str) -> str:
     return material
 
 
+def _restored_criteria(raw) -> dict:
+    """The Manuscript features of a saved Joins Lab session: cleaned (a malformed
+    one dropped), without those the open catalogue file is KNOWN not to answer (a
+    5.0.0 file, rule 9). A file that could not be read keeps them: their check
+    then says it failed."""
+    from shared.catalog_criteria import clean_criteria
+    criteria = clean_criteria(raw, strict=False)[0]
+    if not criteria:
+        return {}
+    try:
+        from desktop.dialogs_filter import drop_unavailable_criteria
+        criteria, _dropped = drop_unavailable_criteria(criteria)
+    except Exception:
+        logger.debug("Joins Lab: the saved features' support could not be read", exc_info=True)
+    return criteria
+
+
 # ---------------------------------------------------------------------------
 # SEED-024 — search-mode parity + candidate xlsx export (pure helpers).
 # Defined at module level (no Qt) so the mode mapping and the export-row
@@ -2696,6 +2713,18 @@ if _QT_AVAILABLE:
             self._cross_gen = 0               # bumped by _retire_cross_worker (latest-wins)
             self._enrich_worker = None
             self._retired_workers = []  # crash-safety: running _EnrichWorkers awaiting finished() (0xC0000409)
+            # Manuscript features (shared.catalog_criteria), chosen in the Filter
+            # dialog; their answer for the results' manuscripts (D20) comes from a
+            # CriteriaMatchWorker: _criteria_answers {(token, ids): set} keeps the
+            # last few, _criteria_state is 'idle' | 'pending' | 'ready' | 'failed'
+            # for the applied ones, and _criteria_tag drops a superseded answer.
+            self._criteria: dict = {}
+            self._criteria_answers: dict = {}
+            self._criteria_key = None
+            self._criteria_state = "idle"
+            self._criteria_tag = 0
+            self._criteria_pending: dict = {}     # worker tag -> the key it checks
+            self._dialog_recount = None           # the open Filter dialog's recount
             self._search_thread = None
             # SEED-024 follow-up: Stop-search toggle state (parity with main search)
             self._is_searching = False
@@ -2805,16 +2834,15 @@ if _QT_AVAILABLE:
                 tr("Filter by shelfmark, text, or title…")
             )
 
-            self.mat_filter = QComboBox()
-            self.mat_filter.addItem(tr("any material"))
+            # Material and size (and "Has dimensions", which went with them) are
+            # Manuscript features (self._criteria; owner, 2026-11-02: one place for
+            # each filter).
 
             # Library / Domain: the chosen library codes / domain keys (none = any),
             # each shown only or hidden. The Filter dialog lists the results' values
             # with counts (_facet_rows); the chips row under the toolbar shows them.
             self.facet_chosen = {"libraries": set(), "domains": set()}
             self.facet_mode = {"libraries": "show_only", "domains": "show_only"}
-
-            self.dim_chk = QCheckBox(tr("Has dimensions"))
 
             self.tri_filter = QComboBox()
             self.tri_filter.addItems([
@@ -2824,15 +2852,6 @@ if _QT_AVAILABLE:
                 tr("N — dismissed"),
                 tr("untriaged"),
             ])
-
-            # Size filter spinboxes — opt-in (D-13: off by default)
-            self.size_btn = QPushButton(tr("Size filter"))
-            self.size_btn.setCheckable(True)
-            self.size_min = QSpinBox()
-            self.size_min.setRange(0, 200)
-            self.size_max = QSpinBox()
-            self.size_max.setRange(0, 200)
-            self.size_max.setValue(200)
 
             # --- Results toolbar: [Grid][Table] + Browse results ▶ + Clear + Filter ▾ + count ---
             res_toolbar = QHBoxLayout()
@@ -3671,34 +3690,6 @@ if _QT_AVAILABLE:
         def _on_enriched(self, enrich: dict):
             """Handle enrichment result (keyed by (sys_id, page) — RR-2)."""
             self._enrich = enrich
-            # Populate material filter from unique materials in enrich
-            materials = sorted(set(
-                v.get("material") or ""
-                for v in enrich.values()
-                if v.get("material")
-            ))
-            try:
-                # Feature 9: store English value as userData; display HE label when HE UI.
-                # apply_filters reads userData (English) for comparison so filter VALUE
-                # stays English regardless of display language.
-                current_mat_val = self.mat_filter.currentData() or self.mat_filter.currentText()
-                self.mat_filter.blockSignals(True)
-                self.mat_filter.clear()
-                self.mat_filter.addItem(tr("any material"), "")  # userData="" = any
-                for mat in materials:
-                    self.mat_filter.addItem(material_display(mat), mat)  # display HE, value EN
-                # Restore previous selection by userData
-                restored = False
-                for i in range(self.mat_filter.count()):
-                    if self.mat_filter.itemData(i) == current_mat_val:
-                        self.mat_filter.setCurrentIndex(i)
-                        restored = True
-                        break
-                if not restored:
-                    self.mat_filter.setCurrentIndex(0)
-                self.mat_filter.blockSignals(False)
-            except RuntimeError:
-                pass
             self._refresh_facet_filters()
             self.apply_filters()
 
@@ -3723,15 +3714,12 @@ if _QT_AVAILABLE:
             self.apply_filters()
 
         def _filter_spec(self) -> dict:
-            """The filters now applied: the hidden widgets', Library's and Domain's."""
-            size_on = self.size_btn.isChecked()
+            """The filters now applied: the hidden widgets', the features', Library's
+            and Domain's."""
             return {
                 "text": self.filter_in.text(),
-                # Feature 9: the English value is the userData ("" or None = any)
-                "material": self.mat_filter.currentData() or "",
-                "dims": self.dim_chk.isChecked(),
                 "triage": self.tri_filter.currentIndex(),
-                "size": (self.size_min.value(), self.size_max.value()) if size_on else None,
+                "criteria_ids": self._applied_criteria_ids(),
                 "libraries": set(self.facet_chosen["libraries"]),
                 "libraries_mode": self.facet_mode["libraries"],
                 "domains": set(self.facet_chosen["domains"]),
@@ -3741,13 +3729,16 @@ if _QT_AVAILABLE:
         def _filter_parts(self, spec: dict):
             """A filter spec as three predicates on a candidate: Library, Domain and
             the rest. Apart, so each of Library and Domain can be counted among the
-            candidates the other filters keep (_facet_rows)."""
+            candidates the other filters keep (_facet_rows).
+
+            ``criteria_ids``: the manuscripts the Manuscript features keep, or None
+            (none chosen, or their answer not known: nothing is filtered by them
+            then, never everything -- rule 9)."""
             text_q = (spec["text"] or "").strip().lower()
-            mat_q = spec["material"]
             tri_q_idx = spec["triage"]
             # tri_q_idx: 0=all, 1=Y, 2=?, 3=N, 4=untriaged
             _tri_map = {1: "yes", 2: "maybe", 3: "no"}
-            size = spec["size"]     # (min, max) cm when the size filter is on (opt-in)
+            criteria_ids = spec.get("criteria_ids")
 
             def library_ok(c) -> bool:
                 return filter_passes(c.library_code, spec["libraries"], spec["libraries_mode"])
@@ -3764,20 +3755,14 @@ if _QT_AVAILABLE:
                     or text_q in (c.title or "").lower()
                 ):
                     return False
-                m = self._enrich.get(c.key) or {}
-                if mat_q and (m.get("material") or "") != mat_q:
-                    return False
-                if spec["dims"] and not (m.get("width_cm") and m.get("height_cm")):
+                # Per manuscript: every candidate page of a manuscript they keep stays
+                if criteria_ids is not None and c.sys_id not in criteria_ids:
                     return False
                 verdict = self.wb.triage.get(c.sys_id)
                 if tri_q_idx == 4 and verdict:
                     return False
                 if tri_q_idx in _tri_map and verdict != _tri_map[tri_q_idx]:
                     return False
-                if size is not None:
-                    w = m.get("width_cm")
-                    if w is None or not (size[0] <= w <= size[1]):
-                        return False
                 return True
 
             return library_ok, domain_ok, rest_ok
@@ -3788,6 +3773,104 @@ if _QT_AVAILABLE:
             library_ok, domain_ok, rest_ok = self._filter_parts(spec)
             return facet_rows(self.results, library_ok, domain_ok, rest_ok, self._path_of,
                               CURRENT_LANG == "he")
+
+        # -- Manuscript features: their answer for the results (D20) ---------------
+
+        def _criteria_universe(self) -> frozenset:
+            """The results' manuscripts the features are checked over: corpus ones
+            only (a LOCAL id has no catalogue data, and as "not recorded" it would
+            pass every "all except")."""
+            from shared.sys_id_patterns import CORPUS_SYS_ID_RE
+            return frozenset(c.sys_id for c in self.results
+                             if c.sys_id and CORPUS_SYS_ID_RE.fullmatch(c.sys_id))
+
+        def _criteria_key_of(self, criteria) -> tuple:
+            from shared.catalog_criteria import criteria_token
+            return (criteria_token(criteria), self._criteria_universe())
+
+        def _criteria_ids_for(self, criteria):
+            """The manuscripts *criteria* keep among the results, when known; else
+            None, and their check is started (its answer re-applies the filters, or
+            recounts the open Filter dialog)."""
+            if not criteria:
+                return None
+            key = self._criteria_key_of(criteria)
+            if key in self._criteria_answers:
+                return self._criteria_answers[key]
+            self._start_criteria_check(criteria, key)
+            return None
+
+        def _applied_criteria_ids(self):
+            """_criteria_ids_for the applied features, keeping _criteria_state."""
+            if not self._criteria:
+                self._criteria_key, self._criteria_state = None, "idle"
+                return None
+            key = self._criteria_key_of(self._criteria)
+            if key in self._criteria_answers:
+                self._criteria_key, self._criteria_state = key, "ready"
+                return self._criteria_answers[key]
+            if key == self._criteria_key and self._criteria_state == "failed":
+                return None   # it failed: tried again when the features are applied again
+            self._criteria_key, self._criteria_state = key, "pending"
+            self._start_criteria_check(self._criteria, key)
+            return None
+
+        def _start_criteria_check(self, criteria, key):
+            if key in self._criteria_pending.values():
+                return
+            if not key[1]:
+                self._remember_criteria_answer(key, set())
+                return
+            from desktop.gui_threads import CriteriaMatchWorker
+            self._criteria_tag += 1
+            self._criteria_pending[self._criteria_tag] = key
+            worker = CriteriaMatchWorker(criteria, key[1], self._criteria_tag)
+            worker.matched.connect(self._on_criteria_matched)
+            worker.failed.connect(self._on_criteria_failed)
+            worker.start()
+            _keep_until_finished(worker)  # after start(): it lets go of a worker not running
+
+        def _remember_criteria_answer(self, key, ids):
+            self._criteria_answers[key] = set(ids)
+            while len(self._criteria_answers) > 8:
+                self._criteria_answers.pop(next(iter(self._criteria_answers)))
+
+        def _on_criteria_matched(self, tag, ids):
+            key = self._criteria_pending.pop(tag, None)
+            if key is None:
+                return   # the results were cleared meanwhile
+            self._remember_criteria_answer(key, ids)
+            self._after_criteria_answer(key)
+
+        def _on_criteria_failed(self, tag, reason):
+            key = self._criteria_pending.pop(tag, None)
+            if key is None:
+                return
+            logger.info("Joins Lab: the manuscript features could not be checked (%s)", reason)
+            if key == self._criteria_key:
+                self._criteria_state = "failed"
+            self._after_criteria_answer(key)
+
+        def _after_criteria_answer(self, key):
+            """An answer landed: re-apply when it is the applied features', and
+            recount the open Filter dialog (its draft features may be these)."""
+            try:
+                if key == self._criteria_key:
+                    self.apply_filters()
+                if self._dialog_recount is not None:
+                    self._dialog_recount()
+            except RuntimeError:
+                pass   # the pane or the dialog is gone
+
+        def _criteria_notices(self) -> list:
+            """What the status line says about filters not applied yet, or that
+            could not be applied."""
+            notices = []
+            if self._criteria_state == "pending":
+                notices.append(tr("Checking manuscript features…"))
+            elif self._criteria_state == "failed":
+                notices.append(tr("The manuscript features could not be applied to these results."))
+            return notices
 
         def _chosen_names(self, key: str) -> list:
             """The chosen libraries or domains as the user reads them; of domains, only
@@ -3812,10 +3895,16 @@ if _QT_AVAILABLE:
             text = self.filter_in.text().strip()
             if text:
                 out.append((f"{tr('Text')}: {text}", None, self.filter_in.clear))
-            mat = self.mat_filter.currentData()
-            if mat:
-                out.append((f"{tr('Material')}: {material_display(mat)}", None,
-                            lambda: self.mat_filter.setCurrentIndex(0)))
+            if self._criteria:
+                # One chip per feature, in the catalogue's own Hebrew when loaded
+                from desktop.dialogs_filter import criteria_chip_texts
+                try:
+                    chips = criteria_chip_texts(self._criteria)
+                except Exception:
+                    from shared.catalog_criteria import criteria_chips
+                    chips = criteria_chips(self._criteria, "he" if CURRENT_LANG == "he" else "en")
+                for key, chip_text in chips:
+                    out.append((chip_text, None, lambda k=key: self._criteria.pop(k, None)))
             for key, label in (("libraries", tr("Library")), ("domains", tr("Domain"))):
                 if not self.facet_chosen[key]:
                     continue
@@ -3825,14 +3914,9 @@ if _QT_AVAILABLE:
                 shown = ", ".join(names[:2]) + (f" +{len(names) - 2}" if len(names) > 2 else "")
                 out.append((f"{label}: {shown}", f"{label}: {', '.join(names)}",
                             lambda k=key: self.facet_chosen[k].clear()))
-            if self.dim_chk.isChecked():
-                out.append((tr("Has dimensions"), None, lambda: self.dim_chk.setChecked(False)))
             if self.tri_filter.currentIndex():
                 out.append((f"{tr('Triage')}: {self.tri_filter.currentText()}", None,
                             lambda: self.tri_filter.setCurrentIndex(0)))
-            if self.size_btn.isChecked():
-                out.append((f"{tr('Width')}: {self.size_min.value()}–{self.size_max.value()} cm",
-                            None, lambda: self.size_btn.setChecked(False)))
             return out
 
         def _refresh_filter_chips(self):
@@ -3899,8 +3983,11 @@ if _QT_AVAILABLE:
                         " (" + tr("Partial results") + ")"
                         if getattr(self, "_search_was_partial", False) else ""
                     )
+                    # Filters not applied yet, or that could not be applied
+                    _notices = "".join(" · " + n for n in self._criteria_notices())
                     self.status.setText(
                         f"{len(filtered)}/{len(self.results)} " + tr("shown") + _partial
+                        + _notices
                     )
                     # G-13.2: hint whenever toggle is ON and results are shown (pure-VS OR intersection).
                     self.vs_hint.setVisible(bool(getattr(self, "_vs_on", False)) and bool(filtered))
@@ -4233,9 +4320,11 @@ if _QT_AVAILABLE:
             self._update_bulk_bar()
 
             # Reset filter controls to defaults
+            self._criteria = {}
+            self._criteria_key, self._criteria_state = None, "idle"
+            self._criteria_pending.clear()   # a check still running answers no one
             try:
                 self.filter_in.clear()
-                self.mat_filter.setCurrentIndex(0)
                 self.tri_filter.setCurrentIndex(0)
                 # Library / Domain back to any and Show only, and Sort back to the
                 # search's order.
@@ -4289,11 +4378,6 @@ if _QT_AVAILABLE:
             except RuntimeError:
                 pass
 
-        def _toggle_size_filter(self, on: bool):
-            """Kept for apply_filters compatibility — no visible widget to show/hide now."""
-            if not on:
-                self.apply_filters()
-
         # ------------------------------------------------------------------
         # Filter ▾ dialog
         # ------------------------------------------------------------------
@@ -4302,7 +4386,8 @@ if _QT_AVAILABLE:
             """Open the filter dialog (adapted_decision 12).
 
             Builds a fresh dialog each time, pre-populating controls from the
-            persistent hidden filter widgets (filter_in, mat_filter, etc.).
+            persistent hidden filter widgets (filter_in, tri_filter, ...) and the
+            Manuscript features (self._criteria, edited in their own window).
             On Apply the hidden widgets are updated + apply_filters is called.
             Anchor info panel shows known fields from wb anchor state.
             """
@@ -4394,25 +4479,46 @@ if _QT_AVAILABLE:
             dlg_filter_in.setText(self.filter_in.text())
             lay.addWidget(dlg_filter_in)
 
-            mat_row = QHBoxLayout()
-            mat_row.addWidget(QLabel(tr("Material") + ":"))
-            # Feature 9: mirror the mat_filter items including userData (English) + display (HE)
-            dlg_mat = QComboBox()
-            dlg_mat.addItem(tr("any material"), "")
-            current_mat_items = [
-                (self.mat_filter.itemText(i), self.mat_filter.itemData(i) or self.mat_filter.itemText(i))
-                for i in range(1, self.mat_filter.count())
-            ]
-            for label, val in current_mat_items:
-                dlg_mat.addItem(label, val)
-            # Restore selection by userData
-            current_val = self.mat_filter.currentData() or ""
-            for i in range(dlg_mat.count()):
-                if dlg_mat.itemData(i) == current_val:
-                    dlg_mat.setCurrentIndex(i)
-                    break
-            mat_row.addWidget(dlg_mat, 1)
-            lay.addLayout(mat_row)
+            # Manuscript features: material, size, script, ... in their own window
+            # (owner, 2026-11-02: one place for each filter). The draft waits for Apply.
+            draft = {"criteria": dict(self._criteria)}
+            dlg_features = QPushButton()
+            lay.addWidget(dlg_features)
+            features_note = QLabel(tr("Features are checked per manuscript: every candidate "
+                                      "page of a matching manuscript stays."))
+            features_note.setStyleSheet("font-size:10px;color:#6b7280;")
+            features_note.setWordWrap(True)
+            lay.addWidget(features_note)
+
+            def _show_features_count():
+                n = len(draft["criteria"])
+                dlg_features.setText(tr("Manuscript features") + (f" ({n})" if n else "") + "…")
+                font = dlg_features.font()
+                font.setBold(bool(n))
+                dlg_features.setFont(font)
+
+            def _set_draft_criteria(criteria):
+                draft["criteria"] = dict(criteria)
+                _show_features_count()
+                _recount()
+
+            def _open_features():
+                from desktop.dialogs_filter import CriteriaDialog
+                corpus = getattr(getattr(self.wb, "meta_mgr", None), "corpus_sys_ids", None)
+                features = CriteriaDialog(dlg, draft["criteria"], universe=corpus,
+                                          within=self._criteria_universe())
+                if features.exec() == QDialog.DialogCode.Accepted:
+                    if features.get_criteria():
+                        from desktop import startup_tips  # noqa: PLC0415
+                        startup_tips.mark_used('features')  # its startup tips are not needed
+                    _set_draft_criteria(features.get_criteria())
+                elif features.dropped_saved_criteria:
+                    # Dropped with a notice (this file cannot answer them): gone on Cancel too.
+                    _set_draft_criteria({k: v for k, v in draft["criteria"].items()
+                                         if k not in features.dropped_saved_criteria})
+
+            dlg_features.clicked.connect(_open_features)
+            _show_features_count()
 
             # Library / Domain: check several (Domain is the tree: a parent takes
             # its branch along), then show only them or hide them. Each counts the
@@ -4452,10 +4558,6 @@ if _QT_AVAILABLE:
             dlg_lib, dlg_lib_mode = _facet_box(tr("Library"), lib_rows, "libraries")
             dlg_dom, dlg_dom_mode = _facet_box(tr("Domain"), dom_rows, "domains")
 
-            dlg_dim = QCheckBox(tr("Has dimensions"))
-            dlg_dim.setChecked(self.dim_chk.isChecked())
-            lay.addWidget(dlg_dim)
-
             tri_row = QHBoxLayout()
             tri_row.addWidget(QLabel(tr("Triage") + ":"))
             dlg_tri = QComboBox()
@@ -4467,51 +4569,15 @@ if _QT_AVAILABLE:
             tri_row.addWidget(dlg_tri, 1)
             lay.addLayout(tri_row)
 
-            sep2 = QFrame()
-            sep2.setFrameShape(QFrame.Shape.HLine)
-            sep2.setFrameShadow(QFrame.Shadow.Sunken)
-            lay.addWidget(sep2)
-
-            dlg_size_chk = QCheckBox(tr("Filter by width (cm)"))
-            dlg_size_chk.setChecked(self.size_btn.isChecked())
-            lay.addWidget(dlg_size_chk)
-
-            size_row = QHBoxLayout()
-            dlg_size_min = QSpinBox()
-            dlg_size_min.setRange(0, 200)
-            dlg_size_min.setValue(self.size_min.value())
-            dlg_size_min.setPrefix(tr("min") + " ")
-            size_row.addWidget(dlg_size_min)
-            dlg_size_max = QSpinBox()
-            dlg_size_max.setRange(0, 200)
-            dlg_size_max.setValue(self.size_max.value())
-            dlg_size_max.setPrefix(tr("max") + " ")
-            size_row.addWidget(dlg_size_max)
-            size_row.addStretch()
-            lay.addLayout(size_row)
-
-            # Note text
-            note = QLabel(tr("With this on, fragments with no recorded width are hidden too."))
-            note.setStyleSheet("font-size:10px;color:#6b7280;")
-            note.setWordWrap(True)
-            lay.addWidget(note)
-
-            # "from anchor" shortcut helpers for the dialog's spinboxes
+            # The "from anchor" shortcuts fill in the features: the anchor's material
+            # as measured (the value the cards show), its width ±2 cm.
             def _set_mat(m):
-                # Feature 9: find by userData (English value), not display text
-                for i in range(dlg_mat.count()):
-                    if (dlg_mat.itemData(i) or "") == m:
-                        dlg_mat.setCurrentIndex(i)
-                        return
-                # Fallback: match by text (handles legacy / unknown materials)
-                idx2 = dlg_mat.findText(m)
-                if idx2 >= 0:
-                    dlg_mat.setCurrentIndex(idx2)
+                _set_draft_criteria({**draft["criteria"], "material": {
+                    "values": [m], "mode": "only", "source": "measured"}})
 
             def _set_width_range(w):
-                dlg_size_chk.setChecked(True)
-                dlg_size_min.setValue(max(0, int(w) - 2))
-                dlg_size_max.setValue(min(200, int(w) + 2))
+                _set_draft_criteria({**draft["criteria"], "width": {
+                    "min": round(max(0.0, w - 2), 1), "max": round(w + 2, 1)}})
 
             btn_row = QHBoxLayout()
             btn_reset = QPushButton(tr("Reset"))
@@ -4524,31 +4590,19 @@ if _QT_AVAILABLE:
 
             def _on_reset():
                 dlg_filter_in.setText("")
-                dlg_mat.setCurrentIndex(0)
+                _set_draft_criteria({})
                 for checklist, mode in ((dlg_lib, dlg_lib_mode), (dlg_dom, dlg_dom_mode)):
                     _check_all(checklist, False)
                     mode.setCurrentIndex(0)
-                dlg_dim.setChecked(False)
                 dlg_tri.setCurrentIndex(0)
-                dlg_size_chk.setChecked(False)
-                dlg_size_min.setValue(0)
-                dlg_size_max.setValue(200)
 
             def _on_apply():
                 # Write back to persistent hidden filter widgets
                 self.filter_in.setText(dlg_filter_in.text())
-                # Sync material combo by userData (Feature 9: English value)
-                self.mat_filter.blockSignals(True)
-                chosen_val = dlg_mat.currentData() or ""
-                synced = False
-                for i in range(self.mat_filter.count()):
-                    if (self.mat_filter.itemData(i) or "") == chosen_val:
-                        self.mat_filter.setCurrentIndex(i)
-                        synced = True
-                        break
-                if not synced:
-                    self.mat_filter.setCurrentIndex(0)
-                self.mat_filter.blockSignals(False)
+                if draft["criteria"] != self._criteria:
+                    self._criteria = dict(draft["criteria"])
+                if self._criteria_state == "failed":
+                    self._criteria_key = None   # applied again: checked again
                 # Library / Domain by value; one no longer among the results (new
                 # results may have come meanwhile) is dropped.
                 for key, checklist, mode in (("libraries", dlg_lib, dlg_lib_mode),
@@ -4556,23 +4610,17 @@ if _QT_AVAILABLE:
                     self.facet_chosen[key] = _checked_values(checklist)
                     self.facet_mode[key] = mode.currentData()
                 self._refresh_facet_filters()
-                self.dim_chk.setChecked(dlg_dim.isChecked())
                 self.tri_filter.setCurrentIndex(dlg_tri.currentIndex())
-                self.size_btn.setChecked(dlg_size_chk.isChecked())
-                self.size_min.setValue(dlg_size_min.value())
-                self.size_max.setValue(dlg_size_max.value())
                 self.apply_filters()
                 dlg.accept()
 
             def _dialog_spec() -> dict:
-                """The filters as the dialog now has them, not yet applied."""
-                size_on = dlg_size_chk.isChecked()
+                """The filters as the dialog now has them, not yet applied (the draft
+                features' answer once their check lands: it recounts then)."""
                 return {
                     "text": dlg_filter_in.text(),
-                    "material": dlg_mat.currentData() or "",
-                    "dims": dlg_dim.isChecked(),
                     "triage": dlg_tri.currentIndex(),
-                    "size": (dlg_size_min.value(), dlg_size_max.value()) if size_on else None,
+                    "criteria_ids": self._criteria_ids_for(draft["criteria"]),
                     "libraries": _checked_values(dlg_lib),
                     "libraries_mode": dlg_lib_mode.currentData(),
                     "domains": _checked_values(dlg_dom),
@@ -4586,14 +4634,17 @@ if _QT_AVAILABLE:
 
             for signal in (dlg_lib.itemChanged, dlg_dom.itemChanged,
                            dlg_lib_mode.currentIndexChanged, dlg_dom_mode.currentIndexChanged,
-                           dlg_filter_in.textChanged, dlg_mat.currentIndexChanged,
-                           dlg_dim.toggled, dlg_tri.currentIndexChanged, dlg_size_chk.toggled,
-                           dlg_size_min.valueChanged, dlg_size_max.valueChanged):
+                           dlg_filter_in.textChanged, dlg_tri.currentIndexChanged):
                 signal.connect(_recount)
 
             btn_reset.clicked.connect(_on_reset)
             btn_apply.clicked.connect(_on_apply)
-            dlg.exec()
+            # A features answer landing while the dialog is open recounts it
+            self._dialog_recount = _recount
+            try:
+                dlg.exec()
+            finally:
+                self._dialog_recount = None
 
         # ------------------------------------------------------------------
         # "Browse results ▶" + bulk actions + selection management
@@ -6537,8 +6588,9 @@ if _QT_AVAILABLE:
             """Serialize the Join Lab INPUT state to a plain dict.
 
             Captured: anchor identity, both builder states, other-side enable + mode,
-            triage dict, filter text + material + triage filter + view_mode, open flag.
-            Candidate result lists are NEVER persisted (search_history.json lesson).
+            triage dict, filter text + Manuscript features + triage filter + view_mode,
+            open flag. Candidate result lists are NEVER persisted (search_history.json
+            lesson).
             """
             pane = getattr(self, "_candidate_pane", None)
             anchor_state = {
@@ -6553,7 +6605,7 @@ if _QT_AVAILABLE:
             other_enabled = False
             other_mode_idx = 0
             filter_text = ""
-            mat_filter_idx = 0
+            criteria = {}
             tri_filter_idx = 0
             view_mode = "grid"
             order = "rank"
@@ -6562,7 +6614,7 @@ if _QT_AVAILABLE:
                     other_enabled = pane.other_enable.isChecked()
                     other_mode_idx = pane.combine_combo.currentIndex()
                     filter_text = pane.filter_in.text()
-                    mat_filter_idx = pane.mat_filter.currentIndex()
+                    criteria = dict(pane._criteria)
                     tri_filter_idx = pane.tri_filter.currentIndex()
                     view_mode = pane.view_mode
                     order = normalize_order(pane.order_combo.currentData())
@@ -6578,7 +6630,7 @@ if _QT_AVAILABLE:
                 "other_mode_idx": other_mode_idx,
                 "triage": dict(self.triage),
                 "filter_text": filter_text,
-                "mat_filter_idx": mat_filter_idx,
+                "criteria": criteria,
                 "tri_filter_idx": tri_filter_idx,
                 "view_mode": view_mode,
                 "order": order,
@@ -6644,9 +6696,11 @@ if _QT_AVAILABLE:
             try:
                 filter_text = state.get("filter_text") or ""
                 pane.filter_in.setText(filter_text)
-                mat_filter_idx = int(state.get("mat_filter_idx", 0))
-                if 0 <= mat_filter_idx < pane.mat_filter.count():
-                    pane.mat_filter.setCurrentIndex(mat_filter_idx)
+                # The features, cleaned; one the open file is KNOWN not to answer is
+                # dropped (rule 9). A session from before them saved the old Material
+                # combo's row ("mat_filter_idx"), which never restored (the list was
+                # filled later, from the results): nothing to carry over.
+                pane._criteria = _restored_criteria(state.get("criteria"))
                 tri_filter_idx = int(state.get("tri_filter_idx", 0))
                 if 0 <= tri_filter_idx < pane.tri_filter.count():
                     pane.tri_filter.setCurrentIndex(tri_filter_idx)

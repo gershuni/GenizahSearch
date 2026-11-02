@@ -249,6 +249,9 @@ def compute_filtered(
     triage: dict,
     anchor_sys_id: str,
     hebrew: Optional[bool] = None,
+    *,
+    criteria_matched: Optional[set] = None,
+    catalogue_ok: bool = True,
 ) -> list:
     """Apply filter_state predicates to all_candidates and return the filtered list.
 
@@ -258,8 +261,8 @@ def compute_filtered(
     Args:
         all_candidates: Full list of Candidate objects.
         filter_state:   Dict with keys:
-                          - materials: list[str] — include only these materials (empty=all)
-                          - has_dims: bool — require both width_cm and height_cm
+                          - criteria: the Manuscript features (shared.catalog_criteria
+                            shape); applied through *criteria_matched*
                           - exclude_mismatch: bool — exclude size-mismatch candidates
                           - triage_states: list[str] — 'All'/'Not triaged'/'Yes'/'Maybe'/'No'
                           - text_q: str — case-insensitive substring on shelfmark+title
@@ -272,6 +275,15 @@ def compute_filtered(
         enrichment:     dict[sys_id → {width_cm, height_cm, material, domain, ...}]
         triage:         dict[sys_id → 'yes'|'maybe'|'no'] (or TriageState)
         anchor_sys_id:  sys_id of the anchor fragment (for size-mismatch comparison)
+        criteria_matched: the manuscripts the features keep (FjmsService.
+                          match_result_criteria over the candidates); None when no
+                          feature is chosen, or their answer is not known (still
+                          checking, or failed: the page says so) -- nothing is
+                          filtered by them then, never everything (rule 9)
+        catalogue_ok:   False when the catalogue data could not be read: the
+                          filters that read it (size mismatch, Domain) are
+                          not applied then, rather than hiding every
+                          candidate (the page says so)
 
     Returns:
         Filtered list of Candidate objects: in the order of all_candidates, or
@@ -279,7 +291,7 @@ def compute_filtered(
         group keeps that order) when filter_state['order'] asks for it.
     """
     library_ok, domain_ok, rest_ok = _filter_parts(
-        filter_state, enrichment, triage, anchor_sys_id)
+        filter_state, enrichment, triage, anchor_sys_id, criteria_matched, catalogue_ok)
     out = [c for c in all_candidates if rest_ok(c) and library_ok(c) and domain_ok(c)]
 
     order = normalize_order(filter_state.get("order"))
@@ -290,18 +302,20 @@ def compute_filtered(
     return out
 
 
-def _filter_parts(filter_state: dict, enrichment: dict, triage, anchor_sys_id: str):
+def _filter_parts(filter_state: dict, enrichment: dict, triage, anchor_sys_id: str,
+                  criteria_matched: Optional[set] = None, catalogue_ok: bool = True):
     """compute_filtered's filters as three predicates on a candidate: Library,
-    Domain, and the rest. Apart, so each of Library and Domain can be counted
-    among the candidates the other filters keep (facet_options)."""
+    Domain, and the rest (the Manuscript features among them). Apart, so each
+    of Library and Domain can be counted among the candidates the other
+    filters keep (facet_options)."""
     text_q = (filter_state.get("text_q") or "").strip().lower()
-    materials = set(filter_state.get("materials") or [])
-    has_dims = bool(filter_state.get("has_dims", False))
-    exclude_mismatch = bool(filter_state.get("exclude_mismatch", False))
+    # The filters that read the catalogue data (the enrichment) stand down when
+    # it could not be read: an empty enrichment would hide every candidate.
+    exclude_mismatch = catalogue_ok and bool(filter_state.get("exclude_mismatch", False))
     triage_states = set(filter_state.get("triage_states") or [])
     libraries = set(filter_state.get("libraries") or [])
     libraries_mode = filter_state.get("libraries_mode")
-    domains = set(filter_state.get("domains") or [])
+    domains = set(filter_state.get("domains") or []) if catalogue_ok else set()
     domains_mode = filter_state.get("domains_mode")
 
     # Look up anchor width for size-mismatch comparison
@@ -324,13 +338,12 @@ def _filter_parts(filter_state: dict, enrichment: dict, triage, anchor_sys_id: s
             if text_q not in shelfmark_l and text_q not in title_l:
                 return False
 
+        # Manuscript features: checked per manuscript, so every candidate page
+        # of a manuscript they keep stays
+        if criteria_matched is not None and c.sys_id not in criteria_matched:
+            return False
+
         m = enrichment.get(c.sys_id, {})
-        # Material filter
-        if materials and m.get("material") not in materials:
-            return False
-        # Has-dims filter
-        if has_dims and not (m.get("width_cm") and m.get("height_cm")):
-            return False
         # Size-mismatch filter
         if exclude_mismatch and is_size_mismatch(m.get("width_cm"), anchor_w):
             return False
@@ -354,16 +367,18 @@ def candidate_domain_label(cand, enrichment: dict, hebrew: bool) -> str:
 
 
 def facet_options(all_candidates: list, filter_state: dict, enrichment: dict,
-                  triage, anchor_sys_id: str, hebrew: bool) -> tuple:
+                  triage, anchor_sys_id: str, hebrew: bool, *,
+                  criteria_matched: Optional[set] = None, catalogue_ok: bool = True) -> tuple:
     """The Library and Domain filter options, each [(value, label, count, depth)].
 
     Every library and domain in the results keeps its row; each counts the
-    candidates the OTHER filters keep, so choosing domains updates the library
-    counts and the other way round. Libraries in code order; domains as a tree
-    (shared.joins_lab.domain_tree_options), a parent counting its branch.
+    candidates the OTHER filters keep (the features among them: *criteria_matched*
+    and *catalogue_ok* as for compute_filtered), so choosing domains updates the
+    library counts and the other way round. Libraries in code order; domains as a
+    tree (shared.joins_lab.domain_tree_options), a parent counting its branch.
     """
     library_ok, domain_ok, rest_ok = _filter_parts(
-        filter_state, enrichment, triage, anchor_sys_id)
+        filter_state, enrichment, triage, anchor_sys_id, criteria_matched, catalogue_ok)
     return facet_rows(all_candidates, library_ok, domain_ok, rest_ok,
                       lambda c: domain_path_of(enrichment.get(c.sys_id)), hebrew)
 
@@ -372,11 +387,9 @@ def more_filters_count(filter_state: dict) -> int:
     """How many of the "More filters…" dialog's filters are on.
 
     Library and Domain are in the toolbar, where the visitor sees them, so they
-    do not count."""
+    do not count. Each Manuscript feature counts as one filter."""
     triage_states = set(filter_state.get("triage_states") or [])
-    return sum((
-        bool(filter_state.get("materials")),
-        bool(filter_state.get("has_dims")),
+    return len(filter_state.get("criteria") or {}) + sum((
         bool(filter_state.get("exclude_mismatch")),
         bool(triage_states) and "All" not in triage_states,
         bool((filter_state.get("text_q") or "").strip()),
@@ -1074,11 +1087,17 @@ def open_filter_dialog(
     enrichment_ready: bool,
     on_apply: Callable,
     on_reset: Callable,
+    *,
+    fjms: Optional[Callable] = None,
+    corpus=None,
+    within: Optional[Callable] = None,
 ) -> None:
     """Open the "More filters…" dialog (D-14, CND-06).
 
     Library and Domain are not here: they sit in the results toolbar (owner,
     2026-10-19: in the dialog nobody found them), and Reset leaves them as they are.
+    Material and size are Manuscript features (owner, 2026-11-02: one place for
+    each filter): the dialog's "Manuscript features" button opens their window.
 
     Args:
         filter_state:     Current filter state dict (mutated in place on Apply).
@@ -1086,32 +1105,39 @@ def open_filter_dialog(
         enrichment_ready: True when enrichment batch has completed.
         on_apply:         Called after Apply closes the dialog.
         on_reset:         Called after Reset closes the dialog.
+        fjms:             Returns the FJMS service; without it, no features button.
+        corpus:           The corpus for the features' value lists (as
+                          filter_panel.corpus_universe).
+        within:           Returns the candidates' manuscripts: the features' total
+                          counts among them (D20).
     """
-    # Gather material options from enrichment (disabled until enrichment ready — Pitfall 7)
-    mat_options = sorted({v.get("material") for v in enrichment.values() if v.get("material")})
+    # The features chosen in their window wait here until Apply.
+    draft = {"criteria": dict(filter_state.get("criteria") or {})}
 
     with ui.dialog() as dlg, ui.card().classes("p-4 gap-4").style("min-width:360px;"):
+        dlg.on("hide", lambda _: dlg.delete())
         ui.label(tr("Filters")).classes("text-base font-semibold")
 
-        # 1. Material (multi-select; disabled until enrichment ready)
-        mat_sel = ui.select(
-            options=mat_options,
-            value=list(filter_state.get("materials") or []),
-            label=tr("Material"),
-            multiple=True,
-        ).props("dense outlined use-chips").classes("w-full")
-        if not enrichment_ready:
-            mat_sel.disable()
+        # 1. Manuscript features: material, size, script, ... (their own window)
+        if fjms is not None:
+            from web.components.criteria_panel import CriteriaControl
+            CriteriaControl(
+                get_criteria=lambda: draft["criteria"],
+                on_apply=lambda criteria: draft.update(criteria=criteria),
+                fjms=fjms, universe=corpus, within=within, mark="joins-criteria",
+            ).build()
+            ui.label(tr("Features are checked per manuscript: every candidate page of a "
+                        "matching manuscript stays.")).classes("text-xs").style(
+                "color: var(--text-muted); max-width: 360px; white-space: normal;")
 
-        # 2. Has dimensions
-        dims_sw = ui.switch(tr("Has dimensions data"), value=bool(filter_state.get("has_dims", False)))
-
-        # 3. Size mismatch (disabled until enrichment ready — Pitfall 7)
+        # 2. Size mismatch against the anchor (disabled until enrichment ready —
+        # Pitfall 7). "Has dimensions data" went with the size filters into the
+        # features (owner, 2026-11-02).
         mismatch_sw = ui.switch(tr("Exclude size mismatch"), value=bool(filter_state.get("exclude_mismatch", False)))
         if not enrichment_ready:
             mismatch_sw.disable()
 
-        # 4. Triage state (multi-select)
+        # 3. Triage state (multi-select)
         # Values stay the English keys the filter compares against; only the
         # labels are translated (they were shown in English to Hebrew users).
         triage_opts = {v: tr(v) for v in ("All", "Not triaged", "Yes", "Maybe", "No")}
@@ -1122,7 +1148,7 @@ def open_filter_dialog(
             multiple=True,
         ).props("dense outlined use-chips").classes("w-full")
 
-        # 5. Text filter (D-14 discretion — included per UI-SPEC)
+        # 4. Text filter (D-14 discretion — included per UI-SPEC)
         text_inp = ui.input(
             placeholder=tr("Filter by shelfmark…"),
             value=filter_state.get("text_q", ""),
@@ -1131,8 +1157,7 @@ def open_filter_dialog(
         with ui.row().classes("justify-end gap-2 mt-2"):
             def _do_reset():
                 filter_state.update({
-                    "materials": [],
-                    "has_dims": False,
+                    "criteria": {},
                     "exclude_mismatch": False,
                     "triage_states": [],
                     "text_q": "",
@@ -1141,8 +1166,7 @@ def open_filter_dialog(
                 on_reset()
 
             def _do_apply():
-                filter_state["materials"] = list(mat_sel.value or [])
-                filter_state["has_dims"] = bool(dims_sw.value)
+                filter_state["criteria"] = dict(draft["criteria"])
                 filter_state["exclude_mismatch"] = bool(mismatch_sw.value)
                 filter_state["triage_states"] = list(tri_sel.value or [])
                 filter_state["text_q"] = text_inp.value or ""
@@ -1459,12 +1483,16 @@ def _facet_select(filter_state: dict, key: str, rows: list, label: str,
     return sel
 
 
-def _grid_header(total: int, *, all_candidates: list, filter_state: dict,
-                 enrichment: dict, enrichment_ready: bool, triage, anchor_sys_id: str,
-                 order: str,
-                 on_order_change: Optional[Callable], on_filter_change: Optional[Callable],
-                 on_filter_open: Optional[Callable]) -> None:
-    """The row above the cards: the count, then Library, Domain, Sort and More filters…"""
+def candidates_toolbar(total: int, *, all_candidates: list, filter_state: dict,
+                       enrichment: dict, enrichment_ready: bool, triage, anchor_sys_id: str,
+                       order: str,
+                       on_order_change: Optional[Callable], on_filter_change: Optional[Callable],
+                       on_filter_open: Optional[Callable],
+                       criteria_matched: Optional[set] = None, catalogue_ok: bool = True,
+                       notices: tuple = ()) -> None:
+    """The row above the cards or the table: the count, then Library, Domain, Sort
+    and More filters…; under it, *notices* (filters not applied yet, or that could
+    not be applied)."""
     with ui.row().classes("w-full items-center justify-between"):
         ui.label(f"{tr('Candidates')} ({total})").classes(
             "text-base font-semibold"
@@ -1473,7 +1501,8 @@ def _grid_header(total: int, *, all_candidates: list, filter_state: dict,
             if on_filter_change is not None:
                 lib_opts, dom_opts = facet_options(
                     all_candidates, filter_state, enrichment, triage, anchor_sys_id,
-                    get_language() == "he")
+                    get_language() == "he", criteria_matched=criteria_matched,
+                    catalogue_ok=catalogue_ok)
                 # Each shows only the chosen values, or hides them, and counts
                 # the candidates the other filters keep.
                 _facet_select(filter_state, "libraries", lib_opts, tr("Library"),
@@ -1501,6 +1530,9 @@ def _grid_header(total: int, *, all_candidates: list, filter_state: dict,
                 ).props("flat dense no-caps").mark("joins-more-filters").tooltip(
                     tr("Filter candidates")
                 )
+    for notice in notices:
+        ui.label(notice).classes("text-sm").style("color: var(--text-secondary);").mark(
+            "joins-filter-notice")
 
 
 # ---------------------------------------------------------------------------
@@ -1546,6 +1578,11 @@ def create_candidate_grid(
     # called after one of them changed filter_state in place.
     all_candidates: Optional[list] = None,
     on_filter_change: Optional[Callable] = None,
+    # 2026-11-02: the Manuscript features' answer and the catalogue data's state,
+    # for the toolbar's counts (as compute_filtered), and its notices.
+    criteria_matched: Optional[set] = None,
+    catalogue_ok: bool = True,
+    notices: tuple = (),
 ) -> ui.element:
     """Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
@@ -1570,6 +1607,9 @@ def create_candidate_grid(
         order:            The order shown in the Sort control.
         on_order_change:  Callback(order) when the visitor picks another order; no
                           Sort control without it.
+        criteria_matched, catalogue_ok: as for compute_filtered (the toolbar's counts).
+        notices:          Lines under the toolbar (filters not applied yet, or that
+                          could not be applied).
         on_restyle_ready: Optional callback(restyle_fn) invoked with the render-scoped
                           restyle function immediately after the grid is built (WR-01).
                           The page stores this so Compare verdicts can restyle grid cards.
@@ -1600,14 +1640,15 @@ def create_candidate_grid(
         enrichment=enrichment, enrichment_ready=enrichment_ready, triage=triage,
         anchor_sys_id=anchor_sys_id, order=order,
         on_order_change=on_order_change, on_filter_change=on_filter_change,
-        on_filter_open=on_filter_open,
+        on_filter_open=on_filter_open, criteria_matched=criteria_matched,
+        catalogue_ok=catalogue_ok, notices=tuple(notices or ()),
     )
 
     with ui.column().classes("w-full gap-2") as outer:
 
         if not candidates and all_candidates:
             # The filters leave none: keep the toolbar, so they can be undone.
-            _grid_header(0, **header)
+            candidates_toolbar(0, **header)
             ui.label(tr("No candidates match these filters.")).classes("text-sm").style(
                 "color: var(--text-secondary);"
             ).mark("joins-no-filter-match")
@@ -1618,7 +1659,7 @@ def create_candidate_grid(
             ).classes("text-sm").style("color: var(--text-secondary);")
         else:
             # Section header row: the count, the filters, Sort (D-14)
-            _grid_header(total, **header)
+            candidates_toolbar(total, **header)
 
             # Responsive grid (D-09). Medium: 1 col <640px, 2 col 640–1023px, 3 col
             # ≥1024px; Small fits 4 at ≥1024px, Large 2 (CARD_SIZES).

@@ -66,6 +66,7 @@ from typing import Optional
 
 from nicegui import run, ui
 
+from shared.catalog_criteria import criteria_token
 from shared.export_dossier import build_image_url_for_row
 from shared.fjms_service import get_fjms_service
 from shared.fragment_details import fetch_fragment_details
@@ -75,6 +76,7 @@ from shared.joins_lab import (
     detect_self_match, domain_hebrew_names, merge_candidates, normalize_order,
     primary_domain,
 )
+from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 from shared.visual_similarity_service import get_vs_service
 from shared.export_utils import GENIZAHSEARCH_URL
 from web import io_bound_result
@@ -86,8 +88,8 @@ from web.joins_lab_link import (
 from web.auth_state import GlobalAuthState, create_login_dialog
 from web.components.anchor_viewer import AnchorViewer, inject_viewer_assets
 from web.components.candidate_grid import (
-    compute_filtered, create_candidate_grid, create_candidate_table, normalize_card_size,
-    open_filter_dialog,
+    candidates_toolbar, compute_filtered, create_candidate_grid, create_candidate_table,
+    normalize_card_size, open_filter_dialog,
 )
 from web.components.compare_modal import create_compare_modal
 from web.components.shelfmark_picker import items_from_manuscripts, open_shelfmark_picker
@@ -501,6 +503,10 @@ async def _fetch_vs_candidates(anchor_sid: str) -> list:
         return []
 
 
+class CatalogueUnavailable(Exception):
+    """The catalogue data (the FJMS sidecar) could not be read for the enrichment."""
+
+
 async def _enrich_candidates(sys_ids: list) -> dict:
     """Batch-enrich candidates with material/dimensions data off the event loop (D-16).
 
@@ -510,7 +516,10 @@ async def _enrich_candidates(sys_ids: list) -> dict:
     CI guard (tests/test_joins_lab_off_loop.py): the sync closure named EXACTLY
     ``run_enrich_core`` MUST be the first positional arg to run.io_bound.
 
-    Returns {} for empty input or when the FJMS service is unavailable (graceful).
+    Returns {} for empty input. Raises CatalogueUnavailable when the FJMS service
+    is unavailable or the batch fails: an empty enrichment would read as "no
+    candidate has a size or a domain" and hide them all under the size-mismatch
+    and Domain filters (rule 9).
     """
     if not sys_ids:
         return {}
@@ -518,7 +527,7 @@ async def _enrich_candidates(sys_ids: list) -> dict:
     def run_enrich_core():
         fjms_svc = get_fjms_service(thread_safe=True)
         if not fjms_svc.is_available():
-            return {}
+            raise CatalogueUnavailable('the FJMS catalog sidecar is not available')
         out = fjms_svc.get_measurement_summaries_batch(sys_ids) or {}
         # The domain for the Library/Domain filter and order: the first of each
         # fragment's domains, as the Visual Similarity window shows it, with its
@@ -532,9 +541,11 @@ async def _enrich_candidates(sys_ids: list) -> dict:
 
     try:
         return await run.io_bound(run_enrich_core)
-    except Exception:
+    except CatalogueUnavailable:
+        raise
+    except Exception as e:
         logger.debug('Enrichment batch failed', exc_info=True)
-        return {}
+        raise CatalogueUnavailable('the enrichment batch failed') from e
 
 
 # ---------------------------------------------------------------------------
@@ -609,8 +620,7 @@ def create_joins_lab_page(
     _triage: dict = {}            # sys_id → 'yes'|'maybe'|'no' (D-11)
     _selected: set = set()        # table multi-select sys_ids
     _filter_state: dict = {       # filter dialog state
-        'materials': [],
-        'has_dims': False,
+        'criteria': {},               # Manuscript features (shared.catalog_criteria)
         'exclude_mismatch': False,
         'triage_states': [],
         'text_q': '',
@@ -622,6 +632,14 @@ def create_joins_lab_page(
     }
     _enrichment: dict = {}        # sys_id → {width_cm, height_cm, material, ...} (D-16)
     _enrichment_ready: dict = {'value': False}
+    # The catalogue data could not be read: the filters that read the enrichment
+    # are not applied (compute_filtered's catalogue_ok), and the page says so.
+    _catalogue_failed: dict = {'value': False}
+    # The Manuscript features' answer for the candidates now shown: which of their
+    # manuscripts the features keep (FjmsService.match_result_criteria, D20), for
+    # 'key' = (criteria token, those manuscripts). 'state': 'idle' (no feature
+    # chosen) | 'pending' | 'ready' | 'failed'; 'gen' drops a superseded answer.
+    _criteria_match: dict = {'key': None, 'ids': None, 'state': 'idle', 'gen': 0}
     _view_mode: dict = {'value': 'grid'}      # 'grid' | 'table'
     # The visitor's card size in the grid (owner, 2026-10-19): Small / Medium /
     # Large, remembered per visitor (candidate_grid.CARD_SIZES; Medium by default).
@@ -1105,13 +1123,21 @@ def create_joins_lab_page(
             anchor_sid = _anchor_state.get('sys_id')
             if anchor_sid and anchor_sid not in sys_ids:
                 sys_ids.append(anchor_sid)
-            enrichment = await _enrich_candidates(sys_ids)
+            _catalogue_failed['value'] = False  # this batch decides it afresh
+            try:
+                enrichment = await _enrich_candidates(sys_ids)
+            except CatalogueUnavailable:
+                # Every candidate stays, and the page names the filters not applied.
+                _catalogue_failed['value'] = True
+                _re_render_candidates_surface()
+                return
             if enrichment is None:
                 return  # cancelled or app stopping (run.io_bound returned None)
             # Store in the page-level dict (shared with filter dialog + table cells)
             _enrichment.clear()
             _enrichment.update(enrichment)
             _enrichment_ready['value'] = True
+            _catalogue_failed['value'] = False
             # Re-render the surface so material/dims populate (same render path)
             _re_render_candidates_surface()
             # Round-5 (PST): re-persist now that enrichment is populated, so a
@@ -1119,6 +1145,75 @@ def create_joins_lab_page(
             _persist_results_snapshot()
         except RuntimeError:
             return  # client/tab deleted mid-fetch — benign teardown (SEED-008 D-20)
+
+    def _criteria_universe(candidates) -> frozenset:
+        """The manuscripts of *candidates* the features are checked over (D20):
+        corpus ones only -- a LOCAL id has no catalogue data, and as "not
+        recorded" it would pass every "all except"."""
+        return frozenset(c.sys_id for c in candidates
+                         if c.sys_id and CORPUS_SYS_ID_RE.fullmatch(c.sys_id))
+
+    def _criteria_matched_for(candidates) -> Optional[set]:
+        """Which of *candidates*' manuscripts the Manuscript features keep, or None:
+        no feature chosen, or the answer not known yet (a check is started, and
+        re-renders when it lands) or failed -- the candidates then show unfiltered,
+        with a notice (_filter_notices), never as an empty list (rule 9)."""
+        criteria = _filter_state.get('criteria') or {}
+        if not criteria:
+            _criteria_match.update(key=None, ids=None, state='idle')
+            return None
+        universe = _criteria_universe(candidates)
+        key = (criteria_token(criteria), universe)
+        if _criteria_match['key'] != key:
+            _criteria_match['gen'] += 1
+            if universe:
+                _criteria_match.update(key=key, ids=None, state='pending')
+                asyncio.ensure_future(
+                    _run_criteria_match(_criteria_match['gen'], criteria, universe))
+            else:
+                _criteria_match.update(key=key, ids=set(), state='ready')
+        return _criteria_match['ids'] if _criteria_match['state'] == 'ready' else None
+
+    async def _run_criteria_match(gen: int, criteria: dict, universe: frozenset) -> None:
+        """The features' check off the event loop, then a re-render -- unless the
+        criteria or the candidates changed meanwhile (a newer check runs then)."""
+        def run_criteria_core():
+            return get_fjms_service(thread_safe=True).match_result_criteria(criteria, universe)
+
+        try:
+            ids = await run.io_bound(run_criteria_core)
+            state = 'ready' if ids is not None else 'failed'
+        except Exception:
+            logger.info('joins-lab: the manuscript features could not be checked', exc_info=True)
+            ids, state = None, 'failed'
+        if gen != _criteria_match['gen']:
+            return
+        _criteria_match.update(ids=set(ids or ()), state=state)
+        try:
+            _re_render_candidates_surface()
+        except RuntimeError:
+            return  # the tab is gone
+
+    def _filtered(candidates, anchor_sid: str) -> list:
+        """compute_filtered with the features' answer and the catalogue data's state."""
+        return compute_filtered(
+            candidates, _filter_state, _enrichment, _triage, anchor_sid,
+            criteria_matched=_criteria_matched_for(candidates),
+            catalogue_ok=not _catalogue_failed['value'],
+        )
+
+    def _filter_notices() -> tuple:
+        """What the toolbar says about filters not applied yet, or that could not be."""
+        notices = []
+        if _criteria_match['state'] == 'pending':
+            notices.append(tr('Checking manuscript features…'))
+        elif _criteria_match['state'] == 'failed':
+            notices.append(tr('The manuscript features could not be applied to these results.'))
+        if _catalogue_failed['value'] and (
+                _filter_state.get('exclude_mismatch') or _filter_state.get('domains')):
+            notices.append(tr('The catalogue data could not be read: the filters that '
+                              'need it are not applied.'))
+        return tuple(notices)
 
     def _re_render_candidates_surface() -> None:
         """Re-render the candidate grid/table into candidates_container in-place.
@@ -1136,9 +1231,7 @@ def create_joins_lab_page(
         display = _compute_display_candidates()
         _all_candidates.clear()
         _all_candidates.extend(display)
-        filtered = compute_filtered(
-            _all_candidates, _filter_state, _enrichment, _triage, anchor_sid
-        )
+        filtered = _filtered(_all_candidates, anchor_sid)
         _filtered_candidates.clear()
         _filtered_candidates.extend(filtered)
 
@@ -1157,9 +1250,9 @@ def create_joins_lab_page(
         'table', create_candidate_grid when 'grid'. Both share the same _triage dict
         and _open_compare handler (D-10: triage is never reset on view switch).
         """
-        # When the filters leave none, the grid still shows its toolbar so they can
-        # be undone (the table has no filter controls).
-        if not _filtered_candidates and (_view_mode['value'] == 'table' or not _all_candidates):
+        # When the filters leave none, the grid and the table still show the toolbar,
+        # so they can be undone.
+        if not _all_candidates:
             ui.label(tr('No candidates found. Try different lines.')).style(
                 'color: var(--text-secondary);'
             )
@@ -1181,6 +1274,13 @@ def create_joins_lab_page(
         if normalize_order(_filter_state.get('order')) != 'rank':
             sort_mode = 'given'   # grouped by library/domain in compute_filtered
 
+        # The toolbar's counts and notices, in both views (the features' answer as
+        # _filtered read it).
+        criteria_matched = (_criteria_match['ids']
+                            if _criteria_match['state'] == 'ready' else None)
+        catalogue_ok = not _catalogue_failed['value']
+        notices = _filter_notices()
+
         # A2: branch on _view_mode to reach the table (not just the grid)
         if _view_mode['value'] == 'table':
             # Phase-120 H2: wire table selection to the page _selected set so
@@ -1191,6 +1291,21 @@ def create_joins_lab_page(
                 # Round-5: reflect selection in the Export-adjacent bulk bar.
                 _refresh_bulk_toolbar()
 
+            # The same toolbar as the grid's (it had none: owner, 2026-11-02)
+            candidates_toolbar(
+                len(_filtered_candidates), all_candidates=_all_candidates,
+                filter_state=_filter_state, enrichment=_enrichment,
+                enrichment_ready=_enrichment_ready['value'], triage=_triage,
+                anchor_sys_id=_anchor_state.get('sys_id') or '',
+                order=_filter_state.get('order', 'rank'), on_order_change=_on_order_change,
+                on_filter_change=_on_toolbar_filter_change, on_filter_open=_on_filter_open,
+                criteria_matched=criteria_matched, catalogue_ok=catalogue_ok, notices=notices,
+            )
+            if not _filtered_candidates:
+                ui.label(tr('No candidates match these filters.')).classes('text-sm').style(
+                    'color: var(--text-secondary);'
+                ).mark('joins-no-filter-match')
+                return
             create_candidate_table(
                 _filtered_candidates,
                 triage=_triage,
@@ -1246,6 +1361,9 @@ def create_joins_lab_page(
                 on_order_change=_on_order_change,
                 all_candidates=_all_candidates,
                 on_filter_change=_on_toolbar_filter_change,
+                criteria_matched=criteria_matched,
+                catalogue_ok=catalogue_ok,
+                notices=notices,
             )
 
     def _on_toolbar_filter_change() -> None:
@@ -1291,13 +1409,21 @@ def create_joins_lab_page(
             # PST-01: persist filter reset
             _persist_state()
 
-        open_filter_dialog(
-            filter_state=_filter_state,
-            enrichment=_enrichment,
-            enrichment_ready=_enrichment_ready['value'],
-            on_apply=_on_filter_apply,
-            on_reset=_on_filter_reset,
-        )
+        from web.components.filter_panel import corpus_universe
+        # In a host the re-renders never clear: built in the toolbar, the dialog
+        # (and the features window inside it) would vanish when a late answer
+        # re-renders the candidates (Codex on the features plan, 2026-11-02).
+        with filter_dialog_host:
+            open_filter_dialog(
+                filter_state=_filter_state,
+                enrichment=_enrichment,
+                enrichment_ready=_enrichment_ready['value'],
+                on_apply=_on_filter_apply,
+                on_reset=_on_filter_reset,
+                fjms=lambda: get_fjms_service(thread_safe=True),
+                corpus=corpus_universe,
+                within=lambda: _criteria_universe(_all_candidates),
+            )
 
     # One WebSearchExecutor per page render (used for SEARCH only —
     # NOT for anchor image data; AnchorViewer resolves its own rich BrowsePage,
@@ -1415,6 +1541,8 @@ def create_joins_lab_page(
 
         # Candidates section (below builder)
         candidates_container = ui.column().classes('w-full gap-2')
+        # The More filters… dialog's parent: never cleared by a re-render
+        filter_dialog_host = ui.element('div')
 
     # -----------------------------------------------------------------------
     # AnchorViewer placeholder + Known-Joins container (populated when anchor loads)
@@ -2686,6 +2814,7 @@ def create_joins_lab_page(
         _filtered_candidates.clear()
         _enrichment.clear()
         _enrichment_ready['value'] = False
+        _catalogue_failed['value'] = False
         _current_page['value'] = 0
 
         # Phase 119 D-06: VS invalidate on re-anchor — clear cached look-alikes
@@ -2971,7 +3100,7 @@ def create_joins_lab_page(
                 display = _compute_display_candidates()
                 _all_candidates.clear()
                 _all_candidates.extend(display)
-                filtered = compute_filtered(display, _filter_state, _enrichment, _triage, anchor_sid_now)
+                filtered = _filtered(display, anchor_sid_now)
                 _filtered_candidates.clear()
                 _filtered_candidates.extend(filtered)
                 _current_page['value'] = 0
@@ -3679,7 +3808,7 @@ def create_joins_lab_page(
                     _link_marks.clear()
                     _current_page['value'] = 0
                     anchor_sid_now = _anchor_state.get('sys_id') or ''
-                    filtered_f1 = compute_filtered(final_f1, _filter_state, _enrichment, _triage, anchor_sid_now)
+                    filtered_f1 = _filtered(final_f1, anchor_sid_now)
                     _filtered_candidates.clear()
                     _filtered_candidates.extend(filtered_f1)
                     candidates_container.clear()
@@ -4052,9 +4181,7 @@ def create_joins_lab_page(
             _ = _self_matched  # noqa: F841
 
             # Compute initial filtered list and reset pagination
-            filtered = compute_filtered(
-                _all_candidates, _filter_state, _enrichment, _triage, anchor_sid_step9
-            )
+            filtered = _filtered(_all_candidates, anchor_sid_step9)
             _filtered_candidates.clear()
             _filtered_candidates.extend(filtered)
             _current_page['value'] = 0
@@ -4283,6 +4410,17 @@ def create_joins_lab_page(
         f = inp.get('f')
         if f and isinstance(f, dict):
             _filter_state.update(f)
+            # A feature the open catalogue file is KNOWN not to answer (a 5.0.0
+            # file) is dropped, with the one notice for it (rule 9); one it
+            # merely failed to read stays, and its check says so.
+            if _filter_state.get('criteria'):
+                from web.components.filter_panel import (
+                    drop_unsupported_criteria, notify_dropped_filters,
+                )
+                kept, dropped = drop_unsupported_criteria(_filter_state['criteria'])
+                _filter_state['criteria'] = kept
+                if dropped:
+                    notify_dropped_filters()
 
         view = inp.get('view', 'grid')
         _view_mode['value'] = view if view in ('grid', 'table') else 'grid'

@@ -1125,10 +1125,11 @@ desktop.Y.X` identity holds via the facades.
 ## web/components/criteria_panel.py
 
 The "Manuscript features" control (catalogue criteria, docs/plans/CATALOGUE_CRITERIA_PLAN.md §6.3, PR 1b):
-on `/catalog-browse` (sidebar card, chips under the button) and in "Search only in..." on `/search` and
-`/parallels` (chips in the page's chip bar).
+on `/catalog-browse` (sidebar card, chips under the button), in "Search only in..." on `/search` and
+`/parallels` (chips in the page's chip bar), and in the Joins Lab's "More filters…" dialog with `within`
+(the candidates' sys_ids: the total counts among them, D20; values and coverage stay on the corpus).
 
-- **Class** `CriteriaControl(get_criteria, on_apply, fjms, universe, mark, show_chips, on_chips)` — the button with
+- **Class** `CriteriaControl(get_criteria, on_apply, fjms, universe, mark, show_chips, on_chips, within)` — the button with
   its badge, the chips (`chips`, `refresh()`, `remove(key)`), and `open()`: the panel (a window over the page, full
   screen under 640 px) with the sections beside their controls, value lists with counts and a filter box, the
   only/all-except toggle, the source choice (D6), ranges with "or: not recorded", per-criterion coverage, the live
@@ -1198,8 +1199,8 @@ on `/catalog-browse` (sidebar card, chips under the button) and in "Search only 
     - Method `__len__` (Line 227)
     - Method `__contains__` (Line 230)
 - **Function** `make_triage_state` (Line 234) — Factory for a fresh in-memory triage state object (D-11).
-- **Function** `compute_filtered` (Line 245) — Apply filter_state predicates to all_candidates and return the filtered list.
-- **Function** `_filter_parts` (Line 293) — compute_filtered's filters as three predicates: Library, Domain, the rest.
+- **Function** `compute_filtered` (Line 245) — Apply filter_state predicates to all_candidates and return the filtered list. `criteria_matched`: the manuscripts the Manuscript features keep (None = none chosen or not known: nothing filtered by them); `catalogue_ok=False`: the filters that read the enrichment stand down.
+- **Function** `_filter_parts` (Line 293) — compute_filtered's filters as three predicates: Library, Domain, the rest (the features among the rest).
 - **Function** `candidate_domain_label` (Line 350) — The candidate's domain as the visitor reads it ('' when it has none).
 - **Function** `facet_options` (Line 356) — The toolbar's Library and Domain options, each [(value, label, count, depth)], counting what the other filters keep.
 - **Function** `more_filters_count` (Line 371) — How many of the "More filters…" dialog's filters are on.
@@ -1212,11 +1213,11 @@ on `/catalog-browse` (sidebar card, chips under the button) and in "Search only 
 - **Function** `cap_candidates` (Line 569) — Decide how many candidate cards to render (WebSocket-safety cap).
 - **Function** `_make_restyle_fn` (Line 599) — Return a render-scoped restyle callable that operates on ``card_refs``.
 - **Function** `_create_candidate_card` (Line 676) — Render a single candidate card (Phase 119 D-09/D-11/D-07, Phase 120 D-07/ACT-01).
-- **Function** `open_filter_dialog` (Line 1061) — Open the "More filters…" dialog (D-14, CND-06).
+- **Function** `open_filter_dialog` (Line 1061) — Open the "More filters…" dialog (D-14, CND-06): the Manuscript features button (`CriteriaControl(within=...)`, mark `joins-criteria`), size mismatch, triage, text. Material, size and "Has dimensions data" are features (owner, 2026-11-02).
 - **Function** `create_candidate_table` (Line 1152) — Render the multi-select sortable table view of candidates (D-10, CND-03).
 - **Function** `nest_options` (Line 1354) — Show a select's options as a tree: an `option` slot indents each by its depth (the value is its index); also the Visual Similarity window's Domain.
 - **Function** `_facet_select` (Line 1372) — One toolbar filter, Library or Domain: several values, each with its count. Each opens with a Show only | Hide switch (`libraries_mode` / `domains_mode`); Domain is nested.
-- **Function** `_grid_header` (Line 1462) — The row above the cards: the count, then Library, Domain, Sort and More filters…
+- **Function** `candidates_toolbar` (Line 1492) — The row above the cards or the table: the count, then Library, Domain, Sort and More filters…; under it the notices (features still checking, or not applied).
 - **Function** `create_candidate_grid` (Line 1510) — Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
 ## web/main.py
@@ -2551,7 +2552,8 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
   `build_script_lists` were removed.
 - `desktop/gui_threads.py`: **Class** `CriterionValuesWorker` — a list's values with corpus counts and each
   criterion's coverage, off the UI thread; **Class** `CriteriaCountWorker` — the dialog's live total and "of
-  which N not recorded" (signal `counted`, not `finished`).
+  which N not recorded" (signal `counted`, not `finished`); **Class** `CriteriaMatchWorker` — which of a set
+  of results' manuscripts the features keep (D20), for the Joins Lab (`matched(tag, ids)` / `failed`).
 - `genizah_app.py`: **Class** `_CatalogUncataloguedWorker` — the domain tree's "No catalogue record (N)";
   **Class** `_PostCriteriaWorker` — the post-search criteria's matches among the results, off the UI thread;
   **Class** `_CatalogHandoffWorker` — the scope of "Search / Parallel search in these results", off the UI
@@ -2942,7 +2944,7 @@ One tip at each start (owner, 2026-10-25), in a strip under the notice bars (`Ti
 
 ## desktop/widgets/filter_chip.py
 
-`make_filter_chip(text, bg_color, on_click)`: a removable chip ("text  ×", dark-mode aware), clicking it removes that filter. Shared by the search's filter dialog (`dialogs_filter._make_chip`) and the Joins Lab's row of active filters (`JoinCandidatePane._refresh_filter_chips`, in a `FlowLayout` under the results toolbar: one chip per filter of the Filter dialog, "Clear all" from two on, and the count on the Filter button). The Joins Lab's Library and Domain choices are plain state (`facet_chosen` / `facet_mode`); its Filter dialog lists them as checklists (Domain the FJMS tree, `_fill_checklist`), each with Select All / Select None, counting live what the dialog's other choices keep (`_facet_rows`). Tests: `tests/test_join_workbench_library_domain_qt.py`.
+`make_filter_chip(text, bg_color, on_click)`: a removable chip ("text  ×", dark-mode aware), clicking it removes that filter. Shared by the search's filter dialog (`dialogs_filter._make_chip`) and the Joins Lab's row of active filters (`JoinCandidatePane._refresh_filter_chips`, in a `FlowLayout` under the results toolbar: one chip per filter of the Filter dialog, "Clear all" from two on, and the count on the Filter button). The Joins Lab's Library and Domain choices are plain state (`facet_chosen` / `facet_mode`); its Filter dialog lists them as checklists (Domain the FJMS tree, `_fill_checklist`), each with Select All / Select None, counting live what the dialog's other choices keep (`_facet_rows`). Material and size are Manuscript features (`self._criteria`, the dialog's "Manuscript features…" button opens `CriteriaDialog(within=...)`; the anchor shortcuts fill them in), matched per manuscript by `CriteriaMatchWorker` (`_applied_criteria_ids`, `_criteria_ids_for`, answers kept in `_criteria_answers`), saved in the session (`_restored_criteria`). Tests: `tests/test_join_workbench_library_domain_qt.py`, `tests/test_join_workbench_criteria_qt.py`.
 
 ## shared/web_links.py
 

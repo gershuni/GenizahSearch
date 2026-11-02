@@ -107,8 +107,33 @@ def test_unknown_keys_and_bad_values_are_dropped():
     assert got["b"] == {"rows": [], "var": False, "text": ""}
     assert got["o"]["combine"] == "AND"
     assert got["m"] == {"990000000030205171": "no"}
-    assert got["f"]["materials"] == ["paper"] and got["f"]["triage_states"] == ["Yes"]
+    # An old link's Material filter becomes the Material feature (measured); the
+    # non-string value is dropped
+    assert "materials" not in got["f"]
+    assert got["f"]["criteria"] == {
+        "material": {"source": "measured", "values": ["paper"], "mode": "only"}}
+    assert got["f"]["triage_states"] == ["Yes"]
     assert got["f"]["text_q"] == ""
+
+
+def test_the_features_ride_in_the_link_and_a_bad_one_is_dropped():
+    """The Manuscript features go through clean_criteria: a known one is kept in
+    its canonical shape, an unknown key or a malformed spec is dropped, and an
+    explicit Material feature wins over an old link's materials."""
+    f = {"criteria": {"region": {"values": ["Oriental"], "mode": "except"},
+                      "width": {"min": 13.5, "max": 17.5},
+                      "lines": {"min": "many"},
+                      "evil": {"values": ["x"]},
+                      "material": {"values": ["Vellum"], "source": "catalogue"}},
+         "materials": ["Paper"]}
+    got = jl.decode_share_state(_token({"v": 1, "f": f}))
+    assert got["f"]["criteria"] == {
+        "region": {"values": ["Oriental"], "mode": "except"},
+        "width": {"source": "either", "min": 13.5, "max": 17.5},
+        "material": {"source": "catalogue", "values": ["Vellum"], "mode": "only"},
+    }
+    # And the address bar's round trip keeps them
+    assert jl.decode_share_state(jl.encode_share_state({"f": got["f"]}))["f"] == got["f"]
 
 
 def test_rows_are_capped_and_mods_kept_boolean():
@@ -137,13 +162,16 @@ def test_stored_session_in_link_shape():
         "single_text": "", "text_position": "anywhere",
         "flex_spacing": False, "bidirectional": True,
         "other_side_enabled": False, "other_side_rows": [_row("x")],
-        "active_filter": {"has_dims": True}, "view_mode": "grid",
+        "active_filter": {"exclude_mismatch": True, "has_dims": True}, "view_mode": "grid",
     }
     got = jl.share_inputs_from_full_state(stored)
     assert got["b"]["type"] == "variants" and got["b"]["var"] is True   # legacy inference
     assert got["g"] == {"flex": False, "bidir": True}
     assert "o" not in got                                               # other side off
-    assert got["f"]["has_dims"] is True
+    assert got["f"]["exclude_mismatch"] is True
+    # "Has dimensions data" went with the size filters into the features: an old
+    # session's is dropped (hiding nothing)
+    assert "has_dims" not in got["f"]
 
 
 def test_the_other_side_keeps_its_own_text_position():

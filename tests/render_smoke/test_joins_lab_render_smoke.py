@@ -2481,8 +2481,11 @@ def test_sort_and_filter_by_library_and_domain(joins_lab_smoke_runner):
                 # Full width: without it Quasar collapses each select to its arrow
                 # and hides the label (seen in a browser, 2026-10-19).
                 dialog_selects = list(ElementFilter(kind=ui.select).within(kind=ui.dialog))
-                assert len(dialog_selects) == 2                # material, triage
+                assert len(dialog_selects) == 1                # triage (material: a feature)
                 assert all('w-full' in sel._classes for sel in dialog_selects)
+                # Material and size are Manuscript features, behind their button
+                assert list(ElementFilter(kind=ui.button, marker='joins-criteria-button')
+                            .within(kind=ui.dialog))
                 text_in = next(i for i in ElementFilter(kind=ui.input).within(kind=ui.dialog))
                 text_in.value = 'T-S'
                 apply_btn = next(b for b in ElementFilter(kind=ui.button)
@@ -3398,5 +3401,116 @@ def test_the_address_bar_follows_a_pinned_candidate(joins_lab_smoke_runner):
                 await asyncio.sleep(0.05)
         assert f'sys_id={STUB_ANCHOR_SID}' not in bar[-1], (
             f'the address bar still names the old anchor: {bar[-1]}')
+
+    joins_lab_smoke_runner(driver)
+
+
+# ---------------------------------------------------------------------------
+# Manuscript features in "More filters…" (2026-11-02), and the table's toolbar
+# ---------------------------------------------------------------------------
+
+_CAND_VS_SID = '990003333333333'     # STUB_RAW_VS: the second stub result
+
+
+class _FeaturesFjms:
+    """The FJMS service the page asks the features' answer of: it keeps *keep*
+    among the candidates' manuscripts, or fails."""
+
+    def __init__(self, keep=(), fail=False):
+        self.keep, self.fail, self.asked = set(keep), fail, []
+
+    def match_result_criteria(self, criteria, sys_ids):
+        from shared.fjms_service import FilterUnavailable
+        self.asked.append(frozenset(sys_ids))
+        if self.fail:
+            raise FilterUnavailable('query_failed', 'broken')
+        return set(sys_ids) & self.keep
+
+
+def _features_link(view='grid', **f):
+    from web.joins_lab_link import encode_share_state
+    return encode_share_state({
+        'b': {'rows': [_link_row('highlighted')], 'type': 'responsa'}, 'view': view,
+        'f': f or {'criteria': {'material': {'values': ['Vellum']}}}})
+
+
+def _notices(user) -> list:
+    from nicegui import ElementFilter, ui
+    with user._client:
+        return [e.text for e in ElementFilter(kind=ui.label, marker='joins-filter-notice')
+                if e.visible]
+
+
+def _table_sids(user) -> set:
+    tables = _find_table_elements(user)
+    assert len(tables) == 1, f'expected the candidates table, found {len(tables)}'
+    return {row['sys_id'] for row in tables[0].rows}
+
+
+def test_the_features_filter_the_candidates_and_the_table_has_the_toolbar(
+        joins_lab_smoke_runner):
+    """A link's features filter the candidates by their manuscripts, asked over the
+    candidates (D20); the table view shows the same toolbar as the grid, with
+    "More filters…" counting the feature."""
+    from unittest.mock import patch
+
+    from nicegui import ElementFilter, ui
+
+    fjms = _FeaturesFjms(keep={_CAND_TEXT_SID})
+
+    async def driver(user):
+        with patch('web.pages.joins_lab.get_fjms_service', return_value=fjms):
+            await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table")}')
+            await asyncio.sleep(1.5)
+            assert _table_sids(user) == {_CAND_TEXT_SID}
+            assert fjms.asked and fjms.asked[-1] == {_CAND_TEXT_SID, _CAND_VS_SID}
+            with user._client:
+                [more] = [b for b in ElementFilter(kind=ui.button, marker='joins-more-filters')
+                          if b.visible]
+                assert more.text.endswith('(1)')
+                assert list(ElementFilter(kind=ui.select, marker='joins-filter-library'))
+            assert _notices(user) == []
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_a_failed_features_check_hides_no_candidate(joins_lab_smoke_runner):
+    """Rule 9: a check that fails keeps every candidate and says so."""
+    from unittest.mock import patch
+
+    fjms = _FeaturesFjms(fail=True)
+
+    async def driver(user):
+        with patch('web.pages.joins_lab.get_fjms_service', return_value=fjms):
+            await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table")}')
+            await asyncio.sleep(1.5)
+            assert fjms.asked
+            assert _table_sids(user) == {_CAND_TEXT_SID, _CAND_VS_SID}
+            [notice] = _notices(user)
+            assert notice in ('The manuscript features could not be applied to these results.',
+                              'לא ניתן היה להחיל את מאפייני כתב היד על התוצאות האלה.')
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_unreadable_catalogue_data_keeps_the_candidates_under_the_domain_filter(
+        joins_lab_smoke_runner):
+    """The Domain filter reads the enrichment: when the catalogue data cannot be
+    read it is not applied (every candidate stays), and the toolbar says so."""
+    from unittest.mock import AsyncMock, patch
+
+    from web.pages.joins_lab import CatalogueUnavailable
+
+    async def driver(user):
+        with patch('web.pages.joins_lab._enrich_candidates', new_callable=AsyncMock,
+                   side_effect=CatalogueUnavailable('no sidecar')):
+            await user.open(
+                f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table", domains=["Bible"])}')
+            await asyncio.sleep(1.5)
+            assert _table_sids(user) == {_CAND_TEXT_SID, _CAND_VS_SID}
+            [notice] = _notices(user)
+            assert notice in (
+                'The catalogue data could not be read: the filters that need it are not applied.',
+                'לא ניתן היה לקרוא את נתוני הקטלוג: המסננים שתלויים בהם לא הוחלו.')
 
     joins_lab_smoke_runner(driver)
