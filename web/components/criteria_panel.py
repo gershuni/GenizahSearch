@@ -142,14 +142,20 @@ class CriteriaControl:
             chip bar passes False and ``on_chips``: it is called with the
             chips (``self.chips``, ``[(key, text)]``) once their text is read,
             and the page draws them, removing one with ``remove(key)``.
+        within: for filters on results already found (the Joins Lab), returns
+            their sys_ids: the total counts among them, against which "not
+            recorded" and "all except" are read (D20), as the desktop
+            CriteriaDialog's ``within``. The value lists and coverage stay
+            on the corpus (their caches are per universe).
     """
 
     def __init__(self, *, get_criteria, on_apply, fjms, universe, mark: str = 'criteria',
-                 show_chips: bool = True, on_chips=None):
+                 show_chips: bool = True, on_chips=None, within=None):
         self._get_criteria = get_criteria
         self._on_apply = on_apply
         self._fjms = fjms
         self._universe = universe
+        self._within = within
         self._mark = mark
         self._show_chips = show_chips
         self._on_chips = on_chips
@@ -564,9 +570,10 @@ class CriteriaControl:
             self._total_label.set_text(tr('No features chosen.'))
             return
         self._total_label.set_text(tr('Counting...'))
+        within = frozenset(self._within()) if self._within is not None else None
         try:
-            total = await run.io_bound(
-                lambda: self._fjms().criteria_live_total(criteria, self._universe()))
+            total = await run.io_bound(lambda: self._fjms().criteria_live_total(
+                criteria, within if within is not None else self._universe()))
             error = None
         except Exception as e:
             logger.info("criteria live total failed: %s", e)
@@ -583,13 +590,19 @@ class CriteriaControl:
                 text = tr('The count could not be computed.')
             self._total_label.set_text(text)
             return
-        text = tr('{n} manuscripts have these features').format(n=_fmt(total['total'] or 0))
+        if within is not None:
+            text = tr('{n} of the {total} manuscripts in the results match').format(
+                n=_fmt(total['total'] or 0), total=_fmt(len(within)))
+        else:
+            text = tr('{n} manuscripts have these features').format(n=_fmt(total['total'] or 0))
         for key, m in total.get('not_recorded', {}).items():
             text += tr(', of which {m} have no {label} recorded').format(
                 m=_fmt(m), label=criterion_label(key, self._lang))
         self._total_label.set_text(text)
 
     async def _load_note(self):
+        if self._within is not None:
+            return  # the note is about the corpus; this total counts the results
         try:
             note = await run.io_bound(lambda: self._fjms().criteria_corpus_note(self._universe()))
         except Exception:

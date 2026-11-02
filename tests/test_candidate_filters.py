@@ -69,33 +69,8 @@ def test_size_mismatch_zero_width_not_flagged():
     assert is_size_mismatch(candidate_width_cm=10.0, anchor_width_cm=0.0) is False
 
 
-@pytest.mark.xfail(
-    reason="Phase 119 Wave 1 — material filter predicate not yet implemented",
-    strict=False,
-)
-def test_material_filter_excludes_non_matching():
-    """CND-06: material filter applied to enrichment dict excludes non-matching candidates."""
-    from shared.joins_lab import Candidate
-    from web.components.candidate_grid import compute_filtered
-
-    enrichment = {
-        "990001": {"material": "parchment", "width_cm": 10.0, "height_cm": 12.0},
-        "990002": {"material": "paper", "width_cm": 11.0, "height_cm": 13.0},
-    }
-    candidates = [
-        Candidate(sys_id="990001", page=1, via_text=True),
-        Candidate(sys_id="990002", page=1, via_text=True),
-    ]
-    filter_state = {
-        "materials": ["parchment"],
-        "has_dims": False,
-        "exclude_mismatch": False,
-        "triage_states": [],
-        "text_q": "",
-    }
-    result = compute_filtered(candidates, filter_state, enrichment, triage={}, anchor_sys_id="999")
-    assert len(result) == 1
-    assert result[0].sys_id == "990001"
+# The material filter is a Manuscript feature since 2026-11-02:
+# tests/test_joins_lab_criteria.py.
 
 
 @pytest.mark.xfail(

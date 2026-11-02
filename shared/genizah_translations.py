@@ -6405,3 +6405,13 @@ TRANSLATIONS.update({
     'Hunting joins? **Focus Search** > **Manuscript features** can keep only manuscripts in the same script, with about the same number of lines and line height as your fragment.':
         'מחפשים צירופים? **מקד חיפוש** > **מאפייני כתב היד** יכול להשאיר רק כתבי יד באותו כתב ובמספר שורות ובגובה שורה קרובים לאלה של הקטע שלכם.',
 })
+
+# Manuscript features in the Joins Lab's filter dialogs, both apps (2026-11-02):
+# web/components/candidate_grid.py, web/pages/joins_lab.py, desktop/join_workbench.py.
+TRANSLATIONS.update({
+    "Features are checked per manuscript: every candidate page of a matching manuscript stays.":
+        "המאפיינים נבדקים לפי כתב היד: כל הדפים המועמדים של כתב יד מתאים נשארים ברשימה.",
+    "Checking manuscript features…": "בודק את מאפייני כתב היד…",
+    "The catalogue data could not be read: the filters that need it are not applied.":
+        "לא ניתן היה לקרוא את נתוני הקטלוג: המסננים שתלויים בהם לא הוחלו.",
+})

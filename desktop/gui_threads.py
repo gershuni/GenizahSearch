@@ -2459,3 +2459,34 @@ class CriteriaCountWorker(QThread):
         except Exception:
             logger.exception("CriteriaCountWorker: the count failed")
             self.failed.emit(self._tag, 'error')
+
+
+class CriteriaMatchWorker(QThread):
+    """Which of a set of results' manuscripts the Manuscript features keep (D20:
+    the results are the universe), off the UI thread --
+    FjmsService.match_result_criteria scans the sidecar's criteria tables. The
+    Joins Lab filters its candidates by it.
+
+    Emits ``matched(tag, ids)`` or ``failed(tag, reason)``; ``tag`` is the
+    caller's, returned unchanged (a newer check supersedes this one). Hold it
+    with _keep_until_finished after start()."""
+
+    matched = pyqtSignal(int, object)
+    failed = pyqtSignal(int, str)
+
+    def __init__(self, criteria, sys_ids, tag=0, parent=None):
+        super().__init__(parent)
+        self._criteria = dict(criteria or {})
+        self._sys_ids = frozenset(sys_ids or ())
+        self._tag = tag
+
+    def run(self):
+        from shared.fjms_service import FilterUnavailable, get_fjms_service
+        try:
+            ids = get_fjms_service().match_result_criteria(self._criteria, self._sys_ids)
+            self.matched.emit(self._tag, set(ids or ()))
+        except FilterUnavailable as exc:
+            self.failed.emit(self._tag, exc.reason or 'error')
+        except Exception:
+            logger.exception("CriteriaMatchWorker: the features could not be checked")
+            self.failed.emit(self._tag, 'error')

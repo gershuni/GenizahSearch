@@ -2481,8 +2481,11 @@ def test_sort_and_filter_by_library_and_domain(joins_lab_smoke_runner):
                 # Full width: without it Quasar collapses each select to its arrow
                 # and hides the label (seen in a browser, 2026-10-19).
                 dialog_selects = list(ElementFilter(kind=ui.select).within(kind=ui.dialog))
-                assert len(dialog_selects) == 2                # material, triage
+                assert len(dialog_selects) == 1                # triage (material: a feature)
                 assert all('w-full' in sel._classes for sel in dialog_selects)
+                # Material and size are Manuscript features, behind their button
+                assert list(ElementFilter(kind=ui.button, marker='joins-criteria-button')
+                            .within(kind=ui.dialog))
                 text_in = next(i for i in ElementFilter(kind=ui.input).within(kind=ui.dialog))
                 text_in.value = 'T-S'
                 apply_btn = next(b for b in ElementFilter(kind=ui.button)
@@ -3398,5 +3401,219 @@ def test_the_address_bar_follows_a_pinned_candidate(joins_lab_smoke_runner):
                 await asyncio.sleep(0.05)
         assert f'sys_id={STUB_ANCHOR_SID}' not in bar[-1], (
             f'the address bar still names the old anchor: {bar[-1]}')
+
+    joins_lab_smoke_runner(driver)
+
+
+# ---------------------------------------------------------------------------
+# Manuscript features in "More filters…" (2026-11-02), and the table's toolbar
+# ---------------------------------------------------------------------------
+
+_CAND_VS_SID = '990003333333333'     # STUB_RAW_VS: the second stub result
+
+
+class _FeaturesFjms:
+    """The FJMS service the page asks the features' answer of: it keeps *keep*
+    among the candidates' manuscripts, or fails."""
+
+    def __init__(self, keep=(), fail=False):
+        self.keep, self.fail, self.asked = set(keep), fail, []
+
+    def match_result_criteria(self, criteria, sys_ids):
+        from shared.fjms_service import FilterUnavailable
+        self.asked.append(frozenset(sys_ids))
+        if self.fail:
+            raise FilterUnavailable('query_failed', 'broken')
+        return set(sys_ids) & self.keep
+
+
+def _features_link(view='grid', **f):
+    from web.joins_lab_link import encode_share_state
+    return encode_share_state({
+        'b': {'rows': [_link_row('highlighted')], 'type': 'responsa'}, 'view': view,
+        'f': f or {'criteria': {'material': {'values': ['Vellum']}}}})
+
+
+def _notices(user) -> list:
+    from nicegui import ElementFilter, ui
+    with user._client:
+        return [e.text for e in ElementFilter(kind=ui.label, marker='joins-filter-notice')
+                if e.visible]
+
+
+def _table_sids(user) -> set:
+    tables = _find_table_elements(user)
+    assert len(tables) == 1, f'expected the candidates table, found {len(tables)}'
+    return {row['sys_id'] for row in tables[0].rows}
+
+
+async def _until(check, timeout: float = 20.0) -> None:
+    """Wait until *check()* holds -- a slow CI runner renders later than a fixed
+    sleep allows (the first of these failed on windows-latest after 1.5 s). The
+    caller asserts afterwards, so a timeout still fails with the real message."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if check():
+                return
+        except (AssertionError, StopIteration, ValueError):
+            pass
+        await asyncio.sleep(0.1)
+
+
+def test_the_features_filter_the_candidates_and_the_table_has_the_toolbar(
+        joins_lab_smoke_runner):
+    """A link's features filter the candidates by their manuscripts, asked over the
+    candidates (D20); the table view shows the same toolbar as the grid, with
+    "More filters…" counting the feature."""
+    from unittest.mock import patch
+
+    from nicegui import ElementFilter, ui
+
+    fjms = _FeaturesFjms(keep={_CAND_TEXT_SID})
+
+    async def driver(user):
+        with patch('web.pages.joins_lab.get_fjms_service', return_value=fjms):
+            await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table")}')
+            await _until(lambda: _table_sids(user) == {_CAND_TEXT_SID})
+            assert _table_sids(user) == {_CAND_TEXT_SID}
+            assert fjms.asked and fjms.asked[-1] == {_CAND_TEXT_SID, _CAND_VS_SID}
+            with user._client:
+                [more] = [b for b in ElementFilter(kind=ui.button, marker='joins-more-filters')
+                          if b.visible]
+                assert more.text.endswith('(1)')
+                assert list(ElementFilter(kind=ui.select, marker='joins-filter-library'))
+            assert _notices(user) == []
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_a_failed_features_check_hides_no_candidate(joins_lab_smoke_runner):
+    """Rule 9: a check that fails keeps every candidate and says so."""
+    from unittest.mock import patch
+
+    fjms = _FeaturesFjms(fail=True)
+
+    async def driver(user):
+        with patch('web.pages.joins_lab.get_fjms_service', return_value=fjms):
+            await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table")}')
+            await _until(lambda: bool(_notices(user)))
+            assert fjms.asked
+            assert _table_sids(user) == {_CAND_TEXT_SID, _CAND_VS_SID}
+            [notice] = _notices(user)
+            assert notice in ('The manuscript features could not be applied to these results.',
+                              'לא ניתן היה להחיל את מאפייני כתב היד על התוצאות האלה.')
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_applying_the_filters_again_retries_a_failed_features_check(joins_lab_smoke_runner):
+    """A check that failed is tried again when the filters are applied again
+    (Codex on #462): the same features over the same candidates are not left on
+    the failed answer once the catalogue service is back."""
+    from unittest.mock import patch
+
+    from nicegui import ElementFilter, ui
+
+    fjms = _FeaturesFjms(keep={_CAND_TEXT_SID}, fail=True)
+
+    async def driver(user):
+        with patch('web.pages.joins_lab.get_fjms_service', return_value=fjms):
+            await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table")}')
+            await _until(lambda: bool(_notices(user)))
+            assert _table_sids(user) == {_CAND_TEXT_SID, _CAND_VS_SID}
+            assert len(_notices(user)) == 1
+            asked = len(fjms.asked)
+
+            fjms.fail = False                               # the service is back
+            with user._client:
+                [more] = [b for b in ElementFilter(kind=ui.button, marker='joins-more-filters')
+                          if b.visible]
+            _click_element(user, more)
+
+            def _apply_button():
+                with user._client:
+                    return next(b for b in ElementFilter(kind=ui.button).within(kind=ui.dialog)
+                                if b._props.get('label') in ('Apply', 'החל'))
+            await _until(lambda: _apply_button() is not None)
+            _click_element(user, _apply_button())
+            await _until(lambda: _table_sids(user) == {_CAND_TEXT_SID})
+            assert len(fjms.asked) == asked + 1
+            assert _table_sids(user) == {_CAND_TEXT_SID}
+            assert _notices(user) == []
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_a_superseded_enrichment_failing_late_changes_nothing(joins_lab_smoke_runner):
+    """The search is run again before its first enrichment batch finished; the
+    newer batch lands, then the older one fails. The newer candidates keep their
+    enrichment and their Domain filter, with no "could not be read" notice
+    (Codex on #462)."""
+    from unittest.mock import patch
+
+    from nicegui import ElementFilter, ui
+
+    from web.pages.joins_lab import CatalogueUnavailable
+
+    calls, failed = [], []
+
+    async def driver(user):
+        release = asyncio.Event()
+
+        async def enrich(sys_ids):
+            calls.append(list(sys_ids))
+            if len(calls) == 1:
+                await release.wait()
+                failed.append(True)
+                raise CatalogueUnavailable('the first batch fails late')
+            return dict(_LIB_DOM_ENRICH)
+
+        with patch('web.pages.joins_lab._enrich_candidates', new=enrich):
+            await user.open(
+                f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table", domains=["Bible"])}')
+            # The search ran and its batch is waiting (the Domain filter, still
+            # without the enrichment, shows no rows yet)
+            await _until(lambda: bool(calls))
+            assert len(calls) == 1                          # still waiting
+
+            def _run_button():
+                with user._client:
+                    [run] = [b for b in ElementFilter(kind=ui.button)
+                             if b._props.get('icon') == 'search' and b.visible]
+                return run
+            await _until(lambda: _run_button() is not None)
+            _click_element(user, _run_button())             # the search again
+            await _until(lambda: len(calls) == 2 and _table_sids(user) == {_LIB_DOM_SIDS[1]})
+            assert len(calls) == 2
+            assert _table_sids(user) == {_LIB_DOM_SIDS[1]}  # Bible: the newer batch
+            release.set()                                   # the older one fails now
+            await _until(lambda: bool(failed))
+            await asyncio.sleep(0.3)                        # its handler has run since
+            assert _table_sids(user) == {_LIB_DOM_SIDS[1]}
+            assert _notices(user) == []
+
+    joins_lab_smoke_runner(driver, mock_search_results=_lib_dom_results())
+
+
+def test_unreadable_catalogue_data_keeps_the_candidates_under_the_domain_filter(
+        joins_lab_smoke_runner):
+    """The Domain filter reads the enrichment: when the catalogue data cannot be
+    read it is not applied (every candidate stays), and the toolbar says so."""
+    from unittest.mock import AsyncMock, patch
+
+    from web.pages.joins_lab import CatalogueUnavailable
+
+    async def driver(user):
+        with patch('web.pages.joins_lab._enrich_candidates', new_callable=AsyncMock,
+                   side_effect=CatalogueUnavailable('no sidecar')):
+            await user.open(
+                f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table", domains=["Bible"])}')
+            await _until(lambda: bool(_notices(user)))
+            assert _table_sids(user) == {_CAND_TEXT_SID, _CAND_VS_SID}
+            [notice] = _notices(user)
+            assert notice in (
+                'The catalogue data could not be read: the filters that need it are not applied.',
+                'לא ניתן היה לקרוא את נתוני הקטלוג: המסננים שתלויים בהם לא הוחלו.')
 
     joins_lab_smoke_runner(driver)

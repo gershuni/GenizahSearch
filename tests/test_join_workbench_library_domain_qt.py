@@ -352,13 +352,13 @@ def test_the_chips_row_names_every_filter_and_each_chip_clears_its_own():
     pane.facet_chosen["domains"] = {"Rabbinic Literature", "Midrash", "Piyyut"}
     pane.facet_mode["domains"] = "hide"
     pane.facet_chosen["libraries"] = {"JTS"}
-    pane.dim_chk.setChecked(True)
+    pane.tri_filter.setCurrentIndex(1)
     pane.apply_filters()
     assert pane._chips_widget.isVisibleTo(pane)
     assert _chip_texts(pane) == [
         "Library: JTS  ×",
         "Domain · Hiding: Piyyut, Rabbinic Literature  ×",   # Midrash: under its parent
-        "Has dimensions  ×",
+        "Triage: Y — kept  ×",
         "Clear all"]
     assert pane.btn_filter.text() == "Filter (3) ▾"
 
@@ -372,7 +372,7 @@ def test_the_chips_row_names_every_filter_and_each_chip_clears_its_own():
                    if layout.itemAt(i).widget().text() == "Clear all"]
     clear_all.click()
     assert pane.facet_chosen == {"libraries": set(), "domains": set()}
-    assert pane.facet_mode["domains"] == "show_only" and not pane.dim_chk.isChecked()
+    assert pane.facet_mode["domains"] == "show_only" and pane.tri_filter.currentIndex() == 0
     assert not pane._chips_widget.isVisibleTo(pane) and pane.btn_filter.text() == "Filter ▾"
     assert _sids(pane) == ["1", "2", "3"]
 

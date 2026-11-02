@@ -19,7 +19,9 @@ What it carries:
   own text position; the cross-side search uses it, not the anchor side's)
 * ``vs`` -- Visual Similarity on
 * ``f`` -- the candidate filter (the filter dialog's keys, Library and Domain
-  included, with ``libraries_mode`` / ``domains_mode``: show only or hide them)
+  included, with ``libraries_mode`` / ``domains_mode``: show only or hide them;
+  ``criteria``, the Manuscript features, which took over the dialog's old
+  ``materials``: one in an older link is read as the Material feature, measured)
   and ``order``, the grid's Sort
 * ``view`` -- grid | table; ``gp`` -- the 0-based grid/table page
 * ``cmp`` -- the Compare pair's candidate as ``[sys_id, page]``
@@ -41,6 +43,7 @@ import zlib
 from typing import Any, Optional
 from urllib.parse import urlencode
 
+from shared.catalog_criteria import clean_criteria
 from shared.joins_lab import normalize_filter_mode, normalize_order
 from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 from web.joins_lab_storage import _cap_rows
@@ -115,11 +118,20 @@ def _clean_filter(f: Any) -> dict:
     if not isinstance(f, dict):
         return {}
     out: dict = {}
+    # The Manuscript features (shared.catalog_criteria); a malformed one is dropped.
+    criteria, _problems = clean_criteria(f.get("criteria"), strict=False)
+    # Before them the dialog had its own Material filter (the measured material on
+    # the cards): a link or session from then keeps it, as the same feature.
     mats = f.get("materials")
-    if isinstance(mats, list):
-        out["materials"] = [m[:_MAX_FILTER_TEXT] for m in mats[:_MAX_FILTER_LIST]
-                            if isinstance(m, str)]
-    out["has_dims"] = bool(f.get("has_dims", False))
+    if "material" not in criteria and isinstance(mats, list):
+        values = [m[:_MAX_FILTER_TEXT] for m in mats[:_MAX_FILTER_LIST]
+                  if isinstance(m, str) and m.strip()]
+        if values:
+            criteria["material"] = {"values": values, "mode": "only", "source": "measured"}
+            criteria, _problems = clean_criteria(criteria, strict=False)
+    out["criteria"] = criteria
+    # "has_dims" (Has dimensions data) went with the size filters into the
+    # features: an older link's is dropped, which hides nothing.
     out["exclude_mismatch"] = bool(f.get("exclude_mismatch", False))
     tri = f.get("triage_states")
     if isinstance(tri, list):
