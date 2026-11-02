@@ -160,6 +160,37 @@ def test_a_failed_check_hides_nothing_and_says_so(svc, workers, monkeypatch):
     assert workers.started == []
 
 
+def test_a_failed_check_is_not_restarted_by_the_open_dialog(svc, workers, monkeypatch):
+    """A check that fails while the Filter dialog is open recounts the dialog;
+    the recount must not start the same check again (a lasting failure would loop
+    worker -> recount -> worker until the dialog closed: Codex on #462). Apply
+    tries it again."""
+    import desktop.join_workbench as jw
+    from PyQt6.QtWidgets import QPushButton
+
+    from shared.fjms_service import FilterUnavailable
+
+    def boom(*_a, **_k):
+        raise FilterUnavailable("query_failed", "broken")
+    monkeypatch.setattr(svc, "match_result_criteria", boom)
+    pane = _pane()
+    pane._criteria = dict(VELLUM)
+    pane.apply_filters()
+    assert len(workers.started) == 1
+    seen = {}
+
+    def drive(dlg):
+        workers.started.pop(0).run()          # fails while the dialog is open
+        seen["restarted"] = len(workers.started)
+        next(b for b in dlg.findChildren(QPushButton) if b.text() == "Apply").click()
+        seen["after_apply"] = len(workers.started)
+
+    monkeypatch.setattr(jw.QDialog, "exec", lambda dlg: (drive(dlg), 1)[1])
+    pane._open_filter_dialog()
+    assert seen == {"restarted": 0, "after_apply": 1}
+    assert "Checking manuscript features…" in pane.status.text()   # the retry runs
+
+
 def test_a_stale_answer_does_not_filter_new_results(svc, workers):
     pane = _pane()
     pane._criteria = dict(VELLUM)

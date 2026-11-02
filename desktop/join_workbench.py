@@ -2725,6 +2725,7 @@ if _QT_AVAILABLE:
             self._criteria_state = "idle"
             self._criteria_tag = 0
             self._criteria_pending: dict = {}     # worker tag -> the key it checks
+            self._criteria_failed: dict = {}      # keys whose check failed (-> reason)
             self._dialog_recount = None           # the open Filter dialog's recount
             self._dropped_notice = False          # a restore dropped saved features
             self._search_thread = None
@@ -3793,7 +3794,8 @@ if _QT_AVAILABLE:
         def _criteria_ids_for(self, criteria):
             """The manuscripts *criteria* keep among the results, when known; else
             None, and their check is started (its answer re-applies the filters, or
-            recounts the open Filter dialog)."""
+            recounts the open Filter dialog) -- unless it failed: that is tried
+            again only when the features are applied (_criteria_failed)."""
             if not criteria:
                 return None
             key = self._criteria_key_of(criteria)
@@ -3808,18 +3810,27 @@ if _QT_AVAILABLE:
                 self._criteria_key, self._criteria_state = None, "idle"
                 return None
             key = self._criteria_key_of(self._criteria)
+            self._criteria_key = key
             if key not in self._criteria_answers:
-                if key == self._criteria_key and self._criteria_state == "failed":
-                    return None   # it failed: tried again when the features are applied again
-                self._criteria_key, self._criteria_state = key, "pending"
+                if key in self._criteria_failed:
+                    self._criteria_state = "failed"
+                    return None   # tried again when the features are applied again
+                self._criteria_state = "pending"
                 self._start_criteria_check(self._criteria, key)
             if key in self._criteria_answers:   # known, or answered at once (Codex on #462)
-                self._criteria_key, self._criteria_state = key, "ready"
+                self._criteria_state = "ready"
                 return self._criteria_answers[key]
             return None
 
+        def _retry_criteria(self, criteria):
+            """The user applied *criteria*: a check of them that failed may run again."""
+            if criteria:
+                self._criteria_failed.pop(self._criteria_key_of(criteria), None)
+
         def _start_criteria_check(self, criteria, key):
-            if key in self._criteria_pending.values():
+            # A failed check is not started again by a re-render or a recount (a
+            # lasting failure would loop through the open dialog: Codex on #462).
+            if key in self._criteria_pending.values() or key in self._criteria_failed:
                 return
             if not key[1]:
                 # No corpus manuscript among the results (none, or only LOCAL ones):
@@ -3852,6 +3863,9 @@ if _QT_AVAILABLE:
             if key is None:
                 return
             logger.info("Joins Lab: the manuscript features could not be checked (%s)", reason)
+            self._criteria_failed[key] = reason
+            while len(self._criteria_failed) > 8:
+                self._criteria_failed.pop(next(iter(self._criteria_failed)))
             if key == self._criteria_key:
                 self._criteria_state = "failed"
             self._after_criteria_answer(key)
@@ -4335,6 +4349,7 @@ if _QT_AVAILABLE:
             self._criteria = {}
             self._criteria_key, self._criteria_state = None, "idle"
             self._criteria_pending.clear()   # a check still running answers no one
+            self._criteria_failed.clear()
             self._dropped_notice = False
             try:
                 self.filter_in.clear()
@@ -4614,8 +4629,7 @@ if _QT_AVAILABLE:
                 self.filter_in.setText(dlg_filter_in.text())
                 if draft["criteria"] != self._criteria:
                     self._criteria = dict(draft["criteria"])
-                if self._criteria_state == "failed":
-                    self._criteria_key = None   # applied again: checked again
+                self._retry_criteria(self._criteria)   # applied again: checked again
                 self._dropped_notice = False    # the user has seen the filters since
                 # Library / Domain by value; one no longer among the results (new
                 # results may have come meanwhile) is dropped.
