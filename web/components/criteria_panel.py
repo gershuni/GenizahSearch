@@ -86,6 +86,21 @@ def drop_unsupported(criteria, fjms) -> tuple[dict, list]:
     return kept, [k for k in (criteria or {}) if k in bad]
 
 
+def prewarm_criteria(fjms, meta_mgr, corpus_timeout: float = 300.0) -> bool:
+    """Compute the panel's values and "recorded for N" counts once, at server
+    start, in a background thread (web/main.py): ~20-30 s over the whole corpus,
+    which the first visitor after a restart otherwise waited for section by
+    section, 1-8 s each (v9.13.0). They are cached per process with the corpus
+    the panel passes (MetadataManager.corpus_sys_ids, one frozenset), and
+    GET /api/criteria reads the same cache. Waits for libraries.csv, which
+    corpus_sys_ids never gives in part. False with no metadata manager yet;
+    raises FilterUnavailable as FjmsService.criteria_vocabulary does."""
+    if meta_mgr is None:
+        return False
+    fjms.criteria_vocabulary(lambda: meta_mgr.corpus_sys_ids(timeout=corpus_timeout))
+    return True
+
+
 def _default_spec(key: str) -> dict:
     criterion = BY_KEY[key]
     spec = {'source': 'either'} if criterion.sources else {}

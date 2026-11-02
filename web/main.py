@@ -3516,6 +3516,15 @@ async def initialize_engine():
                     print("[init] FJMS caches pre-warmed (background).", flush=True)
             except Exception as e:
                 print(f"[init] FJMS cache pre-warm failed (non-fatal): {e}", flush=True)
+                return
+            # The Manuscript features panel's values and counts, so the first
+            # visitor after a restart does not wait for them (v9.13.0).
+            try:
+                from web.components.criteria_panel import prewarm_criteria
+                if fjms.is_available() and prewarm_criteria(fjms, getattr(state, 'meta_mgr', None)):
+                    print("[init] Manuscript features counts pre-warmed (background).", flush=True)
+            except Exception as e:
+                print(f"[init] Manuscript features pre-warm failed (non-fatal): {e}", flush=True)
 
         await run.io_bound(_prewarm_sync)
 
