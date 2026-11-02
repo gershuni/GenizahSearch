@@ -3447,6 +3447,20 @@ def _table_sids(user) -> set:
     return {row['sys_id'] for row in tables[0].rows}
 
 
+async def _until(check, timeout: float = 20.0) -> None:
+    """Wait until *check()* holds -- a slow CI runner renders later than a fixed
+    sleep allows (the first of these failed on windows-latest after 1.5 s). The
+    caller asserts afterwards, so a timeout still fails with the real message."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if check():
+                return
+        except (AssertionError, StopIteration, ValueError):
+            pass
+        await asyncio.sleep(0.1)
+
+
 def test_the_features_filter_the_candidates_and_the_table_has_the_toolbar(
         joins_lab_smoke_runner):
     """A link's features filter the candidates by their manuscripts, asked over the
@@ -3461,7 +3475,7 @@ def test_the_features_filter_the_candidates_and_the_table_has_the_toolbar(
     async def driver(user):
         with patch('web.pages.joins_lab.get_fjms_service', return_value=fjms):
             await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table")}')
-            await asyncio.sleep(1.5)
+            await _until(lambda: _table_sids(user) == {_CAND_TEXT_SID})
             assert _table_sids(user) == {_CAND_TEXT_SID}
             assert fjms.asked and fjms.asked[-1] == {_CAND_TEXT_SID, _CAND_VS_SID}
             with user._client:
@@ -3483,7 +3497,7 @@ def test_a_failed_features_check_hides_no_candidate(joins_lab_smoke_runner):
     async def driver(user):
         with patch('web.pages.joins_lab.get_fjms_service', return_value=fjms):
             await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table")}')
-            await asyncio.sleep(1.5)
+            await _until(lambda: bool(_notices(user)))
             assert fjms.asked
             assert _table_sids(user) == {_CAND_TEXT_SID, _CAND_VS_SID}
             [notice] = _notices(user)
@@ -3506,7 +3520,7 @@ def test_applying_the_filters_again_retries_a_failed_features_check(joins_lab_sm
     async def driver(user):
         with patch('web.pages.joins_lab.get_fjms_service', return_value=fjms):
             await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table")}')
-            await asyncio.sleep(1.5)
+            await _until(lambda: bool(_notices(user)))
             assert _table_sids(user) == {_CAND_TEXT_SID, _CAND_VS_SID}
             assert len(_notices(user)) == 1
             asked = len(fjms.asked)
@@ -3516,12 +3530,14 @@ def test_applying_the_filters_again_retries_a_failed_features_check(joins_lab_sm
                 [more] = [b for b in ElementFilter(kind=ui.button, marker='joins-more-filters')
                           if b.visible]
             _click_element(user, more)
-            await asyncio.sleep(0.3)
-            with user._client:
-                apply_btn = next(b for b in ElementFilter(kind=ui.button).within(kind=ui.dialog)
-                                 if b._props.get('label') in ('Apply', 'החל'))
-            _click_element(user, apply_btn)
-            await asyncio.sleep(0.5)
+
+            def _apply_button():
+                with user._client:
+                    return next(b for b in ElementFilter(kind=ui.button).within(kind=ui.dialog)
+                                if b._props.get('label') in ('Apply', 'החל'))
+            await _until(lambda: _apply_button() is not None)
+            _click_element(user, _apply_button())
+            await _until(lambda: _table_sids(user) == {_CAND_TEXT_SID})
             assert len(fjms.asked) == asked + 1
             assert _table_sids(user) == {_CAND_TEXT_SID}
             assert _notices(user) == []
@@ -3540,7 +3556,7 @@ def test_a_superseded_enrichment_failing_late_changes_nothing(joins_lab_smoke_ru
 
     from web.pages.joins_lab import CatalogueUnavailable
 
-    calls = []
+    calls, failed = [], []
 
     async def driver(user):
         release = asyncio.Event()
@@ -3549,23 +3565,31 @@ def test_a_superseded_enrichment_failing_late_changes_nothing(joins_lab_smoke_ru
             calls.append(list(sys_ids))
             if len(calls) == 1:
                 await release.wait()
+                failed.append(True)
                 raise CatalogueUnavailable('the first batch fails late')
             return dict(_LIB_DOM_ENRICH)
 
         with patch('web.pages.joins_lab._enrich_candidates', new=enrich):
             await user.open(
                 f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table", domains=["Bible"])}')
-            await asyncio.sleep(1.5)
+            # The search ran and its batch is waiting (the Domain filter, still
+            # without the enrichment, shows no rows yet)
+            await _until(lambda: bool(calls))
             assert len(calls) == 1                          # still waiting
-            with user._client:
-                [run] = [b for b in ElementFilter(kind=ui.button)
-                         if b._props.get('icon') == 'search' and b.visible]
-            _click_element(user, run)                       # the search again
-            await asyncio.sleep(1.0)
+
+            def _run_button():
+                with user._client:
+                    [run] = [b for b in ElementFilter(kind=ui.button)
+                             if b._props.get('icon') == 'search' and b.visible]
+                return run
+            await _until(lambda: _run_button() is not None)
+            _click_element(user, _run_button())             # the search again
+            await _until(lambda: len(calls) == 2 and _table_sids(user) == {_LIB_DOM_SIDS[1]})
             assert len(calls) == 2
             assert _table_sids(user) == {_LIB_DOM_SIDS[1]}  # Bible: the newer batch
             release.set()                                   # the older one fails now
-            await asyncio.sleep(0.5)
+            await _until(lambda: bool(failed))
+            await asyncio.sleep(0.3)                        # its handler has run since
             assert _table_sids(user) == {_LIB_DOM_SIDS[1]}
             assert _notices(user) == []
 
@@ -3585,7 +3609,7 @@ def test_unreadable_catalogue_data_keeps_the_candidates_under_the_domain_filter(
                    side_effect=CatalogueUnavailable('no sidecar')):
             await user.open(
                 f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table", domains=["Bible"])}')
-            await asyncio.sleep(1.5)
+            await _until(lambda: bool(_notices(user)))
             assert _table_sids(user) == {_CAND_TEXT_SID, _CAND_VS_SID}
             [notice] = _notices(user)
             assert notice in (
