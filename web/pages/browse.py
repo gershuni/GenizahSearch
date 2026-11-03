@@ -74,6 +74,7 @@ from web.components.shelfmark_picker import items_from_manuscripts, open_shelfma
 from web import io_bound_result
 from web.pages.browse_state import (
     BrowseState, page_has_reading_view, persist_browse_snapshot, clear_browse_snapshot, restore_browse_snapshot,
+    clamp_zoom, zoom_percent,
 )
 from web.browse_bootstrap import resolve_browse_bootstrap
 from web.pages.browse_enrichment import (
@@ -114,8 +115,25 @@ async def add_to_reading_desk_by_shelfmark(service, query, container, add_entry)
 # Custom Styles for Manuscript Viewer
 # ============================================================================
 
+def _viewer_js_version() -> str:
+    """A stamp of /static/manuscript_viewer.js for its <script> URL.
+
+    The static route lets a browser keep a file for an hour. The zoom buttons
+    below are wired to this file's viewer (``zoomIn`` tells the page through
+    ``onChange``); a page built after a deploy must not run the hour-old copy,
+    whose buttons would zoom without telling the page.
+    """
+    import hashlib
+    from pathlib import Path
+    try:
+        data = (Path(__file__).resolve().parent.parent / 'static' / 'manuscript_viewer.js').read_bytes()
+    except OSError:
+        return '0'
+    return hashlib.md5(data).hexdigest()[:10]
+
+
 VIEWER_STYLES = '''
-<script src="/static/manuscript_viewer.js"></script>
+<script src="/static/manuscript_viewer.js?v=__VIEWER_JS_VERSION__"></script>
 <!-- progressiveLoad, initProgressiveImages, fetchFlIdsFromManifest, handleImageError,
      NLI_IIIF_BASE are all in /static/manuscript_viewer.js (shared with /search) -->
 <style>
@@ -610,17 +628,43 @@ VIEWER_STYLES = '''
     }
 </style>
 <script>
+    // The zoom is applied here, in the browser, and the page hears the level
+    // afterwards (2026-11-03): every viewer on this page reports its scale
+    // through the `browse_zoom` event, which the page's ui.on handler stores,
+    // so a rebuilt page (Prev/Next, Show Metadata, Edit) draws the image at
+    // the level the reader sees.
+    window.browseZoomChanged = function(viewer) {
+        if (typeof emitEvent === 'function') {
+            emitEvent('browse_zoom', { scale: viewer.state.scale, seq: viewer.reportSeq || 0 });
+        }
+    };
     // Create viewer via shared factory (manuscript_viewer.js loaded with defer)
     window.manuscriptViewer = createManuscriptViewer({
         imageSelector: '.zoomable-image',
         containerSelector: '.image-container',
         zoomLabelSelector: '.zoom-level-label',
-        gammaFilterId: 'gamma-main'
+        gammaFilterId: 'gamma-main',
+        onChange: window.browseZoomChanged
     });
+    // The viewer the toolbar buttons drive: the fullscreen editor's while its
+    // image is on the page, else the main one. Called from the buttons'
+    // client-side click handlers and, through them, the + / - keys.
+    window.browseActiveViewer = function() {
+        var fs = window.fsEditViewer;
+        if (fs && fs.el && fs.el.isConnected) return fs;
+        return window.manuscriptViewer || null;
+    };
+    window.browseZoom = function(action) {
+        var viewer = window.browseActiveViewer();
+        if (!viewer) return;
+        if (action === 'in') viewer.zoomIn();
+        else if (action === 'out') viewer.zoomOut();
+        else if (action === 'fit') viewer.fit();
+    };
 </script>
 <svg style="position:absolute;width:0;height:0"><filter id="gamma-main"><feComponentTransfer><feFuncR type="gamma" amplitude="1" exponent="1.0"/><feFuncG type="gamma" amplitude="1" exponent="1.0"/><feFuncB type="gamma" amplitude="1" exponent="1.0"/></feComponentTransfer></filter></svg>
 <svg style="position:absolute;width:0;height:0"><filter id="gamma-fs"><feComponentTransfer><feFuncR type="gamma" amplitude="1" exponent="1.0"/><feFuncG type="gamma" amplitude="1" exponent="1.0"/><feFuncB type="gamma" amplitude="1" exponent="1.0"/></feComponentTransfer></filter></svg>
-'''
+'''.replace('__VIEWER_JS_VERSION__', _viewer_js_version())
 
 
 # BrowseState and _crossref_cache imported from web.pages.browse_state (Phase 73, Plan 01)
@@ -1095,7 +1139,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             for key in ('brightness', 'contrast'):
                 if slider_refs.get(key): slider_refs[key].value = 0
             if slider_refs.get('gamma'): slider_refs['gamma'].value = 100
-            _run_page_javascript('if(window.manuscriptViewer) window.manuscriptViewer.resetAdjustments()')
+            # The viewer's own zoom and pan go too: the next page's image is
+            # drawn at 100%, and the viewer must start from there (its scale
+            # is the browser's, not pushed from here).
+            _run_page_javascript('if(window.manuscriptViewer) { window.manuscriptViewer.resetAdjustments(); window.manuscriptViewer.fit(); }')
         update_content()  # Show loading spinner
 
         # === Phase A: Fast page fetch ===
@@ -1707,15 +1754,37 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             fl_id=fl_id
         )
 
-    def zoom_in():
-        """Increase zoom level."""
-        state.zoom_level = min(state.zoom_level + 0.25, 4.0)
-        update_image_transform()
+    # The zoom buttons (2026-11-03). A click is handled in the browser: the
+    # button's js_handler calls the viewer, which applies the transform at
+    # once and reports the level through the `browse_zoom` event (`_zoom_changed`
+    # below). No Python click handler, so a click costs no round-trip -- PostHog
+    # had 50 rage clicks by 19 readers on + in 30 days, each click a linear
+    # 0.25 through the server. The `data-action` attributes stay: the page's
+    # keyboard handler clicks them for + and -.
+    ZOOM_IN_JS = "() => { if (window.browseZoom) window.browseZoom('in'); }"
+    ZOOM_OUT_JS = "() => { if (window.browseZoom) window.browseZoom('out'); }"
+    # Reset applies in the browser first (the two viewers), then reaches the
+    # server for the sliders and the page's own state.
+    ZOOM_RESET_JS = ('(e) => { [window.manuscriptViewer, window.fsEditViewer].forEach('
+                     'function(v) { if (v && v.reset) v.reset(); }); emit(e); }')
 
-    def zoom_out():
-        """Decrease zoom level."""
-        state.zoom_level = max(state.zoom_level - 0.25, 0.25)
-        update_image_transform()
+    def _zoom_changed(e):
+        """The browser's zoom level, from the viewer's `browse_zoom` event.
+
+        `seq` numbers the report; the image markup carries the last one heard
+        (`data-zoom-seq`), so the viewer can tell an image this page drew
+        before hearing its latest level from one drawn after.
+        """
+        args = e.args if isinstance(e.args, dict) else {}
+        if 'scale' not in args:
+            return
+        state.zoom_level = clamp_zoom(args.get('scale'))
+        try:
+            state.zoom_seq = max(state.zoom_seq, int(args.get('seq', 0)))
+        except (TypeError, ValueError):
+            pass
+
+    ui.on('browse_zoom', _zoom_changed)
 
     def zoom_reset():
         """Reset zoom to 100%."""
@@ -1729,25 +1798,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             if slider_refs.get(f'fs_{key}'): slider_refs[f'fs_{key}'].value = 0
         if slider_refs.get('gamma'): slider_refs['gamma'].value = 100
         if slider_refs.get('fs_gamma'): slider_refs['fs_gamma'].value = 100
+        # The button's js_handler has reset both viewers already; the keyboard
+        # and any other caller reach this handler alone, so do it here too.
         ui.run_javascript('''
-            if(window.manuscriptViewer) window.manuscriptViewer.reset();
-            if(window.fsEditViewer) {
-                window.fsEditViewer.state = { x: 0, y: 0, scale: 1, rotation: 0, isDragging: false, startX: 0, startY: 0, brightness: 0, contrast: 0, gamma: 1.0, invert: false };
-                window.fsEditViewer.applyTransform();
-                window.fsEditViewer._applyFilters();
-            }
+            [window.manuscriptViewer, window.fsEditViewer].forEach(function(v) { if (v && v.reset) v.reset(); });
         ''')
-        update_image_transform()
-
-    def fit_width():
-        """Fit image to container width."""
-        state.zoom_level = 1.0
-        update_image_transform()
-
-    def fit_height():
-        """Fit image to container height."""
-        state.zoom_level = 0.9
-        update_image_transform()
 
     def rotate_left():
         """Rotate image 90 degrees counter-clockwise."""
@@ -1806,23 +1861,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         update_content()
 
     def update_image_transform():
-        """Update the image transform (zoom/rotate) via JavaScript."""
-        zoom_percent = int(state.zoom_level * 100)
-        # Update Python state on client side - both regular and fullscreen viewers
+        """Push the rotation to the viewers. The zoom is the browser's: it is
+        applied there and only reported here (`_zoom_changed`), so this never
+        writes a scale -- a rotation right after a zoom would otherwise snap
+        the image back to the level the server last heard of."""
         ui.run_javascript(f'''
-            // Update regular viewer
-            if (window.manuscriptViewer) {{
-                window.manuscriptViewer.update({state.zoom_level}, {state.rotation});
-            }}
-            // Update fullscreen edit viewer if active
-            if (window.fsEditViewer) {{
-                window.fsEditViewer.state.scale = {state.zoom_level};
-                window.fsEditViewer.state.rotation = {state.rotation};
-                window.fsEditViewer.applyTransform();
-            }}
-            // Update all zoom labels
-            document.querySelectorAll('.zoom-level-label').forEach(label => {{
-                label.textContent = '{zoom_percent}%';
+            [window.manuscriptViewer, window.fsEditViewer].forEach(function(v) {{
+                if (v && v.setRotation) v.setRotation({int(state.rotation)});
             }});
         ''')
 
@@ -4765,9 +4810,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     if _ox_direct_link:
                                         ui.link(tr('Open in Bodleian Libraries'), _ox_direct_link, new_tab=True).classes('text-xs').style('color: #9ecbff;').props('data-role="oxford-direct-link"')
                                 with ui.row().classes('gap-1 browse-image-tools') as _image_tools_row:
-                                    ui.button(icon='remove', on_click=zoom_out).props(f'flat round size=sm text-color=white aria-label="{tr("Zoom out")}" data-action="zoom-out"').tooltip(tr('Zoom out'))
-                                    ui.label(f'{int(state.zoom_level * 100)}%').classes('zoom-level-label text-white text-sm px-2')
-                                    ui.button(icon='add', on_click=zoom_in).props(f'flat round size=sm text-color=white aria-label="{tr("Zoom in")}" data-action="zoom-in"').tooltip(tr('Zoom in'))
+                                    ui.button(icon='remove').props(f'flat round size=sm text-color=white aria-label="{tr("Zoom out")}" data-action="zoom-out"').on('click', js_handler=ZOOM_OUT_JS).tooltip(tr('Zoom out'))
+                                    ui.label(f'{zoom_percent(state.zoom_level)}%').classes('zoom-level-label text-white text-sm px-2')
+                                    ui.button(icon='add').props(f'flat round size=sm text-color=white aria-label="{tr("Zoom in")}" data-action="zoom-in"').on('click', js_handler=ZOOM_IN_JS).tooltip(tr('Zoom in'))
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
                                     ui.button(icon='rotate_left', on_click=rotate_left).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Left")}"').tooltip(tr('Rotate Left'))
                                     
@@ -4779,7 +4824,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     
                                     ui.button(icon='rotate_right', on_click=rotate_right).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Right")}"').tooltip(tr('Rotate Right'))
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
-                                    ui.button(icon='restart_alt', on_click=zoom_reset).props(f'flat round size=sm text-color=white aria-label="{tr("Reset View")}"').tooltip(tr('Reset View'))
+                                    ui.button(icon='restart_alt').props(f'flat round size=sm text-color=white aria-label="{tr("Reset View")}" data-action="zoom-reset"').on('click', zoom_reset, [], js_handler=ZOOM_RESET_JS).tooltip(tr('Reset View'))
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
                                     ui.button(icon='fullscreen', on_click=toggle_image_fullscreen).props(f'flat round size=sm text-color=white aria-label="{tr("Fullscreen Image")}" data-action="fullscreen"').tooltip(tr('Fullscreen Image'))
 
@@ -4852,6 +4897,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         data-full-src="{_full_url}"
                                         class="zoomable-image"
                                         style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;"
+                                        data-zoom-seq="{int(state.zoom_seq)}"
                                         draggable="false"
                                         data-oxford-direct="{_ox_direct_attr}"
                                         data-oxford-direct-label="{_ox_direct_label}"
@@ -5290,13 +5336,13 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             with ui.element('div').classes('fullscreen-edit-image-wrapper').props('id="fs-image-wrapper"'):
                                 # Image controls toolbar
                                 with ui.element('div').classes('fullscreen-image-toolbar'):
-                                    ui.button(icon='remove', on_click=zoom_out).props('flat round dense size=sm').tooltip(tr('Zoom out'))
-                                    ui.label(f'{int(state.zoom_level * 100)}%').classes('text-xs zoom-level-label').style('color: #ccc; min-width: 40px; text-align: center;')
-                                    ui.button(icon='add', on_click=zoom_in).props('flat round dense size=sm').tooltip(tr('Zoom in'))
+                                    ui.button(icon='remove').props(f'flat round dense size=sm aria-label="{tr("Zoom out")}"').on('click', js_handler=ZOOM_OUT_JS).tooltip(tr('Zoom out'))
+                                    ui.label(f'{zoom_percent(state.zoom_level)}%').classes('text-xs zoom-level-label').style('color: #ccc; min-width: 40px; text-align: center;')
+                                    ui.button(icon='add').props(f'flat round dense size=sm aria-label="{tr("Zoom in")}"').on('click', js_handler=ZOOM_IN_JS).tooltip(tr('Zoom in'))
                                     ui.separator().props('vertical').classes('mx-1 h-4')
                                     ui.button(icon='rotate_left', on_click=rotate_left).props('flat round dense size=sm').tooltip(tr('Rotate left'))
                                     ui.button(icon='rotate_right', on_click=rotate_right).props('flat round dense size=sm').tooltip(tr('Rotate right'))
-                                    ui.button(icon='restart_alt', on_click=zoom_reset).props('flat round dense size=sm').tooltip(tr('Reset view'))
+                                    ui.button(icon='restart_alt').props(f'flat round dense size=sm aria-label="{tr("Reset view")}"').on('click', zoom_reset, [], js_handler=ZOOM_RESET_JS).tooltip(tr('Reset view'))
 
                                 # Fullscreen image adjustment controls
                                 with ui.element('div').classes('fullscreen-image-toolbar').style(
@@ -5342,7 +5388,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         if '/api/nli_image_by_sysid/' in safe_img_url:
                                             _sep = '&' if '?' in safe_img_url else '?'
                                             _fs_thumb = f"{safe_img_url}{_sep}width=400"
-                                        img_html = f'<img src="{_fs_thumb}" data-full-src="{_fs_full}" class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js}, \'fsEditViewer\')" />'
+                                        img_html = f'<img src="{_fs_thumb}" data-full-src="{_fs_full}" class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" data-zoom-seq="{int(state.zoom_seq)}" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js}, \'fsEditViewer\')" />'
                                         ui.html(img_html, sanitize=False)
                                         ui.run_javascript('initProgressiveImages();')
                                     else:
@@ -5403,93 +5449,23 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 };
                                 document.addEventListener('keydown', escHandler);
 
-                                // Initialize image pan/zoom for fullscreen
+                                // The fullscreen editor's image: the shared viewer (zoom in the
+                                // browser, wheel and double-click at the pointer, pinch on a
+                                // phone), reporting its level like the main one. Until 2026-11-03
+                                // this was a second, inline copy of the viewer with its own wheel
+                                // step.
                                 setTimeout(() => {
                                     const fsImage = document.getElementById('fs-zoomable-image');
                                     const fsImagePanel = document.getElementById('fs-image-panel');
-
-                                    if (fsImage && fsImagePanel) {
-                                        // Create dedicated viewer state for fullscreen
-                                        const fsViewer = {
-                                            el: fsImage,
-                                            state: { x: 0, y: 0, scale: 1, rotation: 0, isDragging: false, startX: 0, startY: 0, brightness: 0, contrast: 0, gamma: 1.0, invert: false },
-
-                                            applyTransform: function() {
-                                                this.el.style.transform = `translate(${this.state.x}px, ${this.state.y}px) rotate(${this.state.rotation}deg) scale(${this.state.scale})`;
-                                                this._applyFilters();
-                                            },
-
-                                            _applyFilters: function() {
-                                                const s = this.state;
-                                                const b = 1 + s.brightness / 100;
-                                                const c = 1 + s.contrast / 100;
-                                                const inv = s.invert ? 1 : 0;
-                                                let f = 'brightness(' + b + ') contrast(' + c + ') invert(' + inv + ')';
-                                                if (s.gamma !== 1.0) {
-                                                    const svgFilter = document.getElementById('gamma-fs');
-                                                    if (svgFilter) {
-                                                        const exp = 1.0 / s.gamma;
-                                                        svgFilter.querySelectorAll('feFuncR, feFuncG, feFuncB').forEach(fn => fn.setAttribute('exponent', exp));
-                                                    }
-                                                    f += ' url(#gamma-fs)';
-                                                }
-                                                this.el.style.filter = f;
-                                            },
-
-                                            setBrightness: function(val) { this.state.brightness = val; this._applyFilters(); },
-                                            setContrast: function(val) { this.state.contrast = val; this._applyFilters(); },
-                                            setGamma: function(val) { this.state.gamma = val; this._applyFilters(); },
-                                            toggleInvert: function() { this.state.invert = !this.state.invert; this._applyFilters(); },
-                                            resetAdjustments: function() {
-                                                this.state.brightness = 0; this.state.contrast = 0;
-                                                this.state.gamma = 1.0; this.state.invert = false;
-                                                this._applyFilters();
-                                            },
-
-                                            onWheel: function(e) {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                const delta = e.deltaY > 0 ? -0.15 : 0.15;
-                                                this.state.scale = Math.max(0.25, Math.min(5, this.state.scale + delta));
-                                                this.applyTransform();
-                                                // Update zoom label in image toolbar
-                                                const label = document.querySelector('.fullscreen-image-toolbar .zoom-level-label');
-                                                if (label) label.textContent = Math.round(this.state.scale * 100) + '%';
-                                            },
-
-                                            onMouseDown: function(e) {
-                                                if (e.button !== 0) return;
-                                                e.preventDefault();
-                                                this.state.isDragging = true;
-                                                this.state.startX = e.clientX - this.state.x;
-                                                this.state.startY = e.clientY - this.state.y;
-                                                this.el.style.cursor = 'grabbing';
-                                            },
-
-                                            onMouseMove: function(e) {
-                                                if (!this.state.isDragging) return;
-                                                e.preventDefault();
-                                                this.state.x = e.clientX - this.state.startX;
-                                                this.state.y = e.clientY - this.state.startY;
-                                                this.applyTransform();
-                                            },
-
-                                            onMouseUp: function() {
-                                                this.state.isDragging = false;
-                                                this.el.style.cursor = 'grab';
-                                            }
-                                        };
-
-                                        // Bind events
-                                        fsImagePanel.addEventListener('wheel', (e) => fsViewer.onWheel(e), { passive: false });
-                                        fsImage.addEventListener('mousedown', (e) => fsViewer.onMouseDown(e));
-                                        document.addEventListener('mousemove', (e) => fsViewer.onMouseMove(e));
-                                        document.addEventListener('mouseup', () => fsViewer.onMouseUp());
-                                        fsImage.ondragstart = (e) => e.preventDefault();
-                                        fsImage.style.cursor = 'grab';
-
-                                        // Store reference for button controls
-                                        window.fsEditViewer = fsViewer;
+                                    if (fsImage && fsImagePanel && typeof createManuscriptViewer === 'function') {
+                                        window.fsEditViewer = createManuscriptViewer({
+                                            imageSelector: '#fs-zoomable-image',
+                                            containerSelector: '#fs-image-panel',
+                                            zoomLabelSelector: '.fullscreen-image-toolbar .zoom-level-label',
+                                            gammaFilterId: 'gamma-fs',
+                                            onChange: window.browseZoomChanged
+                                        });
+                                        window.fsEditViewer.init();
                                     }
                                 }, 100);
 
