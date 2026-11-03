@@ -40,7 +40,8 @@ from web.pages.search_state import (
     discard_search_run, post_criteria_matches, result_sys_id, PostMatchRefill,
 )
 from web import search_runs
-from web.search_box_input import TEXT_MODES, split_placeholder, typed_as_shelfmark
+from web.search_box_input import TEXT_MODES, search_box_input_kind, split_placeholder
+from web.home_query import home_query_target
 from shared.keyboard_layout import layout_suggestion
 from web.pages.search_results import (
     toggle_expansion as _toggle_expansion,
@@ -5190,11 +5191,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         is_responsa = (mode_select.value == 'responsa')
         mode_override, parsed_query = state.searcher.parse_query_syntax(query, responsa_mode=is_responsa)
 
-        # A shelfmark or a system number typed into the box, in a text mode, runs
-        # in Shelfmark mode as the `#` prefix would (web/search_box_input.py), and
-        # the line under the count says so, with the same query as text one click
-        # away (*as_text*). The mode selector is left as it was: the next query is
-        # text again. A Hebrew query, or a prefixed one, is untouched.
+        # Typed into the box in a text mode (web/search_box_input.py): a system
+        # number opens that manuscript in Browse, as the homepage box does (the
+        # Shelfmark lookup compares shelfmarks, never ids: Codex on #469); a
+        # shelfmark runs in Shelfmark mode as the `#` prefix would, and the line
+        # under the count says so, with the same query as text one click away
+        # (*as_text*). The mode selector is left as it was: the next query is text
+        # again. A Hebrew query, or a prefixed one, is untouched.
         _typed_shelfmark = False
         if mode_override:
             mode = mode_override
@@ -5207,7 +5210,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             mode_select.value = mode
         else:
             mode = mode_select.value
-            if not as_text and mode in TEXT_MODES and typed_as_shelfmark(query):
+            kind = search_box_input_kind(query) if (not as_text and mode in TEXT_MODES) else 'text'
+            if kind == 'sys_id':
+                ui.navigate.to(home_query_target(query))
+                return
+            if kind == 'shelfmark':
                 mode = 'Shelfmark'
                 _typed_shelfmark = True
 
@@ -5994,8 +6001,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if _typed_shelfmark:
             _show_shelfmark_notice()
         elif not results and mode in TEXT_MODES:
-            # "Did you mean <Hebrew>?" for a query typed on the English layout.
-            await _offer_layout_suggestion(clean_query, mode, this_generation)
+            # "Did you mean <Hebrew>?" for a query typed on the English layout:
+            # beside the rest of the page's work, not before it (its corpus check
+            # is one index query, off the loop).
+            asyncio.ensure_future(_after_delay(0, _offer_layout_suggestion, clean_query, mode, this_generation))
         # SEED-026 (smoke round 3 — BUG A real root cause): reveal the library filter button
         # HERE, at render time, NOT only in _apply_enrichment_to_ui(). The library filter
         # needs no enrichment data (only bool(search_state.results)); enrichment runs later

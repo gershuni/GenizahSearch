@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """The /search box's two input fixes, on the real page (2026-11-03).
 
-1. A shelfmark or a system number typed into the box runs in Shelfmark mode, as
-   the ``#`` prefix would, with "Searched as a shelfmark." under the count and a
-   "Search as text instead" link that runs the same query as text. A Hebrew
-   query runs as before, in the page's text mode.
+1. A shelfmark typed into the box runs in Shelfmark mode, as the ``#`` prefix
+   would, with "Searched as a shelfmark." under the count and a "Search as text
+   instead" link that runs the same query as text; a corpus system number opens
+   that manuscript in Browse, as the homepage box does. A Hebrew query, a word
+   with a number ("Psalm 23") and a bare number run as before, in the page's
+   text mode.
 2. A Latin-script query that spells Hebrew on the Hebrew keyboard layout
    (``dcuk`` = גבול) and finds nothing gets "Did you mean <Hebrew>?" under
    "0 Results" -- only when the engine says the words occur in the corpus
@@ -110,7 +112,22 @@ def test_a_shelfmark_typed_into_the_box_runs_in_shelfmark_mode_and_a_hebrew_quer
             seen['typed'] = {q: await _search_typed(user, engine, q) for q in SHELFMARKS}
             seen['hebrew'] = await _search_typed(user, engine, HEBREW)
             seen['hebrew_notice'] = [t for t in _texts(user, ui.label) if t == 'Searched as a shelfmark.']
+            # A word with a number, and a bare number, are text (Codex on #469).
+            seen['as_text_shapes'] = {q: await _search_typed(user, engine, q) for q in ('Psalm 23', '12')}
             seen['suggestions_asked'] = list(engine.asked)
+            # A corpus system number opens that manuscript in Browse; no search runs.
+            calls_before = len(engine.calls)
+            with patch('nicegui.ui.navigate.to') as nav_mock:
+                box = next(e for e in _elements(user, ui.input)
+                           if e.props.get('placeholder') == 'Enter Hebrew text to search')
+                with user.client:
+                    box.value = '990053835020205171'
+                button = next(b for b in _elements(user, ui.button)
+                              if b.props.get('label') == 'Search' and 'px-8' in b.classes)
+                UserInteraction(user, {button}, None).click()
+                await _settle()
+                seen['sys_id_nav'] = [c.args[0] for c in nav_mock.call_args_list]
+            seen['sys_id_calls'] = len(engine.calls) - calls_before
 
     _run(go)
     assert seen['url_open'] == {'query': 'ts 20.57', 'mode': 'Shelfmark'}, seen
@@ -121,7 +138,11 @@ def test_a_shelfmark_typed_into_the_box_runs_in_shelfmark_mode_and_a_hebrew_quer
         assert call == {'query': query, 'mode': 'Shelfmark'}, (query, call)
     assert seen['hebrew'] == {'query': HEBREW, 'mode': 'literal'}, seen
     assert seen['hebrew_notice'] == [], 'a Hebrew query is not a shelfmark'
-    assert seen['suggestions_asked'] == [], 'no keyboard-layout suggestion for a shelfmark or for Hebrew'
+    for query, call in seen['as_text_shapes'].items():
+        assert call == {'query': query, 'mode': 'literal'}, (query, call)
+    assert seen['suggestions_asked'] == [], 'no keyboard-layout suggestion for a shelfmark, Hebrew or digits'
+    assert seen['sys_id_nav'] == ['/browse?sys_id=990053835020205171'], seen
+    assert seen['sys_id_calls'] == 0, 'a system number is opened, not searched'
 
 
 def test_a_query_typed_on_the_english_layout_is_offered_as_the_hebrew_it_spells():

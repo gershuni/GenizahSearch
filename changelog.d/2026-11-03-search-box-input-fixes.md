@@ -5,14 +5,19 @@ English browser hit zero results 53% of the time against 33% for Hebrew-browser 
 every Latin-script search found nothing).
 
 ### Shelfmarks typed into the search box
-- A shelfmark or a system number typed into the /search box (`ts 20.57`, `t-s ns 307.61b`,
-  `add 3356`, `ts k2.27`, `t-s 10g4.5`, `tad c2.1`, `5559a.10`) ran as a text search and
-  found nothing. In a text mode it now runs in the page's Shelfmark mode, as the `#` prefix
-  would, with "Searched as a shelfmark." under the count and a "Search as text instead" link
-  that runs the same query as text. The mode selector is left as it was, so the next query
-  is text again; a Hebrew query, a prefixed one, and every other mode are untouched. The
-  recogniser is the homepage box's (`web/home_query.py`: a corpus sys_id, a Hebrew or Arabic
-  letter means text), narrowed to strings with a digit in them (`web/search_box_input.py`).
+- A shelfmark typed into the /search box (`ts 20.57`, `t-s ns 307.61b`, `add 3356`,
+  `ts k2.27`, `t-s 10g4.5`, `tad c2.1`, `5559a.10`) ran as a text search and found nothing.
+  In a text mode it now runs in the page's Shelfmark mode, as the `#` prefix would, with
+  "Searched as a shelfmark." under the count and a "Search as text instead" link that runs
+  the same query as text; a corpus system number opens that manuscript in Browse, as the
+  homepage box does. The mode selector is left as it was, so the next query is text again;
+  a Hebrew query, a prefixed one, and every other mode are untouched. The recogniser is the
+  homepage box's (`web/home_query.py`: a corpus sys_id, a Hebrew or Arabic letter means
+  text), narrowed for a box that also takes words: a shelfmark must have a digit and the
+  shape of one -- a dotted number or a letter-digit run, or a collection prefix (`T-S`,
+  `ENA`, `Add.`), a library name or the NLI catalogue's own form first
+  (`web/search_box_input.py::search_box_input_kind`), so `Psalm 23` and a bare `12` stay
+  text.
 
 ### Hebrew typed with the keyboard still on English
 - "Did you mean <Hebrew>?" under "0 Results" for a Latin-script query that spells Hebrew on

@@ -2,15 +2,18 @@
 """What the /search box was given (web/search_box_input.py).
 
 The shelfmarks are real zero-result text searches from PostHog ``search_executed``
-(2026-11-03). The page's wiring -- Shelfmark mode, the notice, the keyboard-layout
-suggestion -- is tests/render_smoke/test_search_box_input_render_smoke.py.
+(2026-11-03). The page's wiring -- Browse for a system number, Shelfmark mode and
+the notice for a shelfmark, the keyboard-layout suggestion -- is
+tests/render_smoke/test_search_box_input_render_smoke.py.
 """
 from __future__ import annotations
 
 import pytest
 
 from web.home_query import home_query_target
-from web.search_box_input import TEXT_MODES, split_placeholder, typed_as_shelfmark
+from web.search_box_input import (
+    COLLECTION_PREFIXES, TEXT_MODES, search_box_input_kind, split_placeholder, typed_as_shelfmark,
+)
 from web.search_bootstrap import VALID_SEARCH_MODES
 
 SHELFMARKS = ['ts 20.57', 't-s ns 307.61b', 'add 3356', 'ts k2.27', 't-s 10g4.5', 'tad c2.1', '5559a.10']
@@ -18,15 +21,35 @@ SHELFMARKS = ['ts 20.57', 't-s ns 307.61b', 'add 3356', 'ts k2.27', 't-s 10g4.5'
 
 @pytest.mark.parametrize('typed', SHELFMARKS + [
     'T-S 12.123',
-    'MS Heb c 57',
+    'MS Heb c 57',             # a letter-digit run is not needed: "Heb" is a collection prefix
     'Moss. IV,12.2',
     'ENA 2156.1',
+    'Or 5557B',
+    'Halper 331',
+    'Gaster 1358',
+    'Add. 3356',
     '  ts 20.57  ',
-    '990053835020205171',      # a corpus sys_id (libraries.csv row 1)
-    '12345',                   # a number: the Shelfmark lookup decides what it matches
+    'Cambridge T-S 12.123',    # a library name first (_strip_library_prefix)
+    'JTS ENA 2156',
+    'British Library Or 5557',
+    'Cambridge University Library, Ms. T-S K 08.026',   # the NLI catalogue's form
+    '20.57',                   # a dotted number alone
+    'k2.27',
+    '12b',
 ])
-def test_a_shelfmark_or_a_system_number_is_recognised(typed):
+def test_a_shelfmark_is_recognised(typed):
+    assert search_box_input_kind(typed) == 'shelfmark', typed
     assert typed_as_shelfmark(typed)
+
+
+@pytest.mark.parametrize('sys_id', [
+    '990053835020205171',      # libraries.csv row 1
+    '  990053835020205171  ',
+    '990000012345000000',      # Phase-85 synthetic
+])
+def test_a_corpus_system_number_is_a_sys_id_not_a_shelfmark(sys_id):
+    assert search_box_input_kind(sys_id) == 'sys_id'
+    assert not typed_as_shelfmark(sys_id)
 
 
 @pytest.mark.parametrize('typed', [
@@ -37,14 +60,21 @@ def test_a_shelfmark_or_a_system_number_is_recognised(typed):
     'dcuk',                    # גבול on the English layout: a word, not a shelfmark
     'fufch anh',
     'marriage',                # an English word
-    'ts',                      # a library alone, no number
+    'Psalm 23',                # a word and a number: no shelfmark shape (Codex on #469)
+    'chapter 2',
+    'version 1',
+    'ts',                      # a collection prefix alone, no number
+    '12',                      # a bare number: 15,533 catalogue rows, not what anyone meant
+    '3356',
+    '970993169503583183',      # the LOCAL namespace is no corpus sys_id; nor a shelfmark shape
     '٩٩٠٠٥٣٨٣٥٠٢٠٢٠٥١٧١',       # Arabic-Indic digits: not ASCII
     'ts 20.57?',               # a mark no shelfmark is written with
     '',
     '   ',
     None,
 ])
-def test_words_and_hebrew_are_left_as_text(typed):
+def test_words_hebrew_and_bare_numbers_are_left_as_text(typed):
+    assert search_box_input_kind(typed) == 'text', typed
     assert not typed_as_shelfmark(typed)
 
 
@@ -53,6 +83,16 @@ def test_the_homepage_box_sends_the_same_strings_to_browse_as_shelfmarks(typed):
     """The same recogniser: what the homepage opens as a shelfmark, the search box
     runs in Shelfmark mode."""
     assert home_query_target(typed).startswith('/browse?shelfmark=')
+
+
+def test_the_homepage_box_opens_the_same_system_numbers():
+    assert home_query_target('990053835020205171') == '/browse?sys_id=990053835020205171'
+
+
+def test_collection_prefixes_are_lower_case_without_dots():
+    for prefix in COLLECTION_PREFIXES:
+        assert prefix == prefix.lower() and '.' not in prefix and ' ' not in prefix, prefix
+    assert {'t-s', 'ts', 'ena', 'add', 'or', 'moss', 'heb', 'evr', 'gaster', 'adler'} <= COLLECTION_PREFIXES
 
 
 def test_text_modes_are_the_page_modes_that_search_for_words():
