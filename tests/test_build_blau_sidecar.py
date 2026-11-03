@@ -351,6 +351,13 @@ def test_build_fails_on_a_missing_or_malformed_bibliography(tmp_path, capsys):
     assert "abbreviation" in capsys.readouterr().out
 
 
+def test_build_fails_on_a_duplicate_bibliography_id(tmp_path, capsys):
+    """Codex round 3: a duplicate source id surfaced as a write failure (exit 4), not a source error."""
+    src = write_source(tmp_path / "download", bibliography=BIBLIOGRAPHY + [BIBLIOGRAPHY[0]])
+    assert build_main(["--source-dir", str(src), "--out", str(tmp_path / "blau.db")]) == EXIT_SOURCE
+    assert "duplicate bibliography id 'blau-bib-000001'" in capsys.readouterr().out
+
+
 def test_build_fails_on_a_duplicate_id(tmp_path, capsys):
     data = dictionary()
     data["בלג (بلغ)"]["stems"][0]["forms"][0]["id"] = "blau-f-000001"
@@ -519,6 +526,21 @@ def test_verify_checks_columns_types_constraints_and_indexes(built):
     assert any("table stray is not part of the schema" in p for p in verify(str(built), 3, 5))
     _mutate(built, "CREATE INDEX idx_stray ON stray(x)")
     assert any(p.startswith("indexes ") for p in verify(str(built), 3, 5))
+
+
+def test_verify_stops_cleanly_when_a_queried_column_is_gone(built):
+    """Codex round 3: a dropped roots.name_ja raised OperationalError in a later check."""
+    _mutate(built, "ALTER TABLE roots DROP COLUMN name_ja")
+    problems = verify(str(built), 3, 5)
+    assert any("table roots does not match the schema: missing ['name_ja']" in p for p in problems)
+    assert problems[-1] == "schema differs from the builder's DDL; no further checks were run"
+
+
+def test_verify_fails_when_a_cross_reference_flag_is_cleared(built):
+    """Codex round 3: the cross-reference total was not compared with meta.cross_references."""
+    _mutate(built, "UPDATE roots SET is_cross_reference = 0, target_id = NULL WHERE id = 'blau-e-000002'")
+    assert any("0 roots are cross-references but meta.cross_references says '1'" in p
+               for p in verify(str(built), 3, 5))
 
 
 def test_verify_requires_the_schema_version_this_code_reads(built):

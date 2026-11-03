@@ -104,7 +104,13 @@ def verify(db: str, expect_roots: int, expect_forms: int, expect_source_sha256: 
             return problems
         # Columns, types, constraints and indexes against the builder's DDL (Codex round 2: the
         # table names alone let a file with a dropped column pass).
-        problems.extend(schema_problems(con))
+        schema = schema_problems(con)
+        if schema:
+            # A structurally different file cannot be queried by the checks below (a missing
+            # column would raise); say what differs and stop (Codex round 3).
+            problems.extend(schema)
+            problems.append("schema differs from the builder's DDL; no further checks were run")
+            return problems
         fk = con.execute("PRAGMA foreign_key_check").fetchall()
         if fk:
             problems.append(f"{len(fk)} foreign-key rows do not resolve (first: {fk[0]})")
@@ -157,6 +163,9 @@ def verify(db: str, expect_roots: int, expect_forms: int, expect_source_sha256: 
         # 1.1); the build pins their number, so a NULLed target is a mutation, not a source gap.
         n = con.execute("SELECT COUNT(*) FROM roots WHERE is_cross_reference = 1 AND target_id IS NULL").fetchone()[0]
         xrefs = con.execute("SELECT COUNT(*) FROM roots WHERE is_cross_reference = 1").fetchone()[0]
+        if str(xrefs) != meta.get("cross_references", "0"):
+            problems.append(f"{xrefs} roots are cross-references but meta.cross_references says "
+                            f"{meta.get('cross_references')!r}")
         if str(n) != meta.get("cross_references_unresolved", "0"):
             problems.append(f"{n} cross-reference roots have no target but meta.cross_references_unresolved "
                             f"says {meta.get('cross_references_unresolved')!r}")

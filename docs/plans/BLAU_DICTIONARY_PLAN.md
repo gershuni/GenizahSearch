@@ -321,4 +321,11 @@ to the search. Costs: 6,495 keys × one indexed whole-word search; measured on a
   passed: the sub-entry count is compared with `meta.sub_entries_unnamed` too (ceiling 5%).
 - A parent directory that cannot be created (a file in its place) raised before the output-error
   handler: directory creation and the temp file are inside the guarded block, exit 4.
-  Round 3 was not requested (usage limit); CI on the round-2 head is the remaining check.
+
+**Round 3** (`1fb5d692`), Codex: three P2, all fixed; the budget ends here.
+- A schema mismatch was recorded but the later checks still queried the missing column and
+  raised: the gate now stops after the schema report ("no further checks were run").
+- The cross-reference total was used only for a ceiling; a root whose flag was cleared passed:
+  it is compared with `meta.cross_references` like the other pinned counts.
+- A duplicate bibliography id surfaced as a write failure (exit 4): it is a source error (exit 2),
+  and ids/abbreviations must be strings.

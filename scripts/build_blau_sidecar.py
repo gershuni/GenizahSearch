@@ -216,9 +216,15 @@ def read_bibliography(path: Path) -> tuple[list, dict]:
         raise SourceError(f"{path} is not valid UTF-8 JSON: {exc}") from exc
     if not isinstance(items, list) or not items:
         raise SourceError(f"{path}: expected a non-empty list of bibliography entries")
+    seen: set[str] = set()
     for item in items:
         if not isinstance(item, dict) or not item.get("id") or not item.get("abbreviation"):
             raise SourceError(f"{path}: every bibliography entry needs an id and an abbreviation")
+        if not isinstance(item["id"], str) or not isinstance(item["abbreviation"], str):
+            raise SourceError(f"{path}: bibliography ids and abbreviations must be strings")
+        if item["id"] in seen:
+            raise SourceError(f"{path}: duplicate bibliography id {item['id']!r}")
+        seen.add(item["id"])
     return items, {"bibliography_sha256": hashlib.sha256(raw).hexdigest()}
 
 
