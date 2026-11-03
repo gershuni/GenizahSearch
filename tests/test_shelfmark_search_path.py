@@ -20,6 +20,7 @@ Shelfmark mode 3 s at the median. Two causes, both fixed here:
 """
 import itertools
 import threading
+import time
 from concurrent.futures import Future
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -283,9 +284,12 @@ def test_metadata_search_ids_resolves_as_execute_metadata_search_did():
 
 class _Fake:
     """An engine as IsolatedEngine sees it: a catalogue that is loaded, and
-    execute_search that records where it ran."""
-    def __init__(self, ids):
+    execute_search that records where it ran and, like the engine's metadata
+    search, asks its progress callback per manuscript and answers a cancel
+    (InterruptedError from that callback) with the rows it had."""
+    def __init__(self, ids, row_seconds=0.0):
         self.ids = list(ids)
+        self.row_seconds = row_seconds
         self.meta_mgr = SimpleNamespace(_csv_bank_loaded=True)
         self.calls = []
 
@@ -297,8 +301,18 @@ class _Fake:
                        responsa_options=None, restrict_sys_ids=None, text_position=None,
                        corpus_scope='all', phase_callback=None, preview_callback=None, ids_only=False,
                        metadata_sys_ids=None):
-        self.calls.append(('run', threading.current_thread().name, metadata_sys_ids, progress_callback))
-        return [{'display': {'id': sid}} for sid in (metadata_sys_ids or [])]
+        self.calls.append(('run', threading.current_thread().name, metadata_sys_ids))
+        rows = []
+        try:
+            for i, sid in enumerate(metadata_sys_ids or []):
+                if progress_callback:
+                    progress_callback(i, len(metadata_sys_ids))
+                if self.row_seconds:
+                    time.sleep(self.row_seconds)
+                rows.append({'display': {'id': sid}})
+        except InterruptedError:
+            rows.append({'display': {'id': 'stopped'}})
+        return rows
 
 
 def _no_queue(monkeypatch):
@@ -310,12 +324,51 @@ def _no_queue(monkeypatch):
 def test_a_lookup_runs_in_the_calling_thread_without_a_worker(monkeypatch, mode):
     _no_queue(monkeypatch)
     fake = _Fake(['1', '2'])
-    progress = object()
-    rows = IsolatedEngine(fake, 'search').execute_search('T-S 12.123', mode, 0, progress_callback=progress,
+    ticks = []
+    rows = IsolatedEngine(fake, 'search').execute_search('T-S 12.123', mode, 0, progress_callback=lambda *v: ticks.append(v),
                                                          restrict_sys_ids={'1', '2', '3'})
     assert [r['display']['id'] for r in rows] == ['1', '2']
     assert fake.calls == [('resolve', 'T-S 12.123', mode, {'1', '2', '3'}),
-                          ('run', threading.current_thread().name, ['1', '2'], progress)]
+                          ('run', threading.current_thread().name, ['1', '2'])]
+    assert ticks == [(0, 2), (1, 2)]                 # the caller's progress still hears the engine
+
+
+# What the worker-wait loop enforces on a worker, the inline path enforces on itself
+# (Codex review of PR #468, round 1).
+
+def test_an_inline_lookup_stops_at_its_deadline(monkeypatch):
+    from shared.search_regex import SearchBudgetExceeded, search_budget
+    _no_queue(monkeypatch)
+    fake = _Fake([str(i) for i in range(20)], row_seconds=0.02)
+    with pytest.raises(SearchBudgetExceeded):
+        IsolatedEngine(fake, 'search').controlled(seconds=0.05).execute_search('T-S', 'Shelfmark', 0)
+    assert fake.calls[-1][0] == 'run'
+    with pytest.raises(SearchBudgetExceeded), search_budget(0.05):   # the API's budget, as a context
+        IsolatedEngine(fake, 'search').execute_search('T-S', 'Shelfmark', 0)
+
+
+def test_an_inline_lookup_stops_when_cancelled(monkeypatch):
+    _no_queue(monkeypatch)
+    fake = _Fake(['1', '2', '3'])
+    cancel = threading.Event()
+    cancel.set()
+    with pytest.raises(InterruptedError):
+        IsolatedEngine(fake, 'search').controlled(cancel=cancel).execute_search('T-S', 'Shelfmark', 0)
+    assert fake.calls[-1][0] == 'run'                 # it ran, was stopped at its first check, and raised
+
+
+def test_an_inline_lookup_keeps_the_website_time_limit(monkeypatch):
+    from shared.config import Config
+    _no_queue(monkeypatch)
+    monkeypatch.setattr(Config, 'WEB_SEARCH_TIME_LIMIT', 0.05)
+    fake = _Fake([str(i) for i in range(20)], row_seconds=0.02)
+    rows = IsolatedEngine(fake, 'search').execute_search('T-S', 'Shelfmark', 0)
+    assert rows[-1]['display']['id'] == 'stopped' and len(rows) < 20
+    assert research_jobs.consume_time_limit_stop() is True
+    assert research_jobs.consume_time_limit_stop() is False
+    monkeypatch.setattr(Config, 'WEB_SEARCH_TIME_LIMIT', 0)         # no limit
+    assert len(IsolatedEngine(fake, 'search').execute_search('T-S', 'Shelfmark', 0)) == 20
+    assert research_jobs.consume_time_limit_stop() is False
 
 
 def test_the_inline_ceiling_is_a_lookup_not_a_listing(monkeypatch):

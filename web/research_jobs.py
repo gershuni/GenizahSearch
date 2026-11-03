@@ -562,6 +562,49 @@ class IsolatedEngine:
         return list(resolve(arguments.get('query_str', ''), arguments['mode'],
                             arguments.get('restrict_sys_ids')))
 
+    def _run_metadata_search_inline(self, original, arguments, progress, time_limit, shared):
+        """A Title/Shelfmark lookup in this thread (INLINE_METADATA_ROWS), under what
+        the worker-wait loop below enforces on a worker: the cancel event (a background
+        API job's, or the page's `run_research_call`), the deadlines (``search_budget``
+        and ``controlled(seconds=)``: SearchBudgetExceeded, as the loop raises it), and
+        the website's time limit (Config.WEB_SEARCH_TIME_LIMIT, or what is left of a
+        shared one: the engine returns the rows it had, marked as a stopped search, and
+        ``consume_time_limit_stop`` says so, as for a worker). The engine asks its
+        progress callback every few manuscripts, and the checks ride on it; the
+        engine's cut-off signal lands on this thread, as a worker's is copied onto it.
+        """
+        from shared.search_regex import _deadline, SearchBudgetExceeded
+        cancelled = self._cancel or _cancel_context.get()
+        running_since = time.monotonic()
+        stopped = {'time_limit': False}
+
+        def inline_progress(*values):
+            now = time.monotonic()
+            if cancelled is not None and cancelled.is_set():
+                raise InterruptedError('Search cancelled')
+            deadline = _deadline.get()
+            if self._deadline is not None:
+                deadline = min(deadline or float('inf'), self._deadline)
+            if deadline is not None and now >= deadline:
+                raise SearchBudgetExceeded()
+            if time_limit and now - running_since >= time_limit:
+                stopped['time_limit'] = True
+                raise InterruptedError('Search time limit reached')
+            if progress:
+                progress(*values)
+
+        try:
+            result = original(**arguments, progress_callback=inline_progress)
+        finally:
+            if shared is not None and shared['left'] is not None:
+                shared['left'] -= time.monotonic() - running_since
+        # The engine answers a cancel with the rows it had; the caller of a cancelled
+        # search gets what the worker path gives it.
+        if cancelled is not None and cancelled.is_set():
+            raise InterruptedError('Search cancelled')
+        _time_limit_stop.value = stopped['time_limit']
+        return result
+
     def __getattr__(self, name):
         original = getattr(self._engine, name)
         if name not in {'execute_search', 'search_composition_logic', 'lab_search', 'lab_composition_search'}:
@@ -601,15 +644,8 @@ class IsolatedEngine:
                 if sys_ids is not None:
                     arguments['metadata_sys_ids'] = sys_ids
                     if len(sys_ids) <= INLINE_METADATA_ROWS:
-                        # A lookup: this thread, this process (see INLINE_METADATA_ROWS).
-                        # The engine's cut-off signal lands on this thread, as a
-                        # worker's result is copied onto it below.
-                        running_since = time.monotonic()
-                        try:
-                            return original(**arguments, progress_callback=progress)
-                        finally:
-                            if shared is not None and shared['left'] is not None:
-                                shared['left'] -= time.monotonic() - running_since
+                        return self._run_metadata_search_inline(original, arguments, progress,
+                                                                time_limit, shared)
             queue = get_queue()
             payload = {'kind': self._kind, 'method': name, 'arguments': arguments,
                        'options': self._options, 'settings': self.job_settings(),
