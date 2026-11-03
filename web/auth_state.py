@@ -610,6 +610,7 @@ def create_login_dialog():
                     # Google login button
                     async def handle_google_login():
                         login_error.classes('hidden', remove='visible')
+                        set_affordance(None)
                         # Get current URL for redirect
                         redirect_url = f"{os.environ.get('SITE_URL', 'https://genizahsearch.com')}/auth/callback"
                         result = get_oauth_url('google', redirect_url)

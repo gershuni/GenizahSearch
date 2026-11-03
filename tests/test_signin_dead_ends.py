@@ -52,7 +52,7 @@ def test_resend_confirmation_email_calls_supabase_resend(monkeypatch):
     assert calls == [{'type': 'signup', 'email': 'a@b.c'}]
 
 
-def _drive(monkeypatch, login_result, clicks):
+def _drive(monkeypatch, login_result, clicks, oauth_error=None):
     """Open the login dialog, press Login with `login_result`, then press the
     buttons named in `clicks`. Returns (buttons visible, notes, resends, events)."""
     from nicegui import core, ui
@@ -66,6 +66,8 @@ def _drive(monkeypatch, login_result, clicks):
         return login_result
 
     events, resends = [], []
+    if oauth_error:
+        monkeypatch.setattr(auth_state, 'get_oauth_url', lambda *a, **k: {'error': oauth_error})
     monkeypatch.setattr(auth_state, 'do_login', fake_login)
     monkeypatch.setattr(analytics, 'posthog_capture', lambda name, props=None: events.append((name, props)))
     monkeypatch.setattr(sc, 'resend_confirmation_email',
@@ -128,3 +130,11 @@ def test_not_confirmed_shows_resend_and_sends_once_per_minute(monkeypatch):
 def test_other_errors_show_neither(monkeypatch):
     visible, _, _, _ = _drive(monkeypatch, {'error': 'Down', 'error_code': 'unexpected_failure'}, [])
     assert visible == set()
+
+
+def test_google_login_failure_clears_the_password_affordance(monkeypatch):
+    visible, notes, _, _ = _drive(
+        monkeypatch, {'error': 'Wrong', 'error_code': 'invalid_credentials'},
+        ['Login with Google'], oauth_error='OAuth down')
+    assert visible == set(), 'the OAuth error sits beside an irrelevant button'
+    assert 'OAuth down' in notes
