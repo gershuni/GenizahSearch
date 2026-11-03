@@ -287,14 +287,17 @@ class _Fake:
     execute_search that records where it ran and, like the engine's metadata
     search, asks its progress callback per manuscript and answers a cancel
     (InterruptedError from that callback) with the rows it had."""
-    def __init__(self, ids, row_seconds=0.0):
+    def __init__(self, ids, row_seconds=0.0, resolve_seconds=0.0):
         self.ids = list(ids)
         self.row_seconds = row_seconds
+        self.resolve_seconds = resolve_seconds
         self.meta_mgr = SimpleNamespace(_csv_bank_loaded=True)
         self.calls = []
 
     def metadata_search_ids(self, query_str, mode, restrict_sys_ids=None):
         self.calls.append(('resolve', query_str, mode, restrict_sys_ids))
+        if self.resolve_seconds:
+            time.sleep(self.resolve_seconds)
         return self.ids
 
     def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None,
@@ -305,7 +308,7 @@ class _Fake:
         rows = []
         try:
             for i, sid in enumerate(metadata_sys_ids or []):
-                if progress_callback:
+                if progress_callback and i % 5 == 0:         # as the engine ticks
                     progress_callback(i, len(metadata_sys_ids))
                 if self.row_seconds:
                     time.sleep(self.row_seconds)
@@ -330,7 +333,7 @@ def test_a_lookup_runs_in_the_calling_thread_without_a_worker(monkeypatch, mode)
     assert [r['display']['id'] for r in rows] == ['1', '2']
     assert fake.calls == [('resolve', 'T-S 12.123', mode, {'1', '2', '3'}),
                           ('run', threading.current_thread().name, ['1', '2'])]
-    assert ticks == [(0, 2), (1, 2)]                 # the caller's progress still hears the engine
+    assert ticks == [(0, 2)]                         # the caller's progress still hears the engine
 
 
 # What the worker-wait loop enforces on a worker, the inline path enforces on itself
@@ -347,14 +350,68 @@ def test_an_inline_lookup_stops_at_its_deadline(monkeypatch):
         IsolatedEngine(fake, 'search').execute_search('T-S', 'Shelfmark', 0)
 
 
-def test_an_inline_lookup_stops_when_cancelled(monkeypatch):
+def test_an_inline_lookup_cancelled_while_it_runs_raises_as_a_worker_s_does(monkeypatch):
     _no_queue(monkeypatch)
     fake = _Fake(['1', '2', '3'])
+    cancel = threading.Event()
+    with pytest.raises(InterruptedError):
+        IsolatedEngine(fake, 'search').controlled(cancel=cancel).execute_search(
+            'T-S', 'Shelfmark', 0, progress_callback=lambda *v: cancel.set())   # cancelled at its first tick
+    assert fake.calls[-1][0] == 'run'                 # it ran, and the cancel was reported on return
+
+
+def test_a_deadline_passed_since_the_engine_s_last_tick_is_still_reported(monkeypatch):
+    """One to five manuscripts tick once, before the first; a deadline that passes
+    while they are read is reported when the engine returns, as the worker-wait loop
+    checks it before taking a worker's result (Codex, round 2)."""
+    from shared.search_regex import SearchBudgetExceeded
+    _no_queue(monkeypatch)
+    fake = _Fake(['1', '2'], row_seconds=0.04)
+    with pytest.raises(SearchBudgetExceeded):
+        IsolatedEngine(fake, 'search').controlled(seconds=0.05).execute_search('T-S', 'Shelfmark', 0)
+    assert fake.calls[-1] == ('run', threading.current_thread().name, ['1', '2'])    # it ran to the end
+
+
+def test_a_cancelled_job_does_no_catalogue_work(monkeypatch):
+    _no_queue(monkeypatch)
+    fake = _Fake(['1'])
     cancel = threading.Event()
     cancel.set()
     with pytest.raises(InterruptedError):
         IsolatedEngine(fake, 'search').controlled(cancel=cancel).execute_search('T-S', 'Shelfmark', 0)
-    assert fake.calls[-1][0] == 'run'                 # it ran, was stopped at its first check, and raised
+    assert fake.calls == []                           # not even resolved
+
+
+def test_a_passed_deadline_does_no_catalogue_work(monkeypatch):
+    from shared.search_regex import SearchBudgetExceeded
+    _no_queue(monkeypatch)
+    fake = _Fake(['1'])
+    engine = IsolatedEngine(fake, 'search').controlled(seconds=0.01)
+    time.sleep(0.02)
+    with pytest.raises(SearchBudgetExceeded):
+        engine.execute_search('T-S', 'Shelfmark', 0)
+    assert fake.calls == []
+
+
+def test_resolving_the_manuscripts_comes_off_a_shared_time_limit(monkeypatch):
+    from shared.config import Config
+    _no_queue(monkeypatch)
+    monkeypatch.setattr(Config, 'WEB_SEARCH_TIME_LIMIT', 60)
+    fake = _Fake(['1'], resolve_seconds=0.05)
+    with research_jobs.shared_time_limit():
+        IsolatedEngine(fake, 'search').execute_search('T-S', 'Shelfmark', 0)
+        left = research_jobs._shared_limit.get()['left']
+    assert left <= 60 - 0.03                    # 0.05 slept, less the clock's granularity
+
+
+def test_a_broad_search_s_resolution_comes_off_the_worker_s_time_limit(monkeypatch):
+    from shared.config import Config
+    submitted = _stub_queue(monkeypatch)
+    monkeypatch.setattr(Config, 'WEB_SEARCH_TIME_LIMIT', 60)
+    fake = _Fake([str(i) for i in range(INLINE_METADATA_ROWS + 1)], resolve_seconds=0.05)
+    with research_jobs.shared_time_limit():
+        IsolatedEngine(fake, 'search').execute_search('T-S', 'Shelfmark', 0)
+    assert submitted[-1]['time_limit'] <= 60 - 0.03
 
 
 def test_an_inline_lookup_keeps_the_website_time_limit(monkeypatch):

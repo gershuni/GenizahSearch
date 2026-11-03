@@ -52,6 +52,7 @@ TIME_LIMIT_GRACE_SECONDS = 60
 # searching -- and a broader search still goes to a worker, which skips its catalogue.
 METADATA_SEARCH_MODES = frozenset({'Title', 'Shelfmark'})
 INLINE_METADATA_ROWS = 100
+_TO_WORKER = object()   # IsolatedEngine._metadata_search: the search goes to a worker
 _time_limit_stop = threading.local()
 
 
@@ -562,23 +563,33 @@ class IsolatedEngine:
         return list(resolve(arguments.get('query_str', ''), arguments['mode'],
                             arguments.get('restrict_sys_ids')))
 
-    def _run_metadata_search_inline(self, original, arguments, progress, time_limit, shared):
-        """A Title/Shelfmark lookup in this thread (INLINE_METADATA_ROWS), under what
-        the worker-wait loop below enforces on a worker: the cancel event (a background
-        API job's, or the page's `run_research_call`), the deadlines (``search_budget``
-        and ``controlled(seconds=)``: SearchBudgetExceeded, as the loop raises it), and
-        the website's time limit (Config.WEB_SEARCH_TIME_LIMIT, or what is left of a
-        shared one: the engine returns the rows it had, marked as a stopped search, and
-        ``consume_time_limit_stop`` says so, as for a worker). The engine asks its
-        progress callback every few manuscripts, and the checks ride on it; the
+    def _metadata_search(self, original, arguments, progress, time_limit, shared):
+        """A Title/Shelfmark search's manuscripts, resolved in this process, and a
+        lookup (INLINE_METADATA_ROWS or fewer) run in this thread; ``_TO_WORKER``
+        when the search goes to a worker (the engine cannot resolve them here, or
+        there are more), with its manuscripts in *arguments* when they were resolved.
+
+        Under what the worker-wait loop enforces on a worker: the cancel event (a
+        background API job's, or the page's `run_research_call`), the deadlines
+        (``search_budget`` and ``controlled(seconds=)``: SearchBudgetExceeded, as
+        the loop raises it), and the website's time limit (Config.WEB_SEARCH_TIME_LIMIT,
+        or what is left of a shared one: the engine returns the rows it had, marked
+        as a stopped search, and ``consume_time_limit_stop`` says so, as for a worker).
+        Checked before the manuscripts are resolved (an already-cancelled job does
+        no catalogue work), at every progress tick the engine asks for (every few
+        manuscripts), and, cancel and deadlines, once the engine has returned: its
+        last tick may be manuscripts ago, and the loop checks them before it takes a
+        worker's result. The time limit is a tick's check, there as here: the worker's
+        ``_time_limited`` is its progress callback, and a lookup that ended is complete.
+        The time this takes, resolution included, comes off a shared limit; the
         engine's cut-off signal lands on this thread, as a worker's is copied onto it.
         """
         from shared.search_regex import _deadline, SearchBudgetExceeded
         cancelled = self._cancel or _cancel_context.get()
-        running_since = time.monotonic()
+        started = time.monotonic()
         stopped = {'time_limit': False}
 
-        def inline_progress(*values):
+        def check(at_tick=True):
             now = time.monotonic()
             if cancelled is not None and cancelled.is_set():
                 raise InterruptedError('Search cancelled')
@@ -587,21 +598,30 @@ class IsolatedEngine:
                 deadline = min(deadline or float('inf'), self._deadline)
             if deadline is not None and now >= deadline:
                 raise SearchBudgetExceeded()
-            if time_limit and now - running_since >= time_limit:
+            if at_tick and time_limit and now - started >= time_limit:
                 stopped['time_limit'] = True
                 raise InterruptedError('Search time limit reached')
+
+        def inline_progress(*values):
+            check()
             if progress:
                 progress(*values)
 
         try:
+            check()
+            sys_ids = self._resolve_metadata_search(arguments)
+            if sys_ids is None:
+                return _TO_WORKER
+            arguments['metadata_sys_ids'] = sys_ids
+            if len(sys_ids) > INLINE_METADATA_ROWS:
+                return _TO_WORKER
             result = original(**arguments, progress_callback=inline_progress)
         finally:
             if shared is not None and shared['left'] is not None:
-                shared['left'] -= time.monotonic() - running_since
+                shared['left'] -= time.monotonic() - started
         # The engine answers a cancel with the rows it had; the caller of a cancelled
         # search gets what the worker path gives it.
-        if cancelled is not None and cancelled.is_set():
-            raise InterruptedError('Search cancelled')
+        check(at_tick=False)
         _time_limit_stop.value = stopped['time_limit']
         return result
 
@@ -640,12 +660,12 @@ class IsolatedEngine:
                 # What is left of the shared limit; 0 would mean no limit to the worker.
                 time_limit = max(shared['left'], 0.001)
             if name == 'execute_search' and arguments.get('mode') in METADATA_SEARCH_MODES:
-                sys_ids = self._resolve_metadata_search(arguments)
-                if sys_ids is not None:
-                    arguments['metadata_sys_ids'] = sys_ids
-                    if len(sys_ids) <= INLINE_METADATA_ROWS:
-                        return self._run_metadata_search_inline(original, arguments, progress,
-                                                                time_limit, shared)
+                result = self._metadata_search(original, arguments, progress, time_limit, shared)
+                if result is not _TO_WORKER:
+                    return result
+                if shared is not None and time_limit:
+                    # Resolving the manuscripts here took from the shared limit.
+                    time_limit = max(shared['left'], 0.001)
             queue = get_queue()
             payload = {'kind': self._kind, 'method': name, 'arguments': arguments,
                        'options': self._options, 'settings': self.job_settings(),
