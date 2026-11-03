@@ -688,6 +688,22 @@ def request_password_reset(email: str) -> Dict:
         return {'error': f'Failed to send reset email: {str(e)}'}
 
 
+def resend_confirmation_email(email: str) -> Dict:
+    """Ask Supabase to send the sign-up confirmation mail again (throwaway client).
+
+    The caller shows the same neutral message whatever this returns, so the
+    button cannot be used to learn which addresses are registered.
+    """
+    try:
+        throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        throwaway.auth.resend({'type': 'signup', 'email': email})
+        return {'success': True}
+    except AuthApiError as e:
+        return {'error': str(e), 'error_code': getattr(e, 'code', '')}
+    except Exception as e:
+        return {'error': f'Failed to resend confirmation email: {str(e)}'}
+
+
 def change_password(new_password: str, access_token: Optional[str] = None) -> Dict:
     """Change current user's password without GoTrue's local-session requirement.
 

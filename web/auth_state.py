@@ -328,6 +328,29 @@ def _login_error_message(result: Dict) -> str:
     return result.get('error', '')
 
 
+# Seconds between two "Resend confirmation email" sends from one login dialog.
+RESEND_COOLDOWN_SECONDS = 60
+
+
+def login_error_affordance(error_code) -> Optional[str]:
+    """Which way out a failed password sign-in offers under its error:
+    'forgot' (open the password-recovery dialog), 'resend' (send the
+    confirmation mail again) or None."""
+    if error_code == 'invalid_credentials':
+        return 'forgot'
+    if error_code == 'email_not_confirmed':
+        return 'resend'
+    return None
+
+
+def resend_wait_seconds(last_sent, now) -> int:
+    """Whole seconds left before the next resend (0 = allowed). `last_sent`
+    is a monotonic timestamp or None."""
+    if last_sent is None:
+        return 0
+    return max(0, int(RESEND_COOLDOWN_SECONDS - (now - last_sent) + 0.999))
+
+
 # What the visitor typed in the Register form, kept in the sign-up metadata.
 # The database's new-user trigger (handle_new_user,
 # migrations/profiles_no_email_username.sql) writes it into the profile when
@@ -485,6 +508,48 @@ def create_login_dialog():
                     ).style('color: var(--text-muted);').on('click', forgot_password_dialog.open)
 
                     login_error = ui.label('').classes('text-red-500 text-sm hidden')
+                    # The way out of the two errors people get stuck on.
+                    login_forgot_btn = ui.button(
+                        tr('Forgot password?'), on_click=forgot_password_dialog.open,
+                    ).props('flat dense no-caps color=primary').classes('hidden')
+                    login_resend_btn = ui.button(tr('Resend confirmation email')).props(
+                        'flat dense no-caps color=primary').classes('hidden')
+                    login_resend_note = ui.label('').classes('text-sm hidden').style('color: var(--text-muted);')
+                    resend_state = {'last': None}
+
+                    def set_affordance(kind):
+                        login_forgot_btn.classes('hidden' if kind != 'forgot' else '',
+                                                 remove='hidden' if kind == 'forgot' else '')
+                        login_resend_btn.classes('hidden' if kind != 'resend' else '',
+                                                 remove='hidden' if kind == 'resend' else '')
+                        login_resend_note.classes('hidden', remove='visible')
+
+                    async def handle_resend():
+                        import time
+                        from nicegui import run
+                        from web.analytics import posthog_capture
+                        from web.supabase_client import resend_confirmation_email
+                        email = (login_email.value or '').strip()
+                        if not email:
+                            login_resend_note.text = tr('Please enter your email address')
+                        else:
+                            wait = resend_wait_seconds(resend_state['last'], time.monotonic())
+                            if wait:
+                                login_resend_note.text = tr('Please wait a minute before sending another.')
+                            else:
+                                resend_state['last'] = time.monotonic()
+                                result = await run.io_bound(resend_confirmation_email, email)
+                                if result is None:
+                                    return
+                                if 'error' in result:
+                                    logger.warning("resend_confirmation_email failed: %s", result['error'])
+                                posthog_capture('confirmation_resent', {})
+                                # Same words whatever happened: no probing for addresses.
+                                login_resend_note.text = tr(
+                                    'If that address is registered, a new confirmation email is on its way.')
+                        login_resend_note.classes('visible', remove='hidden')
+
+                    login_resend_btn.on_click(handle_resend)
 
                     # Load saved email from browser storage
                     def load_saved_email():
@@ -502,6 +567,7 @@ def create_login_dialog():
 
                     async def handle_login():
                         login_error.classes('hidden', remove='visible')
+                        set_affordance(None)
                         if not login_email.value or not login_password.value:
                             login_error.text = tr('Please fill in all fields')
                             login_error.classes('visible', remove='hidden')
@@ -511,6 +577,7 @@ def create_login_dialog():
                         if "error" in result:
                             login_error.text = result["error"]
                             login_error.classes('visible', remove='hidden')
+                            set_affordance(login_error_affordance(result.get('error_code')))
                         else:
                             # Save or clear email based on "Remember me" checkbox
                             try:
