@@ -6393,6 +6393,9 @@ TRANSLATIONS.update({
         'שורות, רוחב, גובה וחומר נלקחים מהקטלוג, מהמדידה או מאחד מהם; כשקובעים כמה ערכים נמדדים, כולם צריכים להתקיים באותו עמוד.',
     "The period of copy now uses each catalogue record's full range of dates, shown in the results (for example 944–1100), and the catalogue records of about 30,600 more manuscripts show their source.":
         'תקופת ההעתקה מתחשבת עכשיו בטווח התאריכים המלא של כל רשומת קטלוג, והתוצאות מציגות אותו (למשל 944–1100); ורשומות הקטלוג של עוד כ־30,600 כתבי יד מציגות את מקורן.',
+    # v9.13.1 (2026-11-03): the sixth bullet, approved with the release texts.
+    'The Joins Lab can filter its candidates by Manuscript features too: Filter ▾ > Manuscript features, where material and size are now chosen.':
+        'גם במעבדת הצירופים אפשר לסנן את המועמדים לפי מאפייני כתב היד: סנן ▾ > מאפייני כתב היד, ושם נבחרים עכשיו גם החומר והמידות.',
 })
 
 # v9.13.0 startup tips for the Manuscript features (desktop/startup_tips.py),

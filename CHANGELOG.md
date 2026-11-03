@@ -4,6 +4,70 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [9.13.1] - 2026-11-03 — Manuscript features in the Joins Lab
+
+The Manuscript features of 9.13.0 now filter the Joins Lab's candidates on both apps, and replace the
+Lab's own Material, Width and "Has dimensions" filters (PR #462); on the website their counts are ready
+when the server starts (PR #461). Web and desktop: installer 9.13.1; no data file changes. Desktop What's
+New gains a sixth bullet and stays content version 9.13.0 (owner: not shown again to today's readers); no
+web What's New. Help (both apps, EN/HE) describes the new filter dialogs.
+
+### Manuscript features in the Joins Lab (web + desktop, PR #462)
+
+The v9.13.0 Manuscript features panel is now in the Joins Lab's filter dialog
+on both apps ("More filters…" on the web, "Filter ▾" on the desktop), as a
+"Manuscript features" button that opens the same window as Search and Browse by
+Identification. Owner rulings 2026-11-02: inside the existing dialog, and one
+place for each filter.
+
+- **Filters the candidates already found**, with the candidates as the universe
+  (D20): "Not recorded" and "All except" are read among them; the window's total
+  says "N of the M manuscripts in the results match". Checked **per manuscript**:
+  every candidate page of a matching manuscript stays. The Library and Domain
+  counts follow the features.
+- **One place for each filter:** the dialogs' own Material (web, desktop), Width
+  (desktop) and "Has dimensions" / "Has dimensions data" (it went with the size
+  filters) are gone; material and size are features. The desktop's anchor
+  shortcuts fill in the features: "match material" as the measured material (the
+  value the cards showed), "width ±2 cm" as the Width range. A link or saved web
+  session with the old Material keeps it as the Material feature (measured); an
+  old "Has dimensions" is dropped (it hides nothing); the desktop's old saved
+  material row never restored, so nothing carries over.
+- **Never an empty list for an error** (rule 9): while the check runs, and when it
+  fails, every candidate shows with a note under the toolbar (web) or in the
+  status line (desktop). A stale answer for older candidates or criteria is
+  dropped. A saved feature a 5.0.0 catalogue file cannot answer is dropped with
+  the usual notice.
+- **Fixed (web):** when the catalogue data could not be read, a saved Domain
+  filter hid every candidate; it and size mismatch now stand down and the page
+  says so.
+- **Web table view** now has the grid's toolbar (count, Library, Domain, Sort,
+  More filters…), also when the filters leave nothing. The More filters… dialog
+  lives in a host the re-renders never clear, so a late answer cannot close it.
+- Desktop: features are saved in the Joins Lab session; the Joins Lab's Clear
+  removes them.
+
+Code: `web/components/criteria_panel.py` (`CriteriaControl(within=...)`),
+`web/components/candidate_grid.py` (`compute_filtered(criteria_matched=,
+catalogue_ok=)`, `candidates_toolbar`), `web/pages/joins_lab.py`,
+`web/joins_lab_link.py`, `desktop/join_workbench.py`,
+`desktop/gui_threads.py::CriteriaMatchWorker`. Tests:
+`tests/test_joins_lab_criteria.py`, `tests/test_join_workbench_criteria_qt.py`,
+render smoke in `tests/render_smoke/test_joins_lab_render_smoke.py`.
+
+### The Manuscript features counts are ready when the site starts (web, PR #461)
+
+- The value lists and "recorded for N" counts of the **Manuscript features** window are computed once at
+  server start, in the background pre-warm (`web/components/criteria_panel.py::prewarm_criteria`, called from
+  `web/main.py`): about 20-30 seconds over all 255,723 manuscripts. The first visitor after a restart used to
+  wait for them section by section, 1-8 seconds each (Measured 7.9 s on the owner's machine); afterwards they
+  came from the cache, as they do now from the start. `GET /api/criteria` reads the same cache.
+- The note under the total ("These criteria cover all N manuscripts...") and the "of M" beside every count
+  are cached too (`FjmsService.criteria_corpus_note`): each section opened ran a corpus-wide width query
+  for them, every time. A visitor who opens the window while the start is still computing waits for that
+  computation instead of running the same query beside it, while other features are still computed side by
+  side (`FjmsService._build_once`, one lock per feature; GitHub Codex on PR 461).
+
 ## [9.13.0] - 2026-11-02 — Find manuscripts by features
 
 One panel of catalogue criteria — "Manuscript features" — on Browse by Identification and in "Search only

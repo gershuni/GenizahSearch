@@ -1273,7 +1273,7 @@ Click **Find Candidates** to run the query.
 - **Add as Join** (login) — record a confirmed join.
 - **Add anchor + this candidate to the Fragment Puzzle**.
 
-To act on several candidates at once, tick their checkboxes (**Select for bulk actions**): **Add to List** (login) and **Add to Puzzle** then appear next to **Export**. The filter button (**Filter candidates**) opens **Filters**: **Material**, **Has dimensions data**, **Exclude size mismatch** (hides candidates whose width differs from the anchor's by a factor of more than 1.4), **Triage state**, and a box that matches text in the shelfmark or title. **Table** switches to a compact table for many results. Your anchor, query, candidates and triage **survive a page refresh**; **Reset** clears them.
+To act on several candidates at once, tick their checkboxes (**Select for bulk actions**): **Add to List** (login) and **Add to Puzzle** then appear next to **Export**. The filter button (**More filters…**) opens **Filters**: **Manuscript features** (the same window as on Browse by Identification — material, size, script, period and more; it is checked per manuscript, so every candidate page of a matching manuscript stays), **Exclude size mismatch** (hides candidates whose width differs from the anchor's by a factor of more than 1.4), **Triage state**, and a box that matches text in the shelfmark or title. **Table** switches to a compact table for many results. Your anchor, query, candidates and triage **survive a page refresh**; **Reset** clears them.
         ''').style('color: var(--text-secondary);')
 
     # === PGP Information ===
@@ -2035,7 +2035,7 @@ def _create_hebrew_content(precision=None, band_counts=None):
 - **הוסף כצירוף** (דורש התחברות) — תיעוד צירוף מאושר.
 - **הוסף את העוגן ואת המועמד הזה לפאזל הקטעים**.
 
-כדי לפעול על כמה מועמדים בבת אחת, סמנו את תיבות הסימון שלהם (**בחר לפעולות קבוצתיות**): ליד **ייצוא** יופיעו אז **הוסף לרשימה** (דורש התחברות) ו**הוסף לפאזל**. כפתור הסינון (**סנן מועמדים**) פותח את **סינון**: **חומר**, **קיימים נתוני מידות**, **הסתר אי-התאמת גודל** (מסתיר מועמדים שרוחבם שונה מרוחב העוגן ביותר מפי 1.4), **מצב מיון**, ותיבה שמחפשת טקסט במספר המדף או בכותרת. הכפתור **טבלה** עובר לתצוגת טבלה קומפקטית כשיש הרבה תוצאות. העוגן, השאילתה, המועמדים ומצב המיון **נשמרים גם לאחר רענון הדף**; **איפוס** מאפס אותם.
+כדי לפעול על כמה מועמדים בבת אחת, סמנו את תיבות הסימון שלהם (**בחר לפעולות קבוצתיות**): ליד **ייצוא** יופיעו אז **הוסף לרשימה** (דורש התחברות) ו**הוסף לפאזל**. הכפתור **סינונים נוספים…** פותח את **סינון**: **מאפייני כתב היד** (אותו חלון כמו בעיון לפי זיהוי — חומר, מידות, כתב, תקופה ועוד; הבדיקה היא לפי כתב היד, כך שכל הדפים המועמדים של כתב יד מתאים נשארים), **הסתר אי-התאמת גודל** (מסתיר מועמדים שרוחבם שונה מרוחב העוגן ביותר מפי 1.4), **מצב מיון**, ותיבה שמחפשת טקסט במספר המדף או בכותרת. הכפתור **טבלה** עובר לתצוגת טבלה קומפקטית כשיש הרבה תוצאות. העוגן, השאילתה, המועמדים ומצב המיון **נשמרים גם לאחר רענון הדף**; **איפוס** מאפס אותם.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === PGP Information ===

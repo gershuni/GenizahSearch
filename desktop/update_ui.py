@@ -319,12 +319,15 @@ class WhatsNewDialog(QDialog):
         # Manuscript features window, its lists and counts, where it opens and Browse by
         # Identification over the whole corpus, catalogue or measured sources, and the
         # period's full date range with the restored catalogue sources.
+        # v9.13.1 (2026-11-03, approved): a sixth, the features in the Joins Lab;
+        # WHATS_NEW_CONTENT_VERSION stays 9.13.0 (not shown again to its readers).
         items = [
             tr('The new Manuscript features button opens one window with what the catalogue records about each manuscript: period of copy, language and alphabet, script and region, vocalization, number of columns and lines, physical status, material, attributes, and measurements computed from the photographs.'),
             tr('Tick values, or choose "All except these"; "Not recorded" finds the manuscripts the catalogue says nothing about. Each value shows how many manuscripts have it, and the window counts the matches before you apply it.'),
             tr('On the Browse by Identification tab the window lists the manuscripts; in Focus Search it limits a search to them. Browse by Identification now lists all 255,723 manuscripts, including the 29,169 without a catalogue record.'),
             tr('Lines, width, height and material come from the catalogue, from the measurements, or from either; when you set several measured values, they must all hold on the same page.'),
             tr("The period of copy now uses each catalogue record's full range of dates, shown in the results (for example 944–1100), and the catalogue records of about 30,600 more manuscripts show their source."),
+            tr('The Joins Lab can filter its candidates by Manuscript features too: Filter ▾ > Manuscript features, where material and size are now chosen.'),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)
