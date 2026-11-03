@@ -343,6 +343,8 @@ to the search. Costs: 6,495 keys × one indexed whole-word search; measured on a
 - The credit line was plain text; ruling (a) wants the site linked on every surface, and an
   empty answer had no other link: both credit lines are links to the site.
 
+**Round 3** (`7a3528c6`), Codex: no findings. The review loop ends here (findings 2 → 3 → 0).
+
 ### Phase 1 (PR #472)
 
 **Round 1** (PR #472, `4794cf69`), Codex: two P2, both fixed.
