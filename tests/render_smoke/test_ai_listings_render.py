@@ -235,3 +235,77 @@ def test_each_launch_lights_the_unread_dot_again(settings):
     assert _has_unread_dot(WHATS_NEW_VERSION + '+ai-chatgpt') is False
     settings(AI_CHATGPT_PLUGIN_URL=PLUGIN, AI_CLAUDE_CONNECTOR_URL=CONNECTOR)
     assert _has_unread_dot(WHATS_NEW_VERSION + '+ai-chatgpt') is True
+
+
+# --- MCP-first /ai page (MCP_ENABLED on, as in production) -------------------------------------
+
+def _ordered(path='/ai', lang='en'):
+    """(hrefs in page order, text labels in page order) of a rendered page."""
+    async def driver(user, client):
+        await user.open(path)
+        with user._client:
+            elements = list(user._client.elements.values())
+        hrefs = [(getattr(e, '_props', None) or {}).get('href') for e in elements]
+        labels = [str(getattr(e, 'text', '') or '') + str(getattr(e, 'content', '') or '') for e in elements]
+        return [h for h in hrefs if h], labels
+    return _run(driver, lang)
+
+
+def _index(items, needle):
+    return next(i for i, item in enumerate(items) if needle in item)
+
+
+@pytest.fixture
+def mcp_on(monkeypatch, settings):
+    from web import feature_flags
+    monkeypatch.setattr(feature_flags, 'MCP_ENABLED', True)
+    return settings
+
+
+def test_mcp_comes_first_and_the_gpt_is_last(mcp_on):
+    from web.pages.ai_tools import API_URL, SKILL_URL
+    mcp_on()
+    hrefs, labels = _ordered()
+    mcp, skill = _index(labels, listings.MCP_URL), _index(labels, 'Already using an AI assistant?')
+    gpt = _index(labels, 'The GenizahSearch GPT')
+    assert mcp < skill < gpt
+    assert hrefs.index(SKILL_URL) < hrefs.index(API_URL) < hrefs.index('/chatgpt') < hrefs.index('/ai/privacy')
+    text = ' '.join(labels)
+    assert 'Add custom connector' in text and 'Customize' in text and 'Organization settings' in text
+    assert 'December 11, 2026' in text
+    assert 'MCP · Planned' not in text and 'Open in ChatGPT' in text
+    assert _redirect() == (307, listings.GPT_URL)  # the redirect keeps working until retirement
+
+
+def test_mcp_page_hides_the_gpt_when_it_is_off(mcp_on):
+    for kwargs in ({'today': AFTER}, {'AI_CHATGPT_PLUGIN_URL': PLUGIN}):
+        mcp_on(**kwargs)
+        hrefs, labels = _ordered()
+        text = ' '.join(labels)
+        assert listings.MCP_URL in text
+        assert '/chatgpt' not in hrefs and 'The GenizahSearch GPT' not in text
+        assert 'December 11, 2026' not in text and 'Open in ChatGPT' not in text
+
+
+def test_mcp_page_keeps_a_live_listing_in_the_mcp_section(mcp_on):
+    mcp_on(AI_CLAUDE_CONNECTOR_URL=CONNECTOR)
+    hrefs, labels = _ordered()
+    assert hrefs.index(CONNECTOR) < hrefs.index('/chatgpt')
+    assert _index(labels, listings.MCP_URL) < _index(labels, 'Add to Claude') < _index(labels, 'The GenizahSearch GPT')
+
+
+def test_mcp_page_is_hebrew_in_the_hebrew_ui(mcp_on):
+    mcp_on()
+    hrefs, labels = _ordered(lang='he')
+    text = ' '.join(labels)
+    assert 'חיבור שרת ה־MCP של GenizahSearch' in text and 'Add custom connector' in text
+    assert 'Organization settings' in text and 'בעל הארגון' in text
+    assert 'ה־GPT של GenizahSearch' in text and '11 בדצמבר 2026' in text
+    assert 'Connect the GenizahSearch MCP server' not in text
+    assert _index(labels, listings.MCP_URL) < _index(labels, '11 בדצמבר 2026')
+
+
+def test_mcp_off_keeps_the_page_without_the_mcp_card(settings):
+    settings()   # MCP_ENABLED stays at its default, off
+    _, labels = _ordered()
+    assert 'Connect the GenizahSearch MCP server' not in ' '.join(labels)

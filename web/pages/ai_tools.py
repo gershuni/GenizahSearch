@@ -95,10 +95,18 @@ def create_ai_card():
         ui.link(text('More AI options', 'עוד כלי AI'), '/ai')
 
 
+def mcp_enabled():
+    """The MCP server is live (read per call, so a test can switch it)."""
+    from web import feature_flags
+    return bool(feature_flags.MCP_ENABLED)
+
+
 def create_ai_page():
     ui.add_css(AI_STYLES)
     listings = current()
-    if not listings.live and listings.gpt_available:
+    if mcp_enabled():
+        _mcp_page(listings)
+    elif not listings.live and listings.gpt_available:
         _gpt_page()
     else:
         _listings_page(listings)
@@ -174,6 +182,72 @@ def _gpt_page():
         ui.link(text('GPT privacy policy', 'מדיניות הפרטיות של ה־GPT'), '/api/chatgpt/privacy').classes('text-sm')
 
 
+def _mcp_page(listings):
+    """MCP server first; the skill and API; the GPT, while it lives, at the foot with its retirement."""
+    with ui.column().classes('gs-ai w-full max-w-4xl mx-auto p-4 gap-5').props(_direction()):
+        with ui.element('section').classes('gs-ai-hero').props('id=gs-ai-mcp'):
+            _hero_heading()
+            ui.label(text(
+                'Ask in your own words. Your assistant searches the manuscripts, finds parallels, reads pages and cites them, and links you back to each page.',
+                'שאלו במילים שלכם. העוזר יחפש בכתבי היד, ימצא מקבילות, יקרא דפים ויצטט אותם, ויקשר אתכם לכל דף.',
+            )).classes('gs-ai-muted text-lg')
+            h2(text('Connect the GenizahSearch MCP server', 'חיבור שרת ה־MCP של GenizahSearch'), classes='text-xl font-bold')
+            ui.label(text(
+                'Claude (claude.ai): open Customize, then Connectors, choose Add custom connector, and paste this address. In a Team or Enterprise organization, an Owner adds it under Organization settings, then Connectors.',
+                'Claude (claude.ai): פתחו Customize, אחר כך Connectors, בחרו Add custom connector והדביקו את הכתובת הזו. בארגון Team או Enterprise, בעל הארגון (Owner) מוסיף אותה תחת Organization settings, ואז Connectors.',
+            )).classes('gs-ai-muted')
+            ui.label(MCP_URL).classes('gs-ai-code').props('dir=ltr')
+            ui.label(text(
+                'Any other assistant that supports MCP connectors: add a remote MCP server with the same address. No sign-in.',
+                'כל עוזר אחר שתומך בחיבורי MCP: הוסיפו שרת MCP מרוחק עם אותה כתובת. ללא התחברות.',
+            )).classes('gs-ai-muted')
+            if listings.live:
+                with ui.row().classes('items-center gap-4 flex-wrap'):
+                    for name, url in listings.live:
+                        listing_link(name, url)
+        h2(text('What it can do', 'מה אפשר לעשות'), classes='text-xl font-bold')
+        _can_do()
+        _examples()
+        h2(text('Other AI tools', 'כלי AI נוספים'), classes='text-xl font-bold mt-2')
+        with ui.element('div').classes('gs-ai-grid'):
+            _option('terminal', 'Gemini CLI', text(
+                'Install the GenizahSearch extension from a terminal:',
+                'התקינו את התוסף של GenizahSearch משורת הפקודה:',
+            ), code=GEMINI_INSTALL)
+            _skill_and_api_options()
+        if listings.gpt_available:
+            with ui.element('section').classes('gs-ai-option').props('id=gs-ai-gpt'):
+                h2(text('The GenizahSearch GPT', 'ה־GPT של GenizahSearch'), classes='text-lg font-bold')
+                ui.label(text(
+                    'OpenAI is retiring custom GPTs on December 11, 2026. The MCP server above is the replacement.',
+                    'OpenAI סוגרת את ה־GPTs המותאמים ב־11 בדצמבר 2026. שרת ה־MCP שלמעלה הוא התחליף.',
+                )).classes('gs-ai-muted')
+                with ui.row().classes('items-center gap-4 flex-wrap'):
+                    launch_link()
+                    ui.link(text('GPT privacy policy', 'מדיניות הפרטיות של ה־GPT'), '/api/chatgpt/privacy').classes('text-sm')
+        ui.separator()
+        _caution()
+        with ui.row().classes('gap-4 flex-wrap text-sm'):
+            ui.link(text('Privacy policy', 'מדיניות פרטיות'), '/ai/privacy')
+            ui.link(text('Terms of use', 'תנאי שימוש'), '/terms')
+            ui.link(text('Support', 'תמיכה'), '/support')
+
+
+def _can_do():
+    with ui.element('ul').classes('gs-ai-can'):
+        for item in (
+            text('Find manuscripts by a phrase or a shelfmark: exact, with spelling variants, or near spellings',
+                 'מציאת כתבי יד לפי צירוף מילים או סימן מדף: במדויק, בכתיבים שונים או בכתיבים קרובים'),
+            text('Find parallels to a passage, letter by letter or by word chunks',
+                 'איתור מקבילות לקטע, ברמת האות או לפי מקטעי מילים'),
+            text('Read a manuscript page with its transcription and a ready citation',
+                 'קריאת דף בכתב יד עם התעתיק וציטוט מוכן'),
+            text('Catalogue records and bibliography', 'רשומות קטלוג וביבליוגרפיה'),
+        ):
+            with ui.element('li'):
+                ui.label(item)
+
+
 def _listings_page(listings):
     """The live listings, what they do, and every other way in."""
     live = listings.live
@@ -196,18 +270,7 @@ def _listings_page(listings):
                 ui.label(text('Connect your assistant with one of the options below.',
                               'חברו את העוזר שלכם באחת הדרכים שלמטה.')).classes('text-sm gs-ai-muted')
         h2(text('What it can do', 'מה אפשר לעשות'), classes='text-xl font-bold')
-        with ui.element('ul').classes('gs-ai-can'):
-            for item in (
-                text('Find manuscripts by a phrase or a shelfmark: exact, with spelling variants, or near spellings',
-                     'מציאת כתבי יד לפי צירוף מילים או סימן מדף: במדויק, בכתיבים שונים או בכתיבים קרובים'),
-                text('Find parallels to a passage, letter by letter or by word chunks',
-                     'איתור מקבילות לקטע, ברמת האות או לפי מקטעי מילים'),
-                text('Read a manuscript page with its transcription and a ready citation',
-                     'קריאת דף בכתב יד עם התעתיק וציטוט מוכן'),
-                text('Catalogue records and bibliography', 'רשומות קטלוג וביבליוגרפיה'),
-            ):
-                with ui.element('li'):
-                    ui.label(item)
+        _can_do()
         _examples()
         h2(text('Other AI tools', 'כלי AI נוספים'), classes='text-xl font-bold mt-2')
         with ui.element('div').classes('gs-ai-grid'):
