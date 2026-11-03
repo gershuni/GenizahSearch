@@ -673,3 +673,18 @@ def _gui_app_keeper(request):
                 _QT_APP_KEEPER.append(app)
     yield
 
+
+@pytest.fixture(autouse=True)
+def _reset_api_daily_budget():
+    """2026-11-03: the public API's per-address daily budget is a module
+    singleton (web.search_api._daily_budget, default 2,000 a day). A chunk of
+    API test files in one process could spend it, so clear it around every
+    test -- without importing web.search_api for tests that never load it."""
+    mod = sys.modules.get('web.search_api')
+    if mod is not None:
+        mod._daily_budget.reset_for_tests()
+    yield
+    mod = sys.modules.get('web.search_api')
+    if mod is not None:
+        mod._daily_budget.reset_for_tests()
+

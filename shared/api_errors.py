@@ -46,6 +46,10 @@ ERROR_CODES = frozenset({
     'composition_too_long',     # D-06: len(text.strip()) > COMPOSITION_LENGTH_CAP (20000)
     # P9X heavy-mode concurrency additions:
     'heavy_search_busy',        # 503 — heavy-mode concurrency budget (SEARCH_API_HEAVY_CONCURRENCY) exhausted; fail-fast, Retry-After set
+    # 2026-11-03 (scrape limits, after the PostHog review): one caller pulled 8,036
+    # requests in six hours and reader searches queued behind its searches.
+    'search_busy',              # 503 — synchronous interactive-mode concurrency budget (SEARCH_API_INTERACTIVE_CONCURRENCY) exhausted; fail-fast, Retry-After set
+    'daily_limit_reached',      # 429 — per-address trailing-24 h budget (SEARCH_API_DAILY_LIMIT) across search, browse and parallels; Retry-After set
     # Phase 145 (/api/parallels method='passage') additions:
     'passage_unavailable',        # 503 — PASSAGE_PARALLELS_ENABLED off, or the passage index did not load
     'passage_scope_unsupported',  # 400 — method='passage' + filters.library includes 'LOCAL' (include mode); the passage index has no Local-corpus records

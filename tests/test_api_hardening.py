@@ -650,3 +650,122 @@ def test_rate_limiter_reset_for_tests_clears_buckets():
     )
     rl.reset_for_tests()
     assert len(rl._buckets) == 0, f'after reset, buckets should be empty, got {rl._buckets!r}'
+
+
+# ---------------------------------------------------------------------------
+# DailyBudget (2026-11-03 scrape limits): per-IP trailing 24 h budget shared
+# by search, browse and parallels. Call-site tests: tests/test_search_api_v2.py.
+# ---------------------------------------------------------------------------
+
+def test_daily_budget_allows_under_limit():
+    from web.api_hardening import DailyBudget
+    b = DailyBudget(default_limit=3)
+    for _ in range(3):
+        b.check('1.2.3.4')
+
+
+def test_daily_budget_blocks_at_limit_with_retry_after():
+    from shared.api_errors import APIError
+    from web.api_hardening import DailyBudget, DAILY_BUDGET_WINDOW_SECONDS
+    b = DailyBudget(default_limit=2)
+    b.check('1.2.3.4')
+    b.check('1.2.3.4')
+    with pytest.raises(APIError) as exc_info:
+        b.check('1.2.3.4')
+    err = exc_info.value
+    assert err.code == 'daily_limit_reached'
+    assert err.http_status == 429
+    retry_after = int(err.headers['Retry-After'])
+    assert 1 <= retry_after <= DAILY_BUDGET_WINDOW_SECONDS
+
+
+def test_daily_budget_refused_request_not_recorded():
+    """A bucket never grows past the limit: refused requests are not appended,
+    so a scraper that keeps hammering costs bounded memory."""
+    from shared.api_errors import APIError
+    from web.api_hardening import DailyBudget
+    b = DailyBudget(default_limit=2)
+    b.check('1.2.3.4')
+    b.check('1.2.3.4')
+    for _ in range(5):
+        with pytest.raises(APIError):
+            b.check('1.2.3.4')
+    dq, _ = b._buckets['1.2.3.4']
+    assert len(dq) == 2
+
+
+def test_daily_budget_per_ip_isolation():
+    from shared.api_errors import APIError
+    from web.api_hardening import DailyBudget
+    b = DailyBudget(default_limit=1)
+    b.check('a')
+    with pytest.raises(APIError):
+        b.check('a')
+    b.check('b')  # another address is unaffected
+
+
+def test_daily_budget_zero_disables(monkeypatch):
+    from web.api_hardening import DailyBudget
+    monkeypatch.setenv('SEARCH_API_DAILY_LIMIT', '0')
+    b = DailyBudget(default_limit=1)
+    for _ in range(5):
+        b.check('a')
+    assert b._buckets == {}, 'a disabled budget records nothing'
+
+
+def test_daily_budget_env_reread(monkeypatch):
+    from shared.api_errors import APIError
+    from web.api_hardening import DailyBudget
+    b = DailyBudget(default_limit=1)
+    monkeypatch.setenv('SEARCH_API_DAILY_LIMIT', '3')
+    for _ in range(3):
+        b.check('a')
+    with pytest.raises(APIError):
+        b.check('a')
+    monkeypatch.setenv('SEARCH_API_DAILY_LIMIT', 'garbage')
+    assert b._current_limit() == 1, 'an unparseable value keeps the default'
+
+
+def test_daily_budget_window_expiry_frees_budget(monkeypatch):
+    """A request older than 24 h leaves the window; Retry-After says how long."""
+    import web.api_hardening as mod
+    from shared.api_errors import APIError
+    b = mod.DailyBudget(default_limit=1)
+    clock = [1_000_000.0]
+    monkeypatch.setattr(mod.time, 'time', lambda: clock[0])
+    b.check('a')
+    with pytest.raises(APIError) as exc_info:
+        b.check('a')
+    assert int(exc_info.value.headers['Retry-After']) == int(mod.DAILY_BUDGET_WINDOW_SECONDS)
+    clock[0] += mod.DAILY_BUDGET_WINDOW_SECONDS + 1
+    b.check('a')  # the old request has expired
+
+
+def test_daily_budget_evicts_idle_addresses_but_not_the_current_one(monkeypatch):
+    """The periodic sweep drops addresses with nothing in the window and must
+    never drop the bucket of the address being checked (the sweep runs before
+    that bucket is created; a sweep after it would orphan the first append)."""
+    import web.api_hardening as mod
+    b = mod.DailyBudget(default_limit=5)
+    clock = [1_000_000.0]
+    monkeypatch.setattr(mod.time, 'time', lambda: clock[0])
+    b.check('a')
+    clock[0] += mod.DAILY_BUDGET_WINDOW_SECONDS + 61  # past the window and the sweep interval
+    b.check('b')
+    assert 'a' not in b._buckets
+    dq, _ = b._buckets['b']
+    assert len(dq) == 1
+
+
+def test_daily_budget_reset_for_tests():
+    from web.api_hardening import DailyBudget
+    b = DailyBudget(default_limit=5)
+    b.check('a')
+    b.reset_for_tests()
+    assert b._buckets == {}
+
+
+def test_scrape_limit_codes_registered():
+    from shared.api_errors import ERROR_CODES
+    assert 'daily_limit_reached' in ERROR_CODES
+    assert 'search_busy' in ERROR_CODES
