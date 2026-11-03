@@ -3447,6 +3447,16 @@ def _notices(user) -> list:
                 if e.visible]
 
 
+_FEATURES_FAILED = ('The manuscript features could not be applied to these results.',
+                    'לא ניתן היה להחיל את מאפייני כתב היד על התוצאות האלה.')
+
+
+def _features_failed(user) -> bool:
+    """The failure notice is up -- not the "Checking manuscript features…" note
+    that comes first (windows-latest was still showing it on ddbdbda9)."""
+    return any(n in _FEATURES_FAILED for n in _notices(user))
+
+
 def _table_sids(user) -> set:
     tables = _find_table_elements(user)
     assert len(tables) == 1, f'expected the candidates table, found {len(tables)}'
@@ -3503,12 +3513,11 @@ def test_a_failed_features_check_hides_no_candidate(joins_lab_smoke_runner):
     async def driver(user):
         with patch('web.pages.joins_lab.get_fjms_service', return_value=fjms):
             await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table")}')
-            await _until(lambda: bool(_notices(user)))
+            await _until(lambda: _features_failed(user))
             assert fjms.asked
             assert _table_sids(user) == {_CAND_TEXT_SID, _CAND_VS_SID}
             [notice] = _notices(user)
-            assert notice in ('The manuscript features could not be applied to these results.',
-                              'לא ניתן היה להחיל את מאפייני כתב היד על התוצאות האלה.')
+            assert notice in _FEATURES_FAILED
 
     joins_lab_smoke_runner(driver)
 
@@ -3526,7 +3535,7 @@ def test_applying_the_filters_again_retries_a_failed_features_check(joins_lab_sm
     async def driver(user):
         with patch('web.pages.joins_lab.get_fjms_service', return_value=fjms):
             await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table")}')
-            await _until(lambda: bool(_notices(user)))
+            await _until(lambda: _features_failed(user))
             assert _table_sids(user) == {_CAND_TEXT_SID, _CAND_VS_SID}
             assert len(_notices(user)) == 1
             asked = len(fjms.asked)
@@ -3615,11 +3624,12 @@ def test_unreadable_catalogue_data_keeps_the_candidates_under_the_domain_filter(
                    side_effect=CatalogueUnavailable('no sidecar')):
             await user.open(
                 f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={_features_link("table", domains=["Bible"])}')
-            await _until(lambda: bool(_notices(user)))
-            assert _table_sids(user) == {_CAND_TEXT_SID, _CAND_VS_SID}
-            [notice] = _notices(user)
-            assert notice in (
+            unreadable = (
                 'The catalogue data could not be read: the filters that need it are not applied.',
                 'לא ניתן היה לקרוא את נתוני הקטלוג: המסננים שתלויים בהם לא הוחלו.')
+            await _until(lambda: any(n in unreadable for n in _notices(user)))
+            assert _table_sids(user) == {_CAND_TEXT_SID, _CAND_VS_SID}
+            [notice] = _notices(user)
+            assert notice in unreadable
 
     joins_lab_smoke_runner(driver)
