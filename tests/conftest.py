@@ -616,6 +616,9 @@ def crash_telemetry_state(monkeypatch):
     fresh_q: _queue.Queue = _queue.Queue(maxsize=10000)
     monkeypatch.setattr(_ph, '_event_queue', fresh_q)
 
+    # Crash tests install their own fake key and assert delivery; a non-frozen
+    # test process would otherwise be blocked (GENIZAH_TELEMETRY_FORCE).
+    monkeypatch.setenv('GENIZAH_TELEMETRY_FORCE', '1')
     _tel._reset_for_tests()
     _tel._load_consent_state()
 
