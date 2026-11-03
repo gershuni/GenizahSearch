@@ -13,13 +13,15 @@ Both are pinned here on the real page, in a NiceGUI User simulation whose socket
 handshake is withheld: the engine must be called before the handshake (URL open),
 and within a fraction of a second of the click (typed). Against the old code the
 first wait expires with the engine never called.
+
+In tests/render_smoke/ because it enters and tears down the app lifespan: the main
+lane deselects this directory and a fresh-process job runs it (tests/conftest.py).
 """
 from __future__ import annotations
 
 import asyncio
 import os
 import re
-import sys
 import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from types import SimpleNamespace
@@ -36,8 +38,6 @@ from nicegui.testing.user import User
 from nicegui.testing.user_interaction import UserInteraction
 from nicegui.ui_run import set_storage_secret
 from tests.render_smoke._bounded_run import run_bounded
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import web.main  # noqa: E402,F401  (registers /search)
 from web import research_jobs  # noqa: E402

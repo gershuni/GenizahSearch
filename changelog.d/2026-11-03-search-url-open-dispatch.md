@@ -1,8 +1,8 @@
 ## [Unreleased] -- A link-opened search is pinned to start before the page connects (web, branch `claude/search-nav-latency-85bf15`)
 
 ### Tests
-- `tests/test_search_url_open_dispatch.py`: on the real `/search` page in a NiceGUI User
-  simulation whose socket handshake is withheld, a search opened from its address
+- `tests/render_smoke/test_search_url_open_dispatch.py`: on the real `/search` page in a NiceGUI
+  User simulation whose socket handshake is withheld, a search opened from its address
   (`/search?q=...`) must reach the engine before the browser connects, and a typed
   search must reach it without a browser round trip. Pins the v9.11.1 fix (`bde98fb7`:
   the phone fold's awaited `window.innerWidth` held every link-opened search until the

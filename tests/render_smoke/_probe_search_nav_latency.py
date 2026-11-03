@@ -7,15 +7,17 @@ whose search costs the same fixed time every run. What differs between the
 two runs is therefore the page's own work around the search.
 
 Run from the repo root:
-    python -m pytest tests/_probe_search_nav_latency.py -s -p no:cacheprovider
+    python -m pytest tests/render_smoke/_probe_search_nav_latency.py -s -p no:cacheprovider
 
 Env:
     PROBE_RUNS=5                 runs per variant
     PROBE_HANDSHAKE_DELAY=0.0    seconds between the page response and the socket
                                  handshake on a URL open (a browser needs ~0.5-1.5 s)
-    PROBE_SIDECARS=1             point FJMS / PGP / titles at the main checkout's
-                                 sidecars (read-only) so the deferred loaders do
-                                 their real work
+    PROBE_SIDECARS=1             point FJMS / PGP / titles at real sidecars (read-only)
+                                 so the deferred loaders do their real work
+    PROBE_SIDECAR_ROOT=<dir>     the checkout holding fist_data/, pgp_data/ and
+                                 libraries_translations.db (default: this repo's root;
+                                 a worktree has none, so name the main checkout)
 """
 from __future__ import annotations
 
@@ -34,8 +36,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
-MAIN = Path(r'C:\GenizahSearch')
+MAIN = Path(os.environ.get('PROBE_SIDECAR_ROOT') or Path(__file__).resolve().parents[2])
 if os.environ.get('PROBE_SIDECARS') == '1':
+    for _sidecar in ('fist_data/fjms_enrichment.db', 'pgp_data/pgp.db', 'libraries_translations.db'):
+        if not (MAIN / _sidecar).is_file():
+            sys.exit(f'PROBE_SIDECARS=1 but {MAIN / _sidecar} is missing: set PROBE_SIDECAR_ROOT')
     os.environ.setdefault('GENIZAH_FJMS_DB_PATH', str(MAIN / 'fist_data' / 'fjms_enrichment.db'))
 
 import httpx  # noqa: E402
