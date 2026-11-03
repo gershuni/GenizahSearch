@@ -1992,9 +1992,10 @@ Variant and Lab preferences of one website visitor, kept in that visitor's stora
 
 ## web/search_box_input.py
 
-- **Function** `search_box_input_kind` (Line 65) — ``'sys_id'``, ``'shelfmark'`` or ``'text'`` for what the search box holds.
-- **Function** `typed_as_shelfmark` (Line 84) — True when the search box holds a shelfmark (not a system number, not words).
-- **Function** `split_placeholder` (Line 89) — ``(before, after)`` the placeholder in a translated sentence, so the query
+- **Function** `_words_are_shelfmark_words` (Line 80) — No run of four or more letters that is neither a shelfmark word nor a Roman numeral.
+- **Function** `search_box_input_kind` (Line 90) — ``'sys_id'``, ``'shelfmark'`` or ``'text'`` for what the search box holds.
+- **Function** `typed_as_shelfmark` (Line 113) — True when the search box holds a shelfmark (not a system number, not words).
+- **Function** `split_placeholder` (Line 118) — ``(before, after)`` the placeholder in a translated sentence, so the query
 
 ## web/public_name.py
 

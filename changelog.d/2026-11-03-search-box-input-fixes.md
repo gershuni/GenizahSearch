@@ -13,11 +13,13 @@ every Latin-script search found nothing).
   homepage box does. The mode selector is left as it was, so the next query is text again;
   a Hebrew query, a prefixed one, and every other mode are untouched. The recogniser is the
   homepage box's (`web/home_query.py`: a corpus sys_id, a Hebrew or Arabic letter means
-  text), narrowed for a box that also takes words: a shelfmark must have a digit and the
-  shape of one -- a dotted number or a letter-digit run, or a collection prefix (`T-S`,
+  text), narrowed for a box that also takes words: a shelfmark must have a digit, every run
+  of four or more letters in it must be a word catalogue shelfmarks carry (`Moss`, `Misc`,
+  `Gaster`; a Roman numeral; a library name in front is taken off first) and it must have
+  the shape of one -- a dotted number or a letter-digit run, or a collection prefix (`T-S`,
   `ENA`, `Add.`), a library name or the NLI catalogue's own form first
-  (`web/search_box_input.py::search_box_input_kind`), so `Psalm 23` and a bare `12` stay
-  text.
+  (`web/search_box_input.py::search_box_input_kind`), so `Psalm 23`, `version 1.2`,
+  `COVID19` and a bare `12` stay text. New Search clears the line with everything else.
 
 ### Hebrew typed with the keyboard still on English
 - "Did you mean <Hebrew>?" under "0 Results" for a Latin-script query that spells Hebrew on

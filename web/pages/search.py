@@ -3025,6 +3025,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 ui.label(tr('Enter a search query')).classes('mt-4').style('color: var(--text-muted);')
         # Reset results count label
         results_count.text = tr('Results')
+        _clear_input_notice()  # the shelfmark note or layout suggestion of the last search
         # Hide domain filter and printed filter buttons
         _set_btn_visible(domain_filter_btn, False)
         _set_btn_visible(printed_filter_btn, False)

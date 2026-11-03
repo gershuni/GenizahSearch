@@ -11,20 +11,23 @@ selects), saying so under the count with a way to run it as text instead.
 
 ``search_box_input_kind`` is the homepage's recogniser -- a corpus sys_id is
 ``CORPUS_SYS_ID_RE``, a Hebrew or Arabic letter means text -- narrowed for a box
-that also takes words: a shelfmark here must have a digit and the shape of one
-(the Shelfmark mode's own lookup then decides what it matches):
+that also takes words. A shelfmark here is ASCII, has a digit, and:
 
-* a number with a dot in it (``20.57``, ``5559a.10``), or a letter and a digit
-  run together (``k2.27``, ``10g4``, ``307.61b``); or
-* a collection prefix first (``T-S``, ``ENA``, ``Add.``, ``Or.``, ``Moss.``:
-  the first tokens of libraries.csv's shelfmarks, counted 2026-11-03), a
-  library name or code first (``_strip_library_prefix``: ``Cambridge``,
-  ``JTS``), or the NLI catalogue's own form (``looks_like_catalogue_form``:
-  ``..., Ms. T-S K 08.026``).
+* is the NLI catalogue's own form (``looks_like_catalogue_form``:
+  ``Cambridge University Library, Ms. T-S K 08.026``); or
+* after a library name or code is taken off its front (``_strip_library_prefix``:
+  ``Cambridge``, ``JTS``, ``British Library``), every run of four or more
+  letters is a word catalogue shelfmarks carry (``SHELFMARK_WORDS``: ``Moss``,
+  ``Misc``, ``Gaster``, ``Genizah``; counted over libraries.csv 2026-11-03) or
+  a Roman numeral, and the rest has a shelfmark shape: a number with a dot in
+  it (``20.57``, ``5559a.10``), a letter and a digit run together (``k2.27``,
+  ``10g4``, ``307.61b``), a collection prefix first (``T-S``, ``ENA``,
+  ``Add.``, ``Or.``), or a library taken off its front.
 
-So ``Psalm 23``, ``chapter 2`` and a bare ``12`` (15,533 catalogue rows) stay
-text, as do ``dcuk`` (גבול typed on the English layout,
-shared/keyboard_layout.py) and English words.
+So ``Psalm 23``, ``version 1.2``, ``COVID19``, ``test123`` and a bare ``12``
+(15,533 catalogue rows) stay text, as do ``dcuk`` (גבול typed on the English
+layout, shared/keyboard_layout.py) and English words. The Shelfmark mode's own
+lookup then decides what a shelfmark matches.
 
 Pure (no NiceGUI import): ``tests/test_search_box_input.py``; the page's wiring
 is ``tests/render_smoke/test_search_box_input_render_smoke.py``.
@@ -54,12 +57,34 @@ COLLECTION_PREFIXES = frozenset({
     'halper', 'add', 'misc', 'bib', 'lit', 'talm', 'freer', 'krengel', 'rainer', 'gen', 'bible', 'af',
 })
 
+# Runs of four or more letters that catalogue shelfmarks carry, institution names
+# aside (30 or more manuscripts each in libraries.csv, 2026-11-03, after the
+# library prefix is taken off), with the prefixes above. A longer letter run that
+# is none of these is a word, and the query is text.
+SHELFMARK_WORDS = COLLECTION_PREFIXES | frozenset({
+    'series', 'antonin', 'printed', 'loan', 'brumer', 'frag', 'fragment', 'fragments', 'minute', 'arch',
+    'halpern', 'glass', 'hebr', 'schechter', 'mingana', 'blau', 'guenzburg', 'grossmann', 'heid', 'camb',
+    'bodl', 'lewis', 'gibson', 'firk', 'firkovich', 'arabica', 'biblica', 'liturgica', 'talmudica',
+})
+
 # Letters, digits and the marks shelfmarks are written with (``T-S NS 307.61b``,
 # ``Halper 331``, ``Moss. IV,12.2``, ``MS Heb c 57``, ``ENA 2156.1``).
 _SHELFMARK_CHARS_RE = re.compile(r"^[A-Za-z0-9 .,:;'()\[\]/\-]+$")
 _FIRST_TOKEN_RE = re.compile(r'^[A-Za-z][A-Za-z.\-]*')
+_LETTER_RUN_RE = re.compile(r'[A-Za-z]+')
+_ROMAN_RE = re.compile(r'^[ivxlcdm]+$')
 _DOTTED_NUMBER_RE = re.compile(r'[0-9A-Za-z]\.\d')
 _LETTER_DIGIT_RE = re.compile(r'[A-Za-z]\d|\d[A-Za-z]')
+
+
+def _words_are_shelfmark_words(text: str) -> bool:
+    """No run of four or more letters that is neither a shelfmark word nor a Roman numeral."""
+    for run in _LETTER_RUN_RE.findall(text):
+        if len(run) >= 4:
+            lowered = run.lower()
+            if lowered not in SHELFMARK_WORDS and not _ROMAN_RE.match(lowered):
+                return False
+    return True
 
 
 def search_box_input_kind(query: Optional[str]) -> str:
@@ -71,12 +96,16 @@ def search_box_input_kind(query: Optional[str]) -> str:
         return 'sys_id'
     if not _SHELFMARK_CHARS_RE.match(text) or not any(ch.isdigit() for ch in text):
         return 'text'
-    if _DOTTED_NUMBER_RE.search(text) or _LETTER_DIGIT_RE.search(text):
+    if looks_like_catalogue_form(text):
         return 'shelfmark'
-    head = _FIRST_TOKEN_RE.match(text)
+    rest = _strip_library_prefix(text)
+    library_named = rest != text
+    if not rest or not _words_are_shelfmark_words(rest):
+        return 'text'
+    if _DOTTED_NUMBER_RE.search(rest) or _LETTER_DIGIT_RE.search(rest) or library_named:
+        return 'shelfmark'
+    head = _FIRST_TOKEN_RE.match(rest)
     if head and head.group(0).lower().replace('.', '') in COLLECTION_PREFIXES:
-        return 'shelfmark'
-    if _strip_library_prefix(text) != text or looks_like_catalogue_form(text):
         return 'shelfmark'
     return 'text'
 

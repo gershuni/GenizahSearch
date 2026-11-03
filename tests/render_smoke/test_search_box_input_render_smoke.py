@@ -113,7 +113,15 @@ def test_a_shelfmark_typed_into_the_box_runs_in_shelfmark_mode_and_a_hebrew_quer
             seen['hebrew'] = await _search_typed(user, engine, HEBREW)
             seen['hebrew_notice'] = [t for t in _texts(user, ui.label) if t == 'Searched as a shelfmark.']
             # A word with a number, and a bare number, are text (Codex on #469).
-            seen['as_text_shapes'] = {q: await _search_typed(user, engine, q) for q in ('Psalm 23', '12')}
+            seen['as_text_shapes'] = {q: await _search_typed(user, engine, q)
+                                      for q in ('Psalm 23', '12', 'version 1.2', 'COVID19')}
+            # New Search clears the notice with everything else (Codex round 2).
+            await _search_typed(user, engine, 'ts 20.57')
+            seen['notice_again'] = [t for t in _texts(user, ui.label) if t == 'Searched as a shelfmark.']
+            new_search = next(b for b in _elements(user, ui.button) if b.props.get('aria-label') == 'New Search')
+            UserInteraction(user, {new_search}, None).click()
+            await _settle()
+            seen['notice_after_new'] = [t for t in _texts(user, ui.label) if t == 'Searched as a shelfmark.']
             seen['suggestions_asked'] = list(engine.asked)
             # A corpus system number opens that manuscript in Browse; no search runs.
             calls_before = len(engine.calls)
@@ -140,6 +148,8 @@ def test_a_shelfmark_typed_into_the_box_runs_in_shelfmark_mode_and_a_hebrew_quer
     assert seen['hebrew_notice'] == [], 'a Hebrew query is not a shelfmark'
     for query, call in seen['as_text_shapes'].items():
         assert call == {'query': query, 'mode': 'literal'}, (query, call)
+    assert seen['notice_again'] == ['Searched as a shelfmark.'], seen
+    assert seen['notice_after_new'] == [], 'New Search must clear the notice'
     assert seen['suggestions_asked'] == [], 'no keyboard-layout suggestion for a shelfmark, Hebrew or digits'
     assert seen['sys_id_nav'] == ['/browse?sys_id=990053835020205171'], seen
     assert seen['sys_id_calls'] == 0, 'a system number is opened, not searched'

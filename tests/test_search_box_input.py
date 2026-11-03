@@ -12,7 +12,7 @@ import pytest
 
 from web.home_query import home_query_target
 from web.search_box_input import (
-    COLLECTION_PREFIXES, TEXT_MODES, search_box_input_kind, split_placeholder, typed_as_shelfmark,
+    COLLECTION_PREFIXES, SHELFMARK_WORDS, TEXT_MODES, search_box_input_kind, split_placeholder, typed_as_shelfmark,
 )
 from web.search_bootstrap import VALID_SEARCH_MODES
 
@@ -36,6 +36,12 @@ SHELFMARKS = ['ts 20.57', 't-s ns 307.61b', 'add 3356', 'ts k2.27', 't-s 10g4.5'
     '20.57',                   # a dotted number alone
     'k2.27',
     '12b',
+    'Mosseri VIII.402',        # a Roman numeral is no word
+    'T-S Misc. 36.12',
+    'T-S Ar. 18(1).6',
+    'Westminster College Arabica I.12',
+    'Evr. II A 12',
+    'Gen 1.1',                 # three letters: a collection prefix or a short code, never a word
 ])
 def test_a_shelfmark_is_recognised(typed):
     assert search_box_input_kind(typed) == 'shelfmark', typed
@@ -63,6 +69,11 @@ def test_a_corpus_system_number_is_a_sys_id_not_a_shelfmark(sys_id):
     'Psalm 23',                # a word and a number: no shelfmark shape (Codex on #469)
     'chapter 2',
     'version 1',
+    'version 1.2',             # a word of four letters or more is a word, whatever follows it (round 2)
+    'Psalm 23.1',
+    'COVID19',
+    'test123',
+    'Cambridge marriage 1100',  # a library first does not make the words after it a shelfmark
     'ts',                      # a collection prefix alone, no number
     '12',                      # a bare number: 15,533 catalogue rows, not what anyone meant
     '3356',
@@ -90,9 +101,10 @@ def test_the_homepage_box_opens_the_same_system_numbers():
 
 
 def test_collection_prefixes_are_lower_case_without_dots():
-    for prefix in COLLECTION_PREFIXES:
+    for prefix in COLLECTION_PREFIXES | SHELFMARK_WORDS:
         assert prefix == prefix.lower() and '.' not in prefix and ' ' not in prefix, prefix
     assert {'t-s', 'ts', 'ena', 'add', 'or', 'moss', 'heb', 'evr', 'gaster', 'adler'} <= COLLECTION_PREFIXES
+    assert COLLECTION_PREFIXES <= SHELFMARK_WORDS
 
 
 def test_text_modes_are_the_page_modes_that_search_for_words():
