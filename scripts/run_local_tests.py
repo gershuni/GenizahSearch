@@ -505,7 +505,7 @@ def main(argv=None) -> int:
         # errors, first time round). So the lane directory is created here and
         # pytest creates only the per-chunk leaf inside it.
         os.makedirs(basetemp, exist_ok=True)
-        env = dict(os.environ, PYTHONUTF8="1")
+        env = dict(os.environ, PYTHONUTF8="1", POSTHOG_API_KEY="")
         while True:
             try:
                 idx, chunk, load = work.get_nowait()

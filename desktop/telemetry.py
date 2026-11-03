@@ -47,6 +47,7 @@ from shared.posthog_server import (
     set_default_distinct_id,
     set_capture_api_key,
     set_capture_host,
+    set_delivery_blocked as _set_delivery_blocked,
     register_scrub_hook,
     _drain_and_discard,
     send_crash_event_direct,  # Phase 113: module-top import (REVIEWS HIGH-2 — no in-hook import)
@@ -523,6 +524,10 @@ def _wire_transport_config() -> None:
         # Default host is eu.i.posthog.com (matches the EU project); override only
         # if the project ever moves regions.
         host = os.environ.get('GENIZAH_TELEMETRY_HOST') or None
+        # A run from source is a developer, not a user: block every delivery path
+        # (env key included) unless GENIZAH_TELEMETRY_FORCE=1. Frozen .exe unchanged.
+        _set_delivery_blocked(
+            not _frozen and os.environ.get('GENIZAH_TELEMETRY_FORCE') != '1')
         set_capture_api_key(key)
         set_capture_host(host)
         # INFRA-F2: while a real key is wired (consent on), tag every shared-queue
