@@ -3019,15 +3019,21 @@ def test_a_link_keeps_the_other_sides_own_text_position(joins_lab_smoke_runner):
         'o': {'on': True, 'rows': [_link_row('other')], 'combine': 'AND', 'pos': 'line_end'},
     })
 
+    from web.joins_lab_storage import read_full_state
+
     async def driver(user):
+        def saved():
+            with user._client:
+                return read_full_state() or {}
+
         with contextlib.ExitStack() as stack:
             bar = _record_address_bar(stack)
             await user.open(f'/joins-lab?sys_id={STUB_ANCHOR_SID}&state={token}')
-            await asyncio.sleep(1.5)
+            # Wait for the saved link state, not a fixed 1.5 s: on windows-latest
+            # the session held only the anchor by then (CI on the 9.13.1 commit).
+            await _until(lambda: saved().get('other_side_text_position') == 'line_end' and bar)
 
-        from web.joins_lab_storage import read_full_state
-        with user._client:
-            stored = read_full_state() or {}
+        stored = saved()
         assert stored.get('other_side_enabled') is True
         assert stored.get('text_position') == 'anywhere'
         assert stored.get('other_side_text_position') == 'line_end', stored
