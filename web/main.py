@@ -3528,16 +3528,33 @@ async def initialize_engine():
 
         await run.io_bound(_prewarm_sync)
 
+    async def _prewarm_shelfmark_search_background():
+        """The catalogue's index for Shelfmark searches (MetadataManager), off the
+        startup critical path: web/research_jobs.py resolves a Title/Shelfmark
+        search's manuscripts in THIS process, so the first lookup after a restart
+        would otherwise build it (~2 s over the corpus)."""
+        def _prewarm_sync():
+            try:
+                meta_mgr = getattr(state, 'meta_mgr', None)
+                if meta_mgr is not None and meta_mgr.prewarm_shelfmark_search():
+                    print("[init] Shelfmark search index pre-warmed (background).", flush=True)
+            except Exception as e:
+                print(f"[init] Shelfmark search index pre-warm failed (non-fatal): {e}", flush=True)
+
+        await run.io_bound(_prewarm_sync)
+
     if init_ok:
         prewarm = asyncio.create_task(_prewarm_fjms_background(), name='fjms-prewarm')
+        shelfmark_prewarm = asyncio.create_task(_prewarm_shelfmark_search_background(),
+                                                name='shelfmark-search-prewarm')
         # One gc.collect(); gc.freeze() once the loaders that keep allocating
-        # after _init_sync (MetadataManager threads, FL-ID build, this prewarm)
+        # after _init_sync (MetadataManager threads, FL-ID build, these prewarms)
         # are done -- see web/gc_freeze.py. Scheduled from HERE, not as another
         # app.on_startup handler: NiceGUI runs those concurrently, so none of
         # them can run "after" this one.
         from web.gc_freeze import freeze_after_loaders
         asyncio.create_task(
-            freeze_after_loaders(state, extra_tasks=(prewarm,)),
+            freeze_after_loaders(state, extra_tasks=(prewarm, shelfmark_prewarm)),
             name='gc-freeze-after-loaders',
         )
 

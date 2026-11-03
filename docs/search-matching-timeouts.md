@@ -111,6 +111,21 @@ before. A warm worker that died while waiting is replaced by a fresh one for the
 search. `GENIZAH_RESEARCH_PRESTART=0` restores the old behaviour. A search
 arriving while its warm worker is still loading waits only for the rest of the load.
 
+### Catalogue lookups (2026-11-03)
+
+A Title or Shelfmark search reads no text index: it is a catalogue lookup
+(`SearchEngine._execute_metadata_search`), a row per manuscript. It used to go
+through the queue like every other search, and so waited for a worker (its
+catalogue load when no warm one was ready) and for whoever was searching: on the
+API, `search_mode=shelfmark` took 10 s or more on most calls over the 14 days to
+2026-11-03, with 56 timeouts. `IsolatedEngine` now resolves the manuscripts of
+such a search in the server process (`SearchEngine.metadata_search_ids`, over
+`MetadataManager`'s indexed catalogue, milliseconds) and runs a lookup of up to
+`INLINE_METADATA_ROWS` (100) manuscripts in the calling thread, in no worker and
+in no queue. A broader search (a volume, `T-S 12`) still goes to a worker, with
+its manuscripts, so the worker skips the catalogue too. Until the server's own
+catalogue has loaded (its first seconds) the worker resolves them, as before.
+
 ### Early rows
 
 A text search on the search page asks the worker for its first rows

@@ -59,6 +59,213 @@ def _warn_bridge_import_failed(exc):
         _BRIDGE_IMPORT_WARNED = True
 
 
+# ---------------- Shelfmark search (search_by_meta, field 'shelfmark') ----------------
+#
+# A Shelfmark search used to test every catalogue record against the query, one
+# normalization per record per search: 3-5 s over the 255,723 records, for a lookup
+# that returns one manuscript, and in the web app that cost was paid inside a research
+# worker, behind its queue. The rules are unchanged (_shelfmark_matches is the loop's
+# old `matches` closure, verbatim); what changed is that the catalogue is normalized
+# once into _ShelfmarkSearchIndex, which narrows a query to the records that can match
+# it, and _shelfmark_matches then decides over those. Every rule's matches are among the
+# candidates by construction (see _ShelfmarkSearchIndex.candidates), so the answer is
+# the loop's; tests/test_shelfmark_search_path.py checks that against the loop itself.
+
+_SHELFMARK_TOKEN_SPLIT = re.compile(r'[\s\.\-]+')
+_SHELFMARK_SEARCH_BUILD_LOCK = threading.Lock()
+
+
+def _shelfmark_tokens(text):
+    return [t for t in _SHELFMARK_TOKEN_SPLIT.split(text) if t]
+
+
+def _shelfmark_forms(value, normalize):
+    """The forms of a stored shelfmark the search rules compare:
+    (lower-cased, normalized, normalized without dots, tokens of the lower-cased)."""
+    val_norm = value.lower().strip()
+    val_normalized = normalize(value)
+    return (val_norm, val_normalized, val_normalized.replace('.', ''), _shelfmark_tokens(val_norm))
+
+
+def _shelfmark_query(query, normalize):
+    """The same four forms of the query (``_shelfmark_forms``; the tokens come from the
+    lower-cased query, as the loop split them)."""
+    q_norm = query.lower().strip()
+    q_normalized = normalize(query)
+    return (q_norm, q_normalized, q_normalized.replace('.', ''), _shelfmark_tokens(q_norm))
+
+
+def _shelfmark_matches(forms, query):
+    """Whether a stored shelfmark (its ``_shelfmark_forms``) matches a Shelfmark search
+    (its ``_shelfmark_query``).
+
+    Precise matching, to avoid false positives like 120.2 matching 120.25, with the
+    normalization that lets "ts12.123" or "T-S 12 123" find "T-S 12.123": missing or
+    extra spaces, dashes and dots, any case.
+    """
+    val_norm, val_normalized, val_nodots, val_tokens = forms
+    query_norm, q_normalized, q_nodots, query_tokens = query
+
+    # 1. Exact match (case-insensitive)
+    if val_norm == query_norm:
+        return True
+
+    # 2. Exact normalized match: "ts12.123" matches "T-S 12.123"
+    if val_normalized == q_normalized:
+        return True
+
+    # Dot-agnostic match: "ts12123" matches "ts12.123"
+    # This allows users to type without dots and still find results
+    if val_nodots == q_nodots:
+        return True
+
+    # Normalized prefix match: "ts12" matches "T-S 12.123"
+    # But be careful with numeric boundaries
+    if q_normalized and val_normalized.startswith(q_normalized):
+        next_pos = len(q_normalized)
+        if next_pos < len(val_normalized):
+            next_char = val_normalized[next_pos]
+            # Allow if next char is a dot (e.g., "ts12" -> "ts12.123")
+            # or if it's not a digit (e.g., "ts12" -> "ts12a")
+            if next_char == '.' or not next_char.isdigit():
+                return True
+            # If query ends with digit and value continues with digit,
+            # don't immediately return - fall through to token matching
+            # This allows "T-S NS 12" to match "T-S NS 120.2" via tokens
+        else:
+            return True
+
+    # Also try token-based matching for partial searches
+    if not query_tokens:
+        return False
+
+    # Match tokens sequentially: "t-s ns 12.4" must match tokens in order
+    query_idx = 0
+    val_idx = 0
+
+    while query_idx < len(query_tokens) and val_idx < len(val_tokens):
+        qt = query_tokens[query_idx]
+        vt = val_tokens[val_idx]
+
+        # Check if tokens match
+        if qt == vt:
+            # Exact match - advance both
+            query_idx += 1
+            val_idx += 1
+        elif vt.startswith(qt):
+            # Prefix match
+            # For the LAST query token, allow numeric prefix (e.g., "12" matches "120")
+            # For earlier tokens, be strict to avoid false positives
+            if query_idx == len(query_tokens) - 1:
+                # Last token - allow prefix match even for digits
+                query_idx += 1
+                val_idx += 1
+            elif qt.isdigit() and vt.isdigit():
+                # Not last token and both numeric - be strict
+                if len(vt) > len(qt) and vt[len(qt)].isdigit():
+                    val_idx += 1
+                    continue
+                query_idx += 1
+                val_idx += 1
+            else:
+                query_idx += 1
+                val_idx += 1
+        else:
+            val_idx += 1
+
+    return query_idx == len(query_tokens)
+
+
+def _shelfmark_query_is_degenerate(query):
+    """A query with nothing to narrow by (empty, or only separators): the rules are
+    then decided over every record, as the loop did."""
+    q_norm, q_normalized, _q_nodots, query_tokens = query
+    return not q_norm or not q_normalized or not query_tokens
+
+
+def _prefix_range(keys, prefix):
+    """[lo, hi) of the entries of the sorted list *keys* that start with *prefix*."""
+    from bisect import bisect_left
+    lo = bisect_left(keys, prefix)
+    hi = lo
+    count = len(keys)
+    while hi < count and keys[hi].startswith(prefix):
+        hi += 1
+    return lo, hi
+
+
+class _ShelfmarkSearchIndex:
+    """The catalogue's shelfmarks (csv_bank, field 'shelfmark') normalized once, so a
+    Shelfmark search tests only the records that can match it.
+
+    Three sorted views, one per family of rules in ``_shelfmark_matches``:
+
+    * ``norm_keys``: the normalized shelfmarks. A record matching by normalized
+      equality or by normalized prefix starts with the normalized query.
+    * ``nodot_keys``: the normalized shelfmarks without dots. A record matching
+      dot-agnostically equals the dotless query.
+    * ``token_keys`` / ``token_ids``: every token of the lower-cased shelfmarks. A
+      record matching by tokens, or by exact lower-cased equality (identical tokens),
+      has, for EACH query token, a token starting with it; the query token with the
+      fewest such records narrows the most.
+
+    ``candidates`` is the union of the three, a superset of the records any rule
+    matches; the rules themselves decide over it. Built from one snapshot of the
+    catalogue and tied to it (``bank_id``, ``size``): a reloaded or replaced
+    csv_bank gets a new index.
+    """
+
+    __slots__ = ('bank_id', 'size', 'norm_keys', 'norm_ids', 'nodot_keys', 'nodot_ids',
+                 'token_keys', 'token_ids')
+
+    def __init__(self, csv_bank, normalize):
+        self.bank_id = id(csv_bank)
+        self.size = len(csv_bank)
+        by_norm = []
+        by_nodot = []
+        by_token = {}
+        for sys_id, data in list(csv_bank.items()):
+            value = data.get('shelfmark', '') if isinstance(data, dict) else ''
+            if not value or not isinstance(value, str):
+                continue
+            _val_norm, val_normalized, val_nodots, val_tokens = _shelfmark_forms(value, normalize)
+            by_norm.append((val_normalized, sys_id))
+            by_nodot.append((val_nodots, sys_id))
+            for token in set(val_tokens):
+                by_token.setdefault(token, []).append(sys_id)
+        by_norm.sort()
+        by_nodot.sort()
+        self.norm_keys = [key for key, _sid in by_norm]
+        self.norm_ids = [sid for _key, sid in by_norm]
+        self.nodot_keys = [key for key, _sid in by_nodot]
+        self.nodot_ids = [sid for _key, sid in by_nodot]
+        self.token_keys = sorted(by_token)
+        self.token_ids = {token: tuple(ids) for token, ids in by_token.items()}
+
+    def is_for(self, csv_bank):
+        return self.bank_id == id(csv_bank) and self.size == len(csv_bank)
+
+    def candidates(self, query):
+        """The sys_ids a ``_shelfmark_query`` can match (a superset; see the class)."""
+        from bisect import bisect_left, bisect_right
+        _q_norm, q_normalized, q_nodots, query_tokens = query
+        found = set()
+        lo, hi = _prefix_range(self.norm_keys, q_normalized)
+        found.update(self.norm_ids[lo:hi])
+        lo, hi = bisect_left(self.nodot_keys, q_nodots), bisect_right(self.nodot_keys, q_nodots)
+        found.update(self.nodot_ids[lo:hi])
+        best = None
+        for token in query_tokens:
+            lo, hi = _prefix_range(self.token_keys, token)
+            count = sum(len(self.token_ids[key]) for key in self.token_keys[lo:hi])
+            if best is None or count < best[0]:
+                best = (count, lo, hi)
+        if best is not None:
+            for key in self.token_keys[best[1]:best[2]]:
+                found.update(self.token_ids[key])
+        return found
+
+
 _CUDL_LABEL_RE = re.compile(r'^\s*(?:f\.?\s*)?(\d+)\s*([rv])?\b', re.IGNORECASE)
 
 
@@ -312,6 +519,11 @@ class MetadataManager:
         # Set when the load of libraries.csv has ended, read or not.
         self._csv_bank_done = threading.Event()
         self._shelfmark_index = None
+        # The catalogue normalized for Shelfmark searches (_ShelfmarkSearchIndex), built
+        # on the first search after the load; and the NLI cache's shelfmarks normalized
+        # as they are met ({sys_id: (shelfmark, forms)}), since that cache changes.
+        self._shelfmark_search_index = None
+        self._nli_shelfmark_forms = {}
         self.nli_executor = ThreadPoolExecutor(max_workers=2)
         self.ns = {'marc': 'http://www.loc.gov/MARC21/slim'}
 
@@ -467,6 +679,7 @@ class MetadataManager:
             # CSV data is authoritative for shelfmark browsing; force the normalized index
             # to rebuild after background loading completes.
             self._shelfmark_index = None
+            self._shelfmark_search_index = None
             LOGGER.info("Loaded %d records into csv_bank from libraries.csv", len(self.csv_bank))
 
             # Phase 84: build CUDL alias index for cross-system shelfmark lookups (D-03).
@@ -1855,108 +2068,28 @@ class MetadataManager:
         results = set()
         q_norm = query.lower().strip()
 
-        # For shelfmark searches, also compute fully normalized version
-        q_normalized = self._normalize_shelfmark(query) if field == 'shelfmark' else None
+        if field == 'shelfmark':
+            shelfmark_query = _shelfmark_query(query, self._normalize_shelfmark)
+            # 1. The catalogue, through its index (or every record while it loads)
+            results.update(self._shelfmark_search_catalogue(shelfmark_query))
+            # 2. The NLI cache (for items not in CSV or updated)
+            for sys_id, data in self.nli_cache.items():
+                val = data.get(field, '')
+                if val and _shelfmark_matches(self._nli_shelfmark_forms_for(sys_id, val), shelfmark_query):
+                    results.add(sys_id)
+        else:
+            # Other fields (title): substring match
+            # 1. Search in CSV Bank (Fastest) — snapshot to avoid concurrent modification
+            for sys_id, data in list(self.csv_bank.items()):
+                val = data.get(field, '')
+                if val and q_norm in val.lower().strip():
+                    results.add(sys_id)
 
-        # Helper function for smart matching
-        def matches(value, query_norm):
-            val_norm = value.lower().strip()
-
-            # 1. Exact match (case-insensitive)
-            if val_norm == query_norm:
-                return True
-
-            # 2. For shelfmarks, use normalized matching to handle format variations
-            if field == 'shelfmark':
-                # Normalize the value and compare with normalized query
-                val_normalized = self._normalize_shelfmark(value)
-
-                # Exact normalized match: "ts12.123" matches "T-S 12.123"
-                if val_normalized == q_normalized:
-                    return True
-
-                # Dot-agnostic match: "ts12123" matches "ts12.123"
-                # This allows users to type without dots and still find results
-                if val_normalized.replace('.', '') == q_normalized.replace('.', ''):
-                    return True
-
-                # Normalized prefix match: "ts12" matches "T-S 12.123"
-                # But be careful with numeric boundaries
-                if q_normalized and val_normalized.startswith(q_normalized):
-                    next_pos = len(q_normalized)
-                    if next_pos < len(val_normalized):
-                        next_char = val_normalized[next_pos]
-                        # Allow if next char is a dot (e.g., "ts12" -> "ts12.123")
-                        # or if it's not a digit (e.g., "ts12" -> "ts12a")
-                        if next_char == '.' or not next_char.isdigit():
-                            return True
-                        # If query ends with digit and value continues with digit,
-                        # don't immediately return - fall through to token matching
-                        # This allows "T-S NS 12" to match "T-S NS 120.2" via tokens
-                    else:
-                        return True
-
-                # Also try token-based matching for partial searches
-                # Tokenize both query and value
-                val_tokens = [t for t in re.split(r'[\s\.\-]+', val_norm) if t]
-                query_tokens = [t for t in re.split(r'[\s\.\-]+', query_norm) if t]
-
-                if not query_tokens:
-                    return False
-
-                # Match tokens sequentially: "t-s ns 12.4" must match tokens in order
-                query_idx = 0
-                val_idx = 0
-
-                while query_idx < len(query_tokens) and val_idx < len(val_tokens):
-                    qt = query_tokens[query_idx]
-                    vt = val_tokens[val_idx]
-
-                    # Check if tokens match
-                    if qt == vt:
-                        # Exact match - advance both
-                        query_idx += 1
-                        val_idx += 1
-                    elif vt.startswith(qt):
-                        # Prefix match
-                        # For the LAST query token, allow numeric prefix (e.g., "12" matches "120")
-                        # For earlier tokens, be strict to avoid false positives
-                        if query_idx == len(query_tokens) - 1:
-                            # Last token - allow prefix match even for digits
-                            query_idx += 1
-                            val_idx += 1
-                        elif qt.isdigit() and vt.isdigit():
-                            # Not last token and both numeric - be strict
-                            if len(vt) > len(qt) and vt[len(qt)].isdigit():
-                                val_idx += 1
-                                continue
-                            query_idx += 1
-                            val_idx += 1
-                        else:
-                            query_idx += 1
-                            val_idx += 1
-                    else:
-                        val_idx += 1
-
-                return query_idx == len(query_tokens)
-
-            # 3. For other fields (title), use substring match
-            else:
-                return query_norm in val_norm
-
-            return False
-
-        # 1. Search in CSV Bank (Fastest) — snapshot to avoid concurrent modification
-        for sys_id, data in list(self.csv_bank.items()):
-            val = data.get(field, '')
-            if val and matches(val, q_norm):
-                results.add(sys_id)
-
-        # 2. Search in NLI Cache (for items not in CSV or updated)
-        for sys_id, data in self.nli_cache.items():
-            val = data.get(field, '')
-            if val and matches(val, q_norm):
-                results.add(sys_id)
+            # 2. Search in NLI Cache (for items not in CSV or updated)
+            for sys_id, data in self.nli_cache.items():
+                val = data.get(field, '')
+                if val and q_norm in val.lower().strip():
+                    results.add(sys_id)
 
         # Phase 84: CUDL classmark fallback (NORM-01/02). Zero-regression by construction:
         # only runs when canonical matching returned no hits.
@@ -1987,6 +2120,88 @@ class MetadataManager:
                     LOGGER.warning("Catalogue-form search fallback failed for %r", query, exc_info=True)
 
         return list(results)
+
+    def _shelfmark_search_catalogue(self, shelfmark_query):
+        """The csv_bank sys_ids whose shelfmark matches a ``_shelfmark_query``.
+
+        Through ``_ShelfmarkSearchIndex`` once libraries.csv is loaded to the end;
+        over every record before that (the web app loads it in the background, and an
+        index of a partial load would be reused), and for a query with nothing to
+        narrow by. Both give the rules' answer; the index only chooses who is tested.
+        """
+        normalize = self._normalize_shelfmark
+        index = None
+        if (self._csv_bank_loaded and self.csv_bank
+                and not _shelfmark_query_is_degenerate(shelfmark_query)):
+            index = self._shelfmark_search_index_for(self.csv_bank)
+        if index is None:
+            return self._shelfmark_scan_catalogue(shelfmark_query)
+        found = set()
+        bank = self.csv_bank
+        for sys_id in index.candidates(shelfmark_query):
+            data = bank.get(sys_id)
+            value = data.get('shelfmark', '') if data else ''
+            if value and _shelfmark_matches(_shelfmark_forms(value, normalize), shelfmark_query):
+                found.add(sys_id)
+        return found
+
+    def _shelfmark_scan_catalogue(self, shelfmark_query):
+        """The rules over every record of csv_bank: the reference the index must agree
+        with, and the path while the catalogue loads."""
+        normalize = self._normalize_shelfmark
+        found = set()
+        for sys_id, data in list(self.csv_bank.items()):
+            value = data.get('shelfmark', '')
+            if value and _shelfmark_matches(_shelfmark_forms(value, normalize), shelfmark_query):
+                found.add(sys_id)
+        return found
+
+    def _shelfmark_search_index_for(self, csv_bank):
+        """The ``_ShelfmarkSearchIndex`` of this csv_bank, built once (a few seconds
+        over the corpus) and replaced when the bank is reloaded or replaced."""
+        index = getattr(self, '_shelfmark_search_index', None)
+        if index is not None and index.is_for(csv_bank):
+            return index
+        with _SHELFMARK_SEARCH_BUILD_LOCK:
+            index = getattr(self, '_shelfmark_search_index', None)
+            if index is not None and index.is_for(csv_bank):
+                return index
+            index = _ShelfmarkSearchIndex(csv_bank, self._normalize_shelfmark)
+            self._shelfmark_search_index = index
+        return index
+
+    def _nli_shelfmark_forms_for(self, sys_id, value):
+        """``_shelfmark_forms`` of an NLI-cache shelfmark, kept from one search to the
+        next while the entry's shelfmark is that string (the cache changes under
+        fetches, so it is not indexed as a whole)."""
+        cache = getattr(self, '_nli_shelfmark_forms', None)
+        if cache is None:
+            cache = self._nli_shelfmark_forms = {}
+        known = cache.get(sys_id)
+        if known is not None and known[0] == value:
+            return known[1]
+        if len(cache) > 2 * len(self.nli_cache) + 1000:
+            # Entries evicted from the NLI cache: drop their forms.
+            live = set(self.nli_cache.keys())
+            for stale in [key for key in cache if key not in live]:
+                del cache[stale]
+        forms = _shelfmark_forms(value, self._normalize_shelfmark)
+        cache[sys_id] = (value, forms)
+        return forms
+
+    def prewarm_shelfmark_search(self, timeout: float = 300.0) -> bool:
+        """Build the Shelfmark search index now (web/main.py, in a background thread
+        at server start), so the first lookup after a restart does not: ~2 s over the
+        corpus. Waits up to *timeout* seconds for libraries.csv to be read to the end;
+        False when it was not."""
+        if not self._csv_bank_loaded:
+            done = getattr(self, "_csv_bank_done", None)
+            if done is not None:
+                done.wait(timeout)
+        if not self._csv_bank_loaded or not self.csv_bank:
+            return False
+        self._shelfmark_search_index_for(self.csv_bank)
+        return True
 
     # ---------------- Shelfmark Resolution Helpers ----------------
     def _normalize_shelfmark(self, shelfmark: str) -> str:

@@ -43,6 +43,15 @@ _cancel_context = ContextVar('research_cancel', default=None)
 _status_context = ContextVar('research_status', default=None)
 # A worker that has not stopped this long after its time limit is stopped by force.
 TIME_LIMIT_GRACE_SECONDS = 60
+# The engine's catalogue-only modes (SearchEngine._execute_metadata_search): no regex,
+# no matching, a row per manuscript. The manuscripts are resolved HERE, in the server
+# process, whose catalogue is loaded and indexed (MetadataManager.search_by_meta), and
+# handed to execute_search: a lookup of up to INLINE_METADATA_ROWS manuscripts then runs
+# in this thread, with no worker to start or queue to wait in -- a shelfmark lookup used
+# to take 10 s or more on the API, behind the worker's catalogue load and whoever was
+# searching -- and a broader search still goes to a worker, which skips its catalogue.
+METADATA_SEARCH_MODES = frozenset({'Title', 'Shelfmark'})
+INLINE_METADATA_ROWS = 100
 _time_limit_stop = threading.local()
 
 
@@ -539,6 +548,20 @@ class IsolatedEngine:
         from web.variant_preferences import website_defaults
         return snapshot_settings(self._engine, {**website_defaults(), **self._settings})
 
+    def _resolve_metadata_search(self, arguments):
+        """The manuscripts a Title/Shelfmark ``execute_search`` is for, resolved by this
+        process's engine (``SearchEngine.metadata_search_ids``); None when it cannot:
+        an engine without the method (a test fake), or a catalogue still loading
+        (the web app reads libraries.csv in the background; a worker loads its own,
+        whole, so until then the worker resolves them as before)."""
+        resolve = getattr(self._engine, 'metadata_search_ids', None)
+        if resolve is None:
+            return None
+        if not getattr(getattr(self._engine, 'meta_mgr', None), '_csv_bank_loaded', False):
+            return None
+        return list(resolve(arguments.get('query_str', ''), arguments['mode'],
+                            arguments.get('restrict_sys_ids')))
+
     def __getattr__(self, name):
         original = getattr(self._engine, name)
         if name not in {'execute_search', 'search_composition_logic', 'lab_search', 'lab_composition_search'}:
@@ -565,7 +588,6 @@ class IsolatedEngine:
             consume_time_limit_stop()
             _consume_last_responsa_downgrade()
             _consume_last_responsa_downgrade_meta()
-            queue = get_queue()
             from shared.config import Config
             time_limit = Config.WEB_SEARCH_TIME_LIMIT
             shared = _shared_limit.get()
@@ -574,6 +596,21 @@ class IsolatedEngine:
                     shared['left'] = float(time_limit)
                 # What is left of the shared limit; 0 would mean no limit to the worker.
                 time_limit = max(shared['left'], 0.001)
+            if name == 'execute_search' and arguments.get('mode') in METADATA_SEARCH_MODES:
+                sys_ids = self._resolve_metadata_search(arguments)
+                if sys_ids is not None:
+                    arguments['metadata_sys_ids'] = sys_ids
+                    if len(sys_ids) <= INLINE_METADATA_ROWS:
+                        # A lookup: this thread, this process (see INLINE_METADATA_ROWS).
+                        # The engine's cut-off signal lands on this thread, as a
+                        # worker's result is copied onto it below.
+                        running_since = time.monotonic()
+                        try:
+                            return original(**arguments, progress_callback=progress)
+                        finally:
+                            if shared is not None and shared['left'] is not None:
+                                shared['left'] -= time.monotonic() - running_since
+            queue = get_queue()
             payload = {'kind': self._kind, 'method': name, 'arguments': arguments,
                        'options': self._options, 'settings': self.job_settings(),
                        'time_limit': time_limit}
