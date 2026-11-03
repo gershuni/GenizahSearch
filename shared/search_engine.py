@@ -3738,8 +3738,15 @@ class SearchEngine:
         return deduped
 
 
-    def _execute_metadata_search(self, query_str, mode, progress_callback=None, restrict_sys_ids=None):
-        """Search by title or shelfmark via csv_bank. Returns results even for metadata-only records."""
+    def metadata_search_ids(self, query_str, mode, restrict_sys_ids=None):
+        """The manuscripts a Title/Shelfmark search is for: the sys_ids
+        ``_execute_metadata_search`` builds its rows from, before it reads any text.
+
+        The web app resolves them in the server process, whose catalogue is loaded
+        and indexed, and hands them to ``execute_search`` as *metadata_sys_ids*: a
+        lookup then skips the research worker (web/research_jobs.py), and a broad
+        search's worker skips the catalogue.
+        """
         if mode != 'Regex':
             query_str = strip_search_diacritics(query_str)
 
@@ -3749,11 +3756,21 @@ class SearchEngine:
         # Wildcard or empty query with restrict set: return all restricted IDs
         stripped = query_str.strip()
         if (stripped == '*' or stripped == '') and restrict_sys_ids:
-            sys_ids = sorted(restrict_sys_ids)
-        else:
-            sys_ids = self.meta_mgr.search_by_meta(query_str, target_field)
-            if restrict_sys_ids is not None:
-                sys_ids = [s for s in sys_ids if s in restrict_sys_ids]
+            return sorted(restrict_sys_ids)
+        sys_ids = self.meta_mgr.search_by_meta(query_str, target_field)
+        if restrict_sys_ids is not None:
+            sys_ids = [s for s in sys_ids if s in restrict_sys_ids]
+        return sys_ids
+
+    def _execute_metadata_search(self, query_str, mode, progress_callback=None, restrict_sys_ids=None,
+                                 sys_ids=None):
+        """Search by title or shelfmark via csv_bank. Returns results even for metadata-only records.
+
+        *sys_ids*: the manuscripts, when the caller resolved them already
+        (``metadata_search_ids``); otherwise resolved here.
+        """
+        if sys_ids is None:
+            sys_ids = self.metadata_search_ids(query_str, mode, restrict_sys_ids)
         results = []
         total_ids = len(sys_ids)
 
@@ -3828,8 +3845,12 @@ class SearchEngine:
         return results
 
     @bounded_search
-    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None, preview_callback=None, ids_only=False):
+    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all", phase_callback=None, preview_callback=None, ids_only=False, metadata_sys_ids=None):
         """Search the Genizah (and/or LOCAL) index; return the verified result rows.
+
+        *metadata_sys_ids* (Title/Shelfmark only): the manuscripts the search is
+        for, resolved by the caller with ``metadata_search_ids`` (the web app, in the
+        server process); the catalogue is then not searched again here.
 
         *preview_callback(rows)*, when given, is called from this thread while the
         search is still running: with the rows found so far, at most every
@@ -3863,7 +3884,8 @@ class SearchEngine:
         consume_last_search_cutoff()
         # --- Metadata Search Modes (csv_bank-backed, no Tantivy needed) ---
         if mode in ['Title', 'Shelfmark']:
-            return self._execute_metadata_search(query_str, mode, progress_callback, restrict_sys_ids)
+            return self._execute_metadata_search(query_str, mode, progress_callback, restrict_sys_ids,
+                                                 sys_ids=metadata_sys_ids)
 
         # The common entry for every corpus scope and mode: before the LOCAL
         # branch (its broad handler would swallow the ValueError) and the Fuzzy

@@ -2648,6 +2648,8 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
     - Method `get_thumbnail` (Line 1576)
     - Method `batch_fetch_shelfmarks` (Line 1597) — Populate metadata cache.
     - Method `search_by_meta` (Line 1636) — Search for system IDs where the specified field matches the query.
+    - Method `_shelfmark_search_catalogue` / class `_ShelfmarkSearchIndex` — the catalogue normalized once for Shelfmark searches (three sorted views: normalized, dotless, tokens), narrowing a query to the records that can match; `_shelfmark_matches` (the old loop's rules) decides over those, so the answer is the loop's. `_shelfmark_scan_catalogue` is the loop itself: the path while libraries.csv loads, and the reference `tests/test_shelfmark_search_path.py` checks the index against.
+    - Method `prewarm_shelfmark_search` — builds that index at server start (web/main.py, background), ~2 s over the corpus.
     - Method `_normalize_shelfmark` (Line 1767) — Normalize shelfmarks using the canonical module-level function.
     - Method `_iter_shelfmark_sources` (Line 1771) — Yield shelfmark candidates from CSV bank and cached metadata.
     - Method `_get_shelfmark_index` (Line 1789) — Build or return cached pre-normalized shelfmark index.
@@ -2727,6 +2729,7 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
     - Method `_expand_responsa_component` (Line 1784) — Expand a single ResponsaComponent through the full Responsa expansion pipeline.
     - Method `_build_line_break_regex` (Line 1831) — Build a regex pattern for line-break search.
     - Method `_execute_line_break_search` (Line 1928) — Execute a line-break search using | syntax.
+    - Method `metadata_search_ids` — the manuscripts a Title/Shelfmark search is for; the web resolves them in the server process and hands them to `execute_search(metadata_sys_ids=)`.
     - Method `_execute_metadata_search` (Line 2157) — Search by title or shelfmark via csv_bank. Returns results even for metadata-only records.
     - Method `execute_search` (Line 2234)
     - Method `_deduplicate` (Line 2756)

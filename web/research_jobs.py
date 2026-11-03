@@ -43,6 +43,16 @@ _cancel_context = ContextVar('research_cancel', default=None)
 _status_context = ContextVar('research_status', default=None)
 # A worker that has not stopped this long after its time limit is stopped by force.
 TIME_LIMIT_GRACE_SECONDS = 60
+# The engine's catalogue-only modes (SearchEngine._execute_metadata_search): no regex,
+# no matching, a row per manuscript. The manuscripts are resolved HERE, in the server
+# process, whose catalogue is loaded and indexed (MetadataManager.search_by_meta), and
+# handed to execute_search: a lookup of up to INLINE_METADATA_ROWS manuscripts then runs
+# in this thread, with no worker to start or queue to wait in -- a shelfmark lookup used
+# to take 10 s or more on the API, behind the worker's catalogue load and whoever was
+# searching -- and a broader search still goes to a worker, which skips its catalogue.
+METADATA_SEARCH_MODES = frozenset({'Title', 'Shelfmark'})
+INLINE_METADATA_ROWS = 100
+_TO_WORKER = object()   # IsolatedEngine._metadata_search: the search goes to a worker
 _time_limit_stop = threading.local()
 
 
@@ -539,6 +549,82 @@ class IsolatedEngine:
         from web.variant_preferences import website_defaults
         return snapshot_settings(self._engine, {**website_defaults(), **self._settings})
 
+    def _resolve_metadata_search(self, arguments):
+        """The manuscripts a Title/Shelfmark ``execute_search`` is for, resolved by this
+        process's engine (``SearchEngine.metadata_search_ids``); None when it cannot:
+        an engine without the method (a test fake), or a catalogue still loading
+        (the web app reads libraries.csv in the background; a worker loads its own,
+        whole, so until then the worker resolves them as before)."""
+        resolve = getattr(self._engine, 'metadata_search_ids', None)
+        if resolve is None:
+            return None
+        if not getattr(getattr(self._engine, 'meta_mgr', None), '_csv_bank_loaded', False):
+            return None
+        return list(resolve(arguments.get('query_str', ''), arguments['mode'],
+                            arguments.get('restrict_sys_ids')))
+
+    def _metadata_search(self, original, arguments, progress, time_limit, shared):
+        """A Title/Shelfmark search's manuscripts, resolved in this process, and a
+        lookup (INLINE_METADATA_ROWS or fewer) run in this thread; ``_TO_WORKER``
+        when the search goes to a worker (the engine cannot resolve them here, or
+        there are more), with its manuscripts in *arguments* when they were resolved.
+
+        Under what the worker-wait loop enforces on a worker: the cancel event (a
+        background API job's, or the page's `run_research_call`), the deadlines
+        (``search_budget`` and ``controlled(seconds=)``: SearchBudgetExceeded, as
+        the loop raises it), and the website's time limit (Config.WEB_SEARCH_TIME_LIMIT,
+        or what is left of a shared one: the engine returns the rows it had, marked
+        as a stopped search, and ``consume_time_limit_stop`` says so, as for a worker).
+        Checked before the manuscripts are resolved (an already-cancelled job does
+        no catalogue work), at every progress tick the engine asks for (every few
+        manuscripts), and, cancel and deadlines, once the engine has returned: its
+        last tick may be manuscripts ago, and the loop checks them before it takes a
+        worker's result. The time limit is a tick's check, there as here: the worker's
+        ``_time_limited`` is its progress callback, and a lookup that ended is complete.
+        The time this takes, resolution included, comes off a shared limit; the
+        engine's cut-off signal lands on this thread, as a worker's is copied onto it.
+        """
+        from shared.search_regex import _deadline, SearchBudgetExceeded
+        cancelled = self._cancel or _cancel_context.get()
+        started = time.monotonic()
+        stopped = {'time_limit': False}
+
+        def check(at_tick=True):
+            now = time.monotonic()
+            if cancelled is not None and cancelled.is_set():
+                raise InterruptedError('Search cancelled')
+            deadline = _deadline.get()
+            if self._deadline is not None:
+                deadline = min(deadline or float('inf'), self._deadline)
+            if deadline is not None and now >= deadline:
+                raise SearchBudgetExceeded()
+            if at_tick and time_limit and now - started >= time_limit:
+                stopped['time_limit'] = True
+                raise InterruptedError('Search time limit reached')
+
+        def inline_progress(*values):
+            check()
+            if progress:
+                progress(*values)
+
+        try:
+            check()
+            sys_ids = self._resolve_metadata_search(arguments)
+            if sys_ids is None:
+                return _TO_WORKER
+            arguments['metadata_sys_ids'] = sys_ids
+            if len(sys_ids) > INLINE_METADATA_ROWS:
+                return _TO_WORKER
+            result = original(**arguments, progress_callback=inline_progress)
+        finally:
+            if shared is not None and shared['left'] is not None:
+                shared['left'] -= time.monotonic() - started
+        # The engine answers a cancel with the rows it had; the caller of a cancelled
+        # search gets what the worker path gives it.
+        check(at_tick=False)
+        _time_limit_stop.value = stopped['time_limit']
+        return result
+
     def __getattr__(self, name):
         original = getattr(self._engine, name)
         if name not in {'execute_search', 'search_composition_logic', 'lab_search', 'lab_composition_search'}:
@@ -565,7 +651,6 @@ class IsolatedEngine:
             consume_time_limit_stop()
             _consume_last_responsa_downgrade()
             _consume_last_responsa_downgrade_meta()
-            queue = get_queue()
             from shared.config import Config
             time_limit = Config.WEB_SEARCH_TIME_LIMIT
             shared = _shared_limit.get()
@@ -574,6 +659,14 @@ class IsolatedEngine:
                     shared['left'] = float(time_limit)
                 # What is left of the shared limit; 0 would mean no limit to the worker.
                 time_limit = max(shared['left'], 0.001)
+            if name == 'execute_search' and arguments.get('mode') in METADATA_SEARCH_MODES:
+                result = self._metadata_search(original, arguments, progress, time_limit, shared)
+                if result is not _TO_WORKER:
+                    return result
+                if shared is not None and time_limit:
+                    # Resolving the manuscripts here took from the shared limit.
+                    time_limit = max(shared['left'], 0.001)
+            queue = get_queue()
             payload = {'kind': self._kind, 'method': name, 'arguments': arguments,
                        'options': self._options, 'settings': self.job_settings(),
                        'time_limit': time_limit}

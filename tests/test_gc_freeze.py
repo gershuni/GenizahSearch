@@ -392,7 +392,9 @@ def test_initialize_engine_schedules_the_freeze_only_on_success(monkeypatch, ini
     if expect:
         state, extra_tasks = calls[0]
         assert state is web_main.state
-        assert len(extra_tasks) == 1 and isinstance(extra_tasks[0], asyncio.Task)
+        # The FJMS/criteria prewarm and the Shelfmark search index prewarm (2026-11-03).
+        assert {t.get_name() for t in extra_tasks} == {'fjms-prewarm', 'shelfmark-search-prewarm'}
+        assert all(isinstance(t, asyncio.Task) for t in extra_tasks)
 
 
 # ---------------------------------------------------------------------------
