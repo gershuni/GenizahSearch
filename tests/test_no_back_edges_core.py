@@ -88,6 +88,7 @@ EXTRACTED_MODULES = [
     "shared/catalog_criteria.py",        # catalogue criteria plan, PR 1a, 2026-11-01
     "shared/cudl_identity.py",           # structural CUDL identity, 2026-10-29
     "shared/quick_open.py",              # the desktop Go to box (Ctrl+G), 2026-10-24
+    "shared/keyboard_layout.py",         # the /search box's wrong-layout suggestion, 2026-11-03
     "shared/exclusion_service.py",
     "shared/export_dossier.py",
     "shared/export_utils.py",
