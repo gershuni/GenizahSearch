@@ -2787,4 +2787,7 @@ body {
     margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--border-light, #e2e8f0);
     font-size: 0.68rem; line-height: 1.4; color: var(--text-muted, #64748b);
 }
+/* The credit is the link to the dictionary site: muted like the text around
+   it, underlined so it reads as a link; beats the theme's `[data-theme] a`. */
+.gs-blau .credit a { color: inherit; text-decoration: underline; text-decoration-style: dotted; display: block; }
 .blau-hint { color: var(--text-muted, #64748b); }

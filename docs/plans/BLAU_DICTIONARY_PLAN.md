@@ -330,6 +330,19 @@ to the search. Costs: 6,495 keys × one indexed whole-word search; measured on a
   inside the popover): a click on `.blau-close` now unwraps the mark before the page hides the
   popover.
 
+**Round 2** (`aa877b04`), Codex: three P2, all fixed.
+- Cards were keyed by entry, so two candidates that reached the same entry (`ובלג` and `בלג`)
+  merged into one card with the first candidate's metadata, against §6.2: a card is now one
+  scope (an entry, or one sub-entry of it) reached by one candidate, in candidate order
+  (`test_two_candidates_that_reach_the_same_entry_are_two_cards_in_candidate_order`,
+  `test_a_root_hit_and_a_sub_entry_hit_of_one_candidate_are_two_scopes`).
+- The click script's word class spanned U+0591-05C7, which includes the maqaf, paseq, sof pasuq
+  and nun hafukha -- punctuation that `normalize_ja` treats as a word boundary, so a click on
+  `אב־גד` looked up the pair as a phrase: the class now names the combining marks only, pinned
+  by running the script's class as a Python regex.
+- The credit line was plain text; ruling (a) wants the site linked on every surface, and an
+  empty answer had no other link: both credit lines are links to the site.
+
 ### Phase 1 (PR #472)
 
 **Round 1** (PR #472, `4794cf69`), Codex: two P2, both fixed.

@@ -25,7 +25,7 @@ from typing import Any, Callable, Optional
 
 from nicegui import ui
 
-from shared.blau_service import BlauCard, BlauLookup, BlauSense
+from shared.blau_service import SITE_URL, BlauCard, BlauLookup, BlauSense
 from web.translations import tr
 
 logger = logging.getLogger(__name__)
@@ -174,10 +174,13 @@ def _render_examples(result: BlauLookup, lang: str) -> None:
 
 
 def _render_credit(credit_he: str, credit_en: str, lang: str) -> None:
+    """The credit, as a link to the dictionary site (ruling (a): the credit
+    with the site linked, on every panel -- an empty answer has no other
+    link to it)."""
     with ui.element('div').classes(f'{CREDIT_CLASS} credit'):
-        ui.label(credit_he).props('dir="rtl"').classes('credit-he')
+        ui.link(credit_he, SITE_URL, new_tab=True).props('dir="rtl"').classes('credit-he')
         if lang != 'he' and credit_en:
-            ui.label(credit_en).props('dir="ltr"').classes('credit-en')
+            ui.link(credit_en, SITE_URL, new_tab=True).props('dir="ltr"').classes('credit-en')
 
 
 def render_lookup(result: BlauLookup, *, credit_he: str, credit_en: str = '', lang: str = 'he',

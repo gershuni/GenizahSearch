@@ -25,8 +25,9 @@ The lookup (plan §6.2): ``normalize_ja`` the clicked word, then
 ``candidate_stems`` in order -- the word first, then one proclitic layer
 peeled, then one pronoun suffix -- each against ``forms_norm``. A key of a
 headword-like kind (root, sub-entry, headword, variant) makes one card per
-dictionary entry, in candidate order, with the senses under the matched
-sub-entry or root. A key found only inside the dictionary's own example
+scope it reaches -- a dictionary entry, or one sub-entry of it -- per
+candidate, in candidate order, with the matched senses first and then the
+senses under that scope. A key found only inside the dictionary's own example
 phrases (kind ``phrase``) is listed apart, under "also in examples": the entry
 it sits in defines some OTHER word. Ambiguity is the norm, not an error:
 several candidates that hit are several cards, never one merged answer.
@@ -172,18 +173,20 @@ def empty_lookup(word: str = "", key: str = "", candidates: tuple[str, ...] = ()
 
 
 class _CardBuild:
-    """A card while its hits are collected."""
+    """A card while its hits are collected: one scope (an entry, or one of its
+    sub-entries) reached by one candidate."""
 
     __slots__ = ("root", "candidate", "matched_key", "matched_kind", "via", "sub_entry_id",
                  "matched_form_ids")
 
-    def __init__(self, root: sqlite3.Row, candidate: str, matched_key: str, matched_kind: str, via: str):
+    def __init__(self, root: sqlite3.Row, candidate: str, matched_key: str, matched_kind: str, via: str,
+                 sub_entry_id: str):
         self.root = root
         self.candidate = candidate
         self.matched_key = matched_key
         self.matched_kind = matched_kind
         self.via = via
-        self.sub_entry_id: Optional[str] = None
+        self.sub_entry_id = sub_entry_id
         self.matched_form_ids: list[str] = []
 
 
@@ -300,8 +303,14 @@ class BlauService:
             return empty_lookup(word, key, candidates)
 
     def _lookup(self, word: str, key: str, candidates: tuple[str, ...]) -> BlauLookup:
-        cards: dict[str, _CardBuild] = {}
-        overflow: set[str] = set()
+        # A card is one scope reached by one candidate: keyed by (candidate,
+        # root, sub-entry), so two candidates that reach the same entry (כתאב
+        # and תאב) stay two cards in candidate order, and a root hit and a
+        # sub-entry hit under it are not one card with mixed senses (plan §6.2;
+        # Codex on #473).
+        cards: dict[tuple[str, str, str], _CardBuild] = {}
+        card_roots: set[str] = set()
+        overflow: set[tuple[str, str, str]] = set()
         phrase_rows: list[sqlite3.Row] = []
         roots: dict[str, Optional[sqlite3.Row]] = {}
         for candidate in candidates:
@@ -312,14 +321,14 @@ class BlauService:
             for row in rows:
                 kind = row["kind"]
                 if kind in _KIND_RANK:
-                    self._add_hit(cards, overflow, roots, row, candidate)
+                    self._add_hit(cards, card_roots, overflow, roots, row, candidate)
                 elif kind == PHRASE_KIND:
                     phrase_rows.append(row)
         examples: dict[str, BlauExample] = {}
         example_overflow: set[str] = set()
         for row in phrase_rows:
             root_id = _text(row["root_id"])
-            if not root_id or root_id in cards or root_id in examples or root_id in example_overflow:
+            if not root_id or root_id in card_roots or root_id in examples or root_id in example_overflow:
                 continue
             root = self._root(roots, root_id)
             if root is None:
@@ -337,8 +346,9 @@ class BlauService:
             more_examples=len(example_overflow),
         )
 
-    def _add_hit(self, cards: dict[str, _CardBuild], overflow: set[str],
-                 roots: dict[str, Optional[sqlite3.Row]], row: sqlite3.Row, candidate: str) -> None:
+    def _add_hit(self, cards: dict[tuple[str, str, str], _CardBuild], card_roots: set[str],
+                 overflow: set[tuple[str, str, str]], roots: dict[str, Optional[sqlite3.Row]],
+                 row: sqlite3.Row, candidate: str) -> None:
         root_id = _text(row["root_id"])
         root = self._root(roots, root_id)
         if root is None:  # the gate forbids a dangling root; never trust it anyway
@@ -349,18 +359,19 @@ class BlauService:
             if target is not None:
                 via = _text(root["name_ja"])
                 root, root_id = target, _text(target["id"])
-        build = cards.get(root_id)
+        # The scope: the sub-entry the key sits under, else the whole entry.
+        sub_entry_id = _text(row["sub_entry_id"]) if row["kind"] != "root" else ""
+        key = (candidate, root_id, sub_entry_id)
+        build = cards.get(key)
         if build is None:
             if len(cards) >= MAX_CARDS:
-                overflow.add(root_id)
+                overflow.add(key)
                 return
-            build = cards[root_id] = _CardBuild(root, candidate, _text(row["raw"]), row["kind"], via)
+            build = cards[key] = _CardBuild(root, candidate, _text(row["raw"]), row["kind"], via, sub_entry_id)
+            card_roots.add(root_id)
         form_id = _text(row["form_id"])
         if form_id and form_id not in build.matched_form_ids:
             build.matched_form_ids.append(form_id)
-        sub_entry_id = _text(row["sub_entry_id"])
-        if sub_entry_id and build.sub_entry_id is None and row["kind"] != "root":
-            build.sub_entry_id = sub_entry_id
 
     def _finish(self, build: _CardBuild, roots: dict[str, Optional[sqlite3.Row]]) -> BlauCard:
         root = build.root

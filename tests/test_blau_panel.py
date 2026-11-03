@@ -49,6 +49,19 @@ def test_the_script_and_the_renderer_use_the_same_names():
     assert "JSON.stringify" in JS and "word: word.text" in JS
 
 
+def test_the_script_s_word_characters_match_the_normalizer_s_word():
+    """The class the script widens a click over, run as a Python regex (same
+    syntax): Hebrew letters, combining marks and the quote family are word
+    characters; the Hebrew punctuation between the marks is not -- a maqaf ends
+    a word for `normalize_ja` too (Codex on #473)."""
+    source = re.search(r"var WORD_CHAR = /(\[.*?\])/;", JS).group(1)
+    word_char = re.compile(source)
+    for ch in "אבת" + "ָׇּׁ̇" + "'\"׳״‘’":
+        assert word_char.match(ch), hex(ord(ch))
+    for ch in "־׀׃׆" + " .,;:()[]|" + "abc" + "ذل":
+        assert not word_char.match(ch), hex(ord(ch))
+
+
 def test_the_stylesheet_styles_what_the_renderer_and_the_script_make():
     for selector in (f".{blau_panel.POPOVER_CLASS} {{", f".{blau_panel.HIT_CLASS} {{",
                      f".{blau_panel.PANEL_CLASS} .credit {{", f".{blau_panel.PANEL_CLASS} .card {{",

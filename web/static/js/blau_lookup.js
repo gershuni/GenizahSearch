@@ -25,7 +25,12 @@
   var PANE = '[data-blau-lookup]';
   var HIT = 'blau-word-hit';
   var CLOSE = 'blau-close';   // the panel's own close control (the page hides the popover)
-  var WORD_CHAR = /[א-ת֑-ׇ̀-ͯ'"׳״‘’]/;
+  // Hebrew letters; the Hebrew combining marks (U+0591-05BD, 05BF, 05C1-05C2,
+  // 05C4-05C5, 05C7 -- NOT the punctuation between them: maqaf 05BE, paseq
+  // 05C0, sof pasuq 05C3, nun hafukha 05C6, which end a word as they do for
+  // shared/blau_normalize.py); the combining diacriticals; the apostrophe and
+  // geresh family the transcriptions write the Judeo-Arabic letters with.
+  var WORD_CHAR = /[א-ת֑-ׇֽֿׁׂׅׄ̀-ͯ'"׳״‘’]/;
   var WIDTH = 440;   // keep in step with .gs-blau-popover in common.css
   var HEIGHT = 380;
   var GAP = 8;

@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from nicegui import events, ui
 
-from shared.blau_service import BlauCard, BlauExample, BlauLookup, BlauSense, empty_lookup
+from shared.blau_service import SITE_URL, BlauCard, BlauExample, BlauLookup, BlauSense, empty_lookup
 from tests.render_smoke.test_browse_button_icons_render_smoke import (
     OPEN_PAGE, SID, _all_elements, _run_home_smoke, _service, _wait_until,
 )
@@ -151,8 +151,10 @@ def test_a_lookup_draws_the_cards_and_the_credit_line_and_the_close_hides_them()
         assert 'אלכתאב' in texts and 'I' in texts and "'document, deed'" in texts
         assert '+3 more senses on the site' in texts
         assert 'Also in the examples under' in texts and 'וג̇ה' in texts and '+2' in texts
-        assert {ENTRY_URL, EXAMPLE_URL} <= _links(user)
+        assert {ENTRY_URL, EXAMPLE_URL, SITE_URL} <= _links(user)
         assert CREDIT_HE in texts and CREDIT_EN in texts
+        credit_links = [e for e in _all_elements(user) if isinstance(e, ui.link) and e.props.get('href') == SITE_URL]
+        assert sorted(e.text for e in credit_links) == sorted([CREDIT_HE, CREDIT_EN])
         [close] = [e for e in _all_elements(user) if isinstance(e, ui.button) and blau_panel.CLOSE_CLASS in e.classes]
         assert close.props.get('aria-label') == 'Close'
 
@@ -197,6 +199,7 @@ def test_an_empty_answer_says_what_was_looked_for():
         assert 'Nothing in the dictionary for this word.' in texts
         assert 'Looked for' in texts and 'וזזז' in texts and 'זזז' in texts
         assert CREDIT_HE in texts
+        assert SITE_URL in _links(user), 'an empty answer still links the credited site'
 
     _run(driver, _dictionary(result=result), lang='en')
 

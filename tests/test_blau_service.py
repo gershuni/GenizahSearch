@@ -184,6 +184,32 @@ def test_a_proclitic_is_peeled_and_the_headword_under_a_sub_entry_found(service)
     assert [(s.form_id, s.matched) for s in card.senses] == [("blau-f-000003", True)]
 
 
+def test_two_candidates_that_reach_the_same_entry_are_two_cards_in_candidate_order(tmp_path):
+    # Codex on #473: a card is one scope reached by one candidate, never a merge.
+    data = dictionary()
+    data["בלג (بلغ)"]["stems"][0]["forms"][0]["segments"].append(_ja("ובלג", "variant_ja"))
+    svc = BlauService(str(_build(tmp_path, data)))
+    result = svc.lookup("ובלג")
+    assert result.candidates[:2] == ("ובלג", "בלג")  # then לג, with ב read as a preposition: no hit
+    assert [(c.root_id, c.candidate, c.matched_kind, c.matched_key) for c in result.cards] == [
+        (ROOT_3, "ובלג", "variant", "ובלג"), (ROOT_3, "בלג", "root", "בלג")]
+    first, second = result.cards
+    assert first.senses[0].matched and first.senses[0].ja_text == "ובלג"
+    assert not any(s.matched for s in second.senses)
+    assert result.examples == ()
+
+
+def test_a_root_hit_and_a_sub_entry_hit_of_one_candidate_are_two_scopes(tmp_path):
+    data = dictionary()
+    data["בלג (بلغ)"]["name_ja"] = ["מאכ̇ד̇"]  # a root named like root 1's sub-entry
+    data["בלג (بلغ)"]["name_ja_clean"] = ["מאכ̇ד̇"]
+    svc = BlauService(str(_build(tmp_path, data)))
+    cards = svc.lookup("מאכ̇ד̇").cards
+    assert [(c.root_id, c.matched_kind, c.sub_entry) for c in cards] == [
+        (ROOT_3, "root", ""), (ROOT_1, "sub_entry", "מאכ̇ד̇")]
+    assert [s.form_id for s in cards[1].senses] == ["blau-f-000003"]
+
+
 def test_a_cross_reference_root_leads_to_its_target(service):
     result = service.lookup("חוה")
     assert [c.root_id for c in result.cards] == [ROOT_1]
