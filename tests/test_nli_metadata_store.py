@@ -250,7 +250,7 @@ class TestFetchIiifManifest:
         session = _serve(mm, monkeypatch, _Session(raises=AssertionError('no network call expected')))
         assert mm.fetch_iiif_manifest(SYS, suffix=2) == MANIFEST_PARSED
         assert session.calls == []
-        assert MetadataManager._iiif_manifest_cache[(SYS, 2)] == MANIFEST_PARSED
+        assert MetadataManager._iiif_manifest_cache[(SYS, 2)][0] == MANIFEST_PARSED
 
     def test_a_successful_parse_is_stored(self, mm, monkeypatch):
         _serve(mm, monkeypatch, _Session(answer=_Resp(200, json.dumps(MANIFEST_BODY), json_body=MANIFEST_BODY)))
@@ -348,3 +348,73 @@ def test_browse_shows_the_stale_note_and_the_web_counts_the_store():
     assert 'nli_metadata_store.metadata_store_prepare()' in api
     from web.services import BrowsePage
     assert BrowsePage.__dataclass_fields__['nli_stale_from'].default is None
+
+
+# ─── Codex round 1 on #470 ────────────────────────────────────────────────────
+
+class TestAnEmptyAnswerWithStatus200:
+    """P1: a well-formed body with nothing in it must not replace the stored copy, be
+    recorded as a success, or sit in the memory cache."""
+
+    def test_marc_stale_row_survives_an_empty_record(self, mm, monkeypatch):
+        store.metadata_store_put('marc', SYS, 1, MARC_PARSED, now=time.time() - 40 * DAY)
+        br.record_failure('timeout', 'preload')  # one failure on the counter...
+        _serve(mm, monkeypatch, _Session(answer=_Resp(200, '<record><leader>x</leader></record>')))
+        result = mm.fetch_marc_data(SYS)
+        assert result['stale'] is True and result['bibliography'] == MARC_PARSED['bibliography']
+        assert store.metadata_store_get('marc', SYS, 1).payload == MARC_PARSED
+        assert br._state_snapshot()['consecutive_failures'] == 1  # ...not reset: it was no answer
+        assert SYS in MetadataManager._marc_fail_cache
+
+    def test_manifest_stale_row_survives_a_json_error_object(self, mm, monkeypatch):
+        store.metadata_store_put('manifest', SYS, 1, MANIFEST_PARSED, now=time.time() - 40 * DAY)
+        _serve(mm, monkeypatch, _Session(answer=_Resp(200, '{}', json_body={'error': 'not available'})))
+        result = mm.fetch_iiif_manifest(SYS)
+        assert result['stale'] is True and result['canvas_map'] == MANIFEST_PARSED['canvas_map']
+        assert store.metadata_store_get('manifest', SYS, 1).payload == MANIFEST_PARSED
+        assert (SYS, 1) not in MetadataManager._iiif_manifest_cache
+
+    def test_an_empty_manifest_is_not_memory_cached_for_the_life_of_the_process(self, mm, monkeypatch):
+        session = _serve(mm, monkeypatch, _Session(answer=_Resp(200, '{}', json_body={'sequences': []})))
+        assert mm.fetch_iiif_manifest(SYS)['canvas_map'] == {}
+        assert (SYS, 1) not in MetadataManager._iiif_manifest_cache
+        assert (SYS, 1) in MetadataManager._iiif_manifest_fail_cache  # held off for _NLI_FAIL_TTL only
+        MetadataManager._iiif_manifest_fail_cache.clear()
+        mm.fetch_iiif_manifest(SYS)
+        assert len(session.calls) == 2
+
+
+class TestTheMemoryCacheAgesWithTheDiskTtl:
+    """P2: the manifest memory cache had no TTL, so a long-running server served one
+    manifest for the life of the process and NLI_METADATA_STORE_TTL=0 refreshed nothing."""
+
+    def test_ttl_zero_asks_nli_on_every_call(self, mm, monkeypatch):
+        monkeypatch.setattr(store, 'NLI_METADATA_STORE_TTL', 0)
+        session = _serve(mm, monkeypatch, _Session(answer=_Resp(200, json.dumps(MANIFEST_BODY), json_body=MANIFEST_BODY)))
+        mm.fetch_iiif_manifest(SYS)
+        mm.fetch_iiif_manifest(SYS)
+        assert len(session.calls) == 2
+        # ...and the stored row still serves an outage
+        _serve(mm, monkeypatch, _Session(raises=requests.exceptions.Timeout('slow')))
+        MetadataManager._iiif_manifest_fail_cache.clear()
+        assert mm.fetch_iiif_manifest(SYS)['stale'] is True
+
+    def test_a_memory_entry_expires_with_the_disk_row(self, mm, monkeypatch):
+        session = _serve(mm, monkeypatch, _Session(answer=_Resp(200, json.dumps(MANIFEST_BODY), json_body=MANIFEST_BODY)))
+        fetched = time.time()
+        mm.fetch_iiif_manifest(SYS)
+        mm.fetch_iiif_manifest(SYS)
+        assert len(session.calls) == 1  # memory
+        monkeypatch.setattr(time, 'time', lambda: fetched + 40 * DAY)
+        mm.fetch_iiif_manifest(SYS)
+        assert len(session.calls) == 2  # past the TTL: asked again
+
+    def test_a_disk_row_brought_into_memory_keeps_its_own_age(self, mm, monkeypatch):
+        now = time.time()
+        store.metadata_store_put('manifest', SYS, 1, MANIFEST_PARSED, now=now - 25 * DAY)
+        session = _serve(mm, monkeypatch, _Session(answer=_Resp(200, json.dumps(MANIFEST_BODY), json_body=MANIFEST_BODY)))
+        assert mm.fetch_iiif_manifest(SYS) == MANIFEST_PARSED and session.calls == []
+        assert MetadataManager._iiif_manifest_cache[(SYS, 1)][1] == pytest.approx(now - 25 * DAY)
+        monkeypatch.setattr(time, 'time', lambda: now + 10 * DAY)  # the row is now 35 days old
+        mm.fetch_iiif_manifest(SYS)
+        assert len(session.calls) == 1

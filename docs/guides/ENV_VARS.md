@@ -189,9 +189,10 @@ NLI_THUMB_CACHE_MIN_FREE_MB=2048      # no thumbnail is written while the disk h
 # 30 days to 2026-11-03). Only a parse with content is written. A cache: safe to delete, refills.
 NLI_METADATA_STORE_FILE=              # the file (default <INDEX_DIR>/nli_metadata.db); an EMPTY value turns the
                                        # store off. tests/conftest.py points it at a temporary file per test
-NLI_METADATA_STORE_TTL=2592000        # seconds a row answers in NLI's place (30 days, as NLI_DISK_CACHE_TTL).
-                                       # 0 = ask NLI on every call and keep the row for outages only; rows are
-                                       # never dropped for age, since an old row is what an outage is served from
+NLI_METADATA_STORE_TTL=2592000        # seconds a row answers in NLI's place (30 days, as NLI_DISK_CACHE_TTL);
+                                       # the manifest memory cache ages with it too. 0 = ask NLI on every call
+                                       # and keep the row for outages only; rows are never dropped for age,
+                                       # since an old row is what an outage is served from
 NLI_METADATA_STORE_MAX_ROWS=200000    # row cap (about 2 KB a row, so 400 MB at most); past it the oldest-fetched
                                        # rows go, at each write and at web startup. 0 = no cap
 

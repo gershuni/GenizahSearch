@@ -1086,6 +1086,25 @@ class MetadataManager:
         for cache_key in stale:
             cache.pop(cache_key, None)
 
+    # The manifest memory cache holds (result, fetched_at) and ages with the disk
+    # store's TTL (NLI_METADATA_STORE_TTL): a server that runs past it asks NLI again
+    # instead of serving one manifest for the life of the process, and a TTL of 0
+    # means every call asks (Codex on #470).
+    def _manifest_memory_get(self, cache_key, now: float):
+        entry = self._bounded_cache_get(self._iiif_manifest_cache, cache_key)
+        if entry is None:
+            return None
+        result, fetched_at = entry
+        if now - fetched_at < _nli_store.NLI_METADATA_STORE_TTL:
+            return result
+        self._iiif_manifest_cache.pop(cache_key, None)
+        return None
+
+    def _manifest_memory_set(self, cache_key, result: dict, fetched_at: float) -> None:
+        self._bounded_cache_set(
+            self._iiif_manifest_cache, cache_key, (result, fetched_at), self._IIIF_MANIFEST_CACHE_MAX,
+        )
+
     def get_runtime_cache_stats(self) -> dict:
         """Return lightweight cache sizes for the memstat diagnostic endpoint."""
         return {
@@ -1112,9 +1131,10 @@ class MetadataManager:
         if is_synthetic_sys_id(system_id):
             return {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
 
-        # Check manifest-only cache first
+        # Check manifest-only cache first (aged with the disk store's TTL)
         cache_key = (system_id, suffix)
-        cached_manifest = self._bounded_cache_get(self._iiif_manifest_cache, cache_key)
+        now = time.time()
+        cached_manifest = self._manifest_memory_get(cache_key, now)
         if cached_manifest is not None:
             return cached_manifest
 
@@ -1127,11 +1147,10 @@ class MetadataManager:
         # fresh one (NLI_METADATA_STORE_TTL) answers in NLI's place; an older one is
         # refreshed below and, when NLI cannot answer now, served marked stale -- so a
         # breaker window or a 5xx streak no longer empties the page's image list.
-        stored = _nli_store.metadata_store_get('manifest', system_id, suffix)
+        stored = _nli_store.metadata_store_get('manifest', system_id, suffix, now=now)
         if stored is not None and stored.fresh:
-            self._bounded_cache_set(
-                self._iiif_manifest_cache, cache_key, stored.payload, self._IIIF_MANIFEST_CACHE_MAX,
-            )
+            # Into memory with the row's own fetch time, so both expire together.
+            self._manifest_memory_set(cache_key, stored.payload, stored.fetched_at)
             return stored.payload
 
         def _unavailable():
@@ -1149,7 +1168,6 @@ class MetadataManager:
 
         # Negative cache: if this sys_id recently timed out, return empty
         # without re-trying. TTL lets the cache age out so recovery works.
-        now = time.time()
         fail_ts = self._timestamp_cache_recent(
             self._iiif_manifest_fail_cache, cache_key, self._NLI_FAIL_TTL, now
         )
@@ -1195,12 +1213,16 @@ class MetadataManager:
                                 fl_digits = fl_match.group(1)
                                 result['canvas_map'][fl_digits] = label
 
-                self._bounded_cache_set(
-                    self._iiif_manifest_cache,
-                    cache_key,
-                    result,
-                    self._IIIF_MANIFEST_CACHE_MAX,
-                )
+                if not _nli_store.has_content(result):
+                    # A well-formed body with nothing in it (NLI's JSON error object
+                    # with status 200, a manifest without canvases) is not an answer:
+                    # neither a breaker success nor a failure (D-07), the per-sys_id
+                    # negative cache as for a 404, never the memory cache, and the
+                    # stored copy when there is one (Codex P1 on #470).
+                    LOGGER.warning(f"IIIF manifest for {system_id} (suffix={suffix}) parsed empty")
+                    self._timestamp_cache_set(self._iiif_manifest_fail_cache, cache_key, time.time())
+                    return _unavailable()
+                self._manifest_memory_set(cache_key, result, time.time())
                 self._iiif_manifest_fail_cache.pop(cache_key, None)
                 _nli_record_success(path='fetch_iiif_manifest')
                 # Kept on disk only now, after a parse with content: an error page or
@@ -1391,6 +1413,13 @@ class MetadataManager:
                         val = get_sub('a')
                         if val: result['attribution'] = val
 
+                if not _nli_store.has_content(result):
+                    # Well-formed XML with none of the fields read above (an error
+                    # document with status 200): not an answer -- as in
+                    # fetch_iiif_manifest, the negative cache and the stored copy.
+                    LOGGER.warning(f"MARC record for {system_id} parsed empty")
+                    self._timestamp_cache_set(self._marc_fail_cache, system_id, time.time())
+                    return _unavailable()
                 self._marc_fail_cache.pop(system_id, None)
                 _nli_record_success(path='fetch_marc_data')
                 # Kept on disk only now, after a parse with content: an error page or

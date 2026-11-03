@@ -20,7 +20,11 @@ read by both apps.
   is served instead, marked `stale: True` with its `fetched_at`, and the breaker and
   the per-manuscript negative cache record the failure as before.
 - Only a parse with content is written: an error page served with status 200, an
-  empty manifest or a record with no fields never replaces the last good copy.
+  empty manifest or a record with no fields never replaces the last good copy. Such
+  an empty answer is no answer: it is not a breaker success, it goes into the
+  per-manuscript negative cache as a 404 does, and the stored copy is served.
+- The manifest memory cache, which had no lifetime, now ages with the same TTL: a
+  server running past it asks NLI again, and a TTL of 0 asks on every call.
 - Synthetic sys_ids reach neither the store nor the network (Phase 85 D-14); the
   store refuses them too.
 - The file is capped at `NLI_METADATA_STORE_MAX_ROWS` (200,000, about 2 KB a row),
