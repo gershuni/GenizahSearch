@@ -52,7 +52,7 @@ def test_resend_confirmation_email_calls_supabase_resend(monkeypatch):
     assert calls == [{'type': 'signup', 'email': 'a@b.c'}]
 
 
-def _drive(monkeypatch, login_result, clicks, oauth_error=None, edit_email_to=None):
+def _drive(monkeypatch, login_result, clicks, oauth_error=None, edit_email_to=None, edit_during_login=None):
     """Open the login dialog, press Login with `login_result`, then press the
     buttons named in `clicks`. Returns (buttons visible, notes, resends, events)."""
     from nicegui import core, ui
@@ -62,7 +62,12 @@ def _drive(monkeypatch, login_result, clicks, oauth_error=None, edit_email_to=No
     import web.analytics as analytics
     import web.supabase_client as sc
 
+    holder = {}
+
     async def fake_login(email, password):
+        if edit_during_login:
+            holder['email'].value = edit_during_login
+            await asyncio.sleep(0)
         return login_result
 
     events, resends = [], []
@@ -93,6 +98,7 @@ def _drive(monkeypatch, login_result, clicks, oauth_error=None, edit_email_to=No
         panel = [e for e in client.elements.values() if isinstance(e, ui.tab_panel)][0]
         email, pw = [e for e in panel.descendants() if isinstance(e, ui.input)][:2]
         email.value, pw.value = 'a@b.c', 'pw'
+        holder['email'] = email
         press(client, 'Login')
         await asyncio.sleep(0.2)
         if edit_email_to:
@@ -146,4 +152,11 @@ def test_resend_uses_the_address_that_failed_not_the_edited_field(monkeypatch):
     _, _, resends, _ = _drive(
         monkeypatch, {'error': 'Unconfirmed', 'error_code': 'email_not_confirmed'},
         ['Resend confirmation email'], edit_email_to='someone@else.org')
+    assert resends == ['a@b.c']
+
+
+def test_resend_address_is_captured_before_the_login_await(monkeypatch):
+    _, _, resends, _ = _drive(
+        monkeypatch, {'error': 'Unconfirmed', 'error_code': 'email_not_confirmed'},
+        ['Resend confirmation email'], edit_during_login='other@x.org')
     assert resends == ['a@b.c']

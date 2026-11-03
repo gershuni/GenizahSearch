@@ -574,11 +574,12 @@ def create_login_dialog():
                             login_error.classes('visible', remove='hidden')
                             return
 
+                        attempted_email = (login_email.value or '').strip()  # before the await: the field stays editable
                         result = await do_login(login_email.value, login_password.value)
                         if "error" in result:
                             login_error.text = result["error"]
                             login_error.classes('visible', remove='hidden')
-                            resend_state['email'] = (login_email.value or '').strip()
+                            resend_state['email'] = attempted_email
                             set_affordance(login_error_affordance(result.get('error_code')))
                         else:
                             # Save or clear email based on "Remember me" checkbox
