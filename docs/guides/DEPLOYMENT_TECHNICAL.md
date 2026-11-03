@@ -1124,6 +1124,7 @@ All sidecar databases are **NOT in git** (listed in `.gitignore`). They must be 
 | `nli_crossref.db` | `nli_data/` | 248 MB | v1.2.0 | NLI crossref images (815K), Cambridge manifests (141K), Manchester LUNA (28K), JTS DPUL (453) |
 | `pgp.db` | `pgp_data/` | ~156 MB | 1.1.0 | PGP documents (36.6K), sources (10.4K), footnotes (23.8K), fragments (37.4K), meta. **No `pgp_translations`** -- withheld by owner decision (`docs/plans/PGP_TRANSLATION_QUALITY.md`); `scripts/check_shipping_sidecar.py` refuses a copy that carries it |
 | `libraries_translations.db` | project root | 76 MB | - | Dicta translations for library titles (~185K records, Hebrew↔English) |
+| `blau.db` | `blau_data/` | 32 MB | 1.0.0 | Joshua Blau's *Dictionary of Mediaeval Judaeo-Arabic Texts* (2006; blau-dict.netlify.app release 1.1): roots (3,047), sub-entries (3,665), stems (8,295), forms (12,753), citations (41,970), sources (337), `forms_norm` lookup keys (41,932), `meta` with the credit line. Read by `shared/blau_service.py` for `/browse`; deploy with `scripts/deploy_blau_sidecar.ps1 -Roots 3047 -Forms 12753` (the gate before the upload, on the uploaded copy and on the served file; the code must be on the server first, since the gate imports from the repository) |
 
 #### Initial Upload to Server
 
@@ -1137,6 +1138,9 @@ scp nli_data/nli_crossref.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazona
 # withheld corpus. (Deploys run from PowerShell 5.1 with native OpenSSH, where a bash
 # `&&` chain is a parse error -- so the guard and the upload live in one script.)
 #   powershell -File scripts/deploy_pgp_sidecar.ps1
+# blau.db likewise goes through its script: the gate runs on the local file, on the uploaded
+# copy and on the served file, and the swap happens only when all three pass.
+#   powershell -File scripts/deploy_blau_sidecar.ps1 -Roots 3047 -Forms 12753
 
 scp libraries_translations.db ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com:/home/ubuntu/GenizahSearch/
 

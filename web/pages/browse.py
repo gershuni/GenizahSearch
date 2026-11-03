@@ -25,6 +25,8 @@ from shared.fgp_service import (
 )
 from shared.transcription_credits import resolve_transcription_credit
 from shared.export_utils import GENIZAHSEARCH_URL
+from shared.blau_service import get_blau_service
+from web.components import blau_panel
 from web.citation_chip import browse_page_citation, retrieved_today, set_page_citation
 
 logger = logging.getLogger(__name__)
@@ -711,6 +713,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     """
     state = BrowseState()
     refs = BrowsePageRefs(open_discovery_panel_requested=bool(open_computed))
+
+    # The Blau dictionary companion (docs/plans/BLAU_DICTIONARY_PLAN.md §6.2):
+    # decided ONCE per page build, fail-closed. The service is available only
+    # when the sidecar passed every check at open and the kill switch is on;
+    # without it the page carries no script, no popover and no marked pane,
+    # and is byte-for-byte what it was before.
+    blau_service = get_blau_service()
+    blau_on = blau_service.is_available()
+    if blau_on:
+        ui.add_head_html(blau_panel.head_html())
     service = get_service()
 
     # Track metadata panel visibility
@@ -4737,6 +4749,47 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     # -- a second gate here could only drift from it.
                     update_discovery_panel_section(state, refs)
 
+                # The dictionary popover (plan §6.2). ONE element per content
+                # build, fixed-positioned by the click script beside the word
+                # (a sheet at the foot of a phone), so where it sits in the
+                # tree does not matter; here, beside the other full-width
+                # placeholders, so `update_content()` rebuilds it with them
+                # and a lookup in flight for a page the reader has left finds
+                # a deleted element and stops. The script dispatches
+                # `blau-lookup` / `blau-close` on it; the page answers from
+                # the service off the loop and the renderer draws the answer.
+                # The reader's language is captured now: the handler runs
+                # outside any render, where the process global may be another
+                # visitor's (the same capture the deferred joins render makes).
+                if blau_on:
+                    blau_popover = ui.element('div').classes(
+                        f'{blau_panel.POPOVER_CLASS} {blau_panel.PANEL_CLASS} print-hide'
+                    ).style('display: none;').props('role="dialog" aria-live="polite"')
+                    _blau_lang = get_language()
+
+                    def _blau_hide(_e=None):
+                        if not blau_popover.is_deleted:
+                            blau_popover.style('display: none;')
+
+                    async def _blau_lookup(e):
+                        word = blau_panel.lookup_word(e.args)
+                        if not word:
+                            return
+                        result = await run.io_bound(blau_service.lookup, word)
+                        if result is None or blau_popover.is_deleted:
+                            return
+                        with using_language(_blau_lang):
+                            blau_popover.clear()
+                            with blau_popover:
+                                drawn = blau_panel.render_lookup(
+                                    result, credit_he=blau_service.credit_he,
+                                    credit_en=blau_service.credit_en, lang=_blau_lang,
+                                    on_close=_blau_hide)
+                        blau_popover.style('display: flex;' if drawn else 'display: none;')
+
+                    blau_popover.on(blau_panel.LOOKUP_EVENT, _blau_lookup)
+                    blau_popover.on(blau_panel.CLOSE_EVENT, _blau_hide)
+
                 # Main container with flex row
                 with ui.element('div').classes('viewer-panels').style(
                     'display: flex; flex-direction: row; gap: 16px; min-height: 60vh; width: 100%;'
@@ -5131,6 +5184,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
                             # Text content container
                             text_container = ui.column().classes('w-full h-full')
+                            if blau_on:
+                                # The pane whose words the click script looks up.
+                                text_container.props(blau_panel.PANE_ATTR)
                             current_text = {'value': page.text}
 
                             def render_text_content(text: str):
@@ -5222,6 +5278,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         icon='format_list_numbered',
                                         on_click=_toggle_line_numbers,
                                     ).props('flat round dense').tooltip(tr('Toggle line numbers'))
+                                    if blau_on:
+                                        ui.label(tr('Click a word for its dictionary entry')).classes(
+                                            'text-xs blau-hint print-hide')
 
                                 if state.enrichment_loaded:
                                     with version_row:
