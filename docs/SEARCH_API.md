@@ -974,7 +974,9 @@ curl -s https://genizahsearch.com/api/capabilities | python -m json.tool
     "capabilities_requests_per_minute": 120,
     "criteria_requests_per_minute": 120,
     "heavy_concurrency": 2,
-    "passage_concurrency": 4
+    "passage_concurrency": 4,
+    "interactive_concurrency": 2,
+    "daily_requests_per_address": 2000
   },
   "timeouts": {
     "search_core": 30.0,
@@ -1007,7 +1009,7 @@ curl -s https://genizahsearch.com/api/capabilities | python -m json.tool
 | `parallels.max_witnesses` | The **effective** cap — the largest witness count a request would actually be accepted with, which is the lower of `SEARCH_API_PASSAGE_MAX_WITNESSES` (default 25) and what the passage ceiling can afford. Two gates reject a witness list, not one: the handler also refuses on projected cost (`witnesses × 0.75 s > SEARCH_API_PASSAGE_TIMEOUT` → 400 `too_many_witnesses`), so lowering the passage timeout lowers the real cap without touching the cap variable. At defaults the projection binds nothing (30 / 0.75 = 40, above 25); at a 10 s ceiling the real cap is 13. `0` is a truthful answer when the ceiling cannot afford even one witness. |
 | `parallels.max_witness_chars` | The per-witness **length** cap (`MAX_WITNESS_CHARS`, 20,000 characters). A separate rejection from the count cap above — one over-long witness is a 400 `witness_too_long` regardless of how many were sent. |
 | `parallels.sorts` | `[]` when `parallels.multi_witness` is `false` (advertising sort values that `sort_requires_multi_witness` would reject without `witnesses` would be a lie); the three live `sort` values otherwise. |
-| `limits.*` | Live per-bucket rate ceilings (each reads `SEARCH_API_RATE_LIMIT`, tracked independently per endpoint — see Rate Limiting & Buckets) and the two concurrency budgets (`SEARCH_API_HEAVY_CONCURRENCY`, `SEARCH_API_PASSAGE_CONCURRENCY`). The concurrency values are what a request arriving **now** would face, resolved from the environment on each call — not the size the live semaphore was last built with, which lags a configuration change until the next acquisition. |
+| `limits.*` | Live per-bucket rate ceilings (each reads `SEARCH_API_RATE_LIMIT`, tracked independently per endpoint — see Rate Limiting & Buckets), the three concurrency budgets (`SEARCH_API_HEAVY_CONCURRENCY`, `SEARCH_API_PASSAGE_CONCURRENCY`, and since 2026-11-03 `SEARCH_API_INTERACTIVE_CONCURRENCY` as `interactive_concurrency`), and `daily_requests_per_address` (`SEARCH_API_DAILY_LIMIT`, 2026-11-03): the requests one address may make in a trailing 24 h across `/search`, `/browse` and `/parallels` together; `0` means no daily budget. The concurrency values are what a request arriving **now** would face, resolved from the environment on each call — not the size the live semaphore was last built with, which lags a configuration change until the next acquisition. |
 | `timeouts.*` | Live values of every per-mode timeout documented in Environment Variables below, in seconds (floats). `fuzzy` and `parallels` reflect the 110 s edge-timeout ceiling — see "Edge-Timeout Ceiling" below — not a hardcoded 300 s. |
 | `timeouts.browse_core_warmup` | The cold-start ceiling for `/api/browse` (`SEARCH_API_BROWSE_CORE_WARMUP_TIMEOUT`, default 45 s). **`browse_core` does not apply while the provider is warming**: a freshly restarted deployment substitutes this larger budget until its browse map is loaded, so a browse can legitimately take far longer than `browse_core` right after a restart. Both are reported because they answer different questions — size a socket timeout from the larger, reason about steady-state latency from the smaller. |
 
@@ -1287,7 +1289,9 @@ public API surface — renaming any is a breaking change).
 | `filter_vocabulary_unavailable` | 503 | vocabulary loader failed (Phase 78 R2-#3 fail-closed); `GET /api/criteria` when the list cannot be built |
 | `filter_unavailable` | 503 | the filters were valid but could not be applied (the catalog sidecar is absent, or the filter lookup failed). The request is never run without its filters. No `Retry-After`; retry later or drop `filters`. Unfiltered and Library-only requests are unaffected. |
 | `rate_limited` | 429 + `Retry-After` | per-IP sliding window exhausted on the endpoint's own bucket |
+| `daily_limit_reached` | 429 + `Retry-After` | 2026-11-03: the address has used its trailing-24 h budget (`SEARCH_API_DAILY_LIMIT`, default 2,000) across `/search`, `/browse` and `/parallels` together. `Retry-After` is the time until the oldest counted request leaves the window (up to 86,400 s). Checked after the per-minute limiter, so a `rate_limited` request spends none of it; a refused request is not counted. Bulk access beyond it is a conversation with the maintainers, not a retry loop. |
 | `heavy_search_busy` | 503 + `Retry-After` | heavy-mode (variants/fuzzy/parallels) concurrency budget (`SEARCH_API_HEAVY_CONCURRENCY`, default 2) exhausted; fail-fast instead of queueing unboundedly; retry shortly |
+| `search_busy` | 503 + `Retry-After` | 2026-11-03: the synchronous interactive-mode concurrency budget (`SEARCH_API_INTERACTIVE_CONCURRENCY`, default 2) for exact/title/shelfmark/responsa on `/api/search` is exhausted; fail-fast instead of queueing behind other searches; retry shortly, or submit the same body to `POST /api/search/jobs`, which this budget does not gate |
 | `disabled` | 503 | `SEARCH_API_MODE=disabled` |
 | `localhost_only` | 403 | `SEARCH_API_MODE=localhost-only` and request from non-loopback |
 | `internal_error` | 500 | unhandled exception in handler |
@@ -1407,6 +1411,17 @@ and `/api/criteria` a fifth under the same reasoning.
 
 429 responses include a `Retry-After: <seconds>` header.
 
+**Daily budget per address (2026-11-03).** On top of the per-minute buckets, ONE trailing-24 h
+budget per address, shared by `/api/search`, `/api/browse` and `/api/parallels` (capabilities
+and criteria are not counted): `SEARCH_API_DAILY_LIMIT`, default 2,000, `0` disables, advertised
+as `limits.daily_requests_per_address`. Over it, every one of the three endpoints answers
+**429 `daily_limit_reached`** with `Retry-After` set to the time until the oldest counted
+request leaves the window. The check runs after the per-minute limiter, so a `rate_limited`
+request spends no daily budget, and a refused request is not counted. The per-minute buckets
+stop bursts; this stops a sustained pull that stays under them (the case that prompted it:
+8,036 requests from one address in six hours at about 20 a minute). A client that needs more
+than this in a day should talk to the maintainers rather than retry.
+
 The `SEARCH_API_MODE` env var gates all five endpoints uniformly:
 
 - `open` (default) — all callers permitted.
@@ -1431,11 +1446,11 @@ These run in a thread-pool worker (one slow query blocks ONE worker thread, not 
 | `variants` | `SEARCH_API_VARIANTS_TIMEOUT` | 60 s | `SEARCH_API_HEAVY_CONCURRENCY` | 2 |
 | `fuzzy` | `SEARCH_API_FUZZY_TIMEOUT` | 110 s (was 300 s before 2026-09-08) | `SEARCH_API_HEAVY_CONCURRENCY` | 2 |
 | parallels | `SEARCH_API_PARALLELS_TIMEOUT` | 110 s (was 300 s before 2026-09-08) | `SEARCH_API_HEAVY_CONCURRENCY` | 2 |
-| interactive (exact/title/shelfmark/responsa) | `SEARCH_API_CORE_TIMEOUT` | 30 s | — (no cap) | — |
+| interactive (exact/title/shelfmark/responsa) | `SEARCH_API_CORE_TIMEOUT` | 30 s | `SEARCH_API_INTERACTIVE_CONCURRENCY` (since 2026-11-03) | 2 |
 
-**Concurrency budget:** A module-level `asyncio.Semaphore` gates heavy-mode requests. When all `SEARCH_API_HEAVY_CONCURRENCY` slots are occupied, a new heavy request fails immediately with **503 `heavy_search_busy` + `Retry-After: 5`** instead of queuing and potentially starving the threadpool. The slot is released from the worker future's **done-callback**, i.e. when the underlying search/composition thread *actually finishes* — not merely when the request's awaiter returns. This matters on the timeout path: `run_in_executor` cannot cancel a running thread, so a 504'd heavy query keeps occupying its worker; holding the slot until true completion (rather than releasing it the moment the timeout fires) prevents re-admitting heavy work past the budget. A timeout or exception therefore cannot strand a slot, and cannot prematurely free one either.
+**Concurrency budget:** A module-level `asyncio.Semaphore` gates heavy-mode requests. When all `SEARCH_API_HEAVY_CONCURRENCY` slots are occupied, a new heavy request fails immediately with **503 `heavy_search_busy` + `Retry-After: 5`** instead of queuing and potentially starving the threadpool. Since 2026-11-03 a second, separate semaphore gates the synchronous interactive modes the same way: over `SEARCH_API_INTERACTIVE_CONCURRENCY` a new exact/title/shelfmark/responsa request fails immediately with **503 `search_busy` + `Retry-After: 5`**. The two budgets never share slots, so a burst of exact searches cannot block a fuzzy search or the reverse. The interactive budget exists because those searches run in the research queue every website visitor shares; without it, a scraper's queued searches delayed every reader. The slot is released from the worker future's **done-callback**, i.e. when the underlying search/composition thread *actually finishes* — not merely when the request's awaiter returns. This matters on the timeout path: `run_in_executor` cannot cancel a running thread, so a 504'd heavy query keeps occupying its worker; holding the slot until true completion (rather than releasing it the moment the timeout fires) prevents re-admitting heavy work past the budget. A timeout or exception therefore cannot strand a slot, and cannot prematurely free one either.
 
-Interactive modes (exact/title/shelfmark/responsa) are NOT gated by this semaphore and always proceed with their own 30 s baseline.
+Interactive modes (exact/title/shelfmark/responsa) are not gated by the heavy semaphore; they have their own (`SEARCH_API_INTERACTIVE_CONCURRENCY`, above) and their own 30 s baseline. Background jobs (`POST /api/search/jobs`, `POST /api/parallels/jobs`) bypass both semaphores; their admission control is per client (two active jobs) and per deployment (32 in all).
 
 All knobs are re-read per request and can be flipped without a restart.
 
