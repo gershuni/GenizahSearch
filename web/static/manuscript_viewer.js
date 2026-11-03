@@ -256,6 +256,28 @@ function initProgressiveImages() {
     });
 }
 
+// Zoom (2026-11-03). PostHog's 30 days to 2026-11-03 held 50 rage clicks by 19
+// readers on /browse's + button: each click added a linear 0.25 and went
+// through a server round-trip. Every step is now multiplicative -- ZOOM_FACTOR
+// per click, so five clicks take the page from 100% to 759% where the old steps
+// needed 27 -- anchored at the cursor (wheel, double-click, double-tap) or at
+// the middle of the box (buttons, keyboard), and applied here at once. A viewer
+// created with `onChange` tells its owner ZOOM_NOTIFY_MS after the last change;
+// the browse page sends the level to the server with it, so a page it rebuilds
+// keeps the zoom. web/pages/browse_state.py carries the same numbers for the
+// server side; tests/test_browse_zoom_steps.py keeps the two in step.
+const ZOOM_FACTOR = 1.5;
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 8;
+const DOUBLE_CLICK_ZOOM = 2;
+// One mouse-wheel notch (100 px) is x1.22; a trackpad's small deltas add up,
+// and no single event moves more than one click's worth.
+const WHEEL_ZOOM_SENSITIVITY = 0.002;
+const DOUBLE_TAP_MS = 300;
+const DOUBLE_TAP_PX = 30;
+const ZOOM_NOTIFY_MS = 150;
+const ZOOM_BADGE_MS = 900;
+
 /**
  * Create a manuscript viewer instance with zoom, pan, rotate, and image adjustments.
  *
@@ -264,8 +286,11 @@ function initProgressiveImages() {
  * @param {string} options.containerSelector - CSS selector for the image container
  * @param {string} options.zoomLabelSelector - CSS selector for the zoom level label
  * @param {string} options.gammaFilterId - ID of the SVG gamma filter element
- * @param {number} [options.zoomStep=0.25] - Zoom increment per step
- * @param {number} [options.maxZoom=4] - Maximum zoom level
+ * @param {number} [options.minZoom=0.25] - Smallest zoom level
+ * @param {number} [options.maxZoom=8] - Largest zoom level
+ * @param {function} [options.onChange] - Called with the viewer ZOOM_NOTIFY_MS
+ *     after the last zoom change made here (buttons, wheel, double-click,
+ *     pinch, fit, reset); never for a level pushed in with update()/setTransform().
  * @returns {Object} Viewer object with full public API
  */
 function createManuscriptViewer(options) {
@@ -273,8 +298,9 @@ function createManuscriptViewer(options) {
     const containerSelector = options.containerSelector;
     const zoomLabelSelector = options.zoomLabelSelector;
     const gammaFilterId = options.gammaFilterId;
-    const zoomStep = options.zoomStep || 0.25;
-    const maxZoom = options.maxZoom || 4;
+    const minZoom = options.minZoom || MIN_ZOOM;
+    const maxZoom = options.maxZoom || MAX_ZOOM;
+    const onChange = typeof options.onChange === 'function' ? options.onChange : null;
 
     const viewer = {
         el: null,
@@ -308,6 +334,14 @@ function createManuscriptViewer(options) {
 
             console.log('viewer: initializing drag on ' + imageSelector);
 
+            // A new element (the page was rebuilt, the folio changed) is drawn
+            // with whatever transform the server put on it; the state takes
+            // that over, so the next step starts from what is on screen.
+            if (this._boundEl !== this.el) {
+                this._boundEl = this.el;
+                this._adoptInlineTransform();
+            }
+
             // Attach mousedown directly to the IMAGE element. SEED-010: move/up are
             // bound to `document` on drag START and removed on release (see
             // onMouseDown/onMouseUp) instead of overwriting window.onmousemove
@@ -318,6 +352,11 @@ function createManuscriptViewer(options) {
 
             // Mouse wheel zoom - attach to image
             this.el.onwheel = this.onWheel.bind(this);
+            // Double-click: in to DOUBLE_CLICK_ZOOM at the pointer, or back to fit.
+            this.el.ondblclick = this.onDoubleClick.bind(this);
+            // The browser's own double-tap zoom would fight the one below;
+            // `manipulation` leaves panning and pinching to the handlers.
+            this.el.style.touchAction = 'manipulation';
 
             // Touch (2026-10-22): two fingers pinch-zoom; one finger pans once
             // the image is zoomed in. A single finger on an unzoomed image is
@@ -345,23 +384,151 @@ function createManuscriptViewer(options) {
             this._touchEl = this.el;
             this.el.addEventListener('touchstart', this._touch.start, { passive: false });
             this.el.addEventListener('touchmove', this._touch.move, { passive: false });
-            this.el.addEventListener('touchend', this._touch.end);
+            // touchend must be able to preventDefault too: a double-tap's
+            // second touch would otherwise also arrive as a click pair.
+            this.el.addEventListener('touchend', this._touch.end, { passive: false });
             this.el.addEventListener('touchcancel', this._touch.end);
 
             // Set initial cursor on the image
             this.el.style.cursor = 'grab';
         },
 
-        onWheel: function(e) {
-            e.preventDefault();
-            var delta = e.deltaY > 0 ? -zoomStep : zoomStep;
-            this.state.scale = Math.max(0.25, Math.min(maxZoom, this.state.scale + delta));
+        clampZoom: function(scale) {
+            return Math.max(minZoom, Math.min(maxZoom, scale));
+        },
+
+        // The translate / rotate / scale of the element's inline style (the
+        // server renders `translate(0px, 0px) rotate(Rdeg) scale(S)`); an
+        // element with none is drawn untransformed.
+        _adoptInlineTransform: function() {
+            var t = (this.el && this.el.style && this.el.style.transform) || '';
+            var m = /translate\(\s*(-?[\d.]+)px\s*,\s*(-?[\d.]+)px\s*\)/.exec(t);
+            this.state.x = m ? parseFloat(m[1]) : 0;
+            this.state.y = m ? parseFloat(m[2]) : 0;
+            m = /rotate\(\s*(-?[\d.]+)deg\s*\)/.exec(t);
+            this.state.rotation = m ? parseFloat(m[1]) : 0;
+            m = /scale\(\s*(-?[\d.]+)\s*\)/.exec(t);
+            this.state.scale = m ? this.clampZoom(parseFloat(m[1])) : 1;
+            this._setLabelText(Math.round(this.state.scale * 100) + '%');
+        },
+
+        _setLabelText: function(text) {
+            var label = zoomLabelSelector ? document.querySelector(zoomLabelSelector) : null;
+            if (label) label.textContent = text;
+            return label;
+        },
+
+        // Where the image's centre sits with no translate, in client pixels.
+        // Measured from the drawn box and the DRAWN translate (the computed
+        // matrix), not the state's: the 0.1 s transform transition may still
+        // be running, and the box moves with it. transform-origin is the
+        // centre on every surface, so the drawn box is centred on
+        // centre + drawn translate whatever the rotation and scale.
+        _layoutCentre: function() {
+            var rect = this.el.getBoundingClientRect();
+            var drawn = { x: this.state.x, y: this.state.y };
+            try {
+                var t = getComputedStyle(this.el).transform;
+                if (!t || t === 'none') {
+                    drawn = { x: 0, y: 0 };
+                } else {
+                    var m = new DOMMatrix(t);
+                    drawn = { x: m.e, y: m.f };
+                }
+            } catch (err) { /* no DOMMatrix: the state's translate will do */ }
+            return { x: rect.left + rect.width / 2 - drawn.x, y: rect.top + rect.height / 2 - drawn.y };
+        },
+
+        // Zoom by `factor` about the client point (px, py), or, without one,
+        // about the middle of the box (the buttons and the keyboard), so what
+        // the reader is looking at stays put. The point under the anchor stays
+        // under it: with k = new / old,
+        //     translate' = translate * k + (anchor - centre) * (1 - k).
+        zoomBy: function(factor, px, py) {
+            if (!this.el) {
+                this.el = document.querySelector(imageSelector);
+                if (!this.el) return;
+            }
+            var scale = this.state.scale;
+            var next = this.clampZoom(scale * factor);
+            if (next === scale) return;
+            var k = next / scale;
+            var anchor;
+            if (typeof px === 'number' && typeof py === 'number') {
+                anchor = { x: px, y: py };
+            } else {
+                var box = (this.container || this.el).getBoundingClientRect();
+                anchor = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+            }
+            var centre = this._layoutCentre();
+            this.state.x = this.state.x * k + (anchor.x - centre.x) * (1 - k);
+            this.state.y = this.state.y * k + (anchor.y - centre.y) * (1 - k);
+            this.state.scale = next;
             this.applyTransform();
             this.updateLabel();
+            this._changed();
+        },
+
+        // Back to the whole page in its box: scale 1 and no pan; the rotation
+        // and the image adjustments stay.
+        fit: function() {
+            this.state.x = 0;
+            this.state.y = 0;
+            this.state.scale = 1;
+            this.applyTransform();
+            this.updateLabel();
+            this._changed();
+        },
+
+        // Double-click and double-tap: in to DOUBLE_CLICK_ZOOM at the point,
+        // or, from any zoomed-in level, back to fit.
+        toggleZoomAt: function(px, py) {
+            if (this.state.scale > 1.01) {
+                this.fit();
+            } else {
+                this.zoomBy(DOUBLE_CLICK_ZOOM / this.state.scale, px, py);
+            }
+        },
+
+        onDoubleClick: function(e) {
+            e.preventDefault();
+            // A double-tap that toggled just now also reaches some browsers
+            // as a dblclick; one toggle is enough.
+            if (this._tapToggledAt && Date.now() - this._tapToggledAt < 500) return;
+            this.toggleZoomAt(e.clientX, e.clientY);
+        },
+
+        onWheel: function(e) {
+            e.preventDefault();
+            var dy = e.deltaY;
+            if (e.deltaMode === 1) dy *= 16;        // lines
+            else if (e.deltaMode === 2) dy *= 100;  // pages
+            var factor = Math.exp(-dy * WHEEL_ZOOM_SENSITIVITY);
+            factor = Math.max(1 / ZOOM_FACTOR, Math.min(ZOOM_FACTOR, factor));
+            this.zoomBy(factor, e.clientX, e.clientY);
+        },
+
+        // Tell the owner, once, ZOOM_NOTIFY_MS after the last change. The
+        // callback reads the live state when it fires, so a burst of clicks
+        // reports the level the reader ended on.
+        _changed: function() {
+            if (!onChange) return;
+            var self = this;
+            if (this._notifyTimer) clearTimeout(this._notifyTimer);
+            this._notifyTimer = setTimeout(function() {
+                self._notifyTimer = null;
+                onChange(self);
+            }, ZOOM_NOTIFY_MS);
         },
 
         update: function(scale, rotation) {
             this.state.scale = scale;
+            this.state.rotation = rotation;
+            this.applyTransform();
+        },
+
+        // The server's rotation; the zoom stays what the reader set here.
+        setRotation: function(rotation) {
             this.state.rotation = rotation;
             this.applyTransform();
         },
@@ -420,26 +587,39 @@ function createManuscriptViewer(options) {
                 e.preventDefault();
                 this._pinch = { distance: this._touchDistance(e.touches), scale: this.state.scale };
                 this.state.isDragging = false;
-            } else if (e.touches.length === 1 && this.state.scale > 1.01) {
-                e.preventDefault();
-                this.state.isDragging = true;
-                this.state.startX = e.touches[0].clientX - this.state.x;
-                this.state.startY = e.touches[0].clientY - this.state.y;
+                this._tap = null;
+            } else if (e.touches.length === 1) {
+                var touch = e.touches[0];
+                // A tap that ends where it began, quickly, may be half of a
+                // double-tap (onTouchEnd).
+                this._tap = { x: touch.clientX, y: touch.clientY, time: Date.now(), moved: false };
+                if (this.state.scale > 1.01) {
+                    e.preventDefault();
+                    this.state.isDragging = true;
+                    this.state.startX = touch.clientX - this.state.x;
+                    this.state.startY = touch.clientY - this.state.y;
+                }
             }
         },
 
         onTouchMove: function(e) {
             var self = this;
+            if (this._tap && e.touches.length === 1) {
+                var t = e.touches[0];
+                if (Math.abs(t.clientX - this._tap.x) > 10 || Math.abs(t.clientY - this._tap.y) > 10) {
+                    this._tap.moved = true;
+                }
+            }
             if (this._pinch && e.touches.length === 2) {
                 e.preventDefault();
                 var distance = this._touchDistance(e.touches);
                 if (this._pinch.distance > 0) {
-                    this.state.scale = Math.max(0.25, Math.min(maxZoom, this._pinch.scale * distance / this._pinch.distance));
+                    this.state.scale = this.clampZoom(this._pinch.scale * distance / this._pinch.distance);
                     requestAnimationFrame(function() {
                         self.applyTransform();
-                        var label = zoomLabelSelector ? document.querySelector(zoomLabelSelector) : null;
-                        if (label) label.textContent = Math.round(self.state.scale * 100) + '%';
+                        self.updateLabel();
                     });
+                    this._changed();
                 }
             } else if (this.state.isDragging && e.touches.length === 1) {
                 e.preventDefault();
@@ -462,7 +642,23 @@ function createManuscriptViewer(options) {
                     this.state.startY = e.touches[0].clientY - this.state.y;
                 }
             }
-            if (e.touches.length === 0) this.state.isDragging = false;
+            if (e.touches.length === 0) {
+                this.state.isDragging = false;
+                var tap = this._tap;
+                this._tap = null;
+                if (tap && !tap.moved && Date.now() - tap.time < DOUBLE_TAP_MS) {
+                    var last = this._lastTap;
+                    this._lastTap = { x: tap.x, y: tap.y, time: Date.now() };
+                    if (last && this._lastTap.time - last.time < DOUBLE_TAP_MS &&
+                            Math.abs(last.x - tap.x) < DOUBLE_TAP_PX && Math.abs(last.y - tap.y) < DOUBLE_TAP_PX) {
+                        // Ours: no click pair, no browser zoom, and one toggle only.
+                        e.preventDefault();
+                        this._lastTap = null;
+                        this._tapToggledAt = Date.now();
+                        this.toggleZoomAt(tap.x, tap.y);
+                    }
+                }
+            }
         },
 
         applyTransform: function() {
@@ -506,16 +702,8 @@ function createManuscriptViewer(options) {
             this._applyFilters();
         },
 
-        zoomIn: function() {
-            this.state.scale = Math.min(maxZoom, this.state.scale + zoomStep);
-            this.applyTransform();
-            this.updateLabel();
-        },
-        zoomOut: function() {
-            this.state.scale = Math.max(0.25, this.state.scale - zoomStep);
-            this.applyTransform();
-            this.updateLabel();
-        },
+        zoomIn: function() { this.zoomBy(ZOOM_FACTOR); },
+        zoomOut: function() { this.zoomBy(1 / ZOOM_FACTOR); },
         rotateLeft: function() {
             this.state.rotation = (this.state.rotation - 90) % 360;
             this.applyTransform();
@@ -525,9 +713,40 @@ function createManuscriptViewer(options) {
             this.applyTransform();
         },
 
+        // The toolbar figure; where that is hidden (a phone) or absent, a badge
+        // over the image shows the level for a moment instead.
         updateLabel: function() {
-            var label = document.querySelector(zoomLabelSelector);
-            if (label) label.textContent = Math.round(this.state.scale * 100) + '%';
+            var text = Math.round(this.state.scale * 100) + '%';
+            var label = this._setLabelText(text);
+            var shown = false;
+            try { shown = !!label && getComputedStyle(label).display !== 'none'; } catch (err) { shown = !!label; }
+            if (!shown) this._showBadge(text);
+        },
+
+        _showBadge: function(text) {
+            var host = this.container || (this.el && this.el.parentElement);
+            if (!host) return;
+            var badge = null;
+            for (var i = 0; i < host.children.length; i++) {
+                if (host.children[i].className === 'zoom-badge') { badge = host.children[i]; break; }
+            }
+            if (!badge) {
+                badge = document.createElement('div');
+                badge.className = 'zoom-badge';
+                badge.setAttribute('aria-hidden', 'true');
+                badge.style.cssText = 'position:absolute;bottom:8px;left:50%;transform:translateX(-50%);' +
+                    'background:rgba(0,0,0,0.65);color:#fff;font-size:12px;line-height:1;padding:4px 10px;' +
+                    'border-radius:10px;pointer-events:none;opacity:0;transition:opacity 0.2s;z-index:2;';
+                host.appendChild(badge);
+            }
+            badge.textContent = text;
+            badge.style.opacity = '1';
+            if (this._badgeTimer) clearTimeout(this._badgeTimer);
+            var self = this;
+            this._badgeTimer = setTimeout(function() {
+                self._badgeTimer = null;
+                badge.style.opacity = '0';
+            }, ZOOM_BADGE_MS);
         },
 
         reset: function() {
@@ -538,6 +757,7 @@ function createManuscriptViewer(options) {
             this.resetAdjustments();
             this.applyTransform();
             this.updateLabel();
+            this._changed();
         }
     };
 
