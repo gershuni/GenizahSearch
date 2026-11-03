@@ -335,3 +335,9 @@ to the search. Costs: 6,495 keys × one indexed whole-word search; measured on a
 table-valued `pragma_table_info(?)` takes the name as a parameter); `num_stems` and
 `num_sub_entries` are compared with their rows as `num_forms` was. Anything a later review finds
 is a `docs/open_issues.d/` fragment, not another round.
+
+**Round 5** (`7fca394c`), Codex: one P2, recorded as
+`docs/open_issues.d/2026-11-03-blau-gate-form-level-targets.md` (P3): the gate does not check the
+form-level cross-reference targets in `forms.target_ids`. Measured on the real file: 862 targets,
+688 to roots and 174 to stems, none unresolved, so the check must look beyond `roots`; the fragment
+carries the fix sketch (check against every id table, pin the counts in `meta`).
