@@ -426,6 +426,9 @@ def test_the_desktop_fetches_call_session_get_with_the_v940_arguments(env, monke
         raise AssertionError('the desktop must not use the checked-hop helper')
 
     monkeypatch.setattr(pis, 'get_with_checked_redirects', _no_checked)
+    # The parsed-answer store (shared/nli_metadata_store.py) would answer the second
+    # MARC fetch below from the first one's parse; this test is about the fetch itself.
+    monkeypatch.setenv('NLI_METADATA_STORE_FILE', '')
     marc_other = _Resp(200, _marc(shelfmark='Moved shelfmark'))
     web = _Web({MARC_URL: _Resp(302, location=OTHER_MARC), OTHER_MARC: marc_other,
                 MANIFEST_URL: _Resp(302, location=OTHER_MANIFEST),

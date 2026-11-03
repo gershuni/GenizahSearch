@@ -156,6 +156,8 @@ EXTRACTED_MODULES = [
     "shared/regex_prefilter.py",
     # 2026-10-19: the Joins Lab Compare window's info line and links (web + desktop).
     "shared/fragment_details.py",
+    # 2026-11-03: the parsed NLI MARC / manifest answers kept on disk for an NLI outage.
+    "shared/nli_metadata_store.py",
 ]
 
 # Compound statement types whose bodies run at import time

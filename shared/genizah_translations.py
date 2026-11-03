@@ -2723,6 +2723,9 @@ TRANSLATIONS = {
     "Bibliography Ktiv": "ביבליוגרפיה כתיב",
     "Bib. FJMS": "ביבל' פרידברג",
     "Bib. Ktiv": "ביבל' כתיב",
+    # /browse, under the image, when the NLI record and image list came from the
+    # copies kept on disk because NLI could not answer (shared/nli_metadata_store.py)
+    "Catalogue details from {date}": "פרטי הקטלוג מתאריך {date}",
     "Catalog rec.": "קטלוגים",
     "Catalog": "קטלוג",
     "Discussion": "דיון",
