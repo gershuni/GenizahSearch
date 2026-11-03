@@ -480,6 +480,22 @@ def _desktop_default_props_hook(payload: dict) -> 'dict | None':
 # ---------------------------------------------------------------------------
 # Transport config wiring (REVIEWS HIGH-1)
 # ---------------------------------------------------------------------------
+def _apply_source_run_block() -> None:
+    """Block every shared delivery path in a run from source (see GENIZAH_TELEMETRY_FORCE).
+
+    Called at consent load whether or not consent is on: ungated shared emitters
+    (the NLI breaker) resolve POSTHOG_API_KEY themselves, so an unconsented or
+    first-run developer launch must be blocked too. Never raises.
+    """
+    try:
+        import sys as _sys
+        _set_delivery_blocked(
+            not bool(getattr(_sys, 'frozen', False))
+            and os.environ.get('GENIZAH_TELEMETRY_FORCE') != '1')
+    except Exception:
+        logger.debug('telemetry: _apply_source_run_block silently failed', exc_info=True)
+
+
 def _wire_transport_config() -> None:
     """Wire the desktop API key + host into the shared transport.
 
@@ -526,8 +542,7 @@ def _wire_transport_config() -> None:
         host = os.environ.get('GENIZAH_TELEMETRY_HOST') or None
         # A run from source is a developer, not a user: block every delivery path
         # (env key included) unless GENIZAH_TELEMETRY_FORCE=1. Frozen .exe unchanged.
-        _set_delivery_blocked(
-            not _frozen and os.environ.get('GENIZAH_TELEMETRY_FORCE') != '1')
+        _apply_source_run_block()
         set_capture_api_key(key)
         set_capture_host(host)
         # INFRA-F2: while a real key is wired (consent on), tag every shared-queue
@@ -548,6 +563,7 @@ def _load_consent_state() -> None:
     Never raises — all exceptions are swallowed per CRASH-05 contract.
     """
     global _enabled, _install_id, _current_distinct_id, _identified, _crash_distinct_id
+    _apply_source_run_block()
     try:
         cfg = load_app_config()
         enabled = bool(cfg.get(TELEMETRY_ENABLED_KEY, False))

@@ -75,3 +75,17 @@ def test_desktop_frozen_unchanged(monkeypatch, posts):
     monkeypatch.setenv('GENIZAH_TELEMETRY_KEY', 'phc_frozen')
     tel._wire_transport_config()
     assert ph._resolve_api_key() == 'phc_frozen'
+
+
+def test_unconsented_source_launch_is_blocked(monkeypatch, posts, crash_telemetry_state):
+    """Codex P1: first run / opted out never reaches _wire_transport_config."""
+    import desktop.telemetry as tel
+    monkeypatch.setenv('POSTHOG_API_KEY', 'phc_devkey')
+    monkeypatch.setattr(sys, 'frozen', False, raising=False)
+    monkeypatch.delenv('GENIZAH_TELEMETRY_FORCE', raising=False)
+    ph._reset_for_tests()
+    tel._load_consent_state()          # empty config: no consent
+    assert not tel.is_enabled()
+    assert ph._resolve_api_key() == ''
+    ph.send_crash_event_direct('nli_breaker_opened', {}, 'x')
+    assert posts == []
