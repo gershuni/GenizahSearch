@@ -2003,6 +2003,13 @@ Variant and Lab preferences of one website visitor, kept in that visitor's stora
 - **Function** `has_hebrew_or_arabic_letter` (Line 34) — True when ``text`` holds at least one Hebrew or Arabic LETTER.
 - **Function** `home_query_target` (Line 46) — The URL the homepage box navigates to for ``text``, or None if blank.
 
+## web/search_box_input.py
+
+- **Function** `_words_are_shelfmark_words` (Line 80) — No run of four or more letters that is neither a shelfmark word nor a Roman numeral.
+- **Function** `search_box_input_kind` (Line 90) — ``'sys_id'``, ``'shelfmark'`` or ``'text'`` for what the search box holds.
+- **Function** `typed_as_shelfmark` (Line 113) — True when the search box holds a shelfmark (not a system number, not words).
+- **Function** `split_placeholder` (Line 118) — ``(before, after)`` the placeholder in a translated sentence, so the query
+
 ## web/public_name.py
 
 - **Function** `clean_public_name` (Line 39) — the name as it will be stored, or None (blank, or contains `@`).
@@ -2671,6 +2678,16 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
     - Method `_get_catalog_tables` — catalogue-form tables tied to the index list object (`is`, never `id()`).
     - Method `get_display_data` (Line 1924)
 
+## shared/nli_metadata_store.py
+
+The parsed NLI MARC / IIIF-manifest answers kept on disk (2026-11-03), one SQLite file beside the NLI image proxy's FL-id store, so an NLI outage does not empty /browse. Read by `MetadataManager.fetch_marc_data` and `fetch_iiif_manifest` through the module (a test can intercept it). Location from the environment on every call; every error is a miss.
+- **Function** `metadata_store_get` — the stored answer for (kind, sys_id, suffix) as a `StoredAnswer` (payload, fetched_at, fresh), fresh or not; None when there is none or the sys_id is synthetic
+- **Function** `metadata_store_put` — keep a parsed answer; refuses an empty one (`has_content`) and prunes past `NLI_METADATA_STORE_MAX_ROWS`, oldest-fetched first
+- **Function** `served_stale` — the answer a caller returns when NLI cannot answer now: the payload with `stale: True` and `fetched_at`
+- **Function** `stale_from` — the oldest `fetched_at` among the answers served stale (`enrich_metadata` writes it as `nli_stale_from`; `web/pages/browse.py` shows the date under the image)
+- **Function** `metadata_store_prepare` — at web startup: bring the file under the row cap (rows are never dropped for age)
+- **Function** `stats` — counters, row count and file size for `/_internal/memstat` (`nli_metadata_store`)
+
 ## shared/indexer.py
 
 - **Function** `_tr` (Line 38) — Translate text if current language is Hebrew.
@@ -2743,6 +2760,7 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
     - Method `_build_line_break_regex` (Line 1831) — Build a regex pattern for line-break search.
     - Method `_execute_line_break_search` (Line 1928) — Execute a line-break search using | syntax.
     - Method `metadata_search_ids` — the manuscripts a Title/Shelfmark search is for; the web resolves them in the server process and hands them to `execute_search(metadata_sys_ids=)`.
+    - Method `words_occur` — whether every word of a query occurs as a whole word in the open index (one count query, limit 1); the search page's gate for the keyboard-layout suggestion.
     - Method `_execute_metadata_search` (Line 2157) — Search by title or shelfmark via csv_bank. Returns results even for metadata-only records.
     - Method `execute_search` (Line 2234)
     - Method `_deduplicate` (Line 2756)
@@ -3586,3 +3604,9 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
 - **Function** `_result` (Line 262)
 - **Function** `_resolve_record` (Line 276) — The CUDL item a catalogue record links to.
 - **Function** `resolve_record` (Line 358) — See ``_resolve_record``; the result also carries ``marc_label``, the item the
+
+## shared/keyboard_layout.py
+
+- **Function** `map_keys_to_hebrew` (Line 40) — *text* read key by key on the Hebrew layout, or None when a character
+- **Function** `is_latin_query` (Line 55) — ASCII with at least one Latin letter: what a wrong-layout query looks like.
+- **Function** `layout_suggestion` (Line 60) — The Hebrew a Latin-script query spells on the Hebrew layout, or None.

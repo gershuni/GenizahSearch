@@ -21,6 +21,42 @@ from web.services import BrowsePage, DocumentPage
 logger = logging.getLogger(__name__)
 
 
+# The image zoom (2026-11-03). PostHog's 30 days to 2026-11-03 held 50 rage
+# clicks by 19 readers on /browse's + button: each click added a linear 0.25
+# and went through a server round-trip. Now every step is multiplicative and
+# the browser applies it at once (web/static/manuscript_viewer.js carries the
+# same numbers; tests/test_browse_zoom_steps.py keeps the two in step). The
+# page only hears the level afterwards, through the ``browse_zoom`` event, so a
+# rebuilt page (Prev/Next, Show Metadata, Edit) draws the image at the zoom the
+# reader sees.
+ZOOM_FACTOR = 1.5
+ZOOM_MIN = 0.25
+ZOOM_MAX = 8.0
+DOUBLE_CLICK_ZOOM = 2.0
+
+
+def clamp_zoom(level: float) -> float:
+    """``level`` held to the viewer's range; a value that is not a finite number is 1.0."""
+    try:
+        level = float(level)
+    except (TypeError, ValueError):
+        return 1.0
+    if level != level or level in (float('inf'), float('-inf')):
+        return 1.0
+    return max(ZOOM_MIN, min(ZOOM_MAX, level))
+
+
+def zoom_step(level: float, direction: int) -> float:
+    """The level one click from ``level``: in (``direction`` > 0) or out (< 0), by ZOOM_FACTOR, clamped."""
+    factor = ZOOM_FACTOR if direction > 0 else 1.0 / ZOOM_FACTOR
+    return clamp_zoom(clamp_zoom(level) * factor)
+
+
+def zoom_percent(level: float) -> int:
+    """The figure the toolbar shows for ``level``: 1.5 -> 150, 3.375 -> 338."""
+    return int(round(clamp_zoom(level) * 100))
+
+
 def page_has_reading_view(page) -> bool:
     """Whether the reading view offers its versions, Edit, Comment, Notes and Joins for ``page``.
 
@@ -41,6 +77,9 @@ class BrowseState:
         self.error: Optional[str] = None
         self.search_error: Optional[str] = None  # Inline error for shelfmark not found
         self.zoom_level: float = 1.0
+        # The number of the last `browse_zoom` report heard (the viewer's
+        # `reportSeq`), drawn on the image as `data-zoom-seq`.
+        self.zoom_seq: int = 0
         self.rotation: int = 0
         self.is_fullscreen: bool = False
         self.highlight_terms: Optional[str] = None

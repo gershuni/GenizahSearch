@@ -496,10 +496,14 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                 # `attribution_nli`, so on a first, uncached load the value was empty
                 # and the Oxford->NLI fallback fell back to the generic credit instead
                 # of the manifest's own. Read it back here, where the cache is warm.
-                if not result.get('attribution_nli') and hasattr(state_mod.meta_mgr, 'nli_cache'):
+                if hasattr(state_mod.meta_mgr, 'nli_cache'):
                     _cached_attr = state_mod.meta_mgr.nli_cache.get(_sys_id, {})
-                    if _cached_attr.get('attribution_nli'):
+                    if not result.get('attribution_nli') and _cached_attr.get('attribution_nli'):
                         result['attribution_nli'] = _cached_attr['attribution_nli']
+                    # Set by enrich_metadata when a MARC record or manifest came from the
+                    # on-disk copy because NLI could not answer (shared/nli_metadata_store.py).
+                    if _cached_attr.get('nli_stale_from'):
+                        result['nli_stale_from'] = _cached_attr['nli_stale_from']
 
             return result
 
@@ -639,6 +643,8 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                 pg.attribution = browse_enrich['attribution']
             if browse_enrich.get('attribution_nli'):
                 pg.attribution_nli = browse_enrich['attribution_nli']
+            # Always assigned: the note under the image goes away once NLI answers again.
+            pg.nli_stale_from = browse_enrich.get('nli_stale_from')
             if browse_enrich.get('oxford_part_id'):
                 pg.oxford_part_id = browse_enrich['oxford_part_id']
                 pg.oxford_part_display = browse_enrich.get('oxford_part_display', '')

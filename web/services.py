@@ -123,6 +123,7 @@ class BrowsePage:
     external_provider: str = ''  # Which library provided images_ext: 'manchester', 'jts', or '' (Cambridge)
     cambridge_alignment: Optional[Dict] = None  # 260421-aln: CUDL↔NLI alignment verdict (see shared.nli_crossref_service.classify_cambridge_alignment)
     physical_metadata: Optional[Dict] = None  # {material, num_folio, num_bifolio, size} from NLI crossref
+    nli_stale_from: Optional[float] = None  # epoch of the oldest stored NLI answer served because NLI could not answer (shared/nli_metadata_store.py); None when fresh
     library_viewer_url: Optional[Dict] = None  # {url, label, library_abbrev} for holding library link
     # Volume-aware browse (multi-IE manuscripts)
     volume_ie: Optional[str] = None  # Active IE identifier (e.g. 'IE89040977')

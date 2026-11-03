@@ -182,6 +182,21 @@ NLI_THUMB_CACHE_MAX_MB=10240          # the folder's size cap (about 26 KB a thu
                                        # at startup in the background; nothing is written until it is
 NLI_THUMB_CACHE_MIN_FREE_MB=2048      # no thumbnail is written while the disk has less free space than this
 
+# The parsed NLI answers kept on disk (2026-11-03; both apps, shared/nli_metadata_store.py): the MARC
+# record and IIIF manifest of every manuscript MetadataManager fetched, one SQLite file beside the
+# FL-id store. A fresh row answers without asking NLI; an older one is refreshed and, when NLI cannot
+# answer (breaker open, 5xx, timeout, an error page), served marked stale with its date, so /browse
+# keeps its catalogue record and image list through an outage (PostHog: 4,338 breaker opens in the
+# 30 days to 2026-11-03). Only a parse with content is written. A cache: safe to delete, refills.
+NLI_METADATA_STORE_FILE=              # the file (default <INDEX_DIR>/nli_metadata.db); an EMPTY value turns the
+                                       # store off. tests/conftest.py points it at a temporary file per test
+NLI_METADATA_STORE_TTL=2592000        # seconds a row answers in NLI's place (30 days, as NLI_DISK_CACHE_TTL);
+                                       # the manifest memory cache ages with it too. 0 = ask NLI on every call
+                                       # and keep the row for outages only; rows are never dropped for age,
+                                       # since an old row is what an outage is served from
+NLI_METADATA_STORE_MAX_ROWS=200000    # row cap (about 2 KB a row, so 400 MB at most); past it the oldest-fetched
+                                       # rows go, at each write and at web startup. 0 = no cap
+
 # Library image routes (/api/nli_image, nli_image_by_sysid, cambridge/manchester/jts/oxford_image;
 # web-only, web/api.py). Since 2026-10-19 they set no session cookie, so these lifetimes reach
 # Cloudflare as well as browsers -- Cloudflare keeps them only under a Cache Rule for those paths

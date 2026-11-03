@@ -90,6 +90,7 @@ EXTRACTED_MODULES = [
     "shared/blau_normalize.py",          # Blau dictionary lookup keys, 2026-11-03
     "shared/blau_service.py",            # Blau dictionary sidecar reader, 2026-11-04
     "shared/quick_open.py",              # the desktop Go to box (Ctrl+G), 2026-10-24
+    "shared/keyboard_layout.py",         # the /search box's wrong-layout suggestion, 2026-11-03
     "shared/exclusion_service.py",
     "shared/export_dossier.py",
     "shared/export_utils.py",
@@ -157,6 +158,8 @@ EXTRACTED_MODULES = [
     "shared/regex_prefilter.py",
     # 2026-10-19: the Joins Lab Compare window's info line and links (web + desktop).
     "shared/fragment_details.py",
+    # 2026-11-03: the parsed NLI MARC / manifest answers kept on disk for an NLI outage.
+    "shared/nli_metadata_store.py",
 ]
 
 # Compound statement types whose bodies run at import time

@@ -21,6 +21,7 @@ import time as _module_time
 from collections import OrderedDict
 from shared.synthetic_sys_id import is_synthetic_sys_id
 from web import nli_image_store
+from shared import nli_metadata_store
 from urllib.parse import urlparse
 from web.crawler_visibility import (
     ARCHIVE_DISALLOWED_PATHS,
@@ -569,6 +570,9 @@ def init_api_routes(app_override=None):
     # (web/nli_image_store.py). The old nli_fl_ids_cache.json is not read.
     nli_image_store.fl_id_store_prepare(NLI_DISK_CACHE_TTL)
     nli_image_store.thumb_cache_prepare()
+    # The parsed MARC / manifest answers MetadataManager serves during an NLI outage
+    # (shared/nli_metadata_store.py): bring the file under its row cap.
+    nli_metadata_store.metadata_store_prepare()
     _nli_cache = OrderedDict()
     _nli_cache_time = OrderedDict()
     _nli_cache_lock = threading.Lock()
@@ -613,6 +617,7 @@ def init_api_routes(app_override=None):
 
     _register_runtime_cache_stats('nli_fl_ids', _nli_memory_cache_stats)
     _register_runtime_cache_stats('nli_image_store', nli_image_store.stats)
+    _register_runtime_cache_stats('nli_metadata_store', nli_metadata_store.stats)
 
     def _remember_fl_ids(cache_key: str, fl_ids: list, *, complete: bool = True) -> None:
         """Put freshly resolved FL ids in the memory cache, and a manifest's (complete)

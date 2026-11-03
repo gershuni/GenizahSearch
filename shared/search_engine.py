@@ -3762,6 +3762,38 @@ class SearchEngine:
             sys_ids = [s for s in sys_ids if s in restrict_sys_ids]
         return sys_ids
 
+    def words_occur(self, query_str):
+        """Whether every word of *query_str* occurs as a whole word in one document
+        of the open main index: one count query against the term index, limit 1,
+        no text read and no verifier run (milliseconds; never a research worker).
+
+        The search page asks this before it offers the Hebrew a Latin-script query
+        spells on the Hebrew keyboard layout (shared/keyboard_layout.py): a
+        suggestion the corpus cannot answer is noise. Whole words, as the page's
+        Exact retrieves them, on the diacritic-folded field too where the index has
+        it. False without an index or for an empty query; never raises.
+        """
+        if self.searcher is None or self.index is None:
+            return False
+        words = [w.replace('"', '') for w in strip_search_diacritics(query_str or '').split()]
+        words = [w for w in words if w]
+        if not words:
+            return False
+        try:
+            clauses = []
+            for word in words:
+                forms = [f'content:"{word}"']
+                if getattr(self, '_has_content_search', False):
+                    forms.append(f'content_search:"{word}"')
+                clauses.append('(' + ' OR '.join(forms) + ')')
+            query = self.index.parse_query(' AND '.join(clauses), ['content'])
+            return self.searcher.search(query, 1, count=True).count > 0
+        except MemoryError:
+            raise
+        except Exception as e:
+            LOGGER.debug("words_occur(%r) failed: %s", query_str, e)
+            return False
+
     def _execute_metadata_search(self, query_str, mode, progress_callback=None, restrict_sys_ids=None,
                                  sys_ids=None):
         """Search by title or shelfmark via csv_bank. Returns results even for metadata-only records.
