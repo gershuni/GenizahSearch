@@ -47,6 +47,7 @@ from shared.posthog_server import (
     set_default_distinct_id,
     set_capture_api_key,
     set_capture_host,
+    set_delivery_blocked as _set_delivery_blocked,
     register_scrub_hook,
     _drain_and_discard,
     send_crash_event_direct,  # Phase 113: module-top import (REVIEWS HIGH-2 — no in-hook import)
@@ -479,6 +480,22 @@ def _desktop_default_props_hook(payload: dict) -> 'dict | None':
 # ---------------------------------------------------------------------------
 # Transport config wiring (REVIEWS HIGH-1)
 # ---------------------------------------------------------------------------
+def _apply_source_run_block() -> None:
+    """Block every shared delivery path in a run from source (see GENIZAH_TELEMETRY_FORCE).
+
+    Called at consent load whether or not consent is on: ungated shared emitters
+    (the NLI breaker) resolve POSTHOG_API_KEY themselves, so an unconsented or
+    first-run developer launch must be blocked too. Never raises.
+    """
+    try:
+        import sys as _sys
+        _set_delivery_blocked(
+            not bool(getattr(_sys, 'frozen', False))
+            and os.environ.get('GENIZAH_TELEMETRY_FORCE') != '1')
+    except Exception:
+        logger.debug('telemetry: _apply_source_run_block silently failed', exc_info=True)
+
+
 def _wire_transport_config() -> None:
     """Wire the desktop API key + host into the shared transport.
 
@@ -523,6 +540,9 @@ def _wire_transport_config() -> None:
         # Default host is eu.i.posthog.com (matches the EU project); override only
         # if the project ever moves regions.
         host = os.environ.get('GENIZAH_TELEMETRY_HOST') or None
+        # A run from source is a developer, not a user: block every delivery path
+        # (env key included) unless GENIZAH_TELEMETRY_FORCE=1. Frozen .exe unchanged.
+        _apply_source_run_block()
         set_capture_api_key(key)
         set_capture_host(host)
         # INFRA-F2: while a real key is wired (consent on), tag every shared-queue
@@ -543,6 +563,7 @@ def _load_consent_state() -> None:
     Never raises — all exceptions are swallowed per CRASH-05 contract.
     """
     global _enabled, _install_id, _current_distinct_id, _identified, _crash_distinct_id
+    _apply_source_run_block()
     try:
         cfg = load_app_config()
         enabled = bool(cfg.get(TELEMETRY_ENABLED_KEY, False))
@@ -1968,6 +1989,12 @@ if __name__ == '__main__':
             with _enabled_lock:
                 _enabled = True  # in-memory only, no config.pkl write
             _wire_transport_config()  # apply the env key for this one run
+            from shared.posthog_server import _resolve_api_key
+            if not _resolve_api_key():
+                # A source run blocks delivery; report it instead of a false success.
+                print('telemetry: delivery is blocked in a run from source; '
+                      'set GENIZAH_TELEMETRY_FORCE=1 to run the self-test.', file=sys.stderr)
+                sys.exit(1)
             run_selftest()
             # Allow daemon thread to drain
             import time

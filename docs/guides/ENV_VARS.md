@@ -220,3 +220,13 @@ AND `shared.posthog_server.get_dropped_event_count()` — growth in EITHER signa
 The two-queue split is intentional (REVIEWS Issue 5 Option A): refactoring `web/api_hardening`'s
 queue would break 5 existing test monkeypatches that target `web.api_hardening._event_queue`
 directly. A future cleanup plan can unify.
+
+# Telemetry guard (2026-11-03)
+# GENIZAH_TELEMETRY_FORCE=1   # desktop only: deliver telemetry from a run FROM SOURCE
+#   (`python genizah_app.py`). Unset (the default), a non-frozen desktop run blocks every
+#   PostHog delivery path -- queue, crash path, self-test -- even with POSTHOG_API_KEY in
+#   .env, so a developer is not counted as a user or a crash (all 1,157 desktop_crash
+#   events in 30 days came from one dev box). The frozen .exe is unchanged.
+#   pytest never sends: tests/conftest.py blanks POSTHOG_API_KEY for the whole process and
+#   scripts/run_local_tests.py does the same for its child processes; a test that exercises
+#   delivery must install its own fake key. Web is unaffected.

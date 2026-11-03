@@ -39,6 +39,16 @@ if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
 # below (`_isolate_nli_image_store`). Set, not setdefault: a test must never
 # read or write the real stores.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# No pytest process may send telemetry to production PostHog. A developer's
+# .env carries a real POSTHOG_API_KEY and web.main's load_dotenv() does not
+# override a variable that is already set (an empty string counts as set).
+# Tests that exercise delivery install their own fake key explicitly.
+# ---------------------------------------------------------------------------
+os.environ["POSTHOG_API_KEY"] = ""
+os.environ.pop("GENIZAH_TELEMETRY_KEY", None)
+os.environ.pop("GENIZAH_TELEMETRY_FORCE", None)
+
 import atexit as _atexit
 import shutil as _shutil
 import tempfile as _tempfile
@@ -606,6 +616,9 @@ def crash_telemetry_state(monkeypatch):
     fresh_q: _queue.Queue = _queue.Queue(maxsize=10000)
     monkeypatch.setattr(_ph, '_event_queue', fresh_q)
 
+    # Crash tests install their own fake key and assert delivery; a non-frozen
+    # test process would otherwise be blocked (GENIZAH_TELEMETRY_FORCE).
+    monkeypatch.setenv('GENIZAH_TELEMETRY_FORCE', '1')
     _tel._reset_for_tests()
     _tel._load_consent_state()
 

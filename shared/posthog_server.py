@@ -75,6 +75,11 @@ _api_key_override: str | None = None
 _host_override: str | None = None
 _capture_config_lock = threading.Lock()
 
+# When True, no key resolves at all (queue, crash path and selftest all see ''),
+# whatever POSTHOG_API_KEY holds. desktop/telemetry.py sets it for a run from
+# source so a developer is not counted as a user. Web never sets it.
+_delivery_blocked: bool = False
+
 # Phase 113 crash-path snapshot globals (D-05 / REVIEWS HIGH-1).
 # These are PLAIN module globals — written under _capture_config_lock by the
 # two setters below, but READ WITHOUT ANY LOCK by send_crash_event_direct().
@@ -140,7 +145,20 @@ def set_capture_api_key(key: str | None) -> None:
     with _capture_config_lock:
         _api_key_override = key
         # Mirror the _resolve_api_key formula — crash path reads this without a lock.
-        _crash_api_key_snapshot = (key or os.environ.get('POSTHOG_API_KEY', '')).strip()
+        _crash_api_key_snapshot = '' if _delivery_blocked else (
+            key or os.environ.get('POSTHOG_API_KEY', '')).strip()
+
+
+def set_delivery_blocked(blocked: bool) -> None:
+    """Block (True) or allow (False) every delivery path, env key included.
+
+    Also refreshes _crash_api_key_snapshot, which the lock-free crash path reads.
+    """
+    global _delivery_blocked, _crash_api_key_snapshot
+    with _capture_config_lock:
+        _delivery_blocked = bool(blocked)
+        _crash_api_key_snapshot = '' if _delivery_blocked else (
+            _api_key_override or os.environ.get('POSTHOG_API_KEY', '')).strip()
 
 
 def set_capture_host(host: str | None) -> None:
@@ -165,6 +183,8 @@ def _resolve_api_key() -> str:
     """Resolve the effective API key: override or env fallback."""
     with _capture_config_lock:
         override = _api_key_override
+        if _delivery_blocked:
+            return ''
     return (override or os.environ.get('POSTHOG_API_KEY', '')).strip()
 
 
@@ -341,7 +361,8 @@ def _reset_for_tests() -> None:
     via the drop counter.
     """
     global _dropped_events, _default_distinct_id, _scrub_hook, _api_key_override, _host_override
-    global _crash_api_key_snapshot, _crash_capture_url_snapshot
+    global _crash_api_key_snapshot, _crash_capture_url_snapshot, _delivery_blocked
+    _delivery_blocked = False
     # Drain queue
     while True:
         try:
@@ -464,6 +485,7 @@ __all__ = [
     'POSTHOG_CAPTURE_URL',
     'enqueue_event',
     'get_dropped_event_count',
+    'set_delivery_blocked',
     '_reset_for_tests',
     # Phase 111 neutral additions:
     'set_default_distinct_id',
