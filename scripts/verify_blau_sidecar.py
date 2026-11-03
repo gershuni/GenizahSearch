@@ -97,6 +97,15 @@ def verify(db: str, expect_roots: int, expect_forms: int, expect_source_sha256: 
             "AND NOT EXISTS (SELECT 1 FROM roots t WHERE t.id = r.target_id)").fetchone()[0]
         if n:
             problems.append(f"{n} cross-reference roots point at a root that is not in the table")
+        # A cross-reference with no target is one the site itself left unresolved (14 in release
+        # 1.1); the build pins their number, so a NULLed target is a mutation, not a source gap.
+        n = con.execute("SELECT COUNT(*) FROM roots WHERE is_cross_reference = 1 AND target_id IS NULL").fetchone()[0]
+        xrefs = con.execute("SELECT COUNT(*) FROM roots WHERE is_cross_reference = 1").fetchone()[0]
+        if str(n) != meta.get("cross_references_unresolved", "0"):
+            problems.append(f"{n} cross-reference roots have no target but meta.cross_references_unresolved "
+                            f"says {meta.get('cross_references_unresolved')!r}")
+        if n > max(2, xrefs // 10):
+            problems.append(f"{n} cross-reference roots have no target (more than 10% of {xrefs})")
         n = con.execute("SELECT COUNT(*) FROM roots WHERE is_cross_reference = 0 AND num_forms = 0").fetchone()[0]
         if n:
             problems.append(f"{n} ordinary roots have no form")

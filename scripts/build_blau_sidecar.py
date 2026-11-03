@@ -264,18 +264,25 @@ def _int(value, default=0) -> int:
         return default
 
 
+def _string_list(entry, field: str) -> list[str]:
+    """``entry[field]`` as a list of non-empty strings: absent/None is empty, a bare string is one
+    name, a list keeps its strings; anything else (a number, an object) is malformed input."""
+    value = entry.get(field)
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list):
+        raise SourceError(f"entry {entry.get('id')!r}: {field} is {type(value).__name__}, not a list of strings")
+    return [v for v in value if isinstance(v, str) and v.strip()]
+
+
 def _names(entry) -> list[str]:
-    names = entry.get("name_ja")
-    if isinstance(names, str):
-        names = [names]
-    return [n for n in (names or []) if isinstance(n, str) and n.strip()]
+    return _string_list(entry, "name_ja")
 
 
 def _spellings(entry) -> list[str]:
-    spellings = entry.get("arabic_spelling")
-    if isinstance(spellings, str):
-        spellings = [spellings]
-    return [s for s in (spellings or []) if isinstance(s, str) and s.strip()]
+    return _string_list(entry, "arabic_spelling")
 
 
 class Flattener:
@@ -504,6 +511,9 @@ def write_sidecar(path: Path, flat: Flattener, bibliography: list, facts: dict) 
             "credit_en": CREDIT_EN,
             "permission_note": PERMISSION_NOTE,
             "cross_references": str(sum(1 for r in flat.roots if r[9])),
+            # Cross-reference roots the site itself could not resolve (14 in release 1.1, no
+            # target_id): pinned so the gate can tell a mutated file from the source's own gaps.
+            "cross_references_unresolved": str(sum(1 for r in flat.roots if r[9] and r[10] is None)),
             "roots_unnamed": str(flat.roots_unnamed),
             "sub_entries_unnamed": str(flat.sub_entries_unnamed),
             "citations_dangling_source": str(dangling),
@@ -555,6 +565,11 @@ def main(argv=None) -> int:
         flat = flatten(data)
     except SourceError as exc:
         print(f"FAIL: {exc}")
+        return EXIT_SOURCE
+    except (TypeError, AttributeError, KeyError, ValueError) as exc:
+        # Untrusted input of the wrong shape anywhere the walk did not check explicitly
+        # (a scalar where a list or object is expected): still a source failure, not a traceback.
+        print(f"FAIL: the download is not shaped like the dictionary ({type(exc).__name__}: {exc})")
         return EXIT_SOURCE
     facts.update(bib_facts)
     print(f"source   {source_dir / DICTIONARY_FILE} sha256 {facts['source_sha256']} "

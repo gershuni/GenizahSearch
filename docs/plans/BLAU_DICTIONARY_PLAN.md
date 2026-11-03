@@ -45,7 +45,7 @@ the whole dictionary: an object keyed by the printed entry name (`אבד (أبد
 
 | Unit | Count | Shape |
 |---|---|---|
-| roots | 3,047 | `id` `blau-e-…`, `name_ja` (list; 7 roots have none and are keyed by their Arabic spelling in parentheses), `name_ja_clean`, `arabic_spelling`, `start_page_printed`, `is_cross_reference` (191, with `target_id`), `stems`, `sub_entries` |
+| roots | 3,047 | `id` `blau-e-…`, `name_ja` (list; 7 roots have none and are keyed by their Arabic spelling in parentheses), `name_ja_clean`, `arabic_spelling`, `start_page_printed`, `is_cross_reference` (191, with `target_id`; 14 have none, the site's own unresolved pointers), `stems`, `sub_entries` |
 | sub-entries | 3,665 | `blau-se-…`, `name_ja` (54 have none, only an Arabic spelling), `arabic_spelling`, `stems` |
 | stems | 8,295 (4,630 under roots, 3,665 under sub-entries) | `blau-st-…`, `stem_head` with `binyan` ("I" … "X"), `binyan_shift`, `government`, `complement_arabic`, `complement_ja` (strings) and `segments` |
 | forms | 12,753 | `blau-f-…`, `segments`, `is_classical` / `is_reconstructed` / `is_erroneous`, `variant_head`, `dictionary_citations` (13,465), `references` (11,709), `additional_notes` |
@@ -111,7 +111,7 @@ downloaded files. Row counts from the real build:
 
 | Table | Rows | Columns |
 |---|---|---|
-| `meta` | key/value | `version` 1.0.0 · `source_url`, `source_release` 1.1, `source_release_date`, `source_schema_version` v6 · `source_sha256` (the .gz), `source_bytes`, `source_json_sha256`, `source_json_bytes`, `bibliography_sha256` · `normalizer_version` · `built_at`, `builder`, `builder_revision` · `credit_he`, `credit_en`, `permission_note` · `rows_<table>` for every table · `cross_references` 191, `roots_unnamed` 7, `sub_entries_unnamed` 54, `citations_dangling_source` 1 |
+| `meta` | key/value | `version` 1.0.0 · `source_url`, `source_release` 1.1, `source_release_date`, `source_schema_version` v6 · `source_sha256` (the .gz), `source_bytes`, `source_json_sha256`, `source_json_bytes`, `bibliography_sha256` · `normalizer_version` · `built_at`, `builder`, `builder_revision` · `credit_he`, `credit_en`, `permission_note` · `rows_<table>` for every table · `cross_references` 191, `cross_references_unresolved` 14, `roots_unnamed` 7, `sub_entries_unnamed` 54, `citations_dangling_source` 1 |
 | `sources` | 337 | `id`, `abbreviation`, `full_reference`, `page`, `parent` |
 | `roots` | 3,047 | `id`, `key` (the JSON key), `ordinal`, `name_ja` (names joined by ` \| `), `names_json`, `name_ja_clean`, `arabic_spelling`, `arabic_norm`, `start_page_printed`, `is_cross_reference`, `target_id`, `num_stems`, `num_sub_entries`, `num_forms` |
 | `sub_entries` | 3,665 | `id`, `root_id`, `ordinal`, `name_ja`, `names_json`, `arabic_spelling`, `arabic_norm` |
@@ -303,4 +303,11 @@ to the search. Costs: 6,495 keys × one indexed whole-word search; measured on a
 
 ## 11. Review log
 
-(filled by the PR's Codex rounds)
+**Round 1** (PR #472, `4794cf69`), Codex: two P2, both fixed.
+- The gate let a cross-reference root with a NULL `target_id` pass (the dangling-target check
+  tested only non-NULL targets). The real file has 14 such roots, the site's own unresolved
+  pointers, so the build now pins `meta.cross_references_unresolved` and the gate fails on any
+  difference (a NULLed target is a mutation) and on more than 10% of the cross-references.
+- A scalar `name_ja` (or any field of the wrong shape) raised an uncaught `TypeError` instead of
+  exit 2: `name_ja` / `arabic_spelling` are validated as lists of strings, and `main` turns any
+  remaining shape error from the walk into a source failure with the exception named.

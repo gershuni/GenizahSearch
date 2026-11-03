@@ -178,7 +178,7 @@ def test_build_writes_every_table_and_the_meta(built):
     assert "Published with permission" in meta["credit_en"]
     for t, n in counts.items():
         assert meta[f"rows_{t}"] == str(n)
-    assert meta["cross_references"] == "1"
+    assert meta["cross_references"] == "1" and meta["cross_references_unresolved"] == "0"
     assert meta["roots_unnamed"] == "0" and meta["sub_entries_unnamed"] == "0"
     assert meta["citations_dangling_source"] == "0"
 
@@ -325,6 +325,23 @@ def test_build_fails_on_a_dictionary_that_is_not_v6(tmp_path, capsys, data, mess
     assert message in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("field, value, message", [
+    ("name_ja", 123, "name_ja is int, not a list of strings"),
+    ("arabic_spelling", {"x": 1}, "arabic_spelling is dict"),
+    ("stems", 5, "not shaped like the dictionary (TypeError"),
+    ("sub_entries", "x", "sub-entry 0 has no id"),        # a string iterates as characters: caught by the walk
+])
+def test_build_fails_without_a_traceback_on_a_field_of_the_wrong_type(tmp_path, capsys, field, value, message):
+    """Codex round 1: a scalar name_ja raised an uncaught TypeError; every wrong shape is EXIT_SOURCE."""
+    data = dictionary()
+    data["בלג (بلغ)"][field] = value
+    src = write_source(tmp_path / "download", data)
+    assert build_main(["--source-dir", str(src), "--out", str(tmp_path / "blau.db")]) == EXIT_SOURCE
+    out = capsys.readouterr().out
+    assert message in out and "Traceback" not in out
+    assert not (tmp_path / "blau.db").exists()
+
+
 def test_build_fails_on_a_missing_or_malformed_bibliography(tmp_path, capsys):
     src = write_source(tmp_path / "download", bibliography=None)
     assert build_main(["--source-dir", str(src), "--out", str(tmp_path / "blau.db")]) == EXIT_SOURCE
@@ -469,7 +486,13 @@ def test_verify_fails_on_a_missing_credit_line(built):
 
 def test_verify_fails_on_a_dangling_cross_reference(built):
     _mutate(built, "UPDATE roots SET target_id = 'blau-e-999999' WHERE id = 'blau-e-000002'")
-    assert any("cross-reference roots point" in p for p in verify(str(built), 3, 5))
+    assert any("cross-reference roots" in p and "not in the table" in p for p in verify(str(built), 3, 5))
+
+
+def test_verify_fails_on_a_cross_reference_without_a_target(built):
+    """Codex round 1: a NULL target slipped past the dangling-target check."""
+    _mutate(built, "UPDATE roots SET target_id = NULL WHERE id = 'blau-e-000002'")
+    assert any("cross-reference roots" in p and "no target" in p for p in verify(str(built), 3, 5))
 
 
 def test_verify_fails_on_a_dropped_index(built):
