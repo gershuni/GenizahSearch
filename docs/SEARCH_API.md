@@ -1289,7 +1289,7 @@ public API surface — renaming any is a breaking change).
 | `filter_vocabulary_unavailable` | 503 | vocabulary loader failed (Phase 78 R2-#3 fail-closed); `GET /api/criteria` when the list cannot be built |
 | `filter_unavailable` | 503 | the filters were valid but could not be applied (the catalog sidecar is absent, or the filter lookup failed). The request is never run without its filters. No `Retry-After`; retry later or drop `filters`. Unfiltered and Library-only requests are unaffected. |
 | `rate_limited` | 429 + `Retry-After` | per-IP sliding window exhausted on the endpoint's own bucket |
-| `daily_limit_reached` | 429 + `Retry-After` | 2026-11-03: the address has used its trailing-24 h budget (`SEARCH_API_DAILY_LIMIT`, default 2,000) across `/search`, `/browse` and `/parallels` together. `Retry-After` is the time until the oldest counted request leaves the window (up to 86,400 s). Checked after the per-minute limiter, so a `rate_limited` request spends none of it; a refused request is not counted. Bulk access beyond it is a conversation with the maintainers, not a retry loop. |
+| `daily_limit_reached` | 429 + `Retry-After` | 2026-11-03: the address has used its trailing-24 h budget (`SEARCH_API_DAILY_LIMIT`, default 2,000) across `/search`, `/browse` and `/parallels` together. `Retry-After` is the time until the oldest counted request leaves the window (up to 86,400 s). Checked after the per-minute limiter and BEFORE the request is validated or admitted to a concurrency budget, so it counts every request that reaches it: a request later refused as invalid (400, e.g. `query_required`, a bad browse locator, empty parallels text) or as busy (503 `search_busy`, `heavy_search_busy`, `passage_search_busy`) still spends one. Only a `rate_limited` request and the over-budget attempt itself spend nothing. Bulk access beyond it is a conversation with the maintainers, not a retry loop. |
 | `heavy_search_busy` | 503 + `Retry-After` | heavy-mode (variants/fuzzy/parallels) concurrency budget (`SEARCH_API_HEAVY_CONCURRENCY`, default 2) exhausted; fail-fast instead of queueing unboundedly; retry shortly |
 | `search_busy` | 503 + `Retry-After` | 2026-11-03: the synchronous interactive-mode concurrency budget (`SEARCH_API_INTERACTIVE_CONCURRENCY`, default 2) for exact/title/shelfmark/responsa on `/api/search` is exhausted; fail-fast instead of queueing behind other searches; retry shortly, or submit the same body to `POST /api/search/jobs`, which this budget does not gate |
 | `disabled` | 503 | `SEARCH_API_MODE=disabled` |
@@ -1416,8 +1416,11 @@ budget per address, shared by `/api/search`, `/api/browse` and `/api/parallels` 
 and criteria are not counted): `SEARCH_API_DAILY_LIMIT`, default 2,000, `0` disables, advertised
 as `limits.daily_requests_per_address`. Over it, every one of the three endpoints answers
 **429 `daily_limit_reached`** with `Retry-After` set to the time until the oldest counted
-request leaves the window. The check runs after the per-minute limiter, so a `rate_limited`
-request spends no daily budget, and a refused request is not counted. The per-minute buckets
+request leaves the window. The check runs after the per-minute limiter and before validation
+and the concurrency budgets, so every request that reaches it counts, including one later
+refused as invalid (400) or busy (503); only a `rate_limited` request and the over-budget
+attempt itself spend nothing. Repeatedly invalid or concurrency-refused requests can therefore
+exhaust the day. The per-minute buckets
 stop bursts; this stops a sustained pull that stays under them (the case that prompted it:
 8,036 requests from one address in six hours at about 20 a minute). A client that needs more
 than this in a day should talk to the maintainers rather than retry.
