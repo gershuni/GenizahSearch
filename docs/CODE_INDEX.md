@@ -2658,6 +2658,16 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
     - Method `_get_catalog_tables` — catalogue-form tables tied to the index list object (`is`, never `id()`).
     - Method `get_display_data` (Line 1924)
 
+## shared/nli_metadata_store.py
+
+The parsed NLI MARC / IIIF-manifest answers kept on disk (2026-11-03), one SQLite file beside the NLI image proxy's FL-id store, so an NLI outage does not empty /browse. Read by `MetadataManager.fetch_marc_data` and `fetch_iiif_manifest` through the module (a test can intercept it). Location from the environment on every call; every error is a miss.
+- **Function** `metadata_store_get` — the stored answer for (kind, sys_id, suffix) as a `StoredAnswer` (payload, fetched_at, fresh), fresh or not; None when there is none or the sys_id is synthetic
+- **Function** `metadata_store_put` — keep a parsed answer; refuses an empty one (`has_content`) and prunes past `NLI_METADATA_STORE_MAX_ROWS`, oldest-fetched first
+- **Function** `served_stale` — the answer a caller returns when NLI cannot answer now: the payload with `stale: True` and `fetched_at`
+- **Function** `stale_from` — the oldest `fetched_at` among the answers served stale (`enrich_metadata` writes it as `nli_stale_from`; `web/pages/browse.py` shows the date under the image)
+- **Function** `metadata_store_prepare` — at web startup: bring the file under the row cap (rows are never dropped for age)
+- **Function** `stats` — counters, row count and file size for `/_internal/memstat` (`nli_metadata_store`)
+
 ## shared/indexer.py
 
 - **Function** `_tr` (Line 38) — Translate text if current language is Hebrew.

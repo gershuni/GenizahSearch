@@ -4933,6 +4933,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                             f'data-role="image-credit" data-credit-oxford="{html_module.escape(_credit_ox_text, quote=True)}" '
                                             f'data-credit-nli="{html_module.escape(_credit_nli_text, quote=True)}"'
                                         )
+                            # NLI could not answer for this manuscript, so its catalogue
+                            # record and image list came from the copies kept on disk
+                            # (shared/nli_metadata_store.py): say so quietly, with their date.
+                            if page.nli_stale_from:
+                                _stale_date = time.strftime('%Y-%m-%d', time.localtime(page.nli_stale_from))
+                                ui.label(tr('Catalogue details from {date}').format(date=_stale_date)).classes(
+                                    'text-xs w-full text-center py-1'
+                                ).style('color: #999; font-style: italic;').props('data-role="nli-stale-note"')
 
                     # === RIGHT PANEL: Transcription ===
                     text_panel_flex = 'flex: 1 1 auto; min-width: 0;' if has_image else 'flex: 1 1 100%; min-width: 0;'

@@ -57,6 +57,9 @@ _NLI_IMAGE_STORE_TMP = _tempfile.mkdtemp(prefix="nli_image_store_")
 _atexit.register(_shutil.rmtree, _NLI_IMAGE_STORE_TMP, True)
 os.environ["NLI_FL_ID_STORE_FILE"] = os.path.join(_NLI_IMAGE_STORE_TMP, "session", "nli_fl_ids.db")
 os.environ["NLI_THUMB_CACHE_DIR"] = os.path.join(_NLI_IMAGE_STORE_TMP, "session", "nli_thumbs")
+# The same for the parsed MARC / manifest store (shared/nli_metadata_store.py), which
+# MetadataManager reads on the desktop and the web alike.
+os.environ["NLI_METADATA_STORE_FILE"] = os.path.join(_NLI_IMAGE_STORE_TMP, "session", "nli_metadata.db")
 
 
 # ---------------------------------------------------------------------------
@@ -567,6 +570,7 @@ def _isolate_nli_image_store(monkeypatch):
     folder = os.path.join(_NLI_IMAGE_STORE_TMP, str(next(_NLI_IMAGE_STORE_SEQ)))
     monkeypatch.setenv("NLI_FL_ID_STORE_FILE", os.path.join(folder, "nli_fl_ids.db"))
     monkeypatch.setenv("NLI_THUMB_CACHE_DIR", os.path.join(folder, "nli_thumbs"))
+    monkeypatch.setenv("NLI_METADATA_STORE_FILE", os.path.join(folder, "nli_metadata.db"))
 
 
 # ---------------------------------------------------------------------------
