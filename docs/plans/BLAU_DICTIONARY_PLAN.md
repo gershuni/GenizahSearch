@@ -329,3 +329,9 @@ to the search. Costs: 6,495 keys × one indexed whole-word search; measured on a
   it is compared with `meta.cross_references` like the other pinned counts.
 - A duplicate bibliography id surfaced as a write failure (exit 4): it is a source error (exit 2),
   and ids/abbreviations must be strings.
+
+**Round 4** (`db23b348`), Codex: two P2, both two-line fixes, taken although the budget was spent
+(2 -> 3 -> 3 -> 2): a stray table whose name needs quoting made the schema walk raise (the
+table-valued `pragma_table_info(?)` takes the name as a parameter); `num_stems` and
+`num_sub_entries` are compared with their rows as `num_forms` was. Anything a later review finds
+is a `docs/open_issues.d/` fragment, not another round.

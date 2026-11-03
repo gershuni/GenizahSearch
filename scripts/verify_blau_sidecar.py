@@ -35,7 +35,10 @@ def _schema(con: sqlite3.Connection) -> dict:
     """{table: [(column, declared type, notnull, pk)]} and {'<indexes>': [names]} of a connection."""
     out = {}
     for (name,) in con.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"):
-        out[name] = [(r[1], (r[2] or "").upper(), r[3], r[5]) for r in con.execute(f"PRAGMA table_info({name})")]
+        # The table-valued pragma takes the name as a bound parameter, so a stray table whose
+        # name needs quoting ("stray-table") is reported, not a traceback (Codex round 4).
+        out[name] = [(r[1], (r[2] or "").upper(), r[3], r[5])
+                     for r in con.execute("SELECT * FROM pragma_table_info(?)", (name,))]
     out["<indexes>"] = sorted(r[0] for r in con.execute(
         "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'"))
     return out
@@ -174,11 +177,12 @@ def verify(db: str, expect_roots: int, expect_forms: int, expect_source_sha256: 
         n = con.execute("SELECT COUNT(*) FROM roots WHERE is_cross_reference = 0 AND num_forms = 0").fetchone()[0]
         if n:
             problems.append(f"{n} ordinary roots have no form")
-        n = con.execute(
-            "SELECT COUNT(*) FROM roots r WHERE r.num_forms != (SELECT COUNT(*) FROM forms f WHERE f.root_id = r.id)"
-        ).fetchone()[0]
-        if n:
-            problems.append(f"{n} roots record a num_forms that differs from their forms")
+        for column, table in (("num_forms", "forms"), ("num_stems", "stems"), ("num_sub_entries", "sub_entries")):
+            n = con.execute(
+                f"SELECT COUNT(*) FROM roots r WHERE r.{column} != "
+                f"(SELECT COUNT(*) FROM {table} t WHERE t.root_id = r.id)").fetchone()[0]
+            if n:
+                problems.append(f"{n} roots record a {column} that differs from their {table}")
 
         # Forms: every form renders from its segments.
         n = con.execute("SELECT COUNT(*) FROM forms WHERE segments_json IS NULL OR segments_json = ''").fetchone()[0]

@@ -526,6 +526,17 @@ def test_verify_checks_columns_types_constraints_and_indexes(built):
     assert any("table stray is not part of the schema" in p for p in verify(str(built), 3, 5))
     _mutate(built, "CREATE INDEX idx_stray ON stray(x)")
     assert any(p.startswith("indexes ") for p in verify(str(built), 3, 5))
+    _mutate(built, 'CREATE TABLE "stray-table" (x)')      # Codex round 4: a name that needs quoting
+    assert any("table stray-table is not part of the schema" in p for p in verify(str(built), 3, 5))
+
+
+def test_verify_checks_every_denormalized_root_count(built):
+    """Codex round 4: only num_forms was compared with the rows."""
+    _mutate(built, "UPDATE roots SET num_stems = 9 WHERE id = 'blau-e-000001'")
+    assert any("1 roots record a num_stems that differs from their stems" in p for p in verify(str(built), 3, 5))
+    _mutate(built, "UPDATE roots SET num_sub_entries = 0 WHERE id = 'blau-e-000001'")
+    assert any("1 roots record a num_sub_entries that differs from their sub_entries" in p
+               for p in verify(str(built), 3, 5))
 
 
 def test_verify_stops_cleanly_when_a_queried_column_is_gone(built):
