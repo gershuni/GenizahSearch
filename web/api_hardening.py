@@ -278,8 +278,11 @@ class DailyBudget:
 
     check(client_ip) raises APIError('daily_limit_reached', http_status=429,
     headers={'Retry-After': N}) when the address has already used its
-    budget in the trailing window. N is the time until the oldest in-window
-    request expires -- honest backpressure, as in RateLimiter. The
+    budget in the trailing window. N is the time until enough of the oldest
+    in-window requests expire for the bucket to fall under the CURRENT
+    limit (entry [len - limit]: the oldest one normally, a later one right
+    after an operator lowered the limit) -- honest backpressure, as in
+    RateLimiter. The
     over-budget attempt itself is NOT recorded, so a bucket never holds more
     than `limit` timestamps. Every request that passes the check is: the
     handlers call it before validation and before the concurrency budgets,
