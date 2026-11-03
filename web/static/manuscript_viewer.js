@@ -277,6 +277,11 @@ const DOUBLE_TAP_MS = 300;
 const DOUBLE_TAP_PX = 30;
 const ZOOM_NOTIFY_MS = 150;
 const ZOOM_BADGE_MS = 900;
+// Every report to an owner carries a number from this counter (shared by the
+// viewers on a page); the server puts the last number it heard on the image
+// it draws (`data-zoom-seq`), so init() can tell an image drawn before the
+// latest report from one drawn after it.
+let _zoomReportSeq = 0;
 
 /**
  * Create a manuscript viewer instance with zoom, pan, rotate, and image adjustments.
@@ -335,11 +340,25 @@ function createManuscriptViewer(options) {
             console.log('viewer: initializing drag on ' + imageSelector);
 
             // A new element (the page was rebuilt, the folio changed) is drawn
-            // with whatever transform the server put on it; the state takes
-            // that over, so the next step starts from what is on screen.
+            // with whatever transform the server put on it. Usually the state
+            // takes that over, so the next step starts from what is on screen.
+            // Not when the server drew it before it heard the latest level --
+            // a rebuild within the wheel's reporting pause, or with a report
+            // still on its way (its `data-zoom-seq` is behind this viewer's
+            // last report): then the live state is the newer one, it goes
+            // back onto the new element, and the level is said again (Codex
+            // on #471).
             if (this._boundEl !== this.el) {
+                var drawnSeq = parseInt((this.el.dataset && this.el.dataset.zoomSeq) || '0', 10) || 0;
+                var stale = !!this._boundEl && (!!this._notifyTimer || drawnSeq < (this.reportSeq || 0));
                 this._boundEl = this.el;
-                this._adoptInlineTransform();
+                if (stale) {
+                    this.applyTransform();
+                    this._setLabelText(Math.round(this.state.scale * 100) + '%');
+                    this._changed(true);
+                } else {
+                    this._adoptInlineTransform();
+                }
             }
 
             // Attach mousedown directly to the IMAGE element. SEED-010: move/up are
@@ -444,7 +463,9 @@ function createManuscriptViewer(options) {
         // the reader is looking at stays put. The point under the anchor stays
         // under it: with k = new / old,
         //     translate' = translate * k + (anchor - centre) * (1 - k).
-        zoomBy: function(factor, px, py) {
+        // `now`: report the level at once (a click, a double-click); without
+        // it the report waits ZOOM_NOTIFY_MS for the next one (wheel, pinch).
+        zoomBy: function(factor, px, py, now) {
             if (!this.el) {
                 this.el = document.querySelector(imageSelector);
                 if (!this.el) return;
@@ -466,18 +487,21 @@ function createManuscriptViewer(options) {
             this.state.scale = next;
             this.applyTransform();
             this.updateLabel();
-            this._changed();
+            this._changed(now === true);
         },
 
         // Back to the whole page in its box: scale 1 and no pan; the rotation
-        // and the image adjustments stay.
+        // and the image adjustments stay. Reported at once, not after the
+        // pause: the browse page calls this when the folio changes, and a
+        // level still waiting from the last click must not land after it.
         fit: function() {
+            var changed = this.state.scale !== 1 || this.state.x !== 0 || this.state.y !== 0;
             this.state.x = 0;
             this.state.y = 0;
             this.state.scale = 1;
             this.applyTransform();
-            this.updateLabel();
-            this._changed();
+            this.updateLabel(changed);
+            this._changed(true);
         },
 
         // Double-click and double-tap: in to DOUBLE_CLICK_ZOOM at the point,
@@ -486,7 +510,7 @@ function createManuscriptViewer(options) {
             if (this.state.scale > 1.01) {
                 this.fit();
             } else {
-                this.zoomBy(DOUBLE_CLICK_ZOOM / this.state.scale, px, py);
+                this.zoomBy(DOUBLE_CLICK_ZOOM / this.state.scale, px, py, true);
             }
         },
 
@@ -508,17 +532,25 @@ function createManuscriptViewer(options) {
             this.zoomBy(factor, e.clientX, e.clientY);
         },
 
-        // Tell the owner, once, ZOOM_NOTIFY_MS after the last change. The
-        // callback reads the live state when it fires, so a burst of clicks
-        // reports the level the reader ended on.
-        _changed: function() {
+        // Tell the owner: at once (`now`: a click, a double-click, a fit, a
+        // reset), or ZOOM_NOTIFY_MS after the last change (wheel, pinch). The
+        // callback reads the live state when it fires, so a burst reports the
+        // level the reader ended on; `reportSeq` numbers the report.
+        _changed: function(now) {
             if (!onChange) return;
             var self = this;
             if (this._notifyTimer) clearTimeout(this._notifyTimer);
-            this._notifyTimer = setTimeout(function() {
+            this._notifyTimer = null;
+            var report = function() {
                 self._notifyTimer = null;
+                self.reportSeq = ++_zoomReportSeq;
                 onChange(self);
-            }, ZOOM_NOTIFY_MS);
+            };
+            if (now) {
+                report();
+                return;
+            }
+            this._notifyTimer = setTimeout(report, ZOOM_NOTIFY_MS);
         },
 
         update: function(scale, rotation) {
@@ -702,8 +734,8 @@ function createManuscriptViewer(options) {
             this._applyFilters();
         },
 
-        zoomIn: function() { this.zoomBy(ZOOM_FACTOR); },
-        zoomOut: function() { this.zoomBy(1 / ZOOM_FACTOR); },
+        zoomIn: function() { this.zoomBy(ZOOM_FACTOR, undefined, undefined, true); },
+        zoomOut: function() { this.zoomBy(1 / ZOOM_FACTOR, undefined, undefined, true); },
         rotateLeft: function() {
             this.state.rotation = (this.state.rotation - 90) % 360;
             this.applyTransform();
@@ -714,10 +746,13 @@ function createManuscriptViewer(options) {
         },
 
         // The toolbar figure; where that is hidden (a phone) or absent, a badge
-        // over the image shows the level for a moment instead.
-        updateLabel: function() {
+        // over the image shows the level for a moment instead -- only when
+        // the level moved (`changed`, default true): a folio change that
+        // fits an unzoomed page flashes nothing.
+        updateLabel: function(changed) {
             var text = Math.round(this.state.scale * 100) + '%';
             var label = this._setLabelText(text);
+            if (changed === false) return;
             var shown = false;
             try { shown = !!label && getComputedStyle(label).display !== 'none'; } catch (err) { shown = !!label; }
             if (!shown) this._showBadge(text);
@@ -750,14 +785,15 @@ function createManuscriptViewer(options) {
         },
 
         reset: function() {
+            var changed = this.state.scale !== 1;
             this.state.x = 0;
             this.state.y = 0;
             this.state.rotation = 0;
             this.state.scale = 1;
             this.resetAdjustments();
             this.applyTransform();
-            this.updateLabel();
-            this._changed();
+            this.updateLabel(changed);
+            this._changed(true);
         }
     };
 

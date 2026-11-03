@@ -77,6 +77,9 @@ class BrowseState:
         self.error: Optional[str] = None
         self.search_error: Optional[str] = None  # Inline error for shelfmark not found
         self.zoom_level: float = 1.0
+        # The number of the last `browse_zoom` report heard (the viewer's
+        # `reportSeq`), drawn on the image as `data-zoom-seq`.
+        self.zoom_seq: int = 0
         self.rotation: int = 0
         self.is_fullscreen: bool = False
         self.highlight_terms: Optional[str] = None

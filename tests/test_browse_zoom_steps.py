@@ -90,8 +90,9 @@ def test_the_viewer_js_carries_the_same_numbers():
 
 def test_the_viewer_steps_multiply_and_anchor_at_the_pointer():
     js = _read('web/static/manuscript_viewer.js')
-    assert 'zoomIn: function() { this.zoomBy(ZOOM_FACTOR); }' in js
-    assert 'zoomOut: function() { this.zoomBy(1 / ZOOM_FACTOR); }' in js
+    # A click multiplies, and is reported at once (the wheel and the pinch wait for the pause).
+    assert 'zoomIn: function() { this.zoomBy(ZOOM_FACTOR, undefined, undefined, true); }' in js
+    assert 'zoomOut: function() { this.zoomBy(1 / ZOOM_FACTOR, undefined, undefined, true); }' in js
     assert 'const maxZoom = options.maxZoom || MAX_ZOOM;' in js
     # No linear step is left anywhere: the wheel, the pinch and the buttons all clamp through clampZoom.
     assert 'zoomStep' not in js
@@ -103,7 +104,7 @@ def test_the_viewer_steps_multiply_and_anchor_at_the_pointer():
     assert "this.el.style.touchAction = 'manipulation';" in js, "the browser's own double-tap zoom must stay out of it"
     toggle = js[js.index('toggleZoomAt: function'):js.index('onDoubleClick: function')]
     assert 'if (this.state.scale > 1.01) {' in toggle and 'this.fit();' in toggle
-    assert 'this.zoomBy(DOUBLE_CLICK_ZOOM / this.state.scale, px, py);' in toggle
+    assert 'this.zoomBy(DOUBLE_CLICK_ZOOM / this.state.scale, px, py, true);' in toggle
     # A double-tap goes through the same toggle, and keeps the click pair from the browser.
     end = js[js.index('onTouchEnd: function'):js.index('applyTransform: function')]
     assert 'this.toggleZoomAt(tap.x, tap.y);' in end and 'e.preventDefault();' in end
@@ -112,6 +113,7 @@ def test_the_viewer_steps_multiply_and_anchor_at_the_pointer():
 
 def test_the_browse_buttons_zoom_in_the_browser_and_keep_their_hooks():
     browse = _read('web/pages/browse.py')
+    js = _read('web/static/manuscript_viewer.js')
     # Client-side clicks, on the buttons the keyboard handler finds by data-action.
     zoom_in = [line for line in browse.splitlines() if 'data-action="zoom-in"' in line]
     zoom_out = [line for line in browse.splitlines() if 'data-action="zoom-out"' in line]
@@ -129,7 +131,11 @@ def test_the_browse_buttons_zoom_in_the_browser_and_keep_their_hooks():
     assert browse.count("js_handler=ZOOM_RESET_JS") == 2
     # The page hears the level through one event, and a rotation never pushes a scale.
     assert "ui.on('browse_zoom', _zoom_changed)" in browse
-    assert "emitEvent('browse_zoom', { scale: viewer.state.scale })" in browse
+    assert "emitEvent('browse_zoom', { scale: viewer.state.scale, seq: viewer.reportSeq || 0 })" in browse
+    # Every image the page draws says which report it followed, so the viewer
+    # can tell a rebuild drawn before its latest level (Codex on #471).
+    assert browse.count('data-zoom-seq="{int(state.zoom_seq)}"') == 2
+    assert 'drawnSeq < (this.reportSeq || 0)' in js
     transform = browse[browse.index('def update_image_transform'):browse.index('async def _submit_correction_now')]
     assert 'setRotation(' in transform and 'scale' not in transform.split('"""')[2]
     # A page change starts the viewer from the whole page again.

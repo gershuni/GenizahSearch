@@ -241,20 +241,81 @@ const checks = {
         assert.equal(viewer.state.isDragging, false);
     },
 
-    async 'the owner hears once, after the last change, with the level the reader ended on'() {
+    async 'a click reports at once; the wheel once, after the last notch, with the level it ended on'() {
         const { viewer, changes, constants } = makePage();
         viewer.zoomIn(); viewer.zoomIn(); viewer.zoomIn();
-        assert.deepEqual(changes, [], 'nothing before the pause');
+        assert.deepEqual(changes, [1.5, 2.25, 3.375], 'every click is reported as it happens');
+        assert.equal(viewer.reportSeq, 3);
+        const wheel = (deltaY) => viewer.onWheel({ deltaY, deltaMode: 0, clientX: 300, clientY: 200, preventDefault() {} });
+        wheel(-100); wheel(-100); wheel(-100);
+        assert.deepEqual(changes, [1.5, 2.25, 3.375], 'nothing before the pause');
         await sleep(constants.notifyMs + 60);
-        assert.deepEqual(changes, [3.375]);
+        assert.equal(changes.length, 4);
+        assert.ok(near(changes[3], 3.375 * Math.exp(0.6), 1e-9));
+        assert.equal(viewer.reportSeq, 4);
+        // A fit reports at once and cancels a level still waiting: the browse
+        // page fits on a folio change, and the last notch's level must not
+        // land after it.
+        wheel(-100);
         viewer.fit();
+        assert.equal(changes.length, 5);
+        assert.equal(changes[4], 1);
         await sleep(constants.notifyMs + 60);
-        assert.deepEqual(changes, [3.375, 1]);
+        assert.equal(changes.length, 5);
+        viewer.zoomIn();
+        viewer.reset();
+        assert.deepEqual(changes.slice(5), [1.5, 1]);
         // A level pushed in by the server is not reported back.
         viewer.update(2, 0);
         viewer.setRotation(90);
         await sleep(constants.notifyMs + 60);
-        assert.deepEqual(changes, [3.375, 1]);
+        assert.equal(changes.length, 7);
+    },
+
+    async 'an image the server drew before hearing the latest level is not taken over'() {
+        // The page was rebuilt (Show Metadata, Edit) right after a click: the
+        // server drew the new image at the level it last heard, numbered
+        // behind this viewer's last report (Codex on #471).
+        const page = makePage();
+        page.viewer.zoomIn();
+        assert.equal(page.viewer.reportSeq, 1);
+        page.image.style.transform = 'translate(0px, 0px) rotate(0deg) scale(1.0)';
+        page.image.dataset.zoomSeq = '0';
+        page.viewer.el = null;
+        page.viewer._boundEl = {};  // a different element than the one found now
+        page.viewer.init();
+        assert.equal(page.viewer.state.scale, 1.5, 'the live level stays');
+        assert.equal(page.image.style.transform, 'translate(0px, 0px) rotate(0deg) scale(1.5)', 'and goes back onto the new image');
+        assert.equal(page.label.textContent, '150%');
+        assert.deepEqual(page.changes, [1.5, 1.5], 'and is said again');
+        assert.equal(page.viewer.reportSeq, 2);
+        // Drawn after the latest report: the server's level is the newer one (a folio change reset it).
+        page.image.style.transform = 'translate(0px, 0px) rotate(0deg) scale(1.0)';
+        page.image.dataset.zoomSeq = '2';
+        page.viewer.el = null;
+        page.viewer._boundEl = {};
+        page.viewer.init();
+        assert.equal(page.viewer.state.scale, 1);
+        // A wheel report still waiting counts as newer than anything drawn.
+        page.viewer.onWheel({ deltaY: -100, deltaMode: 0, clientX: 300, clientY: 200, preventDefault() {} });
+        const pending = page.viewer.state.scale;
+        page.image.style.transform = 'translate(0px, 0px) rotate(0deg) scale(1.0)';
+        page.image.dataset.zoomSeq = '2';
+        page.viewer.el = null;
+        page.viewer._boundEl = {};
+        page.viewer.init();
+        assert.equal(page.viewer.state.scale, pending);
+        assert.equal(page.changes.length, 3, 'reported at once, not after the pause');
+        await sleep(page.constants.notifyMs + 60);
+        assert.equal(page.changes.length, 3);
+        // A viewer meeting its first element takes it over whatever the number says.
+        const fresh = makePage();
+        fresh.image.style.transform = 'translate(0px, 0px) rotate(0deg) scale(3)';
+        fresh.image.dataset.zoomSeq = '0';
+        fresh.viewer.el = null;
+        fresh.viewer._boundEl = undefined;
+        fresh.viewer.init();
+        assert.equal(fresh.viewer.state.scale, 3);
     },
 
     'a new element is taken over at the transform it was drawn with'() {
@@ -263,6 +324,7 @@ const checks = {
         // The page was rebuilt: a new image, drawn by the server at 225% turned by 90.
         const fresh = new FakeElement('IMG', page.image.rect);
         fresh.style.transform = 'translate(0px, 0px) rotate(90deg) scale(2.25)';
+        fresh.dataset.zoomSeq = String(page.viewer.reportSeq);  // drawn after the click was heard
         page.image.rect = null;
         const image = page.image;
         Object.assign(image, fresh);  // the selector now finds the new element's state
@@ -289,6 +351,14 @@ const checks = {
         const shown = makePage();
         shown.viewer.zoomIn();
         assert.equal(shown.container.children.length, 0, 'no badge beside a visible label');
+        // A folio change fits an unzoomed page: nothing to flash.
+        const quiet = makePage({ labelHidden: true });
+        quiet.viewer.fit();
+        assert.equal(quiet.container.children.length, 0, 'no badge for a fit that changed nothing');
+        quiet.viewer.zoomIn();
+        quiet.viewer.fit();
+        const flashed = quiet.container.children.find((c) => c.className === 'zoom-badge');
+        assert.equal(flashed.textContent, '100%');
     },
 };
 

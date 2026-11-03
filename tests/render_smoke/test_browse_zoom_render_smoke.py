@@ -91,11 +91,19 @@ def test_the_page_hears_the_level_and_a_rebuilt_page_keeps_it():
         assert _zoom_labels(user) == ['100%']
 
         with patch.object(ui, 'run_javascript') as run_js:
-            _tell_the_page(user, {'scale': 1.5})
+            _tell_the_page(user, {'scale': 1.5, 'seq': 7})
         run_js.assert_not_called()  # the level is already applied in the browser
         _rebuild(user)
         await _wait_until(lambda: 'scale(1.5)' in _image_markup(user))
         assert _zoom_labels(user) == ['150%']
+        # The image says which report it followed, so the viewer can tell a
+        # rebuild drawn before its latest level (Codex on #471); the number never goes back.
+        assert 'data-zoom-seq="7"' in _image_markup(user)
+        _tell_the_page(user, {'scale': 1.5, 'seq': 3})
+        _tell_the_page(user, {'scale': 1.5, 'seq': 'x'})
+        _rebuild(user)
+        await _wait_until(lambda: 'Show Metadata' in _texts(user))
+        assert 'data-zoom-seq="7"' in _image_markup(user)
 
         # Clamped to the viewer's range, and a broken payload changes nothing.
         _tell_the_page(user, {'scale': 50})
@@ -168,6 +176,6 @@ def test_the_page_wires_the_shared_viewer_once():
     and the fullscreen editor's viewer are in the page's head and its JS."""
     styles = browse.VIEWER_STYLES
     assert '/static/manuscript_viewer.js?v=' in styles and '__VIEWER_JS_VERSION__' not in styles
-    assert "emitEvent('browse_zoom', { scale: viewer.state.scale })" in styles
+    assert "emitEvent('browse_zoom', { scale: viewer.state.scale, seq: viewer.reportSeq || 0 })" in styles
     assert 'onChange: window.browseZoomChanged' in styles
     assert "if (action === 'in') viewer.zoomIn();" in styles

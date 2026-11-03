@@ -634,7 +634,9 @@ VIEWER_STYLES = '''
     // so a rebuilt page (Prev/Next, Show Metadata, Edit) draws the image at
     // the level the reader sees.
     window.browseZoomChanged = function(viewer) {
-        if (typeof emitEvent === 'function') emitEvent('browse_zoom', { scale: viewer.state.scale });
+        if (typeof emitEvent === 'function') {
+            emitEvent('browse_zoom', { scale: viewer.state.scale, seq: viewer.reportSeq || 0 });
+        }
     };
     // Create viewer via shared factory (manuscript_viewer.js loaded with defer)
     window.manuscriptViewer = createManuscriptViewer({
@@ -1767,11 +1769,20 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                      'function(v) { if (v && v.reset) v.reset(); }); emit(e); }')
 
     def _zoom_changed(e):
-        """The browser's zoom level, from the viewer's `browse_zoom` event."""
+        """The browser's zoom level, from the viewer's `browse_zoom` event.
+
+        `seq` numbers the report; the image markup carries the last one heard
+        (`data-zoom-seq`), so the viewer can tell an image this page drew
+        before hearing its latest level from one drawn after.
+        """
         args = e.args if isinstance(e.args, dict) else {}
         if 'scale' not in args:
             return
         state.zoom_level = clamp_zoom(args.get('scale'))
+        try:
+            state.zoom_seq = max(state.zoom_seq, int(args.get('seq', 0)))
+        except (TypeError, ValueError):
+            pass
 
     ui.on('browse_zoom', _zoom_changed)
 
@@ -4886,6 +4897,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         data-full-src="{_full_url}"
                                         class="zoomable-image"
                                         style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;"
+                                        data-zoom-seq="{int(state.zoom_seq)}"
                                         draggable="false"
                                         data-oxford-direct="{_ox_direct_attr}"
                                         data-oxford-direct-label="{_ox_direct_label}"
@@ -5368,7 +5380,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         if '/api/nli_image_by_sysid/' in safe_img_url:
                                             _sep = '&' if '?' in safe_img_url else '?'
                                             _fs_thumb = f"{safe_img_url}{_sep}width=400"
-                                        img_html = f'<img src="{_fs_thumb}" data-full-src="{_fs_full}" class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js}, \'fsEditViewer\')" />'
+                                        img_html = f'<img src="{_fs_thumb}" data-full-src="{_fs_full}" class="zoomable-image" id="fs-zoomable-image" style="transform: translate(0px, 0px) rotate({state.rotation}deg) scale({state.zoom_level}); cursor: grab;" data-zoom-seq="{int(state.zoom_seq)}" draggable="false" onerror="handleImageError(this, \'{safe_sys_id}\', {page_idx}, {is_oxford_js}, \'fsEditViewer\')" />'
                                         ui.html(img_html, sanitize=False)
                                         ui.run_javascript('initProgressiveImages();')
                                     else:
