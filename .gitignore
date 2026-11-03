@@ -389,3 +389,8 @@ scripts/nightly_verify_search_combinations.cmd
 # Written by deploy.sh on the server AFTER a successful restart: the revision the
 # running genizah-web actually loaded. Per-machine runtime state, never committed.
 /.deployed_revision
+
+# Blau dictionary sidecar (docs/plans/BLAU_DICTIONARY_PLAN.md): the download under
+# blau_data/download/ is untrusted third-party data fetched by hand, and blau.db is the
+# build artifact of scripts/build_blau_sidecar.py, deployed like the other *_data/ sidecars.
+blau_data/

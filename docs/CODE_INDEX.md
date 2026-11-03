@@ -3521,6 +3521,18 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
 - **Function** `compose` (Line 303) — A width preset plus a passage-length profile plus a search depth,
 - **Function** `get_preset` (Line 351)
 
+## shared/blau_normalize.py
+
+- **Function** `strip_site_diacritics` (Line 78) — The site's own "strip diacritics": exactly its regex, nothing more.
+- **Function** `strip_marks` (Line 83) — NFC, then every combining mark (category Mn, Mc, Me) removed.
+- **Function** `fold_finals` (Line 90)
+- **Function** `ja_words` (Line 94) — The Hebrew-letter words of ``text`` after marks, quote marks and finals are folded.
+- **Function** `normalize_ja` (Line 106) — The lookup key of a Judeo-Arabic form or of a corpus token: see the module docstring.
+- **Function** `normalize_arabic` (Line 114) — The lookup key of an Arabic-script spelling: NFKC, marks and tatweel dropped,
+- **Function** `_peel_prefixes` (Line 134)
+- **Function** `_peel_suffix` (Line 149)
+- **Function** `candidate_stems` (Line 157) — Normalized lookup candidates for one corpus word, the word itself first, then with
+
 ## shared/cudl_identity.py
 
 - **Function** `cudl_label_to_shelfmark` (Line 58) — Convert a CUDL manifest label to a human-readable shelfmark.
