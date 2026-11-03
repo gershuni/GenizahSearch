@@ -48,6 +48,7 @@ from web.state import state
 from web.criteria_models import CriteriaModel
 from web.api_hardening import (
     RateLimiter,
+    DailyBudget,
     enforce_mode_gate,
     _resolve_rate_limit_key,
     api_channel,
@@ -110,6 +111,14 @@ _capabilities_rate_limiter = RateLimiter(default_limit=120)
 
 # GET /api/criteria (catalogue criteria, PR 2): its own bucket, as above.
 _criteria_rate_limiter = RateLimiter(default_limit=120)
+
+# 2026-11-03 (scrape limits): ONE trailing-24 h budget per address, shared by
+# /api/search, /api/browse and /api/parallels -- unlike the per-minute buckets
+# above, which are per endpoint. A sustained pull that stays under every
+# per-minute bucket (8,036 requests in six hours on 11-02, ~20/min) is what
+# this bounds. Checked AFTER the per-minute limiter, so a rate-refused request
+# spends no daily budget. Capabilities and criteria are not counted.
+_daily_budget = DailyBudget(default_limit=2000)
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +424,14 @@ DEFAULT_VARIANTS_TIMEOUT = 60.0
 DEFAULT_FUZZY_TIMEOUT = 110.0
 DEFAULT_PARALLELS_TIMEOUT = 110.0
 DEFAULT_HEAVY_CONCURRENCY = 2
+# 2026-11-03: synchronous non-heavy /api/search requests (exact, title,
+# shelfmark, responsa, basic variants are heavy) had NO concurrency budget, so
+# a scraper's searches stacked up in the research queue every website visitor
+# shares (web/research_jobs.py: GENIZAH_RESEARCH_WORKERS slots, one FIFO).
+# Reader search p50 server time was 2.7 s on 2026-11-02 against 1.0-1.3 s on
+# quiet days. This budget caps how many API searches can sit in that queue at
+# once; over it, 503 search_busy at once instead of a 30 s wait for a 504.
+DEFAULT_INTERACTIVE_CONCURRENCY = 2
 # Modes whose variant settings differ from the website defaults every job starts
 # from (web.variant_preferences.default_search): bound per search.
 VARIANT_SETTINGS_MODES = frozenset({'variants_extended', 'fuzzy'})
@@ -788,6 +805,27 @@ class _HeavySemaphoreState(_SemaphoreBudget):
 async def _acquire_heavy_slot():
     """Thin alias -- see _SemaphoreBudget.acquire / _HeavySemaphoreState."""
     return await _HeavySemaphoreState.acquire()
+
+
+class _InteractiveSemaphoreState(_SemaphoreBudget):
+    """The synchronous interactive-mode budget (every /api/search mode that is
+    not heavy: exact, title, shelfmark, responsa), 2026-11-03. Same machinery
+    as the heavy budget; its own semaphore, so a scraper's exact searches and
+    a researcher's fuzzy search never contend for the same slots. Background
+    jobs (web/research_api.py) bypass it, as they bypass the heavy budget:
+    they have their own admission control (two per client, 32 in all)."""
+    _env_var = 'SEARCH_API_INTERACTIVE_CONCURRENCY'
+    _default_capacity = DEFAULT_INTERACTIVE_CONCURRENCY
+    _busy_code = 'search_busy'
+    _busy_message = (
+        'interactive search concurrency limit reached; retry shortly, '
+        'or submit the search as a background job'
+    )
+
+
+async def _acquire_interactive_slot():
+    """Thin alias -- see _SemaphoreBudget.acquire / _InteractiveSemaphoreState."""
+    return await _InteractiveSemaphoreState.acquire()
 
 
 # ---------------------------------------------------------------------------
@@ -1719,6 +1757,9 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             #    which the outer except APIError branch routes through
             #    _build_envelope_response (preserves the Retry-After header).
             _rate_limiter.check(client_ip)
+            # 2b. Trailing-24 h budget for this address (shared with browse and
+            #    parallels). After the per-minute check on purpose.
+            _daily_budget.check(client_ip)
 
             # 3. Query post-validation.
             query = (req.query or '').strip()
@@ -1856,12 +1897,20 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
 
                 loop = asyncio.get_event_loop()
 
-                # P9X heavy-mode concurrency gate (variants/fuzzy only).
-                _heavy_release = None
-                if req.search_mode in HEAVY_SEARCH_MODES and not background_job:
-                    _heavy_release = await _acquire_heavy_slot()
+                # Concurrency gate. Heavy modes (variants/fuzzy) take a heavy
+                # slot (P9X); every other synchronous mode takes an interactive
+                # slot (2026-11-03), so the API can never stack more than
+                # SEARCH_API_INTERACTIVE_CONCURRENCY searches in the research
+                # queue readers share. Background jobs bypass both: they have
+                # their own admission control (web/research_api.py).
+                _slot_release = None
+                if not background_job:
+                    if req.search_mode in HEAVY_SEARCH_MODES:
+                        _slot_release = await _acquire_heavy_slot()
+                    else:
+                        _slot_release = await _acquire_interactive_slot()
                 try:
-                    # The heavy slot must stay held for the WORKER's TRUE
+                    # The slot must stay held for the WORKER's TRUE
                     # lifetime, not merely until the awaiter returns.
                     # run_in_executor cannot cancel a running thread, so on a
                     # timeout the search keeps occupying a threadpool worker.
@@ -1879,11 +1928,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     _search_fut.add_done_callback(
                         lambda future: None if future.cancelled() else future.exception()
                     )
-                    if _heavy_release is not None:
+                    if _slot_release is not None:
                         _search_fut.add_done_callback(
-                            lambda _f, _r=_heavy_release: _r()
+                            lambda _f, _r=_slot_release: _r()
                         )
-                        _heavy_release = None  # ownership -> done-callback
+                        _slot_release = None  # ownership -> done-callback
                     _done, _pending = await asyncio.wait(
                         {_search_fut}, timeout=core_timeout,
                     )
@@ -1918,8 +1967,8 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 finally:
                     # Safety net: only fires if a slot was acquired but never
                     # handed to a done-callback (e.g. executor dispatch failed).
-                    if _heavy_release is not None:
-                        _heavy_release()
+                    if _slot_release is not None:
+                        _slot_release()
                 total = len(results)
 
             # 8. Cap results.
@@ -2152,9 +2201,13 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         # 1. Mode gate (D-04 disabled / D-03 localhost-only -- same as search).
         enforce_mode_gate(request)
 
-        # 2. Rate limit (D-18 -- DIFFERENT instance from search bucket).
+        # 2. Rate limit (D-18 -- DIFFERENT instance from search bucket), then
+        #    the trailing-24 h budget this address shares with search and
+        #    parallels (2026-11-03: 7,459 browse calls from one address in six
+        #    hours passed the per-minute bucket almost throughout).
         client_ip = _resolve_rate_limit_key(request)
         _browse_rate_limiter.check(client_ip)
+        _daily_budget.check(client_ip)
 
         # 3. Locator validation + normalization (D-01 / D-03 / R-02 / R-PR-04).
         loc = _validate_locator(req)
@@ -2304,9 +2357,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         # 1. Mode gate (same as search/browse).
         enforce_mode_gate(request)
 
-        # 2. Rate limit (D-05 — DIFFERENT instance from search and browse buckets).
+        # 2. Rate limit (D-05 — DIFFERENT instance from search and browse buckets),
+        #    then the trailing-24 h budget shared with search and browse.
         client_ip = _resolve_rate_limit_key(request)
         _parallels_rate_limiter.check(client_ip)
+        _daily_budget.check(client_ip)
 
         # 3. Composition text validation (D-06), or the witness list that
         #    replaces it.
@@ -3046,6 +3101,9 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 # face. See effective_capacity()'s docstring.
                 'heavy_concurrency': _HeavySemaphoreState.effective_capacity(),
                 'passage_concurrency': _PassageSemaphoreState.effective_capacity(),
+                # 2026-11-03 scrape limits: same live resolvers the handlers use.
+                'interactive_concurrency': _InteractiveSemaphoreState.effective_capacity(),
+                'daily_requests_per_address': _daily_budget._current_limit(),
             },
             # Every value re-read from the same live resolvers the other
             # three endpoints use per request -- never a literal here, so

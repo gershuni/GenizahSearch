@@ -258,6 +258,122 @@ class RateLimiter:
 
 
 # ---------------------------------------------------------------------------
+# DailyBudget — per-IP trailing 24 h request budget (2026-11-03).
+# ---------------------------------------------------------------------------
+
+DAILY_BUDGET_WINDOW_SECONDS = 86400.0
+
+
+class DailyBudget:
+    """Per-IP request budget over a trailing 24 h window, shared by the
+    search, browse and parallels endpoints (one bucket per address, whatever
+    the endpoint).
+
+    Why (PostHog review, 2026-11-03): the per-minute limiter stops bursts
+    but not sustained pulls. One address made 8,036 requests in six hours
+    at ~20/min, under the per-minute limit almost throughout, and reader
+    searches queued behind its searches. This budget caps the volume one
+    address can take in a day; SEARCH_API_DAILY_LIMIT sets it (default
+    2,000; 0 disables).
+
+    check(client_ip) raises APIError('daily_limit_reached', http_status=429,
+    headers={'Retry-After': N}) when the address has already used its
+    budget in the trailing window. N is the time until enough of the oldest
+    in-window requests expire for the bucket to fall under the CURRENT
+    limit (entry [len - limit]: the oldest one normally, a later one right
+    after an operator lowered the limit) -- honest backpressure, as in
+    RateLimiter. The
+    over-budget attempt itself is NOT recorded, so a bucket never holds more
+    than `limit` timestamps. Every request that passes the check is: the
+    handlers call it before validation and before the concurrency budgets,
+    so a request later refused as invalid (400) or busy (503) still counts
+    (docs/SEARCH_API.md says so; Codex round 2 on PR #466). Buckets with
+    nothing in the window are dropped on the next sweep (at most once a
+    minute).
+    """
+
+    def __init__(self, default_limit: int = 2000):
+        # Bucket value: (deque[float], last_seen: float).
+        self._buckets: dict[str, tuple[deque, float]] = {}
+        self._lock = threading.Lock()
+        self._default_limit = default_limit
+        self._last_sweep = 0.0
+
+    def _current_limit(self) -> int:
+        """Re-read SEARCH_API_DAILY_LIMIT on every check (no restart to tune).
+        0 or negative disables the budget; an unparseable value keeps the default."""
+        try:
+            v = int(os.environ.get('SEARCH_API_DAILY_LIMIT', str(self._default_limit)))
+            return max(0, v)
+        except ValueError:
+            return self._default_limit
+
+    def _evict_stale(self, now: float) -> None:
+        cutoff = now - DAILY_BUDGET_WINDOW_SECONDS
+        stale: list[str] = []
+        for ip, (dq, _last_seen) in self._buckets.items():
+            # `<=`: an entry exactly one window old is out, so a client that
+            # waits exactly Retry-After seconds is admitted.
+            while dq and dq[0] <= cutoff:
+                dq.popleft()
+            if not dq:
+                stale.append(ip)
+        for ip in stale:
+            del self._buckets[ip]
+
+    def check(self, client_ip: str) -> None:
+        """Record a request and raise APIError if the address is over budget.
+
+        Call AFTER the per-minute limiter: a request refused for its rate
+        must not spend daily budget.
+        """
+        limit = self._current_limit()
+        if limit <= 0:
+            return
+        now = time.time()
+        cutoff = now - DAILY_BUDGET_WINDOW_SECONDS
+        with self._lock:
+            # Sweep BEFORE touching this address's bucket: a sweep after the
+            # insert would evict the fresh, still-empty bucket of a new
+            # address and the append below would land in an orphan deque.
+            if now - self._last_sweep > 60.0:
+                self._evict_stale(now)
+                self._last_sweep = now
+            entry = self._buckets.get(client_ip)
+            if entry is None:
+                dq: deque = deque()
+            else:
+                dq, _ = entry
+            self._buckets[client_ip] = (dq, now)
+            while dq and dq[0] <= cutoff:
+                dq.popleft()
+            if len(dq) >= limit:
+                # Admissible once enough of the oldest entries have expired
+                # for the bucket to hold fewer than `limit`: entry
+                # [len - limit], which is [0] only while the bucket is not
+                # larger than the limit. They differ right after an operator
+                # lowers SEARCH_API_DAILY_LIMIT below a bucket's size (Codex
+                # round 3 on PR #466): waiting for [0] alone would still 429.
+                blocking = dq[len(dq) - limit]
+                retry_after = max(1, math.ceil(DAILY_BUDGET_WINDOW_SECONDS - (now - blocking)))
+                raise APIError(
+                    'daily_limit_reached',
+                    'Daily request budget for this address reached; '
+                    'see /api/capabilities limits.daily_requests_per_address',
+                    http_status=429,
+                    headers={'Retry-After': str(retry_after)},
+                )
+            dq.append(now)
+
+    def reset_for_tests(self) -> None:
+        """Clear all bucket state. Called from autouse pytest fixtures.
+        NEVER call this from production code paths."""
+        with self._lock:
+            self._buckets.clear()
+            self._last_sweep = 0.0
+
+
+# ---------------------------------------------------------------------------
 # Mode gate — re-reads SEARCH_API_MODE per call (D-02).
 # ---------------------------------------------------------------------------
 
@@ -750,7 +866,8 @@ def capture_mcp_tool_event(
 
 
 __all__ = [
-    'RateLimiter', 'APIError', 'ERROR_CODES', 'WARNING_CODES',
+    'RateLimiter', 'DailyBudget', 'DAILY_BUDGET_WINDOW_SECONDS',
+    'APIError', 'ERROR_CODES', 'WARNING_CODES',
     'enforce_mode_gate',
     '_resolve_rate_limit_key', '_is_loopback_request',
     'hash_ip', 'capture_api_event', 'capture_mcp_tool_event', 'get_dropped_event_count',

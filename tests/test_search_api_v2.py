@@ -158,22 +158,29 @@ def _silence_posthog(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _reset_rate_limiter():
-    """Clean rate-limiter state per test (R2-#2 pattern)."""
-    from web.search_api import _rate_limiter
+    """Clean rate-limiter and daily-budget state per test (R2-#2 pattern)."""
+    from web.search_api import _rate_limiter, _daily_budget
     _rate_limiter.reset_for_tests()
+    _daily_budget.reset_for_tests()
     yield
     _rate_limiter.reset_for_tests()
+    _daily_budget.reset_for_tests()
 
 
 @pytest.fixture(autouse=True)
 def _reset_heavy_semaphore():
-    """P9X: reset the heavy-mode concurrency semaphore to its default size
-    before and after each test so tests do not share state through the
-    module-level singleton."""
-    from web.search_api import _HeavySemaphoreState, DEFAULT_HEAVY_CONCURRENCY
+    """P9X: reset the heavy-mode (and, since 2026-11-03, the interactive-mode)
+    concurrency semaphores to their default sizes before and after each test
+    so tests do not share state through the module-level singletons."""
+    from web.search_api import (
+        _HeavySemaphoreState, DEFAULT_HEAVY_CONCURRENCY,
+        _InteractiveSemaphoreState, DEFAULT_INTERACTIVE_CONCURRENCY,
+    )
     _HeavySemaphoreState.reset(DEFAULT_HEAVY_CONCURRENCY)
+    _InteractiveSemaphoreState.reset(DEFAULT_INTERACTIVE_CONCURRENCY)
     yield
     _HeavySemaphoreState.reset(DEFAULT_HEAVY_CONCURRENCY)
+    _InteractiveSemaphoreState.reset(DEFAULT_INTERACTIVE_CONCURRENCY)
 
 
 @pytest.fixture
@@ -1528,3 +1535,119 @@ def test_the_heavy_budget_still_gates_basic_variants_and_fuzzy(client, stub_sear
         assert stub_searcher.calls == []
     else:
         assert r.status_code == 200, r.text
+
+
+# ---------------------------------------------------------------------------
+# 2026-11-03 scrape limits, at the call sites: the per-address daily budget
+# (one bucket across search/browse/parallels) and the interactive concurrency
+# budget for synchronous non-heavy searches. Unit tests for DailyBudget are in
+# tests/test_api_hardening.py.
+# ---------------------------------------------------------------------------
+
+def test_daily_budget_refuses_search_at_call_site(client, stub_searcher, monkeypatch):
+    """SEARCH_API_DAILY_LIMIT=2: the third /api/search from one address is 429
+    daily_limit_reached with Retry-After, and the searcher is not called."""
+    monkeypatch.setenv('SEARCH_API_DAILY_LIMIT', '2')
+    for _ in range(2):
+        assert _post_search(client, query='test', search_mode='exact').status_code == 200
+    calls_before = len(stub_searcher.calls)
+    r = _post_search(client, query='test', search_mode='exact')
+    assert r.status_code == 429, r.text
+    assert r.json()['error']['code'] == 'daily_limit_reached'
+    assert int(r.headers['Retry-After']) >= 1
+    assert len(stub_searcher.calls) == calls_before
+
+
+def test_daily_budget_is_one_bucket_across_endpoints(client, stub_searcher, monkeypatch):
+    """One search spends the budget that browse then finds empty: the budget is
+    per address, not per endpoint (unlike the per-minute buckets, which are
+    separate so that search-once + browse-N stays possible)."""
+    monkeypatch.setenv('SEARCH_API_DAILY_LIMIT', '1')
+    assert _post_search(client, query='test', search_mode='exact').status_code == 200
+    r = client.get('/api/browse', params={'sys_id': '9912345678901234'})
+    assert r.status_code == 429, r.text
+    assert r.json()['error']['code'] == 'daily_limit_reached'
+
+
+def test_rate_refused_request_spends_no_daily_budget(client, stub_searcher, monkeypatch):
+    """A request refused by the per-minute limiter never reaches the daily
+    check, so it does not count against the day."""
+    from web.search_api import _daily_budget
+    monkeypatch.setenv('SEARCH_API_RATE_LIMIT', '1')
+    monkeypatch.setenv('SEARCH_API_DAILY_LIMIT', '1')
+    assert _post_search(client, query='test', search_mode='exact').status_code == 200
+    r = _post_search(client, query='test', search_mode='exact')
+    assert r.status_code == 429 and r.json()['error']['code'] == 'rate_limited', r.text
+    recorded = sum(len(dq) for dq, _ in _daily_budget._buckets.values())
+    assert recorded == 1
+
+
+def test_daily_budget_zero_disables_at_call_site(client, stub_searcher, monkeypatch):
+    monkeypatch.setenv('SEARCH_API_DAILY_LIMIT', '0')
+    for _ in range(3):
+        assert _post_search(client, query='test', search_mode='exact').status_code == 200
+
+
+def test_interactive_concurrency_fast_fail(monkeypatch):
+    """Mirror of test_heavy_concurrency_fast_fail for the interactive budget:
+    with its single slot held, acquiring again is 503 search_busy at once."""
+    import asyncio
+    from web.search_api import _acquire_interactive_slot, _InteractiveSemaphoreState
+
+    monkeypatch.setenv('SEARCH_API_INTERACTIVE_CONCURRENCY', '1')
+
+    async def _test():
+        _InteractiveSemaphoreState.reset(1)
+        sem = _InteractiveSemaphoreState.sem
+        sem._value -= 1
+        try:
+            with pytest.raises(APIError) as exc_info:
+                await _acquire_interactive_slot()
+            err = exc_info.value
+            assert err.code == 'search_busy'
+            assert err.http_status == 503
+            assert 'Retry-After' in err.headers
+        finally:
+            sem.release()
+
+    asyncio.run(_test())
+
+
+def test_exact_gated_by_interactive_budget_at_call_site(client, stub_searcher, monkeypatch):
+    """With the single interactive slot held: an exact search is 503 search_busy
+    at once and never reaches the searcher; a heavy (variants) search is NOT
+    gated by that slot; once it is free, exact succeeds again."""
+    import asyncio
+    from web.search_api import _InteractiveSemaphoreState
+
+    monkeypatch.setenv('SEARCH_API_INTERACTIVE_CONCURRENCY', '1')
+    monkeypatch.setenv('SEARCH_API_CORE_TIMEOUT', '30.0')
+
+    async def _hold():
+        _InteractiveSemaphoreState.reset(1)
+        _InteractiveSemaphoreState.sem._value -= 1
+
+    asyncio.run(_hold())
+    try:
+        r = _post_search(client, query='test', search_mode='exact')
+        assert r.status_code == 503, r.text
+        assert r.json()['error']['code'] == 'search_busy'
+        assert 'Retry-After' in r.headers
+        assert stub_searcher.calls == []
+        r2 = _post_search(client, query=QUERIES_PER_MODE['variants'], search_mode='variants')
+        assert r2.status_code == 200, r2.text
+    finally:
+        _InteractiveSemaphoreState.sem.release()
+    r3 = _post_search(client, query='test', search_mode='exact')
+    assert r3.status_code == 200, r3.text
+
+
+def test_interactive_slot_released_after_completed_search(client, stub_searcher, monkeypatch):
+    """Capacity 1: two consecutive exact searches both succeed and the slot is
+    back at capacity afterwards, so the done-callback releases it (no leak)."""
+    from web.search_api import _InteractiveSemaphoreState
+    monkeypatch.setenv('SEARCH_API_INTERACTIVE_CONCURRENCY', '1')
+    _InteractiveSemaphoreState.reset(1)
+    for _ in range(2):
+        assert _post_search(client, query='test', search_mode='exact').status_code == 200
+    assert _InteractiveSemaphoreState.sem._value == 1

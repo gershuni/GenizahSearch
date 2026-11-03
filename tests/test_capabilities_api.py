@@ -206,9 +206,15 @@ def test_capabilities_limits_full_set(client, clean_env):
     the environment until the first `acquire()` rebuilds it; see
     test_capabilities_concurrency_follows_env_before_first_acquire.
     """
-    from web.search_api import _HeavySemaphoreState, _PassageSemaphoreState, _criteria_rate_limiter
+    from web.search_api import (
+        _HeavySemaphoreState, _PassageSemaphoreState, _criteria_rate_limiter,
+        _InteractiveSemaphoreState, _daily_budget,
+    )
     r = _get(client)
     limits = r.json()['limits']
+    # 2026-11-03 scrape limits: advertised from the same resolvers the handlers use.
+    assert limits['interactive_concurrency'] == _InteractiveSemaphoreState.resolve_capacity() == 2
+    assert limits['daily_requests_per_address'] == _daily_budget._current_limit() == 2000
     assert limits['search_requests_per_minute'] == _rate_limiter._current_limit()
     assert limits['browse_requests_per_minute'] == _browse_rate_limiter._current_limit()
     assert limits['parallels_requests_per_minute'] == _parallels_rate_limiter._current_limit()
