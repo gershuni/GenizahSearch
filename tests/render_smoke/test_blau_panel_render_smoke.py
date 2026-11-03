@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from nicegui import events, ui
@@ -211,6 +212,59 @@ def test_a_result_without_a_credit_line_is_not_shown():
         assert not _with_class(user, blau_panel.CARD_CLASS) and not _with_class(user, blau_panel.CREDIT_CLASS)
 
     dictionary = _dictionary(credit_he='')
+    _run(driver, dictionary, lang='en')
+
+
+def _slow_dictionary(slow_word, seconds=0.6):
+    """A dictionary whose lookup of ``slow_word`` takes ``seconds`` (in the
+    worker thread, as the real one would on a slow disk)."""
+    dictionary = _dictionary()
+
+    def lookup(word):
+        if word == slow_word:
+            time.sleep(seconds)
+        return _lookup(word)
+
+    dictionary.lookup.side_effect = lookup
+    return dictionary
+
+
+def _shown_word(user):
+    return [e.text for e in _all_elements(user) if isinstance(e, ui.label) and 'word' in e.classes]
+
+
+def test_a_slow_earlier_lookup_does_not_overwrite_the_newer_word():
+    # Codex on #473: the reader clicks a second word while the first lookup runs.
+    dictionary = _slow_dictionary('slow')
+
+    async def driver(user):
+        await _open(user)
+        popover = _popover(user)
+        _fire(user, popover, blau_panel.LOOKUP_EVENT, {'word': 'slow'})
+        _fire(user, popover, blau_panel.LOOKUP_EVENT, {'word': 'כתאב'})
+        await _wait_until(lambda: popover._style.get('display') == 'flex')
+        assert _shown_word(user) == ['כתאב']
+        await _wait_until(lambda: False, timeout=1.0)  # the slow lookup finishes meanwhile
+        assert dictionary.lookup.call_count == 2
+        assert _shown_word(user) == ['כתאב'], 'the stale lookup redrew the panel'
+        assert len(_with_class(user, blau_panel.CARD_CLASS)) == 1
+
+    _run(driver, dictionary, lang='en')
+
+
+def test_a_close_during_a_lookup_keeps_the_panel_closed():
+    dictionary = _slow_dictionary('slow')
+
+    async def driver(user):
+        await _open(user)
+        popover = _popover(user)
+        _fire(user, popover, blau_panel.LOOKUP_EVENT, {'word': 'slow'})
+        _fire(user, popover, blau_panel.CLOSE_EVENT, {})
+        await _wait_until(lambda: dictionary.lookup.called)
+        await _wait_until(lambda: False, timeout=1.0)
+        assert popover._style.get('display') == 'none', 'the stale lookup reopened the panel'
+        assert not _with_class(user, blau_panel.CARD_CLASS)
+
     _run(driver, dictionary, lang='en')
 
 

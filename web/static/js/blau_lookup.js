@@ -9,7 +9,9 @@
  *     it at the foot of a phone instead) and dispatches `blau-lookup` on the
  *     popover with `detail` = JSON {word};
  *   - anywhere else, or on no word: unwraps the mark and dispatches
- *     `blau-close` (the page hides the popover).
+ *     `blau-close` (the page hides the popover);
+ *   - on the panel's own close control (`.blau-close`): unwraps the mark and
+ *     leaves the hiding to the page, which owns that button.
  * The word is what sits between two non-word characters in the text node
  * under the pointer: Hebrew letters, combining marks, the apostrophe and
  * geresh family the transcriptions write the Judeo-Arabic letters with.
@@ -22,6 +24,7 @@
   var POPOVER = '.gs-blau-popover';
   var PANE = '[data-blau-lookup]';
   var HIT = 'blau-word-hit';
+  var CLOSE = 'blau-close';   // the panel's own close control (the page hides the popover)
   var WORD_CHAR = /[א-ת֑-ׇ̀-ͯ'"׳״‘’]/;
   var WIDTH = 440;   // keep in step with .gs-blau-popover in common.css
   var HEIGHT = 380;
@@ -96,7 +99,11 @@
   document.addEventListener('click', function (event) {
     var pop = document.querySelector(POPOVER);
     if (!pop) return;                       // no dictionary on this page
-    if (pop.contains(event.target)) return; // the panel's own controls
+    if (pop.contains(event.target)) {       // the panel's own controls
+      var closing = event.target.nodeType === 1 ? event.target.closest('.' + CLOSE) : null;
+      if (closing) clearHit();              // the page hides the popover; the word's mark goes with it
+      return;
+    }
     var target = event.target && event.target.nodeType === 1 ? event.target : event.target && event.target.parentElement;
     var pane = target ? target.closest(PANE) : null;
     // Unwrap the previous mark BEFORE reading the caret: unwrapping merges the

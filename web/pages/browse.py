@@ -4811,17 +4811,20 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         f'{blau_panel.POPOVER_CLASS} {blau_panel.PANEL_CLASS} print-hide'
                     ).style('display: none;').props('role="dialog" aria-live="polite"')
                     _blau_lang = get_language()
+                    # The request counter: a lookup that finishes after a later
+                    # click or a close is stale and draws nothing (Codex on
+                    # #473: a slow earlier lookup overwrote the newer word, or
+                    # reopened a panel the reader had closed).
+                    _blau_request = {'value': 0}
 
                     def _blau_hide(_e=None):
+                        _blau_request['value'] += 1
                         if not blau_popover.is_deleted:
                             blau_popover.style('display: none;')
 
-                    async def _blau_lookup(e):
-                        word = blau_panel.lookup_word(e.args)
-                        if not word:
-                            return
+                    async def _blau_answer(word, request):
                         result = await run.io_bound(blau_service.lookup, word)
-                        if result is None or blau_popover.is_deleted:
+                        if result is None or blau_popover.is_deleted or request != _blau_request['value']:
                             return
                         with using_language(_blau_lang):
                             blau_popover.clear()
@@ -4831,6 +4834,19 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     credit_en=blau_service.credit_en, lang=_blau_lang,
                                     on_close=_blau_hide)
                         blau_popover.style('display: flex;' if drawn else 'display: none;')
+
+                    def _blau_lookup(e):
+                        # Synchronous on purpose: the counter must move in the
+                        # order the clicks arrived, before any of their lookups
+                        # runs. An async handler is a task that starts later,
+                        # and a close handled in between would be counted
+                        # before the lookup it was meant to cancel.
+                        word = blau_panel.lookup_word(e.args)
+                        if not word:
+                            return
+                        _blau_request['value'] += 1
+                        background_tasks.create(_blau_answer(word, _blau_request['value']),
+                                                name='blau-lookup')
 
                     blau_popover.on(blau_panel.LOOKUP_EVENT, _blau_lookup)
                     blau_popover.on(blau_panel.CLOSE_EVENT, _blau_hide)

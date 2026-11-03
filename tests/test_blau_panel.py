@@ -44,6 +44,7 @@ def test_the_script_and_the_renderer_use_the_same_names():
     assert f"'.{blau_panel.POPOVER_CLASS}'" in JS
     assert f"'[{blau_panel.PANE_ATTR}]'" in JS
     assert f"'{blau_panel.HIT_CLASS}'" in JS
+    assert f"'{blau_panel.CLOSE_CLASS}'" in JS  # the close control clears the word's mark
     assert f"'{blau_panel.LOOKUP_EVENT}'" in JS and f"'{blau_panel.CLOSE_EVENT}'" in JS
     assert "JSON.stringify" in JS and "word: word.text" in JS
 

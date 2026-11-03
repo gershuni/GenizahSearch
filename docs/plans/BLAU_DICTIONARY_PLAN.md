@@ -319,6 +319,19 @@ to the search. Costs: 6,495 keys × one indexed whole-word search; measured on a
 
 ## 11. Review log
 
+### Phase 2 (PR #473)
+
+**Round 1** (`a4b6796d`), Codex: two P2, both fixed.
+- A lookup that finished after a later click or a close could overwrite the newer word's card
+  or reopen a closed panel: the page keeps a request counter, a close bumps it, and a completion
+  that is no longer the latest draws nothing (`test_a_slow_earlier_lookup_does_not_overwrite_the_newer_word`,
+  `test_a_close_during_a_lookup_keeps_the_panel_closed`).
+- The panel's own close control left the word highlighted (the script returned early on a click
+  inside the popover): a click on `.blau-close` now unwraps the mark before the page hides the
+  popover.
+
+### Phase 1 (PR #472)
+
 **Round 1** (PR #472, `4794cf69`), Codex: two P2, both fixed.
 - The gate let a cross-reference root with a NULL `target_id` pass (the dangling-target check
   tested only non-NULL targets). The real file has 14 such roots, the site's own unresolved
