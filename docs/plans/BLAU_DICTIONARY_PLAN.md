@@ -311,3 +311,14 @@ to the search. Costs: 6,495 keys × one indexed whole-word search; measured on a
 - A scalar `name_ja` (or any field of the wrong shape) raised an uncaught `TypeError` instead of
   exit 2: `name_ja` / `arabic_spelling` are validated as lists of strings, and `main` turns any
   remaining shape error from the walk into a source failure with the exception named.
+
+**Round 2** (`19b39e05`), Codex: three P2, all fixed.
+- The gate checked table names only, so a file with a dropped column passed: it now reads the
+  builder's `DDL` into an in-memory database and compares every table's columns (name, type,
+  NOT NULL, primary key) and the index list with the file, and requires `meta.version` to equal
+  the schema this code reads, with `--expect-version` as an extra.
+- Only unnamed roots were compared with their pinned count; an erased `sub_entries.name_ja`
+  passed: the sub-entry count is compared with `meta.sub_entries_unnamed` too (ceiling 5%).
+- A parent directory that cannot be created (a file in its place) raised before the output-error
+  handler: directory creation and the temp file are inside the guarded block, exit 4.
+  Round 3 was not requested (usage limit); CI on the round-2 head is the remaining check.

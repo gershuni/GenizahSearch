@@ -586,16 +586,19 @@ def main(argv=None) -> int:
                   f"({', '.join(f'{t} {o:,} -> {n:,}' for t, (o, n) in fewer.items())}); pass --force to replace it")
             return EXIT_REFUSED
 
-    out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(f"{out.name}.building-{os.getpid()}")
-    if tmp.exists():
-        tmp.unlink()
     try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        if tmp.exists():
+            tmp.unlink()
         counts = write_sidecar(tmp, flat, bibliography, facts)
         os.replace(tmp, out)
     except (sqlite3.Error, OSError, SourceError) as exc:
-        if tmp.exists():
-            tmp.unlink()
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
         print(f"FAIL: could not write {out}: {exc}")
         return EXIT_OUTPUT
     print(f"wrote    {out} ({out.stat().st_size:,} bytes): " + "; ".join(f"{t} {n:,}" for t, n in counts.items()))

@@ -24,10 +24,55 @@ _REPO_ROOT = os.path.dirname(_SCRIPTS_DIR)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
+from scripts.build_blau_sidecar import DDL, SCHEMA_VERSION  # noqa: E402  -- the one schema definition
 from shared.blau_normalize import NORMALIZER_VERSION, normalize_ja  # noqa: E402
 
 EXPECTED_TABLES = ("meta", "sources", "roots", "sub_entries", "stems", "forms", "citations", "forms_norm")
 COUNTED_TABLES = ("roots", "sub_entries", "stems", "forms", "citations", "forms_norm", "sources")
+
+
+def _schema(con: sqlite3.Connection) -> dict:
+    """{table: [(column, declared type, notnull, pk)]} and {'<indexes>': [names]} of a connection."""
+    out = {}
+    for (name,) in con.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"):
+        out[name] = [(r[1], (r[2] or "").upper(), r[3], r[5]) for r in con.execute(f"PRAGMA table_info({name})")]
+    out["<indexes>"] = sorted(r[0] for r in con.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'"))
+    return out
+
+
+def expected_schema() -> dict:
+    """The schema the builder writes, read back from an in-memory database built with its DDL."""
+    con = sqlite3.connect(":memory:")
+    try:
+        con.executescript(DDL)
+        return _schema(con)
+    finally:
+        con.close()
+
+
+def schema_problems(con: sqlite3.Connection) -> list[str]:
+    """Every table, column (name, type, NOT NULL, primary key) and index, compared with the DDL."""
+    want, have = expected_schema(), _schema(con)
+    problems = []
+    for table, columns in want.items():
+        if table == "<indexes>":
+            continue
+        if table not in have:
+            problems.append(f"table {table} is missing")
+        elif have[table] != columns:
+            missing = [c[0] for c in columns if c[0] not in {h[0] for h in have[table]}]
+            extra = [c[0] for c in have[table] if c[0] not in {w[0] for w in columns}]
+            changed = [c[0] for c in columns if c[0] not in missing
+                       and next(h for h in have[table] if h[0] == c[0]) != c]
+            problems.append(f"table {table} does not match the schema: missing {missing}, extra {extra}, "
+                            f"changed {changed}")
+    for table in have:
+        if table != "<indexes>" and table not in want:
+            problems.append(f"table {table} is not part of the schema")
+    if have["<indexes>"] != want["<indexes>"]:
+        problems.append(f"indexes {have['<indexes>']} != expected {want['<indexes>']}")
+    return problems
 REQUIRED_META = ("version", "source_release", "source_sha256", "source_json_sha256", "built_at",
                  "normalizer_version", "credit_he", "credit_en")
 NORM_KINDS = ("root", "sub_entry", "headword", "variant", "phrase")
@@ -57,6 +102,9 @@ def verify(db: str, expect_roots: int, expect_forms: int, expect_source_sha256: 
         if missing:
             problems.append(f"tables missing: {missing}")
             return problems
+        # Columns, types, constraints and indexes against the builder's DDL (Codex round 2: the
+        # table names alone let a file with a dropped column pass).
+        problems.extend(schema_problems(con))
         fk = con.execute("PRAGMA foreign_key_check").fetchall()
         if fk:
             problems.append(f"{len(fk)} foreign-key rows do not resolve (first: {fk[0]})")
@@ -65,6 +113,8 @@ def verify(db: str, expect_roots: int, expect_forms: int, expect_source_sha256: 
         for key in REQUIRED_META:
             if not meta.get(key):
                 problems.append(f"meta.{key} is missing or empty")
+        if meta.get("version") != SCHEMA_VERSION:
+            problems.append(f"meta.version {meta.get('version')!r} != the schema this code reads, {SCHEMA_VERSION!r}")
         if expect_version and meta.get("version") != expect_version:
             problems.append(f"meta.version {meta.get('version')!r} != expected {expect_version!r}")
         if meta.get("normalizer_version") != str(NORMALIZER_VERSION):
@@ -92,6 +142,12 @@ def verify(db: str, expect_roots: int, expect_forms: int, expect_source_sha256: 
             problems.append(f"{n} roots have no name_ja but meta.roots_unnamed says {meta.get('roots_unnamed')!r}")
         if n > max(5, counts["roots"] // 100):
             problems.append(f"{n} roots have no name_ja (more than 1% of the roots)")
+        n = con.execute("SELECT COUNT(*) FROM sub_entries WHERE name_ja IS NULL OR name_ja = ''").fetchone()[0]
+        if str(n) != meta.get("sub_entries_unnamed", "0"):
+            problems.append(f"{n} sub-entries have no name_ja but meta.sub_entries_unnamed says "
+                            f"{meta.get('sub_entries_unnamed')!r}")
+        if n > max(5, counts["sub_entries"] // 20):
+            problems.append(f"{n} sub-entries have no name_ja (more than 5% of the sub-entries)")
         n = con.execute(
             "SELECT COUNT(*) FROM roots r WHERE r.is_cross_reference = 1 AND r.target_id IS NOT NULL "
             "AND NOT EXISTS (SELECT 1 FROM roots t WHERE t.id = r.target_id)").fetchone()[0]

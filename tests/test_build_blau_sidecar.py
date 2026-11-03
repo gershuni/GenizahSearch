@@ -504,3 +504,39 @@ def test_verify_fails_on_a_dropped_table(built):
     _mutate(built, "DROP TABLE citations")
     problems = verify(str(built), 3, 5)
     assert problems == ["tables missing: ['citations']"]
+
+
+def test_verify_checks_columns_types_constraints_and_indexes(built):
+    """Codex round 2: table names alone let a file with a dropped column pass."""
+    assert verify(str(built), 3, 5) == []
+    _mutate(built, "ALTER TABLE roots DROP COLUMN name_ja_clean")
+    problems = verify(str(built), 3, 5)
+    assert any("table roots does not match the schema: missing ['name_ja_clean']" in p for p in problems)
+    _mutate(built, "ALTER TABLE forms ADD COLUMN extra TEXT")
+    assert any("table forms does not match the schema" in p and "extra ['extra']" in p
+               for p in verify(str(built), 3, 5))
+    _mutate(built, "CREATE TABLE stray (x)")
+    assert any("table stray is not part of the schema" in p for p in verify(str(built), 3, 5))
+    _mutate(built, "CREATE INDEX idx_stray ON stray(x)")
+    assert any(p.startswith("indexes ") for p in verify(str(built), 3, 5))
+
+
+def test_verify_requires_the_schema_version_this_code_reads(built):
+    _mutate(built, "UPDATE meta SET value = '0.9.0' WHERE key = 'version'")
+    assert any("meta.version '0.9.0' != the schema this code reads" in p for p in verify(str(built), 3, 5))
+
+
+def test_verify_fails_on_an_erased_sub_entry_name(built):
+    """Codex round 2: only unnamed roots were compared with the pinned count."""
+    _mutate(built, "UPDATE sub_entries SET name_ja = ''")
+    assert any("sub-entries have no name_ja but meta.sub_entries_unnamed" in p for p in verify(str(built), 3, 5))
+
+
+def test_build_reports_an_unwritable_output_directory_as_exit_output(tmp_path, capsys):
+    """Codex round 2: a parent that is a file raised before the output-error handler."""
+    src = write_source(tmp_path / "download")
+    (tmp_path / "blocker").write_text("a file, not a directory", encoding="utf-8")
+    out = tmp_path / "blocker" / "blau.db"
+    assert build_main(["--source-dir", str(src), "--out", str(out)]) == EXIT_OUTPUT
+    printed = capsys.readouterr().out
+    assert "FAIL: could not write" in printed and "Traceback" not in printed
