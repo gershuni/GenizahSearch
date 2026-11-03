@@ -189,7 +189,14 @@ async def _app(engine):
         async with AsyncExitStack() as stack:
             stack.enter_context(patch('web.main._resolve_ui_language', return_value='en'))
             if os.environ.get('PROBE_SIDECARS') == '1':
+                from shared import document_service
                 from shared.translation_service import TranslationService
+                # The PGP tag loader (load_pgp_tags -> get_all_distinct_tags) and the
+                # transcription lookups go through document_service's singleton, which
+                # resolves pgp.db from LOCALAPPDATA or this repo's root on its own.
+                pgp = document_service.PgpService(db_path=str(MAIN / 'pgp_data' / 'pgp.db'), thread_safe=True)
+                stack.enter_context(patch.object(document_service, '_default_service', pgp))
+                stack.callback(pgp.close)
                 stack.enter_context(patch.object(TranslationService, '_find_pgp_db',
                                                  staticmethod(lambda: str(MAIN / 'pgp_data' / 'pgp.db'))))
                 stack.enter_context(patch.object(TranslationService, '_find_titles_db',
