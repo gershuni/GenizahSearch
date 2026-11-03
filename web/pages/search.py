@@ -3026,6 +3026,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Reset results count label
         results_count.text = tr('Results')
         _clear_input_notice()  # the shelfmark note or layout suggestion of the last search
+        # A layout-suggestion check still running for the last search finds another
+        # generation and shows nothing (Codex round 3 on #469).
+        search_state.search_generation += 1
         # Hide domain filter and printed filter buttons
         _set_btn_visible(domain_filter_btn, False)
         _set_btn_visible(printed_filter_btn, False)
