@@ -309,7 +309,9 @@ class DailyBudget:
         cutoff = now - DAILY_BUDGET_WINDOW_SECONDS
         stale: list[str] = []
         for ip, (dq, _last_seen) in self._buckets.items():
-            while dq and dq[0] < cutoff:
+            # `<=`: an entry exactly one window old is out, so a client that
+            # waits exactly Retry-After seconds is admitted.
+            while dq and dq[0] <= cutoff:
                 dq.popleft()
             if not dq:
                 stale.append(ip)
@@ -340,10 +342,17 @@ class DailyBudget:
             else:
                 dq, _ = entry
             self._buckets[client_ip] = (dq, now)
-            while dq and dq[0] < cutoff:
+            while dq and dq[0] <= cutoff:
                 dq.popleft()
             if len(dq) >= limit:
-                retry_after = max(1, math.ceil(DAILY_BUDGET_WINDOW_SECONDS - (now - dq[0])))
+                # Admissible once enough of the oldest entries have expired
+                # for the bucket to hold fewer than `limit`: entry
+                # [len - limit], which is [0] only while the bucket is not
+                # larger than the limit. They differ right after an operator
+                # lowers SEARCH_API_DAILY_LIMIT below a bucket's size (Codex
+                # round 3 on PR #466): waiting for [0] alone would still 429.
+                blocking = dq[len(dq) - limit]
+                retry_after = max(1, math.ceil(DAILY_BUDGET_WINDOW_SECONDS - (now - blocking)))
                 raise APIError(
                     'daily_limit_reached',
                     'Daily request budget for this address reached; '

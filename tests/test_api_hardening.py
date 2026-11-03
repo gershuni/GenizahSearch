@@ -741,6 +741,30 @@ def test_daily_budget_window_expiry_frees_budget(monkeypatch):
     b.check('a')  # the old request has expired
 
 
+def test_daily_budget_retry_after_after_limit_lowered(monkeypatch):
+    """Lowering SEARCH_API_DAILY_LIMIT below a bucket's size (Codex round 3 on
+    PR #466): Retry-After must point at the entry whose expiry brings the
+    bucket under the NEW limit, not at the oldest entry, whose expiry alone
+    would leave the bucket at the limit and the next request a 429. Waiting
+    exactly Retry-After seconds must then admit the request."""
+    import web.api_hardening as mod
+    from shared.api_errors import APIError
+    b = mod.DailyBudget(default_limit=3)
+    clock = [1_000_000.0]
+    monkeypatch.setattr(mod.time, 'time', lambda: clock[0])
+    for _ in range(3):           # entries at t, t+100, t+200
+        b.check('a')
+        clock[0] += 100          # now t+300
+    monkeypatch.setenv('SEARCH_API_DAILY_LIMIT', '1')
+    with pytest.raises(APIError) as exc_info:
+        b.check('a')
+    retry_after = int(exc_info.value.headers['Retry-After'])
+    # the THIRD entry (t+200) must leave the window: window - (now - (t+200))
+    assert retry_after == int(mod.DAILY_BUDGET_WINDOW_SECONDS) - 100
+    clock[0] += retry_after
+    b.check('a')                 # admitted exactly then, not one 429 later
+
+
 def test_daily_budget_evicts_idle_addresses_but_not_the_current_one(monkeypatch):
     """The periodic sweep drops addresses with nothing in the window and must
     never drop the bucket of the address being checked (the sweep runs before
