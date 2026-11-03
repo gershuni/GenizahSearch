@@ -45,8 +45,10 @@ from web.state import state as _web_state  # noqa: E402
 
 QUERY = 'שבת קודש'
 # The engine must be reached this soon after the page response (URL open) or the
-# click (typed). A browser needs more than this to load the page and connect.
-DISPATCH_WITHIN = 1.5
+# click (typed): measured 0.06-0.12 s locally, so this also rejects a fixed wait
+# or a timed-out round trip of half a second, not only a wait for the socket
+# (Codex round 2). A browser needs longer than this to load the page and connect.
+DISPATCH_WITHIN = 0.5
 
 
 class _Engine:
@@ -167,7 +169,7 @@ def test_a_typed_search_reaches_the_engine_without_a_browser_round_trip():
             UserInteraction(user, {button}, None).click()
             # The simulated browser answers no window.innerWidth: an awaited request
             # for it holds the search until its 1 s timeout.
-            seen['dispatched'] = await _wait_for_calls(engine, 1, 0.5)
+            seen['dispatched'] = await _wait_for_calls(engine, 1, DISPATCH_WITHIN)
             seen['after_s'] = (engine.called_at[0] - t0) if engine.called_at else None
             await _wait_for_calls(engine, 1, 5.0)
 
