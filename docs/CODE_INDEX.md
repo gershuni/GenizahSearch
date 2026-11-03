@@ -1990,6 +1990,11 @@ Variant and Lab preferences of one website visitor, kept in that visitor's stora
 - **Function** `has_hebrew_or_arabic_letter` (Line 34) — True when ``text`` holds at least one Hebrew or Arabic LETTER.
 - **Function** `home_query_target` (Line 46) — The URL the homepage box navigates to for ``text``, or None if blank.
 
+## web/search_box_input.py
+
+- **Function** `typed_as_shelfmark` (Line 40) — True when the search box holds a shelfmark or a corpus sys_id, not words.
+- **Function** `split_placeholder` (Line 50) — ``(before, after)`` the placeholder in a translated sentence, so the query
+
 ## web/public_name.py
 
 - **Function** `clean_public_name` (Line 39) — the name as it will be stored, or None (blank, or contains `@`).
@@ -2730,6 +2735,7 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
     - Method `_build_line_break_regex` (Line 1831) — Build a regex pattern for line-break search.
     - Method `_execute_line_break_search` (Line 1928) — Execute a line-break search using | syntax.
     - Method `metadata_search_ids` — the manuscripts a Title/Shelfmark search is for; the web resolves them in the server process and hands them to `execute_search(metadata_sys_ids=)`.
+    - Method `words_occur` — whether every word of a query occurs as a whole word in the open index (one count query, limit 1); the search page's gate for the keyboard-layout suggestion.
     - Method `_execute_metadata_search` (Line 2157) — Search by title or shelfmark via csv_bank. Returns results even for metadata-only records.
     - Method `execute_search` (Line 2234)
     - Method `_deduplicate` (Line 2756)
@@ -3525,3 +3531,9 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
 - **Function** `_result` (Line 262)
 - **Function** `_resolve_record` (Line 276) — The CUDL item a catalogue record links to.
 - **Function** `resolve_record` (Line 358) — See ``_resolve_record``; the result also carries ``marc_label``, the item the
+
+## shared/keyboard_layout.py
+
+- **Function** `map_keys_to_hebrew` (Line 40) — *text* read key by key on the Hebrew layout, or None when a character
+- **Function** `is_latin_query` (Line 55) — ASCII with at least one Latin letter: what a wrong-layout query looks like.
+- **Function** `layout_suggestion` (Line 60) — The Hebrew a Latin-script query spells on the Hebrew layout, or None.

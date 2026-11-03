@@ -40,6 +40,8 @@ from web.pages.search_state import (
     discard_search_run, post_criteria_matches, result_sys_id, PostMatchRefill,
 )
 from web import search_runs
+from web.search_box_input import TEXT_MODES, split_placeholder, typed_as_shelfmark
+from shared.keyboard_layout import layout_suggestion
 from web.pages.search_results import (
     toggle_expansion as _toggle_expansion,
     render_results as _render_results,
@@ -2347,6 +2349,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ui.button(tr('Clear Filters'), icon='clear', on_click=lambda: clear_filters()).props(
                         'flat dense size=sm'
                     )
+
+            # One line under the count for what the page did with the input: a
+            # shelfmark run in Shelfmark mode, or the Hebrew a Latin-script query
+            # spells on the Hebrew keyboard layout (web/search_box_input.py,
+            # shared/keyboard_layout.py). Filled after a search, cleared at the
+            # start of the next one.
+            input_notice_row = ui.row().classes('w-full px-6 py-1 items-center gap-2 text-sm').style(
+                'background: var(--bg-tertiary); color: var(--text-secondary);'
+            )
+            input_notice_row.set_visibility(False)
 
             results_container = ui.scroll_area().classes('w-full flex-grow results-scroll-area').style(
                 'background: var(--bg-secondary); min-height: 300px;'
@@ -5073,10 +5085,80 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         except Exception:
             pass  # JavaScript execution failed; non-fatal UI glitch
 
+    # --- The line under the count: what the page did with what was typed ---
+
+    def _clear_input_notice():
+        input_notice_row.clear()
+        input_notice_row.set_visibility(False)
+
+    def _link_like(text):
+        """A label that reads and works as a link (click, Enter), for an action
+        that stays on this page and so has no address of its own."""
+        return ui.label(text).classes('cursor-pointer underline').style(
+            'color: var(--primary-600);').props('role="link" tabindex="0"')
+
+    def _show_shelfmark_notice():
+        """"Searched as a shelfmark", with the same query as text one click away."""
+        _clear_input_notice()
+        input_notice_row.set_visibility(True)
+        with input_notice_row:
+            ui.label(tr('Searched as a shelfmark.'))
+            as_text = _link_like(tr('Search as text instead'))
+
+        async def _run_as_text():
+            await execute_search(as_text=True)
+        as_text.on('click', _run_as_text)
+        as_text.on('keydown.enter', _run_as_text)
+
+    def _show_layout_suggestion(hebrew, mode):
+        """"Did you mean <Hebrew>?": the Hebrew as a link to the same search in the
+        page's mode. The click runs it here (the address is for a new tab); shown
+        and taken are both counted (PostHog search_suggestion, kind=layout)."""
+        from web.analytics import posthog_capture
+        _clear_input_notice()
+        input_notice_row.set_visibility(True)
+        before, after = split_placeholder(tr('Did you mean {query}?'))
+        with input_notice_row:
+            # One run of text: the Hebrew sits inside the sentence (its article
+            # letter is glued to it in Hebrew), so no gap between the pieces.
+            with ui.row().classes('items-center gap-0'):
+                if before:
+                    ui.label(before).style('white-space: pre;')
+                link = ui.link(hebrew, _search_url(hebrew, mode)).style('color: var(--primary-600);')
+                if after:
+                    ui.label(after).style('white-space: pre;')
+
+        async def _take():
+            posthog_capture('search_suggestion', {'kind': 'layout', 'taken': True}, client=_page_client)
+            query_input.value = hebrew
+            await execute_search()
+        link.on('click.prevent', _take)
+        posthog_capture('search_suggestion', {'kind': 'layout', 'taken': False}, client=_page_client)
+
+    async def _offer_layout_suggestion(clean_query, mode, generation):
+        """Under a text search that found nothing: the Hebrew a Latin-script query
+        spells on the Hebrew keyboard layout, when the corpus holds those words
+        (``SearchEngine.words_occur``: one count query in this process, off the
+        loop). Nothing when the reader has started another search meanwhile."""
+        hebrew = layout_suggestion(clean_query)
+        if not hebrew:
+            return
+        occurs = getattr(state.searcher, 'words_occur', None)
+        if occurs is None:
+            return  # an engine without the check (a test stub): no suggestion
+        try:
+            found = await run.io_bound(occurs, hebrew)
+        except Exception:
+            logger.debug('Layout suggestion check failed for %r', clean_query, exc_info=True)
+            return
+        if not found or search_state.search_generation != generation or search_state.is_running:
+            return
+        _show_layout_suggestion(hebrew, mode)
+
     # Run the search the controls describe; with *attach* (a run still running, found
     # by Back), follow that run's search instead of starting it again. (No docstring:
     # the double-submit guard stays the first statement -- tests/test_ux_timing.py.)
-    async def execute_search(attach=None):
+    async def execute_search(attach=None, as_text=False):
         # Guard against double-submit (rage-clicking while search is running)
         if search_state.is_running:
             ux_ignored(_page_client, 'search_results')
@@ -5108,6 +5190,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         is_responsa = (mode_select.value == 'responsa')
         mode_override, parsed_query = state.searcher.parse_query_syntax(query, responsa_mode=is_responsa)
 
+        # A shelfmark or a system number typed into the box, in a text mode, runs
+        # in Shelfmark mode as the `#` prefix would (web/search_box_input.py), and
+        # the line under the count says so, with the same query as text one click
+        # away (*as_text*). The mode selector is left as it was: the next query is
+        # text again. A Hebrew query, or a prefixed one, is untouched.
+        _typed_shelfmark = False
         if mode_override:
             mode = mode_override
             clean_query = parsed_query
@@ -5119,6 +5207,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             mode_select.value = mode
         else:
             mode = mode_select.value
+            if not as_text and mode in TEXT_MODES and typed_as_shelfmark(query):
+                mode = 'Shelfmark'
+                _typed_shelfmark = True
 
         # This visitor's variant level and Num Changes, read now: they travel with
         # this search only. The engine's settings object is shared by every visitor
@@ -5234,6 +5325,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # SEED-026 (smoke round 3): hide the library button during the search too; it is
         # re-revealed at RENDER time (not enrichment time) once results exist.
         _set_btn_visible(library_filter_btn, False)
+        _clear_input_notice()  # the last search's shelfmark note or suggestion
         progress_bar.value = 0
         # Collapse filter panel — chips summarize active filters
         adv_filters_panel.value = False
@@ -5668,6 +5760,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Render what we have (no enrichment badges -- acceptable for partial results)
             render_results(results, page=0)
             _ux_first_rows('partial')
+            if _typed_shelfmark:
+                _show_shelfmark_notice()
             # Back to this address shows these rows, cut off ("+"), as the page did.
             if search_run.owner is search_state:
                 try:
@@ -5897,6 +5991,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # IMMEDIATE RENDER — user sees results with title translations only
         render_results(results, page=0)
         _ux_first_rows('ok' if results else 'zero')
+        if _typed_shelfmark:
+            _show_shelfmark_notice()
+        elif not results and mode in TEXT_MODES:
+            # "Did you mean <Hebrew>?" for a query typed on the English layout.
+            await _offer_layout_suggestion(clean_query, mode, this_generation)
         # SEED-026 (smoke round 3 — BUG A real root cause): reveal the library filter button
         # HERE, at render time, NOT only in _apply_enrichment_to_ui(). The library filter
         # needs no enrichment data (only bool(search_state.results)); enrichment runs later

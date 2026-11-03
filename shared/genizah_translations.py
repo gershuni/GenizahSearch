@@ -1530,6 +1530,12 @@ TRANSLATIONS = {
     "Download JSON": "הורד JSON",
     "Advanced Filters": "סינונים מתקדמים",
     "Search only in...": "חפש רק ב...",
+    # /search box input (2026-11-03): a shelfmark typed into the box runs in Shelfmark
+    # mode and says so; a Latin query that spells Hebrew on the Hebrew keyboard layout
+    # is offered under "0 Results" (web/search_box_input.py, shared/keyboard_layout.py).
+    "Searched as a shelfmark.": "החיפוש נערך כמספר מדף.",
+    "Search as text instead": "חפשו כטקסט במקום זאת",
+    "Did you mean {query}?": "האם התכוונתם ל{query}?",
     "Include": "כלול",
     "Search only in selected": "חפש רק בנבחרים",
     "Exclude selected": "החרג נבחרים",
