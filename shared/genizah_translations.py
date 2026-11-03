@@ -1092,8 +1092,8 @@ TRANSLATIONS = {
     "Your email address is not confirmed yet. Open the confirmation link we sent you (check the spam folder too), then sign in.": "כתובת האימייל שלך עדיין לא אושרה. פתח את קישור האישור ששלחנו אליך (בדוק גם בתיקיית הספאם) ואז התחבר.",
     'Wrong email or password. If you signed up with Google, use "Login with Google". To set a new password, use "Forgot password?".': 'אימייל או סיסמה שגויים. אם נרשמת דרך Google, השתמש ב"התחבר עם Google". להגדרת סיסמה חדשה, השתמש ב"שכחת סיסמה?".',
     # Sign-in dead ends (2026-11-03): resend the confirmation mail.
-    "Resend confirmation email": "שלח שוב אימייל אישור",
-    "If that address is registered, a new confirmation email is on its way.": "אם הכתובת הזו רשומה, אימייל אישור חדש בדרך אליה.",
+    "Resend confirmation email": "שלח שוב דוא\"ל אישור",
+    "If that address is registered, a new confirmation email is on its way.": "אם הכתובת הזו רשומה, דוא\"ל אישור חדש בדרך אליה.",
     "Please wait a minute before sending another.": "נא להמתין דקה לפני שליחה נוספת.",
 
     # ==================== Password Reset (web recovery-link landing) ====================
