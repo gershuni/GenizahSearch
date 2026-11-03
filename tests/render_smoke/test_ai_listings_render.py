@@ -271,7 +271,8 @@ def test_mcp_comes_first_and_the_gpt_is_last(mcp_on):
     assert mcp < skill < gpt
     assert hrefs.index(SKILL_URL) < hrefs.index(API_URL) < hrefs.index('/chatgpt') < hrefs.index('/ai/privacy')
     text = ' '.join(labels)
-    assert 'Add custom connector' in text and 'December 11, 2026' in text
+    assert 'Add custom connector' in text and 'Customize' in text and 'Organization settings' in text
+    assert 'December 11, 2026' in text
     assert 'MCP · Planned' not in text and 'Open in ChatGPT' in text
     assert _redirect() == (307, listings.GPT_URL)  # the redirect keeps working until retirement
 
@@ -298,6 +299,7 @@ def test_mcp_page_is_hebrew_in_the_hebrew_ui(mcp_on):
     hrefs, labels = _ordered(lang='he')
     text = ' '.join(labels)
     assert 'חיבור שרת ה־MCP של GenizahSearch' in text and 'Add custom connector' in text
+    assert 'Organization settings' in text and 'בעל הארגון' in text
     assert 'ה־GPT של GenizahSearch' in text and '11 בדצמבר 2026' in text
     assert 'Connect the GenizahSearch MCP server' not in text
     assert _index(labels, listings.MCP_URL) < _index(labels, '11 בדצמבר 2026')

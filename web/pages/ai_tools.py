@@ -193,8 +193,8 @@ def _mcp_page(listings):
             )).classes('gs-ai-muted text-lg')
             h2(text('Connect the GenizahSearch MCP server', 'חיבור שרת ה־MCP של GenizahSearch'), classes='text-xl font-bold')
             ui.label(text(
-                'Claude (claude.ai or Claude Desktop): open Settings, then Connectors, choose Add custom connector, and paste this address.',
-                'Claude (claude.ai או Claude Desktop): פתחו הגדרות, אחר כך Connectors, בחרו Add custom connector והדביקו את הכתובת הזו.',
+                'Claude (claude.ai): open Customize, then Connectors, choose Add custom connector, and paste this address. In a Team or Enterprise organization, an Owner adds it under Organization settings, then Connectors.',
+                'Claude (claude.ai): פתחו Customize, אחר כך Connectors, בחרו Add custom connector והדביקו את הכתובת הזו. בארגון Team או Enterprise, בעל הארגון (Owner) מוסיף אותה תחת Organization settings, ואז Connectors.',
             )).classes('gs-ai-muted')
             ui.label(MCP_URL).classes('gs-ai-code').props('dir=ltr')
             ui.label(text(
