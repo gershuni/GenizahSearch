@@ -515,7 +515,7 @@ def create_login_dialog():
                     login_resend_btn = ui.button(tr('Resend confirmation email')).props(
                         'flat dense no-caps color=primary').classes('hidden')
                     login_resend_note = ui.label('').classes('text-sm hidden').style('color: var(--text-muted);')
-                    resend_state = {'last': None}
+                    resend_state = {'last': None, 'email': ''}
 
                     def set_affordance(kind):
                         login_forgot_btn.classes('hidden' if kind != 'forgot' else '',
@@ -529,7 +529,8 @@ def create_login_dialog():
                         from nicegui import run
                         from web.analytics import posthog_capture
                         from web.supabase_client import resend_confirmation_email
-                        email = (login_email.value or '').strip()
+                        # The address that failed sign-in, not whatever the field holds now.
+                        email = resend_state['email']
                         if not email:
                             login_resend_note.text = tr('Please enter your email address')
                         else:
@@ -577,6 +578,7 @@ def create_login_dialog():
                         if "error" in result:
                             login_error.text = result["error"]
                             login_error.classes('visible', remove='hidden')
+                            resend_state['email'] = (login_email.value or '').strip()
                             set_affordance(login_error_affordance(result.get('error_code')))
                         else:
                             # Save or clear email based on "Remember me" checkbox

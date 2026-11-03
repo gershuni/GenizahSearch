@@ -52,7 +52,7 @@ def test_resend_confirmation_email_calls_supabase_resend(monkeypatch):
     assert calls == [{'type': 'signup', 'email': 'a@b.c'}]
 
 
-def _drive(monkeypatch, login_result, clicks, oauth_error=None):
+def _drive(monkeypatch, login_result, clicks, oauth_error=None, edit_email_to=None):
     """Open the login dialog, press Login with `login_result`, then press the
     buttons named in `clicks`. Returns (buttons visible, notes, resends, events)."""
     from nicegui import core, ui
@@ -95,6 +95,8 @@ def _drive(monkeypatch, login_result, clicks, oauth_error=None):
         email.value, pw.value = 'a@b.c', 'pw'
         press(client, 'Login')
         await asyncio.sleep(0.2)
+        if edit_email_to:
+            email.value = edit_email_to
         for text in clicks:
             press(client, text)
             await asyncio.sleep(0.2)
@@ -138,3 +140,10 @@ def test_google_login_failure_clears_the_password_affordance(monkeypatch):
         ['Login with Google'], oauth_error='OAuth down')
     assert visible == set(), 'the OAuth error sits beside an irrelevant button'
     assert 'OAuth down' in notes
+
+
+def test_resend_uses_the_address_that_failed_not_the_edited_field(monkeypatch):
+    _, _, resends, _ = _drive(
+        monkeypatch, {'error': 'Unconfirmed', 'error_code': 'email_not_confirmed'},
+        ['Resend confirmation email'], edit_email_to='someone@else.org')
+    assert resends == ['a@b.c']
