@@ -1,9 +1,9 @@
 # Blau's dictionary as a companion: a Judeo-Arabic dictionary in GenizahSearch
 
-**Status:** plan **rev. 1** (2026-11-03). Phase 1 (the sidecar, its normalizer and its gate) is
-built on branch `claude/blau-sidecar` and is this plan's PR; phases 2-4 are described, not built.
-Two decisions are **open for the owner** (§9: the permission and credit line, and web-only or
-both apps); nothing in phases 2-4 starts before they are ruled.
+**Status:** plan **rev. 2** (2026-11-03). Phase 1 (the sidecar, its normalizer and its gate) is
+built on branch `claude/blau-sidecar` and is this plan's PR (#472); phases 2-4 are described, not
+built. **Both owner decisions are ruled (2026-11-03, §9):** the site's permission is treated as
+covering GenizahSearch, and the companion is **web only first**. Phase 2 can start.
 **Origin:** the PostHog usage review of 2026-11-03 (`_tmp/posthog_usage_review_2026-11-03.md`):
 readers whose browser is English hit zero results in 53% of their Hebrew-letter searches, against
 33% for readers whose browser is Hebrew. The suspected cause is Judeo-Arabic orthography: a large
@@ -189,9 +189,9 @@ page, and the site's entry link (`/entry/blau-e-…`). Several hits, or several 
 Ambiguity is the norm here, not an error. The credit line of ruling (a) is on the panel, on every
 surface, always.
 
-Web first: a panel beside the viewer (phone: a sheet), opened from a word click, closed by the
-next click; the word stays highlighted. Desktop (if ruling (b) says both): the same lookup in the
-Browse viewer's context menu, same card, same credit.
+Web first (ruling b): a panel beside the viewer (phone: a sheet), opened from a word click,
+closed by the next click; the word stays highlighted. Desktop (a later ruling): the same lookup
+in the Browse viewer's context menu, same card, same credit.
 
 Also here: a "what is this word" entry point on `/search`'s result snippets, since the review
 shows readers leave after a zero result without opening anything.
@@ -265,8 +265,8 @@ to the search. Costs: 6,495 keys × one indexed whole-word search; measured on a
 
 | # | Decision | Recommendation / state |
 |---|---|---|
-| **(a)** | **Permission and credit.** Does the permission the site cites ("published with permission"; research and educational use only; no commercial use beyond conventional scholarly publication) cover bundling the data in GenizahSearch — a free research site and a free desktop app — and what credit line must every surface show? The site's own line is: יהושע בלאו, מילון לטקסטים ערביים־יהודיים מימי הביניים, ירושלים: האקדמיה ללשון העברית והאקדמיה הלאומית הישראלית למדעים, תשס"ו (2006) © האקדמיה ללשון העברית והאקדמיה הלאומית הישראלית למדעים. פורסם ברשות | **OPEN.** My reading: the site's permission is the site's, not ours; the owner should ask the two Academies (or MiDRASH, who obtained it) in writing before phase 2 ships, naming both apps and the credit. Until then the data stays a local build artifact. The sidecar's `meta.credit_he` / `credit_en` carry the site's line verbatim as a placeholder; the English rendering is mine and needs the owner's approval as a public string |
-| **(b)** | **Web-only or both apps?** | **OPEN.** Recommendation: web first (phase 2 on `/browse`, where the review's readers are), desktop in the same release only if (a) covers bundling a 32 MB file in the installer; the installer already ships the FGP and FJMS sidecars, so the mechanism exists |
+| **(a)** | **Permission and credit.** Does the permission the site cites ("published with permission"; research and educational use only; no commercial use beyond conventional scholarly publication) cover bundling the data in GenizahSearch — a free research site and a free desktop app — and what credit line must every surface show? The site's own line is: יהושע בלאו, מילון לטקסטים ערביים־יהודיים מימי הביניים, ירושלים: האקדמיה ללשון העברית והאקדמיה הלאומית הישראלית למדעים, תשס"ו (2006) © האקדמיה ללשון העברית והאקדמיה הלאומית הישראלית למדעים. פורסם ברשות | **RULED 2026-11-03: "Treat as permission."** The site's permission is taken to cover GenizahSearch; the data may be served. The credit line every surface shows is the site's own line above (`meta.credit_he`), with the site linked; the English rendering in `meta.credit_en` is still a public string the owner approves when phase 2 first shows it |
+| **(b)** | **Web-only or both apps?** | **RULED 2026-11-03: "Web only first."** Phase 2 ships on `/browse` on the website; the desktop context-menu lookup and the installer bundling (§7) wait for a later ruling |
 | D1 | The lookup key drops the corpus's apostrophe family as well as the combining marks | decided (§3: 164,480 apostrophes against 9,256 dots) |
 | D2 | Brackets are transparent, not separators | decided (`חיט(ה̈)`, `]הנתשנ`) |
 | D3 | Unnamed roots (7) and sub-entries (54) are kept, counted and pinned, not dropped | decided |
@@ -291,8 +291,8 @@ to the search. Costs: 6,495 keys × one indexed whole-word search; measured on a
   phase 3's chips offer both the dotted and the apostrophe spellings so a search reaches every
   page.
 - **The credit line.** Public strings are the owner's; the line must appear on every surface that
-  shows a gloss (panel, chips, exports, the API if it ever serves this), and the permission question
-  (a) is not ours to answer. Nothing in phases 2-4 is built before (a) is ruled.
+  shows a gloss (panel, chips, exports, the API if it ever serves this). Ruling (a) settled the
+  permission; the English rendering of the line is approved when phase 2 first shows it.
 - **The source may change.** Release 1.1 is pinned by digest in `meta`; a new release is a new
   build, a new gate run, and a diff of the counts the gate pins (§4 rule 5).
 - **Windows cannot replace an open file.** The build's atomic rename fails (exit 4, old file kept)
