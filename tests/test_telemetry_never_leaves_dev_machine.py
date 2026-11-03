@@ -89,3 +89,18 @@ def test_unconsented_source_launch_is_blocked(monkeypatch, posts, crash_telemetr
     assert ph._resolve_api_key() == ''
     ph.send_crash_event_direct('nli_breaker_opened', {}, 'x')
     assert posts == []
+
+
+def _run_module():
+    import subprocess
+    env = dict(os.environ, GENIZAH_TELEMETRY_KEY='phc_devkey', PYTHONUTF8='1')
+    env.pop('GENIZAH_TELEMETRY_FORCE', None)
+    return subprocess.run([sys.executable, '-m', 'desktop.telemetry'], env=env,
+                          capture_output=True, text=True, timeout=60)
+
+
+def test_selftest_entry_point_fails_when_blocked():
+    """Codex P2: a blocked source-run self-test must not report success."""
+    r = _run_module()
+    assert r.returncode == 1
+    assert 'GENIZAH_TELEMETRY_FORCE' in r.stderr

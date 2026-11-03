@@ -1989,6 +1989,12 @@ if __name__ == '__main__':
             with _enabled_lock:
                 _enabled = True  # in-memory only, no config.pkl write
             _wire_transport_config()  # apply the env key for this one run
+            from shared.posthog_server import _resolve_api_key
+            if not _resolve_api_key():
+                # A source run blocks delivery; report it instead of a false success.
+                print('telemetry: delivery is blocked in a run from source; '
+                      'set GENIZAH_TELEMETRY_FORCE=1 to run the self-test.', file=sys.stderr)
+                sys.exit(1)
             run_selftest()
             # Allow daemon thread to drain
             import time
