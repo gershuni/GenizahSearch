@@ -19,7 +19,8 @@
     scan" and the exit code is 2: an incomplete scan is never reported clean. It
     changes nothing. (Codex on the PR: round 1, a junction two levels down was missed
     by a version that looked one level down only; round 2, an unreadable subtree was
-    skipped silently and the scan still said clean.)
+    skipped silently and the scan still said clean; round 3, the same for the
+    .claude\worktrees folder itself during default discovery.)
 
     Remove a junction with `cmd /c rmdir <path>` (no /S): that deletes the link and
     leaves its target alone. Never Remove-Item -Recurse, rm -rf or git worktree remove
@@ -79,8 +80,17 @@ if (-not $Path) {
         $Path = @($here)
     } else {
         $wt = Join-Path (Split-Path $PSScriptRoot -Parent) '.claude\worktrees'
-        $Path = @(Get-ChildItem -LiteralPath $wt -Force -Directory -ErrorAction SilentlyContinue |
-                  ForEach-Object { $_.FullName })
+        $Path = @()
+        if (Test-Path -LiteralPath $wt -PathType Container) {
+            try {
+                $Path = @(Get-ChildItem -LiteralPath $wt -Force -Directory -ErrorAction Stop |
+                          ForEach-Object { $_.FullName })
+            } catch {
+                # Fail closed (Codex, round 3): a worktrees folder we cannot list may hold a
+                # worktree with a junction, so this is not "no worktrees".
+                $script:unscanned += ('{0}: {1}' -f $wt, $_.Exception.Message)
+            }
+        }
     }
 }
 

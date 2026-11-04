@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import getpass
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -130,6 +131,57 @@ def test_a_path_that_is_not_a_folder_is_not_clean(tmp_path: Path) -> None:
     r = _scan(tmp_path / "no_such_worktree")
     assert r.returncode == 2, r.stdout + r.stderr
     assert "could not scan" in r.stdout and "not a folder" in r.stdout, r.stdout
+
+
+@pytest.fixture
+def main_checkout(tmp_path: Path) -> Path:
+    """A copy of the scanner inside a stand-in main checkout (its .git is a FOLDER), so
+    that, run bare from there, its default scope is <repo>/.claude/worktrees/*."""
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    (repo / ".git").mkdir()
+    (repo / ".claude" / "worktrees" / "wt1").mkdir(parents=True)
+    shutil.copy(SCRIPT, repo / "scripts" / SCRIPT.name)
+    return repo
+
+
+def _scan_default(repo: Path) -> subprocess.CompletedProcess:
+    cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+           str(repo / "scripts" / SCRIPT.name)]
+    return subprocess.run(cmd, cwd=str(repo), capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=120)
+
+
+def test_from_a_main_checkout_the_default_scope_is_every_worktree(
+        main_checkout: Path, main_data: Path) -> None:
+    link = main_checkout / ".claude" / "worktrees" / "wt1" / "nli_data"
+    _junction(link, main_data)
+    try:
+        r = _scan_default(main_checkout)
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert str(link) in r.stdout and str(main_data) in r.stdout, r.stdout
+    finally:
+        _rmdir(link)
+    assert (main_data / "sidecar.db").read_bytes() == b"keep me"
+    assert _scan_default(main_checkout).returncode == 0
+
+
+def test_an_unlistable_worktrees_folder_fails_closed(main_checkout: Path) -> None:
+    """Codex, round 3: with -ErrorAction SilentlyContinue an unlistable .claude/worktrees
+    became an empty scope and exit 0."""
+    wts = main_checkout / ".claude" / "worktrees"
+    user = os.environ.get("USERNAME") or getpass.getuser()
+    denied = _icacls(str(wts), "/deny", f"{user}:(RD)")
+    if denied.returncode != 0:
+        pytest.skip("icacls could not deny listing here: " + denied.stdout + denied.stderr)
+    try:
+        r = _scan_default(main_checkout)
+        assert r.returncode == 2, r.stdout + r.stderr
+        assert "could not scan" in r.stdout and str(wts) in r.stdout, r.stdout
+        assert "no reparse points" not in r.stdout, r.stdout
+    finally:
+        assert _icacls(str(wts), "/remove:d", user).returncode == 0
+    assert _scan_default(main_checkout).returncode == 0
 
 
 def test_init_runs_the_scanner() -> None:
