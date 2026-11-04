@@ -3,25 +3,29 @@
 
 Drives the real ``/browse`` over a stubbed browse service (harness: test_browse_button_icons_render_smoke.py)
 and a stubbed dictionary service, and fires the events the click script (web/static/js/blau_lookup.js) would
-dispatch on the popover. Pinned: a served dictionary gives the page the popover (hidden), the marked text pane
-and the hint; a lookup draws one card per entry with its senses, the matched one marked, the example entries,
+dispatch on the popover. Pinned: a served dictionary gives the page the popover (hidden) and the reader's
+switch, OFF by default (owner, 2026-11-04: the page never guesses the text's language) -- no marked pane, no
+hint; the switch marks the pane and shows the hint and the "type a word" button, and the choice holds on the
+next page; a lookup draws one card per entry with its senses, the matched one marked, the example entries,
 the site links, the close control and the credit line -- the site's Hebrew line in both UI languages, the English
-rendering beside it only in the English UI -- and shows the popover; the close hides it; an empty answer says
-what was looked for; a result without a credit line is not shown; a service that is not available leaves the
-page without any of it; a payload without a word asks the dictionary nothing.
+rendering beside it only in the English UI -- and shows the popover, with the word in the box at its top; the
+box looks up what is typed; the close hides it; an empty answer says what the dictionary covers and what was looked for; a result without a credit
+line is not shown; a service that is not available leaves the page without any of it; a payload without a word
+asks the dictionary nothing.
 """
 from __future__ import annotations
 
 import json
 import re
 import time
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from nicegui import events, ui
 
 from shared.blau_service import SITE_URL, BlauCard, BlauExample, BlauLookup, BlauSense, empty_lookup
 from tests.render_smoke.test_browse_button_icons_render_smoke import (
-    OPEN_PAGE, SID, _all_elements, _run_home_smoke, _service, _wait_until,
+    OPEN_PAGE, SID, _all_elements, _click, _run_home_smoke, _service, _wait_until,
 )
 from web.components import blau_panel
 from web.pages import browse
@@ -124,6 +128,82 @@ async def _open(user):
     assert _enriched(user), 'the browse page did not finish its enrichment'
 
 
+def _switch(user):
+    found = _with_class(user, blau_panel.SWITCH_CLASS)
+    assert len(found) <= 1, 'one switch per page'
+    return found[0] if found else None
+
+
+def _visible_texts(user):
+    """Label and link texts of elements that are shown (themselves and every ancestor)."""
+    def shown(element):
+        while element is not None:
+            if not element.visible:
+                return False
+            element = element.parent_slot.parent if element.parent_slot else None
+        return True
+    return [e.text for e in _all_elements(user)
+            if isinstance(e, (ui.label, ui.link)) and e.text and shown(e)]
+
+
+def _hint_shown(user):
+    return any(e.visible for e in _with_class(user, blau_panel.HINT_CLASS))
+
+
+def _opener_shown(user):
+    return any(e.visible for e in _with_class(user, blau_panel.OPEN_CLASS))
+
+
+async def _turn_on(user):
+    switch = _switch(user)
+    _click(user, switch)
+    await _wait_until(lambda: _marked_panes(user))
+    assert _marked_panes(user), 'the switch did not mark the pane'
+
+
+def test_the_switch_is_off_by_default_and_turns_the_lookup_on_and_off():
+    async def driver(user):
+        await _open(user)
+        switch = _switch(user)
+        assert switch is not None and switch.props.get('icon') == 'translate'
+        assert switch.props.get('aria-pressed') == 'false' and 'active' not in switch.classes
+        assert not _marked_panes(user), 'off by default: a click on a word looks nothing up'
+        assert not _hint_shown(user) and not _opener_shown(user)
+        assert _popover(user)._style.get('display') == 'none'
+
+        await _turn_on(user)
+        assert len(_marked_panes(user)) == 1
+        assert switch.props.get('aria-pressed') == 'true' and 'active' in switch.classes
+        assert _hint_shown(user) and _opener_shown(user)
+        assert 'Click a word for its dictionary entry' in _visible_texts(user)
+        tips = [e.text for e in _all_elements(user) if isinstance(e, ui.tooltip)]
+        assert "Turn off Blau's dictionary" in tips
+
+        # Off again, with the panel up: the pane is unmarked and the panel hides.
+        popover = _popover(user)
+        _fire(user, popover, blau_panel.LOOKUP_EVENT, {'word': 'כתאב'})
+        await _wait_until(lambda: popover._style.get('display') == 'flex')
+        _click(user, switch)
+        await _wait_until(lambda: not _marked_panes(user))
+        assert not _marked_panes(user) and popover._style.get('display') == 'none'
+        assert not _hint_shown(user) and switch.props.get('aria-pressed') == 'false'
+        assert "Turn on Blau's dictionary (Judeo-Arabic)" in [
+            e.text for e in _all_elements(user) if isinstance(e, ui.tooltip)]
+
+    _run(driver, _dictionary(), lang='en')
+
+
+def test_the_reader_s_choice_holds_on_the_next_page():
+    async def driver(user):
+        await _open(user)
+        await _turn_on(user)
+        await _open(user)
+        assert len(_marked_panes(user)) == 1 and _hint_shown(user)
+        assert _switch(user).props.get('aria-pressed') == 'true'
+
+    _run(driver, _dictionary(), lang='en')
+
+
 def test_a_lookup_draws_the_cards_and_the_credit_line_and_the_close_hides_them():
     dictionary = _dictionary()
 
@@ -132,8 +212,9 @@ def test_a_lookup_draws_the_cards_and_the_credit_line_and_the_close_hides_them()
         popover = _popover(user)
         assert popover is not None and popover._style.get('display') == 'none'
         assert popover.props.get('role') == 'dialog'
+        await _turn_on(user)
         assert len(_marked_panes(user)) == 1
-        assert 'Click a word for its dictionary entry' in _texts(user)
+        assert 'Click a word for its dictionary entry' in _visible_texts(user)
         assert not _with_class(user, blau_panel.CARD_CLASS)
 
         _fire(user, popover, blau_panel.LOOKUP_EVENT, {'word': 'כתאב'})
@@ -143,7 +224,7 @@ def test_a_lookup_draws_the_cards_and_the_credit_line_and_the_close_hides_them()
 
         texts = _texts(user)
         assert len(_with_class(user, blau_panel.CARD_CLASS)) == 1
-        assert "Blau's dictionary" in texts and 'כתאב' in texts
+        assert "Blau's dictionary" in texts and _shown_word(user) == ['כתאב']
         assert 'כתב' in texts and 'كتب' in texts and 'p. 587' in texts
         senses = _with_class(user, blau_panel.SENSE_CLASS)
         assert len(senses) == 2 and [('matched' in s.classes) for s in senses] == [False, True]
@@ -153,8 +234,11 @@ def test_a_lookup_draws_the_cards_and_the_credit_line_and_the_close_hides_them()
         assert 'Also in the examples under' in texts and 'וג̇ה' in texts and '+2' in texts
         assert {ENTRY_URL, EXAMPLE_URL, SITE_URL} <= _links(user)
         assert CREDIT_HE in texts and CREDIT_EN in texts
+        assert blau_panel.DISCLAIMER in texts, 'the disclaimer is on every panel'
         credit_links = [e for e in _all_elements(user) if isinstance(e, ui.link) and e.props.get('href') == SITE_URL]
         assert sorted(e.text for e in credit_links) == sorted([CREDIT_HE, CREDIT_EN])
+        midrash = [e for e in _all_elements(user) if isinstance(e, ui.link) and e.props.get('href') == blau_panel.ABOUT_URL]
+        assert [e.text for e in midrash] == [blau_panel.MIDRASH_CREDIT], 'the digital edition is credited, linked'
         [close] = [e for e in _all_elements(user) if isinstance(e, ui.button) and blau_panel.CLOSE_CLASS in e.classes]
         assert close.props.get('aria-label') == 'Close'
 
@@ -172,13 +256,17 @@ def test_a_lookup_draws_the_cards_and_the_credit_line_and_the_close_hides_them()
 def test_the_hebrew_ui_shows_the_site_s_line_only_and_its_own_words():
     async def driver(user):
         await _open(user)
+        await _turn_on(user)
         popover = _popover(user)
         _fire(user, popover, blau_panel.LOOKUP_EVENT, {'word': 'כתאב'})
         await _wait_until(lambda: popover._style.get('display') == 'flex')
         texts = _texts(user)
         assert CREDIT_HE in texts and CREDIT_EN not in texts
+        assert any(t.startswith('מילון בלאו מתעד') for t in texts), 'the disclaimer in Hebrew'
+        assert any(t.startswith('המהדורה הדיגיטלית: פרויקט MiDRASH') for t in texts), 'MiDRASH, in Hebrew'
         assert 'מילון בלאו' in texts and 'עמ׳ 587' in texts and 'קלאסי' in texts
-        assert 'לחיצה על מילה פותחת את ערכה במילון בלאו' in texts
+        assert 'לחיצה על מילה פותחת את ערכה במילון בלאו' in _visible_texts(user)
+        assert 'כיבוי מילון בלאו' in [e.text for e in _all_elements(user) if isinstance(e, ui.tooltip)]
         # The Hebrew gloss comes first in a sense, the English after it.
         glosses = [e for e in _all_elements(user) if isinstance(e, ui.label) and 'gloss' in e.classes]
         assert [('he' in g.classes) for g in glosses[:2]] == [True, False]
@@ -196,9 +284,9 @@ def test_an_empty_answer_says_what_was_looked_for():
         await _wait_until(lambda: popover._style.get('display') == 'flex')
         texts = _texts(user)
         assert _with_class(user, blau_panel.EMPTY_CLASS) and not _with_class(user, blau_panel.CARD_CLASS)
-        assert 'Nothing in the dictionary for this word.' in texts
+        assert 'Nothing in the dictionary for this word.' in texts and blau_panel.DISCLAIMER in texts
         assert 'Looked for' in texts and 'וזזז' in texts and 'זזז' in texts
-        assert CREDIT_HE in texts
+        assert CREDIT_HE in texts and blau_panel.MIDRASH_CREDIT in texts
         assert SITE_URL in _links(user), 'an empty answer still links the credited site'
 
     _run(driver, _dictionary(result=result), lang='en')
@@ -233,7 +321,65 @@ def _slow_dictionary(slow_word, seconds=0.6):
 
 
 def _shown_word(user):
-    return [e.text for e in _all_elements(user) if isinstance(e, ui.label) and 'word' in e.classes]
+    """The word the panel shows: the value of the box at its top."""
+    return [e.value for e in _all_elements(user) if isinstance(e, ui.input) and blau_panel.INPUT_CLASS in e.classes]
+
+
+def test_the_type_a_word_button_opens_an_empty_box_and_the_box_looks_up_what_is_typed():
+    dictionary = _dictionary()
+
+    async def driver(user):
+        await _open(user)
+        await _turn_on(user)
+        popover = _popover(user)
+        [opener] = _with_class(user, blau_panel.OPEN_CLASS)
+        assert not [li for li in opener._event_listeners.values() if li.type == 'click'], \
+            'the script handles this click; a server handler would race its close'
+        _fire(user, popover, blau_panel.OPEN_EVENT, {})
+        await _wait_until(lambda: popover._style.get('display') == 'flex')
+        assert _shown_word(user) == [''] and not dictionary.lookup.called
+        [box] = [e for e in _all_elements(user) if isinstance(e, ui.input) and blau_panel.INPUT_CLASS in e.classes]
+        assert 'autofocus' in box.props
+        assert 'Type a Judeo-Arabic word in Hebrew letters, or an Arabic word.' in _texts(user)
+        assert blau_panel.DISCLAIMER in _texts(user)
+        assert CREDIT_HE in _texts(user)
+
+        box.value = ' أخذ '
+        [search] = [e for e in _all_elements(user) if isinstance(e, ui.button) and blau_panel.SEARCH_CLASS in e.classes]
+        _click(user, search)
+        await _wait_until(lambda: dictionary.lookup.called)
+        dictionary.lookup.assert_called_once_with('أخذ')
+        await _wait_until(lambda: _with_class(user, blau_panel.CARD_CLASS))
+        assert _shown_word(user) == ['أخذ'] and len(_with_class(user, blau_panel.CARD_CLASS)) == 1
+
+        # An empty box asks nothing.
+        [box] = [e for e in _all_elements(user) if isinstance(e, ui.input) and blau_panel.INPUT_CLASS in e.classes]
+        box.value = '   '
+        [search] = [e for e in _all_elements(user) if isinstance(e, ui.button) and blau_panel.SEARCH_CLASS in e.classes]
+        _click(user, search)
+        await _wait_until(lambda: False, timeout=0.3)
+        assert dictionary.lookup.call_count == 1
+
+    _run(driver, dictionary, lang='en')
+
+
+def test_an_entry_spelled_without_the_word_s_dot_is_marked():
+    exact = _lookup('ד\'לך')
+    dotted = replace(exact.cards[0], name='ד̇לך ו', matched_key='ד̇לך ו')
+    undotted = replace(exact.cards[0], name='דלך', matched_key='דלך', dot_mismatch=True)
+    result = replace(exact, cards=(dotted, undotted), examples=(), more_examples=0)
+
+    async def driver(user):
+        await _open(user)
+        popover = _popover(user)
+        _fire(user, popover, blau_panel.LOOKUP_EVENT, {'word': 'ד\'לך'})
+        await _wait_until(lambda: popover._style.get('display') == 'flex')
+        cards = _with_class(user, blau_panel.CARD_CLASS)
+        flags = [e for e in _all_elements(user) if isinstance(e, ui.label) and 'dot-mismatch' in e.classes]
+        assert len(cards) == 2 and [f.text for f in flags] == ['spelled without the dot']
+        assert cards[1].id in {a.id for a in flags[0].ancestors()}, 'the flag sits on the undotted entry'
+
+    _run(driver, _dictionary(result=result), lang='en')
 
 
 def test_a_slow_earlier_lookup_does_not_overwrite_the_newer_word():
@@ -291,7 +437,8 @@ def test_an_unavailable_dictionary_leaves_the_page_as_it_was():
 
     async def driver(user):
         await _open(user)
-        assert _popover(user) is None
+        assert _popover(user) is None and _switch(user) is None
+        assert not _with_class(user, blau_panel.OPEN_CLASS)
         assert not _marked_panes(user)
         assert 'Click a word for its dictionary entry' not in _texts(user)
         assert not _with_class(user, blau_panel.PANEL_CLASS)

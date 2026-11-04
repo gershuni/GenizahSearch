@@ -33,20 +33,52 @@ it sits in defines some OTHER word. Ambiguity is the norm, not an error:
 several candidates that hit are several cards, never one merged answer.
 Everything is bounded (``MAX_CARDS``, ``MAX_SENSES``, ``MAX_EXAMPLES``) so one
 click never renders a page.
+
+A single word also reaches an entry whose NAME is several words and begins
+with it (``NAME_PREFIX_KINDS``): ذلك is the entry "ד̇לך ו", and before this a
+click on דלך reached only دلك "to polish" (owner, 2026-11-04).
+
+The dot above. The lookup key drops it (the automatic text mostly omits it,
+plan §3), so דלך and ד̇לך share a key and both readings are cards. When the
+word itself carries the dot -- written with U+0307, or with an apostrophe or
+geresh after the letter, which is how the automatic text and any keyboard
+write it (``dot_pattern``) -- the cards whose spelling has the dot on the same
+letters come first. Only the letters Judeo-Arabic dots count (``DOT_LETTERS``),
+so an abbreviation mark (ר', מ') changes nothing.
+
+A typed word may be Arabic script (the panel's box): it is looked up against
+the Arabic spellings of the entries, sub-entries and forms, by a key that
+also undoes the extraction's broken spacing (``arabic_key``).
+
+No guessing at misread letters: a lookup answers what the word's own
+spelling reaches. One-letter "close spellings" were built and measured
+against the PGP Judeo-Arabic editions (scripts/measure_blau_close_spellings.py)
+and dropped by the owner on 2026-11-04: about 1 offer in 20 was right, because
+most words with no entry were read correctly and the dictionary lacks them.
+The reader corrects a letter in the box instead.
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+import re
 import sqlite3
 import threading
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 from urllib.parse import quote
 
-from shared.blau_normalize import NORMALIZER_VERSION, candidate_stems, normalize_ja
+from shared.blau_normalize import (
+    NORMALIZER_VERSION,
+    QUOTE_MARKS,
+    candidate_stems,
+    fold_finals,
+    normalize_arabic,
+    normalize_ja,
+)
 from shared.thread_local_db import ThreadLocalConnection
 
 logger = logging.getLogger(__name__)
@@ -63,6 +95,13 @@ SIDECAR_FILENAME = "blau.db"
 SITE_URL = "https://blau-dict.netlify.app/"
 
 HEADWORD_KINDS = ("root", "sub_entry", "headword", "variant")
+#: Kinds whose multi-word name a single word may begin ("ד̇לך ו"). Not variants:
+#: a multi-word variant is mostly a verb with its preposition, and would bury a
+#: common word under cards.
+NAME_PREFIX_KINDS = ("root", "sub_entry", "headword")
+#: The letters Judeo-Arabic writes with a dot above for a second Arabic letter
+#: (finals folded): ג̇ ד̇ ט̇ צ̇ ת̇ כ̇.
+DOT_LETTERS = frozenset("גדטצתכ")
 PHRASE_KIND = "phrase"
 MAX_CARDS = 10
 MAX_SENSES = 4
@@ -86,6 +125,80 @@ def blau_enabled() -> bool:
 def entry_url(root_id: str) -> str:
     """The dictionary site's page for one entry."""
     return f"{SITE_URL}entry/{quote(str(root_id), safe='')}"
+
+
+_DOT_ABOVE = "̇"
+
+
+def dot_pattern(text: str) -> str:
+    """The Hebrew letters of ``text`` (finals folded, other marks dropped, words
+    split by one space) with ``*`` after each letter of ``DOT_LETTERS`` that
+    carries the dot above: U+0307 as the dictionary writes it, or an apostrophe
+    or geresh after the letter as the automatic text and a keyboard write it.
+    ``ד'לך`` and ``ד̇לך`` are both ``ד*לכ``; ``ר'`` is ``ר``."""
+    out: list[str] = []
+    for ch in unicodedata.normalize("NFC", text or ""):
+        if "א" <= ch <= "ת":
+            out.append(fold_finals(ch))
+        elif ch == _DOT_ABOVE or ch in QUOTE_MARKS:
+            if out and out[-1] in DOT_LETTERS:
+                out.append("*")
+        elif ch.isspace() and out and out[-1] != " ":
+            out.append(" ")
+    return "".join(out).strip()
+
+
+def _dots_agree(word_pattern: str, spelling: str) -> bool:
+    """The dictionary spelling's first word, dots included, sits inside the
+    looked-up word (whose proclitics the candidate may have peeled)."""
+    first = dot_pattern(spelling).split(" ", 1)[0]
+    return bool(first) and first in word_pattern
+
+
+# The Arabic key: on top of normalize_arabic, the letters a typist writes either
+# way (ta marbuta / ha, alef maqsura / ya, the hamza seats) fold together.
+_ARABIC_EXTRA_FOLD = str.maketrans({"ة": "ه", "ى": "ي", "ؤ": "و", "ئ": "ي"})
+_ARABIC_ALTERNATIVES = re.compile(r"[|,،/;؛]")
+_ARABIC_PLURAL_MARK = "ج"   # the dictionary writes a plural as "ج أبايا"
+
+
+def arabic_key(text: str) -> str:
+    """One Arabic spelling as a lookup key: ``normalize_arabic``, the dictionary's
+    plural mark dropped, the extra folds, and every space removed -- the
+    extraction split words (``أخ ذ``, tatweel-broken forms), so the key is the
+    letters alone, and a typed phrase meets a stored one the same way."""
+    words = normalize_arabic(text).split()
+    if len(words) > 1 and words[0] == _ARABIC_PLURAL_MARK:
+        words = words[1:]
+    return "".join(words).translate(_ARABIC_EXTRA_FOLD)
+
+
+def arabic_keys(spelling: str) -> list[str]:
+    """The keys of a stored Arabic spelling: one per alternative (the dictionary
+    separates them with ``|`` and commas), each of at least two letters."""
+    out: list[str] = []
+    for part in _ARABIC_ALTERNATIVES.split(spelling or ""):
+        key = arabic_key(part)
+        if len(key) >= 2 and key not in out:
+            out.append(key)
+    return out
+
+
+def arabic_candidates(text: str) -> list[str]:
+    """A typed Arabic word's candidates: the word, then without a conjunction
+    (و, ف), then without the article (ال); each at least two letters."""
+    key = arabic_key(text)
+    if len(key) < 2:
+        return []
+    out = [key]
+    rest = key
+    if rest[:1] in ("و", "ف") and len(rest) - 1 >= 3:
+        rest = rest[1:]
+        out.append(rest)
+    if rest.startswith("ال") and len(rest) - 2 >= 2:
+        rest = rest[2:]
+        out.append(rest)
+    return out
 
 
 def default_sidecar_path() -> Optional[str]:
@@ -141,6 +254,9 @@ class BlauCard:
     via: str
     senses: tuple[BlauSense, ...]
     more_senses: int
+    #: The looked-up word carries the dot (``dot_pattern``) and this entry's
+    #: spelling does not have it on the same letters: another word, probably.
+    dot_mismatch: bool = False
 
 
 @dataclass(frozen=True)
@@ -161,15 +277,18 @@ class BlauLookup:
     more_cards: int
     examples: tuple[BlauExample, ...]
     more_examples: int
+    #: "ja" (Hebrew letters) or "arabic" (a typed Arabic-script word).
+    script: str = "ja"
 
     @property
     def found(self) -> bool:
         return bool(self.cards or self.examples)
 
 
-def empty_lookup(word: str = "", key: str = "", candidates: tuple[str, ...] = ()) -> BlauLookup:
+def empty_lookup(word: str = "", key: str = "", candidates: tuple[str, ...] = (),
+                 script: str = "ja") -> BlauLookup:
     return BlauLookup(word=word, key=key, candidates=candidates, cards=(), more_cards=0,
-                      examples=(), more_examples=0)
+                      examples=(), more_examples=0, script=script)
 
 
 class _CardBuild:
@@ -177,7 +296,7 @@ class _CardBuild:
     sub-entries) reached by one candidate."""
 
     __slots__ = ("root", "candidate", "matched_key", "matched_kind", "via", "sub_entry_id",
-                 "matched_form_ids")
+                 "matched_form_ids", "dot_mismatch")
 
     def __init__(self, root: sqlite3.Row, candidate: str, matched_key: str, matched_kind: str, via: str,
                  sub_entry_id: str):
@@ -188,6 +307,7 @@ class _CardBuild:
         self.via = via
         self.sub_entry_id = sub_entry_id
         self.matched_form_ids: list[str] = []
+        self.dot_mismatch = False
 
 
 def _text(value: Any) -> str:
@@ -211,6 +331,9 @@ class BlauService:
     def __init__(self, db_path: Optional[str] = None, thread_safe: bool = False):
         self._conn: Any = None
         self._meta: dict[str, str] = {}
+        # Built on first use, then read-only: the Arabic-spelling index (typed Arabic).
+        self._index_lock = threading.Lock()
+        self._arabic_index: Optional[dict[str, tuple[dict[str, str], ...]]] = None
         self.unavailable_reason = "not opened"
         self._db_path = db_path or default_sidecar_path()
         if not self._db_path:
@@ -285,22 +408,77 @@ class BlauService:
     # -- the lookup ----------------------------------------------------------
 
     def lookup(self, word: str) -> BlauLookup:
-        """What the dictionary has for one clicked word. Never raises; empty
-        when unavailable, when the word has no Hebrew letters, or on any error."""
+        """What the dictionary has for one clicked or typed word. A word with
+        Hebrew letters is looked up as Judeo-Arabic; a word with Arabic letters
+        only, against the Arabic spellings. Never raises; empty when
+        unavailable, when the word has neither, or on any error."""
         word = _text(word)
         if not word or not self.is_available():
             return empty_lookup(word)
         key = ""
         candidates: tuple[str, ...] = ()
+        script = "ja"
         try:
             key = normalize_ja(word)
             if not key:
-                return empty_lookup(word)
+                script = "arabic"
+                candidates = tuple(arabic_candidates(word))
+                if not candidates:
+                    return empty_lookup(word)
+                key = candidates[0]
+                return self._lookup_arabic(word, key, candidates)
             candidates = tuple(candidate_stems(key))
             return self._lookup(word, key, candidates)
         except Exception:
             logger.exception("BlauService: lookup of %r failed", word)
-            return empty_lookup(word, key, candidates)
+            return empty_lookup(word, key, candidates, script)
+
+    # -- typed Arabic ---------------------------------------------------------
+
+    def _arabic(self) -> dict[str, tuple[dict[str, str], ...]]:
+        """arabic_key -> the hits it reaches: entries and sub-entries by their
+        Arabic spelling (kinds root / sub_entry), forms by theirs (a matched
+        form, kind headword). Built once from the open file; nothing new is
+        stored in the sidecar."""
+        if self._arabic_index is None:
+            with self._index_lock:
+                if self._arabic_index is None:
+                    index: dict[str, list[dict[str, str]]] = {}
+
+                    def add(spelling: Any, hit: dict[str, str]) -> None:
+                        for akey in arabic_keys(_text(spelling)):
+                            index.setdefault(akey, []).append(hit)
+
+                    for r in self._conn.execute("SELECT id, arabic_spelling FROM roots ORDER BY ordinal"):
+                        add(r["arabic_spelling"], {"kind": "root", "root_id": _text(r["id"]),
+                                                   "sub_entry_id": "", "form_id": "", "raw": ""})
+                    for r in self._conn.execute(
+                            "SELECT id, root_id, arabic_spelling FROM sub_entries ORDER BY root_id, ordinal"):
+                        add(r["arabic_spelling"], {"kind": "sub_entry", "root_id": _text(r["root_id"]),
+                                                   "sub_entry_id": _text(r["id"]), "form_id": "", "raw": ""})
+                    for r in self._conn.execute(
+                            "SELECT id, root_id, sub_entry_id, arabic_spelling FROM forms "
+                            "WHERE arabic_spelling <> '' ORDER BY id"):
+                        add(r["arabic_spelling"], {"kind": "headword", "root_id": _text(r["root_id"]),
+                                                   "sub_entry_id": _text(r["sub_entry_id"]),
+                                                   "form_id": _text(r["id"]), "raw": ""})
+                    self._arabic_index = {k: tuple(v) for k, v in index.items()}
+        return self._arabic_index
+
+    def _lookup_arabic(self, word: str, key: str, candidates: tuple[str, ...]) -> BlauLookup:
+        index = self._arabic()
+        cards: dict[tuple[str, str, str], _CardBuild] = {}
+        overflow: set[tuple[str, str, str]] = set()
+        roots: dict[str, Optional[sqlite3.Row]] = {}
+        for candidate in candidates:
+            hits = sorted(index.get(candidate, ()), key=lambda h: _KIND_RANK.get(h["kind"], len(HEADWORD_KINDS)))
+            for hit in hits:
+                self._add_hit(cards, set(), overflow, roots, hit, candidate)
+        return BlauLookup(
+            word=word, key=key, candidates=candidates,
+            cards=tuple(self._finish(build, roots) for build in cards.values()),
+            more_cards=len(overflow), examples=(), more_examples=0, script="arabic",
+        )
 
     def _lookup(self, word: str, key: str, candidates: tuple[str, ...]) -> BlauLookup:
         # A card is one scope reached by one candidate: keyed by (candidate,
@@ -313,11 +491,21 @@ class BlauService:
         overflow: set[tuple[str, str, str]] = set()
         phrase_rows: list[sqlite3.Row] = []
         roots: dict[str, Optional[sqlite3.Row]] = {}
+        prefix_marks = ",".join("?" * len(NAME_PREFIX_KINDS))
         for candidate in candidates:
             rows = list(self._conn.execute(
                 "SELECT norm, raw, kind, root_id, sub_entry_id, form_id FROM forms_norm "
                 "WHERE norm = ? ORDER BY rowid", (candidate,)))
             rows.sort(key=lambda r: _KIND_RANK.get(r["kind"], len(HEADWORD_KINDS)))
+            if " " not in candidate:
+                # Entry names of several words that begin with this one (a
+                # range on the lookup index: every key "candidate <more>").
+                named = list(self._conn.execute(
+                    "SELECT norm, raw, kind, root_id, sub_entry_id, form_id FROM forms_norm "
+                    f"WHERE norm > ? AND norm < ? AND kind IN ({prefix_marks}) ORDER BY rowid",
+                    (candidate + " ", candidate + " \U0010ffff", *NAME_PREFIX_KINDS)))
+                named.sort(key=lambda r: _KIND_RANK.get(r["kind"], len(HEADWORD_KINDS)))
+                rows.extend(named)
             for row in rows:
                 kind = row["kind"]
                 if kind in _KIND_RANK:
@@ -338,9 +526,17 @@ class BlauService:
                 continue
             examples[root_id] = BlauExample(root_id=root_id, name=_text(root["name_ja"]),
                                             url=entry_url(root_id), phrase=_text(row["raw"]))
+        builds = list(cards.values())
+        word_pattern = dot_pattern(word)
+        if "*" in word_pattern:
+            # The word carries the dot: its reading first (stable: the rest
+            # keep candidate order), the others marked.
+            for build in builds:
+                build.dot_mismatch = not _dots_agree(word_pattern, build.matched_key)
+            builds.sort(key=lambda b: b.dot_mismatch)
         return BlauLookup(
             word=word, key=key, candidates=candidates,
-            cards=tuple(self._finish(build, roots) for build in cards.values()),
+            cards=tuple(self._finish(build, roots) for build in builds),
             more_cards=len(overflow),
             examples=tuple(examples.values()),
             more_examples=len(example_overflow),
@@ -348,7 +544,9 @@ class BlauService:
 
     def _add_hit(self, cards: dict[tuple[str, str, str], _CardBuild], card_roots: set[str],
                  overflow: set[tuple[str, str, str]], roots: dict[str, Optional[sqlite3.Row]],
-                 row: sqlite3.Row, candidate: str) -> None:
+                 row: Mapping[str, Any], candidate: str) -> None:
+        """One hit into its card. ``row`` is a ``forms_norm`` row, or the same
+        fields as a dict for a typed-Arabic hit (``_arabic``)."""
         root_id = _text(row["root_id"])
         root = self._root(roots, root_id)
         if root is None:  # the gate forbids a dangling root; never trust it anyway
@@ -415,7 +613,7 @@ class BlauService:
             page=_page(root["start_page_printed"]), url=entry_url(root_id),
             candidate=build.candidate, matched_key=build.matched_key, matched_kind=build.matched_kind,
             sub_entry=sub_entry, via=build.via, senses=shown,
-            more_senses=max(0, total - len(shown)),
+            more_senses=max(0, total - len(shown)), dot_mismatch=build.dot_mismatch,
         )
 
     def _sense(self, form: sqlite3.Row, roots: dict[str, Optional[sqlite3.Row]], matched: bool) -> BlauSense:

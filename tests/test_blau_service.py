@@ -24,12 +24,16 @@ from shared.blau_service import (
     MAX_SENSES,
     SCHEMA_VERSION,
     BlauService,
+    arabic_candidates,
+    arabic_key,
+    arabic_keys,
     blau_enabled,
+    dot_pattern,
     entry_url,
     get_blau_service,
     reset_blau_service,
 )
-from tests.test_build_blau_sidecar import _form, _ja, _mutate, _seg, dictionary, write_source
+from tests.test_build_blau_sidecar import _form, _ja, _mutate, _root, _seg, dictionary, write_source
 
 ROOT_1, ROOT_2, ROOT_3 = "blau-e-000001", "blau-e-000002", "blau-e-000003"
 
@@ -295,10 +299,112 @@ def test_a_lookup_never_raises(service, monkeypatch):
     assert result.found is False and result.word == "אכ̇ד̇" and result.key == "אכד"
 
 
+# ---------------------------------------------------------------------------
+# Two-word entry names and the dot above (owner, 2026-11-04: דלך reached only
+# دلك "to polish", never ذلك, whose entry is named "ד̇לך ו")
+# ---------------------------------------------------------------------------
+
+ROOT_POLISH, ROOT_THAT = "blau-e-000004", "blau-e-000005"
+
+
+def _with_dalik_and_dhalik():
+    data = dictionary()
+    data["דלך (دلك)"] = _root("דלך (دلك)", ROOT_POLISH, ["דלך"], ["دلك"], stems=[{
+        "id": "blau-st-000005", "stem_head": {"binyan": "I"},
+        "forms": [_form("blau-f-000006", [_seg("'to polish'", "definition_english", font="English-TNR",
+                                                language="English")])]}])
+    data["ד̇לך ו (ذٰلِكَ و)"] = _root("ד̇לך ו (ذٰلِكَ و)", ROOT_THAT, ["ד̇לך ו"], ["ذٰلِكَ و"], stems=[{
+        "id": "blau-st-000006", "stem_head": {},
+        "forms": [_form("blau-f-000007", [_seg("'and that'", "definition_english", font="English-TNR",
+                                                language="English")])]}])
+    return data
+
+
+@pytest.fixture
+def dalik(tmp_path):
+    svc = BlauService(str(_build(tmp_path, _with_dalik_and_dhalik())))
+    assert svc.is_ready(), svc.unavailable_reason
+    yield svc
+    svc.close()
+
+
+def test_dot_pattern_marks_the_dot_however_it_is_written():
+    assert dot_pattern("ד'לך") == dot_pattern("ד׳לך") == dot_pattern("ד̇לך") == "ד*לכ"
+    assert dot_pattern("דלך") == "דלכ"
+    assert dot_pattern("ואלד'לך") == "ואלד*לכ"
+    assert dot_pattern("ד̇לך ו") == "ד*לכ ו"
+    assert dot_pattern("ר'") == "ר", "an abbreviation mark on a letter Judeo-Arabic never dots"
+    assert dot_pattern("צ̇ץ̇") == "צ*צ*"
+
+
+def test_a_word_reaches_an_entry_whose_name_begins_with_it(dalik):
+    result = dalik.lookup("דלך")
+    assert [c.root_id for c in result.cards] == [ROOT_POLISH, ROOT_THAT]
+    assert result.cards[1].matched_key == "ד̇לך ו" and result.cards[1].matched_kind == "root"
+    assert not any(c.dot_mismatch for c in result.cards), "an undotted word marks nothing"
+
+
+def test_a_word_written_with_the_dot_puts_the_dotted_reading_first(dalik):
+    for word in ("ד'לך", "ד׳לך", "ד̇לך", "וד'לך"):
+        result = dalik.lookup(word)
+        assert [c.root_id for c in result.cards][:2] == [ROOT_THAT, ROOT_POLISH], word
+        assert [c.dot_mismatch for c in result.cards][:2] == [False, True], word
+
+
+def test_a_multi_word_variant_is_not_reached_by_its_first_word(tmp_path):
+    data = _with_dalik_and_dhalik()
+    data["בלג (بلغ)"]["stems"][0]["forms"][0]["segments"].append(_ja("דלך מן", "variant_ja"))
+    svc = BlauService(str(_build(tmp_path, data)))
+    assert ROOT_3 not in [c.root_id for c in svc.lookup("דלך").cards]
+
+
+# ---------------------------------------------------------------------------
+# Typed Arabic
+# ---------------------------------------------------------------------------
+
+def test_arabic_keys_undo_the_extraction_s_spacing_and_fold_what_typists_vary():
+    assert arabic_key("أخ ذ") == "اخذ"
+    assert arabic_key("ج أَبايا") == "ابايا", "the plural mark is not part of the word"
+    assert arabic_key("مدرسة") == arabic_key("مدرسه")
+    assert arabic_key("على") == arabic_key("علي")
+    assert arabic_keys("إِجا ص | إِنْجا ص") == ["اجاص", "انجاص"]
+    assert arabic_keys("ـ") == []
+    assert arabic_candidates("والكتاب") == ["والكتاب", "الكتاب", "كتاب"]
+    assert arabic_candidates("ذ") == []
+
+
+def test_a_typed_arabic_word_finds_the_entry_by_its_arabic_spelling(service):
+    result = service.lookup("أخذ")
+    assert result.script == "arabic" and result.key == "اخذ"
+    assert [c.root_id for c in result.cards] == [ROOT_1]
+    assert result.cards[0].matched_key == ""
+
+
+def test_a_typed_arabic_form_marks_that_form(service):
+    [card] = service.lookup("مأخوذ").cards
+    assert card.root_id == ROOT_1 and card.senses[0].form_id == "blau-f-000002" and card.senses[0].matched
+
+
+def test_a_typed_arabic_word_peels_the_conjunction_and_the_article(service):
+    result = service.lookup("والمأخذ")
+    assert result.candidates == ("والماخذ", "الماخذ", "ماخذ")
+    [card] = result.cards
+    assert card.root_id == ROOT_1 and card.sub_entry == "מאכ̇ד̇" and card.candidate == "ماخذ"
+
+
+def test_a_typed_arabic_word_the_dictionary_lacks_says_so(service):
+    result = service.lookup("قاضي")
+    assert result.script == "arabic" and result.found is False and result.candidates == ("قاضي",)
+
+
+def test_hebrew_letters_win_over_arabic_in_one_word(service):
+    assert service.lookup("אכ̇ד̇ أخذ").script == "ja"
+
+
 def test_thread_safe_lookups_agree_across_threads(built):
     svc = BlauService(str(built), thread_safe=True)
     assert svc.is_ready(), svc.unavailable_reason
-    words = ["אכ̇ד̇", "מאכ̇וד̇", "חוה", "בלג"] * 5
+    words = ["אכ̇ד̇", "מאכ̇וד̇", "חוה", "בלג", "أخذ"] * 5
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(svc.lookup, words))
     expected = {w: svc.lookup(w) for w in set(words)}

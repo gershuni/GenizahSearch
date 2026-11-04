@@ -629,7 +629,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         query_input = ui.input(
                             placeholder=tr('Enter Hebrew text to search'),
                             value=saved_query
-                        ).classes('w-full text-lg').props('outlined dense clearable data-ux-enter=search_results').style('direction: rtl;')
+                        ).classes('w-full text-lg').props(
+                            # data-no-loading-bar: the search runs in the page with its own
+                            # progress bar; the site's top bar would run on 15 s (web/main.py).
+                            'outlined dense clearable data-ux-enter=search_results data-no-loading-bar'
+                        ).style('direction: rtl;')
                         query_input.on('keydown.enter', lambda: execute_search())
 
                         # --- Live shortcut detection: switch mode when user types prefix + space ---

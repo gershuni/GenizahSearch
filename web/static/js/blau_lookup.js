@@ -11,7 +11,17 @@
  *   - anywhere else, or on no word: unwraps the mark and dispatches
  *     `blau-close` (the page hides the popover);
  *   - on the panel's own close control (`.blau-close`): unwraps the mark and
- *     leaves the hiding to the page, which owns that button.
+ *     leaves the hiding to the page, which owns that button;
+ *   - on the "type a word" button (`.blau-open`, beside the hint): unwraps the
+ *     mark, places the popover beside the button and dispatches `blau-open`
+ *     (the page draws the panel with an empty box). The page gives that button
+ *     no click handler of its own: a server click and this script's close
+ *     would race;
+ *   - the close is dispatched only when there is something to close (the
+ *     popover shown, or a word marked): with the lookup switched off the pane
+ *     is not marked, and a click on the page asks the server nothing.
+ * The reader's switch (blau_panel.PREF_KEY) is the pane's attribute: the page
+ * adds or removes it, and this script reads it on every click.
  * The word is what sits between two non-word characters in the text node
  * under the pointer: Hebrew letters, combining marks, the apostrophe and
  * geresh family the transcriptions write the Judeo-Arabic letters with.
@@ -25,6 +35,7 @@
   var PANE = '[data-blau-lookup]';
   var HIT = 'blau-word-hit';
   var CLOSE = 'blau-close';   // the panel's own close control (the page hides the popover)
+  var OPEN = 'blau-open';     // the "type a word" button (this script opens the panel)
   // Hebrew letters; the Hebrew combining marks (U+0591-05BD, 05BF, 05C1-05C2,
   // 05C4-05C5, 05C7 -- NOT the punctuation between them: maqaf 05BE, paseq
   // 05C0, sof pasuq 05C3, nun hafukha 05C6, which end a word as they do for
@@ -91,14 +102,24 @@
     var left = Math.round(rect.left + rect.width / 2 - width / 2);
     left = Math.max(MARGIN, Math.min(left, window.innerWidth - width - MARGIN));
     var below = rect.bottom + GAP + HEIGHT <= window.innerHeight || rect.top - GAP - HEIGHT < 0;
-    pop.style.setProperty('--blau-left', left + 'px');
-    pop.style.setProperty('--blau-top', Math.round(rect.bottom + GAP) + 'px');
-    pop.style.setProperty('--blau-bottom', Math.round(window.innerHeight - rect.top + GAP) + 'px');
+    // On <html>, NOT on the popover: the page shows the popover by setting its
+    // style ('display: flex'), and that re-render replaces the popover's whole
+    // inline style -- the position written there was wiped before the panel
+    // appeared, and it always opened at the fallback corner. Custom properties
+    // inherit, so the stylesheet's var(--blau-left) reads these.
+    var root = document.documentElement.style;
+    root.setProperty('--blau-left', left + 'px');
+    root.setProperty('--blau-top', Math.round(rect.bottom + GAP) + 'px');
+    root.setProperty('--blau-bottom', Math.round(window.innerHeight - rect.top + GAP) + 'px');
     pop.setAttribute('data-blau-place', below ? 'below' : 'above');
   }
 
   function dispatch(pop, name, detail) {
     pop.dispatchEvent(new CustomEvent(name, { detail: JSON.stringify(detail || {}), bubbles: false }));
+  }
+
+  function shown(pop) {
+    return pop.style.display !== 'none';
   }
 
   document.addEventListener('click', function (event) {
@@ -110,7 +131,17 @@
       return;
     }
     var target = event.target && event.target.nodeType === 1 ? event.target : event.target && event.target.parentElement;
+    var opener = target ? target.closest('.' + OPEN) : null;
+    if (opener) {
+      clearHit();
+      place(pop, opener.getBoundingClientRect());
+      dispatch(pop, 'blau-open');
+      return;
+    }
     var pane = target ? target.closest(PANE) : null;
+    // Something to close: the popover is up, or a word is marked (its lookup
+    // may still be running; the close makes it stale).
+    var open = shown(pop) || document.querySelector('.' + HIT) !== null;
     // Unwrap the previous mark BEFORE reading the caret: unwrapping merges the
     // text nodes it had split, and a caret taken first would point into a node
     // that no longer exists (a second click on the same line found no word).
@@ -118,7 +149,7 @@
     var caret = pane ? caretAt(event.clientX, event.clientY) : null;
     var word = caret && pane && pane.contains(caret.node) ? wordAt(caret.node, caret.offset) : null;
     if (!word) {
-      dispatch(pop, 'blau-close');
+      if (open) dispatch(pop, 'blau-close');
       return;
     }
     var rect = markWord(caret.node, word) ||

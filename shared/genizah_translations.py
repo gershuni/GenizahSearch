@@ -6445,7 +6445,6 @@ TRANSLATIONS.update({
     "more senses on the site": "משמעויות נוספות באתר",
     "more entries": "ערכים נוספים",
     "Also in the examples under": "מופיע גם בדוגמאות שבערכים",
-    "Nothing in the dictionary for this word.": "המילה לא נמצאה במילון.",
     "Looked for": "חיפשנו",
     "matched": "התאמה",
     "via": "דרך",
@@ -6455,4 +6454,26 @@ TRANSLATIONS.update({
     "reconstructed": "משוחזר",
     "erroneous": "שגוי",
     "p.": "עמ׳",
+})
+
+# The reader's switch and the box (owner, 2026-11-04: the page does not guess
+# the text's language; the reader turns the lookup on and can type a word).
+TRANSLATIONS.update({
+    "Turn on Blau's dictionary (Judeo-Arabic)": "הפעלת מילון בלאו (ערבית־יהודית)",
+    "Turn off Blau's dictionary": "כיבוי מילון בלאו",
+    "Type a word to look up": "הקלדת מילה לחיפוש במילון",
+    "A word in Hebrew or Arabic letters (ד' for ד̇)": "מילה באותיות עבריות או ערביות (ד' במקום ד̇)",
+    "spelled without the dot": "נכתב בלי הנקודה",
+    "Look up": "חיפוש",
+    "Type a Judeo-Arabic word in Hebrew letters, or an Arabic word.":
+        "אפשר להקליד מילה ערבית־יהודית באותיות עבריות, או מילה ערבית.",
+    # The disclaimer on every panel: the Hebrew is the owner's own wording (2026-11-04).
+    "Blau's dictionary records only meanings particular to Judeo-Arabic. "
+    "To look up verbs and inflected forms, type the root or the base form.":
+        "מילון בלאו מתעד רק הוראות ייחודיות בערבית-יהודית. "
+        "כדי לחפש פעלים ונטיות יש להקליד את השורש או את צורת הבסיס.",
+    "Nothing in the dictionary for this word.": "המילה לא נמצאה במילון.",
+    # The digital edition's credit under the print credit (owner, 2026-11-04, at Ephraim Meiri's request).
+    "Digital edition: the MiDRASH project, funded by the European Union (ERC, MiDRASH, 101071829).":
+        "המהדורה הדיגיטלית: פרויקט MiDRASH, במימון האיחוד האירופי (ERC, MiDRASH, 101071829).",
 })

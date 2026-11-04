@@ -1655,9 +1655,14 @@ def create_layout():
         }
     });
 
-    // 2. Trigger on Enter key in text inputs (search/shelfmark navigation)
+    // 2. Trigger on Enter key in text inputs (search/shelfmark navigation) -- except in
+    //    a box inside [data-no-loading-bar]: its Enter does its work in the page (the
+    //    /search query, with its own progress bar; the Blau dictionary box), no page
+    //    loads, and the bar ran on for the 15-second fallback after every query
+    //    (owner, 2026-11-04).
     document.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
+            if (e.target.closest && e.target.closest('[data-no-loading-bar]')) return;
             var skipTypes = ['submit', 'button', 'checkbox', 'radio', 'file'];
             if (skipTypes.indexOf(e.target.type) === -1) {
                 showLoadingBar();
