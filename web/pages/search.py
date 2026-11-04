@@ -40,7 +40,7 @@ from web.pages.search_state import (
     discard_search_run, post_criteria_matches, result_sys_id, PostMatchRefill,
 )
 from web import search_runs
-from web.search_box_input import TEXT_MODES, search_box_input_kind, split_placeholder
+from shared.search_box_input import TEXT_MODES, search_box_input_kind, split_placeholder
 from web.home_query import home_query_target
 from shared.keyboard_layout import layout_suggestion
 from web.pages.search_results import (
@@ -2357,7 +2357,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             # One line under the count for what the page did with the input: a
             # shelfmark run in Shelfmark mode, or the Hebrew a Latin-script query
-            # spells on the Hebrew keyboard layout (web/search_box_input.py,
+            # spells on the Hebrew keyboard layout (shared/search_box_input.py,
             # shared/keyboard_layout.py). Filled after a search, cleared at the
             # start of the next one.
             input_notice_row = ui.row().classes('w-full px-6 py-1 items-center gap-2 text-sm').style(
@@ -5199,7 +5199,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         is_responsa = (mode_select.value == 'responsa')
         mode_override, parsed_query = state.searcher.parse_query_syntax(query, responsa_mode=is_responsa)
 
-        # Typed into the box in a text mode (web/search_box_input.py): a system
+        # Typed into the box in a text mode (shared/search_box_input.py): a system
         # number opens that manuscript in Browse, as the homepage box does (the
         # Shelfmark lookup compares shelfmarks, never ids: Codex on #469); a
         # shelfmark runs in Shelfmark mode as the `#` prefix would, and the line

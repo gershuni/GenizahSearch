@@ -75,6 +75,7 @@ from desktop.widgets.side_nav import (
 from desktop.go_to_dialog import GoToDialog
 from desktop.shortcuts_dialog import ShortcutsDialog, arrow_keys, key_label
 from shared.quick_open import quick_open_target
+from shared.keyboard_layout import layout_suggestion
 from desktop.widgets.line_number_text_edit import (
     apply_line_numbered_text,
     is_line_numbers_enabled,
@@ -768,6 +769,29 @@ class _CatalogFacetWorker(QThread):
             self.done.emit(result)
         except Exception:
             self.done.emit({})  # Facet query failed; emit empty dict so dialog opens name-only
+
+
+class _LayoutSuggestionWorker(QThread):
+    """Whether the corpus holds the Hebrew a wrong-layout query spells
+    (``SearchEngine.words_occur``: one count query, 75-145 ms on the real index),
+    off the UI thread. Emits ``checked(run_id, hebrew, found)``; ``run_id`` is the
+    search's, so an answer for an older search is recognised and dropped."""
+
+    checked = pyqtSignal(int, str, bool)
+
+    def __init__(self, occurs, hebrew, run_id, parent=None):
+        super().__init__(parent)
+        self._occurs = occurs
+        self._hebrew = hebrew
+        self._run_id = run_id
+
+    def run(self):
+        try:
+            found = bool(self._occurs(self._hebrew))
+        except Exception:
+            logger.debug("_LayoutSuggestionWorker: words_occur(%r) failed", self._hebrew, exc_info=True)
+            found = False
+        self.checked.emit(self._run_id, self._hebrew, found)
 
 
 class _PostCriteriaWorker(QThread):
@@ -1980,6 +2004,16 @@ class GenizahGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to start initialization:\n{}").format(e))
 
+    @staticmethod
+    def _prewarm_shelfmark_search(meta_mgr):
+        """Background thread: ``MetadataManager.prewarm_shelfmark_search`` (waits for
+        libraries.csv). A failure only leaves the index to be built on first use."""
+        try:
+            if meta_mgr is not None and hasattr(meta_mgr, 'prewarm_shelfmark_search'):
+                meta_mgr.prewarm_shelfmark_search()
+        except Exception:
+            logger.debug("Shelfmark search prewarm failed", exc_info=True)
+
     def on_startup_finished(self, meta_mgr, var_mgr, searcher, indexer):
         try:
             self.meta_mgr = meta_mgr
@@ -2093,6 +2127,12 @@ class GenizahGUI(QMainWindow):
                     self._vs_cache = DesktopVSCache()
                 self._vs_cache.check_and_update_version(self._VS_SERVER_URL)
             threading.Thread(target=_check_vs_cache_version, daemon=True).start()
+
+            # The Shelfmark search index, built once libraries.csv is read: the Go to
+            # box asks it whether Latin text is a catalogue shelfmark (``Mingana 9``),
+            # and Browse's shelfmark lookup would otherwise build it on first use.
+            threading.Thread(target=self._prewarm_shelfmark_search, args=(meta_mgr,),
+                             daemon=True, name="prewarm-shelfmark-search").start()
 
             # Show What's New bar until its content has been dismissed
             cfg = load_app_config()
@@ -6734,6 +6774,8 @@ class GenizahGUI(QMainWindow):
         table_layout.addWidget(self.local_scope_strip)
 
         table_layout.addLayout(self._install_load_more_button())
+        self.layout_suggestion_label = self._install_layout_suggestion(self.results_table)
+        self._layout_suggestion = None    # the Hebrew it offers, while shown
 
         self.results_stack = QStackedLayout()
         self.results_stack.addWidget(self.results_placeholder)
@@ -16723,11 +16765,36 @@ class GenizahGUI(QMainWindow):
         self._browse_open_list_entry(entry)
         return True
 
+    def _catalogue_has_shelfmark(self, query):
+        """The Go to box's catalogue check (``MetadataManager.has_shelfmark``): False
+        until the catalogue and its Shelfmark search index are ready (built in the
+        background at start, ``_prewarm_shelfmark_search``), or if the lookup fails."""
+        meta = getattr(self, 'meta_mgr', None)
+        if meta is None or not hasattr(meta, 'has_shelfmark'):
+            return False
+        try:
+            return bool(meta.has_shelfmark(query))
+        except Exception:
+            logger.debug("Go to: catalogue shelfmark check failed for %r", query, exc_info=True)
+            return False
+
+    # The Search tab's modes that search the words of the text (mode_combo order:
+    # Exact, Variants, Responsa, Fuzzy). Go to keeps one of these; from Regex,
+    # Title, Shelfmark or PGP Tags it searches in Exact -- PGP Tags would run the
+    # tag box and drop the words (Codex on #479).
+    _GO_TO_WORD_MODES = (0, 1, 2, 3)
+
+    def _go_to_word_mode(self):
+        combo = getattr(self, 'mode_combo', None)
+        if combo is not None and combo.currentIndex() not in self._GO_TO_WORD_MODES:
+            combo.setCurrentIndex(0)
+
     def go_to(self, text):
         """Open a system number, FL number or shelfmark in Browse, or search
-        Hebrew or Arabic words (shared/quick_open.py decides which). Returns the
+        anything else -- words in any script, Hebrew typed on the English layout
+        (shared/quick_open.py decides which, with the website's rule). Returns the
         kind acted on, or None for blank text."""
-        target = quick_open_target(text)
+        target = quick_open_target(text, self._catalogue_has_shelfmark)
         if target is None:
             return None
         kind, value = target
@@ -16735,6 +16802,7 @@ class GenizahGUI(QMainWindow):
             self.query_input.setText(value)
             self._set_active_tab(self.search_tab)
             if not self.is_searching:
+                self._go_to_word_mode()
                 self.toggle_search()
             return kind
         # Only the one field: browse_load also reads the other two, and a
@@ -23374,6 +23442,14 @@ class GenizahGUI(QMainWindow):
         _run_id = self._run_seq
         self._pause_search.reset_for_run(_run_id, time.monotonic())
 
+        # The run a "Did you mean" may follow: a text search (Exact, Variants,
+        # Fuzzy) over the Genizah index, the only one words_occur reads.
+        self._hide_layout_suggestion()
+        self._layout_offer = None
+        if (not _is_lab and mode_idx != self.MODE_RESPONSA
+                and mode in ('literal', 'variants', 'fuzzy') and _corpus != 'local'):
+            self._layout_offer = (_run_id, query)
+
         self.is_searching = True; self.btn_search.setText(tr("Stop")); self.btn_search.setStyleSheet("background-color: #c0392b; color: white;")
         # The last run's "Search completed in ..." stays until cleared (timeout 0): it
         # described results this run has just replaced (owner, 2026-10-04).
@@ -23937,6 +24013,9 @@ class GenizahGUI(QMainWindow):
         # 13. Update status bar
         self.status_label.setText(tr("Ready."))
         self.status_label.setStyleSheet("")
+        self._layout_offer = None
+        self._layout_cleared_run = getattr(self, '_run_seq', 0)   # a check still running shows nothing
+        GenizahGUI._hide_layout_suggestion(self)
         self._update_load_more_button()
 
         # 14. Save the cleared state now, not debounced: a crash right after
@@ -24327,6 +24406,90 @@ class GenizahGUI(QMainWindow):
         except Exception:
             pass  # Silently fail -- notification is non-critical
 
+    def _install_layout_suggestion(self, table):
+        """The "Did you mean <Hebrew>?" line, after a text search that found
+        nothing, for a query typed with the keyboard on the English layout (as
+        the website's /search does; shared/keyboard_layout.py). Inside the
+        results box, where the rows would be (owner, 2026-11-04): a label in a
+        layout of the table's viewport, at its top and centred, shown only while
+        the table has no rows. The Hebrew is a link that runs it."""
+        label = QLabel()
+        label.setTextFormat(Qt.TextFormat.RichText)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse
+                                      | Qt.TextInteractionFlag.LinksAccessibleByKeyboard)
+        label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        label.setWordWrap(True)
+        label.setStyleSheet("QLabel { font-size: 16px; padding: 24px 12px; background: transparent; }")
+        label.setVisible(False)
+        label.linkActivated.connect(self._take_layout_suggestion)
+        overlay = QVBoxLayout(table.viewport())
+        overlay.setContentsMargins(0, 0, 0, 0)
+        overlay.addWidget(label, 0, Qt.AlignmentFlag.AlignTop)
+        overlay.addStretch(1)
+        return label
+
+    def _offer_layout_suggestion(self):
+        """Under a text search that found nothing: the Hebrew a Latin-script query
+        spells on the Hebrew keyboard layout (shared/keyboard_layout.py), offered
+        when the corpus holds those words -- asked off the UI thread
+        (_LayoutSuggestionWorker). As the website's /search does (PR #469)."""
+        offer = getattr(self, '_layout_offer', None)
+        self._layout_offer = None
+        if not offer:
+            return
+        run_id, query = offer
+        hebrew = layout_suggestion(query)
+        occurs = getattr(self.searcher, 'words_occur', None) if self.searcher else None
+        if not hebrew or occurs is None:
+            return
+        worker = _LayoutSuggestionWorker(occurs, hebrew, run_id, self)
+        worker.checked.connect(self._on_layout_suggestion_checked)
+        # An index reader while it runs: the beside-the-live-index install waits
+        # for every one still running (_index_readers_busy; Codex on #479). Dropped
+        # when it ends, so that check never meets a deleted thread. (Exit settles
+        # any still running: desktop/qthread_exit.py finds them all.)
+        if not hasattr(self, '_layout_suggestion_workers'):
+            self._layout_suggestion_workers = set()
+        self._layout_suggestion_workers.add(worker)
+        worker.finished.connect(lambda w=worker: self._layout_suggestion_worker_done(w))
+        worker.start()
+
+    def _layout_suggestion_worker_done(self, worker):
+        getattr(self, '_layout_suggestion_workers', set()).discard(worker)
+        worker.deleteLater()
+
+    def _on_layout_suggestion_checked(self, run_id, hebrew, found):
+        """Show the line if the corpus has the words and no other search has
+        started since (a newer run, or one running now)."""
+        if (not found or run_id != self._run_seq or self.is_searching
+                or run_id <= getattr(self, '_layout_cleared_run', 0)):
+            return
+        self._show_layout_suggestion(hebrew)
+
+    def _show_layout_suggestion(self, hebrew):
+        import html as _html
+        link = f'<a href="layout">{_html.escape(hebrew)}</a>'
+        # One run of text: in Hebrew the preposition is glued to the word.
+        self.layout_suggestion_label.setText(_html.escape(tr("Did you mean {query}?")).replace('{query}', link))
+        self._layout_suggestion = hebrew
+        self.layout_suggestion_label.setVisible(True)
+
+    def _hide_layout_suggestion(self):
+        label = getattr(self, 'layout_suggestion_label', None)
+        if label is not None:
+            label.setVisible(False)
+            label.clear()
+        self._layout_suggestion = None
+
+    def _take_layout_suggestion(self, _href=None):
+        """The Hebrew, clicked: run it in the same mode, as if typed."""
+        hebrew = self._layout_suggestion
+        if not hebrew or self.is_searching:
+            return
+        self._hide_layout_suggestion()
+        self.query_input.setText(hebrew)
+        self.toggle_search()
+
     def on_search_finished(self, results):
         # Post-search timing (search-speed handoff): where the time goes between
         # execute_search returning and the table showing results.
@@ -24399,6 +24562,8 @@ class GenizahGUI(QMainWindow):
             # 'completed' + result_count=0 → bucket='0' (WARNING-4 / D-07 zero-result rate).
             # _app_shutting_down guard is first-line inside _emit_search_telemetry (REVIEWS HIGH-2).
             self._emit_search_telemetry('cancelled' if was_cancelled else 'completed', 0)
+            if not was_cancelled and getattr(self, '_layout_offer', None):
+                self._offer_layout_suggestion()
             return
 
         self.last_results = results
@@ -25985,6 +26150,7 @@ class GenizahGUI(QMainWindow):
 
     def _execute_tag_search(self):
         """Execute a search by PGP tag from the dropdown."""
+        self._hide_layout_suggestion()
         tag = self.tag_search_combo.currentData()
         if not tag:
             # Fallback: user may have typed text directly
@@ -34485,6 +34651,10 @@ class GenizahGUI(QMainWindow):
             th = getattr(self, attr, None)
             if th is not None and th.isRunning() and name not in busy:
                 busy.append(name)
+        # The "Did you mean" checks (words_occur), every one still running: a newer
+        # zero-result search can start one before an older one ends (Codex on #479).
+        if any(th.isRunning() for th in list(getattr(self, '_layout_suggestion_workers', ()))):
+            busy.append('layout suggestion')
         wb = getattr(self, '_join_workbench', None)
         if wb is not None:
             for name, attr in (('join candidates', '_search_thread'), ('join cross-side', '_cross_worker')):

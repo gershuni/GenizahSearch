@@ -1499,6 +1499,9 @@ TRANSLATIONS = {
     # sys_id (routing in web/home_query.py), so the placeholder names all three
     # inputs -- in few enough words to fit the box on a 360px phone (measured).
     "Text, shelfmark or system ID": "טקסט, מספר מדף או מספר מערכת",
+    # The header's go-to box (web/main.py::render_header_center), on every page.
+    # Hebrew: the owner's words; English approved by the owner (both 2026-11-04).
+    "Search text or go to a shelfmark...": "חפשו טקסט או עברו למספר מדף...",
     "Search mode": "מצב חיפוש",
     "results found": "תוצאות נמצאו",
     "Advanced options": "אפשרויות מתקדמות",
@@ -1532,7 +1535,7 @@ TRANSLATIONS = {
     "Search only in...": "חפש רק ב...",
     # /search box input (2026-11-03): a shelfmark typed into the box runs in Shelfmark
     # mode and says so; a Latin query that spells Hebrew on the Hebrew keyboard layout
-    # is offered under "0 Results" (web/search_box_input.py, shared/keyboard_layout.py).
+    # is offered under "0 Results" (shared/search_box_input.py, shared/keyboard_layout.py).
     "Searched as a shelfmark.": "החיפוש נערך כמספר מדף.",
     "Search as text instead": "חפשו כטקסט במקום זאת",
     "Did you mean {query}?": "האם התכוונתם ל{query}?",

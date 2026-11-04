@@ -14,7 +14,7 @@
    click runs it on this page, and both the showing and the taking are
    counted (PostHog ``search_suggestion``, kind=layout).
 
-The engine is a stub (web/search_box_input.py and shared/keyboard_layout.py
+The engine is a stub (shared/search_box_input.py and shared/keyboard_layout.py
 are pure and tested on their own); what is pinned here is the page's wiring:
 which mode reaches the engine for which input, and what the page then shows.
 The NiceGUI User harness is the one tests/render_smoke/test_search_url_open_dispatch.py
@@ -208,3 +208,21 @@ def test_a_query_typed_on_the_english_layout_is_offered_as_the_hebrew_it_spells(
     assert seen['asked_missing'] == ['גבול', 'כוכבי שמי'], seen
     assert seen['link_missing'] == [], 'words the corpus lacks are not suggested'
     assert len(seen['captured_end']) == 2, 'nothing is counted for a suggestion that was not shown'
+
+
+def test_the_header_box_is_on_the_search_page_too():
+    """Owner, 2026-11-04: the header's go-to box stays on /search, beside the
+    page's own box, so a reader can jump to a manuscript from there."""
+    seen = {}
+
+    async def go():
+        async with _app(_Engine()) as user:
+            await _get_page(user, '/search')
+            await _connect(user)
+            seen['boxes'] = [e for e in _elements(user, ui.input) if 'header-search' in e._markers]
+            seen['page_box'] = [e for e in _elements(user, ui.input)
+                                if e.props.get('placeholder') == 'Enter Hebrew text to search']
+
+    _run(go)
+    assert len(seen['boxes']) == 1, seen
+    assert len(seen['page_box']) == 1, seen

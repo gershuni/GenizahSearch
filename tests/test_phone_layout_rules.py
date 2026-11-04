@@ -387,3 +387,20 @@ def test_joins_lab_keeps_the_anchor_in_a_strip_once_the_pane_scrolls_off():
         assert decl in strip, decl
     assert '.joins-lab-anchor-strip.is-visible.under-hidden-header { top: 0; }' in rules
     assert '.joins-lab-anchor-strip-thumb {' in rules
+
+
+def test_the_header_search_box_folds_behind_a_button_below_1024px():
+    """The header's go-to box (2026-11-04): a field from 1024px, a search button
+    below that opens the field across the bar, and on a phone the header groups
+    stay on one line beside the button (measured at 360 and 375px)."""
+    main = _read('web/main.py')
+    for cls in ("classes('items-center header-search')", "classes('items-center header-search-field')",
+                "classes('header-search-toggle')", "classes('header-search-close')"):
+        assert cls in main, cls
+    css = _read('web/static/common.css')
+    narrow = _phone_rules(css, 1023)
+    assert '.header-search-field { display: none !important; }' in narrow
+    assert '.header-search.is-open .header-search-field {' in narrow
+    assert re.search(r'@media \(min-width: 1024px\) \{\s*\.header-search-toggle \{ display: none !important; \}', css)
+    phone = _phone_rules(css)
+    assert '.app-header > .nicegui-row { flex-wrap: nowrap !important; gap: 4px !important; }' in phone

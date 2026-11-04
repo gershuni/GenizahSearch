@@ -11,6 +11,8 @@ miss can be corrected there. Harness: the homepage User context of
 """
 from __future__ import annotations
 
+import asyncio
+import time
 from unittest.mock import patch
 
 from nicegui import events, ui
@@ -34,6 +36,18 @@ def _press_enter(user, element) -> None:
             events.handle_event(listener.handler, ea)
 
 
+async def _navigated(nav_mock, timeout: float = 5.0) -> list:
+    """The navigate.to calls once the box's handler is done.
+
+    The handler is async since 2026-11-04 (the catalogue lookup runs off the
+    loop), so it navigates after the key press returns."""
+    deadline = time.perf_counter() + timeout
+    while not nav_mock.called and time.perf_counter() < deadline:
+        await asyncio.sleep(0.02)
+    await asyncio.sleep(0.05)
+    return [c.args for c in nav_mock.call_args_list]
+
+
 def test_enter_in_the_hero_box_goes_where_the_input_belongs():
     cases = [
         ('שבת', '/search?q=%D7%A9%D7%91%D7%AA'),
@@ -49,12 +63,14 @@ def test_enter_in_the_hero_box_goes_where_the_input_belongs():
             box.value = typed
             with patch('nicegui.ui.navigate.to') as nav_mock:
                 _press_enter(user, box)
-            assert [c.args for c in nav_mock.call_args_list] == [(expected,)], typed
+                calls = await _navigated(nav_mock)
+            assert calls == [(expected,)], typed
 
         # A blank box navigates nowhere.
         box.value = '   '
         with patch('nicegui.ui.navigate.to') as nav_mock:
             _press_enter(user, box)
+            await asyncio.sleep(0.3)
         assert not nav_mock.called
 
     _run_home_smoke(driver, lang='en')

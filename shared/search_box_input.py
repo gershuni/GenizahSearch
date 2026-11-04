@@ -35,11 +35,11 @@ is ``tests/render_smoke/test_search_box_input_render_smoke.py``.
 from __future__ import annotations
 
 import re
-from typing import Optional, Tuple
+import unicodedata
+from typing import Callable, Optional, Tuple
 
 from shared.browse_map_utils import _strip_library_prefix
 from shared.catalog_shelfmark import looks_like_catalogue_form
-from shared.quick_open import has_hebrew_or_arabic_letter
 from shared.sys_id_patterns import CORPUS_SYS_ID_RE
 
 # The page modes in which what was typed is words to find in the text: the only
@@ -69,12 +69,31 @@ SHELFMARK_WORDS = COLLECTION_PREFIXES | frozenset({
 
 # Letters, digits and the marks shelfmarks are written with (``T-S NS 307.61b``,
 # ``Halper 331``, ``Moss. IV,12.2``, ``MS Heb c 57``, ``ENA 2156.1``).
-_SHELFMARK_CHARS_RE = re.compile(r"^[A-Za-z0-9 .,:;'()\[\]/\-]+$")
+# ``=`` and ``_`` too: catalogue shelfmarks carry them (``Ms. Heb. 1149.5=24``,
+# ``LON BL Or. 10126_2 f. 5-6``; 1,058 libraries.csv strings, Codex on #476).
+# ``*`` and ``?`` (257 strings) stay out: in a search box they are a wildcard
+# and a question.
+_SHELFMARK_CHARS_RE = re.compile(r"^[A-Za-z0-9 .,:;'()\[\]/\-=_]+$")
 _FIRST_TOKEN_RE = re.compile(r'^[A-Za-z][A-Za-z.\-]*')
 _LETTER_RUN_RE = re.compile(r'[A-Za-z]+')
-_ROMAN_RE = re.compile(r'^[ivxlcdm]+$')
+# A Roman numeral, or one with a letter after it: Mosseri volumes are ``IIIa``,
+# ``IVb`` (``Moss. IIIa,20``, 22 libraries.csv shelfmarks; Codex on #476).
+_ROMAN_RE = re.compile(r'^[ivxlcdm]+[a-z]?$')
 _DOTTED_NUMBER_RE = re.compile(r'[0-9A-Za-z]\.\d')
 _LETTER_DIGIT_RE = re.compile(r'[A-Za-z]\d|\d[A-Za-z]')
+
+
+def has_hebrew_or_arabic_letter(text: str) -> bool:
+    """True when ``text`` holds at least one Hebrew or Arabic LETTER.
+
+    Letters only: niqqud, cantillation and Arabic-Indic digits do not count,
+    so a string of them alone is not routed to full-text search. (Here since
+    2026-11-04, from shared/quick_open.py, which re-exports it.)
+    """
+    for ch in text:
+        if ch.isalpha() and unicodedata.name(ch, '').startswith(('HEBREW ', 'ARABIC ')):
+            return True
+    return False
 
 
 def _words_are_shelfmark_words(text: str) -> bool:
@@ -87,13 +106,25 @@ def _words_are_shelfmark_words(text: str) -> bool:
     return True
 
 
+def _without_accents(text: str) -> str:
+    """``text`` with the accents off its Latin letters (``Israélite`` -> ``Israelite``).
+
+    NFD, not NFKD: a full-width digit stays non-ASCII, so it never reads as a number."""
+    return ''.join(ch for ch in unicodedata.normalize('NFD', text) if not unicodedata.combining(ch))
+
+
 def search_box_input_kind(query: Optional[str]) -> str:
     """``'sys_id'``, ``'shelfmark'`` or ``'text'`` for what the search box holds."""
     text = (query or '').strip()
-    if not text or has_hebrew_or_arabic_letter(text) or not text.isascii():
+    if not text or has_hebrew_or_arabic_letter(text):
         return 'text'
-    if CORPUS_SYS_ID_RE.fullmatch(text):
+    if text.isascii() and CORPUS_SYS_ID_RE.fullmatch(text):
         return 'sys_id'
+    # The NLI catalogue form names "the Alliance Israélite Universelle"
+    # (3,321 libraries.csv strings); the rules below read ASCII.
+    text = _without_accents(text)
+    if not text.isascii():
+        return 'text'
     if not _SHELFMARK_CHARS_RE.match(text) or not any(ch.isdigit() for ch in text):
         return 'text'
     if looks_like_catalogue_form(text):
@@ -113,6 +144,27 @@ def search_box_input_kind(query: Optional[str]) -> str:
 def typed_as_shelfmark(query: Optional[str]) -> bool:
     """True when the search box holds a shelfmark (not a system number, not words)."""
     return search_box_input_kind(query) == 'shelfmark'
+
+
+def go_to_kind(query: Optional[str], has_shelfmark: Optional[Callable[[str], bool]] = None) -> Optional[str]:
+    """Where a go-to box sends ``query``: ``'sys_id'``, ``'shelfmark'`` or ``'text'``
+    (None when blank). One rule for the website's homepage and header boxes
+    (``web/home_query.py``) and the desktop's Go to box (``shared/quick_open.py``).
+
+    ``search_box_input_kind`` decides, except that text with a digit and no Hebrew
+    or Arabic letter is first looked up in the catalogue when ``has_shelfmark`` is
+    given (``MetadataManager.has_shelfmark``): no set of rules knows every catalogue
+    form (``Mingana 9``; Codex on #476). Words alone are never looked up."""
+    text = (query or '').strip()
+    if not text:
+        return None
+    kind = search_box_input_kind(text)
+    if kind != 'text':
+        return kind
+    if (has_shelfmark is not None and any(ch.isdigit() for ch in text)
+            and not has_hebrew_or_arabic_letter(text) and has_shelfmark(text)):
+        return 'shelfmark'
+    return 'text'
 
 
 def split_placeholder(template: str, placeholder: str = '{query}') -> Tuple[str, str]:
