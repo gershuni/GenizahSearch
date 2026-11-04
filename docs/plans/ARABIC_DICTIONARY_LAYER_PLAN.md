@@ -264,6 +264,50 @@ words in the same order, the same roots shown), but 164 of the 200 rows now show
 Each row now also names its page (`page`, the transcription header), and the owner's grading
 must use a file written by rev. 4 or later.
 
+**Graded by two AI judges (2026-11-04; the owner's choice for D9, in place of grading by hand).**
+
+*Setup*
+- The rev. 4 sample (seed 20261104) was rebuilt from the served lookup (`shared/arabic_service.py` on
+  the built sidecar). Its roots match the measuring script's on all 200 rows.
+- Each row has about 20 words of context on each side, from the same page of the automatic text.
+  This holds for 188 rows; the other 12 kept the 9-word window.
+- Counts were withheld from the judges.
+- The two judges were Fable 5.1 and Codex `gpt-6-astra`. Both had the same brief. Each first wrote
+  its own Arabic reading, then graded the language, the first reading and the root.
+- They judged separately: neither read the other's files. Scripts: the session scratchpad
+  `judge/`.
+
+*Results, where the judges agree*
+
+| | Fable 5.1 | Codex Astra | where both agree |
+|---|---|---|---|
+| Arabic words | 127 | 124 | 124 (2 with nothing shown) |
+| first reading right | 119/125, 95.2% | 116/122, 95.1% | 116/122, 95.1% |
+| root right (of those with a card) | 90/120, 75.0% | 88/117, 75.2% | 87/116, 75.0% |
+| not Arabic, given a card | 44 of 73 | 47 of 76 | 44 of 73 (D11: not a gate) |
+
+*How far the judges agree*
+- Language: 97.5% (κ 0.955).
+- The first reading: 100% (κ 1.0).
+- The root: 99.1% (κ 0.977).
+- They split on 6 rows, most of them on whether the word is Arabic at all.
+
+**What is wrong.**
+- **The reading.** 6 of 122 readings are wrong, each a dot or a final vowel letter: ويضلك for
+  ويصلك, عني for عنا, غالية for جالية, حفصها for حفظها, مسخوا for مسكوا, ثبيتة for تبيته.
+- **The root.** Of the 29 roots wrong:
+  - 4 follow from a wrong reading.
+  - 5 are مولاي filed under مول, not ولي.
+  - About 20 are weak, hollow or doubled roots and frequent particles:
+    - أدام under ادم, not دوم;
+    - قلت and كنت taken as roots;
+    - يبيع and أباع under بوع, not بيع;
+    - معاش, يبقى and اشتريت under the wrong و/ي heading;
+    - سيدي, نحن, بن, ستين and الاثنين.
+  - These are §4's weak step, and they are systematic: a closed-class entry for the frequent forms
+    and a choice among و/ي headings by the matched entries would address most of them (not done).
+- **Pass or fail.** D9 sets no number for this grading; the owner decides on these figures.
+
 ---
 
 ## 6. The gate
@@ -527,8 +571,11 @@ sight, and the panel's title and hint named Blau alone. So:
 - whether the two source lines are wanted, or the Perseus line alone (D3 asks only that one);
 - the server copy of `arabic_data/arabic.db` (74 MB) and the release.
 
-The gate before deploy is unchanged (D9): your grading of the 200-word sample, written by rev. 4
-or later; a check on documents the method was not shaped on; and the sidecar's own gate.
+The gate before deploy (D9):
+- the 200-word sample, graded by two AI judges at the owner's request (§5.4): the first reading is
+  right on 95.1% of the Arabic words, the root on 75.0%. The owner decides on these figures.
+- still owed: a check on documents the method was not shaped on;
+- the sidecar's own gate.
 
 ---
 
