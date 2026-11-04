@@ -1593,11 +1593,7 @@ def _resolve_ui_language() -> str:
 # Layout Components
 # ============================================================================
 
-# The header's go-to box (render_header_center) is left out where the page has
-# its own: the homepage hero box and the /search box.
-_HEADER_SEARCH_HIDDEN_ON = frozenset({'/', '/search'})
-
-# Below 1024px the box is closed behind a search button. Opening and closing
+# The header's go-to box (render_header_center). Below 1024px the box is closed behind a search button. Opening and closing
 # only toggle a class on the header row (common.css draws the field across the
 # header while it is set) and move the focus, so they run in the browser.
 _HEADER_SEARCH_OPEN_JS = (
@@ -1610,17 +1606,6 @@ _HEADER_SEARCH_CLOSE_JS = (
     " s.classList.remove('is-open'); const b = s.querySelector('.header-search-toggle');"
     " if (b && b.offsetParent) b.focus(); }"
 )
-
-
-def _request_path(fallback: str) -> str:
-    """The path of the page being built, or ``fallback`` when there is no request.
-
-    Read from the request rather than ``current_page``: not every page sets
-    that, and a stale value from the previous page would hide the box."""
-    try:
-        return ui.context.client.request.url.path or fallback
-    except Exception:                                        # noqa: BLE001
-        return fallback
 
 
 def create_layout():
@@ -1829,7 +1814,6 @@ def create_layout():
                              '/catalog-browse'))
 
     _show_whats_new = bool(_new_surfaces) and current_page not in _WHATS_NEW_SUPPRESSED_ON
-    _show_header_search = _request_path(current_page) not in _HEADER_SEARCH_HIDDEN_ON
     # Each listing launch lights the unread dot again (whats_new_suffix).
     _whats_new_key = WHATS_NEW_VERSION + ai_whats_new_suffix()
     _whats_new_unseen = safe_user_get('whats_new_dismissed') != _whats_new_key
@@ -1857,15 +1841,13 @@ def create_layout():
         The homepage box's routing (``web/home_query.py::home_query_target``):
         a sys_id or a shelfmark opens Browse, anything else is searched. It
         replaces the old "Quick search..." box, which ran every input as text
-        and was hidden below 768px. Not on ``/`` (the hero box) or ``/search``
-        (its own box). From 1024px the field sits in the header; below, a
+        and was hidden below 768px. On every page, ``/`` and ``/search`` too
+        (owner, 2026-11-04: it is how a reader jumps to any manuscript from
+        anywhere). From 1024px the field sits in the header; below, a
         search button opens it across the header (``header-search`` rules in
         common.css). Opening and closing are client-side: no round trip.
         """
         with ui.row(wrap=False).classes('items-center header-search') as section:
-            if not _show_header_search:
-                return section
-
             async def _go():
                 # Off the loop: a Latin string with a digit is looked up in the
                 # catalogue (MetadataManager.has_shelfmark) before it is searched.
@@ -1875,7 +1857,7 @@ def create_layout():
 
             with ui.row(wrap=False).classes('items-center header-search-field'):
                 header_box = ui.input(
-                    placeholder=tr('Text, shelfmark or system ID')
+                    placeholder=tr('Search text or go to a shelfmark...')
                 ).props(
                     f'dark dense outlined rounded aria-label="{tr("Search")}"'
                 ).classes('header-search-input').on('keydown.enter', _go).on(

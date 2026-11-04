@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """Render-smoke: the go-to box in the site header (2026-11-04).
 
-``web/main.py::create_layout`` puts a box in the header on every page but
-``/`` (the hero box) and ``/search`` (its own box). Enter in it navigates to
+``web/main.py::create_layout`` puts a box in the header on every page,
+``/`` and ``/search`` included (owner, 2026-11-04: it is how a reader jumps to
+a manuscript from anywhere). Enter in it navigates to
 ``web/home_query.py::home_query_target``'s URL -- the homepage box's routing --
 so a shelfmark opens Browse and words, including Hebrew typed on the English
 layout, are searched. Below 1024px a search button opens it (common.css,
@@ -36,7 +37,7 @@ def test_enter_in_the_header_box_goes_where_the_input_belongs():
         box = _marked_element(user, _BOX)
         assert box is not None, "no element marked 'header-search' on /about"
         assert _marked_element(user, _TOGGLE) is not None
-        assert box.props.get('placeholder') == 'Text, shelfmark or system ID'
+        assert box.props.get('placeholder') == 'Search text or go to a shelfmark...'
         assert box.props.get('aria-label') == 'Search'
         for typed, expected in cases:
             box.value = typed
@@ -59,26 +60,27 @@ def test_the_header_box_speaks_hebrew():
         await user.open('/about')
         box = _marked_element(user, _BOX)
         assert box is not None
-        assert box.props.get('placeholder') == 'טקסט, מספר מדף או מספר מערכת'
+        assert box.props.get('placeholder') == 'חפשו טקסט או עברו למספר מדף...'
         assert box.props.get('aria-label') == 'חפש'
 
     _run_home_smoke(driver, lang='he')
 
 
-def test_no_header_box_on_the_homepage():
-    """The hero box is the homepage's box; a second one beside it is noise."""
+def test_the_homepage_has_both_boxes():
+    """The hero box and the header box, each routing the same way (owner: the
+    header box stays on every page)."""
     async def driver(user):
         await user.open('/')
         assert _marked_element(user, 'home-hero-search') is not None
-        assert _marked_element(user, _BOX) is None
-        assert _marked_element(user, _TOGGLE) is None
+        box = _marked_element(user, _BOX)
+        assert box is not None and _marked_element(user, _TOGGLE) is not None
+        box.value = 'ts 20.57'
+        with patch('nicegui.ui.navigate.to') as nav_mock:
+            _press_enter(user, box)
+            calls = await _navigated(nav_mock)
+        assert calls == [('/browse?shelfmark=ts%2020.57',)]
 
     _run_home_smoke(driver, lang='en')
-
-
-def test_the_pages_without_it_are_the_homepage_and_search():
-    from web.main import _HEADER_SEARCH_HIDDEN_ON
-    assert _HEADER_SEARCH_HIDDEN_ON == {'/', '/search'}
 
 
 class _Catalogue:

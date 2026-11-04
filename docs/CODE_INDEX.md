@@ -1239,7 +1239,7 @@ on `/catalog-browse` (sidebar card, chips under the button), in "Search only in.
 - **Function** `page_meta` (Line 128) — per-route SEO metadata (title, description, canonical, OG/Twitter)
 - **Function** `_resolve_ui_language` (Line 222) — detect UI language from storage/cookie
 - **Function** `create_layout` (Line 240) — shared page layout (header, sidebar, footer)
-- **Function** `_request_path` (Line 1615) — the path of the page being built (the request's, not `current_page`); `create_layout`'s `render_header_center` uses it with `_HEADER_SEARCH_HIDDEN_ON` (`/`, `/search`) to leave out the header's go-to box (`home_query_target`; marks `header-search`, `header-search-toggle`; below 1024px a search button opens it across the bar, client-side `_HEADER_SEARCH_OPEN_JS`/`_CLOSE_JS`, rules `header-search` in common.css). Tests: `tests/render_smoke/test_header_search_render_smoke.py`.
+- `create_layout`'s `render_header_center` — the header's go-to box on every page, `/` and `/search` included (owner, 2026-11-04): `home_query_target` with `catalogue_has_shelfmark` via `run.io_bound`; placeholder "Search text or go to a shelfmark..."; marks `header-search`, `header-search-toggle`; below 1024px a search button opens it across the bar, client-side `_HEADER_SEARCH_OPEN_JS`/`_CLOSE_JS`, rules `header-search` in common.css. Tests: `tests/render_smoke/test_header_search_render_smoke.py`.
 - **Function** `_show_citation_reminder` (Line 635) — periodic citation reminder popup
 - **Function** `apply_theme_immediately` (Line 689) — inject dark/light theme CSS
 - **Function** `_safe_user_storage_get` (Line 821) — safe app.storage.user accessor
