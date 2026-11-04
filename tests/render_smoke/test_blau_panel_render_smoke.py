@@ -6,7 +6,8 @@ and a stubbed dictionary service, and fires the events the click script (web/sta
 dispatch on the popover. Pinned: a served dictionary gives the page the popover (hidden) and the reader's
 switch, OFF by default (owner, 2026-11-04: the page never guesses the text's language) -- no marked pane, no
 hint; the switch marks the pane and shows the hint and the "type a word" button, and the choice holds on the
-next page; a lookup draws one card per entry with its senses, the matched one marked, the example entries,
+next page; the switch is the letters עع with a label, which says "New!" until the visitor first turns it on
+(owner, 2026-11-04), and PostHog counts the switch, the lookups and the tabs, never the word; a lookup draws one card per entry with its senses, the matched one marked, the example entries,
 the site links, the close control and the credit line -- the site's Hebrew line in both UI languages, the English
 rendering beside it only in the English UI -- and shows the popover, with the word in the box at its top; the
 box looks up what is typed; the close hides it; an empty answer says what the dictionary covers and what was looked for; a result without a credit
@@ -184,6 +185,17 @@ def _hint_shown(user):
     return any(e.visible for e in _with_class(user, blau_panel.HINT_CLASS))
 
 
+def _switch_label(user):
+    [label] = _with_class(user, blau_panel.LABEL_CLASS)
+    return label.text
+
+
+def _has_letters(switch):
+    """The switch carries the letters עع, drawn (no icon, no font)."""
+    return [e.content for e in switch.descendants()
+            if isinstance(e, ui.html) and blau_panel.GLYPH_CLASS in e.classes] == [blau_panel.GLYPH_SVG]
+
+
 def _opener_shown(user):
     return any(e.visible for e in _with_class(user, blau_panel.OPEN_CLASS))
 
@@ -199,8 +211,12 @@ def test_the_switch_is_off_by_default_and_turns_the_lookup_on_and_off():
     async def driver(user):
         await _open(user)
         switch = _switch(user)
-        assert switch is not None and switch.props.get('icon') == 'translate'
+        assert switch is not None and not switch.props.get('icon') and _has_letters(switch)
+        assert 'color' not in switch.props, "Quasar's !important text-primary would beat the state colours"
         assert switch.props.get('aria-pressed') == 'false' and 'active' not in switch.classes
+        assert blau_panel.NEW_CLASS in switch.classes, 'new to this visitor: highlighted'
+        assert _switch_label(user) == 'New! Judeo-Arabic dictionaries!'
+        assert switch.props.get('aria-label') == 'New! Judeo-Arabic dictionaries!', 'named on a phone too'
         assert not _marked_panes(user), 'off by default: a click on a word looks nothing up'
         assert not _hint_shown(user) and not _opener_shown(user)
         assert _popover(user)._style.get('display') == 'none'
@@ -208,6 +224,9 @@ def test_the_switch_is_off_by_default_and_turns_the_lookup_on_and_off():
         await _turn_on(user)
         assert len(_marked_panes(user)) == 1
         assert switch.props.get('aria-pressed') == 'true' and 'active' in switch.classes
+        assert blau_panel.NEW_CLASS not in switch.classes, 'turned on once: no longer new'
+        assert _switch_label(user) == 'Judeo-Arabic dictionaries'
+        assert switch.props.get('aria-label') == 'Judeo-Arabic dictionaries'
         assert _hint_shown(user) and _opener_shown(user)
         assert 'Click a word to look it up in the dictionaries' in _visible_texts(user)
         tips = [e.text for e in _all_elements(user) if isinstance(e, ui.tooltip)]
@@ -221,6 +240,7 @@ def test_the_switch_is_off_by_default_and_turns_the_lookup_on_and_off():
         await _wait_until(lambda: not _marked_panes(user))
         assert not _marked_panes(user) and popover._style.get('display') == 'none'
         assert not _hint_shown(user) and switch.props.get('aria-pressed') == 'false'
+        assert blau_panel.NEW_CLASS not in switch.classes, 'off again, but not new again'
         assert 'Turn on the dictionaries (Judeo-Arabic)' in [
             e.text for e in _all_elements(user) if isinstance(e, ui.tooltip)]
 
@@ -234,8 +254,61 @@ def test_the_reader_s_choice_holds_on_the_next_page():
         await _open(user)
         assert len(_marked_panes(user)) == 1 and _hint_shown(user)
         assert _switch(user).props.get('aria-pressed') == 'true'
+        assert blau_panel.NEW_CLASS not in _switch(user).classes
 
     _run(driver, _dictionary(), lang='en')
+
+
+def test_the_switch_says_new_in_the_owner_s_hebrew_until_it_is_first_turned_on():
+    """Owner, 2026-11-04: the feature was too hidden. Until the visitor first turns the dictionaries
+    on, the switch is highlighted and its label says "חדש! מילונים לערבית־יהודית!" (with the maqaf),
+    on every page; once turned on, it is the plain label for good, turned off or not."""
+    async def driver(user):
+        await _open(user)
+        assert blau_panel.NEW_CLASS in _switch(user).classes
+        assert _switch_label(user) == 'חדש! מילונים לערבית־יהודית!'
+        await _open(user)
+        assert blau_panel.NEW_CLASS in _switch(user).classes, 'not turned on yet: still new on the next page'
+        await _turn_on(user)
+        assert _switch_label(user) == 'מילונים לערבית־יהודית'
+        assert _switch(user).props.get('aria-label') == 'מילונים לערבית־יהודית'
+        _click(user, _switch(user))
+        await _wait_until(lambda: not _marked_panes(user))
+        await _open(user)
+        assert blau_panel.NEW_CLASS not in _switch(user).classes and not _marked_panes(user)
+        assert _switch_label(user) == 'מילונים לערבית־יהודית'
+
+    _run(driver, _dictionary(), lang='he')
+
+
+def test_the_switch_the_lookups_and_the_tabs_are_counted_without_the_word():
+    """PostHog (owner, 2026-11-04): is the switch found, and used? The switch says whether it was new;
+    a lookup says how it was asked and which dictionary had something; a tab says which the reader
+    chose. The word itself is never sent."""
+    dictionary, lane = _dictionary(), _lane()
+
+    def sent(captured, name):
+        return [c.args[1] for c in captured.call_args_list if c.args and c.args[0] == name]
+
+    with patch.object(browse, 'posthog_capture') as captured:
+        async def driver(user):
+            await _open(user)
+            await _turn_on(user)
+            assert sent(captured, blau_panel.POSTHOG_SWITCH) == [{'on': True, 'was_new': True}]
+            await _look_up(user, 'דלך', lane, 1)
+            await _wait_until(lambda: sent(captured, blau_panel.POSTHOG_LOOKUP))
+            assert sent(captured, blau_panel.POSTHOG_LOOKUP) == [{'how': 'word', 'blau': True, 'lane': True}]
+            _choose(user, 'lane')
+            await _wait_until(lambda: sent(captured, blau_panel.POSTHOG_TAB))
+            assert sent(captured, blau_panel.POSTHOG_TAB) == [{'tab': 'lane'}]
+            _click(user, _switch(user))
+            await _wait_until(lambda: len(sent(captured, blau_panel.POSTHOG_SWITCH)) == 2)
+            assert sent(captured, blau_panel.POSTHOG_SWITCH)[1] == {'on': False, 'was_new': False}
+            assert all('דלך' not in json.dumps(c.args, ensure_ascii=False) for c in captured.call_args_list)
+            assert all(c.kwargs.get('client') is not None for c in captured.call_args_list), \
+                "through the page's client: a lookup answers from a background task"
+
+        _run(driver, dictionary, lane=lane)
 
 
 def test_a_lookup_draws_the_cards_and_the_credit_line_and_the_close_hides_them():

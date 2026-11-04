@@ -583,6 +583,10 @@ sight, and the panel's title and hint named Blau alone. So:
   empty answer says "Nothing in the dictionary for this word." The owner approved this wording
   (2026-11-04), in Hebrew: מילונים; בלאו / ליין; לחיצה על מילה מחפשת אותה במילונים;
   הפעלת / כיבוי המילונים (ערבית־יהודית).
+- **The switch is seen** (owner, later the same day: the feature was too hidden): the letters עع
+  drawn, and from 640px the label "חדש! מילונים לערבית־יהודית!", highlighted until the visitor
+  first turns it on, then "מילונים לערבית־יהודית" (`docs/plans/BLAU_DICTIONARY_PLAN.md` §6.2.1).
+  PostHog: `dictionary_switch`, `dictionary_lookup`, `dictionary_tab`.
 
 **Lane's tab** (`web/components/lane_panel.py`, drawn by `web/components/blau_panel.py`;
 `web/pages/browse.py` asks both services in one trip off the event loop):

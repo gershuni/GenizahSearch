@@ -1124,23 +1124,26 @@ desktop.Y.X` identity holds via the facades.
 
 ## web/components/blau_panel.py
 
-- **Function** `lookup_on` (Line 126) — The visitor's choice (default off: the page never assumes Judeo-Arabic).
-- **Function** `set_lookup_on` (Line 131)
-- **Function** `switch_tooltip` (Line 135) — What the switch will do when pressed.
-- **Function** `pick_tab` (Line 140) — The tab a lookup opens on: the one the reader last chose while it has
-- **Function** `head_html` (Line 152) — The ``<head>`` line that loads the click script, versioned by its
-- **Function** `lookup_word` (Line 164) — The clicked word from the ``blau-lookup`` event's arguments, or ''.
-- **Function** `_attr` (Line 186)
-- **Function** `_rtl` (Line 190) — A Hebrew-letter text, right-to-left whatever the UI direction.
-- **Function** `_gloss_pair` (Line 195) — (text, class) of the glosses to show, the UI language's first.
-- **Function** `_render_sense` (Line 203)
-- **Function** `_render_card` (Line 226)
-- **Function** `_render_examples` (Line 257)
-- **Function** `_render_credit` (Line 269) — The credit, as a link to the dictionary site (ruling (a): the credit
-- **Function** `_render_box` (Line 282) — The box at the top of the panel: the word shown, editable; Enter or the
-- **Function** `_render_blau` (Line 295) — Blau's tab: the disclaimer, the cards and the examples, or what was
-- **Function** `_render_lane` (Line 317) — Lane's tab: its section (web/components/lane_panel.py), or its title and,
-- **Function** `render_lookup` (Line 326) — Draw the dictionaries' answers for one word into the current container:
+- **Function** `lookup_on` (Line 168) — The visitor's choice (default off: the page never assumes Judeo-Arabic).
+- **Function** `set_lookup_on` (Line 173) — The reader's choice; turning it on also marks the switch as no longer new.
+- **Function** `switch_is_new` (Line 180) — Is the switch still new to this visitor (highlighted, its label saying so)? Yes until
+- **Function** `switch_label` (Line 192) — The switch's label (shown from 640px).
+- **Function** `switch_tooltip` (Line 197) — What the switch will do when pressed.
+- **Function** `lookup_event` (Line 202) — The ``POSTHOG_LOOKUP`` properties of one answered lookup (never the word).
+- **Function** `pick_tab` (Line 209) — The tab a lookup opens on: the one the reader last chose while it has
+- **Function** `head_html` (Line 221) — The ``<head>`` line that loads the click script, versioned by its
+- **Function** `lookup_word` (Line 233) — The clicked word from the ``blau-lookup`` event's arguments, or ''.
+- **Function** `_attr` (Line 255)
+- **Function** `_rtl` (Line 259) — A Hebrew-letter text, right-to-left whatever the UI direction.
+- **Function** `_gloss_pair` (Line 264) — (text, class) of the glosses to show, the UI language's first.
+- **Function** `_render_sense` (Line 272)
+- **Function** `_render_card` (Line 295)
+- **Function** `_render_examples` (Line 326)
+- **Function** `_render_credit` (Line 338) — The credit, as a link to the dictionary site (ruling (a): the credit
+- **Function** `_render_box` (Line 351) — The box at the top of the panel: the word shown, editable; Enter or the
+- **Function** `_render_blau` (Line 364) — Blau's tab: the disclaimer, the cards and the examples, or what was
+- **Function** `_render_lane` (Line 386) — Lane's tab: its section (web/components/lane_panel.py), or its title and,
+- **Function** `render_lookup` (Line 395) — Draw the dictionaries' answers for one word into the current container:
 
 ## web/components/lane_panel.py
 

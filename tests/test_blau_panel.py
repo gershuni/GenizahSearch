@@ -80,9 +80,63 @@ def test_the_switch_is_off_until_the_reader_turns_it_on(monkeypatch):
     monkeypatch.setattr(blau_panel, "safe_user_set", lambda key, value: store.__setitem__(key, value) or True)
     assert blau_panel.lookup_on() is False
     blau_panel.set_lookup_on(True)
-    assert store == {blau_panel.PREF_KEY: True} and blau_panel.lookup_on() is True
+    assert store == {blau_panel.PREF_KEY: True, blau_panel.SEEN_KEY: True} and blau_panel.lookup_on() is True
     blau_panel.set_lookup_on(0)
     assert blau_panel.lookup_on() is False
+    assert store[blau_panel.SEEN_KEY] is True, 'turned off again, the switch is not new again'
+
+
+def test_the_switch_is_new_until_the_reader_first_turns_it_on(monkeypatch):
+    """Owner, 2026-11-04 (the feature was too hidden): highlighted, its label saying so, until
+    the visitor first turns the dictionaries on; a visitor whose lookup is already on has used it."""
+    store = {}
+    monkeypatch.setattr(blau_panel, "safe_user_get", lambda key, default=None: store.get(key, default))
+    monkeypatch.setattr(blau_panel, "safe_user_set", lambda key, value: store.__setitem__(key, value) or True)
+    assert blau_panel.switch_is_new(False) is True and store == {}, "asking does not mark it seen"
+    assert blau_panel.switch_is_new(False) is True
+    assert blau_panel.switch_is_new(True) is False and store == {blau_panel.SEEN_KEY: True}
+    assert blau_panel.switch_is_new(False) is False
+    store.clear()
+    blau_panel.set_lookup_on(False)
+    assert blau_panel.switch_is_new(False) is True, "turning it off is not using it"
+    blau_panel.set_lookup_on(True)
+    assert blau_panel.switch_is_new(False) is False
+
+
+def test_the_switch_s_label_is_the_owner_s_wording_with_the_maqaf():
+    from shared.genizah_translations import TRANSLATIONS
+    from web.translations import using_language
+
+    with using_language("en"):
+        assert blau_panel.switch_label(True) == "New! Judeo-Arabic dictionaries!"
+        assert blau_panel.switch_label(False) == "Judeo-Arabic dictionaries"
+    with using_language("he"):
+        assert blau_panel.switch_label(True) == "חדש! מילונים לערבית־יהודית!"
+        assert blau_panel.switch_label(False) == "מילונים לערבית־יהודית"
+    for text in (blau_panel.NEW_LABEL, blau_panel.LABEL):
+        assert "־" in TRANSLATIONS[text] and "-" not in TRANSLATIONS[text], "the maqaf, not a hyphen"
+
+
+def test_the_switch_s_letters_are_drawn_not_typed():
+    """עع as outlines: the same on every device, no Arabic font needed; coloured by the state."""
+    svg = blau_panel.GLYPH_SVG
+    assert svg.startswith('<svg xmlns="http://www.w3.org/2000/svg" viewBox=') and svg.endswith('"/></svg>')
+    assert 'fill="currentColor"' in svg and 'aria-hidden="true"' in svg
+    assert svg.count("<path ") == 1 and "<text" not in svg and "font" not in svg
+    assert svg.count("Z") == 3, "three closed outlines: ع, and ע's two"
+
+
+def test_a_lookup_is_counted_without_the_word():
+    assert blau_panel.lookup_event(False, empty_lookup("כתאב"), None) == {'how': 'word', 'blau': False, 'lane': None}
+    assert blau_panel.lookup_event(True, None, empty_lane("כתאב")) == {'how': 'box', 'blau': None, 'lane': False}
+    assert {blau_panel.POSTHOG_SWITCH, blau_panel.POSTHOG_LOOKUP, blau_panel.POSTHOG_TAB} == {
+        "dictionary_switch", "dictionary_lookup", "dictionary_tab"}
+
+
+def test_reset_hints_makes_the_switch_new_again():
+    main = (REPO / "web" / "main.py").read_text(encoding="utf-8")
+    route = main[main.index("def reset_hints_route"):main.index("@ui.page('/settings'")]
+    assert "SEEN_KEY as dictionaries_seen" in route and "'hint_tabular_seen', dictionaries_seen)" in route
 
 
 def test_the_switch_says_what_pressing_it_will_do():
@@ -193,6 +247,9 @@ def test_the_stylesheet_styles_what_the_renderer_and_the_script_make():
                      "[data-blau-place=\"above\"]",
                      "--blau-left", "--blau-top", "--blau-bottom",
                      f".{blau_panel.SWITCH_CLASS}.active {{", f".{blau_panel.HINT_CLASS} {{",
+                     f".{blau_panel.SWITCH_CLASS}.{blau_panel.NEW_CLASS} {{",
+                     f".{blau_panel.SWITCH_CLASS} .{blau_panel.GLYPH_CLASS} svg {{",
+                     f".{blau_panel.SWITCH_CLASS} .{blau_panel.LABEL_CLASS} {{",
                      f".{blau_panel.PANEL_CLASS} .panel-head .word-input input {{",
                      f".{blau_panel.PANEL_CLASS} .type-note {{",
                      f".{blau_panel.PANEL_CLASS} .{blau_panel.TABS_CLASS} {{",
@@ -200,6 +257,17 @@ def test_the_stylesheet_styles_what_the_renderer_and_the_script_make():
                      f".{blau_panel.PANEL_CLASS} .{blau_panel.TAB_CLASS}.not-found {{",
                      f".{blau_panel.PANEL_CLASS} .{blau_panel.TAB_PANELS_CLASS} {{"):
         assert selector in CSS, selector
+    # On a phone the switch is the letters alone, with a dot while new; from 640px, its label.
+    phone = CSS[CSS.index("@media (max-width: 639px) {\n    .blau-switch"):]
+    phone = phone[:phone.index("\n}\n")]
+    assert f".{blau_panel.SWITCH_CLASS} .{blau_panel.LABEL_CLASS} {{ display: none; }}" in phone
+    assert f".{blau_panel.SWITCH_CLASS}.{blau_panel.NEW_CLASS}::after {{" in phone
+    # The chip's padding mirrors in Hebrew: logical sides only (the letters at the start).
+    switch_rules = CSS[CSS.index(f".{blau_panel.SWITCH_CLASS}.q-btn {{"):]
+    switch_rules = switch_rules[:switch_rules.index("@media (min-width: 640px)") + 300]
+    assert "padding-inline: 8px 12px" in switch_rules
+    paddings = re.findall(r"padding:\s*([^;]+);", switch_rules)
+    assert paddings and all(len(p.split()) < 4 for p in paddings), f"a 4-value padding is not mirrored: {paddings}"
     # The script places the popover with the size the stylesheet gives it.
     js_width = int(re.search(r"var WIDTH = (\d+)", JS).group(1))
     js_height = int(re.search(r"var HEIGHT = (\d+)", JS).group(1))

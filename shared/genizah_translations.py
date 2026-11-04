@@ -6487,6 +6487,12 @@ TRANSLATIONS.update({
     "Turn on the dictionaries (Judeo-Arabic)": "הפעלת המילונים (ערבית־יהודית)",
     "Turn off the dictionaries": "כיבוי המילונים",
 })
+# The switch's label, from 640px: the owner's wording (2026-11-04), with the maqaf. "New!" until
+# the visitor first turns the dictionaries on (web/components/blau_panel.py::NEW_LABEL).
+TRANSLATIONS.update({
+    "New! Judeo-Arabic dictionaries!": "חדש! מילונים לערבית־יהודית!",
+    "Judeo-Arabic dictionaries": "מילונים לערבית־יהודית",
+})
 # Lane's Lexicon in its tab (web/components/lane_panel.py, phase B, 2026-11-04). DRAFTS for the
 # owner's approval. The Perseus credit line itself is not translated: it is shown verbatim (D3).
 TRANSLATIONS.update({

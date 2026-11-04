@@ -3126,7 +3126,9 @@ def privacy_extension_route():
 def reset_hints_route():
     """Hidden utility route to reset all feature discovery hints."""
     ensure_session_uuid()  # Fix 1 in 87-REVIEWS.md iter 3 (Codex B1-residual): mint UUID before storage pops
-    for key in ('whats_new_dismissed', 'hint_responsa_seen', 'hint_tabular_seen'):
+    # The dictionaries switch is new again only while the lookup is off (blau_panel.switch_is_new).
+    from web.components.blau_panel import SEEN_KEY as dictionaries_seen
+    for key in ('whats_new_dismissed', 'hint_responsa_seen', 'hint_tabular_seen', dictionaries_seen):
         safe_user_pop(key, None)
     ui.navigate.to('/')
 

@@ -227,6 +227,16 @@ not ship.
   asks the server to close only when something is open. While it is on, the hint and a "type a
   word" button (`keyboard`) show. The script handles that button's click (`blau-open`): a server
   handler of its own would race the script's close of the same click.
+  **Since 2026-11-04 (owner: "the function is a bit hidden")** the button is not the `translate`
+  icon but the letters עع (Hebrew ʿayin beside Arabic ʿayn, drawn as outlines:
+  `blau_panel.GLYPH_SVG`) and, from 640px, a label. Until the visitor first turns it on it is
+  highlighted in amber and the label reads "חדש! מילונים לערבית־יהודית!"; on a phone, the
+  highlighted letters with a dot. Turned on once, it is "מילונים לערבית־יהודית" for good
+  (`blau_panel.SEEN_KEY`, `ui.dictionaries_seen`). PostHog counts the switch, the lookups and the
+  tabs (`blau_panel.POSTHOG_*`, never the word). The other options weighed for being noticed (a
+  What's New entry with a live example, a one-time callout, links from `/start` and the homepage,
+  an offer on a selected word, switching it on from catalogue metadata, which would reopen ruling
+  (c)) were not taken.
 - **The box.** Every panel has a box at its top holding the word it shows. Enter, or its search
   button, looks up what the box holds, so a misread word is corrected by the reader and looked up
   again. A word with no Hebrew letter but Arabic ones is looked up against the Arabic spellings
