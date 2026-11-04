@@ -1124,30 +1124,34 @@ desktop.Y.X` identity holds via the facades.
 
 ## web/components/blau_panel.py
 
-- **Function** `lookup_on` (Line 90) — The visitor's choice (default off: the page never assumes Judeo-Arabic).
-- **Function** `set_lookup_on` (Line 95)
-- **Function** `switch_tooltip` (Line 99) — What the switch will do when pressed.
-- **Function** `head_html` (Line 104) — The ``<head>`` line that loads the click script, versioned by its
-- **Function** `lookup_word` (Line 116) — The clicked word from the ``blau-lookup`` event's arguments, or ''.
-- **Function** `_attr` (Line 138)
-- **Function** `_rtl` (Line 142) — A Hebrew-letter text, right-to-left whatever the UI direction.
-- **Function** `_gloss_pair` (Line 147) — (text, class) of the glosses to show, the UI language's first.
-- **Function** `_render_sense` (Line 155)
-- **Function** `_render_card` (Line 178)
-- **Function** `_render_examples` (Line 209)
-- **Function** `_render_credit` (Line 221) — The credit, as a link to the dictionary site (ruling (a): the credit
-- **Function** `_render_box` (Line 231) — The box at the top of the panel: the word shown, editable; Enter or the
-- **Function** `render_lookup` (Line 244) — Draw ``result`` into the current container. Returns False, drawing
+- **Function** `lookup_on` (Line 126) — The visitor's choice (default off: the page never assumes Judeo-Arabic).
+- **Function** `set_lookup_on` (Line 131)
+- **Function** `switch_tooltip` (Line 135) — What the switch will do when pressed.
+- **Function** `pick_tab` (Line 140) — The tab a lookup opens on: the one the reader last chose while it has
+- **Function** `head_html` (Line 152) — The ``<head>`` line that loads the click script, versioned by its
+- **Function** `lookup_word` (Line 164) — The clicked word from the ``blau-lookup`` event's arguments, or ''.
+- **Function** `_attr` (Line 186)
+- **Function** `_rtl` (Line 190) — A Hebrew-letter text, right-to-left whatever the UI direction.
+- **Function** `_gloss_pair` (Line 195) — (text, class) of the glosses to show, the UI language's first.
+- **Function** `_render_sense` (Line 203)
+- **Function** `_render_card` (Line 226)
+- **Function** `_render_examples` (Line 257)
+- **Function** `_render_credit` (Line 269) — The credit, as a link to the dictionary site (ruling (a): the credit
+- **Function** `_render_box` (Line 282) — The box at the top of the panel: the word shown, editable; Enter or the
+- **Function** `_render_blau` (Line 295) — Blau's tab: the disclaimer, the cards and the examples, or what was
+- **Function** `_render_lane` (Line 317) — Lane's tab: its section (web/components/lane_panel.py), or its title and,
+- **Function** `render_lookup` (Line 326) — Draw the dictionaries' answers for one word into the current container:
 
 ## web/components/lane_panel.py
 
-- **Function** `_attr` (Line 51)
-- **Function** `_arabic` (Line 55)
-- **Function** `_render_readings` (Line 59)
-- **Function** `_render_entry` (Line 74)
-- **Function** `_render_root` (Line 85)
-- **Function** `_render_credit` (Line 101) — The Perseus line verbatim (D3; English in both UIs, as Perseus words it), then the
-- **Function** `render_lane` (Line 111) — Draw ``result`` into the current container. Returns False, drawing nothing, when there is
+- **Function** `_attr` (Line 56)
+- **Function** `_arabic` (Line 60)
+- **Function** `_render_readings` (Line 64)
+- **Function** `_render_entry` (Line 79)
+- **Function** `_render_root` (Line 90)
+- **Function** `_render_credit` (Line 106) — The Perseus line verbatim (D3; English in both UIs, as Perseus words it), then the
+- **Function** `render_lane_empty` (Line 116) — Lane's tab when Lane has no reading for ``word`` (or no word was typed yet): its title,
+- **Function** `render_lane` (Line 126) — Draw ``result`` into the current container. Returns False, drawing nothing, when there is
 
 ## web/components/criteria_panel.py
 

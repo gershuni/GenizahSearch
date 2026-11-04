@@ -1,16 +1,17 @@
 # Arabic dictionaries beside Blau: Lane and Lisān al-ʿArab for Judeo-Arabic words
 
-**Status:** plan **rev. 5** (2026-11-04). **The owner ruled D1-D11** (§8): Lane first, Lisān
+**Status:** plan **rev. 6** (2026-11-04). **The owner ruled D1-D12** (§8): Lane first, Lisān
 later; the laneslexicon master files; credit and licence terms at the minimum each source
 requires; Ephraim Meiri's parsed files may be used; the stdlib v3 method; the 250-650 AH count;
-the cards under Blau's for now; the gate plus the owner's grading; a closed-class table; Hebrew
-words given an Arabic card are not a gate (a reader who asks for Arabic gets Arabic). **Phase A
+each dictionary in its own tab of one panel (D12, replacing D8's "under Blau's"); the gate plus
+the owner's grading; a closed-class table; Hebrew words given an Arabic card are not a gate (a
+reader who asks for Arabic gets Arabic). **Phase A
 is built** (§7.1, branch `claude/arabic-lane-sidecar`): `arabic_data/arabic.db` with Lane's
 47,855 articles, its headword table, a 247-million-token word count and a 141-row closed-class
 table; its own gate passes and fails on mutations; the plan's gate passes on it. Nothing is served,
 bundled or deployed; no reader sees anything. **Phase B is built** (§7.2, branch
-`claude/arabic-lane-cards`): Lane's cards under Blau's on `/browse`, not deployed; its wording awaits
-the owner.
+`claude/arabic-lane-cards`): Lane in its own tab beside Blau's on `/browse`, not deployed; its
+wording awaits the owner.
 **Origin:** the owner's review of the Blau companion on 2026-11-04 (PR #475,
 `docs/plans/BLAU_DICTIONARY_PLAN.md` §6.2.1): Blau records what is particular to Judeo-Arabic, so
 an ordinary Arabic word (אבו *abū*, לנא *lanā*) has no entry, and an undotted letter is two
@@ -354,11 +355,11 @@ the 200-word sample is the check this measurement cannot replace (D9).
 
 - **A. A Lane sidecar, `arabic_data/arabic.db`: BUILT (2026-11-04, branch
   `claude/arabic-lane-sidecar`), §7.1.**
-- **B. The Lane cards on `/browse`**, inside the Blau panel, under the same switch and box (rulings
-  (c) and (d) of the Blau plan): the readings as chips, the commonest first; for the chosen
+- **B. The Lane cards on `/browse`**, in the dictionary panel, under the same switch and box
+  (rulings (c) and (d) of the Blau plan): the readings as chips, the commonest first; for the chosen
   reading, the root card with Lane's article (English, truncated, "more"), the Perseus credit line
-  and a link to the source. Typed Arabic skips the reading step. The cards sit under Blau's (D8; to
-  be revisited, since Lane often gives the broader sense). Web only first, as Blau. **BUILT
+  and a link to the source. Typed Arabic skips the reading step. Lane has its own tab beside Blau's
+  (D12, which replaced D8's "under Blau's cards"). Web only first, as Blau. **BUILT
   (2026-11-04, branch `claude/arabic-lane-cards`, not deployed), §7.2.**
 - **C. Lisān al-ʿArab**, the same way, after Lane: its articles from the pinned OpenITI file (or
   Ephraim Meiri's parse, D5), its card beside Lane's, with OpenITI's credit and licence (D4).
@@ -485,8 +486,26 @@ The tables the method reads per lookup are held in memory: the root keys, the ar
 root, the headword table and the closed-class table. The word count stays on disk and is read by
 key. The real file opens in 0.3 s, and a lookup takes 0 to 16 ms.
 
-**The panel** (`web/components/lane_panel.py`, drawn by `web/components/blau_panel.py` after
-Blau's credit; `web/pages/browse.py` asks both services in one trip off the event loop):
+**One tab per dictionary (D12).** The panel was first built with Lane's section under Blau's
+cards and credit (D8). The owner, trying it the same day: a long Blau entry pushed Lane out of
+sight, and the panel's title and hint named Blau alone. So:
+
+- **The tabs.** Each dictionary served has a tab, Blau's then Lane's, in a row between the head
+  and the scrolling body. A tab whose dictionary has nothing for the word is greyed, not hidden,
+  and says so when opened. With one dictionary served there is no tab row, and the head carries its
+  name.
+- **Which tab opens** (`blau_panel.pick_tab`): the tab the reader last chose on this manuscript,
+  while it has something for the word; else the first that has (Blau's, if it does); else the
+  reader's. A tab the panel chose by itself is not remembered as the reader's.
+- **The panel appears when either dictionary is served.** Each lookup asks each service again (the
+  kill switches are read live); a dictionary not served then has no tab, and with neither the panel
+  stays closed.
+- **The wording names no one dictionary:** the head says "Dictionaries", the hint "Click a word to
+  look it up in the dictionaries", the switch "Turn on/off the dictionaries". Inside each tab, an
+  empty answer says "Nothing in the dictionary for this word." (drafts, below).
+
+**Lane's tab** (`web/components/lane_panel.py`, drawn by `web/components/blau_panel.py`;
+`web/pages/browse.py` asks both services in one trip off the event loop):
 
 - **The title**, then the readings as chips. The first is marked; a click on another looks that
   reading up in the box, so the panel then shows it in Arabic letters.
@@ -495,12 +514,13 @@ Blau's credit; `web/pages/browse.py` asks both services in one trip off the even
   (`?q=<root>&source=lane`).
 - **The credits:** the Perseus line verbatim (English in both UIs), then where the entries come from
   and what ranks the readings.
-- **When nothing shows:** a section without the credit line, or a word with no reading, draws
-  nothing. Blau's panel is then as it was.
+- **When nothing shows:** without the credit line, Lane has no tab (D3). For a word with no reading
+  the tab is greyed and says nothing was found.
 
 **Owner decisions still open for phase B** (drafts in place, nothing deployed):
 
-- the English and Hebrew wording of the section (`shared/genizah_translations.py`, marked DRAFTS);
+- the English and Hebrew wording of the section and of the panel's title, tabs, hint and switch
+  (`shared/genizah_translations.py`, marked DRAFTS);
 - whether the two source lines are wanted, or the Perseus line alone (D3 asks only that one);
 - the server copy of `arabic_data/arabic.db` (74 MB) and the release.
 
@@ -520,10 +540,11 @@ or later; a check on documents the method was not shaped on; and the sidecar's o
 | D5 | **The emeiri sites.** Reuse their parsed Lane and Lisān? | **Yes, at our convenience**: their maintainer, Ephraim Meiri, is the owner's friend. Phase A takes whichever source is simpler; the Perseus and OpenITI credits still apply to the text |
 | D6 | **Morphology.** Stdlib (stripping plus Lane's headwords, v3) or CAMeL Tools (GPL v2 database)? | **Stdlib v3** |
 | D7 | **The frequency count.** Which part of OpenITI, which genres? | **All primary non-OCR texts of 250-650 AH, dictionaries excluded** |
-| D8 | **Where the cards go.** Under Blau's cards; a tab of their own; or only when Blau has nothing | **Under Blau's cards** for now; may change, since Lane usually gives the broader sense |
+| D8 | **Where the cards go.** Under Blau's cards; a tab of their own; or only when Blau has nothing | **Under Blau's cards** for now; may change, since Lane usually gives the broader sense. *Replaced by D12* |
 | D9 | **The release gate.** G1-G3 as fixed, with the owner's grading of the 200-word sample as the deciding check | **Keep G1-G3 and add the owner's grading** |
 | D10 | **The closed-class table.** A hand list of about 150 forms (prepositions with pronouns, demonstratives, particles) pointing at Lane's particle articles | **Yes** |
 | D11 | **Hebrew words given an Arabic card** (13 of 20 in the graded sample on the built file, §7.1). A gate, a count threshold or a Hebrew filter? | **Not a gate** (later the same day): "If someone thinks it's Arabic, let him look for Arabic." No filter; the count stays at 2 |
+| D12 | **Where the cards go, after trying phase B.** Under Blau's, the panel's head and hint name Blau alone, and a long Blau entry hides Lane | **A tab per dictionary** (later the same day): "show Lane not under Blau but in a tab", so a long Blau entry needs no scrolling and more dictionaries can be added; the wording becomes general (§7.2) |
 
 ---
 

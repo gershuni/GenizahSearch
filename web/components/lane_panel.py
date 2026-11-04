@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Lane's *Arabic-English Lexicon* under Blau's cards on /browse, RENDERED (phase B of
-docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md; D8: under Blau's cards for now).
+"""Lane's *Arabic-English Lexicon* on /browse, RENDERED (phase B of
+docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md; D12: in its own tab of the dictionary panel).
 
-web/components/blau_panel.py calls ``render_lane`` inside the Blau popover, after Blau's own
-credit, with what ``shared.arabic_service`` answered for the same word. This module draws that
+web/components/blau_panel.py calls ``render_lane`` in Lane's tab of the dictionary popover
+(``render_lane_empty`` when Lane has no reading for the word), with what ``shared.arabic_service``
+answered for the same word. This module draws that
 answer and decides nothing itself: the readings, their order, the root and the entries are the
 service's (the plan's method v4, measured by its gate).
 
@@ -36,8 +37,12 @@ ROOT_CLASS = 'lane-root'
 ENTRY_CLASS = 'lane-entry'
 NO_ROOT_CLASS = 'lane-no-root'
 CREDIT_CLASS = 'lane-credit'
+#: Lane's tab when Lane has no reading for the word.
+EMPTY_SECTION_CLASS = 'lane-none'
 
 TITLE = "Lane's Arabic-English Lexicon"
+#: The same words as Blau's tab when it has nothing (one string, one translation).
+NOTHING = 'Nothing in the dictionary for this word.'
 READINGS_LABEL = 'Arabic readings, commonest first'
 NO_ROOT = 'No root of this reading was found in Lane.'
 #: Where the entries come from (D5) and what orders the readings (D7); the Perseus line is
@@ -108,10 +113,21 @@ def _render_credit(credit: str, lang: str) -> None:
         ui.link(tr(RANKING_NOTE), OPENITI_URL, new_tab=True).props(direction).classes('credit-ranking')
 
 
+def render_lane_empty(word: str, *, titled: bool = True) -> None:
+    """Lane's tab when Lane has no reading for ``word`` (or no word was typed yet): its title,
+    and for a word, that nothing was found."""
+    with ui.element('div').classes(f'{EMPTY_SECTION_CLASS} lane'):
+        if titled:
+            ui.label(tr(TITLE)).classes('lane-title')
+        if word:
+            ui.label(tr(NOTHING)).classes('empty')
+
+
 def render_lane(result: Optional[LaneLookup], *, credit: str, lang: str = 'he',
-                on_search: Optional[Callable[[str], Any]] = None) -> bool:
+                on_search: Optional[Callable[[str], Any]] = None, titled: bool = True) -> bool:
     """Draw ``result`` into the current container. Returns False, drawing nothing, when there is
-    no result, no reading, or no credit line (D3: no Lane text without it)."""
+    no result, no reading, or no credit line (D3: no Lane text without it). ``titled=False``
+    leaves out the section's title (the panel's head already names Lane)."""
     if result is None or not result.readings:
         return False
     credit = (credit or '').strip()
@@ -119,7 +135,8 @@ def render_lane(result: Optional[LaneLookup], *, credit: str, lang: str = 'he',
         logger.warning('lane_panel: no credit line; the Lane lookup of %r is not shown', result.word)
         return False
     with ui.element('div').classes(f'{SECTION_CLASS} lane'):
-        ui.label(tr(TITLE)).classes('lane-title')
+        if titled:
+            ui.label(tr(TITLE)).classes('lane-title')
         if result.script == 'ja':
             _render_readings(result, on_search)
         if result.roots:

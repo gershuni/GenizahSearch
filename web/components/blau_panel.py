@@ -23,6 +23,14 @@ While it is on, a button beside the hint opens the panel with an empty box
 panel has the box at its top, holding the word it shows, so a misread word
 can be corrected and looked up again.
 
+The panel holds every dictionary the site serves, one tab each (owner,
+2026-11-04): Blau's, and Lane's Lexicon (web/components/lane_panel.py, plan
+docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md D12). It opens on the tab the
+reader last chose while that dictionary has something for the word, else on
+the first that has (``pick_tab``); a tab with nothing is greyed, not hidden,
+and says so when opened. With one dictionary served there is no tab row, and
+the head is titled with its name.
+
 Every class here lives in web/static/common.css under ``.gs-blau``; the root
 element carries that class or none of it applies.
 """
@@ -32,7 +40,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 from nicegui import ui
 
@@ -90,6 +98,22 @@ EMPTY_CLASS = 'blau-empty'
 CREDIT_CLASS = 'blau-credit'
 CLOSE_CLASS = 'blau-close'
 
+#: One tab per dictionary (owner, 2026-11-04: Lane in a tab, not under Blau's
+#: cards, so a long entry in one never pushes the other out of sight, and more
+#: dictionaries can be added). The tab row sits between the head and the
+#: scrolling body; a panel with one dictionary has no tab row.
+BLAU_TAB = 'blau'
+LANE_TAB = 'lane'
+TABS_CLASS = 'dict-tabs'
+TAB_CLASS = 'dict-tab'
+TAB_PANELS_CLASS = 'dict-tab-panels'
+#: The head's title when the panel has tabs; with one dictionary, its name.
+TITLE = 'Dictionaries'
+BLAU_TITLE = "Blau's dictionary"
+TAB_LABELS = {BLAU_TAB: 'Blau', LANE_TAB: 'Lane'}
+#: Inside a dictionary's tab: it has nothing for the word.
+NOTHING = 'Nothing in the dictionary for this word.'
+
 _JS_PATH = Path(__file__).resolve().parents[1] / 'static' / 'js' / 'blau_lookup.js'
 
 _FLAG_LABELS = (
@@ -110,7 +134,19 @@ def set_lookup_on(value: bool) -> None:
 
 def switch_tooltip(on: bool) -> str:
     """What the switch will do when pressed."""
-    return tr("Turn off Blau's dictionary") if on else tr("Turn on Blau's dictionary (Judeo-Arabic)")
+    return tr('Turn off the dictionaries') if on else tr('Turn on the dictionaries (Judeo-Arabic)')
+
+
+def pick_tab(tabs: Sequence[str], found: Mapping[str, bool], preferred: Optional[str] = None) -> str:
+    """The tab a lookup opens on: the one the reader last chose while it has
+    something for the word; else the first that has; else the reader's (or
+    the first). ``tabs`` is in display order and never empty."""
+    if preferred in tabs and found.get(preferred):
+        return preferred
+    for name in tabs:
+        if found.get(name):
+            return name
+    return preferred if preferred in tabs else tabs[0]
 
 
 def head_html() -> str:
@@ -256,50 +292,107 @@ def _render_box(word: str, on_search: Callable[[str], Any], focus: bool) -> None
     search.tooltip(tr('Look up'))
 
 
-def render_lookup(result: BlauLookup, *, credit_he: str, credit_en: str = '', lang: str = 'he',
+def _render_blau(result: BlauLookup, credit_he: str, credit_en: str, lang: str) -> None:
+    """Blau's tab: the disclaimer, the cards and the examples, or what was
+    looked for, then the credit (ruling (a): on every panel)."""
+    ui.label(tr(DISCLAIMER)).classes(f'{DISCLAIMER_CLASS} disclaimer')
+    if result.cards:
+        for card in result.cards:
+            _render_card(card, lang)
+        if result.more_cards:
+            ui.label(f'+{result.more_cards} {tr("more entries")}').classes('more')
+    if result.examples:
+        _render_examples(result, lang)
+    if result.word and not result.found:
+        with ui.element('div').classes(f'{EMPTY_CLASS} empty'):
+            ui.label(tr(NOTHING))
+            if result.candidates:
+                with ui.element('div').classes('looked-for'):
+                    ui.label(tr('Looked for')).classes('looked-label')
+                    for candidate in result.candidates:
+                        _rtl(candidate).classes('candidate')
+    _render_credit(credit_he, credit_en, lang)
+
+
+def _render_lane(lane: LaneLookup, credit: str, lang: str, on_search: Optional[Callable[[str], Any]],
+                 titled: bool) -> None:
+    """Lane's tab: its section (web/components/lane_panel.py), or its title and,
+    for a word, that nothing was found."""
+    if lane_panel.render_lane(lane, credit=credit, lang=lang, on_search=on_search, titled=titled):
+        return
+    lane_panel.render_lane_empty(lane.word, titled=titled)
+
+
+def render_lookup(result: Optional[BlauLookup], *, credit_he: str = '', credit_en: str = '', lang: str = 'he',
                   on_close: Optional[Callable[..., Any]] = None,
                   on_search: Optional[Callable[[str], Any]] = None, focus_input: bool = False,
-                  lane: Optional[LaneLookup] = None, lane_credit: str = '') -> bool:
-    """Draw ``result`` into the current container. Returns False, drawing
-    nothing, when there is no credit line to show (ruling (a): no panel
-    without it). With ``on_search`` the head holds the box (the word in it);
-    a result with no word is the panel opened to type one. ``lane`` is Lane's
-    answer for the same word, drawn after Blau's credit
-    (web/components/lane_panel.py; nothing when it has no reading)."""
+                  lane: Optional[LaneLookup] = None, lane_credit: str = '',
+                  tab: Optional[str] = None, on_tab: Optional[Callable[[str], Any]] = None) -> bool:
+    """Draw the dictionaries' answers for one word into the current container:
+    ``result`` is Blau's (None when Blau is not served), ``lane`` Lane's (None
+    when Lane is not served). Each dictionary with its credit line gets a tab
+    (ruling (a), D3: no dictionary's text without its credit); without any,
+    nothing is drawn and the answer is False. With two, the tab row opens on
+    ``pick_tab(..., tab)`` and a tab the reader chooses is reported to
+    ``on_tab``. With ``on_search`` the head holds the box (the word in it); a
+    lookup with no word is the panel opened to type one."""
     credit_he = (credit_he or '').strip()
-    if not credit_he:
-        logger.warning('blau_panel: no credit line; the lookup of %r is not shown', result.word)
+    lane_credit = (lane_credit or '').strip()
+    word = result.word if result is not None else (lane.word if lane is not None else '')
+    tabs: list[str] = []
+    if result is not None:
+        if credit_he:
+            tabs.append(BLAU_TAB)
+        else:
+            logger.warning('blau_panel: no credit line; the lookup of %r in Blau is not shown', word)
+    if lane is not None:
+        if lane_credit:
+            tabs.append(LANE_TAB)
+        else:
+            logger.warning('blau_panel: no Perseus line; the lookup of %r in Lane is not shown', word)
+    if not tabs:
         return False
+    found = {BLAU_TAB: bool(result is not None and result.found),
+             LANE_TAB: bool(lane is not None and lane.readings)}
+    titles = {BLAU_TAB: BLAU_TITLE, LANE_TAB: lane_panel.TITLE}
+    several = len(tabs) > 1
+
+    def draw(name: str) -> None:
+        if name == BLAU_TAB:
+            _render_blau(result, credit_he, credit_en, lang)
+        else:
+            _render_lane(lane, lane_credit, lang, on_search, titled=several)
+
     with ui.element('div').classes('panel-head'):
-        ui.label(tr("Blau's dictionary")).classes('title')
+        ui.label(tr(TITLE if several else titles[tabs[0]])).classes('title')
         if on_search is not None:
-            _render_box(result.word, on_search, focus_input)
-        elif result.word:
-            _rtl(result.word).classes('word')
+            _render_box(word, on_search, focus_input)
+        elif word:
+            _rtl(word).classes('word')
         close = ui.button(icon='close', on_click=on_close).props(
             f'flat round dense size=sm aria-label="{_attr(tr("Close"))}"').classes(CLOSE_CLASS)
         close.tooltip(tr('Close'))
+    if several:
+        current = pick_tab(tabs, found, tab)
+
+        def chosen(e: Any) -> None:
+            if on_tab is not None and e.value in tabs:
+                on_tab(e.value)
+
+        with ui.tabs(value=current, on_change=chosen).props(
+                'dense no-caps inline-label narrow-indicator').classes(TABS_CLASS) as tab_row:
+            for name in tabs:
+                ui.tab(name, label=tr(TAB_LABELS[name])).classes(
+                    f'{TAB_CLASS} ' + ('found' if found[name] else 'not-found'))
     with ui.element('div').classes('panel-body'):
-        ui.label(tr(DISCLAIMER)).classes(f'{DISCLAIMER_CLASS} disclaimer')
-        if result.cards:
-            for card in result.cards:
-                _render_card(card, lang)
-            if result.more_cards:
-                ui.label(f'+{result.more_cards} {tr("more entries")}').classes('more')
-        if result.examples:
-            _render_examples(result, lang)
-        if not result.word:
+        if not word:
             ui.label(tr('Type a Judeo-Arabic word in Hebrew letters, or an Arabic word.')).classes(
                 'type-note')
-        elif not result.found:
-            with ui.element('div').classes(f'{EMPTY_CLASS} empty'):
-                ui.label(tr('Nothing in the dictionary for this word.'))
-                if result.candidates:
-                    with ui.element('div').classes('looked-for'):
-                        ui.label(tr('Looked for')).classes('looked-label')
-                        for candidate in result.candidates:
-                            _rtl(candidate).classes('candidate')
-        _render_credit(credit_he, credit_en, lang)
-        if lane is not None and result.word:
-            lane_panel.render_lane(lane, credit=lane_credit, lang=lang, on_search=on_search)
+        if not several:
+            draw(tabs[0])
+        else:
+            with ui.tab_panels(tab_row, value=current, animated=False).classes(TAB_PANELS_CLASS):
+                for name in tabs:
+                    with ui.tab_panel(name):
+                        draw(name)
     return True

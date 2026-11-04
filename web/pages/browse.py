@@ -27,7 +27,7 @@ from shared.transcription_credits import resolve_transcription_credit
 from shared.export_utils import GENIZAHSEARCH_URL
 from shared.blau_service import empty_lookup as blau_empty_lookup
 from shared.blau_service import get_blau_service
-from shared.arabic_service import get_arabic_service
+from shared.arabic_service import empty_lane, get_arabic_service
 from web.components import blau_panel
 from web.citation_chip import browse_page_citation, retrieved_today, set_page_citation
 
@@ -766,12 +766,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     # without it the page carries no script, no popover and no marked pane,
     # and is byte-for-byte what it was before.
     blau_service = get_blau_service()
-    blau_on = blau_service.is_available()
-    # Lane's Lexicon under Blau's cards (docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md phase B, D8):
-    # in the same panel, so only where Blau's panel is; its own readiness and kill switch decide
-    # per lookup (an unavailable service answers an empty result and nothing is drawn).
-    lane_service = get_arabic_service() if blau_on else None
-    if blau_on:
+    # Lane's Lexicon (docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md phase B, D12): its own tab in the
+    # same panel. The panel, the switch and the script are on the page when EITHER dictionary is
+    # served; each lookup asks each service again (the kill switches are read live), and a
+    # dictionary not served then has no tab.
+    lane_service = get_arabic_service()
+    dict_on = blau_service.is_available() or lane_service.is_available()
+    # The tab the reader last chose, for the next words on this manuscript (blau_panel.pick_tab).
+    dict_tab = {'value': None}
+    if dict_on:
         ui.add_head_html(blau_panel.head_html())
     service = get_service()
 
@@ -4812,7 +4815,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                 # The reader's language is captured now: the handler runs
                 # outside any render, where the process global may be another
                 # visitor's (the same capture the deferred joins render makes).
-                if blau_on:
+                if dict_on:
                     blau_popover = ui.element('div').classes(
                         f'{blau_panel.POPOVER_CLASS} {blau_panel.PANEL_CLASS} print-hide'
                     ).style('display: none;').props(
@@ -4831,6 +4834,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         if not blau_popover.is_deleted:
                             blau_popover.style('display: none;')
 
+                    def _choose_tab(name):
+                        dict_tab['value'] = name
+
                     def _blau_draw(result, focus, lane=None):
                         with using_language(_blau_lang):
                             blau_popover.clear()
@@ -4839,20 +4845,21 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     result, credit_he=blau_service.credit_he,
                                     credit_en=blau_service.credit_en, lang=_blau_lang,
                                     on_close=_blau_hide, on_search=_blau_search,
-                                    focus_input=focus, lane=lane,
-                                    lane_credit=lane_service.credit if lane_service else '')
+                                    focus_input=focus, lane=lane, lane_credit=lane_service.credit,
+                                    tab=dict_tab['value'], on_tab=_choose_tab)
                         blau_popover.style('display: flex;' if drawn else 'display: none;')
 
                     def _both_lookups(word):
-                        # One trip off the loop for both dictionaries; Lane's answer is
-                        # empty when its service is not available.
-                        return blau_service.lookup(word), (lane_service.lookup(word) if lane_service else None)
+                        # One trip off the loop for both dictionaries; None for a
+                        # dictionary not served now (it gets no tab).
+                        return ((blau_service.lookup(word) if blau_service.is_available() else None),
+                                (lane_service.lookup(word) if lane_service.is_available() else None))
 
                     async def _blau_answer(word, request, focus=False):
                         answers = await run.io_bound(_both_lookups, word)
-                        result, lane = answers if answers is not None else (None, None)
-                        if result is None or blau_popover.is_deleted or request != _blau_request['value']:
+                        if answers is None or blau_popover.is_deleted or request != _blau_request['value']:
                             return
+                        result, lane = answers
                         _blau_draw(result, focus, lane)
 
                     def _blau_start(word, focus):
@@ -4881,7 +4888,8 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         # The "type a word" button: the panel with an empty box.
                         _blau_request['value'] += 1
                         if not blau_popover.is_deleted:
-                            _blau_draw(blau_empty_lookup(''), True)
+                            _blau_draw(blau_empty_lookup('') if blau_service.is_available() else None, True,
+                                       empty_lane('') if lane_service.is_available() else None)
 
                     blau_popover.on(blau_panel.LOOKUP_EVENT, _blau_lookup)
                     blau_popover.on(blau_panel.CLOSE_EVENT, _blau_hide)
@@ -5294,7 +5302,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             # never guesses the text's language). Marked, the
                             # pane's words are looked up; unmarked, a click on
                             # a word does nothing.
-                            blau_lookup_on = blau_on and blau_panel.lookup_on()
+                            blau_lookup_on = dict_on and blau_panel.lookup_on()
                             if blau_lookup_on:
                                 text_container.props(blau_panel.PANE_ATTR)
                             current_text = {'value': page.text}
@@ -5388,7 +5396,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         icon='format_list_numbered',
                                         on_click=_toggle_line_numbers,
                                     ).props('flat round dense').tooltip(tr('Toggle line numbers'))
-                                    if blau_on:
+                                    if dict_on:
                                         # The switch, then (while it is on) the
                                         # hint and the "type a word" button --
                                         # whose click the script handles: a
@@ -5402,7 +5410,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         with blau_switch:
                                             blau_switch_tip = ui.tooltip(
                                                 blau_panel.switch_tooltip(blau_lookup_on))
-                                        blau_hint = ui.label(tr('Click a word for its dictionary entry')).classes(
+                                        blau_hint = ui.label(tr('Click a word to look it up in the dictionaries')).classes(
                                             f'text-xs {blau_panel.HINT_CLASS} print-hide')
                                         blau_type = ui.button(icon='keyboard').props(
                                             'flat round dense size=sm').classes(

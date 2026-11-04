@@ -42,7 +42,7 @@ def _translated_arguments() -> set[str]:
 
 def test_every_lane_class_is_styled_under_the_popover_scope():
     classes = [CONSTANTS[name] for name in ("SECTION_CLASS", "READINGS_CLASS", "CHIP_CLASS", "ROOT_CLASS",
-                                            "ENTRY_CLASS", "NO_ROOT_CLASS")]
+                                            "ENTRY_CLASS", "NO_ROOT_CLASS", "EMPTY_SECTION_CLASS")]
     for cls in classes:
         assert f".gs-blau .{cls}" in CSS, cls
 
@@ -50,6 +50,6 @@ def test_every_lane_class_is_styled_under_the_popover_scope():
 def test_every_shown_string_has_its_hebrew():
     shown = _translated_arguments()
     assert {CONSTANTS["TITLE"], CONSTANTS["READINGS_LABEL"], CONSTANTS["NO_ROOT"], CONSTANTS["SOURCE_NOTE"],
-            CONSTANTS["RANKING_NOTE"]} <= shown, "the constants the section shows are translated where drawn"
+            CONSTANTS["RANKING_NOTE"], CONSTANTS["NOTHING"]} <= shown, "the constants the section shows are translated where drawn"
     missing = sorted(t for t in shown if not TRANSLATIONS.get(t))
     assert not missing, missing

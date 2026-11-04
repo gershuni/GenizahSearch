@@ -2844,12 +2844,24 @@ body {
    it, underlined so it reads as a link; beats the theme's `[data-theme] a`. */
 .gs-blau .credit a { color: inherit; text-decoration: underline; text-decoration-style: dotted; display: block; }
 .blau-hint { color: var(--text-muted, #64748b); }
-/* Lane's Lexicon under Blau's cards (docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md phase B;
-   web/components/lane_panel.py). It reuses the card, entry, sense and credit rules above;
-   these are only what Lane adds: the section's rule, the reading chips, the English text. */
-.gs-blau .lane-section {
-    margin-top: 12px; padding-top: 8px; border-top: 2px solid var(--border-light, #e2e8f0);
+/* One tab per dictionary (owner, 2026-11-04; plan D12), between the head and the scrolling
+   body, so a long entry never hides the other tab. A tab with nothing for the word is greyed. */
+.gs-blau .dict-tabs {
+    flex: none; padding-inline: 8px; border-bottom: 1px solid var(--border-light, #e2e8f0);
+    color: var(--text-secondary, #475569);
 }
+/* The tabs start where the reading starts (Quasar centres them by default). */
+.gs-blau .dict-tabs .q-tabs__content { justify-content: flex-start; }
+.gs-blau .dict-tab { min-height: 32px; padding-inline: 12px; font-weight: 600; }
+.gs-blau .dict-tab.q-tab--active { color: var(--primary-600, #059669); }
+.gs-blau .dict-tab.not-found { opacity: 0.5; font-weight: 400; }
+.gs-blau .dict-tab-panels { background: transparent; color: inherit; }
+.gs-blau .dict-tab-panels > .q-panel > .q-tab-panel,
+.gs-blau .dict-tab-panels .q-tab-panel { padding: 0; }
+/* Lane's Lexicon (docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md phase B, D12;
+   web/components/lane_panel.py). It reuses the card, entry, sense and credit rules above;
+   these are only what Lane adds: the title, the reading chips, the English text. */
+.gs-blau .lane-section, .gs-blau .lane-none { padding-top: 2px; }
 .gs-blau .lane-title {
     font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
     color: var(--text-muted, #64748b);

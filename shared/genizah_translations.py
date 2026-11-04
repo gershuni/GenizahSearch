@@ -6437,10 +6437,10 @@ TRANSLATIONS.update({
 
 # The Blau dictionary companion on /browse (web/components/blau_panel.py,
 # docs/plans/BLAU_DICTIONARY_PLAN.md §6.2, 2026-11-04). "Blau's dictionary" is
-# the panel's title; the credit line itself comes from the sidecar's meta.
+# the panel's title when Blau is the only dictionary served; the credit line
+# itself comes from the sidecar's meta.
 TRANSLATIONS.update({
     "Blau's dictionary": "מילון בלאו",
-    "Click a word for its dictionary entry": "לחיצה על מילה פותחת את ערכה במילון בלאו",
     "Open on the dictionary site": "פתיחה באתר המילון",
     "more senses on the site": "משמעויות נוספות באתר",
     "more entries": "ערכים נוספים",
@@ -6459,8 +6459,6 @@ TRANSLATIONS.update({
 # The reader's switch and the box (owner, 2026-11-04: the page does not guess
 # the text's language; the reader turns the lookup on and can type a word).
 TRANSLATIONS.update({
-    "Turn on Blau's dictionary (Judeo-Arabic)": "הפעלת מילון בלאו (ערבית־יהודית)",
-    "Turn off Blau's dictionary": "כיבוי מילון בלאו",
     "Type a word to look up": "הקלדת מילה לחיפוש במילון",
     "A word in Hebrew or Arabic letters (ד' for ד̇)": "מילה באותיות עבריות או ערביות (ד' במקום ד̇)",
     "spelled without the dot": "נכתב בלי הנקודה",
@@ -6478,9 +6476,19 @@ TRANSLATIONS.update({
         "המהדורה הדיגיטלית: פרויקט MiDRASH, במימון האיחוד האירופי (ERC, MiDRASH, 101071829).",
 })
 
-# Lane's Lexicon under Blau's cards (web/components/lane_panel.py,
-# docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md phase B, 2026-11-04). DRAFTS for the owner's approval.
-# The Perseus credit line itself is not translated: it is shown verbatim (D3).
+# The dictionary panel holds every dictionary, one tab each (owner, 2026-11-04; plan
+# docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md D12): its title, the tabs, the hint and the
+# switch name no one dictionary. DRAFTS for the owner's approval.
+TRANSLATIONS.update({
+    "Dictionaries": "מילונים",
+    "Blau": "בלאו",
+    "Lane": "ליין",
+    "Click a word to look it up in the dictionaries": "לחיצה על מילה מחפשת אותה במילונים",
+    "Turn on the dictionaries (Judeo-Arabic)": "הפעלת המילונים (ערבית־יהודית)",
+    "Turn off the dictionaries": "כיבוי המילונים",
+})
+# Lane's Lexicon in its tab (web/components/lane_panel.py, phase B, 2026-11-04). DRAFTS for the
+# owner's approval. The Perseus credit line itself is not translated: it is shown verbatim (D3).
 TRANSLATIONS.update({
     "Lane's Arabic-English Lexicon": "הלקסיקון הערבי-אנגלי של ליין",  # the owner's wording, 2026-11-04
     "Arabic readings, commonest first": "קריאות בערבית, הנפוצה תחילה",

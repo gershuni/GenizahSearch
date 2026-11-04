@@ -8,6 +8,7 @@ import json
 import re
 from pathlib import Path
 
+from shared.arabic_service import empty_lane
 from shared.blau_service import empty_lookup
 from web.components import blau_panel
 
@@ -88,22 +89,54 @@ def test_the_switch_says_what_pressing_it_will_do():
     from web.translations import using_language
 
     with using_language("en"):
-        assert blau_panel.switch_tooltip(False) == "Turn on Blau's dictionary (Judeo-Arabic)"
-        assert blau_panel.switch_tooltip(True) == "Turn off Blau's dictionary"
+        assert blau_panel.switch_tooltip(False) == "Turn on the dictionaries (Judeo-Arabic)"
+        assert blau_panel.switch_tooltip(True) == "Turn off the dictionaries"
     with using_language("he"):
-        assert blau_panel.switch_tooltip(False) == "הפעלת מילון בלאו (ערבית־יהודית)"
+        assert blau_panel.switch_tooltip(False) == "הפעלת המילונים (ערבית־יהודית)"
 
 
 def test_every_new_panel_string_has_its_hebrew():
     from shared.genizah_translations import TRANSLATIONS
 
-    for text in ("Turn on Blau's dictionary (Judeo-Arabic)", "Turn off Blau's dictionary",
+    for text in ("Turn on the dictionaries (Judeo-Arabic)", "Turn off the dictionaries",
                  "Type a word to look up", "A word in Hebrew or Arabic letters (ד' for ד̇)", "Look up",
                  "Type a Judeo-Arabic word in Hebrew letters, or an Arabic word.",
                  "spelled without the dot"):
         assert TRANSLATIONS.get(text, "").strip(), text
         assert text in PANEL_SRC, f"{text!r} is not the renderer's string any more"
+    for text in (blau_panel.TITLE, blau_panel.BLAU_TITLE, blau_panel.NOTHING, *blau_panel.TAB_LABELS.values()):
+        assert TRANSLATIONS.get(text, "").strip(), text
     assert "tr(DISCLAIMER)" in PANEL_SRC
+    assert "tr(TITLE if several else titles[tabs[0]])" in PANEL_SRC
+    assert "label=tr(TAB_LABELS[name])" in PANEL_SRC and "ui.label(tr(NOTHING))" in PANEL_SRC
+
+
+def test_the_page_s_hint_names_no_one_dictionary():
+    """Owner, 2026-11-04: the panel is not Blau's alone, so the hint beside the switch
+    does not say Blau."""
+    from shared.genizah_translations import TRANSLATIONS
+
+    browse = (REPO / "web" / "pages" / "browse.py").read_text(encoding="utf-8")
+    hint = "Click a word to look it up in the dictionaries"
+    assert f"ui.label(tr('{hint}'))" in browse
+    assert TRANSLATIONS[hint] == "לחיצה על מילה מחפשת אותה במילונים"
+    assert "בלאו" not in TRANSLATIONS[hint] and "בלאו" not in blau_panel.switch_tooltip(True)
+
+
+def test_a_lookup_opens_on_the_reader_s_tab_while_it_has_an_answer():
+    tabs = [blau_panel.BLAU_TAB, blau_panel.LANE_TAB]
+    both = {blau_panel.BLAU_TAB: True, blau_panel.LANE_TAB: True}
+    assert blau_panel.pick_tab(tabs, both) == "blau", "no choice yet: the first tab with an answer"
+    assert blau_panel.pick_tab(tabs, both, "lane") == "lane", "the reader's choice holds"
+    lane_only = {blau_panel.BLAU_TAB: False, blau_panel.LANE_TAB: True}
+    assert blau_panel.pick_tab(tabs, lane_only) == "lane", "Blau has nothing: Lane"
+    assert blau_panel.pick_tab(tabs, lane_only, "blau") == "lane", "the chosen tab has nothing: one that has"
+    blau_only = {blau_panel.BLAU_TAB: True, blau_panel.LANE_TAB: False}
+    assert blau_panel.pick_tab(tabs, blau_only, "lane") == "blau"
+    none = {blau_panel.BLAU_TAB: False, blau_panel.LANE_TAB: False}
+    assert blau_panel.pick_tab(tabs, none, "lane") == "lane", "nothing anywhere: the reader's tab stays"
+    assert blau_panel.pick_tab(tabs, none) == "blau" and blau_panel.pick_tab(tabs, none, "other") == "blau"
+    assert blau_panel.pick_tab(["lane"], both, "blau") == "lane", "a choice of a tab not shown is ignored"
 
 
 def test_the_disclaimer_is_the_owner_s_hebrew():
@@ -161,7 +194,11 @@ def test_the_stylesheet_styles_what_the_renderer_and_the_script_make():
                      "--blau-left", "--blau-top", "--blau-bottom",
                      f".{blau_panel.SWITCH_CLASS}.active {{", f".{blau_panel.HINT_CLASS} {{",
                      f".{blau_panel.PANEL_CLASS} .panel-head .word-input input {{",
-                     f".{blau_panel.PANEL_CLASS} .type-note {{"):
+                     f".{blau_panel.PANEL_CLASS} .type-note {{",
+                     f".{blau_panel.PANEL_CLASS} .{blau_panel.TABS_CLASS} {{",
+                     f".{blau_panel.PANEL_CLASS} .{blau_panel.TAB_CLASS} {{",
+                     f".{blau_panel.PANEL_CLASS} .{blau_panel.TAB_CLASS}.not-found {{",
+                     f".{blau_panel.PANEL_CLASS} .{blau_panel.TAB_PANELS_CLASS} {{"):
         assert selector in CSS, selector
     # The script places the popover with the size the stylesheet gives it.
     js_width = int(re.search(r"var WIDTH = (\d+)", JS).group(1))
@@ -174,3 +211,5 @@ def test_the_stylesheet_styles_what_the_renderer_and_the_script_make():
 def test_render_lookup_draws_nothing_without_a_credit_line():
     assert blau_panel.render_lookup(empty_lookup("כתאב"), credit_he="") is False
     assert blau_panel.render_lookup(empty_lookup("כתאב"), credit_he="   ") is False
+    assert blau_panel.render_lookup(None, lane=empty_lane("כתאב"), lane_credit=" ") is False
+    assert blau_panel.render_lookup(None, credit_he="a credit") is False, "no dictionary served"
