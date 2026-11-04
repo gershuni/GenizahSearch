@@ -1239,6 +1239,7 @@ on `/catalog-browse` (sidebar card, chips under the button), in "Search only in.
 - **Function** `page_meta` (Line 128) — per-route SEO metadata (title, description, canonical, OG/Twitter)
 - **Function** `_resolve_ui_language` (Line 222) — detect UI language from storage/cookie
 - **Function** `create_layout` (Line 240) — shared page layout (header, sidebar, footer)
+- `create_layout`'s `render_header_center` — the header's go-to box on every page, `/` and `/search` included (owner, 2026-11-04): `home_query_target` with `catalogue_has_shelfmark` via `run.io_bound`; placeholder "Search text or go to a shelfmark..."; marks `header-search`, `header-search-toggle`; below 1024px a search button opens it across the bar, client-side `_HEADER_SEARCH_OPEN_JS`/`_CLOSE_JS`, rules `header-search` in common.css. Tests: `tests/render_smoke/test_header_search_render_smoke.py`.
 - **Function** `_show_citation_reminder` (Line 635) — periodic citation reminder popup
 - **Function** `apply_theme_immediately` (Line 689) — inject dark/light theme CSS
 - **Function** `_safe_user_storage_get` (Line 821) — safe app.storage.user accessor
@@ -2000,8 +2001,8 @@ Variant and Lab preferences of one website visitor, kept in that visitor's stora
 
 ## web/home_query.py
 
-- **Function** `has_hebrew_or_arabic_letter` (Line 34) — True when ``text`` holds at least one Hebrew or Arabic LETTER.
-- **Function** `home_query_target` (Line 46) — The URL the homepage box navigates to for ``text``, or None if blank.
+- **Function** `home_query_target` (Line 44) — The URL a go-to box navigates to for ``text``, or None if blank. One routing for the homepage hero box, the header box and the /search box's system-number case: `search_box_input_kind` decides -- sys_id -> `/browse?sys_id=`, shelfmark -> `/browse?shelfmark=`, anything else (English words, Hebrew typed on the English layout) -> `/search?q=` (2026-11-04; before, all Latin text went to Browse as a shelfmark). Optional `has_shelfmark` predicate: Latin text with a digit the rules call text is looked up in the catalogue first (`Mingana 9`). Tests: `tests/test_home_query_routing.py`.
+- **Function** `catalogue_has_shelfmark` — the pages' `has_shelfmark`: `state.meta_mgr.has_shelfmark`, False when the catalogue is not loaded or the lookup fails; the pages call `home_query_target` with it via `run.io_bound`.
 
 ## web/search_box_input.py
 
@@ -2673,6 +2674,7 @@ Catalogue criteria (plan `docs/plans/CATALOGUE_CRITERIA_PLAN.md`, rules §6.1): 
     - Method `_normalize_shelfmark` (Line 1767) — Normalize shelfmarks using the canonical module-level function.
     - Method `_iter_shelfmark_sources` (Line 1771) — Yield shelfmark candidates from CSV bank and cached metadata.
     - Method `_get_shelfmark_index` (Line 1789) — Build or return cached pre-normalized shelfmark index.
+    - Method `has_shelfmark` — True when the query, normalised (library prefix off, or whole), is a record's catalogue shelfmark exactly: a binary search of the prewarmed `_ShelfmarkSearchIndex.norm_keys`; False until that index is built (never builds it). For the website's go-to boxes (`web/home_query.py::catalogue_has_shelfmark`). Tests: `tests/test_metadata_has_shelfmark.py`.
     - Method `resolve_system_by_shelfmark` (Line 1822) — Resolve a system ID by shelfmark, ignoring dots/slashes/spaces. A prefix naming a library keeps it (`catalog_shelfmark.named_library_exact`). When nothing matches exactly, falls back to catalogue forms (`shared/catalog_shelfmark.py`) before substring options.
     - Method `resolve_catalog_form` / `resolve_catalog_forms` — exact-or-catalogue-form answer for one / many inputs (one index pass), never substring options; `{sys_id, options, selected_shelfmark, total, tier}`. Used by `search_by_meta`'s empty-result fallback and exclusion lists.
     - Method `_get_catalog_tables` — catalogue-form tables tied to the index list object (`is`, never `id()`).

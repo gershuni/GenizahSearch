@@ -22,7 +22,7 @@ from web.components.typography import h1, h2, h3
 from web.atlas_assets import atlas_preview_available
 from web.discovery_assets import discovery_available
 from web.analytics import posthog_capture
-from web.home_query import home_query_target
+from web.home_query import catalogue_has_shelfmark, home_query_target
 
 logger = logging.getLogger(__name__)
 
@@ -141,8 +141,11 @@ def create_page():
                 with ui.row().classes('items-center gap-2').style(
                     'max-width: 600px; width: 100%;'
                 ):
-                    def _navigate_search():
-                        target = home_query_target(hero_search.value)
+                    async def _navigate_search():
+                        # Off the loop: a Latin string with a digit is looked up
+                        # in the catalogue (MetadataManager.has_shelfmark) before it is searched.
+                        target = await run.io_bound(
+                            home_query_target, hero_search.value, catalogue_has_shelfmark)
                         if target:
                             ui.navigate.to(target)
 
@@ -160,10 +163,10 @@ def create_page():
                         placeholder=tr('Text, shelfmark or system ID')
                     ).classes('flex-grow hero-search-input').props('outlined rounded dense').style(
                         'font-size: 1.1rem;'
-                    ).on('keydown.enter', lambda: _navigate_search()).mark('home-hero-search')
+                    ).on('keydown.enter', _navigate_search).mark('home-hero-search')
                     ui.button(
                         icon='search',
-                        on_click=lambda: _navigate_search()
+                        on_click=_navigate_search
                     ).props(f'round color=primary aria-label="{tr("Search")}"').style('width: 44px; height: 44px;')
 
             # A first-class escape hatch for the many visitors who arrive

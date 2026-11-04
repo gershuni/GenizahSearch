@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import threading
+from array import array
 import pickle
 import requests
 import xml.etree.ElementTree as ET
@@ -221,7 +222,7 @@ class _ShelfmarkSearchIndex:
     """
 
     __slots__ = ('bank_id', 'size', 'norm_keys', 'norm_ids', 'nodot_keys', 'nodot_ids',
-                 'token_keys', 'token_ids')
+                 'token_keys', 'token_ids', 'alternate_hashes')
 
     def __init__(self, csv_bank, normalize):
         self.bank_id = id(csv_bank)
@@ -229,11 +230,20 @@ class _ShelfmarkSearchIndex:
         by_norm = []
         by_nodot = []
         by_token = {}
+        alternates = set()
         for sys_id, data in list(csv_bank.items()):
             value = data.get('shelfmark', '') if isinstance(data, dict) else ''
             if not value or not isinstance(value, str):
                 continue
             _val_norm, val_normalized, val_nodots, val_tokens = _shelfmark_forms(value, normalize)
+            # The record's other call numbers, as the Browse resolver reads them
+            # (``_iter_shelfmark_sources``), for ``MetadataManager.has_shelfmark``
+            # only: hashed, ~300,000 of them in 2.4 MB rather than their strings.
+            for other in data.get('call_numbers_raw') or ():
+                if isinstance(other, str) and other != value:
+                    other_norm = normalize(other)
+                    if other_norm and other_norm != val_normalized:
+                        alternates.add(hash(other_norm))
             by_norm.append((val_normalized, sys_id))
             by_nodot.append((val_nodots, sys_id))
             for token in set(val_tokens):
@@ -246,6 +256,7 @@ class _ShelfmarkSearchIndex:
         self.nodot_ids = [sid for _key, sid in by_nodot]
         self.token_keys = sorted(by_token)
         self.token_ids = {token: tuple(ids) for token, ids in by_token.items()}
+        self.alternate_hashes = array('q', sorted(alternates))
 
     def is_for(self, csv_bank):
         return self.bank_id == id(csv_bank) and self.size == len(csv_bank)
@@ -2352,6 +2363,50 @@ class MetadataManager:
 
         self._shelfmark_index = index
         return index
+
+    def has_shelfmark(self, query) -> bool:
+        """True when ``query`` is a catalogue shelfmark exactly, as ``resolve_system_by_shelfmark``
+        compares them (normalised; with a library name off its front, or whole).
+
+        For the website's go-to boxes (``web/home_query.py``): a rule-based recogniser
+        cannot know every catalogue form (``Mingana 9``, ``P. Mich. Inv. 531``), so what it
+        calls text is looked up here before it is searched. Binary searches of the Shelfmark
+        search index, which the server builds at start (``prewarm_shelfmark_search``): each
+        record's shelfmark (``norm_keys``) and the hashes of its other call numbers
+        (``alternate_hashes``: ``Gaster, Moses Collection Printed series 61``; a hash
+        collision could only send a non-shelfmark to Browse, which then says "No
+        manuscript found"), then the NLI cache's ``shelfmark`` / ``shelfmark_alt`` (as
+        ``resolve_system_by_shelfmark`` reads them; the Shelfmark search's own pass over
+        the cache, with its kept forms). Until the index is built the answer is False --
+        a key press never builds it (seconds of CPU)."""
+        from bisect import bisect_left
+        q = (query or '').strip()
+        if not q:
+            return False
+        bank = self.csv_bank
+        index = getattr(self, '_shelfmark_search_index', None)
+        if index is None or not bank or not index.is_for(bank):
+            return False
+        keys = {self._normalize_shelfmark(q), self._normalize_shelfmark(_strip_library_prefix(q))}
+        keys.discard('')
+        norm_keys = index.norm_keys
+        hashes = index.alternate_hashes
+        for key in keys:
+            i = bisect_left(norm_keys, key)
+            if i < len(norm_keys) and norm_keys[i] == key:
+                return True
+            h = hash(key)
+            j = bisect_left(hashes, h)
+            if j < len(hashes) and hashes[j] == h:
+                return True
+        for sys_id, data in list(self.nli_cache.items()):
+            value = data.get('shelfmark')
+            if isinstance(value, str) and value and self._nli_shelfmark_forms_for(sys_id, value)[1] in keys:
+                return True
+            alt = data.get('shelfmark_alt')
+            if isinstance(alt, str) and alt and self._normalize_shelfmark(alt) in keys:
+                return True
+        return False
 
     def resolve_system_by_shelfmark(self, query, limit=100):
         """

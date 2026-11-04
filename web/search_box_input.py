@@ -35,6 +35,7 @@ is ``tests/render_smoke/test_search_box_input_render_smoke.py``.
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Optional, Tuple
 
 from shared.browse_map_utils import _strip_library_prefix
@@ -69,10 +70,16 @@ SHELFMARK_WORDS = COLLECTION_PREFIXES | frozenset({
 
 # Letters, digits and the marks shelfmarks are written with (``T-S NS 307.61b``,
 # ``Halper 331``, ``Moss. IV,12.2``, ``MS Heb c 57``, ``ENA 2156.1``).
-_SHELFMARK_CHARS_RE = re.compile(r"^[A-Za-z0-9 .,:;'()\[\]/\-]+$")
+# ``=`` and ``_`` too: catalogue shelfmarks carry them (``Ms. Heb. 1149.5=24``,
+# ``LON BL Or. 10126_2 f. 5-6``; 1,058 libraries.csv strings, Codex on #476).
+# ``*`` and ``?`` (257 strings) stay out: in a search box they are a wildcard
+# and a question.
+_SHELFMARK_CHARS_RE = re.compile(r"^[A-Za-z0-9 .,:;'()\[\]/\-=_]+$")
 _FIRST_TOKEN_RE = re.compile(r'^[A-Za-z][A-Za-z.\-]*')
 _LETTER_RUN_RE = re.compile(r'[A-Za-z]+')
-_ROMAN_RE = re.compile(r'^[ivxlcdm]+$')
+# A Roman numeral, or one with a letter after it: Mosseri volumes are ``IIIa``,
+# ``IVb`` (``Moss. IIIa,20``, 22 libraries.csv shelfmarks; Codex on #476).
+_ROMAN_RE = re.compile(r'^[ivxlcdm]+[a-z]?$')
 _DOTTED_NUMBER_RE = re.compile(r'[0-9A-Za-z]\.\d')
 _LETTER_DIGIT_RE = re.compile(r'[A-Za-z]\d|\d[A-Za-z]')
 
@@ -87,13 +94,25 @@ def _words_are_shelfmark_words(text: str) -> bool:
     return True
 
 
+def _without_accents(text: str) -> str:
+    """``text`` with the accents off its Latin letters (``Israélite`` -> ``Israelite``).
+
+    NFD, not NFKD: a full-width digit stays non-ASCII, so it never reads as a number."""
+    return ''.join(ch for ch in unicodedata.normalize('NFD', text) if not unicodedata.combining(ch))
+
+
 def search_box_input_kind(query: Optional[str]) -> str:
     """``'sys_id'``, ``'shelfmark'`` or ``'text'`` for what the search box holds."""
     text = (query or '').strip()
-    if not text or has_hebrew_or_arabic_letter(text) or not text.isascii():
+    if not text or has_hebrew_or_arabic_letter(text):
         return 'text'
-    if CORPUS_SYS_ID_RE.fullmatch(text):
+    if text.isascii() and CORPUS_SYS_ID_RE.fullmatch(text):
         return 'sys_id'
+    # The NLI catalogue form names "the Alliance Israélite Universelle"
+    # (3,321 libraries.csv strings); the rules below read ASCII.
+    text = _without_accents(text)
+    if not text.isascii():
+        return 'text'
     if not _SHELFMARK_CHARS_RE.match(text) or not any(ch.isdigit() for ch in text):
         return 'text'
     if looks_like_catalogue_form(text):

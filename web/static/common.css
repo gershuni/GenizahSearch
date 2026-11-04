@@ -1302,6 +1302,42 @@ body {
     .header-logo-text { display: none !important; }
 }
 
+/* The header's go-to box (web/main.py::render_header_center, 2026-11-04).
+   From 1024px the field sits in the header and the search button is hidden;
+   below, the button shows and the field opens across the whole header bar
+   while the row carries .is-open (set and cleared in the browser). */
+.header-search-input { width: clamp(220px, 24vw, 320px); }
+/* The site's field rules paint every outlined field white; in the header the
+   text and placeholder are white (Quasar "dark"), so the field is see-through. */
+.header-search-input .q-field__control { background: rgba(255, 255, 255, 0.15) !important; }
+.header-search-input .q-field__control:before { border-color: rgba(255, 255, 255, 0.45) !important; }
+.header-search-input input { color: #fff !important; }
+.header-search-input input::placeholder { color: rgba(255, 255, 255, 0.75) !important; opacity: 1; }
+.header-search-close { display: none !important; }
+@media (min-width: 1024px) {
+    .header-search-toggle { display: none !important; }
+}
+@media (max-width: 1023px) {
+    .header-search-field { display: none !important; }
+    .header-search.is-open .header-search-field {
+        display: flex !important;
+        position: absolute;
+        inset: 0;
+        z-index: 10;
+        padding: 0 8px;
+        gap: 4px;
+        background: var(--bg-header);
+    }
+    .header-search.is-open .header-search-input { flex: 1 1 auto; width: auto; }
+    .header-search.is-open .header-search-close { display: inline-flex !important; }
+}
+/* Room for the search button on a phone (measured at 375px: without this the
+   groups beside it wrapped to a second line under the 64px bar). */
+@media (max-width: 640px) {
+    .app-header > .nicegui-row { flex-wrap: nowrap !important; gap: 4px !important; }
+    .app-header .header-search-toggle { min-width: 36px !important; padding: 4px !important; }
+}
+
 /* Ensure logo text doesn't shrink */
 .header-logo-text {
     flex-shrink: 0 !important;
