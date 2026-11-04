@@ -6479,7 +6479,7 @@ TRANSLATIONS.update({
 # docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md phase B, 2026-11-04). DRAFTS for the owner's approval.
 # The Perseus credit line itself is not translated: it is shown verbatim (D3).
 TRANSLATIONS.update({
-    "Lane's Arabic-English Lexicon": "המילון הערבי-אנגלי של ליין",
+    "Lane's Arabic-English Lexicon": "הלקסיקון הערבי-אנגלי של ליין",  # the owner's wording, 2026-11-04
     "Arabic readings, commonest first": "קריאות בערבית, הנפוצה תחילה",
     "Look up this reading": "חיפוש קריאה זו",
     "root": "שורש",
