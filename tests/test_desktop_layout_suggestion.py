@@ -196,6 +196,30 @@ def test_a_stopped_search_with_no_results_offers_nothing():
     assert host.offered == []
 
 
+def test_the_line_sits_in_the_results_box():
+    """Where the rows would be (owner, 2026-11-04): in the results table's
+    viewport, under the column headers, not in the status row."""
+    from PyQt6.QtWidgets import QTableWidget
+
+    class _Builder(QWidget):
+        _install_layout_suggestion = GenizahGUI._install_layout_suggestion
+        _take_layout_suggestion = GenizahGUI._take_layout_suggestion
+
+    host = _Builder()
+    table = QTableWidget(0, 3, host)
+    label = host._install_layout_suggestion(table)
+    assert label.parentWidget() is table.viewport()
+    assert label.isHidden()
+    host.resize(800, 400)
+    table.resize(800, 400)
+    host.show()
+    label.setText("Did you mean x?")
+    label.setVisible(True)
+    QApplication.processEvents()
+    assert label.isVisible()
+    assert label.geometry().top() == 0 and label.width() > 0
+
+
 def test_the_window_builds_the_label_and_resets_it():
     """The real window wires the label (hidden until offered) and its reset."""
     import inspect

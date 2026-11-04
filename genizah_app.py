@@ -6774,6 +6774,8 @@ class GenizahGUI(QMainWindow):
         table_layout.addWidget(self.local_scope_strip)
 
         table_layout.addLayout(self._install_load_more_button())
+        self.layout_suggestion_label = self._install_layout_suggestion(self.results_table)
+        self._layout_suggestion = None    # the Hebrew it offers, while shown
 
         self.results_stack = QStackedLayout()
         self.results_stack.addWidget(self.results_placeholder)
@@ -6819,21 +6821,8 @@ class GenizahGUI(QMainWindow):
         self._zero_result_back_btn.setVisible(False)
         self._zero_result_back_btn.clicked.connect(self._undo_zero_result_refine)
 
-        # "Did you mean <Hebrew>?" after a text search that found nothing, for a
-        # query typed with the keyboard on the English layout (as the website's
-        # /search does; shared/keyboard_layout.py). The Hebrew is a link that runs it.
-        self.layout_suggestion_label = QLabel()
-        self.layout_suggestion_label.setTextFormat(Qt.TextFormat.RichText)
-        self.layout_suggestion_label.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse
-                                                             | Qt.TextInteractionFlag.LinksAccessibleByKeyboard)
-        self.layout_suggestion_label.setVisible(False)
-        self.layout_suggestion_label.linkActivated.connect(self._take_layout_suggestion)
-        self._layout_suggestion = None    # the Hebrew it offers, while shown
-
         # Add controls to status row
-        bot.addWidget(self.status_label)
-        bot.addWidget(self.layout_suggestion_label)
-        bot.addStretch(1)
+        bot.addWidget(self.status_label, 1)
         bot.addWidget(self._zero_result_back_btn)
 
         # Add to List button
@@ -24404,6 +24393,28 @@ class GenizahGUI(QMainWindow):
             ctypes.windll.user32.FlashWindowEx(ctypes.byref(fwi))
         except Exception:
             pass  # Silently fail -- notification is non-critical
+
+    def _install_layout_suggestion(self, table):
+        """The "Did you mean <Hebrew>?" line, after a text search that found
+        nothing, for a query typed with the keyboard on the English layout (as
+        the website's /search does; shared/keyboard_layout.py). Inside the
+        results box, where the rows would be (owner, 2026-11-04): a label in a
+        layout of the table's viewport, at its top and centred, shown only while
+        the table has no rows. The Hebrew is a link that runs it."""
+        label = QLabel()
+        label.setTextFormat(Qt.TextFormat.RichText)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse
+                                      | Qt.TextInteractionFlag.LinksAccessibleByKeyboard)
+        label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        label.setWordWrap(True)
+        label.setStyleSheet("QLabel { font-size: 16px; padding: 24px 12px; background: transparent; }")
+        label.setVisible(False)
+        label.linkActivated.connect(self._take_layout_suggestion)
+        overlay = QVBoxLayout(table.viewport())
+        overlay.setContentsMargins(0, 0, 0, 0)
+        overlay.addWidget(label, 0, Qt.AlignmentFlag.AlignTop)
+        overlay.addStretch(1)
+        return label
 
     def _offer_layout_suggestion(self):
         """Under a text search that found nothing: the Hebrew a Latin-script query
