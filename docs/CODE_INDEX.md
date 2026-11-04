@@ -1139,6 +1139,16 @@ desktop.Y.X` identity holds via the facades.
 - **Function** `_render_box` (Line 231) — The box at the top of the panel: the word shown, editable; Enter or the
 - **Function** `render_lookup` (Line 244) — Draw ``result`` into the current container. Returns False, drawing
 
+## web/components/lane_panel.py
+
+- **Function** `_attr` (Line 51)
+- **Function** `_arabic` (Line 55)
+- **Function** `_render_readings` (Line 59)
+- **Function** `_render_entry` (Line 74)
+- **Function** `_render_root` (Line 85)
+- **Function** `_render_credit` (Line 101) — The Perseus line verbatim (D3; English in both UIs, as Perseus words it), then the
+- **Function** `render_lane` (Line 111) — Draw ``result`` into the current container. Returns False, drawing nothing, when there is
+
 ## web/components/criteria_panel.py
 
 The "Manuscript features" control (catalogue criteria, docs/plans/CATALOGUE_CRITERIA_PLAN.md §6.3, PR 1b):
@@ -3562,6 +3572,55 @@ modules and the four passage core modules (`passage_index`, `passage_search`, `p
 - **Function** `_peel_prefixes` (Line 134)
 - **Function** `_peel_suffix` (Line 149)
 - **Function** `candidate_stems` (Line 157) — Normalized lookup candidates for one corpus word, the word itself first, then with
+
+## shared/arabic_method.py
+
+- **Function** `backoff_count` (Line 35) — The count of the commonest stem left when a proclitic and a pronoun are
+- **Function** `rank_readings` (Line 50) — (skeleton, count) of the word's attested readings, best first.
+- **Function** `_proclitic_layers` (Line 78) — How many proclitics a peeled prefix is: و/ف, then ب/ل/ك, then the article (لل is two).
+- **Function** `form_roots` (Line 90) — Roots of a reading through Lane's headwords: the reading, or the reading with
+- **Function** `strip_roots` (Line 126) — Root keys an Arabic word may come from: peel a proclitic, a pronoun, an
+- **Function** `closed_class_roots` (Line 169) — v4: a closed-class word, alone or after a conjunction (و, ف), is the table's: its roots in
+- **Function** `reading_roots` (Line 178) — The roots of one reading, best first, by method ``version``: the closed-class table (v4),
+
+## shared/arabic_service.py
+
+- **Function** `lane_enabled` (Line 81) — The ``LANE_DICTIONARY_ENABLED`` kill switch, read on every call (default on).
+- **Function** `entry_url` (Line 89) — One Lane entry on Ephraim Meiri's site.
+- **Function** `root_url` (Line 94) — Lane's entries under a root on Ephraim Meiri's site (a headword search in Lane).
+- **Function** `default_sidecar_path` (Line 99) — Where the sidecar lives: the user's updated copy first (as for the Blau, FGP and PGP
+- **Class** `LaneReading` (Line 115) — One Arabic reading of the word: its skeleton, its commonest spelling in the word count
+- **Class** `LaneEntry` (Line 124) — One Lane entry: the headword, the printed page, the text (cut at ``MAX_TEXT``).
+- **Class** `LaneRoot` (Line 137) — One root the first reading may come from, with its entries.
+- **Class** `LaneLookup` (Line 148)
+    - Property `found` (Line 156)
+    - Property `reading` (Line 160) — The reading the root cards are for: the first.
+- **Function** `empty_lane` (Line 165)
+- **Function** `_text` (Line 169)
+- **Function** `_page` (Line 173)
+- **Function** `cut_text` (Line 180) — ``text`` up to ``limit`` characters, ended at a space where one is near, and whether
+- **Class** `_FreqView` (Line 193) — The word count for one lookup: ``.get`` like a Counter, read from ``freq`` by key and kept
+    - Method `__init__` (Line 197)
+    - Method `__bool__` (Line 201)
+    - Method `prefetch` (Line 204)
+    - Method `_row` (Line 215)
+    - Method `get` (Line 220)
+    - Method `spelling` (Line 224)
+- **Class** `ArabicService` (Line 229) — Read-only access to the Arabic sidecar. See the module docstring.
+    - Method `__init__` (Line 232)
+    - Method `_load_tables` (Line 275) — The small tables the method reads on every lookup, held in memory (as the gate's
+    - Property `db_path` (Line 295)
+    - Method `is_ready` (Line 298) — The sidecar is open and passed every check.
+    - Method `is_available` (Line 302) — Ready AND the kill switch is on. The only question a surface asks.
+    - Method `meta` (Line 306)
+    - Property `credit` (Line 310) — The Perseus credit line (D3), verbatim; shown on every Lane card.
+    - Method `close` (Line 314)
+    - Method `lookup` (Line 325) — What Lane has for one clicked or typed word. Hebrew letters are read as Judeo-Arabic;
+    - Method `_matched_entries` (Line 361) — The entries of ``root_key`` whose headword is the reading, or the reading with a
+    - Method `_root` (Line 385)
+- **Function** `_validate` (Line 408) — '' and the meta when the open file is one this reader serves; else the reason.
+- **Function** `get_arabic_service` (Line 445) — The default service, created on first use (per-thread connections by default: safe under
+- **Function** `reset_arabic_service` (Line 455) — Forget the default service (after the sidecar file is replaced).
 
 ## shared/blau_service.py
 

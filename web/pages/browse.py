@@ -27,6 +27,7 @@ from shared.transcription_credits import resolve_transcription_credit
 from shared.export_utils import GENIZAHSEARCH_URL
 from shared.blau_service import empty_lookup as blau_empty_lookup
 from shared.blau_service import get_blau_service
+from shared.arabic_service import get_arabic_service
 from web.components import blau_panel
 from web.citation_chip import browse_page_citation, retrieved_today, set_page_citation
 
@@ -766,6 +767,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     # and is byte-for-byte what it was before.
     blau_service = get_blau_service()
     blau_on = blau_service.is_available()
+    # Lane's Lexicon under Blau's cards (docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md phase B, D8):
+    # in the same panel, so only where Blau's panel is; its own readiness and kill switch decide
+    # per lookup (an unavailable service answers an empty result and nothing is drawn).
+    lane_service = get_arabic_service() if blau_on else None
     if blau_on:
         ui.add_head_html(blau_panel.head_html())
     service = get_service()
@@ -4826,7 +4831,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                         if not blau_popover.is_deleted:
                             blau_popover.style('display: none;')
 
-                    def _blau_draw(result, focus):
+                    def _blau_draw(result, focus, lane=None):
                         with using_language(_blau_lang):
                             blau_popover.clear()
                             with blau_popover:
@@ -4834,14 +4839,21 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     result, credit_he=blau_service.credit_he,
                                     credit_en=blau_service.credit_en, lang=_blau_lang,
                                     on_close=_blau_hide, on_search=_blau_search,
-                                    focus_input=focus)
+                                    focus_input=focus, lane=lane,
+                                    lane_credit=lane_service.credit if lane_service else '')
                         blau_popover.style('display: flex;' if drawn else 'display: none;')
 
+                    def _both_lookups(word):
+                        # One trip off the loop for both dictionaries; Lane's answer is
+                        # empty when its service is not available.
+                        return blau_service.lookup(word), (lane_service.lookup(word) if lane_service else None)
+
                     async def _blau_answer(word, request, focus=False):
-                        result = await run.io_bound(blau_service.lookup, word)
+                        answers = await run.io_bound(_both_lookups, word)
+                        result, lane = answers if answers is not None else (None, None)
                         if result is None or blau_popover.is_deleted or request != _blau_request['value']:
                             return
-                        _blau_draw(result, focus)
+                        _blau_draw(result, focus, lane)
 
                     def _blau_start(word, focus):
                         # Synchronous on purpose: the counter must move in the

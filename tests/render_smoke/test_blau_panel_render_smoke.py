@@ -23,11 +23,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from nicegui import events, ui
 
+from shared import arabic_service
+from shared.arabic_service import LaneEntry, LaneLookup, LaneReading, LaneRoot, empty_lane
 from shared.blau_service import SITE_URL, BlauCard, BlauExample, BlauLookup, BlauSense, empty_lookup
 from tests.render_smoke.test_browse_button_icons_render_smoke import (
     OPEN_PAGE, SID, _all_elements, _click, _run_home_smoke, _service, _wait_until,
 )
-from web.components import blau_panel
+from web.components import blau_panel, lane_panel
 from web.pages import browse
 
 CREDIT_HE = 'יהושע בלאו, מילון לטקסטים ערביים־יהודיים מימי הביניים (שורת קרדיט לבדיקה)'
@@ -63,11 +65,41 @@ def _dictionary(available=True, credit_he=CREDIT_HE, result=None):
     return svc
 
 
-def _run(driver, dictionary, lang='en'):
+PERSEUS = ('Text provided by Perseus Digital Library, with funding from The U.S. Department of Education. '
+           'Original version available for viewing and download at http://www.perseus.tufts.edu/.')
+LANE_ENTRY_URL = arabic_service.entry_url('lane:t:ذا')
+LANE_ROOT_URL = arabic_service.root_url('ذا')
+
+
+def _lane_result(word):
+    entries = (
+        LaneEntry(entry_id='lane:t:ذا', headword='ذَا', page=948, text='ذَا is said to be originally ذَىْ …',
+                  cut=True, url=LANE_ENTRY_URL, matched=True),
+        LaneEntry(entry_id='lane:t:ذو', headword='ذُو', page=984, text='ذُو meaning صَاحِب.', cut=False,
+                  url=arabic_service.entry_url('lane:t:ذو'), matched=False),
+    )
+    root = LaneRoot(root_key='ذWW', name='ذا', page=948, url=LANE_ROOT_URL, entries=entries, more_entries=15)
+    return LaneLookup(word=word, script='ja', readings=(LaneReading('ذلك', 'ذلك', 1227282),
+                                                        LaneReading('دلك', 'دلك', 595)), roots=(root,))
+
+
+def _lane(result=None, credit=PERSEUS, available=True):
+    """The Lane service: by default NOT available, so the Blau tests see Blau only."""
+    svc = MagicMock()
+    svc.credit = credit
+    if available:
+        svc.lookup.side_effect = lambda word: result(word) if callable(result) else (result or _lane_result(word))
+    else:
+        svc.lookup.side_effect = lambda word: empty_lane(word)
+    return svc
+
+
+def _run(driver, dictionary, lang='en', lane=None):
     crossref = MagicMock()
     crossref.is_available.return_value = False
     with patch.object(browse, 'get_service', return_value=_service(OPEN_PAGE)), \
             patch.object(browse, 'get_blau_service', return_value=dictionary), \
+            patch.object(browse, 'get_arabic_service', return_value=lane or _lane(available=False)), \
             patch('shared.nli_crossref_service.get_nli_crossref_service', return_value=crossref), \
             patch.object(browse, 'load_connected_fragments_into', AsyncMock()), \
             patch.object(browse.GlobalAuthState, 'is_logged_in', return_value=False):
@@ -445,3 +477,101 @@ def test_an_unavailable_dictionary_leaves_the_page_as_it_was():
         assert not dictionary.lookup.called
 
     _run(driver, dictionary, lang='en')
+
+
+def _lane_sections(user):
+    return _with_class(user, lane_panel.SECTION_CLASS)
+
+
+def test_lane_s_entries_follow_blau_s_cards_with_the_perseus_line():
+    """Phase B (D8): under Blau's cards and credit, the readings as chips (the commonest first,
+    marked), the root card with Lane's entries, the matched one marked, each linked to its entry
+    on the source site, the rest counted and linked, and the Perseus line verbatim (D3)."""
+    dictionary, lane = _dictionary(), _lane()
+
+    async def driver(user):
+        await _open(user)
+        await _turn_on(user)
+        popover = _popover(user)
+        _fire(user, popover, blau_panel.LOOKUP_EVENT, {'word': 'דלך'})
+        await _wait_until(lambda: _lane_sections(user))
+        lane.lookup.assert_called_once_with('דלך')
+        dictionary.lookup.assert_called_once_with('דלך')
+        assert len(_with_class(user, blau_panel.CARD_CLASS)) == 1, "Blau's card is still drawn"
+        assert len(_lane_sections(user)) == 1
+        texts = _texts(user)
+        assert lane_panel.TITLE in texts and lane_panel.READINGS_LABEL in texts
+        chips = [e for e in _all_elements(user) if isinstance(e, ui.button) and lane_panel.CHIP_CLASS in e.classes]
+        assert [c.text for c in chips] == ['ذلك', 'دلك']
+        assert ['active' in c.classes for c in chips] == [True, False]
+        assert 'ذا' in texts and 'ذَا' in texts and 'p. 948' in texts and 'p. 984' in texts
+        entries = _with_class(user, lane_panel.ENTRY_CLASS)
+        assert [('matched' in e.classes) for e in entries] == [True, False]
+        assert '+15 more entries under this root' in texts
+        links = _links(user)
+        assert {LANE_ENTRY_URL, LANE_ROOT_URL, lane_panel.PERSEUS_URL, arabic_service.SITE_URL,
+                lane_panel.OPENITI_URL} <= links
+        full = [e for e in _all_elements(user) if isinstance(e, ui.link) and e.text == 'full entry']
+        assert [e.props.get('href') for e in full] == [LANE_ENTRY_URL], 'only the cut entry links to its full text'
+        perseus = [e for e in _all_elements(user) if isinstance(e, ui.link)
+                   and e.props.get('href') == lane_panel.PERSEUS_URL]
+        assert [e.text for e in perseus] == [PERSEUS], 'the Perseus line, verbatim'
+        # Blau's credit is drawn before Lane's section: the cards sit under Blau's (D8).
+        order = [e for e in _all_elements(user)
+                 if blau_panel.CREDIT_CLASS in e.classes or lane_panel.SECTION_CLASS in e.classes]
+        assert [blau_panel.CREDIT_CLASS in e.classes for e in order][:2] == [True, False]
+
+    _run(driver, dictionary, lane=lane)
+
+
+def test_a_reading_chip_looks_that_reading_up_in_the_box():
+    dictionary, lane = _dictionary(), _lane()
+
+    async def driver(user):
+        await _open(user)
+        await _turn_on(user)
+        _fire(user, _popover(user), blau_panel.LOOKUP_EVENT, {'word': 'דלך'})
+        await _wait_until(lambda: _lane_sections(user))
+        [first, second] = [e for e in _all_elements(user)
+                           if isinstance(e, ui.button) and lane_panel.CHIP_CLASS in e.classes]
+        assert not [li for li in first._event_listeners.values() if li.type == 'click'], \
+            'the reading shown is not a link to itself'
+        _click(user, second)
+        await _wait_until(lambda: lane.lookup.call_count == 2)
+        assert [c.args[0] for c in lane.lookup.call_args_list] == ['דלך', 'دلك']
+        assert dictionary.lookup.call_args_list[-1].args[0] == 'دلك'
+        await _wait_until(lambda: _shown_word(user) == ['دلك'])
+        assert _shown_word(user) == ['دلك'], 'the box holds the reading looked up'
+
+    _run(driver, dictionary, lane=lane)
+
+
+def test_lane_draws_nothing_without_its_credit_line_or_a_reading():
+    for lane in (_lane(credit=''), _lane(result=lambda word: LaneLookup(word=word, script='ja',
+                                                                          readings=(), roots=()))):
+        dictionary = _dictionary()
+
+        async def driver(user, lane=lane, dictionary=dictionary):
+            await _open(user)
+            await _turn_on(user)
+            popover = _popover(user)
+            _fire(user, popover, blau_panel.LOOKUP_EVENT, {'word': 'כתאב'})
+            await _wait_until(lambda: popover._style.get('display') == 'flex' and lane.lookup.called)
+            assert len(_with_class(user, blau_panel.CARD_CLASS)) == 1
+            assert not _lane_sections(user)
+
+        _run(driver, dictionary, lane=lane)
+
+
+def test_an_unavailable_lane_leaves_blau_s_panel_as_it_was():
+    dictionary = _dictionary()
+
+    async def driver(user):
+        await _open(user)
+        await _turn_on(user)
+        popover = _popover(user)
+        _fire(user, popover, blau_panel.LOOKUP_EVENT, {'word': 'כתאב'})
+        await _wait_until(lambda: popover._style.get('display') == 'flex')
+        assert len(_with_class(user, blau_panel.CARD_CLASS)) == 1 and not _lane_sections(user)
+
+    _run(driver, dictionary)

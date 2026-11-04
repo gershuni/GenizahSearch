@@ -6474,3 +6474,21 @@ TRANSLATIONS.update({
     "Digital edition: the MiDRASH project, funded by the European Union (ERC, MiDRASH, 101071829).":
         "המהדורה הדיגיטלית: פרויקט MiDRASH, במימון האיחוד האירופי (ERC, MiDRASH, 101071829).",
 })
+
+# Lane's Lexicon under Blau's cards (web/components/lane_panel.py,
+# docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md phase B, 2026-11-04). DRAFTS for the owner's approval.
+# The Perseus credit line itself is not translated: it is shown verbatim (D3).
+TRANSLATIONS.update({
+    "Lane's Arabic-English Lexicon": "המילון הערבי-אנגלי של ליין",
+    "Arabic readings, commonest first": "קריאות בערבית, הנפוצה תחילה",
+    "Look up this reading": "חיפוש קריאה זו",
+    "root": "שורש",
+    "All entries of this root": "כל הערכים של השורש",
+    "more entries under this root": "ערכים נוספים תחת השורש",
+    "full entry": "הערך המלא",
+    "No root of this reading was found in Lane.": "לא נמצא במילון של ליין שורש לקריאה זו.",
+    "Lane's entries from semitic.lang.emeiri.org (Ephraim Meiri).":
+        "ערכי ליין מתוך semitic.lang.emeiri.org (אפרים מאירי).",
+    "Readings ranked by a word count of the OpenITI corpus.":
+        "הקריאות מדורגות לפי ספירת מילים בקורפוס OpenITI.",
+})

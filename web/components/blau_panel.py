@@ -36,7 +36,9 @@ from typing import Any, Callable, Optional
 
 from nicegui import ui
 
+from shared.arabic_service import LaneLookup
 from shared.blau_service import SITE_URL, BlauCard, BlauLookup, BlauSense
+from web.components import lane_panel
 from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import tr
 
@@ -256,11 +258,14 @@ def _render_box(word: str, on_search: Callable[[str], Any], focus: bool) -> None
 
 def render_lookup(result: BlauLookup, *, credit_he: str, credit_en: str = '', lang: str = 'he',
                   on_close: Optional[Callable[..., Any]] = None,
-                  on_search: Optional[Callable[[str], Any]] = None, focus_input: bool = False) -> bool:
+                  on_search: Optional[Callable[[str], Any]] = None, focus_input: bool = False,
+                  lane: Optional[LaneLookup] = None, lane_credit: str = '') -> bool:
     """Draw ``result`` into the current container. Returns False, drawing
     nothing, when there is no credit line to show (ruling (a): no panel
     without it). With ``on_search`` the head holds the box (the word in it);
-    a result with no word is the panel opened to type one."""
+    a result with no word is the panel opened to type one. ``lane`` is Lane's
+    answer for the same word, drawn after Blau's credit
+    (web/components/lane_panel.py; nothing when it has no reading)."""
     credit_he = (credit_he or '').strip()
     if not credit_he:
         logger.warning('blau_panel: no credit line; the lookup of %r is not shown', result.word)
@@ -295,4 +300,6 @@ def render_lookup(result: BlauLookup, *, credit_he: str, credit_en: str = '', la
                         for candidate in result.candidates:
                             _rtl(candidate).classes('candidate')
         _render_credit(credit_he, credit_en, lang)
+        if lane is not None and result.word:
+            lane_panel.render_lane(lane, credit=lane_credit, lang=lang, on_search=on_search)
     return True

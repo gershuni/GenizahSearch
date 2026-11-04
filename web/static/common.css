@@ -2808,6 +2808,34 @@ body {
    it, underlined so it reads as a link; beats the theme's `[data-theme] a`. */
 .gs-blau .credit a { color: inherit; text-decoration: underline; text-decoration-style: dotted; display: block; }
 .blau-hint { color: var(--text-muted, #64748b); }
+/* Lane's Lexicon under Blau's cards (docs/plans/ARABIC_DICTIONARY_LAYER_PLAN.md phase B;
+   web/components/lane_panel.py). It reuses the card, entry, sense and credit rules above;
+   these are only what Lane adds: the section's rule, the reading chips, the English text. */
+.gs-blau .lane-section {
+    margin-top: 12px; padding-top: 8px; border-top: 2px solid var(--border-light, #e2e8f0);
+}
+.gs-blau .lane-title {
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--text-muted, #64748b);
+}
+.gs-blau .lane-readings { padding: 4px 0 2px; }
+.gs-blau .lane-readings .readings-label { font-size: 0.75rem; color: var(--text-muted, #64748b); }
+.gs-blau .lane-readings .chips { display: flex; flex-wrap: wrap; gap: 4px 6px; padding-top: 2px; }
+.gs-blau .lane-chip {
+    font-family: 'Noto Naskh Arabic', 'Scheherazade New', 'Amiri', 'Times New Roman', serif;
+    font-size: 1.05rem; min-height: 0; padding: 0 10px; border-radius: 999px;
+    border: 1px solid var(--border-light, #e2e8f0); color: var(--text-secondary, #475569);
+}
+.gs-blau .lane-chip.active {
+    border-color: var(--primary-600, #059669); color: var(--text-primary, #1e293b); font-weight: 700;
+}
+.gs-blau .lane-root .root-label { font-size: 0.72rem; color: var(--text-muted, #64748b); }
+.gs-blau .lane-root .root-name { font-size: 1.3rem; font-weight: 700; }
+.gs-blau .lane-entry .headword { font-size: 1.15rem; font-weight: 600; }
+.gs-blau .lane-entry .page { font-size: 0.75rem; color: var(--text-muted, #64748b); }
+/* Lane's text is English with Arabic inside it: left to right in both UIs. */
+.gs-blau .lane-text { direction: ltr; text-align: left; font-size: 0.85rem; }
+.gs-blau .lane-no-root { font-size: 0.82rem; color: var(--text-muted, #64748b); }
 /* The reader's switch in the version row: tinted while the lookup is on. */
 .blau-switch { color: var(--text-muted, #64748b); }
 .blau-switch.active { color: var(--primary-600, #059669); background: rgba(5, 150, 105, 0.12); }

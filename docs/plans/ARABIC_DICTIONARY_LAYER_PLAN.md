@@ -1,6 +1,6 @@
 # Arabic dictionaries beside Blau: Lane and Lisān al-ʿArab for Judeo-Arabic words
 
-**Status:** plan **rev. 4** (2026-11-04). **The owner ruled D1-D11** (§8): Lane first, Lisān
+**Status:** plan **rev. 5** (2026-11-04). **The owner ruled D1-D11** (§8): Lane first, Lisān
 later; the laneslexicon master files; credit and licence terms at the minimum each source
 requires; Ephraim Meiri's parsed files may be used; the stdlib v3 method; the 250-650 AH count;
 the cards under Blau's for now; the gate plus the owner's grading; a closed-class table; Hebrew
@@ -8,7 +8,9 @@ words given an Arabic card are not a gate (a reader who asks for Arabic gets Ara
 is built** (§7.1, branch `claude/arabic-lane-sidecar`): `arabic_data/arabic.db` with Lane's
 47,855 articles, its headword table, a 247-million-token word count and a 141-row closed-class
 table; its own gate passes and fails on mutations; the plan's gate passes on it. Nothing is served,
-bundled or deployed; no reader sees anything. Next: phase B, the Lane cards on `/browse` (§7).
+bundled or deployed; no reader sees anything. **Phase B is built** (§7.2, branch
+`claude/arabic-lane-cards`): Lane's cards under Blau's on `/browse`, not deployed; its wording awaits
+the owner.
 **Origin:** the owner's review of the Blau companion on 2026-11-04 (PR #475,
 `docs/plans/BLAU_DICTIONARY_PLAN.md` §6.2.1): Blau records what is particular to Judeo-Arabic, so
 an ordinary Arabic word (אבו *abū*, לנא *lanā*) has no entry, and an undotted letter is two
@@ -356,7 +358,8 @@ the 200-word sample is the check this measurement cannot replace (D9).
   (c) and (d) of the Blau plan): the readings as chips, the commonest first; for the chosen
   reading, the root card with Lane's article (English, truncated, "more"), the Perseus credit line
   and a link to the source. Typed Arabic skips the reading step. The cards sit under Blau's (D8; to
-  be revisited, since Lane often gives the broader sense). Web only first, as Blau.
+  be revisited, since Lane often gives the broader sense). Web only first, as Blau. **BUILT
+  (2026-11-04, branch `claude/arabic-lane-cards`, not deployed), §7.2.**
 - **C. Lisān al-ʿArab**, the same way, after Lane: its articles from the pinned OpenITI file (or
   Ephraim Meiri's parse, D5), its card beside Lane's, with OpenITI's credit and licence (D4).
 - **D. The desktop**, on a later ruling (GPL v2 is one reason to keep CAMeL out of it; D6 keeps the
@@ -455,6 +458,54 @@ the owner's grading of the 200 replaces it, D9.)
 readings has decided to read it as Arabic, and gets them; the panel does not judge the word's
 language, as it does not for Blau (ruling (c) of the Blau plan). Phase B therefore adds no Hebrew
 filter and keeps the count at 2. The table above stays as information.
+
+### 7.2 Phase B as built (not deployed)
+
+**One method, served and measured.** The v1-v4 method moved verbatim from the measuring script
+into `shared/arabic_method.py`; the script imports it back. Re-run on the built file, v1, v3 and
+v4 give the same P1, P2, P3, samples and examples as before the move, so the numbers of §7.1 are
+the numbers of what is served.
+
+**The service** (`shared/arabic_service.py`), fail-closed as `shared/blau_service.py`: ready only
+when `arabic_data/arabic.db` is where a sidecar lives, opens read-only and passes `quick_check`,
+has schema 1.0.0 and the running normalizer, every table and both lookup indexes, matching row
+counts, and the Perseus credit line. `LANE_DICTIONARY_ENABLED` (default on, read live) is its kill
+switch. A lookup is method v4 at count 2 (D11):
+
+- **A word in Hebrew letters** gives up to three readings, the commonest in the word count first.
+  An abbreviation gets none.
+- **A word typed in Arabic letters** is its own reading.
+- **The first reading's first root** gets a card. The gate measured the first root only (P1), and
+  the second was often a weak guess (`كتاب` offered توب), so one card.
+- **The card's entries:** the entries whose headword is the reading (or its stem, or the
+  closed-class table's headword) come first, then the rest in Lane's order. At most three are shown,
+  each cut at 600 characters, and the rest are counted.
+
+The tables the method reads per lookup are held in memory: the root keys, the article size per
+root, the headword table and the closed-class table. The word count stays on disk and is read by
+key. The real file opens in 0.3 s, and a lookup takes 0 to 16 ms.
+
+**The panel** (`web/components/lane_panel.py`, drawn by `web/components/blau_panel.py` after
+Blau's credit; `web/pages/browse.py` asks both services in one trip off the event loop):
+
+- **The title**, then the readings as chips. The first is marked; a click on another looks that
+  reading up in the box, so the panel then shows it in Arabic letters.
+- **The root card:** Lane's entries, the matched ones marked. A cut entry links to its full text on
+  Ephraim Meiri's site (`?id=<entry id>`), and the root links to all its entries there
+  (`?q=<root>&source=lane`).
+- **The credits:** the Perseus line verbatim (English in both UIs), then where the entries come from
+  and what ranks the readings.
+- **When nothing shows:** a section without the credit line, or a word with no reading, draws
+  nothing. Blau's panel is then as it was.
+
+**Owner decisions still open for phase B** (drafts in place, nothing deployed):
+
+- the English and Hebrew wording of the section (`shared/genizah_translations.py`, marked DRAFTS);
+- whether the two source lines are wanted, or the Perseus line alone (D3 asks only that one);
+- the server copy of `arabic_data/arabic.db` (74 MB) and the release.
+
+The gate before deploy is unchanged (D9): your grading of the 200-word sample, written by rev. 4
+or later; a check on documents the method was not shaped on; and the sidecar's own gate.
 
 ---
 
