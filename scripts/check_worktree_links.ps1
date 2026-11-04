@@ -20,7 +20,8 @@
     changes nothing. (Codex on the PR: round 1, a junction two levels down was missed
     by a version that looked one level down only; round 2, an unreadable subtree was
     skipped silently and the scan still said clean; round 3, the same for the
-    .claude\worktrees folder itself during default discovery.)
+    .claude\worktrees folder itself during default discovery; round 4, a scan root
+    that is itself a junction was entered instead of reported.)
 
     Remove a junction with `cmd /c rmdir <path>` (no /S): that deletes the link and
     leaves its target alone. Never Remove-Item -Recurse, rm -rf or git worktree remove
@@ -52,8 +53,14 @@ function Get-ReparsePoints([string]$Root) {
     # PowerShell 5.1 follows junctions when it recurses.
     $found = @()
     $stack = New-Object System.Collections.Stack
-    try { $stack.Push((Get-Item -LiteralPath $Root -Force -ErrorAction Stop)) }
+    try { $rootItem = Get-Item -LiteralPath $Root -Force -ErrorAction Stop }
     catch { $script:unscanned += ('{0}: {1}' -f $Root, $_.Exception.Message); return @() }
+    if ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        # The root itself is a link (a -Path naming a junction, or a worktree folder that
+        # IS one): report it and never enter it (Codex, round 4).
+        return @($rootItem)
+    }
+    $stack.Push($rootItem)
     while ($stack.Count -gt 0) {
         $dir = $stack.Pop()
         $entries = @()

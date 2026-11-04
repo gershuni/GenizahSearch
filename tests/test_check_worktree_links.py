@@ -166,6 +166,26 @@ def test_from_a_main_checkout_the_default_scope_is_every_worktree(
     assert _scan_default(main_checkout).returncode == 0
 
 
+def test_a_scan_root_that_is_itself_a_junction_is_reported_not_entered(
+        main_checkout: Path, main_data: Path) -> None:
+    """Codex, round 4: a -Path naming a junction, or a worktree folder that IS one, was
+    pushed onto the walk and its target enumerated; with no links inside the target the
+    scan said clean while the root link stayed in the cleanup's path."""
+    wt2 = main_checkout / ".claude" / "worktrees" / "wt2"
+    _junction(wt2, main_data)
+    try:
+        r = _scan_default(main_checkout)
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert str(wt2) in r.stdout and "Junction" in r.stdout, r.stdout
+        explicit = _scan(wt2)
+        assert explicit.returncode == 1, explicit.stdout + explicit.stderr
+        assert str(wt2) in explicit.stdout, explicit.stdout
+    finally:
+        _rmdir(wt2)
+    assert (main_data / "sidecar.db").read_bytes() == b"keep me"
+    assert _scan_default(main_checkout).returncode == 0
+
+
 def test_an_unlistable_worktrees_folder_fails_closed(main_checkout: Path) -> None:
     """Codex, round 3: with -ErrorAction SilentlyContinue an unlistable .claude/worktrees
     became an empty scope and exit 0."""
