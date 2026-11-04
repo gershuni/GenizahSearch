@@ -89,6 +89,7 @@ def test_latin_text_that_is_not_a_shelfmark_is_searched(text):
     'Halper 331',
     "T-S 10J9 (2)",
     'Cambridge University Library, Ms. T-S K 08.026',   # the NLI catalogue form
+    'Moss. IIIa,20',            # libraries.csv, sys_id 990053799030205171 (Codex on #476)
 ])
 def test_a_shelfmark_is_looked_up_and_survives_the_url(shelfmark):
     assert _route(shelfmark) == ('/browse', 'shelfmark', shelfmark)

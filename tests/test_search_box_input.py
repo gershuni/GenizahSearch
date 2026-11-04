@@ -42,6 +42,11 @@ SHELFMARKS = ['ts 20.57', 't-s ns 307.61b', 'add 3356', 'ts k2.27', 't-s 10g4.5'
     'Westminster College Arabica I.12',
     'Evr. II A 12',
     'Gen 1.1',                 # three letters: a collection prefix or a short code, never a word
+    'Moss. IIIa,20',           # a Roman numeral with a letter after it (Codex on #476)
+    'Moss. IVb,12',
+    'Ms. Heb. 1149.5=24',      # '=' and '_' are written in catalogue shelfmarks
+    'LON BL Or. 10126_2 f. 5-6',
+    'Library of the Alliance Israélite Universelle Ms. II B 163',   # the NLI form, accented
 ])
 def test_a_shelfmark_is_recognised(typed):
     assert search_box_input_kind(typed) == 'shelfmark', typed
@@ -80,6 +85,8 @@ def test_a_corpus_system_number_is_a_sys_id_not_a_shelfmark(sys_id):
     '970993169503583183',      # the LOCAL namespace is no corpus sys_id; nor a shelfmark shape
     '٩٩٠٠٥٣٨٣٥٠٢٠٢٠٥١٧١',       # Arabic-Indic digits: not ASCII
     'ts 20.57?',               # a mark no shelfmark is written with
+    'café 2.1',                # accents come off, the word stays a word
+    '９９００５３８３５０２０２０５１７１',      # full-width digits: not a system number, not ASCII
     '',
     '   ',
     None,
