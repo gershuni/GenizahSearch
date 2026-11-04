@@ -34,6 +34,18 @@ several candidates that hit are several cards, never one merged answer.
 Everything is bounded (``MAX_CARDS``, ``MAX_SENSES``, ``MAX_EXAMPLES``) so one
 click never renders a page.
 
+A single word also reaches an entry whose NAME is several words and begins
+with it (``NAME_PREFIX_KINDS``): ذلك is the entry "ד̇לך ו", and before this a
+click on דלך reached only دلك "to polish" (owner, 2026-11-04).
+
+The dot above. The lookup key drops it (the automatic text mostly omits it,
+plan §3), so דלך and ד̇לך share a key and both readings are cards. When the
+word itself carries the dot -- written with U+0307, or with an apostrophe or
+geresh after the letter, which is how the automatic text and any keyboard
+write it (``dot_pattern``) -- the cards whose spelling has the dot on the same
+letters come first. Only the letters Judeo-Arabic dots count (``DOT_LETTERS``),
+so an abbreviation mark (ר', מ') changes nothing.
+
 A typed word may be Arabic script (the panel's box): it is looked up against
 the Arabic spellings of the entries, sub-entries and forms, by a key that
 also undoes the extraction's broken spacing (``arabic_key``).
@@ -53,12 +65,20 @@ import os
 import re
 import sqlite3
 import threading
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Optional
 from urllib.parse import quote
 
-from shared.blau_normalize import NORMALIZER_VERSION, candidate_stems, normalize_arabic, normalize_ja
+from shared.blau_normalize import (
+    NORMALIZER_VERSION,
+    QUOTE_MARKS,
+    candidate_stems,
+    fold_finals,
+    normalize_arabic,
+    normalize_ja,
+)
 from shared.thread_local_db import ThreadLocalConnection
 
 logger = logging.getLogger(__name__)
@@ -75,6 +95,13 @@ SIDECAR_FILENAME = "blau.db"
 SITE_URL = "https://blau-dict.netlify.app/"
 
 HEADWORD_KINDS = ("root", "sub_entry", "headword", "variant")
+#: Kinds whose multi-word name a single word may begin ("ד̇לך ו"). Not variants:
+#: a multi-word variant is mostly a verb with its preposition, and would bury a
+#: common word under cards.
+NAME_PREFIX_KINDS = ("root", "sub_entry", "headword")
+#: The letters Judeo-Arabic writes with a dot above for a second Arabic letter
+#: (finals folded): ג̇ ד̇ ט̇ צ̇ ת̇ כ̇.
+DOT_LETTERS = frozenset("גדטצתכ")
 PHRASE_KIND = "phrase"
 MAX_CARDS = 10
 MAX_SENSES = 4
@@ -98,6 +125,34 @@ def blau_enabled() -> bool:
 def entry_url(root_id: str) -> str:
     """The dictionary site's page for one entry."""
     return f"{SITE_URL}entry/{quote(str(root_id), safe='')}"
+
+
+_DOT_ABOVE = "̇"
+
+
+def dot_pattern(text: str) -> str:
+    """The Hebrew letters of ``text`` (finals folded, other marks dropped, words
+    split by one space) with ``*`` after each letter of ``DOT_LETTERS`` that
+    carries the dot above: U+0307 as the dictionary writes it, or an apostrophe
+    or geresh after the letter as the automatic text and a keyboard write it.
+    ``ד'לך`` and ``ד̇לך`` are both ``ד*לכ``; ``ר'`` is ``ר``."""
+    out: list[str] = []
+    for ch in unicodedata.normalize("NFC", text or ""):
+        if "א" <= ch <= "ת":
+            out.append(fold_finals(ch))
+        elif ch == _DOT_ABOVE or ch in QUOTE_MARKS:
+            if out and out[-1] in DOT_LETTERS:
+                out.append("*")
+        elif ch.isspace() and out and out[-1] != " ":
+            out.append(" ")
+    return "".join(out).strip()
+
+
+def _dots_agree(word_pattern: str, spelling: str) -> bool:
+    """The dictionary spelling's first word, dots included, sits inside the
+    looked-up word (whose proclitics the candidate may have peeled)."""
+    first = dot_pattern(spelling).split(" ", 1)[0]
+    return bool(first) and first in word_pattern
 
 
 # The Arabic key: on top of normalize_arabic, the letters a typist writes either
@@ -199,6 +254,9 @@ class BlauCard:
     via: str
     senses: tuple[BlauSense, ...]
     more_senses: int
+    #: The looked-up word carries the dot (``dot_pattern``) and this entry's
+    #: spelling does not have it on the same letters: another word, probably.
+    dot_mismatch: bool = False
 
 
 @dataclass(frozen=True)
@@ -238,7 +296,7 @@ class _CardBuild:
     sub-entries) reached by one candidate."""
 
     __slots__ = ("root", "candidate", "matched_key", "matched_kind", "via", "sub_entry_id",
-                 "matched_form_ids")
+                 "matched_form_ids", "dot_mismatch")
 
     def __init__(self, root: sqlite3.Row, candidate: str, matched_key: str, matched_kind: str, via: str,
                  sub_entry_id: str):
@@ -249,6 +307,7 @@ class _CardBuild:
         self.via = via
         self.sub_entry_id = sub_entry_id
         self.matched_form_ids: list[str] = []
+        self.dot_mismatch = False
 
 
 def _text(value: Any) -> str:
@@ -432,11 +491,21 @@ class BlauService:
         overflow: set[tuple[str, str, str]] = set()
         phrase_rows: list[sqlite3.Row] = []
         roots: dict[str, Optional[sqlite3.Row]] = {}
+        prefix_marks = ",".join("?" * len(NAME_PREFIX_KINDS))
         for candidate in candidates:
             rows = list(self._conn.execute(
                 "SELECT norm, raw, kind, root_id, sub_entry_id, form_id FROM forms_norm "
                 "WHERE norm = ? ORDER BY rowid", (candidate,)))
             rows.sort(key=lambda r: _KIND_RANK.get(r["kind"], len(HEADWORD_KINDS)))
+            if " " not in candidate:
+                # Entry names of several words that begin with this one (a
+                # range on the lookup index: every key "candidate <more>").
+                named = list(self._conn.execute(
+                    "SELECT norm, raw, kind, root_id, sub_entry_id, form_id FROM forms_norm "
+                    f"WHERE norm > ? AND norm < ? AND kind IN ({prefix_marks}) ORDER BY rowid",
+                    (candidate + " ", candidate + " \U0010ffff", *NAME_PREFIX_KINDS)))
+                named.sort(key=lambda r: _KIND_RANK.get(r["kind"], len(HEADWORD_KINDS)))
+                rows.extend(named)
             for row in rows:
                 kind = row["kind"]
                 if kind in _KIND_RANK:
@@ -457,9 +526,17 @@ class BlauService:
                 continue
             examples[root_id] = BlauExample(root_id=root_id, name=_text(root["name_ja"]),
                                             url=entry_url(root_id), phrase=_text(row["raw"]))
+        builds = list(cards.values())
+        word_pattern = dot_pattern(word)
+        if "*" in word_pattern:
+            # The word carries the dot: its reading first (stable: the rest
+            # keep candidate order), the others marked.
+            for build in builds:
+                build.dot_mismatch = not _dots_agree(word_pattern, build.matched_key)
+            builds.sort(key=lambda b: b.dot_mismatch)
         return BlauLookup(
             word=word, key=key, candidates=candidates,
-            cards=tuple(self._finish(build, roots) for build in cards.values()),
+            cards=tuple(self._finish(build, roots) for build in builds),
             more_cards=len(overflow),
             examples=tuple(examples.values()),
             more_examples=len(example_overflow),
@@ -536,7 +613,7 @@ class BlauService:
             page=_page(root["start_page_printed"]), url=entry_url(root_id),
             candidate=build.candidate, matched_key=build.matched_key, matched_kind=build.matched_kind,
             sub_entry=sub_entry, via=build.via, senses=shown,
-            more_senses=max(0, total - len(shown)),
+            more_senses=max(0, total - len(shown)), dot_mismatch=build.dot_mismatch,
         )
 
     def _sense(self, form: sqlite3.Row, roots: dict[str, Optional[sqlite3.Row]], matched: bool) -> BlauSense:

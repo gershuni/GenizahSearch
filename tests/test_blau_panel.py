@@ -98,11 +98,23 @@ def test_every_new_panel_string_has_its_hebrew():
     from shared.genizah_translations import TRANSLATIONS
 
     for text in ("Turn on Blau's dictionary (Judeo-Arabic)", "Turn off Blau's dictionary",
-                 "Type a word to look up", "A word in Hebrew or Arabic letters", "Look up",
+                 "Type a word to look up", "A word in Hebrew or Arabic letters (ד' for ד̇)", "Look up",
                  "Type a Judeo-Arabic word in Hebrew letters, or an Arabic word.",
-                 "Blau's dictionary covers Judeo-Arabic; nothing for this word."):
+                 "spelled without the dot"):
         assert TRANSLATIONS.get(text, "").strip(), text
         assert text in PANEL_SRC, f"{text!r} is not the renderer's string any more"
+    assert TRANSLATIONS.get(blau_panel.EMPTY_ANSWER, "").strip()
+    assert "tr(EMPTY_ANSWER)" in PANEL_SRC
+
+
+def test_the_empty_answer_does_not_say_the_word_is_in_another_language():
+    """Owner, 2026-11-04: a word with no entry is usually an ordinary Arabic word
+    (Blau records what is particular to Judeo-Arabic) or an inflected form whose
+    base the lookup missed (אבו, לנא) -- the answer must say so, not imply that
+    the reader clicked a non-Arabic word."""
+    text = blau_panel.EMPTY_ANSWER
+    assert "ordinary Arabic word" in text and "inflected form" in text
+    assert "covers Judeo-Arabic" not in text
 
 
 def test_the_script_s_word_characters_match_the_normalizer_s_word():

@@ -4,7 +4,7 @@ The owner's rulings of 2026-11-04 on the phase-2 companion of `docs/plans/BLAU_D
 the page does not guess the text's language, a reader can type a word, and close spellings
 are not offered.
 
-- **The reader's switch.** On `/browse` a dictionary button (`menu_book`) sits in the version
+- **The reader's switch.** On `/browse` a dictionary button (`translate`) sits in the version
   row beside the line-number toggle. It is OFF by default, and the choice is remembered per
   visitor (`ui.blau_lookup`). While it is off, the pane is not marked, there is no hint, and a
   click on a word does nothing. While it is on, the hint shows, the pane's words are looked up,
@@ -15,8 +15,13 @@ are not offered.
   forms' Arabic spellings (`shared/blau_service.py::arabic_key`: `normalize_arabic`, the
   extraction's broken spacing undone, ة/ه, ى/ي and the hamza seats folded; the conjunction and
   the article peeled). This is an index built in memory on first use: the sidecar is unchanged.
-- **The empty answer** now says what the dictionary covers: "Blau's dictionary covers
-  Judeo-Arabic; nothing for this word."
+- **The empty answer** now says why a word may have no entry: Blau records what is particular to
+  Judeo-Arabic, so an ordinary Arabic word may not be in it, and the lookup does not always find
+  the base of an inflected form.
+- **The dot above.** A word now also reaches an entry whose name is several words and begins with
+  it: דלך shows ذلك (the entry "ד̇לך ו") beside دلك. A word written with the dot (an apostrophe or
+  geresh after ג ד ט צ ת כ, or U+0307) lists the dotted reading first and marks the others
+  "spelled without the dot"; the box's placeholder says "ד' for ד̇".
 - **The click script** asks the server to close only when something is open (the panel shown,
   or a word marked), so with the switch off a click on the page sends nothing.
 - **Close spellings were measured and dropped.** Trying an unknown word with one letter swapped

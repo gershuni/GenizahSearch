@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from nicegui import events, ui
@@ -164,7 +165,7 @@ def test_the_switch_is_off_by_default_and_turns_the_lookup_on_and_off():
     async def driver(user):
         await _open(user)
         switch = _switch(user)
-        assert switch is not None and switch.props.get('icon') == 'menu_book'
+        assert switch is not None and switch.props.get('icon') == 'translate'
         assert switch.props.get('aria-pressed') == 'false' and 'active' not in switch.classes
         assert not _marked_panes(user), 'off by default: a click on a word looks nothing up'
         assert not _hint_shown(user) and not _opener_shown(user)
@@ -278,7 +279,7 @@ def test_an_empty_answer_says_what_was_looked_for():
         await _wait_until(lambda: popover._style.get('display') == 'flex')
         texts = _texts(user)
         assert _with_class(user, blau_panel.EMPTY_CLASS) and not _with_class(user, blau_panel.CARD_CLASS)
-        assert "Blau's dictionary covers Judeo-Arabic; nothing for this word." in texts
+        assert blau_panel.EMPTY_ANSWER in texts
         assert 'Looked for' in texts and 'וזזז' in texts and 'זזז' in texts
         assert CREDIT_HE in texts
         assert SITE_URL in _links(user), 'an empty answer still links the credited site'
@@ -354,6 +355,25 @@ def test_the_type_a_word_button_opens_an_empty_box_and_the_box_looks_up_what_is_
         assert dictionary.lookup.call_count == 1
 
     _run(driver, dictionary, lang='en')
+
+
+def test_an_entry_spelled_without_the_word_s_dot_is_marked():
+    exact = _lookup('ד\'לך')
+    dotted = replace(exact.cards[0], name='ד̇לך ו', matched_key='ד̇לך ו')
+    undotted = replace(exact.cards[0], name='דלך', matched_key='דלך', dot_mismatch=True)
+    result = replace(exact, cards=(dotted, undotted), examples=(), more_examples=0)
+
+    async def driver(user):
+        await _open(user)
+        popover = _popover(user)
+        _fire(user, popover, blau_panel.LOOKUP_EVENT, {'word': 'ד\'לך'})
+        await _wait_until(lambda: popover._style.get('display') == 'flex')
+        cards = _with_class(user, blau_panel.CARD_CLASS)
+        flags = [e for e in _all_elements(user) if isinstance(e, ui.label) and 'dot-mismatch' in e.classes]
+        assert len(cards) == 2 and [f.text for f in flags] == ['spelled without the dot']
+        assert cards[1].id in {a.id for a in flags[0].ancestors()}, 'the flag sits on the undotted entry'
+
+    _run(driver, _dictionary(result=result), lang='en')
 
 
 def test_a_slow_earlier_lookup_does_not_overwrite_the_newer_word():

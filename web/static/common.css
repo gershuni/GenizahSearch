@@ -2787,6 +2787,8 @@ body {
     border: 1px solid var(--border-light, #e2e8f0); color: var(--text-secondary, #475569);
 }
 .gs-blau .flag { background: var(--bg-secondary, #f8fafc); color: var(--text-muted, #64748b); }
+/* The looked-up word has the dot and this entry's spelling does not. */
+.gs-blau .flag.dot-mismatch { border: 1px dashed var(--border-light, #e2e8f0); }
 .gs-blau .gloss { line-height: 1.45; }
 .gs-blau .gloss + .gloss { font-size: 0.82rem; color: var(--text-secondary, #475569); }
 .gs-blau .more { font-size: 0.78rem; }

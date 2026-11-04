@@ -5378,7 +5378,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         # hint and the "type a word" button --
                                         # whose click the script handles: a
                                         # server handler would race its close.
-                                        blau_switch = ui.button(icon='menu_book').props(
+                                        blau_switch = ui.button(icon='translate').props(
                                             'flat round dense').classes(
                                             f'{blau_panel.SWITCH_CLASS} print-hide'
                                             + (' active' if blau_lookup_on else ''))

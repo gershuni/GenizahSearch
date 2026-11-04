@@ -52,6 +52,12 @@ HINT_CLASS = 'blau-hint'
 #: The box at the top of the panel and its search button.
 INPUT_CLASS = 'blau-input'
 SEARCH_CLASS = 'blau-search'
+#: The empty answer (owner, 2026-11-04): a word with no entry is usually an
+#: ordinary Arabic word, which Blau does not record, or an inflected form whose
+#: base the lookup did not find (אבו, לנא) -- not a word in another language.
+EMPTY_ANSWER = ("Not an entry in Blau's dictionary. Blau records what is particular to Judeo-Arabic, "
+                "so an ordinary Arabic word may not be in it; and the lookup does not always find "
+                "the base of an inflected form.")
 
 #: The scope class of the CSS block, and the popover the page creates.
 PANEL_CLASS = 'gs-blau'
@@ -181,6 +187,8 @@ def _render_card(card: BlauCard, lang: str) -> None:
                 ui.label(card.arabic).props('dir="rtl" lang="ar"').classes('ar')
             if card.page is not None:
                 ui.label(f'{tr("p.")} {card.page}').classes('page')
+            if card.dot_mismatch:
+                ui.label(tr('spelled without the dot')).classes('flag dot-mismatch')
             link = ui.link(tr('Open on the dictionary site'), card.url, new_tab=True).classes('site')
             link.props(f'title="{_attr(tr("Open on the dictionary site"))}"')
         if card.via:
@@ -223,7 +231,7 @@ def _render_credit(credit_he: str, credit_en: str, lang: str) -> None:
 def _render_box(word: str, on_search: Callable[[str], Any], focus: bool) -> None:
     """The box at the top of the panel: the word shown, editable; Enter or the
     search button looks up what it holds."""
-    box = ui.input(value=word, placeholder=tr('A word in Hebrew or Arabic letters')).props(
+    box = ui.input(value=word, placeholder=tr("A word in Hebrew or Arabic letters (ד' for ד̇)")).props(
         'dense outlined autocomplete=off spellcheck=false' + (' autofocus' if focus else '')
     ).classes(f'{INPUT_CLASS} word-input')
     box.props(f'aria-label="{_attr(tr("Type a word to look up"))}"')
@@ -266,7 +274,7 @@ def render_lookup(result: BlauLookup, *, credit_he: str, credit_en: str = '', la
                 'type-note')
         elif not result.found:
             with ui.element('div').classes(f'{EMPTY_CLASS} empty'):
-                ui.label(tr("Blau's dictionary covers Judeo-Arabic; nothing for this word."))
+                ui.label(tr(EMPTY_ANSWER))
                 if result.candidates:
                     with ui.element('div').classes('looked-for'):
                         ui.label(tr('Looked for')).classes('looked-label')

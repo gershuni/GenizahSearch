@@ -220,7 +220,7 @@ of §10.
 Rulings (c)-(e) (§9) change three things on the companion of §6.2, and test one idea that does
 not ship.
 
-- **The reader decides where the dictionary applies.** A dictionary button (`menu_book`) in
+- **The reader decides where the dictionary applies.** A dictionary button (`translate`, the languages icon; not the book of Browse) in
   the version row, beside the line-number toggle, is OFF by default and remembered per visitor
   (`web/components/blau_panel.py::PREF_KEY`, `ui.blau_lookup`). While it is off, the pane carries
   no `data-blau-lookup`, there is no hint, and a click on a word does nothing. The click script
@@ -235,8 +235,25 @@ not ship.
   every space removed, plus `normalize_arabic`. The dictionary's plural mark `ج` is dropped, and
   ة/ه, ى/ي and the hamza seats are folded. The conjunction and the article are peeled. The index
   is built in memory on first use (about 50 ms on the real file); the sidecar is unchanged.
-- **The empty answer** says what the dictionary covers: "Blau's dictionary covers Judeo-Arabic;
-  nothing for this word."
+- **The empty answer** (owner's review, same day) says why a word may have no entry: Blau records
+  what is particular to Judeo-Arabic, so an ordinary Arabic word may not be in it, and the lookup
+  does not always find the base of an inflected form (אבו, לנא). It no longer suggests the word is
+  in another language (`blau_panel.EMPTY_ANSWER`).
+- **The dot above** (owner's review: דלך reached only دلك "to polish", and no keyboard types the
+  dot). The key drops the dot, so both readings share it; two changes make the common one reachable
+  and let the reader choose it:
+  - A single word reaches an entry whose name is several words and begins with it
+    (`NAME_PREFIX_KINDS`: roots, sub-entries, headwords; not multi-word variants, which are mostly
+    a verb with its preposition). ذلك is the entry "ד̇לך ו", so דלך now shows دلك and ذلك.
+  - A word written with the dot -- U+0307, or an apostrophe or geresh after ג ד ט צ ת כ, as the
+    automatic text and any keyboard write it (`dot_pattern`) -- puts the entries spelled with the
+    dot on the same letters first and marks the rest "spelled without the dot". ד'לך shows ذلك
+    first. The box's placeholder says how to type it: "ד' for ד̇". An apostrophe after another
+    letter (ר', an abbreviation) changes nothing.
+  - Not solved: where Blau has the dotted word only inside examples (ذا, הד̇א), the only entry is
+    the undotted one, now marked; and an undotted word gives no preference (דלך lists دلك first).
+    Ranking readings by how common each is needs a frequency list of classical Arabic (part of the
+    Arabic-dictionary layer the owner raised on 2026-11-04; not yet planned).
 - **The popover's position** is written on `<html>`, not on the popover. The page shows the
   popover with `.style('display: flex;')`, and that re-render replaced its inline style, so the
   position the script had written there was gone. Since #473 the panel had always opened at the

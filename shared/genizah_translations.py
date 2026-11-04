@@ -6459,10 +6459,14 @@ TRANSLATIONS.update({
     "Turn on Blau's dictionary (Judeo-Arabic)": "הפעלת מילון בלאו (ערבית־יהודית)",
     "Turn off Blau's dictionary": "כיבוי מילון בלאו",
     "Type a word to look up": "הקלדת מילה לחיפוש במילון",
-    "A word in Hebrew or Arabic letters": "מילה באותיות עבריות או ערביות",
+    "A word in Hebrew or Arabic letters (ד' for ד̇)": "מילה באותיות עבריות או ערביות (ד' במקום ד̇)",
+    "spelled without the dot": "נכתב בלי הנקודה",
     "Look up": "חיפוש",
     "Type a Judeo-Arabic word in Hebrew letters, or an Arabic word.":
         "אפשר להקליד מילה ערבית־יהודית באותיות עבריות, או מילה ערבית.",
-    "Blau's dictionary covers Judeo-Arabic; nothing for this word.":
-        "מילון בלאו עוסק בערבית־היהודית; אין בו ערך למילה זו.",
+    "Not an entry in Blau's dictionary. Blau records what is particular to Judeo-Arabic, so an "
+    "ordinary Arabic word may not be in it; and the lookup does not always find the base of an "
+    "inflected form.":
+        "אין לכך ערך במילון בלאו. בלאו מתעד את המיוחד לערבית־היהודית, ולכן מילה ערבית רגילה אולי "
+        "אינה בו; וגם החיפוש אינו מוצא תמיד את הבסיס של צורה נטויה.",
 })
